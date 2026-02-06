@@ -1,0 +1,16 @@
+[stage]
+
+[[stage.files]]
+src = "assets/etc/hostname"
+dst = "/etc/hostname"
+mode = 420
+
+[[stage.files]]
+src = "assets/etc/os-release"
+dst = "/etc/os-release"
+mode = 420
+
+[[stage.files]]
+src = "assets/etc/motd"
+dst = "/etc/motd"
+mode = 420

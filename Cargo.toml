@@ -1,0 +1,7 @@
+[workspace]
+members = [
+  "crates/gaia-image-builder",
+  "crates/gaia-image-builder-macros",
+]
+default-members = ["crates/gaia-image-builder"]
+resolver = "2"

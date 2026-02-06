@@ -1,0 +1,17 @@
+# Cargo outputs
+target/
+debug/
+
+# Builder outputs / caches
+build/
+out/
+output/
+
+# Vendored SDK cache (optional/local)
+assets/sdk/offline/
+
+# Rustfmt backups
+**/*.rs.bk
+
+# MSVC debug info
+*.pdb

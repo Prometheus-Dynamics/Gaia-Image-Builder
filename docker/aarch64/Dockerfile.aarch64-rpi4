@@ -1,0 +1,167 @@
+# Use Debian testing as the base image
+# syntax=docker/dockerfile:1.6
+FROM debian:bookworm AS debian-arm64-base
+
+# 1. Add ARM64 architecture first
+RUN dpkg --add-architecture arm64
+
+# 2. Update package lists to include arm64 packages
+RUN apt-get update -y && apt-get upgrade -y
+
+# 3. Install essential build tools and dependencies for both architectures
+RUN apt-get update -y && \
+    apt-get install -y build-essential curl clang pkg-config mold sccache crossbuild-essential-arm64 libc-dev-arm64-cross gcc-aarch64-linux-gnu libc6-dev 
+
+# GCC may look for a target-prefixed mold wrapper when using `-fuse-ld=mold`.
+RUN ln -sf /usr/bin/mold /usr/bin/aarch64-linux-gnu-ld.mold
+
+# 4. Install Rust and add the aarch64 target
+ENV CARGO_HOME=/usr/local/cargo
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV PATH=/usr/local/rustup/toolchains/1.90.0-x86_64-unknown-linux-gnu/bin:/usr/local/cargo/bin:$PATH
+RUN curl https://sh.rustup.rs -sSf | sh /dev/stdin -y --profile minimal --default-toolchain 1.90.0 && \
+    /usr/local/cargo/bin/rustup target add aarch64-unknown-linux-gnu --toolchain 1.90.0-x86_64-unknown-linux-gnu && \
+    chmod -R a+rX /usr/local/cargo /usr/local/rustup
+
+# 5. Set environment variables for cross-compilation
+ENV CROSS_TOOLCHAIN_PREFIX=aarch64-linux-gnu-
+ENV CROSS_SYSROOT=/usr/aarch64-linux-gnu
+ENV CROSS_TARGET_RUNNER="/usr/bin/qemu-aarch64-static"
+
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=${CROSS_TOOLCHAIN_PREFIX}gcc \
+    CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER=${CROSS_TARGET_RUNNER} \
+    AR_aarch64_unknown_linux_gnu=${CROSS_TOOLCHAIN_PREFIX}ar \
+    CC_aarch64_unknown_linux_gnu=${CROSS_TOOLCHAIN_PREFIX}gcc \
+    CXX_aarch64_unknown_linux_gnu=${CROSS_TOOLCHAIN_PREFIX}g++ \
+    CMAKE_TOOLCHAIN_FILE_aarch64_unknown_linux_gnu=/opt/toolchain.cmake \
+    QEMU_LD_PREFIX="$CROSS_SYSROOT" \
+    RUST_TEST_THREADS=1 \
+    PKG_CONFIG_PATH_aarch64_unknown_linux_gnu="/usr/aarch64-linux-gnu/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig" \
+    PKG_CONFIG_ALLOW_CROSS=1 \
+    CROSS_CMAKE_SYSTEM_NAME=Linux \
+    CROSS_CMAKE_SYSTEM_PROCESSOR=aarch64 \
+    CROSS_CMAKE_CRT=gnu \
+    CROSS_CMAKE_OBJECT_FLAGS="-ffunction-sections -fdata-sections -fPIC" \
+    PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
+
+# 6. Install target-specific libraries and dependencies
+RUN apt-get update -y && \
+    apt-get install -y \
+    libssl-dev:arm64 \
+    libyuv-dev:arm64 \
+    libdw-dev:arm64 \
+    libunwind-dev:arm64 \
+    libudev-dev:arm64 \
+    libgnutls28-dev:arm64 \
+    pkg-config:arm64 \
+    cmake:arm64 \
+    meson:arm64 \
+    ninja-build:arm64
+
+RUN apt-get update -y && \
+    apt-get install -y \
+    build-essential \
+    python3-pip \
+    ninja-build \
+    libyaml-dev:arm64 \
+    python3-yaml \
+    python3-ply \
+    python3-jinja2 \
+    libssl-dev:arm64 \
+    openssl \
+    git \
+    openssh-client \
+    cmake
+
+# Native (host) FFmpeg development headers are required because Cargo runs some build scripts
+# with TARGET==HOST. Target (aarch64) FFmpeg is provided below under /usr/aarch64-linux-gnu.
+RUN apt-get update -y && \
+    apt-get install -y \
+    ffmpeg \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavfilter-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libswresample-dev \
+    libswscale-dev
+
+# Ensure pkg-config does not accidentally pick up host (amd64) libraries when cross-compiling.
+# ffmpeg-sys-next uses pkg-config to locate FFmpeg; we want the aarch64 sysroot only.
+ENV PKG_CONFIG_LIBDIR_aarch64_unknown_linux_gnu="/usr/aarch64-linux-gnu/lib/pkgconfig:/usr/aarch64-linux-gnu/share/pkgconfig" \
+    PKG_CONFIG_SYSROOT_DIR_aarch64_unknown_linux_gnu="/usr/aarch64-linux-gnu"
+
+# ffmpeg-sys-next skips feature probing during cross builds (HOST!=TARGET), but ffmpeg-next relies
+# on the version cfg flags to compile against modern FFmpeg headers. Provide the minimum set of
+# version flags expected when targeting FFmpeg 8.
+ENV DEP_FFMPEG_FFMPEG_3_0=true \
+    DEP_FFMPEG_FFMPEG_3_1=true \
+    DEP_FFMPEG_FFMPEG_3_2=true \
+    DEP_FFMPEG_FFMPEG_3_3=true \
+    DEP_FFMPEG_FFMPEG_4_0=true \
+    DEP_FFMPEG_FFMPEG_4_1=true \
+    DEP_FFMPEG_FFMPEG_4_2=true \
+    DEP_FFMPEG_FFMPEG_4_3=true \
+    DEP_FFMPEG_FFMPEG_4_4=true \
+    DEP_FFMPEG_FFMPEG_5_0=true \
+    DEP_FFMPEG_FFMPEG_5_1=true \
+    DEP_FFMPEG_FFMPEG_6_0=true \
+    DEP_FFMPEG_FFMPEG_6_1=true \
+    DEP_FFMPEG_FFMPEG_7_0=true \
+    DEP_FFMPEG_FFMPEG_7_1=true \
+    DEP_FFMPEG_FFMPEG_8_0=true
+
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
+# Only redirect our private org to SSH; leave public GitHub repos on HTTPS so builds
+# like libcamera/libpisp can clone without SSH keys.
+RUN git config --global url."ssh://git@github.com/Prometheus-Dynamics/".insteadOf "https://github.com/Prometheus-Dynamics/"
+
+# 7. Clean up to reduce image size
+RUN apt-get clean && rm -rf /var/lib/apt/lists/*
+
+COPY docker/aarch64/toolchain.cmake /opt/toolchain.cmake
+
+FROM debian-arm64-base AS rpi4-linux
+
+# Define build arguments for dependency versions
+ARG LIBCAMERA_BRANCH=v0.6.0
+ARG TURBOJPEG_VERSION=3.1.2
+ARG FFMPEG_VERSION=8.0.1
+
+RUN apt-get update -y && apt-get upgrade -y
+
+# Clone the repository and check out the specified branch
+RUN git clone --branch ${LIBCAMERA_BRANCH} https://git.libcamera.org/libcamera/libcamera.git
+
+WORKDIR /libcamera
+
+COPY docker/aarch64/aarch64_cross.txt .
+RUN meson setup cross-build --cross-file aarch64_cross.txt --prefix=/usr/aarch64-linux-gnu
+RUN ninja -C cross-build install
+
+# TurboJPEG
+RUN apt-get update -y && apt-get install -y nasm
+RUN curl -Ls https://github.com/libjpeg-turbo/libjpeg-turbo/archive/refs/tags/${TURBOJPEG_VERSION}.tar.gz \
+        | tar xz && \
+    cd libjpeg-turbo-${TURBOJPEG_VERSION} && \
+    cmake -G"Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=/opt/toolchain.cmake \
+        -DCMAKE_INSTALL_PREFIX=/usr/aarch64-linux-gnu -DENABLE_SHARED=1 -DENABLE_STATIC=OFF \
+        -DWITH_JPEG8=ON && \
+    make -j$(nproc) && make install && \
+    cd .. && rm -rf libjpeg-turbo-${TURBOJPEG_VERSION}
+
+# FFMPEG
+RUN apt-get update -y && apt-get install -y yasm
+RUN curl -Ls https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz \
+        | tar xJ && \
+    cd ffmpeg-${FFMPEG_VERSION} && \
+    ./configure \
+        --prefix=/usr/aarch64-linux-gnu \
+        --enable-shared \
+        --disable-static \
+        --arch=aarch64 \
+        --target-os=linux \
+        --cross-prefix=aarch64-linux-gnu- \
+        --enable-cross-compile && \
+    make -j$(nproc) && make install && \
+    cd .. && rm -rf ffmpeg-${FFMPEG_VERSION}

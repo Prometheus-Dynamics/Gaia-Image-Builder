@@ -1,0 +1,6 @@
+/target
+deploy_pi.sh
+/logs
+/data
+/Helios-Backend
+/log
