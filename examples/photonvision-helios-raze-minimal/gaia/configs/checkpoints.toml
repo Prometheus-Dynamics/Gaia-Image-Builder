@@ -1,0 +1,34 @@
+[checkpoints]
+enabled = true
+default_use_policy = "auto"
+default_upload_policy = "off"
+trust_mode = "verify"
+queue_file = "checkpoints/upload-queue.toml"
+
+[[checkpoints.points]]
+id = "base-os"
+anchor_task = "buildroot.build"
+use_policy = "auto"
+upload_policy = "off"
+fingerprint_from = [
+  "buildroot.version",
+  "buildroot.defconfig",
+  "buildroot.packages",
+  "buildroot.package_versions",
+  "buildroot.symbols",
+  "buildroot.external",
+  "buildroot.rpi",
+]
+
+# Optional remote upload backend (env-backed credentials):
+# [checkpoints.backends.s3.cache]
+# bucket_env = "GAIA_CP_S3_BUCKET"
+# endpoint_url_env = "GAIA_CP_S3_ENDPOINT"
+# prefix = "gaia-photonvision"
+# aws_access_key_id_env = "GAIA_CP_AWS_KEY"
+# aws_secret_access_key_env = "GAIA_CP_AWS_SECRET"
+#
+# [[checkpoints.points]]
+# id = "base-os"
+# backend = "s3:cache"
+# upload_policy = "on_success"

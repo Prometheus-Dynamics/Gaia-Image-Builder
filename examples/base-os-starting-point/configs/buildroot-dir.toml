@@ -1,0 +1,10 @@
+[buildroot]
+archive_format = "none"
+report = true
+report_hashes = false
+
+[buildroot.starting_point]
+enabled = true
+rootfs_dir = "inputs/seed-rootfs"
+source_label = "base-os-starting-point:rootfs_dir"
+apply_stage_overlay = true

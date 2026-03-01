@@ -42,6 +42,8 @@ pub struct ProgramInstallItem {
     pub mode: Option<u32>,
     pub owner: Option<String>,
     pub group: Option<String>,
+    pub enabled_if: Vec<String>,
+    pub disabled_if: Vec<String>,
 }
 
 impl Default for ProgramInstallItem {
@@ -52,11 +54,40 @@ impl Default for ProgramInstallItem {
             mode: None,
             owner: None,
             group: None,
+            enabled_if: Vec::new(),
+            disabled_if: Vec::new(),
         }
     }
 }
 
 pub struct ProgramInstallModule;
+
+fn selected_items(
+    doc: &ConfigDoc,
+    items: &[ProgramInstallItem],
+) -> Result<Vec<ProgramInstallItem>> {
+    let mut out = Vec::new();
+    for item in items {
+        let enabled =
+            crate::build_inputs::conditions_match(doc, &item.enabled_if, &item.disabled_if)
+                .map_err(|e| {
+                    let artifact = item.artifact.trim();
+                    let artifact = if artifact.is_empty() {
+                        "<empty>"
+                    } else {
+                        artifact
+                    };
+                    Error::msg(format!(
+                        "program.install item artifact='{}' condition evaluation failed: {}",
+                        artifact, e
+                    ))
+                })?;
+        if enabled {
+            out.push(item.clone());
+        }
+    }
+    Ok(out)
+}
 
 impl crate::modules::Module for ProgramInstallModule {
     fn id(&self) -> &'static str {
@@ -72,8 +103,12 @@ impl crate::modules::Module for ProgramInstallModule {
         if !cfg.enabled {
             return Ok(());
         }
+        let selected = selected_items(doc, &cfg.items)?;
+        if selected.is_empty() {
+            return Ok(());
+        }
 
-        for item in &cfg.items {
+        for item in &selected {
             if item.artifact.trim().is_empty() {
                 return Err(Error::msg("program.install.items[].artifact is empty"));
             }
@@ -176,8 +211,12 @@ fn exec(doc: &ConfigDoc, ctx: &mut ExecCtx) -> Result<()> {
     util::ensure_dir(&stage_root)?;
 
     let mut installed = Vec::new();
+    let selected = selected_items(doc, &cfg.items)?;
+    if selected.is_empty() {
+        ctx.log("program.install: no install items selected by conditions");
+    }
 
-    for item in &cfg.items {
+    for item in &selected {
         let artifact_id = item.artifact.trim();
         if artifact_id.is_empty() {
             return Err(Error::msg("program.install.items[].artifact is empty"));

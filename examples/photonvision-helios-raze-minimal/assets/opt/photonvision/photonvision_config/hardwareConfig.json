@@ -1,0 +1,11 @@
+{
+  "ledPins": [13],
+  "ledsCanDim": true,
+  "statusRGBPins": [],
+  "statusRGBActiveHigh": false,
+  "getGPIOCommand": "/usr/local/bin/helios-leds-gpio.sh get {p}",
+  "setGPIOCommand": "/usr/local/bin/helios-leds-gpio.sh set {p} {s}",
+  "setPWMCommand": "/usr/local/bin/helios-leds-gpio.sh pwm {p} {v}",
+  "setPWMFrequencyCommand": "/usr/local/bin/helios-leds-gpio.sh pwmfreq {p} {f}",
+  "releaseGPIOCommand": "/usr/local/bin/helios-leds-gpio.sh release {p}"
+}

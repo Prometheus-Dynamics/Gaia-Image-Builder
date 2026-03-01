@@ -1,0 +1,50 @@
+[inputs.options.pv_jar_source]
+description = "How to source PhotonVision jar"
+type = "string"
+default = "release"
+choices = ["release", "local", "repo"]
+env = "GAIA_PV_JAR_SOURCE"
+
+[inputs.options.pv_driver_source]
+description = "How to source photon-libcamera-gl-driver jar"
+type = "string"
+default = "off"
+choices = ["off", "release", "local", "repo"]
+env = "GAIA_PV_DRIVER_SOURCE"
+
+[program]
+enabled = true
+check_policy = "required"
+
+[program.custom]
+enabled = true
+workspace_dir = "."
+
+[[program.custom.artifacts]]
+id = "photon-libcamera-driver-jar"
+mode = "auto"
+enabled_if = ["pv_driver_source!=off"]
+output_path = "inputs/photon-libcamera-gl-driver.jar"
+prebuilt_path = "inputs/photon-libcamera-gl-driver.jar"
+build_command = ["bash", "scripts/fetch-photon-libcamera-driver.sh"]
+
+[[program.custom.artifacts]]
+id = "photonvision-jar"
+mode = "build"
+output_path = "inputs/photonvision-linuxarm64.jar"
+after_artifacts = ["photon-libcamera-driver-jar?"]
+build_command = ["bash", "scripts/fetch-photonvision-jar.sh"]
+
+[program.install]
+enabled = true
+
+[[program.install.items]]
+artifact = "photonvision-jar"
+dest = "/opt/photonvision/photonvision.jar"
+mode = 420
+
+[[program.install.items]]
+artifact = "photon-libcamera-driver-jar"
+enabled_if = ["pv_driver_source!=off"]
+dest = "/opt/photonvision/photon-libcamera-gl-driver.jar"
+mode = 420

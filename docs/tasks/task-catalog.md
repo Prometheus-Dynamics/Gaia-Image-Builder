@@ -22,6 +22,12 @@
 - `program.install.stage`
   - provides: `stage:program-install`
 
+Condition note:
+
+- artifact/install conditions (`enabled_if` / `disabled_if`) are resolved before planning.
+- if a builder has zero selected artifacts, its `program.*.artifacts` task is omitted.
+- if `program.install` has zero selected items, `program.install.stage` is omitted.
+
 ## Stage
 
 - `stage.render`
@@ -45,6 +51,21 @@
 - `buildroot.collect`
   - provides: `artifacts:rootfs`
 
+Checkpoint note:
+
+- with `[checkpoints]` anchored at `buildroot.build`, `buildroot.configure` and `buildroot.build` may be skipped on restore hit, while `buildroot.collect` still runs.
+
+Starting point note:
+
+- with `[buildroot.starting_point]` enabled, `buildroot.fetch/configure/build` remain in plan but short-circuit, and `buildroot.collect` sources artifacts from the configured external rootfs input (`rootfs_dir`, `rootfs_tar`, or `image`).
+
+## Checkpoints (when configured)
+
+- `checkpoints.restore.buildroot-build`
+  - provides: `checkpoints:buildroot-build-restored`
+- `checkpoints.capture.buildroot-build`
+  - captures checkpoint payload/manifest after `buildroot.build` when restore was not used
+
 ## Typical order
 
 A common full run order is:
@@ -59,6 +80,18 @@ A common full run order is:
 8. `buildroot.build`
 9. `core.barrier.stage`
 10. `buildroot.collect`
+
+In starting-point mode:
+
+1. `core.init`
+2. optional `program.*` build tasks
+3. optional `program.install.stage`
+4. `stage.render`
+5. `buildroot.fetch` (skipped)
+6. `buildroot.configure` (skipped)
+7. `buildroot.build` (skipped)
+8. `core.barrier.stage`
+9. `buildroot.collect` (collects from starting point)
 
 ## HeliOS-cm5 trigger map
 

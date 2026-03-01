@@ -4,6 +4,7 @@ use crate::planner::Plan;
 
 pub mod buildroot;
 pub mod buildroot_rpi;
+pub mod checkpoints;
 pub mod core;
 pub mod program;
 pub mod stage;
@@ -25,6 +26,7 @@ pub fn builtin_modules() -> Vec<Box<dyn Module>> {
         Box::new(program::install::ProgramInstallModule),
         Box::new(stage::StageModule),
         Box::new(buildroot_rpi::BuildrootRpiModule),
+        Box::new(checkpoints::CheckpointsModule),
         Box::new(buildroot::BuildrootModule),
     ]
 }

@@ -52,6 +52,8 @@ struct RustArtifact {
     mode: ArtifactMode,
     profile: Option<String>,
     check_ids: Vec<String>,
+    enabled_if: Vec<String>,
+    disabled_if: Vec<String>,
     prebuilt_path: Option<String>,
     output_path: Option<String>,
     build_command: Vec<String>,
@@ -69,6 +71,8 @@ impl Default for RustArtifact {
             mode: ArtifactMode::Auto,
             profile: None,
             check_ids: Vec::new(),
+            enabled_if: Vec::new(),
+            disabled_if: Vec::new(),
             prebuilt_path: None,
             output_path: None,
             build_command: Vec::new(),
@@ -102,6 +106,26 @@ impl Default for RustBuildConfig {
 
 pub struct ProgramRustModule;
 
+fn selected_artifacts(doc: &ConfigDoc, artifacts: &[RustArtifact]) -> Result<Vec<RustArtifact>> {
+    let mut out = Vec::new();
+    for artifact in artifacts {
+        let enabled =
+            crate::build_inputs::conditions_match(doc, &artifact.enabled_if, &artifact.disabled_if)
+                .map_err(|e| {
+                    let id = artifact.id.trim();
+                    let id = if id.is_empty() { "<empty>" } else { id };
+                    Error::msg(format!(
+                        "program.rust.artifacts id='{}' condition evaluation failed: {}",
+                        id, e
+                    ))
+                })?;
+        if enabled {
+            out.push(artifact.clone());
+        }
+    }
+    Ok(out)
+}
+
 impl crate::modules::Module for ProgramRustModule {
     fn id(&self) -> &'static str {
         "program.rust"
@@ -114,6 +138,10 @@ impl crate::modules::Module for ProgramRustModule {
     fn plan(&self, doc: &ConfigDoc, plan: &mut Plan) -> Result<()> {
         let cfg: RustBuildConfig = doc.deserialize_path(self.id())?.unwrap_or_default();
         if !cfg.enabled {
+            return Ok(());
+        }
+        let selected = selected_artifacts(doc, &cfg.artifacts)?;
+        if selected.is_empty() {
             return Ok(());
         }
 
@@ -165,6 +193,7 @@ fn infer_default_output(
 }
 
 fn run_build_command(
+    doc: &ConfigDoc,
     ctx: &mut ExecCtx,
     ws: &WorkspacePaths,
     cwd: &Path,
@@ -177,6 +206,7 @@ fn run_build_command(
     for (k, v) in &artifact.env {
         envs.insert(k.clone(), v.clone());
     }
+    crate::build_inputs::inject_env_vars(doc, &mut envs, None)?;
 
     if artifact.build_command.is_empty() {
         let package = artifact.package.as_deref().ok_or_else(|| {
@@ -519,7 +549,10 @@ fn exec(doc: &ConfigDoc, ctx: &mut ExecCtx) -> Result<()> {
     util::ensure_dir(&module_dir)?;
 
     let mut manifest = Vec::new();
-    let artifacts = cfg.artifacts.clone();
+    let artifacts = selected_artifacts(doc, &cfg.artifacts)?;
+    if artifacts.is_empty() {
+        ctx.log("program.rust: no artifacts selected by conditions");
+    }
     if artifacts.len() <= 1 {
         for artifact in artifacts {
             manifest.push(build_one_artifact(
@@ -660,6 +693,8 @@ fn build_one_artifact(
             "kind": format!("{:?}", artifact.kind),
             "cargo_profile": artifact.cargo_profile.clone(),
             "profile": artifact.profile.clone(),
+            "enabled_if": artifact.enabled_if.clone(),
+            "disabled_if": artifact.disabled_if.clone(),
             "profile_target": profile_target,
             "profile_container_image": profile_container_image,
             "profile_env": profile_env.clone(),
@@ -725,6 +760,7 @@ fn build_one_artifact(
             } else {
                 run_checks(doc, ctx, "rust", workspace_dir, &selected)?;
                 run_build_command(
+                    doc,
                     ctx,
                     ws,
                     &cwd,
@@ -741,6 +777,7 @@ fn build_one_artifact(
         ArtifactMode::Build => {
             run_checks(doc, ctx, "rust", workspace_dir, &selected)?;
             run_build_command(
+                doc,
                 ctx,
                 ws,
                 &cwd,

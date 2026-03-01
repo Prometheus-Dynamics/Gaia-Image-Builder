@@ -16,6 +16,15 @@ Derived in `crates/gaia-image-builder/src/modules/util.rs`.
   - `<build_dir>/stage/<build-name>/rootfs`
 - artifact registry:
   - `<build_dir>/artifacts`
+- checkpoint store:
+  - `<build_dir>/checkpoints`
+  - `<build_dir>/checkpoints/index.json`
+  - `<build_dir>/checkpoints/upload-queue.json`
+  - `<build_dir>/checkpoints/points/<checkpoint-id>/<fingerprint>/manifest.json`
+  - `<build_dir>/checkpoints/points/<checkpoint-id>/<fingerprint>/payload/`
+  - `<build_dir>/checkpoints/points/<checkpoint-id>/<fingerprint>/payload.tar`
+- starting-point extraction cache (when `buildroot.starting_point.rootfs_tar` or `image` is used):
+  - `<build_dir>/starting-point/<build-name>/extract`
 - gaia run directory:
   - `<out_dir>/<build-name>/gaia`
 - module manifests:

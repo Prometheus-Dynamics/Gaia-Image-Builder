@@ -1,0 +1,13 @@
+[Unit]
+Description=Seed PhotonVision camera configuration
+After=local-fs.target
+Before=photonvision.service
+ConditionPathExists=/opt/photonvision/photonvision_config
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/helios-seed-photonvision-camera
+ExecStart=/usr/local/bin/helios-seed-photonvision-camera.sh
+
+[Install]
+WantedBy=multi-user.target

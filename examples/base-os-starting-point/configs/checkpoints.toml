@@ -1,0 +1,11 @@
+[checkpoints]
+enabled = true
+default_use_policy = "auto"
+default_upload_policy = "off"
+trust_mode = "verify"
+
+[[checkpoints.points]]
+id = "base-os"
+anchor_task = "buildroot.build"
+use_policy = "auto"
+upload_policy = "off"

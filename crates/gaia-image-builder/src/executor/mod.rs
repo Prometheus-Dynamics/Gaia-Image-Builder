@@ -345,6 +345,9 @@ impl ExecCtx {
         }
 
         let mut child = cmd
+            // Child tasks run in their own process group. If stdin remains attached to the
+            // controlling TTY, any read can trigger SIGTTIN and suspend the task.
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -737,6 +740,7 @@ pub fn builtin_registry() -> Result<TaskRegistry> {
     crate::modules::program::install::ProgramInstallModule::register_tasks(&mut reg)?;
     crate::modules::stage::StageModule::register_tasks(&mut reg)?;
     crate::modules::buildroot_rpi::BuildrootRpiModule::register_tasks(&mut reg)?;
+    crate::modules::checkpoints::CheckpointsModule::register_tasks(&mut reg)?;
     crate::modules::buildroot::BuildrootModule::register_tasks(&mut reg)?;
     Ok(reg)
 }

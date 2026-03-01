@@ -198,9 +198,8 @@ impl RenderTask {
                 continue;
             };
             let src_abs = resolve_source_path(&ws, src)?;
-            let src_meta = fs::symlink_metadata(&src_abs).map_err(|e| {
-                Error::msg(format!("failed to stat {}: {e}", src_abs.display()))
-            })?;
+            let src_meta = fs::symlink_metadata(&src_abs)
+                .map_err(|e| Error::msg(format!("failed to stat {}: {e}", src_abs.display())))?;
             if !src_meta.is_dir() {
                 continue;
             }

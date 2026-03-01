@@ -41,6 +41,24 @@ From `crates/gaia-image-builder/src/executor/mod.rs`:
 - `--dry-run`: task bodies are not executed; commands are logged.
 - cancellation: active process groups are terminated.
 
+## Checkpoint-aware execution (single-flow)
+
+When `[checkpoints]` is enabled and a point anchors at `buildroot.build`:
+
+- Gaia runs restore/capture orchestration tasks around Buildroot compile steps.
+- on restore hit, `buildroot.configure` and `buildroot.build` short-circuit.
+- `buildroot.collect` still executes, so current stage/program content is reflected in final images.
+
+## Starting-point execution (Buildroot bypass)
+
+When `buildroot.starting_point.enabled=true`:
+
+- `buildroot.fetch`, `buildroot.configure`, and `buildroot.build` short-circuit.
+- `buildroot.collect` imports from `buildroot.starting_point.rootfs_dir`, `rootfs_tar`, or `image`.
+- stage/program outputs are still applied in the same flow.
+- optional `buildroot.starting_point.packages` reconciliation can detect package manager/version from imported rootfs metadata and plan/execute install/remove commands.
+- checkpoint restore/capture around `buildroot.build` are skipped as no-ops in this mode.
+
 ## Core init behavior
 
 `core.init` initializes workspace paths and performs cleanup according to `[workspace].clean`.

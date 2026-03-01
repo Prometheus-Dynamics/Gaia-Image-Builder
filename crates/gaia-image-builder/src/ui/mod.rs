@@ -36,6 +36,7 @@ enum Screen {
     Quick,
     Modules,
     Keys,
+    Inputs,
     Run,
 }
 
@@ -55,6 +56,11 @@ enum QuickItem {
     MaxParallel,
     BuildrootPerfProfile,
     TopLevelLoad,
+    Inputs,
+    RefreshCheckpointStatus,
+    RetryCheckpointUploads,
+    CheckpointUsePolicy,
+    CheckpointUploadPolicy,
     Clean,
     Modules,
     Back,
@@ -123,13 +129,16 @@ struct App {
     doc_base: Option<ConfigDoc>,
     doc_effective: Option<ConfigDoc>,
 
-    // Minimal overrides; currently only used for module enable toggles (future expansion).
+    // Interactive overrides applied on top of loaded config (modules, inputs, and quick edits).
     overrides: toml::Value,
+    overrides_file: Option<PathBuf>,
 
     enabled_modules: Vec<String>,
     module_list: ListState,
     config_keys: Vec<String>,
     config_key_list: ListState,
+    input_keys: Vec<String>,
+    input_key_list: ListState,
     config_parts: Vec<String>,
     config_part_query: String,
     config_part_matches: Vec<usize>,
@@ -146,6 +155,8 @@ struct App {
     tasks: Vec<String>,
     task_state: BTreeMap<String, TaskViewState>,
     task_logs: BTreeMap<String, VecDeque<String>>,
+    checkpoint_status: Vec<crate::checkpoints::CheckpointStatus>,
+    checkpoint_list: ListState,
     all_logs: VecDeque<String>,
     sidebar_logs: VecDeque<String>,
     all_logs_scroll: usize,
@@ -193,6 +204,11 @@ enum InputMode {
         buffer: String,
         error: Option<String>,
     },
+    SelectInputChoice {
+        key: String,
+        options: Vec<toml::Value>,
+        selected: usize,
+    },
     EditGlobalInt {
         name: String,
         buffer: String,
@@ -222,6 +238,11 @@ impl App {
             QuickItem::MaxParallel,
             QuickItem::BuildrootPerfProfile,
             QuickItem::TopLevelLoad,
+            QuickItem::Inputs,
+            QuickItem::RefreshCheckpointStatus,
+            QuickItem::RetryCheckpointUploads,
+            QuickItem::CheckpointUsePolicy,
+            QuickItem::CheckpointUploadPolicy,
             QuickItem::Clean,
             QuickItem::Modules,
             QuickItem::Back,
@@ -238,11 +259,14 @@ impl App {
             selected_build: None,
             doc_base: None,
             doc_effective: None,
-            overrides: toml::Value::Table(Default::default()),
+            overrides: empty_overrides_table(),
+            overrides_file: None,
             enabled_modules: Vec::new(),
             module_list: ListState::default(),
             config_keys: Vec::new(),
             config_key_list: ListState::default(),
+            input_keys: Vec::new(),
+            input_key_list: ListState::default(),
             config_parts: Vec::new(),
             config_part_query: String::new(),
             config_part_matches: Vec::new(),
@@ -257,6 +281,8 @@ impl App {
             tasks: Vec::new(),
             task_state: BTreeMap::new(),
             task_logs: BTreeMap::new(),
+            checkpoint_status: Vec::new(),
+            checkpoint_list: ListState::default(),
             all_logs: VecDeque::new(),
             sidebar_logs: VecDeque::new(),
             all_logs_scroll: 0,
@@ -312,8 +338,21 @@ impl App {
             return Ok(());
         };
         let doc = crate::config::load(&path)?;
+        let overrides_file = build_tui_overrides_path(&path);
+        let overrides = match read_tui_overrides(&overrides_file) {
+            Ok(v) => v,
+            Err(e) => {
+                self.push_sidebar(&format!(
+                    "failed to load tui overrides {}: {e}",
+                    overrides_file.display()
+                ));
+                empty_overrides_table()
+            }
+        };
         self.selected_build = Some(path);
         self.doc_base = Some(doc);
+        self.overrides = overrides;
+        self.overrides_file = Some(overrides_file);
         self.recompute_effective_doc()?;
         self.recompute_modules_and_tasks()?;
         self.screen = Screen::Quick;
@@ -326,10 +365,12 @@ impl App {
         };
         let mut value = base.value.clone();
         crate::config::merge(&mut value, self.overrides.clone());
-        self.doc_effective = Some(ConfigDoc {
+        let mut doc = ConfigDoc {
             path: base.path.clone(),
             value,
-        });
+        };
+        crate::build_inputs::apply_cli_overrides(&mut doc, &[])?;
+        self.doc_effective = Some(doc);
         Ok(())
     }
 
@@ -362,9 +403,24 @@ impl App {
                 m.plan(doc, &mut plan)?;
             }
         }
+        crate::checkpoints::validate_against_plan(doc, &plan)?;
         plan.finalize_default()?;
         let ordered = plan.ordered()?;
         self.tasks = ordered.iter().map(|t| t.id.clone()).collect();
+        let prev_selected_id = self.selected_checkpoint().map(|s| s.id.clone());
+        self.checkpoint_status = crate::checkpoints::status_for_doc(doc)?;
+        if self.checkpoint_status.is_empty() {
+            self.checkpoint_list.select(None);
+        } else if let Some(prev) = prev_selected_id {
+            let idx = self
+                .checkpoint_status
+                .iter()
+                .position(|s| s.id == prev)
+                .unwrap_or(0);
+            self.checkpoint_list.select(Some(idx));
+        } else {
+            self.checkpoint_list.select(Some(0));
+        }
         self.exec_total = self.tasks.len();
         self.exec_done = 0;
         self.exec_ok = None;
@@ -380,6 +436,7 @@ impl App {
 
         // Keep key list consistent with current module selection.
         self.recompute_config_keys();
+        self.recompute_input_keys();
         self.recompute_config_parts();
         Ok(())
     }
@@ -434,6 +491,43 @@ impl App {
         self.config_keys.sort();
         self.config_key_list
             .select(self.config_keys.first().map(|_| 0));
+    }
+
+    fn recompute_input_keys(&mut self) {
+        let previous = self.selected_input_key().map(ToOwned::to_owned);
+        self.input_keys.clear();
+        self.input_key_list.select(None);
+
+        let Some(doc) = self.doc_effective.as_ref() else {
+            return;
+        };
+
+        let mut keys = BTreeSet::<String>::new();
+        if let Some(tbl) = doc.table_path("inputs.options") {
+            for key in tbl.keys() {
+                keys.insert(key.clone());
+            }
+        }
+        if let Some(tbl) = doc.table_path("inputs.values") {
+            for key in tbl.keys() {
+                keys.insert(key.clone());
+            }
+        }
+        if let Some(tbl) = doc.table_path("inputs.resolved") {
+            for key in tbl.keys() {
+                keys.insert(key.clone());
+            }
+        }
+
+        self.input_keys = keys.into_iter().collect();
+        if self.input_keys.is_empty() {
+            self.input_key_list.select(None);
+        } else if let Some(prev) = previous {
+            let idx = self.input_keys.iter().position(|k| k == &prev).unwrap_or(0);
+            self.input_key_list.select(Some(idx));
+        } else {
+            self.input_key_list.select(Some(0));
+        }
     }
 
     fn recompute_config_parts(&mut self) {
@@ -517,6 +611,79 @@ impl App {
         self.config_parts.get(idx).map(|s| s.as_str())
     }
 
+    fn selected_input_key(&self) -> Option<&str> {
+        let idx = self.input_key_list.selected()?;
+        self.input_keys.get(idx).map(|s| s.as_str())
+    }
+
+    fn selected_input_resolved_value(&self) -> Option<toml::Value> {
+        let doc = self.doc_effective.as_ref()?;
+        let key = self.selected_input_key()?;
+        doc.value_path(&format!("inputs.resolved.{key}")).cloned()
+    }
+
+    fn selected_input_is_bool(&self) -> bool {
+        let Some(doc) = self.doc_effective.as_ref() else {
+            return false;
+        };
+        let Some(key) = self.selected_input_key() else {
+            return false;
+        };
+        if let Some(kind) = doc
+            .value_path(&format!("inputs.options.{key}.type"))
+            .and_then(|v| v.as_str())
+        {
+            return kind.eq_ignore_ascii_case("bool");
+        }
+        doc.value_path(&format!("inputs.resolved.{key}"))
+            .is_some_and(toml::Value::is_bool)
+    }
+
+    fn selected_input_choices(&self) -> Vec<toml::Value> {
+        let Some(doc) = self.doc_effective.as_ref() else {
+            return Vec::new();
+        };
+        let Some(key) = self.selected_input_key() else {
+            return Vec::new();
+        };
+        doc.value_path(&format!("inputs.options.{key}.choices"))
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.to_vec())
+            .unwrap_or_default()
+    }
+
+    fn selected_input_choice_index(&self, choices: &[toml::Value]) -> usize {
+        if choices.is_empty() {
+            return 0;
+        }
+        let current = self.selected_input_resolved_value();
+        current
+            .as_ref()
+            .and_then(|cur| {
+                choices
+                    .iter()
+                    .position(|choice| toml_values_equal_loose(cur, choice))
+            })
+            .unwrap_or(0)
+    }
+
+    fn select_next_input_key(&mut self) {
+        if self.input_keys.is_empty() {
+            return;
+        }
+        let i = self.input_key_list.selected().unwrap_or(0);
+        let next = (i + 1).min(self.input_keys.len().saturating_sub(1));
+        self.input_key_list.select(Some(next));
+    }
+
+    fn select_prev_input_key(&mut self) {
+        if self.input_keys.is_empty() {
+            return;
+        }
+        let i = self.input_key_list.selected().unwrap_or(0);
+        self.input_key_list.select(Some(i.saturating_sub(1)));
+    }
+
     fn select_next_config_part(&mut self) {
         if self.config_part_matches.is_empty() {
             return;
@@ -587,27 +754,89 @@ impl App {
         self.set_override_value(path, toml::Value::Boolean(v))
     }
 
-    fn set_override_value(&mut self, path: &str, v: toml::Value) -> Result<()> {
-        let toml::Value::Table(root) = &mut self.overrides else {
-            self.overrides = toml::Value::Table(Default::default());
-            return self.set_override_value(path, v);
-        };
-
+    fn clear_override_path(&mut self, path: &str) -> Result<()> {
         let segs: Vec<&str> = path.split('.').filter(|s| !s.is_empty()).collect();
         if segs.is_empty() {
             return Err(Error::msg("empty override path"));
         }
 
-        let mut cur = root;
-        for seg in &segs[..segs.len() - 1] {
-            let entry = cur
-                .entry((*seg).to_string())
-                .or_insert_with(|| toml::Value::Table(Default::default()));
-            cur = entry
-                .as_table_mut()
-                .ok_or_else(|| Error::msg(format!("override path collides at '{seg}'")))?;
+        if let toml::Value::Table(root) = &mut self.overrides {
+            remove_override_path_from_table(root, &segs);
         }
-        cur.insert(segs[segs.len() - 1].to_string(), v);
+        self.persist_overrides()
+    }
+
+    fn set_override_value(&mut self, path: &str, v: toml::Value) -> Result<()> {
+        {
+            let toml::Value::Table(root) = &mut self.overrides else {
+                self.overrides = empty_overrides_table();
+                return self.set_override_value(path, v);
+            };
+
+            let segs: Vec<&str> = path.split('.').filter(|s| !s.is_empty()).collect();
+            if segs.is_empty() {
+                return Err(Error::msg("empty override path"));
+            }
+
+            let mut cur = root;
+            for seg in &segs[..segs.len() - 1] {
+                let entry = cur
+                    .entry((*seg).to_string())
+                    .or_insert_with(|| toml::Value::Table(Default::default()));
+                cur = entry
+                    .as_table_mut()
+                    .ok_or_else(|| Error::msg(format!("override path collides at '{seg}'")))?;
+            }
+            cur.insert(segs[segs.len() - 1].to_string(), v);
+        }
+
+        self.persist_overrides()
+    }
+
+    fn persist_overrides(&self) -> Result<()> {
+        let Some(path) = self.overrides_file.as_ref() else {
+            return Ok(());
+        };
+        write_tui_overrides(path, &self.overrides)
+    }
+
+    fn clear_override_state(&mut self) {
+        self.overrides = empty_overrides_table();
+        self.overrides_file = None;
+    }
+
+    fn reset_for_picker(&mut self) {
+        self.clear_override_state();
+        self.selected_build = None;
+        self.doc_base = None;
+        self.doc_effective = None;
+        self.enabled_modules.clear();
+        self.module_list.select(None);
+        self.config_keys.clear();
+        self.config_key_list.select(None);
+        self.input_keys.clear();
+        self.input_key_list.select(None);
+        self.config_parts.clear();
+        self.config_part_query.clear();
+        self.config_part_matches.clear();
+        self.config_part_list.select(None);
+        self.tasks.clear();
+        self.task_list.select(None);
+        self.task_state.clear();
+        self.task_logs.clear();
+        self.checkpoint_status.clear();
+        self.checkpoint_list.select(None);
+    }
+
+    fn return_to_picker(&mut self) -> Result<()> {
+        self.reset_for_picker();
+        self.builds = find_tomls(&self.builds_dir)?;
+        if self.builds.is_empty() {
+            self.build_list.select(None);
+        } else {
+            self.build_list.select(Some(0));
+        }
+        self.screen = Screen::Picker;
         Ok(())
     }
 
@@ -632,6 +861,128 @@ impl App {
         self.set_override_bool(&full, !b)?;
         self.recompute_effective_doc()?;
         self.recompute_modules_and_tasks()?;
+        Ok(())
+    }
+
+    fn toggle_selected_input_bool(&mut self) -> Result<()> {
+        let Some(doc) = self.doc_effective.as_ref() else {
+            return Ok(());
+        };
+        let Some(key) = self.selected_input_key() else {
+            return Ok(());
+        };
+        let resolved_path = format!("inputs.resolved.{key}");
+        let Some(val) = doc.value_path(&resolved_path) else {
+            self.push_sidebar("missing input value");
+            return Ok(());
+        };
+        let Some(b) = val.as_bool() else {
+            self.push_sidebar("input is not bool");
+            return Ok(());
+        };
+        let override_path = format!("inputs.values.{key}");
+        self.set_override_bool(&override_path, !b)?;
+        self.recompute_effective_doc()?;
+        self.recompute_modules_and_tasks()?;
+        Ok(())
+    }
+
+    fn cycle_selected_input_choice(&mut self, forward: bool) -> Result<()> {
+        let Some(key) = self.selected_input_key().map(str::to_string) else {
+            return Ok(());
+        };
+        let choices = self.selected_input_choices();
+        if choices.is_empty() {
+            self.push_sidebar("input has no choices");
+            return Ok(());
+        }
+        let cur_idx = self.selected_input_choice_index(&choices);
+        let next_idx = if forward {
+            (cur_idx + 1) % choices.len()
+        } else if cur_idx == 0 {
+            choices.len().saturating_sub(1)
+        } else {
+            cur_idx.saturating_sub(1)
+        };
+        let override_path = format!("inputs.values.{key}");
+        self.set_override_value(&override_path, choices[next_idx].clone())?;
+        self.recompute_effective_doc()?;
+        self.recompute_modules_and_tasks()?;
+        Ok(())
+    }
+
+    fn begin_select_input_choice(&mut self) {
+        let Some(key) = self.selected_input_key().map(str::to_string) else {
+            return;
+        };
+        let options = self.selected_input_choices();
+        if options.is_empty() {
+            self.push_sidebar("input has no choices");
+            return;
+        }
+        let selected = self.selected_input_choice_index(&options);
+        self.input = InputMode::SelectInputChoice {
+            key,
+            options,
+            selected,
+        };
+    }
+
+    fn apply_select_input_choice(&mut self) -> Result<()> {
+        let (key, options, selected) = match &self.input {
+            InputMode::SelectInputChoice {
+                key,
+                options,
+                selected,
+            } => (key.clone(), options.clone(), *selected),
+            _ => return Ok(()),
+        };
+        let Some(value) = options.get(selected).cloned() else {
+            self.push_sidebar("invalid selector state");
+            self.input = InputMode::Normal;
+            return Ok(());
+        };
+        let override_path = format!("inputs.values.{key}");
+        self.set_override_value(&override_path, value)?;
+        self.recompute_effective_doc()?;
+        self.recompute_modules_and_tasks()?;
+        self.input = InputMode::Normal;
+        Ok(())
+    }
+
+    fn reset_input_key_to_default_override(&mut self, key: &str) -> Result<()> {
+        let default = self
+            .doc_effective
+            .as_ref()
+            .and_then(|doc| doc.value_path(&format!("inputs.options.{key}.default")))
+            .cloned();
+        let override_path = format!("inputs.values.{key}");
+        match default {
+            Some(v) if is_primitive_input_value(&v) => self.set_override_value(&override_path, v),
+            Some(_) => self.clear_override_path(&override_path),
+            None => self.clear_override_path(&override_path),
+        }
+    }
+
+    fn reset_selected_input_to_default(&mut self) -> Result<()> {
+        let Some(key) = self.selected_input_key().map(str::to_string) else {
+            return Ok(());
+        };
+        self.reset_input_key_to_default_override(&key)?;
+        self.recompute_effective_doc()?;
+        self.recompute_modules_and_tasks()?;
+        self.push_sidebar(&format!("reset '{key}' to default"));
+        Ok(())
+    }
+
+    fn reset_all_inputs_to_default(&mut self) -> Result<()> {
+        let keys = self.input_keys.clone();
+        for key in &keys {
+            self.reset_input_key_to_default_override(key)?;
+        }
+        self.recompute_effective_doc()?;
+        self.recompute_modules_and_tasks()?;
+        self.push_sidebar("reset all inputs to defaults");
         Ok(())
     }
 
@@ -662,6 +1013,58 @@ impl App {
             }
         };
 
+        self.input = InputMode::EditValue {
+            full_path: full,
+            kind,
+            buffer,
+            error: None,
+        };
+    }
+
+    fn begin_edit_input_value(&mut self) {
+        if !self.selected_input_choices().is_empty() {
+            self.begin_select_input_choice();
+            return;
+        }
+        if self.selected_input_is_bool() {
+            if let Err(e) = self.toggle_selected_input_bool() {
+                self.push_sidebar(&format!("failed to toggle input: {e}"));
+            }
+            return;
+        }
+
+        let Some(doc) = self.doc_effective.as_ref() else {
+            return;
+        };
+        let Some(key) = self.selected_input_key() else {
+            return;
+        };
+
+        let resolved_path = format!("inputs.resolved.{key}");
+        let Some(val) = doc.value_path(&resolved_path) else {
+            self.push_sidebar("missing input value");
+            return;
+        };
+
+        let kind = match val {
+            toml::Value::Boolean(_) => ValueKind::Bool,
+            toml::Value::Integer(_) => ValueKind::Int,
+            toml::Value::Float(_) => ValueKind::Float,
+            toml::Value::String(_) => ValueKind::String,
+            _ => {
+                self.push_sidebar("complex input value; edit not supported");
+                return;
+            }
+        };
+        let buffer = match val {
+            toml::Value::Boolean(b) => b.to_string(),
+            toml::Value::Integer(i) => i.to_string(),
+            toml::Value::Float(f) => f.to_string(),
+            toml::Value::String(s) => s.clone(),
+            _ => String::new(),
+        };
+
+        let full = format!("inputs.values.{key}");
         self.input = InputMode::EditValue {
             full_path: full,
             kind,
@@ -865,6 +1268,11 @@ impl App {
         self.screen = Screen::Keys;
     }
 
+    fn enter_inputs_screen(&mut self) {
+        self.recompute_input_keys();
+        self.screen = Screen::Inputs;
+    }
+
     fn start_run(&mut self) -> Result<()> {
         let Some(doc) = self.doc_effective.as_ref().cloned() else {
             return Ok(());
@@ -895,6 +1303,13 @@ impl App {
                         return;
                     }
                 }
+            }
+            if let Err(e) = crate::checkpoints::validate_against_plan(&doc, &plan) {
+                ctx_for_thread.sink.emit(ExecEvent::ExecutorDone {
+                    ok: false,
+                    error: Some(e.to_string()),
+                });
+                return;
             }
             if let Err(e) = plan.finalize_default() {
                 ctx_for_thread.sink.emit(ExecEvent::ExecutorDone {
@@ -962,6 +1377,33 @@ impl App {
     fn selected_task(&self) -> Option<&str> {
         let idx = self.task_list.selected()?;
         self.tasks.get(idx).map(|s| s.as_str())
+    }
+
+    fn selected_checkpoint(&self) -> Option<&crate::checkpoints::CheckpointStatus> {
+        let idx = self.checkpoint_list.selected()?;
+        self.checkpoint_status.get(idx)
+    }
+
+    fn selected_checkpoint_index(&self) -> Option<usize> {
+        let idx = self.checkpoint_list.selected()?;
+        (idx < self.checkpoint_status.len()).then_some(idx)
+    }
+
+    fn select_next_checkpoint(&mut self) {
+        if self.checkpoint_status.is_empty() {
+            return;
+        }
+        let i = self.checkpoint_list.selected().unwrap_or(0);
+        let next = (i + 1).min(self.checkpoint_status.len().saturating_sub(1));
+        self.checkpoint_list.select(Some(next));
+    }
+
+    fn select_prev_checkpoint(&mut self) {
+        if self.checkpoint_status.is_empty() {
+            return;
+        }
+        let i = self.checkpoint_list.selected().unwrap_or(0);
+        self.checkpoint_list.select(Some(i.saturating_sub(1)));
     }
 
     fn selected_quick_item(&self) -> Option<QuickItem> {
@@ -1154,6 +1596,117 @@ impl App {
             CleanMode::All => CleanMode::None,
         };
         self.set_workspace_clean(next)
+    }
+
+    fn retry_checkpoint_uploads(&mut self) -> Result<()> {
+        let Some(doc) = self.doc_effective.as_ref().cloned() else {
+            return Ok(());
+        };
+        let report = crate::checkpoints::retry_pending_uploads(&doc, None)?;
+        self.push_sidebar(&format!(
+            "checkpoint retry: attempted={} uploaded={} failed={}",
+            report.attempted, report.uploaded, report.failed
+        ));
+        self.refresh_checkpoint_status()?;
+        Ok(())
+    }
+
+    fn refresh_checkpoint_status(&mut self) -> Result<()> {
+        let Some(doc) = self.doc_effective.as_ref().cloned() else {
+            return Ok(());
+        };
+        self.checkpoint_status = crate::checkpoints::status_for_doc(&doc)?;
+        if self.checkpoint_status.is_empty() {
+            self.checkpoint_list.select(None);
+        } else if self.checkpoint_list.selected().is_none() {
+            self.checkpoint_list.select(Some(0));
+        } else {
+            let idx = self
+                .checkpoint_list
+                .selected()
+                .unwrap_or(0)
+                .min(self.checkpoint_status.len().saturating_sub(1));
+            self.checkpoint_list.select(Some(idx));
+        }
+        Ok(())
+    }
+
+    fn set_checkpoint_config_override(
+        &mut self,
+        mutator: impl FnOnce(&mut crate::checkpoints::CheckpointsConfig, usize) -> crate::Result<()>,
+    ) -> Result<()> {
+        let Some(doc) = self.doc_effective.as_ref() else {
+            return Ok(());
+        };
+        let Some(idx) = self.selected_checkpoint_index() else {
+            self.push_sidebar("no checkpoint selected");
+            return Ok(());
+        };
+        let mut cfg: crate::checkpoints::CheckpointsConfig =
+            doc.deserialize_path("checkpoints")?.unwrap_or_default();
+        if idx >= cfg.points.len() {
+            return Ok(());
+        }
+        let selected_id = cfg
+            .points
+            .get(idx)
+            .map(|p| p.id.clone())
+            .unwrap_or_default();
+        mutator(&mut cfg, idx)?;
+        let val = toml::Value::try_from(cfg)
+            .map_err(|e| Error::msg(format!("failed to encode checkpoint config override: {e}")))?;
+        self.set_override_value("checkpoints", val)?;
+        self.recompute_effective_doc()?;
+        self.recompute_modules_and_tasks()?;
+        if !selected_id.trim().is_empty()
+            && let Some(pos) = self
+                .checkpoint_status
+                .iter()
+                .position(|s| s.id == selected_id.trim())
+        {
+            self.checkpoint_list.select(Some(pos));
+        }
+        Ok(())
+    }
+
+    fn cycle_selected_checkpoint_use_policy(&mut self) -> Result<()> {
+        self.set_checkpoint_config_override(|cfg, idx| {
+            let cur = cfg.points[idx].use_policy.unwrap_or(cfg.default_use_policy);
+            let next = match cur {
+                crate::checkpoints::CheckpointUsePolicy::Auto => {
+                    crate::checkpoints::CheckpointUsePolicy::Off
+                }
+                crate::checkpoints::CheckpointUsePolicy::Off => {
+                    crate::checkpoints::CheckpointUsePolicy::Required
+                }
+                crate::checkpoints::CheckpointUsePolicy::Required => {
+                    crate::checkpoints::CheckpointUsePolicy::Auto
+                }
+            };
+            cfg.points[idx].use_policy = Some(next);
+            Ok(())
+        })
+    }
+
+    fn cycle_selected_checkpoint_upload_policy(&mut self) -> Result<()> {
+        self.set_checkpoint_config_override(|cfg, idx| {
+            let cur = cfg.points[idx]
+                .upload_policy
+                .unwrap_or(cfg.default_upload_policy);
+            let next = match cur {
+                crate::checkpoints::CheckpointUploadPolicy::Off => {
+                    crate::checkpoints::CheckpointUploadPolicy::OnSuccess
+                }
+                crate::checkpoints::CheckpointUploadPolicy::OnSuccess => {
+                    crate::checkpoints::CheckpointUploadPolicy::Always
+                }
+                crate::checkpoints::CheckpointUploadPolicy::Always => {
+                    crate::checkpoints::CheckpointUploadPolicy::Off
+                }
+            };
+            cfg.points[idx].upload_policy = Some(next);
+            Ok(())
+        })
     }
 
     fn request_force_exit(&mut self, code: i32) {
@@ -1375,6 +1928,38 @@ impl App {
 
         // Modal input handling.
         match &mut self.input {
+            InputMode::SelectInputChoice {
+                selected, options, ..
+            } => match code {
+                KeyCode::Esc => {
+                    self.input = InputMode::Normal;
+                    return Ok(false);
+                }
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    return self.apply_select_input_choice().map(|_| false);
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if !options.is_empty() {
+                        *selected = (*selected + 1).min(options.len().saturating_sub(1));
+                    }
+                    return Ok(false);
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    *selected = selected.saturating_sub(1);
+                    return Ok(false);
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    if !options.is_empty() {
+                        *selected = (*selected + 1).min(options.len().saturating_sub(1));
+                    }
+                    return Ok(false);
+                }
+                KeyCode::Left | KeyCode::Char('h') => {
+                    *selected = selected.saturating_sub(1);
+                    return Ok(false);
+                }
+                _ => return Ok(false),
+            },
             InputMode::EditValue { buffer, .. }
             | InputMode::EditGlobalInt { buffer, .. }
             | InputMode::EditGlobalFloat { buffer, .. }
@@ -1441,12 +2026,18 @@ impl App {
                 _ => {}
             },
             Screen::Quick => match code {
-                KeyCode::Char('q') | KeyCode::Esc => self.screen = Screen::Picker,
+                KeyCode::Char('q') | KeyCode::Esc => self.return_to_picker()?,
                 KeyCode::Down | KeyCode::Char('j') => self.select_next_quick(),
                 KeyCode::Up | KeyCode::Char('k') => self.select_prev_quick(),
+                KeyCode::Char(']') => self.select_next_checkpoint(),
+                KeyCode::Char('[') => self.select_prev_checkpoint(),
                 KeyCode::Char('s') | KeyCode::Char('r') => self.start_run()?,
                 KeyCode::Char('m') => self.screen = Screen::Modules,
+                KeyCode::Char('i') => self.enter_inputs_screen(),
                 KeyCode::Char('c') => self.cycle_workspace_clean()?,
+                KeyCode::Char('u') => self.cycle_selected_checkpoint_use_policy()?,
+                KeyCode::Char('p') => self.cycle_selected_checkpoint_upload_policy()?,
+                KeyCode::Char('R') => self.refresh_checkpoint_status()?,
                 KeyCode::Char(' ') => match self.selected_quick_item() {
                     Some(QuickItem::DryRun) => self.dry_run = !self.dry_run,
                     Some(QuickItem::MaxParallel) => {
@@ -1460,6 +2051,15 @@ impl App {
                             "buildroot.top_level_load",
                             self.effective_buildroot_top_level_load().unwrap_or(0.0),
                         );
+                    }
+                    Some(QuickItem::Inputs) => self.enter_inputs_screen(),
+                    Some(QuickItem::RefreshCheckpointStatus) => self.refresh_checkpoint_status()?,
+                    Some(QuickItem::RetryCheckpointUploads) => self.retry_checkpoint_uploads()?,
+                    Some(QuickItem::CheckpointUsePolicy) => {
+                        self.cycle_selected_checkpoint_use_policy()?
+                    }
+                    Some(QuickItem::CheckpointUploadPolicy) => {
+                        self.cycle_selected_checkpoint_upload_policy()?
                     }
                     Some(QuickItem::Clean) => self.cycle_workspace_clean()?,
                     _ => {}
@@ -1478,6 +2078,15 @@ impl App {
                             "buildroot.top_level_load",
                             self.effective_buildroot_top_level_load().unwrap_or(0.0),
                         );
+                    }
+                    Some(QuickItem::Inputs) => self.enter_inputs_screen(),
+                    Some(QuickItem::RefreshCheckpointStatus) => self.refresh_checkpoint_status()?,
+                    Some(QuickItem::RetryCheckpointUploads) => self.retry_checkpoint_uploads()?,
+                    Some(QuickItem::CheckpointUsePolicy) => {
+                        self.cycle_selected_checkpoint_use_policy()?
+                    }
+                    Some(QuickItem::CheckpointUploadPolicy) => {
+                        self.cycle_selected_checkpoint_upload_policy()?
                     }
                     Some(QuickItem::Clean) => self.cycle_workspace_clean()?,
                     Some(QuickItem::Modules) => self.screen = Screen::Modules,
@@ -1510,6 +2119,36 @@ impl App {
                 KeyCode::Up | KeyCode::Char('k') => self.select_prev_config_key(),
                 KeyCode::Char(' ') => self.toggle_selected_bool()?,
                 KeyCode::Enter | KeyCode::Char('e') => self.begin_edit_value(),
+                _ => {}
+            },
+            Screen::Inputs => match code {
+                KeyCode::Esc | KeyCode::Char('q') => self.screen = Screen::Quick,
+                KeyCode::Down | KeyCode::Char('j') => self.select_next_input_key(),
+                KeyCode::Up | KeyCode::Char('k') => self.select_prev_input_key(),
+                KeyCode::Char(' ') => {
+                    let choices = self.selected_input_choices();
+                    if !choices.is_empty() {
+                        self.cycle_selected_input_choice(true)?;
+                    } else if self.selected_input_is_bool() {
+                        self.toggle_selected_input_bool()?;
+                    } else {
+                        self.begin_edit_input_value();
+                    }
+                }
+                KeyCode::Left | KeyCode::Char('h') => {
+                    if !self.selected_input_choices().is_empty() {
+                        self.cycle_selected_input_choice(false)?;
+                    }
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    if !self.selected_input_choices().is_empty() {
+                        self.cycle_selected_input_choice(true)?;
+                    }
+                }
+                KeyCode::Enter | KeyCode::Char('e') => self.begin_edit_input_value(),
+                KeyCode::Char('d') => self.reset_selected_input_to_default()?,
+                KeyCode::Char('D') => self.reset_all_inputs_to_default()?,
+                KeyCode::Char('r') => self.start_run()?,
                 _ => {}
             },
             Screen::Run => match code {
@@ -1645,6 +2284,61 @@ impl App {
                             .border_type(BorderType::Double),
                     );
                 f.render_widget(p, area);
+            }
+            InputMode::SelectInputChoice {
+                key,
+                options,
+                selected,
+            } => {
+                let area = centered_rect(75, 60, f.area());
+                let shadow = shadow_rect(area, f.area());
+                f.render_widget(
+                    Fill {
+                        style: Style::default()
+                            .bg(Color::Black)
+                            .add_modifier(Modifier::DIM),
+                    },
+                    shadow,
+                );
+                f.render_widget(Clear, area);
+
+                let rows = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Length(3), Constraint::Min(3)])
+                    .split(area);
+                let header = Paragraph::new(Text::from(vec![
+                    Line::from(vec![
+                        Span::styled("Select input: ", Style::default().fg(Color::Yellow)),
+                        Span::raw(key.clone()),
+                    ]),
+                    Line::from("j/k or arrows to move, enter/space to select, esc to cancel"),
+                ]))
+                .style(Style::default().fg(Color::White).bg(Color::DarkGray))
+                .block(
+                    Block::default()
+                        .title("Input Selector")
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Double),
+                );
+                f.render_widget(header, rows[0]);
+
+                let items = options
+                    .iter()
+                    .map(|v| ListItem::new(short_value(v)))
+                    .collect::<Vec<_>>();
+                let list = List::new(items)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_type(BorderType::Rounded),
+                    )
+                    .highlight_style(Style::default().fg(Color::Black).bg(Color::LightYellow))
+                    .highlight_symbol("> ");
+                let mut state = ListState::default();
+                if !options.is_empty() {
+                    state.select(Some(*selected.min(&options.len().saturating_sub(1))));
+                }
+                f.render_stateful_widget(list, rows[1], &mut state);
             }
             InputMode::EditGlobalInt {
                 name,
@@ -1808,6 +2502,7 @@ impl App {
             Screen::Quick => "Gaia Builder: Quick",
             Screen::Modules => "Gaia Builder: Modules",
             Screen::Keys => "Gaia Builder: Module Keys",
+            Screen::Inputs => "Gaia Builder: Inputs",
             Screen::Run => "Gaia Builder: Run",
         };
         let build = self
@@ -1820,6 +2515,7 @@ impl App {
             Screen::Quick => "quick".to_string(),
             Screen::Modules => "modules".to_string(),
             Screen::Keys => format!("modules > {}", self.selected_module().unwrap_or("<none>")),
+            Screen::Inputs => "inputs".to_string(),
             Screen::Run => "run".to_string(),
         };
         let line = Line::from(vec![
@@ -1843,12 +2539,15 @@ impl App {
         let hint = match self.screen {
             Screen::Picker => "[j/k] Move  [Enter] Select  [r] Rescan  [q] Quit",
             Screen::Quick => {
-                "[j/k] Move  [Enter] Select  [s/r] Start  [c] Cycle Clean  [m] Modules  [Space] Toggle/Edit  [Esc/q] Back"
+                "[j/k] Menu  [[/]] Checkpoint  [u] UsePolicy  [p] UploadPolicy  [R] Refresh  [Enter] Select  [s/r] Start  [i] Inputs  [m] Modules  [Esc/q] Back"
             }
             Screen::Modules => {
                 "[j/k] Move  [Enter] Keys  [Space/e] Toggle module.enabled  [r] Run  [Esc/q] Back"
             }
             Screen::Keys => "[j/k] Move  [Space] Toggle Bool  [Enter/e] Edit Value  [Esc/q] Back",
+            Screen::Inputs => {
+                "[j/k] Move  [Space] Toggle/Cycle  [h/l] Prev/Next Choice  [Enter/e] Selector/Edit  [d] Reset One  [D] Reset All  [r] Run  [Esc/q] Back"
+            }
             Screen::Run => {
                 "[Left/Right/Tab] Tabs  [j/k] Select Task  [[/]/h/l] Config Part  [/] Search  [n/N] Next/Prev Match  [Up/Down PgUp/PgDn] Scroll  [c] Cancel  [Esc] Clear Search/Back when done  [q] Quit when done"
             }
@@ -1865,6 +2564,7 @@ impl App {
             Screen::Quick => self.draw_quick(f, area),
             Screen::Modules => self.draw_modules(f, area),
             Screen::Keys => self.draw_keys(f, area),
+            Screen::Inputs => self.draw_inputs(f, area),
             Screen::Run => self.draw_run(f, area),
         }
     }
@@ -1886,6 +2586,7 @@ impl App {
             .map(|v| format!("{v:.1}"))
             .unwrap_or_else(|| "<unset>".into());
         let perf_profile = self.effective_buildroot_performance_profile();
+        let selected_checkpoint = self.selected_checkpoint();
 
         let items: Vec<ListItem> = self
             .quick_items
@@ -1901,6 +2602,21 @@ impl App {
                     QuickItem::TopLevelLoad => {
                         format!("Buildroot top-level load: {top_level_load}")
                     }
+                    QuickItem::Inputs => format!("Inputs ({})", self.input_keys.len()),
+                    QuickItem::RefreshCheckpointStatus => "Refresh checkpoint status".to_string(),
+                    QuickItem::RetryCheckpointUploads => "Retry checkpoint uploads".to_string(),
+                    QuickItem::CheckpointUsePolicy => format!(
+                        "Selected checkpoint use_policy: {}",
+                        selected_checkpoint
+                            .map(|s| format!("{:?}", s.use_policy).to_lowercase())
+                            .unwrap_or_else(|| "-".to_string())
+                    ),
+                    QuickItem::CheckpointUploadPolicy => format!(
+                        "Selected checkpoint upload_policy: {}",
+                        selected_checkpoint
+                            .map(|s| format!("{:?}", s.upload_policy).to_lowercase())
+                            .unwrap_or_else(|| "-".to_string())
+                    ),
                     QuickItem::Clean => format!("Clean: {clean}"),
                     QuickItem::Modules => "Modules".to_string(),
                     QuickItem::Back => "Back".to_string(),
@@ -1920,6 +2636,11 @@ impl App {
             .highlight_symbol("> ");
         let mut state = self.quick_list.clone();
         f.render_stateful_widget(list, cols[0], &mut state);
+
+        let right_rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(11), Constraint::Min(8)])
+            .split(cols[1]);
 
         let mut lines = Vec::new();
         lines.push(Line::from(vec![
@@ -1946,14 +2667,35 @@ impl App {
                 .map(|v| format!("{v:.1}"))
                 .unwrap_or_else(|| "<unset>".into())
         )));
-        lines.push(Line::from(""));
+        lines.push(Line::from(format!(
+            "inputs configured: {}",
+            self.input_keys.len()
+        )));
+        let use_count = self.checkpoint_status.iter().filter(|s| s.will_use).count();
+        let rebuild_count = self
+            .checkpoint_status
+            .iter()
+            .filter(|s| s.will_rebuild)
+            .count();
+        let pending_count = self
+            .checkpoint_status
+            .iter()
+            .filter(|s| s.pending_upload)
+            .count();
+        lines.push(Line::from(format!(
+            "checkpoints: total={} use={} rebuild={} pending_upload={}",
+            self.checkpoint_status.len(),
+            use_count,
+            rebuild_count,
+            pending_count
+        )));
         lines.push(Line::from(
-            "Start build: select 'Start build' and press Enter, or press 's'.",
+            "Start build: Enter on 'Start build' or press 's'.",
         ));
         lines.push(Line::from(
-            "Edit globals: Dry run / Max parallel / Buildroot perf profile / Buildroot top-level load.",
+            "Input controls: quick menu > Inputs or press 'i'.",
         ));
-        lines.push(Line::from("Modules/Keys: drill down only when needed."));
+        lines.push(Line::from("Checkpoint controls: [/], u, p, R."));
         let p = Paragraph::new(Text::from(lines))
             .wrap(Wrap { trim: false })
             .block(
@@ -1962,7 +2704,43 @@ impl App {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded),
             );
-        f.render_widget(p, cols[1]);
+        f.render_widget(p, right_rows[0]);
+
+        let ck_items: Vec<ListItem> = if self.checkpoint_status.is_empty() {
+            vec![ListItem::new("no checkpoints configured")]
+        } else {
+            self.checkpoint_status
+                .iter()
+                .map(|s| {
+                    let remote = s
+                        .remote_exists
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "-".to_string());
+                    let line = format!(
+                        "id={} local={} remote={} dl={} use={:?} upload={:?} reason={}",
+                        s.id,
+                        s.exists,
+                        remote,
+                        s.will_download,
+                        s.use_policy,
+                        s.upload_policy,
+                        s.reason
+                    );
+                    ListItem::new(line)
+                })
+                .collect()
+        };
+        let mut ck_state = self.checkpoint_list.clone();
+        let ck_list = List::new(ck_items)
+            .block(
+                Block::default()
+                    .title("Checkpoints")
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded),
+            )
+            .highlight_style(Style::default().fg(Color::Black).bg(Color::LightGreen))
+            .highlight_symbol("> ");
+        f.render_stateful_widget(ck_list, right_rows[1], &mut ck_state);
     }
 
     fn draw_picker(&self, f: &mut ratatui::Frame, area: ratatui::layout::Rect) {
@@ -2029,6 +2807,103 @@ impl App {
         let p = Paragraph::new(detail).wrap(Wrap { trim: false }).block(
             Block::default()
                 .title("Module Config Preview")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded),
+        );
+        f.render_widget(p, rows[1]);
+    }
+
+    fn draw_inputs(&self, f: &mut ratatui::Frame, area: ratatui::layout::Rect) {
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(8), Constraint::Percentage(45)])
+            .split(area);
+
+        let items: Vec<ListItem> = if self.input_keys.is_empty() {
+            vec![ListItem::new("<no inputs configured>")]
+        } else {
+            self.input_keys
+                .iter()
+                .map(|k| {
+                    let short = self
+                        .doc_effective
+                        .as_ref()
+                        .and_then(|d| d.value_path(&format!("inputs.resolved.{k}")))
+                        .map(short_value)
+                        .unwrap_or_else(|| "<unset>".to_string());
+                    ListItem::new(format!("{k} = {short}"))
+                })
+                .collect()
+        };
+        let list = List::new(items)
+            .block(
+                Block::default()
+                    .title("Inputs")
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded),
+            )
+            .highlight_style(Style::default().fg(Color::Black).bg(Color::LightYellow))
+            .highlight_symbol("> ");
+        let mut state = self.input_key_list.clone();
+        if self.input_keys.is_empty() {
+            state.select(None);
+        }
+        f.render_stateful_widget(list, rows[0], &mut state);
+
+        let detail = if let (Some(doc), Some(key)) =
+            (self.doc_effective.as_ref(), self.selected_input_key())
+        {
+            let mut lines = Vec::<Line>::new();
+            let choices = self.selected_input_choices();
+            lines.push(Line::from(vec![
+                Span::styled("key: ", Style::default().fg(Color::Yellow)),
+                Span::raw(key.to_string()),
+            ]));
+            if !choices.is_empty() {
+                lines.push(Line::from("control: selector (enter/e), cycle (space/h/l)"));
+            } else if self.selected_input_is_bool() {
+                lines.push(Line::from("control: toggle (space or enter/e)"));
+            } else {
+                lines.push(Line::from("control: editor (enter/e)"));
+            }
+            if let Some(v) = doc.value_path(&format!("inputs.resolved.{key}")) {
+                lines.push(Line::from(format!("resolved: {}", short_value(v))));
+            }
+            if let Some(v) = doc.value_path(&format!("inputs.values.{key}")) {
+                lines.push(Line::from(format!("override/value: {}", short_value(v))));
+            }
+            if let Some(v) = doc.value_path(&format!("inputs.options.{key}.type")) {
+                lines.push(Line::from(format!("type: {}", short_value(v))));
+            }
+            if let Some(v) = doc.value_path(&format!("inputs.options.{key}.default")) {
+                lines.push(Line::from(format!("default: {}", short_value(v))));
+            }
+            if let Some(v) = doc.value_path(&format!("inputs.options.{key}.env")) {
+                lines.push(Line::from(format!("env: {}", short_value(v))));
+            }
+            if let Some(v) = doc.value_path(&format!("inputs.options.{key}.required")) {
+                lines.push(Line::from(format!("required: {}", short_value(v))));
+            }
+            if let Some(v) = doc.value_path(&format!("inputs.options.{key}.choices")) {
+                lines.push(Line::from(format!(
+                    "choices: {}",
+                    toml::to_string(v)
+                        .unwrap_or_else(|_| format!("{v:?}"))
+                        .trim()
+                )));
+            }
+            if let Some(v) = doc.value_path(&format!("inputs.options.{key}.description")) {
+                lines.push(Line::from(""));
+                lines.push(Line::from("description:"));
+                lines.push(Line::from(short_value(v)));
+            }
+            Text::from(lines)
+        } else {
+            Text::from("Select an input.")
+        };
+        let p = Paragraph::new(detail).wrap(Wrap { trim: false }).block(
+            Block::default()
+                .title("Input Detail")
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded),
         );
@@ -2752,6 +3627,116 @@ fn run_loop(
     Ok((None, summary))
 }
 
+fn short_value(v: &toml::Value) -> String {
+    match v {
+        toml::Value::Boolean(b) => b.to_string(),
+        toml::Value::Integer(i) => i.to_string(),
+        toml::Value::Float(f) => format!("{f}"),
+        toml::Value::String(s) => s.clone(),
+        toml::Value::Array(arr) => arr.iter().map(short_value).collect::<Vec<_>>().join(", "),
+        _ => toml::to_string(v)
+            .unwrap_or_else(|_| format!("{v:?}"))
+            .trim()
+            .to_string(),
+    }
+}
+
+fn empty_overrides_table() -> toml::Value {
+    toml::Value::Table(Default::default())
+}
+
+fn build_tui_overrides_path(build_path: &Path) -> PathBuf {
+    let parent = build_path.parent().unwrap_or_else(|| Path::new("."));
+    let build_name = build_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("build.toml");
+    parent
+        .join(".gaia")
+        .join(format!("{build_name}.tui-overrides.toml"))
+}
+
+fn read_tui_overrides(path: &Path) -> Result<toml::Value> {
+    if !path.exists() {
+        return Ok(empty_overrides_table());
+    }
+
+    let raw = fs::read_to_string(path)
+        .map_err(|e| Error::msg(format!("failed to read {}: {e}", path.display())))?;
+    if raw.trim().is_empty() {
+        return Ok(empty_overrides_table());
+    }
+
+    let value: toml::Value = toml::from_str(&raw)
+        .map_err(|e| Error::msg(format!("failed to parse {}: {e}", path.display())))?;
+    if !value.is_table() {
+        return Err(Error::msg(format!(
+            "invalid tui overrides {}: expected table at root",
+            path.display()
+        )));
+    }
+    Ok(value)
+}
+
+fn write_tui_overrides(path: &Path, overrides: &toml::Value) -> Result<()> {
+    if !overrides.is_table() {
+        return Err(Error::msg("invalid overrides: root value must be a table"));
+    }
+
+    let parent = path.parent().ok_or_else(|| {
+        Error::msg(format!(
+            "invalid overrides path (no parent): {}",
+            path.display()
+        ))
+    })?;
+    fs::create_dir_all(parent)
+        .map_err(|e| Error::msg(format!("failed to create {}: {e}", parent.display())))?;
+
+    let body = toml::to_string_pretty(overrides)
+        .map_err(|e| Error::msg(format!("failed to encode tui overrides: {e}")))?;
+    fs::write(path, body)
+        .map_err(|e| Error::msg(format!("failed to write {}: {e}", path.display())))
+}
+
+fn is_primitive_input_value(v: &toml::Value) -> bool {
+    matches!(
+        v,
+        toml::Value::String(_)
+            | toml::Value::Boolean(_)
+            | toml::Value::Integer(_)
+            | toml::Value::Float(_)
+    )
+}
+
+fn toml_values_equal_loose(a: &toml::Value, b: &toml::Value) -> bool {
+    match (a, b) {
+        (toml::Value::Integer(x), toml::Value::Float(y)) => (*x as f64) == *y,
+        (toml::Value::Float(x), toml::Value::Integer(y)) => *x == (*y as f64),
+        _ => a == b,
+    }
+}
+
+fn remove_override_path_from_table(tbl: &mut toml::value::Table, segs: &[&str]) -> bool {
+    if segs.is_empty() {
+        return tbl.is_empty();
+    }
+    if segs.len() == 1 {
+        tbl.remove(segs[0]);
+        return tbl.is_empty();
+    }
+
+    let key = segs[0];
+    let remove_parent = tbl
+        .get_mut(key)
+        .and_then(toml::Value::as_table_mut)
+        .is_some_and(|child| remove_override_path_from_table(child, &segs[1..]));
+    if remove_parent {
+        tbl.remove(key);
+    }
+    tbl.is_empty()
+}
+
 fn find_tomls(dir: &Path) -> Result<Vec<PathBuf>> {
     let mut out = Vec::new();
     if !dir.exists() {
@@ -2766,8 +3751,15 @@ fn find_tomls(dir: &Path) -> Result<Vec<PathBuf>> {
         for e in entries.flatten() {
             let path = e.path();
             if path.is_dir() {
+                if path.file_name().and_then(|s| s.to_str()) == Some(".gaia") {
+                    continue;
+                }
                 stack.push(path);
             } else if path.extension().and_then(|s| s.to_str()) == Some("toml") {
+                let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                if name.ends_with(".tui-overrides.toml") {
+                    continue;
+                }
                 out.push(path);
             }
         }
@@ -2998,5 +3990,66 @@ impl Widget for Fill {
                 buf[(x, y)].set_char(' ').set_style(self.style);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn tui_override_path_is_under_dot_gaia() {
+        let p = PathBuf::from("/tmp/image/build.toml");
+        let out = build_tui_overrides_path(&p);
+        assert_eq!(
+            out,
+            PathBuf::from("/tmp/image/.gaia/build.toml.tui-overrides.toml")
+        );
+    }
+
+    #[test]
+    fn read_missing_tui_overrides_returns_empty_table() {
+        let tmp = tempdir().expect("tmp");
+        let p = tmp.path().join("missing.toml");
+        let v = read_tui_overrides(&p).expect("read");
+        assert!(v.as_table().is_some());
+        assert!(v.as_table().is_some_and(|t| t.is_empty()));
+    }
+
+    #[test]
+    fn write_and_read_tui_overrides_round_trip() {
+        let tmp = tempdir().expect("tmp");
+        let p = tmp.path().join(".gaia/build.toml.tui-overrides.toml");
+        let mut table = toml::Table::new();
+        table.insert("dry_run".into(), toml::Value::Boolean(true));
+        let mut inputs = toml::Table::new();
+        inputs.insert("value".into(), toml::Value::String("release".into()));
+        table.insert("inputs".into(), toml::Value::Table(inputs));
+        let v = toml::Value::Table(table);
+
+        write_tui_overrides(&p, &v).expect("write");
+        let loaded = read_tui_overrides(&p).expect("read");
+        assert_eq!(loaded, v);
+    }
+
+    #[test]
+    fn find_tomls_skips_tui_override_state_files() {
+        let tmp = tempdir().expect("tmp");
+        let build = tmp.path().join("build.toml");
+        fs::write(&build, "imports = []\n").expect("write build");
+
+        let state_dir = tmp.path().join(".gaia");
+        fs::create_dir_all(&state_dir).expect("mkdir .gaia");
+        let state = state_dir.join("build.toml.tui-overrides.toml");
+        fs::write(&state, "[inputs]\n").expect("write state");
+
+        let list = find_tomls(tmp.path()).expect("scan");
+        assert!(list.contains(&build), "missing build.toml from scan");
+        assert!(
+            !list.contains(&state),
+            "tui override state file should be excluded"
+        );
     }
 }

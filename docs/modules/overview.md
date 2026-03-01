@@ -10,7 +10,8 @@ Built-in modules are registered in `crates/gaia-image-builder/src/modules/mod.rs
 - `program.install`: stage artifact outputs into rootfs overlay.
 - `stage`: render files, env files, and systemd units/assets.
 - `buildroot.rpi`: board/boot overlay preparation.
-- `buildroot`: Buildroot source/config/build/image collection pipeline.
+- `buildroot`: Buildroot source/config/build/image collection pipeline (or external `starting_point` import mode).
+- `checkpoints`: in-flow checkpoint restore/capture orchestration for supported anchors.
 
 Read module-specific docs:
 
@@ -18,3 +19,4 @@ Read module-specific docs:
 - [Program Modules](program.md)
 - [Stage Module](stage.md)
 - [Buildroot Modules](buildroot.md)
+- [Checkpoints](checkpoints.md)

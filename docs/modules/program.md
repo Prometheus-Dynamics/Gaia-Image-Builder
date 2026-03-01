@@ -32,8 +32,24 @@ Each builder:
 - has `enabled`, `workspace_dir`, optional default `check_ids`
 - emits one task (`*.artifacts`) that may process multiple artifacts
 - supports artifact `mode`: `build`, `prebuilt`, `auto`
+- supports `enabled_if` / `disabled_if` conditions per artifact
 - writes artifact records to `build/artifacts/<id>.json`
 - writes build state fingerprints to `build/artifacts/<id>.state.json`
+
+Conditions are evaluated from resolved build inputs:
+
+- `[inputs.options.<key>]` defines user-facing toggles/inputs
+- CLI overrides use `--set key=value`
+- conditions support:
+  - `key` (truthy)
+  - `!key` (falsey)
+  - `key=value`
+  - `key!=value`
+
+Build inputs are also exported to program commands as env vars:
+
+- `GAIA_INPUT_<KEY>` (uppercased, non-alnum converted to `_`)
+- example: `pv_jar_source` -> `GAIA_INPUT_PV_JAR_SOURCE`
 
 ### Rust specifics
 
@@ -45,6 +61,8 @@ Each builder:
 
 - `build_command` is required for build mode.
 - `output_path` identifies produced file/dir.
+- `program.custom` additionally supports `after_artifacts` for dependency ordering between custom artifacts.
+  - supports optional dependency with `?` suffix (for example `"driver-jar?"`).
 
 ## `program.install`
 
@@ -52,6 +70,7 @@ Copies artifact outputs into stage rootfs paths (`/usr/bin/...`, etc.).
 
 - `dest` must be absolute image path.
 - can set mode/owner/group.
+- supports `enabled_if` / `disabled_if` per install item.
 - provides `stage:program-install`, which `stage.render` can depend on.
 
 ## Practical pattern
