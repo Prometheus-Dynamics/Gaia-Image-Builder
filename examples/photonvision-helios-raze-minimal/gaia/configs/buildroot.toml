@@ -1,0 +1,42 @@
+[build]
+version = "pv-minimal-0.1.0"
+
+[buildroot]
+version = "2025.11"
+defconfig = "raspberrypicm5io_defconfig"
+compression = "none"
+shrink_ext = true
+archive_format = "img.xz"
+archive_name = "photonvision-helios-raze-minimal"
+collect_refresh_post_image = false
+
+[buildroot.rpi]
+config_file = "assets/boot/config.txt"
+
+[buildroot.packages]
+# Keep this focused on PhotonVision runtime + camera enumeration.
+systemd = true
+avahi = true
+nss-mdns = true
+openjdk = true
+python3 = true
+libcamera = true
+libcamera-apps = true
+libv4l = true
+libv4l_utils = true
+libdrm = true
+mesa3d = true
+sqlite = true
+
+[buildroot.symbols]
+BR2_INIT_SYSTEMD = true
+BR2_INIT_BUSYBOX = false
+BR2_TARGET_GENERIC_HOSTNAME = "photonvision"
+BR2_TARGET_GENERIC_ISSUE = "PhotonVision (Gaia minimal)"
+BR2_PACKAGE_SYSTEMD_NETWORKD = true
+BR2_PACKAGE_SQLITE_CLI = true
+BR2_PACKAGE_LIBCAMERA_V4L2 = true
+BR2_PACKAGE_LIBCAMERA_PIPELINE_RPI_VC4 = true
+BR2_PACKAGE_LIBCAMERA_PIPELINE_RPI_PISP = true
+BR2_PACKAGE_NETWORK_MANAGER = false
+BR2_PACKAGE_DNSMASQ = false

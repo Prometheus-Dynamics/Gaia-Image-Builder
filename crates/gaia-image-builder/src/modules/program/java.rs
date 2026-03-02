@@ -30,6 +30,8 @@ struct JavaArtifact {
     mode: ArtifactMode,
     profile: Option<String>,
     check_ids: Vec<String>,
+    enabled_if: Vec<String>,
+    disabled_if: Vec<String>,
     prebuilt_path: Option<String>,
     output_path: Option<String>,
     build_command: Vec<String>,
@@ -44,6 +46,8 @@ impl Default for JavaArtifact {
             mode: ArtifactMode::Auto,
             profile: None,
             check_ids: Vec::new(),
+            enabled_if: Vec::new(),
+            disabled_if: Vec::new(),
             prebuilt_path: None,
             output_path: None,
             build_command: Vec::new(),
@@ -76,6 +80,26 @@ impl Default for BuildJavaConfig {
 
 pub struct ProgramJavaModule;
 
+fn selected_artifacts(doc: &ConfigDoc, artifacts: &[JavaArtifact]) -> Result<Vec<JavaArtifact>> {
+    let mut out = Vec::new();
+    for artifact in artifacts {
+        let enabled =
+            crate::build_inputs::conditions_match(doc, &artifact.enabled_if, &artifact.disabled_if)
+                .map_err(|e| {
+                    let id = artifact.id.trim();
+                    let id = if id.is_empty() { "<empty>" } else { id };
+                    Error::msg(format!(
+                        "program.java.artifacts id='{}' condition evaluation failed: {}",
+                        id, e
+                    ))
+                })?;
+        if enabled {
+            out.push(artifact.clone());
+        }
+    }
+    Ok(out)
+}
+
 impl crate::modules::Module for ProgramJavaModule {
     fn id(&self) -> &'static str {
         "program.java"
@@ -88,6 +112,10 @@ impl crate::modules::Module for ProgramJavaModule {
     fn plan(&self, doc: &ConfigDoc, plan: &mut Plan) -> Result<()> {
         let cfg: BuildJavaConfig = doc.deserialize_path(self.id())?.unwrap_or_default();
         if !cfg.enabled {
+            return Ok(());
+        }
+        let selected = selected_artifacts(doc, &cfg.artifacts)?;
+        if selected.is_empty() {
             return Ok(());
         }
 
@@ -127,7 +155,10 @@ fn exec(doc: &ConfigDoc, ctx: &mut ExecCtx) -> Result<()> {
     util::ensure_dir(&module_dir)?;
 
     let mut manifest = Vec::new();
-    let artifacts = cfg.artifacts.clone();
+    let artifacts = selected_artifacts(doc, &cfg.artifacts)?;
+    if artifacts.is_empty() {
+        ctx.log("program.java: no artifacts selected by conditions");
+    }
     if artifacts.len() <= 1 {
         for artifact in artifacts {
             manifest.push(build_one_artifact(
@@ -251,6 +282,8 @@ fn build_one_artifact(
             "id": aid,
             "mode": format!("{:?}", artifact.mode),
             "profile": artifact.profile.clone(),
+            "enabled_if": artifact.enabled_if.clone(),
+            "disabled_if": artifact.disabled_if.clone(),
             "target": profile.and_then(|p| p.target.clone()),
             "profile_env": profile.map(|p| p.env.clone()),
             "artifact_env": artifact.env.clone(),
@@ -316,6 +349,11 @@ fn build_one_artifact(
             }
         }
         for (k, v) in &artifact.env {
+            cmd.env(k, v);
+        }
+        let mut input_envs = BTreeMap::new();
+        crate::build_inputs::inject_env_vars(doc, &mut input_envs, None)?;
+        for (k, v) in input_envs {
             cmd.env(k, v);
         }
         ctx.run_cmd(cmd)

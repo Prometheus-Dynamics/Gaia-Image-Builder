@@ -23,6 +23,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_false() -> bool {
+    false
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct BuildrootConfig {
@@ -66,6 +70,79 @@ pub struct BuildrootConfig {
     pub packages: BTreeMap<String, bool>,
     pub package_versions: BTreeMap<String, String>,
     pub symbols: BTreeMap<String, toml::Value>,
+    pub starting_point: BuildrootStartingPointConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct BuildrootStartingPointConfig {
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    pub rootfs_dir: Option<String>,
+    pub rootfs_tar: Option<String>,
+    pub image: Option<String>,
+    pub image_partition: Option<String>,
+    #[serde(default = "default_true")]
+    pub image_read_only: bool,
+    #[serde(default = "default_true")]
+    pub apply_stage_overlay: bool,
+    pub source_label: Option<String>,
+    pub packages: ExternalPackageConfig,
+}
+
+impl Default for BuildrootStartingPointConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            rootfs_dir: None,
+            rootfs_tar: None,
+            image: None,
+            image_partition: None,
+            image_read_only: true,
+            apply_stage_overlay: true,
+            source_label: None,
+            packages: ExternalPackageConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ExternalPackageConfig {
+    #[serde(default = "default_false")]
+    pub enabled: bool,
+    #[serde(default = "default_false")]
+    pub execute: bool,
+    pub manager: Option<String>,
+    pub release_version: Option<String>,
+    #[serde(default = "default_false")]
+    pub allow_major_upgrade: bool,
+    #[serde(default = "default_true")]
+    pub update: bool,
+    #[serde(default = "default_false")]
+    pub dist_upgrade: bool,
+    pub install: Vec<String>,
+    pub remove: Vec<String>,
+    pub extra_args: Vec<String>,
+    pub os_release_path: Option<String>,
+}
+
+impl Default for ExternalPackageConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            execute: false,
+            manager: None,
+            release_version: None,
+            allow_major_upgrade: false,
+            update: true,
+            dist_upgrade: false,
+            install: Vec::new(),
+            remove: Vec::new(),
+            extra_args: Vec::new(),
+            os_release_path: Some("/etc/os-release".into()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -144,6 +221,7 @@ impl Default for BuildrootConfig {
             packages: BTreeMap::new(),
             package_versions: BTreeMap::new(),
             symbols: BTreeMap::new(),
+            starting_point: BuildrootStartingPointConfig::default(),
         }
     }
 }
@@ -178,6 +256,12 @@ impl FetchTask {
     pub fn run(_cfg: &Self, doc: &ConfigDoc, ctx: &mut ExecCtx) -> Result<()> {
         let ws_paths = ctx.workspace_paths_or_init(doc)?;
         let br: BuildrootConfig = doc.deserialize_path("buildroot")?.unwrap_or_default();
+        if br.starting_point.enabled {
+            ctx.log(
+                "buildroot.fetch: starting_point.enabled=true; skipping Buildroot source fetch",
+            );
+            return Ok(());
+        }
         let src_dir = resolve_buildroot_src_dir(&ws_paths, &br)?;
         let git_env = resolve_buildroot_git_env(&br);
 
@@ -300,7 +384,11 @@ fn git_rev_parse(repo: &Path, rev: &str) -> Result<String> {
     module = "buildroot",
     phase = "configure",
     provides = ["buildroot:config"],
-    after = ["buildroot.fetch", "buildroot:target-prepared?"],
+    after = [
+        "buildroot.fetch",
+        "buildroot:target-prepared?",
+        "checkpoints:buildroot-build-restored?",
+    ],
     default_label = "Configure Buildroot",
     core = true
 )]
@@ -325,9 +413,23 @@ impl ConfigureTask {
     pub fn run(_cfg: &Self, doc: &ConfigDoc, ctx: &mut ExecCtx) -> Result<()> {
         let ws = ctx.workspace_paths_or_init(doc)?;
         let br: BuildrootConfig = doc.deserialize_path("buildroot")?.unwrap_or_default();
+        if br.starting_point.enabled {
+            ctx.log(
+                "buildroot.configure: starting_point.enabled=true; skipping Buildroot configure",
+            );
+            return Ok(());
+        }
         let perf = resolve_performance_settings(&br);
         let src_dir = resolve_buildroot_src_dir(&ws, &br)?;
         let out_dir = resolve_buildroot_out_dir(&ws, &src_dir, &br)?;
+
+        if crate::checkpoints::anchor_restored(doc, ctx, "buildroot.build")? {
+            ctx.log(
+                "buildroot.configure: restored checkpoint for buildroot.build; skipping configure",
+            );
+            return Ok(());
+        }
+
         let make_common_env = resolve_buildroot_common_env(&ws, &br, &src_dir)?;
         let tweaked_codegen_pkgs = apply_buildroot_codegen_speed_tweaks(ctx, &src_dir)?;
         if let Some(externals) = make_common_env.get("BR2_EXTERNAL") {
@@ -558,6 +660,32 @@ impl BuildTask {
     pub fn run(_cfg: &Self, doc: &ConfigDoc, ctx: &mut ExecCtx) -> Result<()> {
         let ws = ctx.workspace_paths_or_init(doc)?;
         let br: BuildrootConfig = doc.deserialize_path("buildroot")?.unwrap_or_default();
+        if br.starting_point.enabled {
+            ctx.log("buildroot.build: starting_point.enabled=true; skipping Buildroot build");
+            let run_dir = ws.out_dir.join(build_name(doc)).join("gaia");
+            fs::create_dir_all(&run_dir)
+                .map_err(|e| Error::msg(format!("failed to create run dir: {e}")))?;
+            fs::write(
+                run_dir.join("post-image-needed.marker"),
+                format!("requested_at={}\n", chrono::Utc::now()),
+            )
+            .map_err(|e| Error::msg(format!("failed to write post-image-needed.marker: {e}")))?;
+            return Ok(());
+        }
+
+        if crate::checkpoints::anchor_restored(doc, ctx, "buildroot.build")? {
+            ctx.log("buildroot.build: checkpoint restored; skipping build");
+            let run_dir = ws.out_dir.join(build_name(doc)).join("gaia");
+            fs::create_dir_all(&run_dir)
+                .map_err(|e| Error::msg(format!("failed to create run dir: {e}")))?;
+            fs::write(
+                run_dir.join("post-image-needed.marker"),
+                format!("requested_at={}\n", chrono::Utc::now()),
+            )
+            .map_err(|e| Error::msg(format!("failed to write post-image-needed.marker: {e}")))?;
+            return Ok(());
+        }
+
         let perf = resolve_performance_settings(&br);
         let src_dir = resolve_buildroot_src_dir(&ws, &br)?;
         let out_dir = resolve_buildroot_out_dir(&ws, &src_dir, &br)?;
@@ -637,6 +765,9 @@ impl CollectTask {
     pub fn run(_cfg: &Self, doc: &ConfigDoc, ctx: &mut ExecCtx) -> Result<()> {
         let ws = ctx.workspace_paths_or_init(doc)?;
         let br: BuildrootConfig = doc.deserialize_path("buildroot")?.unwrap_or_default();
+        if br.starting_point.enabled {
+            return collect_from_starting_point(doc, ctx, &ws, &br);
+        }
         let perf = resolve_performance_settings(&br);
         let report_enabled = br.report.unwrap_or(true);
         let report_hashes = br.report_hashes.unwrap_or(true);
@@ -865,6 +996,943 @@ impl CollectTask {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct StartingPointCollectReport {
+    source_label: String,
+    source_rootfs: String,
+    stage_overlay_applied: bool,
+    stage_entries: usize,
+    rootfs_bytes: u64,
+    package_reconcile: ExternalPackageReconcileReport,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct ExternalPackageReconcileReport {
+    enabled: bool,
+    execute_requested: bool,
+    executed: bool,
+    manager: Option<String>,
+    distro_id: Option<String>,
+    version_id: Option<String>,
+    release_version: Option<String>,
+    major_upgrade_allowed: bool,
+    major_upgrade_detected: bool,
+    install: Vec<String>,
+    remove: Vec<String>,
+    commands: Vec<String>,
+}
+
+fn collect_from_starting_point(
+    doc: &ConfigDoc,
+    ctx: &mut ExecCtx,
+    ws: &WorkspacePaths,
+    br: &BuildrootConfig,
+) -> Result<()> {
+    let sp = &br.starting_point;
+    if !sp.enabled {
+        return Err(Error::msg(
+            "collect_from_starting_point called but buildroot.starting_point.enabled=false",
+        ));
+    }
+
+    let run_dir = ws.out_dir.join(build_name(doc)).join("gaia");
+    fs::create_dir_all(&run_dir).map_err(|e| {
+        Error::msg(format!(
+            "failed to create run dir {}: {e}",
+            run_dir.display()
+        ))
+    })?;
+
+    let collect_dir = resolve_collect_dir(doc, ws, br)?;
+    let removed_stale = clear_directory_contents(&collect_dir)?;
+    fs::create_dir_all(&collect_dir)
+        .map_err(|e| Error::msg(format!("failed to create {}: {e}", collect_dir.display())))?;
+    if removed_stale > 0 {
+        ctx.log(&format!(
+            "cleared {} stale artifact entr{} from {}",
+            removed_stale,
+            if removed_stale == 1 { "y" } else { "ies" },
+            collect_dir.display()
+        ));
+    }
+
+    let (source_label, source_rootfs) = resolve_starting_point_rootfs(doc, ctx, ws, sp)?;
+    ctx.log(&format!(
+        "buildroot.collect: using starting point '{}' ({})",
+        source_label,
+        source_rootfs.display()
+    ));
+
+    let rootfs_dir = collect_dir.join("rootfs");
+    fs::create_dir_all(&rootfs_dir)
+        .map_err(|e| Error::msg(format!("failed to create {}: {e}", rootfs_dir.display())))?;
+    copy_dir_all_preserve_links(&source_rootfs, &rootfs_dir)?;
+
+    let mut stage_entries = 0usize;
+    if sp.apply_stage_overlay {
+        let stage_root = crate::modules::util::stage_root_dir(doc, ctx)?;
+        if stage_root.is_dir() {
+            stage_entries = collect_overlay_entries(&stage_root)?.len();
+            copy_dir_all_preserve_links(&stage_root, &rootfs_dir)?;
+            ctx.log(&format!(
+                "applied stage overlay into starting-point rootfs (entries={stage_entries})"
+            ));
+        } else {
+            ctx.log("stage root is missing; skipping stage overlay application");
+        }
+    } else {
+        ctx.log("buildroot.starting_point.apply_stage_overlay=false; skipping stage overlay");
+    }
+
+    let package_reconcile = reconcile_external_packages(ctx, &rootfs_dir, &sp.packages)?;
+    let rootfs_bytes = directory_total_bytes(&rootfs_dir)?;
+
+    let report = StartingPointCollectReport {
+        source_label: source_label.clone(),
+        source_rootfs: source_rootfs.display().to_string(),
+        stage_overlay_applied: sp.apply_stage_overlay,
+        stage_entries,
+        rootfs_bytes,
+        package_reconcile: package_reconcile.clone(),
+    };
+
+    if let Some(fmt) = br
+        .archive_format
+        .as_deref()
+        .map(str::trim)
+        .map(|s| s.to_ascii_lowercase())
+        && matches!(
+            fmt.as_str(),
+            "img" | "img.xz" | "img.gz" | "img.zst" | "xz" | "gz" | "zst"
+        )
+    {
+        return Err(Error::msg(format!(
+            "buildroot.archive_format='{}' is not supported with buildroot.starting_point; use tar-based archive formats",
+            fmt
+        )));
+    }
+
+    let archive = create_collect_archive(doc, ctx, &collect_dir, br)?;
+    let archive_sha256 = if br.report_hashes.unwrap_or(true) {
+        archive.as_ref().map(|p| sha256_file_hex(p)).transpose()?
+    } else {
+        None
+    };
+
+    let manifest = serde_json::json!({
+        "build": build_name(doc),
+        "generated_at": chrono::Utc::now().to_rfc3339(),
+        "images_dir": collect_dir.display().to_string(),
+        "rootfs": rootfs_dir.display().to_string(),
+        "archive": archive.as_ref().map(|p| p.display().to_string()),
+        "archive_sha256": archive_sha256,
+        "starting_point": report,
+        "artifacts": [
+            {
+                "src": source_rootfs.display().to_string(),
+                "dst": rootfs_dir.display().to_string(),
+                "kind": "rootfs_dir"
+            }
+        ],
+    });
+    fs::write(
+        run_dir.join("manifest.json"),
+        serde_json::to_string_pretty(&manifest).unwrap_or_else(|_| "{}".into()),
+    )
+    .map_err(|e| Error::msg(format!("failed to write manifest.json: {e}")))?;
+    ctx.log(&format!(
+        "wrote {}",
+        run_dir.join("manifest.json").display()
+    ));
+
+    if br.report.unwrap_or(true) {
+        let image_report = serde_json::json!({
+            "build": build_name(doc),
+            "generated_at": chrono::Utc::now().to_rfc3339(),
+            "images_dir": collect_dir.display().to_string(),
+            "rootfs": rootfs_dir.display().to_string(),
+            "rootfs_bytes": rootfs_bytes,
+            "archive": archive.as_ref().map(|p| p.display().to_string()),
+            "archive_sha256": archive_sha256,
+            "starting_point": report,
+        });
+        fs::write(
+            run_dir.join("image-report.json"),
+            serde_json::to_string_pretty(&image_report).unwrap_or_else(|_| "{}".into()),
+        )
+        .map_err(|e| Error::msg(format!("failed to write image-report.json: {e}")))?;
+        ctx.log(&format!(
+            "wrote {}",
+            run_dir.join("image-report.json").display()
+        ));
+    }
+
+    Ok(())
+}
+
+fn resolve_starting_point_rootfs(
+    doc: &ConfigDoc,
+    ctx: &mut ExecCtx,
+    ws: &WorkspacePaths,
+    sp: &BuildrootStartingPointConfig,
+) -> Result<(String, PathBuf)> {
+    let dir = sp
+        .rootfs_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let tar = sp
+        .rootfs_tar
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let img = sp.image.as_deref().map(str::trim).filter(|s| !s.is_empty());
+
+    let configured = [dir.is_some(), tar.is_some(), img.is_some()]
+        .into_iter()
+        .filter(|v| *v)
+        .count();
+    if configured == 0 {
+        return Err(Error::msg(
+            "buildroot.starting_point.enabled=true requires one of: rootfs_dir, rootfs_tar, image",
+        ));
+    }
+    if configured > 1 {
+        return Err(Error::msg(
+            "buildroot.starting_point supports exactly one source: rootfs_dir OR rootfs_tar OR image",
+        ));
+    }
+
+    if let Some(raw) = dir {
+        let p = resolve_root_or_abs(ws, raw)?;
+        if !p.is_dir() {
+            return Err(Error::msg(format!(
+                "buildroot.starting_point.rootfs_dir is not a directory: {}",
+                p.display()
+            )));
+        }
+        let label = sp
+            .source_label
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| format!("rootfs_dir:{raw}"));
+        return Ok((label, p));
+    }
+
+    if let Some(raw) = tar {
+        let tar_path = resolve_root_or_abs(ws, raw)?;
+        if !tar_path.is_file() {
+            return Err(Error::msg(format!(
+                "buildroot.starting_point.rootfs_tar is not a file: {}",
+                tar_path.display()
+            )));
+        }
+
+        let extract_root = ws
+            .build_dir
+            .join("starting-point")
+            .join(build_name(doc))
+            .join("extract");
+        remove_path_if_exists(&extract_root)?;
+        fs::create_dir_all(&extract_root).map_err(|e| {
+            Error::msg(format!(
+                "failed to create starting-point extract dir {}: {e}",
+                extract_root.display()
+            ))
+        })?;
+
+        let mut cmd = Command::new("tar");
+        cmd.arg("-xf").arg(&tar_path).arg("-C").arg(&extract_root);
+        ctx.run_cmd(cmd)?;
+        let rootfs = infer_extracted_rootfs_dir(&extract_root)?;
+        let label = sp
+            .source_label
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| format!("rootfs_tar:{raw}"));
+        return Ok((label, rootfs));
+    }
+
+    if let Some(raw) = img {
+        let img_path = resolve_root_or_abs(ws, raw)?;
+        if !img_path.is_file() {
+            return Err(Error::msg(format!(
+                "buildroot.starting_point.image is not a file: {}",
+                img_path.display()
+            )));
+        }
+        let rootfs = extract_rootfs_from_image(doc, ctx, ws, sp, &img_path)?;
+        let label = sp
+            .source_label
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| format!("image:{raw}"));
+        return Ok((label, rootfs));
+    }
+
+    Err(Error::msg(
+        "failed to resolve buildroot.starting_point source",
+    ))
+}
+
+fn infer_extracted_rootfs_dir(extract_root: &Path) -> Result<PathBuf> {
+    let mut dirs = Vec::<PathBuf>::new();
+    let mut files = 0usize;
+    for ent in fs::read_dir(extract_root)
+        .map_err(|e| Error::msg(format!("failed to read {}: {e}", extract_root.display())))?
+    {
+        let ent = ent.map_err(|e| Error::msg(format!("read_dir entry error: {e}")))?;
+        let p = ent.path();
+        if p.is_dir() {
+            dirs.push(p);
+        } else {
+            files = files.saturating_add(1);
+        }
+    }
+    if dirs.len() == 1 && files == 0 {
+        return Ok(dirs.remove(0));
+    }
+    Ok(extract_root.to_path_buf())
+}
+
+#[derive(Debug, Clone)]
+struct ImagePartitionInfo {
+    path: String,
+    fstype: String,
+    size_bytes: u64,
+}
+
+fn extract_rootfs_from_image(
+    doc: &ConfigDoc,
+    ctx: &mut ExecCtx,
+    ws: &WorkspacePaths,
+    sp: &BuildrootStartingPointConfig,
+    image_path: &Path,
+) -> Result<PathBuf> {
+    #[cfg(unix)]
+    {
+        if unsafe { libc::geteuid() } != 0 {
+            return Err(Error::msg(
+                "buildroot.starting_point.image requires running Gaia as root (loop mount)",
+            ));
+        }
+    }
+
+    let work_root = ws
+        .build_dir
+        .join("starting-point")
+        .join(build_name(doc))
+        .join("image");
+    let mount_dir = work_root.join("mount");
+    let extract_dir = work_root.join("extract");
+    remove_path_if_exists(&mount_dir)?;
+    remove_path_if_exists(&extract_dir)?;
+    fs::create_dir_all(&mount_dir)
+        .map_err(|e| Error::msg(format!("failed to create {}: {e}", mount_dir.display())))?;
+    fs::create_dir_all(&extract_dir)
+        .map_err(|e| Error::msg(format!("failed to create {}: {e}", extract_dir.display())))?;
+
+    let loop_device = losetup_attach(image_path)?;
+    ctx.log(&format!(
+        "starting-point image loop attached: {} -> {}",
+        image_path.display(),
+        loop_device
+    ));
+
+    let mut mounted = false;
+    let result = (|| -> Result<PathBuf> {
+        let partitions = list_image_partitions(&loop_device)?;
+        if partitions.is_empty() {
+            return Err(Error::msg(format!(
+                "no partitions detected for image {} via {}",
+                image_path.display(),
+                loop_device
+            )));
+        }
+        let selected = choose_image_partition(&partitions, sp.image_partition.as_deref())?;
+        ctx.log(&format!(
+            "starting-point image selected partition: {} (fstype='{}' size={})",
+            selected.path, selected.fstype, selected.size_bytes
+        ));
+
+        let mut mount_cmd = Command::new("mount");
+        if sp.image_read_only {
+            mount_cmd.arg("-o").arg("ro");
+        }
+        mount_cmd.arg(&selected.path).arg(&mount_dir);
+        ctx.run_cmd(mount_cmd)?;
+        mounted = true;
+
+        copy_dir_all_preserve_links(&mount_dir, &extract_dir)?;
+        Ok(extract_dir.clone())
+    })();
+
+    if mounted {
+        if let Err(e) = run_cleanup_command(Command::new("umount").arg(&mount_dir)) {
+            ctx.log(&format!(
+                "WARN: failed to unmount {}: {}",
+                mount_dir.display(),
+                e
+            ));
+        }
+    }
+    if let Err(e) = run_cleanup_command(Command::new("losetup").arg("-d").arg(&loop_device)) {
+        ctx.log(&format!(
+            "WARN: failed to detach loop device {}: {}",
+            loop_device, e
+        ));
+    }
+
+    result
+}
+
+fn run_cleanup_command(cmd: &mut Command) -> Result<()> {
+    let out = cmd
+        .output()
+        .map_err(|e| Error::msg(format!("cleanup command failed to spawn {:?}: {e}", cmd)))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let msg = if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        format!("status {}", out.status)
+    };
+    Err(Error::msg(format!("{:?}: {}", cmd, msg)))
+}
+
+fn losetup_attach(image_path: &Path) -> Result<String> {
+    let out = Command::new("losetup")
+        .arg("--find")
+        .arg("--show")
+        .arg("--partscan")
+        .arg(image_path)
+        .output()
+        .map_err(|e| Error::msg(format!("failed to run losetup: {e}")))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let msg = if !stderr.is_empty() { stderr } else { stdout };
+        return Err(Error::msg(format!(
+            "losetup failed for {}: {}",
+            image_path.display(),
+            msg
+        )));
+    }
+    let dev = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if dev.is_empty() {
+        return Err(Error::msg(format!(
+            "losetup returned empty loop device for {}",
+            image_path.display()
+        )));
+    }
+    Ok(dev)
+}
+
+fn list_image_partitions(loop_device: &str) -> Result<Vec<ImagePartitionInfo>> {
+    let out = Command::new("lsblk")
+        .arg("-P")
+        .arg("-n")
+        .arg("-o")
+        .arg("PATH,TYPE,FSTYPE,SIZE")
+        .arg(loop_device)
+        .output()
+        .map_err(|e| Error::msg(format!("failed to run lsblk: {e}")))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let msg = if !stderr.is_empty() { stderr } else { stdout };
+        return Err(Error::msg(format!(
+            "lsblk failed for {}: {}",
+            loop_device, msg
+        )));
+    }
+    parse_lsblk_partition_output(&String::from_utf8_lossy(&out.stdout))
+}
+
+fn parse_lsblk_partition_output(raw: &str) -> Result<Vec<ImagePartitionInfo>> {
+    let mut out = Vec::<ImagePartitionInfo>::new();
+    for line in raw.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let pairs = parse_lsblk_pairs_line(line);
+        let typ = pairs.get("TYPE").map(|s| s.as_str()).unwrap_or_default();
+        if typ != "part" {
+            continue;
+        }
+        let Some(path) = pairs.get("PATH").cloned() else {
+            continue;
+        };
+        let fstype = pairs.get("FSTYPE").cloned().unwrap_or_default();
+        let size_bytes = pairs
+            .get("SIZE")
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(0);
+        out.push(ImagePartitionInfo {
+            path,
+            fstype,
+            size_bytes,
+        });
+    }
+    Ok(out)
+}
+
+fn parse_lsblk_pairs_line(line: &str) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::<String, String>::new();
+    for tok in line.split_whitespace() {
+        let Some((k, v)) = tok.split_once('=') else {
+            continue;
+        };
+        let mut val = v.trim().to_string();
+        if val.starts_with('"') && val.ends_with('"') && val.len() >= 2 {
+            val = val[1..val.len() - 1].to_string();
+        }
+        out.insert(k.to_string(), val);
+    }
+    out
+}
+
+fn choose_image_partition(
+    parts: &[ImagePartitionInfo],
+    requested: Option<&str>,
+) -> Result<ImagePartitionInfo> {
+    if let Some(raw) = requested.map(str::trim).filter(|s| !s.is_empty()) {
+        if raw.starts_with('/') {
+            if let Some(p) = parts.iter().find(|p| p.path == raw) {
+                return Ok(p.clone());
+            }
+            return Err(Error::msg(format!(
+                "requested image partition '{}' not found",
+                raw
+            )));
+        }
+
+        if raw.chars().all(|c| c.is_ascii_digit()) {
+            let suffix = format!("p{raw}");
+            if let Some(p) = parts
+                .iter()
+                .find(|p| p.path.ends_with(&suffix) || p.path.ends_with(raw))
+            {
+                return Ok(p.clone());
+            }
+            return Err(Error::msg(format!(
+                "requested image partition number '{}' not found",
+                raw
+            )));
+        }
+
+        if let Some(p) = parts.iter().find(|p| p.path.ends_with(raw)) {
+            return Ok(p.clone());
+        }
+        return Err(Error::msg(format!(
+            "requested image partition selector '{}' not found",
+            raw
+        )));
+    }
+
+    let fs_score = |fstype: &str| match fstype.to_ascii_lowercase().as_str() {
+        "ext4" => 40,
+        "ext3" => 35,
+        "ext2" => 30,
+        "btrfs" => 25,
+        "xfs" => 20,
+        "f2fs" => 20,
+        "vfat" | "fat" | "fat16" | "fat32" | "exfat" => 1,
+        "" => 5,
+        _ => 10,
+    };
+
+    parts
+        .iter()
+        .max_by_key(|p| (fs_score(&p.fstype), p.size_bytes))
+        .cloned()
+        .ok_or_else(|| Error::msg("no image partitions available"))
+}
+
+fn directory_total_bytes(root: &Path) -> Result<u64> {
+    if !root.exists() {
+        return Ok(0);
+    }
+    let mut total = 0u64;
+    for entry in walkdir::WalkDir::new(root) {
+        let entry = entry.map_err(|e| Error::msg(format!("walkdir error: {e}")))?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        total = total.saturating_add(entry.metadata().map(|m| m.len()).unwrap_or(0));
+    }
+    Ok(total)
+}
+
+fn reconcile_external_packages(
+    ctx: &mut ExecCtx,
+    rootfs_dir: &Path,
+    cfg: &ExternalPackageConfig,
+) -> Result<ExternalPackageReconcileReport> {
+    let mut report = ExternalPackageReconcileReport {
+        enabled: cfg.enabled,
+        execute_requested: cfg.execute,
+        executed: false,
+        manager: None,
+        distro_id: None,
+        version_id: None,
+        release_version: None,
+        major_upgrade_allowed: cfg.allow_major_upgrade,
+        major_upgrade_detected: false,
+        install: cfg.install.clone(),
+        remove: cfg.remove.clone(),
+        commands: Vec::new(),
+    };
+    if !cfg.enabled {
+        return Ok(report);
+    }
+
+    let os_release = read_os_release(rootfs_dir, cfg.os_release_path.as_deref())?;
+    let distro_id = os_release.get("ID").cloned();
+    let version_id = os_release.get("VERSION_ID").cloned();
+    report.distro_id = distro_id.clone();
+    report.version_id = version_id.clone();
+
+    let manager = detect_external_package_manager(rootfs_dir, cfg.manager.as_deref())
+        .ok_or_else(|| Error::msg("failed to detect package manager for starting-point rootfs"))?;
+    report.manager = Some(manager.clone());
+
+    let effective_release = cfg.release_version.clone().or(version_id.clone());
+    report.release_version = effective_release.clone();
+    if let (Some(detected), Some(overridden)) =
+        (version_id.as_deref(), cfg.release_version.as_deref())
+    {
+        let detected_major = major_version_component(detected);
+        let override_major = major_version_component(overridden);
+        if detected_major.is_some() && override_major.is_some() && detected_major != override_major
+        {
+            report.major_upgrade_detected = true;
+            if !cfg.allow_major_upgrade {
+                return Err(Error::msg(format!(
+                    "starting point release override '{}' changes major version from '{}' but allow_major_upgrade=false",
+                    overridden, detected
+                )));
+            }
+        }
+    }
+
+    let commands = build_package_reconcile_commands(&manager, cfg, effective_release.as_deref());
+    report.commands = commands.clone();
+    if commands.is_empty() {
+        ctx.log("starting-point package reconcile: no package commands requested");
+        return Ok(report);
+    }
+
+    for c in &commands {
+        ctx.log(&format!("starting-point package command: {c}"));
+    }
+
+    if !cfg.execute {
+        ctx.log("starting-point package reconcile execute=false; commands were planned only");
+        return Ok(report);
+    }
+
+    #[cfg(unix)]
+    {
+        if unsafe { libc::geteuid() } != 0 {
+            return Err(Error::msg(
+                "starting-point package reconciliation execute=true requires running Gaia as root (for chroot)",
+            ));
+        }
+    }
+
+    let script = commands.join(" && ");
+    let mut cmd = Command::new("chroot");
+    cmd.arg(rootfs_dir).arg("/bin/sh").arg("-lc").arg(&script);
+    ctx.run_cmd(cmd)?;
+    report.executed = true;
+    Ok(report)
+}
+
+fn major_version_component(v: &str) -> Option<String> {
+    let v = v.trim();
+    if v.is_empty() {
+        return None;
+    }
+    let major = v
+        .split(|c: char| !c.is_ascii_digit())
+        .find(|seg| !seg.is_empty())?;
+    Some(major.to_string())
+}
+
+fn read_os_release(rootfs_dir: &Path, rel: Option<&str>) -> Result<BTreeMap<String, String>> {
+    let raw_rel = rel
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("/etc/os-release");
+    let rel = raw_rel.trim_start_matches('/');
+    let path = rootfs_dir.join(rel);
+    if !path.is_file() {
+        return Ok(BTreeMap::new());
+    }
+    let content = fs::read_to_string(&path)
+        .map_err(|e| Error::msg(format!("failed to read {}: {e}", path.display())))?;
+    let mut out = BTreeMap::<String, String>::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
+        let key = k.trim();
+        if key.is_empty() {
+            continue;
+        }
+        let mut val = v.trim().to_string();
+        if val.starts_with('"') && val.ends_with('"') && val.len() >= 2 {
+            val = val[1..val.len() - 1].to_string();
+        }
+        out.insert(key.to_string(), val);
+    }
+    Ok(out)
+}
+
+fn detect_external_package_manager(rootfs_dir: &Path, requested: Option<&str>) -> Option<String> {
+    let normalize = |s: &str| s.trim().to_ascii_lowercase();
+    if let Some(raw) = requested.map(str::trim).filter(|s| !s.is_empty()) {
+        let norm = normalize(raw);
+        if norm != "auto" {
+            return Some(norm);
+        }
+    }
+
+    let exists = |rel: &str| rootfs_dir.join(rel.trim_start_matches('/')).is_file();
+    if exists("/usr/bin/apt-get") || exists("/bin/apt-get") {
+        return Some("apt".into());
+    }
+    if exists("/usr/bin/dnf") {
+        return Some("dnf".into());
+    }
+    if exists("/usr/bin/yum") {
+        return Some("yum".into());
+    }
+    if exists("/sbin/apk") || exists("/usr/bin/apk") {
+        return Some("apk".into());
+    }
+    if exists("/usr/bin/pacman") {
+        return Some("pacman".into());
+    }
+    if exists("/usr/bin/zypper") {
+        return Some("zypper".into());
+    }
+    None
+}
+
+fn build_package_reconcile_commands(
+    manager: &str,
+    cfg: &ExternalPackageConfig,
+    release_version: Option<&str>,
+) -> Vec<String> {
+    let mut out = Vec::<String>::new();
+    let extra = cfg
+        .extra_args
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+
+    let install = cfg
+        .install
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    let remove = cfg
+        .remove
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+
+    let apt_release_flag = release_version
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| format!("-o APT::Default-Release={}", sh_quote(s)));
+
+    match manager {
+        "apt" => {
+            if cfg.update {
+                out.push("apt-get update".into());
+            }
+            if !install.is_empty() {
+                let mut args = vec!["apt-get".to_string()];
+                if let Some(f) = apt_release_flag.clone() {
+                    args.push(f);
+                }
+                args.push("install".into());
+                args.push("-y".into());
+                args.extend(extra.clone());
+                args.extend(install.clone());
+                out.push(args.join(" "));
+            }
+            if !remove.is_empty() {
+                let mut args = vec!["apt-get".to_string()];
+                if let Some(f) = apt_release_flag {
+                    args.push(f);
+                }
+                args.push("remove".into());
+                args.push("-y".into());
+                args.extend(extra.clone());
+                args.extend(remove.clone());
+                out.push(args.join(" "));
+            }
+            if cfg.dist_upgrade {
+                let mut args = vec!["apt-get".to_string()];
+                args.push("dist-upgrade".into());
+                args.push("-y".into());
+                args.extend(extra);
+                out.push(args.join(" "));
+            }
+        }
+        "dnf" => {
+            if cfg.update {
+                out.push("dnf makecache".into());
+            }
+            if !install.is_empty() {
+                let mut args = vec!["dnf".to_string(), "-y".into(), "install".into()];
+                args.extend(extra.clone());
+                args.extend(install.clone());
+                out.push(args.join(" "));
+            }
+            if !remove.is_empty() {
+                let mut args = vec!["dnf".to_string(), "-y".into(), "remove".into()];
+                args.extend(extra.clone());
+                args.extend(remove.clone());
+                out.push(args.join(" "));
+            }
+            if cfg.dist_upgrade {
+                let mut args = vec!["dnf".to_string(), "-y".into(), "upgrade".into()];
+                args.extend(extra);
+                out.push(args.join(" "));
+            }
+        }
+        "yum" => {
+            if cfg.update {
+                out.push("yum makecache".into());
+            }
+            if !install.is_empty() {
+                let mut args = vec!["yum".to_string(), "-y".into(), "install".into()];
+                args.extend(extra.clone());
+                args.extend(install.clone());
+                out.push(args.join(" "));
+            }
+            if !remove.is_empty() {
+                let mut args = vec!["yum".to_string(), "-y".into(), "remove".into()];
+                args.extend(extra.clone());
+                args.extend(remove.clone());
+                out.push(args.join(" "));
+            }
+            if cfg.dist_upgrade {
+                let mut args = vec!["yum".to_string(), "-y".into(), "upgrade".into()];
+                args.extend(extra);
+                out.push(args.join(" "));
+            }
+        }
+        "apk" => {
+            if cfg.update {
+                out.push("apk update".into());
+            }
+            if !install.is_empty() {
+                let mut args = vec!["apk".to_string(), "add".into()];
+                args.extend(extra.clone());
+                args.extend(install.clone());
+                out.push(args.join(" "));
+            }
+            if !remove.is_empty() {
+                let mut args = vec!["apk".to_string(), "del".into()];
+                args.extend(extra.clone());
+                args.extend(remove.clone());
+                out.push(args.join(" "));
+            }
+            if cfg.dist_upgrade {
+                let mut args = vec!["apk".to_string(), "upgrade".into()];
+                args.extend(extra);
+                out.push(args.join(" "));
+            }
+        }
+        "pacman" => {
+            if cfg.update {
+                out.push("pacman -Sy --noconfirm".into());
+            }
+            if !install.is_empty() {
+                let mut args = vec!["pacman".to_string(), "-S".into(), "--noconfirm".into()];
+                args.extend(extra.clone());
+                args.extend(install.clone());
+                out.push(args.join(" "));
+            }
+            if !remove.is_empty() {
+                let mut args = vec!["pacman".to_string(), "-R".into(), "--noconfirm".into()];
+                args.extend(extra.clone());
+                args.extend(remove.clone());
+                out.push(args.join(" "));
+            }
+            if cfg.dist_upgrade {
+                let mut args = vec!["pacman".to_string(), "-Syu".into(), "--noconfirm".into()];
+                args.extend(extra);
+                out.push(args.join(" "));
+            }
+        }
+        "zypper" => {
+            if cfg.update {
+                out.push("zypper --non-interactive refresh".into());
+            }
+            if !install.is_empty() {
+                let mut args = vec![
+                    "zypper".to_string(),
+                    "--non-interactive".into(),
+                    "install".into(),
+                ];
+                args.extend(extra.clone());
+                args.extend(install.clone());
+                out.push(args.join(" "));
+            }
+            if !remove.is_empty() {
+                let mut args = vec![
+                    "zypper".to_string(),
+                    "--non-interactive".into(),
+                    "remove".into(),
+                ];
+                args.extend(extra.clone());
+                args.extend(remove.clone());
+                out.push(args.join(" "));
+            }
+            if cfg.dist_upgrade {
+                let mut args = vec![
+                    "zypper".to_string(),
+                    "--non-interactive".into(),
+                    "update".into(),
+                ];
+                args.extend(extra);
+                out.push(args.join(" "));
+            }
+        }
+        _ => {}
+    }
+    out
 }
 
 #[Module(
@@ -1283,6 +2351,13 @@ fn resolve_buildroot_out_dir(
     }
 }
 
+pub fn checkpoint_buildroot_out_dir(doc: &ConfigDoc, ctx: &ExecCtx) -> Result<PathBuf> {
+    let ws = ctx.workspace_paths_or_init(doc)?;
+    let br: BuildrootConfig = doc.deserialize_path("buildroot")?.unwrap_or_default();
+    let src_dir = resolve_buildroot_src_dir(&ws, &br)?;
+    resolve_buildroot_out_dir(&ws, &src_dir, &br)
+}
+
 fn resolve_collect_dir(
     doc: &ConfigDoc,
     ws: &WorkspacePaths,
@@ -1694,6 +2769,10 @@ fn target_binary_exists(out_dir: &Path, name: &str) -> bool {
 
 fn resolve_root_or_abs(ws: &WorkspacePaths, raw: &str) -> Result<PathBuf> {
     ws.resolve_config_path(raw)
+}
+
+fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 #[derive(Debug, Clone)]
@@ -2226,6 +3305,118 @@ mod tests {
             envs.get("GIT_HTTP_VERSION").map(String::as_str),
             Some("HTTP/1.1")
         );
+    }
+
+    #[test]
+    fn detect_external_package_manager_prefers_apt() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rootfs = tmp.path();
+        fs::create_dir_all(rootfs.join("usr/bin")).expect("mkdir");
+        fs::write(rootfs.join("usr/bin/apt-get"), b"").expect("write apt-get");
+        let mgr = detect_external_package_manager(rootfs, None);
+        assert_eq!(mgr.as_deref(), Some("apt"));
+    }
+
+    #[test]
+    fn major_override_detection_blocks_without_allow_flag() {
+        let cfg = ExternalPackageConfig {
+            enabled: true,
+            execute: false,
+            manager: Some("apt".into()),
+            release_version: Some("13".into()),
+            allow_major_upgrade: false,
+            update: false,
+            dist_upgrade: false,
+            install: vec!["nano".into()],
+            remove: vec![],
+            extra_args: vec![],
+            os_release_path: Some("/etc/os-release".into()),
+        };
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rootfs = tmp.path();
+        fs::create_dir_all(rootfs.join("usr/bin")).expect("mkdir");
+        fs::write(rootfs.join("usr/bin/apt-get"), b"").expect("write apt-get");
+        fs::create_dir_all(rootfs.join("etc")).expect("mkdir etc");
+        fs::write(rootfs.join("etc/os-release"), "ID=debian\nVERSION_ID=12\n")
+            .expect("write os-release");
+
+        let sink = std::sync::Arc::new(crate::executor::StdoutSink::default());
+        let mut ctx = crate::executor::ExecCtx::new(true, sink);
+        let err = reconcile_external_packages(&mut ctx, rootfs, &cfg).unwrap_err();
+        assert!(
+            err.to_string().contains("allow_major_upgrade=false"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn package_command_plan_uses_release_override_for_apt() {
+        let cfg = ExternalPackageConfig {
+            enabled: true,
+            execute: false,
+            manager: Some("apt".into()),
+            release_version: Some("bookworm".into()),
+            allow_major_upgrade: true,
+            update: true,
+            dist_upgrade: false,
+            install: vec!["curl".into()],
+            remove: vec!["nano".into()],
+            extra_args: vec!["--no-install-recommends".into()],
+            os_release_path: Some("/etc/os-release".into()),
+        };
+        let cmds = build_package_reconcile_commands("apt", &cfg, Some("bookworm"));
+        let flat = cmds.join(" && ");
+        assert!(flat.contains("APT::Default-Release='bookworm'"));
+        assert!(flat.contains("install"));
+        assert!(flat.contains("remove"));
+    }
+
+    #[test]
+    fn parse_lsblk_output_collects_partitions() {
+        let raw = r#"PATH="/dev/loop0" TYPE="loop" FSTYPE="" SIZE="4294967296"
+PATH="/dev/loop0p1" TYPE="part" FSTYPE="vfat" SIZE="268435456"
+PATH="/dev/loop0p2" TYPE="part" FSTYPE="ext4" SIZE="4026531840"
+"#;
+        let parts = parse_lsblk_partition_output(raw).expect("parse");
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].path, "/dev/loop0p1");
+        assert_eq!(parts[1].fstype, "ext4");
+    }
+
+    #[test]
+    fn choose_image_partition_prefers_ext4_and_size() {
+        let parts = vec![
+            ImagePartitionInfo {
+                path: "/dev/loop0p1".into(),
+                fstype: "vfat".into(),
+                size_bytes: 256 * 1024 * 1024,
+            },
+            ImagePartitionInfo {
+                path: "/dev/loop0p2".into(),
+                fstype: "ext4".into(),
+                size_bytes: 3 * 1024 * 1024 * 1024,
+            },
+        ];
+        let picked = choose_image_partition(&parts, None).expect("pick");
+        assert_eq!(picked.path, "/dev/loop0p2");
+    }
+
+    #[test]
+    fn choose_image_partition_honors_numeric_selector() {
+        let parts = vec![
+            ImagePartitionInfo {
+                path: "/dev/loop0p1".into(),
+                fstype: "vfat".into(),
+                size_bytes: 1,
+            },
+            ImagePartitionInfo {
+                path: "/dev/loop0p2".into(),
+                fstype: "ext4".into(),
+                size_bytes: 2,
+            },
+        ];
+        let picked = choose_image_partition(&parts, Some("1")).expect("pick by number");
+        assert_eq!(picked.path, "/dev/loop0p1");
     }
 }
 

@@ -1,0 +1,7 @@
+[stage]
+enabled = true
+
+[[stage.files]]
+src = "assets/base-os-id-tar.txt"
+dst = "/etc/base-os-id"
+mode = 420

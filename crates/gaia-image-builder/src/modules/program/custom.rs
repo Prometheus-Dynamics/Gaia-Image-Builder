@@ -1,7 +1,6 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::mpsc;
 
 use serde::Deserialize;
 
@@ -30,6 +29,9 @@ struct CustomArtifact {
     mode: ArtifactMode,
     profile: Option<String>,
     check_ids: Vec<String>,
+    enabled_if: Vec<String>,
+    disabled_if: Vec<String>,
+    after_artifacts: Vec<String>,
     prebuilt_path: Option<String>,
     output_path: Option<String>,
     build_command: Vec<String>,
@@ -44,6 +46,9 @@ impl Default for CustomArtifact {
             mode: ArtifactMode::Auto,
             profile: None,
             check_ids: Vec::new(),
+            enabled_if: Vec::new(),
+            disabled_if: Vec::new(),
+            after_artifacts: Vec::new(),
             prebuilt_path: None,
             output_path: None,
             build_command: Vec::new(),
@@ -76,6 +81,140 @@ impl Default for BuildCustomConfig {
 
 pub struct ProgramCustomModule;
 
+fn selected_artifacts(
+    doc: &ConfigDoc,
+    artifacts: &[CustomArtifact],
+) -> Result<Vec<CustomArtifact>> {
+    let mut out = Vec::new();
+    for artifact in artifacts {
+        let enabled =
+            crate::build_inputs::conditions_match(doc, &artifact.enabled_if, &artifact.disabled_if)
+                .map_err(|e| {
+                    let id = artifact.id.trim();
+                    let id = if id.is_empty() { "<empty>" } else { id };
+                    Error::msg(format!(
+                        "program.custom.artifacts id='{}' condition evaluation failed: {}",
+                        id, e
+                    ))
+                })?;
+        if enabled {
+            out.push(artifact.clone());
+        }
+    }
+    Ok(out)
+}
+
+fn ordered_artifacts(artifacts: Vec<CustomArtifact>) -> Result<Vec<CustomArtifact>> {
+    if artifacts.len() <= 1 {
+        return Ok(artifacts);
+    }
+
+    let mut by_id = BTreeMap::<String, CustomArtifact>::new();
+    let mut order = BTreeMap::<String, usize>::new();
+    for (idx, artifact) in artifacts.into_iter().enumerate() {
+        let id = artifact.id.trim().to_string();
+        if id.is_empty() {
+            return Err(Error::msg("program.custom.artifacts[].id is empty"));
+        }
+        if by_id.contains_key(&id) {
+            return Err(Error::msg(format!(
+                "duplicate program.custom artifact id '{}'",
+                id
+            )));
+        }
+        order.insert(id.clone(), idx);
+        by_id.insert(id, artifact);
+    }
+
+    let mut incoming = BTreeMap::<String, usize>::new();
+    let mut outgoing = BTreeMap::<String, BTreeSet<String>>::new();
+    for id in by_id.keys() {
+        incoming.insert(id.clone(), 0);
+        outgoing.entry(id.clone()).or_default();
+    }
+
+    for (id, artifact) in &by_id {
+        for dep_raw in &artifact.after_artifacts {
+            let dep_raw = dep_raw.trim();
+            if dep_raw.is_empty() {
+                continue;
+            }
+            let (dep, optional) = dep_raw
+                .strip_suffix('?')
+                .map(|d| (d.trim(), true))
+                .unwrap_or((dep_raw, false));
+            if dep.is_empty() {
+                return Err(Error::msg(format!(
+                    "program.custom artifact '{}' has empty dependency entry in after_artifacts",
+                    id
+                )));
+            }
+            if !incoming.contains_key(dep) {
+                if optional {
+                    continue;
+                }
+                return Err(Error::msg(format!(
+                    "program.custom artifact '{}' depends on unknown artifact '{}'",
+                    id, dep
+                )));
+            }
+            outgoing
+                .entry(dep.to_string())
+                .or_default()
+                .insert(id.clone());
+            *incoming.get_mut(id).expect("id exists") += 1;
+        }
+    }
+
+    let mut ready = incoming
+        .iter()
+        .filter_map(|(id, in_deg)| (*in_deg == 0).then_some(id.clone()))
+        .collect::<Vec<_>>();
+    ready.sort_by_key(|id| *order.get(id).unwrap_or(&usize::MAX));
+    let mut q = VecDeque::from(ready);
+    let mut out_ids = Vec::<String>::new();
+
+    while let Some(id) = q.pop_front() {
+        out_ids.push(id.clone());
+        if let Some(children) = outgoing.get(&id) {
+            for child in children {
+                let slot = incoming.get_mut(child).expect("child exists");
+                *slot -= 1;
+                if *slot == 0 {
+                    q.push_back(child.clone());
+                }
+            }
+            if q.len() > 1 {
+                let mut drained = q.drain(..).collect::<Vec<_>>();
+                drained.sort_by_key(|tid| *order.get(tid).unwrap_or(&usize::MAX));
+                q = VecDeque::from(drained);
+            }
+        }
+    }
+
+    if out_ids.len() != by_id.len() {
+        let remaining = incoming
+            .iter()
+            .filter_map(|(id, in_deg)| (*in_deg > 0).then_some(id.clone()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(Error::msg(format!(
+            "program.custom artifact dependency cycle detected; remaining: {}",
+            remaining
+        )));
+    }
+
+    let mut out = Vec::with_capacity(out_ids.len());
+    for id in out_ids {
+        out.push(
+            by_id
+                .remove(&id)
+                .ok_or_else(|| Error::msg(format!("missing artifact '{}'", id)))?,
+        );
+    }
+    Ok(out)
+}
+
 impl crate::modules::Module for ProgramCustomModule {
     fn id(&self) -> &'static str {
         "program.custom"
@@ -90,6 +229,11 @@ impl crate::modules::Module for ProgramCustomModule {
         if !cfg.enabled {
             return Ok(());
         }
+        let selected = selected_artifacts(doc, &cfg.artifacts)?;
+        if selected.is_empty() {
+            return Ok(());
+        }
+        let _ordered = ordered_artifacts(selected)?;
 
         validate_program_definitions(doc)?;
 
@@ -127,65 +271,27 @@ fn exec(doc: &ConfigDoc, ctx: &mut ExecCtx) -> Result<()> {
     util::ensure_dir(&module_dir)?;
 
     let mut manifest = Vec::new();
-    let artifacts = cfg.artifacts.clone();
-    if artifacts.len() <= 1 {
-        for artifact in artifacts {
-            manifest.push(build_one_artifact(
-                doc,
-                ctx,
-                &ws,
-                &build_cfg,
-                &workspace_dir,
-                &cfg.check_ids,
-                artifact,
-            )?);
-        }
-    } else {
-        let (tx, rx) = mpsc::channel::<Result<serde_json::Value>>();
-        let default_check_ids = cfg.check_ids.clone();
-        std::thread::scope(|scope| {
-            for artifact in artifacts {
-                let tx = tx.clone();
-                let ws = ws.clone();
-                let build_cfg = build_cfg.clone();
-                let workspace_dir = workspace_dir.clone();
-                let default_check_ids = default_check_ids.clone();
-                let mut local_ctx = ctx.clone();
-                let aid = artifact.id.trim().to_string();
-                if !aid.is_empty() {
-                    local_ctx.set_task(format!("{TASK_ID}:{aid}"));
-                }
-                scope.spawn(move || {
-                    let res = build_one_artifact(
-                        doc,
-                        &mut local_ctx,
-                        &ws,
-                        &build_cfg,
-                        &workspace_dir,
-                        &default_check_ids,
-                        artifact,
-                    );
-                    let _ = tx.send(res);
-                });
-            }
-            drop(tx);
-            let mut first_err: Option<Error> = None;
-            for res in rx {
-                match res {
-                    Ok(row) => manifest.push(row),
-                    Err(e) => {
-                        if first_err.is_none() {
-                            first_err = Some(e);
-                        }
-                    }
-                }
-            }
-            if let Some(e) = first_err {
-                return Err(e);
-            }
-            Ok::<(), Error>(())
-        })?;
+    let selected = selected_artifacts(doc, &cfg.artifacts)?;
+    let artifacts = ordered_artifacts(selected)?;
+    if artifacts.is_empty() {
+        ctx.log("program.custom: no artifacts selected by conditions");
     }
+    for artifact in artifacts {
+        let aid = artifact.id.trim().to_string();
+        if !aid.is_empty() {
+            ctx.set_task(format!("{TASK_ID}:{aid}"));
+        }
+        manifest.push(build_one_artifact(
+            doc,
+            ctx,
+            &ws,
+            &build_cfg,
+            &workspace_dir,
+            &cfg.check_ids,
+            artifact,
+        )?);
+    }
+    ctx.set_task(TASK_ID);
     manifest.sort_by(|a, b| {
         a.get("id")
             .and_then(|v| v.as_str())
@@ -251,6 +357,9 @@ fn build_one_artifact(
             "id": aid,
             "mode": format!("{:?}", artifact.mode),
             "profile": artifact.profile.clone(),
+            "enabled_if": artifact.enabled_if.clone(),
+            "disabled_if": artifact.disabled_if.clone(),
+            "after_artifacts": artifact.after_artifacts.clone(),
             "target": profile.and_then(|p| p.target.clone()),
             "profile_env": profile.map(|p| p.env.clone()),
             "artifact_env": artifact.env.clone(),
@@ -316,6 +425,11 @@ fn build_one_artifact(
             }
         }
         for (k, v) in &artifact.env {
+            cmd.env(k, v);
+        }
+        let mut input_envs = BTreeMap::new();
+        crate::build_inputs::inject_env_vars(doc, &mut input_envs, None)?;
+        for (k, v) in input_envs {
             cmd.env(k, v);
         }
         ctx.run_cmd(cmd)
@@ -421,4 +535,77 @@ fn build_one_artifact(
         "path": abs,
         "mode": format!("{:?}", artifact.mode),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_doc(src: &str) -> ConfigDoc {
+        ConfigDoc {
+            path: "inline.toml".into(),
+            value: toml::from_str(src).expect("valid toml"),
+        }
+    }
+
+    #[test]
+    fn selected_artifacts_honors_conditions() {
+        let mut doc = make_doc(
+            r#"
+[inputs.values]
+jar_mode = "release"
+"#,
+        );
+        crate::build_inputs::apply_cli_overrides(&mut doc, &[]).expect("resolve inputs");
+
+        let mut release = CustomArtifact {
+            id: "release-jar".into(),
+            ..CustomArtifact::default()
+        };
+        release.enabled_if = vec!["jar_mode=release".into()];
+
+        let mut repo = CustomArtifact {
+            id: "repo-jar".into(),
+            ..CustomArtifact::default()
+        };
+        repo.enabled_if = vec!["jar_mode=repo".into()];
+
+        let selected = selected_artifacts(&doc, &[release, repo]).expect("selected");
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].id, "release-jar");
+    }
+
+    #[test]
+    fn ordered_artifacts_respects_after_dependencies() {
+        let base = CustomArtifact {
+            id: "base".into(),
+            ..CustomArtifact::default()
+        };
+        let mut app = CustomArtifact {
+            id: "app".into(),
+            ..CustomArtifact::default()
+        };
+        app.after_artifacts = vec!["base".into()];
+
+        let ordered = ordered_artifacts(vec![app, base]).expect("ordered");
+        let ids = ordered.into_iter().map(|a| a.id).collect::<Vec<_>>();
+        assert_eq!(ids, vec!["base", "app"]);
+    }
+
+    #[test]
+    fn ordered_artifacts_detects_cycle() {
+        let mut a = CustomArtifact {
+            id: "a".into(),
+            ..CustomArtifact::default()
+        };
+        let mut b = CustomArtifact {
+            id: "b".into(),
+            ..CustomArtifact::default()
+        };
+        a.after_artifacts = vec!["b".into()];
+        b.after_artifacts = vec!["a".into()];
+
+        let err = ordered_artifacts(vec![a, b]).expect_err("cycle");
+        assert!(err.to_string().contains("dependency cycle"));
+    }
 }

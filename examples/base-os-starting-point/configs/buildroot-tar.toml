@@ -1,0 +1,17 @@
+[buildroot]
+archive_format = "none"
+report = true
+report_hashes = false
+
+[buildroot.starting_point]
+enabled = true
+rootfs_tar = "inputs/base-rootfs.tar"
+source_label = "base-os-starting-point:rootfs_tar"
+apply_stage_overlay = true
+
+[buildroot.starting_point.packages]
+enabled = true
+manager = "auto"
+execute = false
+install = ["curl"]
+allow_major_upgrade = false

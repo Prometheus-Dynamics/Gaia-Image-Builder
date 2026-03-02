@@ -310,6 +310,11 @@ pub fn run_checks(
         for (k, v) in &check.env {
             cmd.env(k, v);
         }
+        let mut input_envs = BTreeMap::new();
+        crate::build_inputs::inject_env_vars(doc, &mut input_envs, None)?;
+        for (k, v) in input_envs {
+            cmd.env(k, v);
+        }
 
         ctx.log(&format!("check:{} => {:?}", cid, check.run));
         match ctx.run_cmd(cmd) {

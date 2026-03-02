@@ -1,0 +1,56 @@
+[stage]
+enabled = true
+
+[[stage.files]]
+src = "assets/etc/hostname"
+dst = "/etc/hostname"
+mode = 420
+
+[[stage.files]]
+src = "assets/etc/os-release"
+dst = "/etc/os-release"
+mode = 420
+
+[[stage.files]]
+src = "assets/etc/motd"
+dst = "/etc/motd"
+mode = 420
+
+[[stage.files]]
+src = "assets/opt/photonvision/photonvision_config/hardwareConfig.json"
+dst = "/opt/photonvision/photonvision_config/hardwareConfig.json"
+mode = 420
+
+[[stage.files]]
+src = "assets/boot/overlays/ov9782-overlay.dts"
+dst = "/boot/overlays/ov9782-overlay.dts"
+mode = 420
+
+[stage.env.sets.photonvision]
+PHOTONVISION_JAVA_OPTS = "-Xmx512m"
+PHOTONVISION_ARGS = ""
+
+[stage.env.sets.helios_seed]
+HELIOS_CAMERA_FOV = "70.0"
+
+[stage.services.units.photonvision]
+src = "assets/systemd/photonvision.service"
+unit = "photonvision.service"
+targets = ["multi-user.target"]
+env_set = "photonvision"
+
+[[stage.services.units.photonvision.assets]]
+src = "assets/usr/local/bin/photonvision-launch.sh"
+dst = "/usr/local/bin/photonvision-launch.sh"
+mode = 493
+
+[stage.services.units.helios_seed_photonvision_camera]
+src = "assets/systemd/helios-seed-photonvision-camera.service"
+unit = "helios-seed-photonvision-camera.service"
+targets = ["multi-user.target"]
+env_set = "helios_seed"
+
+[[stage.services.units.helios_seed_photonvision_camera.assets]]
+src = "assets/usr/local/bin/helios-seed-photonvision-camera.sh"
+dst = "/usr/local/bin/helios-seed-photonvision-camera.sh"
+mode = 493

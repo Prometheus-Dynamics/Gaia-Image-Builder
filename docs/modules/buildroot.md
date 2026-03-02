@@ -23,6 +23,7 @@ Main OS pipeline with four tasks.
 - clones Buildroot repo if missing
 - fetches updates
 - checks out `buildroot.version` if set
+- when `buildroot.starting_point.enabled=true`, this step is skipped
 
 ### 2) `buildroot.configure`
 
@@ -31,11 +32,16 @@ Main OS pipeline with four tasks.
 - applies package toggles/symbol overrides
 - configures cache/download/performance settings
 - emits `resolved.toml` and configure marker
+- if checkpoint restore hits for anchor `buildroot.build`, this step is skipped
+- when `buildroot.starting_point.enabled=true`, this step is skipped
 
 ### 3) `buildroot.build`
 
 - runs package build/finalization (host-finalize)
 - records post-image-needed marker
+- on successful run, checkpoint capture may occur for anchor `buildroot.build`
+- if checkpoint restore already hit, this step is skipped
+- when `buildroot.starting_point.enabled=true`, this step is skipped
 
 ### 4) `buildroot.collect`
 
@@ -45,6 +51,9 @@ Main OS pipeline with four tasks.
 - optional ext shrink
 - optional archive creation (`img`, `img.xz`, `tar.*`)
 - writes manifests and optional image report
+- still runs after checkpoint restore so staged/program content is applied to final image outputs
+- when `buildroot.starting_point.enabled=true`, Gaia collects from external rootfs source (`rootfs_dir`, `rootfs_tar`, or `image`) instead of Buildroot output
+- optional package reconciliation can run inside chroot against detected package manager
 
 ## Key buildroot config knobs
 
@@ -56,6 +65,18 @@ Main OS pipeline with four tasks.
 - image size/compression: `expand_size_mb`, `compression`, `shrink_ext`
 - package/symbol control: `packages`, `package_versions`, `symbols`
 - external trees: `external`
+- external starting point:
+  - `starting_point.enabled`
+  - `starting_point.rootfs_dir` or `starting_point.rootfs_tar` or `starting_point.image`
+  - image options: `starting_point.image_partition`, `starting_point.image_read_only`
+  - `starting_point.apply_stage_overlay`
+  - `starting_point.packages.*` for package reconciliation
+
+`starting_point.image` notes:
+
+- requires root privileges (loop setup + mount).
+- Gaia attaches a loop device, auto-selects a likely rootfs partition (prefers ext* + size), mounts, copies, then unmounts/detaches.
+- set `starting_point.image_partition` to force a partition (`"2"`, `"p2"`, or full `/dev/...` path).
 
 ## HeliOS examples
 

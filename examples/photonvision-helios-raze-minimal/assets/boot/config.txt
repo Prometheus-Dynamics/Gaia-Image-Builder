@@ -1,0 +1,44 @@
+# Automatically load overlays for detected DSI displays
+display_auto_detect=1
+
+# Automatically load initramfs files, if found
+auto_initramfs=1
+
+# Run in 64-bit mode
+arm_64bit=1
+
+# Disable compensation for displays with overscan
+disable_overscan=1
+
+[cm5]
+
+# Hardware I2C bus for power sensors:
+#   /dev/i2c-1 -> GPIO10 (SDA) / GPIO11 (SCL) via RP1 i2c1
+# Shared software I2C bus for peripheral sensors (IMU, etc.)
+#   bus4 -> GPIO8 (SDA) / GPIO7 (SCL)
+dtoverlay=i2c1-pi5,pins_10_11
+dtoverlay=i2c-gpio,bus=4,i2c_gpio_sda=8,i2c_gpio_scl=7
+
+# Status LED ring
+dtoverlay=ws2812-pio,gpio=13,num_leds=16,brightness=255,dev_name=leds%d
+
+# Enable Pi5/CM5 GPU stack
+dtoverlay=vc4-kms-v3d-pi5
+
+[pi5]
+# Run as fast as firmware / board allows
+arm_boost=1
+
+[all]
+##############################################################
+### PHOTONVISION CAMERA CONFIG
+### Default to camera autodetect for minimal bring-up.
+### For helios-raze OV9782 runs, disable auto-detect and enable ov9782 overlay:
+### camera_auto_detect=0
+### dtoverlay=ov9782-overlay,cam0,clk-continuous
+
+camera_auto_detect=1
+
+dtoverlay=dwc2,dr_mode=peripheral
+
+##############################################################
