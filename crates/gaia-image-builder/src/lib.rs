@@ -10,3 +10,5 @@ pub mod ui;
 pub mod workspace;
 
 pub use error::{Error, Result};
+
+pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");

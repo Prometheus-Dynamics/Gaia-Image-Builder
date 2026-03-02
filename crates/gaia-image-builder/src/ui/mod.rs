@@ -2497,14 +2497,15 @@ impl App {
 
     fn draw_header(&self, f: &mut ratatui::Frame, area: ratatui::layout::Rect) {
         let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-        let title = match self.screen {
-            Screen::Picker => "Gaia Builder: Pick Build",
-            Screen::Quick => "Gaia Builder: Quick",
-            Screen::Modules => "Gaia Builder: Modules",
-            Screen::Keys => "Gaia Builder: Module Keys",
-            Screen::Inputs => "Gaia Builder: Inputs",
-            Screen::Run => "Gaia Builder: Run",
+        let screen_title = match self.screen {
+            Screen::Picker => "Pick Build",
+            Screen::Quick => "Quick",
+            Screen::Modules => "Modules",
+            Screen::Keys => "Module Keys",
+            Screen::Inputs => "Inputs",
+            Screen::Run => "Run",
         };
+        let title = format!("Gaia Builder v{}: {screen_title}", crate::APP_VERSION);
         let build = self
             .selected_build
             .as_ref()

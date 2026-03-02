@@ -316,6 +316,8 @@ fn cmd_run(
     max_parallel: usize,
     inputs: &InputOverrides,
 ) -> Result<()> {
+    println!("gaia v{}", gaia_image_builder::APP_VERSION);
+
     let doc = load_doc(path, inputs)?;
     let plan = build_plan(&doc)?;
 
