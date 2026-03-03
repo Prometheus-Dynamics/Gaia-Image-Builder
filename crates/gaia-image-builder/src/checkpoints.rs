@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{Duration, Instant};
@@ -627,6 +628,108 @@ impl Drop for StoreLock {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct StoreLockMeta {
+    pid: u32,
+    acquired_at: String,
+}
+
+fn write_store_lock_meta(file: &mut fs::File, path: &Path) -> Result<()> {
+    let meta = StoreLockMeta {
+        pid: std::process::id(),
+        acquired_at: chrono::Utc::now().to_rfc3339(),
+    };
+    let body = serde_json::to_vec(&meta)
+        .map_err(|e| Error::msg(format!("failed to encode checkpoint store lock metadata: {e}")))?;
+    file.write_all(&body).map_err(|e| {
+        Error::msg(format!(
+            "failed to write checkpoint store lock metadata {}: {e}",
+            path.display()
+        ))
+    })?;
+    file.flush().map_err(|e| {
+        Error::msg(format!(
+            "failed to flush checkpoint store lock metadata {}: {e}",
+            path.display()
+        ))
+    })?;
+    Ok(())
+}
+
+fn parse_store_lock_pid(raw: &str) -> Option<u32> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(meta) = serde_json::from_str::<StoreLockMeta>(trimmed) {
+        return Some(meta.pid);
+    }
+    if let Some(rest) = trimmed.strip_prefix("pid=") {
+        return rest.trim().parse::<u32>().ok();
+    }
+    if let Some(rest) = trimmed.strip_prefix("pid:") {
+        return rest.trim().parse::<u32>().ok();
+    }
+    trimmed.parse::<u32>().ok()
+}
+
+#[cfg(unix)]
+fn process_exists(pid: u32) -> bool {
+    Path::new("/proc").join(pid.to_string()).exists()
+}
+
+#[cfg(not(unix))]
+fn process_exists(_pid: u32) -> bool {
+    false
+}
+
+fn remove_store_lock(path: &Path) -> Result<bool> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(Error::msg(format!(
+            "failed to remove stale checkpoint store lock {}: {e}",
+            path.display()
+        ))),
+    }
+}
+
+fn try_break_stale_store_lock(path: &Path) -> Result<bool> {
+    let raw = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => {
+            return Err(Error::msg(format!(
+                "failed to read checkpoint store lock {}: {e}",
+                path.display()
+            )));
+        }
+    };
+
+    if let Some(pid) = parse_store_lock_pid(&raw) {
+        if process_exists(pid) {
+            return Ok(false);
+        }
+        return remove_store_lock(path);
+    }
+
+    // Compatibility fallback for legacy empty/malformed lock files: only
+    // break when obviously stale to avoid disturbing a still-running writer.
+    let stale_after = Duration::from_secs(10 * 60);
+    let modified = match fs::metadata(path).and_then(|m| m.modified()) {
+        Ok(ts) => ts,
+        Err(_) => return Ok(false),
+    };
+    let age = match modified.elapsed() {
+        Ok(d) => d,
+        Err(_) => return Ok(false),
+    };
+    if age >= stale_after {
+        return remove_store_lock(path);
+    }
+    Ok(false)
+}
+
 fn acquire_store_lock(ws: &WorkspacePaths) -> Result<StoreLock> {
     let path = store_root(ws).join(".store.lock");
     if let Some(parent) = path.parent() {
@@ -640,8 +743,17 @@ fn acquire_store_lock(ws: &WorkspacePaths) -> Result<StoreLock> {
             .create_new(true)
             .open(&path)
         {
-            Ok(_) => return Ok(StoreLock { path }),
+            Ok(mut file) => {
+                if let Err(err) = write_store_lock_meta(&mut file, &path) {
+                    let _ = fs::remove_file(&path);
+                    return Err(err);
+                }
+                return Ok(StoreLock { path });
+            }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                if try_break_stale_store_lock(&path)? {
+                    continue;
+                }
                 if Instant::now() >= deadline {
                     return Err(Error::msg(format!(
                         "timed out waiting for checkpoint store lock {}",
@@ -2490,7 +2602,19 @@ pub fn capture_anchor(
         }
         let rel = name.replace('/', "_");
         let dst = payload.join(&rel);
+        ctx.log(&format!(
+            "checkpoint:{} capturing target '{}' from {}",
+            point_id,
+            name,
+            t.path.display()
+        ));
         copy_path(&t.path, &dst)?;
+        ctx.log(&format!(
+            "checkpoint:{} captured target '{}' into {}",
+            point_id,
+            name,
+            dst.display()
+        ));
         manifest_targets.push(CheckpointManifestTarget {
             name: name.to_string(),
             payload_rel: rel,
@@ -2509,8 +2633,6 @@ pub fn capture_anchor(
         targets: manifest_targets,
     };
     write_manifest(&manifest_path_for_object(&object_dir), &manifest)?;
-    let _ = ensure_payload_archive(&object_dir)?;
-
     let mut idx = load_index(&ws)?;
     let manifest_rel = manifest_path_for_object(&object_dir)
         .strip_prefix(store_root(&ws))
@@ -2584,6 +2706,11 @@ pub fn capture_anchor(
                 )?;
             }
         }
+    } else {
+        ctx.log(&format!(
+            "checkpoint:{} local capture complete (upload_policy=off or no backend configured)",
+            point_id
+        ));
     }
 
     Ok(())
@@ -2839,6 +2966,31 @@ use_policy = "auto"
         assert_eq!(st.len(), 1);
         assert!(st[0].reason.contains("inputs_changed"));
         assert!(st[0].reason.contains("buildroot.packages"));
+    }
+
+    #[test]
+    fn acquire_store_lock_breaks_stale_lock_with_dead_pid() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let doc = mk_doc(tmp.path(), "");
+        let ws = workspace_paths_for_doc(&doc).expect("ws");
+        let lock_path = store_root(&ws).join(".store.lock");
+        if let Some(parent) = lock_path.parent() {
+            fs::create_dir_all(parent).expect("create lock dir");
+        }
+        let stale_meta = serde_json::json!({
+            "pid": u32::MAX,
+            "acquired_at": chrono::Utc::now().to_rfc3339(),
+        });
+        fs::write(
+            &lock_path,
+            serde_json::to_string(&stale_meta).expect("encode stale meta"),
+        )
+        .expect("write stale lock");
+
+        let guard = acquire_store_lock(&ws).expect("acquire lock");
+        assert!(lock_path.is_file());
+        drop(guard);
+        assert!(!lock_path.exists());
     }
 
     fn spawn_http_file_server(

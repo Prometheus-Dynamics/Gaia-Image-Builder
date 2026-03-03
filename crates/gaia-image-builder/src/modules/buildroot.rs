@@ -2148,6 +2148,9 @@ fn copy_file(src: &Path, dst: &Path) -> Result<()> {
         fs::create_dir_all(parent)
             .map_err(|e| Error::msg(format!("failed to create {}: {e}", parent.display())))?;
     }
+    if fs::symlink_metadata(dst).is_ok() {
+        remove_path_if_exists(dst)?;
+    }
     fs::copy(src, dst).map_err(|e| {
         Error::msg(format!(
             "failed to copy {} -> {}: {e}",
@@ -2291,8 +2294,7 @@ fn copy_symlink(src: &Path, dst: &Path) -> Result<()> {
             .map_err(|e| Error::msg(format!("failed to create {}: {e}", parent.display())))?;
     }
     if fs::symlink_metadata(dst).is_ok() {
-        fs::remove_file(dst)
-            .map_err(|e| Error::msg(format!("failed to remove {}: {e}", dst.display())))?;
+        remove_path_if_exists(dst)?;
     }
     let target = fs::read_link(src)
         .map_err(|e| Error::msg(format!("failed to read symlink {}: {e}", src.display())))?;
