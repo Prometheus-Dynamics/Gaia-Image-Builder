@@ -39,6 +39,7 @@ impl Default for ProgramInstallConfig {
 pub struct ProgramInstallItem {
     pub artifact: String,
     pub dest: String,
+    pub replace: bool,
     pub mode: Option<u32>,
     pub owner: Option<String>,
     pub group: Option<String>,
@@ -51,6 +52,7 @@ impl Default for ProgramInstallItem {
         Self {
             artifact: String::new(),
             dest: String::new(),
+            replace: false,
             mode: None,
             owner: None,
             group: None,
@@ -187,6 +189,29 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
+fn remove_path(path: &Path) -> Result<()> {
+    let meta = match fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            return Err(Error::msg(format!(
+                "failed to stat {} before replacement: {e}",
+                path.display()
+            )));
+        }
+    };
+
+    if meta.file_type().is_dir() {
+        fs::remove_dir_all(path)
+            .map_err(|e| Error::msg(format!("failed to remove dir {}: {e}", path.display())))?;
+    } else {
+        fs::remove_file(path)
+            .map_err(|e| Error::msg(format!("failed to remove file {}: {e}", path.display())))?;
+    }
+
+    Ok(())
+}
+
 #[cfg(unix)]
 fn set_mode(path: &Path, mode: u32) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -233,6 +258,9 @@ fn exec(doc: &ConfigDoc, ctx: &mut ExecCtx) -> Result<()> {
         }
 
         let dst = util::stage_path(doc, ctx, item.dest.trim())?;
+        if item.replace {
+            remove_path(&dst)?;
+        }
         if src.is_dir() {
             copy_dir_all(&src, &dst)?;
         } else {
@@ -259,6 +287,7 @@ fn exec(doc: &ConfigDoc, ctx: &mut ExecCtx) -> Result<()> {
             "producer": rec.producer,
             "src": rec.abs_path,
             "dst": item.dest,
+            "replace": item.replace,
             "mode": item.mode,
             "owner": item.owner,
             "group": item.group,
@@ -321,4 +350,83 @@ fn apply_owner_group(
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::exec;
+    use crate::config::ConfigDoc;
+    use crate::executor::{ExecCtx, StdoutSink};
+    use crate::modules::program::{ArtifactRecord, write_artifact_record};
+    use std::fs;
+    use std::sync::Arc;
+
+    #[test]
+    fn replace_removes_stale_directory_contents_before_install() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let workspace_root = temp.path();
+        let src = workspace_root.join("frontend-build");
+        fs::create_dir_all(src.join("_app")).expect("create frontend build dir");
+        fs::write(src.join("index.html"), "fresh").expect("write frontend entry");
+        fs::write(src.join("_app/current.js"), "current").expect("write current asset");
+
+        let config = format!(
+            r#"
+[workspace]
+root_dir = "{}"
+
+[program.install]
+enabled = true
+
+[[program.install.items]]
+artifact = "helios-frontend"
+dest = "/opt/helios/frontend"
+replace = true
+"#,
+            workspace_root.display()
+        );
+
+        let doc = ConfigDoc {
+            path: workspace_root.join("replace.toml"),
+            value: toml::from_str(&config).expect("valid config"),
+        };
+        let sink = Arc::new(StdoutSink::default());
+        let mut ctx = ExecCtx::new(false, sink);
+
+        let stale_dir = workspace_root
+            .join("build")
+            .join("stage")
+            .join("replace")
+            .join("rootfs")
+            .join("opt/helios/frontend");
+        fs::create_dir_all(stale_dir.join("_app")).expect("create stale frontend dir");
+        fs::write(stale_dir.join("_app/stale.js"), "stale").expect("write stale asset");
+
+        write_artifact_record(
+            &doc,
+            &ctx,
+            &ArtifactRecord {
+                id: "helios-frontend".into(),
+                producer: "custom".into(),
+                kind: "dir".into(),
+                abs_path: src.display().to_string(),
+            },
+        )
+        .expect("write artifact record");
+
+        exec(&doc, &mut ctx).expect("run install");
+
+        assert!(
+            stale_dir.join("index.html").is_file(),
+            "fresh directory contents should be copied"
+        );
+        assert!(
+            stale_dir.join("_app/current.js").is_file(),
+            "new asset should be present after replace"
+        );
+        assert!(
+            !stale_dir.join("_app/stale.js").exists(),
+            "stale asset should be removed before install"
+        );
+    }
 }

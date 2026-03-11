@@ -639,8 +639,11 @@ fn write_store_lock_meta(file: &mut fs::File, path: &Path) -> Result<()> {
         pid: std::process::id(),
         acquired_at: chrono::Utc::now().to_rfc3339(),
     };
-    let body = serde_json::to_vec(&meta)
-        .map_err(|e| Error::msg(format!("failed to encode checkpoint store lock metadata: {e}")))?;
+    let body = serde_json::to_vec(&meta).map_err(|e| {
+        Error::msg(format!(
+            "failed to encode checkpoint store lock metadata: {e}"
+        ))
+    })?;
     file.write_all(&body).map_err(|e| {
         Error::msg(format!(
             "failed to write checkpoint store lock metadata {}: {e}",

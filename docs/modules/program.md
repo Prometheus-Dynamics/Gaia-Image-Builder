@@ -69,6 +69,8 @@ Build inputs are also exported to program commands as env vars:
 Copies artifact outputs into stage rootfs paths (`/usr/bin/...`, etc.).
 
 - `dest` must be absolute image path.
+- `replace = true` removes an existing destination before copying the artifact.
+  - useful for hashed/static asset directories that must not accumulate stale files.
 - can set mode/owner/group.
 - supports `enabled_if` / `disabled_if` per install item.
 - provides `stage:program-install`, which `stage.render` can depend on.
