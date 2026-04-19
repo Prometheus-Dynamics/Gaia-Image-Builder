@@ -3334,15 +3334,31 @@ fn apply_board_override(
     board_name: &str,
     src_board_dir: &Path,
 ) -> Result<()> {
-    if buildroot_src_dir.join(".git").is_dir() {
+    if buildroot_src_dir.join(".git").is_dir()
+        && git_path_is_tracked(buildroot_src_dir, &format!("board/{board_name}"))?
+    {
         // Heal stale board mutations from previous runs before layering overrides.
-        let _ = Command::new("git")
+        // Capture output here so git errors do not write directly into the TUI.
+        let out = Command::new("git")
             .arg("-C")
             .arg(buildroot_src_dir)
             .arg("checkout")
             .arg("--")
             .arg(format!("board/{board_name}"))
-            .status();
+            .output()
+            .map_err(|e| {
+                Error::msg(format!(
+                    "failed to restore buildroot board/{board_name} before override: {e}"
+                ))
+            })?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let msg = if !stderr.is_empty() { stderr } else { stdout };
+            return Err(Error::msg(format!(
+                "failed to restore buildroot board/{board_name} before override: {msg}"
+            )));
+        }
     }
 
     let dst_dir = buildroot_src_dir.join("board").join(board_name);
@@ -3408,14 +3424,38 @@ fn apply_board_override(
     Ok(())
 }
 
+#[cfg(unix)]
+fn git_path_is_tracked(repo_dir: &Path, rel_path: &str) -> Result<bool> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo_dir)
+        .arg("ls-files")
+        .arg("--error-unmatch")
+        .arg(rel_path)
+        .output()
+        .map_err(|e| Error::msg(format!("failed to query git tracked path {rel_path}: {e}")))?;
+    Ok(out.status.success())
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use std::process::Command;
+
+    fn init_git_repo(path: &Path) {
+        let status = Command::new("git")
+            .arg("init")
+            .arg(path)
+            .status()
+            .expect("git init");
+        assert!(status.success(), "git init should succeed");
+    }
 
     #[test]
     fn board_override_replaces_upstream_board_dir() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let br_src = tmp.path().join("buildroot-src");
+        init_git_repo(&br_src);
         let upstream = br_src.join("board/raspberrypicm5io");
         fs::create_dir_all(&upstream).expect("create upstream board dir");
         fs::write(upstream.join("post-build.sh"), b"#!/bin/sh\necho keep\n")
@@ -3425,6 +3465,14 @@ mod tests {
             b"#!/bin/sh\necho upstream\n",
         )
         .expect("write upstream file");
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(&br_src)
+            .arg("add")
+            .arg("board/raspberrypicm5io")
+            .status()
+            .expect("git add upstream board");
+        assert!(status.success(), "git add should succeed");
 
         let ext_root = tmp.path().join("external");
         let ext_board = ext_root.join("boards/raspberrypicm5io");
@@ -3452,6 +3500,27 @@ mod tests {
             fs::read_link(&overridden).expect("read override symlink"),
             ext_board.join("post-image.sh")
         );
+    }
+
+    #[test]
+    fn board_override_skips_git_restore_for_external_only_board() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let br_src = tmp.path().join("buildroot-src");
+        fs::create_dir_all(br_src.join("board")).expect("create board root");
+        init_git_repo(&br_src);
+
+        let ext_root = tmp.path().join("external");
+        let ext_board = ext_root.join("boards/raspberrypicm5io-squashfs");
+        fs::create_dir_all(&ext_board).expect("create external board dir");
+        fs::write(ext_board.join("post-image.sh"), b"#!/bin/sh\necho external\n")
+            .expect("write external file");
+
+        apply_board_override(&br_src, "raspberrypicm5io-squashfs", &ext_board)
+            .expect("apply board override");
+
+        let installed = br_src
+            .join("board/raspberrypicm5io-squashfs/post-image.sh");
+        assert!(installed.exists(), "external-only board should be installed");
     }
 
     #[test]
