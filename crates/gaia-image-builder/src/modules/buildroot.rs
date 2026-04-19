@@ -27,6 +27,8 @@ fn default_false() -> bool {
     false
 }
 
+const BUILDROOT_OUT_DIR_SCHEMA_VERSION: u32 = 1;
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct BuildrootConfig {
@@ -422,13 +424,20 @@ impl ConfigureTask {
         let perf = resolve_performance_settings(&br);
         let src_dir = resolve_buildroot_src_dir(&ws, &br)?;
         let out_dir = resolve_buildroot_out_dir(&ws, &src_dir, &br)?;
-
-        if crate::checkpoints::anchor_restored(doc, ctx, "buildroot.build")? {
+        let restored = crate::checkpoints::anchor_restored(doc, ctx, "buildroot.build")?;
+        if restored {
+            if buildroot_out_dir_schema_mismatch(&out_dir)? {
+                return Err(Error::msg(format!(
+                    "restored Buildroot out_dir {} uses an incompatible Gaia schema and cannot be reused safely; disable or refresh the checkpoint and rebuild clean",
+                    out_dir.display()
+                )));
+            }
             ctx.log(
                 "buildroot.configure: restored checkpoint for buildroot.build; skipping configure",
             );
             return Ok(());
         }
+        reset_buildroot_out_dir_if_schema_mismatch(ctx, &out_dir)?;
 
         let make_common_env = resolve_buildroot_common_env(&ws, &br, &src_dir)?;
         let tweaked_codegen_pkgs = apply_buildroot_codegen_speed_tweaks(ctx, &src_dir)?;
@@ -611,6 +620,7 @@ impl ConfigureTask {
             format!("configured_at={}\n", chrono::Utc::now()),
         )
         .map_err(|e| Error::msg(format!("failed to write configure.marker: {e}")))?;
+        write_buildroot_out_dir_schema_marker(&out_dir)?;
 
         ctx.log(&format!(
             "configured buildroot: src={} O={}",
@@ -707,14 +717,14 @@ impl BuildTask {
         }
         let make_opts_ref = make_opts.iter().map(String::as_str).collect::<Vec<_>>();
 
-        // Build all configured packages and finalize host/staging, but defer
-        // rootfs/image generation to collect (after stage:done).
+        // Build all configured target packages and finalize the target tree,
+        // but defer post-image/rootfs generation to collect (after stage:done).
         run_make(
             ctx,
             &src_dir,
             &out_dir,
             &make_opts_ref,
-            &["host-finalize"],
+            &["target-finalize"],
             &envs,
         )?;
 
@@ -783,6 +793,7 @@ impl CollectTask {
         if refresh_post_image || post_image_needed || !images_dir.is_dir() {
             let stage_root = crate::modules::util::stage_root_dir(doc, ctx)?;
             sync_stage_overlay_into_buildroot_target(doc, ctx, &out_dir, &stage_root)?;
+            validate_target_tree(ctx, &out_dir)?;
 
             // Buildroot image generation intentionally happens here (after stage:done)
             // so package builds and stage/program work can overlap.
@@ -2016,6 +2027,179 @@ fn sync_stage_overlay_into_buildroot_target(
         removed_service_paths
     ));
     Ok(())
+}
+
+fn validate_target_tree(ctx: &mut ExecCtx, out_dir: &Path) -> Result<()> {
+    let target_root = out_dir.join("target");
+    let manifest = out_dir.join("build/packages-file-list.txt");
+    if !target_root.is_dir() {
+        return Err(Error::msg(format!(
+            "buildroot target dir missing: {}",
+            target_root.display()
+        )));
+    }
+    if !manifest.is_file() {
+        return Err(Error::msg(format!(
+            "buildroot package file manifest missing: {}",
+            manifest.display()
+        )));
+    }
+
+    let raw = fs::read_to_string(&manifest).map_err(|e| {
+        Error::msg(format!(
+            "failed to read Buildroot package file manifest {}: {e}",
+            manifest.display()
+        ))
+    })?;
+
+    let mut checked = 0usize;
+    let mut missing = Vec::<PathBuf>::new();
+    for line in raw.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Some((_pkg, rel)) = line.split_once(',') else {
+            continue;
+        };
+        let rel = rel.trim().trim_start_matches("./");
+        if rel.is_empty() {
+            continue;
+        }
+        if should_ignore_missing_manifest_path(rel) {
+            continue;
+        }
+        let path = target_root.join(rel);
+        checked += 1;
+        if !path.exists() {
+            missing.push(path);
+        }
+    }
+
+    if missing.is_empty() {
+        ctx.log(&format!(
+            "validated Buildroot target tree against package manifest: {} path(s) checked",
+            checked
+        ));
+        return Ok(());
+    }
+
+    let preview = missing
+        .iter()
+        .take(32)
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>();
+    ctx.log(&format!(
+        "invalid Buildroot target tree detected: {} missing path(s) from package manifest",
+        missing.len()
+    ));
+    Err(Error::msg(format!(
+        "buildroot target tree is inconsistent with {}: checked {} path(s), missing {}. First missing paths: {}",
+        manifest.display(),
+        checked,
+        missing.len(),
+        preview.join(", ")
+    )))
+}
+
+fn should_ignore_missing_manifest_path(rel: &str) -> bool {
+    const PREFIXES: &[&str] = &[
+        "usr/include/",
+        "usr/lib/pkgconfig/",
+        "usr/share/pkgconfig/",
+        "usr/lib/cmake/",
+        "usr/share/cmake/",
+        "usr/share/aclocal/",
+        "usr/lib/rpm/",
+        "usr/doc/",
+        "usr/info/",
+        "usr/share/info/",
+        "usr/share/doc/",
+        "usr/share/gtk-doc/",
+        "usr/share/man/",
+        "usr/man/",
+        "usr/share/zsh/",
+        "usr/share/locale/",
+        "usr/share/zoneinfo/",
+        "usr/share/terminfo/",
+        "usr/lib/terminfo/",
+        "usr/lib/terminfo",
+        "usr/lib/systemd/catalog/",
+        "usr/lib/environment.d/",
+        "usr/lib/udev/hwdb.d/",
+        "usr/share/cpuinfo/",
+        "var/lib/avahi-autoipd",
+        "dev/fd",
+        "dev/stderr",
+        "dev/stdin",
+        "dev/stdout",
+        "etc/mtab",
+        "etc/resolv.conf",
+    ];
+    if PREFIXES.iter().any(|prefix| rel.starts_with(prefix)) {
+        return true;
+    }
+
+    if rel.ends_with(".a") || rel.ends_with(".la") || rel.ends_with(".prl") {
+        return true;
+    }
+
+    if rel.starts_with("usr/lib/python")
+        && (rel.ends_with(".py") || rel.ends_with(".opt-1.pyc") || rel.ends_with(".opt-2.pyc"))
+    {
+        return true;
+    }
+
+    false
+}
+
+fn buildroot_out_dir_schema_marker(out_dir: &Path) -> PathBuf {
+    out_dir.join(".gaia-buildroot-outdir-schema")
+}
+
+fn buildroot_out_dir_schema_mismatch(out_dir: &Path) -> Result<bool> {
+    let marker = buildroot_out_dir_schema_marker(out_dir);
+    let current = fs::read_to_string(&marker)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok());
+    Ok(out_dir.exists() && current != Some(BUILDROOT_OUT_DIR_SCHEMA_VERSION))
+}
+
+fn reset_buildroot_out_dir_if_schema_mismatch(ctx: &mut ExecCtx, out_dir: &Path) -> Result<()> {
+    let marker = buildroot_out_dir_schema_marker(out_dir);
+    let current = fs::read_to_string(&marker)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok());
+    if current == Some(BUILDROOT_OUT_DIR_SCHEMA_VERSION) || !out_dir.exists() {
+        return Ok(());
+    }
+
+    ctx.log(&format!(
+        "resetting Buildroot out_dir {} due to schema mismatch (found {:?}, expected {})",
+        out_dir.display(),
+        current,
+        BUILDROOT_OUT_DIR_SCHEMA_VERSION
+    ));
+    fs::remove_dir_all(out_dir).map_err(|e| {
+        Error::msg(format!(
+            "failed to remove stale buildroot out_dir {}: {e}",
+            out_dir.display()
+        ))
+    })?;
+    Ok(())
+}
+
+fn write_buildroot_out_dir_schema_marker(out_dir: &Path) -> Result<()> {
+    fs::write(
+        buildroot_out_dir_schema_marker(out_dir),
+        format!("{BUILDROOT_OUT_DIR_SCHEMA_VERSION}\n"),
+    )
+    .map_err(|e| {
+        Error::msg(format!(
+            "failed to write buildroot out_dir schema marker in {}: {e}",
+            out_dir.display()
+        ))
+    })
 }
 
 fn purge_configured_stage_service_paths(doc: &ConfigDoc, target_root: &Path) -> Result<usize> {

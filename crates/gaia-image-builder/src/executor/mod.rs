@@ -795,6 +795,15 @@ fn read_output_stream<R: Read>(reader: R, tx: mpsc::Sender<String>) {
     let mut buf = [0u8; 8192];
     let mut pending = Vec::with_capacity(1024);
 
+    let flush_pending = |pending: &mut Vec<u8>, tx: &mpsc::Sender<String>| {
+        if pending.is_empty() {
+            return;
+        }
+        let line = String::from_utf8_lossy(pending).into_owned();
+        pending.clear();
+        let _ = tx.send(line);
+    };
+
     loop {
         let n = match r.read(&mut buf) {
             Ok(0) => break,
@@ -802,28 +811,24 @@ fn read_output_stream<R: Read>(reader: R, tx: mpsc::Sender<String>) {
             Err(_) => break,
         };
         for b in &buf[..n] {
-            if *b == b'\n' || *b == b'\r' {
-                if pending.is_empty() {
-                    continue;
+            match *b {
+                b'\n' => flush_pending(&mut pending, &tx),
+                b'\r' => {
+                    if !pending.is_empty() {
+                        pending.push(b'\r');
+                    }
                 }
-                let line = String::from_utf8_lossy(&pending).into_owned();
-                pending.clear();
-                let _ = tx.send(line);
-            } else {
-                pending.push(*b);
-                if pending.len() >= MAX_PENDING_BYTES {
-                    let line = String::from_utf8_lossy(&pending).into_owned();
-                    pending.clear();
-                    let _ = tx.send(line);
+                _ => {
+                    pending.push(*b);
+                    if pending.len() >= MAX_PENDING_BYTES {
+                        flush_pending(&mut pending, &tx);
+                    }
                 }
             }
         }
     }
 
-    if !pending.is_empty() {
-        let line = String::from_utf8_lossy(&pending).into_owned();
-        let _ = tx.send(line);
-    }
+    flush_pending(&mut pending, &tx);
 }
 
 fn append_task_log_line(

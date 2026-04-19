@@ -10,6 +10,7 @@ enum EscapeMode {
 }
 
 pub fn sanitize_log_line(input: &str) -> String {
+    let input = input.rsplit('\r').next().unwrap_or(input);
     let mut out = String::with_capacity(input.len().min(MAX_LOG_CHARS));
     let mut esc_mode: Option<EscapeMode> = None;
     let mut truncated = false;
@@ -66,7 +67,10 @@ pub fn sanitize_log_line(input: &str) -> String {
         if c == '\r' || c == '\n' {
             continue;
         }
-        if c == '\t' {
+        if c == '\u{0008}' {
+            out.pop();
+            char_count = out.chars().count();
+        } else if c == '\t' {
             out.push(' ');
             char_count += 1;
         } else if c.is_control() || is_format_control(c) {
@@ -120,5 +124,19 @@ mod tests {
         let input = "a\tb\nc\r\u{202e}x";
         let got = sanitize_log_line(input);
         assert_eq!(got, "a bcx");
+    }
+
+    #[test]
+    fn keeps_only_latest_carriage_return_frame() {
+        let input = "building 10%\rbuilding 50%\rerror: pathspec 'board/raspberrypicm5io-squashfs' did not match";
+        let got = sanitize_log_line(input);
+        assert_eq!(got, "error: pathspec 'board/raspberrypicm5io-squashfs' did not match");
+    }
+
+    #[test]
+    fn applies_backspaces() {
+        let input = "erro\u{0008}\u{0008}\u{0008}rror";
+        let got = sanitize_log_line(input);
+        assert_eq!(got, "error");
     }
 }
