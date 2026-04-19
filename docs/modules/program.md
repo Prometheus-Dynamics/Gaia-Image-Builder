@@ -57,6 +57,21 @@ Build inputs are also exported to program commands as env vars:
 - For multi-bin packages, set `bin = "target-name"` on the artifact.
   - Gaia will then default to `cargo build -p <package> --bin <target-name>`.
   - Inferred `kind = "bin"` outputs also use that bin target name instead of the package name.
+- Rust artifacts may define artifact-local cargo profile tuning:
+  ```toml
+  [[rust.artifacts]]
+  id = "orion-node"
+  package = "orion-node"
+  bin = "orion-node"
+
+  [rust.artifacts.cargo.profile]
+  lto = "fat"
+  codegen_units = 1
+  opt_level = "z"
+  strip = "symbols"
+  ```
+  - These settings only apply to that artifact's selected `cargo_profile`.
+  - Gaia translates them into `CARGO_PROFILE_<PROFILE>_*` env vars for that artifact build.
 - Supports optional container builds via program profile `container_image`.
 - Auto output inference for `bin`/`cdylib` kinds when `output_path` is omitted.
 

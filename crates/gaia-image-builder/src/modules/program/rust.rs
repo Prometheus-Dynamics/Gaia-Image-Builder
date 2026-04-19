@@ -46,6 +46,32 @@ fn default_release() -> String {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
+struct RustCargoProfileSettings {
+    lto: Option<String>,
+    codegen_units: Option<u32>,
+    opt_level: Option<String>,
+    strip: Option<String>,
+}
+
+impl Default for RustCargoProfileSettings {
+    fn default() -> Self {
+        Self {
+            lto: None,
+            codegen_units: None,
+            opt_level: None,
+            strip: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+struct RustCargoSettings {
+    profile: RustCargoProfileSettings,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
 struct RustArtifact {
     id: String,
     package: Option<String>,
@@ -64,6 +90,7 @@ struct RustArtifact {
     target_dir: Option<String>,
     build_command: Vec<String>,
     cwd: Option<String>,
+    cargo: RustCargoSettings,
     env: BTreeMap<String, String>,
     cargo_profile: String,
 }
@@ -88,6 +115,7 @@ impl Default for RustArtifact {
             target_dir: None,
             build_command: Vec::new(),
             cwd: None,
+            cargo: RustCargoSettings::default(),
             env: BTreeMap::new(),
             cargo_profile: default_release(),
         }
@@ -252,6 +280,51 @@ fn default_build_argv(
     }
 
     argv
+}
+
+fn apply_artifact_cargo_profile_env(
+    cargo_profile: &str,
+    cargo: &RustCargoSettings,
+    env: &mut BTreeMap<String, String>,
+) {
+    let profile = cargo_profile.trim();
+    if profile.is_empty() {
+        return;
+    }
+    let profile_key = profile.replace('-', "_").to_ascii_uppercase();
+    let settings = &cargo.profile;
+
+    if let Some(lto) = settings.lto.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        env.insert(format!("CARGO_PROFILE_{profile_key}_LTO"), lto.to_string());
+    }
+    if let Some(codegen_units) = settings.codegen_units {
+        env.insert(
+            format!("CARGO_PROFILE_{profile_key}_CODEGEN_UNITS"),
+            codegen_units.to_string(),
+        );
+    }
+    if let Some(opt_level) = settings
+        .opt_level
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        env.insert(
+            format!("CARGO_PROFILE_{profile_key}_OPT_LEVEL"),
+            opt_level.to_string(),
+        );
+    }
+    if let Some(strip) = settings
+        .strip
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        env.insert(
+            format!("CARGO_PROFILE_{profile_key}_STRIP"),
+            strip.to_string(),
+        );
+    }
 }
 
 fn run_build_command(
@@ -775,6 +848,11 @@ fn build_one_artifact(
     let profile_container_image = profile.and_then(|p| p.container_image.as_deref());
     let profile_env = profile.map(|p| &p.env).cloned().unwrap_or_default();
     let mut effective_env = profile_env.clone();
+    apply_artifact_cargo_profile_env(
+        artifact.cargo_profile.trim(),
+        &artifact.cargo,
+        &mut effective_env,
+    );
     for (k, v) in &artifact.env {
         effective_env.insert(k.clone(), v.clone());
     }
@@ -856,6 +934,14 @@ fn build_one_artifact(
             "manifest_path": artifact.manifest_path.clone(),
             "kind": format!("{:?}", artifact.kind),
             "cargo_profile": artifact.cargo_profile.clone(),
+            "cargo": {
+                "profile": {
+                    "lto": artifact.cargo.profile.lto.clone(),
+                    "codegen_units": artifact.cargo.profile.codegen_units,
+                    "opt_level": artifact.cargo.profile.opt_level.clone(),
+                    "strip": artifact.cargo.profile.strip.clone(),
+                }
+            },
             "profile": artifact.profile.clone(),
             "enabled_if": artifact.enabled_if.clone(),
             "disabled_if": artifact.disabled_if.clone(),
@@ -1011,7 +1097,11 @@ fn build_one_artifact(
 
 #[cfg(test)]
 mod tests {
-    use super::{RustArtifact, RustArtifactKind, default_build_argv, infer_default_output};
+    use super::{
+        RustArtifact, RustArtifactKind, RustCargoProfileSettings, RustCargoSettings,
+        apply_artifact_cargo_profile_env, default_build_argv, infer_default_output,
+    };
+    use std::collections::BTreeMap;
     use std::path::Path;
 
     #[test]
@@ -1103,5 +1193,38 @@ mod tests {
     fn selected_bin_field_defaults_cleanly() {
         let artifact = RustArtifact::default();
         assert!(artifact.bin.is_none());
+    }
+
+    #[test]
+    fn cargo_profile_settings_apply_to_active_artifact_profile_only() {
+        let mut env = BTreeMap::new();
+        apply_artifact_cargo_profile_env(
+            "release",
+            &RustCargoSettings {
+                profile: RustCargoProfileSettings {
+                    lto: Some("fat".into()),
+                    codegen_units: Some(1),
+                    opt_level: Some("z".into()),
+                    strip: Some("symbols".into()),
+                },
+            },
+            &mut env,
+        );
+
+        assert_eq!(env.get("CARGO_PROFILE_RELEASE_LTO").map(String::as_str), Some("fat"));
+        assert_eq!(
+            env.get("CARGO_PROFILE_RELEASE_CODEGEN_UNITS")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            env.get("CARGO_PROFILE_RELEASE_OPT_LEVEL").map(String::as_str),
+            Some("z")
+        );
+        assert_eq!(
+            env.get("CARGO_PROFILE_RELEASE_STRIP").map(String::as_str),
+            Some("symbols")
+        );
+        assert!(!env.contains_key("CARGO_PROFILE_DEV_LTO"));
     }
 }
