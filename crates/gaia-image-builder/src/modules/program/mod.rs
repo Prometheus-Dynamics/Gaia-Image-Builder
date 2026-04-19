@@ -98,6 +98,49 @@ pub enum ArtifactMode {
     Auto,
 }
 
+fn default_false() -> bool {
+    false
+}
+
+fn default_git_update() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum ArtifactSource {
+    Git(GitArtifactSource),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GitArtifactSource {
+    pub repo: String,
+    #[serde(rename = "ref")]
+    pub git_ref: Option<String>,
+    pub rev: Option<String>,
+    pub branch: Option<String>,
+    pub subdir: Option<String>,
+    #[serde(default = "default_git_update")]
+    pub update: bool,
+    #[serde(default = "default_false")]
+    pub shallow: bool,
+}
+
+impl Default for GitArtifactSource {
+    fn default() -> Self {
+        Self {
+            repo: String::new(),
+            git_ref: None,
+            rev: None,
+            branch: None,
+            subdir: None,
+            update: true,
+            shallow: false,
+        }
+    }
+}
+
 impl Default for ArtifactMode {
     fn default() -> Self {
         Self::Auto
@@ -335,6 +378,208 @@ pub fn run_checks(
 
 pub fn resolve_from_workspace_root(ws: &WorkspacePaths, raw: &str) -> Result<PathBuf> {
     ws.resolve_config_path(raw)
+}
+
+pub fn materialize_artifact_source(
+    ctx: &mut ExecCtx,
+    ws: &WorkspacePaths,
+    namespace: &str,
+    artifact_id: &str,
+    source: &ArtifactSource,
+) -> Result<PathBuf> {
+    match source {
+        ArtifactSource::Git(git) => materialize_git_artifact_source(ctx, ws, namespace, artifact_id, git),
+    }
+}
+
+fn materialize_git_artifact_source(
+    ctx: &mut ExecCtx,
+    ws: &WorkspacePaths,
+    namespace: &str,
+    artifact_id: &str,
+    source: &GitArtifactSource,
+) -> Result<PathBuf> {
+    let repo = source.repo.trim();
+    if repo.is_empty() {
+        return Err(Error::msg(format!(
+            "artifact '{}' git source repo is empty",
+            artifact_id
+        )));
+    }
+
+    let key_payload = serde_json::json!({
+        "namespace": namespace,
+        "artifact_id": artifact_id,
+        "repo": source.repo,
+    });
+    let key = compute_artifact_fingerprint(&key_payload, &ws.root)?;
+    let checkout_dir = ws
+        .build_dir
+        .join("sources")
+        .join(namespace.trim())
+        .join(artifact_id.trim())
+        .join(key);
+
+    if !checkout_dir.exists() {
+        if let Some(parent) = checkout_dir.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                Error::msg(format!(
+                    "failed to create source parent dir {}: {e}",
+                    parent.display()
+                ))
+            })?;
+        }
+        ctx.log(&format!(
+            "cloning artifact source repo='{}' into {}",
+            repo,
+            checkout_dir.display()
+        ));
+        let mut cmd = Command::new("git");
+        cmd.arg("clone");
+        if source.shallow {
+            cmd.arg("--depth").arg("1");
+            if let Some(branch) = source
+                .branch
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                cmd.arg("--branch").arg(branch).arg("--single-branch");
+            }
+        } else if let Some(branch) = source
+            .branch
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            cmd.arg("--branch").arg(branch);
+        }
+        cmd.arg(repo).arg(&checkout_dir);
+        ctx.run_cmd(cmd)?;
+    } else if !checkout_dir.join(".git").is_dir() {
+        return Err(Error::msg(format!(
+            "artifact source dir exists but is not a git repo: {}",
+            checkout_dir.display()
+        )));
+    }
+
+    if source.update {
+        ctx.log(&format!(
+            "fetching artifact source updates in {}",
+            checkout_dir.display()
+        ));
+        let mut fetch = Command::new("git");
+        fetch
+            .arg("-C")
+            .arg(&checkout_dir)
+            .arg("fetch")
+            .arg("--tags")
+            .arg("--prune");
+        ctx.run_cmd(fetch)?;
+    }
+
+    if let Some(rev) = source.rev.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let want = git_rev_parse(&checkout_dir, rev)?;
+        let current = git_rev_parse(&checkout_dir, "HEAD")?;
+        if current != want {
+            let mut co = Command::new("git");
+            co.arg("-C")
+                .arg(&checkout_dir)
+                .arg("checkout")
+                .arg("--force")
+                .arg(rev);
+            ctx.run_cmd(co)?;
+
+            let mut reset = Command::new("git");
+            reset
+                .arg("-C")
+                .arg(&checkout_dir)
+                .arg("reset")
+                .arg("--hard")
+                .arg(&want);
+            ctx.run_cmd(reset)?;
+        }
+    } else if let Some(target) = source
+        .git_ref
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            source
+                .branch
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        })
+    {
+        let want = git_rev_parse(&checkout_dir, &format!("{target}^{{commit}}"))?;
+        let current = git_rev_parse(&checkout_dir, "HEAD")?;
+        if current != want {
+            let mut co = Command::new("git");
+            co.arg("-C")
+                .arg(&checkout_dir)
+                .arg("checkout")
+                .arg("--force")
+                .arg(target);
+            ctx.run_cmd(co)?;
+
+            let mut reset = Command::new("git");
+            reset
+                .arg("-C")
+                .arg(&checkout_dir)
+                .arg("reset")
+                .arg("--hard")
+                .arg(&want);
+            ctx.run_cmd(reset)?;
+        }
+    }
+
+    let root = if let Some(subdir) = source.subdir.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        checkout_dir.join(subdir)
+    } else {
+        checkout_dir
+    };
+    if !root.exists() {
+        return Err(Error::msg(format!(
+            "artifact source subdir does not exist: {}",
+            root.display()
+        )));
+    }
+    Ok(root)
+}
+
+fn git_rev_parse(repo: &Path, rev: &str) -> Result<String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .arg("rev-parse")
+        .arg("--verify")
+        .arg(rev)
+        .output()
+        .map_err(|e| {
+            Error::msg(format!(
+                "failed to run git rev-parse in {}: {e}",
+                repo.display()
+            ))
+        })?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        return Err(Error::msg(format!(
+            "git rev-parse '{}' failed in {}: {}",
+            rev,
+            repo.display(),
+            stderr.trim()
+        )));
+    }
+    let parsed = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if parsed.is_empty() {
+        return Err(Error::msg(format!(
+            "git rev-parse '{}' returned empty output in {}",
+            rev,
+            repo.display()
+        )));
+    }
+    Ok(parsed)
 }
 
 pub fn artifact_record_path(doc: &ConfigDoc, ctx: &ExecCtx, artifact_id: &str) -> Result<PathBuf> {

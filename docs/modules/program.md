@@ -54,6 +54,9 @@ Build inputs are also exported to program commands as env vars:
 ### Rust specifics
 
 - If `build_command` is omitted, defaults to `cargo build` for declared `package`.
+- For multi-bin packages, set `bin = "target-name"` on the artifact.
+  - Gaia will then default to `cargo build -p <package> --bin <target-name>`.
+  - Inferred `kind = "bin"` outputs also use that bin target name instead of the package name.
 - Supports optional container builds via program profile `container_image`.
 - Auto output inference for `bin`/`cdylib` kinds when `output_path` is omitted.
 

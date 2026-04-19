@@ -9,8 +9,9 @@ use crate::config::ConfigDoc;
 use crate::error::{Error, Result};
 use crate::executor::{ExecCtx, ModuleExec, TaskRegistry};
 use crate::modules::program::{
-    ArtifactBuildState, ArtifactMode, ArtifactRecord, ProgramConfig, compute_artifact_fingerprint,
-    effective_check_ids, load_program_cfg, now_rfc3339, path_kind, read_artifact_state,
+    ArtifactBuildState, ArtifactMode, ArtifactRecord, ArtifactSource, ProgramConfig,
+    compute_artifact_fingerprint, effective_check_ids, load_program_cfg,
+    materialize_artifact_source, now_rfc3339, path_kind, read_artifact_state,
     resolve_from_workspace_root, resolve_profile, run_checks, validate_program_definitions,
     write_artifact_record, write_artifact_state,
 };
@@ -48,6 +49,10 @@ fn default_release() -> String {
 struct RustArtifact {
     id: String,
     package: Option<String>,
+    bin: Option<String>,
+    source: Option<ArtifactSource>,
+    workspace_dir: Option<String>,
+    manifest_path: Option<String>,
     kind: RustArtifactKind,
     mode: ArtifactMode,
     profile: Option<String>,
@@ -56,6 +61,7 @@ struct RustArtifact {
     disabled_if: Vec<String>,
     prebuilt_path: Option<String>,
     output_path: Option<String>,
+    target_dir: Option<String>,
     build_command: Vec<String>,
     cwd: Option<String>,
     env: BTreeMap<String, String>,
@@ -67,6 +73,10 @@ impl Default for RustArtifact {
         Self {
             id: String::new(),
             package: None,
+            bin: None,
+            source: None,
+            workspace_dir: None,
+            manifest_path: None,
             kind: RustArtifactKind::Bin,
             mode: ArtifactMode::Auto,
             profile: None,
@@ -75,6 +85,7 @@ impl Default for RustArtifact {
             disabled_if: Vec::new(),
             prebuilt_path: None,
             output_path: None,
+            target_dir: None,
             build_command: Vec::new(),
             cwd: None,
             env: BTreeMap::new(),
@@ -170,6 +181,7 @@ fn infer_default_output(
     cargo_profile: &str,
     kind: &RustArtifactKind,
     package: Option<&str>,
+    bin: Option<&str>,
 ) -> Result<PathBuf> {
     let pkg = package.ok_or_else(|| Error::msg("missing package for inferred rust output"))?;
     let mut p = target_dir.to_path_buf();
@@ -181,7 +193,7 @@ fn infer_default_output(
     p = p.join(cargo_profile);
 
     match kind {
-        RustArtifactKind::Bin => Ok(p.join(pkg)),
+        RustArtifactKind::Bin => Ok(p.join(bin.unwrap_or(pkg))),
         RustArtifactKind::Cdylib => {
             let lib = format!("lib{}.so", pkg.replace('-', "_"));
             Ok(p.join(lib))
@@ -192,6 +204,56 @@ fn infer_default_output(
     }
 }
 
+fn selected_bin_name(artifact: &RustArtifact) -> Option<&str> {
+    artifact
+        .bin
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+}
+
+fn default_build_argv(
+    package: &str,
+    bin: Option<&str>,
+    manifest_path: Option<&Path>,
+    profile_target: Option<&str>,
+    cargo_profile: &str,
+) -> Vec<String> {
+    let mut argv = vec![
+        "cargo".to_string(),
+        "build".to_string(),
+    ];
+
+    if let Some(manifest_path) = manifest_path {
+        argv.push("--manifest-path".to_string());
+        argv.push(manifest_path.display().to_string());
+    }
+
+    argv.push("-p".to_string());
+    argv.push(package.to_string());
+
+    if let Some(bin) = bin {
+        argv.push("--bin".to_string());
+        argv.push(bin.to_string());
+    }
+
+    if let Some(target) = profile_target
+        && !target.trim().is_empty()
+    {
+        argv.push("--target".to_string());
+        argv.push(target.trim().to_string());
+    }
+
+    if cargo_profile == "release" {
+        argv.push("--release".to_string());
+    } else if !cargo_profile.trim().is_empty() {
+        argv.push("--profile".to_string());
+        argv.push(cargo_profile.trim().to_string());
+    }
+
+    argv
+}
+
 fn run_build_command(
     doc: &ConfigDoc,
     ctx: &mut ExecCtx,
@@ -200,39 +262,28 @@ fn run_build_command(
     profile_container_image: Option<&str>,
     profile_target: Option<&str>,
     artifact: &RustArtifact,
-    profile_env: &BTreeMap<String, String>,
+    effective_env: &BTreeMap<String, String>,
 ) -> Result<()> {
-    let mut envs = profile_env.clone();
-    for (k, v) in &artifact.env {
-        envs.insert(k.clone(), v.clone());
-    }
+    let mut envs = effective_env.clone();
     crate::build_inputs::inject_env_vars(doc, &mut envs, None)?;
 
     if artifact.build_command.is_empty() {
         let package = artifact.package.as_deref().ok_or_else(|| {
             Error::msg("program.rust.artifacts[].package is required when build_command is not set")
         })?;
-
-        let mut argv = vec![
-            "cargo".to_string(),
-            "build".to_string(),
-            "-p".to_string(),
-            package.to_string(),
-        ];
-
-        if let Some(target) = profile_target
-            && !target.trim().is_empty()
-        {
-            argv.push("--target".to_string());
-            argv.push(target.trim().to_string());
-        }
-
-        if artifact.cargo_profile == "release" {
-            argv.push("--release".to_string());
-        } else if !artifact.cargo_profile.trim().is_empty() {
-            argv.push("--profile".to_string());
-            argv.push(artifact.cargo_profile.trim().to_string());
-        }
+        let manifest_path = artifact
+            .manifest_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(Path::new);
+        let argv = default_build_argv(
+            package,
+            selected_bin_name(artifact),
+            manifest_path,
+            profile_target,
+            artifact.cargo_profile.trim(),
+        );
 
         run_with_optional_container(ctx, ws, cwd, profile_container_image, &argv, &envs)
     } else {
@@ -509,17 +560,31 @@ fn resolve_output_path(
         });
     }
 
-    let target_dir = effective_env
-        .get("CARGO_TARGET_DIR")
-        .map(String::as_str)
+    let target_dir = artifact
+        .target_dir
+        .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|raw| {
             if Path::new(raw).is_absolute() {
                 PathBuf::from(raw)
             } else {
-                cwd.join(raw)
+                ws_root.join(raw)
             }
+        })
+        .or_else(|| {
+            effective_env
+                .get("CARGO_TARGET_DIR")
+                .map(String::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|raw| {
+                    if Path::new(raw).is_absolute() {
+                        PathBuf::from(raw)
+                    } else {
+                        cwd.join(raw)
+                    }
+                })
         })
         .unwrap_or_else(|| workspace_dir.join("target"));
 
@@ -529,7 +594,70 @@ fn resolve_output_path(
         artifact.cargo_profile.trim(),
         &artifact.kind,
         artifact.package.as_deref(),
+        selected_bin_name(artifact),
     )
+}
+
+fn resolve_manifest_path(cwd: &Path, artifact: &RustArtifact) -> Result<Option<String>> {
+    if let Some(raw) = artifact
+        .manifest_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let path = if Path::new(raw).is_absolute() {
+            PathBuf::from(raw)
+        } else {
+            cwd.join(raw)
+        };
+        return Ok(Some(path.display().to_string()));
+    }
+    let default_manifest = cwd.join("Cargo.toml");
+    if default_manifest.is_file() {
+        return Ok(Some(default_manifest.display().to_string()));
+    }
+    Ok(None)
+}
+
+fn resolve_effective_target_dir(
+    ws: &WorkspacePaths,
+    cwd: &Path,
+    artifact_id: &str,
+    artifact: &RustArtifact,
+    effective_env: &BTreeMap<String, String>,
+) -> Option<PathBuf> {
+    artifact
+        .target_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|raw| {
+            if Path::new(raw).is_absolute() {
+                PathBuf::from(raw)
+            } else {
+                ws.root.join(raw)
+            }
+        })
+        .or_else(|| {
+            artifact
+                .source
+                .as_ref()
+                .map(|_| ws.build_dir.join("targets").join("rust").join(artifact_id))
+        })
+        .or_else(|| {
+            effective_env
+                .get("CARGO_TARGET_DIR")
+                .map(String::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|raw| {
+                    if Path::new(raw).is_absolute() {
+                        PathBuf::from(raw)
+                    } else {
+                        cwd.join(raw)
+                    }
+                })
+        })
 }
 
 fn exec(doc: &ConfigDoc, ctx: &mut ExecCtx) -> Result<()> {
@@ -637,7 +765,7 @@ fn build_one_artifact(
     default_check_ids: &[String],
     artifact: RustArtifact,
 ) -> Result<serde_json::Value> {
-    let aid = artifact.id.trim();
+    let aid = artifact.id.trim().to_string();
     if aid.is_empty() {
         return Err(Error::msg("program.rust.artifacts[].id is empty"));
     }
@@ -659,6 +787,20 @@ fn build_one_artifact(
         .map(|p| resolve_from_workspace_root(ws, p))
         .transpose()?;
 
+    let source_root = artifact
+        .source
+        .as_ref()
+        .map(|source| materialize_artifact_source(ctx, ws, "rust", &aid, source))
+        .transpose()?;
+
+    let artifact_workspace_dir = artifact
+        .workspace_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|p| resolve_from_workspace_root(ws, p))
+        .transpose()?;
+
     let cwd = artifact
         .cwd
         .as_deref()
@@ -666,7 +808,25 @@ fn build_one_artifact(
         .filter(|s| !s.is_empty())
         .map(|p| resolve_from_workspace_root(ws, p))
         .transpose()?
-        .unwrap_or_else(|| workspace_dir.to_path_buf());
+        .unwrap_or_else(|| {
+            source_root
+                .clone()
+                .or(artifact_workspace_dir)
+                .unwrap_or_else(|| workspace_dir.to_path_buf())
+        });
+
+    let mut artifact = artifact;
+    artifact.manifest_path = resolve_manifest_path(&cwd, &artifact)?;
+    let force_git_managed_target_dir = artifact.source.is_some()
+        && artifact.target_dir.is_none()
+        && !artifact.env.contains_key("CARGO_TARGET_DIR");
+
+    let effective_target_dir = resolve_effective_target_dir(ws, &cwd, &aid, &artifact, &effective_env);
+    if let Some(resolved) = effective_target_dir.as_ref()
+        && (!effective_env.contains_key("CARGO_TARGET_DIR") || force_git_managed_target_dir)
+    {
+        effective_env.insert("CARGO_TARGET_DIR".into(), resolved.display().to_string());
+    }
 
     let selected = effective_check_ids(default_check_ids, &artifact.check_ids);
     let output = if matches!(artifact.mode, ArtifactMode::Prebuilt) {
@@ -690,6 +850,10 @@ fn build_one_artifact(
             "id": aid,
             "mode": format!("{:?}", artifact.mode),
             "package": artifact.package.clone(),
+            "bin": artifact.bin.clone(),
+            "source": artifact.source.clone(),
+            "workspace_dir": artifact.workspace_dir.clone(),
+            "manifest_path": artifact.manifest_path.clone(),
             "kind": format!("{:?}", artifact.kind),
             "cargo_profile": artifact.cargo_profile.clone(),
             "profile": artifact.profile.clone(),
@@ -699,6 +863,10 @@ fn build_one_artifact(
             "profile_container_image": profile_container_image,
             "profile_env": profile_env.clone(),
             "artifact_env": artifact.env.clone(),
+            "target_dir": artifact.target_dir.clone(),
+            "effective_target_dir": effective_target_dir
+                .as_ref()
+                .map(|p| p.display().to_string()),
             "build_command": artifact.build_command.clone(),
             "cwd": cwd.display().to_string(),
             "output": output.as_ref().map(|x| x.display().to_string()),
@@ -712,7 +880,7 @@ fn build_one_artifact(
             let has_usable_prebuilt = prebuilt.as_ref().is_some_and(|p| p.exists());
             if !has_usable_prebuilt && out.exists() {
                 if let (Some(state), Some(fp)) =
-                    (read_artifact_state(doc, ctx, aid)?, fingerprint.as_ref())
+                    (read_artifact_state(doc, ctx, &aid)?, fingerprint.as_ref())
                 {
                     let expected = out
                         .canonicalize()
@@ -767,7 +935,7 @@ fn build_one_artifact(
                     profile_container_image,
                     profile_target,
                     &artifact,
-                    &profile_env,
+                    &effective_env,
                 )?;
                 output
                     .clone()
@@ -784,7 +952,7 @@ fn build_one_artifact(
                 profile_container_image,
                 profile_target,
                 &artifact,
-                &profile_env,
+                &effective_env,
             )?;
             output
                 .clone()
@@ -839,4 +1007,101 @@ fn build_one_artifact(
         "path": abs,
         "mode": format!("{:?}", artifact.mode),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RustArtifact, RustArtifactKind, default_build_argv, infer_default_output};
+    use std::path::Path;
+
+    #[test]
+    fn default_build_argv_adds_bin_for_multi_bin_packages() {
+        let argv = default_build_argv(
+            "helios-api",
+            Some("helios-api-tools"),
+            None,
+            Some("aarch64-unknown-linux-gnu"),
+            "release",
+        );
+        assert_eq!(
+            argv,
+            vec![
+                "cargo",
+                "build",
+                "-p",
+                "helios-api",
+                "--bin",
+                "helios-api-tools",
+                "--target",
+                "aarch64-unknown-linux-gnu",
+                "--release",
+            ]
+        );
+    }
+
+    #[test]
+    fn default_build_argv_adds_manifest_path_when_present() {
+        let argv = default_build_argv(
+            "orion-node",
+            Some("orion-node"),
+            Some(Path::new("/tmp/Orion/Cargo.toml")),
+            Some("aarch64-unknown-linux-gnu"),
+            "release",
+        );
+        assert_eq!(
+            argv,
+            vec![
+                "cargo",
+                "build",
+                "--manifest-path",
+                "/tmp/Orion/Cargo.toml",
+                "-p",
+                "orion-node",
+                "--bin",
+                "orion-node",
+                "--target",
+                "aarch64-unknown-linux-gnu",
+                "--release",
+            ]
+        );
+    }
+
+    #[test]
+    fn infer_default_output_prefers_bin_name_for_binaries() {
+        let output = infer_default_output(
+            Path::new("/tmp/target"),
+            Some("aarch64-unknown-linux-gnu"),
+            "release",
+            &RustArtifactKind::Bin,
+            Some("helios-api"),
+            Some("helios-api-tools"),
+        )
+        .expect("output path");
+
+        assert_eq!(
+            output,
+            Path::new("/tmp/target/aarch64-unknown-linux-gnu/release/helios-api-tools")
+        );
+    }
+
+    #[test]
+    fn infer_default_output_falls_back_to_package_name_without_bin() {
+        let output = infer_default_output(
+            Path::new("/tmp/target"),
+            None,
+            "release",
+            &RustArtifactKind::Bin,
+            Some("helios-engine"),
+            None,
+        )
+        .expect("output path");
+
+        assert_eq!(output, Path::new("/tmp/target/release/helios-engine"));
+    }
+
+    #[test]
+    fn selected_bin_field_defaults_cleanly() {
+        let artifact = RustArtifact::default();
+        assert!(artifact.bin.is_none());
+    }
 }
