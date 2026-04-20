@@ -512,7 +512,7 @@ fn materialize_git_artifact_source(
                 .filter(|s| !s.is_empty())
         })
     {
-        let want = git_rev_parse(&checkout_dir, &format!("{target}^{{commit}}"))?;
+        let want = git_resolve_checkout_target(&checkout_dir, target)?;
         let current = git_rev_parse(&checkout_dir, "HEAD")?;
         if current != want {
             let mut co = Command::new("git");
@@ -520,17 +520,8 @@ fn materialize_git_artifact_source(
                 .arg(&checkout_dir)
                 .arg("checkout")
                 .arg("--force")
-                .arg(target);
-            ctx.run_cmd(co)?;
-
-            let mut reset = Command::new("git");
-            reset
-                .arg("-C")
-                .arg(&checkout_dir)
-                .arg("reset")
-                .arg("--hard")
                 .arg(&want);
-            ctx.run_cmd(reset)?;
+            ctx.run_cmd(co)?;
         }
     }
 
@@ -580,6 +571,29 @@ fn git_rev_parse(repo: &Path, rev: &str) -> Result<String> {
         )));
     }
     Ok(parsed)
+}
+
+fn git_resolve_checkout_target(repo: &Path, target: &str) -> Result<String> {
+    let candidates = [
+        format!("{target}^{{commit}}"),
+        format!("origin/{target}^{{commit}}"),
+        format!("refs/remotes/origin/{target}^{{commit}}"),
+    ];
+
+    let mut errors = Vec::new();
+    for candidate in candidates {
+        match git_rev_parse(repo, &candidate) {
+            Ok(rev) => return Ok(rev),
+            Err(err) => errors.push(err.to_string()),
+        }
+    }
+
+    Err(Error::msg(format!(
+        "unable to resolve git target '{}' in {}: {}",
+        target,
+        repo.display(),
+        errors.join(" | ")
+    )))
 }
 
 pub fn artifact_record_path(doc: &ConfigDoc, ctx: &ExecCtx, artifact_id: &str) -> Result<PathBuf> {
