@@ -10,15 +10,17 @@ gaia validate <build.toml>
 gaia plan <build.toml>
 gaia clean <build.toml>
 gaia run <build.toml>
+gaia tui <build.toml>
 ```
 
 If no command is provided, Gaia treats the first positional argument as a build path and defaults to `run`.
 
-The default CLI build is intentionally lean and does not include terminal UI
-dependencies. Build with the `tui` feature to enable the interactive command:
+The installed `gaia` binary includes terminal UI support by default. Use
+`--no-default-features` when building or installing if you need a lean binary
+without terminal UI dependencies.
 
 ```bash
-cargo run -p gaia --features tui -- tui <build.toml>
+cargo run -p gaia -- tui <build.toml>
 ```
 
 ## Shared Modifiers
@@ -118,9 +120,8 @@ Prints selection/overview context, then:
 
 Starts the interactive terminal UI for the current build.
 
-This command is only available when the binary is built with the `tui` feature.
-Without that feature, Gaia returns a clear command failure instead of pulling UI
-dependencies into the default CLI.
+This command is available in default `gaia` builds. If the binary is built with
+`--no-default-features`, Gaia returns a clear command failure for `tui`.
 
 Current TUI behavior:
 - `Overview` tab for resolved build shape, provider/runtime overview, and failure policy
@@ -153,4 +154,4 @@ There is no public CLI for:
 - interactive config authoring
 
 The supported public path right now is `resolve`, `validate`, `plan`, `clean`,
-and `run`; `tui` is supported in builds compiled with the `tui` feature.
+`run`, and `tui` in default builds.

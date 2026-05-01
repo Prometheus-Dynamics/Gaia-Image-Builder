@@ -40,7 +40,7 @@ cargo run -q -p gaia -- plan examples/default-workspace/configs/default.toml
 cargo run -q -p gaia -- clean examples/default-workspace/configs/default.toml --target all
 
 # use the interactive terminal UI
-cargo run -q -p gaia --features tui -- tui examples/default-workspace/configs/default.toml
+cargo run -q -p gaia -- tui examples/default-workspace/configs/default.toml
 
 # execute it
 cargo run -q -p gaia -- run examples/default-workspace/configs/default.toml

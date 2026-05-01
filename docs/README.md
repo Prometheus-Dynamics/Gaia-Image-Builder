@@ -20,7 +20,7 @@ This is the rebuilt documentation set for the current typed Gaia system.
 
 - [cli.md](cli.md)
   Actual supported commands and overrides:
-  `resolve`, `validate`, `plan`, `run`, feature-gated `tui`, `--preset`, `--env-file`, `--env`, `--set`.
+  `resolve`, `validate`, `plan`, `run`, default `tui`, `--preset`, `--env-file`, `--env`, `--set`.
 
 - [execution.md](execution.md)
   How Gaia turns config into a validated spec, then into a typed plan, then into execution with reuse, rollback, and cancellation.
