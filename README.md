@@ -18,7 +18,7 @@ The rewrite is no longer the old `buildroot` / `program` / `stage` bucket model.
 ## Install
 
 ```bash
-cargo install --git https://github.com/Prometheus-Dynamics/Gaia-Image-Builder --package gaia
+cargo install --git https://github.com/Prometheus-Dynamics/Gaia-Image-Builder gaia
 ```
 
 ## Commands
