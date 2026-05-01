@@ -2,16 +2,22 @@ use super::*;
 
 pub(crate) fn discover_build_entries(current_build: &str) -> Vec<BuildEntry> {
     let mut paths = Vec::new();
-    let configs_dir = PathBuf::from("configs");
-    if configs_dir.exists() {
-        collect_toml_files(&configs_dir, &mut paths);
+
+    let build_configs_dir = PathBuf::from("configs").join("builds");
+    if build_configs_dir.exists() {
+        collect_toml_files(&build_configs_dir, &mut paths);
+    } else {
+        let configs_dir = PathBuf::from("configs");
+        if configs_dir.exists() {
+            collect_toml_files(&configs_dir, &mut paths);
+        }
     }
-    if !paths
-        .iter()
-        .any(|path| path == &PathBuf::from(current_build))
-    {
-        paths.push(PathBuf::from(current_build));
+
+    let current_path = PathBuf::from(current_build);
+    if current_path.is_file() && !paths.iter().any(|path| path == &current_path) {
+        paths.push(current_path);
     }
+
     paths.sort();
     paths.dedup();
     paths

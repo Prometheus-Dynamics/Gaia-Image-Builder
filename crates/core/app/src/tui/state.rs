@@ -31,10 +31,16 @@ impl<'a> TuiState<'a> {
     pub(crate) fn new(context: &'a AppContext, build: &str, options: &ResolveOptions) -> Self {
         let mut build_list = ListState::default();
         let build_entries = discover_build_entries(build);
+        let selected_build = build_entries
+            .iter()
+            .find(|entry| entry.path == build)
+            .or_else(|| build_entries.first())
+            .map(|entry| entry.path.clone())
+            .unwrap_or_else(|| build.to_string());
         if !build_entries.is_empty() {
             let selected = build_entries
                 .iter()
-                .position(|entry| entry.path == build)
+                .position(|entry| entry.path == selected_build)
                 .unwrap_or(0);
             build_list.select(Some(selected));
         }
@@ -44,7 +50,7 @@ impl<'a> TuiState<'a> {
 
         Self {
             context,
-            build: build.to_string(),
+            build: selected_build,
             options: options.clone(),
             screen: Screen::Setup,
             build_entries,
