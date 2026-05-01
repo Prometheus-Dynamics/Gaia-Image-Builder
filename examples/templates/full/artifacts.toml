@@ -1,0 +1,158 @@
+# Sources, artifacts, and install mappings.
+
+[[sources]]
+id = "workspace-root"
+kind = "path"
+path = "${workspace.root_dir}"
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "buildroot-upstream"
+kind = "git"
+repo = "https://github.com/buildroot/buildroot.git"
+tag = "2025.11"
+update = true
+refresh = "always"
+pin = "floating"
+
+[[sources]]
+id = "seed-rootfs"
+kind = "archive"
+path = "@assets/rootfs/base-rootfs.tar"
+strip_components = 0
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "tool-download"
+kind = "download"
+url = "https://example.invalid/releases/tool.tar.xz"
+sha256 = "replace-me"
+output_path = "${workspace.build_dir}/downloads/tool.tar.xz"
+refresh = "auto"
+pin = "locked"
+
+# Rust binary.
+[[artifacts]]
+id = "helios-api"
+kind = "rust"
+package = "helios-api"
+target_name = "helios-api"
+source = "workspace-root"
+profile = "${build.profile}"
+install_name = "helios-api"
+install_class = "binary"
+install_dest_hint = "/usr/bin/helios-api"
+output_path = "${workspace.out_dir}/artifacts/helios-api"
+
+# Rust shared object / library-ish output.
+[[artifacts]]
+id = "cv-plugin"
+kind = "rust"
+package = "cv-plugin"
+target_name = "cv-plugin.so"
+source = "workspace-root"
+profile = "${build.profile}"
+install_name = "cv-plugin"
+install_class = "library"
+install_dest_hint = "/usr/lib/example/plugins/cv-plugin.so"
+output_path = "${workspace.out_dir}/artifacts/cv-plugin.so"
+
+# Java output points at the expected built jar path inside the source tree.
+[[artifacts]]
+id = "orion-node"
+kind = "java"
+build_target = "build/libs/orion-node.jar"
+source = "workspace-root"
+install_name = "orion-node"
+install_class = "archive"
+install_dest_hint = "/usr/lib/example/orion-node.jar"
+output_path = "${workspace.out_dir}/artifacts/orion-node.jar"
+
+# Node output packages a package directory with `npm pack`.
+[[artifacts]]
+id = "frontend-package"
+kind = "node"
+package_dir = "frontend"
+source = "workspace-root"
+install_name = "frontend-package"
+install_class = "archive"
+install_dest_hint = "/opt/example/frontend.tgz"
+output_path = "${workspace.out_dir}/artifacts/frontend.tgz"
+
+# Python output builds a wheel from a package directory.
+[[artifacts]]
+id = "python-sdk"
+kind = "python"
+package_dir = "sdk/python"
+source = "workspace-root"
+install_name = "python-sdk"
+install_class = "archive"
+install_dest_hint = "/opt/example/python-sdk.whl"
+output_path = "${workspace.out_dir}/artifacts/python-sdk.whl"
+
+# Go output builds a binary from a Go package path.
+[[artifacts]]
+id = "heliosctl"
+kind = "go"
+package = "./cmd/heliosctl"
+source = "workspace-root"
+install_name = "heliosctl"
+install_class = "binary"
+install_dest_hint = "/usr/bin/heliosctl"
+output_path = "${workspace.out_dir}/artifacts/heliosctl"
+
+[[install]]
+id = "install-helios-api"
+artifact = "helios-api"
+dest = "/usr/bin/helios-api"
+replace = true
+mode = 493
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-cv-plugin"
+artifact = "cv-plugin"
+dest = "/usr/lib/example/plugins/cv-plugin.so"
+replace = true
+mode = 420
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-orion-node"
+artifact = "orion-node"
+dest = "/usr/lib/example/orion-node.jar"
+replace = true
+mode = 420
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-frontend"
+artifact = "frontend-package"
+dest = "/opt/example/frontend.tgz"
+replace = true
+mode = 420
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-python-sdk"
+artifact = "python-sdk"
+dest = "/opt/example/python-sdk.whl"
+replace = true
+mode = 420
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-heliosctl"
+artifact = "heliosctl"
+dest = "/usr/bin/heliosctl"
+replace = true
+mode = 493
+owner = "root"
+group = "root"

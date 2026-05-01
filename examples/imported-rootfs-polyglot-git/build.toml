@@ -1,0 +1,236 @@
+# Polyglot imported-image example that builds multiple pulled repos and installs them into a base image.
+
+build_name = "imported-rootfs-polyglot-git"
+version = "2.0.0"
+description = "Import a base rootfs tar, pull multiple git repos, build Rust/Go/Java/Node/Python projects, and install them into the image."
+target = "local"
+profile = "release"
+
+[workspace]
+root_dir = "examples/imported-rootfs-polyglot-git"
+build_dir = "../../.gaia/examples/imported-rootfs-polyglot-git/build"
+out_dir = "../../.gaia/examples/imported-rootfs-polyglot-git/out"
+
+[reporting]
+summary = true
+provenance = true
+manifest = true
+
+[execution]
+jobs = 1
+
+[execution.docker]
+enabled = true
+image = "gaia-polyglot-artifacts:latest"
+
+[providers.git]
+timeout_seconds = 300
+
+[providers.rust]
+timeout_seconds = 900
+
+[providers.go]
+timeout_seconds = 900
+
+[providers.java]
+timeout_seconds = 900
+
+[providers.node]
+timeout_seconds = 900
+
+[providers.python]
+timeout_seconds = 900
+
+[providers.starting_point]
+timeout_seconds = 300
+
+[[workspace.named_paths]]
+alias = "assets"
+path = "assets"
+kind = "host"
+
+[[sources]]
+id = "base-rootfs"
+kind = "path"
+path = "seed"
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "rust-source"
+kind = "git"
+repo = "examples/imported-rootfs-polyglot-git/seed-rust-repo"
+branch = "main"
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "go-source"
+kind = "git"
+repo = "examples/imported-rootfs-polyglot-git/seed-go-repo"
+branch = "main"
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "java-source"
+kind = "git"
+repo = "examples/imported-rootfs-polyglot-git/seed-java-repo"
+branch = "main"
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "node-source"
+kind = "git"
+repo = "examples/imported-rootfs-polyglot-git/seed-node-repo"
+branch = "main"
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "python-source"
+kind = "git"
+repo = "examples/imported-rootfs-polyglot-git/seed-python-repo"
+branch = "main"
+refresh = "never"
+pin = "locked"
+
+[[artifacts]]
+id = "rust-app"
+kind = "rust"
+package = "rust-app"
+source = "rust-source"
+profile = "${build.profile}"
+install_name = "rust-app"
+install_class = "binary"
+install_dest_hint = "/usr/bin/rust-app"
+output_path = "${workspace.out_dir}/artifacts/rust-app"
+
+[[artifacts]]
+id = "go-app"
+kind = "go"
+package = "."
+source = "go-source"
+install_name = "go-app"
+install_class = "binary"
+install_dest_hint = "/usr/bin/go-app"
+output_path = "${workspace.out_dir}/artifacts/go-app"
+
+[[artifacts]]
+id = "java-app"
+kind = "java"
+build_target = "target/java-app.jar"
+source = "java-source"
+install_name = "java-app"
+install_class = "archive"
+install_dest_hint = "/usr/lib/example/java-app.jar"
+output_path = "${workspace.out_dir}/artifacts/java-app.jar"
+
+[[artifacts]]
+id = "node-app"
+kind = "node"
+package_dir = "."
+source = "node-source"
+install_name = "node-app"
+install_class = "archive"
+install_dest_hint = "/opt/example/node-app.tgz"
+output_path = "${workspace.out_dir}/artifacts/node-app.tgz"
+
+[[artifacts]]
+id = "python-app"
+kind = "python"
+package_dir = "."
+source = "python-source"
+install_name = "python-app"
+install_class = "archive"
+install_dest_hint = "/opt/example/python-app.whl"
+output_path = "${workspace.out_dir}/artifacts/python-app.whl"
+
+[[install]]
+id = "install-rust-app"
+artifact = "rust-app"
+dest = "/usr/bin/rust-app"
+replace = true
+mode = 493
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-go-app"
+artifact = "go-app"
+dest = "/usr/bin/go-app"
+replace = true
+mode = 493
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-java-app"
+artifact = "java-app"
+dest = "/usr/lib/example/java-app.jar"
+replace = true
+mode = 420
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-node-app"
+artifact = "node-app"
+dest = "/opt/example/node-app.tgz"
+replace = true
+mode = 420
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-python-app"
+artifact = "python-app"
+dest = "/opt/example/python-app.whl"
+replace = true
+mode = 420
+owner = "root"
+group = "root"
+
+[[stage.files]]
+id = "motd"
+src = "@assets/etc/motd"
+dest = "/etc/motd"
+origin = "static-asset"
+
+[[stage.env_sets]]
+id = "runtime-env"
+name = "runtime"
+entries = [
+  ["APP_MODE", "polyglot-git-smoke"],
+  ["FEATURE_SET", "rust,go,java,node,python"],
+]
+
+[[stage.services]]
+id = "polyglot-service"
+name = "polyglot.service"
+unit_path = "@assets/systemd/polyglot.service"
+
+[image]
+kind = "starting-point"
+source = "base-rootfs"
+source_path = "content/base-rootfs.tar"
+rootfs_validation_mode = "require-file"
+output_mode = "copy-and-archive"
+
+[image.feed]
+install_entries = [
+  "install-rust-app",
+  "install-go-app",
+  "install-java-app",
+  "install-node-app",
+  "install-python-app",
+]
+stage_files = ["motd"]
+stage_env_sets = ["runtime-env"]
+stage_services = ["polyglot-service"]
+
+[image.output]
+collect_dir = "${workspace.out_dir}/images"
+archive_name = "${build.name}-${build.version}.tar"
+emit_report = true

@@ -1,28 +1,41 @@
 # Gaia Docs
 
-This folder is the detailed documentation for how Gaia Image Builder works.
+This is the rebuilt documentation set for the current typed Gaia system.
 
-## Categories
+## Read In This Order
 
-- [Architecture](architecture/overview.md)
-- [Modules](modules/overview.md)
-- [Checkpoints](modules/checkpoints.md)
-- [Tasks](tasks/execution-model.md)
-- [Guides](guides/build-your-own-image.md)
-- [Reference](reference/cli.md)
-- [HeliOS File Map](reference/helios-file-map.md)
+1. [configuration.md](configuration.md)
+2. [cli.md](cli.md)
+3. [execution.md](execution.md)
+4. [providers.md](providers.md)
+5. [platform-support.md](platform-support.md)
+6. [reporting-and-state.md](reporting-and-state.md)
+7. [migration-from-legacy.md](migration-from-legacy.md)
+8. [completion-checklist.md](completion-checklist.md)
 
-## Advanced Guides
+## What Each Doc Covers
 
-- [Recreate HeliOS From Scratch](guides/recreate-helios-from-scratch.md)
-- [HeliOS Recipes](guides/helios-recipes.md)
-- [Module And Task Development](guides/module-and-task-dev.md)
+- [configuration.md](configuration.md)
+  Full TOML surface for build metadata, inputs, presets, env, workspace, sources, artifacts, install, stage, image, checkpoints, reporting, and policy.
 
-## Fast path
+- [cli.md](cli.md)
+  Actual supported commands and overrides:
+  `resolve`, `validate`, `plan`, `run`, feature-gated `tui`, `--preset`, `--env-file`, `--env`, `--set`.
 
-1. Read [Architecture Overview](architecture/overview.md).
-2. Read [Task Execution Model](tasks/execution-model.md).
-3. Follow [Build Your Own Image](guides/build-your-own-image.md).
-4. Follow [Recreate HeliOS From Scratch](guides/recreate-helios-from-scratch.md).
-5. Run [Base OS Starting-Point Example](../examples/base-os-starting-point/README.md) for fast smoke tests.
-6. Run [PhotonVision HeliOS Raze Minimal Example](../examples/photonvision-helios-raze-minimal/README.md) for a Gaia-only PV runtime profile.
+- [execution.md](execution.md)
+  How Gaia turns config into a validated spec, then into a typed plan, then into execution with reuse, rollback, and cancellation.
+
+- [providers.md](providers.md)
+  Current provider model and what each provider actually does today.
+
+- [platform-support.md](platform-support.md)
+  Supported release host, Unix process assumptions, and privileged image-provider requirements.
+
+- [reporting-and-state.md](reporting-and-state.md)
+  Machine-readable output files, provider state files, runtime state files, and reuse-state behavior.
+
+- [migration-from-legacy.md](migration-from-legacy.md)
+  How to translate old Gaia trees that still think in `buildroot` / `program` / `stage` module buckets.
+
+- [completion-checklist.md](completion-checklist.md)
+  The concrete remaining work required before Gaia can be considered done as an OS-image build system.

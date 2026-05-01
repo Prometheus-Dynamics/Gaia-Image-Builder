@@ -1,0 +1,97 @@
+# Richer starting-point example: imported base rootfs plus a pulled git repo artifact.
+
+build_name = "imported-rootfs-rust-git"
+version = "2.0.0"
+description = "Import a base rootfs tar, pull a git repo, build it, install it into the image, and stage runtime content."
+target = "local"
+profile = "release"
+
+[workspace]
+root_dir = "examples/imported-rootfs-rust-git"
+build_dir = "../../.gaia/examples/imported-rootfs-rust-git/build"
+out_dir = "../../.gaia/examples/imported-rootfs-rust-git/out"
+
+[reporting]
+summary = true
+provenance = true
+manifest = true
+
+[[workspace.named_paths]]
+alias = "assets"
+path = "assets"
+kind = "host"
+
+[[sources]]
+id = "app-source"
+kind = "git"
+repo = "file://${workspace.root_dir}/seed-app-repo"
+branch = "main"
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "base-rootfs"
+kind = "path"
+path = "seed"
+refresh = "never"
+pin = "locked"
+
+[[artifacts]]
+id = "git-project-app"
+kind = "rust"
+package = "git-project-app"
+source = "app-source"
+profile = "${build.profile}"
+install_name = "git-project-app"
+install_class = "binary"
+install_dest_hint = "/usr/bin/git-project-app"
+output_path = "${workspace.out_dir}/artifacts/git-project-app"
+
+[[install]]
+id = "install-git-project-app"
+artifact = "git-project-app"
+dest = "/usr/bin/git-project-app"
+replace = true
+mode = 493
+owner = "root"
+group = "root"
+
+[[stage.files]]
+id = "motd"
+src = "@assets/etc/motd"
+dest = "/etc/motd"
+origin = "static-asset"
+
+[[stage.env_sets]]
+id = "runtime-env"
+name = "runtime"
+entries = [
+  ["APP_MODE", "git-smoke"],
+  ["LISTEN_ADDR", "0.0.0.0:8080"],
+]
+
+[[stage.services]]
+id = "git-project-service"
+name = "git-project.service"
+unit_path = "@assets/systemd/git-project.service"
+
+[image]
+kind = "starting-point"
+source = "base-rootfs"
+source_path = "content/base-rootfs.tar"
+rootfs_validation_mode = "require-file"
+output_mode = "copy-and-archive"
+
+[image.feed]
+install_entries = ["install-git-project-app"]
+stage_files = ["motd"]
+stage_env_sets = ["runtime-env"]
+stage_services = ["git-project-service"]
+
+[image.output]
+collect_dir = "${workspace.out_dir}/images"
+archive_name = "${build.name}-${build.version}.tar"
+emit_report = true
+
+[execution]
+jobs = 1

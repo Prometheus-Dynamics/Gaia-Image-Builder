@@ -1,0 +1,150 @@
+version = "2.0.0"
+description = "Gaia rewrite default build for workspace-level image assembly."
+branch = "${interpolation.values.default_branch}"
+target = "${input.target}"
+profile = "${input.profile}"
+labels = [
+  ["stack", "rewrite"],
+  ["mode", "${env:GAIA_MODE}"],
+  ["target", "${input.target}"],
+]
+preset = "rewrite-dev"
+
+[inputs.target]
+description = "Hardware target identifier"
+kind = "string"
+default = "cm5"
+
+[inputs.profile]
+description = "Release profile selector"
+kind = "enum"
+default = "dev"
+choices = ["dev", "ci", "release"]
+
+[product]
+family = "gaia"
+name = "image-builder"
+sku = "gaia-rewrite-dev"
+
+[interpolation]
+allow_unresolved = true
+values = [
+  ["default_branch", "main"],
+  ["release_channel", "${env:GAIA_MODE}"],
+]
+
+[failure]
+rollback_on_error = true
+preserve_failed_outputs = false
+rollback_domains = ["sources", "artifacts", "installs", "stage", "images", "checkpoints"]
+
+[execution]
+jobs = 0
+
+[providers.rust]
+allow_nested_build = false
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 300
+
+[providers.git]
+allow_remote_resolution = false
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 60
+
+[providers.archive]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 120
+
+[providers.download]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 120
+
+[providers.go]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 300
+
+[providers.java]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 300
+
+[providers.node]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 300
+
+[providers.python]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 300
+
+[providers.buildroot]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 600
+
+[providers.starting_point]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 120
+
+[presets.rewrite-dev]
+env_files = ["runtime.env"]
+env = { GAIA_MODE = "rewrite" }
+
+[presets.ci]
+env_files = ["runtime.env"]
+env = { GAIA_MODE = "ci" }
+overrides = [
+  ["input.profile", "ci"],
+  ["build.labels.mode", "ci"],
+  ["provenance.identity.channel", "ci"],
+  ["workspace.out_dir", ".gaia/examples/default-workspace/out-ci"],
+]
+
+[provenance.identity]
+project = "gaia-image-builder"
+vendor = "Prometheus Dynamics"
+channel = "${interpolation.values.release_channel}"
+labels = [
+  ["preset", "${preset.name}"],
+  ["branch", "${interpolation.values.default_branch}"],
+]
+
+[workspace]
+root_dir = "."
+build_dir = ".gaia/examples/default-workspace/build"
+out_dir = ".gaia/examples/default-workspace/out"
+
+[[workspace.named_paths]]
+alias = "assets"
+path = "examples/default-workspace/assets"
+kind = "host"
+
+[[workspace.named_paths]]
+alias = "configs"
+path = "examples/default-workspace/configs"
+kind = "host"
+
+[[sources]]
+id = "workspace-root"
+kind = "path"
+path = "${workspace.root_dir}"
+identity_ignore = [".git", ".gaia", "build", "out", "out-ci", "target"]
+refresh = "never"
+pin = "locked"

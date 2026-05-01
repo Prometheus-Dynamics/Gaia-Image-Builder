@@ -1,0 +1,11 @@
+[Unit]
+Description=Gaia Git Project Smoke
+After=network.target
+
+[Service]
+EnvironmentFile=/etc/default/runtime.env
+ExecStart=/usr/bin/git-project-app
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

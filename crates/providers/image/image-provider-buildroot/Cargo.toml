@@ -1,0 +1,18 @@
+[package]
+name = "gaia-image-provider-buildroot"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Buildroot image provider scaffold for Gaia."
+
+[dependencies]
+gaia-image-providers.workspace = true
+gaia-process.workspace = true
+gaia-spec.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

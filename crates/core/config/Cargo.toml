@@ -1,0 +1,21 @@
+[package]
+name = "gaia-config"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Configuration loading and resolution layer for Gaia."
+
+[dependencies]
+gaia-spec.workspace = true
+serde.workspace = true
+toml.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+gaia-spec.workspace = true
+
+[lints]
+workspace = true

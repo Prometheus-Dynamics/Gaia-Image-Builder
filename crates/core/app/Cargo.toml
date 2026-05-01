@@ -1,0 +1,35 @@
+[package]
+name = "gaia-app"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Application layer for Gaia CLI and future TUI orchestration."
+
+[dependencies]
+crossterm = { workspace = true, optional = true }
+gaia-artifact-providers.workspace = true
+gaia-config.workspace = true
+gaia-default-providers.workspace = true
+gaia-exec.workspace = true
+gaia-image-providers.workspace = true
+gaia-plan.workspace = true
+gaia-process.workspace = true
+gaia-report.workspace = true
+gaia-source-providers.workspace = true
+gaia-spec.workspace = true
+gaia-validate.workspace = true
+ratatui = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tracing.workspace = true
+
+[features]
+default = []
+tui = ["dep:crossterm", "dep:ratatui"]
+
+[lints]
+workspace = true

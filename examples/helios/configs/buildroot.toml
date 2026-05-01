@@ -1,3 +1,0 @@
-[buildroot]
-version = "2025.11"
-defconfig = "raspberrypicm5io_defconfig"

@@ -1,0 +1,21 @@
+[package]
+name = "gaia"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Thin binary entrypoint for the Gaia rewrite workspace."
+
+[dependencies]
+gaia-app.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[features]
+default = []
+tui = ["gaia-app/tui"]
+
+[lints]
+workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "gaia-validate"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Validation layer for resolved Gaia build specs."
+
+[dependencies]
+gaia-artifact-providers.workspace = true
+gaia-image-providers.workspace = true
+gaia-spec.workspace = true
+gaia-source-providers.workspace = true
+
+[dev-dependencies]
+gaia-config.workspace = true
+
+[lints]
+workspace = true

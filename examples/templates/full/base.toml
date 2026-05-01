@@ -1,0 +1,187 @@
+# Full Gaia base template.
+# Copy this file, then layer artifact/stage/image fragments on top with `imports`.
+
+build_name = "template-image"
+# Optional human-facing label.
+display_name = "Template Image"
+
+# Optional canonical build metadata.
+version = "2.0.0"
+description = "Example template showing the full Gaia config surface."
+branch = "main"
+target = "${input.target}"
+profile = "${input.profile}"
+
+# Free-form metadata labels.
+labels = [
+  ["stack", "template"],
+  ["target", "${input.target}"],
+]
+
+[product]
+family = "example"
+name = "gaia-template"
+sku = "example-template"
+
+# Inputs become part of the resolved typed build selection.
+[inputs.target]
+description = "Hardware target identifier"
+kind = "string"
+default = "cm5"
+
+[inputs.profile]
+description = "Build profile"
+kind = "enum"
+default = "dev"
+choices = ["dev", "ci", "release"]
+
+[inputs.enable_debug]
+description = "Enable extra debug behavior"
+kind = "boolean"
+default = "false"
+
+[inputs.build_number]
+description = "External build number"
+kind = "integer"
+required = false
+
+# Default selected preset.
+preset = "dev"
+
+[presets.dev]
+env_files = ["runtime.env"]
+env = { GAIA_MODE = "dev" }
+overrides = [
+  ["input.profile", "dev"],
+]
+
+[presets.release]
+env_files = ["runtime.env"]
+env = { GAIA_MODE = "release" }
+overrides = [
+  ["input.profile", "release"],
+  ["workspace.out_dir", ".gaia/examples/templates/full/out-release"],
+]
+
+# Additional interpolation variables.
+[interpolation]
+allow_unresolved = false
+values = [
+  ["default_branch", "main"],
+  ["release_channel", "${env:GAIA_MODE}"],
+]
+
+# Failure policy controls rollback behavior.
+[failure]
+rollback_on_error = true
+preserve_failed_outputs = false
+rollback_domains = ["sources", "artifacts", "installs", "stage", "images", "checkpoints"]
+
+# Scheduler and retained process-output policy.
+[execution]
+jobs = 4
+
+[execution.output_retention]
+stdout_bytes = 1048576
+stderr_bytes = 1048576
+stdout_lines = 1000
+stderr_lines = 1000
+failure_tail_lines = 100
+
+# Provider execution policy.
+[providers.rust]
+allow_nested_build = false
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 300
+
+[providers.git]
+allow_remote_resolution = false
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 60
+
+[providers.archive]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 120
+
+[providers.download]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 120
+
+[providers.go]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 300
+
+[providers.java]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 300
+
+[providers.node]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 300
+
+[providers.python]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 300
+
+[providers.buildroot]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 900
+local_jobs = 2
+
+[providers.starting_point]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 120
+
+[provenance.identity]
+project = "example-project"
+vendor = "Example Vendor"
+channel = "${interpolation.values.release_channel}"
+labels = [
+  ["branch", "${build.branch}"],
+  ["preset", "${preset.name}"],
+]
+
+[workspace]
+root_dir = "."
+build_dir = ".gaia/examples/templates/full/build"
+out_dir = ".gaia/examples/templates/full/out"
+
+[[workspace.named_paths]]
+alias = "assets"
+path = "assets"
+kind = "host"
+
+[[workspace.named_paths]]
+alias = "generated"
+path = "generated"
+kind = "logical"
+
+[reporting]
+summary = true
+provenance = true
+manifest = true
+
+[reporting.masking]
+enabled = true
+replacement = "***"
+patterns = ["TOKEN", "SECRET", "PASSWORD", "API_KEY"]

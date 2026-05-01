@@ -1,0 +1,7 @@
+{
+  "name": "node-app",
+  "version": "2.0.0",
+  "description": "Gaia polyglot node app",
+  "main": "index.js",
+  "files": ["index.js"]
+}

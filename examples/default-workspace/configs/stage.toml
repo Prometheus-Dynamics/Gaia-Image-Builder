@@ -1,0 +1,24 @@
+[reporting]
+summary = true
+provenance = true
+manifest = true
+
+[stage]
+
+[[stage.files]]
+id = "motd"
+src = "${workspace.paths.assets}/etc/motd"
+dest = "/etc/motd"
+origin = "static-asset"
+
+[[stage.env_sets]]
+id = "runtime-env"
+name = "runtime"
+entries = [
+  ["GAIA_MODE", "${env:GAIA_MODE}"],
+]
+
+[[stage.services]]
+id = "gaia-service"
+name = "gaia.service"
+unit_path = "${workspace.paths.assets}/systemd/gaia.service"

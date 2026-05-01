@@ -1,0 +1,18 @@
+# Existing oversized Rust files to reduce over time.
+crates/gaia-image-builder/src/checkpoints.rs
+crates/gaia-image-builder/src/executor/mod.rs
+crates/gaia-image-builder/src/modules/buildroot.rs
+crates/gaia-image-builder/src/modules/program/mod.rs
+crates/gaia-image-builder/src/modules/program/rust.rs
+crates/gaia-image-builder/src/modules/stage.rs
+crates/gaia-image-builder/src/ui/mod.rs
+crates/core/gaia-app/src/tui/mod.rs
+crates/providers/source/gaia-source-providers/src/lib.rs
+crates/core/gaia-report/src/lib.rs
+crates/core/gaia-config/src/interpolate/mod.rs
+crates/core/gaia-plan/tests/plan_flow.rs
+crates/core/gaia-validate/src/lib.rs
+crates/core/gaia-plan/src/lib.rs
+crates/core/gaia-exec/src/operations/mod.rs
+crates/core/gaia-report/tests/report_flow.rs
+crates/core/gaia-exec/tests/exec_flow.rs

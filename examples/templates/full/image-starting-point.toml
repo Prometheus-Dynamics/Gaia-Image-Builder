@@ -1,0 +1,24 @@
+# Starting-point image template.
+
+[image]
+kind = "starting-point"
+
+# Rootfs source. Can be a directory or file depending on validation mode.
+rootfs_path = "${workspace.build_dir}/seed-rootfs"
+
+# require-exists | require-directory | require-file | allow-missing
+rootfs_validation_mode = "require-directory"
+
+# copy-rootfs | archive-only | copy-and-archive
+output_mode = "copy-and-archive"
+
+[image.feed]
+install_entries = ["install-helios-api", "install-heliosctl"]
+stage_files = ["hostname", "motd", "generated-build-info"]
+stage_env_sets = ["runtime-env", "api-env"]
+stage_services = ["helios-api", "helios-engine"]
+
+[image.output]
+collect_dir = "${workspace.out_dir}/images"
+archive_name = "${build.name}-${build.version}.tar"
+emit_report = true

@@ -1,0 +1,28 @@
+[[sources]]
+id = "gaia-upstream"
+kind = "git"
+repo = "https://github.com/Prometheus-Dynamics/Gaia-Image-Builder"
+branch = "${build.branch}"
+update = true
+refresh = "always"
+pin = "floating"
+
+[[artifacts]]
+id = "gaia-app"
+kind = "rust"
+package = "gaia"
+source = "workspace-root"
+profile = "${build.profile}"
+install_name = "${build.name}"
+install_class = "binary"
+install_dest_hint = "/usr/bin/${build.name}"
+output_path = "${workspace.out_dir}/artifacts/gaia"
+
+[[install]]
+id = "install-gaia-app"
+artifact = "gaia-app"
+dest = "/usr/bin/${build.name}"
+replace = true
+mode = 493
+owner = "root"
+group = "root"

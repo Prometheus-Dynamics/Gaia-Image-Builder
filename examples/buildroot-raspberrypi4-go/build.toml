@@ -1,0 +1,119 @@
+build_name = "buildroot-raspberrypi4-go"
+version = "2.0.0"
+description = "Minimal Raspberry Pi 4 image with one cross-target Go binary and one OS tweak."
+target = "raspberrypi4-64"
+profile = "release"
+
+[workspace]
+root_dir = "examples/buildroot-raspberrypi4-go"
+build_dir = "../../.gaia/examples/buildroot-raspberrypi4-go/build"
+out_dir = "../../.gaia/examples/buildroot-raspberrypi4-go/out"
+
+[reporting]
+summary = true
+provenance = true
+manifest = true
+
+[providers.git]
+allow_remote_resolution = true
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 900
+
+[providers.buildroot]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 7200
+
+[providers.go]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 300
+
+[[workspace.named_paths]]
+alias = "assets"
+path = "assets"
+kind = "host"
+
+[[sources]]
+id = "app-source"
+kind = "path"
+path = "app"
+identity_ignore = [".gaia"]
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "buildroot-source"
+kind = "git"
+repo = "https://github.com/buildroot/buildroot"
+tag = "2025.11.3"
+refresh = "never"
+pin = "locked"
+
+[[artifacts]]
+id = "pi-dummy"
+kind = "go"
+package = "."
+source = "app-source"
+target = "linux/arm64"
+install_name = "pi-dummy"
+install_class = "binary"
+install_dest_hint = "/usr/bin/pi-dummy"
+output_path = "${workspace.out_dir}/artifacts/pi-dummy"
+
+[artifacts.execution]
+backend = "docker"
+
+[artifacts.execution.docker]
+image = "golang:1.24-bookworm"
+
+[[install]]
+id = "install-pi-dummy"
+artifact = "pi-dummy"
+dest = "/usr/bin/pi-dummy"
+replace = true
+mode = 493
+owner = "root"
+group = "root"
+
+[[stage.files]]
+id = "motd"
+src = "@assets/etc/motd"
+dest = "/etc/motd"
+origin = "static-asset"
+
+[image]
+kind = "buildroot"
+source = "buildroot-source"
+defconfig_path = "assets/buildroot-raspberrypi4-smoke.defconfig"
+config_fragments = ["@assets/buildroot-board.fragment"]
+config_overrides = [
+  ["BR2_PACKAGE_HOST_GENIMAGE", "y"],
+  ["BR2_TARGET_ROOTFS_EXT2_SIZE", "\"64M\""],
+]
+external_tree_mode = "disabled"
+
+[image.feed]
+install_entries = ["install-pi-dummy"]
+stage_files = ["motd"]
+
+[[image.expected_images]]
+name = "sdcard.img"
+format = "raw"
+required = true
+
+[image.output]
+collect_dir = "${workspace.out_dir}/images"
+archive_name = "${build.name}-${build.version}.img"
+emit_report = true
+
+[execution]
+jobs = 0
+
+[execution.docker]
+enabled = true
+image = "gaia-buildroot-smoke:latest"

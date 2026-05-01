@@ -1,0 +1,25 @@
+[package]
+name = "gaia-exec"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Execution runtime for planned Gaia operations."
+
+[dependencies]
+gaia-plan.workspace = true
+gaia-artifact-providers.workspace = true
+gaia-image-providers.workspace = true
+gaia-process.workspace = true
+gaia-source-providers.workspace = true
+gaia-spec.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+gaia-config.workspace = true
+gaia-default-providers.workspace = true
+
+[lints]
+workspace = true

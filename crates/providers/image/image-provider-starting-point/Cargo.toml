@@ -1,0 +1,19 @@
+[package]
+name = "gaia-image-provider-starting-point"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Starting-point image provider scaffold for Gaia."
+
+[dependencies]
+gaia-image-providers.workspace = true
+gaia-process.workspace = true
+gaia-spec.workspace = true
+libc.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true
