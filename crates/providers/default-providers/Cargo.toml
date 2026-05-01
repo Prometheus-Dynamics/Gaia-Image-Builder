@@ -1,0 +1,25 @@
+[package]
+name = "gaia-default-providers"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Default provider catalog composition for Gaia."
+
+[dependencies]
+gaia-artifact-provider-go.workspace = true
+gaia-artifact-provider-java.workspace = true
+gaia-artifact-provider-node.workspace = true
+gaia-artifact-provider-python.workspace = true
+gaia-artifact-provider-rust.workspace = true
+gaia-artifact-providers.workspace = true
+gaia-image-provider-buildroot.workspace = true
+gaia-image-provider-starting-point.workspace = true
+gaia-image-providers.workspace = true
+gaia-source-providers.workspace = true
+gaia-spec.workspace = true
+
+[lints]
+workspace = true

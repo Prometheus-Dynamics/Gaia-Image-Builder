@@ -1,7 +1,76 @@
 [workspace]
 members = [
-  "crates/gaia-image-builder",
-  "crates/gaia-image-builder-macros",
+  "crates/core/gaia",
+  "crates/core/app",
+  "crates/core/config",
+  "crates/core/process",
+  "crates/core/spec",
+  "crates/core/validate",
+  "crates/core/plan",
+  "crates/core/exec",
+  "crates/core/report",
+  "crates/providers/source/source-providers",
+  "crates/providers/default-providers",
+  "crates/providers/artifact/artifact-providers",
+  "crates/providers/artifact/artifact-provider-rust",
+  "crates/providers/artifact/artifact-provider-java",
+  "crates/providers/artifact/artifact-provider-node",
+  "crates/providers/artifact/artifact-provider-python",
+  "crates/providers/artifact/artifact-provider-go",
+  "crates/providers/image/image-providers",
+  "crates/providers/image/image-provider-buildroot",
+  "crates/providers/image/image-provider-starting-point",
 ]
-default-members = ["crates/gaia-image-builder"]
-resolver = "2"
+default-members = ["crates/core/gaia"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+version = "2.0.0"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Prometheus-Dynamics/Gaia-Image-Builder"
+homepage = "https://github.com/Prometheus-Dynamics/Gaia-Image-Builder"
+rust-version = "1.94"
+
+[workspace.dependencies]
+gaia = { path = "crates/core/gaia", version = "2.0.0" }
+gaia-app = { path = "crates/core/app", version = "2.0.0" }
+gaia-config = { path = "crates/core/config", version = "2.0.0" }
+gaia-process = { path = "crates/core/process", version = "2.0.0" }
+gaia-spec = { path = "crates/core/spec", version = "2.0.0" }
+gaia-validate = { path = "crates/core/validate", version = "2.0.0" }
+gaia-plan = { path = "crates/core/plan", version = "2.0.0" }
+gaia-exec = { path = "crates/core/exec", version = "2.0.0" }
+gaia-report = { path = "crates/core/report", version = "2.0.0" }
+gaia-source-providers = { path = "crates/providers/source/source-providers", version = "2.0.0" }
+gaia-default-providers = { path = "crates/providers/default-providers", version = "2.0.0" }
+gaia-artifact-providers = { path = "crates/providers/artifact/artifact-providers", version = "2.0.0" }
+gaia-image-providers = { path = "crates/providers/image/image-providers", version = "2.0.0" }
+gaia-artifact-provider-rust = { path = "crates/providers/artifact/artifact-provider-rust", version = "2.0.0" }
+gaia-artifact-provider-java = { path = "crates/providers/artifact/artifact-provider-java", version = "2.0.0" }
+gaia-artifact-provider-node = { path = "crates/providers/artifact/artifact-provider-node", version = "2.0.0" }
+gaia-artifact-provider-python = { path = "crates/providers/artifact/artifact-provider-python", version = "2.0.0" }
+gaia-artifact-provider-go = { path = "crates/providers/artifact/artifact-provider-go", version = "2.0.0" }
+gaia-image-provider-buildroot = { path = "crates/providers/image/image-provider-buildroot", version = "2.0.0" }
+gaia-image-provider-starting-point = { path = "crates/providers/image/image-provider-starting-point", version = "2.0.0" }
+clap = { version = "4", features = ["derive", "env"] }
+crossterm = "0.29"
+libc = "0.2"
+ratatui = "0.30"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11.0"
+tempfile = "3"
+toml = "1.1.2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+unused_lifetimes = "deny"
+unused_attributes = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"

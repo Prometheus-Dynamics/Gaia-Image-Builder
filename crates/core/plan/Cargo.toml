@@ -1,0 +1,23 @@
+[package]
+name = "gaia-plan"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Planning layer that turns Gaia specs into executable plans."
+
+[dependencies]
+gaia-artifact-providers.workspace = true
+gaia-image-providers.workspace = true
+gaia-source-providers.workspace = true
+gaia-spec.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+gaia-config.workspace = true
+gaia-default-providers.workspace = true
+
+[lints]
+workspace = true

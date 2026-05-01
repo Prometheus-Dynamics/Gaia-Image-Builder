@@ -1,0 +1,16 @@
+[package]
+name = "gaia-image-providers"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Shared image provider contracts and catalogs for Gaia."
+
+[dependencies]
+gaia-process.workspace = true
+gaia-spec.workspace = true
+
+[lints]
+workspace = true

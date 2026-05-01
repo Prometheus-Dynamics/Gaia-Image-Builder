@@ -1,0 +1,17 @@
+[package]
+name = "gaia-source-providers"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Shared source provider contracts and catalogs for Gaia."
+
+[dependencies]
+gaia-process.workspace = true
+gaia-spec.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

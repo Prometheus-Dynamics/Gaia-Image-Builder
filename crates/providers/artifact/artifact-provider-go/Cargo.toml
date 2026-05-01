@@ -1,0 +1,16 @@
+[package]
+name = "gaia-artifact-provider-go"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Go artifact provider scaffold for Gaia."
+
+[dependencies]
+gaia-artifact-providers.workspace = true
+gaia-spec.workspace = true
+
+[lints]
+workspace = true

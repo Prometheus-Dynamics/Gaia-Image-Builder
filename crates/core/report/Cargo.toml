@@ -1,0 +1,29 @@
+[package]
+name = "gaia-report"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Reporting, provenance, and summary layer for Gaia."
+
+[dependencies]
+gaia-exec.workspace = true
+gaia-plan.workspace = true
+gaia-spec.workspace = true
+gaia-validate.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+gaia-artifact-providers.workspace = true
+gaia-config.workspace = true
+gaia-default-providers.workspace = true
+gaia-image-providers.workspace = true
+gaia-source-providers.workspace = true
+gaia-validate.workspace = true
+
+[lints]
+workspace = true
