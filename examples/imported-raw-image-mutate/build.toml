@@ -1,0 +1,83 @@
+# Raw starting-point smoke example that mutates a base disk image.
+
+build_name = "imported-raw-image-mutate"
+version = "2.0.0"
+description = "Mutate an imported raw Alpine image, install packages, and apply normal Gaia image feed content."
+target = "host-x86_64"
+profile = "release"
+
+[workspace]
+root_dir = "examples/imported-raw-image-mutate"
+build_dir = "../../.gaia/examples/imported-raw-image-mutate/build"
+out_dir = "../../.gaia/examples/imported-raw-image-mutate/out"
+
+[reporting]
+summary = true
+provenance = true
+manifest = true
+
+[[workspace.named_paths]]
+alias = "assets"
+path = "assets"
+kind = "host"
+
+[[sources]]
+id = "app-source"
+kind = "path"
+path = "app"
+identity_ignore = ["target", ".gaia"]
+refresh = "never"
+pin = "locked"
+
+[[artifacts]]
+id = "raw-smoke-app"
+kind = "rust"
+package = "raw-smoke-app"
+source = "app-source"
+profile = "${build.profile}"
+target = "x86_64-unknown-linux-musl"
+install_name = "raw-smoke-app"
+install_class = "binary"
+install_dest_hint = "/usr/bin/raw-smoke-app"
+output_path = "${workspace.out_dir}/artifacts/raw-smoke-app"
+
+[[install]]
+id = "install-raw-smoke-app"
+artifact = "raw-smoke-app"
+dest = "/usr/bin/raw-smoke-app"
+replace = true
+mode = 493
+owner = "root"
+group = "root"
+
+[[stage.files]]
+id = "motd"
+src = "@assets/etc/motd"
+dest = "/etc/motd"
+origin = "static-asset"
+
+[image]
+kind = "starting-point"
+rootfs_path = "seed/base.img"
+rootfs_validation_mode = "require-file"
+output_mode = "archive-only"
+image_read_only = false
+
+[image.packages]
+enabled = true
+execute = true
+manager = "apk"
+update = true
+install = ["curl"]
+
+[image.feed]
+install_entries = ["install-raw-smoke-app"]
+stage_files = ["motd"]
+
+[image.output]
+collect_dir = "${workspace.out_dir}/images"
+archive_name = "${build.name}-${build.version}.img"
+emit_report = true
+
+[execution]
+jobs = 1

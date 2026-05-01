@@ -3,9 +3,21 @@ target/
 debug/
 
 # Builder outputs / caches
+.codex
 build/
 out/
 output/
+.gaia/
+**/build-*/
+**/out-*/
+**/output-*/
+**/.gaia/
+examples/**/seed/*.img
+examples/**/seed/*.tar
+examples/**/seed/*.tar.gz
+examples/**/seed/rootfs/
+examples/**/seed-*-repo/
+examples/**/seed-app-repo/
 
 # Vendored SDK cache (optional/local)
 assets/sdk/offline/

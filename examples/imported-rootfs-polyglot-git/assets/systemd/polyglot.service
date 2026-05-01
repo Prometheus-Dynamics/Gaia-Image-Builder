@@ -1,0 +1,11 @@
+[Unit]
+Description=Gaia Polyglot Git Smoke
+After=network.target
+
+[Service]
+EnvironmentFile=/etc/default/runtime.env
+ExecStart=/usr/bin/rust-app
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Gaia Rewrite Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/default
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

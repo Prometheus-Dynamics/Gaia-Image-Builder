@@ -1,0 +1,31 @@
+build_name = "default"
+extends = "base.toml"
+imports = ["artifacts.toml", "stage.toml"]
+
+[image]
+kind = "buildroot"
+defconfig = "raspberrypi_defconfig"
+external_tree_mode = "auto"
+
+[image.feed]
+install_entries = ["install-gaia-app"]
+stage_files = ["motd"]
+stage_env_sets = ["runtime-env"]
+stage_services = ["gaia-service"]
+
+[[image.expected_images]]
+name = "rootfs.tar"
+format = "tar"
+required = false
+
+[image.output]
+collect_dir = "${workspace.out_dir}/images"
+archive_name = "${build.name}-${build.version}.tar"
+emit_report = true
+
+[[checkpoints]]
+id = "base-image"
+backend = "local"
+anchor = "image"
+use_policy = "auto"
+upload_policy = "off"

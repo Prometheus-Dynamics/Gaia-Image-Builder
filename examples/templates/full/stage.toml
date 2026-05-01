@@ -1,0 +1,62 @@
+# Stage files, env sets, services, and checkpoints.
+
+[[stage.files]]
+id = "hostname"
+src = "@assets/etc/hostname"
+dest = "/etc/hostname"
+origin = "static-asset"
+
+[[stage.files]]
+id = "motd"
+src = "@assets/etc/motd"
+dest = "/etc/motd"
+origin = "static-asset"
+
+# Generated content is allowed too. The source value is still a string today;
+# use your own generated path convention and mark the origin.
+[[stage.files]]
+id = "generated-build-info"
+src = "${workspace.build_dir}/generated/build-info.txt"
+dest = "/etc/example/build-info.txt"
+origin = "generated"
+
+[[stage.env_sets]]
+id = "runtime-env"
+name = "runtime"
+entries = [
+  ["GAIA_MODE", "${env:GAIA_MODE}"],
+  ["HELIOS_TARGET", "${build.target}"],
+  ["EXAMPLE_CHANNEL", "${provenance.identity.channel}"],
+]
+
+[[stage.env_sets]]
+id = "api-env"
+name = "helios-api"
+entries = [
+  ["ENV_FILE", "/etc/default/helios-api"],
+  ["API_BIND", "0.0.0.0:5800"],
+]
+
+[[stage.services]]
+id = "helios-api"
+name = "helios-api.service"
+unit_path = "@assets/systemd/helios-api.service"
+
+[[stage.services]]
+id = "helios-engine"
+name = "helios-engine.service"
+unit_path = "@assets/systemd/helios-engine.service"
+
+[[checkpoints]]
+id = "base-image"
+backend = "local"
+anchor = "image"
+use_policy = "auto"
+upload_policy = "off"
+
+[[checkpoints]]
+id = "after-api-stage"
+backend = "local"
+anchor = "stage-service:helios-api"
+use_policy = "always"
+upload_policy = "off"

@@ -1,0 +1,98 @@
+build_name = "buildroot-rust-minimal"
+version = "2.0.0"
+description = "Fast minimal Buildroot image with one Rust binary and one staged file."
+target = "qemu-x86_64"
+profile = "release"
+
+[workspace]
+root_dir = "examples/buildroot-rust-minimal"
+build_dir = "../../.gaia/examples/buildroot-rust-minimal/build"
+out_dir = "../../.gaia/examples/buildroot-rust-minimal/out"
+
+[reporting]
+summary = true
+provenance = true
+manifest = true
+
+[providers.git]
+allow_remote_resolution = true
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 900
+
+[providers.buildroot]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 7200
+
+[[workspace.named_paths]]
+alias = "assets"
+path = "assets"
+kind = "host"
+
+[[sources]]
+id = "app-source"
+kind = "path"
+path = "app"
+identity_ignore = ["target", ".gaia"]
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "buildroot-source"
+kind = "git"
+repo = "https://git.buildroot.net/buildroot"
+tag = "2025.11.3"
+refresh = "never"
+pin = "locked"
+
+[[artifacts]]
+id = "smoke-app"
+kind = "rust"
+package = "smoke-app"
+source = "app-source"
+profile = "${build.profile}"
+install_name = "smoke-app"
+install_class = "binary"
+install_dest_hint = "/usr/bin/smoke-app"
+output_path = "${workspace.out_dir}/artifacts/smoke-app"
+
+[[install]]
+id = "install-smoke-app"
+artifact = "smoke-app"
+dest = "/usr/bin/smoke-app"
+replace = true
+mode = 493
+owner = "root"
+group = "root"
+
+[[stage.files]]
+id = "motd"
+src = "@assets/etc/motd"
+dest = "/etc/motd"
+origin = "static-asset"
+
+[image]
+kind = "buildroot"
+source = "buildroot-source"
+defconfig_path = "@assets/buildroot-smoke.defconfig"
+external_tree_mode = "disabled"
+
+[image.feed]
+install_entries = ["install-smoke-app"]
+stage_files = ["motd"]
+
+[[image.expected_images]]
+name = "rootfs.tar"
+format = "tar"
+required = true
+
+[image.output]
+collect_dir = "${workspace.out_dir}/images"
+archive_name = "${build.name}-${build.version}.tar"
+emit_report = true
+
+[execution]
+jobs = 0

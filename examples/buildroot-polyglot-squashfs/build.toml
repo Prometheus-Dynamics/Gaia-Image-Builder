@@ -1,0 +1,230 @@
+# Small Buildroot example that exercises every artifact provider without dragging in
+# a full distro/module stack. It is meant for fast iteration and plan/validate testing.
+
+build_name = "buildroot-polyglot-squashfs"
+version = "2.0.0"
+description = "Tiny polyglot Buildroot image with simple OS modifications."
+target = "qemu-x86_64"
+profile = "release"
+
+[workspace]
+root_dir = "examples/buildroot-polyglot-squashfs"
+build_dir = "../../.gaia/examples/buildroot-polyglot-squashfs/build"
+out_dir = "../../.gaia/examples/buildroot-polyglot-squashfs/out"
+
+[reporting]
+summary = true
+provenance = true
+manifest = true
+
+[[workspace.named_paths]]
+alias = "assets"
+path = "assets"
+kind = "host"
+
+[[sources]]
+id = "rust-source"
+kind = "path"
+path = "rust-hello"
+identity_ignore = ["target", ".gaia"]
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "go-source"
+kind = "path"
+path = "go-hello"
+identity_ignore = ["target", ".gaia"]
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "java-source"
+kind = "path"
+path = "java-hello"
+identity_ignore = ["target", ".gaia"]
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "node-source"
+kind = "path"
+path = "node-hello"
+identity_ignore = ["node_modules", ".gaia-pack", ".gaia"]
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "python-source"
+kind = "path"
+path = "python-hello"
+identity_ignore = ["dist", "build", ".gaia-wheelhouse", ".gaia"]
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "buildroot-source"
+kind = "git"
+repo = "https://git.buildroot.net/buildroot"
+tag = "2025.11.3"
+refresh = "never"
+pin = "locked"
+
+[[artifacts]]
+id = "rust-hello"
+kind = "rust"
+package = "rust-hello"
+source = "rust-source"
+profile = "${build.profile}"
+install_name = "rust-hello"
+install_class = "binary"
+install_dest_hint = "/usr/bin/rust-hello"
+output_path = "${workspace.out_dir}/artifacts/rust-hello"
+
+[[artifacts]]
+id = "go-hello"
+kind = "go"
+package = "."
+source = "go-source"
+install_name = "go-hello"
+install_class = "binary"
+install_dest_hint = "/usr/bin/go-hello"
+output_path = "${workspace.out_dir}/artifacts/go-hello"
+
+[[artifacts]]
+id = "java-hello"
+kind = "java"
+build_target = "target/java-hello-2.0.0.jar"
+source = "java-source"
+install_name = "java-hello"
+install_class = "archive"
+install_dest_hint = "/usr/lib/polyglot/java-hello.jar"
+output_path = "${workspace.out_dir}/artifacts/java-hello.jar"
+
+[[artifacts]]
+id = "node-hello"
+kind = "node"
+package_dir = "."
+source = "node-source"
+install_name = "node-hello"
+install_class = "archive"
+install_dest_hint = "/opt/polyglot/node-hello.tgz"
+output_path = "${workspace.out_dir}/artifacts/node-hello.tgz"
+
+[[artifacts]]
+id = "python-hello"
+kind = "python"
+package_dir = "."
+source = "python-source"
+install_name = "python-hello"
+install_class = "archive"
+install_dest_hint = "/opt/polyglot/python-hello.whl"
+output_path = "${workspace.out_dir}/artifacts/python-hello.whl"
+
+[[install]]
+id = "install-rust-hello"
+artifact = "rust-hello"
+dest = "/usr/bin/rust-hello"
+replace = true
+mode = 493
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-go-hello"
+artifact = "go-hello"
+dest = "/usr/bin/go-hello"
+replace = true
+mode = 493
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-java-hello"
+artifact = "java-hello"
+dest = "/usr/lib/polyglot/java-hello.jar"
+replace = true
+mode = 420
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-node-hello"
+artifact = "node-hello"
+dest = "/opt/polyglot/node-hello.tgz"
+replace = true
+mode = 420
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-python-hello"
+artifact = "python-hello"
+dest = "/opt/polyglot/python-hello.whl"
+replace = true
+mode = 420
+owner = "root"
+group = "root"
+
+[[stage.files]]
+id = "hostname"
+src = "@assets/etc/hostname"
+dest = "/etc/hostname"
+origin = "static-asset"
+
+[[stage.files]]
+id = "motd"
+src = "@assets/etc/motd"
+dest = "/etc/motd"
+origin = "static-asset"
+
+[[stage.env_sets]]
+id = "runtime-env"
+name = "runtime"
+entries = [
+  ["POLYGLOT_TARGET", "${build.target}"],
+  ["POLYGLOT_PROFILE", "${build.profile}"],
+]
+
+[[stage.services]]
+id = "rust-hello-service"
+name = "rust-hello.service"
+unit_path = "@assets/systemd/rust-hello.service"
+
+[image]
+kind = "buildroot"
+source = "buildroot-source"
+defconfig_path = "@assets/buildroot-polyglot-squashfs.defconfig"
+external_tree_mode = "disabled"
+
+[image.feed]
+install_entries = [
+  "install-rust-hello",
+  "install-go-hello",
+  "install-java-hello",
+  "install-node-hello",
+  "install-python-hello",
+]
+stage_files = ["hostname", "motd"]
+stage_env_sets = ["runtime-env"]
+stage_services = ["rust-hello-service"]
+
+[[image.expected_images]]
+name = "rootfs.squashfs"
+format = "squashfs"
+required = true
+
+[image.output]
+collect_dir = "${workspace.out_dir}/images"
+archive_name = "${build.name}-${build.version}.squashfs"
+emit_report = true
+
+[[checkpoints]]
+id = "base-image"
+backend = "local"
+anchor = "image"
+use_policy = "auto"
+upload_policy = "off"
+
+[execution]
+jobs = 1

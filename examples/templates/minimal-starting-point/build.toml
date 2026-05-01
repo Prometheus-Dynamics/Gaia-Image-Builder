@@ -1,0 +1,59 @@
+# Minimal starting-point Gaia template.
+
+build_name = "my-starting-point-image"
+version = "2.0.0"
+target = "cm5"
+profile = "release"
+
+[workspace]
+root_dir = "."
+build_dir = ".gaia/examples/templates/minimal-starting-point/build"
+out_dir = ".gaia/examples/templates/minimal-starting-point/out"
+
+[[workspace.named_paths]]
+alias = "assets"
+path = "assets"
+kind = "host"
+
+[[sources]]
+id = "workspace-root"
+kind = "path"
+path = "${workspace.root_dir}"
+refresh = "never"
+pin = "locked"
+
+[[artifacts]]
+id = "my-app"
+kind = "rust"
+package = "my-app"
+source = "workspace-root"
+profile = "${build.profile}"
+output_path = "${workspace.out_dir}/artifacts/my-app"
+
+[[install]]
+id = "install-my-app"
+artifact = "my-app"
+dest = "/usr/bin/my-app"
+replace = true
+mode = 493
+
+[[stage.files]]
+id = "motd"
+src = "@assets/etc/motd"
+dest = "/etc/motd"
+origin = "static-asset"
+
+[image]
+kind = "starting-point"
+rootfs_path = "${workspace.build_dir}/seed-rootfs"
+rootfs_validation_mode = "require-directory"
+output_mode = "copy-and-archive"
+
+[image.feed]
+install_entries = ["install-my-app"]
+stage_files = ["motd"]
+
+[image.output]
+collect_dir = "${workspace.out_dir}/images"
+archive_name = "${build.name}-${build.version}.tar"
+emit_report = true

@@ -1,4 +1,0 @@
-[workspace]
-root_dir = "examples/base-os-starting-point"
-build_dir = "build"
-out_dir = "out"

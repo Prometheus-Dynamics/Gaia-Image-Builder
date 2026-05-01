@@ -1,0 +1,8 @@
+[package]
+name = "smoke-app"
+version = "2.0.0"
+edition = "2024"
+
+[[bin]]
+name = "smoke-app"
+path = "src/main.rs"
