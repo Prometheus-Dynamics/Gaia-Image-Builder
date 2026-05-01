@@ -1,0 +1,45 @@
+# Changelog
+
+All notable changes to this workspace should be documented in this file.
+
+The format is based on Keep a Changelog and this project follows Semantic Versioning.
+
+## [2.0.0] - 2026-05-01
+
+### Breaking Changes
+
+- Rebuilt Gaia around the typed configuration model and removed the legacy `buildroot` / `program` / `stage` bucket compatibility layer.
+- Split legacy program definitions into explicit `[[sources]]`, `[[artifacts]]`, and `[[install]]` domains.
+- Replaced legacy checkpoint anchors with typed anchors such as `image`, `install:<id>`, `stage-file:<id>`, `stage-env:<id>`, and `stage-service:<id>`.
+- Standardized generated image names and example output paths on the `2.0.0` release version.
+
+### Added
+
+- Added the current multi-crate workspace structure for core Gaia domains: config, spec, validation, planning, execution, process helpers, reporting, CLI/app orchestration, and the `gaia` binary.
+- Added provider crates for source acquisition, artifact builds, image generation, and default provider registration.
+- Added source providers for local paths, archives, downloads, and git-backed sources with identity and state tracking.
+- Added artifact providers for Rust, Go, Java, Node, Python, and provider-level artifact output contracts.
+- Added image providers for Buildroot images and starting-point image/rootfs mutation workflows.
+- Added typed reporting and state outputs for summaries, manifests, provenance, backend state, reuse decisions, and runtime state.
+- Added examples for Buildroot squashfs, SD card, Raspberry Pi 4, aarch64, minimal Rust, imported rootfs, imported raw image mutation, polyglot git projects, and template-based starting points.
+- Added Docker build environments and smoke-test scripts for CI, Buildroot, polyglot artifacts, raw starting-point images, and aarch64 artifact builds.
+
+### Changed
+
+- Bumped all Gaia workspace crates and internal path dependency requirements from `0.2.0` to `2.0.0`.
+- Bumped example build definitions, seed applications, package manifests, documentation paths, verification scripts, and generated artifact references to `2.0.0`.
+- Refreshed `Cargo.lock` so workspace package entries resolve to `2.0.0`.
+- Reworked the README and documentation index around the current typed domain model and command set.
+- Expanded CLI documentation for `resolve`, `validate`, `plan`, `run`, `clean`, feature-gated `tui`, presets, environment files, environment overrides, and `--set` overrides.
+- Updated migration guidance for translating older Gaia trees into typed source, artifact, install, stage, image, checkpoint, reporting, and policy declarations.
+
+### Validation
+
+- Updated test fixtures and expected image/archive names that depended on pre-2.0.0 sample versions.
+- Kept the release aligned with the existing Rust 2024 workspace settings, shared lint policy, and `rust-version = "1.94"` requirement.
+
+## [0.1.3] - 2026-04-20
+
+- Shifted the repository onto the shared workspace-skeleton baseline.
+- Added standardized repo docs, scripts, testing notes, toolchain pinning, and CI entrypoints.
+- Kept Gaia-specific architecture, module, and guide documentation intact under `docs/`.
