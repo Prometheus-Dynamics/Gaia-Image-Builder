@@ -26,7 +26,8 @@ cargo run -p gaia -- tui <build.toml>
 For projects with layered configs, put concrete entrypoints in
 `configs/builds/*.toml`. Short build names such as `base-os-cm5` resolve through
 that directory, and the TUI build picker lists those concrete entrypoints instead
-of every imported layer.
+of every imported layer. Running `gaia tui` without a build opens that picker
+when project build entrypoints are available.
 
 ## Shared Modifiers
 

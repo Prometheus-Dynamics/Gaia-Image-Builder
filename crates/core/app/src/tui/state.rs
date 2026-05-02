@@ -1,5 +1,7 @@
 use super::*;
 
+const DEFAULT_BUILD_CONFIG: &str = "examples/default-workspace/configs/default.toml";
+
 pub(crate) struct TuiState<'a> {
     pub(crate) context: &'a AppContext,
     pub(crate) build: String,
@@ -31,11 +33,19 @@ impl<'a> TuiState<'a> {
     pub(crate) fn new(context: &'a AppContext, build: &str, options: &ResolveOptions) -> Self {
         let mut build_list = ListState::default();
         let build_entries = discover_build_entries(build);
-        let selected_build = build_entries
+        let discovered_build = build_entries
             .iter()
             .find(|entry| entry.path == build)
-            .or_else(|| build_entries.first())
-            .map(|entry| entry.path.clone())
+            .map(|entry| entry.path.clone());
+        let should_open_picker = discovered_build.is_none()
+            && build == DEFAULT_BUILD_CONFIG
+            && !build_entries.is_empty();
+        let selected_build = discovered_build
+            .or_else(|| {
+                should_open_picker
+                    .then(|| build_entries.first().map(|entry| entry.path.clone()))
+                    .flatten()
+            })
             .unwrap_or_else(|| build.to_string());
         if !build_entries.is_empty() {
             let selected = build_entries
@@ -52,7 +62,11 @@ impl<'a> TuiState<'a> {
             context,
             build: selected_build,
             options: options.clone(),
-            screen: Screen::Setup,
+            screen: if should_open_picker {
+                Screen::Picker
+            } else {
+                Screen::Setup
+            },
             build_entries,
             build_list,
             setup_list,
@@ -90,7 +104,7 @@ impl<'a> TuiState<'a> {
     }
 
     pub(crate) fn refresh(&mut self) {
-        let spec = match try_resolve_config_with_options(&self.build, &self.options) {
+        let mut spec = match try_resolve_config_with_options(&self.build, &self.options) {
             Ok(spec) => spec,
             Err(error) => {
                 self.set_status(error.to_string());
@@ -101,6 +115,28 @@ impl<'a> TuiState<'a> {
                 return;
             }
         };
+        let has_branch_override = self
+            .options
+            .explicit_overrides
+            .iter()
+            .any(|(key, _)| key == "build.branch");
+        if spec.metadata.branch.is_none()
+            && !has_branch_override
+            && let Some(git_branch) = self.current_git_branch()
+        {
+            self.set_or_clear_override("build.branch", &git_branch);
+            spec = match try_resolve_config_with_options(&self.build, &self.options) {
+                Ok(spec) => spec,
+                Err(error) => {
+                    self.set_status(error.to_string());
+                    self.spec = None;
+                    self.validation = None;
+                    self.plan = None;
+                    self.plan_diagnostics.clear();
+                    return;
+                }
+            };
+        }
         let validation = validate_spec_with_providers(
             &spec,
             &self.context.source_catalog,
