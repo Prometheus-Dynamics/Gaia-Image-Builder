@@ -70,6 +70,9 @@ impl<'a> TuiState<'a> {
             self.set_status("run already in progress");
             return;
         }
+        if self.pending_refresh_at.is_some() || self.refresh_receiver.is_some() {
+            self.refresh();
+        }
 
         let (Some(_spec), Some(validation), Some(_plan)) = (
             self.spec.as_ref(),

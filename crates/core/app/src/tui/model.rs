@@ -160,6 +160,19 @@ pub(crate) enum RunThreadMessage {
     Finished(Box<Result<RunArtifacts, String>>),
 }
 
+pub(crate) struct RefreshArtifacts {
+    pub(crate) options: ResolveOptions,
+    pub(crate) spec: ResolvedBuildSpec,
+    pub(crate) validation: ValidationReport,
+    pub(crate) plan: ExecutionPlan,
+    pub(crate) plan_diagnostics: Vec<gaia_plan::PlanDiagnostic>,
+}
+
+pub(crate) struct RefreshThreadMessage {
+    pub(crate) revision: u64,
+    pub(crate) result: Result<RefreshArtifacts, String>,
+}
+
 pub(crate) enum RunState {
     Idle,
     Running {

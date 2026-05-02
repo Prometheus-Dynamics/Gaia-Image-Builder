@@ -370,6 +370,149 @@ fn resolves_layered_default_config() {
 }
 
 #[test]
+fn resolves_string_and_conditional_table_imports() {
+    let root = std::env::temp_dir().join(format!(
+        "gaia-conditional-imports-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).expect("temp config dir");
+    let base = root.join("base.toml");
+    let full = root.join("full.toml");
+    let build = root.join("build.toml");
+    std::fs::write(
+        &base,
+        r#"
+[[sources]]
+id = "base-source"
+kind = "path"
+path = "."
+"#,
+    )
+    .expect("base");
+    std::fs::write(
+        &full,
+        r#"
+[[sources]]
+id = "full-source"
+kind = "path"
+path = "."
+"#,
+    )
+    .expect("full");
+    std::fs::write(
+        &build,
+        r#"
+build_name = "conditional"
+profile = "base-os"
+imports = [
+  "base.toml",
+  { path = "full.toml", when = { profile = "full" } },
+]
+"#,
+    )
+    .expect("build");
+
+    let base_spec = gaia_config::resolve_config(&build.display().to_string());
+    assert!(
+        base_spec
+            .sources
+            .iter()
+            .any(|source| source.id.as_str() == "base-source")
+    );
+    assert!(
+        !base_spec
+            .sources
+            .iter()
+            .any(|source| source.id.as_str() == "full-source")
+    );
+
+    let full_spec = gaia_config::resolve_config_with_options(
+        &build.display().to_string(),
+        &gaia_config::ResolveOptions {
+            explicit_overrides: vec![("build.profile".into(), "full".into())],
+            ..Default::default()
+        },
+    );
+    assert!(
+        full_spec
+            .sources
+            .iter()
+            .any(|source| source.id.as_str() == "base-source")
+    );
+    assert!(
+        full_spec
+            .sources
+            .iter()
+            .any(|source| source.id.as_str() == "full-source")
+    );
+}
+
+#[test]
+fn conditional_imports_see_selected_input_backed_build_profile() {
+    let root = std::env::temp_dir().join(format!(
+        "gaia-conditional-input-imports-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).expect("temp config dir");
+    let full = root.join("full.toml");
+    let build = root.join("build.toml");
+    std::fs::write(
+        &full,
+        r#"
+[[sources]]
+id = "full-source"
+kind = "path"
+path = "."
+"#,
+    )
+    .expect("full");
+    std::fs::write(
+        &build,
+        r#"
+build_name = "conditional"
+profile = "${input.profile}"
+imports = [
+  { path = "full.toml", when = { profile = "full" } },
+]
+
+[inputs.profile]
+kind = "enum"
+default = "base-os"
+choices = ["base-os", "full"]
+"#,
+    )
+    .expect("build");
+
+    let base_spec = gaia_config::resolve_config(&build.display().to_string());
+    assert!(
+        !base_spec
+            .sources
+            .iter()
+            .any(|source| source.id.as_str() == "full-source")
+    );
+
+    let full_spec = gaia_config::resolve_config_with_options(
+        &build.display().to_string(),
+        &gaia_config::ResolveOptions {
+            explicit_overrides: vec![("input.profile".into(), "full".into())],
+            ..Default::default()
+        },
+    );
+    assert!(
+        full_spec
+            .sources
+            .iter()
+            .any(|source| source.id.as_str() == "full-source")
+    );
+}
+
+#[test]
 fn unresolved_provider_policy_uses_shared_release_defaults() {
     let path = write_temp_config(
         r#"

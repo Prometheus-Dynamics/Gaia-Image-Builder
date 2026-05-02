@@ -85,15 +85,23 @@ fn load_build_config_from_path(
     raw.imported_configs = raw
         .imports
         .iter()
-        .map(|import| resolve_relative_config_path(&config_dir, import))
+        .map(|import| {
+            (
+                import.clone(),
+                resolve_relative_config_path(&config_dir, &import.path),
+            )
+        })
         .inspect(|import_path| {
             tracing::trace!(
                 path = %canonical_path.display(),
-                import = %import_path.display(),
+                import = %import_path.1.display(),
                 "loading imported config"
             );
         })
-        .map(|import_path| load_build_config_from_path(&import_path, loading_stack))
+        .map(|(import, import_path)| {
+            load_build_config_from_path(&import_path, loading_stack)
+                .map(|config| crate::raw::RawImportedConfig { import, config })
+        })
         .collect::<Result<Vec<_>, _>>()?;
 
     loading_stack.pop();

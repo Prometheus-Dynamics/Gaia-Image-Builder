@@ -317,10 +317,7 @@ fn plan_rebuilds_when_runtime_state_files_are_missing_even_if_other_outputs_exis
     }
 }
 
-#[test]
-fn plan_does_not_reuse_when_spec_fingerprint_is_stale_even_if_outputs_match() {
-    let spec = test_spec();
-    let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
+fn materialize_reusable_test_outputs(spec: &gaia_spec::ResolvedBuildSpec) {
     fs::create_dir_all(PathBuf::from(&spec.workspace.build_dir).join("sources/gaia-upstream"))
         .expect("gaia-upstream source dir");
     fs::write(
@@ -345,7 +342,8 @@ fn plan_does_not_reuse_when_spec_fingerprint_is_stale_even_if_outputs_match() {
         .collect_dir
         .clone()
         .expect("image collect dir");
-    fs::create_dir_all(&collect_dir).expect("image collect dir create");
+    fs::create_dir_all(PathBuf::from(&collect_dir).join("buildroot-output/target"))
+        .expect("buildroot target dir");
     fs::write(
         PathBuf::from(&collect_dir).join("image-provider.txt"),
         "image",
@@ -385,6 +383,13 @@ fn plan_does_not_reuse_when_spec_fingerprint_is_stale_even_if_outputs_match() {
         "kind=checkpoint\ncheckpoint_id=base-image\nbackend=local\n",
     )
     .expect("checkpoint runtime state");
+}
+
+#[test]
+fn stale_spec_fingerprint_still_reuses_unchanged_operation_fingerprints() {
+    let mut spec = test_spec();
+    let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
+    materialize_reusable_test_outputs(&spec);
     let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
     let reused_ids = [
         "source:gaia-upstream",
@@ -397,8 +402,12 @@ fn plan_does_not_reuse_when_spec_fingerprint_is_stale_even_if_outputs_match() {
         "image:build",
         "checkpoint:base-image",
     ];
+    let old_spec_fingerprint = spec_fingerprint(&spec);
+    spec.metadata
+        .labels
+        .push(("release-note".into(), "docs-only".into()));
     let state = ReuseState {
-        spec_fingerprint: spec_fingerprint(&spec).wrapping_add(1),
+        spec_fingerprint: old_spec_fingerprint,
         completed_operation_ids: reused_ids
             .into_iter()
             .map(str::to_string)
@@ -428,16 +437,12 @@ fn plan_does_not_reuse_when_spec_fingerprint_is_stale_even_if_outputs_match() {
         Some(&state),
     );
 
-    assert!(
-        plan.operations
-            .iter()
-            .all(|operation| matches!(operation.reuse, OperationReuse::Execute(_)))
-    );
     assert!(plan.operations.iter().any(|operation| {
         operation.id.as_str() == "artifact:gaia-app"
-            && matches!(
-                &operation.reuse,
-                OperationReuse::Execute(reason) if reason.code == "artifact_build_required"
-            )
+            && matches!(&operation.reuse, OperationReuse::Reuse { .. })
+    }));
+    assert!(plan.operations.iter().any(|operation| {
+        operation.id.as_str() == "stage:file:motd"
+            && matches!(&operation.reuse, OperationReuse::Reuse { .. })
     }));
 }

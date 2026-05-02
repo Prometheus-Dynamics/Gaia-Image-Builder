@@ -14,8 +14,7 @@ fn provider_execution_materializes_real_outputs() {
     let plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
 
     let _ = fs::remove_file(Path::new(&spec.workspace.out_dir).join("artifacts/gaia"));
-    let _ =
-        fs::remove_file(Path::new(&spec.workspace.out_dir).join("images/default-2.0.0.tar"));
+    let _ = fs::remove_file(Path::new(&spec.workspace.out_dir).join("images/default-2.0.0.tar"));
     let _ = fs::remove_file(Path::new(&spec.workspace.out_dir).join("images/image-provider.txt"));
 
     let outcome = execute_plan(

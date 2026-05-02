@@ -3,6 +3,7 @@ use crate::{
 };
 use gaia_spec::{
     ArtifactDefinition, CheckpointAnchorRef, ImageDefinition, ResolvedBuildSpec, SourceDefinition,
+    SourcePinPolicySpec, SourceRefreshPolicySpec,
 };
 use std::collections::HashMap;
 use std::env;
@@ -26,10 +27,6 @@ pub(crate) fn apply_reuse_state(
     let Some(reuse_state) = reuse_state else {
         return plan;
     };
-    if reuse_state.spec_fingerprint != spec_fingerprint(spec) {
-        return plan;
-    }
-
     let mut decisions = HashMap::<String, bool>::new();
 
     for operation in &mut plan.operations {
@@ -43,6 +40,7 @@ pub(crate) fn apply_reuse_state(
                     .get(&operation_id)
                     .copied()
                     != Some(operation.fingerprint);
+                let source_refresh_reason = source_refresh_rebuild_reason(spec, &operation.kind);
                 let outputs_missing = !operation_outputs_present(spec, &operation.kind);
                 let output_signature_mismatch = reuse_state
                     .operation_output_signatures
@@ -50,6 +48,7 @@ pub(crate) fn apply_reuse_state(
                     .map(String::as_str)
                     != operation_output_signature(spec, &operation.kind).as_deref();
                 if !reuse_state.completed_operation_ids.contains(&operation_id)
+                    || source_refresh_reason.is_some()
                     || fingerprint_mismatch
                     || outputs_missing
                     || output_signature_mismatch
@@ -75,6 +74,10 @@ pub(crate) fn apply_reuse_state(
                         operation.id.as_str()
                     ),
                 );
+            } else if let Some((code, message)) =
+                source_refresh_rebuild_reason(spec, &operation.kind)
+            {
+                operation.reuse = OperationReuse::execute(code, message);
             } else if reuse_state
                 .operation_fingerprints
                 .get(&operation_id)
@@ -133,6 +136,51 @@ pub(crate) fn apply_reuse_state(
     plan
 }
 
+fn source_refresh_rebuild_reason(
+    spec: &ResolvedBuildSpec,
+    kind: &OperationKind,
+) -> Option<(&'static str, String)> {
+    let OperationKind::MaterializeSource { source_id } = kind else {
+        return None;
+    };
+    let source = spec.sources.iter().find(|source| source.id == *source_id)?;
+    let (refresh_policy, pin_policy, remote_git) = match &source.definition {
+        SourceDefinition::Git(git) => (
+            git.refresh_policy,
+            git.pin_policy,
+            local_repo_path(&git.repo).is_none(),
+        ),
+        SourceDefinition::Path(path) => (path.refresh_policy, path.pin_policy, false),
+        SourceDefinition::Archive(archive) => (archive.refresh_policy, archive.pin_policy, false),
+        SourceDefinition::Download(download) => {
+            (download.refresh_policy, download.pin_policy, false)
+        }
+    };
+
+    if refresh_policy == SourceRefreshPolicySpec::Always {
+        return Some((
+            "source_refresh_always",
+            format!(
+                "source '{}' will materialize because its refresh policy is always",
+                source.id.as_str()
+            ),
+        ));
+    }
+    if refresh_policy == SourceRefreshPolicySpec::Auto
+        && remote_git
+        && pin_policy == SourcePinPolicySpec::Floating
+    {
+        return Some((
+            "remote_floating_source",
+            format!(
+                "source '{}' will materialize because it tracks a floating remote git ref",
+                source.id.as_str()
+            ),
+        ));
+    }
+    None
+}
+
 pub(crate) fn artifact_rebuild_message(artifact: &gaia_spec::ArtifactSpec) -> String {
     if !artifact.dependencies.is_empty() {
         return format!(
@@ -186,12 +234,10 @@ pub(crate) fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKi
                 .hash(&mut hasher);
         }
         OperationKind::RenderStageFile { item_id } => {
-            spec.stage
-                .files
-                .iter()
-                .find(|item| item.id == *item_id)
-                .map(|item| format!("{item:?}"))
-                .hash(&mut hasher);
+            if let Some(item) = spec.stage.files.iter().find(|item| item.id == *item_id) {
+                format!("{item:?}").hash(&mut hasher);
+                path_state_signature(&resolve_workspace_path(spec, &item.src)).hash(&mut hasher);
+            }
         }
         OperationKind::RenderStageEnvSet { item_id } => {
             spec.stage
@@ -202,12 +248,11 @@ pub(crate) fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKi
                 .hash(&mut hasher);
         }
         OperationKind::RenderStageService { item_id } => {
-            spec.stage
-                .services
-                .iter()
-                .find(|item| item.id == *item_id)
-                .map(|item| format!("{item:?}"))
-                .hash(&mut hasher);
+            if let Some(item) = spec.stage.services.iter().find(|item| item.id == *item_id) {
+                format!("{item:?}").hash(&mut hasher);
+                path_state_signature(&resolve_workspace_path(spec, &item.unit_path))
+                    .hash(&mut hasher);
+            }
         }
         OperationKind::PrepareImage | OperationKind::BuildImage => {
             format!("{:?}", spec.image).hash(&mut hasher);
@@ -418,6 +463,11 @@ fn hash_path_state(path: &Path, hasher: &mut DefaultHasher, ignored_names: &[Str
     metadata.is_dir().hash(hasher);
     metadata.is_file().hash(hasher);
     metadata.file_type().is_symlink().hash(hasher);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode().hash(hasher);
+    }
     if let Ok(modified) = metadata.modified()
         && let Ok(duration) = modified.duration_since(UNIX_EPOCH)
     {

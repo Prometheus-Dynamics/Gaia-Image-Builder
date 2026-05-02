@@ -128,19 +128,16 @@ impl<'a> TuiState<'a> {
         match field {
             SetupEditField::Branch => {
                 self.set_or_clear_override("build.branch", &value);
-                self.refresh();
-                self.set_status(format!("branch set to {}", self.current_branch_value()));
+                self.request_refresh(format!("branch set to {}", self.current_branch_value()));
             }
             SetupEditField::Target => {
                 self.set_or_clear_override("input.target", &value);
-                self.refresh();
-                self.set_status(format!("target set to {}", self.current_target_value()));
+                self.request_refresh(format!("target set to {}", self.current_target_value()));
             }
             SetupEditField::Jobs => {
                 if value.parse::<u32>().is_ok() {
                     self.set_or_clear_override("execution.jobs", &value);
-                    self.refresh();
-                    self.set_status(format!("jobs set to {}", self.current_jobs_value()));
+                    self.request_refresh(format!("jobs set to {}", self.current_jobs_label()));
                 } else {
                     self.set_status("jobs must be a non-negative integer");
                 }
@@ -247,6 +244,10 @@ impl<'a> TuiState<'a> {
             .unwrap_or_else(|| "0".into())
     }
 
+    pub(crate) fn current_jobs_label(&self) -> String {
+        format_jobs_label(self.current_jobs_value().as_str())
+    }
+
     pub(crate) fn current_git_branch(&self) -> Option<String> {
         let output = std::process::Command::new("git")
             .arg("branch")
@@ -268,15 +269,13 @@ impl<'a> TuiState<'a> {
             .any(|(key, _)| key == "build.branch");
         if has_branch_override {
             self.clear_override("build.branch");
-            self.refresh();
-            self.set_status(format!(
+            self.request_refresh(format!(
                 "branch restored to configured {}",
                 self.current_branch_value()
             ));
         } else if let Some(git_branch) = self.current_git_branch() {
             self.set_or_clear_override("build.branch", &git_branch);
-            self.refresh();
-            self.set_status(format!("branch set to git {}", self.current_branch_value()));
+            self.request_refresh(format!("branch set to git {}", self.current_branch_value()));
         } else {
             self.set_status("current git branch is unavailable");
         }
@@ -305,8 +304,8 @@ impl<'a> TuiState<'a> {
         let len = choices.len() as i32;
         let next = (current_index as i32 + direction).rem_euclid(len) as usize;
         self.set_or_clear_override("input.profile", &choices[next]);
-        self.refresh();
-        self.set_status(format!("profile set to {}", self.current_profile_value()));
+        self.set_or_clear_override("build.profile", &choices[next]);
+        self.request_refresh(format!("profile set to {}", self.current_profile_value()));
     }
 
     pub(crate) fn cycle_jobs(&mut self, direction: i32) {
@@ -318,8 +317,7 @@ impl<'a> TuiState<'a> {
             .unwrap_or(0) as i32;
         let next = (current_index + direction).clamp(0, (steps.len() - 1) as i32) as usize;
         self.set_or_clear_override("execution.jobs", &steps[next].to_string());
-        self.refresh();
-        self.set_status(format!("jobs set to {}", self.current_jobs_value()));
+        self.request_refresh(format!("jobs set to {}", self.current_jobs_label()));
     }
 
     pub(crate) fn setup_item_label(&self, item: SetupItem) -> String {
@@ -327,7 +325,7 @@ impl<'a> TuiState<'a> {
             SetupItem::Branch => format!("Branch: {}", self.current_branch_value()),
             SetupItem::Target => format!("Target: {}", self.current_target_value()),
             SetupItem::Profile => format!("Profile: {}", self.current_profile_value()),
-            SetupItem::Jobs => format!("Jobs: {}", self.current_jobs_value()),
+            SetupItem::Jobs => format!("Jobs: {}", self.current_jobs_label()),
             _ => item.title().to_string(),
         }
     }
@@ -392,5 +390,13 @@ impl<'a> TuiState<'a> {
                 }
             }
         }
+    }
+}
+
+pub(crate) fn format_jobs_label(value: &str) -> String {
+    if value == "0" {
+        "0 (all cores)".to_string()
+    } else {
+        value.to_string()
     }
 }

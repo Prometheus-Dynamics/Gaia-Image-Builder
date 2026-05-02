@@ -441,6 +441,11 @@ fn hash_dir(path: &Path, hasher: &mut DefaultHasher) {
     metadata.is_dir().hash(hasher);
     metadata.is_file().hash(hasher);
     metadata.len().hash(hasher);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode().hash(hasher);
+    }
     metadata
         .modified()
         .ok()

@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::setup::format_jobs_label;
 
 impl<'a> TuiState<'a> {
     pub(crate) fn selected_detail_view(&self) -> DetailView {
@@ -179,19 +180,11 @@ impl<'a> TuiState<'a> {
                 spec.metadata.branch.as_deref().unwrap_or("-"),
                 spec.metadata.target.as_deref().unwrap_or("-"),
                 spec.metadata.profile.as_deref().unwrap_or("-"),
-                if spec.policy.execution.jobs == 0 {
-                    "all".to_string()
-                } else {
-                    spec.policy.execution.jobs.to_string()
-                },
+                format_jobs_label(spec.policy.execution.jobs.to_string().as_str()),
             )),
             Line::from(format!(
                 "execution runtime: parallel jobs={}",
-                if spec.policy.execution.jobs == 0 {
-                    "all".to_string()
-                } else {
-                    spec.policy.execution.jobs.to_string()
-                }
+                format_jobs_label(spec.policy.execution.jobs.to_string().as_str())
             )),
             Line::from(""),
         ];
@@ -397,7 +390,7 @@ impl<'a> TuiState<'a> {
                     continue;
                 }
                 found = true;
-                lines.push(Line::from(message.clone()));
+                lines.extend(sanitize_tui_lines(message).into_iter().map(Line::from));
             }
         }
         if !found {

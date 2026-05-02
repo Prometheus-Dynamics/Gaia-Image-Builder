@@ -455,6 +455,55 @@ pub(crate) fn image_feed_signature_is_current(output_dir: &Path, signature: &str
         .is_ok_and(|current| current == signature)
 }
 
+pub(crate) fn image_feed_outputs_present(
+    spec: &ResolvedBuildSpec,
+    image: &ImageSpec,
+    rootfs_dir: &Path,
+) -> bool {
+    image.feed.install_entries.iter().all(|install_id| {
+        spec.install
+            .entries
+            .iter()
+            .find(|entry| entry.id == *install_id)
+            .map(|install| rootfs_path(rootfs_dir, &install.dest).exists())
+            .unwrap_or(false)
+    }) && image.feed.stage_files.iter().all(|stage_file_id| {
+        spec.stage
+            .files
+            .iter()
+            .find(|file| file.id == *stage_file_id)
+            .map(|stage_file| rootfs_path(rootfs_dir, &stage_file.dest).exists())
+            .unwrap_or(false)
+    }) && image.feed.stage_env_sets.iter().all(|env_set_id| {
+        spec.stage
+            .env_sets
+            .iter()
+            .find(|env_set| env_set.id == *env_set_id)
+            .map(|env_set| {
+                rootfs_dir
+                    .join("etc")
+                    .join("default")
+                    .join(format!("{}.env", env_set.name))
+                    .exists()
+            })
+            .unwrap_or(false)
+    }) && image.feed.stage_services.iter().all(|service_id| {
+        spec.stage
+            .services
+            .iter()
+            .find(|service| service.id == *service_id)
+            .map(|service| {
+                rootfs_dir
+                    .join("etc")
+                    .join("systemd")
+                    .join("system")
+                    .join(&service.name)
+                    .exists()
+            })
+            .unwrap_or(false)
+    })
+}
+
 pub(crate) fn write_image_feed_signature(
     output_dir: &Path,
     signature: &str,

@@ -158,6 +158,7 @@ impl ImageProvider for BuildrootImageProvider {
                 let feed_signature = build_image_feed_signature(spec, image)?;
                 if buildroot_expected_images_present(image, &output_dir)
                     && image_feed_signature_is_current(&output_dir, &feed_signature)
+                    && image_feed_outputs_present(spec, image, &target_dir)
                 {
                     messages.push(format!(
                         "reused image feed overlay and refreshed images at '{}'",

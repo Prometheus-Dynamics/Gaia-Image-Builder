@@ -29,6 +29,29 @@ pub(crate) fn refresh_buildroot_images_after_feed_overlay(
     {
         return Ok(messages);
     }
+    if non_tar_expected_images
+        .iter()
+        .any(|expected| expected.format == BuildrootExpectedImageFormatSpec::Squashfs)
+        && non_tar_expected_images.iter().all(|expected| {
+            matches!(
+                expected.format,
+                BuildrootExpectedImageFormatSpec::Squashfs | BuildrootExpectedImageFormatSpec::Raw
+            )
+        })
+        && let Some(mut messages) =
+            refresh_buildroot_squashfs_images_direct(buildroot_dir, output_dir, execution, policy)?
+        && let Some(post_image_messages) = refresh_buildroot_post_image_direct(
+            buildroot_dir,
+            output_dir,
+            execution,
+            policy,
+            log_sink.clone(),
+            cancel_check.clone(),
+        )?
+    {
+        messages.extend(post_image_messages);
+        return Ok(messages);
+    }
 
     let mut command = Command::new("make");
     command
@@ -46,6 +69,77 @@ pub(crate) fn refresh_buildroot_images_after_feed_overlay(
         log_sink,
         cancel_check,
     )
+}
+
+pub(crate) fn refresh_buildroot_post_image_direct(
+    buildroot_dir: &Path,
+    output_dir: &Path,
+    execution: &ImageExecutionContext,
+    policy: &ImageExecutionPolicy,
+    log_sink: Option<ProcessLogSink>,
+    cancel_check: Option<ProcessCancelCheck>,
+) -> Result<Option<Vec<String>>, ImageProviderError> {
+    let config_path = output_dir.join(".config");
+    let config = match fs::read_to_string(&config_path) {
+        Ok(config) => config,
+        Err(_) => return Ok(None),
+    };
+    let Some(script_value) = buildroot_config_value(&config, "BR2_ROOTFS_POST_IMAGE_SCRIPT") else {
+        return Ok(None);
+    };
+    if script_value.trim().is_empty() {
+        return Ok(None);
+    }
+
+    let images_dir = output_dir.join("images");
+    let target_dir = output_dir.join("target");
+    let build_dir = output_dir.join("build");
+    let host_dir = output_dir.join("host");
+    if !images_dir.is_dir() || !target_dir.is_dir() || !build_dir.is_dir() || !host_dir.is_dir() {
+        return Ok(None);
+    }
+
+    let mut command = Command::new("sh");
+    command
+        .arg("-c")
+        .arg(&script_value)
+        .current_dir(buildroot_dir)
+        .env("BASE_DIR", output_dir)
+        .env("BINARIES_DIR", &images_dir)
+        .env("TARGET_DIR", &target_dir)
+        .env("BUILD_DIR", &build_dir)
+        .env("HOST_DIR", &host_dir)
+        .env("STAGING_DIR", output_dir.join("staging"))
+        .env("BR2_CONFIG", &config_path);
+
+    let mut messages = run_command(
+        command,
+        "buildroot direct post-image refresh",
+        execution,
+        policy,
+        log_sink,
+        cancel_check,
+    )?;
+    messages.push(format!(
+        "refreshed buildroot post-image outputs directly via '{}'",
+        script_value
+    ));
+    Ok(Some(messages))
+}
+
+fn buildroot_config_value(config: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}=");
+    config.lines().find_map(|line| {
+        let value = line.strip_prefix(&prefix)?;
+        Some(unquote_buildroot_value(value.trim()).to_string())
+    })
+}
+
+fn unquote_buildroot_value(value: &str) -> &str {
+    value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .unwrap_or(value)
 }
 
 pub(crate) fn refresh_buildroot_squashfs_images_direct(

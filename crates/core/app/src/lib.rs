@@ -167,6 +167,23 @@ fn print_outcome(outcome: &CommandOutcome) {
                 "plan optionality: required={} conditional={} best-effort={}",
                 required, conditional, best_effort
             );
+            let execute = plan
+                .operations
+                .iter()
+                .filter(|operation| operation.reuse.should_execute())
+                .count();
+            let reuse = plan.operations.len().saturating_sub(execute);
+            println!("plan reuse: execute={} reuse={}", execute, reuse);
+            for operation in &plan.operations {
+                if let gaia_plan::OperationReuse::Execute(reason) = &operation.reuse {
+                    println!(
+                        "execute {}: {}: {}",
+                        operation.id.as_str(),
+                        reason.code,
+                        reason.message
+                    );
+                }
+            }
             print_selection(spec);
             for line in backend_overview_lines(spec) {
                 println!("{line}");

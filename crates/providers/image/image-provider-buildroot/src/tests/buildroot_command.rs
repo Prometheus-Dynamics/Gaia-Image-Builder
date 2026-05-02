@@ -201,6 +201,56 @@ fn refresh_buildroot_images_after_feed_overlay_runs_target_post_image_for_non_ta
 }
 
 #[test]
+fn refresh_buildroot_post_image_direct_runs_configured_script_with_buildroot_env() {
+    let workspace_root = temp_path("gaia-buildroot-direct-post-image-workspace");
+    let buildroot_dir = workspace_root.join("buildroot");
+    let output_dir = workspace_root.join("out/buildroot-output");
+    let script_path = workspace_root.join("post-image.sh");
+    fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
+    fs::create_dir_all(output_dir.join("images")).expect("images dir");
+    fs::create_dir_all(output_dir.join("target")).expect("target dir");
+    fs::create_dir_all(output_dir.join("build")).expect("build dir");
+    fs::create_dir_all(output_dir.join("host")).expect("host dir");
+    fs::write(
+        output_dir.join(".config"),
+        format!(
+            "BR2_ROOTFS_POST_IMAGE_SCRIPT=\"{}\"\n",
+            script_path.display()
+        ),
+    )
+    .expect("buildroot config");
+    fs::write(
+        &script_path,
+        "#!/bin/sh\nset -e\n[ -d \"$BINARIES_DIR\" ]\n[ -d \"$TARGET_DIR\" ]\nprintf raw > \"$BINARIES_DIR/sdcard.img\"\n",
+    )
+    .expect("post image script");
+    #[cfg(unix)]
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755))
+        .expect("post image script perms");
+
+    let messages = refresh_buildroot_post_image_direct(
+        &buildroot_dir,
+        &output_dir,
+        &test_execution(),
+        &ImageExecutionPolicy::default(),
+        None,
+        None,
+    )
+    .expect("direct post-image should not error")
+    .expect("direct post-image should run");
+
+    assert_eq!(
+        fs::read_to_string(output_dir.join("images/sdcard.img")).expect("raw image"),
+        "raw"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| { message.contains("refreshed buildroot post-image outputs directly") })
+    );
+}
+
+#[test]
 fn materialize_defconfig_support_files_copies_sibling_assets_into_output_dir() {
     let assets_dir = temp_path("gaia-buildroot-defconfig-assets");
     let output_dir = temp_path("gaia-buildroot-defconfig-out");

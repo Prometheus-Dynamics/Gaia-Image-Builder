@@ -10,11 +10,20 @@ fn bootstrap_logging() {
         .or_else(|_| EnvFilter::try_new("info"))
         .unwrap_or_else(|_| EnvFilter::default());
 
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_target(false)
-        .without_time()
-        .try_init();
+    if std::env::args().nth(1).as_deref() == Some("tui") {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_target(false)
+            .without_time()
+            .with_writer(std::io::sink)
+            .try_init();
+    } else {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_target(false)
+            .without_time()
+            .try_init();
+    }
 
     tracing::debug!("gaia bootstrap logging initialized");
 }

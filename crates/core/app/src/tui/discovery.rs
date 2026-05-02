@@ -118,12 +118,65 @@ pub(crate) fn render_event_line(event: &ExecutionEvent) -> Line<'static> {
         ExecutionEvent::Failed {
             operation_id,
             message,
-        } => Line::from(format!("failed: {}  {}", operation_id.as_str(), message)),
+        } => Line::from(format!(
+            "failed: {}  {}",
+            operation_id.as_str(),
+            sanitize_tui_line(message)
+        )),
         ExecutionEvent::Log {
             operation_id,
             message,
-        } => Line::from(format!("log: {}  {}", operation_id.as_str(), message)),
+        } => Line::from(format!(
+            "log: {}  {}",
+            operation_id.as_str(),
+            sanitize_tui_line(message)
+        )),
     }
+}
+
+pub(crate) fn sanitize_tui_lines(text: &str) -> Vec<String> {
+    text.split('\n').map(sanitize_tui_line).collect()
+}
+
+pub(crate) fn sanitize_tui_line(text: &str) -> String {
+    #[derive(Clone, Copy)]
+    enum EscapeState {
+        Normal,
+        Escape,
+        Csi,
+        Osc,
+    }
+
+    let mut clean = String::with_capacity(text.len());
+    let mut state = EscapeState::Normal;
+    for ch in text.chars() {
+        match state {
+            EscapeState::Normal => match ch {
+                '\u{1b}' => state = EscapeState::Escape,
+                '\t' | '\r' => clean.push(' '),
+                _ if ch.is_control() => clean.push(' '),
+                _ => clean.push(ch),
+            },
+            EscapeState::Escape => match ch {
+                '[' => state = EscapeState::Csi,
+                ']' => state = EscapeState::Osc,
+                _ => state = EscapeState::Normal,
+            },
+            EscapeState::Csi => {
+                if ('@'..='~').contains(&ch) {
+                    state = EscapeState::Normal;
+                }
+            }
+            EscapeState::Osc => {
+                if ch == '\u{7}' {
+                    state = EscapeState::Normal;
+                } else if ch == '\u{1b}' {
+                    state = EscapeState::Escape;
+                }
+            }
+        }
+    }
+    clean
 }
 
 pub(crate) fn format_elapsed(duration: Duration) -> String {
@@ -146,4 +199,17 @@ pub(crate) fn index_of_monitor_view(view: MonitorView) -> usize {
         .iter()
         .position(|candidate| *candidate == view)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_tui_line_removes_control_sequences() {
+        assert_eq!(
+            sanitize_tui_line("build \u{1b}[32mok\u{1b}[0m\rnext\tvalue"),
+            "build ok next value"
+        );
+    }
 }

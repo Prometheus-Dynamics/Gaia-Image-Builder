@@ -201,6 +201,67 @@ fn collect_expected_images_and_archive_promote_raw_board_image() {
 }
 
 #[test]
+fn archive_buildroot_output_compresses_raw_board_image_for_img_xz_output() {
+    let output_dir = temp_path("gaia-buildroot-raw-board-xz-out");
+    let collect_dir = temp_path("gaia-buildroot-raw-board-xz-collect");
+    let archive_path = collect_dir.join("helios.img.xz");
+    fs::create_dir_all(output_dir.join("images")).expect("images dir");
+    fs::write(output_dir.join("images/rootfs.squashfs"), "rootfs").expect("rootfs image");
+    fs::write(output_dir.join("images/sdcard.img"), "raw image").expect("raw image");
+    let image = ImageSpec {
+        definition: ImageDefinition::Buildroot(BuildrootImageSpec {
+            expected_images: vec![
+                BuildrootExpectedImageSpec {
+                    name: "rootfs.squashfs".into(),
+                    format: BuildrootExpectedImageFormatSpec::Squashfs,
+                    required: true,
+                },
+                BuildrootExpectedImageSpec {
+                    name: "sdcard.img".into(),
+                    format: BuildrootExpectedImageFormatSpec::Raw,
+                    required: true,
+                },
+            ],
+            ..BuildrootImageSpec::default()
+        }),
+        feed: gaia_spec::ImageFeedSpec::default(),
+        output: ImageOutputSpec {
+            collect_dir: None,
+            archive_name: None,
+            emit_report: true,
+        },
+    };
+
+    let matched = collect_expected_images(&image, &output_dir, &collect_dir)
+        .expect("raw image should be collected");
+    assert_eq!(
+        matched,
+        vec!["rootfs.squashfs".to_string(), "sdcard.img".to_string()]
+    );
+    let mut reuse_details = Vec::new();
+    let execution = test_execution();
+    let policy = ImageExecutionPolicy::default();
+    archive_buildroot_output(BuildrootArchiveRequest {
+        image: &image,
+        collect_dir: &collect_dir,
+        output_dir: &output_dir,
+        matched_expected_images: &matched,
+        archive_path: &archive_path,
+        reuse_details: &mut reuse_details,
+        command: test_command_context(&execution, &policy),
+    })
+    .expect("raw image should be compressed");
+
+    let output = Command::new("xz")
+        .arg("-dc")
+        .arg(&archive_path)
+        .output()
+        .expect("xz decompress");
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "raw image");
+}
+
+#[test]
 fn image_feed_has_content_is_false_for_bare_image() {
     let image = ImageSpec {
         definition: ImageDefinition::Buildroot(BuildrootImageSpec::default()),

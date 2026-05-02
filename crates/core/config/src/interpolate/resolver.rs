@@ -33,12 +33,17 @@ fn resolve_token(token: &str, raw: &RawBuildConfig, env: &ResolvedEnvironment) -
     }
 
     match token {
-        "build.name" => raw.build_name.clone(),
+        "build.name" => interpolate_string(raw.build_name.clone(), raw, env),
         "build.display_name" => raw
             .display_name
             .clone()
-            .unwrap_or_else(|| raw.build_name.clone()),
-        "build.version" => raw.version.clone().unwrap_or_default(),
+            .map(|value| interpolate_string(value, raw, env))
+            .unwrap_or_else(|| interpolate_string(raw.build_name.clone(), raw, env)),
+        "build.version" => raw
+            .version
+            .clone()
+            .map(|value| interpolate_string(value, raw, env))
+            .unwrap_or_default(),
         "build.description" => raw
             .description
             .clone()

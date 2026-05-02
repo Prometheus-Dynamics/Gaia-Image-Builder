@@ -21,7 +21,7 @@ pub struct RawBuildConfig {
     pub preset: Option<String>,
     pub presets: BTreeMap<String, RawPresetConfig>,
     pub extends: Option<String>,
-    pub imports: Vec<String>,
+    pub imports: Vec<RawImportConfig>,
     pub env_files: Vec<String>,
     pub env: BTreeMap<String, String>,
     pub workspace: RawWorkspaceConfig,
@@ -54,9 +54,44 @@ pub struct RawBuildConfig {
     #[serde(skip)]
     pub extends_config: Option<Box<RawBuildConfig>>,
     #[serde(skip)]
-    pub imported_configs: Vec<RawBuildConfig>,
+    pub imported_configs: Vec<RawImportedConfig>,
     #[serde(skip)]
     pub unresolved_tokens: Vec<RawUnresolvedInterpolation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawImportConfig {
+    pub path: String,
+    pub when: Option<RawWhenConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawImportedConfig {
+    pub import: RawImportConfig,
+    pub config: RawBuildConfig,
+}
+
+impl<'de> Deserialize<'de> for RawImportConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum ImportValue {
+            Path(String),
+            Table {
+                path: String,
+                #[serde(default)]
+                when: Option<RawWhenConfig>,
+            },
+        }
+
+        match ImportValue::deserialize(deserializer)? {
+            ImportValue::Path(path) => Ok(Self { path, when: None }),
+            ImportValue::Table { path, when } => Ok(Self { path, when }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

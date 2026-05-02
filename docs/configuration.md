@@ -11,11 +11,15 @@ Gaia accepts:
 Config files can use:
 - `extends = "base.toml"` for one base file
 - `imports = ["a.toml", "b.toml"]` for additive fragments
+- table imports with `when` for conditional fragments, for example
+  `{ path = "full.toml", when = { profile = "full" } }`
 
 Merging rules:
 - later imports override earlier ones
 - vectors of typed objects merge by id/key where supported
 - free-form override pairs stay user-controlled
+- conditional imports are selected from top-level build metadata, including
+  `build.target`, `build.profile`, and `build.branch` overrides
 
 ## Top-Level Build Fields
 

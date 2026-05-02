@@ -7,7 +7,7 @@ use crate::raw::{
     RawOutputRetentionPolicyConfig, RawPostBuildHookConfig, RawPresetConfig, RawProductConfig,
     RawProvenanceConfig, RawProvenanceIdentityConfig, RawProviderPoliciesConfig,
     RawReportingConfig, RawReportingMaskingConfig, RawRustProviderPolicyConfig, RawStageConfig,
-    RawWorkspaceNamedPathConfig,
+    RawWhenConfig, RawWhenImageKind, RawWorkspaceNamedPathConfig,
 };
 
 pub fn merge_config(raw: RawBuildConfig) -> RawBuildConfig {
@@ -18,11 +18,164 @@ pub fn merge_config(raw: RawBuildConfig) -> RawBuildConfig {
         .map(merge_config)
         .unwrap_or_default();
 
+    let context = ImportWhenContext::from_raw(&raw);
     for imported in &raw.imported_configs {
-        merged = merge_two(merged, merge_config(imported.clone()));
+        if import_when_matches(imported.import.when.as_ref(), &context) {
+            merged = merge_two(merged, merge_config(imported.config.clone()));
+        }
     }
 
     merge_two(merged, strip_loaded_children(raw))
+}
+
+struct ImportWhenContext {
+    target: Option<String>,
+    profile: Option<String>,
+    branch: Option<String>,
+    image_kind: RawWhenImageKind,
+}
+
+impl ImportWhenContext {
+    fn from_raw(raw: &RawBuildConfig) -> Self {
+        let selected_inputs = selected_inputs_for_imports(raw);
+        let mut target = raw
+            .target
+            .clone()
+            .map(|value| interpolate_import_context_value(&value, &selected_inputs));
+        let mut profile = raw
+            .profile
+            .clone()
+            .map(|value| interpolate_import_context_value(&value, &selected_inputs));
+        let mut branch = raw
+            .branch
+            .clone()
+            .map(|value| interpolate_import_context_value(&value, &selected_inputs));
+        for (key, value) in &raw.explicit_overrides {
+            match key.as_str() {
+                "build.target" => {
+                    target = Some(interpolate_import_context_value(value, &selected_inputs))
+                }
+                "build.profile" => {
+                    profile = Some(interpolate_import_context_value(value, &selected_inputs))
+                }
+                "build.branch" => {
+                    branch = Some(interpolate_import_context_value(value, &selected_inputs))
+                }
+                _ => {}
+            }
+        }
+        Self {
+            target,
+            profile,
+            branch,
+            image_kind: match raw.image.definition {
+                RawImageDefinition::Buildroot { .. } => RawWhenImageKind::Buildroot,
+                RawImageDefinition::StartingPoint { .. } => RawWhenImageKind::StartingPoint,
+            },
+        }
+    }
+
+    fn interpolate_expected(&self, value: &str) -> String {
+        value
+            .replace(
+                "${build.target}",
+                self.target.as_deref().unwrap_or_default(),
+            )
+            .replace(
+                "${build.profile}",
+                self.profile.as_deref().unwrap_or_default(),
+            )
+            .replace(
+                "${build.branch}",
+                self.branch.as_deref().unwrap_or_default(),
+            )
+    }
+}
+
+fn import_when_matches(when: Option<&RawWhenConfig>, context: &ImportWhenContext) -> bool {
+    let Some(when) = when else {
+        return true;
+    };
+    let target_matches = when.target.as_ref().is_none_or(|expected| {
+        context.target.as_deref() == Some(context.interpolate_expected(expected).as_str())
+    });
+    let profile_matches = when.profile.as_ref().is_none_or(|expected| {
+        context.profile.as_deref() == Some(context.interpolate_expected(expected).as_str())
+    });
+    let branch_matches = when.branch.as_ref().is_none_or(|expected| {
+        context.branch.as_deref() == Some(context.interpolate_expected(expected).as_str())
+    });
+    let image_kind_matches = when
+        .image_kind
+        .is_none_or(|expected| expected == context.image_kind);
+    let all_matches = when
+        .all
+        .iter()
+        .all(|item| import_when_matches(Some(item), context));
+    let any_matches = if when.any.is_empty() {
+        true
+    } else {
+        when.any
+            .iter()
+            .any(|item| import_when_matches(Some(item), context))
+    };
+    let not_matches = when
+        .not
+        .as_ref()
+        .is_none_or(|item| !import_when_matches(Some(item.as_ref()), context));
+
+    target_matches
+        && profile_matches
+        && branch_matches
+        && image_kind_matches
+        && all_matches
+        && any_matches
+        && not_matches
+}
+
+fn selected_inputs_for_imports(raw: &RawBuildConfig) -> BTreeMap<String, String> {
+    let mut selected = raw
+        .selected_inputs
+        .iter()
+        .cloned()
+        .collect::<BTreeMap<_, _>>();
+    for (key, value) in &raw.explicit_overrides {
+        if let Some(name) = key.strip_prefix("input.") {
+            selected.insert(name.to_string(), value.clone());
+        } else if let Some(name) = key.strip_prefix("inputs.") {
+            selected.insert(name.to_string(), value.clone());
+        }
+    }
+    selected
+}
+
+fn interpolate_import_context_value(
+    value: &str,
+    selected_inputs: &BTreeMap<String, String>,
+) -> String {
+    let mut output = String::new();
+    let mut rest = value;
+
+    while let Some(start) = rest.find("${") {
+        output.push_str(&rest[..start]);
+        let remainder = &rest[start + 2..];
+        let Some(end) = remainder.find('}') else {
+            output.push_str(&rest[start..]);
+            return output;
+        };
+        let token = &remainder[..end];
+        let replacement = token
+            .strip_prefix("input.")
+            .or_else(|| token.strip_prefix("inputs."))
+            .and_then(|name| selected_inputs.get(name))
+            .cloned()
+            .unwrap_or_default();
+        output.push_str(&replacement);
+        rest = &remainder[end + 1..];
+    }
+
+    output.push_str(rest);
+    output
 }
 
 fn merge_two(mut base: RawBuildConfig, overlay: RawBuildConfig) -> RawBuildConfig {
@@ -153,26 +306,19 @@ fn merge_image(base: RawImageConfig, overlay: RawImageConfig) -> RawImageConfig 
     RawImageConfig {
         definition: merge_image_definition(base.definition, overlay.definition),
         feed: RawImageFeedConfig {
-            install_entries: if overlay.feed.install_entries.is_empty() {
-                base.feed.install_entries
-            } else {
-                overlay.feed.install_entries
-            },
-            stage_files: if overlay.feed.stage_files.is_empty() {
-                base.feed.stage_files
-            } else {
-                overlay.feed.stage_files
-            },
-            stage_env_sets: if overlay.feed.stage_env_sets.is_empty() {
-                base.feed.stage_env_sets
-            } else {
-                overlay.feed.stage_env_sets
-            },
-            stage_services: if overlay.feed.stage_services.is_empty() {
-                base.feed.stage_services
-            } else {
-                overlay.feed.stage_services
-            },
+            install_entries: merge_string_lists(
+                base.feed.install_entries,
+                overlay.feed.install_entries,
+            ),
+            stage_files: merge_string_lists(base.feed.stage_files, overlay.feed.stage_files),
+            stage_env_sets: merge_string_lists(
+                base.feed.stage_env_sets,
+                overlay.feed.stage_env_sets,
+            ),
+            stage_services: merge_string_lists(
+                base.feed.stage_services,
+                overlay.feed.stage_services,
+            ),
         },
         output: RawImageOutputConfig {
             collect_dir: overlay.output.collect_dir.or(base.output.collect_dir),

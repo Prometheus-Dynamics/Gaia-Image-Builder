@@ -46,7 +46,8 @@ pub fn try_resolve_config_with_options(
     tracing::debug!(build, preset = ?options.preset, "resolving build config");
     let raw = load_build_config(build)?;
     tracing::debug!(build, "loaded build config");
-    let merged = merge_config(raw);
+    let selected = apply_preset_selection(raw, build, options);
+    let merged = merge_config(selected);
     let selected = apply_preset_selection(merged, build, options);
     let preset_applied = apply_selected_preset(selected)?;
     let overridden = apply_cli_overrides(preset_applied, options)?;

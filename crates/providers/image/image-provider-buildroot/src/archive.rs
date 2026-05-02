@@ -22,8 +22,8 @@ pub(crate) fn archive_buildroot_output(
         reuse_details,
         command: command_context,
     } = request;
+    let entries = archive_entries_for_buildroot_archive(image, matched_expected_images);
     if let Some(tar_mode) = tar_archive_mode(archive_path) {
-        let entries = archive_entries_for_buildroot_archive(image, matched_expected_images);
         if archive_signature_is_current(collect_dir, &entries, archive_path, tar_mode) {
             reuse_details.push("image-archive".to_string());
             return Ok(vec![format!(
@@ -41,9 +41,19 @@ pub(crate) fn archive_buildroot_output(
             command: command_context,
         });
     }
-    if matched_expected_images.len() == 1 {
-        let source_path = collect_dir.join(&matched_expected_images[0]);
+    if entries.len() == 1 {
+        let source_path = collect_dir.join(&entries[0]);
         if source_path.is_file() {
+            if raw_xz_archive_path(archive_path) {
+                return compress_primary_image(
+                    &source_path,
+                    archive_path,
+                    command_context.execution,
+                    command_context.policy,
+                    command_context.log_sink,
+                    command_context.cancel_check,
+                );
+            }
             if let Some(parent) = archive_path.parent() {
                 fs::create_dir_all(parent).map_err(|error| {
                     ImageProviderError::backend_command(format!(
@@ -279,4 +289,59 @@ pub(crate) fn archive_directory(
         .arg(source_dir)
         .arg(".");
     run_command(command, label, execution, policy, log_sink, cancel_check)
+}
+
+fn raw_xz_archive_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".img.xz") || name.ends_with(".raw.xz"))
+}
+
+fn compress_primary_image(
+    source_path: &Path,
+    archive_path: &Path,
+    execution: &ImageExecutionContext,
+    _policy: &ImageExecutionPolicy,
+    _log_sink: Option<ProcessLogSink>,
+    _cancel_check: Option<ProcessCancelCheck>,
+) -> Result<Vec<String>, ImageProviderError> {
+    if let Some(parent) = archive_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            ImageProviderError::backend_command(format!(
+                "failed to create archive dir '{}': {error}",
+                parent.display()
+            ))
+        })?;
+    }
+    let mut command = Command::new("xz");
+    command.arg("-T0").arg("-c").arg(source_path);
+    let output_file = fs::File::create(archive_path).map_err(|error| {
+        ImageProviderError::new(
+            ImageProviderErrorKind::RuntimeState,
+            format!(
+                "failed to create compressed primary buildroot image '{}': {error}",
+                archive_path.display()
+            ),
+        )
+    })?;
+    let mut command = command_for_execution(&command, execution)?;
+    command.stdout(std::process::Stdio::from(output_file));
+    let output = command.output().map_err(|error| {
+        ImageProviderError::new(
+            ImageProviderErrorKind::ToolStart,
+            format!("failed to start xz compression: {error}"),
+        )
+    })?;
+    if !output.status.success() {
+        return Err(ImageProviderError::backend_command(format!(
+            "failed to compress primary buildroot image '{}': {}",
+            source_path.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(vec![format!(
+        "compressed primary buildroot image '{}' to '{}'",
+        source_path.display(),
+        archive_path.display()
+    )])
 }
