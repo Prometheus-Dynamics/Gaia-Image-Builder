@@ -184,18 +184,12 @@ fn buildroot_package_overrides_are_staged_as_external_tree() {
     let output_dir = temp_path("gaia-buildroot-package-overrides-output");
     let user_external = workspace.join("user-external");
     let override_pkg = workspace.join("gaia/assets/buildroot/packages/foo");
-    let source_pkg = buildroot_dir.join("package/foo");
 
     fs::create_dir_all(&override_pkg).expect("override package dir");
-    fs::create_dir_all(&source_pkg).expect("source package dir");
+    fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     fs::create_dir_all(&user_external).expect("user external dir");
     fs::write(override_pkg.join("Config.in"), "config BR2_PACKAGE_FOO\n").expect("override config");
     fs::write(override_pkg.join("foo.mk"), "FOO_VERSION = gaia\n").expect("override mk");
-    fs::write(
-        source_pkg.join("Config.in"),
-        "config BR2_PACKAGE_FOO_SOURCE\n",
-    )
-    .expect("source config");
     fs::write(
         buildroot_dir.join("Makefile"),
         "%_defconfig:\n\t@mkdir -p $(O)\n\t@printf '%s' \"$$BR2_EXTERNAL\" > $(O)/br2_external_defconfig\n\t@touch $(O)/.config\nall:\n\t@printf '%s' \"$$BR2_EXTERNAL\" > $(O)/br2_external_make\n",
@@ -227,10 +221,6 @@ fn buildroot_package_overrides_are_staged_as_external_tree() {
     .expect("buildroot run");
 
     let generated_external = output_dir.join("gaia-buildroot-external");
-    assert_eq!(
-        fs::read_to_string(source_pkg.join("Config.in")).expect("source package config"),
-        "config BR2_PACKAGE_FOO_SOURCE\n"
-    );
     assert!(generated_external.join("external.desc").is_file());
     assert_eq!(
         fs::read_to_string(generated_external.join("external.desc")).expect("external desc"),
@@ -265,6 +255,85 @@ fn buildroot_package_overrides_are_staged_as_external_tree() {
     );
     assert!(messages.iter().any(|message| {
         message.contains("staged 1 generated Buildroot external package override(s)")
+    }));
+}
+
+#[test]
+fn buildroot_package_overrides_replace_existing_source_packages() {
+    let workspace = temp_path("gaia-buildroot-package-replacements-workspace");
+    let buildroot_dir = temp_path("gaia-buildroot-package-replacements-source");
+    let output_dir = temp_path("gaia-buildroot-package-replacements-output");
+    let override_pkg = workspace.join("gaia/assets/buildroot/packages/foo");
+    let source_pkg = buildroot_dir.join("package/foo");
+
+    fs::create_dir_all(&override_pkg).expect("override package dir");
+    fs::create_dir_all(&source_pkg).expect("source package dir");
+    fs::write(override_pkg.join("Config.in"), "config BR2_PACKAGE_FOO\n").expect("override config");
+    fs::write(override_pkg.join("foo.mk"), "FOO_VERSION = gaia\n").expect("override mk");
+    fs::write(
+        source_pkg.join("Config.in"),
+        "config BR2_PACKAGE_FOO_SOURCE\n",
+    )
+    .expect("source config");
+    fs::write(
+        buildroot_dir.join("Makefile"),
+        "%_defconfig:\n\t@mkdir -p $(O)\n\t@printf '%s' \"$${BR2_EXTERNAL-unset}\" > $(O)/br2_external_defconfig\n\t@touch $(O)/.config\nclean:\n\t@printf clean > $(O)/cleaned\nall:\n\t@printf '%s' \"$${BR2_EXTERNAL-unset}\" > $(O)/br2_external_make\n",
+    )
+    .expect("makefile");
+
+    let mut spec = ResolvedBuildSpec::new("buildroot-package-replacements");
+    spec.workspace.root_dir = workspace.display().to_string();
+    let image = ImageSpec {
+        definition: ImageDefinition::Buildroot(BuildrootImageSpec {
+            defconfig: Some("test_defconfig".into()),
+            external_tree: None,
+            ..BuildrootImageSpec::default()
+        }),
+        feed: gaia_spec::ImageFeedSpec::default(),
+        output: ImageOutputSpec::default(),
+        assembly: None,
+    };
+    let execution = test_execution();
+    let policy = ImageExecutionPolicy::default();
+
+    let messages = run_buildroot(BuildrootRunRequest {
+        spec: &spec,
+        image: &image,
+        buildroot_dir: &buildroot_dir,
+        output_dir: &output_dir,
+        command: test_command_context(&execution, &policy),
+    })
+    .expect("buildroot run");
+
+    assert_eq!(
+        fs::read_to_string(source_pkg.join("Config.in")).expect("source package config"),
+        "config BR2_PACKAGE_FOO\n"
+    );
+    assert_eq!(
+        fs::read_to_string(source_pkg.join("foo.mk")).expect("source package mk"),
+        "FOO_VERSION = gaia\n"
+    );
+    assert!(!output_dir.join("gaia-buildroot-external").exists());
+    assert_eq!(
+        fs::read_to_string(output_dir.join("br2_external_defconfig")).expect("defconfig external"),
+        "unset"
+    );
+    assert_eq!(
+        fs::read_to_string(output_dir.join("cleaned")).expect("clean marker"),
+        "clean"
+    );
+    assert!(
+        output_dir
+            .join(".gaia-buildroot-package-replacements-state")
+            .is_file()
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("replaced 1 Buildroot source package definition"))
+    );
+    assert!(messages.iter().any(|message| {
+        message.contains("cleaned Buildroot output for changed package replacements")
     }));
 }
 

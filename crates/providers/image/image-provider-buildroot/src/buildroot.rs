@@ -89,22 +89,30 @@ pub(crate) fn run_buildroot(
             _ => (None, None, &[][..], &[][..], None),
         };
 
-    let generated_external_tree = materialize_buildroot_package_overrides(spec, output_dir)?;
-    if generated_external_tree.is_some() {
+    let package_overrides =
+        materialize_buildroot_package_overrides(spec, buildroot_dir, output_dir)?;
+    if package_overrides.generated_external_tree.is_some() {
         ensure_no_generated_external_name_conflict(external_tree)?;
     }
     let br2_external = buildroot_external_tree_value(
         external_tree,
-        generated_external_tree
+        package_overrides
+            .generated_external_tree
             .as_ref()
             .map(|generated| generated.path.as_path()),
     );
     let br2_external = br2_external.as_deref();
-    if let Some(generated_external_tree) = &generated_external_tree {
+    if let Some(generated_external_tree) = &package_overrides.generated_external_tree {
         messages.push(format!(
             "staged {} generated Buildroot external package override(s) at '{}'",
             generated_external_tree.package_count,
             generated_external_tree.path.display()
+        ));
+    }
+    if package_overrides.replacement_count > 0 {
+        messages.push(format!(
+            "replaced {} Buildroot source package definition(s)",
+            package_overrides.replacement_count
         ));
     }
 
@@ -221,6 +229,29 @@ pub(crate) fn run_buildroot(
         ));
     }
 
+    if let Some(replacement_digest) = package_overrides.replacement_digest.as_deref()
+        && buildroot_package_replacements_need_clean(output_dir, replacement_digest)
+    {
+        let mut command = Command::new("make");
+        command
+            .arg(format!("O={}", output_dir.display()))
+            .arg("clean")
+            .current_dir(buildroot_dir);
+        apply_buildroot_policy_env(&mut command, spec, command_context.policy)?;
+        if let Some(br2_external) = br2_external {
+            command.env("BR2_EXTERNAL", br2_external);
+        }
+        messages.extend(run_command(
+            command,
+            "buildroot clean for package replacements",
+            command_context.execution,
+            command_context.policy,
+            command_context.log_sink.clone(),
+            command_context.cancel_check.clone(),
+        )?);
+        messages.push("cleaned Buildroot output for changed package replacements".into());
+    }
+
     let mut command = Command::new("make");
     command
         .arg(format!("O={}", output_dir.display()))
@@ -238,7 +269,37 @@ pub(crate) fn run_buildroot(
         command_context.log_sink,
         command_context.cancel_check,
     )?);
+    if let Some(replacement_digest) = package_overrides.replacement_digest.as_deref() {
+        write_buildroot_package_replacement_state(output_dir, replacement_digest)?;
+    }
     Ok(messages)
+}
+
+fn buildroot_package_replacement_state_path(output_dir: &Path) -> PathBuf {
+    output_dir.join(".gaia-buildroot-package-replacements-state")
+}
+
+fn buildroot_package_replacements_need_clean(output_dir: &Path, replacement_digest: &str) -> bool {
+    let state_path = buildroot_package_replacement_state_path(output_dir);
+    fs::read_to_string(state_path)
+        .map(|state| state.trim() != replacement_digest)
+        .unwrap_or(true)
+}
+
+fn write_buildroot_package_replacement_state(
+    output_dir: &Path,
+    replacement_digest: &str,
+) -> Result<(), ImageProviderError> {
+    fs::write(
+        buildroot_package_replacement_state_path(output_dir),
+        format!("{replacement_digest}\n"),
+    )
+    .map_err(|error| {
+        ImageProviderError::backend_command(format!(
+            "failed to write Buildroot package replacement state in '{}': {error}",
+            output_dir.display()
+        ))
+    })
 }
 
 pub(crate) struct BuildrootConfigOverrideRequest<'a> {

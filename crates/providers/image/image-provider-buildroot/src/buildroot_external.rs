@@ -9,14 +9,25 @@ pub(crate) struct GeneratedBuildrootExternalTree {
     pub package_count: usize,
 }
 
+pub(crate) struct MaterializedBuildrootPackageOverrides {
+    pub generated_external_tree: Option<GeneratedBuildrootExternalTree>,
+    pub replacement_count: usize,
+    pub replacement_digest: Option<String>,
+}
+
 pub(crate) fn materialize_buildroot_package_overrides(
     spec: &ResolvedBuildSpec,
+    buildroot_dir: &Path,
     output_dir: &Path,
-) -> Result<Option<GeneratedBuildrootExternalTree>, ImageProviderError> {
+) -> Result<MaterializedBuildrootPackageOverrides, ImageProviderError> {
     let package_override_dir =
         Path::new(&spec.workspace.root_dir).join("gaia/assets/buildroot/packages");
     if !package_override_dir.is_dir() {
-        return Ok(None);
+        return Ok(MaterializedBuildrootPackageOverrides {
+            generated_external_tree: None,
+            replacement_count: 0,
+            replacement_digest: None,
+        });
     }
 
     let external_tree_dir = output_dir.join("gaia-buildroot-external");
@@ -36,6 +47,7 @@ pub(crate) fn materialize_buildroot_package_overrides(
         ))
     })?;
     let mut package_names = Vec::new();
+    let mut replacement_names = Vec::new();
     for entry in fs::read_dir(&package_override_dir).map_err(|error| {
         ImageProviderError::backend_command(format!(
             "failed to read Buildroot package overrides '{}': {error}",
@@ -65,17 +77,49 @@ pub(crate) fn materialize_buildroot_package_overrides(
             ))
         })?;
         validate_package_override(&entry.path(), &package_name)?;
-        let dest = external_package_dir.join(&package_name);
-        copy_dir_contents(&entry.path(), &dest, None)?;
-        package_names.push(package_name);
+        let buildroot_package_dir = buildroot_dir.join("package").join(&package_name);
+        if buildroot_package_dir.is_dir() {
+            fs::remove_dir_all(&buildroot_package_dir).map_err(|error| {
+                ImageProviderError::backend_command(format!(
+                    "failed to replace Buildroot package '{}' at '{}': {error}",
+                    package_name,
+                    buildroot_package_dir.display()
+                ))
+            })?;
+            copy_dir_contents(&entry.path(), &buildroot_package_dir, None)?;
+            replacement_names.push(package_name);
+        } else {
+            let dest = external_package_dir.join(&package_name);
+            copy_dir_contents(&entry.path(), &dest, None)?;
+            package_names.push(package_name);
+        }
     }
     package_names.sort();
+    replacement_names.sort();
 
-    write_generated_external_tree_metadata(&external_tree_dir, &package_names)?;
-    Ok(Some(GeneratedBuildrootExternalTree {
-        path: external_tree_dir,
-        package_count: package_names.len(),
-    }))
+    let generated_external_tree = if package_names.is_empty() {
+        if external_tree_dir.exists() {
+            fs::remove_dir_all(&external_tree_dir).map_err(|error| {
+                ImageProviderError::backend_command(format!(
+                    "failed to clean empty generated Buildroot external tree '{}': {error}",
+                    external_tree_dir.display()
+                ))
+            })?;
+        }
+        None
+    } else {
+        write_generated_external_tree_metadata(&external_tree_dir, &package_names)?;
+        Some(GeneratedBuildrootExternalTree {
+            path: external_tree_dir,
+            package_count: package_names.len(),
+        })
+    };
+    Ok(MaterializedBuildrootPackageOverrides {
+        generated_external_tree,
+        replacement_count: replacement_names.len(),
+        replacement_digest: (!replacement_names.is_empty())
+            .then(|| dir_digest(&package_override_dir)),
+    })
 }
 
 fn write_generated_external_tree_metadata(
