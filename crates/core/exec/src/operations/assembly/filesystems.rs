@@ -150,7 +150,7 @@ fn write_vfat_filesystem(context: VfatWriteContext<'_>) -> Result<(), AssemblyEr
     drop(image);
 
     let mut format_command = Command::new(&mformat.program);
-    format_command.arg("-i").arg(output).arg("-F").arg("::");
+    format_command.arg("-i").arg(output).arg("::");
     let format_output =
         run_command_capture_tail(spec, &mut format_command, retention, cancel_check.clone())?;
     if !format_output.status.success() {

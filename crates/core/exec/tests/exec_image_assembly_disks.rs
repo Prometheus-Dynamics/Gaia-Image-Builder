@@ -136,6 +136,10 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
     let first_copy = log.find("a.txt").expect("a copied");
     let second_copy = log.find("z.txt").expect("z copied");
     assert!(first_copy < second_copy, "{log}");
+    assert!(
+        !log.contains(" -F "),
+        "vfat assembly should let mformat choose a valid FAT variant for the image size: {log}"
+    );
     let state = fs::read_to_string(
         Path::new(&spec.workspace.out_dir).join(".gaia/runtime/image-assembly.state"),
     )
