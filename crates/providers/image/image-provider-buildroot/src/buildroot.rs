@@ -229,9 +229,22 @@ pub(crate) fn run_buildroot(
         ));
     }
 
-    if let Some(replacement_digest) = package_overrides.replacement_digest.as_deref()
-        && buildroot_package_replacements_need_clean(output_dir, replacement_digest)
-    {
+    let config_digest = buildroot_config_digest(output_dir);
+    let replacement_clean_needed =
+        package_overrides
+            .replacement_digest
+            .as_deref()
+            .is_some_and(|replacement_digest| {
+                buildroot_state_needs_clean(
+                    output_dir,
+                    ".gaia-buildroot-package-replacements-state",
+                    replacement_digest,
+                )
+            });
+    let config_clean_needed = config_digest.as_deref().is_some_and(|config_digest| {
+        buildroot_state_needs_clean(output_dir, ".gaia-buildroot-config-state", config_digest)
+    });
+    if replacement_clean_needed || config_clean_needed {
         let mut command = Command::new("make");
         command
             .arg(format!("O={}", output_dir.display()))
@@ -249,7 +262,12 @@ pub(crate) fn run_buildroot(
             command_context.log_sink.clone(),
             command_context.cancel_check.clone(),
         )?);
-        messages.push("cleaned Buildroot output for changed package replacements".into());
+        if replacement_clean_needed {
+            messages.push("cleaned Buildroot output for changed package replacements".into());
+        }
+        if config_clean_needed {
+            messages.push("cleaned Buildroot output for changed effective config".into());
+        }
     }
 
     let mut command = Command::new("make");
@@ -270,33 +288,48 @@ pub(crate) fn run_buildroot(
         command_context.cancel_check,
     )?);
     if let Some(replacement_digest) = package_overrides.replacement_digest.as_deref() {
-        write_buildroot_package_replacement_state(output_dir, replacement_digest)?;
+        write_buildroot_state(
+            output_dir,
+            ".gaia-buildroot-package-replacements-state",
+            replacement_digest,
+        )?;
+    }
+    if let Some(config_digest) = config_digest.as_deref() {
+        write_buildroot_state(output_dir, ".gaia-buildroot-config-state", config_digest)?;
     }
     Ok(messages)
 }
 
-fn buildroot_package_replacement_state_path(output_dir: &Path) -> PathBuf {
-    output_dir.join(".gaia-buildroot-package-replacements-state")
+fn buildroot_config_digest(output_dir: &Path) -> Option<String> {
+    let config_path = output_dir.join(".config");
+    config_path
+        .is_file()
+        .then(|| file_sha256_or_placeholder(&config_path))
 }
 
-fn buildroot_package_replacements_need_clean(output_dir: &Path, replacement_digest: &str) -> bool {
-    let state_path = buildroot_package_replacement_state_path(output_dir);
-    fs::read_to_string(state_path)
-        .map(|state| state.trim() != replacement_digest)
-        .unwrap_or(true)
+fn buildroot_state_needs_clean(output_dir: &Path, state_file: &str, digest: &str) -> bool {
+    let state_path = output_dir.join(state_file);
+    match fs::read_to_string(state_path) {
+        Ok(state) => state.trim() != digest,
+        Err(_) => buildroot_output_has_prior_build(output_dir),
+    }
 }
 
-fn write_buildroot_package_replacement_state(
+fn buildroot_output_has_prior_build(output_dir: &Path) -> bool {
+    ["build", "target", "images"]
+        .iter()
+        .any(|entry| output_dir.join(entry).exists())
+}
+
+fn write_buildroot_state(
     output_dir: &Path,
-    replacement_digest: &str,
+    state_file: &str,
+    digest: &str,
 ) -> Result<(), ImageProviderError> {
-    fs::write(
-        buildroot_package_replacement_state_path(output_dir),
-        format!("{replacement_digest}\n"),
-    )
-    .map_err(|error| {
+    fs::write(output_dir.join(state_file), format!("{digest}\n")).map_err(|error| {
         ImageProviderError::backend_command(format!(
-            "failed to write Buildroot package replacement state in '{}': {error}",
+            "failed to write Buildroot state '{}' in '{}': {error}",
+            state_file,
             output_dir.display()
         ))
     })

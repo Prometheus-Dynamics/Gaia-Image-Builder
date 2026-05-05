@@ -268,6 +268,7 @@ fn buildroot_package_overrides_replace_existing_source_packages() {
 
     fs::create_dir_all(&override_pkg).expect("override package dir");
     fs::create_dir_all(&source_pkg).expect("source package dir");
+    fs::create_dir_all(output_dir.join("target")).expect("stale target dir");
     fs::write(override_pkg.join("Config.in"), "config BR2_PACKAGE_FOO\n").expect("override config");
     fs::write(override_pkg.join("foo.mk"), "FOO_VERSION = gaia\n").expect("override mk");
     fs::write(
@@ -334,6 +335,63 @@ fn buildroot_package_overrides_replace_existing_source_packages() {
     );
     assert!(messages.iter().any(|message| {
         message.contains("cleaned Buildroot output for changed package replacements")
+    }));
+}
+
+#[test]
+fn buildroot_config_changes_clean_existing_output_before_make() {
+    let workspace = temp_path("gaia-buildroot-config-clean-workspace");
+    let buildroot_dir = temp_path("gaia-buildroot-config-clean-source");
+    let output_dir = temp_path("gaia-buildroot-config-clean-output");
+
+    fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
+    fs::create_dir_all(output_dir.join("target")).expect("stale target dir");
+    fs::write(output_dir.join(".config"), "BR2_PACKAGE_FOO=n\n").expect("stale config");
+    fs::write(output_dir.join("target/stale"), "stale\n").expect("stale target file");
+    fs::write(
+        buildroot_dir.join("Makefile"),
+        ".DEFAULT_GOAL := all\n%_defconfig:\n\t@mkdir -p $(O)\n\t@test -f $(O)/.config || printf 'BR2_PACKAGE_FOO=n\\n' > $(O)/.config\nolddefconfig:\n\t@true\nclean:\n\t@rm -rf $(O)/target\n\t@printf clean > $(O)/cleaned\nall:\n\t@mkdir -p $(O)/target\n\t@printf built > $(O)/target/current\n",
+    )
+    .expect("makefile");
+
+    let mut spec = ResolvedBuildSpec::new("buildroot-config-clean");
+    spec.workspace.root_dir = workspace.display().to_string();
+    let image = ImageSpec {
+        definition: ImageDefinition::Buildroot(BuildrootImageSpec {
+            defconfig: Some("test_defconfig".into()),
+            config_overrides: vec![("BR2_PACKAGE_FOO".into(), "y".into())],
+            ..BuildrootImageSpec::default()
+        }),
+        feed: gaia_spec::ImageFeedSpec::default(),
+        output: ImageOutputSpec::default(),
+        assembly: None,
+    };
+    let execution = test_execution();
+    let policy = ImageExecutionPolicy::default();
+
+    let messages = run_buildroot(BuildrootRunRequest {
+        spec: &spec,
+        image: &image,
+        buildroot_dir: &buildroot_dir,
+        output_dir: &output_dir,
+        command: test_command_context(&execution, &policy),
+    })
+    .expect("buildroot run");
+
+    let config = fs::read_to_string(output_dir.join(".config")).expect("config");
+    assert!(config.contains("BR2_PACKAGE_FOO=y"));
+    assert_eq!(
+        fs::read_to_string(output_dir.join("cleaned")).expect("clean marker"),
+        "clean"
+    );
+    assert!(!output_dir.join("target/stale").exists());
+    assert_eq!(
+        fs::read_to_string(output_dir.join("target/current")).expect("rebuilt target"),
+        "built"
+    );
+    assert!(output_dir.join(".gaia-buildroot-config-state").is_file());
+    assert!(messages.iter().any(|message| {
+        message.contains("cleaned Buildroot output for changed effective config")
     }));
 }
 
