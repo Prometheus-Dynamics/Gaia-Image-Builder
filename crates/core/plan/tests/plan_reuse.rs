@@ -413,6 +413,8 @@ fn plan_rebuilds_assembly_when_direct_partition_image_changes() {
             partition_table: AssemblyPartitionTableSpec::Mbr,
             signature: None,
             signature_text: None,
+            first_lba: None,
+            alignment_lba: None,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "rootfs".into(),
                 kind: None,

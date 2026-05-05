@@ -334,6 +334,8 @@ fn build_operation_reruns_when_assembly_provider_input_is_missing() {
             partition_table: AssemblyPartitionTableSpec::Mbr,
             signature: None,
             signature_text: None,
+            first_lba: None,
+            alignment_lba: None,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "rootfs".into(),
                 kind: Some("0x83".into()),

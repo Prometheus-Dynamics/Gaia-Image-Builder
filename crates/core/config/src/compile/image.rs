@@ -188,6 +188,8 @@ pub(crate) fn compile_image_assembly(
                 partition_table: compile_assembly_partition_table(disk.partition_table),
                 signature: disk.signature,
                 signature_text: disk.signature_text,
+                first_lba: disk.first_lba,
+                alignment_lba: disk.alignment_lba,
                 partitions: disk
                     .partitions
                     .into_iter()

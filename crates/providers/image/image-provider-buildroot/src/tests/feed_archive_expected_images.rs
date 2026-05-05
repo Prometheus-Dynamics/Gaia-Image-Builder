@@ -57,6 +57,8 @@ fn collect_expected_images_skips_required_output_generated_by_assembly() {
             partition_table: AssemblyPartitionTableSpec::Mbr,
             signature: None,
             signature_text: None,
+            first_lba: None,
+            alignment_lba: None,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "rootfs".into(),
                 kind: Some("0x83".into()),
@@ -98,6 +100,8 @@ fn buildroot_expected_images_present_rejects_assembly_only_outputs_without_provi
             partition_table: AssemblyPartitionTableSpec::Mbr,
             signature: None,
             signature_text: None,
+            first_lba: None,
+            alignment_lba: None,
             partitions: Vec::new(),
         }],
         ..ImageAssemblySpec::default()
@@ -126,6 +130,8 @@ fn buildroot_expected_images_present_requires_provider_root_assembly_inputs() {
             partition_table: AssemblyPartitionTableSpec::Mbr,
             signature: None,
             signature_text: None,
+            first_lba: None,
+            alignment_lba: None,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "rootfs".into(),
                 kind: Some("0x83".into()),

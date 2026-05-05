@@ -224,6 +224,8 @@ pub struct AssemblyDiskSpec {
     pub partition_table: AssemblyPartitionTableSpec,
     pub signature: Option<String>,
     pub signature_text: Option<String>,
+    pub first_lba: Option<u64>,
+    pub alignment_lba: Option<u64>,
     pub partitions: Vec<AssemblyDiskPartitionSpec>,
 }
 

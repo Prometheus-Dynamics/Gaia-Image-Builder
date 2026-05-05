@@ -100,6 +100,8 @@ pub struct RawAssemblyDiskConfig {
     pub partition_table: RawAssemblyPartitionTable,
     pub signature: Option<String>,
     pub signature_text: Option<String>,
+    pub first_lba: Option<u64>,
+    pub alignment_lba: Option<u64>,
     pub partitions: Vec<RawAssemblyDiskPartitionConfig>,
 }
 
@@ -111,6 +113,8 @@ impl Default for RawAssemblyDiskConfig {
             partition_table: RawAssemblyPartitionTable::Mbr,
             signature: None,
             signature_text: None,
+            first_lba: None,
+            alignment_lba: None,
             partitions: Vec::new(),
         }
     }

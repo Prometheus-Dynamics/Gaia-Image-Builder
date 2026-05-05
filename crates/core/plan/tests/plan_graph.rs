@@ -489,6 +489,8 @@ fn image_assembly_fingerprint_tracks_direct_partition_images() {
             partition_table: AssemblyPartitionTableSpec::Mbr,
             signature: None,
             signature_text: None,
+            first_lba: None,
+            alignment_lba: None,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "rootfs".into(),
                 kind: None,
@@ -538,6 +540,8 @@ fn image_assembly_fingerprint_tracks_provider_root_partition_images() {
             partition_table: AssemblyPartitionTableSpec::Mbr,
             signature: None,
             signature_text: None,
+            first_lba: None,
+            alignment_lba: None,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "rootfs".into(),
                 kind: None,
@@ -583,6 +587,8 @@ fn image_assembly_fingerprint_tracks_missing_partition_image_becoming_present() 
             partition_table: AssemblyPartitionTableSpec::Mbr,
             signature: None,
             signature_text: None,
+            first_lba: None,
+            alignment_lba: None,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "rootfs".into(),
                 kind: None,
@@ -644,6 +650,8 @@ fn image_assembly_fingerprint_does_not_hash_generated_filesystem_partition_outpu
             partition_table: AssemblyPartitionTableSpec::Mbr,
             signature: None,
             signature_text: None,
+            first_lba: None,
+            alignment_lba: None,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "rootfs".into(),
                 kind: None,

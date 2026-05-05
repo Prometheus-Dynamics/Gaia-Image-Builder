@@ -63,12 +63,13 @@ fn plan_mbr_partitions(
         ));
     }
     let mut planned = Vec::new();
-    let mut next_lba = 2048u64;
+    let alignment_lba = disk.alignment_lba.unwrap_or(2048).max(1);
+    let mut next_lba = disk.first_lba.unwrap_or(2048);
     for partition in &disk.partitions {
         let image = roots.resolve_path(spec, &partition.image)?;
         let bytes = file_len(&image)?;
         let sector_count = bytes.div_ceil(512).max(1);
-        let start_lba = align_to(next_lba, 2048);
+        let start_lba = align_to(next_lba, alignment_lba);
         let end_lba = start_lba
             .checked_add(sector_count)
             .ok_or_else(|| format!("assembly disk '{}' partition layout is too large", disk.id))?;

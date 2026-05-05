@@ -377,6 +377,8 @@ fn image_assembly_disk_failure_cleans_generated_filesystem_output() {
             partition_table: AssemblyPartitionTableSpec::Mbr,
             signature: None,
             signature_text: None,
+            first_lba: None,
+            alignment_lba: None,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "missing".into(),
                 kind: None,
@@ -437,6 +439,8 @@ fn image_assembly_disk_write_failure_cleans_temp_and_final_outputs() {
             partition_table: AssemblyPartitionTableSpec::Mbr,
             signature: None,
             signature_text: None,
+            first_lba: None,
+            alignment_lba: None,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "rootfs".into(),
                 kind: None,

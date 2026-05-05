@@ -315,6 +315,8 @@ fn assembly_disk_helpers_parse_types_aliases_and_signatures() {
         partition_table: gaia_spec::AssemblyPartitionTableSpec::Mbr,
         signature: Some("0x48454c49".into()),
         signature_text: None,
+        first_lba: None,
+        alignment_lba: None,
         partitions: Vec::new(),
     };
 

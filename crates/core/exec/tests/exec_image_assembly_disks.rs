@@ -85,6 +85,8 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
             partition_table: AssemblyPartitionTableSpec::Mbr,
             signature: Some("0x48454c49".into()),
             signature_text: None,
+            first_lba: None,
+            alignment_lba: None,
             partitions: vec![
                 AssemblyDiskPartitionSpec {
                     name: "boot".into(),
@@ -175,6 +177,8 @@ fn executes_image_assembly_archives_single_disk_as_raw_xz() {
             partition_table: AssemblyPartitionTableSpec::Mbr,
             signature: None,
             signature_text: Some("GAIA".into()),
+            first_lba: None,
+            alignment_lba: None,
             partitions: vec![
                 AssemblyDiskPartitionSpec {
                     name: "boot".into(),
@@ -339,6 +343,8 @@ fn executes_image_assembly_mbr_disk() {
             partition_table: AssemblyPartitionTableSpec::Mbr,
             signature: Some("0x48454c49".into()),
             signature_text: None,
+            first_lba: None,
+            alignment_lba: None,
             partitions: vec![
                 AssemblyDiskPartitionSpec {
                     name: "boot".into(),
@@ -422,6 +428,80 @@ fn executes_image_assembly_mbr_disk() {
 }
 
 #[test]
+fn executes_image_assembly_mbr_disk_with_explicit_lba_layout() {
+    let mut spec = test_spec();
+    let build_dir = Path::new(&spec.workspace.build_dir);
+    let image_dir = build_dir.join("explicit-disk-images");
+    let output_dir = build_dir.join("explicit-disk-output");
+    fs::create_dir_all(&image_dir).expect("image dir");
+    fs::write(image_dir.join("boot.vfat"), vec![0x11; 1024]).expect("boot image");
+    fs::write(image_dir.join("rootfs.squashfs"), vec![0x22; 2048]).expect("rootfs image");
+
+    spec.image.assembly = Some(ImageAssemblySpec {
+        disks: vec![AssemblyDiskSpec {
+            id: "sdcard".into(),
+            output: output_dir.join("sdcard.img").display().to_string().into(),
+            partition_table: AssemblyPartitionTableSpec::Mbr,
+            signature: Some("0x48454c49".into()),
+            signature_text: None,
+            first_lba: Some(1),
+            alignment_lba: Some(1),
+            partitions: vec![
+                AssemblyDiskPartitionSpec {
+                    name: "boot".into(),
+                    kind: None,
+                    type_alias: Some("fat32-lba".into()),
+                    bootable: true,
+                    image: image_dir.join("boot.vfat").display().to_string().into(),
+                },
+                AssemblyDiskPartitionSpec {
+                    name: "rootfs".into(),
+                    kind: Some("0x83".into()),
+                    type_alias: None,
+                    bootable: false,
+                    image: image_dir
+                        .join("rootfs.squashfs")
+                        .display()
+                        .to_string()
+                        .into(),
+                },
+            ],
+        }],
+        ..ImageAssemblySpec::default()
+    });
+    let plan = gaia_plan::ExecutionPlan {
+        build_id: spec.identity.id.clone(),
+        operations: vec![PlannedOperation::new(
+            OperationId::image_assembly(),
+            OperationKind::AssembleImage,
+        )],
+    };
+    let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
+    let outcome = execute_plan(
+        &spec,
+        &plan,
+        ExecutionProviders {
+            source_catalog: &source_catalog,
+            artifact_catalog: &artifact_catalog,
+            image_catalog: &image_catalog,
+        },
+    );
+
+    assert!(outcome.errors.is_empty(), "{:?}", outcome.errors);
+    let disk = fs::read(output_dir.join("sdcard.img")).expect("disk");
+    assert_eq!(
+        u32::from_le_bytes(disk[454..458].try_into().expect("boot start")),
+        1
+    );
+    assert_eq!(
+        u32::from_le_bytes(disk[470..474].try_into().expect("root start")),
+        3
+    );
+    assert_eq!(&disk[512..516], &[0x11; 4]);
+    assert_eq!(&disk[1536..1540], &[0x22; 4]);
+}
+
+#[test]
 fn image_assembly_mbr_rejects_more_than_four_partitions_before_writing_disk() {
     let mut spec = test_spec();
     let build_dir = Path::new(&spec.workspace.build_dir);
@@ -439,6 +519,8 @@ fn image_assembly_mbr_rejects_more_than_four_partitions_before_writing_disk() {
             partition_table: AssemblyPartitionTableSpec::Mbr,
             signature: None,
             signature_text: None,
+            first_lba: None,
+            alignment_lba: None,
             partitions: (0..5)
                 .map(|index| AssemblyDiskPartitionSpec {
                     name: format!("part{index}"),

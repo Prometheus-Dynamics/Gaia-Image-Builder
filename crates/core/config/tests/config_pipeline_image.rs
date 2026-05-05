@@ -98,6 +98,8 @@ id = "sdcard"
 output = "$provider.images/sdcard.img"
 partition_table = "mbr"
 signature = "0x48454c49"
+first_lba = 1
+alignment_lba = 1
 
 [[image.assembly.disks.partitions]]
 name = "boot"
@@ -131,6 +133,8 @@ applets = ["sh", "mount"]
         assembly.disks[0].partitions[0].type_alias.as_deref(),
         Some("fat32-lba")
     );
+    assert_eq!(assembly.disks[0].first_lba, Some(1));
+    assert_eq!(assembly.disks[0].alignment_lba, Some(1));
     assert_eq!(assembly.busybox_initramfs[0].applets, vec!["sh", "mount"]);
 
     let _ = std::fs::remove_file(path);
