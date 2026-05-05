@@ -6,8 +6,8 @@ use gaia_exec::{
 };
 use gaia_plan::{OperationId, OperationKind, PlannedOperation};
 use gaia_spec::{
-    AssemblyBusyboxInitramfsSpec, AssemblyFileSpec, AssemblyFilesystemKindSpec,
-    AssemblyTransformKindSpec, AssemblyTransformSpec, ImageAssemblySpec,
+    AssemblyBusyboxInitramfsSpec, AssemblyDirSpec, AssemblyFileSpec, AssemblyFilesystemKindSpec,
+    AssemblySymlinkSpec, AssemblyTransformKindSpec, AssemblyTransformSpec, ImageAssemblySpec,
 };
 use std::fs;
 use std::path::Path;
@@ -578,11 +578,35 @@ fn executes_busybox_initramfs_and_packs_cpio_gzip() {
     spec.image.assembly = Some(ImageAssemblySpec {
         work_dir: Some(build_dir.join("assembly").display().to_string().into()),
         trees: vec![assembly_tree("initramfs", "$assembly.work/initramfs")],
+        dirs: vec![
+            AssemblyDirSpec {
+                tree: "initramfs".into(),
+                path: "dev".into(),
+                mode: None,
+            },
+            AssemblyDirSpec {
+                tree: "initramfs".into(),
+                path: "mnt/lower".into(),
+                mode: Some("0755".into()),
+            },
+        ],
+        symlinks: vec![
+            AssemblySymlinkSpec {
+                tree: "initramfs".into(),
+                path: "lib64".into(),
+                target: "lib".into(),
+            },
+            AssemblySymlinkSpec {
+                tree: "initramfs".into(),
+                path: "usr/lib64".into(),
+                target: "../lib".into(),
+            },
+        ],
         busybox_initramfs: vec![AssemblyBusyboxInitramfsSpec {
             tree: "initramfs".into(),
             busybox: busybox.display().to_string().into(),
             include_runtime_libs: false,
-            applets: vec!["sh".into(), "mount".into()],
+            applets: vec!["sh".into(), "mount".into(), "insmod".into()],
         }],
         filesystems: vec![assembly_filesystem(
             "initramfs",
@@ -624,6 +648,20 @@ fn executes_busybox_initramfs_and_packs_cpio_gzip() {
         fs::read_link(tree.join("bin/mount")).expect("mount applet"),
         Path::new("busybox")
     );
+    assert!(tree.join("dev").is_dir());
+    assert!(tree.join("mnt/lower").is_dir());
+    assert_eq!(
+        fs::read_link(tree.join("lib64")).expect("lib64 symlink"),
+        Path::new("lib")
+    );
+    assert_eq!(
+        fs::read_link(tree.join("usr/lib64")).expect("usr/lib64 symlink"),
+        Path::new("../lib")
+    );
+    assert_eq!(
+        fs::read_link(tree.join("bin/insmod")).expect("insmod applet"),
+        Path::new("busybox")
+    );
     assert_eq!(
         &fs::read(output_dir.join("initramfs.cpio.gz")).unwrap()[..2],
         &[0x1f, 0x8b]
@@ -632,8 +670,10 @@ fn executes_busybox_initramfs_and_packs_cpio_gzip() {
         Path::new(&spec.workspace.out_dir).join(".gaia/runtime/image-assembly.state"),
     )
     .expect("assembly state");
+    assert!(state.contains("created_dir_count=2"));
+    assert!(state.contains("created_symlink_count=2"));
     assert!(state.contains("completed_busybox_initramfs_count=1"));
-    assert!(state.contains("busybox.1.applet_count=2"));
+    assert!(state.contains("busybox.1.applet_count=3"));
     assert!(state.contains("busybox.1.runtime_linkage=not-requested"));
     assert!(state.contains("completed_filesystem_count=1"));
 }

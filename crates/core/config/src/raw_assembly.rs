@@ -6,6 +6,8 @@ pub struct RawImageAssemblyConfig {
     pub work_dir: Option<String>,
     pub out_dir: Option<String>,
     pub trees: Vec<RawAssemblyTreeConfig>,
+    pub dirs: Vec<RawAssemblyDirConfig>,
+    pub symlinks: Vec<RawAssemblySymlinkConfig>,
     pub files: Vec<RawAssemblyFileConfig>,
     pub transforms: Vec<RawAssemblyTransformConfig>,
     pub filesystems: Vec<RawAssemblyFilesystemConfig>,
@@ -18,6 +20,22 @@ pub struct RawImageAssemblyConfig {
 pub struct RawAssemblyTreeConfig {
     pub id: String,
     pub path: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawAssemblyDirConfig {
+    pub tree: String,
+    pub path: String,
+    pub mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawAssemblySymlinkConfig {
+    pub tree: String,
+    pub path: String,
+    pub target: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

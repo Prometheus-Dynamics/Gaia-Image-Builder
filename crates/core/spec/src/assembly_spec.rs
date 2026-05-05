@@ -8,6 +8,8 @@ pub struct ImageAssemblySpec {
     pub work_dir: Option<AssemblyPathTemplate>,
     pub out_dir: Option<AssemblyPathTemplate>,
     pub trees: Vec<AssemblyTreeSpec>,
+    pub dirs: Vec<AssemblyDirSpec>,
+    pub symlinks: Vec<AssemblySymlinkSpec>,
     pub files: Vec<AssemblyFileSpec>,
     pub transforms: Vec<AssemblyTransformSpec>,
     pub filesystems: Vec<AssemblyFilesystemSpec>,
@@ -20,6 +22,8 @@ impl ImageAssemblySpec {
         self.work_dir.is_none()
             && self.out_dir.is_none()
             && self.trees.is_empty()
+            && self.dirs.is_empty()
+            && self.symlinks.is_empty()
             && self.files.is_empty()
             && self.transforms.is_empty()
             && self.filesystems.is_empty()
@@ -32,6 +36,26 @@ impl ImageAssemblySpec {
 pub struct AssemblyTreeSpec {
     pub id: AssemblyTreeId,
     pub path: AssemblyPathTemplate,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssemblyDirSpec {
+    pub tree: AssemblyTreeId,
+    pub path: String,
+    pub mode: Option<String>,
+}
+
+impl AssemblyDirSpec {
+    pub fn parsed_mode(&self) -> Result<Option<FileMode>, FileModeParseError> {
+        self.mode.as_deref().map(FileMode::from_str).transpose()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssemblySymlinkSpec {
+    pub tree: AssemblyTreeId,
+    pub path: String,
+    pub target: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -20,6 +20,20 @@ pub(crate) fn assembly_input_signature(spec: &ResolvedBuildSpec) -> String {
     let mut generated_partition_images = 0usize;
     let mut direct_partition_images = 0usize;
     let mut partition_resolution_errors = 0usize;
+    for dir in &assembly.dirs {
+        parts.push(format!(
+            "dir:{}:{}:{}",
+            dir.tree,
+            dir.path,
+            dir.mode.as_deref().unwrap_or("")
+        ));
+    }
+    for symlink in &assembly.symlinks {
+        parts.push(format!(
+            "symlink:{}:{}:{}",
+            symlink.tree, symlink.path, symlink.target
+        ));
+    }
     for file in &assembly.files {
         if let Some(src) = &file.src {
             let resolved = roots
@@ -65,10 +79,11 @@ pub(crate) fn assembly_input_signature(spec: &ResolvedBuildSpec) -> String {
             .resolve_path(spec, &initramfs.busybox)
             .unwrap_or_else(|_| PathBuf::from(initramfs.busybox.as_str()));
         parts.push(format!(
-            "busybox:{}:{}:{}",
+            "busybox:{}:{}:{}:{}",
             initramfs.tree,
             resolved.display(),
-            path_state_signature(&resolved)
+            path_state_signature(&resolved),
+            initramfs.applets.join(",")
         ));
         if initramfs.include_runtime_libs {
             parts.push(command_signature("ldd", ["--version"]));

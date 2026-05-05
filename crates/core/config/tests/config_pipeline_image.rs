@@ -68,6 +68,16 @@ path = "$assembly.work/boot"
 id = "initramfs"
 path = "$assembly.work/initramfs"
 
+[[image.assembly.dirs]]
+tree = "initramfs"
+path = "mnt/lower"
+mode = "0755"
+
+[[image.assembly.symlinks]]
+tree = "initramfs"
+path = "lib64"
+target = "lib"
+
 [[image.assembly.files]]
 tree = "boot"
 src = "@assets/board/config.txt"
@@ -121,6 +131,12 @@ applets = ["sh", "mount"]
     assert_eq!(assembly.work_dir.as_deref(), Some("build/assembly"));
     assert_eq!(assembly.out_dir.as_deref(), Some("$provider.images"));
     assert_eq!(assembly.trees.len(), 2);
+    assert_eq!(assembly.dirs.len(), 1);
+    assert_eq!(assembly.dirs[0].path, "mnt/lower");
+    assert_eq!(assembly.dirs[0].mode.as_deref(), Some("0755"));
+    assert_eq!(assembly.symlinks.len(), 1);
+    assert_eq!(assembly.symlinks[0].path, "lib64");
+    assert_eq!(assembly.symlinks[0].target, "lib");
     assert_eq!(assembly.files.len(), 2);
     assert_eq!(assembly.transforms[0].kind, AssemblyTransformKindSpec::Gzip);
     assert!(assembly.transforms[0].deterministic);

@@ -342,15 +342,12 @@ dest = "."
 
     let spec = resolve_config(path.to_str().expect("temp path should be utf-8"));
     let report = validate_spec(&spec);
-    let unsupported_count = report
-        .diagnostics
-        .iter()
-        .filter(|diagnostic| diagnostic.code == "assembly_glob_unsupported")
-        .count();
-
-    assert_eq!(
-        unsupported_count, 2,
-        "expected unsupported glob diagnostics, got {report:?}"
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "assembly_glob_unsupported"),
+        "nested assembly globs should be supported, got {report:?}"
     );
 
     let _ = std::fs::remove_file(path);

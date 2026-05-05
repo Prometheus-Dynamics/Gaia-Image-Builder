@@ -89,6 +89,8 @@ pub(crate) fn stage_image_assembly(
         "image_assembly_stage",
         operation_id = %operation_id.as_str(),
         tree_count = tracing::field::Empty,
+        dir_count = tracing::field::Empty,
+        symlink_count = tracing::field::Empty,
         file_entry_count = tracing::field::Empty,
         transform_count = tracing::field::Empty,
         filesystem_count = tracing::field::Empty,
@@ -104,6 +106,8 @@ pub(crate) fn stage_image_assembly(
     };
 
     tracing::Span::current().record("tree_count", assembly.trees.len());
+    tracing::Span::current().record("dir_count", assembly.dirs.len());
+    tracing::Span::current().record("symlink_count", assembly.symlinks.len());
     tracing::Span::current().record("file_entry_count", assembly.files.len());
     tracing::Span::current().record("transform_count", assembly.transforms.len());
     tracing::Span::current().record("filesystem_count", assembly.filesystems.len());
@@ -114,6 +118,8 @@ pub(crate) fn stage_image_assembly(
     let mut state = KeyValueState::new()
         .with("kind", gaia_spec::IMAGE_ASSEMBLY_STATE_KIND)
         .with("tree_count", assembly.trees.len())
+        .with("dir_count", assembly.dirs.len())
+        .with("symlink_count", assembly.symlinks.len())
         .with("file_entry_count", assembly.files.len())
         .with("transform_count", assembly.transforms.len())
         .with("filesystem_count", assembly.filesystems.len())
@@ -153,6 +159,42 @@ pub(crate) fn stage_image_assembly(
             tree.id,
             path.display()
         ));
+    }
+
+    let mut dir_count = 0usize;
+    for dir in &assembly.dirs {
+        let tree_path = roots.tree_path(&dir.tree)?;
+        let dest = create_assembly_dir(tree_path, dir)?;
+        dir_count += 1;
+        state.insert(format!("dir.{dir_count}.tree"), dir.tree.as_str());
+        state.insert(format!("dir.{dir_count}.path"), dest.display().to_string());
+        if let Some(mode) = &dir.mode {
+            state.insert(format!("dir.{dir_count}.mode"), mode);
+        }
+    }
+    state.insert("created_dir_count", dir_count);
+    if dir_count > 0 {
+        messages.push(format!("created {dir_count} assembly dir(s)"));
+    }
+
+    let mut symlink_count = 0usize;
+    for symlink in &assembly.symlinks {
+        let tree_path = roots.tree_path(&symlink.tree)?;
+        let dest = create_assembly_symlink(tree_path, symlink)?;
+        symlink_count += 1;
+        state.insert(
+            format!("symlink.{symlink_count}.tree"),
+            symlink.tree.as_str(),
+        );
+        state.insert(
+            format!("symlink.{symlink_count}.path"),
+            dest.display().to_string(),
+        );
+        state.insert(format!("symlink.{symlink_count}.target"), &symlink.target);
+    }
+    state.insert("created_symlink_count", symlink_count);
+    if symlink_count > 0 {
+        messages.push(format!("created {symlink_count} assembly symlink(s)"));
     }
 
     let mut staged_count = 0usize;

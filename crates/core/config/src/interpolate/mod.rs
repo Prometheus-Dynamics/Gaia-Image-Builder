@@ -355,6 +355,28 @@ fn interpolate_image_assembly(
             tree
         })
         .collect();
+    assembly.dirs = assembly
+        .dirs
+        .into_iter()
+        .map(|mut dir| {
+            dir.tree = resolver::interpolate_string(dir.tree, raw, env);
+            dir.path = resolver::interpolate_string(dir.path, raw, env);
+            dir.mode = dir
+                .mode
+                .map(|value| resolver::interpolate_string(value, raw, env));
+            dir
+        })
+        .collect();
+    assembly.symlinks = assembly
+        .symlinks
+        .into_iter()
+        .map(|mut symlink| {
+            symlink.tree = resolver::interpolate_string(symlink.tree, raw, env);
+            symlink.path = resolver::interpolate_string(symlink.path, raw, env);
+            symlink.target = resolver::interpolate_string(symlink.target, raw, env);
+            symlink
+        })
+        .collect();
     assembly.files = assembly
         .files
         .into_iter()

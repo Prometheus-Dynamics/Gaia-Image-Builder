@@ -42,6 +42,8 @@ fn merge_image_assembly(
             work_dir: overlay.work_dir.or(base.work_dir),
             out_dir: overlay.out_dir.or(base.out_dir),
             trees: merge_by_key(base.trees, overlay.trees, |tree| tree.id.clone()),
+            dirs: [base.dirs, overlay.dirs].concat(),
+            symlinks: [base.symlinks, overlay.symlinks].concat(),
             files: [base.files, overlay.files].concat(),
             transforms: [base.transforms, overlay.transforms].concat(),
             filesystems: merge_by_key(base.filesystems, overlay.filesystems, |filesystem| {

@@ -4,7 +4,7 @@ use crate::{
 };
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssemblyRoots {
@@ -118,12 +118,70 @@ pub fn expand_simple_glob(
     roots: &AssemblyRoots,
     pattern: &str,
 ) -> Result<Vec<PathBuf>, String> {
-    if !pattern.contains('*') {
-        return Ok(vec![roots.resolve_path(spec, pattern)?]);
+    let resolved = AssemblyPathTemplate::new(pattern)
+        .resolve(&roots.template_context(spec))
+        .map_err(|error| error.to_string())?;
+    let resolved_pattern = resolve_workspace_path_or_absolute(spec, &resolved)?;
+    if !resolved_pattern.to_string_lossy().contains('*') {
+        return Ok(vec![resolved_pattern]);
     }
-    let (dir_raw, file_pattern) = pattern.rsplit_once('/').unwrap_or((".", pattern));
-    let dir = roots.resolve_path(spec, dir_raw)?;
-    let entries = match fs::read_dir(&dir) {
+
+    let components: Vec<_> = resolved_pattern.components().collect();
+    let mut matches = expand_glob_components(&components, 0, PathBuf::new())?;
+    matches.sort_by_key(|path| path.display().to_string());
+    Ok(matches)
+}
+
+fn expand_glob_components(
+    components: &[Component<'_>],
+    index: usize,
+    current: PathBuf,
+) -> Result<Vec<PathBuf>, String> {
+    if index >= components.len() {
+        return Ok(vec![current]);
+    }
+
+    match components[index] {
+        Component::Prefix(prefix) => {
+            let mut next = current;
+            next.push(prefix.as_os_str());
+            expand_glob_components(components, index + 1, next)
+        }
+        Component::RootDir => {
+            let mut next = current;
+            next.push(Component::RootDir.as_os_str());
+            expand_glob_components(components, index + 1, next)
+        }
+        Component::CurDir => expand_glob_components(components, index + 1, current),
+        Component::ParentDir => {
+            let mut next = current;
+            next.push("..");
+            expand_glob_components(components, index + 1, next)
+        }
+        Component::Normal(segment) => {
+            let segment = segment.to_string_lossy();
+            if !segment.contains('*') {
+                let mut next = current;
+                next.push(segment.as_ref());
+                return expand_glob_components(components, index + 1, next);
+            }
+            let entries = read_glob_dir(&current)?;
+            let mut matches = Vec::new();
+            for entry in entries {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if !wildcard_match(&segment, &name) {
+                    continue;
+                }
+                matches.extend(expand_glob_components(components, index + 1, entry.path())?);
+            }
+            Ok(matches)
+        }
+    }
+}
+
+fn read_glob_dir(dir: &Path) -> Result<Vec<fs::DirEntry>, String> {
+    let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => {
@@ -133,29 +191,47 @@ pub fn expand_simple_glob(
             ));
         }
     };
-    let mut matches = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|error| {
-            format!(
-                "failed to read assembly glob entry in '{}': {error}",
-                dir.display()
-            )
-        })?;
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if wildcard_match(file_pattern, &name) {
-            matches.push(entry.path());
-        }
-    }
-    matches.sort_by_key(|path| path.display().to_string());
-    Ok(matches)
+    entries
+        .map(|entry| {
+            entry.map_err(|error| {
+                format!(
+                    "failed to read assembly glob entry in '{}': {error}",
+                    dir.display()
+                )
+            })
+        })
+        .collect()
 }
 
 pub fn wildcard_match(pattern: &str, value: &str) -> bool {
-    let Some((prefix, suffix)) = pattern.split_once('*') else {
+    if !pattern.contains('*') {
         return pattern == value;
-    };
-    value.starts_with(prefix) && value.ends_with(suffix)
+    }
+
+    let mut remainder = value;
+    let mut parts = pattern.split('*').peekable();
+    let first = parts.next().unwrap_or_default();
+    if !first.is_empty() {
+        let Some(stripped) = remainder.strip_prefix(first) else {
+            return false;
+        };
+        remainder = stripped;
+    }
+
+    while let Some(part) = parts.next() {
+        if part.is_empty() {
+            continue;
+        }
+        if parts.peek().is_none() {
+            return remainder.ends_with(part);
+        }
+        let Some(position) = remainder.find(part) else {
+            return false;
+        };
+        remainder = &remainder[position + part.len()..];
+    }
+
+    true
 }
 
 fn resolve_assembly_path_without_trees(

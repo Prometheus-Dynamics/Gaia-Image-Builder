@@ -103,6 +103,34 @@ fn expand_simple_glob_sorts_matches_and_allows_missing_directories() {
 }
 
 #[test]
+fn expand_simple_glob_matches_versioned_parent_directories() {
+    let root = unique_dir("gaia-assembly-nested-glob");
+    let spec = test_spec(&root);
+    let firmware = root.join("build/rpi-firmware-1.2.3/boot/overlays");
+    fs::create_dir_all(&firmware).expect("firmware dir");
+    fs::write(firmware.join("hat_map.dtb"), "hat").expect("hat map");
+    fs::write(firmware.join("skip.txt"), "skip").expect("skip");
+    let roots = AssemblyRoots {
+        assembly_work: root.join("build/assembly"),
+        assembly_out: root.join("out/images"),
+        provider_images: root.join("out/images"),
+        provider_target: root.join("out/images/buildroot-output/target"),
+        provider_host: None,
+        provider_staging: None,
+        trees: std::collections::BTreeMap::new(),
+    };
+
+    let pattern = root
+        .join("build/rpi-firmware-*/boot/overlays/*.dtb")
+        .display()
+        .to_string();
+    let matches = expand_simple_glob(&spec, &roots, &pattern).expect("nested glob matches");
+    assert_eq!(matches, vec![firmware.join("hat_map.dtb")]);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn file_sha256_hashes_sparse_files_incrementally() {
     use std::io::{Seek, SeekFrom, Write};
 

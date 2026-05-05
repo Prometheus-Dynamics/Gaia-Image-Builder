@@ -142,6 +142,24 @@ pub(crate) fn compile_image_assembly(
                 path: tree.path.into(),
             })
             .collect(),
+        dirs: raw
+            .dirs
+            .into_iter()
+            .map(|dir| AssemblyDirSpec {
+                tree: dir.tree.into(),
+                path: dir.path,
+                mode: dir.mode,
+            })
+            .collect(),
+        symlinks: raw
+            .symlinks
+            .into_iter()
+            .map(|symlink| AssemblySymlinkSpec {
+                tree: symlink.tree.into(),
+                path: symlink.path,
+                target: symlink.target,
+            })
+            .collect(),
         files: raw
             .files
             .into_iter()

@@ -46,6 +46,110 @@ pub(super) fn assembly_file_dest(
     Ok(normalized_dest)
 }
 
+pub(super) fn assembly_tree_dest(tree_path: &Path, dest: &str) -> Result<PathBuf, String> {
+    if dest.trim().is_empty() {
+        return Err("assembly destination path cannot be empty".into());
+    }
+    if dest.contains('*') {
+        return Err(format!("assembly destination '{dest}' cannot contain '*'"));
+    }
+    let dest_path = tree_path.join(dest);
+    let normalized_tree = normalize_path_lossy(tree_path);
+    let normalized_dest = normalize_path_lossy(&dest_path);
+    if !normalized_dest.starts_with(&normalized_tree) {
+        return Err(format!(
+            "assembly destination '{}' escapes tree '{}'",
+            normalized_dest.display(),
+            normalized_tree.display()
+        ));
+    }
+    Ok(normalized_dest)
+}
+
+pub(super) fn create_assembly_dir(
+    tree_path: &Path,
+    dir: &gaia_spec::AssemblyDirSpec,
+) -> Result<PathBuf, String> {
+    let dest = assembly_tree_dest(tree_path, &dir.path)?;
+    std_fs::create_dir_all(&dest).map_err(|error| {
+        format!(
+            "failed to create assembly dir '{}' in tree '{}': {error}",
+            dest.display(),
+            tree_path.display()
+        )
+    })?;
+    apply_mode(&dest, dir.parsed_mode().map_err(|error| error.to_string())?)?;
+    Ok(dest)
+}
+
+pub(super) fn create_assembly_symlink(
+    tree_path: &Path,
+    symlink: &gaia_spec::AssemblySymlinkSpec,
+) -> Result<PathBuf, String> {
+    if symlink.target.trim().is_empty() {
+        return Err(format!(
+            "assembly symlink '{}' target cannot be empty",
+            symlink.path
+        ));
+    }
+    let dest = assembly_tree_dest(tree_path, &symlink.path)?;
+    if let Some(parent) = dest.parent() {
+        std_fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "failed to create assembly symlink parent '{}': {error}",
+                parent.display()
+            )
+        })?;
+    }
+    if dest.exists() || dest.symlink_metadata().is_ok() {
+        let metadata = std_fs::symlink_metadata(&dest).map_err(|error| {
+            format!(
+                "failed to inspect existing assembly symlink destination '{}': {error}",
+                dest.display()
+            )
+        })?;
+        if metadata.file_type().is_dir() {
+            std_fs::remove_dir_all(&dest).map_err(|error| {
+                format!(
+                    "failed to replace existing assembly directory '{}': {error}",
+                    dest.display()
+                )
+            })?;
+        } else {
+            std_fs::remove_file(&dest).map_err(|error| {
+                format!(
+                    "failed to replace existing assembly symlink destination '{}': {error}",
+                    dest.display()
+                )
+            })?;
+        }
+    }
+    create_symlink(&symlink.target, &dest)?;
+    Ok(dest)
+}
+
+#[cfg(unix)]
+fn create_symlink(target: &str, dest: &Path) -> Result<(), String> {
+    std::os::unix::fs::symlink(target, dest).map_err(|error| {
+        format!(
+            "failed to create assembly symlink '{}' -> '{}': {error}",
+            dest.display(),
+            target
+        )
+    })
+}
+
+#[cfg(not(unix))]
+fn create_symlink(target: &str, dest: &Path) -> Result<(), String> {
+    std_fs::write(dest, target).map_err(|error| {
+        format!(
+            "failed to materialize assembly symlink placeholder '{}' -> '{}': {error}",
+            dest.display(),
+            target
+        )
+    })
+}
+
 pub(super) fn copy_assembly_file(
     source: &Path,
     dest: &Path,

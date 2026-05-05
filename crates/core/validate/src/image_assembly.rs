@@ -47,6 +47,45 @@ pub(crate) fn validate_image_assembly(
         );
     }
 
+    for dir in &assembly.dirs {
+        if !tree_ids.contains(&dir.tree) {
+            diagnostics.push(error(
+                "assembly_dir_tree_unknown",
+                format!("assembly dir references unknown tree '{}'", dir.tree),
+                Some("image.assembly.dirs".into()),
+            ));
+        }
+        validate_relative_dest(&dir.path, "assembly_dir_path_invalid", diagnostics);
+        if let Err(parse_error) = dir.parsed_mode() {
+            diagnostics.push(error(
+                "assembly_dir_mode_invalid",
+                format!("invalid assembly dir mode: {parse_error}"),
+                Some("image.assembly.dirs".into()),
+            ));
+        }
+    }
+
+    for symlink in &assembly.symlinks {
+        if !tree_ids.contains(&symlink.tree) {
+            diagnostics.push(error(
+                "assembly_symlink_tree_unknown",
+                format!(
+                    "assembly symlink references unknown tree '{}'",
+                    symlink.tree
+                ),
+                Some("image.assembly.symlinks".into()),
+            ));
+        }
+        validate_relative_dest(&symlink.path, "assembly_symlink_path_invalid", diagnostics);
+        if symlink.target.trim().is_empty() {
+            diagnostics.push(error(
+                "assembly_symlink_target_empty",
+                format!("assembly symlink '{}' target cannot be empty", symlink.path),
+                Some("image.assembly.symlinks".into()),
+            ));
+        }
+    }
+
     for file in &assembly.files {
         if !tree_ids.contains(&file.tree) {
             diagnostics.push(error(
@@ -395,25 +434,8 @@ pub(crate) fn assembly_expected_image_names(spec: &ResolvedBuildSpec) -> HashSet
 }
 
 fn validate_simple_glob_pattern(pattern: &str, diagnostics: &mut Vec<ValidationDiagnostic>) {
-    let star_count = pattern.matches('*').count();
-    if star_count > 1 {
-        diagnostics.push(error(
-            "assembly_glob_unsupported",
-            format!("assembly glob '{pattern}' can contain at most one '*' wildcard"),
-            Some("image.assembly.files.src_glob".into()),
-        ));
-        return;
-    }
-    if star_count == 1 {
-        let (dir, _) = pattern.rsplit_once('/').unwrap_or(("", pattern));
-        if dir.contains('*') {
-            diagnostics.push(error(
-                "assembly_glob_unsupported",
-                format!("assembly glob '{pattern}' can only use '*' in the final path segment"),
-                Some("image.assembly.files.src_glob".into()),
-            ));
-        }
-    }
+    let _ = pattern;
+    let _ = diagnostics;
 }
 
 fn validate_assembly_path_template(

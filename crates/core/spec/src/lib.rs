@@ -25,12 +25,12 @@ pub use artifact::{
 };
 pub use assembly::{AssemblyRoots, expand_simple_glob, wildcard_match};
 pub use assembly_spec::{
-    AssemblyBusyboxInitramfsSpec, AssemblyDiskPartitionSpec, AssemblyDiskSpec, AssemblyFileSpec,
-    AssemblyFilesystemKindSpec, AssemblyFilesystemSpec, AssemblyPartitionTableSpec,
-    AssemblyPathTemplate, AssemblyPathTemplateContext, AssemblyPathTemplateError,
-    AssemblyTransformKindSpec, AssemblyTransformSpec, AssemblyTreeSpec, ByteSize,
-    ByteSizeParseError, FileMode, FileModeParseError, ImageAssemblySpec, MbrPartitionType,
-    MbrPartitionTypeParseError,
+    AssemblyBusyboxInitramfsSpec, AssemblyDirSpec, AssemblyDiskPartitionSpec, AssemblyDiskSpec,
+    AssemblyFileSpec, AssemblyFilesystemKindSpec, AssemblyFilesystemSpec,
+    AssemblyPartitionTableSpec, AssemblyPathTemplate, AssemblyPathTemplateContext,
+    AssemblyPathTemplateError, AssemblySymlinkSpec, AssemblyTransformKindSpec,
+    AssemblyTransformSpec, AssemblyTreeSpec, ByteSize, ByteSizeParseError, FileMode,
+    FileModeParseError, ImageAssemblySpec, MbrPartitionType, MbrPartitionTypeParseError,
 };
 pub use checkpoints::{
     CheckpointAnchorRef, CheckpointBackendRef, CheckpointId, CheckpointPointSpec, CheckpointPolicy,
