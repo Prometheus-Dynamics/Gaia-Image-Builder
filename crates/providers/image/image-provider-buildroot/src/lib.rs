@@ -135,27 +135,18 @@ impl ImageProvider for BuildrootImageProvider {
         if let Some(buildroot_dir) = resolve_buildroot_dir(spec, image) {
             let output_dir = collect_dir.join("buildroot-output");
             let target_dir = output_dir.join("target");
-            if buildroot_expected_images_present(image, &output_dir) {
-                messages.push(format!(
-                    "reused completed buildroot output at '{}' ({})",
-                    output_dir.display(),
-                    buildroot_expected_images_reuse_detail(image)
-                ));
-                reuse_details.push("buildroot-output".to_string());
-            } else {
-                messages.extend(run_buildroot(BuildrootRunRequest {
-                    spec,
-                    image,
-                    buildroot_dir: &buildroot_dir,
-                    output_dir: &output_dir,
-                    command: ImageCommandContext {
-                        execution: &execution,
-                        policy,
-                        log_sink: log_sink.clone(),
-                        cancel_check: cancel_check.clone(),
-                    },
-                })?);
-            }
+            messages.extend(run_buildroot(BuildrootRunRequest {
+                spec,
+                image,
+                buildroot_dir: &buildroot_dir,
+                output_dir: &output_dir,
+                command: ImageCommandContext {
+                    execution: &execution,
+                    policy,
+                    log_sink: log_sink.clone(),
+                    cancel_check: cancel_check.clone(),
+                },
+            })?);
             if image_feed_has_content(image) {
                 let feed_signature = build_image_feed_signature(spec, image)?;
                 if buildroot_expected_images_present(image, &output_dir)
@@ -306,35 +297,25 @@ impl ImageProvider for BuildrootImageProvider {
                     )
                 })?;
                 let output_dir = collect_dir.join("buildroot-output");
-                let mut reuse_details = Vec::new();
-                let messages = if buildroot_expected_images_present(request.image, &output_dir) {
-                    reuse_details.push("buildroot-prepare-output".to_string());
-                    vec![format!(
-                        "reused prepared buildroot output at '{}' ({})",
-                        output_dir.display(),
-                        buildroot_expected_images_reuse_detail(request.image)
-                    )]
-                } else {
-                    run_buildroot(BuildrootRunRequest {
-                        spec: request.spec,
-                        image: request.image,
-                        buildroot_dir: &buildroot_dir,
-                        output_dir: &output_dir,
-                        command: ImageCommandContext {
-                            execution: &execution,
-                            policy: request.policy,
-                            log_sink: request.log_sink,
-                            cancel_check: request.cancel_check,
-                        },
-                    })?
-                };
+                let messages = run_buildroot(BuildrootRunRequest {
+                    spec: request.spec,
+                    image: request.image,
+                    buildroot_dir: &buildroot_dir,
+                    output_dir: &output_dir,
+                    command: ImageCommandContext {
+                        execution: &execution,
+                        policy: request.policy,
+                        log_sink: request.log_sink,
+                        cancel_check: request.cancel_check,
+                    },
+                })?;
                 let result = ImageExecutionResult {
                     provider_id: self.id().into(),
                     collect_dir: Some(collect_dir),
                     archive_path: None,
                     emit_report: false,
-                    reused: !reuse_details.is_empty(),
-                    reuse_details,
+                    reused: false,
+                    reuse_details: Vec::new(),
                     messages,
                     state_details: {
                         let mut details = state_details;

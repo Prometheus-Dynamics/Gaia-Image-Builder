@@ -4,6 +4,13 @@ All notable changes to this workspace should be documented in this file.
 
 The format is based on Keep a Changelog and this project follows Semantic Versioning.
 
+## [Unreleased]
+
+### Fixed
+
+- Fixed Buildroot image execution so provider-level expected-image reuse no longer bypasses scheduled Buildroot runs, ensuring config fragments, config overrides, `olddefconfig`, and package rebuild decisions are applied when the planner marks image operations dirty.
+- Fixed Buildroot feed refresh for assembly-generated raw disk outputs so Buildroot no longer tries to run stale provider post-image hooks for images now produced by typed image assembly.
+
 ## [2.0.0] - 2026-05-01
 
 ### Breaking Changes

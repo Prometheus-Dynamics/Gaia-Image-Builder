@@ -82,7 +82,7 @@ fn execute_image_refuses_implicit_buildroot_fallback() {
 }
 
 #[test]
-fn prepare_operation_reuses_existing_expected_buildroot_images() {
+fn prepare_operation_reruns_even_when_expected_buildroot_images_exist() {
     let workspace_root = temp_path("gaia-buildroot-prepare-reuse-workspace");
     let build_dir = workspace_root.join("build");
     let source_dir = build_dir.join("sources").join("buildroot-source");
@@ -94,8 +94,12 @@ fn prepare_operation_reuses_existing_expected_buildroot_images() {
     fs::create_dir_all(&source_dir).expect("source dir");
     fs::create_dir_all(&target_dir).expect("target dir");
     fs::create_dir_all(&images_dir).expect("images dir");
-    fs::write(source_dir.join("Makefile"), "all:\n\t@true\n").expect("buildroot makefile");
-    fs::write(target_dir.join("marker"), "prepared").expect("prepared marker");
+    fs::write(
+        source_dir.join("Makefile"),
+        "%_defconfig:\n\t@mkdir -p $(O)/target\n\t@echo defconfig > $(O)/target/marker\nall:\n\t@echo make >> $(O)/target/marker\n",
+    )
+    .expect("buildroot makefile");
+    fs::write(target_dir.join("marker"), "stale").expect("prepared marker");
     fs::write(images_dir.join("rootfs.tar"), "image").expect("expected image");
 
     let mut spec = ResolvedBuildSpec::new("buildroot-prepare-reuse");
@@ -137,12 +141,93 @@ fn prepare_operation_reuses_existing_expected_buildroot_images() {
             log_sink: None,
             cancel_check: None,
         })
-        .expect("prepare should reuse existing expected image output");
+        .expect("prepare should rerun buildroot even with existing expected image output");
 
-    assert!(result.messages.iter().any(|message| {
-        message.contains("reused prepared buildroot output") && message.contains("buildroot-output")
-    }));
-    assert!(target_dir.join("marker").is_file());
+    assert!(!result.reused);
+    assert_eq!(
+        fs::read_to_string(target_dir.join("marker")).expect("marker"),
+        "defconfig\nmake\n"
+    );
+}
+
+#[test]
+fn build_operation_applies_config_overrides_when_expected_images_exist() {
+    let workspace_root = temp_path("gaia-buildroot-existing-output-config-workspace");
+    let build_dir = workspace_root.join("build");
+    let source_dir = build_dir.join("sources").join("buildroot-source");
+    let collect_dir = workspace_root.join("out").join("images");
+    let output_dir = collect_dir.join("buildroot-output");
+    let images_dir = output_dir.join("images");
+
+    fs::create_dir_all(&source_dir).expect("source dir");
+    fs::create_dir_all(&images_dir).expect("images dir");
+    fs::write(images_dir.join("rootfs.tar"), "existing image").expect("expected image");
+    fs::write(
+        output_dir.join(".config"),
+        "BR2_TARGET_ROOTFS_TAR=y\nBR2_PACKAGE_BUSYBOX=n\nBR2_ROOTFS_POST_IMAGE_SCRIPT=\"old.sh\"\n",
+    )
+    .expect("stale config");
+    fs::write(
+        source_dir.join("Makefile"),
+        "all:\n\t@printf all >> $(O)/buildroot-ran\nolddefconfig:\n\t@printf olddefconfig >> $(O)/buildroot-ran\n%_defconfig:\n\t@mkdir -p $(O)\n\t@test -f $(O)/.config || printf 'BR2_TARGET_ROOTFS_TAR=y\\nBR2_PACKAGE_BUSYBOX=n\\n' > $(O)/.config\n",
+    )
+    .expect("buildroot makefile");
+
+    let mut spec = ResolvedBuildSpec::new("buildroot-existing-output-config");
+    spec.workspace.root_dir = workspace_root.display().to_string();
+    spec.workspace.build_dir = "build".into();
+    spec.workspace.out_dir = "out".into();
+
+    let image = ImageSpec {
+        definition: ImageDefinition::Buildroot(BuildrootImageSpec {
+            source: Some(SourceId::new("buildroot-source")),
+            defconfig: Some("raspberrypicm5io_defconfig".into()),
+            config_overrides: vec![
+                ("BR2_PACKAGE_BUSYBOX".into(), "y".into()),
+                ("BR2_ROOTFS_POST_IMAGE_SCRIPT".into(), "\"\"".into()),
+            ],
+            expected_images: vec![BuildrootExpectedImageSpec {
+                name: "rootfs.tar".into(),
+                format: BuildrootExpectedImageFormatSpec::Tar,
+                required: true,
+            }],
+            ..BuildrootImageSpec::default()
+        }),
+        feed: gaia_spec::ImageFeedSpec::default(),
+        output: ImageOutputSpec {
+            collect_dir: Some(collect_dir.display().to_string()),
+            archive_name: None,
+            emit_report: false,
+        },
+        assembly: None,
+    };
+
+    let result = BuildrootImageProvider
+        .execute_image_operation(gaia_image_providers::ImageOperationExecution {
+            spec: &spec,
+            image: &image,
+            operation: ImageProviderOperation::Build,
+            output: &ImageOutputContract {
+                collect_dir: Some(collect_dir.display().to_string()),
+                archive_name: None,
+                emit_report: false,
+            },
+            policy: &ImageExecutionPolicy::default(),
+            log_sink: None,
+            cancel_check: None,
+        })
+        .expect("build should rerun buildroot and apply config overrides");
+
+    assert!(!result.reused);
+    assert_eq!(
+        fs::read_to_string(output_dir.join("buildroot-ran")).expect("buildroot marker"),
+        "olddefconfigall"
+    );
+    let config = fs::read_to_string(output_dir.join(".config")).expect("config");
+    assert!(config.contains("BR2_PACKAGE_BUSYBOX=y"));
+    assert!(!config.contains("BR2_PACKAGE_BUSYBOX=n"));
+    assert!(config.contains("BR2_ROOTFS_POST_IMAGE_SCRIPT=\"\""));
+    assert!(!config.contains("BR2_ROOTFS_POST_IMAGE_SCRIPT=\"old.sh\""));
 }
 
 #[test]

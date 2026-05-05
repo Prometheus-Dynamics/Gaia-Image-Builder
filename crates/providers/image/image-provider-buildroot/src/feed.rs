@@ -128,39 +128,6 @@ pub(crate) fn buildroot_expected_images_present(image: &ImageSpec, output_dir: &
     })
 }
 
-pub(crate) fn buildroot_expected_images_reuse_detail(image: &ImageSpec) -> String {
-    let ImageDefinition::Buildroot(buildroot) = &image.definition else {
-        return "no buildroot expected images".to_string();
-    };
-    let assembly_expected = assembly_expected_image_names(image);
-    let concrete_required = buildroot
-        .expected_images
-        .iter()
-        .filter(|expected| expected.required)
-        .filter(|expected| !assembly_expected.contains(&expected.name))
-        .map(|expected| expected.name.as_str())
-        .collect::<Vec<_>>();
-    let provider_image_inputs = assembly_provider_image_inputs(image)
-        .into_iter()
-        .map(|input| input.display().to_string())
-        .collect::<Vec<_>>();
-    let mut parts = Vec::new();
-    if !concrete_required.is_empty() {
-        parts.push(format!("required outputs: {}", concrete_required.join(",")));
-    }
-    if !provider_image_inputs.is_empty() {
-        parts.push(format!(
-            "assembly provider inputs: {}",
-            provider_image_inputs.join(",")
-        ));
-    }
-    if parts.is_empty() {
-        "no concrete required outputs or assembly provider inputs".to_string()
-    } else {
-        parts.join("; ")
-    }
-}
-
 pub(crate) fn materialize_fallback_rootfs(
     spec: &ResolvedBuildSpec,
     image: &ImageSpec,

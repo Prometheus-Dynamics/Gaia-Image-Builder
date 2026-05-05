@@ -12,10 +12,14 @@ pub(crate) fn refresh_buildroot_images_after_feed_overlay(
     let ImageDefinition::Buildroot(buildroot) = &image.definition else {
         return Ok(Vec::new());
     };
+    let assembly_outputs = assembly_expected_image_names(image);
     let non_tar_expected_images = buildroot
         .expected_images
         .iter()
-        .filter(|expected| expected.format != BuildrootExpectedImageFormatSpec::Tar)
+        .filter(|expected| {
+            expected.format != BuildrootExpectedImageFormatSpec::Tar
+                && !assembly_outputs.contains(expected.name.as_str())
+        })
         .collect::<Vec<_>>();
     if non_tar_expected_images.is_empty() {
         return Ok(Vec::new());
@@ -69,6 +73,19 @@ pub(crate) fn refresh_buildroot_images_after_feed_overlay(
         log_sink,
         cancel_check,
     )
+}
+
+fn assembly_expected_image_names(image: &ImageSpec) -> BTreeSet<&str> {
+    let Some(assembly) = &image.assembly else {
+        return BTreeSet::new();
+    };
+    assembly
+        .filesystems
+        .iter()
+        .map(|filesystem| filesystem.output.as_ref())
+        .chain(assembly.disks.iter().map(|disk| disk.output.as_ref()))
+        .filter_map(|output| Path::new(output).file_name()?.to_str())
+        .collect()
 }
 
 pub(crate) fn refresh_buildroot_post_image_direct(
