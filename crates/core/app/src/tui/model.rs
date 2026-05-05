@@ -34,12 +34,13 @@ impl DetailView {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SetupItem {
     StartBuild,
     Branch,
     Target,
     Profile,
+    Input(String),
     Jobs,
     Overview,
     Selection,
@@ -52,8 +53,8 @@ pub(crate) enum SetupItem {
 }
 
 impl SetupItem {
-    pub(crate) fn all() -> &'static [Self] {
-        &[
+    pub(crate) fn defaults() -> Vec<Self> {
+        vec![
             Self::StartBuild,
             Self::Branch,
             Self::Target,
@@ -70,12 +71,13 @@ impl SetupItem {
         ]
     }
 
-    pub(crate) fn title(self) -> &'static str {
+    pub(crate) fn title(&self) -> &str {
         match self {
             Self::StartBuild => "Start Build",
             Self::Branch => "Branch",
             Self::Target => "Target",
             Self::Profile => "Profile",
+            Self::Input(name) => name.as_str(),
             Self::Jobs => "Jobs",
             Self::Overview => "Overview",
             Self::Selection => "Selection",
@@ -88,12 +90,13 @@ impl SetupItem {
         }
     }
 
-    pub(crate) fn detail_view(self) -> DetailView {
+    pub(crate) fn detail_view(&self) -> DetailView {
         match self {
             Self::StartBuild
             | Self::Branch
             | Self::Target
             | Self::Profile
+            | Self::Input(_)
             | Self::Jobs
             | Self::Overview => DetailView::Overview,
             Self::Selection => DetailView::Selection,
@@ -115,10 +118,10 @@ pub(crate) enum MonitorView {
     Spec,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SetupEditField {
     Branch,
-    Target,
+    Input(String),
     Jobs,
 }
 

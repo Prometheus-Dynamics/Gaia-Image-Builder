@@ -1,4 +1,6 @@
 use super::*;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 pub(crate) fn resolve_buildroot_dir(
     spec: &ResolvedBuildSpec,
@@ -87,6 +89,25 @@ pub(crate) fn run_buildroot(
             _ => (None, None, &[][..], &[][..], None),
         };
 
+    let generated_external_tree = materialize_buildroot_package_overrides(spec, output_dir)?;
+    if generated_external_tree.is_some() {
+        ensure_no_generated_external_name_conflict(external_tree)?;
+    }
+    let br2_external = buildroot_external_tree_value(
+        external_tree,
+        generated_external_tree
+            .as_ref()
+            .map(|generated| generated.path.as_path()),
+    );
+    let br2_external = br2_external.as_deref();
+    if let Some(generated_external_tree) = &generated_external_tree {
+        messages.push(format!(
+            "staged {} generated Buildroot external package override(s) at '{}'",
+            generated_external_tree.package_count,
+            generated_external_tree.path.display()
+        ));
+    }
+
     if let Some(defconfig_path) = defconfig_path {
         let resolved_defconfig_path = resolve_workspace_path(
             &ResolvedBuildSpec {
@@ -105,8 +126,9 @@ pub(crate) fn run_buildroot(
                 resolved_defconfig_path.display()
             ))
             .current_dir(buildroot_dir);
-        if let Some(external_tree) = external_tree {
-            command.env("BR2_EXTERNAL", external_tree);
+        apply_buildroot_policy_env(&mut command, spec, command_context.policy)?;
+        if let Some(br2_external) = br2_external {
+            command.env("BR2_EXTERNAL", br2_external);
         }
         messages.extend(run_command(
             command,
@@ -122,7 +144,7 @@ pub(crate) fn run_buildroot(
                 buildroot_dir,
                 output_dir,
                 config_fragments,
-                external_tree,
+                br2_external,
                 command_context.clone(),
             )?);
         }
@@ -132,20 +154,28 @@ pub(crate) fn run_buildroot(
                     spec,
                     output_dir,
                     overrides: config_overrides,
-                    external_tree,
+                    external_tree: br2_external,
                     buildroot_dir,
                     command: command_context.clone(),
                 },
             )?);
         }
+        messages.extend(apply_buildroot_cache_config(
+            spec,
+            buildroot_dir,
+            output_dir,
+            br2_external,
+            command_context.clone(),
+        )?);
     } else if let Some(defconfig) = defconfig {
         let mut command = Command::new("make");
         command
             .arg(format!("O={}", output_dir.display()))
             .arg(defconfig)
             .current_dir(buildroot_dir);
-        if let Some(external_tree) = external_tree {
-            command.env("BR2_EXTERNAL", external_tree);
+        apply_buildroot_policy_env(&mut command, spec, command_context.policy)?;
+        if let Some(br2_external) = br2_external {
+            command.env("BR2_EXTERNAL", br2_external);
         }
         messages.extend(run_command(
             command,
@@ -161,7 +191,7 @@ pub(crate) fn run_buildroot(
                 buildroot_dir,
                 output_dir,
                 config_fragments,
-                external_tree,
+                br2_external,
                 command_context.clone(),
             )?);
         }
@@ -171,12 +201,19 @@ pub(crate) fn run_buildroot(
                     spec,
                     output_dir,
                     overrides: config_overrides,
-                    external_tree,
+                    external_tree: br2_external,
                     buildroot_dir,
                     command: command_context.clone(),
                 },
             )?);
         }
+        messages.extend(apply_buildroot_cache_config(
+            spec,
+            buildroot_dir,
+            output_dir,
+            br2_external,
+            command_context.clone(),
+        )?);
     } else if !config_fragments.is_empty() || !config_overrides.is_empty() {
         return Err(ImageProviderError::new(
             ImageProviderErrorKind::PolicyBlocked,
@@ -189,8 +226,9 @@ pub(crate) fn run_buildroot(
         .arg(format!("O={}", output_dir.display()))
         .current_dir(buildroot_dir);
     append_make_jobs(&mut command, command_context.policy.local_jobs);
-    if let Some(external_tree) = external_tree {
-        command.env("BR2_EXTERNAL", external_tree);
+    apply_buildroot_policy_env(&mut command, spec, command_context.policy)?;
+    if let Some(br2_external) = br2_external {
+        command.env("BR2_EXTERNAL", br2_external);
     }
     messages.extend(run_command(
         command,
@@ -260,6 +298,7 @@ pub(crate) fn apply_buildroot_config_overrides(
         .arg(format!("O={}", output_dir.display()))
         .arg("olddefconfig")
         .current_dir(buildroot_dir);
+    apply_buildroot_policy_env(&mut command, spec, command_context.policy)?;
     if let Some(external_tree) = external_tree {
         command.env("BR2_EXTERNAL", external_tree);
     }
@@ -413,6 +452,7 @@ pub(crate) fn apply_buildroot_config_fragments(
         .arg(format!("O={}", output_dir.display()))
         .arg("olddefconfig")
         .current_dir(buildroot_dir);
+    apply_buildroot_policy_env(&mut command, spec, command_context.policy)?;
     if let Some(external_tree) = external_tree {
         command.env("BR2_EXTERNAL", external_tree);
     }
@@ -497,4 +537,199 @@ pub(crate) fn append_make_jobs(command: &mut Command, jobs: u32) {
     }
     let jobs = usize::try_from(jobs).unwrap_or(1);
     command.arg(format!("-j{jobs}"));
+}
+
+pub(crate) fn apply_buildroot_cache_config(
+    spec: &ResolvedBuildSpec,
+    buildroot_dir: &Path,
+    output_dir: &Path,
+    external_tree: Option<&str>,
+    command_context: ImageCommandContext<'_>,
+) -> Result<Vec<String>, ImageProviderError> {
+    let config_path = output_dir.join(".config");
+    if !config_path.is_file() {
+        return Ok(Vec::new());
+    }
+    let mut overrides = Vec::new();
+    if let Some(download_dir) = buildroot_download_dir(spec, command_context.policy)? {
+        overrides.push(("BR2_DL_DIR".to_string(), quoted_path_value(&download_dir)?));
+    }
+    if command_context.policy.ccache_enabled {
+        overrides.push(("BR2_CCACHE".to_string(), "y".to_string()));
+        if let Some(ccache_dir) = buildroot_ccache_dir(spec, command_context.policy)? {
+            overrides.push((
+                "BR2_CCACHE_DIR".to_string(),
+                quoted_path_value(&ccache_dir)?,
+            ));
+        }
+    }
+    if overrides.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let original = fs::read_to_string(&config_path).map_err(|error| {
+        ImageProviderError::new(
+            ImageProviderErrorKind::RuntimeState,
+            format!(
+                "failed to read buildroot config '{}': {error}",
+                config_path.display()
+            ),
+        )
+    })?;
+    let merged = merge_buildroot_config_assignments(&original, &overrides);
+    if merged == original {
+        return Ok(Vec::new());
+    }
+    fs::write(&config_path, merged).map_err(|error| {
+        ImageProviderError::new(
+            ImageProviderErrorKind::RuntimeState,
+            format!(
+                "failed to write buildroot cache config '{}': {error}",
+                config_path.display()
+            ),
+        )
+    })?;
+
+    let mut command = Command::new("make");
+    command
+        .arg(format!("O={}", output_dir.display()))
+        .arg("olddefconfig")
+        .current_dir(buildroot_dir);
+    apply_buildroot_policy_env(&mut command, spec, command_context.policy)?;
+    if let Some(external_tree) = external_tree {
+        command.env("BR2_EXTERNAL", external_tree);
+    }
+    let mut messages = run_command(
+        command,
+        "buildroot cache config olddefconfig",
+        command_context.execution,
+        command_context.policy,
+        command_context.log_sink,
+        command_context.cancel_check,
+    )?;
+    messages.push("applied buildroot download/compiler cache configuration".to_string());
+    Ok(messages)
+}
+
+pub(crate) fn apply_buildroot_policy_env(
+    command: &mut Command,
+    spec: &ResolvedBuildSpec,
+    policy: &ImageExecutionPolicy,
+) -> Result<(), ImageProviderError> {
+    if let Some(download_dir) = buildroot_download_dir(spec, policy)? {
+        command.env("BR2_DL_DIR", download_dir);
+    }
+    if policy.ccache_enabled
+        && let Some(ccache_dir) = buildroot_ccache_dir(spec, policy)?
+    {
+        command.env("BR2_CCACHE_DIR", ccache_dir);
+    }
+    Ok(())
+}
+
+fn buildroot_download_dir(
+    spec: &ResolvedBuildSpec,
+    policy: &ImageExecutionPolicy,
+) -> Result<Option<PathBuf>, ImageProviderError> {
+    policy
+        .download_dir
+        .as_deref()
+        .map(|path| ensure_cache_dir(spec, path, "buildroot download"))
+        .transpose()
+}
+
+fn buildroot_ccache_dir(
+    spec: &ResolvedBuildSpec,
+    policy: &ImageExecutionPolicy,
+) -> Result<Option<PathBuf>, ImageProviderError> {
+    policy
+        .ccache_dir
+        .as_deref()
+        .map(|path| ensure_cache_dir(spec, path, "buildroot ccache"))
+        .transpose()
+}
+
+fn ensure_cache_dir(
+    spec: &ResolvedBuildSpec,
+    path: &str,
+    label: &str,
+) -> Result<PathBuf, ImageProviderError> {
+    let raw = Path::new(path);
+    let resolved = if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        Path::new(&spec.workspace.root_dir).join(raw)
+    };
+    fs::create_dir_all(&resolved).map_err(|error| {
+        ImageProviderError::new(
+            ImageProviderErrorKind::RuntimeState,
+            format!(
+                "failed to create {label} dir '{}': {error}",
+                resolved.display()
+            ),
+        )
+    })?;
+    Ok(fs::canonicalize(&resolved).unwrap_or(resolved))
+}
+
+fn quoted_path_value(path: &Path) -> Result<String, ImageProviderError> {
+    kconfig_string_value(&path.display().to_string())
+}
+
+pub(crate) fn kconfig_string_value(value: &str) -> Result<String, ImageProviderError> {
+    let mut escaped = String::with_capacity(value.len() + 2);
+    escaped.push('"');
+    for ch in value.chars() {
+        match ch {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' | '\r' => {
+                return Err(ImageProviderError::backend_command(
+                    "Buildroot Kconfig string values cannot contain newline characters",
+                ));
+            }
+            _ => escaped.push(ch),
+        }
+    }
+    escaped.push('"');
+    Ok(escaped)
+}
+
+pub(crate) fn buildroot_state_digest(image: &ImageSpec, output_dir: &Path) -> String {
+    let mut hasher = DefaultHasher::new();
+    output_dir
+        .join(".config")
+        .display()
+        .to_string()
+        .hash(&mut hasher);
+    file_state_for_digest(&output_dir.join(".config")).hash(&mut hasher);
+    image_feed_signature_path(output_dir)
+        .display()
+        .to_string()
+        .hash(&mut hasher);
+    file_state_for_digest(&image_feed_signature_path(output_dir)).hash(&mut hasher);
+    if let ImageDefinition::Buildroot(buildroot) = &image.definition {
+        for expected in &buildroot.expected_images {
+            expected.name.hash(&mut hasher);
+            expected.format.as_str().hash(&mut hasher);
+            expected.required.hash(&mut hasher);
+            file_state_for_digest(&output_dir.join("images").join(&expected.name))
+                .hash(&mut hasher);
+            file_state_for_digest(&output_dir.join(&expected.name)).hash(&mut hasher);
+        }
+    }
+    format!("{:016x}", hasher.finish())
+}
+
+fn file_state_for_digest(path: &Path) -> String {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => format!(
+            "file:{}:{}",
+            metadata.len(),
+            file_sha256_or_placeholder(path)
+        ),
+        Ok(metadata) if metadata.is_dir() => format!("dir:{}", metadata.len()),
+        Ok(_) => "other".to_string(),
+        Err(_) => "missing".to_string(),
+    }
 }

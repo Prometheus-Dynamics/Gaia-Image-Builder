@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use crate::model::{
     CleanupStatus, ExecutionFailureReport, FailureClass, FailureClassCount, RunSummary,
 };
-use crate::state::rollback_domains;
+use crate::state::{output_hygiene_warnings, rollback_domains};
 
 pub fn render_summary(
     spec: &ResolvedBuildSpec,
@@ -57,7 +57,7 @@ pub fn render_summary(
         build_profile: spec.metadata.profile.clone(),
         primary_image_output,
         operation_count: plan.operations.len(),
-        warning_count: validation.warnings.len(),
+        warning_count: validation.warnings.len() + output_hygiene_warnings(spec).len(),
         error_count: validation.errors.len() + outcome.errors.len(),
         completed_operations: outcome.completed_operations,
         reused_operations: outcome.reused_ids.len(),

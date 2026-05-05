@@ -1,7 +1,10 @@
 pub mod support;
 
 use gaia_config::resolve_config;
-use gaia_spec::ImageDefinition;
+use gaia_spec::{
+    AssemblyFilesystemKindSpec, AssemblyTransformKindSpec, BuildrootExpectedImageFormatSpec,
+    ImageDefinition,
+};
 use std::time::{SystemTime, UNIX_EPOCH};
 use support::write_temp_config;
 
@@ -32,6 +35,338 @@ defconfig = "dummy_defconfig"
 
     match &spec.image.definition {
         ImageDefinition::Buildroot(buildroot) => assert!(buildroot.allow_fallback),
+        other => panic!("expected buildroot image, got {other:?}"),
+    }
+
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn resolves_image_assembly_tables() {
+    let path = write_temp_config(
+        r#"
+build_name = "assembly-config"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[image]
+kind = "buildroot"
+defconfig = "dummy_defconfig"
+
+[image.assembly]
+work_dir = "build/assembly"
+out_dir = "$provider.images"
+
+[[image.assembly.trees]]
+id = "boot"
+path = "$assembly.work/boot"
+
+[[image.assembly.trees]]
+id = "initramfs"
+path = "$assembly.work/initramfs"
+
+[[image.assembly.files]]
+tree = "boot"
+src = "@assets/board/config.txt"
+dest = "config.txt"
+mode = "0644"
+
+[[image.assembly.files]]
+tree = "boot"
+src_glob = "$provider.images/*.dtb"
+dest = "."
+optional = true
+
+[[image.assembly.transforms]]
+kind = "gzip"
+src = "$provider.images/Image"
+dest = "$assembly.tree.boot/kernel.img"
+deterministic = true
+
+[[image.assembly.filesystems]]
+id = "initramfs"
+kind = "cpio-gzip"
+source_tree = "initramfs"
+output = "$assembly.tree.boot/initramfs"
+deterministic = true
+
+[[image.assembly.disks]]
+id = "sdcard"
+output = "$provider.images/sdcard.img"
+partition_table = "mbr"
+signature = "0x48454c49"
+
+[[image.assembly.disks.partitions]]
+name = "boot"
+type_alias = "fat32-lba"
+bootable = true
+image = "$provider.images/boot.vfat"
+
+[[image.assembly.busybox_initramfs]]
+tree = "initramfs"
+busybox = "$provider.target/usr/bin/busybox"
+include_runtime_libs = true
+applets = ["sh", "mount"]
+"#,
+    );
+
+    let spec = resolve_config(path.to_str().expect("temp path should be utf-8"));
+    let assembly = spec.image.assembly.as_ref().expect("assembly");
+
+    assert_eq!(assembly.work_dir.as_deref(), Some("build/assembly"));
+    assert_eq!(assembly.out_dir.as_deref(), Some("$provider.images"));
+    assert_eq!(assembly.trees.len(), 2);
+    assert_eq!(assembly.files.len(), 2);
+    assert_eq!(assembly.transforms[0].kind, AssemblyTransformKindSpec::Gzip);
+    assert!(assembly.transforms[0].deterministic);
+    assert_eq!(
+        assembly.filesystems[0].kind,
+        AssemblyFilesystemKindSpec::CpioGzip
+    );
+    assert!(assembly.filesystems[0].deterministic);
+    assert_eq!(
+        assembly.disks[0].partitions[0].type_alias.as_deref(),
+        Some("fat32-lba")
+    );
+    assert_eq!(assembly.busybox_initramfs[0].applets, vec!["sh", "mount"]);
+
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn image_assembly_deterministic_defaults_match_supported_operations() {
+    let path = write_temp_config(
+        r#"
+build_name = "assembly-deterministic-defaults"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[image]
+kind = "buildroot"
+defconfig = "dummy_defconfig"
+
+[image.assembly]
+work_dir = "build/assembly"
+
+[[image.assembly.transforms]]
+kind = "gzip"
+src = "$provider.images/Image"
+dest = "$provider.images/Image.gz"
+
+[[image.assembly.filesystems]]
+id = "initramfs"
+kind = "cpio"
+source_tree = "boot"
+output = "$provider.images/initramfs.cpio"
+
+[[image.assembly.filesystems]]
+id = "bootfs"
+kind = "vfat"
+source_tree = "boot"
+output = "$provider.images/boot.vfat"
+"#,
+    );
+
+    let spec = resolve_config(path.to_str().expect("temp path should be utf-8"));
+    let assembly = spec.image.assembly.as_ref().expect("assembly");
+
+    assert!(assembly.transforms[0].deterministic);
+    assert!(assembly.filesystems[0].deterministic);
+    assert!(!assembly.filesystems[1].deterministic);
+
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn reporting_output_hygiene_policy_compiles() {
+    let path = write_temp_config(
+        r#"
+build_name = "reporting-output-hygiene"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[image]
+kind = "buildroot"
+defconfig = "dummy_defconfig"
+
+[reporting.output_hygiene]
+large_file_threshold_bytes = 4096
+transient_dir_names = [".cache", "tmp-work"]
+"#,
+    );
+
+    let spec = resolve_config(path.to_str().expect("temp path should be utf-8"));
+
+    assert_eq!(
+        spec.reporting.output_hygiene.large_file_threshold_bytes,
+        4096
+    );
+    assert_eq!(
+        spec.reporting.output_hygiene.transient_dir_names,
+        vec![".cache".to_string(), "tmp-work".to_string()]
+    );
+
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn image_configs_without_assembly_keep_assembly_absent() {
+    for (name, image_toml) in [
+        (
+            "buildroot-no-assembly",
+            r#"
+[image]
+kind = "buildroot"
+defconfig = "dummy_defconfig"
+"#,
+        ),
+        (
+            "starting-point-no-assembly",
+            r#"
+[image]
+kind = "starting-point"
+rootfs_path = "/tmp/gaia-missing-rootfs"
+rootfs_validation_mode = "allow-missing"
+output_mode = "copy-rootfs"
+"#,
+        ),
+    ] {
+        let path = write_temp_config(&format!(
+            r#"
+build_name = "{name}"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+{image_toml}
+"#
+        ));
+
+        let spec = resolve_config(path.to_str().expect("temp path should be utf-8"));
+        assert!(
+            spec.image.assembly.is_none(),
+            "{name} should not get an implicit assembly spec"
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn resolves_new_buildroot_expected_image_formats() {
+    let path = write_temp_config(
+        r#"
+build_name = "buildroot-new-formats"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[image]
+kind = "buildroot"
+defconfig = "dummy_defconfig"
+
+[[image.expected_images]]
+name = "rootfs.cpio.gz"
+format = "cpio"
+required = true
+
+[[image.expected_images]]
+name = "rootfs.ext2"
+format = "ext2"
+required = true
+
+[[image.expected_images]]
+name = "rootfs.ext3"
+format = "ext3"
+required = true
+
+[[image.expected_images]]
+name = "rootfs.ubifs"
+format = "ubifs"
+required = true
+
+[[image.expected_images]]
+name = "rootfs.ubi"
+format = "ubi"
+required = true
+
+[[image.expected_images]]
+name = "rootfs.jffs2"
+format = "jffs2"
+required = true
+
+[[image.expected_images]]
+name = "rootfs.erofs"
+format = "erofs"
+required = true
+
+[[image.expected_images]]
+name = "rootfs.romfs"
+format = "romfs"
+required = true
+
+[[image.expected_images]]
+name = "rootfs.cramfs"
+format = "cramfs"
+required = true
+
+[[image.expected_images]]
+name = "rootfs.cloop"
+format = "cloop"
+required = true
+
+[[image.expected_images]]
+name = "rootfs.f2fs"
+format = "f2fs"
+required = true
+
+[[image.expected_images]]
+name = "rootfs.btrfs"
+format = "btrfs"
+required = true
+"#,
+    );
+
+    let spec = resolve_config(path.to_str().expect("temp path should be utf-8"));
+
+    match &spec.image.definition {
+        ImageDefinition::Buildroot(buildroot) => {
+            let mut formats = buildroot
+                .expected_images
+                .iter()
+                .map(|image| image.format)
+                .collect::<Vec<_>>();
+            formats.sort_by_key(|format| format.as_str());
+            assert_eq!(
+                formats,
+                vec![
+                    BuildrootExpectedImageFormatSpec::Btrfs,
+                    BuildrootExpectedImageFormatSpec::Cloop,
+                    BuildrootExpectedImageFormatSpec::Cpio,
+                    BuildrootExpectedImageFormatSpec::Cramfs,
+                    BuildrootExpectedImageFormatSpec::Erofs,
+                    BuildrootExpectedImageFormatSpec::Ext2,
+                    BuildrootExpectedImageFormatSpec::Ext3,
+                    BuildrootExpectedImageFormatSpec::F2fs,
+                    BuildrootExpectedImageFormatSpec::Jffs2,
+                    BuildrootExpectedImageFormatSpec::Romfs,
+                    BuildrootExpectedImageFormatSpec::Ubi,
+                    BuildrootExpectedImageFormatSpec::Ubifs,
+                ]
+            );
+        }
         other => panic!("expected buildroot image, got {other:?}"),
     }
 

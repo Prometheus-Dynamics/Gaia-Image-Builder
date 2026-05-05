@@ -20,6 +20,9 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - Added source providers for local paths, archives, downloads, and git-backed sources with identity and state tracking.
 - Added artifact providers for Rust, Go, Java, Node, Python, and provider-level artifact output contracts.
 - Added image providers for Buildroot images and starting-point image/rootfs mutation workflows.
+- Added first-class Buildroot expected image formats for `cpio`, `ext2`, `ext3`, `ubifs`, `ubi`, `jffs2`, `romfs`, `cramfs`, `cloop`, `f2fs`, `btrfs`, and `erofs`.
+- Added image assembly support for staged trees, file transforms, generated filesystems, MBR disks, BusyBox initramfs generation, typed assembly path templates, and reusable assembly fingerprints.
+- Added dynamic input choices from git refs, GitHub releases, JSON sources, and commands with bounded subprocess execution, cache/lock files, fallback choices, and template-driven selected values.
 - Added typed reporting and state outputs for summaries, manifests, provenance, backend state, reuse decisions, and runtime state.
 - Added examples for Buildroot squashfs, SD card, Raspberry Pi 4, aarch64, minimal Rust, imported rootfs, imported raw image mutation, polyglot git projects, and template-based starting points.
 - Added Docker build environments and smoke-test scripts for CI, Buildroot, polyglot artifacts, raw starting-point images, and aarch64 artifact builds.
@@ -32,11 +35,16 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - Reworked the README and documentation index around the current typed domain model and command set.
 - Expanded CLI documentation for `resolve`, `validate`, `plan`, `run`, `clean`, feature-gated `tui`, presets, environment files, environment overrides, and `--set` overrides.
 - Updated migration guidance for translating older Gaia trees into typed source, artifact, install, stage, image, checkpoint, reporting, and policy declarations.
+- Hardened shared process execution with timeout/cancellation support, bounded stream retention, direct stdout-to-file execution, process-tree cleanup, and bounded stream-reader queues.
+- Reworked Buildroot package overrides to stage generated package trees through `BR2_EXTERNAL` instead of mutating the Buildroot source checkout.
+- Added Buildroot cache policy support for download and compiler cache directories, including generated `.config` updates with escaped Kconfig string values.
+- Strengthened dynamic input cache identity with versioned deterministic keys and removed process-global environment mutation from dynamic input tests.
 
 ### Validation
 
 - Updated test fixtures and expected image/archive names that depended on pre-2.0.0 sample versions.
 - Kept the release aligned with the existing Rust 2024 workspace settings, shared lint policy, and `rust-version = "1.94"` requirement.
+- Added regression coverage for image assembly cleanup, Buildroot expected image collection, dynamic input cache separation, bounded process output, and Buildroot external tree validation.
 
 ## [0.1.3] - 2026-04-20
 

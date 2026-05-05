@@ -1,4 +1,4 @@
-use crate::{InstallId, SourceId, StageItemId};
+use crate::{ImageAssemblySpec, InstallId, SourceId, StageItemId};
 use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -6,6 +6,7 @@ pub struct ImageSpec {
     pub definition: ImageDefinition,
     pub feed: ImageFeedSpec,
     pub output: ImageOutputSpec,
+    pub assembly: Option<ImageAssemblySpec>,
 }
 
 impl ImageSpec {
@@ -14,6 +15,7 @@ impl ImageSpec {
             definition,
             feed: ImageFeedSpec::default(),
             output: ImageOutputSpec::default(),
+            assembly: None,
         }
     }
 
@@ -94,20 +96,44 @@ pub struct BuildrootExpectedImageSpec {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuildrootExpectedImageFormatSpec {
     Tar,
+    Cpio,
+    Ext2,
+    Ext3,
     Ext4,
+    Ubifs,
+    Ubi,
+    Jffs2,
+    Romfs,
+    Cramfs,
+    Cloop,
+    F2fs,
+    Btrfs,
     Squashfs,
     Raw,
     Kernel,
+    Erofs,
 }
 
 impl BuildrootExpectedImageFormatSpec {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Tar => "tar",
+            Self::Cpio => "cpio",
+            Self::Ext2 => "ext2",
+            Self::Ext3 => "ext3",
             Self::Ext4 => "ext4",
+            Self::Ubifs => "ubifs",
+            Self::Ubi => "ubi",
+            Self::Jffs2 => "jffs2",
+            Self::Romfs => "romfs",
+            Self::Cramfs => "cramfs",
+            Self::Cloop => "cloop",
+            Self::F2fs => "f2fs",
+            Self::Btrfs => "btrfs",
             Self::Squashfs => "squashfs",
             Self::Raw => "raw",
             Self::Kernel => "kernel",
+            Self::Erofs => "erofs",
         }
     }
 }

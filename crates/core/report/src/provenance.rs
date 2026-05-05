@@ -7,8 +7,8 @@ use crate::model::{
     ArtifactInstallIdentityRecord, BackendStateRecord, PrecedenceLayerReport, ProvenanceReport,
 };
 use crate::state::{
-    artifact_spec_state_path, build_artifact_output_metadata, image_contract, read_backend_state,
-    rollback_domains, runtime_state_dir,
+    artifact_spec_state_path, build_artifact_output_metadata, image_contract,
+    output_hygiene_warnings, read_backend_state, rollback_domains, runtime_state_dir,
 };
 
 pub fn render_provenance(spec: &ResolvedBuildSpec, outcome: &ExecutionOutcome) -> ProvenanceReport {
@@ -141,6 +141,7 @@ pub fn render_provenance(spec: &ResolvedBuildSpec, outcome: &ExecutionOutcome) -
             .filter_map(|result| result.archive_path.as_ref())
             .map(|path| path.display().to_string())
             .collect(),
+        output_hygiene_warnings: output_hygiene_warnings(spec),
         source_backend_states: spec
             .sources
             .iter()
@@ -220,6 +221,19 @@ pub fn render_provenance(spec: &ResolvedBuildSpec, outcome: &ExecutionOutcome) -
                 ),
             })
             .collect(),
+        image_assembly_backend_states: spec
+            .image
+            .assembly
+            .as_ref()
+            .map(|_| {
+                vec![BackendStateRecord {
+                    id: "image:assembly".to_string(),
+                    state: read_backend_state(
+                        &runtime_state_dir(spec).join(gaia_spec::IMAGE_ASSEMBLY_STATE_FILE_NAME),
+                    ),
+                }]
+            })
+            .unwrap_or_default(),
         checkpoint_backend_states: spec
             .checkpoints
             .points

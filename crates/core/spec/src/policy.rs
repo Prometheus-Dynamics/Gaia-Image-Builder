@@ -133,13 +133,15 @@ impl ProviderExecutionPolicySpec {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResolvedCommandPolicySpec {
     pub retry_attempts: u32,
     pub retry_backoff_ms: u64,
     pub retry_backoff_strategy: RetryBackoffStrategySpec,
     pub timeout_seconds: u64,
     pub local_jobs: u32,
+    pub download_dir: Option<String>,
+    pub ccache: BuildrootCcachePolicySpec,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -181,6 +183,8 @@ impl From<&RustProviderPolicySpec> for ResolvedCommandPolicySpec {
             retry_backoff_strategy: policy.retry_backoff_strategy,
             timeout_seconds: policy.timeout_seconds,
             local_jobs: 0,
+            download_dir: None,
+            ccache: BuildrootCcachePolicySpec::default(),
         }
     }
 }
@@ -202,6 +206,8 @@ impl From<&GitProviderPolicySpec> for ResolvedCommandPolicySpec {
             retry_backoff_strategy: policy.retry_backoff_strategy,
             timeout_seconds: policy.timeout_seconds,
             local_jobs: 0,
+            download_dir: None,
+            ccache: BuildrootCcachePolicySpec::default(),
         }
     }
 }
@@ -213,6 +219,14 @@ pub struct CommandProviderPolicySpec {
     pub retry_backoff_strategy: RetryBackoffStrategySpec,
     pub timeout_seconds: u64,
     pub local_jobs: u32,
+    pub download_dir: Option<String>,
+    pub ccache: BuildrootCcachePolicySpec,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BuildrootCcachePolicySpec {
+    pub enabled: bool,
+    pub dir: Option<String>,
 }
 
 impl From<&CommandProviderPolicySpec> for ResolvedCommandPolicySpec {
@@ -223,6 +237,8 @@ impl From<&CommandProviderPolicySpec> for ResolvedCommandPolicySpec {
             retry_backoff_strategy: policy.retry_backoff_strategy,
             timeout_seconds: policy.timeout_seconds,
             local_jobs: policy.local_jobs,
+            download_dir: policy.download_dir.clone(),
+            ccache: policy.ccache.clone(),
         }
     }
 }
@@ -352,6 +368,8 @@ mod tests {
                 retry_backoff_strategy: RetryBackoffStrategySpec::Exponential,
                 timeout_seconds: 120,
                 local_jobs: 0,
+                download_dir: None,
+                ccache: BuildrootCcachePolicySpec::default(),
             }
         );
         let buildroot_policy = providers.image_command_policy(ImageProviderKind::Buildroot);

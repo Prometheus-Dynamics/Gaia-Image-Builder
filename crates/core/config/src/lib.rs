@@ -1,13 +1,16 @@
 mod compile;
+mod dynamic_inputs;
 mod env;
 mod interpolate;
 mod load;
 mod merge;
 mod overrides;
 mod raw;
+mod raw_assembly;
 
 pub use compile::compile_config;
 
+use dynamic_inputs::resolve_dynamic_inputs;
 use env::resolve_environment;
 use interpolate::interpolate_config;
 use load::{discover_build_root, load_build_config};
@@ -51,13 +54,14 @@ pub fn try_resolve_config_with_options(
     let selected = apply_preset_selection(merged, build, options);
     let preset_applied = apply_selected_preset(selected)?;
     let overridden = apply_cli_overrides(preset_applied, options)?;
-    let env = resolve_environment(&overridden)?;
+    let with_dynamic_inputs = resolve_dynamic_inputs(overridden)?;
+    let env = resolve_environment(&with_dynamic_inputs)?;
     tracing::debug!(
         build,
         env_files = options.env_files.len(),
         "resolved config environment"
     );
-    let interpolated = interpolate_config(overridden, &env);
+    let interpolated = interpolate_config(with_dynamic_inputs, &env);
     let normalized = normalize_paths(interpolated)?;
     let spec = compile_config(normalized);
     tracing::debug!(

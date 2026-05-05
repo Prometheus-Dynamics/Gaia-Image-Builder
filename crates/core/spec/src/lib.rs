@@ -1,4 +1,6 @@
 mod artifact;
+mod assembly;
+mod assembly_spec;
 mod checkpoints;
 mod clean;
 mod ids;
@@ -21,12 +23,24 @@ pub use artifact::{
     ArtifactSpec, ArtifactVariantSpec, BuildModeSpec, DockerArtifactExecutionSpec, GoArtifactSpec,
     JavaArtifactSpec, NodeArtifactSpec, PythonArtifactSpec, RustArtifactSpec,
 };
+pub use assembly::{AssemblyRoots, expand_simple_glob, wildcard_match};
+pub use assembly_spec::{
+    AssemblyBusyboxInitramfsSpec, AssemblyDiskPartitionSpec, AssemblyDiskSpec, AssemblyFileSpec,
+    AssemblyFilesystemKindSpec, AssemblyFilesystemSpec, AssemblyPartitionTableSpec,
+    AssemblyPathTemplate, AssemblyPathTemplateContext, AssemblyPathTemplateError,
+    AssemblyTransformKindSpec, AssemblyTransformSpec, AssemblyTreeSpec, ByteSize,
+    ByteSizeParseError, FileMode, FileModeParseError, ImageAssemblySpec, MbrPartitionType,
+    MbrPartitionTypeParseError,
+};
 pub use checkpoints::{
     CheckpointAnchorRef, CheckpointBackendRef, CheckpointId, CheckpointPointSpec, CheckpointPolicy,
     CheckpointSpec,
 };
 pub use clean::{CleanProfileSpec, CleanSpec};
-pub use ids::{ArtifactId, BuildId, IdError, InstallId, SourceId, StageItemId};
+pub use ids::{
+    ArtifactId, AssemblyFilesystemId, AssemblyTreeId, BuildId, IdError, InstallId, SourceId,
+    StageItemId,
+};
 pub use image::{
     BuildrootExpectedImageFormatSpec, BuildrootExpectedImageSpec, BuildrootExternalTreeModeSpec,
     BuildrootImageSpec, ImageDefinition, ImageFeedSpec, ImageOutputSpec, ImageProviderKind,
@@ -37,24 +51,28 @@ pub use inputs::{InputKindSpec, InputOptionSpec, InputSpec};
 pub use install::{InstallEntrySpec, InstallSpec};
 pub use metadata::{BuildMetadataSpec, ProductIdentitySpec};
 pub use policy::{
-    BuildPolicySpec, CommandProviderPolicySpec, DEFAULT_ARCHIVE_PROVIDER_TIMEOUT_SECONDS,
-    DEFAULT_BUILDROOT_PROVIDER_TIMEOUT_SECONDS, DEFAULT_COMMAND_RETRY_ATTEMPTS,
-    DEFAULT_COMMAND_RETRY_BACKOFF_MS, DEFAULT_COMMAND_RETRY_BACKOFF_STRATEGY,
-    DEFAULT_DOWNLOAD_PROVIDER_TIMEOUT_SECONDS, DEFAULT_GIT_PROVIDER_TIMEOUT_SECONDS,
-    DEFAULT_GO_PROVIDER_TIMEOUT_SECONDS, DEFAULT_JAVA_PROVIDER_TIMEOUT_SECONDS,
-    DEFAULT_NODE_PROVIDER_TIMEOUT_SECONDS, DEFAULT_OUTPUT_RETENTION_FAILURE_TAIL_LINES,
-    DEFAULT_OUTPUT_RETENTION_POLICY, DEFAULT_OUTPUT_RETENTION_STDERR_BYTES,
-    DEFAULT_OUTPUT_RETENTION_STDERR_LINES, DEFAULT_OUTPUT_RETENTION_STDOUT_BYTES,
-    DEFAULT_OUTPUT_RETENTION_STDOUT_LINES, DEFAULT_PROVIDER_LOCAL_JOBS,
-    DEFAULT_PYTHON_PROVIDER_TIMEOUT_SECONDS, DEFAULT_RUST_PROVIDER_TIMEOUT_SECONDS,
-    DEFAULT_STARTING_POINT_PROVIDER_TIMEOUT_SECONDS, DockerExecutionSpec, ExecutionPolicySpec,
-    FailureHandlingPolicySpec, GitProviderPolicySpec, InterpolationSpec, OutputRetentionPolicySpec,
-    PrecedenceLayerSpec, PrecedencePolicySpec, PrecedenceSource, PrecedenceTarget,
-    PresetSelectionSpec, ProviderExecutionPolicySpec, ResolvedCommandPolicySpec,
-    RetryBackoffStrategySpec, RollbackDomain, RustProviderPolicySpec, UnresolvedInterpolationSpec,
+    BuildPolicySpec, BuildrootCcachePolicySpec, CommandProviderPolicySpec,
+    DEFAULT_ARCHIVE_PROVIDER_TIMEOUT_SECONDS, DEFAULT_BUILDROOT_PROVIDER_TIMEOUT_SECONDS,
+    DEFAULT_COMMAND_RETRY_ATTEMPTS, DEFAULT_COMMAND_RETRY_BACKOFF_MS,
+    DEFAULT_COMMAND_RETRY_BACKOFF_STRATEGY, DEFAULT_DOWNLOAD_PROVIDER_TIMEOUT_SECONDS,
+    DEFAULT_GIT_PROVIDER_TIMEOUT_SECONDS, DEFAULT_GO_PROVIDER_TIMEOUT_SECONDS,
+    DEFAULT_JAVA_PROVIDER_TIMEOUT_SECONDS, DEFAULT_NODE_PROVIDER_TIMEOUT_SECONDS,
+    DEFAULT_OUTPUT_RETENTION_FAILURE_TAIL_LINES, DEFAULT_OUTPUT_RETENTION_POLICY,
+    DEFAULT_OUTPUT_RETENTION_STDERR_BYTES, DEFAULT_OUTPUT_RETENTION_STDERR_LINES,
+    DEFAULT_OUTPUT_RETENTION_STDOUT_BYTES, DEFAULT_OUTPUT_RETENTION_STDOUT_LINES,
+    DEFAULT_PROVIDER_LOCAL_JOBS, DEFAULT_PYTHON_PROVIDER_TIMEOUT_SECONDS,
+    DEFAULT_RUST_PROVIDER_TIMEOUT_SECONDS, DEFAULT_STARTING_POINT_PROVIDER_TIMEOUT_SECONDS,
+    DockerExecutionSpec, ExecutionPolicySpec, FailureHandlingPolicySpec, GitProviderPolicySpec,
+    InterpolationSpec, OutputRetentionPolicySpec, PrecedenceLayerSpec, PrecedencePolicySpec,
+    PrecedenceSource, PrecedenceTarget, PresetSelectionSpec, ProviderExecutionPolicySpec,
+    ResolvedCommandPolicySpec, RetryBackoffStrategySpec, RollbackDomain, RustProviderPolicySpec,
+    UnresolvedInterpolationSpec,
 };
 pub use provenance::{ProvenanceIdentitySpec, ProvenanceSpec};
-pub use reporting::{PostBuildHookSpec, ReportingOutputsSpec, ReportingSpec, SecretMaskingSpec};
+pub use reporting::{
+    DEFAULT_LARGE_UNEXPECTED_OUTPUT_BYTES, DEFAULT_TRANSIENT_DIR_NAMES, OutputHygieneSpec,
+    PostBuildHookSpec, ReportingOutputsSpec, ReportingSpec, SecretMaskingSpec,
+};
 pub use selection::SelectionSpec;
 pub use source::{
     ArchiveSourceSpec, DownloadSourceSpec, GitSourceSpec, PathSourceSpec, SourceDefinition,
@@ -63,7 +81,10 @@ pub use source::{
 pub use stage::{
     StageContentOriginSpec, StageEnvSetSpec, StageFileSpec, StageServiceSpec, StageSpec,
 };
-pub use state::KeyValueState;
+pub use state::{
+    IMAGE_ASSEMBLY_STATE_FILE_NAME, IMAGE_ASSEMBLY_STATE_KIND, KeyValueState,
+    RUNTIME_STATE_DIR_NAME,
+};
 pub use workspace::{
     CleanPolicy, WorkspaceNamedPathSpec, WorkspacePathError, WorkspacePathKindSpec, WorkspaceSpec,
     resolve_workspace_path,

@@ -30,6 +30,9 @@ pub(crate) fn image_execution_policy(spec: &ResolvedBuildSpec) -> ImageExecution
         timeout_seconds: policy.timeout_seconds,
         jobs: spec.policy.execution.jobs,
         local_jobs: policy.local_jobs,
+        download_dir: policy.download_dir,
+        ccache_enabled: policy.ccache.enabled,
+        ccache_dir: policy.ccache.dir,
         output_retention: process_output_retention(spec),
     }
 }
@@ -192,10 +195,8 @@ pub(crate) fn stage_result(
         .with_cleanup_paths(vec![state_path])
 }
 
-fn runtime_state_dir(spec: &ResolvedBuildSpec) -> PathBuf {
-    PathBuf::from(&spec.workspace.out_dir)
-        .join(".gaia")
-        .join("runtime")
+pub(crate) fn runtime_state_dir(spec: &ResolvedBuildSpec) -> PathBuf {
+    PathBuf::from(&spec.workspace.out_dir).join(gaia_spec::RUNTIME_STATE_DIR_NAME)
 }
 
 pub(crate) fn install_state_path(
@@ -516,7 +517,6 @@ pub(crate) fn image_definition_cleanup_paths(spec: &ResolvedBuildSpec) -> Vec<Pa
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn output_tail_uses_execution_retention_policy() {
         let mut spec = ResolvedBuildSpec::new("tail-policy");

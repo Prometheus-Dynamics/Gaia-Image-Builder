@@ -48,6 +48,11 @@ pub(crate) fn compile_command_policy(
         retry_backoff_strategy: compile_backoff_strategy(raw.retry_backoff_strategy),
         timeout_seconds: nonzero_u64_or(raw.timeout_seconds, default_timeout_seconds),
         local_jobs: raw.local_jobs,
+        download_dir: raw.download_dir.clone(),
+        ccache: BuildrootCcachePolicySpec {
+            enabled: raw.ccache.enabled,
+            dir: raw.ccache.dir.clone(),
+        },
     }
 }
 

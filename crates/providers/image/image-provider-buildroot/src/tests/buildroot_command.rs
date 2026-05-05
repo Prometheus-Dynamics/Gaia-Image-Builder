@@ -23,6 +23,7 @@ fn run_buildroot_reports_make_failures() {
             archive_name: None,
             emit_report: true,
         },
+        assembly: None,
     };
 
     let execution = test_execution();
@@ -96,6 +97,305 @@ fn make_jobs_are_provider_local_and_not_forced_by_scheduler_jobs() {
     let mut local_jobs = Command::new("make");
     append_make_jobs(&mut local_jobs, 2);
     assert!(local_jobs.get_args().any(|arg| arg == "-j2"));
+}
+
+#[test]
+fn buildroot_cache_policy_sets_make_environment_and_creates_dirs() {
+    let workspace = temp_path("gaia-buildroot-cache-workspace");
+    let mut spec = ResolvedBuildSpec::new("buildroot-cache-test");
+    spec.workspace.root_dir = workspace.display().to_string();
+    let policy = ImageExecutionPolicy {
+        download_dir: Some(".gaia/cache/buildroot/dl".into()),
+        ccache_enabled: true,
+        ccache_dir: Some(".gaia/cache/buildroot/ccache".into()),
+        ..ImageExecutionPolicy::default()
+    };
+    let mut command = Command::new("make");
+
+    apply_buildroot_policy_env(&mut command, &spec, &policy).expect("cache env");
+
+    let envs = command
+        .get_envs()
+        .map(|(key, value)| {
+            (
+                key.to_string_lossy().to_string(),
+                value
+                    .map(|value| value.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(envs.iter().any(|(key, _)| key == "BR2_DL_DIR"));
+    assert!(envs.iter().any(|(key, _)| key == "BR2_CCACHE_DIR"));
+    assert!(workspace.join(".gaia/cache/buildroot/dl").is_dir());
+    assert!(workspace.join(".gaia/cache/buildroot/ccache").is_dir());
+}
+
+#[test]
+fn buildroot_kconfig_string_value_escapes_quotes_and_backslashes() {
+    let value = kconfig_string_value(r#"/tmp/cache/"quoted"\dir"#).expect("kconfig string");
+
+    assert_eq!(value, r#""/tmp/cache/\"quoted\"\\dir""#);
+}
+
+#[test]
+fn buildroot_kconfig_string_value_rejects_newlines() {
+    let error = kconfig_string_value("/tmp/cache\nbad").expect_err("newline should be rejected");
+
+    assert!(error.message.contains("newline"), "{error:?}");
+}
+
+#[test]
+fn buildroot_cache_config_escapes_kconfig_paths() {
+    let workspace = temp_path("gaia-buildroot-cache-escaping-workspace");
+    let buildroot_dir = temp_path("gaia-buildroot-cache-escaping-source");
+    let output_dir = temp_path("gaia-buildroot-cache-escaping-output");
+    fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
+    fs::create_dir_all(&output_dir).expect("output dir");
+    fs::write(output_dir.join(".config"), "BR2_TARGET_ROOTFS_TAR=y\n").expect("config");
+    fs::write(buildroot_dir.join("Makefile"), "olddefconfig:\n\t@true\n").expect("makefile");
+    let mut spec = ResolvedBuildSpec::new("buildroot-cache-escaping-test");
+    spec.workspace.root_dir = workspace.display().to_string();
+    let policy = ImageExecutionPolicy {
+        download_dir: Some(r#".gaia/cache/buildroot/"dl"\dir"#.into()),
+        ..ImageExecutionPolicy::default()
+    };
+    let execution = test_execution();
+
+    apply_buildroot_cache_config(
+        &spec,
+        &buildroot_dir,
+        &output_dir,
+        None,
+        test_command_context(&execution, &policy),
+    )
+    .expect("cache config");
+
+    let config = fs::read_to_string(output_dir.join(".config")).expect("config");
+    assert!(config.contains(r#"BR2_DL_DIR=".gaia"#) || config.contains("BR2_DL_DIR="));
+    assert!(config.contains(r#"\"dl\""#), "{config}");
+    assert!(config.contains(r#"\\dir"#), "{config}");
+}
+
+#[test]
+fn buildroot_package_overrides_are_staged_as_external_tree() {
+    let workspace = temp_path("gaia-buildroot-package-overrides-workspace");
+    let buildroot_dir = temp_path("gaia-buildroot-package-overrides-source");
+    let output_dir = temp_path("gaia-buildroot-package-overrides-output");
+    let user_external = workspace.join("user-external");
+    let override_pkg = workspace.join("gaia/assets/buildroot/packages/foo");
+    let source_pkg = buildroot_dir.join("package/foo");
+
+    fs::create_dir_all(&override_pkg).expect("override package dir");
+    fs::create_dir_all(&source_pkg).expect("source package dir");
+    fs::create_dir_all(&user_external).expect("user external dir");
+    fs::write(override_pkg.join("Config.in"), "config BR2_PACKAGE_FOO\n").expect("override config");
+    fs::write(override_pkg.join("foo.mk"), "FOO_VERSION = gaia\n").expect("override mk");
+    fs::write(
+        source_pkg.join("Config.in"),
+        "config BR2_PACKAGE_FOO_SOURCE\n",
+    )
+    .expect("source config");
+    fs::write(
+        buildroot_dir.join("Makefile"),
+        "%_defconfig:\n\t@mkdir -p $(O)\n\t@printf '%s' \"$$BR2_EXTERNAL\" > $(O)/br2_external_defconfig\n\t@touch $(O)/.config\nall:\n\t@printf '%s' \"$$BR2_EXTERNAL\" > $(O)/br2_external_make\n",
+    )
+    .expect("makefile");
+
+    let mut spec = ResolvedBuildSpec::new("buildroot-package-overrides");
+    spec.workspace.root_dir = workspace.display().to_string();
+    let image = ImageSpec {
+        definition: ImageDefinition::Buildroot(BuildrootImageSpec {
+            defconfig: Some("test_defconfig".into()),
+            external_tree: Some(user_external.display().to_string()),
+            ..BuildrootImageSpec::default()
+        }),
+        feed: gaia_spec::ImageFeedSpec::default(),
+        output: ImageOutputSpec::default(),
+        assembly: None,
+    };
+    let execution = test_execution();
+    let policy = ImageExecutionPolicy::default();
+
+    let messages = run_buildroot(BuildrootRunRequest {
+        spec: &spec,
+        image: &image,
+        buildroot_dir: &buildroot_dir,
+        output_dir: &output_dir,
+        command: test_command_context(&execution, &policy),
+    })
+    .expect("buildroot run");
+
+    let generated_external = output_dir.join("gaia-buildroot-external");
+    assert_eq!(
+        fs::read_to_string(source_pkg.join("Config.in")).expect("source package config"),
+        "config BR2_PACKAGE_FOO_SOURCE\n"
+    );
+    assert!(generated_external.join("external.desc").is_file());
+    assert_eq!(
+        fs::read_to_string(generated_external.join("external.desc")).expect("external desc"),
+        "name: GAIA_GENERATED\ndesc: Gaia generated Buildroot package overrides\n"
+    );
+    assert_eq!(
+        fs::read_to_string(generated_external.join("package/foo/foo.mk")).expect("staged package"),
+        "FOO_VERSION = gaia\n"
+    );
+    assert!(
+        fs::read_to_string(generated_external.join("Config.in"))
+            .expect("generated Config.in")
+            .contains("BR2_EXTERNAL_GAIA_GENERATED_PATH/package/foo/Config.in")
+    );
+    assert!(
+        fs::read_to_string(generated_external.join("external.mk"))
+            .expect("generated external.mk")
+            .contains("BR2_EXTERNAL_GAIA_GENERATED_PATH")
+    );
+    let expected_external = format!(
+        "{}:{}",
+        user_external.display(),
+        generated_external.display()
+    );
+    assert_eq!(
+        fs::read_to_string(output_dir.join("br2_external_defconfig")).expect("defconfig external"),
+        expected_external
+    );
+    assert_eq!(
+        fs::read_to_string(output_dir.join("br2_external_make")).expect("make external"),
+        expected_external
+    );
+    assert!(messages.iter().any(|message| {
+        message.contains("staged 1 generated Buildroot external package override(s)")
+    }));
+}
+
+#[test]
+fn buildroot_package_override_missing_config_in_fails_before_make() {
+    let workspace = temp_path("gaia-buildroot-package-overrides-missing-config-workspace");
+    let buildroot_dir = temp_path("gaia-buildroot-package-overrides-missing-config-source");
+    let output_dir = temp_path("gaia-buildroot-package-overrides-missing-config-output");
+    let override_pkg = workspace.join("gaia/assets/buildroot/packages/foo");
+
+    fs::create_dir_all(&override_pkg).expect("override package dir");
+    fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
+    fs::write(override_pkg.join("foo.mk"), "FOO_VERSION = gaia\n").expect("override mk");
+    fs::write(
+        buildroot_dir.join("Makefile"),
+        "%_defconfig:\n\t@touch should-not-run\nall:\n\t@touch should-not-run\n",
+    )
+    .expect("makefile");
+
+    let mut spec = ResolvedBuildSpec::new("buildroot-package-overrides-missing-config");
+    spec.workspace.root_dir = workspace.display().to_string();
+    let image = ImageSpec {
+        definition: ImageDefinition::Buildroot(BuildrootImageSpec {
+            defconfig: Some("test_defconfig".into()),
+            ..BuildrootImageSpec::default()
+        }),
+        feed: gaia_spec::ImageFeedSpec::default(),
+        output: ImageOutputSpec::default(),
+        assembly: None,
+    };
+    let execution = test_execution();
+    let policy = ImageExecutionPolicy::default();
+
+    let error = run_buildroot(BuildrootRunRequest {
+        spec: &spec,
+        image: &image,
+        buildroot_dir: &buildroot_dir,
+        output_dir: &output_dir,
+        command: test_command_context(&execution, &policy),
+    })
+    .expect_err("missing Config.in should fail before make");
+
+    assert_eq!(error.kind, ImageProviderErrorKind::BackendCommand);
+    assert!(error.message.contains("missing required Config.in"));
+    assert!(
+        !buildroot_dir.join("should-not-run").exists(),
+        "make should not run after package validation fails"
+    );
+}
+
+#[test]
+fn buildroot_package_override_detects_generated_external_name_conflict() {
+    let workspace = temp_path("gaia-buildroot-package-overrides-conflict-workspace");
+    let buildroot_dir = temp_path("gaia-buildroot-package-overrides-conflict-source");
+    let output_dir = temp_path("gaia-buildroot-package-overrides-conflict-output");
+    let user_external = workspace.join("user-external");
+    let override_pkg = workspace.join("gaia/assets/buildroot/packages/foo");
+
+    fs::create_dir_all(&override_pkg).expect("override package dir");
+    fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
+    fs::create_dir_all(&user_external).expect("user external dir");
+    fs::write(override_pkg.join("Config.in"), "config BR2_PACKAGE_FOO\n").expect("override config");
+    fs::write(override_pkg.join("foo.mk"), "FOO_VERSION = gaia\n").expect("override mk");
+    fs::write(
+        user_external.join("external.desc"),
+        "name: GAIA_GENERATED\ndesc: user tree\n",
+    )
+    .expect("user external desc");
+    fs::write(
+        buildroot_dir.join("Makefile"),
+        "%_defconfig:\n\t@touch should-not-run\nall:\n\t@touch should-not-run\n",
+    )
+    .expect("makefile");
+
+    let mut spec = ResolvedBuildSpec::new("buildroot-package-overrides-conflict");
+    spec.workspace.root_dir = workspace.display().to_string();
+    let image = ImageSpec {
+        definition: ImageDefinition::Buildroot(BuildrootImageSpec {
+            defconfig: Some("test_defconfig".into()),
+            external_tree: Some(user_external.display().to_string()),
+            ..BuildrootImageSpec::default()
+        }),
+        feed: gaia_spec::ImageFeedSpec::default(),
+        output: ImageOutputSpec::default(),
+        assembly: None,
+    };
+    let execution = test_execution();
+    let policy = ImageExecutionPolicy::default();
+
+    let error = run_buildroot(BuildrootRunRequest {
+        spec: &spec,
+        image: &image,
+        buildroot_dir: &buildroot_dir,
+        output_dir: &output_dir,
+        command: test_command_context(&execution, &policy),
+    })
+    .expect_err("reserved generated external name should fail");
+
+    assert_eq!(error.kind, ImageProviderErrorKind::BackendCommand);
+    assert!(error.message.contains("reserved generated external name"));
+    assert!(
+        !buildroot_dir.join("should-not-run").exists(),
+        "make should not run after external name validation fails"
+    );
+}
+
+#[test]
+fn buildroot_state_digest_ignores_unrelated_build_tree_files() {
+    let output_dir = temp_path("gaia-buildroot-digest-out");
+    fs::create_dir_all(output_dir.join("images")).expect("images dir");
+    fs::write(output_dir.join(".config"), "BR2_TARGET_ROOTFS_TAR=y\n").expect("config");
+    fs::write(output_dir.join("images/rootfs.tar"), "rootfs").expect("image");
+    let image = ImageSpec {
+        definition: ImageDefinition::Buildroot(BuildrootImageSpec {
+            expected_images: vec![BuildrootExpectedImageSpec {
+                name: "rootfs.tar".into(),
+                format: BuildrootExpectedImageFormatSpec::Tar,
+                required: true,
+            }],
+            ..BuildrootImageSpec::default()
+        }),
+        feed: gaia_spec::ImageFeedSpec::default(),
+        output: ImageOutputSpec::default(),
+        assembly: None,
+    };
+    let before = buildroot_state_digest(&image, &output_dir);
+
+    fs::create_dir_all(output_dir.join("build/package")).expect("build dir");
+    fs::write(output_dir.join("build/package/stamp"), "changed").expect("stamp");
+
+    assert_eq!(before, buildroot_state_digest(&image, &output_dir));
 }
 
 #[test]
@@ -180,6 +480,7 @@ fn refresh_buildroot_images_after_feed_overlay_runs_target_post_image_for_non_ta
             archive_name: None,
             emit_report: true,
         },
+        assembly: None,
     };
 
     let messages = refresh_buildroot_images_after_feed_overlay(
@@ -430,6 +731,7 @@ fn refresh_buildroot_images_after_feed_overlay_skips_tar_only_outputs() {
             archive_name: None,
             emit_report: true,
         },
+        assembly: None,
     };
 
     let messages = refresh_buildroot_images_after_feed_overlay(
@@ -472,6 +774,7 @@ fn refresh_buildroot_images_after_feed_overlay_reports_target_post_image_failure
             archive_name: None,
             emit_report: true,
         },
+        assembly: None,
     };
 
     let error = refresh_buildroot_images_after_feed_overlay(

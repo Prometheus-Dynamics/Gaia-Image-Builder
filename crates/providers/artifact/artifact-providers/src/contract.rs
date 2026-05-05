@@ -40,6 +40,8 @@ impl ArtifactExecutionContract {
             retry_backoff_strategy: RetryBackoffStrategySpec::Fixed,
             timeout_seconds: 300,
             local_jobs: 0,
+            download_dir: None,
+            ccache: Default::default(),
         }
     }
 

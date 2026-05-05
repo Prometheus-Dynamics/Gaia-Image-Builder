@@ -54,6 +54,7 @@ fn starting_point_tar_rootfs_accepts_image_feed_overlay() {
             archive_name: Some("overlay.tar".into()),
             emit_report: true,
         },
+        assembly: None,
     };
     spec.sources.push(SourceSpec::new(
         "base-rootfs",
@@ -170,6 +171,7 @@ fn starting_point_rejects_overlay_on_opaque_file_rootfs() {
             archive_name: Some("opaque.tar".into()),
             emit_report: true,
         },
+        assembly: None,
     };
 
     let output = ImageOutputContract {

@@ -167,6 +167,11 @@ pub fn materialize_reusable_outputs(spec: &gaia_spec::ResolvedBuildSpec) {
     fs::create_dir_all(&image_dir).expect("image output dir");
     fs::write(image_dir.join("image-provider.txt"), "image").expect("image marker");
     fs::write(image_dir.join("default-2.0.0.tar"), "archive").expect("image archive");
+    fs::write(
+        image_dir.join(".gaia-image-state.txt"),
+        "provider=buildroot\nemit_report=true\narchive=default-2.0.0.tar\nreused=false\n",
+    )
+    .expect("image provider state");
     let runtime_dir = Path::new(&spec.workspace.out_dir).join(".gaia/runtime");
     fs::create_dir_all(&runtime_dir).expect("runtime dir");
     fs::write(
@@ -223,6 +228,54 @@ pub fn reuse_state_for_ids(
                     .map(|signature| (operation.id.as_str().to_string(), signature))
             })
             .collect(),
+    }
+}
+
+pub fn assembly_tree(id: &str, path: impl ToString) -> gaia_spec::AssemblyTreeSpec {
+    gaia_spec::AssemblyTreeSpec {
+        id: id.into(),
+        path: path.to_string().into(),
+    }
+}
+
+pub fn assembly_file(tree: &str, src: impl ToString, dest: &str) -> gaia_spec::AssemblyFileSpec {
+    gaia_spec::AssemblyFileSpec {
+        tree: tree.into(),
+        src: Some(src.to_string().into()),
+        src_glob: None,
+        dest: dest.into(),
+        mode: None,
+        optional: false,
+        preserve_symlink: false,
+    }
+}
+
+pub fn assembly_transform(
+    kind: gaia_spec::AssemblyTransformKindSpec,
+    src: impl ToString,
+    dest: impl ToString,
+) -> gaia_spec::AssemblyTransformSpec {
+    gaia_spec::AssemblyTransformSpec {
+        kind,
+        src: Some(src.to_string().into()),
+        dest: dest.to_string().into(),
+        deterministic: true,
+    }
+}
+
+pub fn assembly_filesystem(
+    id: &str,
+    kind: gaia_spec::AssemblyFilesystemKindSpec,
+    source_tree: &str,
+    output: impl ToString,
+) -> gaia_spec::AssemblyFilesystemSpec {
+    gaia_spec::AssemblyFilesystemSpec {
+        id: id.into(),
+        kind,
+        source_tree: source_tree.into(),
+        output: output.to_string().into(),
+        size: None,
+        deterministic: kind != gaia_spec::AssemblyFilesystemKindSpec::Vfat,
     }
 }
 

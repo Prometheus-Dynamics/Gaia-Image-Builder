@@ -127,6 +127,7 @@ pub struct ProvenanceReport {
     pub image_contract: BTreeMap<String, String>,
     pub image_output_collect_dirs: Vec<String>,
     pub image_output_archives: Vec<String>,
+    pub output_hygiene_warnings: Vec<OutputHygieneWarningRecord>,
     pub source_backend_states: Vec<BackendStateRecord>,
     pub artifact_backend_states: Vec<BackendStateRecord>,
     pub image_backend_states: Vec<BackendStateRecord>,
@@ -134,6 +135,7 @@ pub struct ProvenanceReport {
     pub stage_file_backend_states: Vec<BackendStateRecord>,
     pub stage_env_set_backend_states: Vec<BackendStateRecord>,
     pub stage_service_backend_states: Vec<BackendStateRecord>,
+    pub image_assembly_backend_states: Vec<BackendStateRecord>,
     pub checkpoint_backend_states: Vec<BackendStateRecord>,
     pub completed_operation_ids: Vec<String>,
 }
@@ -172,7 +174,18 @@ pub struct ManifestReport {
     pub stage_env_sets: Vec<ManifestStageEnvSetRecord>,
     pub stage_services: Vec<ManifestStageServiceRecord>,
     pub image_outputs: Vec<ManifestImageOutputRecord>,
+    pub image_assembly: Vec<BackendStateRecord>,
+    pub output_hygiene_warnings: Vec<OutputHygieneWarningRecord>,
     pub checkpoints: Vec<ManifestCheckpointRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OutputHygieneWarningRecord {
+    pub code: String,
+    pub directory: String,
+    pub path: String,
+    pub message: String,
+    pub size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

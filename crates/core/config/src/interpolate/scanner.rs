@@ -573,6 +573,15 @@ pub(crate) fn collect_unresolved_tokens(raw: &RawBuildConfig) -> Vec<RawUnresolv
             &mut unresolved,
         );
     }
+    if let Some(names) = &raw.reporting.output_hygiene.transient_dir_names {
+        for (index, value) in names.iter().enumerate() {
+            scan_string(
+                &format!("reporting.output_hygiene.transient_dir_names[{index}]"),
+                value,
+                &mut unresolved,
+            );
+        }
+    }
     if let Some(hook) = &raw.reporting.post_build {
         scan_string("reporting.post_build.script", &hook.script, &mut unresolved);
     }

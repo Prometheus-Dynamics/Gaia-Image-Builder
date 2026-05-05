@@ -45,7 +45,7 @@ fn generates_report_bundle_with_reuse_counts() {
 
     let report = generate_report(&spec, &validation, &plan, &outcome);
 
-    assert_eq!(report.summary.reused_operations, 9);
+    assert_eq!(report.summary.reused_operations, 8);
     assert_eq!(report.summary.checkpoint_built_count, 0);
     assert_eq!(report.summary.checkpoint_reused_count, 1);
     assert!(report.rebuild_reasons.len() >= 2);

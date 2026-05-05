@@ -4,10 +4,14 @@ use gaia_plan::{
     OperationReuse, ReuseState, operation_output_signature, plan_build,
     plan_build_with_reuse_state, spec_fingerprint,
 };
+use gaia_spec::{
+    AssemblyDiskPartitionSpec, AssemblyDiskSpec, AssemblyFileSpec, AssemblyPartitionTableSpec,
+    AssemblyTreeSpec, ImageAssemblySpec,
+};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
-use support::{provider_catalogs, test_spec};
+use support::{provider_catalogs, test_spec, test_spec_with_root, unique_dir};
 
 #[test]
 fn default_plan_reuses_operations_when_state_matches() {
@@ -315,6 +319,152 @@ fn plan_rebuilds_when_runtime_state_files_are_missing_even_if_other_outputs_exis
                 )
         }));
     }
+}
+
+#[test]
+fn plan_rebuilds_assembly_when_runtime_state_is_missing_even_if_outputs_exist() {
+    let mut spec = test_spec();
+    let build_dir = PathBuf::from(&spec.workspace.build_dir);
+    let source_dir = build_dir.join("assembly-source");
+    let tree_dir = build_dir.join("assembly-tree");
+    fs::create_dir_all(&source_dir).expect("source dir");
+    fs::write(source_dir.join("config.txt"), "config").expect("source file");
+    fs::create_dir_all(&tree_dir).expect("tree dir");
+    fs::write(tree_dir.join("config.txt"), "stale").expect("stale assembly output");
+    spec.image.assembly = Some(ImageAssemblySpec {
+        trees: vec![AssemblyTreeSpec {
+            id: "boot".into(),
+            path: tree_dir.display().to_string().into(),
+        }],
+        files: vec![AssemblyFileSpec {
+            tree: "boot".into(),
+            src: Some(source_dir.join("config.txt").display().to_string().into()),
+            src_glob: None,
+            dest: "config.txt".into(),
+            mode: None,
+            optional: false,
+            preserve_symlink: false,
+        }],
+        ..ImageAssemblySpec::default()
+    });
+    let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
+    let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
+    let reused_ids = ["image:assembly"];
+    let state = ReuseState {
+        spec_fingerprint: spec_fingerprint(&spec),
+        completed_operation_ids: reused_ids
+            .into_iter()
+            .map(str::to_string)
+            .collect::<BTreeSet<_>>(),
+        operation_fingerprints: baseline_plan
+            .operations
+            .iter()
+            .filter(|operation| reused_ids.contains(&operation.id.as_str()))
+            .map(|operation| (operation.id.as_str().to_string(), operation.fingerprint))
+            .collect(),
+        operation_output_signatures: baseline_plan
+            .operations
+            .iter()
+            .filter(|operation| reused_ids.contains(&operation.id.as_str()))
+            .filter_map(|operation| {
+                operation_output_signature(&spec, &operation.kind)
+                    .map(|signature| (operation.id.as_str().to_string(), signature))
+            })
+            .collect(),
+    };
+
+    let plan = plan_build_with_reuse_state(
+        &spec,
+        &source_catalog,
+        &artifact_catalog,
+        &image_catalog,
+        Some(&state),
+    );
+
+    assert!(plan.operations.iter().any(|operation| {
+        operation.id.as_str() == "image:assembly"
+            && matches!(
+                &operation.reuse,
+                OperationReuse::Execute(reason) if reason.code == "materialized_output_missing"
+            )
+    }));
+}
+
+#[test]
+fn plan_rebuilds_assembly_when_direct_partition_image_changes() {
+    let root_dir = unique_dir("gaia-plan-assembly-reuse-partition-root");
+    fs::create_dir_all(&root_dir).expect("root dir");
+    let mut spec = test_spec_with_root(root_dir);
+    let partition_image = gaia_spec::resolve_workspace_path(&spec.workspace, "@assets/rootfs.img")
+        .expect("asset path");
+    fs::create_dir_all(partition_image.parent().expect("asset parent")).expect("assets dir");
+    fs::write(&partition_image, "one").expect("partition image");
+    let runtime_dir = PathBuf::from(&spec.workspace.out_dir).join(".gaia/runtime");
+    fs::create_dir_all(&runtime_dir).expect("runtime dir");
+    fs::write(
+        runtime_dir.join("image-assembly.state"),
+        "kind=image-assembly\ncompleted_disk_count=1\n",
+    )
+    .expect("assembly runtime state");
+    spec.image.assembly = Some(ImageAssemblySpec {
+        disks: vec![AssemblyDiskSpec {
+            id: "sdcard".into(),
+            output: "$assembly.out/sdcard.img".into(),
+            partition_table: AssemblyPartitionTableSpec::Mbr,
+            signature: None,
+            signature_text: None,
+            partitions: vec![AssemblyDiskPartitionSpec {
+                name: "rootfs".into(),
+                kind: None,
+                type_alias: Some("linux".into()),
+                bootable: false,
+                image: "@assets/rootfs.img".into(),
+            }],
+        }],
+        ..ImageAssemblySpec::default()
+    });
+    let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
+    let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
+    let reused_ids = ["image:assembly"];
+    let state = ReuseState {
+        spec_fingerprint: spec_fingerprint(&spec),
+        completed_operation_ids: reused_ids
+            .into_iter()
+            .map(str::to_string)
+            .collect::<BTreeSet<_>>(),
+        operation_fingerprints: baseline_plan
+            .operations
+            .iter()
+            .filter(|operation| reused_ids.contains(&operation.id.as_str()))
+            .map(|operation| (operation.id.as_str().to_string(), operation.fingerprint))
+            .collect(),
+        operation_output_signatures: baseline_plan
+            .operations
+            .iter()
+            .filter(|operation| reused_ids.contains(&operation.id.as_str()))
+            .filter_map(|operation| {
+                operation_output_signature(&spec, &operation.kind)
+                    .map(|signature| (operation.id.as_str().to_string(), signature))
+            })
+            .collect(),
+    };
+
+    fs::write(&partition_image, "two").expect("updated partition image");
+    let plan = plan_build_with_reuse_state(
+        &spec,
+        &source_catalog,
+        &artifact_catalog,
+        &image_catalog,
+        Some(&state),
+    );
+
+    assert!(plan.operations.iter().any(|operation| {
+        operation.id.as_str() == "image:assembly"
+            && matches!(
+                &operation.reuse,
+                OperationReuse::Execute(reason) if reason.code == "operation_fingerprint_mismatch"
+            )
+    }));
 }
 
 fn materialize_reusable_test_outputs(spec: &gaia_spec::ResolvedBuildSpec) {

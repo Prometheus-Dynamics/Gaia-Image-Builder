@@ -15,6 +15,7 @@ RUN apt-get update \
         git \
         gzip \
         make \
+        mtools \
         patch \
         perl \
         python3 \

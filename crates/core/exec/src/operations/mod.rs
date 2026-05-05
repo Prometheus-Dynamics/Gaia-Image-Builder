@@ -1,5 +1,7 @@
+mod assembly;
 mod helpers;
 
+use assembly::*;
 use gaia_artifact_providers::ArtifactExecutionContract;
 use gaia_plan::{OperationId, OperationKind, OperationReuse, PlannedOperation};
 use gaia_spec::{ArtifactDefinition, ResolvedBuildSpec, RollbackDomain};
@@ -485,6 +487,41 @@ pub fn dispatch_operation(
                     image_cleanup,
                 )
                 .with_image_result(image_result)
+            }
+            OperationKind::AssembleImage => {
+                let summary = match stage_image_assembly(spec, &operation.id, cancel_check.clone())
+                {
+                    Ok(summary) => summary,
+                    Err(error) => {
+                        return failure_with_cleanup_and_tail(
+                            operation.id.clone(),
+                            "assembly_execution_failed",
+                            error.kind,
+                            error.message.clone(),
+                            output_tail(&[error.message], spec),
+                            RollbackDomain::Images,
+                            image_assembly_cleanup_paths(spec),
+                        );
+                    }
+                };
+                let state_path = assembly_state_path(spec);
+                if let Err(message) = write_runtime_state(state_path.clone(), &summary.state) {
+                    return failure_with_cleanup(
+                        operation.id.clone(),
+                        "assembly_runtime_state_failed",
+                        ExecutionErrorKind::RuntimeState,
+                        message,
+                        RollbackDomain::Images,
+                        image_assembly_cleanup_paths(spec),
+                    );
+                }
+                success_from_messages(
+                    operation.id.clone(),
+                    summary.messages,
+                    "assembled image files".into(),
+                    RollbackDomain::Images,
+                    [summary.cleanup_paths, vec![assembly_state_path(spec)]].concat(),
+                )
             }
             OperationKind::CaptureCheckpoint { checkpoint_id } => {
                 let checkpoint = spec

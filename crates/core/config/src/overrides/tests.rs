@@ -79,6 +79,9 @@ fn documented_override_keys_parse_as_typed_keys() {
         "policy.providers.buildroot.retry_attempts",
         "policy.providers.buildroot.timeout_seconds",
         "policy.providers.buildroot.local_jobs",
+        "policy.providers.buildroot.download_dir",
+        "policy.providers.buildroot.ccache.enabled",
+        "policy.providers.buildroot.ccache.dir",
         "policy.providers.starting_point.retry_attempts",
         "policy.providers.starting_point.timeout_seconds",
     ] {

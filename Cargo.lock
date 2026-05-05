@@ -517,8 +517,10 @@ dependencies = [
 name = "gaia-config"
 version = "2.0.0"
 dependencies = [
+ "gaia-process",
  "gaia-spec",
  "serde",
+ "serde_json",
  "toml",
  "tracing",
 ]
@@ -552,6 +554,7 @@ dependencies = [
  "gaia-process",
  "gaia-source-providers",
  "gaia-spec",
+ "sha2 0.11.0",
  "tracing",
 ]
 
@@ -592,6 +595,7 @@ dependencies = [
  "gaia-config",
  "gaia-default-providers",
  "gaia-image-providers",
+ "gaia-process",
  "gaia-source-providers",
  "gaia-spec",
  "tracing",

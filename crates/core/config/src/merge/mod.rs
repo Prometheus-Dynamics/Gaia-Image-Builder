@@ -1,14 +1,17 @@
+mod image;
+
 use std::collections::BTreeMap;
 
 use crate::raw::{
     RawBuildConfig, RawBuildrootExpectedImageConfig, RawExecutionPolicyConfig,
-    RawFailurePolicyConfig, RawGitProviderPolicyConfig, RawImageConfig, RawImageDefinition,
-    RawImageFeedConfig, RawImageOutputConfig, RawInputOptionConfig, RawInterpolationConfig,
-    RawOutputRetentionPolicyConfig, RawPostBuildHookConfig, RawPresetConfig, RawProductConfig,
-    RawProvenanceConfig, RawProvenanceIdentityConfig, RawProviderPoliciesConfig,
-    RawReportingConfig, RawReportingMaskingConfig, RawRustProviderPolicyConfig, RawStageConfig,
-    RawWhenConfig, RawWhenImageKind, RawWorkspaceNamedPathConfig,
+    RawFailurePolicyConfig, RawGitProviderPolicyConfig, RawImageDefinition, RawInputOptionConfig,
+    RawInterpolationConfig, RawOutputHygieneConfig, RawOutputRetentionPolicyConfig,
+    RawPostBuildHookConfig, RawPresetConfig, RawProductConfig, RawProvenanceConfig,
+    RawProvenanceIdentityConfig, RawProviderPoliciesConfig, RawReportingConfig,
+    RawReportingMaskingConfig, RawRustProviderPolicyConfig, RawStageConfig, RawWhenConfig,
+    RawWhenImageKind, RawWorkspaceNamedPathConfig,
 };
+use image::merge_image;
 
 pub fn merge_config(raw: RawBuildConfig) -> RawBuildConfig {
     let mut merged = raw
@@ -302,197 +305,26 @@ fn merge_stage(base: RawStageConfig, overlay: RawStageConfig) -> RawStageConfig 
     }
 }
 
-fn merge_image(base: RawImageConfig, overlay: RawImageConfig) -> RawImageConfig {
-    RawImageConfig {
-        definition: merge_image_definition(base.definition, overlay.definition),
-        feed: RawImageFeedConfig {
-            install_entries: merge_string_lists(
-                base.feed.install_entries,
-                overlay.feed.install_entries,
-            ),
-            stage_files: merge_string_lists(base.feed.stage_files, overlay.feed.stage_files),
-            stage_env_sets: merge_string_lists(
-                base.feed.stage_env_sets,
-                overlay.feed.stage_env_sets,
-            ),
-            stage_services: merge_string_lists(
-                base.feed.stage_services,
-                overlay.feed.stage_services,
-            ),
-        },
-        output: RawImageOutputConfig {
-            collect_dir: overlay.output.collect_dir.or(base.output.collect_dir),
-            archive_name: overlay.output.archive_name.or(base.output.archive_name),
-            emit_report: base.output.emit_report || overlay.output.emit_report,
-        },
-    }
-}
-
-fn merge_image_definition(
-    base: RawImageDefinition,
-    overlay: RawImageDefinition,
-) -> RawImageDefinition {
-    match (base, overlay) {
-        (
-            RawImageDefinition::Buildroot {
-                source: base_source,
-                defconfig: base_defconfig,
-                defconfig_path: base_defconfig_path,
-                allow_fallback: base_allow_fallback,
-                config_fragments: base_config_fragments,
-                config_overrides: base_config_overrides,
-                external_tree: base_external_tree,
-                external_tree_mode: base_external_tree_mode,
-                expected_images: base_expected_images,
-            },
-            RawImageDefinition::Buildroot {
-                source: overlay_source,
-                defconfig: overlay_defconfig,
-                defconfig_path: overlay_defconfig_path,
-                allow_fallback: overlay_allow_fallback,
-                config_fragments: overlay_config_fragments,
-                config_overrides: overlay_config_overrides,
-                external_tree: overlay_external_tree,
-                external_tree_mode: overlay_external_tree_mode,
-                expected_images: overlay_expected_images,
-            },
-        ) => RawImageDefinition::Buildroot {
-            source: overlay_source.or(base_source),
-            defconfig: overlay_defconfig.or(base_defconfig),
-            defconfig_path: overlay_defconfig_path.or(base_defconfig_path),
-            allow_fallback: base_allow_fallback || overlay_allow_fallback,
-            config_fragments: merge_string_lists(base_config_fragments, overlay_config_fragments),
-            config_overrides: merge_override_pairs(base_config_overrides, overlay_config_overrides),
-            external_tree: overlay_external_tree.or(base_external_tree),
-            external_tree_mode: overlay_external_tree_mode.or(base_external_tree_mode),
-            expected_images: merge_expected_images(base_expected_images, overlay_expected_images),
-        },
-        (
-            RawImageDefinition::StartingPoint {
-                source: base_source,
-                source_path: base_source_path,
-                rootfs_path: base_rootfs_path,
-                image_partition: base_image_partition,
-                image_read_only: base_image_read_only,
-                packages: base_packages,
-                rootfs_validation_mode: base_rootfs_validation_mode,
-                output_mode: base_output_mode,
-            },
-            RawImageDefinition::StartingPoint {
-                source: overlay_source,
-                source_path: overlay_source_path,
-                rootfs_path: overlay_rootfs_path,
-                image_partition: overlay_image_partition,
-                image_read_only: overlay_image_read_only,
-                packages: overlay_packages,
-                rootfs_validation_mode: overlay_rootfs_validation_mode,
-                output_mode: overlay_output_mode,
-            },
-        ) => RawImageDefinition::StartingPoint {
-            source: overlay_source.or(base_source),
-            source_path: overlay_source_path.or(base_source_path),
-            rootfs_path: if overlay_rootfs_path.trim().is_empty() {
-                base_rootfs_path
-            } else {
-                overlay_rootfs_path
-            },
-            image_partition: overlay_image_partition.or(base_image_partition),
-            image_read_only: overlay_image_read_only && base_image_read_only,
-            packages: crate::raw::RawStartingPointPackagesConfig {
-                enabled: base_packages.enabled || overlay_packages.enabled,
-                execute: base_packages.execute || overlay_packages.execute,
-                manager: overlay_packages.manager.or(base_packages.manager),
-                release_version: overlay_packages
-                    .release_version
-                    .or(base_packages.release_version),
-                allow_major_upgrade: base_packages.allow_major_upgrade
-                    || overlay_packages.allow_major_upgrade,
-                update: base_packages.update || overlay_packages.update,
-                dist_upgrade: base_packages.dist_upgrade || overlay_packages.dist_upgrade,
-                install: if overlay_packages.install.is_empty() {
-                    base_packages.install
-                } else {
-                    overlay_packages.install
-                },
-                remove: if overlay_packages.remove.is_empty() {
-                    base_packages.remove
-                } else {
-                    overlay_packages.remove
-                },
-                extra_args: if overlay_packages.extra_args.is_empty() {
-                    base_packages.extra_args
-                } else {
-                    overlay_packages.extra_args
-                },
-                os_release_path: overlay_packages
-                    .os_release_path
-                    .or(base_packages.os_release_path),
-            },
-            rootfs_validation_mode: overlay_rootfs_validation_mode.or(base_rootfs_validation_mode),
-            output_mode: overlay_output_mode.or(base_output_mode),
-        },
-        (
-            base_definition,
-            RawImageDefinition::Buildroot {
-                source: _,
-                defconfig: None,
-                defconfig_path: None,
-                allow_fallback: false,
-                config_fragments,
-                config_overrides,
-                external_tree: None,
-                external_tree_mode: None,
-                expected_images,
-            },
-        ) if expected_images.is_empty()
-            && config_fragments.is_empty()
-            && config_overrides.is_empty() =>
-        {
-            base_definition
-        }
-        (base_definition, overlay_definition) => match overlay_definition {
-            RawImageDefinition::StartingPoint {
-                source,
-                source_path,
-                rootfs_path,
-                image_partition,
-                packages,
-                rootfs_validation_mode,
-                output_mode,
-                image_read_only,
-            } if source.is_none()
-                && source_path.is_none()
-                && rootfs_path.trim().is_empty()
-                && image_partition.is_none()
-                && rootfs_validation_mode.is_none()
-                && output_mode.is_none()
-                && image_read_only
-                && !packages.enabled
-                && !packages.execute
-                && packages.manager.is_none()
-                && packages.release_version.is_none()
-                && !packages.allow_major_upgrade
-                && !packages.update
-                && !packages.dist_upgrade
-                && packages.install.is_empty()
-                && packages.remove.is_empty()
-                && packages.extra_args.is_empty()
-                && packages.os_release_path.is_none() =>
-            {
-                base_definition
-            }
-            overlay_definition => overlay_definition,
-        },
-    }
-}
-
 fn merge_reporting(base: RawReportingConfig, overlay: RawReportingConfig) -> RawReportingConfig {
     RawReportingConfig {
         summary: base.summary || overlay.summary,
         provenance: base.provenance || overlay.provenance,
         manifest: base.manifest || overlay.manifest,
         masking: merge_reporting_masking(base.masking, overlay.masking),
+        output_hygiene: merge_output_hygiene(base.output_hygiene, overlay.output_hygiene),
         post_build: merge_reporting_post_build(base.post_build, overlay.post_build),
+    }
+}
+
+fn merge_output_hygiene(
+    base: RawOutputHygieneConfig,
+    overlay: RawOutputHygieneConfig,
+) -> RawOutputHygieneConfig {
+    RawOutputHygieneConfig {
+        large_file_threshold_bytes: overlay
+            .large_file_threshold_bytes
+            .or(base.large_file_threshold_bytes),
+        transient_dir_names: overlay.transient_dir_names.or(base.transient_dir_names),
     }
 }
 
@@ -598,6 +430,11 @@ fn merge_command_policy(
         retry_backoff_strategy: overlay.retry_backoff_strategy,
         timeout_seconds: base.timeout_seconds.max(overlay.timeout_seconds),
         local_jobs: base.local_jobs.max(overlay.local_jobs),
+        download_dir: overlay.download_dir.or(base.download_dir),
+        ccache: crate::raw::RawBuildrootCcachePolicyConfig {
+            enabled: base.ccache.enabled || overlay.ccache.enabled,
+            dir: overlay.ccache.dir.or(base.ccache.dir),
+        },
     }
 }
 
@@ -690,7 +527,7 @@ fn merge_named_paths(
     merged.into_iter().collect()
 }
 
-fn merge_override_pairs(
+pub(super) fn merge_override_pairs(
     base: Vec<(String, String)>,
     overlay: Vec<(String, String)>,
 ) -> Vec<(String, String)> {
@@ -704,7 +541,7 @@ fn merge_override_pairs(
     merged.into_iter().collect()
 }
 
-fn merge_expected_images(
+pub(super) fn merge_expected_images(
     base: Vec<RawBuildrootExpectedImageConfig>,
     overlay: Vec<RawBuildrootExpectedImageConfig>,
 ) -> Vec<RawBuildrootExpectedImageConfig> {
@@ -718,7 +555,7 @@ fn merge_expected_images(
     merged.into_values().collect()
 }
 
-fn merge_string_lists(base: Vec<String>, overlay: Vec<String>) -> Vec<String> {
+pub(super) fn merge_string_lists(base: Vec<String>, overlay: Vec<String>) -> Vec<String> {
     let mut merged = Vec::new();
     for value in base.into_iter().chain(overlay) {
         if !merged.contains(&value) {
@@ -728,7 +565,7 @@ fn merge_string_lists(base: Vec<String>, overlay: Vec<String>) -> Vec<String> {
     merged
 }
 
-fn merge_by_key<T, K, F>(base: Vec<T>, overlay: Vec<T>, key: F) -> Vec<T>
+pub(super) fn merge_by_key<T, K, F>(base: Vec<T>, overlay: Vec<T>, key: F) -> Vec<T>
 where
     K: Ord,
     F: Fn(&T) -> K,
@@ -741,81 +578,4 @@ where
         merged.insert(key(&item), item);
     }
     merged.into_values().collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::merge_image_definition;
-    use crate::raw::{
-        RawBuildrootExpectedImageConfig, RawBuildrootExpectedImageFormat, RawImageDefinition,
-    };
-
-    #[test]
-    fn layered_buildroot_image_definition_composes_overrides_and_expected_images() {
-        let merged = merge_image_definition(
-            RawImageDefinition::Buildroot {
-                source: None,
-                defconfig: None,
-                defconfig_path: None,
-                allow_fallback: false,
-                config_fragments: vec!["storage.fragment".into()],
-                config_overrides: vec![
-                    ("BR2_TARGET_ROOTFS_EXT2".into(), "n".into()),
-                    ("BR2_TARGET_ROOTFS_SQUASHFS".into(), "y".into()),
-                ],
-                external_tree: None,
-                external_tree_mode: None,
-                expected_images: vec![RawBuildrootExpectedImageConfig {
-                    name: "rootfs.squashfs".into(),
-                    format: RawBuildrootExpectedImageFormat::Squashfs,
-                    required: true,
-                }],
-            },
-            RawImageDefinition::Buildroot {
-                source: None,
-                defconfig: Some("raspberrypicm5io_defconfig".into()),
-                defconfig_path: None,
-                allow_fallback: false,
-                config_fragments: vec!["target.fragment".into()],
-                config_overrides: vec![("BR2_ROOTFS_POST_IMAGE_SCRIPT".into(), "\"\"".into())],
-                external_tree: None,
-                external_tree_mode: None,
-                expected_images: vec![],
-            },
-        );
-
-        match merged {
-            RawImageDefinition::Buildroot {
-                defconfig,
-                config_fragments,
-                config_overrides,
-                expected_images,
-                ..
-            } => {
-                assert_eq!(defconfig.as_deref(), Some("raspberrypicm5io_defconfig"));
-                assert_eq!(
-                    config_fragments,
-                    vec![
-                        "storage.fragment".to_string(),
-                        "target.fragment".to_string()
-                    ]
-                );
-                assert_eq!(
-                    config_overrides,
-                    vec![
-                        (
-                            "BR2_ROOTFS_POST_IMAGE_SCRIPT".to_string(),
-                            "\"\"".to_string()
-                        ),
-                        ("BR2_TARGET_ROOTFS_EXT2".to_string(), "n".to_string()),
-                        ("BR2_TARGET_ROOTFS_SQUASHFS".to_string(), "y".to_string()),
-                    ]
-                );
-                assert_eq!(expected_images.len(), 1);
-                assert_eq!(expected_images[0].name, "rootfs.squashfs");
-                assert!(expected_images[0].required);
-            }
-            other => panic!("expected buildroot image, got {other:?}"),
-        }
-    }
 }

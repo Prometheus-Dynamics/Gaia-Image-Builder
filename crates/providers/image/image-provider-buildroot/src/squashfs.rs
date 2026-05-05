@@ -79,6 +79,8 @@ pub(crate) fn refresh_buildroot_post_image_direct(
     log_sink: Option<ProcessLogSink>,
     cancel_check: Option<ProcessCancelCheck>,
 ) -> Result<Option<Vec<String>>, ImageProviderError> {
+    let normalized_output_dir = normalize_path(output_dir);
+    let output_dir = normalized_output_dir.as_path();
     let config_path = output_dir.join(".config");
     let config = match fs::read_to_string(&config_path) {
         Ok(config) => config,
@@ -142,12 +144,28 @@ fn unquote_buildroot_value(value: &str) -> &str {
         .unwrap_or(value)
 }
 
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
+}
+
 pub(crate) fn refresh_buildroot_squashfs_images_direct(
     buildroot_dir: &Path,
     output_dir: &Path,
     execution: &ImageExecutionContext,
     policy: &ImageExecutionPolicy,
 ) -> Result<Option<Vec<String>>, ImageProviderError> {
+    let normalized_output_dir = normalize_path(output_dir);
+    let output_dir = normalized_output_dir.as_path();
     let rootfs_build_dir = output_dir.join("build/buildroot-fs/squashfs");
     let fakeroot_script = rootfs_build_dir.join("fakeroot");
     let staged_target_dir = rootfs_build_dir.join("target");

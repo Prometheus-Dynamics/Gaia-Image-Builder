@@ -7,10 +7,9 @@ impl<'a> TuiState<'a> {
             SetupItem::Branch => {
                 self.begin_edit(SetupEditField::Branch, self.current_branch_value())
             }
-            SetupItem::Target => {
-                self.begin_edit(SetupEditField::Target, self.current_target_value())
-            }
+            SetupItem::Target => self.cycle_target(1),
             SetupItem::Profile => self.cycle_profile(1),
+            SetupItem::Input(name) => self.activate_input(&name, 1),
             SetupItem::Jobs => self.begin_edit(SetupEditField::Jobs, self.current_jobs_value()),
             SetupItem::PickBuild => self.screen = Screen::Picker,
             SetupItem::Refresh => self.refresh(),
@@ -19,7 +18,10 @@ impl<'a> TuiState<'a> {
     }
 
     pub(crate) fn selected_setup_item(&self) -> SetupItem {
-        SetupItem::all()[self.setup_list.selected().unwrap_or(0)]
+        self.setup_items
+            .get(self.setup_list.selected().unwrap_or(0))
+            .cloned()
+            .unwrap_or(SetupItem::StartBuild)
     }
 
     pub(crate) fn selected_monitor_view(&self) -> MonitorView {
@@ -29,27 +31,28 @@ impl<'a> TuiState<'a> {
     pub(crate) fn next_setup_detail(&mut self) {
         match self.selected_setup_item() {
             SetupItem::Branch => self.cycle_branch_mode(1),
-            SetupItem::Target => {}
+            SetupItem::Target => self.cycle_target(1),
             SetupItem::Profile => self.cycle_profile(1),
+            SetupItem::Input(name) => self.activate_input(&name, 1),
             SetupItem::Jobs => self.cycle_jobs(1),
             SetupItem::Overview => self
                 .setup_list
-                .select(Some(index_of_setup_item(SetupItem::Selection))),
+                .select(Some(self.index_of_setup_item(&SetupItem::Selection))),
             SetupItem::Selection => self
                 .setup_list
-                .select(Some(index_of_setup_item(SetupItem::Validation))),
+                .select(Some(self.index_of_setup_item(&SetupItem::Validation))),
             SetupItem::Validation => self
                 .setup_list
-                .select(Some(index_of_setup_item(SetupItem::Plan))),
+                .select(Some(self.index_of_setup_item(&SetupItem::Plan))),
             SetupItem::Plan => self
                 .setup_list
-                .select(Some(index_of_setup_item(SetupItem::Reports))),
+                .select(Some(self.index_of_setup_item(&SetupItem::Reports))),
             SetupItem::Reports => self
                 .setup_list
-                .select(Some(index_of_setup_item(SetupItem::Spec))),
+                .select(Some(self.index_of_setup_item(&SetupItem::Spec))),
             SetupItem::Spec => self
                 .setup_list
-                .select(Some(index_of_setup_item(SetupItem::Overview))),
+                .select(Some(self.index_of_setup_item(&SetupItem::Overview))),
             _ => {}
         }
         self.detail_scroll = 0;
@@ -58,27 +61,28 @@ impl<'a> TuiState<'a> {
     pub(crate) fn prev_setup_detail(&mut self) {
         match self.selected_setup_item() {
             SetupItem::Branch => self.cycle_branch_mode(-1),
-            SetupItem::Target => {}
+            SetupItem::Target => self.cycle_target(-1),
             SetupItem::Profile => self.cycle_profile(-1),
+            SetupItem::Input(name) => self.activate_input(&name, -1),
             SetupItem::Jobs => self.cycle_jobs(-1),
             SetupItem::Overview => self
                 .setup_list
-                .select(Some(index_of_setup_item(SetupItem::Spec))),
+                .select(Some(self.index_of_setup_item(&SetupItem::Spec))),
             SetupItem::Selection => self
                 .setup_list
-                .select(Some(index_of_setup_item(SetupItem::Overview))),
+                .select(Some(self.index_of_setup_item(&SetupItem::Overview))),
             SetupItem::Validation => self
                 .setup_list
-                .select(Some(index_of_setup_item(SetupItem::Selection))),
+                .select(Some(self.index_of_setup_item(&SetupItem::Selection))),
             SetupItem::Plan => self
                 .setup_list
-                .select(Some(index_of_setup_item(SetupItem::Validation))),
+                .select(Some(self.index_of_setup_item(&SetupItem::Validation))),
             SetupItem::Reports => self
                 .setup_list
-                .select(Some(index_of_setup_item(SetupItem::Plan))),
+                .select(Some(self.index_of_setup_item(&SetupItem::Plan))),
             SetupItem::Spec => self
                 .setup_list
-                .select(Some(index_of_setup_item(SetupItem::Reports))),
+                .select(Some(self.index_of_setup_item(&SetupItem::Reports))),
             _ => {}
         }
         self.detail_scroll = 0;
@@ -101,7 +105,7 @@ impl<'a> TuiState<'a> {
     }
 
     pub(crate) fn move_setup_down(&mut self) {
-        let total = SetupItem::all().len();
+        let total = self.setup_items.len();
         let current = self.setup_list.selected().unwrap_or(0);
         self.setup_list.select(Some((current + 1).min(total - 1)));
         self.detail_scroll = 0;
@@ -130,9 +134,13 @@ impl<'a> TuiState<'a> {
                 self.set_or_clear_override("build.branch", &value);
                 self.request_refresh(format!("branch set to {}", self.current_branch_value()));
             }
-            SetupEditField::Target => {
-                self.set_or_clear_override("input.target", &value);
-                self.request_refresh(format!("target set to {}", self.current_target_value()));
+            SetupEditField::Input(name) => {
+                self.set_input_override(&name, &value);
+                self.request_refresh(format!(
+                    "{} set to {}",
+                    name,
+                    self.current_input_value(&name)
+                ));
             }
             SetupEditField::Jobs => {
                 if value.parse::<u32>().is_ok() {
@@ -230,6 +238,34 @@ impl<'a> TuiState<'a> {
             .unwrap_or_default()
     }
 
+    pub(crate) fn current_input_value(&self, name: &str) -> String {
+        let input_key = format!("input.{name}");
+        self.options
+            .explicit_overrides
+            .iter()
+            .find(|(key, _)| key == &input_key)
+            .map(|(_, value)| value.clone())
+            .or_else(|| {
+                self.spec.as_ref().and_then(|spec| {
+                    spec.selection
+                        .selected_inputs
+                        .iter()
+                        .find(|(selected_name, _)| selected_name == name)
+                        .map(|(_, value)| value.clone())
+                })
+            })
+            .or_else(|| {
+                self.spec.as_ref().and_then(|spec| {
+                    spec.inputs
+                        .declared
+                        .iter()
+                        .find(|input| input.name == name)
+                        .and_then(|input| input.default.clone())
+                })
+            })
+            .unwrap_or_default()
+    }
+
     pub(crate) fn current_jobs_value(&self) -> String {
         self.options
             .explicit_overrides
@@ -282,13 +318,7 @@ impl<'a> TuiState<'a> {
     }
 
     pub(crate) fn cycle_profile(&mut self, direction: i32) {
-        let Some(choices) = self.spec.as_ref().and_then(|spec| {
-            spec.inputs
-                .declared
-                .iter()
-                .find(|input| input.name == "profile")
-                .map(|input| input.choices.clone())
-        }) else {
+        let Some(choices) = self.input_choices("profile") else {
             self.set_status("profile input is not declared");
             return;
         };
@@ -308,6 +338,102 @@ impl<'a> TuiState<'a> {
         self.request_refresh(format!("profile set to {}", self.current_profile_value()));
     }
 
+    pub(crate) fn cycle_target(&mut self, direction: i32) {
+        let Some(choices) = self.input_choices("target") else {
+            self.set_status("target input is not declared");
+            return;
+        };
+        if choices.is_empty() {
+            self.set_status("target has no choices to cycle");
+            return;
+        }
+        let current = self.current_target_value();
+        let current_index = choices
+            .iter()
+            .position(|choice| choice == &current)
+            .unwrap_or(0);
+        let len = choices.len() as i32;
+        let next = (current_index as i32 + direction).rem_euclid(len) as usize;
+        self.set_or_clear_override("input.target", &choices[next]);
+        self.set_or_clear_override("build.target", &choices[next]);
+        self.request_refresh(format!("target set to {}", self.current_target_value()));
+    }
+
+    pub(crate) fn activate_input(&mut self, name: &str, direction: i32) {
+        let Some(input) = self.input_option(name) else {
+            self.set_status(format!("input '{name}' is not declared"));
+            return;
+        };
+        match input.kind {
+            gaia_spec::InputKindSpec::Enum => self.cycle_input_choice(name, direction),
+            gaia_spec::InputKindSpec::Boolean => self.toggle_boolean_input(name),
+            _ => self.begin_edit(
+                SetupEditField::Input(name.to_string()),
+                self.current_input_value(name),
+            ),
+        }
+    }
+
+    fn cycle_input_choice(&mut self, name: &str, direction: i32) {
+        let Some(choices) = self.input_choices(name) else {
+            self.set_status(format!("input '{name}' is not declared"));
+            return;
+        };
+        if choices.is_empty() {
+            self.set_status(format!("input '{name}' has no choices to cycle"));
+            return;
+        }
+        let current = self.current_input_value(name);
+        let current_index = choices
+            .iter()
+            .position(|choice| choice == &current)
+            .unwrap_or(0);
+        let len = choices.len() as i32;
+        let next = (current_index as i32 + direction).rem_euclid(len) as usize;
+        self.set_input_override(name, &choices[next]);
+        self.request_refresh(format!("{name} set to {}", self.current_input_value(name)));
+    }
+
+    fn toggle_boolean_input(&mut self, name: &str) {
+        let current = self.current_input_value(name);
+        let next = if current.eq_ignore_ascii_case("true") {
+            "false"
+        } else {
+            "true"
+        };
+        self.set_input_override(name, next);
+        self.request_refresh(format!("{name} set to {}", self.current_input_value(name)));
+    }
+
+    fn set_input_override(&mut self, name: &str, value: &str) {
+        self.set_or_clear_override(&format!("input.{name}"), value);
+        match name {
+            "target" => self.set_or_clear_override("build.target", value),
+            "profile" => self.set_or_clear_override("build.profile", value),
+            _ => {}
+        }
+    }
+
+    fn input_option(&self, name: &str) -> Option<gaia_spec::InputOptionSpec> {
+        self.spec.as_ref().and_then(|spec| {
+            spec.inputs
+                .declared
+                .iter()
+                .find(|input| input.name == name)
+                .cloned()
+        })
+    }
+
+    fn input_choices(&self, name: &str) -> Option<Vec<String>> {
+        self.spec.as_ref().and_then(|spec| {
+            spec.inputs
+                .declared
+                .iter()
+                .find(|input| input.name == name)
+                .map(|input| input.choices.clone())
+        })
+    }
+
     pub(crate) fn cycle_jobs(&mut self, direction: i32) {
         let steps = [0u32, 1, 2, 4, 8, 12, 16];
         let current = self.current_jobs_value().parse::<u32>().unwrap_or(0);
@@ -325,9 +451,17 @@ impl<'a> TuiState<'a> {
             SetupItem::Branch => format!("Branch: {}", self.current_branch_value()),
             SetupItem::Target => format!("Target: {}", self.current_target_value()),
             SetupItem::Profile => format!("Profile: {}", self.current_profile_value()),
+            SetupItem::Input(name) => format!("{name}: {}", self.current_input_value(&name)),
             SetupItem::Jobs => format!("Jobs: {}", self.current_jobs_label()),
             _ => item.title().to_string(),
         }
+    }
+
+    pub(crate) fn index_of_setup_item(&self, item: &SetupItem) -> usize {
+        self.setup_items
+            .iter()
+            .position(|candidate| candidate == item)
+            .unwrap_or(0)
     }
 
     pub(crate) fn move_operation_down(&mut self) {

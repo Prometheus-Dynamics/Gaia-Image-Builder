@@ -3,6 +3,7 @@ mod checkpoints;
 mod core;
 mod diagnostics;
 mod image;
+mod image_assembly;
 mod inputs;
 mod install_stage;
 mod model;

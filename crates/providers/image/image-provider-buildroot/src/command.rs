@@ -142,6 +142,54 @@ pub(crate) fn command_output_with_timeout(
     })
 }
 
+pub(crate) struct CommandStdoutToFileRequest<'a> {
+    pub(crate) command: &'a mut Command,
+    pub(crate) output_path: &'a Path,
+    pub(crate) execution: &'a ImageExecutionContext,
+    pub(crate) timeout: Duration,
+    pub(crate) label: &'a str,
+    pub(crate) retention: ProcessOutputRetention,
+    pub(crate) log_sink: Option<ProcessLogSink>,
+    pub(crate) cancel_check: Option<ProcessCancelCheck>,
+}
+
+pub(crate) fn command_stdout_to_file_with_timeout(
+    request: CommandStdoutToFileRequest<'_>,
+) -> Result<Output, ImageProviderError> {
+    let CommandStdoutToFileRequest {
+        command,
+        output_path,
+        execution,
+        timeout,
+        label,
+        retention,
+        log_sink,
+        cancel_check,
+    } = request;
+    let label = label.to_string();
+    let wrapped_sink = log_sink.map(|sink| label_process_log_sink(label.clone(), sink));
+    let mut exec_command = command_for_execution(command, execution)?;
+    run_command_stdout_to_file_with_timeout_and_retention(
+        &mut exec_command,
+        output_path,
+        timeout,
+        &label,
+        retention,
+        wrapped_sink,
+        cancel_check,
+    )
+    .map(|result| result.output)
+    .map_err(move |error| {
+        let kind = match error.kind {
+            ProcessRunErrorKind::ToolStart => ImageProviderErrorKind::ToolStart,
+            ProcessRunErrorKind::Timeout => ImageProviderErrorKind::Timeout,
+            ProcessRunErrorKind::Cancelled => ImageProviderErrorKind::Cancelled,
+            ProcessRunErrorKind::RuntimeState => ImageProviderErrorKind::RuntimeState,
+        };
+        ImageProviderError::new(kind, error.message)
+    })
+}
+
 pub(crate) fn execution_context(spec: &ResolvedBuildSpec) -> ImageExecutionContext {
     let workspace_root = PathBuf::from(&spec.workspace.root_dir);
     ImageExecutionContext {

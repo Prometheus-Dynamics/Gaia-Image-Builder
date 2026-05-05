@@ -17,9 +17,21 @@ The rewrite is no longer the old `buildroot` / `program` / `stage` bucket model.
 
 ## Install
 
+Install directly from Git:
+
 ```bash
 cargo install --git https://github.com/Prometheus-Dynamics/Gaia-Image-Builder gaia
 ```
+
+Or install from a local checkout or source archive:
+
+```bash
+cargo install --path crates/core/gaia
+```
+
+For local installation, download and extract the repository source archive or
+use an existing checkout, open a shell in the `Gaia-Image-Builder` directory,
+then run the local command above.
 
 ## Commands
 

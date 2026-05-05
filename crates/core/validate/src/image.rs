@@ -9,12 +9,14 @@ use gaia_spec::{
 
 use crate::ValidationDiagnostic;
 use crate::diagnostics::{error, warning};
+use crate::image_assembly::{assembly_expected_image_names, validate_image_assembly};
 use crate::workspace::resolve_workspace_path;
 
 pub(crate) fn validate_image_contract(
     spec: &ResolvedBuildSpec,
     diagnostics: &mut Vec<ValidationDiagnostic>,
 ) {
+    let assembly_expected_image_names = assembly_expected_image_names(spec);
     match &spec.image.definition {
         ImageDefinition::Buildroot(buildroot) => {
             if buildroot.defconfig.is_none()
@@ -85,6 +87,7 @@ pub(crate) fn validate_image_contract(
                                 validate_buildroot_expected_images_against_defconfig(
                                     buildroot,
                                     &defconfig_contents,
+                                    &assembly_expected_image_names,
                                 ),
                             );
                         }
@@ -390,6 +393,8 @@ pub(crate) fn validate_image_contract(
             Some("image.output".into()),
         ));
     }
+
+    validate_image_assembly(spec, diagnostics);
 }
 
 fn starting_point_looks_like_raw_image(starting_point: &StartingPointImageSpec) -> bool {
@@ -404,16 +409,57 @@ fn starting_point_looks_like_raw_image(starting_point: &StartingPointImageSpec) 
 fn validate_buildroot_expected_images_against_defconfig(
     buildroot: &gaia_spec::BuildrootImageSpec,
     defconfig_contents: &str,
+    assembly_expected_image_names: &HashSet<String>,
 ) -> Vec<ValidationDiagnostic> {
     let mut diagnostics = Vec::new();
     for expected_image in &buildroot.expected_images {
+        if assembly_expected_image_names.contains(&expected_image.name) {
+            continue;
+        }
         let supported = match expected_image.format {
             BuildrootExpectedImageFormatSpec::Tar => {
                 defconfig_contents.contains("BR2_TARGET_ROOTFS_TAR=y")
             }
+            BuildrootExpectedImageFormatSpec::Cpio => {
+                defconfig_contents.contains("BR2_TARGET_ROOTFS_CPIO=y")
+            }
+            BuildrootExpectedImageFormatSpec::Ext2 => {
+                defconfig_contents.contains("BR2_TARGET_ROOTFS_EXT2=y")
+                    && (defconfig_contents.contains("BR2_TARGET_ROOTFS_EXT2_2r0=y")
+                        || defconfig_contents.contains("BR2_TARGET_ROOTFS_EXT2_2r1=y")
+                        || defconfig_contents.contains("BR2_TARGET_ROOTFS_EXT2_2=y"))
+            }
+            BuildrootExpectedImageFormatSpec::Ext3 => {
+                defconfig_contents.contains("BR2_TARGET_ROOTFS_EXT2=y")
+                    && defconfig_contents.contains("BR2_TARGET_ROOTFS_EXT2_3=y")
+            }
             BuildrootExpectedImageFormatSpec::Ext4 => {
                 defconfig_contents.contains("BR2_TARGET_ROOTFS_EXT2=y")
                     && defconfig_contents.contains("BR2_TARGET_ROOTFS_EXT2_4=y")
+            }
+            BuildrootExpectedImageFormatSpec::Ubifs => {
+                defconfig_contents.contains("BR2_TARGET_ROOTFS_UBIFS=y")
+            }
+            BuildrootExpectedImageFormatSpec::Ubi => {
+                defconfig_contents.contains("BR2_TARGET_ROOTFS_UBI=y")
+            }
+            BuildrootExpectedImageFormatSpec::Jffs2 => {
+                defconfig_contents.contains("BR2_TARGET_ROOTFS_JFFS2=y")
+            }
+            BuildrootExpectedImageFormatSpec::Romfs => {
+                defconfig_contents.contains("BR2_TARGET_ROOTFS_ROMFS=y")
+            }
+            BuildrootExpectedImageFormatSpec::Cramfs => {
+                defconfig_contents.contains("BR2_TARGET_ROOTFS_CRAMFS=y")
+            }
+            BuildrootExpectedImageFormatSpec::Cloop => {
+                defconfig_contents.contains("BR2_TARGET_ROOTFS_CLOOP=y")
+            }
+            BuildrootExpectedImageFormatSpec::F2fs => {
+                defconfig_contents.contains("BR2_TARGET_ROOTFS_F2FS=y")
+            }
+            BuildrootExpectedImageFormatSpec::Btrfs => {
+                defconfig_contents.contains("BR2_TARGET_ROOTFS_BTRFS=y")
             }
             BuildrootExpectedImageFormatSpec::Squashfs => {
                 defconfig_contents.contains("BR2_TARGET_ROOTFS_SQUASHFS=y")
@@ -424,6 +470,9 @@ fn validate_buildroot_expected_images_against_defconfig(
             BuildrootExpectedImageFormatSpec::Raw => {
                 defconfig_contents.contains("BR2_PACKAGE_HOST_GENIMAGE=y")
                     || defconfig_contents.contains("BR2_ROOTFS_POST_IMAGE_SCRIPT")
+            }
+            BuildrootExpectedImageFormatSpec::Erofs => {
+                defconfig_contents.contains("BR2_TARGET_ROOTFS_EROFS=y")
             }
         };
         if !supported {
@@ -448,7 +497,24 @@ fn expected_image_name_matches_format(
     let name = name.trim().to_ascii_lowercase();
     match format {
         BuildrootExpectedImageFormatSpec::Tar => name.ends_with(".tar"),
+        BuildrootExpectedImageFormatSpec::Cpio => {
+            name.ends_with(".cpio")
+                || name.ends_with(".cpio.gz")
+                || name.ends_with(".cpio.xz")
+                || name.ends_with(".cpio.zst")
+                || name.ends_with(".cpio.lz4")
+        }
+        BuildrootExpectedImageFormatSpec::Ext2 => name.ends_with(".ext2"),
+        BuildrootExpectedImageFormatSpec::Ext3 => name.ends_with(".ext3"),
         BuildrootExpectedImageFormatSpec::Ext4 => name.ends_with(".ext4"),
+        BuildrootExpectedImageFormatSpec::Ubifs => name.ends_with(".ubifs"),
+        BuildrootExpectedImageFormatSpec::Ubi => name.ends_with(".ubi"),
+        BuildrootExpectedImageFormatSpec::Jffs2 => name.ends_with(".jffs2"),
+        BuildrootExpectedImageFormatSpec::Romfs => name.ends_with(".romfs"),
+        BuildrootExpectedImageFormatSpec::Cramfs => name.ends_with(".cramfs"),
+        BuildrootExpectedImageFormatSpec::Cloop => name.ends_with(".cloop"),
+        BuildrootExpectedImageFormatSpec::F2fs => name.ends_with(".f2fs"),
+        BuildrootExpectedImageFormatSpec::Btrfs => name.ends_with(".btrfs"),
         BuildrootExpectedImageFormatSpec::Squashfs => name.ends_with(".squashfs"),
         BuildrootExpectedImageFormatSpec::Raw => name.ends_with(".img") || name.ends_with(".raw"),
         BuildrootExpectedImageFormatSpec::Kernel => {
@@ -459,5 +525,6 @@ fn expected_image_name_matches_format(
                 || name.ends_with("bzimage")
                 || name.ends_with(".itb")
         }
+        BuildrootExpectedImageFormatSpec::Erofs => name.ends_with(".erofs"),
     }
 }

@@ -11,6 +11,7 @@ description = "Planning layer that turns Gaia specs into executable plans."
 [dependencies]
 gaia-artifact-providers.workspace = true
 gaia-image-providers.workspace = true
+gaia-process.workspace = true
 gaia-source-providers.workspace = true
 gaia-spec.workspace = true
 tracing.workspace = true

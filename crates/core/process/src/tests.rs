@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::thread;
 
 static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -229,6 +230,160 @@ fn run_command_uses_configured_output_retention() {
     assert_eq!(result.stderr_lines, vec!["stderr-3"]);
     assert!(result.output.stdout.len() <= 9);
     assert!(result.output.stderr.len() <= 9);
+}
+
+#[test]
+fn run_command_bounds_stdout_without_newlines() {
+    let result = run_command_with_timeout_and_retention(
+        Command::new("python3")
+            .arg("-c")
+            .arg("import sys; sys.stdout.write('x' * 200000)"),
+        Duration::from_secs(10),
+        "long-stdout-line-retention-test",
+        ProcessOutputRetention {
+            stdout_bytes: 32,
+            stderr_bytes: 32,
+            stdout_lines: 4,
+            stderr_lines: 4,
+        },
+        None,
+        None,
+    )
+    .expect("command should complete");
+
+    assert!(result.output.status.success());
+    assert_eq!(result.output.stdout.len(), 32);
+    assert!(result.output.stderr.is_empty());
+    assert_eq!(result.stdout_lines.len(), 1);
+    assert!(result.stdout_lines[0].len() <= MAX_RETAINED_LINE_BYTES);
+}
+
+#[test]
+fn run_command_bounds_stderr_without_newlines() {
+    let result = run_command_with_timeout_and_retention(
+        Command::new("python3")
+            .arg("-c")
+            .arg("import sys; sys.stderr.write('e' * 200000)"),
+        Duration::from_secs(10),
+        "long-stderr-line-retention-test",
+        ProcessOutputRetention {
+            stdout_bytes: 32,
+            stderr_bytes: 32,
+            stdout_lines: 4,
+            stderr_lines: 4,
+        },
+        None,
+        None,
+    )
+    .expect("command should complete");
+
+    assert!(result.output.status.success());
+    assert!(result.output.stdout.is_empty());
+    assert_eq!(result.output.stderr.len(), 32);
+    assert_eq!(result.stderr_lines.len(), 1);
+    assert!(result.stderr_lines[0].len() <= MAX_RETAINED_LINE_BYTES);
+}
+
+#[test]
+fn run_command_bounds_fast_stdout_stream() {
+    let result = run_command_with_timeout_and_retention(
+        Command::new("python3")
+            .arg("-c")
+            .arg("import sys; sys.stdout.buffer.write((b'line\\n') * 50_000)"),
+        Duration::from_secs(20),
+        "fast-stdout-retention-test",
+        ProcessOutputRetention {
+            stdout_bytes: 128,
+            stderr_bytes: 128,
+            stdout_lines: 8,
+            stderr_lines: 8,
+        },
+        None,
+        None,
+    )
+    .expect("command should complete");
+
+    assert!(result.output.status.success());
+    assert!(result.output.stdout.len() <= 128);
+    assert_eq!(result.stdout_lines.len(), 8);
+    assert!(result.output.stderr.is_empty());
+}
+
+#[test]
+fn run_command_bounds_fast_stderr_stream() {
+    let result = run_command_with_timeout_and_retention(
+        Command::new("python3")
+            .arg("-c")
+            .arg("import sys; sys.stderr.buffer.write((b'line\\n') * 50_000)"),
+        Duration::from_secs(20),
+        "fast-stderr-retention-test",
+        ProcessOutputRetention {
+            stdout_bytes: 128,
+            stderr_bytes: 128,
+            stdout_lines: 8,
+            stderr_lines: 8,
+        },
+        None,
+        None,
+    )
+    .expect("command should complete");
+
+    assert!(result.output.status.success());
+    assert!(result.output.stdout.is_empty());
+    assert!(result.output.stderr.len() <= 128);
+    assert_eq!(result.stderr_lines.len(), 8);
+}
+
+#[test]
+fn run_command_retains_invalid_utf8_bytes() {
+    let result = run_command_with_timeout_and_retention(
+        Command::new("python3").arg("-c").arg(
+            "import sys; sys.stdout.buffer.write(bytes([0xff, 0xfe, 10])); sys.stderr.buffer.write(bytes([0xfd, 0xfc, 10]))",
+        ),
+        Duration::from_secs(10),
+        "invalid-utf8-retention-test",
+        ProcessOutputRetention {
+            stdout_bytes: 8,
+            stderr_bytes: 8,
+            stdout_lines: 2,
+            stderr_lines: 2,
+        },
+        None,
+        None,
+    )
+    .expect("command should complete");
+
+    assert!(result.output.status.success());
+    assert_eq!(result.output.stdout, vec![0xff, 0xfe, b'\n']);
+    assert_eq!(result.output.stderr, vec![0xfd, 0xfc, b'\n']);
+    assert_eq!(result.stdout_lines.len(), 1);
+    assert_eq!(result.stderr_lines.len(), 1);
+}
+
+#[test]
+fn run_command_retains_blank_line_bytes() {
+    let result = run_command_with_timeout_and_retention(
+        Command::new("python3")
+            .arg("-c")
+            .arg("import sys; sys.stdout.buffer.write(b'\\n\\n'); sys.stderr.buffer.write(b'\\n')"),
+        Duration::from_secs(10),
+        "blank-line-retention-test",
+        ProcessOutputRetention {
+            stdout_bytes: 8,
+            stderr_bytes: 8,
+            stdout_lines: 4,
+            stderr_lines: 4,
+        },
+        None,
+        None,
+    )
+    .expect("command should complete");
+
+    assert!(result.output.status.success());
+    assert_eq!(result.output.stdout, b"\n\n");
+    assert_eq!(result.output.stderr, b"\n");
+    assert_eq!(result.stdout_lines, vec!["", ""]);
+    assert_eq!(result.stderr_lines, vec![""]);
 }
 
 fn unique_dir(name: &str) -> PathBuf {

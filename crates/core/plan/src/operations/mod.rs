@@ -48,6 +48,10 @@ impl OperationId {
         Self::new("image:prepare")
     }
 
+    pub fn image_assembly() -> Self {
+        Self::new("image:assembly")
+    }
+
     pub fn checkpoint(checkpoint_id: &CheckpointId) -> Self {
         Self::new(format!("checkpoint:{}", checkpoint_id.as_str()))
     }
@@ -257,6 +261,7 @@ pub enum OperationKind {
     },
     PrepareImage,
     BuildImage,
+    AssembleImage,
     CaptureCheckpoint {
         checkpoint_id: CheckpointId,
     },

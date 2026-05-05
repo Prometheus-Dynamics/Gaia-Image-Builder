@@ -9,8 +9,13 @@ pub(crate) fn collect_expected_images(
         return Ok(Vec::new());
     };
     let images_dir = output_dir.join("images");
+    let assembly_expected = assembly_expected_image_names(image);
+    let mut collected = std::collections::BTreeSet::new();
     let mut matched = Vec::new();
     for expected in &buildroot.expected_images {
+        if assembly_expected.contains(&expected.name) {
+            continue;
+        }
         let candidates = [
             images_dir.join(&expected.name),
             output_dir.join(&expected.name),
@@ -38,6 +43,7 @@ pub(crate) fn collect_expected_images(
                         ),
                     )
                 })?;
+                collected.insert(PathBuf::from(&expected.name));
                 matched.push(expected.name.clone());
             }
             None if expected.required => {
@@ -52,6 +58,43 @@ pub(crate) fn collect_expected_images(
             None => {}
         }
     }
+    for input in assembly_provider_image_inputs(image) {
+        if !collected.insert(input.clone()) {
+            continue;
+        }
+        let candidates = [images_dir.join(&input), output_dir.join(&input)];
+        let Some(found_path) = candidates.iter().find(|path| path.exists()).cloned() else {
+            return Err(ImageProviderError::new(
+                ImageProviderErrorKind::OutputMissing,
+                format!(
+                    "required buildroot assembly input '{}' was not produced",
+                    input.display()
+                ),
+            ));
+        };
+        let dest = collect_dir.join(&input);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                ImageProviderError::new(
+                    ImageProviderErrorKind::RuntimeState,
+                    format!(
+                        "failed to create buildroot assembly input dir '{}': {error}",
+                        parent.display()
+                    ),
+                )
+            })?;
+        }
+        fs::copy(&found_path, &dest).map_err(|error| {
+            ImageProviderError::new(
+                ImageProviderErrorKind::RuntimeState,
+                format!(
+                    "failed to copy buildroot assembly input '{}' to '{}': {error}",
+                    found_path.display(),
+                    dest.display()
+                ),
+            )
+        })?;
+    }
     Ok(matched)
 }
 
@@ -62,14 +105,60 @@ pub(crate) fn buildroot_expected_images_present(image: &ImageSpec, output_dir: &
     if buildroot.expected_images.is_empty() {
         return false;
     }
-    buildroot
+    let assembly_expected = assembly_expected_image_names(image);
+    let concrete_required = buildroot
         .expected_images
         .iter()
         .filter(|expected| expected.required)
-        .all(|expected| {
-            output_dir.join("images").join(&expected.name).is_file()
-                || output_dir.join(&expected.name).is_file()
-        })
+        .filter(|expected| !assembly_expected.contains(&expected.name))
+        .collect::<Vec<_>>();
+    let provider_image_inputs = assembly_provider_image_inputs(image);
+    if concrete_required.is_empty() && provider_image_inputs.is_empty() {
+        return false;
+    }
+    concrete_required.iter().all(|expected| {
+        output_dir.join("images").join(&expected.name).is_file()
+            || output_dir.join(&expected.name).is_file()
+    }) && provider_image_inputs.iter().all(|input| {
+        output_dir
+            .parent()
+            .is_some_and(|collect_dir| collect_dir.join(input).is_file())
+            || output_dir.join("images").join(input).is_file()
+            || output_dir.join(input).is_file()
+    })
+}
+
+pub(crate) fn buildroot_expected_images_reuse_detail(image: &ImageSpec) -> String {
+    let ImageDefinition::Buildroot(buildroot) = &image.definition else {
+        return "no buildroot expected images".to_string();
+    };
+    let assembly_expected = assembly_expected_image_names(image);
+    let concrete_required = buildroot
+        .expected_images
+        .iter()
+        .filter(|expected| expected.required)
+        .filter(|expected| !assembly_expected.contains(&expected.name))
+        .map(|expected| expected.name.as_str())
+        .collect::<Vec<_>>();
+    let provider_image_inputs = assembly_provider_image_inputs(image)
+        .into_iter()
+        .map(|input| input.display().to_string())
+        .collect::<Vec<_>>();
+    let mut parts = Vec::new();
+    if !concrete_required.is_empty() {
+        parts.push(format!("required outputs: {}", concrete_required.join(",")));
+    }
+    if !provider_image_inputs.is_empty() {
+        parts.push(format!(
+            "assembly provider inputs: {}",
+            provider_image_inputs.join(",")
+        ));
+    }
+    if parts.is_empty() {
+        "no concrete required outputs or assembly provider inputs".to_string()
+    } else {
+        parts.join("; ")
+    }
 }
 
 pub(crate) fn materialize_fallback_rootfs(
@@ -104,8 +193,12 @@ pub(crate) fn materialize_fallback_rootfs(
     let ImageDefinition::Buildroot(buildroot) = &image.definition else {
         return Ok(Vec::new());
     };
+    let assembly_expected = assembly_expected_image_names(image);
     let mut matched = Vec::new();
     for expected in &buildroot.expected_images {
+        if assembly_expected.contains(&expected.name) {
+            continue;
+        }
         if expected.format == BuildrootExpectedImageFormatSpec::Tar {
             let tar_path = rootfs_dir
                 .parent()
@@ -132,6 +225,51 @@ pub(crate) fn materialize_fallback_rootfs(
         }
     }
     Ok(matched)
+}
+
+fn assembly_expected_image_names(image: &ImageSpec) -> std::collections::HashSet<String> {
+    let Some(assembly) = &image.assembly else {
+        return std::collections::HashSet::new();
+    };
+    assembly
+        .filesystems
+        .iter()
+        .map(|filesystem| filesystem.output.as_str())
+        .chain(assembly.disks.iter().map(|disk| disk.output.as_str()))
+        .filter_map(|output| {
+            Path::new(output)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+fn assembly_provider_image_inputs(image: &ImageSpec) -> std::collections::BTreeSet<PathBuf> {
+    let Some(assembly) = &image.assembly else {
+        return std::collections::BTreeSet::new();
+    };
+    let generated_outputs = assembly
+        .filesystems
+        .iter()
+        .map(|filesystem| filesystem.output.as_str())
+        .chain(assembly.disks.iter().map(|disk| disk.output.as_str()))
+        .collect::<std::collections::HashSet<_>>();
+    assembly
+        .disks
+        .iter()
+        .flat_map(|disk| &disk.partitions)
+        .filter_map(|partition| {
+            let image = partition.image.as_str();
+            if generated_outputs.contains(image) {
+                return None;
+            }
+            image
+                .strip_prefix("$provider.images/")
+                .filter(|relative| !relative.trim().is_empty())
+                .map(PathBuf::from)
+        })
+        .collect()
 }
 
 pub(crate) fn apply_image_feed_to_rootfs(

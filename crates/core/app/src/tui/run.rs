@@ -89,7 +89,7 @@ impl<'a> TuiState<'a> {
                 validation.errors.len()
             ));
             self.setup_list
-                .select(Some(index_of_setup_item(SetupItem::Validation)));
+                .select(Some(self.index_of_setup_item(&SetupItem::Validation)));
             return;
         }
         if !self.plan_diagnostics.is_empty() {
@@ -98,7 +98,7 @@ impl<'a> TuiState<'a> {
                 self.plan_diagnostics.len()
             ));
             self.setup_list
-                .select(Some(index_of_setup_item(SetupItem::Plan)));
+                .select(Some(self.index_of_setup_item(&SetupItem::Plan)));
             return;
         }
 

@@ -28,6 +28,12 @@ retry_attempts = 1
 retry_backoff_ms = 0
 retry_backoff_strategy = "fixed"
 timeout_seconds = 7200
+local_jobs = 4
+download_dir = "../../.gaia/cache/buildroot/dl"
+
+[providers.buildroot.ccache]
+enabled = true
+dir = "../../.gaia/cache/buildroot/ccache"
 
 [[workspace.named_paths]]
 alias = "assets"

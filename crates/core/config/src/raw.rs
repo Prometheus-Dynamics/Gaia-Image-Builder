@@ -3,6 +3,13 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Deserializer, de};
 
+use crate::raw_assembly::RawImageAssemblyConfig;
+
+#[path = "raw_inputs.rs"]
+mod raw_inputs;
+
+pub use raw_inputs::*;
+
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct RawBuildConfig {
@@ -170,26 +177,6 @@ pub struct RawProductConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawInputOptionConfig {
-    pub description: Option<String>,
-    pub kind: RawInputKind,
-    pub required: bool,
-    pub default: Option<String>,
-    pub choices: Vec<String>,
-}
-
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum RawInputKind {
-    #[default]
-    String,
-    Integer,
-    Boolean,
-    Enum,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
-#[serde(default)]
 pub struct RawInterpolationConfig {
     pub allow_unresolved: bool,
     // Interpolation values intentionally remain free-form pairs because they define user-owned
@@ -300,6 +287,15 @@ pub struct RawCommandProviderPolicyConfig {
     pub retry_backoff_strategy: RawRetryBackoffStrategy,
     pub timeout_seconds: u64,
     pub local_jobs: u32,
+    pub download_dir: Option<String>,
+    pub ccache: RawBuildrootCcachePolicyConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawBuildrootCcachePolicyConfig {
+    pub enabled: bool,
+    pub dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
@@ -567,6 +563,7 @@ pub struct RawImageConfig {
     pub definition: RawImageDefinition,
     pub feed: RawImageFeedConfig,
     pub output: RawImageOutputConfig,
+    pub assembly: Option<RawImageAssemblyConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -670,10 +667,22 @@ fn default_true() -> bool {
 #[serde(rename_all = "kebab-case")]
 pub enum RawBuildrootExpectedImageFormat {
     Tar,
+    Cpio,
+    Ext2,
+    Ext3,
     Ext4,
+    Ubifs,
+    Ubi,
+    Jffs2,
+    Romfs,
+    Cramfs,
+    Cloop,
+    F2fs,
+    Btrfs,
     Squashfs,
     Raw,
     Kernel,
+    Erofs,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -735,7 +744,15 @@ pub struct RawReportingConfig {
     pub provenance: bool,
     pub manifest: bool,
     pub masking: RawReportingMaskingConfig,
+    pub output_hygiene: RawOutputHygieneConfig,
     pub post_build: Option<RawPostBuildHookConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawOutputHygieneConfig {
+    pub large_file_threshold_bytes: Option<u64>,
+    pub transient_dir_names: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

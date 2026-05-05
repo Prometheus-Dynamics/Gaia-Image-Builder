@@ -396,6 +396,7 @@ fn operation_parallel_resource_keys(
             }
             keys
         }
+        gaia_plan::OperationKind::AssembleImage => vec![ParallelResourceKey::ImageWorkspace],
         gaia_plan::OperationKind::CaptureCheckpoint { checkpoint_id } => {
             vec![ParallelResourceKey::Checkpoint {
                 checkpoint_id: checkpoint_id.as_str().to_string(),

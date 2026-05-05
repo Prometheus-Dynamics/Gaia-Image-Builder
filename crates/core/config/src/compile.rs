@@ -10,7 +10,8 @@ use artifact::compile_artifact;
 use checkpoint::{compile_checkpoint, compile_stage_content_origin};
 use image::{
     compile_buildroot_expected_image_format, compile_buildroot_external_tree_mode,
-    compile_image_feed, compile_rootfs_validation_mode, compile_starting_point_output_mode,
+    compile_image_assembly, compile_image_feed, compile_rootfs_validation_mode,
+    compile_starting_point_output_mode,
 };
 use policy::{
     compile_backoff_strategy, compile_command_policy, compile_docker_execution, compile_input_kind,
@@ -28,11 +29,18 @@ use crate::raw::{
     RawSourcePinPolicy, RawSourceRefreshPolicy, RawStageContentOrigin, RawStartingPointOutputMode,
     RawStartingPointRootfsValidationMode, RawWhenConfig, RawWhenImageKind, RawWorkspacePathKind,
 };
+use crate::raw_assembly::{
+    RawAssemblyFilesystemKind, RawAssemblyPartitionTable, RawAssemblyTransformKind,
+    RawImageAssemblyConfig,
+};
 
 use gaia_spec::{
     ArtifactDefinition, ArtifactExecutionSpec, ArtifactInstallClassSpec,
     ArtifactInstallIdentitySpec, ArtifactOutputSpec, ArtifactRef, ArtifactSpec,
-    ArtifactVariantSpec, BuildMetadataSpec, BuildModeSpec, BuildPolicySpec,
+    ArtifactVariantSpec, AssemblyBusyboxInitramfsSpec, AssemblyDiskPartitionSpec, AssemblyDiskSpec,
+    AssemblyFileSpec, AssemblyFilesystemKindSpec, AssemblyFilesystemSpec,
+    AssemblyPartitionTableSpec, AssemblyTransformKindSpec, AssemblyTransformSpec, AssemblyTreeSpec,
+    BuildMetadataSpec, BuildModeSpec, BuildPolicySpec, BuildrootCcachePolicySpec,
     BuildrootExpectedImageFormatSpec, BuildrootExpectedImageSpec, BuildrootExternalTreeModeSpec,
     BuildrootImageSpec, CheckpointAnchorRef, CheckpointBackendRef, CheckpointId,
     CheckpointPointSpec, CheckpointPolicy, CleanProfileSpec, CleanSpec, CommandProviderPolicySpec,
@@ -43,18 +51,18 @@ use gaia_spec::{
     DEFAULT_RUST_PROVIDER_TIMEOUT_SECONDS, DEFAULT_STARTING_POINT_PROVIDER_TIMEOUT_SECONDS,
     DockerArtifactExecutionSpec, DockerExecutionSpec, ExecutionPolicySpec,
     FailureHandlingPolicySpec, GitProviderPolicySpec, GitSourceSpec, GoArtifactSpec,
-    ImageDefinition, ImageFeedSpec, ImageOutputSpec, ImageSpec, InputKindSpec, InputOptionSpec,
-    InputSpec, InstallEntrySpec, InstallId, InterpolationSpec, JavaArtifactSpec, NodeArtifactSpec,
-    OutputRetentionPolicySpec, PathSourceSpec, PostBuildHookSpec, PrecedenceLayerSpec,
-    PrecedencePolicySpec, PrecedenceSource, PrecedenceTarget, PresetSelectionSpec,
-    ProductIdentitySpec, ProvenanceIdentitySpec, ProvenanceSpec, ProviderExecutionPolicySpec,
-    PythonArtifactSpec, ReportingOutputsSpec, ReportingSpec, ResolvedBuildSpec,
-    RetryBackoffStrategySpec, RollbackDomain, RustArtifactSpec, RustProviderPolicySpec,
-    SecretMaskingSpec, SelectionSpec, SourceDefinition, SourcePinPolicySpec, SourceRef,
-    SourceRefreshPolicySpec, SourceSpec, StageContentOriginSpec, StageEnvSetSpec, StageFileSpec,
-    StageItemId, StageServiceSpec, StartingPointImageSpec, StartingPointOutputModeSpec,
-    StartingPointRootfsValidationModeSpec, UnresolvedInterpolationSpec, WorkspaceNamedPathSpec,
-    WorkspacePathKindSpec, WorkspaceSpec,
+    ImageAssemblySpec, ImageDefinition, ImageFeedSpec, ImageOutputSpec, ImageSpec, InputKindSpec,
+    InputOptionSpec, InputSpec, InstallEntrySpec, InstallId, InterpolationSpec, JavaArtifactSpec,
+    NodeArtifactSpec, OutputHygieneSpec, OutputRetentionPolicySpec, PathSourceSpec,
+    PostBuildHookSpec, PrecedenceLayerSpec, PrecedencePolicySpec, PrecedenceSource,
+    PrecedenceTarget, PresetSelectionSpec, ProductIdentitySpec, ProvenanceIdentitySpec,
+    ProvenanceSpec, ProviderExecutionPolicySpec, PythonArtifactSpec, ReportingOutputsSpec,
+    ReportingSpec, ResolvedBuildSpec, RetryBackoffStrategySpec, RollbackDomain, RustArtifactSpec,
+    RustProviderPolicySpec, SecretMaskingSpec, SelectionSpec, SourceDefinition,
+    SourcePinPolicySpec, SourceRef, SourceRefreshPolicySpec, SourceSpec, StageContentOriginSpec,
+    StageEnvSetSpec, StageFileSpec, StageItemId, StageServiceSpec, StartingPointImageSpec,
+    StartingPointOutputModeSpec, StartingPointRootfsValidationModeSpec,
+    UnresolvedInterpolationSpec, WorkspaceNamedPathSpec, WorkspacePathKindSpec, WorkspaceSpec,
 };
 
 pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
@@ -452,6 +460,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
             archive_name: raw.image.output.archive_name,
             emit_report: raw.image.output.emit_report,
         },
+        assembly: compile_image_assembly(raw.image.assembly),
     };
     spec.checkpoints.points = raw
         .checkpoints
@@ -468,6 +477,23 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
             enabled: raw.reporting.masking.enabled,
             replacement: raw.reporting.masking.replacement,
             patterns: raw.reporting.masking.patterns,
+        },
+        output_hygiene: OutputHygieneSpec {
+            large_file_threshold_bytes: raw
+                .reporting
+                .output_hygiene
+                .large_file_threshold_bytes
+                .unwrap_or(gaia_spec::DEFAULT_LARGE_UNEXPECTED_OUTPUT_BYTES),
+            transient_dir_names: raw
+                .reporting
+                .output_hygiene
+                .transient_dir_names
+                .unwrap_or_else(|| {
+                    gaia_spec::DEFAULT_TRANSIENT_DIR_NAMES
+                        .iter()
+                        .map(|name| (*name).into())
+                        .collect()
+                }),
         },
         post_build: raw.reporting.post_build.and_then(|hook| {
             if hook.script.trim().is_empty() {

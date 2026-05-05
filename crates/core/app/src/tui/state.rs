@@ -1,6 +1,5 @@
 use super::*;
-
-const DEFAULT_BUILD_CONFIG: &str = "examples/default-workspace/configs/default.toml";
+use crate::cli::EXAMPLE_DEFAULT_BUILD_CONFIG;
 const SETUP_REFRESH_DEBOUNCE: Duration = Duration::from_millis(200);
 
 pub(crate) struct TuiState<'a> {
@@ -10,6 +9,7 @@ pub(crate) struct TuiState<'a> {
     pub(crate) screen: Screen,
     pub(crate) build_entries: Vec<BuildEntry>,
     pub(crate) build_list: ListState,
+    pub(crate) setup_items: Vec<SetupItem>,
     pub(crate) setup_list: ListState,
     pub(crate) operation_list: ListState,
     pub(crate) monitor_view: usize,
@@ -42,7 +42,7 @@ impl<'a> TuiState<'a> {
             .find(|entry| entry.path == build)
             .map(|entry| entry.path.clone());
         let should_open_picker = discovered_build.is_none()
-            && build == DEFAULT_BUILD_CONFIG
+            && build == EXAMPLE_DEFAULT_BUILD_CONFIG
             && !build_entries.is_empty();
         let selected_build = discovered_build
             .or_else(|| {
@@ -73,6 +73,7 @@ impl<'a> TuiState<'a> {
             },
             build_entries,
             build_list,
+            setup_items: SetupItem::defaults(),
             setup_list,
             operation_list: ListState::default(),
             monitor_view: 0,
@@ -213,6 +214,7 @@ impl<'a> TuiState<'a> {
     }
 
     fn apply_refresh_artifacts(&mut self, artifacts: RefreshArtifacts) {
+        self.rebuild_setup_items(&artifacts.spec);
         self.options = artifacts.options;
         self.spec = Some(artifacts.spec);
         self.validation = Some(artifacts.validation);
@@ -221,6 +223,37 @@ impl<'a> TuiState<'a> {
         self.detail_scroll = 0;
         self.ensure_operation_selection();
         self.set_status("refreshed resolve/validate/plan state");
+    }
+
+    fn rebuild_setup_items(&mut self, spec: &ResolvedBuildSpec) {
+        let selected = self.selected_setup_item();
+        let mut items = vec![SetupItem::StartBuild, SetupItem::Branch];
+        for input in &spec.inputs.declared {
+            match input.name.as_str() {
+                "target" => items.push(SetupItem::Target),
+                "profile" => items.push(SetupItem::Profile),
+                _ => items.push(SetupItem::Input(input.name.clone())),
+            }
+        }
+        items.extend([
+            SetupItem::Jobs,
+            SetupItem::Overview,
+            SetupItem::Selection,
+            SetupItem::Validation,
+            SetupItem::Plan,
+            SetupItem::Reports,
+            SetupItem::Spec,
+            SetupItem::PickBuild,
+            SetupItem::Refresh,
+        ]);
+        items.dedup();
+        let fallback_index = self.setup_list.selected().unwrap_or(0).min(items.len() - 1);
+        let selected_index = items
+            .iter()
+            .position(|candidate| *candidate == selected)
+            .unwrap_or(fallback_index);
+        self.setup_items = items;
+        self.setup_list.select(Some(selected_index));
     }
 
     fn clear_refresh_state(&mut self, error: impl Into<String>) {

@@ -6,6 +6,39 @@ use std::fs;
 use support::write_temp_config;
 
 #[test]
+fn starting_point_without_assembly_validates_without_assembly_diagnostics() {
+    let path = write_temp_config(
+        r#"
+build_name = "starting-point-no-assembly-validation"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[image]
+kind = "starting-point"
+rootfs_path = "/tmp/gaia-missing-rootfs"
+rootfs_validation_mode = "allow-missing"
+output_mode = "copy-rootfs"
+"#,
+    );
+
+    let spec = resolve_config(path.to_str().expect("temp path utf-8"));
+    let report = validate_spec(&spec);
+
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.code.starts_with("assembly_")),
+        "unexpected assembly diagnostic in {report:?}"
+    );
+
+    let _ = fs::remove_file(path);
+}
+
+#[test]
 fn unknown_starting_point_source_is_rejected() {
     let path = write_temp_config(
         r#"

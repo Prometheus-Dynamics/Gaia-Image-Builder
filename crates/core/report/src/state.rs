@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::model::ArtifactOutputMetadataRecord;
+use crate::model::{ArtifactOutputMetadataRecord, OutputHygieneWarningRecord};
 
 pub(crate) fn rollback_domains(spec: &ResolvedBuildSpec) -> Vec<String> {
     spec.policy
@@ -106,9 +106,96 @@ pub(crate) fn build_artifact_output_metadata(
 }
 
 pub(crate) fn runtime_state_dir(spec: &ResolvedBuildSpec) -> PathBuf {
-    PathBuf::from(&spec.workspace.out_dir)
-        .join(".gaia")
-        .join("runtime")
+    PathBuf::from(&spec.workspace.out_dir).join(gaia_spec::RUNTIME_STATE_DIR_NAME)
+}
+
+pub(crate) fn output_hygiene_warnings(spec: &ResolvedBuildSpec) -> Vec<OutputHygieneWarningRecord> {
+    let mut warnings = Vec::new();
+    let Some(collect_dir) = &spec.image.output.collect_dir else {
+        return warnings;
+    };
+    let collect_dir = PathBuf::from(collect_dir);
+    if !collect_dir.is_dir() {
+        return warnings;
+    }
+    let expected_names = expected_publish_filenames(spec);
+    let entries = match fs::read_dir(&collect_dir) {
+        Ok(entries) => entries,
+        Err(_) => return warnings,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if spec
+            .reporting
+            .output_hygiene
+            .transient_dir_names
+            .iter()
+            .any(|configured| configured == &name)
+            && path.is_dir()
+        {
+            warnings.push(OutputHygieneWarningRecord {
+                code: "publish_transient_directory".into(),
+                directory: collect_dir.display().to_string(),
+                path: path.display().to_string(),
+                message: format!(
+                    "publish directory contains transient directory '{}'",
+                    path.display()
+                ),
+                size_bytes: None,
+            });
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if metadata.is_file()
+            && metadata.len() >= spec.reporting.output_hygiene.large_file_threshold_bytes
+            && !expected_names.contains(&name)
+            && !is_known_state_file(&name)
+        {
+            warnings.push(OutputHygieneWarningRecord {
+                code: "publish_large_unexpected_file".into(),
+                directory: collect_dir.display().to_string(),
+                path: path.display().to_string(),
+                message: format!(
+                    "publish directory contains large non-output file '{}'",
+                    path.display()
+                ),
+                size_bytes: Some(metadata.len()),
+            });
+        }
+    }
+    warnings
+}
+
+fn expected_publish_filenames(spec: &ResolvedBuildSpec) -> std::collections::HashSet<String> {
+    let mut names = std::collections::HashSet::new();
+    if let Some(archive_name) = &spec.image.output.archive_name {
+        names.insert(archive_name.clone());
+    }
+    if let ImageDefinition::Buildroot(buildroot) = &spec.image.definition {
+        for expected in &buildroot.expected_images {
+            names.insert(expected.name.clone());
+        }
+    }
+    if let Some(assembly) = &spec.image.assembly {
+        for output in assembly
+            .filesystems
+            .iter()
+            .map(|filesystem| filesystem.output.as_str())
+            .chain(assembly.disks.iter().map(|disk| disk.output.as_str()))
+        {
+            if let Some(name) = Path::new(output).file_name().and_then(|name| name.to_str()) {
+                names.insert(name.to_string());
+            }
+        }
+    }
+    names
+}
+
+fn is_known_state_file(name: &str) -> bool {
+    name == ".gaia-image-state.txt" || name.ends_with(".gaia-state.txt")
 }
 
 fn parse_backend_state(contents: &str) -> BTreeMap<String, String> {

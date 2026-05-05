@@ -16,3 +16,4 @@ crates/core/gaia-plan/src/lib.rs
 crates/core/gaia-exec/src/operations/mod.rs
 crates/core/gaia-report/tests/report_flow.rs
 crates/core/gaia-exec/tests/exec_flow.rs
+crates/core/config/src/raw.rs

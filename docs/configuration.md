@@ -82,6 +82,23 @@ kind = "enum"
 default = "release"
 choices = ["dev", "ci", "release"]
 
+[inputs.release_ref]
+description = "Release tag from the application repository"
+kind = "enum"
+default_from = "latest-stable"
+
+[inputs.release_ref.choices_from]
+kind = "git-tags"
+repo = "https://github.com/example/app.git"
+include = ["v2026*"]
+exclude = ["*-alpha*", "*-beta*", "*-rc*"]
+sort = "version-desc"
+version_scheme = "semver"
+prefer_stable = true
+limit = 25
+cache_ttl_seconds = 3600
+fallback_choices = ["v2026.1.0"]
+
 [inputs.enable_debug]
 description = "Turn on debug-only behaviors"
 kind = "boolean"
@@ -98,6 +115,109 @@ Kinds:
 - `integer`
 - `boolean`
 - `enum`
+
+Dynamic choices:
+- `choices_from.kind`: `git-tags`, `git-branches`, `github-releases`, `json`, or `command`.
+- `choices_from.repo`: git remote URL or local repository path.
+- `choices_from.source`: optional id of a declared git `[[sources]]` entry; use this instead of repeating `repo`.
+- `choices_from.url`: URL or local path for `json` choices.
+- `choices_from.json_path`: simple JSON path such as `$.releases[*].tag`.
+- `choices_from.command`: argv array for command-produced choices; stdout lines become choices.
+- `choices_from.pattern`: single `git ls-remote` ref glob passed to git.
+- `choices_from.include`: list of glob patterns Gaia applies to returned names.
+- `choices_from.exclude`: list of glob patterns to remove from returned names.
+- `choices_from.strip_prefix`: remove a prefix from displayed/selected choices after filtering.
+- `choices_from.selected_value_template`: transform selected values with `${choice}`.
+- `choices_from.display_template`: reserved for richer TUI display labels; current resolved choices remain selected values.
+- `choices_from.sort`: `version-desc`, `version-asc`, `lexical-desc`, or `lexical-asc`.
+- `choices_from.version_scheme`: `versionish` or `semver`.
+- `choices_from.prefer_stable`: rank stable releases before prerelease-looking refs.
+- `choices_from.limit`: truncate the resolved list.
+- `choices_from.refresh`: `auto`, `always`, or `never`.
+- `choices_from.cache_ttl_seconds`: reuse a local `.gaia/input-cache` entry while fresh; stale cache is also used if the remote fetch fails.
+- `choices_from.max_age_warning_seconds`: warn when a cache entry is older than this threshold.
+- `choices_from.fallback_choices`: offline/error fallback if no cache is available.
+- `choices_from.allow_empty`: allow a dynamic source to resolve an empty choice list.
+- `choices_from.on_error`: `fail`, `warn`, or `ignore`.
+- `choices_from.timeout_seconds`: timeout passed to supported fetch helpers such as `curl`.
+- `choices_from.auth_env`: environment variable containing a bearer token for HTTP choices.
+- `choices_from.credential_helper`: reserved for explicit git credential-helper policy; git currently uses the user's normal git configuration.
+- `choices_from.include_prereleases`: include GitHub prereleases for `github-releases`.
+- `choices_from.include_drafts`: include GitHub draft releases for `github-releases`.
+- `choices_from.lock` and `choices_from.lock_key`: reserved for future lockfile writing; current resolution still uses cache/fallback behavior.
+- `default_from`: `first-choice` or `latest-stable`.
+
+When `strip_prefix` changes the selected value, interpolate the prefix explicitly where
+the underlying git ref still needs it:
+
+```toml
+[[sources]]
+id = "app"
+kind = "git"
+repo = "https://github.com/example/app.git"
+branch = "release/${input.release_branch}"
+
+[inputs.release_branch]
+kind = "enum"
+default_from = "latest-stable"
+
+[inputs.release_branch.choices_from]
+kind = "git-branches"
+source = "app"
+include = ["release/v2026*"]
+strip_prefix = "release/"
+sort = "version-desc"
+```
+
+GitHub release choices:
+
+```toml
+[inputs.release_ref]
+kind = "enum"
+default_from = "latest-stable"
+
+[inputs.release_ref.choices_from]
+kind = "github-releases"
+repo = "PhotonVision/photonvision"
+include_prereleases = false
+include_drafts = false
+sort = "published-desc"
+limit = 25
+cache_ttl_seconds = 3600
+fallback_choices = ["v2026.3.4"]
+```
+
+JSON manifest choices:
+
+```toml
+[inputs.release_ref]
+kind = "enum"
+default_from = "first-choice"
+
+[inputs.release_ref.choices_from]
+kind = "json"
+url = "https://example.com/releases.json"
+json_path = "$.releases[*].tag"
+include = ["v2026*"]
+exclude = ["*-rc*"]
+selected_value_template = "refs/tags/${choice}"
+sort = "version-desc"
+```
+
+Command choices:
+
+```toml
+[inputs.release_ref]
+kind = "enum"
+default_from = "first-choice"
+
+[inputs.release_ref.choices_from]
+kind = "command"
+command = ["./scripts/list-release-tags.sh"]
+sort = "version-desc"
+timeout_seconds = 5
+fallback_choices = ["v2026.3.4"]
+```
 
 Validation:
 - required inputs must be selected
@@ -248,8 +368,17 @@ retry_attempts = 1
 retry_backoff_ms = 0
 retry_backoff_strategy = "fixed"
 timeout_seconds = 900
-local_jobs = 2
+local_jobs = 4
+download_dir = ".gaia/cache/buildroot/dl"
+
+[providers.buildroot.ccache]
+enabled = true
+dir = ".gaia/cache/buildroot/ccache"
 ```
+
+For Buildroot, `download_dir` is passed as `BR2_DL_DIR` so source tarballs can be
+shared across clean builds. When `providers.buildroot.ccache.enabled = true`,
+Gaia enables `BR2_CCACHE` and passes `BR2_CCACHE_DIR` when `dir` is set.
 
 Retry strategies:
 - `fixed`
@@ -537,10 +666,22 @@ Buildroot fields:
 
 Expected image formats:
 - `tar`
+- `cpio`
+- `ext2`
+- `ext3`
 - `ext4`
+- `ubifs`
+- `ubi`
+- `jffs2`
+- `romfs`
+- `cramfs`
+- `cloop`
+- `f2fs`
+- `btrfs`
 - `squashfs`
 - `raw`
 - `kernel`
+- `erofs`
 
 ### Starting Point
 
@@ -577,6 +718,145 @@ The image feed declares which install/stage domains are part of the final image 
 - `stage_services`
 
 If omitted, the current compiler auto-feeds all entries in the corresponding domain.
+
+### Image Assembly
+
+Image assembly runs after the image provider has produced its base outputs. It creates named work trees, stages selected files, runs typed transforms, and can package trees into supported filesystem artifacts.
+
+```toml
+[image.assembly]
+work_dir = "${workspace.build_dir}/assembly"
+out_dir = "$provider.images"
+
+[[image.assembly.trees]]
+id = "boot"
+path = "$assembly.work/boot"
+
+[[image.assembly.trees]]
+id = "initramfs"
+path = "$assembly.work/initramfs"
+
+[[image.assembly.files]]
+tree = "boot"
+src = "@assets/board/config.txt"
+dest = "config.txt"
+
+[[image.assembly.files]]
+tree = "boot"
+src_glob = "$provider.images/*.dtb"
+dest = "."
+optional = true
+
+[[image.assembly.files]]
+tree = "initramfs"
+src = "@assets/initramfs/init"
+dest = "init"
+mode = "0755"
+
+[[image.assembly.transforms]]
+kind = "gzip"
+src = "$provider.images/Image"
+dest = "$assembly.tree.boot/kernel.img"
+deterministic = true
+
+[[image.assembly.transforms]]
+kind = "compile-dts"
+src = "@assets/overlays/example-overlay.dts"
+dest = "$assembly.tree.boot/overlays/example-overlay.dtbo"
+
+[[image.assembly.busybox_initramfs]]
+tree = "initramfs"
+busybox = "$provider.target/bin/busybox"
+include_runtime_libs = false
+applets = ["sh", "mount", "mkdir", "switch_root"]
+
+[[image.assembly.filesystems]]
+id = "bootfs"
+kind = "vfat"
+source_tree = "boot"
+output = "$provider.images/boot.vfat"
+size = "32M"
+
+[[image.assembly.filesystems]]
+id = "initramfs"
+kind = "cpio-gzip"
+source_tree = "initramfs"
+output = "$assembly.tree.boot/initramfs"
+deterministic = true
+
+[[image.assembly.disks]]
+id = "sdcard"
+output = "$provider.images/sdcard.img"
+partition_table = "mbr"
+signature = "0x48454c49"
+
+[[image.assembly.disks.partitions]]
+name = "boot"
+type_alias = "fat32-lba"
+bootable = true
+image = "$provider.images/boot.vfat"
+
+[[image.assembly.disks.partitions]]
+name = "rootfs"
+type = "0x83"
+image = "$provider.images/rootfs.squashfs"
+```
+
+Assembly roots:
+- `$provider.images`: provider image output directory.
+- `$provider.target`: provider target root tree, when the provider exposes one.
+- `$provider.host`: provider host tools directory, when the provider exposes one.
+- `$provider.staging`: provider staging/sysroot directory, when the provider exposes one.
+- `$assembly.work`: configured assembly work directory.
+- `$assembly.out`: configured assembly output directory.
+- `$assembly.tree.<id>`: path for a declared assembly tree.
+- `@assets/...`: workspace asset path.
+
+Assembly behavior:
+- Declared `trees` are cleaned and recreated before staging.
+- File entries use exactly one of `src` or `src_glob`.
+- Glob staging is deterministic and currently supports simple non-recursive `*` filename patterns.
+- `optional = true` skips missing sources without failing the build and records the skip in runtime state.
+- `mode = "0755"` applies Unix file modes on Unix hosts.
+- Transform kinds currently implemented are `copy`, `gzip`, and `compile-dts`.
+- `gzip` uses stable name and timestamp behavior for deterministic output.
+- `compile-dts` resolves `dtc` from provider host tools first, then host `PATH`.
+- `busybox_initramfs` copies the configured BusyBox binary to `bin/busybox`, creates requested applet symlinks in `bin`, and can copy `ldd`-reported runtime libraries when `include_runtime_libs = true`.
+- Runtime library discovery is intended for Linux-style hosts and target binaries that can be inspected by host `ldd`; static BusyBox output skips library copying.
+- Filesystem kinds currently implemented are `vfat`, `cpio`, and `cpio-gzip`.
+- `vfat` uses `mtools` (`mformat` and `mcopy`), resolving provider host tools first, then host `PATH`; `size` accepts byte values or `K`, `M`, and `G` suffixes.
+- Raw MBR disk assembly writes up to four 1 MiB-aligned partitions sequentially from declared partition images.
+- MBR partition `type` accepts raw `0xNN` values; `type_alias` currently supports `fat32-lba` and `linux`.
+- Assembly runtime state is included in provenance and manifest reports with staged file, transform, and filesystem output sizes and digests.
+
+Provider hooks and assembly:
+- Keep provider-native post-image hooks for provider-specific behavior that must run inside the provider build environment.
+- Prefer typed assembly for generic staging, compression, device-tree compilation, filesystem images, raw MBR disk layout, and BusyBox initramfs generation.
+- During migration, provider hooks and typed assembly can coexist; assembly runs after provider image build and feed refresh so it can consume provider outputs.
+- Gaia reports publish-directory hygiene warnings for transient directories and large unexpected files, but these warnings do not fail builds. Tune the policy with `[reporting.output_hygiene]`:
+
+```toml
+[reporting.output_hygiene]
+large_file_threshold_bytes = 104857600
+transient_dir_names = [".cache", "build", "buildroot-output", "sources", "target"]
+```
+
+Buildroot migration example:
+- Old hook-oriented approach: set `BR2_ROOTFS_POST_IMAGE_SCRIPT="support/scripts/genimage.sh"` and `BR2_ROOTFS_POST_SCRIPT_ARGS="-c ${CONFIG_DIR}/genimage.cfg"` in the Buildroot defconfig to create `sdcard.img`.
+- Typed assembly equivalent: leave Buildroot responsible for producing root filesystem artifacts, then declare an MBR disk in TOML:
+
+```toml
+[[image.assembly.disks]]
+id = "sdcard"
+output = "$provider.images/sdcard.img"
+partition_table = "mbr"
+signature_text = "GAIA"
+
+[[image.assembly.disks.partitions]]
+name = "rootfs"
+type_alias = "linux"
+image = "$provider.images/buildroot-output/images/rootfs.ext4"
+```
 
 ## Checkpoints
 

@@ -149,7 +149,7 @@ pub struct ImageOutputContract {
     pub emit_report: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageExecutionPolicy {
     pub retry_attempts: u32,
     pub retry_backoff_ms: u64,
@@ -157,6 +157,9 @@ pub struct ImageExecutionPolicy {
     pub timeout_seconds: u64,
     pub jobs: u32,
     pub local_jobs: u32,
+    pub download_dir: Option<String>,
+    pub ccache_enabled: bool,
+    pub ccache_dir: Option<String>,
     pub output_retention: ProcessOutputRetention,
 }
 
@@ -169,6 +172,9 @@ impl Default for ImageExecutionPolicy {
             timeout_seconds: 300,
             jobs: 0,
             local_jobs: 0,
+            download_dir: None,
+            ccache_enabled: false,
+            ccache_dir: None,
             output_retention: ProcessOutputRetention::default(),
         }
     }
@@ -468,6 +474,85 @@ fn hash_dir(path: &Path, hasher: &mut DefaultHasher) {
     }
 }
 
+pub fn temporary_publish_output_path(output: &Path, fallback_name: &str) -> PathBuf {
+    let Some(parent) = output.parent() else {
+        return output.with_extension("gaia-tmp");
+    };
+    let file_name = output
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(fallback_name);
+    parent.join(format!(".{file_name}.gaia-tmp"))
+}
+
+pub fn temporary_publish_backup_path(output: &Path, fallback_name: &str) -> PathBuf {
+    let Some(parent) = output.parent() else {
+        return output.with_extension("gaia-backup");
+    };
+    let file_name = output
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(fallback_name);
+    parent.join(format!(".{file_name}.gaia-backup"))
+}
+
+pub fn publish_replace_output(
+    temp: &Path,
+    output: &Path,
+    output_label: &str,
+    fallback_name: &str,
+) -> Result<(), String> {
+    match fs::rename(temp, output) {
+        Ok(()) => return Ok(()),
+        Err(error) if !output.exists() => {
+            return Err(format!(
+                "failed to publish {output_label} '{}' from '{}': {error}",
+                output.display(),
+                temp.display()
+            ));
+        }
+        Err(_) => {}
+    }
+
+    let backup = temporary_publish_backup_path(output, fallback_name);
+    if backup.exists() {
+        fs::remove_file(&backup).map_err(|error| {
+            format!(
+                "failed to remove stale {output_label} backup '{}': {error}",
+                backup.display()
+            )
+        })?;
+    }
+    fs::rename(output, &backup).map_err(|error| {
+        format!(
+            "failed to move existing {output_label} '{}' to backup '{}': {error}",
+            output.display(),
+            backup.display()
+        )
+    })?;
+    match fs::rename(temp, output) {
+        Ok(()) => {
+            let _ = fs::remove_file(&backup);
+            Ok(())
+        }
+        Err(error) => {
+            let restore_result = fs::rename(&backup, output);
+            let restore_message = match restore_result {
+                Ok(()) => format!("previous {output_label} was restored"),
+                Err(restore_error) => format!(
+                    "failed to restore previous {output_label} from '{}': {restore_error}",
+                    backup.display()
+                ),
+            };
+            Err(format!(
+                "failed to publish {output_label} '{}' from '{}': {error}; {restore_message}",
+                output.display(),
+                temp.display()
+            ))
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct ImageProviderCatalog {
     providers: Vec<Box<dyn ImageProvider>>,
@@ -567,5 +652,27 @@ mod tests {
 
         assert!(error.message.contains("failed to move image archive"));
         assert!(!archive_path.with_extension("gaia.tmp").exists());
+    }
+
+    #[test]
+    fn publish_replace_output_restores_previous_output_when_replacement_fails() {
+        let root = temp_path("gaia-publish-replace-restore");
+        let output = root.join("output.img");
+        let missing_temp = temporary_publish_output_path(&output, "output");
+        fs::create_dir_all(&root).expect("root dir");
+        fs::write(&output, "previous").expect("previous output");
+
+        let error = publish_replace_output(&missing_temp, &output, "test output", "output")
+            .expect_err("publish failure");
+
+        assert!(
+            error.contains("previous test output was restored"),
+            "{error}"
+        );
+        assert_eq!(
+            fs::read_to_string(&output).expect("restored output"),
+            "previous"
+        );
+        assert!(!temporary_publish_backup_path(&output, "output").exists());
     }
 }

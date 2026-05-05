@@ -1,6 +1,7 @@
 mod graph;
 mod operations;
 mod reuse;
+mod reuse_assembly;
 
 pub use graph::{ExecutionPlan, PlanDiagnostic, ReuseState};
 pub use operations::{
@@ -328,6 +329,27 @@ pub fn plan_build_with_reuse_state(
         operations.push(planned);
     }
 
+    let has_image_assembly = spec
+        .image
+        .assembly
+        .as_ref()
+        .is_some_and(|assembly| !assembly.is_empty());
+    if has_image_assembly {
+        operations.push(
+            PlannedOperation::new(OperationId::image_assembly(), OperationKind::AssembleImage)
+                .with_dependency(OperationId::image())
+                .with_parallelism(OperationParallelism::parallelizable(
+                    OperationParallelismDomain::Images,
+                ))
+                .with_optionality(OperationOptionality::Required)
+                .with_fingerprint(operation_fingerprint(spec, &OperationKind::AssembleImage))
+                .with_reuse(OperationReuse::execute(
+                    "image_assembly_required",
+                    "image assembly will execute after provider image output is available",
+                )),
+        );
+    }
+
     for checkpoint in &spec.checkpoints.points {
         let anchor_dependency = checkpoint_anchor_dependency(&checkpoint.anchor);
         let checkpoint_optionality = checkpoint_optionality(checkpoint);
@@ -366,7 +388,11 @@ pub fn plan_build_with_reuse_state(
         ))
         .with_optionality(OperationOptionality::Required)
         .with_fingerprint(operation_fingerprint(spec, &OperationKind::EmitReport))
-        .with_dependency(OperationId::image())
+        .with_dependency(if has_image_assembly {
+            OperationId::image_assembly()
+        } else {
+            OperationId::image()
+        })
         .with_reuse(OperationReuse::execute(
             "report_emission_required",
             "report emission always runs at the end of a plan",

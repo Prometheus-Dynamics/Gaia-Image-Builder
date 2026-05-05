@@ -11,7 +11,9 @@ use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
+
+const COMMAND_SIGNATURE_TIMEOUT_SECONDS: u64 = 2;
 
 pub fn spec_fingerprint(spec: &ResolvedBuildSpec) -> u64 {
     let mut hasher = DefaultHasher::new();
@@ -258,6 +260,11 @@ pub(crate) fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKi
             format!("{:?}", spec.image).hash(&mut hasher);
             image_backend_signature(spec, &spec.image).hash(&mut hasher);
         }
+        OperationKind::AssembleImage => {
+            format!("{:?}", spec.image.assembly).hash(&mut hasher);
+            operation_output_signature(spec, &OperationKind::BuildImage).hash(&mut hasher);
+            crate::reuse_assembly::assembly_input_signature(spec).hash(&mut hasher);
+        }
         OperationKind::CaptureCheckpoint { checkpoint_id } => {
             spec.checkpoints
                 .points
@@ -360,13 +367,30 @@ fn image_backend_signature(spec: &ResolvedBuildSpec, image: &gaia_spec::ImageSpe
     }
 }
 
-fn command_signature<const N: usize>(program: &str, args: [&str; N]) -> String {
+pub(crate) fn command_signature<const N: usize>(program: &str, args: [&str; N]) -> String {
     let mut command = Command::new(program);
     command.args(args);
-    match command.output() {
-        Ok(output) if output.status.success() => {
-            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let retention = gaia_process::ProcessOutputRetention {
+        stdout_bytes: 4096,
+        stderr_bytes: 4096,
+        stdout_lines: 8,
+        stderr_lines: 8,
+    };
+    match gaia_process::run_command_with_timeout_and_retention(
+        &mut command,
+        Duration::from_secs(COMMAND_SIGNATURE_TIMEOUT_SECONDS),
+        "reuse command signature",
+        retention,
+        None,
+        None,
+    ) {
+        Ok(result) if result.output.status.success() => {
+            let stdout = String::from_utf8_lossy(&result.output.stdout)
+                .trim()
+                .to_string();
+            let stderr = String::from_utf8_lossy(&result.output.stderr)
+                .trim()
+                .to_string();
             if !stdout.is_empty() {
                 format!("{program}:{stdout}")
             } else if !stderr.is_empty() {
@@ -375,8 +399,15 @@ fn command_signature<const N: usize>(program: &str, args: [&str; N]) -> String {
                 format!("{program}:ok")
             }
         }
-        Ok(output) => format!("{program}:exit-{}", output.status),
-        Err(error) => format!("{program}:unavailable:{error}"),
+        Ok(result) => format!("{program}:exit-{}", result.output.status),
+        Err(error) => match error.kind {
+            gaia_process::ProcessRunErrorKind::Timeout => {
+                format!("{program}:timeout-{COMMAND_SIGNATURE_TIMEOUT_SECONDS}s")
+            }
+            gaia_process::ProcessRunErrorKind::Cancelled => format!("{program}:cancelled"),
+            gaia_process::ProcessRunErrorKind::ToolStart => format!("{program}:unavailable"),
+            gaia_process::ProcessRunErrorKind::RuntimeState => format!("{program}:runtime-error"),
+        },
     }
 }
 
@@ -431,7 +462,7 @@ fn local_repo_path(repo: &str) -> Option<PathBuf> {
     file_repo.or_else(|| direct.exists().then_some(direct))
 }
 
-fn path_state_signature(path: &Path) -> String {
+pub(crate) fn path_state_signature(path: &Path) -> String {
     let mut hasher = DefaultHasher::new();
     hash_path_state(path, &mut hasher, &[]);
     format!("{:016x}", hasher.finish())
@@ -568,6 +599,7 @@ fn operation_outputs_present(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
             };
             collect_exists || archive_exists
         }
+        OperationKind::AssembleImage => assembly_state_path(spec).is_file(),
     }
 }
 
@@ -627,7 +659,7 @@ pub fn operation_output_signature(
                 let output_dir = Path::new(collect_dir).join("buildroot-output");
                 format!(
                     "{}|{}",
-                    path_state_signature(&output_dir.join("target")),
+                    provider_state_signature(&Path::new(collect_dir).join(".gaia-image-state.txt")),
                     path_state_signature(&output_dir.join(".config")),
                 )
             })
@@ -652,6 +684,7 @@ pub fn operation_output_signature(
             }
             (!parts.is_empty()).then(|| parts.join("|"))
         }
+        OperationKind::AssembleImage => Some(provider_state_signature(&assembly_state_path(spec))),
         OperationKind::CaptureCheckpoint { checkpoint_id } => Some(provider_state_signature(
             &checkpoint_state_path(spec, checkpoint_id),
         )),
@@ -670,9 +703,7 @@ fn provider_state_signature(path: &Path) -> String {
 }
 
 fn runtime_state_dir(spec: &ResolvedBuildSpec) -> PathBuf {
-    PathBuf::from(&spec.workspace.out_dir)
-        .join(".gaia")
-        .join("runtime")
+    PathBuf::from(&spec.workspace.out_dir).join(gaia_spec::RUNTIME_STATE_DIR_NAME)
 }
 
 fn install_state_path(spec: &ResolvedBuildSpec, install_id: &gaia_spec::InstallId) -> PathBuf {
@@ -692,6 +723,10 @@ fn checkpoint_state_path(
     checkpoint_id: &gaia_spec::CheckpointId,
 ) -> PathBuf {
     runtime_state_dir(spec).join(format!("checkpoint-{}.state", checkpoint_id.as_str()))
+}
+
+fn assembly_state_path(spec: &ResolvedBuildSpec) -> PathBuf {
+    runtime_state_dir(spec).join(gaia_spec::IMAGE_ASSEMBLY_STATE_FILE_NAME)
 }
 
 pub(crate) fn checkpoint_anchor_dependency(anchor: &CheckpointAnchorRef) -> OperationId {
@@ -720,3 +755,7 @@ pub(crate) fn checkpoint_optionality(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "reuse_tests.rs"]
+mod tests;

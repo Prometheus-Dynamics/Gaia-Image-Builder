@@ -222,6 +222,10 @@ fn rust_buildroot_sdcard_smoke_example_validates_and_plans_cleanly() {
                 buildroot.expected_images[0].format,
                 gaia_spec::BuildrootExpectedImageFormatSpec::Raw
             );
+            assert!(
+                spec.image.assembly.is_some(),
+                "sdcard example should use typed assembly for raw disk output"
+            );
         }
         other => panic!("expected validated outcome, got {other:?}"),
     }
@@ -244,6 +248,11 @@ fn rust_buildroot_sdcard_smoke_example_validates_and_plans_cleanly() {
                 plan.operations
                     .iter()
                     .any(|operation| operation.id.as_str() == "image:build")
+            );
+            assert!(
+                plan.operations
+                    .iter()
+                    .any(|operation| operation.id.as_str() == "image:assembly")
             );
         }
         other => panic!("expected planned outcome, got {other:?}"),

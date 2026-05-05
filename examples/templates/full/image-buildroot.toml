@@ -33,3 +33,28 @@ required = false
 collect_dir = "${workspace.out_dir}/images"
 archive_name = "${build.name}-${build.version}.img.xz"
 emit_report = true
+
+[image.assembly]
+work_dir = "${workspace.build_dir}/assembly"
+out_dir = "$provider.images"
+
+[[image.assembly.trees]]
+id = "boot"
+path = "$assembly.work/boot"
+
+[[image.assembly.trees]]
+id = "initramfs"
+path = "$assembly.work/initramfs"
+
+[[image.assembly.files]]
+tree = "boot"
+src_glob = "$provider.images/*.dtb"
+dest = "."
+optional = true
+
+[[image.assembly.filesystems]]
+id = "initramfs"
+kind = "cpio-gzip"
+source_tree = "initramfs"
+output = "$assembly.tree.boot/initramfs"
+deterministic = true

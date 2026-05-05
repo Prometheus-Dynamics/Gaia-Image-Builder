@@ -21,7 +21,7 @@ impl std::error::Error for IdError {}
 
 macro_rules! id_type {
     ($name:ident) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub struct $name(String);
 
         impl $name {
@@ -92,6 +92,8 @@ id_type!(SourceId);
 id_type!(ArtifactId);
 id_type!(InstallId);
 id_type!(StageItemId);
+id_type!(AssemblyTreeId);
+id_type!(AssemblyFilesystemId);
 
 #[cfg(test)]
 mod tests {

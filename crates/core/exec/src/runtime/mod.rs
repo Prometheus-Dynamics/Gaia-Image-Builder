@@ -150,6 +150,7 @@ impl ExecutionRuntime {
                 operation_id: failed_operation_id.clone(),
                 message: cleanup_message("cleaned", failed_cleanup_paths.len(), failures.len()),
             });
+            self.emit_cleanup_failure_events(failed_operation_id, &failures);
         } else if preserve_failed_outputs && !failed_cleanup_paths.is_empty() {
             self.record_error_cleanup(failed_operation_id, ExecutionCleanupStatus::Preserved, &[]);
             self.emit_event(ExecutionEvent::Log {
@@ -181,13 +182,14 @@ impl ExecutionRuntime {
                 self.outcome.cleanup_failures.extend(failures.clone());
                 self.outcome.rolled_back_ids.push(operation_id.clone());
                 self.emit_event(ExecutionEvent::Log {
-                    operation_id,
+                    operation_id: operation_id.clone(),
                     message: cleanup_message(
                         "rolled back",
                         cleanup_paths_for_op.len(),
                         failures.len(),
                     ),
                 });
+                self.emit_cleanup_failure_events(&operation_id, &failures);
             } else {
                 self.emit_event(ExecutionEvent::Log {
                     operation_id,
@@ -233,6 +235,7 @@ impl ExecutionRuntime {
                         cleanup_message("cleaned", cancelled_cleanup_paths.len(), failures.len())
                     ),
                 });
+                self.emit_cleanup_failure_events(operation_id, &failures);
             }
             while let Some((completed_operation_id, cleanup_domain, cleanup_paths_for_op)) =
                 self.cleanup_stack.pop()
@@ -244,7 +247,7 @@ impl ExecutionRuntime {
                         .rolled_back_ids
                         .push(completed_operation_id.clone());
                     self.emit_event(ExecutionEvent::Log {
-                        operation_id: completed_operation_id,
+                        operation_id: completed_operation_id.clone(),
                         message: format!(
                             "{} after cancellation",
                             cleanup_message(
@@ -254,6 +257,7 @@ impl ExecutionRuntime {
                             )
                         ),
                     });
+                    self.emit_cleanup_failure_events(&completed_operation_id, &failures);
                 }
             }
             self.outcome.completed_operations = 0;
@@ -283,6 +287,25 @@ impl ExecutionRuntime {
                 .iter()
                 .map(|failure| failure.message.clone())
                 .collect();
+        }
+    }
+
+    fn emit_cleanup_failure_events(
+        &mut self,
+        operation_id: &OperationId,
+        failures: &[CleanupFailure],
+    ) {
+        for failure in failures {
+            tracing::warn!(
+                operation_id = %operation_id.as_str(),
+                cleanup_path = %failure.path.display(),
+                message = %failure.message,
+                "cleanup failed"
+            );
+            self.emit_event(ExecutionEvent::Log {
+                operation_id: operation_id.clone(),
+                message: format!("cleanup failure: {}", failure.message),
+            });
         }
     }
 }

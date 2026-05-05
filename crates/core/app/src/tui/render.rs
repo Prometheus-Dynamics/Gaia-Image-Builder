@@ -85,9 +85,10 @@ pub(crate) fn render_monitor(frame: &mut Frame<'_>, area: Rect, state: &mut TuiS
 }
 
 pub(crate) fn render_setup_menu(frame: &mut Frame<'_>, area: Rect, state: &mut TuiState<'_>) {
-    let items = SetupItem::all()
+    let items = state
+        .setup_items
         .iter()
-        .map(|item| ListItem::new(state.setup_item_label(*item)))
+        .map(|item| ListItem::new(state.setup_item_label(item.clone())))
         .collect::<Vec<_>>();
     let list = List::new(items)
         .block(Block::default().title("Setup").borders(Borders::ALL))

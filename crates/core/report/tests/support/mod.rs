@@ -92,6 +92,11 @@ pub fn materialize_reusable_outputs(spec: &gaia_spec::ResolvedBuildSpec) {
         .clone()
         .expect("image archive name");
     fs::write(PathBuf::from(&collect_dir).join(archive_name), "archive").expect("image archive");
+    fs::write(
+        PathBuf::from(&collect_dir).join(".gaia-image-state.txt"),
+        "provider=buildroot\nemit_report=true\narchive=default-2.0.0.tar\nreused=false\n",
+    )
+    .expect("image provider state");
     let runtime_dir = PathBuf::from(&spec.workspace.out_dir).join(".gaia/runtime");
     fs::create_dir_all(&runtime_dir).expect("runtime dir");
     fs::write(

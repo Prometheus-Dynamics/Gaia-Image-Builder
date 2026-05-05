@@ -6,7 +6,10 @@ use gaia_source_providers::SourceProviderCatalog;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static UNIQUE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub fn config_path() -> String {
     format!(
@@ -20,9 +23,10 @@ pub fn unique_dir(prefix: &str) -> String {
         .duration_since(UNIX_EPOCH)
         .expect("system time")
         .as_nanos();
+    let count = UNIQUE_COUNTER.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir()
         .join("gaia-tests")
-        .join(format!("{prefix}-{nonce}"))
+        .join(format!("{prefix}-{nonce}-{count}"))
         .display()
         .to_string()
 }
@@ -30,8 +34,9 @@ pub fn unique_dir(prefix: &str) -> String {
 pub fn write_temp_build(contents: &str) -> String {
     let root = std::env::temp_dir().join("gaia-tests");
     fs::create_dir_all(&root).expect("test scratch root");
+    let count = UNIQUE_COUNTER.fetch_add(1, Ordering::Relaxed);
     let path = root.join(format!(
-        "gaia-cli-build-{}.toml",
+        "gaia-cli-build-{}-{count}.toml",
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time")

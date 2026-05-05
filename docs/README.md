@@ -11,7 +11,8 @@ This is the rebuilt documentation set for the current typed Gaia system.
 5. [platform-support.md](platform-support.md)
 6. [reporting-and-state.md](reporting-and-state.md)
 7. [migration-from-legacy.md](migration-from-legacy.md)
-8. [completion-checklist.md](completion-checklist.md)
+8. [future-features.md](future-features.md)
+9. [completion-checklist.md](completion-checklist.md)
 
 ## What Each Doc Covers
 
@@ -36,6 +37,9 @@ This is the rebuilt documentation set for the current typed Gaia system.
 
 - [migration-from-legacy.md](migration-from-legacy.md)
   How to translate old Gaia trees that still think in `buildroot` / `program` / `stage` module buckets.
+
+- [future-features.md](future-features.md)
+  Future checkpoint reuse, CI multiplex builds, and first-class image/root filesystem formats to consider.
 
 - [completion-checklist.md](completion-checklist.md)
   The concrete remaining work required before Gaia can be considered done as an OS-image build system.

@@ -96,6 +96,12 @@ retry_attempts = 1
 retry_backoff_ms = 0
 retry_backoff_strategy = "fixed"
 timeout_seconds = 600
+local_jobs = 4
+download_dir = ".gaia/cache/buildroot/dl"
+
+[providers.buildroot.ccache]
+enabled = true
+dir = ".gaia/cache/buildroot/ccache"
 
 [providers.starting_point]
 retry_attempts = 1

@@ -8,7 +8,8 @@ use gaia_image_providers::{
 use gaia_process::{
     DockerRunSpec, ProcessRetryBackoffStrategy, ProcessRunErrorKind, docker_run_command,
     label_process_log_sink, retry_backoff_duration as process_retry_backoff_duration,
-    run_command_with_timeout_and_retention, sleep_with_cancel,
+    run_command_stdout_to_file_with_timeout_and_retention, run_command_with_timeout_and_retention,
+    sleep_with_cancel,
 };
 use gaia_spec::{
     BuildrootExpectedImageFormatSpec, BuildrootExternalTreeModeSpec, ImageDefinition, ImageSpec,
@@ -136,8 +137,9 @@ impl ImageProvider for BuildrootImageProvider {
             let target_dir = output_dir.join("target");
             if buildroot_expected_images_present(image, &output_dir) {
                 messages.push(format!(
-                    "reused completed buildroot output at '{}'",
-                    output_dir.display()
+                    "reused completed buildroot output at '{}' ({})",
+                    output_dir.display(),
+                    buildroot_expected_images_reuse_detail(image)
                 ));
                 reuse_details.push("buildroot-output".to_string());
             } else {
@@ -205,7 +207,7 @@ impl ImageProvider for BuildrootImageProvider {
             ));
             state_details.push((
                 "buildroot_output_digest".to_string(),
-                dir_digest(&output_dir),
+                buildroot_state_digest(image, &output_dir),
             ));
             state_details.push((
                 "matched_expected_images".to_string(),
@@ -304,13 +306,13 @@ impl ImageProvider for BuildrootImageProvider {
                     )
                 })?;
                 let output_dir = collect_dir.join("buildroot-output");
-                let target_dir = output_dir.join("target");
                 let mut reuse_details = Vec::new();
-                let messages = if target_dir.is_dir() {
+                let messages = if buildroot_expected_images_present(request.image, &output_dir) {
                     reuse_details.push("buildroot-prepare-output".to_string());
                     vec![format!(
-                        "reused prepared buildroot output at '{}'",
-                        output_dir.display()
+                        "reused prepared buildroot output at '{}' ({})",
+                        output_dir.display(),
+                        buildroot_expected_images_reuse_detail(request.image)
                     )]
                 } else {
                     run_buildroot(BuildrootRunRequest {
@@ -343,7 +345,7 @@ impl ImageProvider for BuildrootImageProvider {
                         ));
                         details.push((
                             "buildroot_output_digest".to_string(),
-                            dir_digest(&output_dir),
+                            buildroot_state_digest(request.image, &output_dir),
                         ));
                         details.extend(build_state_details(request.spec));
                         details.extend(build_image_contract_state_details(request.image));
@@ -367,6 +369,7 @@ impl ImageProvider for BuildrootImageProvider {
 
 mod archive;
 mod buildroot;
+mod buildroot_external;
 mod command;
 mod feed;
 mod fs_util;
@@ -376,6 +379,7 @@ mod tests;
 
 pub(crate) use archive::*;
 pub(crate) use buildroot::*;
+pub(crate) use buildroot_external::*;
 pub(crate) use command::*;
 pub(crate) use feed::*;
 pub(crate) use fs_util::*;

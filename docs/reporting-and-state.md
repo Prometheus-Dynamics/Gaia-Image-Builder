@@ -52,6 +52,8 @@ Includes:
 - artifact install identities
 - artifact output metadata
 - image provider / feed / contract
+- image assembly runtime state
+- output hygiene warnings for publish directories
 - backend state collections for all major domains
 
 ### Manifest
@@ -65,6 +67,8 @@ Includes structured records for:
 - stage env sets
 - stage services
 - image outputs
+- image assembly
+- output hygiene warnings
 - checkpoints
 
 ### Rebuild Reasons
@@ -114,6 +118,26 @@ Reuse is invalidated when:
 - runtime state changes
 - output signatures change
 - outputs disappear
+
+Image assembly reuse is also invalidated when declared assembly inputs change, including staged file sources, glob match sets, transform inputs, BusyBox helper inputs, and resolved tool signatures where relevant.
+
+## Output Hygiene
+
+Gaia reports publish-directory hygiene warnings without failing the build. These warnings are visible in provenance and manifest reports, and are included in the summary warning count.
+
+Current warnings include:
+- known transient directories in image publish directories, such as `.cache`, `build`, `buildroot-output`, `sources`, or `target`
+- large non-output files in publish directories
+
+The defaults can be tuned at runtime:
+
+```toml
+[reporting.output_hygiene]
+large_file_threshold_bytes = 104857600
+transient_dir_names = [".cache", "build", "buildroot-output", "sources", "target"]
+```
+
+Expected image names, configured image archives, assembly filesystem outputs, assembly disk outputs, and Gaia state files are not treated as unexpected large files.
 
 ## Corrupt State Handling
 

@@ -301,9 +301,29 @@ fn compress_primary_image(
     source_path: &Path,
     archive_path: &Path,
     execution: &ImageExecutionContext,
-    _policy: &ImageExecutionPolicy,
-    _log_sink: Option<ProcessLogSink>,
-    _cancel_check: Option<ProcessCancelCheck>,
+    policy: &ImageExecutionPolicy,
+    log_sink: Option<ProcessLogSink>,
+    cancel_check: Option<ProcessCancelCheck>,
+) -> Result<Vec<String>, ImageProviderError> {
+    compress_primary_image_with_program(
+        Path::new("xz"),
+        source_path,
+        archive_path,
+        execution,
+        policy,
+        log_sink,
+        cancel_check,
+    )
+}
+
+pub(crate) fn compress_primary_image_with_program(
+    xz_program: &Path,
+    source_path: &Path,
+    archive_path: &Path,
+    execution: &ImageExecutionContext,
+    policy: &ImageExecutionPolicy,
+    log_sink: Option<ProcessLogSink>,
+    cancel_check: Option<ProcessCancelCheck>,
 ) -> Result<Vec<String>, ImageProviderError> {
     if let Some(parent) = archive_path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
@@ -313,35 +333,46 @@ fn compress_primary_image(
             ))
         })?;
     }
-    let mut command = Command::new("xz");
-    command.arg("-T0").arg("-c").arg(source_path);
-    let output_file = fs::File::create(archive_path).map_err(|error| {
-        ImageProviderError::new(
-            ImageProviderErrorKind::RuntimeState,
-            format!(
-                "failed to create compressed primary buildroot image '{}': {error}",
-                archive_path.display()
-            ),
-        )
-    })?;
-    let mut command = command_for_execution(&command, execution)?;
-    command.stdout(std::process::Stdio::from(output_file));
-    let output = command.output().map_err(|error| {
-        ImageProviderError::new(
-            ImageProviderErrorKind::ToolStart,
-            format!("failed to start xz compression: {error}"),
-        )
+    let temp_archive = temporary_archive_output_path(archive_path);
+    let mut command = Command::new(xz_program);
+    command
+        .arg(format!("-T{}", policy.local_jobs.max(1)))
+        .arg("-c")
+        .arg(source_path);
+    let output = command_stdout_to_file_with_timeout(CommandStdoutToFileRequest {
+        command: &mut command,
+        output_path: &temp_archive,
+        execution,
+        timeout: Duration::from_secs(policy.timeout_seconds.max(1)),
+        label: "buildroot raw image compression",
+        retention: policy.output_retention,
+        log_sink,
+        cancel_check,
+    })
+    .inspect_err(|_| {
+        let _ = fs::remove_file(&temp_archive);
     })?;
     if !output.status.success() {
+        let _ = fs::remove_file(&temp_archive);
         return Err(ImageProviderError::backend_command(format!(
             "failed to compress primary buildroot image '{}': {}",
             source_path.display(),
             String::from_utf8_lossy(&output.stderr).trim()
         )));
     }
+    publish_archive_output(&temp_archive, archive_path)?;
     Ok(vec![format!(
         "compressed primary buildroot image '{}' to '{}'",
         source_path.display(),
         archive_path.display()
     )])
+}
+
+pub(crate) fn temporary_archive_output_path(output: &Path) -> PathBuf {
+    gaia_image_providers::temporary_publish_output_path(output, "image-archive")
+}
+
+fn publish_archive_output(temp: &Path, output: &Path) -> Result<(), ImageProviderError> {
+    gaia_image_providers::publish_replace_output(temp, output, "image archive", "image-archive")
+        .map_err(|message| ImageProviderError::new(ImageProviderErrorKind::RuntimeState, message))
 }

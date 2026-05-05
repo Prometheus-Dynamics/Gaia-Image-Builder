@@ -2,6 +2,7 @@ use super::*;
 
 pub(crate) fn discover_build_entries(current_build: &str) -> Vec<BuildEntry> {
     let mut paths = Vec::new();
+    paths.extend(crate::cli::current_dir_build_toml_files(Path::new(".")));
 
     let build_configs_dir = PathBuf::from("configs").join("builds");
     if build_configs_dir.exists() {
@@ -185,13 +186,6 @@ pub(crate) fn format_elapsed(duration: Duration) -> String {
     let minutes = (seconds % 3600) / 60;
     let remaining = seconds % 60;
     format!("{hours:02}:{minutes:02}:{remaining:02}")
-}
-
-pub(crate) fn index_of_setup_item(item: SetupItem) -> usize {
-    SetupItem::all()
-        .iter()
-        .position(|candidate| *candidate == item)
-        .unwrap_or(0)
 }
 
 pub(crate) fn index_of_monitor_view(view: MonitorView) -> usize {

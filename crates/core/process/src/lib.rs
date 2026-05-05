@@ -1,8 +1,9 @@
 use std::ffi::OsStr;
-use std::io::{BufRead, BufReader, Read};
+use std::fs::File;
+use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -11,14 +12,19 @@ use std::os::unix::process::CommandExt;
 
 const MAX_RETAINED_STREAM_BYTES: usize = 1024 * 1024;
 const MAX_RETAINED_STREAM_LINES: usize = 1_000;
+const STREAM_READ_BUFFER_BYTES: usize = 8 * 1024;
+const MAX_RETAINED_LINE_BYTES: usize = 64 * 1024;
+const STREAM_MESSAGE_QUEUE_BOUND: usize = 64;
 
 mod docker;
+mod stream;
 mod tar;
 
 pub use docker::{
     DockerRunError, DockerRunSpec, absolute_docker_mount_candidate, discover_docker_mounts,
     docker_run_command, normalize_docker_mount_path,
 };
+use stream::spawn_stream_reader;
 pub use tar::{TarArchiveValidationError, validate_tar_archive_entries};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +70,10 @@ pub struct ProcessRunResult {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Byte tails are retained before lossy line decoding; diagnostic lines are
+/// bounded separately so invalid UTF-8 and blank output remain observable.
+/// Stream readers consume fixed-size chunks and send through a bounded queue,
+/// so child output cannot allocate memory proportional to an unbounded stream.
 pub struct ProcessOutputRetention {
     pub stdout_bytes: usize,
     pub stderr_bytes: usize,
@@ -83,11 +93,14 @@ impl Default for ProcessOutputRetention {
 }
 
 #[derive(Debug)]
-enum StreamMessage {
-    Data {
+pub(crate) enum StreamMessage {
+    Bytes {
+        stream: ProcessLogStream,
+        bytes: Vec<u8>,
+    },
+    Line {
         stream: ProcessLogStream,
         line: String,
-        bytes: Vec<u8>,
     },
     Done {
         stream: ProcessLogStream,
@@ -123,7 +136,7 @@ impl RetainedStream {
         }
     }
 
-    fn push(&mut self, line: String, bytes: &[u8]) {
+    fn push_line(&mut self, line: String) {
         if self.max_lines > 0 {
             self.lines.push(line);
             if self.lines.len() > self.max_lines {
@@ -131,7 +144,9 @@ impl RetainedStream {
                 self.lines.drain(0..excess);
             }
         }
+    }
 
+    fn push_bytes(&mut self, bytes: &[u8]) {
         if self.max_bytes > 0 {
             self.bytes.extend_from_slice(bytes);
             if self.bytes.len() > self.max_bytes {
@@ -231,7 +246,7 @@ pub fn run_command_with_timeout_and_retention(
     let stderr = child.stderr.take();
     let stdout_sink = sink.clone();
     let stderr_sink = sink;
-    let (tx, rx) = mpsc::channel::<StreamMessage>();
+    let (tx, rx) = mpsc::sync_channel::<StreamMessage>(STREAM_MESSAGE_QUEUE_BOUND);
 
     spawn_stream_reader(stdout, ProcessLogStream::Stdout, stdout_sink, tx.clone());
     spawn_stream_reader(stderr, ProcessLogStream::Stderr, stderr_sink, tx.clone());
@@ -330,6 +345,143 @@ pub fn run_command_with_timeout_and_retention(
             stderr: stream_state.stderr.bytes,
         },
         stdout_lines: stream_state.stdout.lines,
+        stderr_lines: stream_state.stderr.lines,
+    })
+}
+
+pub fn run_command_stdout_to_file_with_timeout_and_retention(
+    command: &mut Command,
+    output_path: &Path,
+    timeout: Duration,
+    label: &str,
+    retention: ProcessOutputRetention,
+    sink: Option<ProcessLogSink>,
+    cancel_check: Option<ProcessCancelCheck>,
+) -> Result<ProcessRunResult, ProcessRunError> {
+    let description = command_description(command);
+    let stdout = File::create(output_path).map_err(|error| ProcessRunError {
+        kind: ProcessRunErrorKind::RuntimeState,
+        message: format!(
+            "failed to create stdout file for {label} at '{}': {error}",
+            output_path.display()
+        ),
+    })?;
+    command.stdout(Stdio::from(stdout)).stderr(Stdio::piped());
+    configure_process_group(command);
+    let mut child = command.spawn().map_err(|error| {
+        tracing::warn!(
+            command_label = label,
+            command_program = %description.program,
+            command_args = ?description.args,
+            command_cwd = description.cwd.as_deref().unwrap_or("<inherit>"),
+            error = %error,
+            "process start failed"
+        );
+        ProcessRunError {
+            kind: ProcessRunErrorKind::ToolStart,
+            message: format!("failed to start {label}: {error}"),
+        }
+    })?;
+    let child_id = child.id();
+    let process_group = ProcessGroup::for_child(&child);
+    tracing::debug!(
+        command_label = label,
+        command_program = %description.program,
+        command_args = ?description.args,
+        command_cwd = description.cwd.as_deref().unwrap_or("<inherit>"),
+        pid = child_id,
+        timeout_seconds = timeout.as_secs(),
+        "process started"
+    );
+
+    let stderr = child.stderr.take();
+    let (tx, rx) = mpsc::sync_channel::<StreamMessage>(STREAM_MESSAGE_QUEUE_BOUND);
+    spawn_stream_reader(stderr, ProcessLogStream::Stderr, sink, tx.clone());
+    drop(tx);
+
+    let mut stream_state = StreamDrainState::with_retention(retention);
+    stream_state.stdout_done = true;
+
+    let start = Instant::now();
+    let status = loop {
+        drain_stream_messages(&rx, &mut stream_state);
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if cancel_check.as_ref().is_some_and(|cancel| cancel()) {
+                    terminate_child_tree(&mut child, process_group);
+                    drain_stream_messages_until_idle(
+                        &rx,
+                        &mut stream_state,
+                        Duration::from_millis(250),
+                    );
+                    tracing::warn!(
+                        command_label = label,
+                        command_program = %description.program,
+                        pid = child_id,
+                        elapsed_ms = start.elapsed().as_millis(),
+                        "process cancelled"
+                    );
+                    return Err(ProcessRunError {
+                        kind: ProcessRunErrorKind::Cancelled,
+                        message: format!("{label} cancelled"),
+                    });
+                }
+                if start.elapsed() >= timeout {
+                    terminate_child_tree(&mut child, process_group);
+                    drain_stream_messages_until_idle(
+                        &rx,
+                        &mut stream_state,
+                        Duration::from_millis(250),
+                    );
+                    tracing::warn!(
+                        command_label = label,
+                        command_program = %description.program,
+                        pid = child_id,
+                        timeout_seconds = timeout.as_secs(),
+                        elapsed_ms = start.elapsed().as_millis(),
+                        "process timed out"
+                    );
+                    return Err(ProcessRunError {
+                        kind: ProcessRunErrorKind::Timeout,
+                        message: format!("{label} timed out after {}s", timeout.as_secs()),
+                    });
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => {
+                terminate_child_tree(&mut child, process_group);
+                drain_stream_messages_until_idle(
+                    &rx,
+                    &mut stream_state,
+                    Duration::from_millis(250),
+                );
+                tracing::warn!(
+                    command_label = label,
+                    command_program = %description.program,
+                    pid = child_id,
+                    elapsed_ms = start.elapsed().as_millis(),
+                    error = %error,
+                    "process poll failed"
+                );
+                return Err(ProcessRunError {
+                    kind: ProcessRunErrorKind::RuntimeState,
+                    message: format!("failed to poll {label}: {error}"),
+                });
+            }
+        }
+    };
+
+    terminate_leftover_tree(process_group);
+    drain_stream_messages_until_idle(&rx, &mut stream_state, Duration::from_millis(500));
+
+    Ok(ProcessRunResult {
+        output: Output {
+            status,
+            stdout: Vec::new(),
+            stderr: stream_state.stderr.bytes,
+        },
+        stdout_lines: Vec::new(),
         stderr_lines: stream_state.stderr.lines,
     })
 }
@@ -549,62 +701,6 @@ fn terminate_leftover_tree(group: ProcessGroup) {
 #[cfg(not(unix))]
 fn terminate_leftover_tree(_group: ProcessGroup) {}
 
-fn spawn_stream_reader(
-    stream: Option<impl Read + Send + 'static>,
-    which: ProcessLogStream,
-    sink: Option<ProcessLogSink>,
-    tx: Sender<StreamMessage>,
-) {
-    thread::spawn(move || {
-        read_stream(stream, which, sink, tx);
-    });
-}
-
-fn read_stream(
-    stream: Option<impl Read + Send + 'static>,
-    which: ProcessLogStream,
-    sink: Option<ProcessLogSink>,
-    tx: Sender<StreamMessage>,
-) {
-    let Some(stream) = stream else {
-        let _ = tx.send(StreamMessage::Done { stream: which });
-        return;
-    };
-    let mut reader = BufReader::new(stream);
-    let mut buffer = String::new();
-    loop {
-        buffer.clear();
-        match reader.read_line(&mut buffer) {
-            Ok(0) => break,
-            Ok(_) => {
-                let bytes = buffer.as_bytes().to_vec();
-                let line = buffer.trim_end_matches(['\r', '\n']).to_string();
-                if line.is_empty() {
-                    continue;
-                }
-                if let Some(sink) = &sink {
-                    sink(ProcessLogLine {
-                        stream: which,
-                        line: line.clone(),
-                    });
-                }
-                if tx
-                    .send(StreamMessage::Data {
-                        stream: which,
-                        line,
-                        bytes,
-                    })
-                    .is_err()
-                {
-                    return;
-                }
-            }
-            Err(_) => break,
-        }
-    }
-    let _ = tx.send(StreamMessage::Done { stream: which });
-}
-
 fn drain_stream_messages(rx: &Receiver<StreamMessage>, state: &mut StreamDrainState) {
     while let Ok(message) = rx.try_recv() {
         apply_stream_message(message, state);
@@ -631,19 +727,29 @@ fn drain_stream_messages_until_idle(
 
 fn apply_stream_message(message: StreamMessage, state: &mut StreamDrainState) {
     match message {
-        StreamMessage::Data {
+        StreamMessage::Bytes {
+            stream: ProcessLogStream::Stdout,
+            bytes,
+        } => {
+            state.stdout.push_bytes(&bytes);
+        }
+        StreamMessage::Bytes {
+            stream: ProcessLogStream::Stderr,
+            bytes,
+        } => {
+            state.stderr.push_bytes(&bytes);
+        }
+        StreamMessage::Line {
             stream: ProcessLogStream::Stdout,
             line,
-            bytes,
         } => {
-            state.stdout.push(line, &bytes);
+            state.stdout.push_line(line);
         }
-        StreamMessage::Data {
+        StreamMessage::Line {
             stream: ProcessLogStream::Stderr,
             line,
-            bytes,
         } => {
-            state.stderr.push(line, &bytes);
+            state.stderr.push_line(line);
         }
         StreamMessage::Done {
             stream: ProcessLogStream::Stdout,

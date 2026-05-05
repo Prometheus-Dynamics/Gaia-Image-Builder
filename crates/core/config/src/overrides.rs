@@ -68,6 +68,9 @@ enum KnownOverrideKey {
     PolicyProvidersBuildrootRetryAttempts,
     PolicyProvidersBuildrootTimeoutSeconds,
     PolicyProvidersBuildrootLocalJobs,
+    PolicyProvidersBuildrootDownloadDir,
+    PolicyProvidersBuildrootCcacheEnabled,
+    PolicyProvidersBuildrootCcacheDir,
     PolicyProvidersStartingPointRetryAttempts,
     PolicyProvidersStartingPointTimeoutSeconds,
 }
@@ -243,6 +246,15 @@ impl<'a> OverrideKey<'a> {
             }
             "policy.providers.buildroot.local_jobs" => {
                 Self::Known(KnownOverrideKey::PolicyProvidersBuildrootLocalJobs)
+            }
+            "policy.providers.buildroot.download_dir" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersBuildrootDownloadDir)
+            }
+            "policy.providers.buildroot.ccache.enabled" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersBuildrootCcacheEnabled)
+            }
+            "policy.providers.buildroot.ccache.dir" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersBuildrootCcacheDir)
             }
             "policy.providers.starting_point.retry_attempts" => {
                 Self::Known(KnownOverrideKey::PolicyProvidersStartingPointRetryAttempts)
@@ -621,6 +633,15 @@ fn apply_known_override(
         }
         KnownOverrideKey::PolicyProvidersBuildrootLocalJobs => {
             raw.providers.buildroot.local_jobs = parse_u32_override(key, value)?
+        }
+        KnownOverrideKey::PolicyProvidersBuildrootDownloadDir => {
+            raw.providers.buildroot.download_dir = Some(value.to_string())
+        }
+        KnownOverrideKey::PolicyProvidersBuildrootCcacheEnabled => {
+            raw.providers.buildroot.ccache.enabled = parse_bool_override(key, value)?
+        }
+        KnownOverrideKey::PolicyProvidersBuildrootCcacheDir => {
+            raw.providers.buildroot.ccache.dir = Some(value.to_string())
         }
         KnownOverrideKey::PolicyProvidersStartingPointRetryAttempts => {
             raw.providers.starting_point.retry_attempts = parse_u32_override(key, value)?

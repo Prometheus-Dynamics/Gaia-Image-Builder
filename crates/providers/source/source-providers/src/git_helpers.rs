@@ -13,8 +13,22 @@ pub(crate) fn clone_or_update_local_git_source(
     cancel_check: Option<ProcessCancelCheck>,
 ) -> Result<(), SourceProviderError> {
     let repo = git.repo.strip_prefix("file://").unwrap_or(&git.repo);
+    let reference_repo = if is_local_git_repo(&git.repo) {
+        None
+    } else {
+        Some(ensure_remote_git_cache(
+            git,
+            execution,
+            policy,
+            log_sink.clone(),
+            cancel_check.clone(),
+        )?)
+    };
     let mut clone = git_command();
     clone.arg("clone");
+    if let Some(reference_repo) = &reference_repo {
+        clone.arg("--reference-if-able").arg(reference_repo);
+    }
     if git.rev.is_none() {
         clone.arg("--depth").arg("1");
         if let Some(branch) = &git.branch {
@@ -82,6 +96,54 @@ pub(crate) fn clone_or_update_local_git_source(
         })?;
     }
     Ok(())
+}
+
+fn ensure_remote_git_cache(
+    git: &GitSourceSpec,
+    execution: &SourceExecutionContext,
+    policy: SourceCommandPolicy,
+    log_sink: Option<ProcessLogSink>,
+    cancel_check: Option<ProcessCancelCheck>,
+) -> Result<PathBuf, SourceProviderError> {
+    let cache_dir = execution
+        .workspace_root
+        .join(".gaia")
+        .join("cache")
+        .join("git");
+    fs::create_dir_all(&cache_dir).map_err(|error| {
+        SourceProviderError::runtime_state(format!(
+            "failed to create git source cache dir '{}': {error}",
+            cache_dir.display()
+        ))
+    })?;
+    let mirror_dir = cache_dir.join(format!("{}.git", remote_git_cache_key(git)));
+    if mirror_dir.join("HEAD").is_file() {
+        return Ok(mirror_dir);
+    }
+    let mut clone = git_command();
+    clone
+        .arg("clone")
+        .arg("--mirror")
+        .arg(&git.repo)
+        .arg(&mirror_dir);
+    run_command_with_policy(
+        clone,
+        execution,
+        "clone remote git source cache",
+        policy,
+        log_sink,
+        cancel_check,
+    )?;
+    Ok(mirror_dir)
+}
+
+fn remote_git_cache_key(git: &GitSourceSpec) -> String {
+    let mut hasher = DefaultHasher::new();
+    git.repo.hash(&mut hasher);
+    git.branch.hash(&mut hasher);
+    git.tag.hash(&mut hasher);
+    git.rev.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 pub(crate) fn resolve_remote_git_refs(

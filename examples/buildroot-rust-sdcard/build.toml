@@ -26,6 +26,12 @@ retry_attempts = 1
 retry_backoff_ms = 0
 retry_backoff_strategy = "fixed"
 timeout_seconds = 7200
+local_jobs = 4
+download_dir = "../../.gaia/cache/buildroot/dl"
+
+[providers.buildroot.ccache]
+enabled = true
+dir = "../../.gaia/cache/buildroot/ccache"
 
 [[workspace.named_paths]]
 alias = "assets"
@@ -93,6 +99,21 @@ required = true
 collect_dir = "${workspace.out_dir}/images"
 archive_name = "${build.name}-${build.version}.img"
 emit_report = true
+
+[image.assembly]
+work_dir = "${workspace.build_dir}/assembly"
+out_dir = "$provider.images"
+
+[[image.assembly.disks]]
+id = "sdcard"
+output = "$provider.images/sdcard.img"
+partition_table = "mbr"
+signature_text = "GAIA"
+
+[[image.assembly.disks.partitions]]
+name = "rootfs"
+type_alias = "linux"
+image = "$provider.images/buildroot-output/images/rootfs.ext4"
 
 [execution]
 jobs = 0

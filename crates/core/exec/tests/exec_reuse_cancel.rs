@@ -81,7 +81,23 @@ fn executes_reused_plan_and_records_reused_operations() {
     );
 
     assert_eq!(outcome.completed_operations, 11);
-    assert_eq!(outcome.reused_ids.len(), 9);
+    assert_eq!(
+        outcome.reused_ids.len(),
+        8,
+        "reused ids: {:?}",
+        outcome
+            .reused_ids
+            .iter()
+            .map(|id| id.as_str())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        !outcome
+            .reused_ids
+            .iter()
+            .any(|id| id.as_str() == "source:gaia-upstream"),
+        "refresh-always remote sources should execute even when present in reuse state"
+    );
     assert!(
         outcome
             .events

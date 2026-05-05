@@ -55,6 +55,7 @@ fn starting_point_raw_image_rejects_read_only_overlay_before_root_check() {
             archive_name: Some("base-mutated.img".into()),
             emit_report: true,
         },
+        assembly: None,
     };
     spec.artifacts.push(ArtifactSpec::new(
         "smoke-app",

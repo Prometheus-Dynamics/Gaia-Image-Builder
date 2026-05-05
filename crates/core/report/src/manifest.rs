@@ -9,8 +9,8 @@ use crate::model::{
     ManifestStageEnvSetRecord, ManifestStageFileRecord, ManifestStageServiceRecord,
 };
 use crate::state::{
-    artifact_spec_state_path, build_artifact_output_metadata, image_contract, read_backend_state,
-    rollback_domains, runtime_state_dir,
+    artifact_spec_state_path, build_artifact_output_metadata, image_contract,
+    output_hygiene_warnings, read_backend_state, rollback_domains, runtime_state_dir,
 };
 
 pub fn render_manifest(spec: &ResolvedBuildSpec, plan: &ExecutionPlan) -> ManifestReport {
@@ -161,6 +161,20 @@ pub fn render_manifest(spec: &ResolvedBuildSpec, plan: &ExecutionPlan) -> Manife
             })
             .collect(),
         image_outputs: Vec::new(),
+        image_assembly: spec
+            .image
+            .assembly
+            .as_ref()
+            .map(|_| {
+                vec![crate::model::BackendStateRecord {
+                    id: "image:assembly".to_string(),
+                    state: read_backend_state(
+                        &runtime_state_dir(spec).join(gaia_spec::IMAGE_ASSEMBLY_STATE_FILE_NAME),
+                    ),
+                }]
+            })
+            .unwrap_or_default(),
+        output_hygiene_warnings: output_hygiene_warnings(spec),
         checkpoints: spec
             .checkpoints
             .points

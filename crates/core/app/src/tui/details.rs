@@ -189,6 +189,24 @@ impl<'a> TuiState<'a> {
             Line::from(""),
         ];
         lines.extend(backend_overview_lines(spec).into_iter().map(Line::from));
+        if !spec.image.feed.install_entries.is_empty() {
+            lines.push(Line::from(""));
+            lines.push(Line::from("runtime install targets:").bold());
+            for install_id in &spec.image.feed.install_entries {
+                if let Some(install) = spec
+                    .install
+                    .entries
+                    .iter()
+                    .find(|entry| entry.id == *install_id)
+                {
+                    lines.push(Line::from(format!(
+                        "{} -> {}",
+                        install.id.as_str(),
+                        install.dest
+                    )));
+                }
+            }
+        }
         if let Some(run) = self.last_run.as_ref() {
             lines.push(Line::from(""));
             lines.push(Line::from("last run:").bold());
@@ -522,7 +540,7 @@ impl<'a> TuiState<'a> {
         let Some(spec) = self.spec.as_ref() else {
             return vec![Line::from("spec not loaded")];
         };
-        vec![
+        let mut lines = vec![
             Line::from("typed spec snapshot").bold(),
             Line::from(format!("identity.id={}", spec.identity.id.as_str())),
             Line::from(format!("identity.build_name={}", spec.identity.build_name)),
@@ -544,6 +562,19 @@ impl<'a> TuiState<'a> {
                 spec.checkpoints.points.len()
             )),
             Line::from(format!("image.provider={}", image_provider_label(spec))),
-        ]
+        ];
+        if !spec.install.entries.is_empty() {
+            lines.push(Line::from(""));
+            lines.push(Line::from("install entries:").bold());
+            lines.extend(spec.install.entries.iter().map(|install| {
+                Line::from(format!(
+                    "{} artifact={} dest={}",
+                    install.id.as_str(),
+                    install.artifact.id.as_str(),
+                    install.dest
+                ))
+            }));
+        }
+        lines
     }
 }
