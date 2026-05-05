@@ -8,6 +8,7 @@ use gaia_spec::{
 };
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 use support::{provider_catalogs, test_spec};
 
 #[cfg(unix)]
@@ -148,6 +149,88 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
     assert!(state.contains("completed_disk_count=1"));
     assert!(state.contains("disk.1.partition.1.type=0x0C"));
     assert!(state.contains("disk.1.partition.2.type=0x83"));
+}
+
+#[test]
+fn executes_image_assembly_archives_single_disk_as_raw_xz() {
+    let mut spec = test_spec();
+    let build_dir = Path::new(&spec.workspace.build_dir);
+    let collect_dir = Path::new(&spec.workspace.out_dir).join("images");
+    spec.image.output.collect_dir = Some(collect_dir.display().to_string());
+    spec.image.output.archive_name = Some("published.img.xz".into());
+    let boot_image = build_dir.join("boot.img");
+    let rootfs_image = build_dir.join("rootfs.img");
+    fs::create_dir_all(build_dir).expect("build dir");
+    fs::write(&boot_image, vec![0x11; 1024]).expect("boot image");
+    fs::write(&rootfs_image, vec![0x22; 2048]).expect("rootfs image");
+    let sdcard = collect_dir.join("sdcard.img");
+    spec.image.assembly = Some(ImageAssemblySpec {
+        disks: vec![AssemblyDiskSpec {
+            id: "sdcard".into(),
+            output: sdcard.display().to_string().into(),
+            partition_table: AssemblyPartitionTableSpec::Mbr,
+            signature: None,
+            signature_text: Some("GAIA".into()),
+            partitions: vec![
+                AssemblyDiskPartitionSpec {
+                    name: "boot".into(),
+                    kind: None,
+                    type_alias: Some("fat32-lba".into()),
+                    bootable: true,
+                    image: boot_image.display().to_string().into(),
+                },
+                AssemblyDiskPartitionSpec {
+                    name: "rootfs".into(),
+                    kind: Some("0x83".into()),
+                    type_alias: None,
+                    bootable: false,
+                    image: rootfs_image.display().to_string().into(),
+                },
+            ],
+        }],
+        ..ImageAssemblySpec::default()
+    });
+    let plan = gaia_plan::ExecutionPlan {
+        build_id: spec.identity.id.clone(),
+        operations: vec![PlannedOperation::new(
+            OperationId::image_assembly(),
+            OperationKind::AssembleImage,
+        )],
+    };
+    let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
+    let outcome = execute_plan(
+        &spec,
+        &plan,
+        ExecutionProviders {
+            source_catalog: &source_catalog,
+            artifact_catalog: &artifact_catalog,
+            image_catalog: &image_catalog,
+        },
+    );
+
+    assert!(outcome.errors.is_empty(), "{:?}", outcome.errors);
+    let archive = collect_dir.join("published.img.xz");
+    assert!(archive.is_file(), "missing archive {}", archive.display());
+    let decompressed = Command::new("xz")
+        .arg("-dc")
+        .arg(&archive)
+        .output()
+        .expect("xz decompress");
+    assert!(
+        decompressed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&decompressed.stderr)
+    );
+    assert_eq!(
+        decompressed.stdout,
+        fs::read(&sdcard).expect("sdcard output")
+    );
+    let state = fs::read_to_string(
+        Path::new(&spec.workspace.out_dir).join(".gaia/runtime/image-assembly.state"),
+    )
+    .expect("assembly state");
+    assert!(state.contains(&format!("archive.path={}", archive.display())));
+    assert!(state.contains(&format!("archive.source={}", sdcard.display())));
 }
 
 #[cfg(unix)]

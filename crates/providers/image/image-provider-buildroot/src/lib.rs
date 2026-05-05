@@ -175,7 +175,9 @@ impl ImageProvider for BuildrootImageProvider {
             }
             let matched_expected_images =
                 collect_expected_images(image, &output_dir, &collect_dir)?;
-            if let Some(archive_path) = &archive_path {
+            if let Some(archive_path) = &archive_path
+                && should_archive_buildroot_output(image, archive_path)
+            {
                 messages.extend(archive_buildroot_output(BuildrootArchiveRequest {
                     image,
                     collect_dir: &collect_dir,
@@ -190,6 +192,11 @@ impl ImageProvider for BuildrootImageProvider {
                         cancel_check: cancel_check.clone(),
                     },
                 })?);
+            } else if let Some(archive_path) = &archive_path {
+                messages.push(format!(
+                    "deferred raw image archive '{}' to typed image assembly",
+                    archive_path.display()
+                ));
             }
             state_details.push(("backend_mode".to_string(), "buildroot".to_string()));
             state_details.push((
@@ -346,6 +353,14 @@ impl ImageProvider for BuildrootImageProvider {
             ),
         }
     }
+}
+
+fn should_archive_buildroot_output(image: &ImageSpec, archive_path: &Path) -> bool {
+    !(image
+        .assembly
+        .as_ref()
+        .is_some_and(|assembly| !assembly.disks.is_empty())
+        && raw_xz_archive_path(archive_path))
 }
 
 mod archive;

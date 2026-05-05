@@ -291,7 +291,7 @@ pub(crate) fn archive_directory(
     run_command(command, label, execution, policy, log_sink, cancel_check)
 }
 
-fn raw_xz_archive_path(path: &Path) -> bool {
+pub(crate) fn raw_xz_archive_path(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name.ends_with(".img.xz") || name.ends_with(".raw.xz"))

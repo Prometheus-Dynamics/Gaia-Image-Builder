@@ -6,7 +6,7 @@ use std::fs as std_fs;
 #[cfg(test)]
 use std::io::Read;
 use std::io::{Seek, SeekFrom, Write};
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use std::time::Duration;
 
@@ -369,6 +369,7 @@ pub(crate) fn stage_image_assembly(
     state.insert("completed_filesystem_count", filesystem_count);
 
     let mut disk_count = 0usize;
+    let mut disk_outputs = Vec::new();
     for disk in &assembly.disks {
         let span = tracing::info_span!(
             "assembly_disk",
@@ -382,6 +383,7 @@ pub(crate) fn stage_image_assembly(
         let summary = execute_assembly_disk(spec, &roots, disk)?;
         tracing::Span::current().record("output_path", summary.output.display().to_string());
         disk_count += 1;
+        disk_outputs.push(summary.output.clone());
         let disk_state = AssemblyStateKey::new("disk", disk_count);
         state.insert(disk_state.field("id"), disk.id.as_str());
         state.insert(
@@ -433,7 +435,20 @@ pub(crate) fn stage_image_assembly(
     }
     state.insert("completed_disk_count", disk_count);
 
-    let cleanup_paths = context.cleanup_paths();
+    let mut cleanup_paths = context.cleanup_paths();
+    if let Some(summary) = archive_assembly_disk_output(spec, &disk_outputs, cancel_check.clone())?
+    {
+        state.insert("archive.path", summary.output.display().to_string());
+        state.insert("archive.source", summary.source.display().to_string());
+        state.insert("archive.bytes", summary.bytes);
+        state.insert("archive.sha256", summary.sha256);
+        cleanup_paths.push(summary.output.clone());
+        messages.push(format!(
+            "compressed assembly disk '{}' to '{}'",
+            summary.source.display(),
+            summary.output.display()
+        ));
+    }
     state.insert("cleanup_path_count", cleanup_paths.len());
     for (index, path) in cleanup_paths.iter().enumerate() {
         state.insert(
@@ -447,6 +462,79 @@ pub(crate) fn stage_image_assembly(
         messages,
         cleanup_paths,
     })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AssemblyArchiveSummary {
+    output: PathBuf,
+    source: PathBuf,
+    bytes: u64,
+    sha256: String,
+}
+
+fn archive_assembly_disk_output(
+    spec: &ResolvedBuildSpec,
+    disk_outputs: &[PathBuf],
+    cancel_check: Option<gaia_process::ProcessCancelCheck>,
+) -> Result<Option<AssemblyArchiveSummary>, AssemblyError> {
+    let Some(archive_path) = assembly_archive_path(spec) else {
+        return Ok(None);
+    };
+    if !raw_xz_archive_path(&archive_path) {
+        return Ok(None);
+    }
+    if disk_outputs.is_empty() {
+        return Ok(None);
+    }
+    if disk_outputs.len() != 1 {
+        return Err(AssemblyError::runtime(format!(
+            "image.output.archive_name '{}' requests a raw compressed image, but assembly produced {} disk outputs; configure a single assembly disk or use a tar archive",
+            archive_path.display(),
+            disk_outputs.len()
+        )));
+    }
+    let source = &disk_outputs[0];
+    let temp_archive = temporary_assembly_output_path(&archive_path);
+    let mut command = Command::new("xz");
+    command.arg("-T1").arg("-c").arg(source);
+    let output = run_command_stdout_to_file(
+        spec,
+        &mut command,
+        &temp_archive,
+        process_output_retention(spec),
+        cancel_check,
+    )
+    .inspect_err(|_| {
+        let _ = std_fs::remove_file(&temp_archive);
+    })?;
+    if !output.status.success() {
+        let _ = std_fs::remove_file(&temp_archive);
+        return Err(AssemblyError::runtime(format!(
+            "failed to compress assembly disk '{}' to '{}': {}",
+            source.display(),
+            archive_path.display(),
+            output.stderr_tail()
+        )));
+    }
+    publish_assembly_output(&temp_archive, &archive_path)?;
+    Ok(Some(AssemblyArchiveSummary {
+        output: archive_path.clone(),
+        source: source.clone(),
+        bytes: file_len(&archive_path)?,
+        sha256: file_sha256(&archive_path)?,
+    }))
+}
+
+fn assembly_archive_path(spec: &ResolvedBuildSpec) -> Option<PathBuf> {
+    let collect_dir = spec.image.output.collect_dir.as_ref()?;
+    let archive_name = spec.image.output.archive_name.as_ref()?;
+    Some(PathBuf::from(collect_dir).join(archive_name))
+}
+
+fn raw_xz_archive_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".img.xz") || name.ends_with(".raw.xz"))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
