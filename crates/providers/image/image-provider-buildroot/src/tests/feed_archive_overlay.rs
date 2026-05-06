@@ -43,6 +43,7 @@ fn apply_image_feed_to_rootfs_writes_install_file_env_and_service_content() {
         id: "motd".into(),
         src: "assets/motd".into(),
         dest: "/etc/motd".into(),
+        mode: Some(0o755),
         origin: gaia_spec::StageContentOriginSpec::StaticAsset,
     });
     spec.stage.env_sets.push(gaia_spec::StageEnvSetSpec {
@@ -74,6 +75,15 @@ fn apply_image_feed_to_rootfs_writes_install_file_env_and_service_content() {
     assert_eq!(
         fs::read_to_string(rootfs_dir.join("etc/motd")).expect("staged motd"),
         "hello motd"
+    );
+    #[cfg(unix)]
+    assert_eq!(
+        fs::metadata(rootfs_dir.join("etc/motd"))
+            .expect("staged motd metadata")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o755
     );
     assert_eq!(
         fs::read_to_string(rootfs_dir.join("etc/default/runtime.env")).expect("env set"),
@@ -132,6 +142,7 @@ fn final_tar_image_contains_install_stage_env_and_service_content() {
         id: "motd".into(),
         src: "assets/motd".into(),
         dest: "/etc/motd".into(),
+        mode: Some(0o755),
         origin: gaia_spec::StageContentOriginSpec::StaticAsset,
     });
     spec.stage.env_sets.push(gaia_spec::StageEnvSetSpec {

@@ -13,6 +13,7 @@ pub struct StageFileSpec {
     pub id: StageItemId,
     pub src: String,
     pub dest: String,
+    pub mode: Option<u32>,
     pub origin: StageContentOriginSpec,
 }
 
@@ -27,8 +28,14 @@ impl StageFileSpec {
             id: id.into(),
             src: src.into(),
             dest: dest.into(),
+            mode: None,
             origin,
         }
+    }
+
+    pub fn with_mode(mut self, mode: u32) -> Self {
+        self.mode = Some(mode);
+        self
     }
 
     pub fn static_asset(

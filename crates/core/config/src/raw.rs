@@ -507,6 +507,8 @@ pub struct RawStageFileConfig {
     pub src: String,
     pub dest: String,
     #[serde(default)]
+    pub mode: Option<u32>,
+    #[serde(default)]
     pub origin: Option<RawStageContentOrigin>,
 }
 

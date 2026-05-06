@@ -324,6 +324,18 @@ pub(crate) fn apply_image_feed_to_rootfs(
         let src = resolve_workspace_path(spec, &stage_file.src)?;
         let dest = rootfs_path(rootfs_dir, &stage_file.dest);
         copy_path(&src, &dest)?;
+        #[cfg(unix)]
+        if let Some(mode) = stage_file.mode {
+            fs::set_permissions(&dest, fs::Permissions::from_mode(mode)).map_err(|error| {
+                ImageProviderError::new(
+                    ImageProviderErrorKind::RuntimeState,
+                    format!(
+                        "failed to set stage file mode on '{}': {error}",
+                        dest.display()
+                    ),
+                )
+            })?;
+        }
     }
 
     for env_set_id in &image.feed.stage_env_sets {
@@ -692,9 +704,10 @@ pub(crate) fn build_image_feed_signature(
             })?;
         let src = resolve_workspace_path(spec, &stage_file.src)?;
         signature.push_str(&format!(
-            "{}|{}|{}\n",
+            "{}|{}|{:?}|{}\n",
             stage_file.id.as_str(),
             stage_file.dest,
+            stage_file.mode,
             dir_digest(&src)
         ));
     }

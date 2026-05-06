@@ -4,6 +4,8 @@ use gaia_spec::{
     BuildrootExpectedImageFormatSpec, BuildrootExpectedImageSpec, BuildrootImageSpec,
     ImageAssemblySpec, ImageDefinition, ImageOutputSpec, ImageSpec,
 };
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 static TEMP_PATH_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

@@ -43,6 +43,7 @@ fn empty_public_ids_are_validation_errors() {
         id: StageItemId::new(""),
         src: "assets/demo".into(),
         dest: "/etc/demo".into(),
+        mode: None,
         origin: gaia_spec::StageContentOriginSpec::Generated,
     });
     spec.checkpoints = CheckpointSpec {

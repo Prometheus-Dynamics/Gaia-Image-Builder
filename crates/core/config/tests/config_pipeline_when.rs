@@ -57,6 +57,7 @@ when = { not = { branch = "dev-branch" } }
 id = "motd-kept"
 src = "README.md"
 dest = "/etc/motd"
+mode = 493
 when = { image_kind = "buildroot" }
 
 [[stage.files]]
@@ -150,6 +151,7 @@ when = { branch = "main" }
             .collect::<Vec<_>>(),
         vec!["motd-kept"]
     );
+    assert_eq!(spec.stage.files[0].mode, Some(493));
     assert_eq!(
         spec.image
             .feed

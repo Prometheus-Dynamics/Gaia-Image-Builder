@@ -370,6 +370,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
             id: StageItemId::new(file.id),
             src: file.src,
             dest: file.dest,
+            mode: file.mode,
             origin: compile_stage_content_origin(file.origin),
         })
         .collect();

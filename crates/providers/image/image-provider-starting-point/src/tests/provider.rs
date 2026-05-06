@@ -90,6 +90,7 @@ fn starting_point_tar_rootfs_accepts_image_feed_overlay() {
         id: "motd".into(),
         src: motd.display().to_string(),
         dest: "/etc/motd".into(),
+        mode: None,
         origin: StageContentOriginSpec::StaticAsset,
     });
     spec.stage.env_sets.push(StageEnvSetSpec {
