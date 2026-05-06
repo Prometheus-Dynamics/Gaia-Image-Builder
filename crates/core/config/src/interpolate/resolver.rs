@@ -122,10 +122,10 @@ fn resolve_token(token: &str, raw: &RawBuildConfig, env: &ResolvedEnvironment) -
             .unwrap_or_default(),
         "config.root_dir" => config_root_dir(raw),
         "execution.root_dir" => execution_root_dir(),
-        "project.root_dir" => project_root_dir(raw),
-        "workspace.root_dir" => raw.workspace.root_dir.clone(),
-        "workspace.build_dir" => raw.workspace.build_dir.clone(),
-        "workspace.out_dir" => raw.workspace.out_dir.clone(),
+        "project.root_dir" => project_root_dir(raw, env),
+        "workspace.root_dir" => interpolate_string(raw.workspace.root_dir.clone(), raw, env),
+        "workspace.build_dir" => interpolate_string(raw.workspace.build_dir.clone(), raw, env),
+        "workspace.out_dir" => interpolate_string(raw.workspace.out_dir.clone(), raw, env),
         _ => raw
             .interpolation
             .values
@@ -186,13 +186,14 @@ fn execution_root_dir() -> String {
         .unwrap_or_default()
 }
 
-fn project_root_dir(raw: &RawBuildConfig) -> String {
+fn project_root_dir(raw: &RawBuildConfig, env: &ResolvedEnvironment) -> String {
     let build_root = raw
         .source_path
         .as_deref()
         .and_then(config_workspace_root)
         .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    normalize_path(&absolutize(&build_root, &raw.workspace.root_dir))
+    let workspace_root = interpolate_string(raw.workspace.root_dir.clone(), raw, env);
+    normalize_path(&absolutize(&build_root, &workspace_root))
         .display()
         .to_string()
 }

@@ -16,6 +16,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - Fixed Buildroot feed refresh for assembly-generated raw disk outputs so Buildroot no longer tries to run stale provider post-image hooks for images now produced by typed image assembly.
 - Fixed raw `.img.xz` publishing for typed image assembly so Gaia compresses the assembled disk image after disk creation instead of allowing the Buildroot provider to publish an expected root filesystem image under the final disk archive name.
 - Fixed typed assembly `vfat` filesystem generation so Gaia no longer forces FAT32 for small boot images, allowing mtools to choose a valid FAT variant for the requested image size.
+- Fixed nested workspace path interpolation so references such as `${workspace.build_dir}/assembly` fully expand embedded build tokens instead of creating literal `${build.name}` directories.
 - Added typed assembly MBR layout controls for `first_lba` and `alignment_lba`, allowing board images to preserve firmware-sensitive partition layouts instead of always using 1 MiB partition alignment.
 
 ## [2.0.0] - 2026-05-01

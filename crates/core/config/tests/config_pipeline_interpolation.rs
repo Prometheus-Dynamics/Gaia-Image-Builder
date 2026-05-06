@@ -50,6 +50,9 @@ required = true
 [image.output]
 collect_dir = "gaia/output/${build.name}/images"
 archive_name = "${project.root_dir}/output/${build.name}-${build.version}.tar.xz"
+
+[image.assembly]
+work_dir = "${workspace.build_dir}/assembly"
 "#,
     );
 
@@ -74,6 +77,15 @@ archive_name = "${project.root_dir}/output/${build.name}-${build.version}.tar.xz
             .named_paths
             .iter()
             .any(|path| { path.alias == "execution" && PathBuf::from(&path.path).is_absolute() })
+    );
+    let assembly = spec.image.assembly.as_ref().expect("assembly");
+    assert_eq!(
+        assembly.work_dir.as_deref(),
+        Some("gaia/build/root-token-build/assembly")
+    );
+    assert!(
+        spec.policy.interpolation.unresolved.is_empty(),
+        "nested workspace interpolation should not leave unresolved tokens"
     );
 }
 
