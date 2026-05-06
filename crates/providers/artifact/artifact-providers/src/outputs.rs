@@ -130,8 +130,7 @@ pub fn copy_artifact_file_to_output(
 pub fn artifact_marker_contract(contract: &ArtifactExecutionContract) -> ArtifactExecutionContract {
     ArtifactExecutionContract {
         output: crate::ArtifactOutputContract {
-            path: Path::new(&contract.output.path)
-                .with_extension("gaia-build.txt")
+            path: artifact_sidecar_path(contract, "gaia-build.txt")
                 .display()
                 .to_string(),
             kind: crate::ArtifactOutputKind::File,
@@ -150,11 +149,26 @@ pub fn materialize_artifact_marker_and_state(
 }
 
 pub fn artifact_state_path(contract: &ArtifactExecutionContract) -> PathBuf {
+    artifact_sidecar_path(contract, "gaia-state.txt")
+}
+
+pub fn artifact_sidecar_path(contract: &ArtifactExecutionContract, suffix: &str) -> PathBuf {
+    let output_path = Path::new(&contract.output.path);
     match contract.output.kind {
-        ArtifactOutputKind::File => {
-            Path::new(&contract.output.path).with_extension("gaia-state.txt")
+        ArtifactOutputKind::File => output_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(".gaia")
+            .join(format!(
+                "{}.{suffix}",
+                output_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("artifact")
+            )),
+        ArtifactOutputKind::Directory => {
+            output_path.join(".gaia").join(format!("artifact.{suffix}"))
         }
-        ArtifactOutputKind::Directory => Path::new(&contract.output.path).join(".gaia-state.txt"),
     }
 }
 

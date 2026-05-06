@@ -52,14 +52,14 @@ fn provider_execution_materializes_real_outputs() {
             .is_file()
     );
     let artifact_state = fs::read_to_string(
-        Path::new(&spec.workspace.out_dir).join("artifacts/gaia.gaia-state.txt"),
+        Path::new(&spec.workspace.out_dir).join("artifacts/.gaia/gaia.gaia-state.txt"),
     )
     .expect("artifact state");
     assert!(artifact_state.contains("provider=artifact.rust"));
     assert!(artifact_state.contains("output_sha256="));
     assert!(artifact_state.contains("output_bytes="));
     let artifact_marker = fs::read_to_string(
-        Path::new(&spec.workspace.out_dir).join("artifacts/gaia.gaia-build.txt"),
+        Path::new(&spec.workspace.out_dir).join("artifacts/.gaia/gaia.gaia-build.txt"),
     )
     .expect("artifact marker");
     assert!(artifact_marker.contains("provider=artifact.rust"));

@@ -373,8 +373,9 @@ impl AssemblyPathTemplate {
             if let Some(variable) = token.strip_prefix("$provider.") {
                 match variable {
                     "images" | "target" => {}
+                    "buildroot_output" if provider_kind == ImageProviderKind::Buildroot => {}
                     "host" | "staging" if provider_kind == ImageProviderKind::Buildroot => {}
-                    "host" | "staging" => {
+                    "buildroot_output" | "host" | "staging" => {
                         return Err(AssemblyPathTemplateError::UnavailableProviderVariable(
                             token.into(),
                         ));
@@ -432,6 +433,7 @@ impl AssemblyPathTemplate {
 pub struct AssemblyPathTemplateContext<'a> {
     pub provider_kind: ImageProviderKind,
     pub provider_images: &'a Path,
+    pub provider_buildroot_output: Option<&'a Path>,
     pub provider_target: &'a Path,
     pub provider_host: Option<&'a Path>,
     pub provider_staging: Option<&'a Path>,
@@ -444,6 +446,9 @@ impl AssemblyPathTemplateContext<'_> {
     fn resolve_token(&self, token: &str) -> Result<String, AssemblyPathTemplateError> {
         let path = match token {
             "$provider.images" => Some(self.provider_images),
+            "$provider.buildroot_output" if self.provider_kind == ImageProviderKind::Buildroot => {
+                self.provider_buildroot_output
+            }
             "$provider.target" => Some(self.provider_target),
             "$provider.host" if self.provider_kind == ImageProviderKind::Buildroot => {
                 self.provider_host
@@ -458,7 +463,10 @@ impl AssemblyPathTemplateContext<'_> {
         if let Some(path) = path {
             return Ok(path.display().to_string());
         }
-        if matches!(token, "$provider.host" | "$provider.staging") {
+        if matches!(
+            token,
+            "$provider.buildroot_output" | "$provider.host" | "$provider.staging"
+        ) {
             return Err(AssemblyPathTemplateError::UnavailableProviderVariable(
                 token.into(),
             ));
@@ -636,12 +644,15 @@ mod tests {
     #[test]
     fn assembly_path_template_validates_known_tokens() {
         let template = AssemblyPathTemplate::new(
-            "$provider.images/$assembly.work/$assembly.out/$assembly.tree.boot/Image",
+            "$provider.images/$provider.buildroot_output/$assembly.work/$assembly.out/$assembly.tree.boot/Image",
         );
 
         assert_eq!(
             template.validate_tokens(ImageProviderKind::Buildroot, |id| id == "boot"),
             Ok(())
+        );
+        let template = AssemblyPathTemplate::new(
+            "$provider.images/$assembly.work/$assembly.out/$assembly.tree.boot/Image",
         );
         assert_eq!(
             template.validate_tokens(ImageProviderKind::StartingPoint, |id| id == "boot"),
@@ -676,6 +687,13 @@ mod tests {
             ))
         );
         assert_eq!(
+            AssemblyPathTemplate::new("$provider.buildroot_output")
+                .validate_tokens(ImageProviderKind::StartingPoint, |_| true),
+            Err(AssemblyPathTemplateError::UnavailableProviderVariable(
+                "$provider.buildroot_output".into()
+            ))
+        );
+        assert_eq!(
             AssemblyPathTemplate::new("$provider.sdk")
                 .validate_tokens(ImageProviderKind::Buildroot, |_| true),
             Err(AssemblyPathTemplateError::UnknownProviderVariable(
@@ -694,6 +712,7 @@ mod tests {
         let context = AssemblyPathTemplateContext {
             provider_kind: ImageProviderKind::Buildroot,
             provider_images: Path::new("/tmp/images"),
+            provider_buildroot_output: Some(Path::new("/tmp/build/image/buildroot-output")),
             provider_target: Path::new("/tmp/images/buildroot-output/target"),
             provider_host: Some(Path::new("/tmp/images/buildroot-output/host")),
             provider_staging: Some(Path::new("/tmp/images/buildroot-output/staging")),
@@ -704,11 +723,11 @@ mod tests {
 
         assert_eq!(
             AssemblyPathTemplate::new(
-                "$provider.images:$provider.target:$provider.host:$provider.staging:$assembly.work:$assembly.out:$assembly.tree.boot/Image"
+                "$provider.images:$provider.buildroot_output:$provider.target:$provider.host:$provider.staging:$assembly.work:$assembly.out:$assembly.tree.boot/Image"
             )
             .resolve(&context)
             .expect("resolved"),
-            "/tmp/images:/tmp/images/buildroot-output/target:/tmp/images/buildroot-output/host:/tmp/images/buildroot-output/staging:/tmp/work:/tmp/images:/tmp/work/boot/Image"
+            "/tmp/images:/tmp/build/image/buildroot-output:/tmp/images/buildroot-output/target:/tmp/images/buildroot-output/host:/tmp/images/buildroot-output/staging:/tmp/work:/tmp/images:/tmp/work/boot/Image"
         );
     }
 
@@ -718,6 +737,7 @@ mod tests {
         let context = AssemblyPathTemplateContext {
             provider_kind: ImageProviderKind::StartingPoint,
             provider_images: Path::new("/tmp/images"),
+            provider_buildroot_output: None,
             provider_target: Path::new("/tmp/images/rootfs"),
             provider_host: None,
             provider_staging: None,

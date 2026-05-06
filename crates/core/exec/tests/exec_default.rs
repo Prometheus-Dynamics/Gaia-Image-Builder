@@ -64,7 +64,7 @@ fn executes_default_plan_with_runtime_events() {
     );
     assert!(
         Path::new(&spec.workspace.out_dir)
-            .join("artifacts/gaia.gaia-state.txt")
+            .join("artifacts/.gaia/gaia.gaia-state.txt")
             .is_file()
     );
     assert!(

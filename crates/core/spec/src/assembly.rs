@@ -27,7 +27,7 @@ impl AssemblyRoots {
                 .as_deref()
                 .unwrap_or("out/images/buildroot"),
         )?;
-        let buildroot_output = provider_images.join("buildroot-output");
+        let buildroot_output = buildroot_output_dir(spec)?;
         let provider_target = match spec.image.provider_kind() {
             crate::ImageProviderKind::Buildroot => buildroot_output.join("target"),
             crate::ImageProviderKind::StartingPoint => provider_images.join("rootfs"),
@@ -103,6 +103,13 @@ impl AssemblyRoots {
         AssemblyPathTemplateContext {
             provider_kind: spec.image.provider_kind(),
             provider_images: &self.provider_images,
+            provider_buildroot_output: (spec.image.provider_kind()
+                == crate::ImageProviderKind::Buildroot)
+                .then_some(
+                    self.provider_target
+                        .parent()
+                        .unwrap_or(&self.provider_target),
+                ),
             provider_target: &self.provider_target,
             provider_host: self.provider_host.as_deref(),
             provider_staging: self.provider_staging.as_deref(),
@@ -111,6 +118,13 @@ impl AssemblyRoots {
             trees: &self.trees,
         }
     }
+}
+
+fn buildroot_output_dir(spec: &ResolvedBuildSpec) -> Result<PathBuf, String> {
+    resolve_workspace_path_or_absolute(
+        spec,
+        &format!("{}/image/buildroot-output", spec.workspace.build_dir),
+    )
 }
 
 pub fn expand_simple_glob(
@@ -251,6 +265,9 @@ fn resolve_assembly_path_without_trees(
     let context = AssemblyPathTemplateContext {
         provider_kind: spec.image.provider_kind(),
         provider_images,
+        provider_buildroot_output: (spec.image.provider_kind()
+            == crate::ImageProviderKind::Buildroot)
+            .then_some(provider_target.parent().unwrap_or(provider_target)),
         provider_target,
         provider_host,
         provider_staging,
@@ -317,15 +334,15 @@ mod tests {
         );
         assert_eq!(
             roots.provider_target,
-            PathBuf::from("/workspace/out/images/buildroot-output/target")
+            PathBuf::from("/workspace/build/image/buildroot-output/target")
         );
         assert_eq!(
             roots.provider_host.as_deref(),
-            Some(Path::new("/workspace/out/images/buildroot-output/host"))
+            Some(Path::new("/workspace/build/image/buildroot-output/host"))
         );
         assert_eq!(
             roots.provider_staging.as_deref(),
-            Some(Path::new("/workspace/out/images/buildroot-output/staging"))
+            Some(Path::new("/workspace/build/image/buildroot-output/staging"))
         );
         assert_eq!(
             roots.tree_path("boot").expect("tree"),

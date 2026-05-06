@@ -515,21 +515,21 @@ fn buildroot_assembly_roots_expose_images_target_host_and_staging() {
     assert_eq!(roots.provider_images, root.join("publish"));
     assert_eq!(
         roots.provider_target,
-        root.join("publish/buildroot-output/target")
+        root.join("build/image/buildroot-output/target")
     );
     assert_eq!(
         roots.provider_host.as_deref(),
-        Some(root.join("publish/buildroot-output/host").as_path())
+        Some(root.join("build/image/buildroot-output/host").as_path())
     );
     assert_eq!(
         roots.provider_staging.as_deref(),
-        Some(root.join("publish/buildroot-output/staging").as_path())
+        Some(root.join("build/image/buildroot-output/staging").as_path())
     );
     assert_eq!(
         roots
             .resolve_path(&spec, "$provider.host/bin/dtc")
             .expect("host"),
-        root.join("publish/buildroot-output/host/bin/dtc")
+        root.join("build/image/buildroot-output/host/bin/dtc")
     );
     assert_eq!(
         roots.tree_path("roots").expect("tree"),

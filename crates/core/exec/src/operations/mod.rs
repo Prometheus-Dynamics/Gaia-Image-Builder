@@ -515,13 +515,27 @@ pub fn dispatch_operation(
                         image_assembly_cleanup_paths(spec),
                     );
                 }
-                success_from_messages(
+                let mut success = success_from_messages(
                     operation.id.clone(),
                     summary.messages,
                     "assembled image files".into(),
                     RollbackDomain::Images,
                     [summary.cleanup_paths, vec![assembly_state_path(spec)]].concat(),
-                )
+                );
+                if let Some(archive_path) = summary.archive_path {
+                    success =
+                        success.with_image_result(gaia_image_providers::ImageExecutionResult {
+                            provider_id: format!("image.{}", spec.image.provider_kind().as_str()),
+                            collect_dir: spec.image.output.collect_dir.as_ref().map(PathBuf::from),
+                            archive_path: Some(archive_path),
+                            emit_report: spec.image.output.emit_report,
+                            reused: false,
+                            reuse_details: Vec::new(),
+                            messages: Vec::new(),
+                            state_details: Vec::new(),
+                        });
+                }
+                success
             }
             OperationKind::CaptureCheckpoint { checkpoint_id } => {
                 let checkpoint = spec

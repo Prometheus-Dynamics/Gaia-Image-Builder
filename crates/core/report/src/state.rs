@@ -75,9 +75,19 @@ pub(crate) fn image_contract(spec: &ResolvedBuildSpec) -> BTreeMap<String, Strin
 pub(crate) fn artifact_spec_state_path(artifact: &gaia_spec::ArtifactSpec) -> PathBuf {
     let output_path = artifact.output.as_path();
     if output_path.is_dir() {
-        output_path.join(".gaia-state.txt")
+        output_path.join(".gaia").join("artifact.gaia-state.txt")
     } else {
-        output_path.with_extension("gaia-state.txt")
+        output_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(".gaia")
+            .join(format!(
+                "{}.gaia-state.txt",
+                output_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("artifact")
+            ))
     }
 }
 

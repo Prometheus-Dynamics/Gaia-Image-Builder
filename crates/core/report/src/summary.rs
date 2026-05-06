@@ -36,13 +36,17 @@ pub fn render_summary(
             ) && matches!(operation.reuse, OperationReuse::Reuse { .. })
         })
         .count();
-    let primary_image_output = outcome.image_results.iter().find_map(|result| {
-        result
-            .archive_path
-            .as_ref()
-            .or(result.collect_dir.as_ref())
-            .map(|path| path.display().to_string())
-    });
+    let primary_image_output = outcome
+        .image_results
+        .iter()
+        .find_map(|result| result.archive_path.as_ref())
+        .or_else(|| {
+            outcome
+                .image_results
+                .iter()
+                .find_map(|result| result.collect_dir.as_ref())
+        })
+        .map(|path| path.display().to_string());
     let image_reuse_details = outcome
         .image_results
         .iter()

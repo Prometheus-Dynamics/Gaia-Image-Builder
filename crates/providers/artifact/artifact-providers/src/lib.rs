@@ -19,10 +19,10 @@ pub use digest::{
 };
 pub use gaia_process::{ProcessCancelCheck, ProcessLogLine, ProcessLogSink, sleep_with_cancel};
 pub use outputs::{
-    artifact_marker_contract, artifact_output_path, artifact_package_root, artifact_state_path,
-    copy_artifact_file_to_output, ensure_artifact_output_parent, finalize_temp_output,
-    materialize_artifact_marker_and_state, materialize_artifact_output, materialize_artifact_state,
-    render_build_context_state,
+    artifact_marker_contract, artifact_output_path, artifact_package_root, artifact_sidecar_path,
+    artifact_state_path, copy_artifact_file_to_output, ensure_artifact_output_parent,
+    finalize_temp_output, materialize_artifact_marker_and_state, materialize_artifact_output,
+    materialize_artifact_state, render_build_context_state,
 };
 
 use gaia_spec::{ArtifactProviderKind, ArtifactSpec, ResolvedBuildSpec, RetryBackoffStrategySpec};

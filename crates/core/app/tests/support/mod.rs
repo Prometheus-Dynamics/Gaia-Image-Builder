@@ -97,8 +97,14 @@ pub fn materialize_reusable_outputs(spec: &gaia_spec::ResolvedBuildSpec) {
         fs::create_dir_all(parent).expect("artifact output dir");
     }
     fs::write(&spec.artifacts[0].output.path, "artifact").expect("artifact output");
+    let artifact_state = PathBuf::from(&spec.artifacts[0].output.path)
+        .parent()
+        .expect("artifact output parent")
+        .join(".gaia/gaia.gaia-state.txt");
+    fs::create_dir_all(artifact_state.parent().expect("artifact state parent"))
+        .expect("artifact state dir");
     fs::write(
-        PathBuf::from(&spec.artifacts[0].output.path).with_extension("gaia-state.txt"),
+        artifact_state,
         "provider=artifact.rust\nartifact=gaia-app\noutput=test\n",
     )
     .expect("artifact state");

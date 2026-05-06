@@ -87,7 +87,7 @@ fn prepare_operation_reruns_even_when_expected_buildroot_images_exist() {
     let build_dir = workspace_root.join("build");
     let source_dir = build_dir.join("sources").join("buildroot-source");
     let collect_dir = workspace_root.join("out").join("images");
-    let output_dir = collect_dir.join("buildroot-output");
+    let output_dir = build_dir.join("image/buildroot-output");
     let target_dir = output_dir.join("target");
     let images_dir = output_dir.join("images");
 
@@ -156,7 +156,7 @@ fn build_operation_applies_config_overrides_when_expected_images_exist() {
     let build_dir = workspace_root.join("build");
     let source_dir = build_dir.join("sources").join("buildroot-source");
     let collect_dir = workspace_root.join("out").join("images");
-    let output_dir = collect_dir.join("buildroot-output");
+    let output_dir = build_dir.join("image/buildroot-output");
     let images_dir = output_dir.join("images");
 
     fs::create_dir_all(&source_dir).expect("source dir");
@@ -236,7 +236,7 @@ fn prepare_operation_does_not_reuse_partial_target_tree() {
     let build_dir = workspace_root.join("build");
     let source_dir = build_dir.join("sources").join("buildroot-source");
     let collect_dir = workspace_root.join("out").join("images");
-    let output_dir = collect_dir.join("buildroot-output");
+    let output_dir = build_dir.join("image/buildroot-output");
     let target_dir = output_dir.join("target");
 
     fs::create_dir_all(&source_dir).expect("source dir");
@@ -294,7 +294,7 @@ fn build_operation_reruns_when_assembly_provider_input_is_missing() {
     let build_dir = workspace_root.join("build");
     let source_dir = build_dir.join("sources").join("buildroot-source");
     let collect_dir = workspace_root.join("out").join("images");
-    let output_dir = collect_dir.join("buildroot-output");
+    let output_dir = build_dir.join("image/buildroot-output");
     let images_dir = output_dir.join("images");
     let marker = output_dir.join("buildroot-ran");
 

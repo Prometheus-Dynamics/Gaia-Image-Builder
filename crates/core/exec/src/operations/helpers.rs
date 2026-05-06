@@ -471,15 +471,11 @@ pub(crate) fn source_cleanup_paths(
 
 pub(crate) fn artifact_cleanup_paths(contract: &ArtifactExecutionContract) -> Vec<PathBuf> {
     let output_path = PathBuf::from(&contract.output.path);
-    let mut paths = vec![output_path.clone()];
-    if contract.output.kind == gaia_artifact_providers::ArtifactOutputKind::File {
-        paths.push(output_path.with_extension("gaia-build.txt"));
-        paths.push(output_path.with_extension("gaia-state.txt"));
-    } else {
-        paths.push(output_path.join(".gaia-artifact.txt"));
-        paths.push(output_path.join(".gaia-state.txt"));
-    }
-    paths
+    vec![
+        output_path,
+        gaia_artifact_providers::artifact_sidecar_path(contract, "gaia-build.txt"),
+        gaia_artifact_providers::artifact_sidecar_path(contract, "gaia-state.txt"),
+    ]
 }
 
 pub(crate) fn image_cleanup_paths(

@@ -34,6 +34,7 @@ pub(crate) struct AssemblyStagingSummary {
     pub state: KeyValueState,
     pub messages: Vec<String>,
     pub cleanup_paths: Vec<PathBuf>,
+    pub archive_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +103,7 @@ pub(crate) fn stage_image_assembly(
             state: KeyValueState::new().with("kind", gaia_spec::IMAGE_ASSEMBLY_STATE_KIND),
             messages: vec!["image assembly has no configured actions".into()],
             cleanup_paths: Vec::new(),
+            archive_path: None,
         });
     };
 
@@ -478,12 +480,14 @@ pub(crate) fn stage_image_assembly(
     state.insert("completed_disk_count", disk_count);
 
     let mut cleanup_paths = context.cleanup_paths();
+    let mut archive_path = None;
     if let Some(summary) = archive_assembly_disk_output(spec, &disk_outputs, cancel_check.clone())?
     {
         state.insert("archive.path", summary.output.display().to_string());
         state.insert("archive.source", summary.source.display().to_string());
         state.insert("archive.bytes", summary.bytes);
         state.insert("archive.sha256", summary.sha256);
+        archive_path = Some(summary.output.clone());
         cleanup_paths.push(summary.output.clone());
         messages.push(format!(
             "compressed assembly disk '{}' to '{}'",
@@ -503,6 +507,7 @@ pub(crate) fn stage_image_assembly(
         state,
         messages,
         cleanup_paths,
+        archive_path,
     })
 }
 

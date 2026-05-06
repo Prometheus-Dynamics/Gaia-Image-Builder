@@ -491,6 +491,7 @@ fn uses_supported_provider_variable(spec: &ResolvedBuildSpec, value: &str) -> bo
 fn provider_variables(value: &str) -> Vec<&str> {
     const VARIABLES: &[&str] = &[
         "provider.images",
+        "provider.buildroot_output",
         "provider.target",
         "provider.host",
         "provider.staging",
@@ -506,7 +507,11 @@ fn provider_root_supported(spec: &ResolvedBuildSpec, variable: &str) -> bool {
     match spec.image.provider_kind() {
         gaia_spec::ImageProviderKind::Buildroot => matches!(
             variable,
-            "provider.images" | "provider.target" | "provider.host" | "provider.staging"
+            "provider.images"
+                | "provider.buildroot_output"
+                | "provider.target"
+                | "provider.host"
+                | "provider.staging"
         ),
         gaia_spec::ImageProviderKind::StartingPoint => {
             matches!(variable, "provider.images" | "provider.target")

@@ -494,8 +494,11 @@ fn materialize_reusable_test_outputs(spec: &gaia_spec::ResolvedBuildSpec) {
         .collect_dir
         .clone()
         .expect("image collect dir");
-    fs::create_dir_all(PathBuf::from(&collect_dir).join("buildroot-output/target"))
-        .expect("buildroot target dir");
+    fs::create_dir_all(&collect_dir).expect("image collect dir");
+    fs::create_dir_all(
+        PathBuf::from(&spec.workspace.build_dir).join("image/buildroot-output/target"),
+    )
+    .expect("buildroot target dir");
     fs::write(
         PathBuf::from(&collect_dir).join("image-provider.txt"),
         "image",

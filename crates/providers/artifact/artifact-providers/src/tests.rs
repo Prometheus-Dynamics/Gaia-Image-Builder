@@ -167,11 +167,23 @@ fn materialize_artifact_marker_and_state_writes_both_files() {
     materialize_artifact_marker_and_state(&contract, "marker", "state").expect("marker and state");
 
     assert_eq!(
-        fs::read_to_string(output_path.with_extension("gaia-build.txt")).expect("marker"),
+        fs::read_to_string(
+            output_path
+                .parent()
+                .expect("parent")
+                .join(".gaia/artifact.bin.gaia-build.txt")
+        )
+        .expect("marker"),
         "marker"
     );
     assert_eq!(
-        fs::read_to_string(output_path.with_extension("gaia-state.txt")).expect("state"),
+        fs::read_to_string(
+            output_path
+                .parent()
+                .expect("parent")
+                .join(".gaia/artifact.bin.gaia-state.txt")
+        )
+        .expect("state"),
         "state"
     );
     let _ = fs::remove_dir_all(output_path.ancestors().nth(1).expect("test root"));

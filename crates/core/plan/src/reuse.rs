@@ -575,14 +575,7 @@ fn operation_outputs_present(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
         OperationKind::CaptureCheckpoint { checkpoint_id } => {
             checkpoint_state_path(spec, checkpoint_id).is_file()
         }
-        OperationKind::PrepareImage => {
-            spec.image.output.collect_dir.as_deref().is_some_and(|dir| {
-                Path::new(dir)
-                    .join("buildroot-output")
-                    .join("target")
-                    .is_dir()
-            })
-        }
+        OperationKind::PrepareImage => buildroot_output_dir(spec).join("target").is_dir(),
         OperationKind::BuildImage => {
             let collect_exists = spec
                 .image
@@ -622,14 +615,9 @@ pub fn operation_output_signature(
             .find(|artifact| artifact.id == *artifact_id)
             .map(|artifact| {
                 let output_path = Path::new(&artifact.output.path);
-                let state_path = if output_path.is_dir() {
-                    output_path.join(".gaia-state.txt")
-                } else {
-                    output_path.with_extension("gaia-state.txt")
-                };
                 format!(
                     "{}|{}",
-                    provider_state_signature(&state_path),
+                    provider_state_signature(&artifact_state_path(output_path)),
                     path_state_signature(output_path),
                 )
             }),
@@ -656,11 +644,10 @@ pub fn operation_output_signature(
         )),
         OperationKind::PrepareImage => {
             spec.image.output.collect_dir.as_deref().map(|collect_dir| {
-                let output_dir = Path::new(collect_dir).join("buildroot-output");
                 format!(
                     "{}|{}",
                     provider_state_signature(&Path::new(collect_dir).join(".gaia-image-state.txt")),
-                    path_state_signature(&output_dir.join(".config")),
+                    path_state_signature(&buildroot_output_dir(spec).join(".config")),
                 )
             })
         }
@@ -689,6 +676,34 @@ pub fn operation_output_signature(
             &checkpoint_state_path(spec, checkpoint_id),
         )),
     }
+}
+
+fn artifact_state_path(output_path: &Path) -> PathBuf {
+    if output_path.is_dir() {
+        output_path.join(".gaia").join("artifact.gaia-state.txt")
+    } else {
+        output_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(".gaia")
+            .join(format!(
+                "{}.gaia-state.txt",
+                output_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("artifact")
+            ))
+    }
+}
+
+fn buildroot_output_dir(spec: &ResolvedBuildSpec) -> PathBuf {
+    let build_dir = PathBuf::from(&spec.workspace.build_dir);
+    let resolved_build_dir = if build_dir.is_absolute() {
+        build_dir
+    } else {
+        PathBuf::from(&spec.workspace.root_dir).join(build_dir)
+    };
+    resolved_build_dir.join("image/buildroot-output")
 }
 
 fn provider_state_signature(path: &Path) -> String {

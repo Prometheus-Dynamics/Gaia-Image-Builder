@@ -122,7 +122,11 @@ fn plan_rebuilds_when_provider_state_changes_even_if_output_file_matches() {
         fs::create_dir_all(parent).expect("artifact output dir");
     }
     fs::write(&spec.artifacts[0].output.path, "artifact-v1").expect("artifact output");
-    let state_path = PathBuf::from(&spec.artifacts[0].output.path).with_extension("gaia-state.txt");
+    let state_path = PathBuf::from(&spec.artifacts[0].output.path)
+        .parent()
+        .expect("artifact parent")
+        .join(".gaia/gaia.gaia-state.txt");
+    fs::create_dir_all(state_path.parent().expect("state parent")).expect("state dir");
     fs::write(
         &state_path,
         "provider=artifact.rust\nartifact=gaia-app\noutput=one\n",

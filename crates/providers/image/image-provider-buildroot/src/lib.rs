@@ -133,7 +133,7 @@ impl ImageProvider for BuildrootImageProvider {
             state_details.push(("defconfig_path".to_string(), path.clone()));
         }
         if let Some(buildroot_dir) = resolve_buildroot_dir(spec, image) {
-            let output_dir = collect_dir.join("buildroot-output");
+            let output_dir = buildroot_output_dir(spec);
             let target_dir = output_dir.join("target");
             messages.extend(run_buildroot(BuildrootRunRequest {
                 spec,
@@ -206,6 +206,10 @@ impl ImageProvider for BuildrootImageProvider {
             state_details.push((
                 "buildroot_output_digest".to_string(),
                 buildroot_state_digest(image, &output_dir),
+            ));
+            state_details.push((
+                "buildroot_output_dir".to_string(),
+                output_dir.display().to_string(),
             ));
             state_details.push((
                 "matched_expected_images".to_string(),
@@ -303,7 +307,7 @@ impl ImageProvider for BuildrootImageProvider {
                         "buildroot backend unavailable and image.buildroot.allow_fallback is false",
                     )
                 })?;
-                let output_dir = collect_dir.join("buildroot-output");
+                let output_dir = buildroot_output_dir(request.spec);
                 let messages = run_buildroot(BuildrootRunRequest {
                     spec: request.spec,
                     image: request.image,
@@ -353,6 +357,16 @@ impl ImageProvider for BuildrootImageProvider {
             ),
         }
     }
+}
+
+fn buildroot_output_dir(spec: &ResolvedBuildSpec) -> PathBuf {
+    let build_dir = PathBuf::from(&spec.workspace.build_dir);
+    let resolved_build_dir = if build_dir.is_absolute() {
+        build_dir
+    } else {
+        PathBuf::from(&spec.workspace.root_dir).join(build_dir)
+    };
+    resolved_build_dir.join("image/buildroot-output")
 }
 
 fn should_archive_buildroot_output(image: &ImageSpec, archive_path: &Path) -> bool {

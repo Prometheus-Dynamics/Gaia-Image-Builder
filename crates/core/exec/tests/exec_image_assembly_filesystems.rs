@@ -103,8 +103,7 @@ fn gzip_transform_failure_reports_bounded_stderr_tail_and_tool_path() {
 
     let mut spec = test_spec();
     spec.policy.execution.output_retention.stderr_bytes = 4;
-    let collect_dir = spec.image.output.collect_dir.clone().expect("collect dir");
-    let provider_bin = Path::new(&collect_dir).join("buildroot-output/host/bin");
+    let provider_bin = Path::new(&spec.workspace.build_dir).join("image/buildroot-output/host/bin");
     fs::create_dir_all(&provider_bin).expect("provider bin");
     let fake_gzip = provider_bin.join("gzip");
     fs::write(&fake_gzip, "#!/bin/sh\nprintf 'prefixTAIL' >&2\nexit 7\n").expect("fake gzip");
@@ -160,8 +159,7 @@ fn gzip_transform_failure_reports_bounded_stderr_tail_and_tool_path() {
 #[test]
 fn gzip_transform_tool_start_failure_is_typed() {
     let mut spec = test_spec();
-    let collect_dir = spec.image.output.collect_dir.clone().expect("collect dir");
-    let provider_bin = Path::new(&collect_dir).join("buildroot-output/host/bin");
+    let provider_bin = Path::new(&spec.workspace.build_dir).join("image/buildroot-output/host/bin");
     fs::create_dir_all(&provider_bin).expect("provider bin");
     let fake_gzip = provider_bin.join("gzip");
     fs::write(&fake_gzip, "#!/bin/sh\nprintf unused\n").expect("fake gzip");
@@ -213,8 +211,7 @@ fn gzip_transform_honors_assembly_command_timeout() {
 
     let mut spec = test_spec();
     spec.policy.providers.buildroot.timeout_seconds = 1;
-    let collect_dir = spec.image.output.collect_dir.clone().expect("collect dir");
-    let provider_bin = Path::new(&collect_dir).join("buildroot-output/host/bin");
+    let provider_bin = Path::new(&spec.workspace.build_dir).join("image/buildroot-output/host/bin");
     fs::create_dir_all(&provider_bin).expect("provider bin");
     let fake_gzip = provider_bin.join("gzip");
     fs::write(&fake_gzip, "#!/bin/sh\nsleep 10\n").expect("fake gzip");
@@ -271,8 +268,7 @@ fn gzip_transform_succeeds_when_tool_version_probe_hangs() {
 
     let mut spec = test_spec();
     spec.policy.providers.buildroot.timeout_seconds = 10;
-    let collect_dir = spec.image.output.collect_dir.clone().expect("collect dir");
-    let provider_bin = Path::new(&collect_dir).join("buildroot-output/host/bin");
+    let provider_bin = Path::new(&spec.workspace.build_dir).join("image/buildroot-output/host/bin");
     fs::create_dir_all(&provider_bin).expect("provider bin");
     let fake_gzip = provider_bin.join("gzip");
     fs::write(
@@ -344,8 +340,7 @@ fn gzip_transform_honors_execution_cancellation() {
 
     let mut spec = test_spec();
     spec.policy.providers.buildroot.timeout_seconds = 30;
-    let collect_dir = spec.image.output.collect_dir.clone().expect("collect dir");
-    let provider_bin = Path::new(&collect_dir).join("buildroot-output/host/bin");
+    let provider_bin = Path::new(&spec.workspace.build_dir).join("image/buildroot-output/host/bin");
     fs::create_dir_all(&provider_bin).expect("provider bin");
     let fake_gzip = provider_bin.join("gzip");
     fs::write(&fake_gzip, "#!/bin/sh\nsleep 10\n").expect("fake gzip");
@@ -410,7 +405,7 @@ fn compile_dts_prefers_provider_host_dtc() {
     let mut spec = test_spec();
     let collect_dir = Path::new(&spec.workspace.out_dir).join("images");
     spec.image.output.collect_dir = Some(collect_dir.display().to_string());
-    let provider_bin = collect_dir.join("buildroot-output/host/bin");
+    let provider_bin = Path::new(&spec.workspace.build_dir).join("image/buildroot-output/host/bin");
     fs::create_dir_all(&provider_bin).expect("provider bin");
     let fake_dtc = provider_bin.join("dtc");
     fs::write(

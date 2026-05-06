@@ -20,8 +20,14 @@ fn report_generation_tolerates_corrupt_backend_state_lines() {
         "provider=source.path\nrefresh_policy=never\npin_policy=locked\nbroken-line-without-equals\npath_digest=abc123\n",
     )
     .expect("corrupt source state");
+    let artifact_state = PathBuf::from(&spec.artifacts[0].output.path)
+        .parent()
+        .expect("artifact output parent")
+        .join(".gaia/gaia.gaia-state.txt");
+    fs::create_dir_all(artifact_state.parent().expect("artifact state parent"))
+        .expect("artifact state dir");
     fs::write(
-        PathBuf::from(&spec.artifacts[0].output.path).with_extension("gaia-state.txt"),
+        artifact_state,
         "provider=artifact.rust\nresolved_identifier_kind=package-target\nresolved_identifier=gaia:gaia\nproduced_filename=gaia\noutput_class=binary\nbuild_tool=cargo\nbuild_tool_version=cargo 1.82.0\nbad-line\noutput_sha256=deadbeef\n",
     )
     .expect("corrupt artifact state");

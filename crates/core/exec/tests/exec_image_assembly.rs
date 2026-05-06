@@ -490,11 +490,10 @@ fn image_assembly_filesystem_failure_cleans_temp_and_final_outputs() {
 
     let mut spec = test_spec();
     let build_dir = Path::new(&spec.workspace.build_dir);
-    let collect_dir = Path::new(spec.image.output.collect_dir.as_ref().expect("collect dir"));
     let source_dir = build_dir.join("filesystem-cleanup-sources");
     let tree_dir = build_dir.join("filesystem-cleanup-tree");
     let output_dir = build_dir.join("filesystem-cleanup-output");
-    let host_bin = collect_dir.join("buildroot-output/host/bin");
+    let host_bin = build_dir.join("image/buildroot-output/host/bin");
     fs::create_dir_all(&source_dir).expect("source dir");
     fs::create_dir_all(&host_bin).expect("host bin");
     fs::write(source_dir.join("boot.txt"), "boot").expect("source file");

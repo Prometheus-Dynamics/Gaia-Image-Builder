@@ -21,7 +21,7 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
     let output_dir = build_dir.join("filesystem-output");
     let collect_dir = Path::new(&spec.workspace.out_dir).join("images");
     spec.image.output.collect_dir = Some(collect_dir.display().to_string());
-    let provider_bin = collect_dir.join("buildroot-output/host/bin");
+    let provider_bin = build_dir.join("image/buildroot-output/host/bin");
     fs::create_dir_all(&provider_bin).expect("provider bin");
     let log = build_dir.join("mtools.log");
     let fake_mformat = provider_bin.join("mformat");
@@ -252,7 +252,7 @@ fn vfat_filesystem_honors_mformat_timeout() {
     let output_dir = build_dir.join("filesystem-timeout-output");
     let collect_dir = Path::new(&spec.workspace.out_dir).join("images");
     spec.image.output.collect_dir = Some(collect_dir.display().to_string());
-    let provider_bin = collect_dir.join("buildroot-output/host/bin");
+    let provider_bin = build_dir.join("image/buildroot-output/host/bin");
     fs::create_dir_all(&provider_bin).expect("provider bin");
     let fake_mformat = provider_bin.join("mformat");
     let fake_mcopy = provider_bin.join("mcopy");
