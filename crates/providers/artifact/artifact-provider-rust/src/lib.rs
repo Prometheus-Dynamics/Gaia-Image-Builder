@@ -78,9 +78,7 @@ impl ArtifactProvider for RustProvider {
         let source_dir = contract.source_dir.as_deref().unwrap_or(".");
         let output_path = artifact_output_path(contract, source_dir);
 
-        let (build_mode, mut messages) = if output_path.is_file() {
-            ("existing-output", Vec::new())
-        } else if contract.allow_nested_build {
+        let (build_mode, mut messages) = if contract.allow_nested_build {
             (
                 "cargo",
                 build_with_cargo(
@@ -92,6 +90,8 @@ impl ArtifactProvider for RustProvider {
                     cancel_check,
                 )?,
             )
+        } else if output_path.is_file() {
+            ("existing-output", Vec::new())
         } else {
             materialize_artifact_output(
                 contract,
@@ -348,5 +348,41 @@ mod tests {
         assert!(state.contains("build_tool=cargo"));
         assert!(state.contains("compiler_tool=rustc"));
         assert!(state.contains("artifact_target=aarch64-unknown-linux-gnu"));
+    }
+
+    #[test]
+    fn nested_rust_build_does_not_accept_stale_existing_output() {
+        let output_path = temp_path("gaia-rust-provider-stale-output");
+        fs::write(&output_path, "stale").expect("output");
+        let missing_source_dir = temp_path("gaia-rust-provider-missing-source-with-output");
+        let artifact = ArtifactSpec::new(
+            "gaia-app",
+            ArtifactDefinition::Rust(RustArtifactSpec {
+                package: "gaia".into(),
+                target_name: Some("gaia".into()),
+                variant: ArtifactVariantSpec::File,
+            }),
+            None,
+            ArtifactOutputSpec {
+                path: output_path.display().to_string(),
+            },
+        );
+        let contract = ArtifactExecutionContract::from_spec(
+            &artifact,
+            Some(missing_source_dir.display().to_string()),
+            true,
+            ArtifactExecutionContract::default_command_policy(),
+            gaia_spec::OutputRetentionPolicySpec::default(),
+        );
+
+        let error = RustProvider
+            .execute_artifact(&artifact, &contract, None, None)
+            .expect_err("nested build should not reuse stale output");
+
+        assert_eq!(
+            error.kind,
+            gaia_artifact_providers::ArtifactProviderErrorKind::ToolStart
+        );
+        assert!(error.message.contains("failed to start cargo build"));
     }
 }

@@ -203,7 +203,7 @@ pub(crate) fn artifact_rebuild_message(artifact: &gaia_spec::ArtifactSpec) -> St
     )
 }
 
-pub(crate) fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKind) -> u64 {
+pub fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKind) -> u64 {
     let mut hasher = DefaultHasher::new();
     match kind {
         OperationKind::ResolveBuild => {
@@ -542,16 +542,18 @@ fn workspace_path_ignores(spec: &ResolvedBuildSpec) -> Vec<String> {
 fn operation_outputs_present(spec: &ResolvedBuildSpec, kind: &OperationKind) -> bool {
     match kind {
         OperationKind::ResolveBuild | OperationKind::EmitReport => true,
-        OperationKind::MaterializeSource { source_id } => PathBuf::from(&spec.workspace.build_dir)
-            .join("sources")
-            .join(source_id.as_str())
-            .join("source.txt")
-            .is_file(),
+        OperationKind::MaterializeSource { source_id } => {
+            resolve_workspace_path(spec, &spec.workspace.build_dir)
+                .join("sources")
+                .join(source_id.as_str())
+                .join("source.txt")
+                .is_file()
+        }
         OperationKind::BuildArtifact { artifact_id } => spec
             .artifacts
             .iter()
             .find(|artifact| artifact.id == *artifact_id)
-            .is_some_and(|artifact| Path::new(&artifact.output.path).exists()),
+            .is_some_and(|artifact| artifact_output_path(spec, &artifact.output.path).exists()),
         OperationKind::InstallArtifact {
             install_id,
             artifact,
@@ -561,7 +563,9 @@ fn operation_outputs_present(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
                     .artifacts
                     .iter()
                     .find(|candidate| candidate.id == artifact.id)
-                    .is_some_and(|artifact| Path::new(&artifact.output.path).exists())
+                    .is_some_and(|artifact| {
+                        artifact_output_path(spec, &artifact.output.path).exists()
+                    })
         }
         OperationKind::RenderStageFile { item_id } => {
             stage_state_path(spec, "file", item_id).is_file()
@@ -577,17 +581,16 @@ fn operation_outputs_present(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
         }
         OperationKind::PrepareImage => buildroot_output_dir(spec).join("target").is_dir(),
         OperationKind::BuildImage => {
-            let collect_exists = spec
-                .image
-                .output
-                .collect_dir
-                .as_deref()
-                .is_some_and(|dir| Path::new(dir).join("image-provider.txt").is_file());
+            let collect_exists = spec.image.output.collect_dir.as_deref().is_some_and(|dir| {
+                resolve_workspace_path(spec, dir)
+                    .join("image-provider.txt")
+                    .is_file()
+            });
             let archive_exists = match (
                 spec.image.output.collect_dir.as_deref(),
                 spec.image.output.archive_name.as_deref(),
             ) {
-                (Some(dir), Some(name)) => Path::new(dir).join(name).is_file(),
+                (Some(dir), Some(name)) => resolve_workspace_path(spec, dir).join(name).is_file(),
                 _ => false,
             };
             collect_exists || archive_exists
@@ -603,7 +606,7 @@ pub fn operation_output_signature(
     match kind {
         OperationKind::ResolveBuild | OperationKind::EmitReport => None,
         OperationKind::MaterializeSource { source_id } => {
-            let materialized_dir = PathBuf::from(&spec.workspace.build_dir)
+            let materialized_dir = resolve_workspace_path(spec, &spec.workspace.build_dir)
                 .join("sources")
                 .join(source_id.as_str());
             let state = materialized_dir.join(".gaia-source-state.txt");
@@ -614,11 +617,11 @@ pub fn operation_output_signature(
             .iter()
             .find(|artifact| artifact.id == *artifact_id)
             .map(|artifact| {
-                let output_path = Path::new(&artifact.output.path);
+                let output_path = artifact_output_path(spec, &artifact.output.path);
                 format!(
                     "{}|{}",
-                    provider_state_signature(&artifact_state_path(output_path)),
-                    path_state_signature(output_path),
+                    provider_state_signature(&artifact_state_path(&output_path)),
+                    path_state_signature(&output_path),
                 )
             }),
         OperationKind::InstallArtifact {
@@ -630,7 +633,10 @@ pub fn operation_output_signature(
             spec.artifacts
                 .iter()
                 .find(|candidate| candidate.id == artifact.id)
-                .map(|artifact| path_state_signature(Path::new(&artifact.output.path)))
+                .map(|artifact| path_state_signature(&artifact_output_path(
+                    spec,
+                    &artifact.output.path
+                )))
                 .unwrap_or_else(|| "artifact-missing".into())
         )),
         OperationKind::RenderStageFile { item_id } => Some(provider_state_signature(
@@ -644,9 +650,10 @@ pub fn operation_output_signature(
         )),
         OperationKind::PrepareImage => {
             spec.image.output.collect_dir.as_deref().map(|collect_dir| {
+                let collect_dir = resolve_workspace_path(spec, collect_dir);
                 format!(
                     "{}|{}",
-                    provider_state_signature(&Path::new(collect_dir).join(".gaia-image-state.txt")),
+                    provider_state_signature(&collect_dir.join(".gaia-image-state.txt")),
                     path_state_signature(&buildroot_output_dir(spec).join(".config")),
                 )
             })
@@ -654,11 +661,12 @@ pub fn operation_output_signature(
         OperationKind::BuildImage => {
             let mut parts = Vec::new();
             if let Some(collect_dir) = spec.image.output.collect_dir.as_deref() {
+                let collect_dir = resolve_workspace_path(spec, collect_dir);
                 parts.push(provider_state_signature(
-                    &Path::new(collect_dir).join(".gaia-image-state.txt"),
+                    &collect_dir.join(".gaia-image-state.txt"),
                 ));
                 parts.push(path_state_signature(
-                    &Path::new(collect_dir).join("image-provider.txt"),
+                    &collect_dir.join("image-provider.txt"),
                 ));
             }
             if let (Some(collect_dir), Some(archive_name)) = (
@@ -666,7 +674,7 @@ pub fn operation_output_signature(
                 spec.image.output.archive_name.as_deref(),
             ) {
                 parts.push(path_state_signature(
-                    &Path::new(collect_dir).join(archive_name),
+                    &resolve_workspace_path(spec, collect_dir).join(archive_name),
                 ));
             }
             (!parts.is_empty()).then(|| parts.join("|"))
@@ -676,6 +684,10 @@ pub fn operation_output_signature(
             &checkpoint_state_path(spec, checkpoint_id),
         )),
     }
+}
+
+fn artifact_output_path(spec: &ResolvedBuildSpec, output_path: &str) -> PathBuf {
+    resolve_workspace_path(spec, output_path)
 }
 
 fn artifact_state_path(output_path: &Path) -> PathBuf {
@@ -697,13 +709,7 @@ fn artifact_state_path(output_path: &Path) -> PathBuf {
 }
 
 fn buildroot_output_dir(spec: &ResolvedBuildSpec) -> PathBuf {
-    let build_dir = PathBuf::from(&spec.workspace.build_dir);
-    let resolved_build_dir = if build_dir.is_absolute() {
-        build_dir
-    } else {
-        PathBuf::from(&spec.workspace.root_dir).join(build_dir)
-    };
-    resolved_build_dir.join("image/buildroot-output")
+    resolve_workspace_path(spec, &spec.workspace.build_dir).join("image/buildroot-output")
 }
 
 fn provider_state_signature(path: &Path) -> String {
@@ -718,7 +724,7 @@ fn provider_state_signature(path: &Path) -> String {
 }
 
 fn runtime_state_dir(spec: &ResolvedBuildSpec) -> PathBuf {
-    PathBuf::from(&spec.workspace.out_dir).join(gaia_spec::RUNTIME_STATE_DIR_NAME)
+    resolve_workspace_path(spec, &spec.workspace.out_dir).join(gaia_spec::RUNTIME_STATE_DIR_NAME)
 }
 
 fn install_state_path(spec: &ResolvedBuildSpec, install_id: &gaia_spec::InstallId) -> PathBuf {

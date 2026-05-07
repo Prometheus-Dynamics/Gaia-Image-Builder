@@ -97,6 +97,76 @@ fn apply_image_feed_to_rootfs_writes_install_file_env_and_service_content() {
 }
 
 #[test]
+fn prunes_removed_stage_file_from_previous_runtime_state() {
+    let workspace_root = temp_path("gaia-buildroot-feed-prune-workspace");
+    let rootfs_dir = temp_path("gaia-buildroot-feed-prune-rootfs");
+    let output_dir = temp_path("gaia-buildroot-feed-prune-output");
+    let runtime_dir = workspace_root.join("out/.gaia/runtime");
+    fs::create_dir_all(rootfs_dir.join("usr/local/bin")).expect("rootfs bin");
+    fs::create_dir_all(&runtime_dir).expect("runtime dir");
+    fs::write(rootfs_dir.join("usr/local/bin/old.sh"), "stale").expect("stale file");
+    fs::write(
+        runtime_dir.join("stage-file-old-script.state"),
+        "kind=stage-file\nitem_id=old-script\nsrc=assets/old.sh\ndest=/usr/local/bin/old.sh\norigin=static-asset\n",
+    )
+    .expect("runtime state");
+
+    let mut spec = ResolvedBuildSpec::new("buildroot-feed-prune-test");
+    spec.workspace.root_dir = workspace_root.display().to_string();
+    spec.workspace.out_dir = workspace_root.join("out").display().to_string();
+    let image = ImageSpec::new(ImageDefinition::Buildroot(BuildrootImageSpec::default()));
+
+    prune_stale_image_feed_outputs(&spec, &image, &rootfs_dir, &output_dir)
+        .expect("prune stale feed");
+
+    assert!(!rootfs_dir.join("usr/local/bin/old.sh").exists());
+}
+
+#[test]
+fn stale_image_feed_outputs_are_pruned_before_overlay() {
+    let workspace_root = temp_path("gaia-buildroot-feed-prune-workspace");
+    let rootfs_dir = temp_path("gaia-buildroot-feed-prune-rootfs");
+    let output_dir = temp_path("gaia-buildroot-feed-prune-output");
+    let assets_dir = workspace_root.join("assets");
+    fs::create_dir_all(&assets_dir).expect("assets dir");
+    fs::create_dir_all(rootfs_dir.join("usr/local/bin")).expect("rootfs bin");
+    fs::create_dir_all(&output_dir).expect("output dir");
+    fs::write(rootfs_dir.join("usr/local/bin/old.sh"), "stale").expect("stale rootfs file");
+    fs::write(assets_dir.join("new"), "fresh").expect("fresh asset");
+    fs::write(
+        image_feed_managed_paths_path(&output_dir),
+        "gaia-image-feed-managed-paths-v1\n/usr/local/bin/old.sh\n/etc/new\n",
+    )
+    .expect("managed paths");
+
+    let mut spec = ResolvedBuildSpec::new("buildroot-feed-prune-test");
+    spec.workspace.root_dir = workspace_root.display().to_string();
+    spec.stage.files.push(gaia_spec::StageFileSpec {
+        id: "new".into(),
+        src: "assets/new".into(),
+        dest: "/etc/new".into(),
+        mode: None,
+        origin: gaia_spec::StageContentOriginSpec::StaticAsset,
+    });
+    let mut image = ImageSpec::new(ImageDefinition::Buildroot(BuildrootImageSpec::default()));
+    image.feed.stage_files.push("new".into());
+
+    prune_stale_image_feed_outputs(&spec, &image, &rootfs_dir, &output_dir).expect("prune");
+    apply_image_feed_to_rootfs(&spec, &image, &rootfs_dir).expect("feed overlay");
+    write_image_feed_managed_paths(&output_dir, &spec, &image).expect("managed paths");
+
+    assert!(!rootfs_dir.join("usr/local/bin/old.sh").exists());
+    assert_eq!(
+        fs::read_to_string(rootfs_dir.join("etc/new")).expect("new file"),
+        "fresh"
+    );
+    assert_eq!(
+        fs::read_to_string(image_feed_managed_paths_path(&output_dir)).expect("managed paths"),
+        "gaia-image-feed-managed-paths-v1\n/etc/new\n"
+    );
+}
+
+#[test]
 fn final_tar_image_contains_install_stage_env_and_service_content() {
     let workspace_root = temp_path("gaia-buildroot-final-image-workspace");
     let rootfs_dir = temp_path("gaia-buildroot-final-image-rootfs");

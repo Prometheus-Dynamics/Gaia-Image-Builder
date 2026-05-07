@@ -6,6 +6,10 @@ mod scheduler;
 
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::thread;
 
 use gaia_artifact_providers::ArtifactProviderCatalog;
@@ -107,9 +111,13 @@ pub fn execute_plan_with_cancellation_and_observer(
         Option<gaia_spec::RollbackDomain>,
         Vec<std::path::PathBuf>,
     )> = None;
+    let stop_running_operations = Arc::new(AtomicBool::new(false));
     let cancel_check: ProcessCancelCheck = {
         let cancellation = cancellation.clone();
-        std::sync::Arc::new(move || cancellation.is_cancelled())
+        let stop_running_operations = stop_running_operations.clone();
+        Arc::new(move || {
+            cancellation.is_cancelled() || stop_running_operations.load(Ordering::SeqCst)
+        })
     };
 
     let schedule_context = ScheduleReadyContext {
@@ -253,6 +261,7 @@ pub fn execute_plan_with_cancellation_and_observer(
                     result.cleanup_domain,
                     result.cleanup_paths.clone(),
                 ));
+                stop_running_operations.store(true, Ordering::SeqCst);
             }
 
             runtime.record(result);

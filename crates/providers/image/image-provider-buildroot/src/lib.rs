@@ -159,6 +159,7 @@ impl ImageProvider for BuildrootImageProvider {
                     ));
                     reuse_details.push("image-feed-overlay".to_string());
                 } else {
+                    prune_stale_image_feed_outputs(spec, image, &target_dir, &output_dir)?;
                     apply_image_feed_to_rootfs(spec, image, &target_dir)?;
                     messages.extend(refresh_buildroot_images_after_feed_overlay(
                         image,
@@ -170,6 +171,7 @@ impl ImageProvider for BuildrootImageProvider {
                         cancel_check.clone(),
                     )?);
                     refresh_expected_tar_images(image, &target_dir, &output_dir, &execution)?;
+                    write_image_feed_managed_paths(&output_dir, spec, image)?;
                     write_image_feed_signature(&output_dir, &feed_signature)?;
                 }
             }

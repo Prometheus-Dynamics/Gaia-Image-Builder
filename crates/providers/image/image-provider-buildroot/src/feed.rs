@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) fn collect_expected_images(
     image: &ImageSpec,
@@ -567,6 +568,10 @@ pub(crate) fn image_feed_signature_path(output_dir: &Path) -> PathBuf {
     output_dir.join(".gaia-image-feed-state.txt")
 }
 
+pub(crate) fn image_feed_managed_paths_path(output_dir: &Path) -> PathBuf {
+    output_dir.join(".gaia-image-feed-managed-paths.txt")
+}
+
 pub(crate) fn image_feed_signature_is_current(output_dir: &Path, signature: &str) -> bool {
     fs::read_to_string(image_feed_signature_path(output_dir))
         .is_ok_and(|current| current == signature)
@@ -621,6 +626,145 @@ pub(crate) fn image_feed_outputs_present(
     })
 }
 
+pub(crate) fn prune_stale_image_feed_outputs(
+    spec: &ResolvedBuildSpec,
+    image: &ImageSpec,
+    rootfs_dir: &Path,
+    output_dir: &Path,
+) -> Result<(), ImageProviderError> {
+    let current_paths = image_feed_managed_paths(spec, image)?;
+    let mut previous_paths = read_image_feed_managed_paths(output_dir)?;
+    previous_paths.extend(stale_runtime_state_managed_paths(spec)?);
+    for previous in previous_paths {
+        if current_paths.contains(&previous) {
+            continue;
+        }
+        let dest = rootfs_path(rootfs_dir, &previous);
+        remove_path_if_exists(&dest)?;
+        prune_empty_parent_dirs(&dest, rootfs_dir)?;
+    }
+    Ok(())
+}
+
+fn stale_runtime_state_managed_paths(
+    spec: &ResolvedBuildSpec,
+) -> Result<BTreeSet<String>, ImageProviderError> {
+    let runtime_dir =
+        PathBuf::from(&spec.workspace.out_dir).join(gaia_spec::RUNTIME_STATE_DIR_NAME);
+    let entries = match fs::read_dir(&runtime_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeSet::new()),
+        Err(error) => {
+            return Err(ImageProviderError::new(
+                ImageProviderErrorKind::RuntimeState,
+                format!(
+                    "failed to read runtime state dir '{}': {error}",
+                    runtime_dir.display()
+                ),
+            ));
+        }
+    };
+
+    let current_install_ids = spec
+        .image
+        .feed
+        .install_entries
+        .iter()
+        .map(|id| id.as_str())
+        .collect::<BTreeSet<_>>();
+    let current_stage_file_ids = spec
+        .image
+        .feed
+        .stage_files
+        .iter()
+        .map(|id| id.as_str())
+        .collect::<BTreeSet<_>>();
+    let current_stage_env_ids = spec
+        .image
+        .feed
+        .stage_env_sets
+        .iter()
+        .map(|id| id.as_str())
+        .collect::<BTreeSet<_>>();
+    let current_stage_service_ids = spec
+        .image
+        .feed
+        .stage_services
+        .iter()
+        .map(|id| id.as_str())
+        .collect::<BTreeSet<_>>();
+
+    let mut paths = BTreeSet::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            ImageProviderError::new(
+                ImageProviderErrorKind::RuntimeState,
+                format!(
+                    "failed to read runtime state entry in '{}': {error}",
+                    runtime_dir.display()
+                ),
+            )
+        })?;
+        let path = entry.path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("state") {
+            continue;
+        }
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let contents = fs::read_to_string(&path).map_err(|error| {
+            ImageProviderError::new(
+                ImageProviderErrorKind::RuntimeState,
+                format!("failed to read runtime state '{}': {error}", path.display()),
+            )
+        })?;
+        let state = parse_key_value_state(&contents);
+        if let Some(id) = file_name
+            .strip_prefix("install-")
+            .and_then(|name| name.strip_suffix(".state"))
+            && !current_install_ids.contains(id)
+            && let Some(dest) = state.get("dest")
+        {
+            paths.insert(dest.clone());
+        }
+        if let Some(id) = file_name
+            .strip_prefix("stage-file-")
+            .and_then(|name| name.strip_suffix(".state"))
+            && !current_stage_file_ids.contains(id)
+            && let Some(dest) = state.get("dest")
+        {
+            paths.insert(dest.clone());
+        }
+        if let Some(id) = file_name
+            .strip_prefix("stage-env-")
+            .and_then(|name| name.strip_suffix(".state"))
+            && !current_stage_env_ids.contains(id)
+            && let Some(name) = state.get("name")
+        {
+            paths.insert(format!("/etc/default/{name}.env"));
+        }
+        if let Some(id) = file_name
+            .strip_prefix("stage-service-")
+            .and_then(|name| name.strip_suffix(".state"))
+            && !current_stage_service_ids.contains(id)
+            && let Some(name) = state.get("name")
+        {
+            paths.insert(format!("/etc/systemd/system/{name}"));
+        }
+    }
+    Ok(paths)
+}
+
+fn parse_key_value_state(contents: &str) -> BTreeMap<String, String> {
+    contents
+        .lines()
+        .filter_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            Some((key.to_string(), value.to_string()))
+        })
+        .collect()
+}
+
 pub(crate) fn write_image_feed_signature(
     output_dir: &Path,
     signature: &str,
@@ -634,6 +778,190 @@ pub(crate) fn write_image_feed_signature(
             ),
         )
     })
+}
+
+pub(crate) fn write_image_feed_managed_paths(
+    output_dir: &Path,
+    spec: &ResolvedBuildSpec,
+    image: &ImageSpec,
+) -> Result<(), ImageProviderError> {
+    let mut body = String::from("gaia-image-feed-managed-paths-v1\n");
+    for path in image_feed_managed_paths(spec, image)? {
+        body.push_str(&path);
+        body.push('\n');
+    }
+    fs::write(image_feed_managed_paths_path(output_dir), body).map_err(|error| {
+        ImageProviderError::new(
+            ImageProviderErrorKind::RuntimeState,
+            format!(
+                "failed to write image feed managed paths '{}': {error}",
+                image_feed_managed_paths_path(output_dir).display()
+            ),
+        )
+    })
+}
+
+fn read_image_feed_managed_paths(
+    output_dir: &Path,
+) -> Result<std::collections::BTreeSet<String>, ImageProviderError> {
+    let path = image_feed_managed_paths_path(output_dir);
+    let contents = match fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(std::collections::BTreeSet::new());
+        }
+        Err(error) => {
+            return Err(ImageProviderError::new(
+                ImageProviderErrorKind::RuntimeState,
+                format!(
+                    "failed to read image feed managed paths '{}': {error}",
+                    path.display()
+                ),
+            ));
+        }
+    };
+    Ok(contents
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && *line != "gaia-image-feed-managed-paths-v1")
+        .map(str::to_string)
+        .collect())
+}
+
+fn image_feed_managed_paths(
+    spec: &ResolvedBuildSpec,
+    image: &ImageSpec,
+) -> Result<std::collections::BTreeSet<String>, ImageProviderError> {
+    let mut paths = std::collections::BTreeSet::new();
+
+    for install_id in &image.feed.install_entries {
+        let install = spec
+            .install
+            .entries
+            .iter()
+            .find(|entry| entry.id == *install_id)
+            .ok_or_else(|| {
+                ImageProviderError::new(
+                    ImageProviderErrorKind::RuntimeState,
+                    format!(
+                        "image feed references unknown install '{}'",
+                        install_id.as_str()
+                    ),
+                )
+            })?;
+        paths.insert(install.dest.clone());
+    }
+
+    for stage_file_id in &image.feed.stage_files {
+        let stage_file = spec
+            .stage
+            .files
+            .iter()
+            .find(|file| file.id == *stage_file_id)
+            .ok_or_else(|| {
+                ImageProviderError::new(
+                    ImageProviderErrorKind::RuntimeState,
+                    format!(
+                        "image feed references unknown stage file '{}'",
+                        stage_file_id.as_str()
+                    ),
+                )
+            })?;
+        paths.insert(stage_file.dest.clone());
+    }
+
+    for env_set_id in &image.feed.stage_env_sets {
+        let env_set = spec
+            .stage
+            .env_sets
+            .iter()
+            .find(|env_set| env_set.id == *env_set_id)
+            .ok_or_else(|| {
+                ImageProviderError::new(
+                    ImageProviderErrorKind::RuntimeState,
+                    format!(
+                        "image feed references unknown stage env set '{}'",
+                        env_set_id.as_str()
+                    ),
+                )
+            })?;
+        paths.insert(format!("/etc/default/{}.env", env_set.name));
+    }
+
+    for service_id in &image.feed.stage_services {
+        let service = spec
+            .stage
+            .services
+            .iter()
+            .find(|service| service.id == *service_id)
+            .ok_or_else(|| {
+                ImageProviderError::new(
+                    ImageProviderErrorKind::RuntimeState,
+                    format!(
+                        "image feed references unknown stage service '{}'",
+                        service_id.as_str()
+                    ),
+                )
+            })?;
+        paths.insert(format!("/etc/systemd/system/{}", service.name));
+    }
+
+    Ok(paths)
+}
+
+fn remove_path_if_exists(path: &Path) -> Result<(), ImageProviderError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(path).map_err(|error| {
+            ImageProviderError::new(
+                ImageProviderErrorKind::RuntimeState,
+                format!(
+                    "failed to remove stale image feed directory '{}': {error}",
+                    path.display()
+                ),
+            )
+        }),
+        Ok(_) => fs::remove_file(path).map_err(|error| {
+            ImageProviderError::new(
+                ImageProviderErrorKind::RuntimeState,
+                format!(
+                    "failed to remove stale image feed file '{}': {error}",
+                    path.display()
+                ),
+            )
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(ImageProviderError::new(
+            ImageProviderErrorKind::RuntimeState,
+            format!(
+                "failed to inspect stale image feed path '{}': {error}",
+                path.display()
+            ),
+        )),
+    }
+}
+
+fn prune_empty_parent_dirs(path: &Path, stop_at: &Path) -> Result<(), ImageProviderError> {
+    let mut current = path.parent();
+    while let Some(dir) = current {
+        if dir == stop_at {
+            break;
+        }
+        match fs::remove_dir(dir) {
+            Ok(()) => current = dir.parent(),
+            Err(error) if error.kind() == std::io::ErrorKind::DirectoryNotEmpty => break,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) => {
+                return Err(ImageProviderError::new(
+                    ImageProviderErrorKind::RuntimeState,
+                    format!(
+                        "failed to prune stale image feed parent '{}': {error}",
+                        dir.display()
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn build_image_feed_signature(

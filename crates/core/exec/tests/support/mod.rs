@@ -308,3 +308,46 @@ impl SourceProvider for SleepPathSourceProvider {
         Ok(vec![format!("slept for {}", source.id.as_str())])
     }
 }
+
+pub struct FailThenCancelAwarePathSourceProvider;
+
+impl SourceProvider for FailThenCancelAwarePathSourceProvider {
+    fn id(&self) -> &'static str {
+        "source.path.fail-then-cancel-aware"
+    }
+
+    fn kind(&self) -> gaia_spec::SourceProviderKind {
+        gaia_spec::SourceProviderKind::Path
+    }
+
+    fn execute_source(
+        &self,
+        spec: &gaia_spec::ResolvedBuildSpec,
+        source: &gaia_spec::SourceSpec,
+        log_sink: Option<gaia_source_providers::ProcessLogSink>,
+        cancel_check: Option<gaia_source_providers::ProcessCancelCheck>,
+    ) -> Result<Vec<String>, gaia_source_providers::SourceProviderError> {
+        let _ = log_sink;
+        if source.id.as_str() == "fail" {
+            thread::sleep(Duration::from_millis(50));
+            return Err(gaia_source_providers::SourceProviderError::backend_command(
+                "intentional source failure",
+            ));
+        }
+        for _ in 0..50 {
+            if cancel_check.as_ref().is_some_and(|cancel| cancel()) {
+                return Err(gaia_source_providers::SourceProviderError::new(
+                    gaia_source_providers::SourceProviderErrorKind::Cancelled,
+                    format!("{} cancelled", source.id.as_str()),
+                ));
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        let source_dir = Path::new(&spec.workspace.build_dir)
+            .join("sources")
+            .join(source.id.as_str());
+        fs::create_dir_all(&source_dir).expect("cancel aware source dir");
+        fs::write(source_dir.join("source.txt"), "ok").expect("cancel aware source marker");
+        Ok(vec![format!("slept for {}", source.id.as_str())])
+    }
+}

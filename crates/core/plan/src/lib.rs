@@ -9,7 +9,7 @@ pub use operations::{
     OperationParallelismDomain, OperationParallelismMode, OperationReuse, PlannedOperation,
     RebuildReason,
 };
-pub use reuse::{operation_output_signature, spec_fingerprint};
+pub use reuse::{operation_fingerprint, operation_output_signature, spec_fingerprint};
 
 use gaia_artifact_providers::{ArtifactProviderCatalog, ArtifactProviderOperation};
 use gaia_image_providers::{ImageProviderCatalog, ImageProviderOperation};
@@ -18,7 +18,7 @@ use gaia_spec::{ImageDefinition, ResolvedBuildSpec};
 
 use crate::reuse::{
     apply_reuse_state, artifact_rebuild_message, checkpoint_anchor_dependency,
-    checkpoint_optionality, operation_fingerprint,
+    checkpoint_optionality,
 };
 
 pub fn plan_build(

@@ -35,7 +35,12 @@ pub fn load_reuse_state(spec: &ResolvedBuildSpec) -> Option<ReuseState> {
     let operation_output_signatures = lines
         .filter_map(|line| line.strip_prefix("out="))
         .filter_map(|line| line.split_once(';'))
-        .map(|(operation_id, signature)| (operation_id.to_string(), signature.to_string()))
+        .map(|(operation_id, signature)| {
+            (
+                operation_id.to_string(),
+                decode_signature(signature).unwrap_or_else(|| signature.to_string()),
+            )
+        })
         .collect::<BTreeMap<_, _>>();
     Some(ReuseState {
         spec_fingerprint: fingerprint,
@@ -70,18 +75,64 @@ pub fn save_reuse_state(
             body.push_str(&format!(
                 "op={};{}\n",
                 operation.id.as_str(),
-                operation.fingerprint
+                gaia_plan::operation_fingerprint(spec, &operation.kind)
             ));
             if let Some(signature) = gaia_plan::operation_output_signature(spec, &operation.kind) {
-                body.push_str(&format!("out={};{}\n", operation.id.as_str(), signature));
+                body.push_str(&format!(
+                    "out={};{}\n",
+                    operation.id.as_str(),
+                    encode_signature(&signature)
+                ));
             }
         }
     }
     let _ = fs::write(path, body);
 }
 
+fn encode_signature(signature: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity("hex:".len() + signature.len() * 2);
+    encoded.push_str("hex:");
+    for byte in signature.as_bytes() {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    encoded
+}
+
+fn decode_signature(signature: &str) -> Option<String> {
+    let hex = signature.strip_prefix("hex:")?;
+    if hex.len() % 2 != 0 {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(hex.len() / 2);
+    for pair in hex.as_bytes().chunks_exact(2) {
+        let high = hex_value(pair[0])?;
+        let low = hex_value(pair[1])?;
+        bytes.push((high << 4) | low);
+    }
+    String::from_utf8(bytes).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
 fn reuse_state_path(spec: &ResolvedBuildSpec) -> PathBuf {
-    PathBuf::from(&spec.workspace.out_dir)
+    gaia_spec::resolve_workspace_path(&spec.workspace, &spec.workspace.out_dir)
+        .unwrap_or_else(|_| {
+            let path = PathBuf::from(&spec.workspace.out_dir);
+            if path.is_absolute() {
+                path
+            } else {
+                PathBuf::from(&spec.workspace.root_dir).join(path)
+            }
+        })
         .join(".gaia")
         .join(format!("{}.reuse-state", spec.build_name()))
 }
@@ -176,6 +227,34 @@ mod tests {
                 .get("install:install-gaia-app")
                 .map(String::as_str),
             Some("signature-2")
+        );
+    }
+
+    #[test]
+    fn load_reuse_state_decodes_multiline_output_signatures() {
+        let spec = test_spec();
+        let path = reuse_state_path(&spec);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("reuse state dir");
+        }
+        let signature = "state:provider=artifact.rust\noutput_sha256=abc123\n|deadbeef";
+        fs::write(
+            &path,
+            format!(
+                "fingerprint=123\nartifact:gaia-app\nop=artifact:gaia-app;456\nout=artifact:gaia-app;{}\n",
+                encode_signature(signature)
+            ),
+        )
+        .expect("reuse state write");
+
+        let state = load_reuse_state(&spec).expect("reuse state");
+
+        assert_eq!(
+            state
+                .operation_output_signatures
+                .get("artifact:gaia-app")
+                .map(String::as_str),
+            Some(signature)
         );
     }
 
