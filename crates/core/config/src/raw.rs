@@ -409,6 +409,8 @@ pub struct RawArtifactConfig {
     #[serde(default)]
     pub dependencies: Vec<String>,
     #[serde(default)]
+    pub after_image_prepare: bool,
+    #[serde(default)]
     pub install_name: Option<String>,
     #[serde(default)]
     pub install_class: Option<RawArtifactInstallClass>,
@@ -462,6 +464,12 @@ pub enum RawArtifactDefinition {
     },
     Java {
         build_target: String,
+        #[serde(default)]
+        build_args: Vec<String>,
+        #[serde(default)]
+        build_command: Vec<String>,
+        #[serde(default)]
+        build_env: Vec<(String, String)>,
     },
     Node {
         package_dir: String,

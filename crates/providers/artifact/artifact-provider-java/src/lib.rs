@@ -47,6 +47,14 @@ impl ArtifactProvider for JavaProvider {
                 message: "java build_target cannot be empty".into(),
             });
         }
+        if let ArtifactDefinition::Java(java) = &artifact.definition
+            && java.build_command.iter().any(|arg| arg.trim().is_empty())
+        {
+            issues.push(ArtifactProviderValidationIssue {
+                code: "java_build_command_empty_arg",
+                message: "java build_command entries cannot be empty".into(),
+            });
+        }
         if let Some(target) = &artifact.target
             && !target.trim().is_empty()
         {
@@ -75,7 +83,7 @@ impl ArtifactProvider for JavaProvider {
         };
         let source_dir = contract.source_dir.as_deref().unwrap_or(".");
         let (build_tool, mut messages) =
-            run_java_build(source_dir, contract, log_sink, cancel_check)?;
+            run_java_build(artifact, source_dir, contract, log_sink, cancel_check)?;
         let built_path = resolve_java_built_path(source_dir, &build_target)?;
         let output_path = artifact_output_path(contract, source_dir);
         copy_artifact_file_to_output(&built_path, &output_path, "built java artifact")?;
@@ -109,19 +117,44 @@ fn reject_unsupported_artifact_target(
 }
 
 fn run_java_build(
+    artifact: &ArtifactSpec,
     source_dir: &str,
     contract: &ArtifactExecutionContract,
     log_sink: Option<ProcessLogSink>,
     cancel_check: Option<ProcessCancelCheck>,
 ) -> Result<(String, Vec<String>), ArtifactProviderError> {
     let source_dir = Path::new(source_dir);
+    if let ArtifactDefinition::Java(java) = &artifact.definition
+        && let Some((program, args)) = java.build_command.split_first()
+    {
+        let mut command = Command::new(program);
+        command.args(args);
+        apply_build_env(&mut command, &java.build_env);
+        command.current_dir(source_dir);
+        return Ok((
+            "custom-command".to_string(),
+            run_command(
+                command,
+                "java custom build command",
+                contract,
+                log_sink,
+                cancel_check.clone(),
+            )?,
+        ));
+    }
+    let custom = match &artifact.definition {
+        ArtifactDefinition::Java(java) if !java.build_args.is_empty() => Some(java),
+        _ => None,
+    };
     if source_dir.join("pom.xml").is_file() {
         let mut command = Command::new("mvn");
-        command
-            .arg("-q")
-            .arg("-DskipTests")
-            .arg("package")
-            .current_dir(source_dir);
+        if let Some(java) = custom {
+            command.args(&java.build_args);
+            apply_build_env(&mut command, &java.build_env);
+        } else {
+            command.arg("-q").arg("-DskipTests").arg("package");
+        }
+        command.current_dir(source_dir);
         return Ok((
             "maven".to_string(),
             run_command(
@@ -136,7 +169,13 @@ fn run_java_build(
 
     if source_dir.join("gradlew").is_file() {
         let mut command = Command::new(source_dir.join("gradlew"));
-        command.arg("build").arg("-q").current_dir(source_dir);
+        if let Some(java) = custom {
+            command.args(&java.build_args);
+            apply_build_env(&mut command, &java.build_env);
+        } else {
+            command.arg("build").arg("-q");
+        }
+        command.current_dir(source_dir);
         return Ok((
             "gradle-wrapper".to_string(),
             run_command(
@@ -151,7 +190,13 @@ fn run_java_build(
 
     if source_dir.join("build.gradle").is_file() || source_dir.join("build.gradle.kts").is_file() {
         let mut command = Command::new("gradle");
-        command.arg("build").arg("-q").current_dir(source_dir);
+        if let Some(java) = custom {
+            command.args(&java.build_args);
+            apply_build_env(&mut command, &java.build_env);
+        } else {
+            command.arg("build").arg("-q");
+        }
+        command.current_dir(source_dir);
         return Ok((
             "gradle".to_string(),
             run_command(
@@ -171,6 +216,12 @@ fn run_java_build(
             source_dir.display()
         ),
     ))
+}
+
+fn apply_build_env(command: &mut Command, env: &[(String, String)]) {
+    for (key, value) in env {
+        command.env(key, value);
+    }
 }
 
 fn resolve_java_built_path(
@@ -290,6 +341,9 @@ mod tests {
                     "java-missing-tool",
                     ArtifactDefinition::Java(gaia_spec::JavaArtifactSpec {
                         build_target: "app.jar".into(),
+                        build_args: Vec::new(),
+                        build_command: Vec::new(),
+                        build_env: Vec::new(),
                     }),
                     None,
                     gaia_spec::ArtifactOutputSpec {
@@ -321,6 +375,9 @@ mod tests {
             "java-artifact",
             ArtifactDefinition::Java(gaia_spec::JavaArtifactSpec {
                 build_target: "build/libs/app.jar".into(),
+                build_args: Vec::new(),
+                build_command: Vec::new(),
+                build_env: Vec::new(),
             }),
             None,
             gaia_spec::ArtifactOutputSpec {
@@ -351,11 +408,54 @@ mod tests {
     }
 
     #[test]
+    fn execute_artifact_uses_custom_build_command() {
+        let source_dir = temp_path("gaia-java-provider-custom-src");
+        let output_path = temp_path("gaia-java-provider-custom-out").join("app.jar");
+        fs::create_dir_all(&source_dir).expect("source dir");
+        let artifact = ArtifactSpec::new(
+            "java-custom-command",
+            ArtifactDefinition::Java(gaia_spec::JavaArtifactSpec {
+                build_target: "build/libs/app.jar".into(),
+                build_args: Vec::new(),
+                build_command: vec![
+                    "bash".into(),
+                    "-c".into(),
+                    "mkdir -p build/libs && printf custom > build/libs/app.jar".into(),
+                ],
+                build_env: Vec::new(),
+            }),
+            None,
+            gaia_spec::ArtifactOutputSpec {
+                path: output_path.display().to_string(),
+            },
+        );
+        let contract = ArtifactExecutionContract::from_spec(
+            &artifact,
+            Some(source_dir.display().to_string()),
+            false,
+            ArtifactExecutionContract::default_command_policy(),
+            gaia_spec::OutputRetentionPolicySpec::default(),
+        );
+
+        JavaProvider
+            .execute_artifact(&artifact, &contract, None, None)
+            .expect("custom command artifact");
+
+        assert_eq!(
+            fs::read_to_string(&output_path).expect("copied artifact"),
+            "custom"
+        );
+    }
+
+    #[test]
     fn validate_artifact_rejects_target_override() {
         let mut artifact = ArtifactSpec::new(
             "java-targeted",
             ArtifactDefinition::Java(gaia_spec::JavaArtifactSpec {
                 build_target: "build/libs/app.jar".into(),
+                build_args: Vec::new(),
+                build_command: Vec::new(),
+                build_env: Vec::new(),
             }),
             None,
             gaia_spec::ArtifactOutputSpec {
@@ -379,6 +479,9 @@ mod tests {
             "java-targeted",
             ArtifactDefinition::Java(gaia_spec::JavaArtifactSpec {
                 build_target: "build/libs/app.jar".into(),
+                build_args: Vec::new(),
+                build_command: Vec::new(),
+                build_env: Vec::new(),
             }),
             None,
             gaia_spec::ArtifactOutputSpec {

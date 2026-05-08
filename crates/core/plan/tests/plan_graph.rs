@@ -136,6 +136,7 @@ path = "."
 id = "gaia-app"
 kind = "rust"
 package = "gaia"
+after_image_prepare = true
 output_path = "out/gaia"
 
 [[install]]
@@ -165,6 +166,11 @@ defconfig = "qemu_aarch64_virt_defconfig"
         .iter()
         .find(|operation| operation.id.as_str() == "image:build")
         .expect("image build operation");
+    let artifact = plan
+        .operations
+        .iter()
+        .find(|operation| operation.id.as_str() == "artifact:gaia-app")
+        .expect("artifact operation");
 
     assert!(
         image_prepare
@@ -177,6 +183,12 @@ defconfig = "qemu_aarch64_virt_defconfig"
             .depends_on
             .iter()
             .any(|dependency| dependency.as_str() == "install:install-gaia-app")
+    );
+    assert!(
+        artifact
+            .depends_on
+            .iter()
+            .any(|dependency| dependency.as_str() == "image:prepare")
     );
     assert!(
         image_build

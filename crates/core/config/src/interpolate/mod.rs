@@ -577,8 +577,30 @@ fn interpolate_artifact(
             target_name: target_name.map(|value| resolver::interpolate_string(value, raw, env)),
             emit_directory,
         },
-        RawArtifactDefinition::Java { build_target } => RawArtifactDefinition::Java {
+        RawArtifactDefinition::Java {
+            build_target,
+            build_args,
+            build_command,
+            build_env,
+        } => RawArtifactDefinition::Java {
             build_target: resolver::interpolate_string(build_target, raw, env),
+            build_args: build_args
+                .into_iter()
+                .map(|value| resolver::interpolate_string(value, raw, env))
+                .collect(),
+            build_command: build_command
+                .into_iter()
+                .map(|value| resolver::interpolate_string(value, raw, env))
+                .collect(),
+            build_env: build_env
+                .into_iter()
+                .map(|(key, value)| {
+                    (
+                        resolver::interpolate_string(key, raw, env),
+                        resolver::interpolate_string(value, raw, env),
+                    )
+                })
+                .collect(),
         },
         RawArtifactDefinition::Node { package_dir } => RawArtifactDefinition::Node {
             package_dir: resolver::interpolate_string(package_dir, raw, env),

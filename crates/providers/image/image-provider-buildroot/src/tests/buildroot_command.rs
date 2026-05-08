@@ -89,7 +89,7 @@ fn make_jobs_are_provider_local_and_not_forced_by_scheduler_jobs() {
     let mut no_local_jobs = Command::new("make");
     append_make_jobs(&mut no_local_jobs, 0);
     assert!(
-        !no_local_jobs
+        no_local_jobs
             .get_args()
             .any(|arg| arg.to_string_lossy().starts_with("-j"))
     );
@@ -575,11 +575,15 @@ fn buildroot_local_jobs_are_rendered_as_make_jobs() {
 }
 
 #[test]
-fn buildroot_zero_local_jobs_omits_make_jobs() {
+fn buildroot_zero_local_jobs_uses_available_parallelism() {
     let mut command = Command::new("make");
     append_make_jobs(&mut command, 0);
 
-    assert_eq!(command.get_args().count(), 0);
+    assert!(
+        command
+            .get_args()
+            .any(|arg| arg.to_string_lossy().starts_with("-j"))
+    );
 }
 
 #[test]
@@ -611,6 +615,7 @@ fn refresh_buildroot_images_after_feed_overlay_runs_target_post_image_for_non_ta
     };
 
     let messages = refresh_buildroot_images_after_feed_overlay(
+        &ResolvedBuildSpec::new("buildroot-post-image-test"),
         &image,
         &buildroot_dir,
         &output_dir,
@@ -626,6 +631,106 @@ fn refresh_buildroot_images_after_feed_overlay_runs_target_post_image_for_non_ta
         "expected target-post-image to refresh non-tar image"
     );
     assert!(messages.is_empty());
+}
+
+#[test]
+fn refresh_buildroot_images_after_feed_overlay_disables_legacy_before_target_post_image() {
+    let buildroot_dir = temp_path("gaia-buildroot-post-image-legacy-dir");
+    let output_dir = temp_path("gaia-buildroot-post-image-legacy-out");
+    fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
+    fs::create_dir_all(&output_dir).expect("output dir");
+    fs::write(output_dir.join(".config"), "BR2_LEGACY=y\n").expect("buildroot config");
+    fs::write(
+        buildroot_dir.join("Makefile"),
+        "target-post-image:\n\t@if grep -q 'BR2_LEGACY=y' $(O)/.config; then exit 12; fi\n\t@mkdir -p $(O)/images\n\t@printf raw > $(O)/images/sdcard.img\n",
+    )
+    .expect("makefile");
+    let image = ImageSpec {
+        definition: ImageDefinition::Buildroot(BuildrootImageSpec {
+            config_overrides: vec![("BR2_LEGACY".into(), "n".into())],
+            expected_images: vec![BuildrootExpectedImageSpec {
+                name: "sdcard.img".into(),
+                format: BuildrootExpectedImageFormatSpec::Raw,
+                required: true,
+            }],
+            ..BuildrootImageSpec::default()
+        }),
+        feed: gaia_spec::ImageFeedSpec::default(),
+        output: ImageOutputSpec {
+            collect_dir: None,
+            archive_name: None,
+            emit_report: true,
+        },
+        assembly: None,
+    };
+
+    refresh_buildroot_images_after_feed_overlay(
+        &ResolvedBuildSpec::new("buildroot-post-image-legacy-test"),
+        &image,
+        &buildroot_dir,
+        &output_dir,
+        &test_execution(),
+        &ImageExecutionPolicy::default(),
+        None,
+        None,
+    )
+    .expect("target-post-image refresh should succeed");
+
+    let config = fs::read_to_string(output_dir.join(".config")).expect("config");
+    assert!(config.contains("# BR2_LEGACY is not set"));
+    assert!(output_dir.join("images/sdcard.img").is_file());
+}
+
+#[test]
+fn refresh_buildroot_images_after_feed_overlay_absolutizes_external_tree() {
+    let workspace_root = temp_path("gaia-buildroot-post-image-external-workspace");
+    let buildroot_dir = workspace_root.join("buildroot");
+    let output_dir = workspace_root.join("out");
+    fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
+    fs::create_dir_all(workspace_root.join("external")).expect("external tree");
+    fs::write(
+        buildroot_dir.join("Makefile"),
+        "target-post-image:\n\t@mkdir -p $(O)/images\n\t@printf '%s' \"$(BR2_EXTERNAL)\" > $(O)/images/br2_external\n\t@printf raw > $(O)/images/sdcard.img\n",
+    )
+    .expect("makefile");
+    let mut spec = ResolvedBuildSpec::new("buildroot-post-image-external-test");
+    spec.workspace.root_dir = workspace_root.display().to_string();
+    let image = ImageSpec {
+        definition: ImageDefinition::Buildroot(BuildrootImageSpec {
+            external_tree: Some("external".into()),
+            expected_images: vec![BuildrootExpectedImageSpec {
+                name: "sdcard.img".into(),
+                format: BuildrootExpectedImageFormatSpec::Raw,
+                required: true,
+            }],
+            ..BuildrootImageSpec::default()
+        }),
+        feed: gaia_spec::ImageFeedSpec::default(),
+        output: ImageOutputSpec {
+            collect_dir: None,
+            archive_name: None,
+            emit_report: true,
+        },
+        assembly: None,
+    };
+
+    refresh_buildroot_images_after_feed_overlay(
+        &spec,
+        &image,
+        &buildroot_dir,
+        &output_dir,
+        &test_execution(),
+        &ImageExecutionPolicy::default(),
+        None,
+        None,
+    )
+    .expect("target-post-image refresh should succeed");
+
+    let external = fs::read_to_string(output_dir.join("images/br2_external")).expect("external");
+    assert_eq!(
+        external,
+        workspace_root.join("external").display().to_string()
+    );
 }
 
 #[test]
@@ -862,6 +967,7 @@ fn refresh_buildroot_images_after_feed_overlay_skips_tar_only_outputs() {
     };
 
     let messages = refresh_buildroot_images_after_feed_overlay(
+        &ResolvedBuildSpec::new("buildroot-post-image-skip-test"),
         &image,
         &buildroot_dir,
         &output_dir,
@@ -905,6 +1011,7 @@ fn refresh_buildroot_images_after_feed_overlay_reports_target_post_image_failure
     };
 
     let error = refresh_buildroot_images_after_feed_overlay(
+        &ResolvedBuildSpec::new("buildroot-post-image-failure-test"),
         &image,
         &buildroot_dir,
         &output_dir,

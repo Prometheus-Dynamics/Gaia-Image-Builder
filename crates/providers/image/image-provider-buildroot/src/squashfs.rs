@@ -1,6 +1,7 @@
 use super::*;
 
 pub(crate) fn refresh_buildroot_images_after_feed_overlay(
+    spec: &ResolvedBuildSpec,
     image: &ImageSpec,
     buildroot_dir: &Path,
     output_dir: &Path,
@@ -62,8 +63,19 @@ pub(crate) fn refresh_buildroot_images_after_feed_overlay(
         .arg(format!("O={}", output_dir.display()))
         .arg("target-post-image")
         .current_dir(buildroot_dir);
-    if let Some(external_tree) = buildroot.external_tree.as_deref() {
+    let generated_external_tree = output_dir
+        .join("gaia-buildroot-external")
+        .is_dir()
+        .then(|| output_dir.join("gaia-buildroot-external"));
+    if let Some(external_tree) = buildroot_external_tree_value(
+        spec,
+        buildroot.external_tree.as_deref(),
+        generated_external_tree.as_deref(),
+    ) {
         command.env("BR2_EXTERNAL", external_tree);
+    }
+    if buildroot_legacy_disabled(buildroot.config_overrides.as_slice()) {
+        disable_buildroot_legacy_flag(output_dir)?;
     }
     run_command(
         command,

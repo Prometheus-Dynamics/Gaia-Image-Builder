@@ -240,12 +240,43 @@ pub(crate) fn collect_unresolved_tokens(raw: &RawBuildConfig) -> Vec<RawUnresolv
                     &mut unresolved,
                 );
             }
-            RawArtifactDefinition::Java { build_target } => {
+            RawArtifactDefinition::Java {
+                build_target,
+                build_args,
+                build_command,
+                build_env,
+            } => {
                 scan_string(
                     &format!("artifacts.{}.java.build_target", artifact.id),
                     build_target,
                     &mut unresolved,
                 );
+                for (index, value) in build_args.iter().enumerate() {
+                    scan_string(
+                        &format!("artifacts.{}.java.build_args.{index}", artifact.id),
+                        value,
+                        &mut unresolved,
+                    );
+                }
+                for (index, value) in build_command.iter().enumerate() {
+                    scan_string(
+                        &format!("artifacts.{}.java.build_command.{index}", artifact.id),
+                        value,
+                        &mut unresolved,
+                    );
+                }
+                for (index, (key, value)) in build_env.iter().enumerate() {
+                    scan_string(
+                        &format!("artifacts.{}.java.build_env.{index}.key", artifact.id),
+                        key,
+                        &mut unresolved,
+                    );
+                    scan_string(
+                        &format!("artifacts.{}.java.build_env.{index}.value", artifact.id),
+                        value,
+                        &mut unresolved,
+                    );
+                }
             }
             RawArtifactDefinition::Node { package_dir } => {
                 scan_string(

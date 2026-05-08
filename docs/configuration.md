@@ -535,6 +535,19 @@ source = "workspace-root"
 output_path = "${workspace.out_dir}/artifacts/orion-node.jar"
 
 [[artifacts]]
+id = "camera-jni"
+kind = "java"
+build_target = "build/libs/camera-jni-linuxarm64.jar"
+build_command = ["tools/build_arm64_jni.sh"]
+build_env = [
+  ["SYSROOT_DIR", "${workspace.build_dir}/image/buildroot-output/host/aarch64-buildroot-linux-gnu/sysroot"],
+  ["MAVEN_LOCAL_REPO", "${workspace.build_dir}/m2"],
+]
+after_image_prepare = true
+source = "camera-jni-source"
+output_path = "${workspace.out_dir}/artifacts/camera-jni-linuxarm64.jar"
+
+[[artifacts]]
 id = "frontend-package"
 kind = "node"
 package_dir = "frontend"
@@ -562,6 +575,7 @@ Artifact common fields:
 - `source`
 - `profile`
 - `dependencies`
+- `after_image_prepare`
 - `install_name`
 - `install_class`
 - `install_dest_hint`
@@ -574,12 +588,17 @@ Artifact kinds:
   - `emit_directory`
 - `java`
   - `build_target`
+  - `build_args`
+  - `build_command`
+  - `build_env`
 - `node`
   - `package_dir`
 - `python`
   - `package_dir`
 - `go`
   - `package`
+
+Java artifacts run Maven or Gradle automatically when `build_command` is omitted. Use `build_args` to replace the default Maven/Gradle arguments while keeping tool detection, or use `build_command` for a source-local command such as a wrapper script. `build_env` adds environment variables for either mode. `after_image_prepare = true` schedules the artifact after Buildroot prepare, which is useful when the artifact needs the generated Buildroot sysroot before the final image feed is assembled.
 
 Install classes:
 - `binary`

@@ -114,7 +114,18 @@ When no clean profile, target, or explicit path is provided, Gaia removes
 
 ### `run`
 
-Prints selection/overview context, then:
+Prints live execution progress while the plan runs, then:
+- a compact progress bar
+- completed/total operation counts and percentage
+- running operation count
+- elapsed time
+- current operation id
+- throttled heartbeat lines with the latest provider output for long-running commands
+
+Set `GAIA_RUN_PROGRESS=quiet` to disable live progress output for scripts that
+only want the final summary.
+
+After execution completes, prints:
 - execution summary
 - failure policy
 - rollback summary

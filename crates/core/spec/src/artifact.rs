@@ -10,6 +10,7 @@ pub struct ArtifactSpec {
     pub target: Option<String>,
     pub build_mode: Option<BuildModeSpec>,
     pub dependencies: Vec<ArtifactRef>,
+    pub after_image_prepare: bool,
     pub output: ArtifactOutputSpec,
     pub install_identity: Option<ArtifactInstallIdentitySpec>,
 }
@@ -29,6 +30,7 @@ impl ArtifactSpec {
             target: None,
             build_mode: None,
             dependencies: Vec::new(),
+            after_image_prepare: false,
             output,
             install_identity: None,
         }
@@ -81,6 +83,9 @@ pub struct RustArtifactSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JavaArtifactSpec {
     pub build_target: String,
+    pub build_args: Vec<String>,
+    pub build_command: Vec<String>,
+    pub build_env: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

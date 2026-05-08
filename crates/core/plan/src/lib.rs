@@ -128,6 +128,9 @@ pub fn plan_build_with_reuse_state(
             for dependency in &artifact.dependencies {
                 planned = planned.with_dependency(OperationId::artifact(&dependency.id));
             }
+            if artifact.after_image_prepare {
+                planned = planned.with_dependency(OperationId::image_prepare());
+            }
             operations.push(planned);
         }
     }

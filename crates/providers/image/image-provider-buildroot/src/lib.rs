@@ -162,6 +162,7 @@ impl ImageProvider for BuildrootImageProvider {
                     prune_stale_image_feed_outputs(spec, image, &target_dir, &output_dir)?;
                     apply_image_feed_to_rootfs(spec, image, &target_dir)?;
                     messages.extend(refresh_buildroot_images_after_feed_overlay(
+                        spec,
                         image,
                         &buildroot_dir,
                         &output_dir,

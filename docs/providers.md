@@ -43,7 +43,7 @@ Kinds:
 Current execution paths:
 - Rust: `cargo build`
 - Go: `go build`
-- Java: Maven/Gradle build + built-target resolution
+- Java: Maven/Gradle build, custom source-local build commands, and built-target resolution
 - Node: `npm pack`
 - Python: `python3 -m pip wheel`
 
@@ -64,7 +64,8 @@ Provider-specific examples:
   - compiler tool/version
 - Java
   - build target
-  - maven vs gradle vs gradle wrapper
+  - maven vs gradle vs gradle wrapper vs custom command
+  - optional Buildroot prepare dependency for sysroot-aware JNI builds
 - Node
   - package dir
   - tarball output class

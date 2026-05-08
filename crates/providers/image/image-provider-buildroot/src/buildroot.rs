@@ -95,6 +95,7 @@ pub(crate) fn run_buildroot(
         ensure_no_generated_external_name_conflict(external_tree)?;
     }
     let br2_external = buildroot_external_tree_value(
+        spec,
         external_tree,
         package_overrides
             .generated_external_tree
@@ -244,6 +245,9 @@ pub(crate) fn run_buildroot(
     let config_clean_needed = config_digest.as_deref().is_some_and(|config_digest| {
         buildroot_state_needs_clean(output_dir, ".gaia-buildroot-config-state", config_digest)
     });
+    if buildroot_legacy_disabled(config_overrides) {
+        disable_buildroot_legacy_flag(output_dir)?;
+    }
     if replacement_clean_needed || config_clean_needed {
         let mut command = Command::new("make");
         command
@@ -279,6 +283,9 @@ pub(crate) fn run_buildroot(
     if let Some(br2_external) = br2_external {
         command.env("BR2_EXTERNAL", br2_external);
     }
+    if buildroot_legacy_disabled(config_overrides) {
+        disable_buildroot_legacy_flag(output_dir)?;
+    }
     messages.extend(run_command(
         command,
         "buildroot make",
@@ -313,6 +320,52 @@ fn buildroot_state_needs_clean(output_dir: &Path, state_file: &str, digest: &str
         Ok(state) => state.trim() != digest,
         Err(_) => buildroot_output_has_prior_build(output_dir),
     }
+}
+
+pub(crate) fn buildroot_legacy_disabled(overrides: &[(String, String)]) -> bool {
+    overrides
+        .iter()
+        .any(|(key, value)| key == "BR2_LEGACY" && value.trim() == "n")
+}
+
+pub(crate) fn disable_buildroot_legacy_flag(output_dir: &Path) -> Result<(), ImageProviderError> {
+    let config_path = output_dir.join(".config");
+    if !config_path.is_file() {
+        return Ok(());
+    }
+    let config = fs::read_to_string(&config_path).map_err(|error| {
+        ImageProviderError::new(
+            ImageProviderErrorKind::RuntimeState,
+            format!(
+                "failed to read Buildroot config '{}': {error}",
+                config_path.display()
+            ),
+        )
+    })?;
+    if !config.lines().any(|line| line.trim() == "BR2_LEGACY=y") {
+        return Ok(());
+    }
+    let rewritten = config
+        .lines()
+        .map(|line| {
+            if line.trim() == "BR2_LEGACY=y" {
+                "# BR2_LEGACY is not set"
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    fs::write(&config_path, rewritten).map_err(|error| {
+        ImageProviderError::new(
+            ImageProviderErrorKind::RuntimeState,
+            format!(
+                "failed to write Buildroot config '{}': {error}",
+                config_path.display()
+            ),
+        )
+    })
 }
 
 fn buildroot_output_has_prior_build(output_dir: &Path) -> bool {
@@ -626,10 +679,13 @@ pub(crate) fn copy_dir_contents(
 }
 
 pub(crate) fn append_make_jobs(command: &mut Command, jobs: u32) {
-    if jobs == 0 {
-        return;
-    }
-    let jobs = usize::try_from(jobs).unwrap_or(1);
+    let jobs = if jobs == 0 {
+        std::thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(1)
+    } else {
+        usize::try_from(jobs).unwrap_or(1)
+    };
     command.arg(format!("-j{jobs}"));
 }
 

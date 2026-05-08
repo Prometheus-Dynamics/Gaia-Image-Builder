@@ -114,6 +114,61 @@ output_path = "out/custom-artifact"
 }
 
 #[test]
+fn parses_java_custom_build_command_and_image_prepare_dependency() {
+    let path = write_temp_config(
+        r#"
+build_name = "java-custom-command"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[[sources]]
+id = "buildroot"
+kind = "path"
+path = "/tmp/buildroot"
+
+[[artifacts]]
+id = "jni-jar"
+kind = "java"
+build_target = "build/libs/jni-linuxarm64.jar"
+build_command = ["tools/build_arm64_jni.sh"]
+build_env = [["SYSROOT_DIR", "${workspace.build_dir}/image/buildroot-output/host/aarch64-buildroot-linux-gnu/sysroot"]]
+after_image_prepare = true
+output_path = "out/jni-linuxarm64.jar"
+
+[image]
+kind = "buildroot"
+source = "buildroot"
+defconfig = "raspberrypicm5io_defconfig"
+"#,
+    );
+
+    let spec = resolve_config(path.to_str().expect("temp path should be utf-8"));
+
+    let artifact = spec
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.id.as_str() == "jni-jar")
+        .expect("java artifact");
+    assert!(artifact.after_image_prepare);
+    let gaia_spec::ArtifactDefinition::Java(java) = &artifact.definition else {
+        panic!("expected java artifact");
+    };
+    assert_eq!(java.build_command, ["tools/build_arm64_jni.sh"]);
+    assert_eq!(
+        java.build_env,
+        [(
+            "SYSROOT_DIR".to_string(),
+            "build/image/buildroot-output/host/aarch64-buildroot-linux-gnu/sysroot".to_string()
+        )]
+    );
+
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn resolves_mixed_artifact_execution_backends() {
     let path = write_temp_config(
         r#"

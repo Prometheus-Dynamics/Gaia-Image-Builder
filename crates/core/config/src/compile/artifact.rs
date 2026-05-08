@@ -15,9 +15,17 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig) -> ArtifactSpec {
                 ArtifactVariantSpec::File
             },
         }),
-        RawArtifactDefinition::Java { build_target } => {
-            ArtifactDefinition::Java(JavaArtifactSpec { build_target })
-        }
+        RawArtifactDefinition::Java {
+            build_target,
+            build_args,
+            build_command,
+            build_env,
+        } => ArtifactDefinition::Java(JavaArtifactSpec {
+            build_target,
+            build_args,
+            build_command,
+            build_env,
+        }),
         RawArtifactDefinition::Node { package_dir } => {
             ArtifactDefinition::Node(NodeArtifactSpec { package_dir })
         }
@@ -34,6 +42,7 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig) -> ArtifactSpec {
         target: raw.target,
         build_mode: raw.profile.map(compile_build_mode),
         dependencies: raw.dependencies.into_iter().map(ArtifactRef::new).collect(),
+        after_image_prepare: raw.after_image_prepare,
         install_identity: raw
             .install_name
             .map(|install_name| ArtifactInstallIdentitySpec {
