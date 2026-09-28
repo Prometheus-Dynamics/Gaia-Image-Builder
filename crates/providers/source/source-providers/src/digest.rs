@@ -1,8 +1,12 @@
 use super::*;
 
-pub(crate) fn verify_sha256(path: &Path, expected_sha: &str) -> Result<(), SourceProviderError> {
-    let actual = sha256_or_placeholder(path);
-    if actual == expected_sha {
+/// Compares an already computed digest against the expected one.
+pub(crate) fn check_sha256(
+    path: &Path,
+    expected_sha: &str,
+    actual: &str,
+) -> Result<(), SourceProviderError> {
+    if actual.eq_ignore_ascii_case(expected_sha) {
         return Ok(());
     }
     Err(SourceProviderError::new(

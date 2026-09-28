@@ -17,8 +17,8 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 use std::time::Duration;
 
-pub use cli::{AppArgs, AppCommand, CleanArgs};
-pub use commands::{CommandOutcome, CommandResult};
+pub use cli::{AppArgs, AppCommand, CleanArgs, LockArgs};
+pub use commands::{CommandOutcome, CommandResult, LockChange, LockReport, LockReportEntry};
 
 #[derive(Default)]
 pub struct AppContext {
@@ -279,10 +279,50 @@ fn print_outcome(outcome: &CommandOutcome) {
                 report.missing.len()
             );
             for path in &report.removed {
-                println!("{action}: {}", path.display());
+                match report.sizes.get(path) {
+                    Some(bytes) => {
+                        println!("{action}: {} ({})", path.display(), format_bytes(*bytes))
+                    }
+                    None => println!("{action}: {}", path.display()),
+                }
             }
             for path in &report.missing {
                 println!("clean missing: {}", path.display());
+            }
+            if !report.sizes.is_empty() {
+                let verb = if report.dry_run {
+                    "would free"
+                } else {
+                    "freed"
+                };
+                println!("{verb}: {}", format_bytes(report.freed_bytes()));
+            }
+        }
+        CommandOutcome::Locked { spec, report } => {
+            println!(
+                "locked build '{}' git sources={} into {}",
+                spec.identity.display_name,
+                report.entries.len(),
+                report.lockfile.display()
+            );
+            for entry in &report.entries {
+                let change = match &entry.change {
+                    commands::LockChange::Added => "added".to_string(),
+                    commands::LockChange::Unchanged => "unchanged".to_string(),
+                    commands::LockChange::Updated { previous } => {
+                        format!("updated from {previous}")
+                    }
+                };
+                println!(
+                    "lock {}: {} {} ({change})",
+                    entry.source, entry.reference, entry.commit
+                );
+            }
+            for source in &report.skipped {
+                println!("lock {source}: pinned by rev, no entry needed");
+            }
+            for source in &report.removed {
+                println!("lock {source}: removed (no longer a git source)");
             }
         }
         CommandOutcome::Ran {
@@ -521,6 +561,21 @@ fn print_outcome(outcome: &CommandOutcome) {
         CommandOutcome::Failed { message } => {
             eprintln!("{message}");
         }
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
     }
 }
 

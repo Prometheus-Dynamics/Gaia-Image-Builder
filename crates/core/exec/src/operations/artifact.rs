@@ -75,6 +75,36 @@ fn prepare_artifact<'env>(
     })
 }
 
+/// Builds the artifact's Docker execution image from its Dockerfile when the
+/// content-addressed tag is missing, and points the contract at that tag.
+/// Runs at execution time only, never while computing batch keys.
+fn ensure_execution_image(
+    operation_id: &OperationId,
+    spec: &ResolvedBuildSpec,
+    contract: &mut ArtifactExecutionContract,
+    tail: &LogTail,
+    context: &DispatchContext,
+) -> Result<(), Box<OperationExecutionResult>> {
+    gaia_artifact_providers::ensure_docker_execution_image(
+        contract,
+        tail.sink(operation_id.clone(), context.event_sender.clone()),
+        context.cancel_check.clone(),
+    )
+    // Build output already streamed through the sink.
+    .map(drop)
+    .map_err(|message| {
+        Box::new(failure_with_cleanup_and_tail(
+            operation_id.clone(),
+            "artifact_execution_image_failed",
+            execution_error_kind_from_artifact(&message.kind),
+            message.message.clone(),
+            tail.failure_tail(&message.message, spec),
+            RollbackDomain::Artifacts,
+            Vec::new(),
+        ))
+    })
+}
+
 /// Turns a provider result into the operation result, exactly as a single
 /// build does.
 fn artifact_result(
@@ -120,7 +150,7 @@ pub(crate) fn execute_artifact_operation(
     providers: &ExecutionProviders<'_>,
     context: &DispatchContext,
 ) -> OperationExecutionResult {
-    let prepared = match prepare_artifact(
+    let mut prepared = match prepare_artifact(
         operation_id,
         artifact_id,
         spec,
@@ -131,6 +161,11 @@ pub(crate) fn execute_artifact_operation(
         Err(failure) => return *failure,
     };
     let tail = LogTail::for_spec(spec);
+    if let Err(failure) =
+        ensure_execution_image(operation_id, spec, &mut prepared.contract, &tail, context)
+    {
+        return *failure;
+    }
     let log_sink = tail.sink(operation_id.clone(), context.event_sender.clone());
     let result = prepared.provider.execute_artifact(
         prepared.artifact,
@@ -195,7 +230,19 @@ pub(crate) fn dispatch_artifact_batch(
             providers,
             context.job_budget,
         ) {
-            Ok(prepared) => members.push((position, artifact_id, prepared)),
+            Ok(mut prepared) => {
+                let tail = LogTail::for_spec(spec);
+                match ensure_execution_image(
+                    &operation.id,
+                    spec,
+                    &mut prepared.contract,
+                    &tail,
+                    context,
+                ) {
+                    Ok(()) => members.push((position, artifact_id, prepared)),
+                    Err(failure) => results[position] = Some(*failure),
+                }
+            }
             Err(failure) => results[position] = Some(*failure),
         }
     }

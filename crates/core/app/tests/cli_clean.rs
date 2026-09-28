@@ -42,6 +42,100 @@ out_dir = "{out_dir}"
 }
 
 #[test]
+fn clean_caches_prunes_orphaned_mirrors_and_leftovers_with_sizes() {
+    let root_dir = unique_dir("gaia-cli-clean-caches-root");
+    let root = PathBuf::from(&root_dir);
+    let build_dir = root.join("build");
+    let repo = "https://example.invalid/orion.git";
+    let git_cache = root.join(".gaia/cache/git");
+    let used_mirror = git_cache.join(gaia_source_providers::remote_git_mirror_dir_name(repo));
+    let orphan_mirror = git_cache.join("repo-0000000000000000.git");
+    let old_layout_mirror = git_cache.join("orion-main-1234.git");
+    let preserved = build_dir.join("sources/.orion.gaia-preserved");
+    let refresh =
+        build_dir.join("image/buildroot-output/build/buildroot-fs/squashfs/target.refresh");
+    let downloads = root.join(".gaia/cache/downloads/sha256");
+    for dir in [
+        &used_mirror,
+        &orphan_mirror,
+        &old_layout_mirror,
+        &preserved,
+        &refresh,
+        &downloads,
+    ] {
+        fs::create_dir_all(dir).expect("cache dir");
+    }
+    fs::write(orphan_mirror.join("pack"), vec![0u8; 1000]).expect("orphan data");
+    fs::write(preserved.join("state"), vec![0u8; 24]).expect("preserved data");
+    fs::write(downloads.join("abc"), "cached").expect("download");
+
+    let build = write_temp_build(&format!(
+        r#"
+build_name = "clean-caches"
+
+[workspace]
+root_dir = "{root_dir}"
+build_dir = "{build}"
+out_dir = "{root_dir}/out"
+
+[[sources]]
+id = "orion"
+kind = "git"
+repo = "{repo}"
+branch = "main"
+"#,
+        build = build_dir.display()
+    ));
+
+    let dry_run = run_with_args(AppArgs::parse_from([
+        "clean",
+        &build,
+        "--target",
+        "caches",
+        "--dry-run",
+    ]));
+    match dry_run {
+        CommandOutcome::Cleaned { report, .. } => {
+            assert!(report.dry_run);
+            assert_eq!(report.removed.len(), 4, "{:?}", report.removed);
+            assert!(report.freed_bytes() >= 1024);
+        }
+        other => panic!("expected cleaned outcome, got {other:?}"),
+    }
+    assert!(orphan_mirror.exists());
+
+    let cleaned = run_with_args(AppArgs::parse_from(["clean", &build, "--target", "caches"]));
+    match cleaned {
+        CommandOutcome::Cleaned { report, .. } => {
+            assert_eq!(report.freed_bytes(), 1024);
+        }
+        other => panic!("expected cleaned outcome, got {other:?}"),
+    }
+    assert!(used_mirror.exists(), "mirror of a current source is kept");
+    assert!(!orphan_mirror.exists());
+    assert!(!old_layout_mirror.exists());
+    assert!(!preserved.exists());
+    assert!(!refresh.exists());
+    assert!(
+        downloads.join("abc").exists(),
+        "shared caches need --all-caches"
+    );
+    assert!(
+        build_dir.join("sources").exists(),
+        "build dir is not a cache"
+    );
+
+    let all = run_with_args(AppArgs::parse_from(["clean", &build, "--all-caches"]));
+    assert!(matches!(all, CommandOutcome::Cleaned { .. }), "{all:?}");
+    assert!(!used_mirror.exists());
+    assert!(!root.join(".gaia/cache/downloads").exists());
+    assert!(
+        build_dir.exists(),
+        "--all-caches alone must not clean the build dir"
+    );
+}
+
+#[test]
 fn clean_uses_configured_profile_and_supports_dry_run() {
     let root_dir = unique_dir("gaia-cli-clean-profile-root");
     let build_dir = unique_dir("gaia-cli-clean-profile-build");

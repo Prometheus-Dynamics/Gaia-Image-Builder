@@ -65,17 +65,18 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig) -> ArtifactSpec {
 pub(crate) fn compile_artifact_execution(
     raw: crate::raw::RawArtifactExecutionConfig,
 ) -> Option<ArtifactExecutionSpec> {
+    let docker = DockerArtifactExecutionSpec {
+        image: raw.docker.image,
+        dockerfile: raw.docker.dockerfile,
+        context: raw.docker.context,
+    };
     match raw.backend {
         Some(crate::raw::RawArtifactExecutionBackend::Host) => Some(ArtifactExecutionSpec::Host),
         Some(crate::raw::RawArtifactExecutionBackend::Docker) => {
-            Some(ArtifactExecutionSpec::Docker(DockerArtifactExecutionSpec {
-                image: raw.docker.image,
-            }))
+            Some(ArtifactExecutionSpec::Docker(docker))
         }
-        None if raw.docker.image.is_some() => {
-            Some(ArtifactExecutionSpec::Docker(DockerArtifactExecutionSpec {
-                image: raw.docker.image,
-            }))
+        None if docker.image.is_some() || docker.dockerfile.is_some() => {
+            Some(ArtifactExecutionSpec::Docker(docker))
         }
         None => None,
     }

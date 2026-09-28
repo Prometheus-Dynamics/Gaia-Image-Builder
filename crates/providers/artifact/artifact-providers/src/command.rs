@@ -209,6 +209,98 @@ pub fn run_command_with_retries(
     ))
 }
 
+/// Builds the Dockerfile-backed execution image when its content-addressed
+/// tag is missing, and records the image id on the contract. A no-op for
+/// host execution and plain `image` references.
+pub fn ensure_docker_execution_image(
+    contract: &mut ArtifactExecutionContract,
+    log_sink: Option<ProcessLogSink>,
+    cancel_check: Option<ProcessCancelCheck>,
+) -> Result<Vec<String>, ArtifactProviderError> {
+    ensure_docker_execution_image_with(
+        std::ffi::OsStr::new("docker"),
+        contract,
+        log_sink,
+        cancel_check,
+    )
+}
+
+pub(crate) fn ensure_docker_execution_image_with(
+    docker_program: &std::ffi::OsStr,
+    contract: &mut ArtifactExecutionContract,
+    log_sink: Option<ProcessLogSink>,
+    cancel_check: Option<ProcessCancelCheck>,
+) -> Result<Vec<String>, ArtifactProviderError> {
+    let timeout = Duration::from_secs(contract.timeout_seconds.max(1));
+    let retention = process_output_retention(contract);
+    let ArtifactExecutionBackend::Docker(docker) = &mut contract.execution_backend else {
+        return Ok(Vec::new());
+    };
+    let Some(build) = &mut docker.build else {
+        return Ok(Vec::new());
+    };
+    if let Some(error) = &build.hash_error {
+        return Err(ArtifactProviderError::new(
+            ArtifactProviderErrorKind::PolicyBlocked,
+            error.clone(),
+        ));
+    }
+    let tag = docker.image.clone();
+    let image_id = |label: &str| -> Result<Option<String>, ArtifactProviderError> {
+        let mut inspect = gaia_process::docker_image_id_command(docker_program, &tag);
+        let output = command_output_with_timeout_sink_and_retention(
+            &mut inspect,
+            Duration::from_secs(60),
+            label,
+            retention,
+            None,
+            cancel_check.clone(),
+        )?
+        .output;
+        let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok((output.status.success() && !id.is_empty()).then_some(id))
+    };
+    if let Some(id) = image_id("inspect docker execution image")? {
+        build.image_id = Some(id);
+        return Ok(vec![format!(
+            "docker execution image '{tag}' is up to date"
+        )]);
+    }
+    let mut command = gaia_process::docker_image_build_command(
+        docker_program,
+        Path::new(&build.dockerfile),
+        Path::new(build.context.as_deref().unwrap_or(".")),
+        &tag,
+    );
+    tracing::info!(image = %tag, dockerfile = %build.dockerfile, "building docker execution image");
+    let output = command_output_with_timeout_sink_and_retention(
+        &mut command,
+        timeout,
+        "build docker execution image",
+        retention,
+        log_sink,
+        cancel_check.clone(),
+    )?
+    .output;
+    if !output.status.success() {
+        return Err(ArtifactProviderError::backend_command(format!(
+            "docker build of '{}' for image '{tag}' failed: {}",
+            build.dockerfile,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    let id = image_id("inspect built docker execution image")?.ok_or_else(|| {
+        ArtifactProviderError::backend_command(format!(
+            "docker build reported success but image '{tag}' is missing"
+        ))
+    })?;
+    build.image_id = Some(id);
+    Ok(vec![format!(
+        "built docker execution image '{tag}' from '{}'",
+        build.dockerfile
+    )])
+}
+
 fn execution_backend(contract: &ArtifactExecutionContract) -> &'static str {
     match contract.execution_backend {
         ArtifactExecutionBackend::Host => "host",

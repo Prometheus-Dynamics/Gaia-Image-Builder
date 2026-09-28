@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use gaia_spec::{ResolvedBuildSpec, SourceDefinition};
 
 use crate::ValidationDiagnostic;
-use crate::diagnostics::error;
+use crate::diagnostics::{error, warning};
 use crate::workspace::resolve_workspace_path;
 
 pub(crate) fn validate_sources(
@@ -108,5 +108,90 @@ pub(crate) fn validate_sources(
             }
         }
     }
+    validate_git_source_refs(spec, diagnostics);
+    validate_git_lockfile(spec, diagnostics);
     source_ids
+}
+
+/// Normalizes a repository URL for comparison (`.git` suffix, trailing `/`).
+fn normalized_repo(repo: &str) -> String {
+    let trimmed = repo.trim().trim_end_matches('/');
+    trimmed
+        .strip_suffix(".git")
+        .unwrap_or(trimmed)
+        .to_ascii_lowercase()
+}
+
+/// Warns when two sources check out the same repository at different refs,
+/// which usually means one of them was not updated along with the other.
+fn validate_git_source_refs(spec: &ResolvedBuildSpec, diagnostics: &mut Vec<ValidationDiagnostic>) {
+    let git_sources = spec
+        .sources
+        .iter()
+        .filter_map(|source| match &source.definition {
+            SourceDefinition::Git(git) => Some((source.id.as_str(), git)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for (index, (id, git)) in git_sources.iter().enumerate() {
+        for (other_id, other) in &git_sources[index + 1..] {
+            if normalized_repo(&git.repo) == normalized_repo(&other.repo)
+                && git.ref_selector() != other.ref_selector()
+            {
+                diagnostics.push(warning(
+                    "git_source_ref_divergence",
+                    format!(
+                        "git sources '{id}' ({}) and '{other_id}' ({}) use the same repo '{}' at different refs",
+                        git.ref_selector(),
+                        other.ref_selector(),
+                        git.repo
+                    ),
+                    Some(format!("source:{other_id}")),
+                ));
+            }
+        }
+    }
+}
+
+/// Reports lockfile entries that no longer match the configured source, and
+/// lockfiles that cannot be read (they would otherwise be silently ignored).
+fn validate_git_lockfile(spec: &ResolvedBuildSpec, diagnostics: &mut Vec<ValidationDiagnostic>) {
+    use gaia_config::lockfile::{GitLockStatus, GitLockfile, lockfile_path};
+
+    let Some(path) = lockfile_path(spec) else {
+        return;
+    };
+    let lock = match GitLockfile::load(&path) {
+        Ok(Some(lock)) => lock,
+        Ok(None) => return,
+        Err(message) => {
+            diagnostics.push(error(
+                "git_lockfile_invalid",
+                format!("{message}; fix it or regenerate it with `gaia lock`"),
+                Some(path.display().to_string()),
+            ));
+            return;
+        }
+    };
+    for source in &spec.sources {
+        let SourceDefinition::Git(git) = &source.definition else {
+            continue;
+        };
+        if let GitLockStatus::Stale(entry) = lock.status(source.id.as_str(), git) {
+            diagnostics.push(warning(
+                "git_lock_stale",
+                format!(
+                    "lockfile '{}' pins git source '{}' for {} at {}, but the config now uses {} at {}; the lock entry is ignored until `gaia lock --update {}`",
+                    path.display(),
+                    source.id.as_str(),
+                    entry.repo,
+                    entry.reference,
+                    git.repo,
+                    git.ref_selector(),
+                    source.id.as_str()
+                ),
+                Some(format!("source:{}", source.id.as_str())),
+            ));
+        }
+    }
 }

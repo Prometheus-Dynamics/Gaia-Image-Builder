@@ -9,6 +9,7 @@ gaia resolve <build.toml>
 gaia validate <build.toml>
 gaia plan <build.toml>
 gaia clean <build.toml>
+gaia lock <build.toml>
 gaia run <build.toml>
 gaia tui <build.toml>
 ```
@@ -126,6 +127,25 @@ Built-in targets:
   Remove both build and output directories.
 - `--target configured`
   Use the profile named by `clean.default`.
+- `--target caches`
+  Prune cache leftovers without touching build or output directories:
+  - git mirrors under `.gaia/cache/git` that no git source of this build uses
+    (including mirrors left from the older one-mirror-per-ref layout; a
+    mirror used only by another build in the same workspace is pruned too
+    and re-created on its next fetch),
+  - `.<source>.gaia-preserved` stashes left in `build_dir/sources` by an
+    interrupted re-clone,
+  - Buildroot `target.refresh` work trees under
+    `build_dir/image/buildroot-output/build/buildroot-fs/*/`.
+
+  Gaia reports the size of each removed cache path and the total freed.
+- `--all-caches`
+  Also remove the shared workspace caches wholesale: `.gaia/cache/git`,
+  `.gaia/cache/downloads`, `.gaia/cache/buildroot/dl` and
+  `.gaia/docker-cache` (cargo registry/git and sccache for Docker artifact
+  builds). They refill on the next build, at the cost of re-downloading.
+  Implies `--target caches`; on its own it does not clean build or output
+  directories.
 
 Other options:
 - `--profile <name>`
@@ -137,6 +157,36 @@ Other options:
 
 When no clean profile, target, or explicit path is provided, Gaia removes
 `workspace.build_dir` and `workspace.out_dir`.
+
+```bash
+gaia clean configs/builds/cm5.toml --target caches --dry-run
+gaia clean configs/builds/cm5.toml --all-caches
+```
+
+### `lock`
+
+Resolves the commit each git source's `branch`, `tag` (or `HEAD`) points at
+and writes it to the build's lockfile, `<build>.gaia.lock` next to the build
+entrypoint (`configs/builds/cm5.toml` locks into
+`configs/builds/cm5.gaia.lock`). Commit the lockfile. See
+[Git Source Lockfile](configuration.md#git-source-lockfile).
+
+```bash
+gaia lock configs/builds/cm5.toml                    # add missing entries, keep existing ones
+gaia lock configs/builds/cm5.toml --update           # re-resolve every git source
+gaia lock configs/builds/cm5.toml --update orion     # re-resolve one source (comma-separate several)
+```
+
+- Without `--update`, entries that still match the source's repo and ref are
+  kept as they are; missing and stale entries are resolved and written.
+- `--update [source-id]` re-resolves the named sources, or all of them when
+  no id follows. Put the build path before `--update` so the id is not taken
+  as the build; `--update=<id>` works in any position.
+- Entries for sources the build no longer has are dropped.
+- Sources pinned with `rev` need no entry and are skipped.
+
+Resolution uses `git ls-remote`, so it works for remote URLs, `file://` URLs
+and local repository paths.
 
 ### `run`
 
@@ -215,4 +265,4 @@ There is no public CLI for:
 - interactive config authoring
 
 The supported public path right now is `resolve`, `validate`, `plan`, `clean`,
-`run`, and `tui` in default builds.
+`lock`, `run`, and `tui` in default builds.

@@ -60,7 +60,7 @@ impl SourceProvider for GitSourceProvider {
                 source,
                 &materialized_dir,
                 &format!(
-                    "git repo={}\nselected_ref_type={}\nselected_ref_value={}\nresolved_mode=local\nresolved_commit_sha={}\nmaterialized_tree_digest={}\n",
+                    "git repo={}\nselected_ref_type={}\nselected_ref_value={}\nresolved_mode=local\nresolved_commit_sha={}\nmaterialized_tree_digest={}\n{}",
                     git.repo,
                     selected_ref_type,
                     selected_ref_value,
@@ -69,6 +69,47 @@ impl SourceProvider for GitSourceProvider {
                         &materialized_dir,
                         &[".git", ".gaia", "source.txt", ".gaia-source-state.txt"]
                     ),
+                    lock_marker(git),
+                ),
+            )?;
+        } else if let Some(locked_commit) = &git.locked_commit
+            && spec.policy.providers.git.allow_remote_resolution
+        {
+            // The lockfile names the commit, so skip resolving the floating
+            // ref over the network.
+            clone_or_update_local_git_source(
+                git,
+                &materialized_dir,
+                &execution,
+                git_policy,
+                log_sink.clone(),
+                cancel_check.clone(),
+            )?;
+            let resolved_head =
+                git_head_commit(&materialized_dir).unwrap_or_else(|| locked_commit.clone());
+            messages.push(format!(
+                "git source '{}' cloned locked commit {} from '{}'",
+                source.id.as_str(),
+                locked_commit,
+                git.repo
+            ));
+            write_source_marker(
+                spec,
+                self.id(),
+                source,
+                &materialized_dir,
+                &format!(
+                    "git repo={}\nselected_ref_type={}\nselected_ref_value={}\nresolved_mode=locked\nresolved_commit_sha={}\nmaterialized_head_commit={}\nmaterialized_tree_digest={}\n{}",
+                    git.repo,
+                    git_selected_ref(git).0,
+                    git_selected_ref(git).1,
+                    locked_commit,
+                    resolved_head,
+                    tree_digest(
+                        &materialized_dir,
+                        &[".git", ".gaia", "source.txt", ".gaia-source-state.txt"]
+                    ),
+                    lock_marker(git),
                 ),
             )?;
         } else {
@@ -225,4 +266,13 @@ impl SourceProvider for GitSourceProvider {
         }
         Ok(messages)
     }
+}
+
+/// Lockfile details recorded in the source state, empty for unlocked sources
+/// so their state is unchanged.
+fn lock_marker(git: &GitSourceSpec) -> String {
+    git.locked_commit
+        .as_deref()
+        .map(|commit| format!("lock_mode=locked\nlocked_commit_sha={commit}\n"))
+        .unwrap_or_default()
 }

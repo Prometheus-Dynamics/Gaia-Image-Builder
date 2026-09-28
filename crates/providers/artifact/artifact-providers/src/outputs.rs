@@ -202,13 +202,33 @@ pub fn render_build_context_state(contract: &ArtifactExecutionContract) -> Strin
         ArtifactExecutionBackend::Host => ("host", ""),
         ArtifactExecutionBackend::Docker(docker) => ("docker", docker.image.as_str()),
     };
-    gaia_spec::KeyValueState::new()
+    let mut state = gaia_spec::KeyValueState::new()
         .with(
             "artifact_target",
             contract.artifact_target.as_deref().unwrap_or_default(),
         )
         .with("execution_backend", execution_backend)
-        .with("execution_backend_image", execution_backend_image)
+        .with("execution_backend_image", execution_backend_image);
+    // Dockerfile-built images also record what they were built from; plain
+    // image references keep their existing state.
+    if let ArtifactExecutionBackend::Docker(docker) = &contract.execution_backend
+        && let Some(build) = &docker.build
+    {
+        state = state
+            .with(
+                "execution_backend_image_dockerfile",
+                build.dockerfile.as_str(),
+            )
+            .with(
+                "execution_backend_image_hash",
+                build.content_hash.as_deref().unwrap_or_default(),
+            )
+            .with(
+                "execution_backend_image_id",
+                build.image_id.as_deref().unwrap_or_default(),
+            );
+    }
+    state
         .with(
             "build_version",
             contract.build_version.as_deref().unwrap_or_default(),

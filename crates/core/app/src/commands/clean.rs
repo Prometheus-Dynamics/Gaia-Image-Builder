@@ -1,6 +1,6 @@
 use gaia_config::{ResolveOptions, try_resolve_config_with_options};
-use gaia_spec::{CleanProfileSpec, ResolvedBuildSpec};
-use std::collections::BTreeSet;
+use gaia_spec::{CleanProfileSpec, ResolvedBuildSpec, SourceDefinition};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -14,6 +14,15 @@ pub struct CleanReport {
     pub dry_run: bool,
     pub removed: Vec<PathBuf>,
     pub missing: Vec<PathBuf>,
+    /// Sizes of removed cache paths (measured for the `caches` target only;
+    /// walking a whole build tree just to report its size is too slow).
+    pub sizes: BTreeMap<PathBuf, u64>,
+}
+
+impl CleanReport {
+    pub fn freed_bytes(&self) -> u64 {
+        self.sizes.values().sum()
+    }
 }
 
 pub fn clean_build_command(
@@ -38,14 +47,29 @@ pub fn clean_build_command(
 
 fn clean_build(spec: &ResolvedBuildSpec, clean_args: &CleanArgs) -> Result<CleanReport, String> {
     let paths = clean_paths(spec, clean_args)?;
+    let cache_paths = cache_clean_paths(spec, clean_args)?;
     let mut removed = Vec::new();
     let mut missing = Vec::new();
+    let mut sizes = BTreeMap::new();
 
-    for path in paths {
+    let tagged = paths
+        .into_iter()
+        .map(|path| (path, false))
+        .chain(cache_paths.into_iter().map(|path| (path, true)));
+    for (path, is_cache) in tagged {
         guard_clean_path(spec, &path)?;
-        if !path.exists() {
-            missing.push(path);
+        // Already removed, or inside a directory that was.
+        if removed.iter().any(|done: &PathBuf| path.starts_with(done)) {
             continue;
+        }
+        if !path.exists() {
+            if !missing.contains(&path) {
+                missing.push(path);
+            }
+            continue;
+        }
+        if is_cache {
+            sizes.insert(path.clone(), path_size(&path));
         }
         if !clean_args.dry_run {
             remove_path(&path).map_err(|error| {
@@ -63,6 +87,7 @@ fn clean_build(spec: &ResolvedBuildSpec, clean_args: &CleanArgs) -> Result<Clean
         build_name: spec.identity.display_name.clone(),
         dry_run: clean_args.dry_run,
         removed,
+        sizes,
         missing,
     })
 }
@@ -72,7 +97,8 @@ fn clean_paths(spec: &ResolvedBuildSpec, clean_args: &CleanArgs) -> Result<Vec<P
 
     if let Some(profile_name) = clean_args.profile.as_deref() {
         append_profile_paths(spec, profile_name, &mut paths)?;
-    } else if clean_args.targets.is_empty() && clean_args.paths.is_empty() {
+    } else if clean_args.targets.is_empty() && clean_args.paths.is_empty() && !clean_args.all_caches
+    {
         if let Some(profile_name) = spec.clean.default_profile.as_deref() {
             append_profile_paths(spec, profile_name, &mut paths)?;
         } else {
@@ -140,6 +166,8 @@ fn append_target_paths(
 ) -> Result<(), String> {
     match target {
         "build" => paths.push(PathBuf::from(&spec.workspace.build_dir)),
+        // Collected by `cache_clean_paths`.
+        "caches" => {}
         "out" | "outputs" => paths.push(PathBuf::from(&spec.workspace.out_dir)),
         "all" => {
             paths.push(PathBuf::from(&spec.workspace.build_dir));
@@ -162,6 +190,114 @@ fn append_target_paths(
         }
     }
     Ok(())
+}
+
+/// Workspace-relative caches that `--all-caches` removes wholesale. They are
+/// shared by every build in the workspace and refill on demand.
+const SHARED_CACHE_DIRS: &[&str] = &[
+    gaia_source_providers::GIT_MIRROR_CACHE_DIR,
+    gaia_source_providers::DOWNLOAD_CACHE_DIR,
+    ".gaia/cache/buildroot/dl",
+    ".gaia/docker-cache",
+];
+
+/// Paths removed by the `caches` target (or `--all-caches`):
+/// - git mirrors under `.gaia/cache/git` that no git source of this build
+///   uses (including mirrors from the old one-per-ref layout),
+/// - `.<source>.gaia-preserved` stashes left by an interrupted re-clone,
+/// - Buildroot `target.refresh` work trees left by squashfs refreshes,
+/// - with `--all-caches`, the shared caches in [`SHARED_CACHE_DIRS`].
+fn cache_clean_paths(
+    spec: &ResolvedBuildSpec,
+    clean_args: &CleanArgs,
+) -> Result<Vec<PathBuf>, String> {
+    let wants_caches =
+        clean_args.all_caches || clean_args.targets.iter().any(|target| target == "caches");
+    if !wants_caches {
+        return Ok(Vec::new());
+    }
+    let workspace_root = PathBuf::from(&spec.workspace.root_dir);
+    // Source providers key the cache off the canonical workspace root.
+    let cache_root = fs::canonicalize(&workspace_root).unwrap_or(workspace_root);
+    let mut paths = Vec::new();
+
+    if clean_args.all_caches {
+        paths.extend(SHARED_CACHE_DIRS.iter().map(|dir| cache_root.join(dir)));
+    } else {
+        let used = spec
+            .sources
+            .iter()
+            .filter_map(|source| match &source.definition {
+                SourceDefinition::Git(git) => {
+                    Some(gaia_source_providers::remote_git_mirror_dir_name(&git.repo))
+                }
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        let mirrors = cache_root.join(gaia_source_providers::GIT_MIRROR_CACHE_DIR);
+        paths.extend(
+            sorted_children(&mirrors)
+                .into_iter()
+                .filter(|path| !path_name(path).is_some_and(|name| used.contains(name))),
+        );
+    }
+
+    let sources_dir = PathBuf::from(&spec.workspace.build_dir).join("sources");
+    paths.extend(sorted_children(&sources_dir).into_iter().filter(|path| {
+        path_name(path)
+            .is_some_and(|name| name.starts_with('.') && name.ends_with(".gaia-preserved"))
+    }));
+    let buildroot_fs =
+        PathBuf::from(&spec.workspace.build_dir).join("image/buildroot-output/build/buildroot-fs");
+    paths.extend(
+        sorted_children(&buildroot_fs)
+            .into_iter()
+            .map(|fs_dir| fs_dir.join("target.refresh"))
+            .filter(|path| path.is_dir()),
+    );
+    Ok(dedupe_paths(paths))
+}
+
+fn sorted_children(dir: &Path) -> Vec<PathBuf> {
+    let mut children = fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    children.sort();
+    children
+}
+
+fn path_name(path: &Path) -> Option<&str> {
+    path.file_name().and_then(|name| name.to_str())
+}
+
+/// Total size of the files under `path` (symlinks are not followed).
+fn path_size(path: &Path) -> u64 {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return 0;
+    };
+    if !metadata.is_dir() {
+        return metadata.len();
+    }
+    let mut total = 0;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            match entry.file_type() {
+                Ok(kind) if kind.is_dir() => stack.push(entry.path()),
+                Ok(_) => total += entry.metadata().map(|meta| meta.len()).unwrap_or(0),
+                Err(_) => {}
+            }
+        }
+    }
+    total
 }
 
 fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {

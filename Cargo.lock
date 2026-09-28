@@ -607,6 +607,7 @@ name = "gaia-process"
 version = "2.0.0"
 dependencies = [
  "libc",
+ "sha2 0.11.0",
  "tracing",
 ]
 

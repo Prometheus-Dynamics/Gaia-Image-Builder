@@ -232,6 +232,7 @@ fn command_for_execution_wraps_docker_backend() {
         execution_backend_explicit: true,
         execution_backend: ArtifactExecutionBackend::Docker(ArtifactDockerExecution {
             image: "ghcr.io/example/rust-cross:latest".to_string(),
+            build: None,
         }),
         artifact_target: Some("aarch64-unknown-linux-gnu".to_string()),
         build_version: None,
@@ -433,4 +434,150 @@ fn artifact_contract_rejects_empty_inherited_docker_image() {
 
     assert_eq!(error.kind, ArtifactProviderErrorKind::PolicyBlocked);
     assert!(error.message.contains("non-empty image"));
+}
+
+const FAKE_DOCKER: &str = r#"#!/bin/sh
+dir="$(dirname "$0")"
+echo "$*" >> "$dir/calls.log"
+case "$1" in
+  image)
+    key=$(printf %s "$5" | tr '/:' '__')
+    if [ -f "$dir/images/$key" ]; then echo "sha256:fake-$key"; exit 0; fi
+    echo "Error: No such image: $5" >&2
+    exit 1
+    ;;
+  build)
+    key=$(printf %s "$5" | tr '/:' '__')
+    mkdir -p "$dir/images" && touch "$dir/images/$key"
+    exit 0
+    ;;
+esac
+exit 2
+"#;
+
+fn dockerfile_artifact() -> ArtifactSpec {
+    let mut artifact = ArtifactSpec::new(
+        "helios-engine",
+        ArtifactDefinition::Rust(gaia_spec::RustArtifactSpec {
+            package: "demo".to_string(),
+            target_name: None,
+            variant: ArtifactVariantSpec::File,
+            features: Vec::new(),
+            no_default_features: false,
+            all_features: false,
+        }),
+        None,
+        ArtifactOutputSpec {
+            path: "out/helios-engine".to_string(),
+        },
+    );
+    artifact.execution = Some(ArtifactExecutionSpec::Docker(
+        gaia_spec::DockerArtifactExecutionSpec {
+            image: Some("registry.example/helios-cross-rust194:latest".into()),
+            dockerfile: Some("docker/rust/Dockerfile".into()),
+            context: None,
+        },
+    ));
+    artifact
+}
+
+fn dockerfile_contract(
+    spec: &ResolvedBuildSpec,
+) -> Result<ArtifactExecutionContract, ArtifactProviderError> {
+    ArtifactExecutionContract::from_spec(
+        &dockerfile_artifact(),
+        None,
+        false,
+        ArtifactExecutionContract::default_command_policy(),
+        gaia_spec::OutputRetentionPolicySpec::default(),
+    )
+    .try_with_build_context(spec)
+}
+
+fn docker_tag(contract: &ArtifactExecutionContract) -> String {
+    match &contract.execution_backend {
+        ArtifactExecutionBackend::Docker(docker) => docker.image.clone(),
+        ArtifactExecutionBackend::Host => panic!("expected docker backend"),
+    }
+}
+
+#[test]
+fn dockerfile_execution_image_is_built_once_and_tagged_by_content() {
+    let workspace = temp_path("gaia-dockerfile-exec");
+    let docker_dir = workspace.join("docker/rust");
+    fs::create_dir_all(&docker_dir).expect("docker dir");
+    fs::write(docker_dir.join("Dockerfile"), "FROM rust:1.94\n").expect("dockerfile");
+    let tools = temp_path("gaia-dockerfile-fake-docker");
+    fs::create_dir_all(&tools).expect("tools dir");
+    let fake_docker = tools.join("docker");
+    fs::write(&fake_docker, FAKE_DOCKER).expect("fake docker");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&fake_docker, fs::Permissions::from_mode(0o755)).expect("chmod");
+    }
+    let mut spec = ResolvedBuildSpec::new("dockerfile-exec");
+    spec.workspace.root_dir = workspace.display().to_string();
+
+    let mut contract = dockerfile_contract(&spec).expect("contract");
+    let tag = docker_tag(&contract);
+    assert!(
+        tag.starts_with("gaia-local/helios-cross-rust194:"),
+        "unexpected tag {tag}"
+    );
+
+    let messages = crate::command::ensure_docker_execution_image_with(
+        fake_docker.as_os_str(),
+        &mut contract,
+        None,
+        None,
+    )
+    .expect("image build");
+    assert!(
+        messages[0].contains("built docker execution image"),
+        "{messages:?}"
+    );
+    let state = render_build_context_state(&contract);
+    assert!(state.contains(&format!("execution_backend_image={tag}")));
+    assert!(state.contains("execution_backend_image_id=sha256:fake-"));
+    assert!(state.contains("execution_backend_image_hash="));
+
+    // The tag exists now, so a second run only inspects it.
+    let mut again = dockerfile_contract(&spec).expect("contract");
+    let messages = crate::command::ensure_docker_execution_image_with(
+        fake_docker.as_os_str(),
+        &mut again,
+        None,
+        None,
+    )
+    .expect("image reuse");
+    assert!(messages[0].contains("up to date"), "{messages:?}");
+    let calls = fs::read_to_string(tools.join("calls.log")).expect("calls");
+    assert_eq!(
+        calls
+            .lines()
+            .filter(|line| line.starts_with("build"))
+            .count(),
+        1
+    );
+
+    // Editing the Dockerfile yields a new tag, so the image is rebuilt.
+    fs::write(docker_dir.join("Dockerfile"), "FROM rust:1.95\n").expect("dockerfile");
+    let changed = dockerfile_contract(&spec).expect("contract");
+    assert_ne!(docker_tag(&changed), tag);
+}
+
+#[test]
+fn dockerfile_execution_rejects_missing_dockerfile() {
+    let workspace = temp_path("gaia-dockerfile-missing");
+    fs::create_dir_all(&workspace).expect("workspace");
+    let mut spec = ResolvedBuildSpec::new("dockerfile-missing");
+    spec.workspace.root_dir = workspace.display().to_string();
+    let error = dockerfile_contract(&spec).expect_err("missing dockerfile");
+    assert_eq!(error.kind, ArtifactProviderErrorKind::PolicyBlocked);
+    assert!(
+        error.message.contains("failed to hash docker build"),
+        "{}",
+        error.message
+    );
 }

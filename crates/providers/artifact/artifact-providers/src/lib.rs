@@ -7,11 +7,12 @@ mod tests;
 
 pub use command::{
     apply_job_budget, command_for_execution, command_output_with_timeout,
-    command_output_with_timeout_and_sink, run_command_with_retries,
+    command_output_with_timeout_and_sink, ensure_docker_execution_image, run_command_with_retries,
 };
 pub use contract::{
-    ArtifactDependencyContract, ArtifactDockerExecution, ArtifactExecutionBackend,
-    ArtifactExecutionContract, ArtifactOutputContract, ArtifactOutputKind,
+    ArtifactDependencyContract, ArtifactDockerExecution, ArtifactDockerImageBuild,
+    ArtifactExecutionBackend, ArtifactExecutionContract, ArtifactOutputContract,
+    ArtifactOutputKind,
 };
 pub use digest::{
     ArtifactBackendState, command_version_line, dir_digest, file_sha256_or_placeholder, path_bytes,

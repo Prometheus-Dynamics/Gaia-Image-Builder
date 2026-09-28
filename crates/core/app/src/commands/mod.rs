@@ -1,4 +1,5 @@
 mod clean;
+mod lock;
 mod plan;
 mod resolve;
 mod run;
@@ -17,6 +18,7 @@ use crate::{AppArgs, AppCommand, AppContext};
 use gaia_config::ResolveOptions;
 
 pub use clean::{CleanReport, clean_build_command};
+pub use lock::{LockChange, LockReport, LockReportEntry, lock_build_command};
 pub use plan::plan_build_command;
 pub use resolve::resolve_build_command;
 pub use run::run_build_command;
@@ -55,6 +57,10 @@ pub enum CommandOutcome {
     Cleaned {
         spec: ResolvedBuildSpec,
         report: CleanReport,
+    },
+    Locked {
+        spec: ResolvedBuildSpec,
+        report: LockReport,
     },
     Ran {
         report: ReportBundle,
@@ -97,6 +103,12 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
     if !args.only.is_empty() && !matches!(args.command, AppCommand::Run | AppCommand::Plan) {
         usage_errors.push("--only applies to 'run' and 'plan'".into());
     }
+    if args.lock.update && args.command != AppCommand::Lock {
+        usage_errors.push("--update applies to 'lock'".into());
+    }
+    if args.clean.all_caches && args.command != AppCommand::Clean {
+        usage_errors.push("--all-caches applies to 'clean'".into());
+    }
     if !usage_errors.is_empty() {
         return CommandOutcome::Failed {
             message: format!(
@@ -119,6 +131,7 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
             plan_build_command(context, &args.build, &resolve_options(&args), &targets)
         }
         AppCommand::Clean => clean_build_command(&args.build, &resolve_options(&args), &args.clean),
+        AppCommand::Lock => lock_build_command(&args.build, &resolve_options(&args), &args.lock),
         AppCommand::Run => {
             run_build_command(context, &args.build, &resolve_options(&args), &targets)
         }
@@ -161,6 +174,9 @@ fn help_text() -> String {
         "  gaia clean [build-config] --profile <name>",
         "  gaia clean [build-config] --path <path>",
         "  gaia clean [build-config] --dry-run",
+        "  gaia clean [build-config] --target caches [--all-caches]",
+        "  gaia lock [build-config]",
+        "  gaia lock [build-config] --update [source-id[,source-id...]]",
         "  gaia run [build-config]",
         "  gaia run [build-config] --preset <name>",
         "  gaia run [build-config] --env-file <path>",
@@ -174,6 +190,11 @@ fn help_text() -> String {
         "--only runs part of the build graph plus its dependencies. Targets are",
         "domains (sources, artifacts, install, stage, image, checkpoints) or",
         "operation ids from 'gaia plan'. Reuse state for the rest is kept.",
+        "",
+        "'gaia lock' records the commit of every git source in <build>.gaia.lock",
+        "next to the build file; builds then check out exactly those commits.",
+        "'clean --target caches' prunes orphaned git mirrors and leftover work",
+        "dirs; --all-caches also removes the shared download and tool caches.",
         "",
         "Default build config: examples/default-workspace/configs/default.toml",
     ]

@@ -50,6 +50,9 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - Added `--only <targets>` to `gaia run` and `gaia plan` to execute part of the build graph (a domain such as `artifacts` or `image`, or an operation id such as `artifact:<id>`) plus its dependencies. Partial runs keep the reuse state of operations they skip.
 - Added `gaia tui --builds-dir <dir>` to choose the directory the build picker scans.
+- Added a git source lockfile. `gaia lock <build>` records the commit each git source's branch/tag resolves to in `<build>.gaia.lock` next to the build entrypoint, and `gaia lock <build> --update [source-id]` re-resolves. Locked sources check out exactly that commit, count as pinned for reuse, and include the commit in their fingerprint. Validation warns about stale entries (`git_lock_stale`), rejects unreadable lockfiles (`git_lockfile_invalid`), and warns when two sources use the same repo at different refs (`git_source_ref_divergence`). Builds without a lockfile behave as before.
+- Added Dockerfile-backed artifact execution images: `[artifacts.execution.docker] dockerfile` (and optional `context`) builds the image when missing and tags it `gaia-local/<name>:<content-hash>`. The hash is part of the artifact fingerprint, and the artifact state records the tag, image id and hash.
+- Added `gaia clean <build> --target caches` to prune git mirrors no current source uses (including the old per-ref mirrors), leftover `.gaia-preserved` stashes and Buildroot `target.refresh` trees, reporting the size freed; `--all-caches` also removes the shared git, download, Buildroot download and Docker tool caches.
 - Added a `stage_file_src_placeholder` validation warning for `[[stage.files]]` sources that are directories holding nothing but placeholders such as README or `.gitkeep`.
 - Reworked the TUI:
   - The Plan panel lists every operation with its execute/reuse decision and reason.
@@ -73,6 +76,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - The Buildroot image feed is delivered through a generated post-build script on the `make` command line, so one `make` packs every image once with the feed included, instead of packing, applying the feed to `target/` and repacking (2–3 squashfs packs per build). Stale feed files are still pruned first; if Buildroot does not run the script, Gaia falls back to the previous refresh. The direct squashfs refresh fallback now deletes its `target.refresh` copy after packing.
 - Squashfs tuning settings (compression, block size, padding) no longer count as config changes, so switching XZ and zstd between presets does not clean the Buildroot output tree. Existing config state remains valid.
 - With `shared_output`, builds that differ only in their image feed (for example HeliOS `base-os` and `full`) share one ~16 GB Buildroot tree; after the first full `make`, the shared tree only runs `make target-finalize` and each build packs its own images once.
+- Download sources with a `sha256` are kept in a content-addressed cache (`.gaia/cache/downloads/sha256/<sha>`) after verification and restored from it on re-materialization instead of being downloaded again; each download is hashed once instead of twice.
 - Tool version probes used in fingerprints run once per process with a 10 second timeout, instead of per artifact with a 2 second timeout whose expiry forced rebuilds on loaded machines.
 
 ### Fixed
