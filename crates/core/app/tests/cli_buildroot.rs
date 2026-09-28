@@ -1,6 +1,7 @@
 pub mod support;
 
 use gaia_app::{AppArgs, CommandOutcome, run_with_args};
+use std::path::Path;
 use support::{unique_dir, write_temp_build};
 
 #[test]
@@ -92,8 +93,8 @@ required = true
 
 #[test]
 fn run_command_allows_explicit_buildroot_fallback_and_reports_it() {
-    // Keep root and collect dir in temp: without an explicit collect_dir the
-    // Buildroot provider falls back to a cwd-relative `out/images/buildroot`.
+    // Keep root, out dir and collect dir in temp so the test never writes into
+    // the repository tree.
     let run_out_dir = unique_dir("gaia-cli-fallback-out");
     let build = write_temp_build(&format!(
         r#"
@@ -130,11 +131,9 @@ required = true
         } => {
             assert!(execution_errors.is_empty(), "{execution_errors:?}");
             assert_eq!(
-                report
-                    .summary
-                    .primary_image_output
-                    .as_deref()
-                    .map(|path| path.ends_with("images/buildroot")),
+                report.summary.primary_image_output.as_deref().map(|path| {
+                    Path::new(path).starts_with(&run_out_dir) && path.ends_with("images/buildroot")
+                }),
                 Some(true)
             );
             assert!(report.summary.failure_classes.is_empty());

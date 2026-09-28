@@ -97,6 +97,9 @@ pub(crate) fn image_execution_policy(spec: &ResolvedBuildSpec) -> ImageExecution
         download_dir: policy.download_dir,
         ccache_enabled: policy.ccache.enabled,
         ccache_dir: policy.ccache.dir,
+        shared_output: spec.image.provider_kind() == gaia_spec::ImageProviderKind::Buildroot
+            && spec.policy.providers.buildroot.shared_output,
+        shared_output_dir: spec.policy.providers.buildroot.shared_output_dir.clone(),
         output_retention: process_output_retention(spec),
     }
 }

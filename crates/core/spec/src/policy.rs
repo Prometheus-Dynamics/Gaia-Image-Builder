@@ -225,6 +225,12 @@ pub struct CommandProviderPolicySpec {
     pub local_jobs: u32,
     pub download_dir: Option<String>,
     pub ccache: BuildrootCcachePolicySpec,
+    /// Buildroot only: share one compiled output tree between builds whose
+    /// Buildroot inputs are identical.
+    pub shared_output: bool,
+    /// Buildroot only: where shared output trees live (defaults to
+    /// `.gaia/cache/buildroot/shared` under the workspace root).
+    pub shared_output_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

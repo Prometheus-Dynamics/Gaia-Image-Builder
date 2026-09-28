@@ -118,8 +118,8 @@ impl ImageProvider for BuildrootImageProvider {
         let collect_dir = output
             .collect_dir
             .as_ref()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("out/images/buildroot"));
+            .map(|dir| resolve_collect_dir(spec, dir))
+            .unwrap_or_else(|| default_collect_dir(spec));
         let archive_path = output
             .archive_name
             .as_ref()
@@ -134,47 +134,37 @@ impl ImageProvider for BuildrootImageProvider {
         }
         if let Some(buildroot_dir) = resolve_buildroot_dir(spec, image) {
             let output_dir = buildroot_output_dir(spec);
-            let target_dir = output_dir.join("target");
-            messages.extend(run_buildroot(BuildrootRunRequest {
-                spec,
-                image,
-                buildroot_dir: &buildroot_dir,
-                output_dir: &output_dir,
-                command: ImageCommandContext {
-                    execution: &execution,
-                    policy,
-                    log_sink: log_sink.clone(),
-                    cancel_check: cancel_check.clone(),
-                },
-            })?);
-            if image_feed_has_content(image) {
-                let feed_signature = build_image_feed_signature(spec, image)?;
-                if buildroot_expected_images_present(image, &output_dir)
-                    && image_feed_signature_is_current(&output_dir, &feed_signature)
-                    && image_feed_outputs_present(spec, image, &target_dir)
-                {
-                    messages.push(format!(
-                        "reused image feed overlay and refreshed images at '{}'",
-                        output_dir.display()
-                    ));
-                    reuse_details.push("image-feed-overlay".to_string());
-                } else {
-                    prune_stale_image_feed_outputs(spec, image, &target_dir, &output_dir)?;
-                    apply_image_feed_to_rootfs(spec, image, &target_dir)?;
-                    messages.extend(refresh_buildroot_images_after_feed_overlay(
-                        spec,
-                        image,
-                        &buildroot_dir,
-                        &output_dir,
-                        &execution,
-                        policy,
-                        log_sink.clone(),
-                        cancel_check.clone(),
-                    )?);
-                    refresh_expected_tar_images(image, &target_dir, &output_dir, &execution)?;
-                    write_image_feed_managed_paths(&output_dir, spec, image)?;
-                    write_image_feed_signature(&output_dir, &feed_signature)?;
-                }
+            let command = ImageCommandContext {
+                execution: &execution,
+                policy,
+                log_sink: log_sink.clone(),
+                cancel_check: cancel_check.clone(),
+            };
+            if policy.shared_output {
+                let shared =
+                    shared_buildroot_output(spec, image, &buildroot_dir, policy, &execution)?;
+                messages.extend(build_with_shared_output(SharedBuildRequest {
+                    spec,
+                    image,
+                    buildroot_dir: &buildroot_dir,
+                    output_dir: &output_dir,
+                    shared: &shared,
+                    command,
+                })?);
+                state_details.push((
+                    "buildroot_shared_output_dir".to_string(),
+                    shared.dir.display().to_string(),
+                ));
+                state_details.push(("buildroot_shared_key".to_string(), shared.key.clone()));
+            } else {
+                messages.extend(leave_shared_view(&output_dir)?);
+                messages.extend(build_with_private_output(
+                    spec,
+                    image,
+                    &buildroot_dir,
+                    &output_dir,
+                    command,
+                )?);
             }
             let matched_expected_images =
                 collect_expected_images(image, &output_dir, &collect_dir)?;
@@ -297,8 +287,8 @@ impl ImageProvider for BuildrootImageProvider {
                     .output
                     .collect_dir
                     .as_ref()
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| PathBuf::from("out/images/buildroot"));
+                    .map(|dir| resolve_collect_dir(request.spec, dir))
+                    .unwrap_or_else(|| default_collect_dir(request.spec));
                 let execution = execution_context(request.spec);
                 let mut state_details = vec![("defconfig".to_string(), defconfig)];
                 if let Some(path) = &defconfig_path {
@@ -311,18 +301,39 @@ impl ImageProvider for BuildrootImageProvider {
                     )
                 })?;
                 let output_dir = buildroot_output_dir(request.spec);
-                let messages = run_buildroot(BuildrootRunRequest {
-                    spec: request.spec,
-                    image: request.image,
-                    buildroot_dir: &buildroot_dir,
-                    output_dir: &output_dir,
-                    command: ImageCommandContext {
-                        execution: &execution,
-                        policy: request.policy,
-                        log_sink: request.log_sink,
-                        cancel_check: request.cancel_check,
-                    },
-                })?;
+                let command = ImageCommandContext {
+                    execution: &execution,
+                    policy: request.policy,
+                    log_sink: request.log_sink,
+                    cancel_check: request.cancel_check,
+                };
+                let messages = if request.policy.shared_output {
+                    let shared = shared_buildroot_output(
+                        request.spec,
+                        request.image,
+                        &buildroot_dir,
+                        request.policy,
+                        &execution,
+                    )?;
+                    prepare_with_shared_output(SharedBuildRequest {
+                        spec: request.spec,
+                        image: request.image,
+                        buildroot_dir: &buildroot_dir,
+                        output_dir: &output_dir,
+                        shared: &shared,
+                        command,
+                    })?
+                } else {
+                    let mut messages = leave_shared_view(&output_dir)?;
+                    messages.extend(run_buildroot(BuildrootRunRequest {
+                        spec: request.spec,
+                        image: request.image,
+                        buildroot_dir: &buildroot_dir,
+                        output_dir: &output_dir,
+                        command,
+                    })?);
+                    messages
+                };
                 let result = ImageExecutionResult {
                     provider_id: self.id().into(),
                     collect_dir: Some(collect_dir),
@@ -362,6 +373,87 @@ impl ImageProvider for BuildrootImageProvider {
     }
 }
 
+/// Private output tree: one `make` with the image feed delivered by a
+/// post-build script, so every image is packed once with the feed included.
+/// If Buildroot did not run the script, the feed is applied to `target/` and
+/// the images are refreshed the old way.
+fn build_with_private_output(
+    spec: &ResolvedBuildSpec,
+    image: &ImageSpec,
+    buildroot_dir: &Path,
+    output_dir: &Path,
+    command: ImageCommandContext<'_>,
+) -> Result<Vec<String>, ImageProviderError> {
+    let target_dir = output_dir.join("target");
+    let staged_feed = stage_image_feed_for_make(spec, image, output_dir)?;
+    let mut messages = run_buildroot_with(
+        BuildrootRunRequest {
+            spec,
+            image,
+            buildroot_dir,
+            output_dir,
+            command: command.clone(),
+        },
+        BuildrootMakeOptions {
+            post_build_script: staged_feed.as_ref().map(|feed| feed.script.as_path()),
+            shared_tree: false,
+        },
+    )?;
+    let Some(staged_feed) = staged_feed else {
+        remove_path_if_exists(&image_feed_signature_path(output_dir))?;
+        if image_feed_managed_paths_path(output_dir).is_file() && target_dir.is_dir() {
+            prune_stale_image_feed_outputs(spec, image, &target_dir, output_dir)?;
+        }
+        remove_path_if_exists(&image_feed_managed_paths_path(output_dir))?;
+        return Ok(messages);
+    };
+    if staged_feed.applied() {
+        messages.push("applied image feed through a Buildroot post-build script".into());
+    } else {
+        tracing::warn!(
+            output_dir = %output_dir.display(),
+            "Buildroot did not run the image feed post-build script; refreshing images after make"
+        );
+        messages.push(
+            "Buildroot did not run the image feed post-build script; applied the feed after make"
+                .into(),
+        );
+        apply_image_feed_to_rootfs(spec, image, &target_dir)?;
+        messages.extend(refresh_buildroot_images_after_feed_overlay(
+            spec,
+            image,
+            buildroot_dir,
+            output_dir,
+            command.execution,
+            command.policy,
+            command.log_sink.clone(),
+            command.cancel_check.clone(),
+        )?);
+    }
+    refresh_expected_tar_images(image, &target_dir, output_dir, command.execution)?;
+    write_image_feed_managed_paths(output_dir, spec, image)?;
+    write_image_feed_signature(output_dir, &staged_feed.signature)?;
+    remove_path_if_exists(&staged_image_feed_dir(output_dir))?;
+    Ok(messages)
+}
+
+/// Relative collect dirs resolve against the workspace root, not the process
+/// working directory.
+fn resolve_collect_dir(spec: &ResolvedBuildSpec, dir: &str) -> PathBuf {
+    let path = PathBuf::from(dir);
+    if path.is_absolute() {
+        path
+    } else {
+        PathBuf::from(&spec.workspace.root_dir).join(path)
+    }
+}
+
+fn default_collect_dir(spec: &ResolvedBuildSpec) -> PathBuf {
+    let raw = gaia_spec::default_image_collect_dir(&spec.workspace);
+    resolve_workspace_path(spec, &raw)
+        .unwrap_or_else(|_| PathBuf::from(&spec.workspace.root_dir).join(raw))
+}
+
 fn buildroot_output_dir(spec: &ResolvedBuildSpec) -> PathBuf {
     let build_dir = PathBuf::from(&spec.workspace.build_dir);
     let resolved_build_dir = if build_dir.is_absolute() {
@@ -385,7 +477,9 @@ mod buildroot;
 mod buildroot_external;
 mod command;
 mod feed;
+mod feed_make;
 mod fs_util;
+mod shared;
 mod squashfs;
 #[cfg(test)]
 mod tests;
@@ -395,5 +489,7 @@ pub(crate) use buildroot::*;
 pub(crate) use buildroot_external::*;
 pub(crate) use command::*;
 pub(crate) use feed::*;
+pub(crate) use feed_make::*;
 pub(crate) use fs_util::*;
+pub(crate) use shared::*;
 pub(crate) use squashfs::*;

@@ -302,12 +302,8 @@ fn compress_primary_image_streams_logs_and_uses_policy_threads() {
 }
 
 fn fake_xz_script(dir: &Path, name: &str, body: &str) -> PathBuf {
-    fs::create_dir_all(dir).expect("script dir");
     let path = dir.join(name);
-    fs::write(&path, body).expect("script body");
-    let mut permissions = fs::metadata(&path).expect("script metadata").permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&path, permissions).expect("script permissions");
+    write_executable(&path, body);
     path
 }
 

@@ -437,6 +437,8 @@ fn merge_command_policy(
             enabled: base.ccache.enabled || overlay.ccache.enabled,
             dir: overlay.ccache.dir.or(base.ccache.dir),
         },
+        shared_output: base.shared_output || overlay.shared_output,
+        shared_output_dir: overlay.shared_output_dir.or(base.shared_output_dir),
     }
 }
 

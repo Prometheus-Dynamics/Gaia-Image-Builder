@@ -99,36 +99,6 @@ pub(crate) fn collect_expected_images(
     Ok(matched)
 }
 
-pub(crate) fn buildroot_expected_images_present(image: &ImageSpec, output_dir: &Path) -> bool {
-    let ImageDefinition::Buildroot(buildroot) = &image.definition else {
-        return false;
-    };
-    if buildroot.expected_images.is_empty() {
-        return false;
-    }
-    let assembly_expected = assembly_expected_image_names(image);
-    let concrete_required = buildroot
-        .expected_images
-        .iter()
-        .filter(|expected| expected.required)
-        .filter(|expected| !assembly_expected.contains(&expected.name))
-        .collect::<Vec<_>>();
-    let provider_image_inputs = assembly_provider_image_inputs(image);
-    if concrete_required.is_empty() && provider_image_inputs.is_empty() {
-        return false;
-    }
-    concrete_required.iter().all(|expected| {
-        output_dir.join("images").join(&expected.name).is_file()
-            || output_dir.join(&expected.name).is_file()
-    }) && provider_image_inputs.iter().all(|input| {
-        output_dir
-            .parent()
-            .is_some_and(|collect_dir| collect_dir.join(input).is_file())
-            || output_dir.join("images").join(input).is_file()
-            || output_dir.join(input).is_file()
-    })
-}
-
 pub(crate) fn materialize_fallback_rootfs(
     spec: &ResolvedBuildSpec,
     image: &ImageSpec,
@@ -572,60 +542,6 @@ pub(crate) fn image_feed_managed_paths_path(output_dir: &Path) -> PathBuf {
     output_dir.join(".gaia-image-feed-managed-paths.txt")
 }
 
-pub(crate) fn image_feed_signature_is_current(output_dir: &Path, signature: &str) -> bool {
-    fs::read_to_string(image_feed_signature_path(output_dir))
-        .is_ok_and(|current| current == signature)
-}
-
-pub(crate) fn image_feed_outputs_present(
-    spec: &ResolvedBuildSpec,
-    image: &ImageSpec,
-    rootfs_dir: &Path,
-) -> bool {
-    image.feed.install_entries.iter().all(|install_id| {
-        spec.install
-            .entries
-            .iter()
-            .find(|entry| entry.id == *install_id)
-            .map(|install| rootfs_path(rootfs_dir, &install.dest).exists())
-            .unwrap_or(false)
-    }) && image.feed.stage_files.iter().all(|stage_file_id| {
-        spec.stage
-            .files
-            .iter()
-            .find(|file| file.id == *stage_file_id)
-            .map(|stage_file| rootfs_path(rootfs_dir, &stage_file.dest).exists())
-            .unwrap_or(false)
-    }) && image.feed.stage_env_sets.iter().all(|env_set_id| {
-        spec.stage
-            .env_sets
-            .iter()
-            .find(|env_set| env_set.id == *env_set_id)
-            .map(|env_set| {
-                rootfs_dir
-                    .join("etc")
-                    .join("default")
-                    .join(format!("{}.env", env_set.name))
-                    .exists()
-            })
-            .unwrap_or(false)
-    }) && image.feed.stage_services.iter().all(|service_id| {
-        spec.stage
-            .services
-            .iter()
-            .find(|service| service.id == *service_id)
-            .map(|service| {
-                rootfs_dir
-                    .join("etc")
-                    .join("systemd")
-                    .join("system")
-                    .join(&service.name)
-                    .exists()
-            })
-            .unwrap_or(false)
-    })
-}
-
 pub(crate) fn prune_stale_image_feed_outputs(
     spec: &ResolvedBuildSpec,
     image: &ImageSpec,
@@ -909,7 +825,7 @@ fn image_feed_managed_paths(
     Ok(paths)
 }
 
-fn remove_path_if_exists(path: &Path) -> Result<(), ImageProviderError> {
+pub(crate) fn remove_path_if_exists(path: &Path) -> Result<(), ImageProviderError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(path).map_err(|error| {
             ImageProviderError::new(

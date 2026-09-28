@@ -123,7 +123,7 @@ pub(crate) fn materialize_buildroot_package_overrides(
     })
 }
 
-fn buildroot_package_override_dirs(spec: &ResolvedBuildSpec) -> Vec<PathBuf> {
+pub(crate) fn buildroot_package_override_dirs(spec: &ResolvedBuildSpec) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     let workspace_root = Path::new(&spec.workspace.root_dir);
     let legacy = workspace_root.join("gaia/assets/buildroot/packages");

@@ -96,6 +96,18 @@ impl std::fmt::Display for WorkspacePathError {
 
 impl std::error::Error for WorkspacePathError {}
 
+/// Image collect dir used when `image.output.collect_dir` is not set:
+/// `images/buildroot` under the workspace out dir (relative paths resolve
+/// against the workspace root, never the process working directory).
+pub fn default_image_collect_dir(workspace: &WorkspaceSpec) -> String {
+    let out_dir = workspace.out_dir.trim_end_matches('/');
+    if out_dir.is_empty() {
+        "out/images/buildroot".to_string()
+    } else {
+        format!("{out_dir}/images/buildroot")
+    }
+}
+
 pub fn resolve_workspace_path(
     workspace: &WorkspaceSpec,
     raw: &str,

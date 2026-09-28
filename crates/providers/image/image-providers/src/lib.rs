@@ -160,6 +160,11 @@ pub struct ImageExecutionPolicy {
     pub download_dir: Option<String>,
     pub ccache_enabled: bool,
     pub ccache_dir: Option<String>,
+    /// Buildroot: share one compiled output tree between builds whose
+    /// Buildroot inputs are identical.
+    pub shared_output: bool,
+    /// Buildroot: root directory for shared output trees.
+    pub shared_output_dir: Option<String>,
     pub output_retention: ProcessOutputRetention,
 }
 
@@ -175,6 +180,8 @@ impl Default for ImageExecutionPolicy {
             download_dir: None,
             ccache_enabled: false,
             ccache_dir: None,
+            shared_output: false,
+            shared_output_dir: None,
             output_retention: ProcessOutputRetention::default(),
         }
     }

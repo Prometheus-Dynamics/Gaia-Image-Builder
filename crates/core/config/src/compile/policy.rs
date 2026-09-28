@@ -53,6 +53,8 @@ pub(crate) fn compile_command_policy(
             enabled: raw.ccache.enabled,
             dir: raw.ccache.dir.clone(),
         },
+        shared_output: raw.shared_output,
+        shared_output_dir: raw.shared_output_dir.clone(),
     }
 }
 

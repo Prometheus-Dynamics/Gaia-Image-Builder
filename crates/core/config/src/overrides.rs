@@ -73,6 +73,8 @@ enum KnownOverrideKey {
     PolicyProvidersBuildrootDownloadDir,
     PolicyProvidersBuildrootCcacheEnabled,
     PolicyProvidersBuildrootCcacheDir,
+    PolicyProvidersBuildrootSharedOutput,
+    PolicyProvidersBuildrootSharedOutputDir,
     PolicyProvidersStartingPointRetryAttempts,
     PolicyProvidersStartingPointTimeoutSeconds,
 }
@@ -86,6 +88,7 @@ enum OverrideKey<'a> {
     BuildLabel(&'a str),
     ProvenanceIdentityLabel(&'a str),
     WorkspacePath(&'a str),
+    BuildrootConfigOverride(&'a str),
     Unknown,
 }
 
@@ -262,6 +265,12 @@ impl<'a> OverrideKey<'a> {
             "policy.providers.buildroot.ccache.dir" => {
                 Self::Known(KnownOverrideKey::PolicyProvidersBuildrootCcacheDir)
             }
+            "policy.providers.buildroot.shared_output" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersBuildrootSharedOutput)
+            }
+            "policy.providers.buildroot.shared_output_dir" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersBuildrootSharedOutputDir)
+            }
             "policy.providers.starting_point.retry_attempts" => {
                 Self::Known(KnownOverrideKey::PolicyProvidersStartingPointRetryAttempts)
             }
@@ -284,6 +293,11 @@ impl<'a> OverrideKey<'a> {
                     Self::ProvenanceIdentityLabel(name)
                 } else if let Some(name) = key.strip_prefix("workspace.paths.") {
                     Self::WorkspacePath(name)
+                } else if let Some(name) = key
+                    .strip_prefix("image.buildroot.config_overrides.")
+                    .filter(|name| !name.trim().is_empty())
+                {
+                    Self::BuildrootConfigOverride(name)
                 } else {
                     Self::Unknown
                 }
@@ -382,6 +396,14 @@ fn apply_override(
                 value,
                 raw::RawWorkspacePathKind::Host,
             );
+        }
+        OverrideKey::BuildrootConfigOverride(name) => {
+            if let raw::RawImageDefinition::Buildroot {
+                config_overrides, ..
+            } = &mut raw.image.definition
+            {
+                upsert_pair(config_overrides, name, value);
+            }
         }
         OverrideKey::Unknown => {}
     }
@@ -654,6 +676,12 @@ fn apply_known_override(
         }
         KnownOverrideKey::PolicyProvidersBuildrootCcacheDir => {
             raw.providers.buildroot.ccache.dir = Some(value.to_string())
+        }
+        KnownOverrideKey::PolicyProvidersBuildrootSharedOutput => {
+            raw.providers.buildroot.shared_output = parse_bool_override(key, value)?
+        }
+        KnownOverrideKey::PolicyProvidersBuildrootSharedOutputDir => {
+            raw.providers.buildroot.shared_output_dir = Some(value.to_string())
         }
         KnownOverrideKey::PolicyProvidersStartingPointRetryAttempts => {
             raw.providers.starting_point.retry_attempts = parse_u32_override(key, value)?

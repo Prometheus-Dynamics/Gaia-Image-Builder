@@ -55,6 +55,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
   - The Plan panel lists every operation with its execute/reuse decision and reason.
   - The monitor follows the newest running operation (`f` toggles following) and jumps to the failed operation's logs when a run fails.
   - A `?` key-help overlay, `j`/`k` navigation, and `m` to return to a running build from setup.
+- Added opt-in shared Buildroot output trees (`[providers.buildroot] shared_output = true`, optional `shared_output_dir`). Builds with identical Buildroot inputs (source identity, defconfig, fragments, config overrides, external tree, package overrides) compile one tree keyed by a digest of those inputs, under a file lock; each build gets private copy-on-write `target/` and `images/` clones, so feeds never leak between builds. Unused trees are removed when their last build moves to another key.
+- Added the `image.buildroot.config_overrides.<SYMBOL>` override key for presets and `--set`, for example to pick zstd squashfs compression in a development preset while releases keep XZ.
 
 ### Performance
 
@@ -68,6 +70,9 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - Raw image and `tar.xz` compression use all cores (`xz -T0` with a fixed block size, so output does not depend on the thread count).
 - Path-source and git tree digests hash files in-process instead of spawning `sha256sum` per file, and path sources ignore `target`, `node_modules`, `.git`, `.gaia` and `__pycache__` by default. Node and Python scratch output moved under `.gaia/` so builds no longer look like source changes.
 - Re-cloned git sources keep their `.gaia` build state (such as the cargo target dir), and the remote git mirror is shared per repository and refreshed before cloning.
+- The Buildroot image feed is delivered through a generated post-build script on the `make` command line, so one `make` packs every image once with the feed included, instead of packing, applying the feed to `target/` and repacking (2–3 squashfs packs per build). Stale feed files are still pruned first; if Buildroot does not run the script, Gaia falls back to the previous refresh. The direct squashfs refresh fallback now deletes its `target.refresh` copy after packing.
+- Squashfs tuning settings (compression, block size, padding) no longer count as config changes, so switching XZ and zstd between presets does not clean the Buildroot output tree. Existing config state remains valid.
+- With `shared_output`, builds that differ only in their image feed (for example HeliOS `base-os` and `full`) share one ~16 GB Buildroot tree; after the first full `make`, the shared tree only runs `make target-finalize` and each build packs its own images once.
 - Tool version probes used in fingerprints run once per process with a 10 second timeout, instead of per artifact with a 2 second timeout whose expiry forced rebuilds on loaded machines.
 
 ### Fixed
@@ -90,6 +95,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - Fixed TUI slowdown on long builds: operation status and logs are now indexed as events arrive instead of rescanning the whole event stream on every frame, and logs keep the most recent 5,000 lines per operation.
 - Fixed the TUI Plan panel claiming a "serial runtime" executor and always showing the first operation in setup.
 - Fixed `cargo clippy -- -D warnings` failures in the Buildroot provider and app crate.
+- Fixed the Buildroot provider's default collect dir (`out/images/buildroot`) resolving against the process working directory; without `image.output.collect_dir` it is now `<workspace.out_dir>/images/buildroot`, and relative collect dirs resolve against the workspace root, matching planning and assembly.
+- Fixed intermittent "Text file busy" (ETXTBSY) failures: generated fakeroot scripts run through `/bin/sh`, and the Buildroot provider tests create fake tools through a helper that never holds a write descriptor a concurrently forked test could inherit.
 - Added typed assembly MBR layout controls for `first_lba` and `alignment_lba`, allowing board images to preserve firmware-sensitive partition layouts instead of always using 1 MiB partition alignment.
 
 ## [2.0.0] - 2026-05-01
