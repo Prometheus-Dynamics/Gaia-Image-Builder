@@ -63,6 +63,9 @@ fn starting_point_raw_image_rejects_read_only_overlay_before_root_check() {
             package: "smoke-app".into(),
             target_name: None,
             variant: ArtifactVariantSpec::File,
+            features: Vec::new(),
+            no_default_features: false,
+            all_features: false,
         }),
         None,
         ArtifactOutputSpec {

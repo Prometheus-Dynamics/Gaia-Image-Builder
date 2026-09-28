@@ -45,6 +45,7 @@ fn rust_buildroot_smoke_example_validates_and_plans_cleanly() {
             spec,
             plan,
             diagnostics,
+            ..
         } => {
             assert!(diagnostics.is_empty(), "expected no plan diagnostics");
             assert_eq!(spec.image.feed.install_entries.len(), 1);
@@ -100,6 +101,7 @@ fn rust_buildroot_aarch64_smoke_example_validates_and_plans_cleanly() {
             spec,
             plan,
             diagnostics,
+            ..
         } => {
             assert!(diagnostics.is_empty(), "expected no plan diagnostics");
             assert_eq!(spec.image.feed.install_entries.len(), 1);
@@ -168,6 +170,7 @@ fn rust_buildroot_squashfs_smoke_example_validates_and_plans_cleanly() {
             spec,
             plan,
             diagnostics,
+            ..
         } => {
             assert!(diagnostics.is_empty(), "expected no plan diagnostics");
             assert_eq!(spec.image.feed.install_entries.len(), 1);
@@ -240,6 +243,7 @@ fn rust_buildroot_sdcard_smoke_example_validates_and_plans_cleanly() {
             spec,
             plan,
             diagnostics,
+            ..
         } => {
             assert!(diagnostics.is_empty(), "expected no plan diagnostics");
             assert_eq!(spec.image.feed.install_entries.len(), 1);
@@ -328,6 +332,7 @@ fn go_buildroot_raspberrypi4_smoke_example_validates_and_plans_cleanly() {
             spec,
             plan,
             diagnostics,
+            ..
         } => {
             assert!(diagnostics.is_empty(), "expected no plan diagnostics");
             assert_eq!(spec.image.feed.install_entries.len(), 1);

@@ -20,7 +20,7 @@ pub use clean::{CleanReport, clean_build_command};
 pub use plan::plan_build_command;
 pub use resolve::resolve_build_command;
 pub use run::run_build_command;
-pub use state::{load_reuse_state, save_reuse_state};
+pub use state::{load_operation_durations, load_reuse_state, save_reuse_state};
 pub use validate::validate_build_command;
 
 // Keep command outcomes value-typed so tests and callers can match complete
@@ -49,6 +49,8 @@ pub enum CommandOutcome {
         spec: ResolvedBuildSpec,
         plan: ExecutionPlan,
         diagnostics: Vec<PlanDiagnostic>,
+        /// Duration estimate from the last recorded operation timings.
+        estimate: gaia_plan::PlanEstimate,
     },
     Cleaned {
         spec: ResolvedBuildSpec,

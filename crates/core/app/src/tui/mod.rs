@@ -26,7 +26,9 @@ use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph, Wrap};
 
-use crate::commands::{CommandOutcome, RunArtifacts, load_reuse_state, save_reuse_state};
+use crate::commands::{
+    CommandOutcome, RunArtifacts, load_operation_durations, load_reuse_state, save_reuse_state,
+};
 use crate::{AppContext, backend_overview_lines, runtime_overview_lines};
 
 /// How the TUI was invoked from the command line.
@@ -124,6 +126,7 @@ mod discovery;
 mod events;
 mod input;
 mod model;
+mod plan_view;
 mod render;
 mod run;
 mod setup;

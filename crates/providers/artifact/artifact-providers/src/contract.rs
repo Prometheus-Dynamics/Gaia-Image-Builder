@@ -30,6 +30,12 @@ pub struct ArtifactExecutionContract {
     pub build_mode: Option<BuildModeSpec>,
     pub dependencies: Vec<ArtifactDependencyContract>,
     pub output: ArtifactOutputContract,
+    /// CPU budget for this build when several CPU-heavy operations run at
+    /// once. `None` leaves the tools' own defaults (usually every core).
+    /// Exported as `CARGO_BUILD_JOBS`, `MAKEFLAGS=-jN` and
+    /// `CMAKE_BUILD_PARALLEL_LEVEL` unless the command or the environment
+    /// already sets them. Never part of recorded state.
+    pub job_budget: Option<usize>,
 }
 
 impl ArtifactExecutionContract {
@@ -87,6 +93,7 @@ impl ArtifactExecutionContract {
                 .map(ArtifactDependencyContract::from_ref)
                 .collect(),
             output: ArtifactOutputContract::from_spec(artifact),
+            job_budget: None,
         }
     }
 

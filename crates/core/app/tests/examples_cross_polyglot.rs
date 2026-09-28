@@ -62,6 +62,7 @@ fn polyglot_buildroot_example_validates_and_plans_cleanly() {
             spec,
             plan,
             diagnostics,
+            ..
         } => {
             assert!(diagnostics.is_empty(), "expected no plan diagnostics");
             assert_eq!(spec.image.feed.install_entries.len(), 5);
@@ -130,6 +131,7 @@ fn starting_point_cross_target_git_example_validates_and_plans_cleanly() {
             spec,
             plan,
             diagnostics,
+            ..
         } => {
             assert!(diagnostics.is_empty(), "expected no plan diagnostics");
             assert_eq!(spec.image.feed.install_entries.len(), 2);
@@ -191,6 +193,7 @@ fn starting_point_polyglot_git_example_validates_and_plans_cleanly() {
             spec,
             plan,
             diagnostics,
+            ..
         } => {
             assert!(diagnostics.is_empty(), "expected no plan diagnostics");
             assert_eq!(spec.image.feed.install_entries.len(), 5);

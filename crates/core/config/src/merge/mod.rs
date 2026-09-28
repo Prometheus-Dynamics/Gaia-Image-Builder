@@ -383,6 +383,7 @@ fn merge_failure_policy(
             .preserve_failed_outputs
             .or(base.preserve_failed_outputs),
         rollback_domains: overlay.rollback_domains.or(base.rollback_domains),
+        keep_going: overlay.keep_going.or(base.keep_going),
     }
 }
 
@@ -393,6 +394,7 @@ fn merge_provider_policies(
     RawProviderPoliciesConfig {
         rust: RawRustProviderPolicyConfig {
             allow_nested_build: base.rust.allow_nested_build || overlay.rust.allow_nested_build,
+            batch_builds: overlay.rust.batch_builds.or(base.rust.batch_builds),
             retry_attempts: base.rust.retry_attempts.max(overlay.rust.retry_attempts),
             retry_backoff_ms: base
                 .rust

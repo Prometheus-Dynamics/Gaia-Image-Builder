@@ -61,11 +61,31 @@ scoped worker thread, and the main executor loop schedules ready operations,
 receives completion events over channels, and applies rollback/cancellation
 decisions.
 
-`execution.jobs` only limits Gaia scheduler concurrency. It does not get forwarded
-to backend tools. Provider-local worker counts are configured separately through
-provider policy, such as `providers.buildroot.local_jobs` for Buildroot `make -j`.
-Keep `execution.jobs` and provider-local jobs separate to avoid accidentally
-running N Gaia operations where each backend also starts N workers.
+`execution.jobs` limits Gaia scheduler concurrency. It is not forwarded to
+backend tools as-is. Provider-local worker counts are configured separately
+through provider policy, such as `providers.buildroot.local_jobs` for Buildroot
+`make -j`.
+
+To avoid running N heavy operations where each backend also starts one worker
+per core, the scheduler gives each CPU-heavy operation (artifact builds and
+Buildroot prepare/build) a job budget when others run alongside it: the
+available cores divided by the number of heavy operations expected to run at
+once (those already running, the one starting, and ready ones that free job
+slots allow). The budget is exported as `CARGO_BUILD_JOBS`, `MAKEFLAGS=-jN` and
+`CMAKE_BUILD_PARALLEL_LEVEL` (never overriding values you set) and used for
+Buildroot's `make -j` when `local_jobs = 0`. An operation that runs alone gets
+no budget, so single-operation behavior is unchanged. The split is static per
+operation: an operation keeps the budget it started with.
+
+Nested Rust artifacts that share a workspace, target, profile, feature flags
+and backend are started as one scheduling unit and built with a single
+`cargo build -p a -p b ...` (see `providers.rust.batch_builds`). Each artifact
+still reports its own events, result, state and timing.
+
+Streamed build output goes to the live sink (console progress, TUI) as it
+arrives. Only a bounded tail (`execution.output_retention.failure_tail_lines`)
+is kept per operation and reported for failures; successful operations do not
+re-emit their log, so long builds use constant memory.
 
 This keeps provider code straightforward:
 - external tools use blocking `std::process::Command`
@@ -122,6 +142,25 @@ Behavior:
 - when `preserve_failed_outputs = true`, the failed op’s partial outputs are kept
 - `rollback_domains` restrict which completed domains get cleaned up
 - when `rollback_on_error = false`, Gaia leaves current-run outputs in place
+
+By default the first failure stops every running sibling. With
+`keep_going = true`, independent operations keep running to completion;
+operations that depend on a failed one are skipped (a `Skipped` event and
+`skipped_operation_ids` in the run summary), and the run still fails. Finished
+work is not rolled back under `keep_going`: it is recorded in the reuse state
+so the next run reuses it, and only the failed operations' own partial outputs
+are cleaned per the policy above. Cancellation still rolls back as usual.
+
+## Timing
+
+Every operation's wall-clock duration is recorded in the run outcome and in
+`summary.json` (`operation_timings`), and `gaia run` prints the slowest
+operations. The last duration of each operation that executed is saved in the
+reuse state (`dur=<operation id>;<ms>` lines). `gaia plan` and the TUI Plan
+panel use these to estimate the next run: the total work of the operations that
+will execute and the critical path, the dependency chain with the largest
+summed duration (a lower bound on wall-clock time). Operations without a
+recorded duration are listed as untimed.
 
 ## Failure Classification
 

@@ -43,6 +43,19 @@ pub struct RunSummary {
     pub preserve_failed_outputs: bool,
     pub rollback_domains: Vec<String>,
     pub failure_classes: Vec<FailureClassCount>,
+    pub keep_going: bool,
+    /// Operations not run because a dependency failed (`keep_going`).
+    pub skipped_operation_ids: Vec<String>,
+    /// Wall-clock time of every operation that ran, in completion order.
+    pub operation_timings: Vec<OperationTimingRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OperationTimingRecord {
+    pub operation_id: String,
+    pub duration_ms: u64,
+    /// `built`, `reused`, `failed` or `cancelled`.
+    pub status: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -91,6 +91,76 @@ impl CommandOutcome {
     }
 }
 
+/// `gaia plan` estimate lines: total work and the critical path, from the
+/// durations recorded by earlier runs.
+pub(crate) fn plan_estimate_lines(estimate: &gaia_plan::PlanEstimate) -> Vec<String> {
+    use gaia_plan::format_duration_short;
+    if estimate.executing_operations() == 0 {
+        return vec!["plan estimate: nothing to execute".into()];
+    }
+    if estimate.timed_operations == 0 {
+        return vec![format!(
+            "plan estimate: unknown (no recorded timings for the {} operation(s) that will execute)",
+            estimate.executing_operations()
+        )];
+    }
+    let mut lines = vec![format!(
+        "plan estimate: critical-path={} total-work={} timed={}/{}",
+        format_duration_short(estimate.critical_path_duration),
+        format_duration_short(estimate.total_work),
+        estimate.timed_operations,
+        estimate.executing_operations(),
+    )];
+    if !estimate.critical_path.is_empty() {
+        lines.push(format!(
+            "plan critical path: {}",
+            estimate
+                .critical_path
+                .iter()
+                .map(|id| id.as_str())
+                .collect::<Vec<_>>()
+                .join(" -> ")
+        ));
+    }
+    if !estimate.untimed_operations.is_empty() {
+        lines.push(format!(
+            "plan estimate excludes untimed: {}",
+            estimate
+                .untimed_operations
+                .iter()
+                .map(|id| id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    lines
+}
+
+/// The `limit` slowest operations that actually ran, slowest first.
+fn slowest_operation_lines(
+    timings: &[gaia_report::OperationTimingRecord],
+    limit: usize,
+) -> Vec<String> {
+    let mut ran = timings
+        .iter()
+        .filter(|timing| timing.status != "reused")
+        .collect::<Vec<_>>();
+    ran.sort_by(|left, right| right.duration_ms.cmp(&left.duration_ms));
+    ran.into_iter()
+        .take(limit)
+        .map(|timing| {
+            format!(
+                "operation time: {} {} ({})",
+                gaia_plan::format_duration_short(std::time::Duration::from_millis(
+                    timing.duration_ms
+                )),
+                timing.operation_id,
+                timing.status
+            )
+        })
+        .collect()
+}
+
 fn print_outcome(outcome: &CommandOutcome) {
     match outcome {
         CommandOutcome::Help { text } | CommandOutcome::Version { text } => {
@@ -136,6 +206,7 @@ fn print_outcome(outcome: &CommandOutcome) {
             spec,
             plan,
             diagnostics,
+            estimate,
         } => {
             println!(
                 "plan for '{}' has {} operation(s)",
@@ -183,6 +254,9 @@ fn print_outcome(outcome: &CommandOutcome) {
                         reason.message
                     );
                 }
+            }
+            for line in plan_estimate_lines(estimate) {
+                println!("{line}");
             }
             print_selection(spec);
             for line in backend_overview_lines(spec) {
@@ -241,6 +315,16 @@ fn print_outcome(outcome: &CommandOutcome) {
                     "image reuse: {}",
                     report.summary.image_reuse_details.join(", ")
                 );
+            }
+            if !report.summary.skipped_operation_ids.is_empty() {
+                println!(
+                    "keep-going: skipped {} operation(s) blocked by failures: {}",
+                    report.summary.skipped_operation_ids.len(),
+                    report.summary.skipped_operation_ids.join(", ")
+                );
+            }
+            for line in slowest_operation_lines(&report.summary.operation_timings, 5) {
+                println!("{line}");
             }
             if report.summary.rolled_back_operations > 0 {
                 println!(
@@ -661,6 +745,63 @@ fn print_selection(spec: &gaia_spec::ResolvedBuildSpec) {
                 })
                 .collect::<Vec<_>>()
                 .join(", ")
+        );
+    }
+}
+
+#[cfg(test)]
+mod estimate_output_tests {
+    use super::*;
+    use gaia_plan::{OperationId, PlanEstimate};
+    use std::time::Duration;
+
+    #[test]
+    fn plan_estimate_lines_report_critical_path_and_untimed_operations() {
+        let estimate = PlanEstimate {
+            total_work: Duration::from_secs(3_900),
+            critical_path: vec![
+                OperationId::new("source:a"),
+                OperationId::new("image:build"),
+            ],
+            critical_path_duration: Duration::from_secs(3_720),
+            timed_operations: 2,
+            untimed_operations: vec![OperationId::new("artifact:new")],
+        };
+        assert_eq!(
+            plan_estimate_lines(&estimate),
+            vec![
+                "plan estimate: critical-path=1h02m total-work=1h05m timed=2/3".to_string(),
+                "plan critical path: source:a -> image:build".to_string(),
+                "plan estimate excludes untimed: artifact:new".to_string(),
+            ]
+        );
+        assert_eq!(
+            plan_estimate_lines(&PlanEstimate::default()),
+            vec!["plan estimate: nothing to execute".to_string()]
+        );
+    }
+
+    #[test]
+    fn slowest_operations_skip_reused_and_sort_descending() {
+        let record = |id: &str, ms: u64, status: &str| gaia_report::OperationTimingRecord {
+            operation_id: id.into(),
+            duration_ms: ms,
+            status: status.into(),
+        };
+        let lines = slowest_operation_lines(
+            &[
+                record("a", 5_000, "built"),
+                record("b", 90_000, "reused"),
+                record("c", 65_000, "failed"),
+            ],
+            5,
+        );
+        assert_eq!(
+            lines,
+            vec![
+                "operation time: 1m05s c (failed)".to_string(),
+                "operation time: 5s a (built)".to_string(),
+            ]
         );
     }
 }

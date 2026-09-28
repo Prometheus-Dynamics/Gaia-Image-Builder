@@ -420,21 +420,38 @@ fn busybox_runtime_parser_distinguishes_static_dynamic_and_failed_resolution() {
     );
 }
 
+/// Writes an executable script without leaving a writable descriptor on
+/// the final path: the content is written and closed under a temporary name,
+/// made executable, then renamed into place. Spawning also retries `ETXTBSY`
+/// (see `gaia_process`), which covers descriptors inherited by a concurrent
+/// fork in another test thread.
+#[cfg(unix)]
+fn write_fake_executable(path: &Path, contents: &str) {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+    {
+        let mut file = fs::File::create(&temporary).expect("fake executable");
+        file.write_all(contents.as_bytes())
+            .expect("fake executable contents");
+        file.sync_all().expect("fake executable sync");
+    }
+    fs::set_permissions(&temporary, fs::Permissions::from_mode(0o755))
+        .expect("fake executable mode");
+    fs::rename(&temporary, path).expect("fake executable rename");
+}
+
 #[cfg(unix)]
 #[test]
 fn busybox_runtime_resolver_honors_assembly_command_timeout() {
-    use std::os::unix::fs::PermissionsExt;
-
     let root = unique_dir("gaia-busybox-ldd-timeout");
     let mut spec = test_spec(&root);
     spec.policy.providers.buildroot.timeout_seconds = 1;
     let busybox = root.join("busybox");
     fs::write(&busybox, "busybox").expect("busybox");
     let ldd = root.join("ldd");
-    fs::write(&ldd, "#!/bin/sh\nsleep 10\n").expect("fake ldd");
-    let mut permissions = fs::metadata(&ldd).expect("fake ldd metadata").permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&ldd, permissions).expect("fake ldd executable");
+    write_fake_executable(&ldd, "#!/bin/sh\nsleep 10\n");
 
     let started = Instant::now();
     let error = resolve_busybox_runtime_libraries_with_program(&spec, &busybox, &ldd, None)
@@ -450,7 +467,6 @@ fn busybox_runtime_resolver_honors_assembly_command_timeout() {
 #[cfg(unix)]
 #[test]
 fn busybox_runtime_resolver_honors_cancellation() {
-    use std::os::unix::fs::PermissionsExt;
     use std::sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -464,10 +480,7 @@ fn busybox_runtime_resolver_honors_cancellation() {
     let busybox = root.join("busybox");
     fs::write(&busybox, "busybox").expect("busybox");
     let ldd = root.join("ldd");
-    fs::write(&ldd, "#!/bin/sh\nsleep 10\n").expect("fake ldd");
-    let mut permissions = fs::metadata(&ldd).expect("fake ldd metadata").permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&ldd, permissions).expect("fake ldd executable");
+    write_fake_executable(&ldd, "#!/bin/sh\nsleep 10\n");
     let cancelled = Arc::new(AtomicBool::new(false));
     let cancel_check: gaia_process::ProcessCancelCheck = {
         let cancelled = cancelled.clone();

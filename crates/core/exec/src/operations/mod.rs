@@ -1,5 +1,8 @@
+mod artifact;
 mod assembly;
 mod helpers;
+
+pub(crate) use artifact::{artifact_batch_key, dispatch_artifact_batch};
 
 use assembly::*;
 use gaia_artifact_providers::ArtifactExecutionContract;
@@ -13,6 +16,17 @@ use crate::fs::FsMutation;
 use crate::process;
 use crate::runtime::process_log_sink;
 use std::sync::mpsc;
+
+/// Per-dispatch inputs shared by every operation kind.
+#[derive(Clone)]
+pub(crate) struct DispatchContext {
+    pub(crate) build_name: String,
+    pub(crate) event_sender: Option<mpsc::Sender<ExecutionEvent>>,
+    pub(crate) cancel_check: Option<gaia_process::ProcessCancelCheck>,
+    /// CPU budget for the spawned build tool when several CPU-heavy
+    /// operations run at once; `None` keeps the tool defaults.
+    pub(crate) job_budget: Option<usize>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExecutionEvent {
@@ -35,6 +49,12 @@ pub enum ExecutionEvent {
     Failed {
         operation_id: OperationId,
         message: String,
+    },
+    /// Not run because an operation it depends on failed. Only emitted with
+    /// `policy.failure.keep_going`, where independent work continues.
+    Skipped {
+        operation_id: OperationId,
+        reason: String,
     },
 }
 
@@ -114,14 +134,15 @@ impl OperationExecutionResult {
     }
 }
 
-pub fn dispatch_operation(
+pub(crate) fn dispatch_operation(
     operation: &PlannedOperation,
     spec: &ResolvedBuildSpec,
     providers: &ExecutionProviders<'_>,
-    build_name: &str,
-    event_sender: Option<std::sync::mpsc::Sender<ExecutionEvent>>,
-    cancel_check: Option<gaia_process::ProcessCancelCheck>,
+    context: &DispatchContext,
 ) -> OperationExecutionResult {
+    let build_name = context.build_name.as_str();
+    let event_sender = context.event_sender.clone();
+    let cancel_check = context.cancel_check.clone();
     let span = tracing::info_span!(
         "execute_operation",
         build_id = %spec.identity.id.as_str(),
@@ -130,6 +151,7 @@ pub fn dispatch_operation(
         parallelism_mode = ?operation.parallelism.mode,
         parallelism_domain = ?operation.parallelism.domain,
         reused = matches!(operation.reuse, OperationReuse::Reuse { .. }),
+        job_budget = ?context.job_budget,
     );
     let _guard = span.enter();
     if let OperationReuse::Reuse { source } = &operation.reuse {
@@ -178,27 +200,20 @@ pub fn dispatch_operation(
                         format!("missing source provider for '{}'", source_id.as_str()),
                     );
                 };
-                let (log_tx, log_rx) = mpsc::channel::<String>();
-                let direct_sink = process_log_sink(operation.id.clone(), event_sender.clone());
-                let log_sink = direct_sink.map(|direct_sink| {
-                    std::sync::Arc::new(move |line: gaia_source_providers::ProcessLogLine| {
-                        let _ = log_tx.send(line.line.clone());
-                        direct_sink(line);
-                    }) as gaia_source_providers::ProcessLogSink
-                });
+                let tail = LogTail::for_spec(spec);
+                let log_sink = tail.sink(operation.id.clone(), event_sender.clone());
                 success_from_messages(
                     operation.id.clone(),
                     match provider.execute_source(spec, source, log_sink, cancel_check.clone()) {
-                        Ok(messages) => merge_streamed_logs(log_rx, messages),
+                        Ok(messages) => messages,
                         Err(message) => {
-                            let logs = merge_streamed_logs(log_rx, vec![message.message]);
                             if matches!(
                                 message.kind,
                                 gaia_source_providers::SourceProviderErrorKind::Cancelled
                             ) {
                                 return cancelled_with_cleanup(
                                     operation.id.clone(),
-                                    logs.join("\n"),
+                                    message.message,
                                     RollbackDomain::Sources,
                                     source_cleanup_paths(spec, source),
                                 );
@@ -207,8 +222,8 @@ pub fn dispatch_operation(
                                 operation.id.clone(),
                                 "source_execution_failed",
                                 execution_error_kind_from_source(&message.kind),
-                                logs.join("\n"),
-                                output_tail(&logs, spec),
+                                message.message.clone(),
+                                tail.failure_tail(&message.message, spec),
                                 RollbackDomain::Sources,
                                 source_cleanup_paths(spec, source),
                             );
@@ -219,104 +234,13 @@ pub fn dispatch_operation(
                     source_cleanup_paths(spec, source),
                 )
             }
-            OperationKind::BuildArtifact { artifact_id } => {
-                let Some(artifact) = spec
-                    .artifacts
-                    .iter()
-                    .find(|artifact| artifact.id == *artifact_id)
-                else {
-                    return failure_with_kind(
-                        operation.id.clone(),
-                        "missing_artifact_spec",
-                        ExecutionErrorKind::MissingSpec,
-                        format!("missing artifact spec '{}'", artifact_id.as_str()),
-                    );
-                };
-                let Some(provider) = providers
-                    .artifact_catalog
-                    .find_for_kind(artifact.provider_kind())
-                else {
-                    return failure_with_kind(
-                        operation.id.clone(),
-                        "missing_artifact_provider",
-                        ExecutionErrorKind::MissingProvider,
-                        format!("missing artifact provider for '{}'", artifact_id.as_str()),
-                    );
-                };
-                let artifact_execution_policy = spec
-                    .policy
-                    .providers
-                    .artifact_command_policy(artifact.provider_kind());
-                let contract = match ArtifactExecutionContract::from_spec(
-                    artifact,
-                    resolve_artifact_source_dir(spec, artifact),
-                    matches!(artifact.definition, ArtifactDefinition::Rust(_))
-                        && spec.policy.providers.rust.allow_nested_build,
-                    artifact_execution_policy,
-                    spec.policy.execution.output_retention,
-                )
-                .try_with_build_context(spec)
-                {
-                    Ok(contract) => contract,
-                    Err(message) => {
-                        return failure_with_cleanup_and_tail(
-                            operation.id.clone(),
-                            "artifact_contract_invalid",
-                            execution_error_kind_from_artifact(&message.kind),
-                            message.message.clone(),
-                            output_tail(&[message.message], spec),
-                            RollbackDomain::Artifacts,
-                            Vec::new(),
-                        );
-                    }
-                };
-                let _ = process::ProcessSpec::new(format!("build:{}", artifact_id.as_str()));
-                let (log_tx, log_rx) = mpsc::channel::<String>();
-                let direct_sink = process_log_sink(operation.id.clone(), event_sender.clone());
-                let log_sink = direct_sink.map(|direct_sink| {
-                    std::sync::Arc::new(move |line: gaia_artifact_providers::ProcessLogLine| {
-                        let _ = log_tx.send(line.line.clone());
-                        direct_sink(line);
-                    }) as gaia_artifact_providers::ProcessLogSink
-                });
-                success_from_messages(
-                    operation.id.clone(),
-                    match provider.execute_artifact(
-                        artifact,
-                        &contract,
-                        log_sink,
-                        cancel_check.clone(),
-                    ) {
-                        Ok(messages) => merge_streamed_logs(log_rx, messages),
-                        Err(message) => {
-                            let logs = merge_streamed_logs(log_rx, vec![message.message]);
-                            if matches!(
-                                message.kind,
-                                gaia_artifact_providers::ArtifactProviderErrorKind::Cancelled
-                            ) {
-                                return cancelled_with_cleanup(
-                                    operation.id.clone(),
-                                    logs.join("\n"),
-                                    RollbackDomain::Artifacts,
-                                    artifact_cleanup_paths(&contract),
-                                );
-                            }
-                            return failure_with_cleanup_and_tail(
-                                operation.id.clone(),
-                                "artifact_execution_failed",
-                                execution_error_kind_from_artifact(&message.kind),
-                                logs.join("\n"),
-                                output_tail(&logs, spec),
-                                RollbackDomain::Artifacts,
-                                artifact_cleanup_paths(&contract),
-                            );
-                        }
-                    },
-                    format!("built artifact '{}'", artifact_id.as_str()),
-                    RollbackDomain::Artifacts,
-                    artifact_cleanup_paths(&contract),
-                )
-            }
+            OperationKind::BuildArtifact { artifact_id } => artifact::execute_artifact_operation(
+                &operation.id,
+                artifact_id,
+                spec,
+                providers,
+                context,
+            ),
             OperationKind::InstallArtifact {
                 install_id,
                 artifact,
@@ -426,15 +350,14 @@ pub fn dispatch_operation(
                     _ => unreachable!(),
                 };
                 let _ = process::ProcessSpec::new("build-image");
-                let (log_tx, log_rx) = mpsc::channel::<String>();
-                let direct_sink = process_log_sink(operation.id.clone(), event_sender.clone());
-                let log_sink = direct_sink.map(|direct_sink| {
-                    std::sync::Arc::new(move |line: gaia_image_providers::ProcessLogLine| {
-                        let _ = log_tx.send(line.line.clone());
-                        direct_sink(line);
-                    }) as gaia_image_providers::ProcessLogSink
-                });
-                let image_policy = image_execution_policy(spec);
+                let tail = LogTail::for_spec(spec);
+                let log_sink = tail.sink(operation.id.clone(), event_sender.clone());
+                let mut image_policy = image_execution_policy(spec);
+                if let Some(jobs) = context.job_budget
+                    && image_policy.local_jobs == 0
+                {
+                    image_policy.local_jobs = u32::try_from(jobs).unwrap_or(u32::MAX);
+                }
                 let image_result = match provider.execute_image_operation(
                     gaia_image_providers::ImageOperationExecution {
                         spec,
@@ -446,19 +369,15 @@ pub fn dispatch_operation(
                         cancel_check: cancel_check.clone(),
                     },
                 ) {
-                    Ok(mut result) => {
-                        result.messages = merge_streamed_logs(log_rx, result.messages);
-                        result
-                    }
+                    Ok(result) => result,
                     Err(message) => {
-                        let logs = merge_streamed_logs(log_rx, vec![message.message]);
                         if matches!(
                             message.kind,
                             gaia_image_providers::ImageProviderErrorKind::Cancelled
                         ) {
                             return cancelled_with_cleanup(
                                 operation.id.clone(),
-                                logs.join("\n"),
+                                message.message,
                                 RollbackDomain::Images,
                                 image_definition_cleanup_paths(spec),
                             );
@@ -467,8 +386,8 @@ pub fn dispatch_operation(
                             operation.id.clone(),
                             "image_execution_failed",
                             execution_error_kind_from_image(&message.kind),
-                            logs.join("\n"),
-                            output_tail(&logs, spec),
+                            message.message.clone(),
+                            tail.failure_tail(&message.message, spec),
                             RollbackDomain::Images,
                             image_definition_cleanup_paths(spec),
                         );

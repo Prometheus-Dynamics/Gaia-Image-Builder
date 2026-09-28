@@ -4,7 +4,7 @@ use gaia_validate::validate_spec_with_providers;
 
 use crate::AppContext;
 
-use super::{CommandOutcome, load_reuse_state};
+use super::{CommandOutcome, load_operation_durations, load_reuse_state};
 
 pub fn plan_build_command(
     context: &AppContext,
@@ -53,9 +53,11 @@ pub fn plan_build_command(
         }
     };
     let diagnostics = plan.validate();
+    let estimate = gaia_plan::estimate_plan(&plan, &load_operation_durations(&spec));
     CommandOutcome::Planned {
         spec,
         plan,
         diagnostics,
+        estimate,
     }
 }

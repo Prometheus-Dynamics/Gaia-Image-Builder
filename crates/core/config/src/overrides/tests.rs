@@ -59,6 +59,8 @@ fn documented_override_keys_parse_as_typed_keys() {
         "policy.failure.preserve_failed_outputs",
         "policy.failure.rollback_domains",
         "policy.providers.rust.allow_nested_build",
+        "policy.providers.rust.batch_builds",
+        "policy.failure.keep_going",
         "policy.providers.rust.retry_attempts",
         "policy.providers.rust.timeout_seconds",
         "policy.providers.git.allow_remote_resolution",

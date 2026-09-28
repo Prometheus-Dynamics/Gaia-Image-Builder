@@ -18,6 +18,8 @@ pub(crate) struct TuiState<'a> {
     pub(crate) validation: Option<ValidationReport>,
     pub(crate) plan: Option<ExecutionPlan>,
     pub(crate) plan_diagnostics: Vec<gaia_plan::PlanDiagnostic>,
+    /// Last recorded wall-clock duration (ms) per operation id.
+    pub(crate) operation_durations: std::collections::BTreeMap<String, u64>,
     pub(crate) last_run: Option<RunArtifacts>,
     pub(crate) last_run_duration: Option<Duration>,
     pub(crate) events: EventLog,
@@ -94,6 +96,7 @@ impl<'a> TuiState<'a> {
             validation: None,
             plan: None,
             plan_diagnostics: Vec::new(),
+            operation_durations: Default::default(),
             last_run: None,
             last_run_duration: None,
             events: EventLog::default(),
@@ -147,12 +150,14 @@ impl<'a> TuiState<'a> {
                     reuse_state.as_ref(),
                 );
                 let plan_diagnostics = plan.validate();
+                let operation_durations = load_operation_durations(&spec);
                 self.apply_refresh_artifacts(RefreshArtifacts {
                     options,
                     spec,
                     validation,
                     plan,
                     plan_diagnostics,
+                    operation_durations,
                 });
             }
             Err(error) => {
@@ -262,6 +267,7 @@ impl<'a> TuiState<'a> {
         self.validation = Some(artifacts.validation);
         self.plan = Some(artifacts.plan);
         self.plan_diagnostics = artifacts.plan_diagnostics;
+        self.operation_durations = artifacts.operation_durations;
         self.detail_scroll = 0;
         self.ensure_operation_selection();
         self.set_status("refreshed resolve/validate/plan state");
@@ -329,6 +335,7 @@ fn resolve_refresh_artifacts(
         reuse_state.as_ref(),
     );
     let plan_diagnostics = plan.validate();
+    let operation_durations = load_operation_durations(&spec);
 
     Ok(RefreshArtifacts {
         options,
@@ -336,6 +343,7 @@ fn resolve_refresh_artifacts(
         validation,
         plan,
         plan_diagnostics,
+        operation_durations,
     })
 }
 

@@ -24,6 +24,9 @@ fn apply_image_feed_to_rootfs_writes_install_file_env_and_service_content() {
             package: "smoke-app".into(),
             target_name: None,
             variant: gaia_spec::ArtifactVariantSpec::File,
+            features: Vec::new(),
+            no_default_features: false,
+            all_features: false,
         }),
         None,
         gaia_spec::ArtifactOutputSpec {
@@ -193,6 +196,9 @@ fn final_tar_image_contains_install_stage_env_and_service_content() {
             package: "smoke-app".into(),
             target_name: None,
             variant: gaia_spec::ArtifactVariantSpec::File,
+            features: Vec::new(),
+            no_default_features: false,
+            all_features: false,
         }),
         None,
         gaia_spec::ArtifactOutputSpec {
@@ -324,6 +330,9 @@ fn apply_image_feed_to_rootfs_rejects_wrong_target_artifact_binary() {
             package: "smoke-app".into(),
             target_name: None,
             variant: gaia_spec::ArtifactVariantSpec::File,
+            features: Vec::new(),
+            no_default_features: false,
+            all_features: false,
         }),
         None,
         gaia_spec::ArtifactOutputSpec {

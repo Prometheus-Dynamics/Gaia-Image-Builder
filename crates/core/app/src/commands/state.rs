@@ -5,6 +5,31 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
 
+/// Reuse-state line prefix for the last wall-clock duration of an operation
+/// that executed: `dur=<operation id>;<milliseconds>`.
+const DURATION_PREFIX: &str = "dur=";
+
+/// Last recorded wall-clock duration (ms) per operation id. Read tolerantly:
+/// malformed lines are skipped, and durations are kept even when the rest of
+/// the state no longer matches the spec, since they are only estimates.
+pub fn load_operation_durations(spec: &ResolvedBuildSpec) -> BTreeMap<String, u64> {
+    fs::read_to_string(reuse_state_path(spec))
+        .map(|contents| parse_operation_durations(&contents))
+        .unwrap_or_default()
+}
+
+fn parse_operation_durations(contents: &str) -> BTreeMap<String, u64> {
+    contents
+        .lines()
+        .filter_map(|line| line.strip_prefix(DURATION_PREFIX))
+        .filter_map(|line| line.rsplit_once(';'))
+        .filter_map(|(operation_id, value)| {
+            let value = value.trim().parse::<u64>().ok()?;
+            (!operation_id.is_empty()).then(|| (operation_id.to_string(), value))
+        })
+        .collect()
+}
+
 pub fn load_reuse_state(spec: &ResolvedBuildSpec) -> Option<ReuseState> {
     let path = reuse_state_path(spec);
     let contents = fs::read_to_string(path).ok()?;
@@ -21,6 +46,7 @@ pub fn load_reuse_state(spec: &ResolvedBuildSpec) -> Option<ReuseState> {
                 && !line.starts_with("op=")
                 && !line.starts_with("out=")
                 && !line.starts_with("in=")
+                && !line.starts_with(DURATION_PREFIX)
         })
         .map(ToOwned::to_owned)
         .collect::<BTreeSet<_>>();
@@ -77,6 +103,15 @@ pub fn save_reuse_state(
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
+    let mut durations = load_operation_durations(spec);
+    for timing in &outcome.operation_timings {
+        if timing.status == gaia_exec::OperationTimingStatus::Built {
+            durations.insert(
+                timing.operation_id.as_str().to_string(),
+                u64::try_from(timing.duration.as_millis()).unwrap_or(u64::MAX),
+            );
+        }
+    }
     let rolled_back = outcome
         .rolled_back_ids
         .iter()
@@ -128,6 +163,11 @@ pub fn save_reuse_state(
                 body.push_str(&format!("in={id};{signature}\n"));
             }
         }
+    }
+    // Durations are estimates only: keep them for every operation, including
+    // ones whose reuse entry was dropped, so `gaia plan` can still estimate.
+    for (id, milliseconds) in &durations {
+        body.push_str(&format!("{DURATION_PREFIX}{id};{milliseconds}\n"));
     }
     // Write-then-rename so an interrupted save never leaves a truncated file.
     let temporary = path.with_extension("reuse-state.tmp");
@@ -324,6 +364,73 @@ mod tests {
                 .map(String::as_str),
             Some(signature)
         );
+    }
+
+    #[test]
+    fn durations_are_parsed_tolerantly_and_not_taken_as_operation_ids() {
+        let parsed = parse_operation_durations(concat!(
+            "fingerprint=1\n",
+            "dur=artifact:app;1500\n",
+            "dur=image:build;not-a-number\n",
+            "dur=broken-no-separator\n",
+            "dur=;12\n",
+            "dur=stage:a;b;7\n",
+        ));
+        assert_eq!(parsed.get("artifact:app"), Some(&1500));
+        assert_eq!(parsed.get("stage:a;b"), Some(&7));
+        assert_eq!(parsed.len(), 2);
+
+        let spec = test_spec();
+        let path = reuse_state_path(&spec);
+        fs::create_dir_all(path.parent().expect("parent")).expect("reuse state dir");
+        fs::write(&path, "fingerprint=5\nartifact:app\ndur=artifact:app;10\n")
+            .expect("reuse state write");
+        let state = load_reuse_state(&spec).expect("reuse state");
+        assert_eq!(
+            state.completed_operation_ids,
+            ["artifact:app".to_string()].into_iter().collect()
+        );
+    }
+
+    #[test]
+    fn save_records_built_durations_and_keeps_older_ones() {
+        let spec = test_spec();
+        let path = reuse_state_path(&spec);
+        fs::create_dir_all(path.parent().expect("parent")).expect("reuse state dir");
+        fs::write(
+            &path,
+            "fingerprint=5\ndur=image:build;90000\ndur=artifact:app;10\n",
+        )
+        .expect("reuse state write");
+        let plan = ExecutionPlan {
+            build_id: spec.identity.id.clone(),
+            operations: Vec::new(),
+        };
+        let timing = |id: &str, ms: u64, status| gaia_exec::OperationTiming {
+            operation_id: gaia_plan::OperationId::new(id),
+            duration: std::time::Duration::from_millis(ms),
+            status,
+        };
+        let outcome = ExecutionOutcome {
+            operation_timings: vec![
+                timing(
+                    "artifact:app",
+                    2500,
+                    gaia_exec::OperationTimingStatus::Built,
+                ),
+                timing("artifact:lib", 1, gaia_exec::OperationTimingStatus::Reused),
+                timing("artifact:bad", 3, gaia_exec::OperationTimingStatus::Failed),
+            ],
+            ..ExecutionOutcome::default()
+        };
+
+        save_reuse_state(&spec, &plan, &outcome, None);
+        let durations = load_operation_durations(&spec);
+
+        assert_eq!(durations.get("artifact:app"), Some(&2500));
+        assert_eq!(durations.get("image:build"), Some(&90000));
+        assert!(!durations.contains_key("artifact:lib"));
+        assert!(!durations.contains_key("artifact:bad"));
     }
 
     #[test]

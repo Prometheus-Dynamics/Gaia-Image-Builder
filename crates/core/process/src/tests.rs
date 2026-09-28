@@ -386,6 +386,93 @@ fn run_command_retains_blank_line_bytes() {
     assert_eq!(result.stderr_lines, vec![""]);
 }
 
+#[cfg(unix)]
+#[test]
+fn run_command_retries_while_executable_is_busy() {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = unique_dir("etxtbsy");
+    fs::create_dir_all(&dir).expect("dir");
+    let script = dir.join("tool.sh");
+    let mut writer = fs::File::create(&script).expect("script");
+    writer
+        .write_all(b"#!/bin/sh\necho ready\n")
+        .expect("script body");
+    writer.flush().expect("flush");
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).expect("mode");
+    // Keep the script open for writing briefly, like a concurrently forked
+    // child that inherited the descriptor.
+    let releaser = thread::spawn(move || {
+        thread::sleep(std::time::Duration::from_millis(40));
+        drop(writer);
+    });
+
+    let result = run_command_with_timeout(
+        &mut Command::new(&script),
+        std::time::Duration::from_secs(10),
+        "busy script",
+        None,
+        None,
+    )
+    .expect("spawn should retry until the script is released");
+    releaser.join().expect("releaser");
+
+    assert!(result.output.status.success());
+    assert_eq!(result.stdout_lines, vec!["ready".to_string()]);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn run_command_keeps_up_with_high_rate_line_output() {
+    // 300k short lines: the drain loop must wait on the queue rather than
+    // sleep between polls, or the bounded queue throttles the child.
+    let started = std::time::Instant::now();
+    let result = run_command_with_timeout(
+        Command::new("sh")
+            .arg("-c")
+            .arg("yes line | head -n 300000; echo done"),
+        std::time::Duration::from_secs(60),
+        "chatty",
+        None,
+        None,
+    )
+    .expect("chatty command");
+
+    assert!(result.output.status.success());
+    assert_eq!(result.stdout_lines.last().map(String::as_str), Some("done"));
+    assert_eq!(result.stdout_lines.len(), 1_000);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(20),
+        "took {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn retained_stream_keeps_newest_lines_and_bytes() {
+    let mut retained = RetainedStream::with_limits(3, 5);
+    for index in 0..10 {
+        retained.push_line(format!("line {index}"));
+    }
+    retained.push_bytes(b"abc");
+    retained.push_bytes(b"defg");
+    assert_eq!(retained.take_bytes(), b"cdefg".to_vec());
+    retained.push_bytes(b"0123456789");
+    assert_eq!(retained.take_bytes(), b"56789".to_vec());
+    assert_eq!(
+        retained.take_lines(),
+        vec!["line 7".to_string(), "line 8".into(), "line 9".into()]
+    );
+
+    let mut disabled = RetainedStream::with_limits(0, 0);
+    disabled.push_line("ignored".into());
+    disabled.push_bytes(b"ignored");
+    assert!(disabled.take_lines().is_empty());
+    assert!(disabled.take_bytes().is_empty());
+}
+
 fn unique_dir(name: &str) -> PathBuf {
     let counter = TEST_DIR_COUNTER.fetch_add(1, Ordering::SeqCst);
     std::env::temp_dir().join("gaia-tests").join(format!(

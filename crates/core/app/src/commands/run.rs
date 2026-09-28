@@ -292,10 +292,24 @@ impl ConsoleProgress {
                 let message = compact_log_line(&message);
                 self.finish_operation(operation_id.as_str(), &format!("failed: {message}"));
             }
+            ExecutionEvent::Skipped {
+                operation_id,
+                reason,
+            } => {
+                self.finish_operation(operation_id.as_str(), &reason);
+            }
         }
     }
 
     fn finish_operation(&mut self, operation_id: &str, status: &str) {
+        let status = match self.running.get(operation_id) {
+            Some(started_at) if status == "done" => format!(
+                "{status} in {}",
+                gaia_plan::format_duration_short(started_at.elapsed())
+            ),
+            _ => status.to_string(),
+        };
+        let status = status.as_str();
         self.running.remove(operation_id);
         self.last_log.remove(operation_id);
         self.terminal.insert(operation_id.to_string());

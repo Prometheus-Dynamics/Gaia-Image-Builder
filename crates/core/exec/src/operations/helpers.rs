@@ -1,15 +1,79 @@
 use super::*;
 use gaia_image_providers::ImageExecutionPolicy;
 use gaia_spec::{KeyValueState, SourceDefinition, StageItemId};
+use std::collections::VecDeque;
 use std::fs as std_fs;
+use std::sync::{Arc, Mutex};
 
-pub(crate) fn merge_streamed_logs(
-    receiver: mpsc::Receiver<String>,
-    mut messages: Vec<String>,
-) -> Vec<String> {
-    let mut streamed = receiver.try_iter().collect::<Vec<_>>();
-    streamed.append(&mut messages);
-    streamed
+/// Bounded tail of an operation's streamed output.
+///
+/// Every streamed line goes to the live event sink as it arrives; only the
+/// newest `failure_tail_lines` are kept here, for the failure output tail. A
+/// long build (Buildroot emits hundreds of thousands of lines) therefore
+/// costs constant memory and is never re-emitted after it finishes.
+#[derive(Clone)]
+pub(crate) struct LogTail {
+    inner: Arc<Mutex<VecDeque<String>>>,
+    capacity: usize,
+}
+
+impl LogTail {
+    pub(crate) fn new(capacity: usize) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(VecDeque::with_capacity(capacity.min(1024)))),
+            capacity,
+        }
+    }
+
+    pub(crate) fn for_spec(spec: &ResolvedBuildSpec) -> Self {
+        Self::new(spec.policy.execution.output_retention.failure_tail_lines)
+    }
+
+    pub(crate) fn push(&self, line: String) {
+        if self.capacity == 0 {
+            return;
+        }
+        let mut lines = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if lines.len() == self.capacity {
+            lines.pop_front();
+        }
+        lines.push_back(line);
+    }
+
+    pub(crate) fn lines(&self) -> Vec<String> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    /// The retained streamed tail followed by the failure message, bounded
+    /// to the configured tail length.
+    pub(crate) fn failure_tail(&self, message: &str, spec: &ResolvedBuildSpec) -> Vec<String> {
+        let mut lines = self.lines();
+        lines.extend(message.lines().map(str::to_string));
+        output_tail(&lines, spec)
+    }
+
+    /// A sink that streams each line live to the event sender and keeps the
+    /// bounded tail. `None` when nobody is observing the run.
+    pub(crate) fn sink(
+        &self,
+        operation_id: OperationId,
+        event_sender: Option<mpsc::Sender<ExecutionEvent>>,
+    ) -> Option<gaia_process::ProcessLogSink> {
+        let direct_sink = process_log_sink(operation_id, event_sender)?;
+        let tail = self.clone();
+        Some(Arc::new(move |line: gaia_process::ProcessLogLine| {
+            tail.push(line.line.clone());
+            direct_sink(line);
+        }) as gaia_process::ProcessLogSink)
+    }
 }
 
 pub(crate) fn output_tail(lines: &[String], spec: &ResolvedBuildSpec) -> Vec<String> {

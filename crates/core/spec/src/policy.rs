@@ -166,13 +166,29 @@ impl std::fmt::Display for RetryBackoffStrategySpec {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RustProviderPolicySpec {
     pub allow_nested_build: bool,
+    /// Build nested cargo artifacts that share a workspace, target triple,
+    /// profile and execution backend with one `cargo build -p a -p b ...`.
+    pub batch_builds: bool,
     pub retry_attempts: u32,
     pub retry_backoff_ms: u64,
     pub retry_backoff_strategy: RetryBackoffStrategySpec,
     pub timeout_seconds: u64,
+}
+
+impl Default for RustProviderPolicySpec {
+    fn default() -> Self {
+        Self {
+            allow_nested_build: false,
+            batch_builds: true,
+            retry_attempts: 0,
+            retry_backoff_ms: 0,
+            retry_backoff_strategy: RetryBackoffStrategySpec::default(),
+            timeout_seconds: 0,
+        }
+    }
 }
 
 impl From<&RustProviderPolicySpec> for ResolvedCommandPolicySpec {
@@ -248,6 +264,9 @@ pub struct FailureHandlingPolicySpec {
     pub rollback_on_error: bool,
     pub preserve_failed_outputs: bool,
     pub rollback_domains: Vec<RollbackDomain>,
+    /// After a failure, let independent operations finish; only dependents
+    /// of the failed operation are skipped. The run still fails.
+    pub keep_going: bool,
 }
 
 impl Default for FailureHandlingPolicySpec {
@@ -255,6 +274,7 @@ impl Default for FailureHandlingPolicySpec {
         Self {
             rollback_on_error: true,
             preserve_failed_outputs: false,
+            keep_going: false,
             rollback_domains: RollbackDomain::all(),
         }
     }

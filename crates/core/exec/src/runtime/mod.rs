@@ -9,6 +9,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
+use std::time::Duration;
 
 use crate::{ExecutionCleanupStatus, ExecutionError, ExecutionEvent, OperationExecutionResult};
 
@@ -37,6 +38,37 @@ pub struct ExecutionOutcome {
     pub events: Vec<ExecutionEvent>,
     pub errors: Vec<ExecutionError>,
     pub cleanup_failures: Vec<CleanupFailure>,
+    /// Wall-clock time of every operation that ran, in completion order.
+    /// Batched artifact builds each report the batch's duration.
+    pub operation_timings: Vec<OperationTiming>,
+    /// Operations not run because a dependency failed (`keep_going` only).
+    pub skipped_ids: Vec<OperationId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationTiming {
+    pub operation_id: OperationId,
+    pub duration: Duration,
+    pub status: OperationTimingStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperationTimingStatus {
+    Built,
+    Reused,
+    Failed,
+    Cancelled,
+}
+
+impl OperationTimingStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Built => "built",
+            Self::Reused => "reused",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +116,37 @@ impl ExecutionRuntime {
 
     pub fn context(&self) -> &ExecutionContext {
         &self.context
+    }
+
+    /// Records a result together with the wall-clock time it took.
+    pub fn record_timed(&mut self, result: OperationExecutionResult, duration: Duration) {
+        let status = if result.error.is_some() {
+            OperationTimingStatus::Failed
+        } else if result.cancelled {
+            OperationTimingStatus::Cancelled
+        } else if result.reused_source.is_some() {
+            OperationTimingStatus::Reused
+        } else {
+            OperationTimingStatus::Built
+        };
+        self.outcome.operation_timings.push(OperationTiming {
+            operation_id: result.operation_id.clone(),
+            duration,
+            status,
+        });
+        self.record(result);
+    }
+
+    /// Marks `operation_id` as not run because `failed_dependency` failed.
+    pub fn skip(&mut self, operation_id: &OperationId, failed_dependency: &OperationId) {
+        self.outcome.skipped_ids.push(operation_id.clone());
+        self.emit_event(ExecutionEvent::Skipped {
+            operation_id: operation_id.clone(),
+            reason: format!(
+                "skipped because dependency '{}' failed",
+                failed_dependency.as_str()
+            ),
+        });
     }
 
     pub fn record(&mut self, result: OperationExecutionResult) {
@@ -134,6 +197,27 @@ impl ExecutionRuntime {
         preserve_failed_outputs: bool,
         rollback_domains: &[RollbackDomain],
     ) {
+        self.clean_failed_outputs(
+            failed_operation_id,
+            failed_cleanup_domain,
+            failed_cleanup_paths,
+            preserve_failed_outputs,
+            rollback_domains,
+        );
+        self.unwind_completed(rollback_domains);
+    }
+
+    /// Removes (or deliberately keeps) the partial outputs of one failed
+    /// operation, without touching operations that succeeded. Used on its
+    /// own under `keep_going`, where finished work is kept for reuse.
+    pub fn clean_failed_outputs(
+        &mut self,
+        failed_operation_id: &OperationId,
+        failed_cleanup_domain: Option<RollbackDomain>,
+        failed_cleanup_paths: &[PathBuf],
+        preserve_failed_outputs: bool,
+        rollback_domains: &[RollbackDomain],
+    ) {
         if !preserve_failed_outputs
             && !failed_cleanup_paths.is_empty()
             && cleanup_domain_enabled(failed_cleanup_domain, rollback_domains)
@@ -174,6 +258,9 @@ impl ExecutionRuntime {
                 ),
             });
         }
+    }
+
+    fn unwind_completed(&mut self, rollback_domains: &[RollbackDomain]) {
         while let Some((operation_id, cleanup_domain, cleanup_paths_for_op)) =
             self.cleanup_stack.pop()
         {

@@ -71,6 +71,9 @@ fn starting_point_tar_rootfs_accepts_image_feed_overlay() {
             package: "smoke-app".into(),
             target_name: None,
             variant: ArtifactVariantSpec::File,
+            features: Vec::new(),
+            no_default_features: false,
+            all_features: false,
         }),
         Some(SourceRef::new("base-rootfs")),
         ArtifactOutputSpec {
