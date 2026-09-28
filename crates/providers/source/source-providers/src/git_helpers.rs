@@ -29,6 +29,43 @@ pub(crate) fn clone_or_update_local_git_source(
     if let Some(reference_repo) = &reference_repo {
         clone.arg("--reference-if-able").arg(reference_repo);
     }
+    if let Some(locked_commit) = &git.locked_commit {
+        // A locked commit need not be the branch tip any more, so clone the
+        // full history (objects come from the mirror for remote repos) and
+        // check out exactly that commit.
+        clone.arg(repo).arg(output_dir);
+        run_command_with_policy(
+            clone,
+            execution,
+            "clone locked git source",
+            policy,
+            log_sink.clone(),
+            cancel_check.clone(),
+        )?;
+        let mut checkout = git_command();
+        checkout
+            .arg("-C")
+            .arg(output_dir)
+            .arg("checkout")
+            .arg("--detach")
+            .arg(locked_commit);
+        run_command_with_policy(
+            checkout,
+            execution,
+            "checkout locked git commit",
+            policy,
+            log_sink,
+            cancel_check,
+        )?;
+        let head = git_head_commit(output_dir).unwrap_or_default();
+        if !head.starts_with(locked_commit.as_str()) {
+            return Err(SourceProviderError::backend_command(format!(
+                "git source '{}' checked out '{head}' instead of locked commit '{locked_commit}'",
+                git.repo
+            )));
+        }
+        return write_selected_subdir_marker(git, output_dir);
+    }
     if git.rev.is_none() {
         clone.arg("--depth").arg("1");
         if let Some(branch) = &git.branch {
@@ -87,6 +124,13 @@ pub(crate) fn clone_or_update_local_git_source(
             cancel_check,
         )?;
     }
+    write_selected_subdir_marker(git, output_dir)
+}
+
+fn write_selected_subdir_marker(
+    git: &GitSourceSpec,
+    output_dir: &Path,
+) -> Result<(), SourceProviderError> {
     if let Some(subdir) = &git.subdir {
         fs::write(output_dir.join("selected-subdir.txt"), subdir).map_err(|error| {
             SourceProviderError::runtime_state(format!(
@@ -116,7 +160,7 @@ fn ensure_remote_git_cache(
             cache_dir.display()
         ))
     })?;
-    let mirror_dir = cache_dir.join(format!("{}.git", remote_git_cache_key(git)));
+    let mirror_dir = cache_dir.join(remote_git_mirror_dir_name(&git.repo));
     if mirror_dir.join("HEAD").is_file() {
         // Refresh so the mirror keeps supplying objects for new commits; a
         // failed refresh only makes the clone fetch more itself.
@@ -157,10 +201,82 @@ fn ensure_remote_git_cache(
 }
 
 /// One mirror per repository, shared by every branch, tag and revision.
-fn remote_git_cache_key(git: &GitSourceSpec) -> String {
+pub fn remote_git_cache_key(repo: &str) -> String {
     let mut hasher = DefaultHasher::new();
-    git.repo.hash(&mut hasher);
+    repo.hash(&mut hasher);
     format!("repo-{:016x}", hasher.finish())
+}
+
+/// Directory name of a repository's mirror under `.gaia/cache/git`.
+pub fn remote_git_mirror_dir_name(repo: &str) -> String {
+    format!("{}.git", remote_git_cache_key(repo))
+}
+
+/// Workspace-relative directory holding the shared git mirrors.
+pub const GIT_MIRROR_CACHE_DIR: &str = ".gaia/cache/git";
+
+/// Resolves the commit a git source's configured ref points at, using
+/// `git ls-remote` (works for remote URLs, `file://` URLs and local paths).
+/// Sources pinned with `rev` resolve to that revision unchanged.
+pub fn resolve_git_source_commit(git: &GitSourceSpec, timeout: Duration) -> Result<String, String> {
+    if let Some(rev) = &git.rev {
+        return Ok(rev.clone());
+    }
+    let repo = git.repo.as_str();
+    let (kind, value) = git_selected_ref(git);
+    let mut command = git_command();
+    command.arg("ls-remote").arg(repo);
+    let wanted: Vec<String> = match kind {
+        "branch" => {
+            command.arg(format!("refs/heads/{value}"));
+            vec![format!("refs/heads/{value}")]
+        }
+        "tag" => {
+            // Annotated tags list the tag object and the peeled commit
+            // (`refs/tags/<tag>^{}`); the peeled line only matches a glob.
+            command.arg(format!("refs/tags/{value}"));
+            command.arg(format!("refs/tags/{value}^*"));
+            vec![
+                format!("refs/tags/{value}^{{}}"),
+                format!("refs/tags/{value}"),
+            ]
+        }
+        _ => {
+            command.arg("HEAD");
+            vec!["HEAD".into()]
+        }
+    };
+    let output = gaia_process::run_command_with_timeout(
+        &mut command,
+        timeout,
+        &format!("git ls-remote for '{repo}'"),
+        None,
+        None,
+    )
+    .map_err(|error| error.message)?
+    .output;
+    if !output.status.success() {
+        return Err(format!(
+            "git ls-remote failed for '{repo}': {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let listing = String::from_utf8_lossy(&output.stdout);
+    let refs = listing
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            Some((parts.next()?.to_string(), parts.next()?.to_string()))
+        })
+        .collect::<Vec<_>>();
+    wanted
+        .iter()
+        .find_map(|name| {
+            refs.iter()
+                .find(|(_, candidate)| candidate == name)
+                .map(|(sha, _)| sha.clone())
+        })
+        .ok_or_else(|| format!("{kind} '{value}' was not found in '{repo}'"))
 }
 
 pub(crate) fn resolve_remote_git_refs(

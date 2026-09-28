@@ -182,10 +182,12 @@ fn source_refresh_rebuild_reason(
     };
     let source = spec.sources.iter().find(|source| source.id == *source_id)?;
     let (refresh_policy, pin_policy, remote_git) = match &source.definition {
+        // A lockfile entry pins the commit, so the source is not floating
+        // even when its configured ref is.
         SourceDefinition::Git(git) => (
             git.refresh_policy,
             git.pin_policy,
-            local_repo_path(&git.repo).is_none(),
+            local_repo_path(&git.repo).is_none() && git.locked_commit.is_none(),
         ),
         SourceDefinition::Path(path) => (path.refresh_policy, path.pin_policy, false),
         SourceDefinition::Archive(archive) => (archive.refresh_policy, archive.pin_policy, false),
@@ -260,6 +262,11 @@ pub fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
             {
                 format!("{artifact:?}").hash(&mut hasher);
                 artifact_backend_signature(artifact).hash(&mut hasher);
+                // Only hashed when present so image-only artifacts keep
+                // their existing fingerprints.
+                if let Some(image) = artifact_docker_build_signature(spec, artifact) {
+                    image.hash(&mut hasher);
+                }
             }
         }
         OperationKind::InstallArtifact { install_id, .. } => {
@@ -340,6 +347,33 @@ fn source_backend_signature(spec: &ResolvedBuildSpec, source: &gaia_spec::Source
             )
         ),
     }
+}
+
+/// Content hash of a Dockerfile-built execution image, so editing the
+/// Dockerfile or its context rebuilds the artifact.
+fn artifact_docker_build_signature(
+    spec: &ResolvedBuildSpec,
+    artifact: &gaia_spec::ArtifactSpec,
+) -> Option<String> {
+    let Some(gaia_spec::ArtifactExecutionSpec::Docker(docker)) = &artifact.execution else {
+        return None;
+    };
+    let dockerfile = resolve_workspace_path(spec, docker.dockerfile.as_deref()?);
+    let context = docker
+        .context
+        .as_deref()
+        .map(|context| resolve_workspace_path(spec, context))
+        .unwrap_or_else(|| {
+            dockerfile
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_default()
+        });
+    Some(
+        gaia_process::docker_build_context_hash(&dockerfile, &context)
+            .map(|hash| format!("docker-build:{hash}"))
+            .unwrap_or_else(|error| format!("docker-build-error:{error}")),
+    )
 }
 
 fn artifact_backend_signature(artifact: &gaia_spec::ArtifactSpec) -> String {
@@ -495,6 +529,11 @@ fn resolve_workspace_path(spec: &ResolvedBuildSpec, value: &str) -> PathBuf {
 }
 
 fn git_source_state_signature(git: &gaia_spec::GitSourceSpec) -> String {
+    if let Some(locked_commit) = &git.locked_commit {
+        // The checkout is fully determined by the locked commit; new commits
+        // in a local repository do not change it.
+        return format!("locked-git:{locked_commit}");
+    }
     if let Some(local_repo) = local_repo_path(&git.repo) {
         let mut command = Command::new("git");
         command

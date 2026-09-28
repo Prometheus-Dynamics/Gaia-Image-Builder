@@ -158,5 +158,10 @@ mod tests;
 
 pub(crate) use command::*;
 pub(crate) use digest::*;
+pub use download::{DOWNLOAD_CACHE_DIR, download_cache_path};
 pub(crate) use git_helpers::*;
+pub use git_helpers::{
+    GIT_MIRROR_CACHE_DIR, remote_git_cache_key, remote_git_mirror_dir_name,
+    resolve_git_source_commit,
+};
 pub(crate) use state::*;

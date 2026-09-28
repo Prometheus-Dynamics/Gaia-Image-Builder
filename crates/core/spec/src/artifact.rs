@@ -47,9 +47,30 @@ pub enum ArtifactExecutionSpec {
     Docker(DockerArtifactExecutionSpec),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct DockerArtifactExecutionSpec {
     pub image: Option<String>,
+    /// Dockerfile Gaia builds the execution image from (workspace path).
+    pub dockerfile: Option<String>,
+    /// Build context for `dockerfile`; defaults to the Dockerfile's directory.
+    pub context: Option<String>,
+}
+
+// Operation fingerprints hash the Debug output of specs. The Dockerfile
+// fields are only printed when set, so image-only artifacts keep the
+// fingerprints they had before Dockerfile support existed.
+impl std::fmt::Debug for DockerArtifactExecutionSpec {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = formatter.debug_struct("DockerArtifactExecutionSpec");
+        debug.field("image", &self.image);
+        if let Some(dockerfile) = &self.dockerfile {
+            debug.field("dockerfile", dockerfile);
+        }
+        if let Some(context) = &self.context {
+            debug.field("context", context);
+        }
+        debug.finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

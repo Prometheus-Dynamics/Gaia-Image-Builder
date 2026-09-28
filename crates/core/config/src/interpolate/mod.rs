@@ -549,6 +549,16 @@ fn interpolate_artifact(
         .docker
         .image
         .map(|value| resolver::interpolate_string(value, raw, env));
+    artifact.execution.docker.dockerfile = artifact
+        .execution
+        .docker
+        .dockerfile
+        .map(|value| resolver::interpolate_string(value, raw, env));
+    artifact.execution.docker.context = artifact
+        .execution
+        .docker
+        .context
+        .map(|value| resolver::interpolate_string(value, raw, env));
     artifact.target = artifact
         .target
         .map(|value| resolver::interpolate_string(value, raw, env));

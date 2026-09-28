@@ -64,7 +64,7 @@ impl ArtifactExecutionContract {
                 .map(|execution| match execution {
                     ArtifactExecutionSpec::Host => ArtifactExecutionBackend::Host,
                     ArtifactExecutionSpec::Docker(docker) => ArtifactExecutionBackend::Docker(
-                        ArtifactDockerExecution::from_artifact(docker),
+                        ArtifactDockerExecution::from_artifact(artifact.id.as_str(), docker),
                     ),
                 })
                 .unwrap_or(ArtifactExecutionBackend::Host),
@@ -118,6 +118,9 @@ impl ArtifactExecutionContract {
             &self.execution_backend,
             self.execution_backend_explicit,
         );
+        if let ArtifactExecutionBackend::Docker(docker) = &mut self.execution_backend {
+            docker.resolve_build(spec);
+        }
         self.build_version = spec.identity.version.clone();
         self.build_branch = spec.metadata.branch.clone();
         self.build_target = spec.metadata.target.clone();
@@ -126,6 +129,16 @@ impl ArtifactExecutionContract {
 
     fn validate_release_invariants(&self) -> Result<(), ArtifactProviderError> {
         if let ArtifactExecutionBackend::Docker(docker) = &self.execution_backend {
+            if let Some(error) = docker
+                .build
+                .as_ref()
+                .and_then(|build| build.hash_error.as_ref())
+            {
+                return Err(ArtifactProviderError::new(
+                    ArtifactProviderErrorKind::PolicyBlocked,
+                    error.clone(),
+                ));
+            }
             if docker.image.trim().is_empty() {
                 return Err(ArtifactProviderError::new(
                     ArtifactProviderErrorKind::PolicyBlocked,
@@ -150,8 +163,8 @@ fn execution_backend_for_spec(
 ) -> ArtifactExecutionBackend {
     if explicit {
         return match current {
-            ArtifactExecutionBackend::Docker(docker) => {
-                ArtifactExecutionBackend::Docker(if docker.image.is_empty() {
+            ArtifactExecutionBackend::Docker(docker) => ArtifactExecutionBackend::Docker(
+                if docker.image.is_empty() && docker.build.is_none() {
                     spec.policy
                         .execution
                         .docker
@@ -160,14 +173,14 @@ fn execution_backend_for_spec(
                         .unwrap_or_else(|| docker.clone())
                 } else {
                     docker.clone()
-                })
-            }
+                },
+            ),
             ArtifactExecutionBackend::Host => ArtifactExecutionBackend::Host,
         };
     }
     match current {
         ArtifactExecutionBackend::Docker(docker) => {
-            ArtifactExecutionBackend::Docker(if docker.image.is_empty() {
+            ArtifactExecutionBackend::Docker(if docker.image.is_empty() && docker.build.is_none() {
                 spec.policy
                     .execution
                     .docker
@@ -235,20 +248,109 @@ pub enum ArtifactExecutionBackend {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactDockerExecution {
     pub image: String,
+    /// Set when the image is built by Gaia from a Dockerfile.
+    pub build: Option<ArtifactDockerImageBuild>,
+}
+
+/// A Dockerfile-backed execution image. Paths are resolved against the
+/// workspace when the build context is applied; `image` on the owning
+/// execution then holds the content-addressed tag.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactDockerImageBuild {
+    pub dockerfile: String,
+    pub context: Option<String>,
+    /// Repository name for the tag (from `image` or the artifact id).
+    pub name: String,
+    /// SHA-256 of the Dockerfile and context, once resolved.
+    pub content_hash: Option<String>,
+    /// Why the content hash could not be computed.
+    pub hash_error: Option<String>,
+    /// Docker image id, once the image is present locally.
+    pub image_id: Option<String>,
 }
 
 impl ArtifactDockerExecution {
     pub fn new(spec: &DockerExecutionSpec) -> Self {
         Self {
             image: spec.image.clone(),
+            build: None,
         }
     }
 
-    pub fn from_artifact(spec: &gaia_spec::DockerArtifactExecutionSpec) -> Self {
+    pub fn from_artifact(artifact_id: &str, spec: &gaia_spec::DockerArtifactExecutionSpec) -> Self {
+        let build = spec
+            .dockerfile
+            .as_ref()
+            .map(|dockerfile| ArtifactDockerImageBuild {
+                dockerfile: dockerfile.clone(),
+                context: spec.context.clone(),
+                name: spec
+                    .image
+                    .as_deref()
+                    .map(image_repository_name)
+                    .unwrap_or(artifact_id)
+                    .to_string(),
+                content_hash: None,
+                hash_error: None,
+                image_id: None,
+            });
         Self {
-            image: spec.image.clone().unwrap_or_default(),
+            // A Dockerfile-built image is tagged once its content is hashed.
+            image: if build.is_some() {
+                String::new()
+            } else {
+                spec.image.clone().unwrap_or_default()
+            },
+            build,
         }
     }
+
+    fn resolve_build(&mut self, spec: &ResolvedBuildSpec) {
+        let Some(build) = &mut self.build else {
+            return;
+        };
+        let resolve = |value: &str| {
+            gaia_spec::resolve_workspace_path(&spec.workspace, value)
+                .map_err(|error| format!("invalid docker build path '{value}': {error}"))
+        };
+        let resolved = resolve(&build.dockerfile).and_then(|dockerfile| {
+            let context = match &build.context {
+                Some(context) => resolve(context)?,
+                None => dockerfile
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_default(),
+            };
+            Ok((dockerfile, context))
+        });
+        match resolved {
+            Ok((dockerfile, context)) => {
+                build.dockerfile = dockerfile.display().to_string();
+                build.context = Some(context.display().to_string());
+                match gaia_process::docker_build_context_hash(&dockerfile, &context) {
+                    Ok(hash) => {
+                        self.image = gaia_process::docker_local_image_tag(&build.name, &hash);
+                        build.content_hash = Some(hash);
+                    }
+                    Err(error) => {
+                        build.hash_error = Some(format!(
+                            "failed to hash docker build '{}' (context '{}'): {error}",
+                            dockerfile.display(),
+                            context.display()
+                        ));
+                    }
+                }
+            }
+            Err(error) => build.hash_error = Some(error),
+        }
+    }
+}
+
+/// `registry.example/helios-cross-rust194:latest` -> `helios-cross-rust194`.
+fn image_repository_name(image: &str) -> &str {
+    let without_digest = image.split('@').next().unwrap_or(image);
+    let last = without_digest.rsplit('/').next().unwrap_or(without_digest);
+    last.split(':').next().unwrap_or(last)
 }
 
 pub(crate) fn resolve_workspace_root(spec: &ResolvedBuildSpec) -> String {

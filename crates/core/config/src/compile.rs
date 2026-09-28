@@ -291,6 +291,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                             },
                         ),
                         pin_policy: compile_source_pin_policy(pin, default_pin_policy),
+                        locked_commit: None,
                     })
                 }
                 RawSourceDefinition::Path {

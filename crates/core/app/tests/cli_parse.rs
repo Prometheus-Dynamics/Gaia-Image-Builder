@@ -135,6 +135,49 @@ fn reports_unknown_flags_missing_values_and_extra_arguments() {
 }
 
 #[test]
+fn parses_lock_update_with_optional_source_ids() {
+    let all = AppArgs::parse_from(["lock", "cm5.toml", "--update"]);
+    assert_eq!(all.command, AppCommand::Lock);
+    assert_eq!(all.build, "cm5.toml");
+    assert!(all.lock.update);
+    assert!(all.lock.sources.is_empty());
+    assert!(all.usage_errors.is_empty());
+
+    let named = AppArgs::parse_from(["lock", "cm5.toml", "--update", "orion,tools"]);
+    assert_eq!(named.lock.sources, vec!["orion", "tools"]);
+    assert!(named.usage_errors.is_empty());
+
+    // Before the build path, the value after --update stays the build.
+    let flag_first = AppArgs::parse_from(["lock", "--update", "cm5.toml"]);
+    assert_eq!(flag_first.build, "cm5.toml");
+    assert!(flag_first.lock.sources.is_empty());
+
+    let equals = AppArgs::parse_from(["lock", "--update=orion", "cm5.toml"]);
+    assert_eq!(equals.lock.sources, vec!["orion"]);
+    assert_eq!(equals.build, "cm5.toml");
+
+    let followed_by_flag = AppArgs::parse_from(["lock", "cm5.toml", "--update", "--preset", "ci"]);
+    assert!(followed_by_flag.lock.sources.is_empty());
+    assert_eq!(followed_by_flag.preset.as_deref(), Some("ci"));
+}
+
+#[test]
+fn parses_clean_cache_flags() {
+    let args = AppArgs::parse_from([
+        "clean",
+        "cm5.toml",
+        "--target",
+        "caches",
+        "--all-caches",
+        "--dry-run",
+    ]);
+    assert_eq!(args.command, AppCommand::Clean);
+    assert_eq!(args.clean.targets, vec!["caches"]);
+    assert!(args.clean.all_caches);
+    assert!(args.clean.dry_run);
+}
+
+#[test]
 fn help_flag_after_command_shows_help() {
     let args = AppArgs::parse_from(["run", "a.toml", "--help"]);
     assert_eq!(args.command, AppCommand::Help);

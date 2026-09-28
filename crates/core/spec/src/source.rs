@@ -39,7 +39,7 @@ impl SourceDefinition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct GitSourceSpec {
     pub repo: String,
     pub branch: Option<String>,
@@ -49,6 +49,48 @@ pub struct GitSourceSpec {
     pub update: bool,
     pub refresh_policy: SourceRefreshPolicySpec,
     pub pin_policy: SourcePinPolicySpec,
+    /// Commit recorded for this source in the build's lockfile. When set,
+    /// materialization checks out exactly this commit instead of the
+    /// configured branch/tag tip.
+    pub locked_commit: Option<String>,
+}
+
+impl GitSourceSpec {
+    /// The configured selector as `<kind>:<value>` (`branch:main`,
+    /// `tag:v1`, `rev:abc`, or `head:HEAD`), used to key lockfile entries.
+    pub fn ref_selector(&self) -> String {
+        if let Some(branch) = &self.branch {
+            format!("branch:{branch}")
+        } else if let Some(tag) = &self.tag {
+            format!("tag:{tag}")
+        } else if let Some(rev) = &self.rev {
+            format!("rev:{rev}")
+        } else {
+            "head:HEAD".into()
+        }
+    }
+}
+
+// Operation fingerprints hash the Debug output of specs. `locked_commit` is
+// only printed when set, so builds without a lockfile keep the fingerprints
+// they had before lockfiles existed.
+impl std::fmt::Debug for GitSourceSpec {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = formatter.debug_struct("GitSourceSpec");
+        debug
+            .field("repo", &self.repo)
+            .field("branch", &self.branch)
+            .field("tag", &self.tag)
+            .field("rev", &self.rev)
+            .field("subdir", &self.subdir)
+            .field("update", &self.update)
+            .field("refresh_policy", &self.refresh_policy)
+            .field("pin_policy", &self.pin_policy);
+        if let Some(locked_commit) = &self.locked_commit {
+            debug.field("locked_commit", locked_commit);
+        }
+        debug.finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

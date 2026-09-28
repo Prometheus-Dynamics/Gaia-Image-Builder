@@ -432,6 +432,8 @@ pub struct RawArtifactExecutionConfig {
 #[serde(default)]
 pub struct RawArtifactDockerExecutionConfig {
     pub image: Option<String>,
+    pub dockerfile: Option<String>,
+    pub context: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]

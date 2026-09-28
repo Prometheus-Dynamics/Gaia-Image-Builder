@@ -15,6 +15,7 @@ pub struct AppArgs {
     pub env_overrides: Vec<(String, String)>,
     pub explicit_overrides: Vec<(String, String)>,
     pub clean: CleanArgs,
+    pub lock: LockArgs,
     /// `--only` targets for run/plan: build domains or operation ids.
     pub only: Vec<String>,
     /// Problems found while parsing; dispatch refuses to run when non-empty.
@@ -27,6 +28,17 @@ pub struct CleanArgs {
     pub targets: Vec<String>,
     pub paths: Vec<String>,
     pub dry_run: bool,
+    /// `--all-caches`: with the `caches` target, also remove the shared
+    /// git, download, Buildroot download and docker tool caches.
+    pub all_caches: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LockArgs {
+    /// `--update`: re-resolve locked sources instead of keeping them.
+    pub update: bool,
+    /// Source ids named after `--update`; empty means every git source.
+    pub sources: Vec<String>,
 }
 
 impl AppArgs {
@@ -53,6 +65,7 @@ impl AppArgs {
             Some("validate") => Some(AppCommand::Validate),
             Some("plan") => Some(AppCommand::Plan),
             Some("clean") => Some(AppCommand::Clean),
+            Some("lock") => Some(AppCommand::Lock),
             Some("run") => Some(AppCommand::Run),
             _ => None,
         };
@@ -117,6 +130,25 @@ impl AppArgs {
                     }
                 }
                 "--dry-run" => parsed.clean.dry_run = true,
+                "--all-caches" => parsed.clean.all_caches = true,
+                "--update" => {
+                    parsed.lock.update = true;
+                    // `--update [source-id]`: an optional value, taken only
+                    // once the build path is known so it is never mistaken
+                    // for the build.
+                    if parsed.build_explicit
+                        && let Some(next) = args.next_if(|next| !next.starts_with('-'))
+                    {
+                        parsed.lock.sources.extend(split_list(&next));
+                    }
+                }
+                update if update.starts_with("--update=") => {
+                    parsed.lock.update = true;
+                    parsed
+                        .lock
+                        .sources
+                        .extend(split_list(&update["--update=".len()..]));
+                }
                 "--only" => {
                     if let Some(targets) = value("--only", &mut parsed.usage_errors) {
                         parsed.only.extend(
@@ -160,10 +192,20 @@ impl Default for AppArgs {
             env_overrides: Vec::new(),
             explicit_overrides: Vec::new(),
             clean: CleanArgs::default(),
+            lock: LockArgs::default(),
             only: Vec::new(),
             usage_errors: Vec::new(),
         }
     }
+}
+
+fn split_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 fn default_build_config() -> String {
@@ -213,6 +255,7 @@ pub enum AppCommand {
     Validate,
     Plan,
     Clean,
+    Lock,
     Run,
 }
 

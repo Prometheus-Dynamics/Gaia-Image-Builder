@@ -22,7 +22,8 @@ mod tar;
 
 pub use docker::{
     DockerRunError, DockerRunSpec, absolute_docker_mount_candidate, discover_docker_mounts,
-    docker_run_command, normalize_docker_mount_path,
+    docker_build_context_hash, docker_image_build_command, docker_image_id_command,
+    docker_local_image_tag, docker_run_command, normalize_docker_mount_path,
 };
 use stream::spawn_stream_reader;
 pub use tar::{TarArchiveValidationError, validate_tar_archive_entries};

@@ -189,6 +189,7 @@ fn git_provider_persists_resolved_commit_and_selected_ref() {
             update: true,
             refresh_policy: SourceRefreshPolicySpec::Always,
             pin_policy: SourcePinPolicySpec::Floating,
+            locked_commit: None,
         }),
     );
 
@@ -402,4 +403,214 @@ fn retry_backoff_duration_supports_fixed_and_exponential_strategies() {
         retry_backoff_duration(RetryBackoffStrategySpec::Exponential, 10, 3),
         Duration::from_millis(40)
     );
+}
+
+fn run_git(repo: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .expect("git command");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+fn init_repo_with_commit(repo_dir: &Path, contents: &str) {
+    fs::create_dir_all(repo_dir).expect("repo dir");
+    run_git(repo_dir, &["init", "-b", "main"]);
+    run_git(repo_dir, &["config", "user.email", "gaia@example.com"]);
+    run_git(repo_dir, &["config", "user.name", "Gaia Test"]);
+    commit_file(repo_dir, contents);
+}
+
+fn commit_file(repo_dir: &Path, contents: &str) -> String {
+    fs::write(repo_dir.join("VERSION"), contents).expect("repo file");
+    run_git(repo_dir, &["add", "."]);
+    run_git(repo_dir, &["commit", "-m", contents]);
+    run_git(repo_dir, &["rev-parse", "HEAD"])
+}
+
+fn git_source(repo: String, locked_commit: Option<String>) -> SourceSpec {
+    SourceSpec::new(
+        "locked-upstream",
+        SourceDefinition::Git(GitSourceSpec {
+            repo,
+            branch: Some("main".into()),
+            tag: None,
+            rev: None,
+            subdir: None,
+            update: false,
+            refresh_policy: SourceRefreshPolicySpec::Auto,
+            pin_policy: SourcePinPolicySpec::Locked,
+            locked_commit,
+        }),
+    )
+}
+
+#[test]
+fn git_provider_checks_out_locked_commit_instead_of_branch_tip() {
+    let build_dir = temp_path("gaia-source-git-locked-build");
+    let repo_dir = temp_path("gaia-source-git-locked-repo");
+    init_repo_with_commit(&repo_dir, "one");
+    let first = run_git(&repo_dir, &["rev-parse", "HEAD"]);
+    let second = commit_file(&repo_dir, "two");
+    assert_ne!(first, second);
+
+    let spec = test_spec(&build_dir);
+    let source = git_source(
+        format!("file://{}", repo_dir.display()),
+        Some(first.clone()),
+    );
+    GitSourceProvider
+        .execute_source(&spec, &source, None, None)
+        .expect("locked git source execution");
+
+    let materialized = materialized_dir(&spec, &source);
+    assert_eq!(
+        fs::read_to_string(materialized.join("VERSION")).expect("checked out file"),
+        "one"
+    );
+    assert_eq!(
+        git_head_commit(&materialized).as_deref(),
+        Some(first.as_str())
+    );
+    let state = fs::read_to_string(materialized.join(".gaia-source-state.txt")).expect("state");
+    assert!(state.contains(&format!("locked_commit_sha={first}")));
+    assert!(state.contains("lock_mode=locked"));
+
+    // Without a lock the same source follows the branch tip.
+    let unlocked = git_source(format!("file://{}", repo_dir.display()), None);
+    GitSourceProvider
+        .execute_source(&spec, &unlocked, None, None)
+        .expect("unlocked git source execution");
+    assert_eq!(
+        fs::read_to_string(materialized.join("VERSION")).expect("checked out file"),
+        "two"
+    );
+    let state = fs::read_to_string(materialized.join(".gaia-source-state.txt")).expect("state");
+    assert!(!state.contains("locked_commit_sha"));
+}
+
+#[test]
+fn resolve_git_source_commit_reads_branches_annotated_tags_and_head() {
+    let repo_dir = temp_path("gaia-source-git-resolve-repo");
+    init_repo_with_commit(&repo_dir, "one");
+    let tagged = run_git(&repo_dir, &["rev-parse", "HEAD"]);
+    run_git(&repo_dir, &["tag", "-a", "v1", "-m", "release v1"]);
+    let tip = commit_file(&repo_dir, "two");
+    let repo = format!("file://{}", repo_dir.display());
+    let timeout = Duration::from_secs(60);
+
+    let mut git = match git_source(repo.clone(), None).definition {
+        SourceDefinition::Git(git) => git,
+        _ => unreachable!(),
+    };
+    assert_eq!(
+        resolve_git_source_commit(&git, timeout).as_deref(),
+        Ok(tip.as_str())
+    );
+
+    git.branch = None;
+    git.tag = Some("v1".into());
+    assert_eq!(
+        resolve_git_source_commit(&git, timeout).as_deref(),
+        Ok(tagged.as_str())
+    );
+
+    git.tag = None;
+    assert_eq!(
+        resolve_git_source_commit(&git, timeout).as_deref(),
+        Ok(tip.as_str())
+    );
+
+    git.branch = Some("missing".into());
+    assert!(resolve_git_source_commit(&git, timeout).is_err());
+}
+
+#[test]
+fn download_provider_reuses_sha_keyed_cache_without_refetching() {
+    let workspace = temp_path("gaia-source-download-cache-root");
+    let build_dir = workspace.join("build");
+    let download_root = temp_path("gaia-source-download-cache-src");
+    fs::create_dir_all(&download_root).expect("download root");
+    let source_file = download_root.join("payload.txt");
+    fs::write(&source_file, "cached payload").expect("payload file");
+    let sha = sha256_or_placeholder(&source_file);
+
+    let mut spec = test_spec(&build_dir);
+    fs::create_dir_all(&workspace).expect("workspace");
+    spec.workspace.root_dir = workspace.display().to_string();
+    let source = SourceSpec::new(
+        "cached-download",
+        SourceDefinition::Download(DownloadSourceSpec {
+            url: format!("file://{}", source_file.display()),
+            sha256: Some(sha.to_ascii_uppercase()),
+            output_path: "payload.txt".into(),
+            refresh_policy: SourceRefreshPolicySpec::Auto,
+            pin_policy: SourcePinPolicySpec::Locked,
+        }),
+    );
+
+    let messages = DownloadSourceProvider
+        .execute_source(&spec, &source, None, None)
+        .expect("first download");
+    assert!(messages[0].contains("fetched"), "{messages:?}");
+    let cached =
+        download_cache_path(&fs::canonicalize(&workspace).unwrap(), &sha).expect("valid sha");
+    assert_eq!(fs::read_to_string(&cached).unwrap(), "cached payload");
+    let first_state =
+        fs::read_to_string(materialized_dir(&spec, &source).join(".gaia-source-state.txt"))
+            .expect("state");
+
+    // The URL no longer works, so a second materialization must come from the cache.
+    fs::remove_file(&source_file).expect("remove origin");
+    let messages = DownloadSourceProvider
+        .execute_source(&spec, &source, None, None)
+        .expect("cached download");
+    assert!(messages[0].contains("restored from cache"), "{messages:?}");
+    assert_eq!(
+        fs::read_to_string(materialized_dir(&spec, &source).join("payload.txt")).unwrap(),
+        "cached payload"
+    );
+    let second_state =
+        fs::read_to_string(materialized_dir(&spec, &source).join(".gaia-source-state.txt"))
+            .expect("state");
+    assert_eq!(first_state, second_state);
+}
+
+#[test]
+fn download_provider_does_not_cache_mismatched_content() {
+    let workspace = temp_path("gaia-source-download-nocache-root");
+    fs::create_dir_all(&workspace).expect("workspace");
+    let download_root = temp_path("gaia-source-download-nocache-src");
+    fs::create_dir_all(&download_root).expect("download root");
+    let source_file = download_root.join("payload.txt");
+    fs::write(&source_file, "payload").expect("payload file");
+    let wrong_sha = "0".repeat(64);
+
+    let mut spec = test_spec(&workspace.join("build"));
+    spec.workspace.root_dir = workspace.display().to_string();
+    let source = SourceSpec::new(
+        "bad-download",
+        SourceDefinition::Download(DownloadSourceSpec {
+            url: format!("file://{}", source_file.display()),
+            sha256: Some(wrong_sha.clone()),
+            output_path: "payload.txt".into(),
+            refresh_policy: SourceRefreshPolicySpec::Auto,
+            pin_policy: SourcePinPolicySpec::Locked,
+        }),
+    );
+    let error = DownloadSourceProvider
+        .execute_source(&spec, &source, None, None)
+        .expect_err("mismatch");
+    assert!(error.message.contains("sha256 mismatch"));
+    let cached =
+        download_cache_path(&fs::canonicalize(&workspace).unwrap(), &wrong_sha).expect("valid sha");
+    assert!(!cached.exists());
+    assert!(download_cache_path(&workspace, "deadbeef").is_none());
 }

@@ -3,6 +3,7 @@ mod dynamic_inputs;
 mod env;
 mod interpolate;
 mod load;
+pub mod lockfile;
 mod merge;
 mod overrides;
 mod raw;
@@ -63,13 +64,27 @@ pub fn try_resolve_config_with_options(
     );
     let interpolated = interpolate_config(with_dynamic_inputs, &env);
     let normalized = normalize_paths(interpolated)?;
-    let spec = compile_config(normalized);
+    let mut spec = compile_config(normalized);
+    apply_lockfile(&mut spec);
     tracing::debug!(
         build,
         build_id = spec.identity.id.as_str(),
         "compiled resolved build spec"
     );
     Ok(spec)
+}
+
+/// Pins git sources to the commits recorded in the build's lockfile. An
+/// unreadable lockfile is ignored here and reported by validation.
+fn apply_lockfile(spec: &mut ResolvedBuildSpec) {
+    let Some(path) = lockfile::lockfile_path(spec) else {
+        return;
+    };
+    match lockfile::GitLockfile::load(&path) {
+        Ok(Some(lock)) => lockfile::apply_git_lockfile(spec, &lock),
+        Ok(None) => {}
+        Err(error) => tracing::warn!(%error, "ignoring unreadable lockfile"),
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

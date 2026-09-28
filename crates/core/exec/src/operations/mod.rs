@@ -279,6 +279,23 @@ pub fn dispatch_operation(
                         direct_sink(line);
                     }) as gaia_artifact_providers::ProcessLogSink
                 });
+                let mut contract = contract;
+                if let Err(message) = gaia_artifact_providers::ensure_docker_execution_image(
+                    &mut contract,
+                    log_sink.clone(),
+                    cancel_check.clone(),
+                ) {
+                    let logs = merge_streamed_logs(log_rx, vec![message.message]);
+                    return failure_with_cleanup_and_tail(
+                        operation.id.clone(),
+                        "artifact_execution_image_failed",
+                        execution_error_kind_from_artifact(&message.kind),
+                        logs.join("\n"),
+                        output_tail(&logs, spec),
+                        RollbackDomain::Artifacts,
+                        Vec::new(),
+                    );
+                }
                 success_from_messages(
                     operation.id.clone(),
                     match provider.execute_artifact(

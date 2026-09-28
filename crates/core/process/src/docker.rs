@@ -185,9 +185,166 @@ fn docker_workspace_user_args(workspace_root: &Path) -> Vec<String> {
     Vec::new()
 }
 
+/// Directory names skipped when hashing a Docker build context: VCS
+/// metadata and build output that never belong in an execution image.
+const DOCKER_CONTEXT_IGNORES: &[&str] = &[".git", ".gaia", "target", "node_modules"];
+
+/// SHA-256 over a Dockerfile and every file in its build context (relative
+/// path, type, executable bit, contents and symlink targets), in sorted
+/// order. Stable across machines, so it can name a locally built image.
+pub fn docker_build_context_hash(dockerfile: &Path, context: &Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+
+    let mut hasher = Sha256::new();
+    hasher.update(b"dockerfile\0");
+    hasher.update(std::fs::read(dockerfile)?);
+    if !context.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!(
+                "docker build context '{}' is not a directory",
+                context.display()
+            ),
+        ));
+    }
+    let mut stack = vec![context.to_path_buf()];
+    let mut files = Vec::new();
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir)? {
+            let path = entry?.path();
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            if DOCKER_CONTEXT_IGNORES.contains(&name) {
+                continue;
+            }
+            let metadata = std::fs::symlink_metadata(&path)?;
+            if metadata.is_dir() {
+                stack.push(path);
+            } else {
+                files.push((path, metadata));
+            }
+        }
+    }
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    for (path, metadata) in files {
+        let relative = path.strip_prefix(context).unwrap_or(&path);
+        hasher.update(b"\0entry\0");
+        hasher.update(relative.to_string_lossy().as_bytes());
+        if metadata.file_type().is_symlink() {
+            hasher.update(b"\0symlink\0");
+            hasher.update(std::fs::read_link(&path)?.to_string_lossy().as_bytes());
+            continue;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let executable = metadata.permissions().mode() & 0o111 != 0;
+            hasher.update(if executable { b"\0x\0" } else { b"\0f\0" });
+        }
+        hasher.update(std::fs::read(&path)?);
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+/// Tag for a Gaia-built execution image: `gaia-local/<name>:<hash prefix>`.
+/// `name` is reduced to characters Docker accepts in a repository name.
+pub fn docker_local_image_tag(name: &str, content_hash: &str) -> String {
+    let mut repository = name
+        .chars()
+        .map(|character| match character.to_ascii_lowercase() {
+            lower @ ('a'..='z' | '0'..='9' | '.' | '_' | '-') => lower,
+            _ => '-',
+        })
+        .collect::<String>()
+        .trim_matches(|character| matches!(character, '-' | '.' | '_'))
+        .to_string();
+    if repository.is_empty() {
+        repository = "image".into();
+    }
+    let short_hash = &content_hash[..content_hash.len().min(16)];
+    format!("gaia-local/{repository}:{short_hash}")
+}
+
+/// `docker image inspect` printing the image id; fails when the tag is missing.
+pub fn docker_image_id_command(program: &std::ffi::OsStr, tag: &str) -> Command {
+    let mut command = Command::new(program);
+    command
+        .arg("image")
+        .arg("inspect")
+        .arg("--format")
+        .arg("{{.Id}}")
+        .arg(tag);
+    command
+}
+
+/// `docker build -f <dockerfile> -t <tag> <context>`.
+pub fn docker_image_build_command(
+    program: &std::ffi::OsStr,
+    dockerfile: &Path,
+    context: &Path,
+    tag: &str,
+) -> Command {
+    let mut command = Command::new(program);
+    command
+        .arg("build")
+        .arg("-f")
+        .arg(dockerfile)
+        .arg("-t")
+        .arg(tag)
+        .arg(context);
+    command
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn docker_build_context_hash_tracks_dockerfile_and_context_changes() {
+        let dir = unique_dir("docker-context-hash");
+        let context = dir.join("ctx");
+        fs::create_dir_all(context.join("scripts")).expect("context");
+        fs::create_dir_all(context.join(".git")).expect("git dir");
+        let dockerfile = context.join("Dockerfile");
+        fs::write(&dockerfile, "FROM rust:1.94\n").expect("dockerfile");
+        fs::write(context.join("scripts/setup.sh"), "echo hi\n").expect("script");
+
+        let first = docker_build_context_hash(&dockerfile, &context).expect("hash");
+        assert_eq!(first.len(), 64);
+        assert_eq!(
+            first,
+            docker_build_context_hash(&dockerfile, &context).expect("hash")
+        );
+        fs::write(context.join(".git/HEAD"), "ignored").expect("ignored file");
+        assert_eq!(
+            first,
+            docker_build_context_hash(&dockerfile, &context).expect("hash")
+        );
+        fs::write(context.join("scripts/setup.sh"), "echo changed\n").expect("script");
+        let second = docker_build_context_hash(&dockerfile, &context).expect("hash");
+        assert_ne!(first, second);
+        fs::write(&dockerfile, "FROM rust:1.95\n").expect("dockerfile");
+        assert_ne!(
+            second,
+            docker_build_context_hash(&dockerfile, &context).expect("hash")
+        );
+        assert!(docker_build_context_hash(&dir.join("missing"), &context).is_err());
+    }
+
+    #[test]
+    fn docker_local_image_tag_sanitizes_names() {
+        assert_eq!(
+            docker_local_image_tag("Helios Cross/Rust", &"ab".repeat(32)),
+            "gaia-local/helios-cross-rust:abababababababab"
+        );
+        assert_eq!(docker_local_image_tag("!!", "123"), "gaia-local/image:123");
+    }
     use std::ffi::OsStr;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
