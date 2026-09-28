@@ -159,7 +159,7 @@ pub(crate) fn refresh_buildroot_post_image_direct(
     Ok(Some(messages))
 }
 
-fn buildroot_config_value(config: &str, key: &str) -> Option<String> {
+pub(crate) fn buildroot_config_value(config: &str, key: &str) -> Option<String> {
     let prefix = format!("{key}=");
     config.lines().find_map(|line| {
         let value = line.strip_prefix(&prefix)?;
@@ -262,19 +262,32 @@ pub(crate) fn refresh_buildroot_squashfs_images_direct(
 
     command
         .arg("--")
+        // Run through sh: executing a script written moments ago can fail
+        // with ETXTBSY while a concurrently forked child still holds it.
+        .arg("/bin/sh")
         .arg(&working_fakeroot_script)
         .current_dir(buildroot_dir)
         .env("PATH", joined_path)
         .env("FAKEROOTDONTTRYCHOWN", "1");
 
-    let mut messages = run_command(
+    let result = run_command(
         command,
         "buildroot direct squashfs refresh",
         execution,
         policy,
         None,
         None,
-    )?;
+    );
+    // The working copy duplicates the whole target tree; drop it once the
+    // image is packed instead of leaving it in the output tree.
+    for leftover in [
+        working_target_dir.as_path(),
+        working_fakeroot_script.as_path(),
+        working_devices_table.as_path(),
+    ] {
+        remove_path_if_exists(leftover)?;
+    }
+    let mut messages = result?;
     messages.push(format!(
         "refreshed squashfs image directly via '{}'",
         fakeroot_script.display()

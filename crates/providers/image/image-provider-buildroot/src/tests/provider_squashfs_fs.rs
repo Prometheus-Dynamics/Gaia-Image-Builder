@@ -394,35 +394,15 @@ fn direct_squashfs_refresh_reuses_prepared_target_without_make() {
     fs::write(buildroot_dir.join("package-marker"), "present").expect("package marker");
     fs::write(source_target_dir.join("etc-motd"), "hello").expect("source target content");
     fs::write(staged_target_dir.join("prepared-marker"), "keep-me").expect("prepared staged file");
-    fs::write(
-        host_bin_dir.join("fakeroot"),
+    write_executable(
+        &host_bin_dir.join("fakeroot"),
         "#!/bin/sh\nPATH=\"$(dirname \"$0\"):$PATH\" exec \"$@\"\n",
-    )
-    .expect("fakeroot wrapper");
-    fs::write(host_bin_dir.join("chown"), "#!/bin/sh\nexit 0\n").expect("fake chown");
-    fs::write(
-        host_bin_dir.join("mksquashfs"),
+    );
+    write_executable(&host_bin_dir.join("chown"), "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &host_bin_dir.join("mksquashfs"),
         "#!/bin/sh\nprintf 'squashfs-image' > \"$2\"\n",
-    )
-    .expect("mksquashfs wrapper");
-    #[cfg(unix)]
-    {
-        fs::set_permissions(
-            host_bin_dir.join("fakeroot"),
-            fs::Permissions::from_mode(0o755),
-        )
-        .expect("fakeroot perms");
-        fs::set_permissions(
-            host_bin_dir.join("chown"),
-            fs::Permissions::from_mode(0o755),
-        )
-        .expect("chown perms");
-        fs::set_permissions(
-            host_bin_dir.join("mksquashfs"),
-            fs::Permissions::from_mode(0o755),
-        )
-        .expect("mksquashfs perms");
-    }
+    );
     fs::write(
             &fakeroot_script,
             format!(
@@ -455,16 +435,10 @@ fn direct_squashfs_refresh_reuses_prepared_target_without_make() {
         fs::read_to_string(&image_path).expect("squashfs image"),
         "squashfs-image"
     );
-    assert_eq!(
-        fs::read_to_string(working_target_dir.join("etc-motd")).expect("working copy"),
-        "hello"
-    );
-    assert_eq!(
-        fs::read_to_string(working_target_dir.join("prepared-marker"))
-            .expect("preserved prepared marker"),
-        "keep-me"
-    );
-    assert!(working_target_dir.join("var/empty").is_dir());
+    // The fakeroot script checked the merged working copy before packing;
+    // the copy itself must not be left behind.
+    assert!(!working_target_dir.exists(), "target.refresh left behind");
+    assert!(!squashfs_dir.join("fakeroot.refresh").exists());
 }
 
 #[test]

@@ -1,6 +1,7 @@
 pub mod support;
 
 use gaia_app::{AppArgs, CommandOutcome, run_with_args};
+use std::path::Path;
 use support::{unique_dir, write_temp_build};
 
 #[test]
@@ -122,11 +123,9 @@ required = true
         } => {
             assert!(execution_errors.is_empty(), "{execution_errors:?}");
             assert_eq!(
-                report
-                    .summary
-                    .primary_image_output
-                    .as_deref()
-                    .map(|path| path.ends_with("out/images/buildroot")),
+                report.summary.primary_image_output.as_deref().map(|path| {
+                    Path::new(path).starts_with(&run_out_dir) && path.ends_with("images/buildroot")
+                }),
                 Some(true)
             );
             assert!(report.summary.failure_classes.is_empty());

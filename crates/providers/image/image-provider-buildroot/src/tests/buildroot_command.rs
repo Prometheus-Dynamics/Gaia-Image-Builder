@@ -752,14 +752,10 @@ fn refresh_buildroot_post_image_direct_runs_configured_script_with_buildroot_env
         ),
     )
     .expect("buildroot config");
-    fs::write(
+    write_executable(
         &script_path,
         "#!/bin/sh\nset -e\n[ -d \"$BINARIES_DIR\" ]\n[ -d \"$TARGET_DIR\" ]\nprintf raw > \"$BINARIES_DIR/sdcard.img\"\n",
-    )
-    .expect("post image script");
-    #[cfg(unix)]
-    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755))
-        .expect("post image script perms");
+    );
 
     let messages = refresh_buildroot_post_image_direct(
         &buildroot_dir,

@@ -60,8 +60,27 @@ pub(crate) struct BuildrootRunRequest<'a> {
     pub(crate) command: ImageCommandContext<'a>,
 }
 
+/// Extra behavior for the final `make` of [`run_buildroot_with`].
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct BuildrootMakeOptions<'a> {
+    /// Appended to `BR2_ROOTFS_POST_BUILD_SCRIPT` on the make command line
+    /// (the `.config` file is left untouched).
+    pub(crate) post_build_script: Option<&'a Path>,
+    /// The output dir is a shared tree: once its fakeroot scripts match the
+    /// current config, only `make target-finalize` runs, because every build
+    /// packs its own images.
+    pub(crate) shared_tree: bool,
+}
+
 pub(crate) fn run_buildroot(
     request: BuildrootRunRequest<'_>,
+) -> Result<Vec<String>, ImageProviderError> {
+    run_buildroot_with(request, BuildrootMakeOptions::default())
+}
+
+pub(crate) fn run_buildroot_with(
+    request: BuildrootRunRequest<'_>,
+    options: BuildrootMakeOptions<'_>,
 ) -> Result<Vec<String>, ImageProviderError> {
     let BuildrootRunRequest {
         spec,
@@ -232,7 +251,10 @@ pub(crate) fn run_buildroot(
     }
 
     let config_digest = buildroot_config_digest(output_dir);
-    let legacy_config_digest = buildroot_legacy_config_digest(output_dir);
+    let accepted_config_digests = [
+        buildroot_config_digest_v1(output_dir),
+        buildroot_legacy_config_digest(output_dir),
+    ];
     let replacement_clean_needed =
         package_overrides
             .replacement_digest
@@ -246,13 +268,16 @@ pub(crate) fn run_buildroot(
             });
     let config_clean_needed = config_digest.as_deref().is_some_and(|config_digest| {
         buildroot_state_needs_clean(output_dir, ".gaia-buildroot-config-state", config_digest)
-            && legacy_config_digest.as_deref().is_none_or(|legacy_digest| {
-                buildroot_state_needs_clean(
-                    output_dir,
-                    ".gaia-buildroot-config-state",
-                    legacy_digest,
-                )
-            })
+            && accepted_config_digests
+                .iter()
+                .flatten()
+                .all(|older_digest| {
+                    buildroot_state_needs_clean(
+                        output_dir,
+                        ".gaia-buildroot-config-state",
+                        older_digest,
+                    )
+                })
     });
     if buildroot_legacy_disabled(config_overrides) {
         disable_buildroot_legacy_flag(output_dir)?;
@@ -308,6 +333,20 @@ pub(crate) fn run_buildroot(
     if let Some(config_digest) = config_digest.as_deref() {
         write_buildroot_state(output_dir, ".gaia-buildroot-config-state", config_digest)?;
     }
+    if let Some(script) = options.post_build_script {
+        command.arg(post_build_script_override(output_dir, script));
+    }
+    let mut finalize_only = false;
+    if options.shared_tree {
+        let config = fs::read_to_string(output_dir.join(".config")).unwrap_or_default();
+        let fs_types = shared_rootfs_types(&config)?;
+        finalize_only = shared_pack_scripts_current(output_dir, &fs_types);
+        if finalize_only {
+            command.arg("target-finalize");
+        } else {
+            clear_shared_pack_state(output_dir)?;
+        }
+    }
     messages.extend(run_command(
         command,
         "buildroot make",
@@ -316,6 +355,9 @@ pub(crate) fn run_buildroot(
         command_context.log_sink,
         command_context.cancel_check,
     )?);
+    if options.shared_tree && !finalize_only {
+        write_shared_pack_state(output_dir)?;
+    }
     Ok(messages)
 }
 
@@ -335,11 +377,29 @@ const BUILDROOT_NON_OUTPUT_SETTINGS: &[&str] = &[
     "BR2_CPAN_MIRROR",
 ];
 
+/// Squashfs tuning (compression, block size, padding). Root filesystem
+/// images are regenerated from `target/` by every `make`, and the host
+/// squashfs tools support every compressor, so switching XZ for zstd in a
+/// development preset needs no clean.
+fn is_squashfs_tuning_setting(key: &str) -> bool {
+    key.starts_with("BR2_TARGET_ROOTFS_SQUASHFS") && key != "BR2_TARGET_ROOTFS_SQUASHFS"
+}
+
 /// Digest of the effective `.config` settings. Excluded: the generated header,
 /// which names the Buildroot version (with a `-g<sha>` suffix for git trees),
-/// and the settings in [`BUILDROOT_NON_OUTPUT_SETTINGS`]. "is not set" lines
-/// are kept.
+/// the settings in [`BUILDROOT_NON_OUTPUT_SETTINGS`] and squashfs tuning.
+/// "is not set" lines are kept.
 pub(crate) fn buildroot_config_digest(output_dir: &Path) -> Option<String> {
+    buildroot_settings_digest(output_dir, true).map(|hex| format!("settings-v2-sha256:{hex}"))
+}
+
+/// The digest written before squashfs tuning was excluded; still accepted so
+/// an upgrade does not force a full Buildroot clean.
+fn buildroot_config_digest_v1(output_dir: &Path) -> Option<String> {
+    buildroot_settings_digest(output_dir, false).map(|hex| format!("settings-sha256:{hex}"))
+}
+
+fn buildroot_settings_digest(output_dir: &Path, skip_squashfs_tuning: bool) -> Option<String> {
     let contents = fs::read_to_string(output_dir.join(".config")).ok()?;
     let settings = contents
         .lines()
@@ -350,18 +410,20 @@ pub(crate) fn buildroot_config_digest(output_dir: &Path) -> Option<String> {
                 .split(['=', ' '])
                 .next()
                 .unwrap_or_default();
-            !BUILDROOT_NON_OUTPUT_SETTINGS.contains(&key)
+            let squashfs_tuning = skip_squashfs_tuning && is_squashfs_tuning_setting(key);
+            !(BUILDROOT_NON_OUTPUT_SETTINGS.contains(&key) || squashfs_tuning)
         })
         .collect::<Vec<_>>()
         .join("\n");
     let mut hasher = Sha256::new();
     hasher.update(settings.as_bytes());
-    let hex = hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    Some(format!("settings-sha256:{hex}"))
+    Some(
+        hasher
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>(),
+    )
 }
 
 /// Whole-file digest written by earlier Gaia versions; still accepted so an

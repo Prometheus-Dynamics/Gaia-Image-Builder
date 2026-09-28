@@ -430,3 +430,61 @@ paths = [".cache/gaia", "@generated"]
         vec![".cache/gaia".to_string(), "@generated".to_string()]
     );
 }
+
+#[test]
+fn presets_override_buildroot_config_and_enable_shared_output() {
+    let path = write_temp_config(
+        r#"
+build_name = "buildroot-dev-preset"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[image]
+kind = "buildroot"
+defconfig = "raspberrypicm5io_defconfig"
+config_overrides = [["BR2_TARGET_ROOTFS_SQUASHFS4_XZ", "y"], ["BR2_PACKAGE_FOO", "y"]]
+
+[presets.dev]
+overrides = [
+  ["image.buildroot.config_overrides.BR2_TARGET_ROOTFS_SQUASHFS4_XZ", "n"],
+  ["image.buildroot.config_overrides.BR2_TARGET_ROOTFS_SQUASHFS4_ZSTD", "y"],
+  ["policy.providers.buildroot.shared_output", "true"],
+]
+"#,
+    );
+    let config_overrides = |spec: &gaia_spec::ResolvedBuildSpec| match &spec.image.definition {
+        gaia_spec::ImageDefinition::Buildroot(buildroot) => buildroot.config_overrides.clone(),
+        _ => panic!("expected buildroot image"),
+    };
+    let pair = |key: &str, value: &str| (key.to_string(), value.to_string());
+
+    let release = resolve_config(path.to_str().expect("path"));
+    assert!(!release.policy.providers.buildroot.shared_output);
+    assert!(config_overrides(&release).contains(&pair("BR2_TARGET_ROOTFS_SQUASHFS4_XZ", "y")));
+
+    let dev = gaia_config::resolve_config_with_options(
+        path.to_str().expect("path"),
+        &gaia_config::ResolveOptions {
+            preset: Some("dev".into()),
+            explicit_overrides: vec![(
+                "policy.providers.buildroot.shared_output_dir".into(),
+                "/var/cache/gaia-shared".into(),
+            )],
+            ..gaia_config::ResolveOptions::default()
+        },
+    );
+    let overrides = config_overrides(&dev);
+    assert!(overrides.contains(&pair("BR2_TARGET_ROOTFS_SQUASHFS4_XZ", "n")));
+    assert!(overrides.contains(&pair("BR2_TARGET_ROOTFS_SQUASHFS4_ZSTD", "y")));
+    assert!(overrides.contains(&pair("BR2_PACKAGE_FOO", "y")));
+    assert!(dev.policy.providers.buildroot.shared_output);
+    assert_eq!(
+        dev.policy.providers.buildroot.shared_output_dir.as_deref(),
+        Some("/var/cache/gaia-shared")
+    );
+
+    let _ = std::fs::remove_file(path);
+}

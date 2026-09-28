@@ -387,7 +387,97 @@ Cache directories outside the workspace are mounted into Docker builds.
 Buildroot's output tree is cleaned when the effective `.config` changes. The
 generated version header and settings that cannot change the build output
 (`BR2_DL_DIR`, `BR2_CCACHE_DIR`, `BR2_JLEVEL`, download mirrors) are ignored
-for that comparison.
+for that comparison. Squashfs tuning (`BR2_TARGET_ROOTFS_SQUASHFS4_*`, block
+size, padding) is ignored as well, because root filesystem images are
+regenerated on every `make`; switching compression never forces a rebuild.
+
+Gaia delivers the image feed (installs, stage files, env sets, services)
+through Buildroot itself: it stages the feed next to the output tree and
+appends a generated script to `BR2_ROOTFS_POST_BUILD_SCRIPT` on the `make`
+command line (`.config` is not modified). Post-build scripts run after
+package installation, stripping and rootfs overlays, so a single `make` packs
+every image once with the feed included. Feed paths removed since the last
+run are deleted from `target/` before `make`. If Buildroot does not run the
+script, Gaia falls back to applying the feed after `make` and refreshing the
+images.
+
+#### Shared Buildroot trees
+
+```toml
+[providers.buildroot]
+shared_output = true
+# optional; default ".gaia/cache/buildroot/shared" under the workspace root
+shared_output_dir = "/var/cache/gaia/buildroot-shared"
+```
+
+By default every build compiles its own Buildroot output tree under
+`${workspace.build_dir}/image/buildroot-output`. With `shared_output = true`,
+builds whose Buildroot inputs are identical compile packages once, in a tree
+at `<shared_output_dir>/<key>`. The key is a digest of:
+
+- the Buildroot source identity (the resolved commit or content digest the
+  source provider recorded),
+- `defconfig`, `defconfig_path` and `config_fragments` (paths and content),
+- `config_overrides`,
+- the external tree and package override directories,
+- `ccache.enabled` and the Docker image.
+
+The build name, build directory and image feed are not part of the key, so
+`helios-base-os-cm5` and `helios-full-cm5` share one tree when only their
+feeds differ. Changes inside external trees or package override directories
+are handled in place, like a private tree.
+
+Each build keeps a view at its usual output path: `build`, `host`, `staging`
+and `per-package` link into the shared tree, `.config` is a copy, and
+`target/` and `images/` are private copy-on-write clones (`cp --reflink=auto`,
+falling back to a plain copy on filesystems without reflinks). The feed is
+applied only to the private target, and each root filesystem image is packed
+from it with the fakeroot script Buildroot generated for the shared tree, then
+the post-image scripts run against the private `images/`. After the first
+full `make`, the shared tree only runs `make target-finalize`, so each build
+packs its images once. No file from one build's feed reaches the shared tree or
+another build's image.
+
+A file lock (`<key>.lock`) serializes builds that use the same tree; builds
+with different keys run in parallel. When a build moves to a new key (for
+example after a config change), it releases the old tree, which is deleted
+once no build uses it. Turning `shared_output` off again replaces the view
+with a private tree on the next run.
+
+Limitations: initramfs, UBI, ISO9660, AXFS, cloop, OCI and YAFFS2 root
+filesystems depend on more than the target tree and are rejected in shared
+mode. Setting a different squashfs compression per build gives those builds
+separate trees, because the key includes `config_overrides`.
+
+#### Faster compression for development builds
+
+Buildroot `config_overrides` can be set from presets and `--set` with
+`image.buildroot.config_overrides.<SYMBOL>`. Keep XZ in the base config for
+releases and switch to zstd (or lz4) in a development preset:
+
+```toml
+[image]
+kind = "buildroot"
+config_overrides = [["BR2_TARGET_ROOTFS_SQUASHFS4_XZ", "y"]]
+
+[presets.dev]
+overrides = [
+  ["image.buildroot.config_overrides.BR2_TARGET_ROOTFS_SQUASHFS4_XZ", "n"],
+  ["image.buildroot.config_overrides.BR2_TARGET_ROOTFS_SQUASHFS4_ZSTD", "y"],
+]
+```
+
+```sh
+gaia run configs/builds/helios.toml --preset dev
+# or, for one run:
+gaia run configs/builds/helios.toml \
+  --set image.buildroot.config_overrides.BR2_TARGET_ROOTFS_SQUASHFS4_XZ=n \
+  --set image.buildroot.config_overrides.BR2_TARGET_ROOTFS_SQUASHFS4_ZSTD=y
+```
+
+Set the old choice to `n` explicitly so Kconfig does not keep it. Switching
+compression does not clean the Buildroot output tree; only the root filesystem
+image is regenerated.
 
 Retry strategies:
 - `fixed`

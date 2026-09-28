@@ -19,13 +19,14 @@ pub struct AssemblyRoots {
 
 impl AssemblyRoots {
     pub fn new(spec: &ResolvedBuildSpec, assembly: &ImageAssemblySpec) -> Result<Self, String> {
+        let default_collect_dir = crate::default_image_collect_dir(&spec.workspace);
         let provider_images = resolve_workspace_path_or_absolute(
             spec,
             spec.image
                 .output
                 .collect_dir
                 .as_deref()
-                .unwrap_or("out/images/buildroot"),
+                .unwrap_or(&default_collect_dir),
         )?;
         let buildroot_output = buildroot_output_dir(spec)?;
         let provider_target = match spec.image.provider_kind() {

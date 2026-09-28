@@ -298,6 +298,15 @@ pub fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
             image.assembly = None;
             format!("{image:?}").hash(&mut hasher);
             image_backend_signature(spec, &spec.image).hash(&mut hasher);
+            // Only hashed when enabled so existing fingerprints stay valid.
+            let buildroot_policy = &spec.policy.providers.buildroot;
+            if buildroot_policy.shared_output {
+                (
+                    "buildroot-shared-output",
+                    &buildroot_policy.shared_output_dir,
+                )
+                    .hash(&mut hasher);
+            }
         }
         OperationKind::AssembleImage => {
             format!("{:?}", spec.image.assembly).hash(&mut hasher);

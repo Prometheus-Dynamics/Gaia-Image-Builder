@@ -87,7 +87,7 @@ pub use state::{
 };
 pub use workspace::{
     CleanPolicy, WorkspaceNamedPathSpec, WorkspacePathError, WorkspacePathKindSpec, WorkspaceSpec,
-    resolve_workspace_path,
+    default_image_collect_dir, resolve_workspace_path,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

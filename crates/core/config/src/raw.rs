@@ -289,6 +289,8 @@ pub struct RawCommandProviderPolicyConfig {
     pub local_jobs: u32,
     pub download_dir: Option<String>,
     pub ccache: RawBuildrootCcachePolicyConfig,
+    pub shared_output: bool,
+    pub shared_output_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
