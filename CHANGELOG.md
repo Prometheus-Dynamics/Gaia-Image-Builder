@@ -11,7 +11,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - Nested Rust artifacts that share a workspace, target triple, profile, feature
   flags and execution backend are built with one `cargo build -p a -p b ...`
   and their outputs copied individually (`providers.rust.batch_builds`,
-  default `true`). A failed batch falls back to per-artifact builds so errors
+  opt-in, default `false`, because cargo unifies features across the batch). A failed batch falls back to per-artifact builds so errors
   land on the right artifact.
 - CPU-heavy operations running concurrently split the available cores:
   each gets a job budget exported as `CARGO_BUILD_JOBS`, `MAKEFLAGS=-jN` and

@@ -351,15 +351,17 @@ Rust and Git have extra specialized fields:
 - Rust: `allow_nested_build`, `batch_builds`
 - Git: `allow_remote_resolution`
 
-`batch_builds` (default `true`) builds nested cargo artifacts that share a
+`batch_builds` (default `false`) builds nested cargo artifacts that share a
 source workspace, target triple, profile, feature flags and execution backend
 with a single `cargo build -p a -p b ...` (one container start and one
 dependency resolution) and then copies each output. Per-artifact outputs,
 marker and state files are the same as for individual builds. If the combined
 build fails, each artifact is rebuilt on its own so the failure is attributed
 to the right artifact. Note that cargo unifies dependency features across all
-packages selected in one invocation; set `batch_builds = false` if your
-packages rely on different feature sets of a shared dependency.
+packages selected in one invocation, so a batched binary can differ from the
+same package built alone when packages enable different features of a shared
+dependency. It is therefore opt-in; enable it when your packages agree on
+shared dependency features.
 
 Every provider supports:
 - `retry_attempts`
@@ -374,7 +376,7 @@ Example:
 ```toml
 [providers.rust]
 allow_nested_build = false
-batch_builds = true
+batch_builds = true  # opt-in; see above
 retry_attempts = 2
 retry_backoff_ms = 500
 retry_backoff_strategy = "exponential"

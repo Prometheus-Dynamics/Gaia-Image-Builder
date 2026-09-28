@@ -414,6 +414,7 @@ fn compatible_artifacts_build_in_one_batch_with_per_operation_results() {
         ],
     );
     harness.batchable = true;
+    harness.spec.policy.providers.rust.batch_builds = true;
 
     let (outcome, observed, journal) = harness.run();
 
@@ -432,10 +433,9 @@ fn compatible_artifacts_build_in_one_batch_with_per_operation_results() {
 }
 
 #[test]
-fn batching_can_be_disabled_by_policy() {
+fn batching_is_off_by_default() {
     let mut harness = Harness::new("gaia-batch-off", &[("one", &[]), ("two", &[])]);
     harness.batchable = true;
-    harness.spec.policy.providers.rust.batch_builds = false;
 
     let (outcome, _, journal) = harness.run();
 

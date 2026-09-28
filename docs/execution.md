@@ -77,9 +77,9 @@ Buildroot's `make -j` when `local_jobs = 0`. An operation that runs alone gets
 no budget, so single-operation behavior is unchanged. The split is static per
 operation: an operation keeps the budget it started with.
 
-Nested Rust artifacts that share a workspace, target, profile, feature flags
-and backend are started as one scheduling unit and built with a single
-`cargo build -p a -p b ...` (see `providers.rust.batch_builds`). Each artifact
+With `providers.rust.batch_builds = true` (opt-in), nested Rust artifacts that
+share a workspace, target, profile, feature flags and backend are started as
+one scheduling unit and built with a single `cargo build -p a -p b ...`. Each artifact
 still reports its own events, result, state and timing.
 
 Streamed build output goes to the live sink (console progress, TUI) as it

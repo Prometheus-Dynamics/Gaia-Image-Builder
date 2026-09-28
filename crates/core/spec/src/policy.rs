@@ -166,29 +166,17 @@ impl std::fmt::Display for RetryBackoffStrategySpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RustProviderPolicySpec {
     pub allow_nested_build: bool,
     /// Build nested cargo artifacts that share a workspace, target triple,
     /// profile and execution backend with one `cargo build -p a -p b ...`.
+    /// Opt-in: cargo unifies dependency features across the batch.
     pub batch_builds: bool,
     pub retry_attempts: u32,
     pub retry_backoff_ms: u64,
     pub retry_backoff_strategy: RetryBackoffStrategySpec,
     pub timeout_seconds: u64,
-}
-
-impl Default for RustProviderPolicySpec {
-    fn default() -> Self {
-        Self {
-            allow_nested_build: false,
-            batch_builds: true,
-            retry_attempts: 0,
-            retry_backoff_ms: 0,
-            retry_backoff_strategy: RetryBackoffStrategySpec::default(),
-            timeout_seconds: 0,
-        }
-    }
 }
 
 impl From<&RustProviderPolicySpec> for ResolvedCommandPolicySpec {

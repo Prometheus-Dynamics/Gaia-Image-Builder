@@ -153,7 +153,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
         providers: ProviderExecutionPolicySpec {
             rust: RustProviderPolicySpec {
                 allow_nested_build: raw.providers.rust.allow_nested_build,
-                batch_builds: raw.providers.rust.batch_builds.unwrap_or(true),
+                batch_builds: raw.providers.rust.batch_builds.unwrap_or(false),
                 retry_attempts: compile_provider_retry_attempts(raw.providers.rust.retry_attempts),
                 retry_backoff_ms: compile_provider_retry_backoff_ms(
                     raw.providers.rust.retry_backoff_ms,
