@@ -1,4 +1,5 @@
 use super::*;
+use crate::retention::RetainedStream;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;

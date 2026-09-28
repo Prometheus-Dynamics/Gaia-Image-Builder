@@ -1,10 +1,9 @@
-use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -18,6 +17,7 @@ const MAX_RETAINED_LINE_BYTES: usize = 64 * 1024;
 const STREAM_MESSAGE_QUEUE_BOUND: usize = 64;
 
 mod docker;
+mod retention;
 mod stream;
 mod tar;
 
@@ -25,6 +25,10 @@ pub use docker::{
     DockerRunError, DockerRunSpec, absolute_docker_mount_candidate, discover_docker_mounts,
     docker_build_context_hash, docker_image_build_command, docker_image_id_command,
     docker_local_image_tag, docker_run_command, normalize_docker_mount_path,
+};
+use retention::{
+    StreamDrainState, drain_stream_messages, drain_stream_messages_until_idle,
+    wait_for_stream_message,
 };
 use stream::spawn_stream_reader;
 pub use tar::{TarArchiveValidationError, validate_tar_archive_entries};
@@ -107,105 +111,6 @@ pub(crate) enum StreamMessage {
     Done {
         stream: ProcessLogStream,
     },
-}
-
-/// Bounded tail of one output stream. Retaining the newest output costs
-/// O(new data), not O(retained data): lines live in a ring buffer, and bytes
-/// are appended with memcpy behind a moving start offset that is compacted
-/// at most once per `max_bytes` of input.
-#[derive(Debug)]
-struct RetainedStream {
-    lines: VecDeque<String>,
-    bytes: Vec<u8>,
-    /// Retained bytes are `bytes[bytes_start..]`.
-    bytes_start: usize,
-    max_lines: usize,
-    max_bytes: usize,
-}
-
-impl Default for RetainedStream {
-    fn default() -> Self {
-        Self::with_limits(MAX_RETAINED_STREAM_LINES, MAX_RETAINED_STREAM_BYTES)
-    }
-}
-
-impl RetainedStream {
-    fn with_limits(max_lines: usize, max_bytes: usize) -> Self {
-        Self {
-            lines: VecDeque::new(),
-            bytes: Vec::new(),
-            bytes_start: 0,
-            max_lines,
-            max_bytes,
-        }
-    }
-
-    fn push_line(&mut self, line: String) {
-        if self.max_lines == 0 {
-            return;
-        }
-        if self.lines.len() == self.max_lines {
-            self.lines.pop_front();
-        }
-        self.lines.push_back(line);
-    }
-
-    fn push_bytes(&mut self, bytes: &[u8]) {
-        if self.max_bytes == 0 {
-            return;
-        }
-        if bytes.len() >= self.max_bytes {
-            self.bytes.clear();
-            self.bytes_start = 0;
-            self.bytes
-                .extend_from_slice(&bytes[bytes.len() - self.max_bytes..]);
-            return;
-        }
-        self.bytes.extend_from_slice(bytes);
-        let retained = self.bytes.len() - self.bytes_start;
-        if retained > self.max_bytes {
-            self.bytes_start += retained - self.max_bytes;
-        }
-        // Compact once the dead prefix is as large as the retained tail, so
-        // the memmove cost is amortized over at least `max_bytes` of input.
-        if self.bytes_start >= self.max_bytes {
-            self.bytes.drain(..self.bytes_start);
-            self.bytes_start = 0;
-        }
-    }
-
-    fn take_lines(&mut self) -> Vec<String> {
-        Vec::from(std::mem::take(&mut self.lines))
-    }
-
-    fn take_bytes(&mut self) -> Vec<u8> {
-        let mut bytes = std::mem::take(&mut self.bytes);
-        bytes.drain(..std::mem::take(&mut self.bytes_start));
-        bytes
-    }
-}
-
-#[derive(Debug, Default)]
-struct StreamDrainState {
-    stdout: RetainedStream,
-    stderr: RetainedStream,
-    stdout_done: bool,
-    stderr_done: bool,
-}
-
-impl StreamDrainState {
-    fn with_retention(retention: ProcessOutputRetention) -> Self {
-        Self {
-            stdout: RetainedStream::with_limits(retention.stdout_lines, retention.stdout_bytes),
-            stderr: RetainedStream::with_limits(retention.stderr_lines, retention.stderr_bytes),
-            stdout_done: false,
-            stderr_done: false,
-        }
-    }
-
-    fn is_done(&self) -> bool {
-        self.stdout_done && self.stderr_done
-    }
 }
 
 pub fn run_command_with_timeout(
@@ -750,84 +655,6 @@ fn terminate_leftover_tree(group: ProcessGroup) {
 
 #[cfg(not(unix))]
 fn terminate_leftover_tree(_group: ProcessGroup) {}
-
-/// Waits up to `tick` for stream output instead of sleeping blindly, so a
-/// chatty child never stalls on the bounded queue while the loop sleeps.
-fn wait_for_stream_message(
-    rx: &Receiver<StreamMessage>,
-    state: &mut StreamDrainState,
-    tick: Duration,
-) {
-    if state.is_done() {
-        thread::sleep(tick);
-        return;
-    }
-    match rx.recv_timeout(tick) {
-        Ok(message) => apply_stream_message(message, state),
-        Err(RecvTimeoutError::Timeout) => {}
-        // Readers are gone without reporting completion; avoid spinning.
-        Err(RecvTimeoutError::Disconnected) => thread::sleep(tick),
-    }
-}
-
-fn drain_stream_messages(rx: &Receiver<StreamMessage>, state: &mut StreamDrainState) {
-    while let Ok(message) = rx.try_recv() {
-        apply_stream_message(message, state);
-    }
-}
-
-fn drain_stream_messages_until_idle(
-    rx: &Receiver<StreamMessage>,
-    state: &mut StreamDrainState,
-    idle_timeout: Duration,
-) {
-    let deadline = Instant::now() + idle_timeout;
-    while !state.is_done() {
-        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
-            break;
-        };
-        match rx.recv_timeout(remaining) {
-            Ok(message) => apply_stream_message(message, state),
-            Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => break,
-        }
-    }
-    drain_stream_messages(rx, state);
-}
-
-fn apply_stream_message(message: StreamMessage, state: &mut StreamDrainState) {
-    match message {
-        StreamMessage::Bytes {
-            stream: ProcessLogStream::Stdout,
-            bytes,
-        } => {
-            state.stdout.push_bytes(&bytes);
-        }
-        StreamMessage::Bytes {
-            stream: ProcessLogStream::Stderr,
-            bytes,
-        } => {
-            state.stderr.push_bytes(&bytes);
-        }
-        StreamMessage::Line {
-            stream: ProcessLogStream::Stdout,
-            line,
-        } => {
-            state.stdout.push_line(line);
-        }
-        StreamMessage::Line {
-            stream: ProcessLogStream::Stderr,
-            line,
-        } => {
-            state.stderr.push_line(line);
-        }
-        StreamMessage::Done {
-            stream: ProcessLogStream::Stdout,
-        } => state.stdout_done = true,
-        StreamMessage::Done {
-            stream: ProcessLogStream::Stderr,
-        } => state.stderr_done = true,
-    }
-}
 
 #[cfg(test)]
 mod tests;
