@@ -1,5 +1,6 @@
 use crate::{
-    ExecutionPlan, OperationId, OperationKind, OperationOptionality, OperationReuse, ReuseState,
+    ExecutionPlan, OperationId, OperationKind, OperationOptionality, OperationReuse,
+    PlannedOperation, ReuseState,
 };
 use gaia_spec::{
     ArtifactDefinition, CheckpointAnchorRef, ImageDefinition, ResolvedBuildSpec, SourceDefinition,
@@ -11,9 +12,12 @@ use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, UNIX_EPOCH};
 
-const COMMAND_SIGNATURE_TIMEOUT_SECONDS: u64 = 2;
+// Generous because a timeout changes the fingerprint and forces a rebuild; a
+// JVM or rustup proxy on a busy machine can take several seconds to start.
+const COMMAND_SIGNATURE_TIMEOUT_SECONDS: u64 = 10;
 
 pub fn spec_fingerprint(spec: &ResolvedBuildSpec) -> u64 {
     let mut hasher = DefaultHasher::new();
@@ -30,6 +34,8 @@ pub(crate) fn apply_reuse_state(
         return plan;
     };
     let mut decisions = HashMap::<String, bool>::new();
+    // Dependency kinds, for computing input signatures while `plan` is mutated.
+    let snapshot = plan.clone();
 
     for operation in &mut plan.operations {
         let operation_id = operation.id.as_str().to_string();
@@ -49,20 +55,30 @@ pub(crate) fn apply_reuse_state(
                     .get(&operation_id)
                     .map(String::as_str)
                     != operation_output_signature(spec, &operation.kind).as_deref();
+                let dependency_rebuilding = operation.depends_on.iter().any(|dependency| {
+                    if dependency.as_str() == OperationId::resolve().as_str() {
+                        return false;
+                    }
+                    !decisions.get(dependency.as_str()).copied().unwrap_or(false)
+                });
                 if !reuse_state.completed_operation_ids.contains(&operation_id)
                     || source_refresh_reason.is_some()
                     || fingerprint_mismatch
                     || outputs_missing
                     || output_signature_mismatch
+                    || dependency_rebuilding
                 {
                     true
                 } else {
-                    operation.depends_on.iter().any(|dependency| {
-                        if dependency.as_str() == OperationId::resolve().as_str() {
-                            return false;
-                        }
-                        !decisions.get(dependency.as_str()).copied().unwrap_or(false)
-                    })
+                    // Dependencies are all reused, but they may have changed
+                    // since this operation last consumed them (for example
+                    // after a partial `--only` run).
+                    reuse_state
+                        .operation_input_signatures
+                        .get(&operation_id)
+                        .is_some_and(|recorded| {
+                            *recorded != operation_input_signature(spec, &snapshot, operation)
+                        })
                 }
             }
         };
@@ -118,13 +134,32 @@ pub(crate) fn apply_reuse_state(
                 &operation.kind,
                 OperationKind::ResolveBuild | OperationKind::EmitReport
             ) {
-                operation.reuse = OperationReuse::execute(
-                    "dependency_rebuilt",
-                    format!(
-                        "operation '{}' will execute because one or more dependencies are rebuilding",
-                        operation.id.as_str()
-                    ),
-                );
+                let recorded_input = reuse_state
+                    .operation_input_signatures
+                    .get(&operation_id)
+                    .copied();
+                let dependency_rebuilding = operation.depends_on.iter().any(|dependency| {
+                    dependency.as_str() != OperationId::resolve().as_str()
+                        && !decisions.get(dependency.as_str()).copied().unwrap_or(false)
+                });
+                if dependency_rebuilding {
+                    operation.reuse = OperationReuse::execute(
+                        "dependency_rebuilt",
+                        format!(
+                            "operation '{}' will execute because one or more dependencies are rebuilding",
+                            operation.id.as_str()
+                        ),
+                    );
+                    operation.cutoff_input_signature = recorded_input;
+                } else {
+                    operation.reuse = OperationReuse::execute(
+                        "inputs_changed",
+                        format!(
+                            "operation '{}' will execute because its inputs changed since it last ran",
+                            operation.id.as_str()
+                        ),
+                    );
+                }
             }
             decisions.insert(operation_id, false);
         } else {
@@ -257,7 +292,11 @@ pub fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
             }
         }
         OperationKind::PrepareImage | OperationKind::BuildImage => {
-            format!("{:?}", spec.image).hash(&mut hasher);
+            // Disk assembly is fingerprinted by its own operation; a partition
+            // layout change must not re-run the Buildroot build.
+            let mut image = spec.image.clone();
+            image.assembly = None;
+            format!("{image:?}").hash(&mut hasher);
             image_backend_signature(spec, &spec.image).hash(&mut hasher);
         }
         OperationKind::AssembleImage => {
@@ -367,7 +406,26 @@ fn image_backend_signature(spec: &ResolvedBuildSpec, image: &gaia_spec::ImageSpe
     }
 }
 
+/// Tool version signature, probed once per process: planning fingerprints
+/// every artifact, and each probe would otherwise spawn the tool again.
 pub(crate) fn command_signature<const N: usize>(program: &str, args: [&str; N]) -> String {
+    static CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    let key = std::iter::once(program)
+        .chain(args)
+        .collect::<Vec<_>>()
+        .join("\u{1f}");
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(signature) = cache.lock().ok().and_then(|cache| cache.get(&key).cloned()) {
+        return signature;
+    }
+    let signature = probe_command_signature(program, args);
+    if let Ok(mut cache) = cache.lock() {
+        cache.insert(key, signature.clone());
+    }
+    signature
+}
+
+fn probe_command_signature<const N: usize>(program: &str, args: [&str; N]) -> String {
     let mut command = Command::new(program);
     command.args(args);
     let retention = gaia_process::ProcessOutputRetention {
@@ -521,13 +579,19 @@ fn hash_path_state(path: &Path, hasher: &mut DefaultHasher, ignored_names: &[Str
 }
 
 fn workspace_path_ignores(spec: &ResolvedBuildSpec) -> Vec<String> {
-    let mut ignored = vec![
-        "target".to_string(),
-        ".git".to_string(),
-        ".gaia".to_string(),
-        "build".to_string(),
-        "out".to_string(),
-    ];
+    let mut ignored = [
+        "target",
+        ".git",
+        ".gaia",
+        "build",
+        "out",
+        "node_modules",
+        "__pycache__",
+        ".gaia-pack",
+        ".gaia-wheelhouse",
+    ]
+    .map(str::to_string)
+    .to_vec();
     for path in [&spec.workspace.build_dir, &spec.workspace.out_dir] {
         let candidate = Path::new(path);
         if let Some(name) = candidate.file_name().and_then(|name| name.to_str())
@@ -597,6 +661,68 @@ fn operation_outputs_present(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
         }
         OperationKind::AssembleImage => assembly_state_path(spec).is_file(),
     }
+}
+
+/// A signature of what an operation produced, based on the provider state
+/// files that record output content hashes rather than file timestamps, so
+/// rebuilding identical output yields the same signature.
+pub fn operation_content_signature(
+    spec: &ResolvedBuildSpec,
+    kind: &OperationKind,
+) -> Option<String> {
+    match kind {
+        OperationKind::ResolveBuild | OperationKind::EmitReport => None,
+        OperationKind::BuildArtifact { artifact_id } => spec
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.id == *artifact_id)
+            .map(|artifact| {
+                provider_state_signature(&artifact_state_path(&artifact_output_path(
+                    spec,
+                    &artifact.output.path,
+                )))
+            }),
+        OperationKind::InstallArtifact { install_id, .. } => Some(provider_state_signature(
+            &install_state_path(spec, install_id),
+        )),
+        // Image outputs have no content-hashed state yet; use the
+        // conservative output signature.
+        OperationKind::PrepareImage | OperationKind::BuildImage => {
+            operation_output_signature(spec, kind)
+        }
+        OperationKind::MaterializeSource { .. }
+        | OperationKind::RenderStageFile { .. }
+        | OperationKind::RenderStageEnvSet { .. }
+        | OperationKind::RenderStageService { .. }
+        | OperationKind::AssembleImage
+        | OperationKind::CaptureCheckpoint { .. } => operation_output_signature(spec, kind),
+    }
+}
+
+/// Signature of the content an operation consumes: the content signatures of
+/// its direct dependencies (build resolution excluded).
+pub fn operation_input_signature(
+    spec: &ResolvedBuildSpec,
+    plan: &ExecutionPlan,
+    operation: &PlannedOperation,
+) -> u64 {
+    let mut dependencies = operation
+        .depends_on
+        .iter()
+        .filter(|dependency| dependency.as_str() != OperationId::resolve().as_str())
+        .collect::<Vec<_>>();
+    dependencies.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+    dependencies.dedup();
+    let mut hasher = DefaultHasher::new();
+    for dependency in dependencies {
+        dependency.as_str().hash(&mut hasher);
+        plan.operations
+            .iter()
+            .find(|candidate| candidate.id == *dependency)
+            .and_then(|candidate| operation_content_signature(spec, &candidate.kind))
+            .hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 pub fn operation_output_signature(

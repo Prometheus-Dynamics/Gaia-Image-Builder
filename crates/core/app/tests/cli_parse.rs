@@ -89,3 +89,53 @@ fn parses_clean_command_flags() {
     assert_eq!(args.clean.paths, vec![".cache/gaia".to_string()]);
     assert!(args.clean.dry_run);
 }
+
+#[test]
+fn flags_are_never_taken_as_the_build_path() {
+    let args = AppArgs::parse_from(["tui", "--builds-dir", "configs/builds"]);
+
+    assert_eq!(args.command, AppCommand::Tui);
+    assert!(!args.build_explicit);
+    assert_ne!(args.build, "--builds-dir");
+    assert_eq!(args.builds_dir.as_deref(), Some("configs/builds"));
+    assert!(args.usage_errors.is_empty());
+}
+
+#[test]
+fn build_path_may_follow_flags() {
+    let args = AppArgs::parse_from(["plan", "--preset", "ci", "configs/builds/cm5.toml"]);
+
+    assert_eq!(args.command, AppCommand::Plan);
+    assert_eq!(args.build, "configs/builds/cm5.toml");
+    assert!(args.build_explicit);
+    assert_eq!(args.preset.as_deref(), Some("ci"));
+}
+
+#[test]
+fn reports_unknown_flags_missing_values_and_extra_arguments() {
+    let args = AppArgs::parse_from([
+        "run",
+        "a.toml",
+        "b.toml",
+        "--bogus",
+        "--set",
+        "no-equals-sign",
+        "--preset",
+    ]);
+
+    assert_eq!(
+        args.usage_errors,
+        vec![
+            "unexpected argument 'b.toml'".to_string(),
+            "unknown flag '--bogus'".to_string(),
+            "--set expects KEY=VALUE, got 'no-equals-sign'".to_string(),
+            "--preset requires a value".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn help_flag_after_command_shows_help() {
+    let args = AppArgs::parse_from(["run", "a.toml", "--help"]);
+    assert_eq!(args.command, AppCommand::Help);
+}

@@ -2,6 +2,15 @@ use super::*;
 
 impl<'a> TuiState<'a> {
     pub(crate) fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) {
+        if self.show_help {
+            // Any key closes the help overlay.
+            self.show_help = false;
+            return;
+        }
+        if code == KeyCode::Char('?') && self.edit_field.is_none() {
+            self.show_help = true;
+            return;
+        }
         match self.screen {
             Screen::Picker => self.handle_picker_key(code),
             Screen::Setup => self.handle_setup_key(code, modifiers),
@@ -15,7 +24,8 @@ impl<'a> TuiState<'a> {
             KeyCode::Char('k') | KeyCode::Up => self.select_prev_build(),
             KeyCode::Enter => self.open_selected_build(),
             KeyCode::Char('r') => {
-                self.build_entries = discover_build_entries(&self.build);
+                self.build_entries =
+                    discover_build_entries(&self.build, self.builds_dir.as_deref());
                 self.ensure_build_selection();
                 self.set_status("reloaded build list");
             }
@@ -33,9 +43,16 @@ impl<'a> TuiState<'a> {
             KeyCode::Char('b') => self.screen = Screen::Picker,
             KeyCode::Char('p') => self.refresh(),
             KeyCode::Char('r') | KeyCode::Char('s') => self.start_run(),
+            KeyCode::Char('m') => {
+                if matches!(self.run_state, RunState::Running { .. }) || self.last_run.is_some() {
+                    self.screen = Screen::Monitor;
+                } else {
+                    self.set_status("no build to monitor yet; press s to start one");
+                }
+            }
             KeyCode::Enter => self.activate_setup_item(),
-            KeyCode::Down => self.move_setup_down(),
-            KeyCode::Up => self.move_setup_up(),
+            KeyCode::Char('j') | KeyCode::Down => self.move_setup_down(),
+            KeyCode::Char('k') | KeyCode::Up => self.move_setup_up(),
             KeyCode::PageDown => self.detail_scroll = self.detail_scroll.saturating_add(10),
             KeyCode::PageUp => self.detail_scroll = self.detail_scroll.saturating_sub(10),
             KeyCode::Left if modifiers.is_empty() => self.prev_setup_detail(),
@@ -65,15 +82,32 @@ impl<'a> TuiState<'a> {
     pub(crate) fn handle_monitor_key(&mut self, code: KeyCode, modifiers: KeyModifiers) {
         match code {
             KeyCode::Esc => {
+                self.screen = Screen::Setup;
                 if matches!(self.run_state, RunState::Running { .. }) {
-                    self.set_status("cannot leave monitor while a build is running");
-                } else {
-                    self.screen = Screen::Setup;
+                    self.set_status("build still running; press m to return to the monitor");
                 }
             }
             KeyCode::Char('c') => self.cancel_run(),
-            KeyCode::Down => self.move_operation_down(),
-            KeyCode::Up => self.move_operation_up(),
+            KeyCode::Char('f') => {
+                self.follow_running = !self.follow_running;
+                if self.follow_running {
+                    self.select_newest_running_operation();
+                    self.detail_follow_tail = true;
+                }
+                self.set_status(if self.follow_running {
+                    "following the running operation"
+                } else {
+                    "follow off"
+                });
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.follow_running = false;
+                self.move_operation_down();
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.follow_running = false;
+                self.move_operation_up();
+            }
             KeyCode::Left if modifiers.is_empty() => self.prev_monitor_view(),
             KeyCode::Right if modifiers.is_empty() => self.next_monitor_view(),
             KeyCode::PageDown => {

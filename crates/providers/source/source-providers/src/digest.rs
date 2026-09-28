@@ -16,24 +16,46 @@ pub(crate) fn verify_sha256(path: &Path, expected_sha: &str) -> Result<(), Sourc
     ))
 }
 
+/// Hex SHA-256 of a file, hashed in-process (same output as `sha256sum`).
+/// Tree digests hash every file, so spawning a process per file was the
+/// dominant cost on large source trees.
 pub(crate) fn sha256_or_placeholder(path: &Path) -> String {
-    let output = Command::new("sha256sum").arg(path).output().ok();
-    let Some(output) = output else {
-        return format!("sha256-unavailable:{}", path.display());
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    let mut file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) => return format!("sha256-error:{}:{error}", path.display()),
     };
-    if !output.status.success() {
-        return format!(
-            "sha256-error:{}:{}",
-            path.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 64 * 1024];
+    loop {
+        match file.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => hasher.update(&buffer[..read]),
+            Err(error) => return format!("sha256-error:{}:{error}", path.display()),
+        }
     }
-    String::from_utf8_lossy(&output.stdout)
-        .split_whitespace()
-        .next()
-        .unwrap_or_default()
-        .to_string()
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
+
+/// Directories that never define a path source's identity: VCS metadata,
+/// Gaia's own state, and build or dependency output that builds write into
+/// the source tree. Hashing them cost minutes and made every build look like
+/// a source change.
+pub(crate) const DEFAULT_PATH_SOURCE_IGNORES: &[&str] = &[
+    ".git",
+    ".gaia",
+    "target",
+    "node_modules",
+    "__pycache__",
+    ".gaia-pack",
+    ".gaia-wheelhouse",
+];
 
 pub(crate) fn tree_digest(path: &Path, ignored_names: &[&str]) -> String {
     let mut hasher = DefaultHasher::new();
@@ -45,6 +67,7 @@ pub(crate) fn path_source_digest(path: &Path, identity_ignore: &[String]) -> Str
     let ignored = identity_ignore
         .iter()
         .map(String::as_str)
+        .chain(DEFAULT_PATH_SOURCE_IGNORES.iter().copied())
         .collect::<Vec<_>>();
     tree_digest(path, &ignored)
 }

@@ -377,8 +377,17 @@ dir = ".gaia/cache/buildroot/ccache"
 ```
 
 For Buildroot, `download_dir` is passed as `BR2_DL_DIR` so source tarballs can be
-shared across clean builds. When `providers.buildroot.ccache.enabled = true`,
+shared across clean builds. Without `download_dir`, Gaia still passes
+`BR2_DL_DIR=<workspace>/.gaia/cache/buildroot/dl` through the environment, so
+downloads survive re-fetching the Buildroot source and are shared by every
+build in the workspace. When `providers.buildroot.ccache.enabled = true`,
 Gaia enables `BR2_CCACHE` and passes `BR2_CCACHE_DIR` when `dir` is set.
+Cache directories outside the workspace are mounted into Docker builds.
+
+Buildroot's output tree is cleaned when the effective `.config` changes. The
+generated version header and settings that cannot change the build output
+(`BR2_DL_DIR`, `BR2_CCACHE_DIR`, `BR2_JLEVEL`, download mirrors) are ignored
+for that comparison.
 
 Retry strategies:
 - `fixed`

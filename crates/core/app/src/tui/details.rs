@@ -89,7 +89,7 @@ impl<'a> TuiState<'a> {
             .map(|operation| {
                 let (status, color) = self.operation_status(operation.id.as_str());
                 OperationItem {
-                    label: format!("{} {:?}", operation.id.as_str(), operation.kind),
+                    label: operation.id.as_str().to_string(),
                     status,
                     color,
                 }
@@ -142,11 +142,11 @@ impl<'a> TuiState<'a> {
             }
         }
         if matches!(self.run_state, RunState::Running { .. }) {
-            let status = live_operation_status(&self.live_events, operation_id);
-            if let Some(status) = status {
-                return status;
-            }
-            return ("WAIT", Color::DarkGray);
+            return self
+                .events
+                .status(operation_id)
+                .map(OperationStatus::badge)
+                .unwrap_or(("WAIT", Color::DarkGray));
         }
         ("PEND", Color::DarkGray)
     }
@@ -310,22 +310,24 @@ impl<'a> TuiState<'a> {
         let Some(plan) = self.plan.as_ref() else {
             return vec![Line::from("plan not loaded")];
         };
+        if self.screen == Screen::Setup {
+            return self.plan_overview_lines(plan);
+        }
         let Some(operation) = self.selected_operation() else {
             return vec![Line::from(format!("plan operations: {}", plan.operations.len())).bold()];
         };
         let mut lines = vec![
             Line::from(format!("selected operation: {}", operation.id.as_str())).bold(),
             Line::from(format!("kind: {:?}", operation.kind)),
-            Line::from(format!("optionality: {:?}", operation.optionality)),
+            Line::from(format!("optionality: {}", operation.optionality.as_str())),
             Line::from(format!("parallelism: {:?}", operation.parallelism.mode)),
             Line::from(format!(
                 "parallel domain: {:?}",
                 operation.parallelism.domain
             )),
-            Line::from("executor mode: serial runtime"),
             Line::from(format!("dependencies: {}", operation.depends_on.len())),
             Line::from(format!("fingerprint: {}", operation.fingerprint)),
-            Line::from(format!("reuse: {:?}", operation.reuse)),
+            reuse_line(&operation.reuse),
             Line::from(""),
         ];
         if !operation.depends_on.is_empty() {
@@ -347,8 +349,53 @@ impl<'a> TuiState<'a> {
         lines
     }
 
+    /// What the next run will rebuild, what it will reuse, and why.
+    fn plan_overview_lines(&self, plan: &ExecutionPlan) -> Vec<Line<'static>> {
+        let execute = plan
+            .operations
+            .iter()
+            .filter(|operation| operation.reuse.should_execute())
+            .count();
+        let mut lines = vec![
+            Line::from(format!(
+                "{} operation(s): {} will run, {} will be reused",
+                plan.operations.len(),
+                execute,
+                plan.operations.len() - execute
+            ))
+            .bold(),
+            Line::from(""),
+        ];
+        if !self.plan_diagnostics.is_empty() {
+            lines.push(Line::from("plan diagnostics:").bold().fg(Color::Red));
+            lines.extend(self.plan_diagnostics.iter().map(|diagnostic| {
+                Line::from(format!("{}: {}", diagnostic.code, diagnostic.message)).fg(Color::Red)
+            }));
+            lines.push(Line::from(""));
+        }
+        for operation in &plan.operations {
+            let (badge, color, reason) = match &operation.reuse {
+                gaia_plan::OperationReuse::Execute(reason) => {
+                    ("RUN  ", Color::LightCyan, reason.message.clone())
+                }
+                gaia_plan::OperationReuse::Reuse { source } => {
+                    ("REUSE", Color::LightBlue, format!("reused from {source}"))
+                }
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!("{badge} "), Style::default().fg(color)),
+                Span::raw(operation.id.as_str().to_string()),
+            ]));
+            lines.push(Line::from(Span::styled(
+                format!("      {reason}"),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+        lines
+    }
+
     pub(crate) fn event_lines(&self) -> Vec<Line<'static>> {
-        if self.last_run.is_none() && self.live_events.is_empty() {
+        if self.last_run.is_none() && self.events.is_empty() {
             return match &self.run_state {
                 RunState::Running { .. } => vec![
                     Line::from("events").bold(),
@@ -364,17 +411,7 @@ impl<'a> TuiState<'a> {
         }
         let mut lines = vec![Line::from("live event stream").bold()];
         lines.push(Line::from(""));
-        let events = self
-            .last_run
-            .as_ref()
-            .map(|run| &run.outcome.events)
-            .unwrap_or(&self.live_events);
-        lines.extend(
-            events
-                .iter()
-                .filter(|event| !matches!(event, ExecutionEvent::Log { .. }))
-                .map(render_event_line),
-        );
+        lines.extend(self.events.lifecycle().iter().map(render_event_line));
         if lines.len() == 2 {
             lines.push(Line::from("no events yet"));
         }
@@ -382,48 +419,71 @@ impl<'a> TuiState<'a> {
     }
 
     pub(crate) fn log_lines(&self) -> Vec<Line<'static>> {
-        let selected_operation = self
+        let Some(operation_id) = self
             .selected_operation()
-            .map(|operation| operation.id.as_str().to_string());
-        let title = selected_operation
-            .as_deref()
-            .map(|id| format!("task logs: {id}"))
-            .unwrap_or_else(|| "task logs".to_string());
-        let mut lines = vec![Line::from(title).bold(), Line::from("")];
-        let events = self
-            .last_run
-            .as_ref()
-            .map(|run| &run.outcome.events)
-            .unwrap_or(&self.live_events);
-        let mut found = false;
-        for event in events {
-            if let ExecutionEvent::Log {
-                operation_id,
-                message,
-            } = event
-            {
-                if let Some(selected_operation) = selected_operation.as_deref()
-                    && operation_id.as_str() != selected_operation
-                {
-                    continue;
-                }
-                found = true;
-                lines.extend(sanitize_tui_lines(message).into_iter().map(Line::from));
+            .map(|operation| operation.id.as_str().to_string())
+        else {
+            return vec![
+                Line::from("task logs").bold(),
+                Line::from("no operation selected"),
+            ];
+        };
+        let mut lines = vec![
+            Line::from(format!("task logs: {operation_id}")).bold(),
+            Line::from(""),
+        ];
+        let log = self.events.log(&operation_id);
+        if let Some(log) = log {
+            if log.dropped > 0 {
+                lines.push(
+                    Line::from(format!(
+                        "... {} earlier line(s) not kept; full output is in the provider logs",
+                        log.dropped
+                    ))
+                    .fg(Color::DarkGray),
+                );
             }
+            lines.extend(log.lines.iter().cloned().map(Line::from));
         }
-        if !found {
+        let failure = self.last_run.as_ref().and_then(|run| {
+            run.outcome
+                .errors
+                .iter()
+                .find(|error| error.operation_id.as_str() == operation_id)
+        });
+        if let Some(failure) = failure {
+            lines.push(Line::from(""));
+            lines.push(
+                Line::from(format!("failed: {}", failure.code))
+                    .bold()
+                    .fg(Color::Red),
+            );
+            lines.extend(
+                sanitize_tui_lines(&failure.message)
+                    .into_iter()
+                    .map(|line| Line::from(line).fg(Color::Red)),
+            );
+            if log.is_none() && !failure.output_tail.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from("output tail:").bold());
+                lines.extend(
+                    failure
+                        .output_tail
+                        .iter()
+                        .map(|line| Line::from(sanitize_tui_line(line))),
+                );
+            }
+        } else if log.is_none() {
             match &self.run_state {
                 RunState::Running { .. } => {
-                    lines.push(Line::from("no task logs yet"));
-                    lines.push(Line::from(
-                        "provider subprocess output and executor logs appear here when emitted",
-                    ));
+                    lines.push(Line::from("no output from this operation yet"));
+                }
+                RunState::Idle if self.last_run.is_some() => {
+                    lines.push(Line::from("this operation produced no output"));
                 }
                 RunState::Idle => {
                     lines.push(Line::from("no task logs available yet"));
-                    lines.push(Line::from(
-                        "start a build with 's' and select an operation to inspect its logs",
-                    ));
+                    lines.push(Line::from("start a build with 's' to see operation output"));
                 }
             }
         }
@@ -576,5 +636,14 @@ impl<'a> TuiState<'a> {
             }));
         }
         lines
+    }
+}
+
+fn reuse_line(reuse: &gaia_plan::OperationReuse) -> Line<'static> {
+    match reuse {
+        gaia_plan::OperationReuse::Execute(reason) => {
+            Line::from(format!("will run: {} ({})", reason.message, reason.code))
+        }
+        gaia_plan::OperationReuse::Reuse { source } => Line::from(format!("will reuse: {source}")),
     }
 }

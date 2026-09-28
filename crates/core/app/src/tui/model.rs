@@ -176,6 +176,15 @@ pub(crate) struct RefreshThreadMessage {
     pub(crate) result: Result<RefreshArtifacts, String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QuitState {
+    Idle,
+    /// Quit was pressed once during a build; the next press cancels it.
+    Armed,
+    /// Cancellation was requested; exit when the run thread finishes.
+    CancelThenExit,
+}
+
 pub(crate) enum RunState {
     Idle,
     Running {

@@ -16,12 +16,12 @@ impl<'a> TuiState<'a> {
                     "ready".into()
                 }
             }
-            RunState::Running { started_at, .. } => {
-                let current = current_operation_label(&self.live_events).unwrap_or("starting");
-                format!(
-                    "running: {current} {}",
-                    format_elapsed(started_at.elapsed())
-                )
+            RunState::Running { .. } if self.quit == QuitState::CancelThenExit => {
+                "cancelling".into()
+            }
+            RunState::Running { .. } => {
+                let current = self.events.newest_running().unwrap_or("starting");
+                format!("running: {current}")
             }
         }
     }
@@ -34,7 +34,7 @@ impl<'a> TuiState<'a> {
         let completed = if let Some(run) = self.last_run.as_ref() {
             run.report.summary.completed_operations + run.report.summary.reused_operations
         } else {
-            live_completed_count(&self.live_events)
+            self.events.completed_count()
         }
         .min(total);
         ((completed as f64 / total as f64) * 100.0) as u16
@@ -43,22 +43,28 @@ impl<'a> TuiState<'a> {
     pub(crate) fn run_elapsed_label(&self) -> String {
         match &self.run_state {
             RunState::Running { started_at, .. } => format_elapsed(started_at.elapsed()),
-            RunState::Idle => "00:00:00".into(),
+            RunState::Idle => self
+                .last_run_duration
+                .map(format_elapsed)
+                .unwrap_or_else(|| "00:00:00".into()),
         }
     }
 
     pub(crate) fn monitor_summary_line(&self) -> String {
         match &self.run_state {
             RunState::Running { .. } => {
-                let current = current_operation_label(&self.live_events).unwrap_or("starting");
-                let completed = live_completed_count(&self.live_events);
-                let total = self.operation_total();
+                let running = self.events.running();
+                let running_label = match running {
+                    [] => "starting".to_string(),
+                    [only] => only.clone(),
+                    [.., newest] => format!("{newest} (+{} more)", running.len() - 1),
+                };
                 format!(
-                    "live: op={}  completed={}/{}  events={}  use Left/Right for Events|Logs|Reports",
-                    current,
-                    completed,
-                    total,
-                    self.live_events.len()
+                    "running: {}  completed={}/{}  follow={}",
+                    running_label,
+                    self.events.completed_count(),
+                    self.operation_total(),
+                    if self.follow_running { "on" } else { "off [f]" },
                 )
             }
             RunState::Idle => {

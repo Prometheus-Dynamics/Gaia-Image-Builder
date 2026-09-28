@@ -108,16 +108,32 @@ Current provider/runtime state files:
 Gaia also persists reuse state including:
 - spec fingerprint
 - completed operation ids
-- per-operation fingerprints
+- per-operation fingerprints (as computed when the run was planned)
 - per-operation output signatures
+- per-operation input signatures: the content signatures of the operation's
+  direct dependencies when it last ran
 
 Reuse is invalidated when:
-- spec changes
 - operation fingerprint changes
 - provider state changes
 - runtime state changes
 - output signatures change
 - outputs disappear
+- a dependency's content differs from what the operation last consumed
+
+State is saved after every run, including failed, cancelled, and `--only`
+runs. Operations that finished are recorded; entries for operations the run
+did not attempt are kept, and their input signatures make them rebuild if
+anything they depend on changed in the meantime. The file is written to a
+temporary path and renamed into place.
+
+### Early cutoff
+
+An operation that would re-run only because a dependency is rebuilding is
+checked again when it is scheduled, after its dependencies finish. If the
+rebuilt dependencies produced the same content as last time (for example, a
+touched source file that compiles to a byte-identical artifact), the operation
+is reused instead of rebuilt, and the rebuild stops propagating.
 
 Image assembly reuse is also invalidated when declared assembly inputs change, including staged file sources, glob match sets, transform inputs, BusyBox helper inputs, and resolved tool signatures where relevant.
 

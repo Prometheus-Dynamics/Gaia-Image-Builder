@@ -76,7 +76,8 @@ impl ArtifactProvider for NodeProvider {
         };
         let source_dir = contract.source_dir.as_deref().unwrap_or(".");
         let package_root = artifact_package_root(source_dir, &package_dir);
-        let pack_dir = package_root.join(".gaia-pack");
+        // Scratch output lives under .gaia so it never looks like a source change.
+        let pack_dir = package_root.join(".gaia").join("pack");
         fs::create_dir_all(&pack_dir).map_err(|error| {
             format!(
                 "failed to create node pack dir '{}': {error}",

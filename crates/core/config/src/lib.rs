@@ -93,6 +93,13 @@ pub enum ConfigError {
         path: String,
         message: String,
     },
+    /// An `imports` or `extends` entry names a file that does not exist.
+    ConfigReferenceMissing {
+        referenced_by: String,
+        field: &'static str,
+        reference: String,
+        resolved: String,
+    },
     ConfigRead {
         path: String,
         message: String,
@@ -194,6 +201,15 @@ impl fmt::Display for ConfigError {
             Self::ConfigPath { path, message } => {
                 write!(formatter, "failed to canonicalize '{path}': {message}")
             }
+            Self::ConfigReferenceMissing {
+                referenced_by,
+                field,
+                reference,
+                resolved,
+            } => write!(
+                formatter,
+                "{field} '{reference}' in '{referenced_by}' does not exist (resolved to '{resolved}')"
+            ),
             Self::ConfigRead { path, message } => {
                 write!(formatter, "failed to read build config '{path}': {message}")
             }

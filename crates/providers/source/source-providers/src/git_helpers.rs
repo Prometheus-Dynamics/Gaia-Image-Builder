@@ -118,6 +118,25 @@ fn ensure_remote_git_cache(
     })?;
     let mirror_dir = cache_dir.join(format!("{}.git", remote_git_cache_key(git)));
     if mirror_dir.join("HEAD").is_file() {
+        // Refresh so the mirror keeps supplying objects for new commits; a
+        // failed refresh only makes the clone fetch more itself.
+        let mut fetch = git_command();
+        fetch
+            .arg("-C")
+            .arg(&mirror_dir)
+            .arg("fetch")
+            .arg("--prune")
+            .arg("origin");
+        if let Err(error) = run_command_with_policy(
+            fetch,
+            execution,
+            "refresh remote git source cache",
+            policy,
+            log_sink,
+            cancel_check,
+        ) {
+            tracing::warn!(mirror = %mirror_dir.display(), ?error, "git cache refresh failed");
+        }
         return Ok(mirror_dir);
     }
     let mut clone = git_command();
@@ -137,13 +156,11 @@ fn ensure_remote_git_cache(
     Ok(mirror_dir)
 }
 
+/// One mirror per repository, shared by every branch, tag and revision.
 fn remote_git_cache_key(git: &GitSourceSpec) -> String {
     let mut hasher = DefaultHasher::new();
     git.repo.hash(&mut hasher);
-    git.branch.hash(&mut hasher);
-    git.tag.hash(&mut hasher);
-    git.rev.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+    format!("repo-{:016x}", hasher.finish())
 }
 
 pub(crate) fn resolve_remote_git_refs(

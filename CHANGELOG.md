@@ -6,6 +6,30 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added
+
+- Added `--only <targets>` to `gaia run` and `gaia plan` to execute part of the build graph (a domain such as `artifacts` or `image`, or an operation id such as `artifact:<id>`) plus its dependencies. Partial runs keep the reuse state of operations they skip.
+- Added `gaia tui --builds-dir <dir>` to choose the directory the build picker scans.
+- Added a `stage_file_src_placeholder` validation warning for `[[stage.files]]` sources that are directories holding nothing but placeholders such as README or `.gitkeep`.
+- Reworked the TUI:
+  - The Plan panel lists every operation with its execute/reuse decision and reason.
+  - The monitor follows the newest running operation (`f` toggles following) and jumps to the failed operation's logs when a run fails.
+  - A `?` key-help overlay, `j`/`k` navigation, and `m` to return to a running build from setup.
+
+### Performance
+
+- Added early cutoff: each operation records the content signature of the inputs it consumed, and an operation scheduled only because a dependency rebuilt is reused when that dependency produced identical content, so a no-op rebuild no longer cascades into image and assembly rebuilds.
+- Reuse state is now saved after failed, cancelled and partial runs, keeping every operation that finished. It records plan-time fingerprints instead of re-probing tools after the run, and is written atomically.
+- Buildroot records its config state before the long `make`, so a failed build after a config change resumes on retry instead of cleaning the output tree again.
+- The Buildroot config comparison ignores the generated version header and settings that cannot change output (download/ccache locations, `BR2_JLEVEL`, mirrors), avoiding spurious full rebuilds. Existing state files remain valid.
+- Buildroot images no longer run a separate prepare step (a second full `make`) unless an artifact sets `after_image_prepare`, and disk-assembly changes no longer re-run the Buildroot build.
+- Buildroot downloads default to a workspace-wide cache (`.gaia/cache/buildroot/dl`, passed through the environment), which survives re-fetching the Buildroot source and is shared across builds. Cache directories outside the workspace are mounted into Docker builds.
+- Docker artifact builds keep `CARGO_HOME` (registry and git dependencies) and `SCCACHE_DIR` under `.gaia/docker-cache` instead of losing them with each `--rm` container.
+- Raw image and `tar.xz` compression use all cores (`xz -T0` with a fixed block size, so output does not depend on the thread count).
+- Path-source and git tree digests hash files in-process instead of spawning `sha256sum` per file, and path sources ignore `target`, `node_modules`, `.git`, `.gaia` and `__pycache__` by default. Node and Python scratch output moved under `.gaia/` so builds no longer look like source changes.
+- Re-cloned git sources keep their `.gaia` build state (such as the cargo target dir), and the remote git mirror is shared per repository and refreshed before cloning.
+- Tool version probes used in fingerprints run once per process with a 10 second timeout, instead of per artifact with a 2 second timeout whose expiry forced rebuilds on loaded machines.
+
 ### Fixed
 
 - Added declarative assembly support for creating directories and symlinks before filesystem packing, and expanded assembly glob matching to support versioned parent directories such as Buildroot firmware output paths.
@@ -18,6 +42,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - Fixed Buildroot output hygiene so large internal Buildroot work trees live under the build directory instead of the image collect directory, artifact state sidecars live under hidden `.gaia` folders, and reports prefer the final compressed assembly archive as the primary image output.
 - Fixed typed assembly `vfat` filesystem generation so Gaia no longer forces FAT32 for small boot images, allowing mtools to choose a valid FAT variant for the requested image size.
 - Fixed nested workspace path interpolation so references such as `${workspace.build_dir}/assembly` fully expand embedded build tokens instead of creating literal `${build.name}` directories.
+- Fixed argument parsing so flags are never taken as the build path (`gaia tui --builds-dir configs/builds` previously tried to load a build named `--builds-dir`), and unknown flags, missing flag values, malformed `KEY=VALUE` pairs, and extra positional arguments are reported instead of silently ignored.
+- Fixed missing `imports` and `extends` entries failing with a bare `failed to canonicalize` error; the error now names the config file that contains the reference.
+- Fixed TUI quit during a running build abandoning the build without cancelling it; quitting now asks first, then cancels and waits for the build to stop.
+- Fixed TUI typing `q` in a text field quitting the application.
+- Fixed the TUI showing the previous run's operation statuses and progress while a new run was starting.
+- Fixed TUI slowdown on long builds: operation status and logs are now indexed as events arrive instead of rescanning the whole event stream on every frame, and logs keep the most recent 5,000 lines per operation.
+- Fixed the TUI Plan panel claiming a "serial runtime" executor and always showing the first operation in setup.
+- Fixed `cargo clippy -- -D warnings` failures in the Buildroot provider and app crate.
 - Added typed assembly MBR layout controls for `first_lba` and `alignment_lba`, allowing board images to preserve firmware-sensitive partition layouts instead of always using 1 MiB partition alignment.
 
 ## [2.0.0] - 2026-05-01

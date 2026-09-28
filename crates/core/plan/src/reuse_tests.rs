@@ -1,4 +1,4 @@
-use super::command_signature;
+use super::{COMMAND_SIGNATURE_TIMEOUT_SECONDS, command_signature};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -48,10 +48,13 @@ fn command_signature_times_out_hanging_tools() {
 
     let signature = command_signature(script.to_str().expect("script path"), ["--version"]);
 
-    assert!(started.elapsed() < Duration::from_secs(10));
+    assert!(started.elapsed() < Duration::from_secs(25));
     assert_eq!(
         signature,
-        format!("{}:timeout-2s", script.to_str().expect("script path"))
+        format!(
+            "{}:timeout-{COMMAND_SIGNATURE_TIMEOUT_SECONDS}s",
+            script.to_str().expect("script path")
+        )
     );
 
     let _ = fs::remove_file(script);

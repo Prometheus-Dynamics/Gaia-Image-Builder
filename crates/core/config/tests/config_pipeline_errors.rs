@@ -130,3 +130,41 @@ fn rejects_invalid_numeric_override_with_typed_error() {
     );
     assert!(error.to_string().contains("slow"));
 }
+
+#[test]
+fn missing_import_names_the_importing_file() {
+    let dir = std::env::temp_dir().join(format!(
+        "gaia-missing-import-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let build = dir.join("build.toml");
+    std::fs::write(
+        &build,
+        "build_name = \"dead-ref\"\nimports = [\"layers/gone.toml\"]\n",
+    )
+    .expect("build config");
+
+    let error = gaia_config::try_resolve_config(build.to_str().expect("utf-8 path"))
+        .expect_err("missing import should fail");
+
+    match &error {
+        gaia_config::ConfigError::ConfigReferenceMissing {
+            referenced_by,
+            field,
+            reference,
+            ..
+        } => {
+            assert_eq!(*field, "import");
+            assert_eq!(reference, "layers/gone.toml");
+            assert!(referenced_by.ends_with("build.toml"));
+        }
+        other => panic!("expected missing reference error, got {other:?}"),
+    }
+    assert!(error.to_string().contains("import 'layers/gone.toml' in '"));
+    let _ = std::fs::remove_dir_all(dir);
+}

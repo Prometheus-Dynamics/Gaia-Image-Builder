@@ -23,6 +23,9 @@ impl SourceProvider for GitSourceProvider {
             ));
         };
         let materialized_dir = materialized_dir(spec, source);
+        // Build state kept inside the checkout (such as .gaia/cargo-target)
+        // survives the re-clone; restored when this guard drops.
+        let _preserved = PreservedGaiaDir::stash(&materialized_dir)?;
         prepare_materialized_dir(&materialized_dir)?;
         let execution = execution_context(spec);
 
@@ -64,7 +67,7 @@ impl SourceProvider for GitSourceProvider {
                     resolved_head,
                     tree_digest(
                         &materialized_dir,
-                        &[".git", "source.txt", ".gaia-source-state.txt"]
+                        &[".git", ".gaia", "source.txt", ".gaia-source-state.txt"]
                     ),
                 ),
             )?;
@@ -149,7 +152,7 @@ impl SourceProvider for GitSourceProvider {
                                 resolved_head,
                                 tree_digest(
                                     &materialized_dir,
-                                    &[".git", "source.txt", ".gaia-source-state.txt"]
+                                    &[".git", ".gaia", "source.txt", ".gaia-source-state.txt"]
                                 ),
                             ),
                         )?;
@@ -186,7 +189,7 @@ impl SourceProvider for GitSourceProvider {
                                     sanitize_state_value(&error.message),
                                     tree_digest(
                                         &materialized_dir,
-                                        &[".git", "source.txt", ".gaia-source-state.txt"]
+                                        &[".git", ".gaia", "source.txt", ".gaia-source-state.txt"]
                                     ),
                                 ),
                             )?;

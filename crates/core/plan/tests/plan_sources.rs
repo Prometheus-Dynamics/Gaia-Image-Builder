@@ -59,6 +59,7 @@ fn plan_rebuilds_when_path_source_tree_changes() {
                     .map(|signature| (operation.id.as_str().to_string(), signature))
             })
             .collect(),
+        operation_input_signatures: Default::default(),
     };
 
     let plan = plan_build_with_reuse_state(
@@ -125,6 +126,7 @@ fn plan_ignores_workspace_derived_dirs_when_hashing_path_sources() {
         )]
         .into_iter()
         .collect(),
+        operation_input_signatures: Default::default(),
     };
 
     let plan = plan_build_with_reuse_state(
@@ -186,6 +188,7 @@ fn plan_rebuilds_source_when_provider_state_changes() {
         operation_output_signatures: [("source:workspace-root".to_string(), baseline_signature)]
             .into_iter()
             .collect(),
+        operation_input_signatures: Default::default(),
     };
 
     let plan = plan_build_with_reuse_state(

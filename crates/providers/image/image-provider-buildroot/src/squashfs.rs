@@ -1,5 +1,6 @@
 use super::*;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn refresh_buildroot_images_after_feed_overlay(
     spec: &ResolvedBuildSpec,
     image: &ImageSpec,

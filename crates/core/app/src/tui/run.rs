@@ -12,10 +12,12 @@ impl<'a> TuiState<'a> {
         };
         let run_duration = started_at.elapsed();
         let mut finished = None;
+        let mut received_events = false;
         loop {
             match receiver.try_recv() {
                 Ok(RunThreadMessage::Event(event)) => {
-                    self.live_events.push(event);
+                    self.events.push(event);
+                    received_events = true;
                 }
                 Ok(RunThreadMessage::Finished(result)) => {
                     finished = Some(*result);
@@ -30,6 +32,9 @@ impl<'a> TuiState<'a> {
         }
 
         let Some(message) = finished else {
+            if received_events && self.follow_running {
+                self.select_newest_running_operation();
+            }
             return;
         };
 
@@ -37,12 +42,17 @@ impl<'a> TuiState<'a> {
             Ok(run) => {
                 let cancelled = run.outcome.cancelled;
                 let error_count = run.outcome.errors.len();
-                self.live_events = run.outcome.events.clone();
+                self.events = EventLog::from_events(&run.outcome.events);
                 self.last_run = Some(run);
                 self.last_run_duration = Some(run_duration);
                 if cancelled {
                     self.set_status("run cancelled");
-                } else if error_count == 0 {
+                } else if error_count > 0 {
+                    self.focus_first_failure();
+                    self.set_status(format!(
+                        "run failed with {error_count} error(s); showing logs for the failed operation"
+                    ));
+                } else {
                     self.monitor_view = index_of_monitor_view(MonitorView::Reports);
                     let report_count = self
                         .last_run
@@ -53,8 +63,6 @@ impl<'a> TuiState<'a> {
                         "run completed successfully; {} report file(s) written",
                         report_count
                     ));
-                } else {
-                    self.set_status(format!("run failed with {} error(s)", error_count));
                 }
             }
             Err(message) => {
@@ -63,6 +71,50 @@ impl<'a> TuiState<'a> {
         }
         self.run_state = RunState::Idle;
         self.detail_scroll = 0;
+        if self.quit == QuitState::CancelThenExit {
+            self.pending_exit_code = Some((self.exit_code().max(130), Instant::now()));
+        }
+        self.quit = QuitState::Idle;
+    }
+
+    fn focus_first_failure(&mut self) {
+        let failed = self.events.first_failed().map(str::to_string).or_else(|| {
+            self.last_run.as_ref().and_then(|run| {
+                run.outcome
+                    .errors
+                    .first()
+                    .map(|error| error.operation_id.as_str().to_string())
+            })
+        });
+        if let Some(index) = failed.and_then(|id| self.index_of_operation(&id)) {
+            self.operation_list.select(Some(index));
+        }
+        self.follow_running = false;
+        self.monitor_view = index_of_monitor_view(MonitorView::Logs);
+        self.detail_follow_tail = true;
+    }
+
+    pub(crate) fn select_newest_running_operation(&mut self) {
+        let index = self
+            .events
+            .newest_running()
+            .and_then(|id| self.index_of_operation(id));
+        if let Some(index) = index
+            && self.operation_list.selected() != Some(index)
+        {
+            self.operation_list.select(Some(index));
+            if self.detail_follow_tail {
+                self.detail_scroll = 0;
+            }
+        }
+    }
+
+    pub(crate) fn index_of_operation(&self, operation_id: &str) -> Option<usize> {
+        self.plan
+            .as_ref()?
+            .operations
+            .iter()
+            .position(|operation| operation.id.as_str() == operation_id)
     }
 
     pub(crate) fn start_run(&mut self) {
@@ -107,9 +159,12 @@ impl<'a> TuiState<'a> {
         let cancellation = ExecutionCancellation::new();
         let cancellation_for_thread = cancellation.clone();
         let (tx, rx) = mpsc::channel();
-        self.live_events.clear();
+        self.events = EventLog::default();
+        self.last_run = None;
         self.last_run_duration = None;
         self.pending_exit_code = None;
+        self.quit = QuitState::Idle;
+        self.follow_running = true;
         thread::spawn(move || {
             let context = AppContext::with_defaults();
             let result =
@@ -187,11 +242,9 @@ pub(crate) fn collect_run_artifacts(
             event_tx
         }),
     );
+    save_reuse_state(&spec, &plan, &outcome, reuse_state.as_ref());
     let report = generate_report(&spec, &validation, &plan, &outcome);
     let report_outputs = write_report_bundle(&spec, &report)?;
-    if outcome.errors.is_empty() && !outcome.cancelled {
-        save_reuse_state(&spec, &plan, &outcome);
-    }
 
     Ok(RunArtifacts {
         spec,

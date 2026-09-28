@@ -29,12 +29,21 @@ use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragra
 use crate::commands::{CommandOutcome, RunArtifacts, load_reuse_state, save_reuse_state};
 use crate::{AppContext, backend_overview_lines, runtime_overview_lines};
 
+/// How the TUI was invoked from the command line.
+pub struct TuiLaunch<'a> {
+    pub build: &'a str,
+    /// Whether the user named a build config, as opposed to a default.
+    pub build_explicit: bool,
+    /// Directory to scan for build entrypoints instead of `configs/builds`.
+    pub builds_dir: Option<&'a str>,
+}
+
 pub fn run_tui_command(
     context: &AppContext,
-    build: &str,
+    launch: TuiLaunch<'_>,
     options: &ResolveOptions,
 ) -> CommandOutcome {
-    match launch_tui(context, build, options) {
+    match launch_tui(context, launch, options) {
         Ok((exit_code, summary)) => CommandOutcome::TuiExited { summary, exit_code },
         Err(error) => CommandOutcome::Failed {
             message: format!("failed to launch tui: {error}"),
@@ -44,15 +53,16 @@ pub fn run_tui_command(
 
 fn launch_tui(
     context: &AppContext,
-    build: &str,
+    launch: TuiLaunch<'_>,
     options: &ResolveOptions,
 ) -> io::Result<(i32, String)> {
-    let mut state = TuiState::new(context, build, options);
+    let mut state = TuiState::new(context, launch, options);
     state.refresh();
 
     let mut terminal = setup_terminal()?;
-    let exit_code = run_loop(&mut terminal, &mut state)?;
+    let result = run_loop(&mut terminal, &mut state);
     restore_terminal(&mut terminal)?;
+    let exit_code = result?;
     Ok((exit_code, state.tui_exit_summary()))
 }
 
@@ -93,12 +103,17 @@ fn run_loop(
             continue;
         }
 
-        match key.code {
-            KeyCode::Char('q') => return Ok(state.exit_code()),
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return Ok(state.exit_code());
+        let is_quit = match key.code {
+            KeyCode::Char('c') => key.modifiers.contains(KeyModifiers::CONTROL),
+            KeyCode::Char('q') => state.edit_field.is_none(),
+            _ => false,
+        };
+        if is_quit {
+            if let Some(code) = state.request_quit() {
+                return Ok(code);
             }
-            _ => state.handle_key(key.code, key.modifiers),
+        } else {
+            state.handle_key(key.code, key.modifiers);
         }
         state.tick();
     }
@@ -106,6 +121,7 @@ fn run_loop(
 
 mod details;
 mod discovery;
+mod events;
 mod input;
 mod model;
 mod render;
@@ -115,6 +131,7 @@ mod state;
 mod status;
 
 pub(crate) use discovery::*;
+pub(crate) use events::*;
 pub(crate) use model::*;
 pub(crate) use render::*;
 pub(crate) use state::*;

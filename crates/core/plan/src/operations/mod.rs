@@ -112,6 +112,11 @@ pub struct PlannedOperation {
     pub optionality: OperationOptionality,
     pub fingerprint: u64,
     pub reuse: OperationReuse,
+    /// Set when the operation executes only because a dependency is
+    /// rebuilding. Holds the input signature recorded the last time the
+    /// operation ran; if the rebuilt dependencies produce the same content
+    /// signature, the executor reuses the operation instead (early cutoff).
+    pub cutoff_input_signature: Option<u64>,
 }
 
 impl PlannedOperation {
@@ -124,6 +129,7 @@ impl PlannedOperation {
             optionality: OperationOptionality::Required,
             fingerprint: 0,
             reuse: OperationReuse::execute("initial_plan", "operation will execute in this plan"),
+            cutoff_input_signature: None,
         }
     }
 

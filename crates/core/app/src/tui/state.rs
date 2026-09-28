@@ -1,10 +1,10 @@
 use super::*;
-use crate::cli::EXAMPLE_DEFAULT_BUILD_CONFIG;
 const SETUP_REFRESH_DEBOUNCE: Duration = Duration::from_millis(200);
 
 pub(crate) struct TuiState<'a> {
     pub(crate) context: &'a AppContext,
     pub(crate) build: String,
+    pub(crate) builds_dir: Option<PathBuf>,
     pub(crate) options: ResolveOptions,
     pub(crate) screen: Screen,
     pub(crate) build_entries: Vec<BuildEntry>,
@@ -20,13 +20,18 @@ pub(crate) struct TuiState<'a> {
     pub(crate) plan_diagnostics: Vec<gaia_plan::PlanDiagnostic>,
     pub(crate) last_run: Option<RunArtifacts>,
     pub(crate) last_run_duration: Option<Duration>,
-    pub(crate) live_events: Vec<ExecutionEvent>,
+    pub(crate) events: EventLog,
     pub(crate) run_state: RunState,
     pub(crate) status: String,
     pub(crate) status_since: Instant,
     pub(crate) edit_field: Option<SetupEditField>,
     pub(crate) edit_buffer: String,
     pub(crate) pending_exit_code: Option<(i32, Instant)>,
+    pub(crate) quit: QuitState,
+    pub(crate) show_help: bool,
+    /// Monitor selection tracks the newest running operation until the user
+    /// picks one by hand.
+    pub(crate) follow_running: bool,
     pub(crate) pending_refresh_at: Option<Instant>,
     pub(crate) refresh_receiver: Option<Receiver<RefreshThreadMessage>>,
     pub(crate) refresh_revision: u64,
@@ -34,23 +39,29 @@ pub(crate) struct TuiState<'a> {
 }
 
 impl<'a> TuiState<'a> {
-    pub(crate) fn new(context: &'a AppContext, build: &str, options: &ResolveOptions) -> Self {
+    pub(crate) fn new(
+        context: &'a AppContext,
+        launch: TuiLaunch<'_>,
+        options: &ResolveOptions,
+    ) -> Self {
+        let builds_dir = launch.builds_dir.map(PathBuf::from);
+        let build = launch.build;
         let mut build_list = ListState::default();
-        let build_entries = discover_build_entries(build);
+        let build_entries = discover_build_entries(build, builds_dir.as_deref());
         let discovered_build = build_entries
             .iter()
             .find(|entry| entry.path == build)
             .map(|entry| entry.path.clone());
-        let should_open_picker = discovered_build.is_none()
-            && build == EXAMPLE_DEFAULT_BUILD_CONFIG
-            && !build_entries.is_empty();
-        let selected_build = discovered_build
-            .or_else(|| {
-                should_open_picker
-                    .then(|| build_entries.first().map(|entry| entry.path.clone()))
-                    .flatten()
-            })
-            .unwrap_or_else(|| build.to_string());
+        // Without an explicit build, let the user choose unless there is only
+        // one candidate.
+        let should_open_picker = !launch.build_explicit && build_entries.len() > 1;
+        let selected_build = if launch.build_explicit {
+            build.to_string()
+        } else {
+            discovered_build
+                .or_else(|| build_entries.first().map(|entry| entry.path.clone()))
+                .unwrap_or_else(|| build.to_string())
+        };
         if !build_entries.is_empty() {
             let selected = build_entries
                 .iter()
@@ -65,6 +76,7 @@ impl<'a> TuiState<'a> {
         Self {
             context,
             build: selected_build,
+            builds_dir,
             options: options.clone(),
             screen: if should_open_picker {
                 Screen::Picker
@@ -84,13 +96,16 @@ impl<'a> TuiState<'a> {
             plan_diagnostics: Vec::new(),
             last_run: None,
             last_run_duration: None,
-            live_events: Vec::new(),
+            events: EventLog::default(),
             run_state: RunState::Idle,
             status: "loading build state".into(),
             status_since: Instant::now(),
             edit_field: None,
             edit_buffer: String::new(),
             pending_exit_code: None,
+            quit: QuitState::Idle,
+            show_help: false,
+            follow_running: true,
             pending_refresh_at: None,
             refresh_receiver: None,
             refresh_revision: 0,
@@ -158,6 +173,33 @@ impl<'a> TuiState<'a> {
         }
         self.poll_refresh_completion();
         self.start_pending_refresh();
+    }
+
+    /// Handles q / Ctrl+C. Returns an exit code when the TUI should close now.
+    ///
+    /// A running build is never abandoned silently: the first press asks for
+    /// confirmation, the second cancels the build and exits once it has
+    /// stopped, and a third forces the exit.
+    pub(crate) fn request_quit(&mut self) -> Option<i32> {
+        if !matches!(self.run_state, RunState::Running { .. }) {
+            return Some(self.exit_code());
+        }
+        match self.quit {
+            QuitState::Idle => {
+                self.quit = QuitState::Armed;
+                self.set_status("a build is running: press q again to cancel it and quit");
+                None
+            }
+            QuitState::Armed => {
+                self.quit = QuitState::CancelThenExit;
+                self.cancel_run();
+                self.set_status(
+                    "cancelling build; will exit once it stops (press q again to force)",
+                );
+                None
+            }
+            QuitState::CancelThenExit => Some(130),
+        }
     }
 
     pub(crate) fn should_exit(&self) -> Option<i32> {

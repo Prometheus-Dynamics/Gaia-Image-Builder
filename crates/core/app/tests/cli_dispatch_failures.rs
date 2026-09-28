@@ -176,3 +176,17 @@ stage_files = ["missing-stage-file"]
     let _ = fs::remove_file(path);
     let _ = fs::remove_file(out_file);
 }
+
+#[test]
+fn usage_errors_fail_before_resolving_the_build() {
+    let outcome = run_with_args(AppArgs::parse_from(["validate", "--no-such-flag"]));
+
+    assert_eq!(outcome.exit_code(), 1);
+    match outcome {
+        CommandOutcome::Failed { message } => {
+            assert!(message.contains("unknown flag '--no-such-flag'"));
+            assert!(message.contains("gaia --help"));
+        }
+        other => panic!("expected failed outcome, got {other:?}"),
+    }
+}

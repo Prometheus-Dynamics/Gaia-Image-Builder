@@ -1,18 +1,30 @@
 use super::*;
 
-pub(crate) fn discover_build_entries(current_build: &str) -> Vec<BuildEntry> {
+pub(crate) fn discover_build_entries(
+    current_build: &str,
+    builds_dir: Option<&Path>,
+) -> Vec<BuildEntry> {
     let mut paths = Vec::new();
-    paths.extend(crate::cli::current_dir_build_toml_files(Path::new(".")));
-
-    let build_configs_dir = PathBuf::from("configs").join("builds");
-    if build_configs_dir.exists() {
-        collect_toml_files(&build_configs_dir, &mut paths);
-    } else {
-        let configs_dir = PathBuf::from("configs");
-        if configs_dir.exists() {
-            collect_toml_files(&configs_dir, &mut paths);
+    let label_root = match builds_dir {
+        Some(dir) => {
+            collect_toml_files(dir, &mut paths);
+            Some(dir.to_path_buf())
         }
-    }
+        None => {
+            paths.extend(crate::cli::current_dir_build_toml_files(Path::new(".")));
+            let build_configs_dir = PathBuf::from("configs").join("builds");
+            if build_configs_dir.exists() {
+                collect_toml_files(&build_configs_dir, &mut paths);
+                Some(build_configs_dir)
+            } else {
+                let configs_dir = PathBuf::from("configs");
+                if configs_dir.exists() {
+                    collect_toml_files(&configs_dir, &mut paths);
+                }
+                None
+            }
+        }
+    };
 
     let current_path = PathBuf::from(current_build);
     if current_path.is_file() && !paths.iter().any(|path| path == &current_path) {
@@ -23,9 +35,17 @@ pub(crate) fn discover_build_entries(current_build: &str) -> Vec<BuildEntry> {
     paths.dedup();
     paths
         .into_iter()
-        .map(|path| BuildEntry {
-            label: path.display().to_string(),
-            path: path.display().to_string(),
+        .map(|path| {
+            let label = label_root
+                .as_deref()
+                .and_then(|root| path.strip_prefix(root).ok())
+                .unwrap_or(&path)
+                .display()
+                .to_string();
+            BuildEntry {
+                label,
+                path: path.display().to_string(),
+            }
         })
         .collect()
 }
@@ -49,57 +69,6 @@ pub(crate) fn image_provider_label(spec: &ResolvedBuildSpec) -> &'static str {
         gaia_spec::ImageProviderKind::Buildroot => "Buildroot",
         gaia_spec::ImageProviderKind::StartingPoint => "StartingPoint",
     }
-}
-
-pub(crate) fn live_operation_status(
-    events: &[ExecutionEvent],
-    operation_id: &str,
-) -> Option<(&'static str, Color)> {
-    let mut status = None;
-    for event in events {
-        match event {
-            ExecutionEvent::Started { operation_id: id } if id.as_str() == operation_id => {
-                status = Some(("RUN", Color::LightCyan));
-            }
-            ExecutionEvent::Succeeded { operation_id: id } if id.as_str() == operation_id => {
-                status = Some(("OK", Color::Green));
-            }
-            ExecutionEvent::Reused { operation_id: id } if id.as_str() == operation_id => {
-                status = Some(("REUSE", Color::LightBlue));
-            }
-            ExecutionEvent::Cancelled { operation_id: id } if id.as_str() == operation_id => {
-                status = Some(("CANCEL", Color::LightYellow));
-            }
-            ExecutionEvent::Failed {
-                operation_id: id, ..
-            } if id.as_str() == operation_id => {
-                status = Some(("FAIL", Color::Red));
-            }
-            _ => {}
-        }
-    }
-    status
-}
-
-pub(crate) fn current_operation_label(events: &[ExecutionEvent]) -> Option<&str> {
-    for event in events.iter().rev() {
-        if let ExecutionEvent::Started { operation_id } = event {
-            return Some(operation_id.as_str());
-        }
-    }
-    None
-}
-
-pub(crate) fn live_completed_count(events: &[ExecutionEvent]) -> usize {
-    events
-        .iter()
-        .filter(|event| {
-            matches!(
-                event,
-                ExecutionEvent::Succeeded { .. } | ExecutionEvent::Reused { .. }
-            )
-        })
-        .count()
 }
 
 pub(crate) fn render_event_line(event: &ExecutionEvent) -> Line<'static> {

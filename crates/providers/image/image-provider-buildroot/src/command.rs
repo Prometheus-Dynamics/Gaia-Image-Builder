@@ -216,8 +216,26 @@ pub(crate) fn command_for_execution(
             "docker execution requires a non-empty image",
         ));
     }
-    let spec =
+    let mut spec =
         DockerRunSpec::discovered_mounts(image.clone(), execution.workspace_root.clone(), command);
+    // Cache and external-tree directories reach Buildroot through the
+    // environment, which mount discovery does not scan. Without mounting
+    // them, a cache outside the workspace would live only inside the --rm
+    // container and be lost after every build.
+    for (key, value) in command.get_envs() {
+        let (Some(key), Some(value)) = (key.to_str(), value) else {
+            continue;
+        };
+        if !matches!(key, "BR2_DL_DIR" | "BR2_CCACHE_DIR" | "BR2_EXTERNAL") {
+            continue;
+        }
+        for part in value.to_string_lossy().split([':', ' ']) {
+            let path = Path::new(part);
+            if path.is_absolute() && path.is_dir() && !spec.mounts.iter().any(|m| m == path) {
+                spec.mounts.push(path.to_path_buf());
+            }
+        }
+    }
     docker_run_command(command, &spec).map_err(|error| {
         ImageProviderError::new(ImageProviderErrorKind::PolicyBlocked, error.to_string())
     })

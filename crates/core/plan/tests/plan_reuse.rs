@@ -114,6 +114,7 @@ fn default_plan_reuses_operations_when_state_matches() {
                     .map(|signature| (operation.id.as_str().to_string(), signature))
             })
             .collect(),
+        operation_input_signatures: Default::default(),
     };
 
     let plan = plan_build_with_reuse_state(
@@ -166,6 +167,7 @@ fn plan_rebuilds_when_materialized_outputs_are_missing_even_if_state_matches() {
                     .map(|signature| (operation.id.as_str().to_string(), signature))
             })
             .collect(),
+        operation_input_signatures: Default::default(),
     };
 
     let plan = plan_build_with_reuse_state(
@@ -289,6 +291,7 @@ fn plan_rebuilds_when_runtime_state_files_are_missing_even_if_other_outputs_exis
                     .map(|signature| (operation.id.as_str().to_string(), signature))
             })
             .collect(),
+        operation_input_signatures: Default::default(),
     };
 
     fs::remove_file(runtime_dir.join("install-install-gaia-app.state"))
@@ -371,6 +374,7 @@ fn plan_rebuilds_assembly_when_runtime_state_is_missing_even_if_outputs_exist() 
                     .map(|signature| (operation.id.as_str().to_string(), signature))
             })
             .collect(),
+        operation_input_signatures: Default::default(),
     };
 
     let plan = plan_build_with_reuse_state(
@@ -449,6 +453,7 @@ fn plan_rebuilds_assembly_when_direct_partition_image_changes() {
                     .map(|signature| (operation.id.as_str().to_string(), signature))
             })
             .collect(),
+        operation_input_signatures: Default::default(),
     };
 
     fs::write(&partition_image, "two").expect("updated partition image");
@@ -582,6 +587,7 @@ fn stale_spec_fingerprint_still_reuses_unchanged_operation_fingerprints() {
                     .map(|signature| (operation.id.as_str().to_string(), signature))
             })
             .collect(),
+        operation_input_signatures: Default::default(),
     };
 
     let plan = plan_build_with_reuse_state(
@@ -600,4 +606,119 @@ fn stale_spec_fingerprint_still_reuses_unchanged_operation_fingerprints() {
         operation.id.as_str() == "stage:file:motd"
             && matches!(&operation.reuse, OperationReuse::Reuse { .. })
     }));
+}
+
+fn fully_recorded_state(
+    spec: &gaia_spec::ResolvedBuildSpec,
+    baseline_plan: &gaia_plan::ExecutionPlan,
+    reused_ids: &[&str],
+) -> ReuseState {
+    let mut state = support::reuse_state_for_ids(spec, baseline_plan, reused_ids);
+    state.operation_input_signatures = baseline_plan
+        .operations
+        .iter()
+        .filter(|operation| reused_ids.contains(&operation.id.as_str()))
+        .map(|operation| {
+            (
+                operation.id.as_str().to_string(),
+                gaia_plan::operation_input_signature(spec, baseline_plan, operation),
+            )
+        })
+        .collect();
+    state
+}
+
+const REUSABLE_IDS: [&str; 9] = [
+    "source:gaia-upstream",
+    "source:workspace-root",
+    "artifact:gaia-app",
+    "install:install-gaia-app",
+    "stage:file:motd",
+    "stage:env:runtime-env",
+    "stage:service:gaia-service",
+    "image:build",
+    "checkpoint:base-image",
+];
+
+fn reuse_of<'plan>(plan: &'plan gaia_plan::ExecutionPlan, id: &str) -> &'plan OperationReuse {
+    &plan
+        .operations
+        .iter()
+        .find(|operation| operation.id.as_str() == id)
+        .unwrap_or_else(|| panic!("operation {id} in plan"))
+        .reuse
+}
+
+#[test]
+fn operation_reruns_when_reused_inputs_changed_since_it_last_ran() {
+    let spec = test_spec();
+    let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
+    materialize_reusable_test_outputs(&spec);
+    let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
+    let mut state = fully_recorded_state(&spec, &baseline_plan, &REUSABLE_IDS);
+
+    let plan = plan_build_with_reuse_state(
+        &spec,
+        &source_catalog,
+        &artifact_catalog,
+        &image_catalog,
+        Some(&state),
+    );
+    assert!(matches!(
+        reuse_of(&plan, "install:install-gaia-app"),
+        OperationReuse::Reuse { .. }
+    ));
+
+    // The install last consumed different artifact content, e.g. the artifact
+    // was rebuilt by an `--only artifacts` run after the install ran.
+    state
+        .operation_input_signatures
+        .insert("install:install-gaia-app".into(), 1);
+    let plan = plan_build_with_reuse_state(
+        &spec,
+        &source_catalog,
+        &artifact_catalog,
+        &image_catalog,
+        Some(&state),
+    );
+
+    assert!(matches!(
+        reuse_of(&plan, "artifact:gaia-app"),
+        OperationReuse::Reuse { .. }
+    ));
+    assert!(matches!(
+        reuse_of(&plan, "install:install-gaia-app"),
+        OperationReuse::Execute(reason) if reason.code == "inputs_changed"
+    ));
+}
+
+#[test]
+fn dependency_rebuild_offers_early_cutoff_with_recorded_input_signature() {
+    let spec = test_spec();
+    let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
+    materialize_reusable_test_outputs(&spec);
+    let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
+    let mut state = fully_recorded_state(&spec, &baseline_plan, &REUSABLE_IDS);
+    // Force the artifact to rebuild.
+    state.completed_operation_ids.remove("artifact:gaia-app");
+    let recorded = state.operation_input_signatures["install:install-gaia-app"];
+
+    let plan = plan_build_with_reuse_state(
+        &spec,
+        &source_catalog,
+        &artifact_catalog,
+        &image_catalog,
+        Some(&state),
+    );
+    let install = plan
+        .operations
+        .iter()
+        .find(|operation| operation.id.as_str() == "install:install-gaia-app")
+        .expect("install operation");
+
+    assert!(matches!(
+        &install.reuse,
+        OperationReuse::Execute(reason) if reason.code == "dependency_rebuilt"
+    ));
+    assert_eq!(install.cutoff_input_signature, Some(recorded));
 }

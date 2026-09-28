@@ -7,6 +7,50 @@ pub(crate) fn materialized_dir(spec: &ResolvedBuildSpec, source: &SourceSpec) ->
         .join(source.id.as_str())
 }
 
+/// Moves a materialized source's `.gaia` dir aside so wiping and re-cloning
+/// the source does not throw away build state kept there, such as the cargo
+/// target dir. Dropping the guard moves it back.
+pub(crate) struct PreservedGaiaDir {
+    stashed: PathBuf,
+    home: PathBuf,
+}
+
+impl PreservedGaiaDir {
+    pub(crate) fn stash(materialized_dir: &Path) -> Result<Option<Self>, SourceProviderError> {
+        let home = materialized_dir.join(".gaia");
+        if !home.is_dir() {
+            return Ok(None);
+        }
+        let name = materialized_dir
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let stashed = materialized_dir.with_file_name(format!(".{name}.gaia-preserved"));
+        if stashed.exists() {
+            let _ = fs::remove_dir_all(&stashed);
+        }
+        fs::rename(&home, &stashed).map_err(|error| {
+            SourceProviderError::runtime_state(format!(
+                "failed to preserve '{}': {error}",
+                home.display()
+            ))
+        })?;
+        Ok(Some(Self { stashed, home }))
+    }
+}
+
+impl Drop for PreservedGaiaDir {
+    fn drop(&mut self) {
+        if let Some(parent) = self.home.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if !self.home.exists() && fs::rename(&self.stashed, &self.home).is_ok() {
+            return;
+        }
+        let _ = fs::remove_dir_all(&self.stashed);
+    }
+}
+
 pub(crate) fn prepare_materialized_dir(dir: &Path) -> Result<(), SourceProviderError> {
     if dir.exists() {
         fs::remove_dir_all(dir).map_err(|error| {

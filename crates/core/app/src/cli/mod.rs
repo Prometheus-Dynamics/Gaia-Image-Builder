@@ -6,11 +6,19 @@ pub const EXAMPLE_DEFAULT_BUILD_CONFIG: &str = "examples/default-workspace/confi
 pub struct AppArgs {
     pub command: AppCommand,
     pub build: String,
+    /// True when the build config came from the command line rather than a default.
+    pub build_explicit: bool,
+    /// Directory the TUI build picker scans for build entrypoints.
+    pub builds_dir: Option<String>,
     pub preset: Option<String>,
     pub env_files: Vec<String>,
     pub env_overrides: Vec<(String, String)>,
     pub explicit_overrides: Vec<(String, String)>,
     pub clean: CleanArgs,
+    /// `--only` targets for run/plan: build domains or operation ids.
+    pub only: Vec<String>,
+    /// Problems found while parsing; dispatch refuses to run when non-empty.
+    pub usage_errors: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -31,143 +39,111 @@ impl AppArgs {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        let mut args = args.into_iter().map(Into::into);
-        let Some(first) = args.next() else {
-            return Self::default();
+        let mut args = args.into_iter().map(Into::into).peekable();
+        let mut parsed = Self {
+            build: String::new(),
+            ..Self::default()
         };
 
-        let mut parsed = match first.as_str() {
-            "-h" | "--help" | "help" => Self {
-                command: AppCommand::Help,
-                build: String::new(),
-                preset: None,
-                env_files: Vec::new(),
-                env_overrides: Vec::new(),
-                explicit_overrides: Vec::new(),
-                clean: CleanArgs::default(),
-            },
-            "-V" | "--version" | "version" => Self {
-                command: AppCommand::Version,
-                build: String::new(),
-                preset: None,
-                env_files: Vec::new(),
-                env_overrides: Vec::new(),
-                explicit_overrides: Vec::new(),
-                clean: CleanArgs::default(),
-            },
-            "resolve" => Self {
-                command: AppCommand::Resolve,
-                build: args.next().unwrap_or_else(default_build_config),
-                preset: None,
-                env_files: Vec::new(),
-                env_overrides: Vec::new(),
-                explicit_overrides: Vec::new(),
-                clean: CleanArgs::default(),
-            },
-            "tui" => Self {
-                command: AppCommand::Tui,
-                build: args.next().unwrap_or_else(default_build_config),
-                preset: None,
-                env_files: Vec::new(),
-                env_overrides: Vec::new(),
-                explicit_overrides: Vec::new(),
-                clean: CleanArgs::default(),
-            },
-            "validate" => Self {
-                command: AppCommand::Validate,
-                build: args.next().unwrap_or_else(default_build_config),
-                preset: None,
-                env_files: Vec::new(),
-                env_overrides: Vec::new(),
-                explicit_overrides: Vec::new(),
-                clean: CleanArgs::default(),
-            },
-            "plan" => Self {
-                command: AppCommand::Plan,
-                build: args.next().unwrap_or_else(default_build_config),
-                preset: None,
-                env_files: Vec::new(),
-                env_overrides: Vec::new(),
-                explicit_overrides: Vec::new(),
-                clean: CleanArgs::default(),
-            },
-            "clean" => Self {
-                command: AppCommand::Clean,
-                build: args.next().unwrap_or_else(default_build_config),
-                preset: None,
-                env_files: Vec::new(),
-                env_overrides: Vec::new(),
-                explicit_overrides: Vec::new(),
-                clean: CleanArgs::default(),
-            },
-            "run" => Self {
-                command: AppCommand::Run,
-                build: args.next().unwrap_or_else(default_build_config),
-                preset: None,
-                env_files: Vec::new(),
-                env_overrides: Vec::new(),
-                explicit_overrides: Vec::new(),
-                clean: CleanArgs::default(),
-            },
-            build => Self {
-                command: AppCommand::Run,
-                build: build.into(),
-                preset: None,
-                env_files: Vec::new(),
-                env_overrides: Vec::new(),
-                explicit_overrides: Vec::new(),
-                clean: CleanArgs::default(),
-            },
+        let command = match args.peek().map(String::as_str) {
+            Some("-h" | "--help" | "help") => Some(AppCommand::Help),
+            Some("-V" | "--version" | "version") => Some(AppCommand::Version),
+            Some("resolve") => Some(AppCommand::Resolve),
+            Some("tui") => Some(AppCommand::Tui),
+            Some("validate") => Some(AppCommand::Validate),
+            Some("plan") => Some(AppCommand::Plan),
+            Some("clean") => Some(AppCommand::Clean),
+            Some("run") => Some(AppCommand::Run),
+            _ => None,
         };
+        if let Some(command) = command {
+            args.next();
+            parsed.command = command;
+        }
+        if matches!(parsed.command, AppCommand::Help | AppCommand::Version) {
+            return parsed;
+        }
 
         while let Some(arg) = args.next() {
+            let mut value = |flag: &str, errors: &mut Vec<String>| {
+                let value = args.next();
+                if value.is_none() {
+                    errors.push(format!("{flag} requires a value"));
+                }
+                value
+            };
             match arg.as_str() {
-                "--preset" => {
-                    parsed.preset = args.next();
+                "-h" | "--help" => {
+                    parsed.command = AppCommand::Help;
+                    return parsed;
+                }
+                "--preset" => parsed.preset = value("--preset", &mut parsed.usage_errors),
+                "--builds-dir" => {
+                    parsed.builds_dir = value("--builds-dir", &mut parsed.usage_errors)
                 }
                 "--env-file" => {
-                    if let Some(value) = args.next() {
-                        parsed.env_files.push(value);
+                    if let Some(path) = value("--env-file", &mut parsed.usage_errors) {
+                        parsed.env_files.push(path);
                     }
                 }
-                "--env" => {
-                    if let Some(value) = args.next()
-                        && let Some((key, raw_value)) = value.split_once('=')
-                    {
+                "--env" | "--set" => {
+                    let Some(pair) = value(&arg, &mut parsed.usage_errors) else {
+                        continue;
+                    };
+                    let Some((key, raw_value)) = pair.split_once('=') else {
                         parsed
-                            .env_overrides
-                            .push((key.to_string(), raw_value.to_string()));
-                    }
-                }
-                "--set" => {
-                    if let Some(value) = args.next()
-                        && let Some((key, raw_value)) = value.split_once('=')
-                    {
-                        parsed
-                            .explicit_overrides
-                            .push((key.to_string(), raw_value.to_string()));
+                            .usage_errors
+                            .push(format!("{arg} expects KEY=VALUE, got '{pair}'"));
+                        continue;
+                    };
+                    let entry = (key.to_string(), raw_value.to_string());
+                    if arg == "--env" {
+                        parsed.env_overrides.push(entry);
+                    } else {
+                        parsed.explicit_overrides.push(entry);
                     }
                 }
                 "--profile" | "--clean-profile" => {
-                    parsed.clean.profile = args.next();
+                    parsed.clean.profile = value(&arg, &mut parsed.usage_errors)
                 }
                 "--target" => {
-                    if let Some(value) = args.next() {
-                        parsed.clean.targets.push(value);
+                    if let Some(target) = value("--target", &mut parsed.usage_errors) {
+                        parsed.clean.targets.push(target);
                     }
                 }
                 "--path" => {
-                    if let Some(value) = args.next() {
-                        parsed.clean.paths.push(value);
+                    if let Some(path) = value("--path", &mut parsed.usage_errors) {
+                        parsed.clean.paths.push(path);
                     }
                 }
-                "--dry-run" => {
-                    parsed.clean.dry_run = true;
+                "--dry-run" => parsed.clean.dry_run = true,
+                "--only" => {
+                    if let Some(targets) = value("--only", &mut parsed.usage_errors) {
+                        parsed.only.extend(
+                            targets
+                                .split(',')
+                                .map(str::trim)
+                                .filter(|target| !target.is_empty())
+                                .map(str::to_string),
+                        );
+                    }
                 }
-                _ => {}
+                flag if flag.starts_with('-') => {
+                    parsed.usage_errors.push(format!("unknown flag '{flag}'"));
+                }
+                positional if !parsed.build_explicit => {
+                    parsed.build = positional.to_string();
+                    parsed.build_explicit = true;
+                }
+                positional => parsed
+                    .usage_errors
+                    .push(format!("unexpected argument '{positional}'")),
             }
         }
 
+        if !parsed.build_explicit {
+            parsed.build = default_build_config();
+        }
         parsed
     }
 }
@@ -177,11 +153,15 @@ impl Default for AppArgs {
         Self {
             command: AppCommand::Run,
             build: default_build_config(),
+            build_explicit: false,
+            builds_dir: None,
             preset: None,
             env_files: Vec::new(),
             env_overrides: Vec::new(),
             explicit_overrides: Vec::new(),
             clean: CleanArgs::default(),
+            only: Vec::new(),
+            usage_errors: Vec::new(),
         }
     }
 }

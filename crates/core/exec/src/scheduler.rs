@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
@@ -5,7 +6,7 @@ use std::thread;
 
 use gaia_plan::{
     ExecutionPlan, OperationId, OperationParallelismDomain, OperationParallelismMode,
-    PlannedOperation,
+    OperationReuse, PlannedOperation,
 };
 use gaia_process::ProcessCancelCheck;
 use gaia_spec::{ArtifactDefinition, ResolvedBuildSpec};
@@ -13,6 +14,31 @@ use gaia_spec::{ArtifactDefinition, ResolvedBuildSpec};
 use crate::ExecutionProviders;
 use crate::operations::{ExecutionEvent, OperationExecutionResult, dispatch_operation};
 use crate::runtime::ExecutionRuntime;
+
+/// Early cutoff: an operation scheduled only because a dependency rebuilt is
+/// reused when those dependencies produced the same content it consumed last
+/// time. Checked at dispatch, after every dependency has finished.
+fn early_cutoff<'plan>(
+    spec: &ResolvedBuildSpec,
+    plan: &ExecutionPlan,
+    operation: &'plan PlannedOperation,
+) -> Cow<'plan, PlannedOperation> {
+    let Some(recorded) = operation.cutoff_input_signature else {
+        return Cow::Borrowed(operation);
+    };
+    if gaia_plan::operation_input_signature(spec, plan, operation) != recorded {
+        return Cow::Borrowed(operation);
+    }
+    tracing::info!(
+        operation_id = %operation.id.as_str(),
+        "rebuilt dependencies produced unchanged content; reusing operation"
+    );
+    let mut reused = operation.clone();
+    reused.reuse = OperationReuse::Reuse {
+        source: "early-cutoff: rebuilt inputs were unchanged".into(),
+    };
+    Cow::Owned(reused)
+}
 
 pub(crate) struct ScheduleReadyContext<'env> {
     pub(crate) spec: &'env ResolvedBuildSpec,
@@ -61,7 +87,7 @@ pub(crate) fn schedule_ready_operations<'scope, 'env>(
         else {
             break;
         };
-        let operation = &plan.operations[index];
+        let operation = early_cutoff(spec, plan, &plan.operations[index]);
         let tx = result_tx.clone();
         let operation_event_sender = event_sender.clone();
         let operation_cancel_check = cancel_check.clone();
@@ -79,9 +105,13 @@ pub(crate) fn schedule_ready_operations<'scope, 'env>(
         );
         running[index] = true;
         *running_count += 1;
+        let parallel = supports_parallel_runtime(
+            operation.parallelism.mode.clone(),
+            &operation.parallelism.domain,
+        );
         scope.spawn(move || {
             let result = dispatch_operation(
-                operation,
+                &operation,
                 spec,
                 providers,
                 build_name,
@@ -91,10 +121,7 @@ pub(crate) fn schedule_ready_operations<'scope, 'env>(
             let _ = tx.send((index, result));
         });
         scheduled_any = true;
-        if !supports_parallel_runtime(
-            operation.parallelism.mode.clone(),
-            &operation.parallelism.domain,
-        ) {
+        if !parallel {
             break;
         }
     }

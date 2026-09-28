@@ -12,6 +12,76 @@ pub(crate) fn render(frame: &mut Frame<'_>, state: &mut TuiState<'_>) {
         Screen::Monitor => render_monitor(frame, layout[0], state),
     }
     render_footer(frame, layout[1], state);
+    if state.show_help {
+        render_help(frame, frame.area(), state);
+    }
+}
+
+const HELP_GLOBAL: &[(&str, &str)] = &[
+    ("?", "toggle this help"),
+    ("q / Ctrl+C", "quit (asks first while a build is running)"),
+];
+const HELP_PICKER: &[(&str, &str)] = &[
+    ("j/k Up/Down", "move"),
+    ("Enter", "open build"),
+    ("r", "rescan build files"),
+];
+const HELP_SETUP: &[(&str, &str)] = &[
+    ("j/k Up/Down", "move through setup items"),
+    ("Left/Right", "change value / switch detail view"),
+    ("Enter", "select or edit the item"),
+    ("s / r", "start build"),
+    ("m", "back to the monitor"),
+    ("b", "pick a different build"),
+    ("p", "refresh resolve/validate/plan"),
+    ("PgUp/PgDn", "scroll detail panel"),
+];
+const HELP_MONITOR: &[(&str, &str)] = &[
+    ("j/k Up/Down", "select operation (turns follow off)"),
+    ("f", "follow the running operation"),
+    (
+        "Left/Right",
+        "switch view: Overview Events Logs Reports Spec",
+    ),
+    ("PgUp/PgDn Home", "scroll"),
+    ("End", "jump to the newest output"),
+    ("c", "cancel the build"),
+    ("Esc", "back to setup (the build keeps running)"),
+];
+
+pub(crate) fn render_help(frame: &mut Frame<'_>, area: Rect, state: &TuiState<'_>) {
+    let screen_keys = match state.screen {
+        Screen::Picker => HELP_PICKER,
+        Screen::Setup => HELP_SETUP,
+        Screen::Monitor => HELP_MONITOR,
+    };
+    let mut lines = Vec::new();
+    for (key, action) in screen_keys.iter().chain(HELP_GLOBAL) {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{key:>16}  "),
+                Style::default().fg(Color::LightYellow),
+            ),
+            Span::raw(*action),
+        ]));
+    }
+    let width = 64.min(area.width);
+    let height = (lines.len() as u16 + 2).min(area.height);
+    let popup = Rect {
+        x: area.x + (area.width - width) / 2,
+        y: area.y + (area.height - height) / 2,
+        width,
+        height,
+    };
+    frame.render_widget(ratatui::widgets::Clear, popup);
+    frame.render_widget(
+        Paragraph::new(Text::from(lines)).block(
+            Block::default()
+                .title(" Keys (any key closes) ")
+                .borders(Borders::ALL),
+        ),
+        popup,
+    );
 }
 
 pub(crate) fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &TuiState<'_>) {
@@ -19,12 +89,12 @@ pub(crate) fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &TuiState<
         "[Type] edit  [Backspace] delete  [Enter] apply  [Esc] cancel"
     } else {
         match state.screen {
-            Screen::Picker => "[Up/Down] move  [Enter] open build  [r] reload build list  [q] quit",
+            Screen::Picker => "[Enter] open  [r] rescan  [?] help  [q] quit",
             Screen::Setup => {
-                "[Up/Down] move  [Left/Right] detail/value  [Enter] select/edit  [s/r] start build  [b] builds  [p] refresh  [q] quit"
+                "[Enter] select/edit  [Left/Right] value  [s] start  [?] help  [q] quit"
             }
             Screen::Monitor => {
-                "[Up/Down] select op  [Left/Right] view  [PgUp/PgDn] scroll  [End] tail  [c] cancel  [q] quit"
+                "[Left/Right] view  [f] follow  [c] cancel  [Esc] setup  [?] help  [q] quit"
             }
         }
     };

@@ -1,4 +1,5 @@
 use super::*;
+use sha2::{Digest, Sha256};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
@@ -231,6 +232,7 @@ pub(crate) fn run_buildroot(
     }
 
     let config_digest = buildroot_config_digest(output_dir);
+    let legacy_config_digest = buildroot_legacy_config_digest(output_dir);
     let replacement_clean_needed =
         package_overrides
             .replacement_digest
@@ -244,6 +246,13 @@ pub(crate) fn run_buildroot(
             });
     let config_clean_needed = config_digest.as_deref().is_some_and(|config_digest| {
         buildroot_state_needs_clean(output_dir, ".gaia-buildroot-config-state", config_digest)
+            && legacy_config_digest.as_deref().is_none_or(|legacy_digest| {
+                buildroot_state_needs_clean(
+                    output_dir,
+                    ".gaia-buildroot-config-state",
+                    legacy_digest,
+                )
+            })
     });
     if buildroot_legacy_disabled(config_overrides) {
         disable_buildroot_legacy_flag(output_dir)?;
@@ -286,14 +295,9 @@ pub(crate) fn run_buildroot(
     if buildroot_legacy_disabled(config_overrides) {
         disable_buildroot_legacy_flag(output_dir)?;
     }
-    messages.extend(run_command(
-        command,
-        "buildroot make",
-        command_context.execution,
-        command_context.policy,
-        command_context.log_sink,
-        command_context.cancel_check,
-    )?);
+    // Record the state the output tree now corresponds to before the long
+    // make: if the build fails, retrying with the same inputs must resume it
+    // rather than clean everything again.
     if let Some(replacement_digest) = package_overrides.replacement_digest.as_deref() {
         write_buildroot_state(
             output_dir,
@@ -304,14 +308,76 @@ pub(crate) fn run_buildroot(
     if let Some(config_digest) = config_digest.as_deref() {
         write_buildroot_state(output_dir, ".gaia-buildroot-config-state", config_digest)?;
     }
+    messages.extend(run_command(
+        command,
+        "buildroot make",
+        command_context.execution,
+        command_context.policy,
+        command_context.log_sink,
+        command_context.cancel_check,
+    )?);
     Ok(messages)
 }
 
-fn buildroot_config_digest(output_dir: &Path) -> Option<String> {
+/// Settings that only say where to download or cache things, or how many
+/// jobs to run. Changing them cannot change what is built, so they must not
+/// trigger a full clean.
+const BUILDROOT_NON_OUTPUT_SETTINGS: &[&str] = &[
+    "BR2_DL_DIR",
+    "BR2_CCACHE_DIR",
+    "BR2_CCACHE_INITIAL_SETUP",
+    "BR2_JLEVEL",
+    "BR2_PRIMARY_SITE",
+    "BR2_BACKUP_SITE",
+    "BR2_KERNEL_MIRROR",
+    "BR2_GNU_MIRROR",
+    "BR2_LUAROCKS_MIRROR",
+    "BR2_CPAN_MIRROR",
+];
+
+/// Digest of the effective `.config` settings. Excluded: the generated header,
+/// which names the Buildroot version (with a `-g<sha>` suffix for git trees),
+/// and the settings in [`BUILDROOT_NON_OUTPUT_SETTINGS`]. "is not set" lines
+/// are kept.
+pub(crate) fn buildroot_config_digest(output_dir: &Path) -> Option<String> {
+    let contents = fs::read_to_string(output_dir.join(".config")).ok()?;
+    let settings = contents
+        .lines()
+        .filter(|line| !is_buildroot_config_header(line))
+        .filter(|line| {
+            let key = line
+                .trim_start_matches("# ")
+                .split(['=', ' '])
+                .next()
+                .unwrap_or_default();
+            !BUILDROOT_NON_OUTPUT_SETTINGS.contains(&key)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut hasher = Sha256::new();
+    hasher.update(settings.as_bytes());
+    let hex = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Some(format!("settings-sha256:{hex}"))
+}
+
+/// Whole-file digest written by earlier Gaia versions; still accepted so an
+/// upgrade does not force a full Buildroot clean.
+fn buildroot_legacy_config_digest(output_dir: &Path) -> Option<String> {
     let config_path = output_dir.join(".config");
     config_path
         .is_file()
         .then(|| file_sha256_or_placeholder(&config_path))
+}
+
+fn is_buildroot_config_header(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed == "#"
+        || trimmed.starts_with("# Automatically generated file")
+        || (trimmed.starts_with("# Buildroot ") && trimmed.ends_with(" Configuration"))
 }
 
 fn buildroot_state_needs_clean(output_dir: &Path, state_file: &str, digest: &str) -> bool {
@@ -761,14 +827,23 @@ pub(crate) fn apply_buildroot_cache_config(
     Ok(messages)
 }
 
+const DEFAULT_BUILDROOT_DOWNLOAD_DIR: &str = ".gaia/cache/buildroot/dl";
+
 pub(crate) fn apply_buildroot_policy_env(
     command: &mut Command,
     spec: &ResolvedBuildSpec,
     policy: &ImageExecutionPolicy,
 ) -> Result<(), ImageProviderError> {
-    if let Some(download_dir) = buildroot_download_dir(spec, policy)? {
-        command.env("BR2_DL_DIR", download_dir);
-    }
+    // Without an explicit download_dir, Buildroot would download into its own
+    // source tree, which is deleted whenever the source is re-materialized.
+    // Default to a workspace-wide cache shared by every build. It is passed
+    // only through the environment (which Buildroot honors over .config), so
+    // existing output trees see no config change.
+    let download_dir = match buildroot_download_dir(spec, policy)? {
+        Some(download_dir) => download_dir,
+        None => ensure_cache_dir(spec, DEFAULT_BUILDROOT_DOWNLOAD_DIR, "buildroot download")?,
+    };
+    command.env("BR2_DL_DIR", download_dir);
     if policy.ccache_enabled
         && let Some(ccache_dir) = buildroot_ccache_dir(spec, policy)?
     {

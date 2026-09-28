@@ -23,6 +23,8 @@ pub struct ReuseState {
     pub completed_operation_ids: BTreeSet<String>,
     pub operation_fingerprints: BTreeMap<String, u64>,
     pub operation_output_signatures: BTreeMap<String, String>,
+    /// Content signature of each operation's direct inputs when it last ran.
+    pub operation_input_signatures: BTreeMap<String, u64>,
 }
 
 impl ExecutionPlan {

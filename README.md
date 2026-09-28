@@ -73,7 +73,7 @@ Supported CLI modifiers:
 - [docs/providers.md](docs/providers.md): source, artifact, and image providers
 - [docs/reporting-and-state.md](docs/reporting-and-state.md): reports, runtime state, provider state, reuse state
 - [docs/migration-from-legacy.md](docs/migration-from-legacy.md): how to translate old Gaia configs
-- [docs/completion-checklist.md](docs/completion-checklist.md): concrete remaining work before Gaia is actually done
+- [docs/future-features.md](docs/future-features.md): planned work, such as storage-backed checkpoints
 - [examples/README.md](examples/README.md): commented template configs
 
 ## Repository Reality
@@ -83,4 +83,4 @@ This repo now contains:
 - a default workspace fixture under `examples/default-workspace/`
 - `examples/templates/` for user-facing config templates
 
-The active remaining work is tracked in [docs/completion-checklist.md](docs/completion-checklist.md).
+Planned work is tracked in [docs/future-features.md](docs/future-features.md).

@@ -115,6 +115,16 @@ pub(crate) fn validate_install_and_stage(
                             ),
                             Some(format!("stage:{}", file.id.as_str())),
                         ));
+                    } else if resolved_path.is_dir() && !directory_has_payload(&resolved_path) {
+                        diagnostics.push(warning(
+                            "stage_file_src_placeholder",
+                            format!(
+                                "stage file '{}' source directory '{}' is empty or only holds placeholders (README, .gitkeep); nothing will be staged",
+                                file.id.as_str(),
+                                resolved_path.display()
+                            ),
+                            Some(format!("stage:{}", file.id.as_str())),
+                        ));
                     } else if resolved_path.is_file()
                         && should_check_busybox_script(file.dest.as_str(), &resolved_path)
                         && let Ok(contents) = fs::read_to_string(&resolved_path)
@@ -251,6 +261,23 @@ pub(crate) fn validate_install_and_stage(
             format!("stage service '{}'", service.id.as_str()),
         );
     }
+}
+
+/// True when `dir` holds at least one file other than placeholders such as
+/// README or .gitkeep, looking through subdirectories.
+fn directory_has_payload(dir: &std::path::Path) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else {
+        // Unreadable directories are reported elsewhere; do not warn here.
+        return true;
+    };
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        if path.is_dir() {
+            return directory_has_payload(&path);
+        }
+        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        !(name.starts_with("readme") || name == ".gitkeep" || name == ".keep")
+    })
 }
 
 fn register_image_destination(

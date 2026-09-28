@@ -1,5 +1,5 @@
 use gaia_config::{ResolveOptions, try_resolve_config_with_options};
-use gaia_plan::plan_build_with_reuse_state;
+use gaia_plan::{PlanTarget, plan_build_with_reuse_state};
 use gaia_validate::validate_spec_with_providers;
 
 use crate::AppContext;
@@ -10,6 +10,7 @@ pub fn plan_build_command(
     context: &AppContext,
     build: &str,
     options: &ResolveOptions,
+    targets: &[PlanTarget],
 ) -> CommandOutcome {
     let spec = match try_resolve_config_with_options(build, options) {
         Ok(spec) => spec,
@@ -43,6 +44,14 @@ pub fn plan_build_command(
         &context.image_catalog,
         reuse_state.as_ref(),
     );
+    let plan = if targets.is_empty() {
+        plan
+    } else {
+        match plan.restrict_to(targets) {
+            Ok(plan) => plan,
+            Err(message) => return CommandOutcome::Failed { message },
+        }
+    };
     let diagnostics = plan.validate();
     CommandOutcome::Planned {
         spec,

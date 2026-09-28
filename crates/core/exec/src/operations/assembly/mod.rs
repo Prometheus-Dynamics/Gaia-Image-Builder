@@ -543,7 +543,13 @@ fn archive_assembly_disk_output(
     let source = &disk_outputs[0];
     let temp_archive = temporary_assembly_output_path(&archive_path);
     let mut command = Command::new("xz");
-    command.arg("-T1").arg("-c").arg(source);
+    // All cores; the fixed block size keeps output identical for any thread
+    // count, so archives stay reproducible across machines.
+    command
+        .arg("-T0")
+        .arg("--block-size=24MiB")
+        .arg("-c")
+        .arg(source);
     let output = run_command_stdout_to_file(
         spec,
         &mut command,

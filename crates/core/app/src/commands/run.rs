@@ -3,7 +3,7 @@ use gaia_exec::{
     ExecutionCancellation, ExecutionEvent, ExecutionProviders,
     execute_plan_with_cancellation_and_observer,
 };
-use gaia_plan::plan_build_with_reuse_state;
+use gaia_plan::{PlanTarget, plan_build_with_reuse_state};
 use gaia_process::ProcessRunErrorKind;
 use gaia_report::{generate_report, write_report_bundle};
 use gaia_validate::validate_spec_with_providers;
@@ -29,8 +29,9 @@ pub fn run_build_command(
     context: &AppContext,
     build: &str,
     options: &ResolveOptions,
+    targets: &[PlanTarget],
 ) -> CommandOutcome {
-    let run = match collect_run_artifacts(context, build, options) {
+    let run = match collect_run_artifacts(context, build, options, targets) {
         Ok(run) => run,
         Err(message) => return CommandOutcome::Failed { message },
     };
@@ -70,6 +71,7 @@ fn collect_run_artifacts(
     context: &AppContext,
     build: &str,
     options: &ResolveOptions,
+    targets: &[PlanTarget],
 ) -> Result<RunArtifacts, String> {
     let span = tracing::info_span!("run_build", build);
     let _guard = span.enter();
@@ -101,6 +103,11 @@ fn collect_run_artifacts(
         &context.image_catalog,
         reuse_state.as_ref(),
     );
+    let plan = if targets.is_empty() {
+        plan
+    } else {
+        plan.restrict_to(targets)?
+    };
     let plan_diagnostics = plan.validate();
     tracing::debug!(
         operations = plan.operations.len(),
@@ -142,6 +149,9 @@ fn collect_run_artifacts(
         cancelled = outcome.cancelled,
         "executed run build"
     );
+    // Record finished work before anything else can fail, including after a
+    // failed or cancelled run.
+    save_reuse_state(&spec, &plan, &outcome, reuse_state.as_ref());
     let report = generate_report(&spec, &validation, &plan, &outcome);
     let report_outputs = write_report_outputs(&spec, &report)?;
     let run_duration = started_at.elapsed();
@@ -152,9 +162,6 @@ fn collect_run_artifacts(
                 spec.identity.display_name
             )
         })?;
-    if outcome.errors.is_empty() {
-        save_reuse_state(&spec, &plan, &outcome);
-    }
 
     Ok(RunArtifacts {
         spec,
@@ -646,28 +653,6 @@ fn build_post_build_payload(
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn progress_bar_renders_completed_fraction() {
-        assert_eq!(progress_bar(0, 4), "[----------------]");
-        assert_eq!(progress_bar(2, 4), "[########--------]");
-        assert_eq!(progress_bar(4, 4), "[################]");
-    }
-
-    #[test]
-    fn compact_log_line_strips_ansi_and_bounds_output() {
-        let line = format!("\u{1b}[31mERROR\u{1b}[0m {}", "x ".repeat(200));
-        let compact = compact_log_line(&line);
-
-        assert!(compact.starts_with("ERROR"));
-        assert!(compact.len() <= 140);
-        assert!(!compact.contains('\u{1b}'));
-    }
-}
-
 fn primary_output_payload(path: &Path) -> io::Result<PostBuildPrimaryOutput> {
     Ok(PostBuildPrimaryOutput {
         path: path.display().to_string(),
@@ -719,5 +704,27 @@ fn is_executable_file(path: &Path) -> bool {
     #[cfg(not(unix))]
     {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn progress_bar_renders_completed_fraction() {
+        assert_eq!(progress_bar(0, 4), "[----------------]");
+        assert_eq!(progress_bar(2, 4), "[########--------]");
+        assert_eq!(progress_bar(4, 4), "[################]");
+    }
+
+    #[test]
+    fn compact_log_line_strips_ansi_and_bounds_output() {
+        let line = format!("\u{1b}[31mERROR\u{1b}[0m {}", "x ".repeat(200));
+        let compact = compact_log_line(&line);
+
+        assert!(compact.starts_with("ERROR"));
+        assert!(compact.len() <= 140);
+        assert!(!compact.contains('\u{1b}'));
     }
 }

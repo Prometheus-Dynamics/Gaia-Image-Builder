@@ -2,6 +2,7 @@ mod graph;
 mod operations;
 mod reuse;
 mod reuse_assembly;
+mod targets;
 
 pub use graph::{ExecutionPlan, PlanDiagnostic, ReuseState};
 pub use operations::{
@@ -9,7 +10,11 @@ pub use operations::{
     OperationParallelismDomain, OperationParallelismMode, OperationReuse, PlannedOperation,
     RebuildReason,
 };
-pub use reuse::{operation_fingerprint, operation_output_signature, spec_fingerprint};
+pub use reuse::{
+    operation_content_signature, operation_fingerprint, operation_input_signature,
+    operation_output_signature, spec_fingerprint,
+};
+pub use targets::{PlanDomain, PlanTarget};
 
 use gaia_artifact_providers::{ArtifactProviderCatalog, ArtifactProviderOperation};
 use gaia_image_providers::{ImageProviderCatalog, ImageProviderOperation};
@@ -198,6 +203,7 @@ pub fn plan_build_with_reuse_state(
                     file.id.as_str()
                 ),
             ),
+            cutoff_input_signature: None,
         });
     }
     for env_set in &spec.stage.env_sets {
@@ -224,6 +230,7 @@ pub fn plan_build_with_reuse_state(
                     env_set.id.as_str()
                 ),
             ),
+            cutoff_input_signature: None,
         });
     }
     for service in &spec.stage.services {
@@ -250,6 +257,7 @@ pub fn plan_build_with_reuse_state(
                     service.id.as_str()
                 ),
             ),
+            cutoff_input_signature: None,
         });
     }
 
@@ -284,10 +292,22 @@ pub fn plan_build_with_reuse_state(
     image_prepare_dependencies.dedup_by(|left, right| left.as_str() == right.as_str());
     image_finalize_dependencies.sort_by(|left, right| left.as_str().cmp(right.as_str()));
     image_finalize_dependencies.dedup_by(|left, right| left.as_str() == right.as_str());
-    let has_image_prepare = image_plan
+    // Prepare runs the same full Buildroot make as Build. It only earns its
+    // cost when an artifact must build against the prepared sysroot before
+    // the final image; otherwise Build alone does the work once.
+    let prepare_needed = spec
+        .artifacts
+        .iter()
+        .any(|artifact| artifact.after_image_prepare);
+    let has_image_prepare = prepare_needed
+        && image_plan
+            .operations
+            .contains(&ImageProviderOperation::Prepare);
+    for operation in image_plan
         .operations
-        .contains(&ImageProviderOperation::Prepare);
-    for operation in image_plan.operations {
+        .into_iter()
+        .filter(|operation| has_image_prepare || *operation != ImageProviderOperation::Prepare)
+    {
         let planned = match operation {
             ImageProviderOperation::Prepare => {
                 let mut planned = PlannedOperation::new(

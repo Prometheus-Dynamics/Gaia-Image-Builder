@@ -15,6 +15,10 @@ gaia tui <build.toml>
 
 If no command is provided, Gaia treats the first positional argument as a build path and defaults to `run`.
 
+Flags may appear before or after the build path. Gaia rejects unknown flags,
+flags missing their value, malformed `KEY=VALUE` pairs, and extra positional
+arguments with exit code `1` instead of silently ignoring them.
+
 The installed `gaia` binary includes terminal UI support by default. Use
 `--no-default-features` when building or installing if you need a lean binary
 without terminal UI dependencies.
@@ -49,6 +53,25 @@ Semantics:
   Add one or more runtime env overrides.
 - `--set`
   Apply explicit top-level override values.
+
+## Running Part Of A Build
+
+`run` and `plan` accept `--only <targets>` to execute a slice of the build graph
+plus everything it depends on. Targets are comma-separated or repeated, and are
+either a domain (`sources`, `artifacts`, `install`, `stage`, `image`,
+`checkpoints`) or an operation id as printed by `gaia plan` (for example
+`artifact:helios-engine`).
+
+```bash
+# build only the artifacts (and the sources they need)
+gaia run configs/builds/cm5.toml --only artifacts
+
+# preview what a single artifact rebuild would execute
+gaia plan configs/builds/cm5.toml --only artifact:helios-engine
+```
+
+A partial run keeps the reuse state of operations it did not execute, so an
+artifacts-only run does not force the next full run to rebuild the image.
 
 Examples:
 
@@ -140,23 +163,39 @@ Starts the interactive terminal UI for the current build.
 This command is available in default `gaia` builds. If the binary is built with
 `--no-default-features`, Gaia returns a clear command failure for `tui`.
 
-Current TUI behavior:
-- `Overview` tab for resolved build shape, provider/runtime overview, and failure policy
-- `Validation` tab for typed validation diagnostics
-- `Plan` tab for operation ordering, optionality, and parallelism shape
-- `Run` tab for the latest in-TUI execution summary, runtime overview, errors, and report paths
+```bash
+gaia tui                              # pick from configs/builds/*.toml
+gaia tui --builds-dir path/to/builds  # pick from another directory
+gaia tui configs/builds/cm5.toml      # open one build directly
+```
 
-Current controls:
-- `q` quit
-- `Tab` / `Left` / `Right` switch tabs
-- `Up` / `Down` scroll
-- `p` refresh resolve/validate/plan state
-- `r` execute the current build and update the `Run` tab
+Without an explicit build, the TUI opens the build picker when more than one
+entrypoint is found and goes straight to setup when there is only one.
+
+Screens:
+- **Picker** lists build entrypoints.
+- **Setup** edits inputs (enum inputs cycle with `Left`/`Right`, booleans
+  toggle, others open a text field), branch, and parallel jobs, and shows
+  Overview, Selection, Validation, Plan, Reports, and Spec panels. The Plan
+  panel lists every operation with whether the next run will execute or reuse
+  it, and why.
+- **Monitor** shows progress, every operation with its live status, and
+  Overview, Events, Logs, Reports, and Spec views. The selection follows the
+  newest running operation until you move it by hand (`f` turns following back
+  on). When a run fails, the monitor jumps to the failed operation's logs.
+
+Press `?` on any screen for the key list. `q` or `Ctrl+C` quits; while a
+build is running, the first press asks for confirmation, the second cancels the
+build and exits once it stops, and a third exits immediately. `Esc` from the
+monitor returns to setup without stopping the build, and `m` goes back.
+
+Logs keep the most recent 5,000 lines per operation in the TUI.
 
 ## Exit Codes
 
 Current behavior:
 - success commands return `0`
+- invalid arguments and config load failures return `1`
 - validation failure returns a non-zero validation code
 - execution failure returns a non-zero execution code
 

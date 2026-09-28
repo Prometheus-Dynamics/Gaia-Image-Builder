@@ -27,7 +27,7 @@ fn provider_execution_materializes_real_outputs() {
         },
     );
 
-    assert!(outcome.errors.is_empty());
+    assert!(outcome.errors.is_empty(), "{:#?}", outcome.errors);
 
     let git_source = fs::read_to_string(
         Path::new(&spec.workspace.build_dir).join("sources/gaia-upstream/source.txt"),

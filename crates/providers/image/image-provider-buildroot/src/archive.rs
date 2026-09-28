@@ -244,6 +244,9 @@ pub(crate) fn archive_files(
         })?;
     }
     let mut command = Command::new("tar");
+    if matches!(mode, TarArchiveMode::Xz) {
+        command.env("XZ_OPT", "-T0 --block-size=24MiB");
+    }
     command
         .arg(mode.create_arg())
         .arg(archive_path)
@@ -335,8 +338,11 @@ pub(crate) fn compress_primary_image_with_program(
     }
     let temp_archive = temporary_archive_output_path(archive_path);
     let mut command = Command::new(xz_program);
+    // `local_jobs = 0` means all cores. The fixed block size keeps output
+    // identical for any thread count.
     command
-        .arg(format!("-T{}", policy.local_jobs.max(1)))
+        .arg(format!("-T{}", policy.local_jobs))
+        .arg("--block-size=24MiB")
         .arg("-c")
         .arg(source_path);
     let output = command_stdout_to_file_with_timeout(CommandStdoutToFileRequest {

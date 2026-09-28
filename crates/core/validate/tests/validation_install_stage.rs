@@ -242,8 +242,58 @@ origin = "static-asset"
         !report
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code == "stage_file_src_missing"),
+            .any(|diagnostic| diagnostic.code == "stage_file_src_missing"
+                || diagnostic.code == "stage_file_src_placeholder"),
         "directory-backed static stage source should validate"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn placeholder_only_stage_directory_is_a_warning() {
+    let root = create_temp_workspace("gaia-stage-dir-placeholder");
+    fs::create_dir_all(root.join("assets/templates/nested")).expect("stage dir");
+    fs::write(root.join("assets/templates/README.md"), "# moved").expect("readme");
+    fs::write(root.join("assets/templates/nested/.gitkeep"), "").expect("gitkeep");
+    let config_path = root.join("build.toml");
+    fs::write(
+        &config_path,
+        format!(
+            r#"
+build_name = "placeholder-stage-dir-src"
+
+[workspace]
+root_dir = "{}"
+build_dir = "build"
+out_dir = "out"
+
+[image]
+kind = "starting-point"
+rootfs_path = "/tmp/rootfs"
+
+[[stage.files]]
+id = "pipeline-templates"
+src = "assets/templates"
+dest = "/opt/templates"
+origin = "static-asset"
+"#,
+            root.display()
+        ),
+    )
+    .expect("config");
+
+    let spec = resolve_config(config_path.to_str().expect("utf-8 path"));
+    let report = validate_spec(&spec);
+
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
+    assert!(
+        report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "stage_file_src_placeholder"
+                && diagnostic.severity == gaia_validate::DiagnosticSeverity::Warning
+        }),
+        "{:?}",
+        report.diagnostics
     );
 
     let _ = fs::remove_dir_all(root);

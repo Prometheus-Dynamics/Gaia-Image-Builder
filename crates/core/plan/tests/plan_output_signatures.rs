@@ -40,6 +40,7 @@ fn plan_rebuilds_when_operation_fingerprint_mismatches_even_if_outputs_exist() {
                     .map(|signature| (operation.id.as_str().to_string(), signature))
             })
             .collect(),
+        operation_input_signatures: Default::default(),
     };
 
     let plan = plan_build_with_reuse_state(
@@ -94,6 +95,7 @@ fn plan_rebuilds_when_materialized_outputs_change_even_if_operation_fingerprint_
         operation_output_signatures: [("artifact:gaia-app".to_string(), output_signature)]
             .into_iter()
             .collect(),
+        operation_input_signatures: Default::default(),
     };
 
     let plan = plan_build_with_reuse_state(
@@ -161,6 +163,7 @@ fn plan_rebuilds_when_provider_state_changes_even_if_output_file_matches() {
         operation_output_signatures: [("artifact:gaia-app".to_string(), output_signature)]
             .into_iter()
             .collect(),
+        operation_input_signatures: Default::default(),
     };
 
     let plan = plan_build_with_reuse_state(

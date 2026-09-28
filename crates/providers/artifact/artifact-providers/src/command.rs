@@ -234,13 +234,24 @@ fn docker_command(
             ),
         )
     })?;
-    let spec = DockerRunSpec::workspace_mount(
+    let mut spec = DockerRunSpec::workspace_mount(
         docker.image.clone(),
         PathBuf::from(workspace_root),
         command,
     )
-    .with_extra_env("HOME", docker_home)
-    .with_extra_env("XDG_CACHE_HOME", docker_cache);
+    .with_extra_env("HOME", &docker_home)
+    .with_extra_env("XDG_CACHE_HOME", &docker_cache);
+    // Containers run with --rm, so tool caches inside the image are lost after
+    // every build. Keep them in the workspace cache unless the artifact sets
+    // its own location.
+    for (key, cache_dir) in [("CARGO_HOME", "cargo"), ("SCCACHE_DIR", "sccache")] {
+        let already_set = command
+            .get_envs()
+            .any(|(name, value)| name == key && value.is_some());
+        if !already_set {
+            spec = spec.with_extra_env(key, docker_cache.join(cache_dir));
+        }
+    }
     docker_run_command(command, &spec).map_err(|error| {
         ArtifactProviderError::new(ArtifactProviderErrorKind::PolicyBlocked, error.to_string())
     })

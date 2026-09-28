@@ -153,5 +153,6 @@ pub fn reuse_state_for_ids(
                     .map(|signature| (operation.id.as_str().to_string(), signature))
             })
             .collect(),
+        operation_input_signatures: Default::default(),
     }
 }

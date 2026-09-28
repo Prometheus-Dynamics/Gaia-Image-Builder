@@ -76,7 +76,8 @@ impl ArtifactProvider for PythonProvider {
         };
         let source_dir = contract.source_dir.as_deref().unwrap_or(".");
         let package_root = artifact_package_root(source_dir, &package_dir);
-        let wheelhouse = package_root.join(".gaia-wheelhouse");
+        // Scratch output lives under .gaia so it never looks like a source change.
+        let wheelhouse = package_root.join(".gaia").join("wheelhouse");
         fs::create_dir_all(&wheelhouse).map_err(|error| {
             format!(
                 "failed to create python wheelhouse '{}': {error}",

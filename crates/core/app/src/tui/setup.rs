@@ -284,19 +284,6 @@ impl<'a> TuiState<'a> {
         format_jobs_label(self.current_jobs_value().as_str())
     }
 
-    pub(crate) fn current_git_branch(&self) -> Option<String> {
-        let output = std::process::Command::new("git")
-            .arg("branch")
-            .arg("--show-current")
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        (!branch.is_empty()).then_some(branch)
-    }
-
     pub(crate) fn cycle_branch_mode(&mut self, _direction: i32) {
         let has_branch_override = self
             .options
@@ -309,7 +296,7 @@ impl<'a> TuiState<'a> {
                 "branch restored to configured {}",
                 self.current_branch_value()
             ));
-        } else if let Some(git_branch) = self.current_git_branch() {
+        } else if let Some(git_branch) = current_git_branch() {
             self.set_or_clear_override("build.branch", &git_branch);
             self.request_refresh(format!("branch set to git {}", self.current_branch_value()));
         } else {

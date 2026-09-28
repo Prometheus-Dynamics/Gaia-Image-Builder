@@ -70,8 +70,21 @@ fn load_build_config_from_path(
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf();
+    let ensure_exists = |field: &'static str, reference: &str, resolved: &Path| {
+        if resolved.is_file() {
+            Ok(())
+        } else {
+            Err(ConfigError::ConfigReferenceMissing {
+                referenced_by: canonical_path.display().to_string(),
+                field,
+                reference: reference.to_string(),
+                resolved: resolved.display().to_string(),
+            })
+        }
+    };
     if let Some(extends) = &raw.extends {
         let extends_path = resolve_relative_config_path(&config_dir, extends);
+        ensure_exists("extends", extends, &extends_path)?;
         tracing::trace!(
             path = %canonical_path.display(),
             extends = %extends_path.display(),
@@ -99,6 +112,7 @@ fn load_build_config_from_path(
             );
         })
         .map(|(import, import_path)| {
+            ensure_exists("import", &import.path, &import_path)?;
             load_build_config_from_path(&import_path, loading_stack)
                 .map(|config| crate::raw::RawImportedConfig { import, config })
         })
