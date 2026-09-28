@@ -47,7 +47,9 @@ enum KnownOverrideKey {
     ExecutionOutputRetentionFailureTailLines,
     PolicyFailurePreserveFailedOutputs,
     PolicyFailureRollbackDomains,
+    PolicyFailureKeepGoing,
     PolicyProvidersRustAllowNestedBuild,
+    PolicyProvidersRustBatchBuilds,
     PolicyProvidersRustRetryAttempts,
     PolicyProvidersRustTimeoutSeconds,
     PolicyProvidersGitAllowRemoteResolution,
@@ -184,8 +186,12 @@ impl<'a> OverrideKey<'a> {
             "policy.failure.rollback_domains" => {
                 Self::Known(KnownOverrideKey::PolicyFailureRollbackDomains)
             }
+            "policy.failure.keep_going" => Self::Known(KnownOverrideKey::PolicyFailureKeepGoing),
             "policy.providers.rust.allow_nested_build" => {
                 Self::Known(KnownOverrideKey::PolicyProvidersRustAllowNestedBuild)
+            }
+            "policy.providers.rust.batch_builds" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersRustBatchBuilds)
             }
             "policy.providers.rust.retry_attempts" => {
                 Self::Known(KnownOverrideKey::PolicyProvidersRustRetryAttempts)
@@ -571,8 +577,14 @@ fn apply_known_override(
         KnownOverrideKey::PolicyFailureRollbackDomains => {
             raw.failure.rollback_domains = Some(parse_rollback_domains_csv(key, value)?)
         }
+        KnownOverrideKey::PolicyFailureKeepGoing => {
+            raw.failure.keep_going = Some(parse_bool_override(key, value)?)
+        }
         KnownOverrideKey::PolicyProvidersRustAllowNestedBuild => {
             raw.providers.rust.allow_nested_build = parse_bool_override(key, value)?
+        }
+        KnownOverrideKey::PolicyProvidersRustBatchBuilds => {
+            raw.providers.rust.batch_builds = Some(parse_bool_override(key, value)?)
         }
         KnownOverrideKey::PolicyProvidersRustRetryAttempts => {
             raw.providers.rust.retry_attempts = parse_u32_override(key, value)?

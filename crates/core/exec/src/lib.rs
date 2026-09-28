@@ -20,15 +20,18 @@ use gaia_source_providers::SourceProviderCatalog;
 use gaia_spec::ResolvedBuildSpec;
 use runtime::ExecutionRuntime;
 use scheduler::{
-    ScheduleReadyContext, ScheduleReadyState, next_pending_operation_id, resolve_parallel_jobs,
-    schedule_ready_operations,
+    ScheduleReadyContext, ScheduleReadyState, ScheduledResult, next_pending_operation_id,
+    resolve_parallel_jobs, schedule_ready_operations,
 };
 
 pub use operations::{
     ExecutionCleanupStatus, ExecutionError, ExecutionErrorKind, ExecutionEvent,
     OperationExecutionResult,
 };
-pub use runtime::{CleanupFailure, ExecutionCancellation, ExecutionContext, ExecutionOutcome};
+pub use runtime::{
+    CleanupFailure, ExecutionCancellation, ExecutionContext, ExecutionOutcome, OperationTiming,
+    OperationTimingStatus,
+};
 
 pub struct ExecutionProviders<'a> {
     pub source_catalog: &'a SourceProviderCatalog,
@@ -74,6 +77,7 @@ pub fn execute_plan_with_cancellation_and_observer(
         operations = plan.operations.len(),
         max_parallel_jobs,
         rollback_on_error = spec.policy.failure.rollback_on_error,
+        keep_going = spec.policy.failure.keep_going,
     );
     let _guard = span.enter();
     let context = ExecutionContext::new(spec);
@@ -97,20 +101,26 @@ pub fn execute_plan_with_cancellation_and_observer(
             }
         }
     }
+    let keep_going = spec.policy.failure.keep_going;
+    // `completed` holds every operation that finished in any way, so the
+    // scheduler never starts it again; `succeeded` is the subset whose
+    // dependents may run.
     let mut completed = vec![false; operation_count];
+    let mut succeeded = vec![false; operation_count];
     let mut running = vec![false; operation_count];
     let mut running_count = 0usize;
-    let mut first_failure: Option<(
+    let mut running_units = 0usize;
+    let mut running_heavy_units = 0usize;
+    type FailedCleanup = (
         OperationId,
         Option<gaia_spec::RollbackDomain>,
         Vec<std::path::PathBuf>,
-    )> = None;
+    );
+    let mut first_failure: Option<FailedCleanup> = None;
+    // Failures seen under `keep_going`, which does not stop the run.
+    let mut kept_going_failures: Vec<FailedCleanup> = Vec::new();
     let mut cancellation_pending = false;
-    let mut cancelled_cleanup: Option<(
-        OperationId,
-        Option<gaia_spec::RollbackDomain>,
-        Vec<std::path::PathBuf>,
-    )> = None;
+    let mut cancelled_cleanup: Option<FailedCleanup> = None;
     let stop_running_operations = Arc::new(AtomicBool::new(false));
     let cancel_check: ProcessCancelCheck = {
         let cancellation = cancellation.clone();
@@ -131,8 +141,7 @@ pub fn execute_plan_with_cancellation_and_observer(
     };
 
     thread::scope(|scope| {
-        let (result_tx, result_rx) =
-            std::sync::mpsc::channel::<(usize, OperationExecutionResult)>();
+        let (result_tx, result_rx) = std::sync::mpsc::channel::<ScheduledResult>();
         loop {
             if cancellation.is_cancelled() {
                 cancellation_pending = true;
@@ -149,6 +158,8 @@ pub fn execute_plan_with_cancellation_and_observer(
                         completed: &completed,
                         running: &mut running,
                         running_count: &mut running_count,
+                        running_units: &mut running_units,
+                        running_heavy_units: &mut running_heavy_units,
                     },
                 );
                 if scheduled_any {
@@ -157,6 +168,31 @@ pub fn execute_plan_with_cancellation_and_observer(
             }
 
             if running_count == 0 {
+                for (failed_operation_id, failed_cleanup_domain, failed_cleanup_paths) in
+                    kept_going_failures.drain(..)
+                {
+                    // Under keep_going, finished work is kept (and recorded
+                    // for reuse); only the failed operations' partial
+                    // outputs are cleaned.
+                    if spec.policy.failure.rollback_on_error {
+                        runtime.clean_failed_outputs(
+                            &failed_operation_id,
+                            failed_cleanup_domain,
+                            &failed_cleanup_paths,
+                            spec.policy.failure.preserve_failed_outputs,
+                            &spec.policy.failure.rollback_domains,
+                        );
+                    }
+                }
+                if keep_going && !cancellation_pending {
+                    skip_blocked_operations(
+                        &mut runtime,
+                        plan,
+                        &operation_index,
+                        &completed,
+                        &succeeded,
+                    );
+                }
                 if let Some((failed_operation_id, failed_cleanup_domain, failed_cleanup_paths)) =
                     first_failure.take()
                 {
@@ -195,11 +231,25 @@ pub fn execute_plan_with_cancellation_and_observer(
                 break;
             }
 
-            let Ok((index, result)) = result_rx.recv() else {
+            let Ok(ScheduledResult {
+                index,
+                result,
+                duration,
+                unit_finished,
+                heavy,
+            }) = result_rx.recv()
+            else {
                 break;
             };
             running[index] = false;
+            completed[index] = true;
             running_count = running_count.saturating_sub(1);
+            if unit_finished {
+                running_units = running_units.saturating_sub(1);
+                if heavy {
+                    running_heavy_units = running_heavy_units.saturating_sub(1);
+                }
+            }
 
             if result.cancelled {
                 tracing::warn!(
@@ -214,12 +264,11 @@ pub fn execute_plan_with_cancellation_and_observer(
                     result.cleanup_domain,
                     result.cleanup_paths.clone(),
                 ));
-                runtime.record(result);
+                runtime.record_timed(result, duration);
                 continue;
             }
 
-            let succeeded = result.error.is_none();
-            if succeeded {
+            if result.error.is_none() {
                 if let Some(source) = &result.reused_source {
                     tracing::info!(
                         operation_id = %result.operation_id.as_str(),
@@ -229,10 +278,11 @@ pub fn execute_plan_with_cancellation_and_observer(
                 } else {
                     tracing::info!(
                         operation_id = %result.operation_id.as_str(),
+                        duration_ms = duration.as_millis(),
                         "operation succeeded"
                     );
                 }
-                completed[index] = true;
+                succeeded[index] = true;
                 for &dependent in &dependents[index] {
                     remaining_dependencies[dependent] =
                         remaining_dependencies[dependent].saturating_sub(1);
@@ -246,27 +296,79 @@ pub fn execute_plan_with_cancellation_and_observer(
                         output_tail_lines = error.output_tail.len(),
                         cleanup_domain = ?result.cleanup_domain,
                         cleanup_paths = result.cleanup_paths.len(),
+                        keep_going,
                         "operation failed"
                     );
-                } else {
-                    tracing::warn!(
-                        operation_id = %result.operation_id.as_str(),
-                        cleanup_domain = ?result.cleanup_domain,
-                        cleanup_paths = result.cleanup_paths.len(),
-                        "operation failed without error detail"
-                    );
                 }
-                first_failure = Some((
+                let failure = (
                     result.operation_id.clone(),
                     result.cleanup_domain,
                     result.cleanup_paths.clone(),
-                ));
-                stop_running_operations.store(true, Ordering::SeqCst);
+                );
+                if keep_going {
+                    kept_going_failures.push(failure);
+                } else {
+                    first_failure = Some(failure);
+                    stop_running_operations.store(true, Ordering::SeqCst);
+                }
             }
 
-            runtime.record(result);
+            runtime.record_timed(result, duration);
         }
     });
 
     runtime.finish()
+}
+
+/// Emits `Skipped` for every operation that never ran because something it
+/// depends on (directly or transitively) did not succeed.
+fn skip_blocked_operations(
+    runtime: &mut ExecutionRuntime,
+    plan: &ExecutionPlan,
+    operation_index: &HashMap<&str, usize>,
+    completed: &[bool],
+    succeeded: &[bool],
+) {
+    for (index, operation) in plan.operations.iter().enumerate() {
+        if completed[index] {
+            continue;
+        }
+        let blocker = operation.depends_on.iter().find(|dependency| {
+            operation_index
+                .get(dependency.as_str())
+                .is_some_and(|&index| !succeeded[index])
+        });
+        if let Some(blocker) = blocker {
+            runtime.skip(
+                &operation.id,
+                &root_failure(plan, operation_index, succeeded, blocker),
+            );
+        }
+    }
+}
+
+/// Follows unsucceeded dependencies down to the operation that actually
+/// failed, so skip reasons name the root cause.
+fn root_failure(
+    plan: &ExecutionPlan,
+    operation_index: &HashMap<&str, usize>,
+    succeeded: &[bool],
+    start: &OperationId,
+) -> OperationId {
+    let mut current = start.clone();
+    for _ in 0..plan.operations.len() {
+        let Some(&index) = operation_index.get(current.as_str()) else {
+            break;
+        };
+        let next = plan.operations[index].depends_on.iter().find(|dependency| {
+            operation_index
+                .get(dependency.as_str())
+                .is_some_and(|&index| !succeeded[index])
+        });
+        match next {
+            Some(next) => current = next.clone(),
+            None => break,
+        }
+    }
+    current
 }

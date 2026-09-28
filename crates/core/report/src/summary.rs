@@ -5,7 +5,8 @@ use gaia_validate::ValidationReport;
 use std::collections::BTreeMap;
 
 use crate::model::{
-    CleanupStatus, ExecutionFailureReport, FailureClass, FailureClassCount, RunSummary,
+    CleanupStatus, ExecutionFailureReport, FailureClass, FailureClassCount, OperationTimingRecord,
+    RunSummary,
 };
 use crate::state::{output_hygiene_warnings, rollback_domains};
 
@@ -82,6 +83,21 @@ pub fn render_summary(
         checkpoint_built_count,
         checkpoint_reused_count,
         failure_classes,
+        keep_going: spec.policy.failure.keep_going,
+        skipped_operation_ids: outcome
+            .skipped_ids
+            .iter()
+            .map(|id| id.as_str().to_string())
+            .collect(),
+        operation_timings: outcome
+            .operation_timings
+            .iter()
+            .map(|timing| OperationTimingRecord {
+                operation_id: timing.operation_id.as_str().to_string(),
+                duration_ms: u64::try_from(timing.duration.as_millis()).unwrap_or(u64::MAX),
+                status: timing.status.as_str().to_string(),
+            })
+            .collect(),
     }
 }
 

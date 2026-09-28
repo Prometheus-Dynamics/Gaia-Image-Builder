@@ -107,6 +107,9 @@ Prints the same selection/overview context, then validation counts and diagnosti
 Prints selection/overview context, then:
 - operation count
 - optionality highlights
+- the operations that will execute and why
+- an estimate from the durations recorded by earlier runs: the critical path
+  (longest dependency chain), total work, and any operations with no timing yet
 - runtime domain summaries
 
 ### `clean`
@@ -150,6 +153,8 @@ only want the final summary.
 
 After execution completes, prints:
 - execution summary
+- skipped operations (with `policy.failure.keep_going`)
+- the slowest operations and their durations
 - failure policy
 - rollback summary
 - failure-class summary

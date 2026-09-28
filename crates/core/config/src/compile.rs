@@ -148,10 +148,12 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
             rollback_on_error: raw.failure.rollback_on_error.unwrap_or(true),
             preserve_failed_outputs: raw.failure.preserve_failed_outputs.unwrap_or(false),
             rollback_domains: compile_rollback_domains(raw.failure.rollback_domains),
+            keep_going: raw.failure.keep_going.unwrap_or(false),
         },
         providers: ProviderExecutionPolicySpec {
             rust: RustProviderPolicySpec {
                 allow_nested_build: raw.providers.rust.allow_nested_build,
+                batch_builds: raw.providers.rust.batch_builds.unwrap_or(true),
                 retry_attempts: compile_provider_retry_attempts(raw.providers.rust.retry_attempts),
                 retry_backoff_ms: compile_provider_retry_backoff_ms(
                     raw.providers.rust.retry_backoff_ms,

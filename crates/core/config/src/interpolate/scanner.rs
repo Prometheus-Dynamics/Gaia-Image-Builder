@@ -227,8 +227,16 @@ pub(crate) fn collect_unresolved_tokens(raw: &RawBuildConfig) -> Vec<RawUnresolv
             RawArtifactDefinition::Rust {
                 package,
                 target_name,
+                features,
                 ..
             } => {
+                for (index, value) in features.iter().enumerate() {
+                    scan_string(
+                        &format!("artifacts.{}.rust.features.{index}", artifact.id),
+                        value,
+                        &mut unresolved,
+                    );
+                }
                 scan_string(
                     &format!("artifacts.{}.rust.package", artifact.id),
                     package,

@@ -231,6 +231,7 @@ pub struct RawFailurePolicyConfig {
     pub rollback_on_error: Option<bool>,
     pub preserve_failed_outputs: Option<bool>,
     pub rollback_domains: Option<Vec<RawRollbackDomain>>,
+    pub keep_going: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -263,6 +264,7 @@ pub struct RawProviderPoliciesConfig {
 #[serde(default)]
 pub struct RawRustProviderPolicyConfig {
     pub allow_nested_build: bool,
+    pub batch_builds: Option<bool>,
     pub retry_attempts: u32,
     pub retry_backoff_ms: u64,
     pub retry_backoff_strategy: RawRetryBackoffStrategy,
@@ -461,6 +463,12 @@ pub enum RawArtifactDefinition {
         target_name: Option<String>,
         #[serde(default)]
         emit_directory: bool,
+        #[serde(default)]
+        features: Vec<String>,
+        #[serde(default)]
+        no_default_features: bool,
+        #[serde(default)]
+        all_features: bool,
     },
     Java {
         build_target: String,

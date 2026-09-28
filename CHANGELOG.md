@@ -6,6 +6,46 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Executor and runtime
+
+- Nested Rust artifacts that share a workspace, target triple, profile, feature
+  flags and execution backend are built with one `cargo build -p a -p b ...`
+  and their outputs copied individually (`providers.rust.batch_builds`,
+  default `true`). A failed batch falls back to per-artifact builds so errors
+  land on the right artifact.
+- CPU-heavy operations running concurrently split the available cores:
+  each gets a job budget exported as `CARGO_BUILD_JOBS`, `MAKEFLAGS=-jN` and
+  `CMAKE_BUILD_PARALLEL_LEVEL` (and Buildroot `make -j` when `local_jobs = 0`).
+  A heavy operation running alone is unchanged; user-set variables win.
+- `[failure] keep_going = true` (`policy.failure.keep_going`): after a failure,
+  independent operations finish, dependents of the failed operation are
+  skipped (new `Skipped` event, `skipped_operation_ids` in the summary), the
+  run still fails, and finished work is kept and saved in the reuse state
+  instead of being rolled back. Default behavior is unchanged.
+- Streamed build output is no longer retained in full: operations keep a
+  bounded tail (`failure_tail_lines`) for failure reports and successful
+  operations no longer re-emit their whole log as events. Failure messages
+  are now the provider's error; the streamed tail is in `output_tail`.
+  Subprocess output retention uses ring buffers.
+- Per-operation wall-clock timings are recorded in the run outcome and
+  `summary.json` (`operation_timings`), printed by `gaia run` (slowest
+  operations), and persisted in the reuse state (`dur=` lines). `gaia plan`
+  and the TUI Plan panel show last durations, the estimated total work and the
+  critical path.
+- The TUI keeps its live log after a run instead of rebuilding it from the
+  outcome, and shows skipped operations.
+- Spawning a freshly written executable retries briefly on `ETXTBSY`, fixing
+  intermittent "Text file busy" failures in tests that exec fake scripts.
+
+### Rust artifact features
+
+- Rust artifacts accept `features = [...]`, `no_default_features` and
+  `all_features`, passed straight through to cargo. `all_features` cannot be
+  combined with the other two. The flags are part of the artifact fingerprint
+  and are recorded in the artifact backend state when set. Adding the fields
+  changes every Rust artifact's fingerprint once, so existing Rust artifacts
+  rebuild on the first run after upgrading.
+
 ### Added
 
 - Added `--only <targets>` to `gaia run` and `gaia plan` to execute part of the build graph (a domain such as `artifacts` or `image`, or an operation id such as `artifact:<id>`) plus its dependencies. Partial runs keep the reuse state of operations they skip.

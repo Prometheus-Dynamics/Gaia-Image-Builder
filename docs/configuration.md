@@ -292,6 +292,7 @@ If unresolved tokens remain:
 rollback_on_error = true
 preserve_failed_outputs = false
 rollback_domains = ["sources", "artifacts", "installs", "stage", "images", "checkpoints"]
+keep_going = false
 ```
 
 Meaning:
@@ -301,6 +302,14 @@ Meaning:
   Keep the failed operation’s partial outputs for debugging.
 - `rollback_domains`
   Restrict cleanup to specific domains.
+- `keep_going` (default `false`)
+  After a failure, let independent operations run to completion instead of
+  stopping them. Operations that depend (directly or transitively) on a failed
+  operation are skipped and reported as skipped; the run still fails. Work that
+  finished is kept rather than rolled back, and is recorded in the reuse state
+  so the next run reuses it. Failed operations' partial outputs are still
+  cleaned according to `rollback_on_error`, `preserve_failed_outputs` and
+  `rollback_domains`. Override with `--set policy.failure.keep_going=true`.
 
 Allowed rollback domains:
 - `sources`
@@ -328,15 +337,29 @@ Output retention controls how much external command output Gaia keeps in memory 
 
 Each value defaults to the shown release default when omitted or set to `0`. The same fields can be set from the CLI with `--set execution.output_retention.<field>=...` or `--set policy.execution.output_retention.<field>=...`.
 
-`jobs` controls Gaia's operation scheduler only. It limits how many independent Gaia operations may run at once; it is not forwarded to backend build tools.
+`jobs` controls Gaia's operation scheduler. It limits how many independent Gaia operations may run at once; it is not forwarded to backend build tools as-is.
+
+When several CPU-heavy operations (artifact builds, Buildroot prepare/build) run at the same time, Gaia splits the available cores evenly between them and caps each spawned tool with `CARGO_BUILD_JOBS`, `MAKEFLAGS=-jN` and `CMAKE_BUILD_PARALLEL_LEVEL` (and Buildroot's `make -j` when `providers.buildroot.local_jobs = 0`). A heavy operation that runs alone keeps its tools' defaults. Variables you already set in the environment are never overridden, and an explicit `local_jobs` wins.
+
+`failure_tail_lines` also bounds streamed build output: every line goes to the live progress/TUI sink as it arrives, but only the newest `failure_tail_lines` lines are retained, and only failed operations report them. Successful operations do not re-emit their build log.
 
 ## Provider Execution Policy
 
 Provider policy lives under `[providers.*]`.
 
-Rust and Git have one extra specialized field:
-- Rust: `allow_nested_build`
+Rust and Git have extra specialized fields:
+- Rust: `allow_nested_build`, `batch_builds`
 - Git: `allow_remote_resolution`
+
+`batch_builds` (default `true`) builds nested cargo artifacts that share a
+source workspace, target triple, profile, feature flags and execution backend
+with a single `cargo build -p a -p b ...` (one container start and one
+dependency resolution) and then copies each output. Per-artifact outputs,
+marker and state files are the same as for individual builds. If the combined
+build fails, each artifact is rebuilt on its own so the failure is attributed
+to the right artifact. Note that cargo unifies dependency features across all
+packages selected in one invocation; set `batch_builds = false` if your
+packages rely on different feature sets of a shared dependency.
 
 Every provider supports:
 - `retry_attempts`
@@ -351,6 +374,7 @@ Example:
 ```toml
 [providers.rust]
 allow_nested_build = false
+batch_builds = true
 retry_attempts = 2
 retry_backoff_ms = 500
 retry_backoff_strategy = "exponential"
@@ -595,6 +619,24 @@ Artifact kinds:
   - `package`
   - `target_name`
   - `emit_directory`
+  - `features` (list, passed as `--features a,b`; supports interpolation)
+  - `no_default_features` (bool, passed as `--no-default-features`)
+  - `all_features` (bool, passed as `--all-features`; cannot be combined with
+    `features` or `no_default_features`)
+
+  Feature flags are part of the artifact's identity: changing them rebuilds the
+  artifact, and non-default flags are recorded in its backend state. Only
+  artifacts with identical flags are batched into one cargo invocation.
+
+  ```toml
+  [[artifacts]]
+  id = "orion-node"
+  kind = "rust"
+  package = "orion-node"
+  no_default_features = true
+  features = ["metrics"]
+  output_path = "out/orion-node"
+  ```
 - `java`
   - `build_target`
   - `build_args`

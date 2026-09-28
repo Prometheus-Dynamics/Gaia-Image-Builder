@@ -6,8 +6,8 @@ mod outputs;
 mod tests;
 
 pub use command::{
-    command_for_execution, command_output_with_timeout, command_output_with_timeout_and_sink,
-    run_command_with_retries,
+    apply_job_budget, command_for_execution, command_output_with_timeout,
+    command_output_with_timeout_and_sink, run_command_with_retries,
 };
 pub use contract::{
     ArtifactDependencyContract, ArtifactDockerExecution, ArtifactExecutionBackend,
@@ -17,7 +17,9 @@ pub use digest::{
     ArtifactBackendState, command_version_line, dir_digest, file_sha256_or_placeholder, path_bytes,
     produced_filename, render_artifact_backend_state,
 };
-pub use gaia_process::{ProcessCancelCheck, ProcessLogLine, ProcessLogSink, sleep_with_cancel};
+pub use gaia_process::{
+    ProcessCancelCheck, ProcessLogLine, ProcessLogSink, ProcessLogStream, sleep_with_cancel,
+};
 pub use outputs::{
     artifact_marker_contract, artifact_output_path, artifact_package_root, artifact_sidecar_path,
     artifact_state_path, copy_artifact_file_to_output, ensure_artifact_output_parent,
@@ -65,6 +67,44 @@ pub trait ArtifactProvider: Send + Sync {
             ),
         ))
     }
+    /// Artifacts with equal keys can be built by one tool invocation through
+    /// [`ArtifactProvider::execute_artifact_batch`]. `None` (the default)
+    /// means the artifact is always built on its own.
+    fn batch_key(
+        &self,
+        _artifact: &ArtifactSpec,
+        _contract: &ArtifactExecutionContract,
+    ) -> Option<String> {
+        None
+    }
+    /// Builds several artifacts that share a [`ArtifactProvider::batch_key`].
+    /// Returns one result per item, in order; each must match what
+    /// `execute_artifact` would have produced for that item. The default
+    /// builds them one after another.
+    fn execute_artifact_batch(
+        &self,
+        items: &[ArtifactBatchItem<'_>],
+        cancel_check: Option<ProcessCancelCheck>,
+    ) -> Vec<Result<Vec<String>, ArtifactProviderError>> {
+        items
+            .iter()
+            .map(|item| {
+                self.execute_artifact(
+                    item.artifact,
+                    item.contract,
+                    item.log_sink.clone(),
+                    cancel_check.clone(),
+                )
+            })
+            .collect()
+    }
+}
+
+/// One member of a batched artifact build.
+pub struct ArtifactBatchItem<'a> {
+    pub artifact: &'a ArtifactSpec,
+    pub contract: &'a ArtifactExecutionContract,
+    pub log_sink: Option<ProcessLogSink>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

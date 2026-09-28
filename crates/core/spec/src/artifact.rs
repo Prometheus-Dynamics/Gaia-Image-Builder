@@ -78,6 +78,12 @@ pub struct RustArtifactSpec {
     pub package: String,
     pub target_name: Option<String>,
     pub variant: ArtifactVariantSpec,
+    /// Passed to cargo as `--features a,b`.
+    pub features: Vec<String>,
+    /// Passed to cargo as `--no-default-features`.
+    pub no_default_features: bool,
+    /// Passed to cargo as `--all-features`; exclusive with the two above.
+    pub all_features: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

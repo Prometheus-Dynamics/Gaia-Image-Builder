@@ -6,6 +6,56 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use support::write_temp_config;
 
 #[test]
+fn parses_rust_artifact_feature_flags() {
+    let path = write_temp_config(
+        r#"
+build_name = "rust-features"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[image]
+kind = "starting-point"
+rootfs_path = "/tmp/rootfs"
+
+[[artifacts]]
+id = "node"
+kind = "rust"
+package = "orion-node"
+features = ["tls", "metrics-${build.name}"]
+no_default_features = true
+output_path = "out/node"
+
+[[artifacts]]
+id = "plain"
+kind = "rust"
+package = "orion-cli"
+output_path = "out/plain"
+"#,
+    );
+
+    let spec = resolve_config(path.to_str().expect("temp path utf-8"));
+
+    let gaia_spec::ArtifactDefinition::Rust(node) = &spec.artifacts[0].definition else {
+        panic!("expected rust artifact");
+    };
+    assert_eq!(
+        node.features,
+        vec!["tls".to_string(), "metrics-rust-features".to_string()]
+    );
+    assert!(node.no_default_features);
+    assert!(!node.all_features);
+    let gaia_spec::ArtifactDefinition::Rust(plain) = &spec.artifacts[1].definition else {
+        panic!("expected rust artifact");
+    };
+    assert!(plain.features.is_empty() && !plain.no_default_features && !plain.all_features);
+
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn resolves_artifact_target_field() {
     let path = write_temp_config(
         r#"

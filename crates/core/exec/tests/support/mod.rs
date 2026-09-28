@@ -110,6 +110,9 @@ pub fn artifact_failure_spec_with_overrides(
         package: "missing-package".into(),
         target_name: Some("gaia-bad".into()),
         variant: gaia_spec::ArtifactVariantSpec::File,
+        features: Vec::new(),
+        no_default_features: false,
+        all_features: false,
     });
     spec.artifacts.push(bad_artifact);
     spec

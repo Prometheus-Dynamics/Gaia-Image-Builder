@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 use std::thread;
+use std::time::{Duration, Instant};
 
 use gaia_plan::{
     ExecutionPlan, OperationId, OperationParallelismDomain, OperationParallelismMode,
@@ -12,7 +13,10 @@ use gaia_process::ProcessCancelCheck;
 use gaia_spec::{ArtifactDefinition, ResolvedBuildSpec};
 
 use crate::ExecutionProviders;
-use crate::operations::{ExecutionEvent, OperationExecutionResult, dispatch_operation};
+use crate::operations::{
+    DispatchContext, ExecutionEvent, OperationExecutionResult, dispatch_artifact_batch,
+    dispatch_operation,
+};
 use crate::runtime::ExecutionRuntime;
 
 /// Early cutoff: an operation scheduled only because a dependency rebuilt is
@@ -52,14 +56,31 @@ pub(crate) struct ScheduleReadyContext<'env> {
 
 pub(crate) struct ScheduleReadyState<'a> {
     pub(crate) remaining_dependencies: &'a [usize],
+    /// Operations that finished in any way (succeeded, failed or cancelled);
+    /// they are never scheduled again.
     pub(crate) completed: &'a [bool],
     pub(crate) running: &'a mut [bool],
     pub(crate) running_count: &'a mut usize,
+    /// Scheduled units still running. A unit is one operation or one batch
+    /// of artifact builds; each occupies one job slot.
+    pub(crate) running_units: &'a mut usize,
+    pub(crate) running_heavy_units: &'a mut usize,
+}
+
+/// One operation result sent back to the executor loop.
+pub(crate) struct ScheduledResult {
+    pub(crate) index: usize,
+    pub(crate) result: OperationExecutionResult,
+    /// Wall-clock time of the unit that produced this result.
+    pub(crate) duration: Duration,
+    /// Set on the last result of a unit: its job slot is free again.
+    pub(crate) unit_finished: bool,
+    pub(crate) heavy: bool,
 }
 
 pub(crate) fn schedule_ready_operations<'scope, 'env>(
     scope: &'scope thread::Scope<'scope, 'env>,
-    result_tx: &std::sync::mpsc::Sender<(usize, OperationExecutionResult)>,
+    result_tx: &std::sync::mpsc::Sender<ScheduledResult>,
     runtime: &mut ExecutionRuntime,
     context: &ScheduleReadyContext<'env>,
     state: ScheduleReadyState<'_>,
@@ -68,18 +89,17 @@ pub(crate) fn schedule_ready_operations<'scope, 'env>(
     let spec = context.spec;
     let plan = context.plan;
     let providers = context.providers;
-    let build_name = context.build_name;
-    let event_sender = &context.event_sender;
-    let cancel_check = &context.cancel_check;
     let max_parallel_jobs = context.max_parallel_jobs;
     let ScheduleReadyState {
         remaining_dependencies,
         completed,
         running,
         running_count,
+        running_units,
+        running_heavy_units,
     } = state;
     loop {
-        if *running_count >= max_parallel_jobs {
+        if *running_units >= max_parallel_jobs {
             break;
         }
         let Some(index) =
@@ -87,38 +107,99 @@ pub(crate) fn schedule_ready_operations<'scope, 'env>(
         else {
             break;
         };
-        let operation = early_cutoff(spec, plan, &plan.operations[index]);
-        let tx = result_tx.clone();
-        let operation_event_sender = event_sender.clone();
-        let operation_cancel_check = cancel_check.clone();
-        runtime.emit_event(ExecutionEvent::Started {
-            operation_id: operation.id.clone(),
-        });
-        tracing::info!(
-            operation_id = %operation.id.as_str(),
-            operation_kind = ?operation.kind,
-            parallelism_mode = ?operation.parallelism.mode,
-            parallelism_domain = ?operation.parallelism.domain,
-            running_operations = *running_count,
-            max_parallel_jobs,
-            "operation started"
+        let leader = early_cutoff(spec, plan, &plan.operations[index]).into_owned();
+        let companions = units::batch_companions(
+            context,
+            index,
+            &leader,
+            remaining_dependencies,
+            completed,
+            running,
         );
-        running[index] = true;
-        *running_count += 1;
-        let parallel = supports_parallel_runtime(
-            operation.parallelism.mode.clone(),
-            &operation.parallelism.domain,
-        );
-        scope.spawn(move || {
-            let result = dispatch_operation(
-                &operation,
-                spec,
-                providers,
-                build_name,
-                operation_event_sender,
-                Some(operation_cancel_check),
+        let parallel =
+            supports_parallel_runtime(leader.parallelism.mode.clone(), &leader.parallelism.domain);
+        let mut unit = vec![(index, leader)];
+        unit.extend(companions);
+        let heavy = unit
+            .iter()
+            .any(|(_, operation)| units::is_cpu_heavy(operation));
+        let job_budget = if heavy {
+            units::unit_job_budget(
+                context,
+                &unit,
+                units::BudgetInputs {
+                    remaining_dependencies,
+                    completed,
+                    running,
+                    running_units: *running_units,
+                    running_heavy_units: *running_heavy_units,
+                },
+            )
+        } else {
+            None
+        };
+        for (index, operation) in &unit {
+            runtime.emit_event(ExecutionEvent::Started {
+                operation_id: operation.id.clone(),
+            });
+            tracing::info!(
+                operation_id = %operation.id.as_str(),
+                operation_kind = ?operation.kind,
+                parallelism_mode = ?operation.parallelism.mode,
+                parallelism_domain = ?operation.parallelism.domain,
+                running_operations = *running_count,
+                max_parallel_jobs,
+                batch_size = unit.len(),
+                job_budget = ?job_budget,
+                "operation started"
             );
-            let _ = tx.send((index, result));
+            running[*index] = true;
+            *running_count += 1;
+        }
+        *running_units += 1;
+        if heavy {
+            *running_heavy_units += 1;
+        }
+        let tx = result_tx.clone();
+        let dispatch_context = DispatchContext {
+            build_name: context.build_name.to_string(),
+            event_sender: context.event_sender.clone(),
+            cancel_check: Some(context.cancel_check.clone()),
+            job_budget,
+        };
+        scope.spawn(move || {
+            let started = Instant::now();
+            let results = if let [(index, operation)] = unit.as_slice() {
+                vec![(
+                    *index,
+                    dispatch_operation(operation, spec, providers, &dispatch_context),
+                )]
+            } else {
+                let operations = unit
+                    .iter()
+                    .map(|(_, operation)| operation.clone())
+                    .collect::<Vec<_>>();
+                unit.iter()
+                    .map(|(index, _)| *index)
+                    .zip(dispatch_artifact_batch(
+                        &operations,
+                        spec,
+                        providers,
+                        &dispatch_context,
+                    ))
+                    .collect()
+            };
+            let duration = started.elapsed();
+            let last = results.len().saturating_sub(1);
+            for (position, (index, result)) in results.into_iter().enumerate() {
+                let _ = tx.send(ScheduledResult {
+                    index,
+                    result,
+                    duration,
+                    unit_finished: position == last,
+                    heavy,
+                });
+            }
         });
         scheduled_any = true;
         if !parallel {
@@ -474,6 +555,8 @@ pub(crate) fn next_pending_operation_id(
         .find(|(index, _)| !completed[*index] && !running[*index])
         .map(|(_, operation)| operation.id.clone())
 }
+
+mod units;
 
 #[cfg(test)]
 mod tests;

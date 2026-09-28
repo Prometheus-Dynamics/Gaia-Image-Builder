@@ -169,6 +169,7 @@ pub(crate) struct RefreshArtifacts {
     pub(crate) validation: ValidationReport,
     pub(crate) plan: ExecutionPlan,
     pub(crate) plan_diagnostics: Vec<gaia_plan::PlanDiagnostic>,
+    pub(crate) operation_durations: std::collections::BTreeMap<String, u64>,
 }
 
 pub(crate) struct RefreshThreadMessage {

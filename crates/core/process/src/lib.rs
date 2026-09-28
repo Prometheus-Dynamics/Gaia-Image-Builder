@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::path::Path;
@@ -107,53 +108,79 @@ pub(crate) enum StreamMessage {
     },
 }
 
+/// Bounded tail of one output stream. Retaining the newest output costs
+/// O(new data), not O(retained data): lines live in a ring buffer, and bytes
+/// are appended with memcpy behind a moving start offset that is compacted
+/// at most once per `max_bytes` of input.
 #[derive(Debug)]
 struct RetainedStream {
-    lines: Vec<String>,
+    lines: VecDeque<String>,
     bytes: Vec<u8>,
+    /// Retained bytes are `bytes[bytes_start..]`.
+    bytes_start: usize,
     max_lines: usize,
     max_bytes: usize,
 }
 
 impl Default for RetainedStream {
     fn default() -> Self {
-        Self {
-            lines: Vec::new(),
-            bytes: Vec::new(),
-            max_lines: MAX_RETAINED_STREAM_LINES,
-            max_bytes: MAX_RETAINED_STREAM_BYTES,
-        }
+        Self::with_limits(MAX_RETAINED_STREAM_LINES, MAX_RETAINED_STREAM_BYTES)
     }
 }
 
 impl RetainedStream {
     fn with_limits(max_lines: usize, max_bytes: usize) -> Self {
         Self {
-            lines: Vec::new(),
+            lines: VecDeque::new(),
             bytes: Vec::new(),
+            bytes_start: 0,
             max_lines,
             max_bytes,
         }
     }
 
     fn push_line(&mut self, line: String) {
-        if self.max_lines > 0 {
-            self.lines.push(line);
-            if self.lines.len() > self.max_lines {
-                let excess = self.lines.len() - self.max_lines;
-                self.lines.drain(0..excess);
-            }
+        if self.max_lines == 0 {
+            return;
         }
+        if self.lines.len() == self.max_lines {
+            self.lines.pop_front();
+        }
+        self.lines.push_back(line);
     }
 
     fn push_bytes(&mut self, bytes: &[u8]) {
-        if self.max_bytes > 0 {
-            self.bytes.extend_from_slice(bytes);
-            if self.bytes.len() > self.max_bytes {
-                let excess = self.bytes.len() - self.max_bytes;
-                self.bytes.drain(0..excess);
-            }
+        if self.max_bytes == 0 {
+            return;
         }
+        if bytes.len() >= self.max_bytes {
+            self.bytes.clear();
+            self.bytes_start = 0;
+            self.bytes
+                .extend_from_slice(&bytes[bytes.len() - self.max_bytes..]);
+            return;
+        }
+        self.bytes.extend_from_slice(bytes);
+        let retained = self.bytes.len() - self.bytes_start;
+        if retained > self.max_bytes {
+            self.bytes_start += retained - self.max_bytes;
+        }
+        // Compact once the dead prefix is as large as the retained tail, so
+        // the memmove cost is amortized over at least `max_bytes` of input.
+        if self.bytes_start >= self.max_bytes {
+            self.bytes.drain(..self.bytes_start);
+            self.bytes_start = 0;
+        }
+    }
+
+    fn take_lines(&mut self) -> Vec<String> {
+        Vec::from(std::mem::take(&mut self.lines))
+    }
+
+    fn take_bytes(&mut self) -> Vec<u8> {
+        let mut bytes = std::mem::take(&mut self.bytes);
+        bytes.drain(..std::mem::take(&mut self.bytes_start));
+        bytes
     }
 }
 
@@ -216,7 +243,7 @@ pub fn run_command_with_timeout_and_retention(
     );
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     configure_process_group(command);
-    let mut child = command.spawn().map_err(|error| {
+    let mut child = spawn_retrying_busy_executable(command).map_err(|error| {
         tracing::warn!(
             command_label = label,
             command_program = %description.program,
@@ -299,7 +326,7 @@ pub fn run_command_with_timeout_and_retention(
                         message: format!("{label} timed out after {}s", timeout.as_secs()),
                     });
                 }
-                thread::sleep(Duration::from_millis(10));
+                wait_for_stream_message(&rx, &mut stream_state, Duration::from_millis(10));
             }
             Err(error) => {
                 terminate_child_tree(&mut child, process_group);
@@ -341,11 +368,11 @@ pub fn run_command_with_timeout_and_retention(
     Ok(ProcessRunResult {
         output: Output {
             status,
-            stdout: stream_state.stdout.bytes,
-            stderr: stream_state.stderr.bytes,
+            stdout: stream_state.stdout.take_bytes(),
+            stderr: stream_state.stderr.take_bytes(),
         },
-        stdout_lines: stream_state.stdout.lines,
-        stderr_lines: stream_state.stderr.lines,
+        stdout_lines: stream_state.stdout.take_lines(),
+        stderr_lines: stream_state.stderr.take_lines(),
     })
 }
 
@@ -368,7 +395,7 @@ pub fn run_command_stdout_to_file_with_timeout_and_retention(
     })?;
     command.stdout(Stdio::from(stdout)).stderr(Stdio::piped());
     configure_process_group(command);
-    let mut child = command.spawn().map_err(|error| {
+    let mut child = spawn_retrying_busy_executable(command).map_err(|error| {
         tracing::warn!(
             command_label = label,
             command_program = %description.program,
@@ -447,7 +474,7 @@ pub fn run_command_stdout_to_file_with_timeout_and_retention(
                         message: format!("{label} timed out after {}s", timeout.as_secs()),
                     });
                 }
-                thread::sleep(Duration::from_millis(10));
+                wait_for_stream_message(&rx, &mut stream_state, Duration::from_millis(10));
             }
             Err(error) => {
                 terminate_child_tree(&mut child, process_group);
@@ -479,10 +506,10 @@ pub fn run_command_stdout_to_file_with_timeout_and_retention(
         output: Output {
             status,
             stdout: Vec::new(),
-            stderr: stream_state.stderr.bytes,
+            stderr: stream_state.stderr.take_bytes(),
         },
         stdout_lines: Vec::new(),
-        stderr_lines: stream_state.stderr.lines,
+        stderr_lines: stream_state.stderr.take_lines(),
     })
 }
 
@@ -658,6 +685,28 @@ pub(crate) fn output_text(output: &Output) -> String {
     }
 }
 
+/// Spawns `command`, retrying briefly when the executable is "busy".
+///
+/// `ETXTBSY` happens when a freshly written executable is still open for
+/// writing in a child that another thread forked but has not exec'd yet (the
+/// child briefly inherits the descriptor). It clears within milliseconds, so
+/// a few short retries make freshly generated scripts safe to run.
+fn spawn_retrying_busy_executable(command: &mut Command) -> std::io::Result<Child> {
+    const ATTEMPTS: u32 = 20;
+    let mut attempt = 1;
+    loop {
+        match command.spawn() {
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ExecutableFileBusy && attempt < ATTEMPTS =>
+            {
+                thread::sleep(Duration::from_millis(5 * u64::from(attempt)));
+                attempt += 1;
+            }
+            result => return result,
+        }
+    }
+}
+
 #[cfg(unix)]
 fn configure_process_group(command: &mut Command) {
     command.process_group(0);
@@ -700,6 +749,25 @@ fn terminate_leftover_tree(group: ProcessGroup) {
 
 #[cfg(not(unix))]
 fn terminate_leftover_tree(_group: ProcessGroup) {}
+
+/// Waits up to `tick` for stream output instead of sleeping blindly, so a
+/// chatty child never stalls on the bounded queue while the loop sleeps.
+fn wait_for_stream_message(
+    rx: &Receiver<StreamMessage>,
+    state: &mut StreamDrainState,
+    tick: Duration,
+) {
+    if state.is_done() {
+        thread::sleep(tick);
+        return;
+    }
+    match rx.recv_timeout(tick) {
+        Ok(message) => apply_stream_message(message, state),
+        Err(RecvTimeoutError::Timeout) => {}
+        // Readers are gone without reporting completion; avoid spinning.
+        Err(RecvTimeoutError::Disconnected) => thread::sleep(tick),
+    }
+}
 
 fn drain_stream_messages(rx: &Receiver<StreamMessage>, state: &mut StreamDrainState) {
     while let Ok(message) = rx.try_recv() {

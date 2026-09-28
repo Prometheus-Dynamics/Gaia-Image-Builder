@@ -572,10 +572,19 @@ fn interpolate_artifact(
             package,
             target_name,
             emit_directory,
+            features,
+            no_default_features,
+            all_features,
         } => RawArtifactDefinition::Rust {
             package: resolver::interpolate_string(package, raw, env),
             target_name: target_name.map(|value| resolver::interpolate_string(value, raw, env)),
             emit_directory,
+            features: features
+                .into_iter()
+                .map(|value| resolver::interpolate_string(value, raw, env))
+                .collect(),
+            no_default_features,
+            all_features,
         },
         RawArtifactDefinition::Java {
             build_target,

@@ -42,7 +42,20 @@ impl<'a> TuiState<'a> {
             Ok(run) => {
                 let cancelled = run.outcome.cancelled;
                 let error_count = run.outcome.errors.len();
-                self.events = EventLog::from_events(&run.outcome.events);
+                // The run thread forwards every event before `Finished`, so
+                // the live log is complete. It also holds the streamed build
+                // output, which the outcome deliberately does not keep.
+                if self.events.is_empty() {
+                    self.events = EventLog::from_events(&run.outcome.events);
+                }
+                for timing in &run.outcome.operation_timings {
+                    if timing.status == gaia_exec::OperationTimingStatus::Built {
+                        self.operation_durations.insert(
+                            timing.operation_id.as_str().to_string(),
+                            u64::try_from(timing.duration.as_millis()).unwrap_or(u64::MAX),
+                        );
+                    }
+                }
                 self.last_run = Some(run);
                 self.last_run_duration = Some(run_duration);
                 if cancelled {
@@ -219,9 +232,14 @@ pub(crate) fn collect_run_artifacts(
         reuse_state.as_ref(),
     );
     let plan_diagnostics = plan.validate();
-    let observer = {
-        let tx = event_sender.clone();
-        Some(mpsc::Sender::clone(&tx))
+    let (event_tx, event_rx) = mpsc::channel::<ExecutionEvent>();
+    let forwarder = {
+        let sender = event_sender.clone();
+        thread::spawn(move || {
+            while let Ok(event) = event_rx.recv() {
+                let _ = sender.send(RunThreadMessage::Event(event));
+            }
+        })
     };
     let outcome = execute_plan_with_cancellation_and_observer(
         &spec,
@@ -232,16 +250,11 @@ pub(crate) fn collect_run_artifacts(
             image_catalog: &context.image_catalog,
         },
         cancellation,
-        observer.map(|sender| {
-            let (event_tx, event_rx) = mpsc::channel::<ExecutionEvent>();
-            thread::spawn(move || {
-                while let Ok(event) = event_rx.recv() {
-                    let _ = sender.send(RunThreadMessage::Event(event));
-                }
-            });
-            event_tx
-        }),
+        Some(event_tx),
     );
+    // Every sender is dropped once execution returns; wait until all events
+    // are forwarded so they arrive before `Finished`.
+    let _ = forwarder.join();
     save_reuse_state(&spec, &plan, &outcome, reuse_state.as_ref());
     let report = generate_report(&spec, &validation, &plan, &outcome);
     let report_outputs = write_report_bundle(&spec, &report)?;

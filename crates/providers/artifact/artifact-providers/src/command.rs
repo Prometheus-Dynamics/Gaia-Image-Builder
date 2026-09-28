@@ -69,9 +69,44 @@ pub fn command_for_execution(
     command: &Command,
     contract: &ArtifactExecutionContract,
 ) -> Result<Command, ArtifactProviderError> {
+    let mut budgeted;
+    let command = match contract.job_budget {
+        Some(jobs) => {
+            budgeted = gaia_process::clone_command(command);
+            apply_job_budget(&mut budgeted, jobs);
+            &budgeted
+        }
+        None => command,
+    };
     match &contract.execution_backend {
         ArtifactExecutionBackend::Host => Ok(gaia_process::clone_command(command)),
         ArtifactExecutionBackend::Docker(docker) => docker_command(command, contract, docker),
+    }
+}
+
+/// Environment variables that cap build tool parallelism.
+const JOB_BUDGET_ENV: [&str; 3] = [
+    "CARGO_BUILD_JOBS",
+    "MAKEFLAGS",
+    "CMAKE_BUILD_PARALLEL_LEVEL",
+];
+
+/// Caps the tool parallelism of `command` at `jobs` through the usual
+/// environment variables. A variable the command or the calling environment
+/// already sets is left alone, so users keep control.
+pub fn apply_job_budget(command: &mut Command, jobs: usize) {
+    let jobs = jobs.max(1);
+    for key in JOB_BUDGET_ENV {
+        let set_on_command = command.get_envs().any(|(name, _)| name == key);
+        if set_on_command || std::env::var_os(key).is_some() {
+            continue;
+        }
+        let value = if key == "MAKEFLAGS" {
+            format!("-j{jobs}")
+        } else {
+            jobs.to_string()
+        };
+        command.env(key, value);
     }
 }
 

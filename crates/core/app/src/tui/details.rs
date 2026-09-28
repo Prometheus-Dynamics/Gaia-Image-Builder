@@ -140,6 +140,14 @@ impl<'a> TuiState<'a> {
             {
                 return ("CANCEL", Color::LightYellow);
             }
+            if run
+                .outcome
+                .skipped_ids
+                .iter()
+                .any(|id| id.as_str() == operation_id)
+            {
+                return OperationStatus::Skipped.badge();
+            }
         }
         if matches!(self.run_state, RunState::Running { .. }) {
             return self
@@ -328,6 +336,13 @@ impl<'a> TuiState<'a> {
             Line::from(format!("dependencies: {}", operation.depends_on.len())),
             Line::from(format!("fingerprint: {}", operation.fingerprint)),
             reuse_line(&operation.reuse),
+            Line::from(format!(
+                "last duration: {}",
+                self.operation_durations
+                    .get(operation.id.as_str())
+                    .map(|ms| gaia_plan::format_duration_short(Duration::from_millis(*ms)))
+                    .unwrap_or_else(|| "-".into())
+            )),
             Line::from(""),
         ];
         if !operation.depends_on.is_empty() {
@@ -345,51 +360,6 @@ impl<'a> TuiState<'a> {
             lines.extend(self.plan_diagnostics.iter().map(|diagnostic| {
                 Line::from(format!("{}: {}", diagnostic.code, diagnostic.message))
             }));
-        }
-        lines
-    }
-
-    /// What the next run will rebuild, what it will reuse, and why.
-    fn plan_overview_lines(&self, plan: &ExecutionPlan) -> Vec<Line<'static>> {
-        let execute = plan
-            .operations
-            .iter()
-            .filter(|operation| operation.reuse.should_execute())
-            .count();
-        let mut lines = vec![
-            Line::from(format!(
-                "{} operation(s): {} will run, {} will be reused",
-                plan.operations.len(),
-                execute,
-                plan.operations.len() - execute
-            ))
-            .bold(),
-            Line::from(""),
-        ];
-        if !self.plan_diagnostics.is_empty() {
-            lines.push(Line::from("plan diagnostics:").bold().fg(Color::Red));
-            lines.extend(self.plan_diagnostics.iter().map(|diagnostic| {
-                Line::from(format!("{}: {}", diagnostic.code, diagnostic.message)).fg(Color::Red)
-            }));
-            lines.push(Line::from(""));
-        }
-        for operation in &plan.operations {
-            let (badge, color, reason) = match &operation.reuse {
-                gaia_plan::OperationReuse::Execute(reason) => {
-                    ("RUN  ", Color::LightCyan, reason.message.clone())
-                }
-                gaia_plan::OperationReuse::Reuse { source } => {
-                    ("REUSE", Color::LightBlue, format!("reused from {source}"))
-                }
-            };
-            lines.push(Line::from(vec![
-                Span::styled(format!("{badge} "), Style::default().fg(color)),
-                Span::raw(operation.id.as_str().to_string()),
-            ]));
-            lines.push(Line::from(Span::styled(
-                format!("      {reason}"),
-                Style::default().fg(Color::DarkGray),
-            )));
         }
         lines
     }

@@ -93,6 +93,14 @@ pub(crate) fn render_event_line(event: &ExecutionEvent) -> Line<'static> {
             operation_id.as_str(),
             sanitize_tui_line(message)
         )),
+        ExecutionEvent::Skipped {
+            operation_id,
+            reason,
+        } => Line::from(format!(
+            "skipped: {}  {}",
+            operation_id.as_str(),
+            sanitize_tui_line(reason)
+        )),
         ExecutionEvent::Log {
             operation_id,
             message,

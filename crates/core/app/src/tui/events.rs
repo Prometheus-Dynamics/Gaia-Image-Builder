@@ -32,6 +32,7 @@ pub(crate) enum OperationStatus {
     Reused,
     Cancelled,
     Failed,
+    Skipped,
 }
 
 impl OperationStatus {
@@ -42,6 +43,7 @@ impl OperationStatus {
             Self::Reused => ("REUSE", Color::LightBlue),
             Self::Cancelled => ("CANCEL", Color::LightYellow),
             Self::Failed => ("FAIL", Color::Red),
+            Self::Skipped => ("SKIP", Color::DarkGray),
         }
     }
 }
@@ -83,13 +85,16 @@ impl EventLog {
                 (operation_id, OperationStatus::Cancelled)
             }
             ExecutionEvent::Failed { operation_id, .. } => (operation_id, OperationStatus::Failed),
+            ExecutionEvent::Skipped { operation_id, .. } => {
+                (operation_id, OperationStatus::Skipped)
+            }
         };
         let id = operation_id.as_str().to_string();
         self.running.retain(|running| running != &id);
         match status {
             OperationStatus::Running => self.running.push(id.clone()),
             OperationStatus::Succeeded | OperationStatus::Reused => self.completed += 1,
-            OperationStatus::Cancelled | OperationStatus::Failed => {}
+            OperationStatus::Cancelled | OperationStatus::Failed | OperationStatus::Skipped => {}
         }
         self.statuses.insert(id, status);
         self.lifecycle.push(event);
@@ -165,6 +170,19 @@ mod tests {
         assert_eq!(log.status("a"), Some(OperationStatus::Failed));
         assert_eq!(log.status("b"), Some(OperationStatus::Succeeded));
         assert_eq!(log.first_failed(), Some("a"));
+    }
+
+    #[test]
+    fn skipped_operations_are_not_running_or_completed() {
+        let mut log = EventLog::default();
+        log.push(ExecutionEvent::Skipped {
+            operation_id: id("c"),
+            reason: "skipped because dependency 'a' failed".into(),
+        });
+        assert_eq!(log.status("c"), Some(OperationStatus::Skipped));
+        assert_eq!(OperationStatus::Skipped.badge().0, "SKIP");
+        assert!(log.running().is_empty());
+        assert_eq!(log.completed_count(), 0);
     }
 
     #[test]

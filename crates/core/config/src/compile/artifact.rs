@@ -6,6 +6,9 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig) -> ArtifactSpec {
             package,
             target_name,
             emit_directory,
+            features,
+            no_default_features,
+            all_features,
         } => ArtifactDefinition::Rust(RustArtifactSpec {
             package,
             target_name,
@@ -14,6 +17,9 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig) -> ArtifactSpec {
             } else {
                 ArtifactVariantSpec::File
             },
+            features,
+            no_default_features,
+            all_features,
         }),
         RawArtifactDefinition::Java {
             build_target,

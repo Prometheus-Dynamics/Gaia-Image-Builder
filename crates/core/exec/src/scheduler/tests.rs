@@ -45,6 +45,9 @@ fn rust_artifact(id: &str, source: &str, output: &str) -> ArtifactSpec {
             package: id.into(),
             target_name: None,
             variant: ArtifactVariantSpec::File,
+            features: Vec::new(),
+            no_default_features: false,
+            all_features: false,
         }),
         Some(SourceRef::new(source)),
         ArtifactOutputSpec {

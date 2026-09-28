@@ -51,6 +51,7 @@ fn starting_point_raw_image_example_validates_and_plans_cleanly() {
             spec,
             plan,
             diagnostics,
+            ..
         } => {
             assert!(diagnostics.is_empty(), "expected no plan diagnostics");
             assert_eq!(spec.image.feed.install_entries.len(), 1);
@@ -164,6 +165,7 @@ fn starting_point_git_project_example_validates_and_plans_cleanly() {
             spec,
             plan,
             diagnostics,
+            ..
         } => {
             assert!(diagnostics.is_empty(), "expected no plan diagnostics");
             assert_eq!(spec.image.feed.install_entries.len(), 1);

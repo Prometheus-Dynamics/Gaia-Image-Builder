@@ -24,6 +24,9 @@ fn empty_public_ids_are_validation_errors() {
             package: "demo".into(),
             target_name: None,
             variant: gaia_spec::ArtifactVariantSpec::File,
+            features: Vec::new(),
+            no_default_features: false,
+            all_features: false,
         }),
         None,
         ArtifactOutputSpec {
