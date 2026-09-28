@@ -12,7 +12,7 @@ use gaia_spec::{
 };
 use std::fs;
 use std::path::PathBuf;
-use support::{default_config_path, provider_catalogs, unique_dir};
+use support::{default_config_path, provider_catalogs, rebase_workspace_root, unique_dir};
 
 #[test]
 fn default_plan_has_valid_operations_and_rebuild_reasons() {
@@ -362,9 +362,7 @@ fn image_assembly_fingerprint_tracks_staged_file_inputs() {
     let source_path = PathBuf::from(&root_dir).join("config.txt");
     fs::write(&source_path, "one").expect("source");
     let mut spec = resolve_config(&default_config_path());
-    spec.workspace.root_dir = root_dir.clone();
-    spec.workspace.build_dir = PathBuf::from(&root_dir).join("build").display().to_string();
-    spec.workspace.out_dir = PathBuf::from(&root_dir).join("out").display().to_string();
+    rebase_workspace_root(&mut spec, &root_dir);
     spec.image.assembly = Some(ImageAssemblySpec {
         trees: vec![AssemblyTreeSpec {
             id: "boot".into(),
@@ -407,9 +405,7 @@ fn image_assembly_fingerprint_tracks_glob_expansion() {
     fs::create_dir_all(&source_dir).expect("source dir");
     fs::write(source_dir.join("a.dtb"), "one").expect("first dtb");
     let mut spec = resolve_config(&default_config_path());
-    spec.workspace.root_dir = root_dir.clone();
-    spec.workspace.build_dir = PathBuf::from(&root_dir).join("build").display().to_string();
-    spec.workspace.out_dir = PathBuf::from(&root_dir).join("out").display().to_string();
+    rebase_workspace_root(&mut spec, &root_dir);
     spec.image.assembly = Some(ImageAssemblySpec {
         trees: vec![AssemblyTreeSpec {
             id: "boot".into(),
@@ -452,9 +448,7 @@ fn image_assembly_fingerprint_tracks_transform_inputs() {
     let source_path = PathBuf::from(&root_dir).join("kernel");
     fs::write(&source_path, "one").expect("source");
     let mut spec = resolve_config(&default_config_path());
-    spec.workspace.root_dir = root_dir.clone();
-    spec.workspace.build_dir = PathBuf::from(&root_dir).join("build").display().to_string();
-    spec.workspace.out_dir = PathBuf::from(&root_dir).join("out").display().to_string();
+    rebase_workspace_root(&mut spec, &root_dir);
     spec.image.assembly = Some(ImageAssemblySpec {
         transforms: vec![AssemblyTransformSpec {
             kind: AssemblyTransformKindSpec::Gzip,
@@ -487,9 +481,7 @@ fn image_assembly_fingerprint_tracks_transform_inputs() {
 fn image_assembly_fingerprint_tracks_direct_partition_images() {
     let root_dir = unique_dir("gaia-plan-image-assembly-partition-fingerprint-root");
     let mut spec = resolve_config(&default_config_path());
-    spec.workspace.root_dir = root_dir.clone();
-    spec.workspace.build_dir = PathBuf::from(&root_dir).join("build").display().to_string();
-    spec.workspace.out_dir = PathBuf::from(&root_dir).join("out").display().to_string();
+    rebase_workspace_root(&mut spec, &root_dir);
     let partition_image = gaia_spec::resolve_workspace_path(&spec.workspace, "@assets/rootfs.img")
         .expect("asset path");
     fs::create_dir_all(partition_image.parent().expect("asset parent")).expect("assets dir");
@@ -537,9 +529,7 @@ fn image_assembly_fingerprint_tracks_provider_root_partition_images() {
     let root_dir = unique_dir("gaia-plan-image-assembly-provider-partition-fingerprint-root");
     fs::create_dir_all(&root_dir).expect("root dir");
     let mut spec = resolve_config(&default_config_path());
-    spec.workspace.root_dir = root_dir.clone();
-    spec.workspace.build_dir = PathBuf::from(&root_dir).join("build").display().to_string();
-    spec.workspace.out_dir = PathBuf::from(&root_dir).join("out").display().to_string();
+    rebase_workspace_root(&mut spec, &root_dir);
     let collect_dir = PathBuf::from(&root_dir).join("out/images");
     spec.image.output.collect_dir = Some(collect_dir.display().to_string());
     fs::create_dir_all(&collect_dir).expect("collect dir");
@@ -587,9 +577,7 @@ fn image_assembly_fingerprint_tracks_provider_root_partition_images() {
 fn image_assembly_fingerprint_tracks_missing_partition_image_becoming_present() {
     let root_dir = unique_dir("gaia-plan-image-assembly-missing-partition-fingerprint-root");
     let mut spec = resolve_config(&default_config_path());
-    spec.workspace.root_dir = root_dir.clone();
-    spec.workspace.build_dir = PathBuf::from(&root_dir).join("build").display().to_string();
-    spec.workspace.out_dir = PathBuf::from(&root_dir).join("out").display().to_string();
+    rebase_workspace_root(&mut spec, &root_dir);
     let partition_image = gaia_spec::resolve_workspace_path(&spec.workspace, "@assets/rootfs.img")
         .expect("asset path");
     spec.image.assembly = Some(ImageAssemblySpec {
@@ -636,9 +624,7 @@ fn image_assembly_fingerprint_does_not_hash_generated_filesystem_partition_outpu
     let root_dir = unique_dir("gaia-plan-image-assembly-generated-partition-fingerprint-root");
     fs::create_dir_all(&root_dir).expect("root dir");
     let mut spec = resolve_config(&default_config_path());
-    spec.workspace.root_dir = root_dir.clone();
-    spec.workspace.build_dir = PathBuf::from(&root_dir).join("build").display().to_string();
-    spec.workspace.out_dir = PathBuf::from(&root_dir).join("out").display().to_string();
+    rebase_workspace_root(&mut spec, &root_dir);
     let generated_output = PathBuf::from(&root_dir).join("out/images/rootfs.cpio");
     fs::create_dir_all(generated_output.parent().expect("generated parent"))
         .expect("generated dir");

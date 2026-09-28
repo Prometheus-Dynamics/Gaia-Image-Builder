@@ -5,12 +5,14 @@ use support::{unique_dir, write_temp_build};
 
 #[test]
 fn run_command_refuses_invalid_buildroot_defconfig_path_before_execution() {
-    let build = write_temp_build(
+    // Root the workspace in a temp dir; "." would resolve to the crate directory.
+    let root_dir = unique_dir("gaia-cli-bad-defconfig-root");
+    let build = write_temp_build(&format!(
         r#"
 build_name = "bad-buildroot-defconfig"
 
 [workspace]
-root_dir = "."
+root_dir = "{root_dir}"
 build_dir = "build"
 out_dir = "out"
 
@@ -23,7 +25,7 @@ name = "rootfs.tar"
 format = "tar"
 required = true
 "#,
-    );
+    ));
 
     let run = run_with_args(AppArgs::parse_from(vec!["run".to_string(), build]));
 
@@ -39,12 +41,14 @@ required = true
 
 #[test]
 fn run_command_fails_when_buildroot_backend_is_missing_and_fallback_is_not_enabled() {
-    let build = write_temp_build(
+    // Root the workspace in a temp dir; "." would resolve to the crate directory.
+    let root_dir = unique_dir("gaia-cli-missing-backend-root");
+    let build = write_temp_build(&format!(
         r#"
 build_name = "missing-buildroot-backend"
 
 [workspace]
-root_dir = "."
+root_dir = "{root_dir}"
 build_dir = "build"
 out_dir = "out"
 
@@ -57,7 +61,7 @@ name = "rootfs.tar"
 format = "tar"
 required = true
 "#,
-    );
+    ));
 
     let run = run_with_args(AppArgs::parse_from(vec!["run".to_string(), build]));
 
@@ -88,27 +92,31 @@ required = true
 
 #[test]
 fn run_command_allows_explicit_buildroot_fallback_and_reports_it() {
+    // Keep root and collect dir in temp: without an explicit collect_dir the
+    // Buildroot provider falls back to a cwd-relative `out/images/buildroot`.
     let run_out_dir = unique_dir("gaia-cli-fallback-out");
     let build = write_temp_build(&format!(
         r#"
 build_name = "explicit-buildroot-fallback"
 
 [workspace]
-root_dir = "."
+root_dir = "{run_out_dir}"
 build_dir = "build"
-out_dir = "{}"
+out_dir = "{run_out_dir}"
 
 [image]
 kind = "buildroot"
 defconfig = "dummy_defconfig"
 allow_fallback = true
 
+[image.output]
+collect_dir = "{run_out_dir}/images/buildroot"
+
 [[image.expected_images]]
 name = "rootfs.tar"
 format = "tar"
 required = true
-"#,
-        run_out_dir
+"#
     ));
 
     let run = run_with_args(AppArgs::parse_from(vec!["run".to_string(), build]));
@@ -126,7 +134,7 @@ required = true
                     .summary
                     .primary_image_output
                     .as_deref()
-                    .map(|path| path.ends_with("out/images/buildroot")),
+                    .map(|path| path.ends_with("images/buildroot")),
                 Some(true)
             );
             assert!(report.summary.failure_classes.is_empty());

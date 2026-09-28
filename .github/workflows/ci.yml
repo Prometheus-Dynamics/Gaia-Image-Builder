@@ -1,3 +1,5 @@
+# The workspace and docs-and-lints jobs are mirrored locally by scripts/ci.sh
+# (also the docker/ci image entrypoint); keep them in sync.
 name: CI
 
 on:
@@ -34,6 +36,9 @@ jobs:
 
       - name: Run workspace tests
         run: cargo test --workspace --all-features
+
+      - name: Run slow end-to-end tests
+        run: cargo test -p gaia-exec --test exec_default -- --ignored
 
   docs-and-lints:
     runs-on: ubuntu-latest

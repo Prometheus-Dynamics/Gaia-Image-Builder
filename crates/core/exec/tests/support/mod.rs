@@ -52,6 +52,70 @@ pub fn test_spec() -> gaia_spec::ResolvedBuildSpec {
     )
 }
 
+/// Like [`test_spec`], but rooted in a throwaway workspace whose `gaia` package is a
+/// tiny fixture crate instead of this repository. The default example's Rust artifact
+/// then compiles in seconds (instead of building all of Gaia) and nothing is written
+/// into the repository tree.
+pub fn fixture_spec() -> gaia_spec::ResolvedBuildSpec {
+    let root_dir = unique_dir("gaia-exec-fixture-root");
+    let root = PathBuf::from(&root_dir);
+    write_fixture_crate(&root);
+    copy_dir_recursive(
+        &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../examples/default-workspace/assets"),
+        &root.join("examples/default-workspace/assets"),
+    );
+    resolve_config_with_options(
+        &default_config_path(),
+        &ResolveOptions {
+            explicit_overrides: vec![
+                ("workspace.root_dir".into(), root_dir),
+                (
+                    "workspace.build_dir".into(),
+                    unique_dir("gaia-exec-fixture-build"),
+                ),
+                (
+                    "workspace.out_dir".into(),
+                    unique_dir("gaia-exec-fixture-out"),
+                ),
+                ("image.allow_fallback".into(), "true".into()),
+                (
+                    "policy.providers.rust.allow_nested_build".into(),
+                    "true".into(),
+                ),
+            ],
+            ..ResolveOptions::default()
+        },
+    )
+}
+
+fn write_fixture_crate(root: &Path) {
+    fs::create_dir_all(root.join("src")).expect("fixture crate src dir");
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"gaia\"\nversion = \"2.0.0\"\nedition = \"2021\"\n\n[[bin]]\nname = \"gaia\"\npath = \"src/main.rs\"\n\n[workspace]\n",
+    )
+    .expect("fixture cargo toml");
+    fs::write(
+        root.join("src/main.rs"),
+        "fn main() { println!(\"gaia fixture\"); }\n",
+    )
+    .expect("fixture main");
+}
+
+fn copy_dir_recursive(from: &Path, to: &Path) {
+    fs::create_dir_all(to).expect("fixture copy dir");
+    for entry in fs::read_dir(from).expect("fixture source dir") {
+        let entry = entry.expect("fixture dir entry");
+        let target = to.join(entry.file_name());
+        if entry.file_type().expect("fixture file type").is_dir() {
+            copy_dir_recursive(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), &target).expect("fixture file copy");
+        }
+    }
+}
+
 pub fn provider_catalogs() -> (
     SourceProviderCatalog,
     ArtifactProviderCatalog,

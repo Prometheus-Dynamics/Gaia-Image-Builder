@@ -53,6 +53,21 @@ pub fn test_spec() -> gaia_spec::ResolvedBuildSpec {
     )
 }
 
+/// Moves an already resolved spec onto `root_dir`, rebasing the build/out dirs and
+/// every named path (e.g. `@assets`) so tests never write into the repository.
+pub fn rebase_workspace_root(spec: &mut gaia_spec::ResolvedBuildSpec, root_dir: &str) {
+    let old_root = PathBuf::from(&spec.workspace.root_dir);
+    let new_root = PathBuf::from(root_dir);
+    for named in &mut spec.workspace.named_paths {
+        if let Ok(rel) = PathBuf::from(&named.path).strip_prefix(&old_root) {
+            named.path = new_root.join(rel).display().to_string();
+        }
+    }
+    spec.workspace.root_dir = root_dir.to_string();
+    spec.workspace.build_dir = new_root.join("build").display().to_string();
+    spec.workspace.out_dir = new_root.join("out").display().to_string();
+}
+
 pub fn test_spec_with_root(root_dir: String) -> gaia_spec::ResolvedBuildSpec {
     let build_dir = unique_dir("gaia-plan-build");
     let out_dir = unique_dir("gaia-plan-out");

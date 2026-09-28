@@ -5,11 +5,11 @@ use gaia_plan::plan_build;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use support::{provider_catalogs, test_spec};
+use support::{fixture_spec, provider_catalogs};
 
 #[test]
 fn provider_execution_materializes_real_outputs() {
-    let spec = test_spec();
+    let spec = fixture_spec();
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
 
@@ -63,6 +63,8 @@ fn provider_execution_materializes_real_outputs() {
     )
     .expect("artifact marker");
     assert!(artifact_marker.contains("provider=artifact.rust"));
+    // The fixture crate is compiled for real, not replaced by a placeholder output.
+    assert!(artifact_marker.contains("mode=cargo"), "{artifact_marker}");
 
     let image_marker =
         fs::read_to_string(Path::new(&spec.workspace.out_dir).join("images/image-provider.txt"))

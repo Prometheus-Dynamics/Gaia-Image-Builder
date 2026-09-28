@@ -1,19 +1,11 @@
 # Existing oversized Rust files to reduce over time.
-crates/gaia-image-builder/src/checkpoints.rs
-crates/gaia-image-builder/src/executor/mod.rs
-crates/gaia-image-builder/src/modules/buildroot.rs
-crates/gaia-image-builder/src/modules/program/mod.rs
-crates/gaia-image-builder/src/modules/program/rust.rs
-crates/gaia-image-builder/src/modules/stage.rs
-crates/gaia-image-builder/src/ui/mod.rs
-crates/core/gaia-app/src/tui/mod.rs
-crates/providers/source/gaia-source-providers/src/lib.rs
-crates/core/gaia-report/src/lib.rs
-crates/core/gaia-config/src/interpolate/mod.rs
-crates/core/gaia-plan/tests/plan_flow.rs
-crates/core/gaia-validate/src/lib.rs
-crates/core/gaia-plan/src/lib.rs
-crates/core/gaia-exec/src/operations/mod.rs
-crates/core/gaia-report/tests/report_flow.rs
-crates/core/gaia-exec/tests/exec_flow.rs
+# Paths are relative to the repository root. Remove an entry once the file
+# drops back under the limit (800 lines by default).
 crates/core/config/src/raw.rs
+# TODO: split these; they were baselined instead of split to avoid conflicting
+# with concurrent work on the Buildroot provider, planner and executor.
+crates/providers/image/image-provider-buildroot/src/feed.rs
+crates/providers/image/image-provider-buildroot/src/tests/buildroot_command.rs
+crates/providers/image/image-provider-buildroot/src/buildroot.rs
+crates/core/plan/src/reuse.rs
+crates/core/exec/src/operations/assembly/mod.rs
