@@ -89,7 +89,16 @@ pub(super) enum OverrideKey<'a> {
     ProvenanceIdentityLabel(&'a str),
     WorkspacePath(&'a str),
     BuildrootConfigOverride(&'a str),
+    /// `sources.<id>.path`: read a git source from a local directory.
+    SourcePath(&'a str),
     Unknown,
+}
+
+/// Source id of a `sources.<id>.path` override key.
+pub(crate) fn source_path_override_id(key: &str) -> Option<&str> {
+    key.strip_prefix("sources.")?
+        .strip_suffix(".path")
+        .filter(|id| !id.is_empty() && !id.contains('.'))
 }
 
 impl<'a> OverrideKey<'a> {
@@ -298,6 +307,8 @@ impl<'a> OverrideKey<'a> {
                     .filter(|name| !name.trim().is_empty())
                 {
                     Self::BuildrootConfigOverride(name)
+                } else if let Some(id) = source_path_override_id(key) {
+                    Self::SourcePath(id)
                 } else {
                     Self::Unknown
                 }

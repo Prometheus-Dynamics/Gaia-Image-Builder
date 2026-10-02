@@ -100,6 +100,7 @@ fn resolves_config_with_cli_selection_overrides() {
                     "artifacts,images,stage,checkpoints".into(),
                 ),
             ],
+            ..Default::default()
         },
     );
 

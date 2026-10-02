@@ -139,3 +139,68 @@ pin = "locked"
         "{misuse:?}"
     );
 }
+
+#[test]
+fn lock_pins_unpinned_import_sources_so_resolution_works() {
+    let root = PathBuf::from(unique_dir("gaia-cli-lock-import"));
+    let repo = root.join("atlas");
+    fs::create_dir_all(&repo).expect("repo dir");
+    git(&repo, &["init", "-b", "main"]);
+    git(&repo, &["config", "user.email", "gaia@example.com"]);
+    git(&repo, &["config", "user.name", "Gaia Test"]);
+    fs::write(
+        repo.join("layer.toml"),
+        "[[stage.env_sets]]\nid = \"raze-env\"\nname = \"raze\"\nentries = [[\"RAZE\", \"1\"]]\n",
+    )
+    .expect("layer");
+    let first = commit(&repo, "one");
+
+    let configs = root.join("configs/builds");
+    fs::create_dir_all(&configs).expect("configs dir");
+    let build_path = configs.join("cm5.toml");
+    fs::write(
+        &build_path,
+        format!(
+            r#"
+build_name = "lock-import"
+imports = [{{ source = "atlas", path = "layer.toml" }}]
+
+[workspace]
+root_dir = "{root}"
+build_dir = "{root}/build"
+out_dir = "{root}/out"
+
+[[sources]]
+id = "atlas"
+kind = "git"
+repo = "file://{repo}"
+"#,
+            root = root.display(),
+            repo = repo.display()
+        ),
+    )
+    .expect("build config");
+    let build = build_path.display().to_string();
+
+    let error = gaia_config::try_resolve_config(&build).expect_err("unpinned import");
+    assert!(error.to_string().contains("gaia lock"), "{error}");
+
+    let outcome = run_with_args(AppArgs::parse_from(["lock", &build]));
+    assert!(
+        matches!(outcome, CommandOutcome::Locked { .. }),
+        "{outcome:?}"
+    );
+    // A new upstream commit does not move the locked import.
+    commit(&repo, "two");
+    let spec = gaia_config::try_resolve_config(&build).expect("resolve after lock");
+    assert_eq!(
+        spec.selection.import_sources[0].identity,
+        format!("git:file://{}@{first}", repo.display())
+    );
+    assert!(
+        spec.stage
+            .env_sets
+            .iter()
+            .any(|env_set| env_set.id.as_str() == "raze-env")
+    );
+}

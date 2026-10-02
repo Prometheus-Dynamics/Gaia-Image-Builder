@@ -10,6 +10,7 @@ description = "Configuration loading and resolution layer for Gaia."
 
 [dependencies]
 gaia-process.workspace = true
+gaia-source-providers.workspace = true
 gaia-spec.workspace = true
 serde.workspace = true
 serde_json.workspace = true

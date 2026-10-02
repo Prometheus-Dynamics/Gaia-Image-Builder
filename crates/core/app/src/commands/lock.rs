@@ -39,7 +39,13 @@ pub fn lock_build_command(
     options: &ResolveOptions,
     lock_args: &LockArgs,
 ) -> CommandOutcome {
-    let spec = match try_resolve_config_with_options(build, options) {
+    // Import sources without `rev` need a lock entry to resolve; locking is
+    // what creates that entry, so let resolution follow their current ref.
+    let options = ResolveOptions {
+        resolve_unpinned_import_sources: true,
+        ..options.clone()
+    };
+    let spec = match try_resolve_config_with_options(build, &options) {
         Ok(spec) => spec,
         Err(error) => {
             return CommandOutcome::Failed {

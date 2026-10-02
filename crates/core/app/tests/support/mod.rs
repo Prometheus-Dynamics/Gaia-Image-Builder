@@ -178,6 +178,7 @@ pub fn seed_reuse_state(root_dir: &str, build_dir: &str, out_dir: &str) {
                 ("workspace.out_dir".into(), out_dir.into()),
                 ("workspace.build_dir".into(), build_dir.into()),
             ],
+            ..Default::default()
         },
     );
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();

@@ -518,6 +518,7 @@ name = "gaia-config"
 version = "2.0.0"
 dependencies = [
  "gaia-process",
+ "gaia-source-providers",
  "gaia-spec",
  "serde",
  "serde_json",

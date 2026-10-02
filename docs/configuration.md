@@ -21,6 +21,79 @@ Merging rules:
 - conditional imports are selected from top-level build metadata, including
   `build.target`, `build.profile`, and `build.branch` overrides
 
+### Imports From a Git Source
+
+A layer can live in another repository and be imported from a git source,
+for example shared device support kept next to the hardware it supports:
+
+```toml
+# in a local config file (the build entrypoint or a layer it imports by path)
+imports = [
+  "../layers/base-os.toml",
+  { source = "atlas", path = "devices/raze/gaia/device.toml", when = { target = "cm5" } },
+]
+
+[[sources]]
+id = "atlas"
+kind = "git"
+repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager"
+rev = "<full commit sha>"   # or an entry in the build's lockfile
+```
+
+- `source = "<id>"` reads `path` (relative to the repository root) from that
+  source's checkout while the config is resolved, so `resolve`, `validate` and
+  `plan` see the imported layer like any local one.
+- The source must be a `kind = "git"` entry of `[[sources]]` in a local file:
+  the entrypoint, its `extends` chain, or a layer imported by plain path. Files
+  read from a source cannot declare import sources.
+- It must be pinned: either `rev`, or an entry in `<build>.gaia.lock`. Running
+  `gaia lock <build>` records the current commit of an unpinned import source
+  (see [Git Source Lockfile](#git-source-lockfile)). Otherwise resolution fails
+  with an error naming the importing file and the source id.
+- The checkout is made in `<workspace>/.gaia/cache/import-sources/<id>-<rev>`,
+  through the shared per-repository mirror in `.gaia/cache/git` for remote
+  repositories. An existing checkout is reused without fetching, so use full
+  commit shas for `rev`.
+- `when` behaves exactly as for local imports. An import whose `when` does not
+  match is not fetched.
+- Imports and `extends` inside a source-imported file resolve relative to that
+  file, like local imports, and must stay inside the checkout: `..` or symlink
+  escapes are rejected.
+- The source stays a normal build source with the same id, materialized at
+  the same commit.
+
+Path tokens, rewritten when each file is loaded (only at the start of a
+string value):
+- `@self` / `@self/<rest>`: absolute directory of the file containing the
+  value. This is the same for local files and source-imported files, so a
+  layer written with `@self/overlays/raze.dtbo` works from a checkout and from a
+  vendored copy imported by plain path.
+- `@source:<id>` / `@source:<id>/<rest>`: the checkout directory of import
+  source `<id>`, for consumers referencing files in the source.
+
+Relative paths elsewhere still resolve against the workspace root, so layers
+meant to be imported from a source should reference their own files with
+`@self`.
+
+Local development: `--set sources.<id>.path=<dir>` (absolute, or relative to
+the workspace root) reads imports and `@source:<id>` from `<dir>` without
+fetching or needing a pin, and the source materializes from `<dir>` as a
+`kind = "path"` source with the same id. Only `--set` overrides are honored for
+import resolution, not preset overrides. Do not run `gaia lock` with such an
+override: the source is then a path source and its lock entry is dropped.
+
+Reuse: the resolved import sources are recorded in the spec
+(`selection.import_sources`) with their identity: `git:<repo>@<commit>`, or for
+a path override, `path:<dir>#<digest of the imported config files>`. Items
+declared by source-imported files (sources, artifacts, installs, stage files,
+env sets, services, and the image when such a file sets `[image]` fields)
+fold that identity into their operation fingerprints. Changing `rev` therefore
+rebuilds what came from the layer, even when the resolved values are
+identical. Items declared only locally keep their fingerprints. Trade-off: the
+attribution is by id, so a local item overriding an id the layer also declares
+is rebuilt too; and values a layer contributes without an id (env, inputs,
+policy) are covered only through the spec parts they change.
+
 ## Top-Level Build Fields
 
 Supported top-level fields:

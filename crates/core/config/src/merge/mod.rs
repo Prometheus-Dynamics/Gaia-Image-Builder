@@ -31,6 +31,12 @@ pub fn merge_config(raw: RawBuildConfig) -> RawBuildConfig {
     merge_two(merged, strip_loaded_children(raw))
 }
 
+/// Whether an import with `when` declared in `raw` is merged, as decided by
+/// `merge_config` for that file.
+pub(crate) fn import_applies(raw: &RawBuildConfig, when: &RawWhenConfig) -> bool {
+    import_when_matches(Some(when), &ImportWhenContext::from_raw(raw))
+}
+
 struct ImportWhenContext {
     target: Option<String>,
     profile: Option<String>,

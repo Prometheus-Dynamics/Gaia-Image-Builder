@@ -2,6 +2,7 @@ use crate::{ConfigError, ResolveOptions, raw};
 
 mod keys;
 
+pub(crate) use keys::source_path_override_id;
 use keys::{KnownOverrideKey, OverrideKey};
 
 pub(crate) fn apply_cli_overrides(
@@ -102,6 +103,29 @@ fn apply_override(
             {
                 upsert_pair(config_overrides, name, value);
             }
+        }
+        OverrideKey::SourcePath(id) => {
+            // The source keeps its id but materializes from the local
+            // directory, which import resolution also reads from.
+            let source = raw
+                .sources
+                .iter_mut()
+                .find(|source| source.id == id)
+                .ok_or_else(|| {
+                    ConfigError::invalid_override_value(key, value, "the id of a declared source")
+                })?;
+            let refresh = match &source.definition {
+                raw::RawSourceDefinition::Git { refresh, .. }
+                | raw::RawSourceDefinition::Path { refresh, .. }
+                | raw::RawSourceDefinition::Archive { refresh, .. }
+                | raw::RawSourceDefinition::Download { refresh, .. } => *refresh,
+            };
+            source.definition = raw::RawSourceDefinition::Path {
+                path: value.to_string(),
+                identity_ignore: Vec::new(),
+                refresh,
+                pin: None,
+            };
         }
         OverrideKey::Unknown => {}
     }
