@@ -57,11 +57,14 @@ fn load_build_config_from_path(
         .map_err(|error| ConfigError::config_read(&canonical_path, error))?;
     let value: toml::Value = toml::from_str(&contents)
         .map_err(|error| ConfigError::config_parse(&canonical_path, error))?;
+    crate::gaia_version::check_required_gaia_version(&canonical_path, &value)?;
     validate_raw_toml_shape(&canonical_path, &value)?;
+    let unknown_keys = crate::unknown_keys::unknown_config_keys(&value);
     let mut raw: RawBuildConfig = value
         .try_into()
         .map_err(|error| ConfigError::config_parse(&canonical_path, error))?;
     raw.source_path = Some(canonical_path.clone());
+    raw.unknown_keys = unknown_keys;
     if raw.build_name.trim().is_empty() {
         raw.build_name = infer_build_name(&canonical_path);
     }

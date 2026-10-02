@@ -100,6 +100,7 @@ pub(crate) fn image_execution_policy(spec: &ResolvedBuildSpec) -> ImageExecution
         shared_output: spec.image.provider_kind() == gaia_spec::ImageProviderKind::Buildroot
             && spec.policy.providers.buildroot.shared_output,
         shared_output_dir: spec.policy.providers.buildroot.shared_output_dir.clone(),
+        override_check: spec.policy.providers.buildroot.override_check,
         output_retention: process_output_retention(spec),
     }
 }

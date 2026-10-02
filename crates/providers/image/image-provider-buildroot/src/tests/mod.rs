@@ -69,5 +69,6 @@ mod config_digest;
 mod feed_archive;
 mod feed_archive_expected_images;
 mod feed_archive_overlay;
+mod override_check;
 mod provider_squashfs_fs;
 mod single_pass_shared;

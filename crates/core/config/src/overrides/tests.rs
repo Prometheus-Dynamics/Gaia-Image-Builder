@@ -86,6 +86,7 @@ fn documented_override_keys_parse_as_typed_keys() {
         "policy.providers.buildroot.ccache.dir",
         "policy.providers.buildroot.shared_output",
         "policy.providers.buildroot.shared_output_dir",
+        "policy.providers.buildroot.override_check",
         "policy.providers.starting_point.retry_attempts",
         "policy.providers.starting_point.timeout_seconds",
     ] {

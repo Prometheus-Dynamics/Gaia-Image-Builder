@@ -3,8 +3,8 @@ use crate::{
     PlannedOperation, ReuseState,
 };
 use gaia_spec::{
-    ArtifactDefinition, CheckpointAnchorRef, ImageDefinition, ResolvedBuildSpec, SourceDefinition,
-    SourcePinPolicySpec, SourceRefreshPolicySpec,
+    CheckpointAnchorRef, ImageDefinition, ResolvedBuildSpec, SourceDefinition, SourcePinPolicySpec,
+    SourceRefreshPolicySpec,
 };
 use std::collections::HashMap;
 use std::env;
@@ -17,7 +17,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 // Generous because a timeout changes the fingerprint and forces a rebuild; a
 // JVM or rustup proxy on a busy machine can take several seconds to start.
-const COMMAND_SIGNATURE_TIMEOUT_SECONDS: u64 = 10;
+pub(crate) const COMMAND_SIGNATURE_TIMEOUT_SECONDS: u64 = 10;
 
 pub fn spec_fingerprint(spec: &ResolvedBuildSpec) -> u64 {
     let mut hasher = DefaultHasher::new();
@@ -261,7 +261,8 @@ pub fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
                 .find(|artifact| artifact.id == *artifact_id)
             {
                 format!("{artifact:?}").hash(&mut hasher);
-                artifact_backend_signature(artifact).hash(&mut hasher);
+                crate::reuse_toolchain::artifact_backend_signature(spec, artifact)
+                    .hash(&mut hasher);
                 // Only hashed when present so image-only artifacts keep
                 // their existing fingerprints.
                 if let Some(image) = artifact_docker_build_signature(spec, artifact) {
@@ -385,28 +386,6 @@ fn artifact_docker_build_signature(
     )
 }
 
-fn artifact_backend_signature(artifact: &gaia_spec::ArtifactSpec) -> String {
-    match &artifact.definition {
-        ArtifactDefinition::Rust(_) => format!(
-            "{}|{}",
-            command_signature("cargo", ["--version"]),
-            command_signature("rustc", ["--version"])
-        ),
-        ArtifactDefinition::Go(_) => command_signature("go", ["version"]),
-        ArtifactDefinition::Python(_) => command_signature("python3", ["--version"]),
-        ArtifactDefinition::Node(_) => format!(
-            "{}|{}",
-            command_signature("npm", ["--version"]),
-            command_signature("node", ["--version"])
-        ),
-        ArtifactDefinition::Java(_) => format!(
-            "{}|{}",
-            command_signature("mvn", ["-version"]),
-            command_signature("gradle", ["--version"])
-        ),
-    }
-}
-
 fn image_backend_signature(spec: &ResolvedBuildSpec, image: &gaia_spec::ImageSpec) -> String {
     match &image.definition {
         ImageDefinition::Buildroot(_buildroot) => {
@@ -469,6 +448,10 @@ pub(crate) fn command_signature<const N: usize>(program: &str, args: [&str; N]) 
 }
 
 fn probe_command_signature<const N: usize>(program: &str, args: [&str; N]) -> String {
+    // Checked first so a missing tool does not log a process start failure.
+    if !crate::reuse_toolchain::program_on_path(program) {
+        return format!("{program}:unavailable");
+    }
     let mut command = Command::new(program);
     command.args(args);
     let retention = gaia_process::ProcessOutputRetention {

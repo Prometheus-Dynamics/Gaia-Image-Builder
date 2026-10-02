@@ -28,6 +28,10 @@ pub struct RunSummary {
     pub reused_operations: usize,
     pub image_reused: bool,
     pub image_reuse_details: Vec<String>,
+    /// Warnings image providers raised during the run (for example Buildroot
+    /// `config_overrides` that olddefconfig dropped). Counted in
+    /// `warning_count`.
+    pub image_warnings: Vec<String>,
     pub rolled_back_operations: usize,
     pub cleanup_failure_count: usize,
     pub source_count: usize,
@@ -305,6 +309,7 @@ pub struct ManifestImageOutputRecord {
     pub emit_report: bool,
     pub reused: bool,
     pub reuse_details: Vec<String>,
+    pub warnings: Vec<String>,
     pub backend_state: BTreeMap<String, String>,
 }
 

@@ -103,6 +103,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
             name: raw.product.name,
             sku: raw.product.sku,
         },
+        config_warnings: Vec::new(),
     };
     spec.inputs = InputSpec {
         declared: raw

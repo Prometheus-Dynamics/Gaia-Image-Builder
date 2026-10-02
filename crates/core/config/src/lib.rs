@@ -1,6 +1,7 @@
 mod compile;
 mod dynamic_inputs;
 mod env;
+mod gaia_version;
 mod interpolate;
 mod load;
 pub mod lockfile;
@@ -8,8 +9,10 @@ mod merge;
 mod overrides;
 mod raw;
 mod raw_assembly;
+mod unknown_keys;
 
 pub use compile::compile_config;
+pub use gaia_version::GAIA_VERSION;
 
 use dynamic_inputs::resolve_dynamic_inputs;
 use env::resolve_environment;
@@ -50,6 +53,7 @@ pub fn try_resolve_config_with_options(
     tracing::debug!(build, preset = ?options.preset, "resolving build config");
     let raw = load_build_config(build)?;
     tracing::debug!(build, "loaded build config");
+    let unknown_key_warnings = unknown_keys::collect_unknown_key_warnings(&raw);
     let selected = apply_preset_selection(raw, build, options);
     let merged = merge_config(selected);
     let selected = apply_preset_selection(merged, build, options);
@@ -65,6 +69,7 @@ pub fn try_resolve_config_with_options(
     let interpolated = interpolate_config(with_dynamic_inputs, &env);
     let normalized = normalize_paths(interpolated)?;
     let mut spec = compile_config(normalized);
+    spec.metadata.config_warnings = unknown_key_warnings;
     apply_lockfile(&mut spec);
     tracing::debug!(
         build,
@@ -141,6 +146,13 @@ pub enum ConfigError {
         key: String,
         value: String,
         expected: &'static str,
+    },
+    /// The build file's `gaia_version` requirement does not match this
+    /// binary.
+    GaiaVersionUnsupported {
+        path: String,
+        required: String,
+        installed: String,
     },
 }
 
@@ -261,6 +273,16 @@ impl fmt::Display for ConfigError {
             } => write!(
                 formatter,
                 "invalid override value for '{key}': '{value}' (expected {expected})"
+            ),
+            Self::GaiaVersionUnsupported {
+                path,
+                required,
+                installed,
+            } => write!(
+                formatter,
+                "this build requires gaia {required}, but gaia {installed} is installed \
+                 (gaia_version in '{path}'); upgrade with: {}",
+                gaia_version::UPGRADE_COMMAND
             ),
         }
     }

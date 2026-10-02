@@ -26,6 +26,7 @@ Merging rules:
 Supported top-level fields:
 
 ```toml
+gaia_version = ">=2.1.0"
 build_name = "helios-cm5"
 display_name = "HeliOS CM5"
 version = "v2026.2.0"
@@ -40,6 +41,14 @@ labels = [
 ```
 
 Meaning:
+- `gaia_version`
+  Optional semver requirement on the Gaia binary (Cargo syntax: `">=2.1.0"`,
+  `">=2.1, <3"`; a bare `"2.1.0"` means `^2.1.0`). It is checked on the raw
+  TOML of every loaded file (including `extends` and imports) before any
+  other parsing or validation, so an older binary fails with
+  `this build requires gaia >=2.1.0, but gaia 2.0.0 is installed; upgrade with: cargo install ...`
+  instead of misreading the file. Gaia 2.0.0 and older ignore this key, so it
+  only protects against binaries from 2.1.0 on.
 - `build_name`
   Stable canonical identity used for report file naming and persisted state names.
 - `display_name`
@@ -56,6 +65,15 @@ Meaning:
   Top-level profile metadata. This is also propagated into provider state.
 - `labels`
   Free-form metadata pairs.
+
+Unknown keys are ignored when loading (so a file written for a newer Gaia
+still loads), but validation reports each one as a `config_unknown_key`
+warning, for example `unknown key 'build_command' in '<file>' is ignored`.
+The check covers top-level keys and the `workspace`, `product`,
+`interpolation`, `clean`, `execution`, `failure`, `providers.*`,
+`provenance`, `reporting`, `stage`, `install` and `checkpoints` tables. Tables
+whose fields depend on a `kind` (`sources`, `artifacts`, `image`) and free-form
+maps (`inputs`, `presets`, `env`) are not checked.
 
 ## Product Metadata
 
@@ -475,6 +493,36 @@ filesystems depend on more than the target tree and are rejected in shared
 mode. Setting a different squashfs compression per build gives those builds
 separate trees, because the key includes `config_overrides`.
 
+#### Dropped config overrides
+
+```toml
+[providers.buildroot]
+override_check = "error" # default; or "warn" / "off"
+```
+
+`olddefconfig` silently resets every symbol whose `depends on` is not met and
+drops symbols that no longer exist, so a requested `BR2_PACKAGE_OPENJDK=y`
+can vanish (for example when `BR2_PACKAGE_XORG7` is off) while validate and
+plan pass. After the defconfig, fragments, `config_overrides` and cache
+settings are applied (private and shared trees alike), Gaia compares every
+`config_overrides` entry with the final `.config`:
+
+- `y`, `m` or a value is **dropped** when the symbol is missing or
+  `# KEY is not set`, and **changed** when it holds a different value;
+- `n` (or `""`) is satisfied by a missing symbol or `# KEY is not set`;
+- string quotes are optional, and `int`/`hex` values compare numerically;
+- for repeated keys the last entry counts; `BR2_DL_DIR` and `BR2_CCACHE_DIR`
+  are skipped because Gaia's cache policy rewrites them.
+
+With `"error"` the image operation fails before the long `make`, listing each
+symbol with the requested and final value and the hint
+"usually an unmet `depends on`; check menuconfig for <KEY>". With `"warn"` the
+build continues and each entry is reported as a warning: in the `gaia run`
+output, in `summary.json` (`image_warnings`, counted in `warning_count`) and
+on the image record of `manifest.json` (`warnings`). `"off"` skips the
+comparison. `--set policy.providers.buildroot.override_check=warn` relaxes it
+for one run.
+
 #### Faster compression for development builds
 
 Buildroot `config_overrides` can be set from presets and `--set` with
@@ -832,6 +880,25 @@ context rebuilds the image and the artifact. The artifact state records
 `execution_backend_image_hash` and `execution_backend_image_dockerfile`. Keep
 the context small: it is hashed at every plan. A clean machine only needs
 Docker and the repository to build the image.
+
+Reuse fingerprints identify the toolchain an artifact was built with. Host
+artifacts hash the host tool versions (`cargo`/`rustc`, `go`, `python3`,
+`npm`/`node`, `mvn`/`gradle`). Docker artifacts never probe host tools (so a
+host without Maven or Gradle no longer logs failed probes); they hash the
+execution image instead:
+
+- a Dockerfile-built image contributes its content hash, without calling
+  Docker;
+- a plain `image` (or `[execution.docker] image`) contributes its image id
+  from `docker image inspect --format '{{.Id}}'`, probed once per process, so
+  pulling or rebuilding a different image under the same tag rebuilds the
+  artifact;
+- an image that is not present locally contributes `image-missing:<tag>`.
+  Planning does not fail; the first run after the image is pulled rebuilds the
+  artifact once.
+
+Moving to these signatures changes the fingerprint of every docker-backed
+artifact once, so they rebuild on the first run after upgrading.
 
 Install classes:
 - `binary`

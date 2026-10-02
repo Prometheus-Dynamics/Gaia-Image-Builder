@@ -75,6 +75,7 @@ pub(super) enum KnownOverrideKey {
     PolicyProvidersBuildrootCcacheDir,
     PolicyProvidersBuildrootSharedOutput,
     PolicyProvidersBuildrootSharedOutputDir,
+    PolicyProvidersBuildrootOverrideCheck,
     PolicyProvidersStartingPointRetryAttempts,
     PolicyProvidersStartingPointTimeoutSeconds,
 }
@@ -270,6 +271,9 @@ impl<'a> OverrideKey<'a> {
             }
             "policy.providers.buildroot.shared_output_dir" => {
                 Self::Known(KnownOverrideKey::PolicyProvidersBuildrootSharedOutputDir)
+            }
+            "policy.providers.buildroot.override_check" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersBuildrootOverrideCheck)
             }
             "policy.providers.starting_point.retry_attempts" => {
                 Self::Known(KnownOverrideKey::PolicyProvidersStartingPointRetryAttempts)

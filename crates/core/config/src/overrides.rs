@@ -381,6 +381,20 @@ fn apply_known_override(
         KnownOverrideKey::PolicyProvidersBuildrootSharedOutputDir => {
             raw.providers.buildroot.shared_output_dir = Some(value.to_string())
         }
+        KnownOverrideKey::PolicyProvidersBuildrootOverrideCheck => {
+            raw.providers.buildroot.override_check = Some(match value {
+                "error" => crate::raw::RawBuildrootOverrideCheck::Error,
+                "warn" => crate::raw::RawBuildrootOverrideCheck::Warn,
+                "off" => crate::raw::RawBuildrootOverrideCheck::Off,
+                _ => {
+                    return Err(ConfigError::invalid_override_value(
+                        key,
+                        value,
+                        "one of: error, warn, off",
+                    ));
+                }
+            })
+        }
         KnownOverrideKey::PolicyProvidersStartingPointRetryAttempts => {
             raw.providers.starting_point.retry_attempts = parse_u32_override(key, value)?
         }

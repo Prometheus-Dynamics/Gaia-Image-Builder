@@ -231,6 +231,33 @@ pub struct CommandProviderPolicySpec {
     /// Buildroot only: where shared output trees live (defaults to
     /// `.gaia/cache/buildroot/shared` under the workspace root).
     pub shared_output_dir: Option<String>,
+    /// Buildroot only: what to do when `olddefconfig` drops or changes a
+    /// requested `config_overrides` entry.
+    pub override_check: BuildrootOverrideCheckSpec,
+}
+
+/// `[providers.buildroot] override_check`: how Gaia reacts when the final
+/// Buildroot `.config` does not contain a requested `config_overrides` entry
+/// (usually an unmet `depends on`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum BuildrootOverrideCheckSpec {
+    /// Fail the image operation before the long `make`.
+    #[default]
+    Error,
+    /// Report the dropped entries in the run output and report, then build.
+    Warn,
+    /// Do not compare.
+    Off,
+}
+
+impl BuildrootOverrideCheckSpec {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warn => "warn",
+            Self::Off => "off",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

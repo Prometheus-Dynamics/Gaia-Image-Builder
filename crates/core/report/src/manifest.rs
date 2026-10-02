@@ -246,6 +246,7 @@ pub fn render_manifest_with_outcome(
             emit_report: result.emit_report,
             reused: result.reused,
             reuse_details: result.reuse_details.clone(),
+            warnings: result.warnings.clone(),
             backend_state: result
                 .collect_dir
                 .as_ref()

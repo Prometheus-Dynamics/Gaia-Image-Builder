@@ -7,6 +7,9 @@ pub struct BuildMetadataSpec {
     pub profile: Option<String>,
     pub labels: Vec<(String, String)>,
     pub product: ProductIdentitySpec,
+    /// Problems found while loading the build files (for example unknown
+    /// keys), reported as validation warnings.
+    pub config_warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

@@ -3,7 +3,7 @@ use super::*;
 /// A fake Buildroot: `make` installs a base file, runs the post-build
 /// scripts named on the command line (as Buildroot's target-finalize does),
 /// then "packs" the target into a listing and counts the packs.
-const SINGLE_PASS_MAKEFILE: &str = "%_defconfig:\n\t@mkdir -p $(O)\n\t@printf 'BR2_TARGET_ROOTFS_SQUASHFS=y\\n' > $(O)/.config\nall:\n\t@mkdir -p $(O)/target/usr/bin $(O)/images\n\t@printf base > $(O)/target/usr/bin/base\n\t@for s in $(BR2_ROOTFS_POST_BUILD_SCRIPT); do $$s $(O)/target; done\n\t@(cd $(O)/target && find . -mindepth 1 | LC_ALL=C sort) > $(O)/images/rootfs.squashfs\n\t@printf x >> $(O)/pack-count\nclean:\n\t@:\n";
+pub(super) const SINGLE_PASS_MAKEFILE: &str = "%_defconfig:\n\t@mkdir -p $(O)\n\t@printf 'BR2_TARGET_ROOTFS_SQUASHFS=y\\n' > $(O)/.config\nall:\n\t@mkdir -p $(O)/target/usr/bin $(O)/images\n\t@printf base > $(O)/target/usr/bin/base\n\t@for s in $(BR2_ROOTFS_POST_BUILD_SCRIPT); do $$s $(O)/target; done\n\t@(cd $(O)/target && find . -mindepth 1 | LC_ALL=C sort) > $(O)/images/rootfs.squashfs\n\t@printf x >> $(O)/pack-count\nclean:\n\t@:\n";
 
 /// Like [`SINGLE_PASS_MAKEFILE`] but ignores post-build scripts, so Gaia
 /// must fall back to refreshing the images after make.
@@ -13,9 +13,9 @@ const NO_POST_BUILD_MAKEFILE: &str = "%_defconfig:\n\t@mkdir -p $(O)\n\t@printf 
 /// installs a target with Buildroot's warning file, and generates a
 /// fakeroot script that packs `build/buildroot-fs/squashfs/target` into
 /// `images/rootfs.squashfs`. `target-finalize` only logs.
-const SHARED_MAKEFILE: &str = "%_defconfig:\n\t@mkdir -p $(O)\n\t@printf 'BR2_TARGET_ROOTFS_SQUASHFS=y\\nBR2_ROOTFS_POST_IMAGE_SCRIPT=\"board/post-image.sh\"\\n' > $(O)/.config\nall:\n\t@printf 'all\\n' >> $(O)/make-log\n\t@mkdir -p $(O)/target/usr/bin $(O)/images $(O)/host/bin $(O)/build/buildroot-fs/squashfs\n\t@printf base > $(O)/target/usr/bin/base\n\t@printf warn > $(O)/target/THIS_IS_NOT_YOUR_ROOT_FILESYSTEM\n\t@printf kernel > $(O)/images/Image\n\t@printf '#!/bin/sh\\nexec \"$$@\"\\n' > $(O)/host/bin/fakeroot\n\t@chmod +x $(O)/host/bin/fakeroot\n\t@printf '#!/bin/sh\\nset -e\\n(cd $(O)/build/buildroot-fs/squashfs/target && find . -mindepth 1 | LC_ALL=C sort) > $(O)/images/rootfs.squashfs\\n' > $(O)/build/buildroot-fs/squashfs/fakeroot\n\t@printf pristine > $(O)/images/rootfs.squashfs\ntarget-finalize:\n\t@printf 'finalize\\n' >> $(O)/make-log\n";
+pub(super) const SHARED_MAKEFILE: &str = "%_defconfig:\n\t@mkdir -p $(O)\n\t@printf 'BR2_TARGET_ROOTFS_SQUASHFS=y\\nBR2_ROOTFS_POST_IMAGE_SCRIPT=\"board/post-image.sh\"\\n' > $(O)/.config\nall:\n\t@printf 'all\\n' >> $(O)/make-log\n\t@mkdir -p $(O)/target/usr/bin $(O)/images $(O)/host/bin $(O)/build/buildroot-fs/squashfs\n\t@printf base > $(O)/target/usr/bin/base\n\t@printf warn > $(O)/target/THIS_IS_NOT_YOUR_ROOT_FILESYSTEM\n\t@printf kernel > $(O)/images/Image\n\t@printf '#!/bin/sh\\nexec \"$$@\"\\n' > $(O)/host/bin/fakeroot\n\t@chmod +x $(O)/host/bin/fakeroot\n\t@printf '#!/bin/sh\\nset -e\\n(cd $(O)/build/buildroot-fs/squashfs/target && find . -mindepth 1 | LC_ALL=C sort) > $(O)/images/rootfs.squashfs\\n' > $(O)/build/buildroot-fs/squashfs/fakeroot\n\t@printf pristine > $(O)/images/rootfs.squashfs\ntarget-finalize:\n\t@printf 'finalize\\n' >> $(O)/make-log\n";
 
-fn squashfs_image(source: &str, stage_files: &[&str]) -> ImageSpec {
+pub(super) fn squashfs_image(source: &str, stage_files: &[&str]) -> ImageSpec {
     let mut image = ImageSpec::new(ImageDefinition::Buildroot(BuildrootImageSpec {
         source: Some(SourceId::new(source)),
         defconfig: Some("fake_defconfig".into()),
@@ -30,7 +30,7 @@ fn squashfs_image(source: &str, stage_files: &[&str]) -> ImageSpec {
     image
 }
 
-fn feed_spec(workspace_root: &Path, name: &str, build_dir: &str) -> ResolvedBuildSpec {
+pub(super) fn feed_spec(workspace_root: &Path, name: &str, build_dir: &str) -> ResolvedBuildSpec {
     let mut spec = ResolvedBuildSpec::new(name);
     spec.workspace.root_dir = workspace_root.display().to_string();
     spec.workspace.build_dir = build_dir.into();
@@ -58,7 +58,11 @@ fn feed_spec(workspace_root: &Path, name: &str, build_dir: &str) -> ResolvedBuil
     spec
 }
 
-fn write_buildroot_source(workspace_root: &Path, build_dir: &str, makefile: &str) -> PathBuf {
+pub(super) fn write_buildroot_source(
+    workspace_root: &Path,
+    build_dir: &str,
+    makefile: &str,
+) -> PathBuf {
     let source_dir = workspace_root
         .join(build_dir)
         .join("sources")
@@ -74,7 +78,7 @@ fn write_buildroot_source(workspace_root: &Path, build_dir: &str, makefile: &str
     source_dir
 }
 
-fn run_build(
+pub(super) fn run_build(
     spec: &ResolvedBuildSpec,
     image: &ImageSpec,
     policy: &ImageExecutionPolicy,

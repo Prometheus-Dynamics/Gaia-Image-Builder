@@ -55,6 +55,17 @@ pub(crate) fn compile_command_policy(
         },
         shared_output: raw.shared_output,
         shared_output_dir: raw.shared_output_dir.clone(),
+        override_check: match raw.override_check {
+            None | Some(crate::raw::RawBuildrootOverrideCheck::Error) => {
+                gaia_spec::BuildrootOverrideCheckSpec::Error
+            }
+            Some(crate::raw::RawBuildrootOverrideCheck::Warn) => {
+                gaia_spec::BuildrootOverrideCheckSpec::Warn
+            }
+            Some(crate::raw::RawBuildrootOverrideCheck::Off) => {
+                gaia_spec::BuildrootOverrideCheckSpec::Off
+            }
+        },
     }
 }
 

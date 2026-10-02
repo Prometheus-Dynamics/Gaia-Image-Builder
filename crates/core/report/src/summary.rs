@@ -53,6 +53,16 @@ pub fn render_summary(
         .iter()
         .flat_map(|result| result.reuse_details.clone())
         .collect::<Vec<_>>();
+    let mut image_warnings = Vec::<String>::new();
+    for warning in outcome
+        .image_results
+        .iter()
+        .flat_map(|result| &result.warnings)
+    {
+        if !image_warnings.contains(warning) {
+            image_warnings.push(warning.clone());
+        }
+    }
     RunSummary {
         build_name: spec.identity.display_name.clone(),
         build_version: spec.identity.version.clone(),
@@ -62,12 +72,15 @@ pub fn render_summary(
         build_profile: spec.metadata.profile.clone(),
         primary_image_output,
         operation_count: plan.operations.len(),
-        warning_count: validation.warnings.len() + output_hygiene_warnings(spec).len(),
+        warning_count: validation.warnings.len()
+            + output_hygiene_warnings(spec).len()
+            + image_warnings.len(),
         error_count: validation.errors.len() + outcome.errors.len(),
         completed_operations: outcome.completed_operations,
         reused_operations: outcome.reused_ids.len(),
         image_reused: outcome.image_results.iter().any(|result| result.reused),
         image_reuse_details,
+        image_warnings,
         rolled_back_operations: outcome.rolled_back_ids.len(),
         cleanup_failure_count: outcome.cleanup_failures.len(),
         rollback_on_error: spec.policy.failure.rollback_on_error,

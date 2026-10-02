@@ -94,6 +94,16 @@ Typed Buildroot contract includes:
 - `external_tree_mode`
 - expected image list
 
+After every config step (defconfig, fragments, `config_overrides`, cache
+settings, `olddefconfig`), the provider compares each requested
+`config_overrides` entry with the final `.config` of the private or shared
+tree. `[providers.buildroot] override_check` (`"error"` by default, `"warn"`,
+`"off"`) decides whether a dropped or changed symbol fails the operation
+before the long `make` or is returned as a warning on the image result
+(`ImageExecutionResult::warnings`), which the run output, `summary.json`
+(`image_warnings`) and `manifest.json` report. See
+[configuration](configuration.md#dropped-config-overrides).
+
 ### Starting Point
 
 Current reality:
@@ -114,6 +124,13 @@ Provider command policies support:
 Specialized fields:
 - Rust: `allow_nested_build`
 - Git: `allow_remote_resolution`
+- Buildroot: `local_jobs`, `download_dir`, `ccache`, `shared_output`,
+  `shared_output_dir`, `override_check`
+
+Artifact reuse fingerprints include the artifact's toolchain identity: host
+tool versions for host builds, and the execution image (Dockerfile content
+hash, the image id from `docker image inspect`, or `image-missing:<tag>`) for
+docker builds. Host tools are never probed for docker-backed artifacts.
 
 ## Provider Errors
 

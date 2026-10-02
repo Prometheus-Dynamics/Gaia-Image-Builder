@@ -18,3 +18,13 @@ pub(crate) fn validate_reporting(
         ));
     }
 }
+
+/// Problems the config loader found, such as keys this Gaia does not know.
+pub(crate) fn validate_config_warnings(
+    spec: &ResolvedBuildSpec,
+    diagnostics: &mut Vec<ValidationDiagnostic>,
+) {
+    for message in &spec.metadata.config_warnings {
+        diagnostics.push(warning("config_unknown_key", message.clone(), None));
+    }
+}

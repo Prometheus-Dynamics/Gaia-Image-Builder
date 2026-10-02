@@ -13,6 +13,8 @@ pub use raw_inputs::*;
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct RawBuildConfig {
+    /// Semver requirement on the Gaia binary, checked before anything else.
+    pub gaia_version: Option<String>,
     pub build_name: String,
     pub display_name: Option<String>,
     pub version: Option<String>,
@@ -64,6 +66,9 @@ pub struct RawBuildConfig {
     pub imported_configs: Vec<RawImportedConfig>,
     #[serde(skip)]
     pub unresolved_tokens: Vec<RawUnresolvedInterpolation>,
+    /// Dotted paths of keys in this file that Gaia does not know.
+    #[serde(skip)]
+    pub unknown_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -293,6 +298,15 @@ pub struct RawCommandProviderPolicyConfig {
     pub ccache: RawBuildrootCcachePolicyConfig,
     pub shared_output: bool,
     pub shared_output_dir: Option<String>,
+    pub override_check: Option<RawBuildrootOverrideCheck>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RawBuildrootOverrideCheck {
+    Error,
+    Warn,
+    Off,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

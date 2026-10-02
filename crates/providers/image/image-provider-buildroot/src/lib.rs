@@ -255,6 +255,7 @@ impl ImageProvider for BuildrootImageProvider {
             emit_report: output.emit_report,
             reused: !reuse_details.is_empty(),
             reuse_details,
+            warnings: override_check_warnings(&messages),
             messages,
             state_details: {
                 let mut details = state_details;
@@ -341,6 +342,7 @@ impl ImageProvider for BuildrootImageProvider {
                     emit_report: false,
                     reused: false,
                     reuse_details: Vec::new(),
+                    warnings: override_check_warnings(&messages),
                     messages,
                     state_details: {
                         let mut details = state_details;
@@ -474,11 +476,13 @@ fn should_archive_buildroot_output(image: &ImageSpec, archive_path: &Path) -> bo
 
 mod archive;
 mod buildroot;
+mod buildroot_config;
 mod buildroot_external;
 mod command;
 mod feed;
 mod feed_make;
 mod fs_util;
+mod override_check;
 mod shared;
 mod squashfs;
 #[cfg(test)]
@@ -486,10 +490,12 @@ mod tests;
 
 pub(crate) use archive::*;
 pub(crate) use buildroot::*;
+pub(crate) use buildroot_config::*;
 pub(crate) use buildroot_external::*;
 pub(crate) use command::*;
 pub(crate) use feed::*;
 pub(crate) use feed_make::*;
 pub(crate) use fs_util::*;
+pub(crate) use override_check::*;
 pub(crate) use shared::*;
 pub(crate) use squashfs::*;

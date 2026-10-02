@@ -2,7 +2,8 @@ pub use gaia_process::{
     ProcessCancelCheck, ProcessLogLine, ProcessLogSink, ProcessOutputRetention,
 };
 use gaia_spec::{
-    ImageDefinition, ImageProviderKind, ImageSpec, ResolvedBuildSpec, RetryBackoffStrategySpec,
+    BuildrootOverrideCheckSpec, ImageDefinition, ImageProviderKind, ImageSpec, ResolvedBuildSpec,
+    RetryBackoffStrategySpec,
 };
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
@@ -165,6 +166,9 @@ pub struct ImageExecutionPolicy {
     pub shared_output: bool,
     /// Buildroot: root directory for shared output trees.
     pub shared_output_dir: Option<String>,
+    /// Buildroot: what to do when a requested `config_overrides` entry is
+    /// missing or different in the final `.config`.
+    pub override_check: BuildrootOverrideCheckSpec,
     pub output_retention: ProcessOutputRetention,
 }
 
@@ -182,6 +186,7 @@ impl Default for ImageExecutionPolicy {
             ccache_dir: None,
             shared_output: false,
             shared_output_dir: None,
+            override_check: BuildrootOverrideCheckSpec::default(),
             output_retention: ProcessOutputRetention::default(),
         }
     }
@@ -196,6 +201,9 @@ pub struct ImageExecutionResult {
     pub reused: bool,
     pub reuse_details: Vec<String>,
     pub messages: Vec<String>,
+    /// Problems worth surfacing in the run output and report even though the
+    /// operation succeeded.
+    pub warnings: Vec<String>,
     pub state_details: Vec<(String, String)>,
 }
 
@@ -651,6 +659,7 @@ mod tests {
             reused: false,
             reuse_details: Vec::new(),
             messages: Vec::new(),
+            warnings: Vec::new(),
             state_details: Vec::new(),
         };
 

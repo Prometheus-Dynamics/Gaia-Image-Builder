@@ -3,6 +3,7 @@ mod graph;
 mod operations;
 mod reuse;
 mod reuse_assembly;
+mod reuse_toolchain;
 mod targets;
 
 pub use estimate::{PlanEstimate, estimate_plan, format_duration_short};

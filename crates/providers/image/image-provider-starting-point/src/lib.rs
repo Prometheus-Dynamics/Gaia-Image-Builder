@@ -214,6 +214,7 @@ impl ImageProvider for StartingPointImageProvider {
                 ));
                 messages
             },
+            warnings: Vec::new(),
             state_details: {
                 let mut details = state_details;
                 details.extend(build_state_details(spec));

@@ -6,6 +6,5 @@ crates/core/config/src/raw.rs
 # with concurrent work on the Buildroot provider, planner and executor.
 crates/providers/image/image-provider-buildroot/src/feed.rs
 crates/providers/image/image-provider-buildroot/src/tests/buildroot_command.rs
-crates/providers/image/image-provider-buildroot/src/buildroot.rs
 crates/core/plan/src/reuse.rs
 crates/core/exec/src/operations/assembly/mod.rs

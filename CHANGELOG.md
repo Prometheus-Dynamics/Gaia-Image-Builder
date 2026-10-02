@@ -6,6 +6,47 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+The workspace version is now `2.1.0` (crates and internal dependency
+versions); these changes are released as 2.1.0.
+
+### Config safety
+
+- Buildroot `config_overrides` are verified against the final `.config` after
+  the defconfig, fragments, overrides, cache settings and `olddefconfig`, for
+  private and shared trees. Entries that Kconfig dropped (missing or
+  `# KEY is not set` when `y`/`m`/a value was requested) or changed are listed
+  with the requested and final value and the hint "usually an unmet
+  `depends on`; check menuconfig for <KEY>". `[providers.buildroot]
+  override_check = "error" | "warn" | "off"` (also
+  `--set policy.providers.buildroot.override_check=...`) defaults to `"error"`,
+  which fails the image operation before the long `make`. **This can fail
+  builds that previously succeeded with silently missing packages**; set
+  `"warn"` to keep building. Warnings appear in the `gaia run` output,
+  `summary.json` (`image_warnings`, counted in `warning_count`) and on the
+  `manifest.json` image record (`warnings`).
+- Build files accept `gaia_version = ">=2.1.0"` (a semver requirement). It is
+  checked on the raw TOML of every loaded file before any other parsing or
+  validation; a too-old binary fails with "this build requires gaia >=2.1.0,
+  but gaia 2.0.0 is installed; upgrade with: cargo install ...".
+- Unknown keys, which are still ignored when loading, are reported as
+  `config_unknown_key` validation warnings (top level and the non-`kind`
+  tables such as `providers.*`, `execution`, `stage`, `reporting`).
+- The Buildroot provider's config steps moved from `buildroot.rs` to
+  `buildroot_config.rs`, bringing `buildroot.rs` under the 800-line limit.
+
+### Reuse fingerprints
+
+- Docker-backed artifacts no longer probe `cargo`/`rustc`/`mvn`/`gradle`/...
+  on the host (which also logged "process start failed" warnings when the
+  tools were only in the container). Their fingerprint uses the execution
+  image: the Dockerfile content hash for Dockerfile-built images (no Docker
+  call), otherwise the image id from `docker image inspect`, memoized per
+  process, or `image-missing:<tag>` when the image is not present. This
+  changes the fingerprint of docker-backed artifacts once, so they rebuild on
+  the first run after upgrading.
+- Host tool probes check `PATH` first, so a missing tool no longer logs a
+  process start failure (its signature is unchanged).
+
 ### Executor and runtime
 
 - Nested Rust artifacts that share a workspace, target triple, profile, feature

@@ -5,6 +5,7 @@ use crate::{DiagnosticSeverity, ValidationReport};
 pub fn validate_spec(spec: &ResolvedBuildSpec) -> ValidationReport {
     let mut diagnostics = Vec::new();
 
+    crate::reporting::validate_config_warnings(spec, &mut diagnostics);
     crate::inputs::validate_inputs(spec, &mut diagnostics);
     let source_ids = crate::sources::validate_sources(spec, &mut diagnostics);
     let artifact_ids = crate::artifacts::validate_artifacts(spec, &source_ids, &mut diagnostics);
