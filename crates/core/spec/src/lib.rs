@@ -73,7 +73,7 @@ pub use reporting::{
     DEFAULT_LARGE_UNEXPECTED_OUTPUT_BYTES, DEFAULT_TRANSIENT_DIR_NAMES, OutputHygieneSpec,
     PostBuildHookSpec, ReportingOutputsSpec, ReportingSpec, SecretMaskingSpec,
 };
-pub use selection::SelectionSpec;
+pub use selection::{ImportSourceSpec, SelectionSpec};
 pub use source::{
     ArchiveSourceSpec, DownloadSourceSpec, GitSourceSpec, PathSourceSpec, SourceDefinition,
     SourcePinPolicySpec, SourceProviderKind, SourceRef, SourceRefreshPolicySpec, SourceSpec,

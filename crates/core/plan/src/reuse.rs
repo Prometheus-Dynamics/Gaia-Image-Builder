@@ -333,6 +333,9 @@ pub fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
             format!("{:?}", spec.reporting).hash(&mut hasher);
         }
     }
+    if let Some(imports) = crate::reuse_imports::import_source_signature(spec, kind) {
+        imports.hash(&mut hasher);
+    }
     hasher.finish()
 }
 

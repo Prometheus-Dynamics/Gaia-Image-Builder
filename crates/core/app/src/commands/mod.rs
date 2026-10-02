@@ -211,5 +211,6 @@ fn resolve_options(args: &AppArgs) -> ResolveOptions {
         env_files: args.env_files.clone(),
         env_overrides: args.env_overrides.clone(),
         explicit_overrides: args.explicit_overrides.clone(),
+        resolve_unpinned_import_sources: false,
     }
 }

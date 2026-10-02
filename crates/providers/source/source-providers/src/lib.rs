@@ -151,6 +151,7 @@ mod digest;
 mod download;
 mod git;
 mod git_helpers;
+mod git_import;
 mod path;
 mod state;
 #[cfg(test)]
@@ -164,4 +165,5 @@ pub use git_helpers::{
     GIT_MIRROR_CACHE_DIR, remote_git_cache_key, remote_git_mirror_dir_name,
     resolve_git_source_commit,
 };
+pub use git_import::{IMPORT_SOURCE_CACHE_DIR, ensure_git_revision_checkout};
 pub(crate) use state::*;

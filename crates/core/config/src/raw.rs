@@ -74,6 +74,8 @@ pub struct RawBuildConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawImportConfig {
     pub path: String,
+    /// Git source whose checkout `path` is read from (`load/import_sources.rs`).
+    pub source: Option<String>,
     pub when: Option<RawWhenConfig>,
 }
 
@@ -95,13 +97,19 @@ impl<'de> Deserialize<'de> for RawImportConfig {
             Table {
                 path: String,
                 #[serde(default)]
+                source: Option<String>,
+                #[serde(default)]
                 when: Option<RawWhenConfig>,
             },
         }
 
         match ImportValue::deserialize(deserializer)? {
-            ImportValue::Path(path) => Ok(Self { path, when: None }),
-            ImportValue::Table { path, when } => Ok(Self { path, when }),
+            ImportValue::Path(path) => Ok(Self {
+                path,
+                source: None,
+                when: None,
+            }),
+            ImportValue::Table { path, source, when } => Ok(Self { path, source, when }),
         }
     }
 }

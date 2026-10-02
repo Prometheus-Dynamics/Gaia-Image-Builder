@@ -22,6 +22,7 @@ fn masks_sensitive_env_values_in_provenance() {
                 ("env.DB_PASSWORD".into(), "ultra-secret-password".into()),
                 ("build.version".into(), "9.9.9".into()),
             ],
+            ..Default::default()
         },
     );
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();

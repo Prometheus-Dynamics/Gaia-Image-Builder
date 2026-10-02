@@ -90,6 +90,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
         env_overrides: raw.env_overrides,
         explicit_overrides: raw.explicit_overrides,
         precedence_order,
+        import_sources: Vec::new(),
     };
     spec.metadata = BuildMetadataSpec {
         version: spec.identity.version.clone(),

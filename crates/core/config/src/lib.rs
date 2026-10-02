@@ -51,8 +51,12 @@ pub fn try_resolve_config_with_options(
     );
     let _guard = span.enter();
     tracing::debug!(build, preset = ?options.preset, "resolving build config");
-    let raw = load_build_config(build)?;
-    tracing::debug!(build, "loaded build config");
+    let (raw, import_sources) = load_build_config(build, options)?;
+    tracing::debug!(
+        build,
+        import_sources = import_sources.len(),
+        "loaded build config"
+    );
     let unknown_key_warnings = unknown_keys::collect_unknown_key_warnings(&raw);
     let selected = apply_preset_selection(raw, build, options);
     let merged = merge_config(selected);
@@ -70,6 +74,7 @@ pub fn try_resolve_config_with_options(
     let normalized = normalize_paths(interpolated)?;
     let mut spec = compile_config(normalized);
     spec.metadata.config_warnings = unknown_key_warnings;
+    spec.selection.import_sources = import_sources;
     apply_lockfile(&mut spec);
     tracing::debug!(
         build,
@@ -98,6 +103,9 @@ pub struct ResolveOptions {
     pub env_files: Vec<String>,
     pub env_overrides: Vec<(String, String)>,
     pub explicit_overrides: Vec<(String, String)>,
+    /// Resolve import sources that have neither `rev` nor a lockfile entry
+    /// to their current commit instead of failing. Used by `gaia lock`.
+    pub resolve_unpinned_import_sources: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,6 +161,13 @@ pub enum ConfigError {
         path: String,
         required: String,
         installed: String,
+    },
+    /// An `imports` entry with `source = "<id>"` (or an `@source:<id>`
+    /// reference) could not be resolved.
+    ImportSource {
+        source_id: String,
+        referenced_by: String,
+        message: String,
     },
 }
 
@@ -283,6 +298,14 @@ impl fmt::Display for ConfigError {
                 "this build requires gaia {required}, but gaia {installed} is installed \
                  (gaia_version in '{path}'); upgrade with: {}",
                 gaia_version::UPGRADE_COMMAND
+            ),
+            Self::ImportSource {
+                source_id,
+                referenced_by,
+                message,
+            } => write!(
+                formatter,
+                "import source '{source_id}' used by '{referenced_by}': {message}"
             ),
         }
     }
