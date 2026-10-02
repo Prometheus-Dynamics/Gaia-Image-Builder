@@ -51,7 +51,11 @@ pub fn try_resolve_config_with_options(
     );
     let _guard = span.enter();
     tracing::debug!(build, preset = ?options.preset, "resolving build config");
-    let (raw, import_sources) = load_build_config(build, options)?;
+    let load::LoadedBuildConfig {
+        raw,
+        import_sources,
+        unused_import_sources,
+    } = load_build_config(build, options)?;
     tracing::debug!(
         build,
         import_sources = import_sources.len(),
@@ -75,6 +79,7 @@ pub fn try_resolve_config_with_options(
     let mut spec = compile_config(normalized);
     spec.metadata.config_warnings = unknown_key_warnings;
     spec.selection.import_sources = import_sources;
+    drop_unused_import_sources(&mut spec, &unused_import_sources);
     apply_lockfile(&mut spec);
     tracing::debug!(
         build,
@@ -82,6 +87,42 @@ pub fn try_resolve_config_with_options(
         "compiled resolved build spec"
     );
     Ok(spec)
+}
+
+/// Removes sources declared only for importing config into layers this
+/// selection does not use (for example a device package source in a
+/// multi-target build), so they are neither planned nor fetched. A source
+/// that an artifact or the image also builds from is kept.
+fn drop_unused_import_sources(spec: &mut ResolvedBuildSpec, unused: &[String]) {
+    if unused.is_empty() {
+        return;
+    }
+    let image_source = match &spec.image.definition {
+        gaia_spec::ImageDefinition::Buildroot(buildroot) => buildroot.source.clone(),
+        gaia_spec::ImageDefinition::StartingPoint(starting_point) => starting_point.source.clone(),
+    };
+    let built_from = |id: &str| {
+        image_source
+            .as_ref()
+            .is_some_and(|source| source.as_str() == id)
+            || spec.artifacts.iter().any(|artifact| {
+                artifact
+                    .source
+                    .as_ref()
+                    .is_some_and(|source| source.id.as_str() == id)
+            })
+    };
+    let drop = unused
+        .iter()
+        .filter(|id| !built_from(id))
+        .cloned()
+        .collect::<Vec<_>>();
+    if drop.is_empty() {
+        return;
+    }
+    tracing::debug!(sources = ?drop, "dropping import-only sources of non-selected layers");
+    spec.sources
+        .retain(|source| !drop.iter().any(|id| id == source.id.as_str()));
 }
 
 /// Pins git sources to the commits recorded in the build's lockfile. An

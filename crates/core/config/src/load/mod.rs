@@ -31,7 +31,7 @@ pub fn discover_build_root() -> Result<PathBuf, ConfigError> {
 pub(crate) fn load_build_config(
     build: &str,
     options: &ResolveOptions,
-) -> Result<(RawBuildConfig, Vec<ImportSourceSpec>), ConfigError> {
+) -> Result<LoadedBuildConfig, ConfigError> {
     tracing::debug!(build, "resolving build config path");
     let build_path = resolve_build_path(build)?;
     tracing::debug!(path = %build_path.display(), "loading build config");
@@ -66,7 +66,21 @@ pub(crate) fn load_build_config(
         has_extends = config.extends_config.is_some(),
         "build config loaded"
     );
-    Ok((config, loader.sources.into_specs()))
+    let unused_import_sources = loader.sources.unused_references();
+    Ok(LoadedBuildConfig {
+        raw: config,
+        import_sources: loader.sources.into_specs(),
+        unused_import_sources,
+    })
+}
+
+pub(crate) struct LoadedBuildConfig {
+    pub(crate) raw: RawBuildConfig,
+    /// Import sources that supplied files or `@source:` paths.
+    pub(crate) import_sources: Vec<ImportSourceSpec>,
+    /// Sources referenced as import sources somewhere in the local config
+    /// files, but only by layers this selection does not use.
+    pub(crate) unused_import_sources: Vec<String>,
 }
 
 struct Loader<'a> {
@@ -159,13 +173,19 @@ impl Loader<'_> {
         }
         let mut imported_configs = Vec::new();
         for import in raw.imports.clone() {
+            // Merging drops an import whose `when` does not match, so do not
+            // load it at all: nothing in it may trigger a source checkout or
+            // `@source:` resolution for a layer that is not selected.
+            if !self.import_applies(&raw, entrypoint, &import) {
+                tracing::trace!(
+                    import_source = import.source.as_deref(),
+                    path = %import.path,
+                    "skipping import whose when does not match"
+                );
+                continue;
+            }
             let (import_path, import_origin) = match import.source.as_deref() {
                 Some(id) => {
-                    // Skip the checkout when merging would drop the import.
-                    if !self.import_applies(&raw, entrypoint, &import) {
-                        tracing::trace!(import_source = id, path = %import.path, "skipping import");
-                        continue;
-                    }
                     let path = self
                         .sources
                         .import_path(id, &import.path, &canonical_path)?;
@@ -234,10 +254,26 @@ fn declare_local_sources(path: &Path, sources: &mut ImportSources, seen: &mut BT
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf();
-    if rewrite_path_tokens(&mut value, &config_dir, &mut |_| Ok(None)).is_err() {
+    let mut referenced = BTreeSet::new();
+    let rewritten = rewrite_path_tokens(&mut value, &config_dir, &mut |id| {
+        referenced.insert(id.to_string());
+        Ok(None)
+    });
+    if rewritten.is_err() {
         return;
     }
     sources.declare_from(&canonical, &value);
+    for import in value
+        .get("imports")
+        .and_then(toml::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(id) = import.get("source").and_then(toml::Value::as_str) {
+            referenced.insert(id.to_string());
+        }
+    }
+    sources.note_references(referenced);
     let mut local = Vec::new();
     if let Some(extends) = value.get("extends").and_then(toml::Value::as_str) {
         local.push(extends.to_string());

@@ -424,3 +424,59 @@ fn source_imported_files_cannot_declare_import_sources() {
     assert!(error.contains("import source 'inner'"), "{error}");
     assert!(error.contains("chain.toml"), "{error}");
 }
+
+/// A local layer selected for one target only references the source with
+/// `@source:` (inside a `:`-separated list). Other targets must not fetch the
+/// source, resolve its tokens, or plan it, even when its rev is unreachable.
+#[test]
+fn non_selected_local_layers_neither_fetch_nor_plan_their_import_source() {
+    let fixture = Fixture::new("local-when");
+    fs::create_dir_all(fixture.workspace.join("configs/layers")).expect("layers dir");
+    fs::write(
+        fixture.workspace.join("configs/layers/raze.toml"),
+        r#"
+[[stage.files]]
+id = "raze-overlay"
+src = "@source:atlas/devices/raze/gaia/overlays/raze.dtbo:raze/assets/extra"
+dest = "/boot/overlays/raze.dtbo"
+"#,
+    )
+    .expect("raze layer");
+    let imports = r#""../layers/raze.toml""#;
+    let raze_only = format!("{{ path = {imports}, when = {{ target = \"raze\" }} }}");
+
+    // An unreachable rev, like an unpushed commit: non-raze targets must not care.
+    fixture.write_build(
+        &raze_only,
+        "rev = \"0000000000000000000000000000000000000000\"",
+        "",
+    );
+    let spec = fixture.resolve(&[]).expect("non-raze target resolves");
+    assert!(stage_file_src(&spec, "raze-overlay").is_none());
+    assert!(spec.selection.import_sources.is_empty());
+    assert!(
+        spec.sources
+            .iter()
+            .all(|source| source.id.as_str() != "atlas"),
+        "an import-only source of a non-selected layer must not be planned"
+    );
+
+    let rev = fixture.commits[0].clone();
+    fixture.write_build(&raze_only, &format!("rev = \"{rev}\""), "");
+    let spec = fixture
+        .resolve(&[("build.target", "raze")])
+        .expect("raze target resolves");
+    let src = stage_file_src(&spec, "raze-overlay").expect("raze overlay staged");
+    assert_eq!(
+        src,
+        format!(
+            "{}/devices/raze/gaia/overlays/raze.dtbo:raze/assets/extra",
+            fixture.checkout(&rev).display()
+        )
+    );
+    assert!(
+        spec.sources
+            .iter()
+            .any(|source| source.id.as_str() == "atlas")
+    );
+}

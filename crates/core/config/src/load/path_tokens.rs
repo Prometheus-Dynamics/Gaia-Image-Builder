@@ -45,7 +45,42 @@ pub(super) fn rewrite_path_tokens(
     Ok(())
 }
 
+/// Rewrites a value, treating it as a `:`-separated path list (as used by
+/// `external_tree`) so a token may start any entry, not only the first.
 fn rewrite_string(
+    text: &str,
+    self_dir: &Path,
+    resolve_source: &mut SourceRootResolver<'_>,
+) -> Result<Option<String>, ConfigError> {
+    if !text.contains(':') {
+        return rewrite_entry(text, self_dir, resolve_source);
+    }
+    let mut entries = Vec::<String>::new();
+    for part in text.split(':') {
+        // `@source:<id>/...` contains the separator itself; rejoin it.
+        match entries.last_mut() {
+            Some(previous) if previous == "@source" => {
+                previous.push(':');
+                previous.push_str(part);
+            }
+            _ => entries.push(part.to_string()),
+        }
+    }
+    let mut changed = false;
+    let mut rewritten = Vec::with_capacity(entries.len());
+    for entry in &entries {
+        match rewrite_entry(entry, self_dir, resolve_source)? {
+            Some(value) => {
+                changed = true;
+                rewritten.push(value);
+            }
+            None => rewritten.push(entry.clone()),
+        }
+    }
+    Ok(changed.then(|| rewritten.join(":")))
+}
+
+fn rewrite_entry(
     text: &str,
     self_dir: &Path,
     resolve_source: &mut SourceRootResolver<'_>,
@@ -121,5 +156,27 @@ nested = { list = ["@self/units/a.service"] }
             value["nested"]["list"][0].as_str(),
             Some("/layers/raze/units/a.service")
         );
+    }
+
+    #[test]
+    fn rewrites_tokens_in_every_entry_of_a_colon_separated_list() {
+        let value = rewrite(
+            r#"
+first = "@source:atlas/devices/raze/gaia/buildroot-external:raze/assets/buildroot"
+later = "raze/assets/buildroot:@source:atlas/ext:@self/ext"
+url = "https://example.com:8080/x"
+untouched = "@source:other/a:b"
+"#,
+        );
+        assert_eq!(
+            value["first"].as_str(),
+            Some("/cache/atlas-abc/devices/raze/gaia/buildroot-external:raze/assets/buildroot")
+        );
+        assert_eq!(
+            value["later"].as_str(),
+            Some("raze/assets/buildroot:/cache/atlas-abc/ext:/layers/raze/ext")
+        );
+        assert_eq!(value["url"].as_str(), Some("https://example.com:8080/x"));
+        assert_eq!(value["untouched"].as_str(), Some("@source:other/a:b"));
     }
 }

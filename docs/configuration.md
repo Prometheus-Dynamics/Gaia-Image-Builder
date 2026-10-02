@@ -55,15 +55,22 @@ rev = "<full commit sha>"   # or an entry in the build's lockfile
   repositories. An existing checkout is reused without fetching, so use full
   commit shas for `rev`.
 - `when` behaves exactly as for local imports. An import whose `when` does not
-  match is not fetched.
+  match is not loaded at all, whether it is local or from a source: nothing in
+  it is fetched or token-resolved, so a layer selected for one target may use
+  `@source:<id>` while other targets build without that source being
+  reachable.
+- A git source used only as an import source (by `source = ...` or
+  `@source:<id>`) that no selected layer uses is left out of the plan; it is
+  kept when an artifact or the image builds from it.
 - Imports and `extends` inside a source-imported file resolve relative to that
   file, like local imports, and must stay inside the checkout: `..` or symlink
   escapes are rejected.
 - The source stays a normal build source with the same id, materialized at
   the same commit.
 
-Path tokens, rewritten when each file is loaded (only at the start of a
-string value):
+Path tokens, rewritten when each file is loaded, at the start of a string value
+or of any entry of a `:`-separated list such as
+`external_tree = "@source:atlas/devices/raze/gaia/buildroot-external:raze/assets/buildroot"`:
 - `@self` / `@self/<rest>`: absolute directory of the file containing the
   value. This is the same for local files and source-imported files, so a
   layer written with `@self/overlays/raze.dtbo` works from a checkout and from a

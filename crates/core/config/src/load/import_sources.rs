@@ -33,6 +33,9 @@ pub(super) struct ImportSources {
     path_overrides: BTreeMap<String, PathBuf>,
     resolve_unpinned: bool,
     resolved: BTreeMap<String, Resolved>,
+    /// Ids used as import sources (`source = ...` or `@source:`) by any
+    /// local config file, selected or not.
+    referenced: BTreeSet<String>,
 }
 
 struct Declaration {
@@ -72,7 +75,22 @@ impl ImportSources {
             path_overrides,
             resolve_unpinned,
             resolved: BTreeMap::new(),
+            referenced: BTreeSet::new(),
         }
+    }
+
+    pub(super) fn note_references(&mut self, ids: BTreeSet<String>) {
+        self.referenced.extend(ids);
+    }
+
+    /// Declared sources referenced as import sources that this selection
+    /// never resolved, because only non-selected layers use them.
+    pub(super) fn unused_references(&self) -> Vec<String> {
+        self.referenced
+            .iter()
+            .filter(|id| self.declared.contains_key(*id) && !self.resolved.contains_key(*id))
+            .cloned()
+            .collect()
     }
 
     /// Registers the git `[[sources]]` of a local config file.

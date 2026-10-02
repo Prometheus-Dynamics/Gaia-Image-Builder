@@ -69,9 +69,11 @@ fn run_command_reports_cancellation() {
 #[test]
 fn run_command_does_not_hang_when_child_leaves_inherited_stdio_open() {
     let start = Instant::now();
+    // A non-login shell: profile scripts only add startup time, which made the
+    // 3 second bound flaky on a loaded machine.
     let result = run_command_with_timeout(
         Command::new("bash")
-            .arg("-lc")
+            .arg("-c")
             .arg("echo ready; (sleep 5) & exit 0"),
         Duration::from_secs(10),
         "inherited-stdio-test",
