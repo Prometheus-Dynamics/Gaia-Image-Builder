@@ -490,10 +490,15 @@ pub(crate) fn stage_image_assembly(
         archive_path = Some(summary.output.clone());
         cleanup_paths.push(summary.output.clone());
         messages.push(format!(
-            "compressed assembly disk '{}' to '{}'",
+            "published assembly disk '{}' as '{}'",
             summary.source.display(),
             summary.output.display()
         ));
+    } else if let [disk] = disk_outputs.as_slice() {
+        // Without a raw archive, the single assembled disk is still the
+        // deliverable: report it as the primary image output rather than
+        // letting an intermediate rootfs image stand in for it.
+        archive_path = Some(disk.clone());
     }
     state.insert("cleanup_path_count", cleanup_paths.len());
     for (index, path) in cleanup_paths.iter().enumerate() {
@@ -527,21 +532,39 @@ fn archive_assembly_disk_output(
     let Some(archive_path) = assembly_archive_path(spec) else {
         return Ok(None);
     };
-    if !raw_xz_archive_path(&archive_path) {
+    let Some(compressed) = raw_archive_kind(&archive_path) else {
         return Ok(None);
-    }
+    };
     if disk_outputs.is_empty() {
         return Ok(None);
     }
     if disk_outputs.len() != 1 {
         return Err(AssemblyError::runtime(format!(
-            "image.output.archive_name '{}' requests a raw compressed image, but assembly produced {} disk outputs; configure a single assembly disk or use a tar archive",
+            "image.output.archive_name '{}' requests a raw disk image, but assembly produced {} disk outputs; configure a single assembly disk or use a tar archive",
             archive_path.display(),
             disk_outputs.len()
         )));
     }
     let source = &disk_outputs[0];
     let temp_archive = temporary_assembly_output_path(&archive_path);
+    if !compressed {
+        // An uncompressed `.img`/`.raw` archive is the assembled disk itself.
+        std_fs::copy(source, &temp_archive).map_err(|error| {
+            let _ = std_fs::remove_file(&temp_archive);
+            AssemblyError::runtime(format!(
+                "failed to copy assembly disk '{}' to '{}': {error}",
+                source.display(),
+                archive_path.display()
+            ))
+        })?;
+        publish_assembly_output(&temp_archive, &archive_path)?;
+        return Ok(Some(AssemblyArchiveSummary {
+            output: archive_path.clone(),
+            source: source.clone(),
+            bytes: file_len(&archive_path)?,
+            sha256: file_sha256(&archive_path)?,
+        }));
+    }
     let mut command = Command::new("xz");
     // All cores; the fixed block size keeps output identical for any thread
     // count, so archives stay reproducible across machines.
@@ -584,10 +607,17 @@ fn assembly_archive_path(spec: &ResolvedBuildSpec) -> Option<PathBuf> {
     Some(PathBuf::from(collect_dir).join(archive_name))
 }
 
-fn raw_xz_archive_path(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.ends_with(".img.xz") || name.ends_with(".raw.xz"))
+/// `Some(true)` for a compressed raw disk archive name (`.img.xz`,
+/// `.raw.xz`), `Some(false)` for an uncompressed one (`.img`, `.raw`).
+fn raw_archive_kind(path: &Path) -> Option<bool> {
+    let name = path.file_name()?.to_str()?;
+    if name.ends_with(".img.xz") || name.ends_with(".raw.xz") {
+        Some(true)
+    } else if name.ends_with(".img") || name.ends_with(".raw") {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

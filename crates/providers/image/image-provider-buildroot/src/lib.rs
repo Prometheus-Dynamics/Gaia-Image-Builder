@@ -466,12 +466,23 @@ fn buildroot_output_dir(spec: &ResolvedBuildSpec) -> PathBuf {
     resolved_build_dir.join("image/buildroot-output")
 }
 
+/// A raw disk archive name (`.img`, `.raw`, or their `.xz` forms) belongs to
+/// typed image assembly when it builds disks. Buildroot would otherwise copy
+/// its first expected image, such as a bare rootfs, under the disk's name.
 fn should_archive_buildroot_output(image: &ImageSpec, archive_path: &Path) -> bool {
+    let raw_disk_name = archive_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            [".img", ".raw", ".img.xz", ".raw.xz"]
+                .iter()
+                .any(|suffix| name.ends_with(suffix))
+        });
     !(image
         .assembly
         .as_ref()
         .is_some_and(|assembly| !assembly.disks.is_empty())
-        && raw_xz_archive_path(archive_path))
+        && raw_disk_name)
 }
 
 mod archive;

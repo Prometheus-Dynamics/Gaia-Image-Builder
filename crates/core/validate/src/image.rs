@@ -394,7 +394,53 @@ pub(crate) fn validate_image_contract(
         ));
     }
 
+    validate_raw_archive_source(spec, diagnostics);
     validate_image_assembly(spec, diagnostics);
+}
+
+/// An `.img`/`.raw` archive name promises a flashable disk. Without an
+/// assembly disk, Buildroot publishes its single expected image under that
+/// name (or archives the output tree when there are several), so warn unless
+/// that image is itself a raw disk image.
+fn validate_raw_archive_source(
+    spec: &ResolvedBuildSpec,
+    diagnostics: &mut Vec<ValidationDiagnostic>,
+) {
+    let Some(name) = spec.image.output.archive_name.as_deref() else {
+        return;
+    };
+    let lowered = name.to_ascii_lowercase();
+    let raw_disk_name = [".img", ".raw", ".img.xz", ".raw.xz"]
+        .iter()
+        .any(|suffix| lowered.ends_with(suffix));
+    let assembly_builds_disks = spec
+        .image
+        .assembly
+        .as_ref()
+        .is_some_and(|assembly| !assembly.disks.is_empty());
+    let gaia_spec::ImageDefinition::Buildroot(buildroot) = &spec.image.definition else {
+        return;
+    };
+    if !raw_disk_name || assembly_builds_disks {
+        return;
+    }
+    let source_is_disk = matches!(
+        buildroot.expected_images.as_slice(),
+        [only] if only.format == BuildrootExpectedImageFormatSpec::Raw
+    );
+    if !source_is_disk {
+        diagnostics.push(warning(
+            "image_archive_not_a_disk",
+            format!(
+                "image.output.archive_name '{name}' looks like a disk image, but there is no \
+                 assembly disk and the Buildroot expected images are not a single raw disk \
+                 image, so the archive would hold a root filesystem or an output-tree archive \
+                 that cannot be flashed; add an [[image.assembly.disks]] entry or expect the \
+                 raw disk image Buildroot produces (for example sdcard.img)"
+            ),
+            Some("image.output.archive_name".into()),
+        ));
+    }
 }
 
 fn starting_point_looks_like_raw_image(starting_point: &StartingPointImageSpec) -> bool {

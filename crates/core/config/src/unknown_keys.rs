@@ -4,13 +4,16 @@
 //! written for a newer Gaia still load). Validation reports them as
 //! warnings instead. Known keys are taken from the serde field lists of the
 //! raw structs themselves, so the check never drifts from the parser.
-//! Sections whose struct flattens another (sources, artifacts, image) or
-//! holds free-form maps (inputs, presets, env) are not checked.
+//! Sections whose struct flattens another (sources, artifacts, the image's
+//! own `kind`-specific keys) or holds free-form maps (inputs, presets, env)
+//! are not checked; the image's plain nested tables (`output`, `feed`,
+//! `assembly` and its entries) are.
 use std::path::Path;
 
 use serde::de::{self, DeserializeOwned, Deserializer, Visitor};
 
 use crate::raw::{self, RawBuildConfig};
+use crate::raw_assembly;
 
 type FieldsFn = fn() -> Option<&'static [&'static str]>;
 
@@ -35,7 +38,73 @@ const COMMAND_PROVIDER_CHILDREN: &[Section] = &[section(
     &[],
 )];
 
+/// For a table whose own keys depend on `kind` (flattened), so only its
+/// plain nested tables are checked.
+fn unchecked() -> Option<&'static [&'static str]> {
+    None
+}
+
+const ASSEMBLY_CHILDREN: &[Section] = &[
+    section(
+        "trees",
+        struct_fields::<raw_assembly::RawAssemblyTreeConfig>,
+        &[],
+    ),
+    section(
+        "dirs",
+        struct_fields::<raw_assembly::RawAssemblyDirConfig>,
+        &[],
+    ),
+    section(
+        "symlinks",
+        struct_fields::<raw_assembly::RawAssemblySymlinkConfig>,
+        &[],
+    ),
+    section(
+        "files",
+        struct_fields::<raw_assembly::RawAssemblyFileConfig>,
+        &[],
+    ),
+    section(
+        "transforms",
+        struct_fields::<raw_assembly::RawAssemblyTransformConfig>,
+        &[],
+    ),
+    section(
+        "filesystems",
+        struct_fields::<raw_assembly::RawAssemblyFilesystemConfig>,
+        &[],
+    ),
+    section(
+        "disks",
+        struct_fields::<raw_assembly::RawAssemblyDiskConfig>,
+        &[section(
+            "partitions",
+            struct_fields::<raw_assembly::RawAssemblyDiskPartitionConfig>,
+            &[],
+        )],
+    ),
+    section(
+        "busybox_initramfs",
+        struct_fields::<raw_assembly::RawAssemblyBusyboxInitramfsConfig>,
+        &[],
+    ),
+];
+
 const SECTIONS: &[Section] = &[
+    section(
+        "image",
+        unchecked,
+        &[
+            section("output", struct_fields::<raw::RawImageOutputConfig>, &[]),
+            section("feed", struct_fields::<raw::RawImageFeedConfig>, &[]),
+            section(
+                "assembly",
+                struct_fields::<raw_assembly::RawImageAssemblyConfig>,
+                ASSEMBLY_CHILDREN,
+            ),
+        ],
+    ),
     section("workspace", struct_fields::<raw::RawWorkspaceConfig>, &[]),
     section("product", struct_fields::<raw::RawProductConfig>, &[]),
     section(
@@ -213,9 +282,6 @@ fn check_table(
     children: &'static [Section],
     unknown: &mut Vec<String>,
 ) {
-    let Some(known) = known else {
-        return;
-    };
     let tables: Vec<(String, &toml::Table)> = match value {
         toml::Value::Table(table) => vec![(prefix.to_string(), table)],
         toml::Value::Array(items) => items
@@ -235,7 +301,11 @@ fn check_table(
             } else {
                 format!("{path}.{key}")
             };
-            if !known.contains(&key.as_str()) {
+            // Without a field list (flattened or custom types) only the
+            // listed nested tables are checked.
+            if let Some(known) = known
+                && !known.contains(&key.as_str())
+            {
                 unknown.push(child_path);
                 continue;
             }
@@ -343,6 +413,24 @@ mod tests {
                 "providers.buildroot.ccache.size",
                 "providers.buildroot.shared_outptu",
                 "stage.files[0].owner",
+            ]
+        );
+    }
+
+    #[test]
+    fn nested_image_tables_are_checked_but_kind_keys_are_not() {
+        assert_eq!(
+            unknown(
+                "[image]\nkind = \"buildroot\"\ndefconfig = \"x\"\n\
+                 [image.output]\narchive_name = \"a.img\"\narchive_format = \"img.xz\"\n\
+                 [image.assembly]\nwork_dir = \"w\"\n\
+                 [[image.assembly.disks]]\nid = \"sd\"\noutput = \"sd.img\"\nsector_size = 512\n\
+                 [[image.assembly.disks.partitions]]\nname = \"boot\"\nimage = \"b\"\nlabel = \"x\"\n"
+            ),
+            vec![
+                "image.assembly.disks[0].partitions[0].label",
+                "image.assembly.disks[0].sector_size",
+                "image.output.archive_format",
             ]
         );
     }
