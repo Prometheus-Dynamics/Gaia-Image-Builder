@@ -12,7 +12,11 @@ pub(crate) struct GeneratedBuildrootExternalTree {
 pub(crate) struct MaterializedBuildrootPackageOverrides {
     pub generated_external_tree: Option<GeneratedBuildrootExternalTree>,
     pub replacement_count: usize,
+    /// Content digest of the override trees.
     pub replacement_digest: Option<String>,
+    /// The timestamp-based digest earlier Gaia versions stored; still
+    /// accepted so an upgrade does not force a full clean.
+    pub legacy_replacement_digest: Option<String>,
 }
 
 pub(crate) fn materialize_buildroot_package_overrides(
@@ -26,6 +30,7 @@ pub(crate) fn materialize_buildroot_package_overrides(
             generated_external_tree: None,
             replacement_count: 0,
             replacement_digest: None,
+            legacy_replacement_digest: None,
         });
     }
 
@@ -119,6 +124,8 @@ pub(crate) fn materialize_buildroot_package_overrides(
         generated_external_tree,
         replacement_count: replacement_names.len(),
         replacement_digest: (!replacement_names.is_empty())
+            .then(|| package_override_content_digest(&package_override_dirs)),
+        legacy_replacement_digest: (!replacement_names.is_empty())
             .then(|| package_override_dirs_digest(&package_override_dirs)),
     })
 }

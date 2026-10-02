@@ -123,6 +123,12 @@ versions); these changes are released as 2.1.0.
 
 ### Fixed
 
+- Fixed spurious full Buildroot cleans (a from-scratch rebuild) after changes that only affect image generation:
+  - Gaia now keeps a snapshot of the `.config` each output tree was built from and compares settings semantically, ignoring `BR2_TARGET_ROOTFS_*` (filesystem image formats, sizes, compression), post-image and fakeroot scripts, download/cache locations, job counts and mirrors. Buildroot regenerates images on every `make`, so for example resizing the ext4 rootfs now just repacks it.
+  - Package replacement changes are detected by content (relative paths, modes, file contents) instead of timestamps and absolute paths, so re-syncing the override trees or bumping an import source's rev without changing them no longer cleans.
+  - Shared Buildroot trees are keyed by defconfig, fragment and package override content rather than paths.
+  - Trees built by earlier versions keep their existing state and are not cleaned by the upgrade.
+  - The clean step now says which input changed.
 - Fixed a raw disk `archive_name` without `.xz` (for example `board.img`) publishing Buildroot's first expected image, such as a bare `rootfs.ext4`, under the disk's name and reporting it as the primary image output. When typed assembly builds disks, every `.img`/`.raw` archive name (compressed or not) now comes from the assembled disk, and with no archive configured the single assembled disk is reported as the primary output. Without an assembly disk, validation warns (`image_archive_not_a_disk`) when the Buildroot expected images are not a single raw disk image.
 - Unknown-key warnings now cover the image's nested tables (`[image.output]`, `[image.feed]`, `[image.assembly]` and its trees, files, filesystems, disks and partitions), so typos such as `archive_format` are reported instead of silently ignored.
 - Fixed imports whose `when` does not match still being loaded: local layers for other targets resolved their `@source:` tokens and fetched the source, so a multi-target build failed for every target when one target's device source was unreachable. Non-matching imports are now skipped entirely, and a git source used only as an import source by non-selected layers is no longer planned. `@self` and `@source:` tokens are also resolved in every entry of a `:`-separated list, not only the first.

@@ -138,17 +138,17 @@ pub(crate) fn shared_output_key_material(
         }
         if let Some(defconfig_path) = &buildroot.defconfig_path {
             let resolved = resolve_workspace_path(spec, defconfig_path)?;
+            // Content, not location: an import-source checkout's path holds
+            // its rev, which must not start a new tree on its own.
             material.push_str(&format!(
-                "defconfig_path={}|{}\n",
-                resolved.display(),
+                "defconfig_path={}\n",
                 file_sha256_or_placeholder(&resolved)
             ));
         }
         for fragment in &buildroot.config_fragments {
             let resolved = resolve_workspace_path(spec, fragment)?;
             material.push_str(&format!(
-                "fragment={}|{}\n",
-                resolved.display(),
+                "fragment={}\n",
                 file_sha256_or_placeholder(&resolved)
             ));
         }
@@ -162,8 +162,12 @@ pub(crate) fn shared_output_key_material(
             material.push_str(&format!("external_tree={external_tree}\n"));
         }
     }
-    for package_dir in buildroot_package_override_dirs(spec) {
-        material.push_str(&format!("package_overrides={}\n", package_dir.display()));
+    let package_dirs = buildroot_package_override_dirs(spec);
+    if !package_dirs.is_empty() {
+        material.push_str(&format!(
+            "package_overrides={}\n",
+            package_override_content_digest(&package_dirs)
+        ));
     }
     material.push_str(&format!("ccache={}\n", policy.ccache_enabled));
     material.push_str(&format!(

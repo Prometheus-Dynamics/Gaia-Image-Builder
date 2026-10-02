@@ -494,6 +494,7 @@ mod feed;
 mod feed_make;
 mod fs_util;
 mod override_check;
+mod rebuild_inputs;
 mod shared;
 mod squashfs;
 #[cfg(test)]
@@ -508,5 +509,6 @@ pub(crate) use feed::*;
 pub(crate) use feed_make::*;
 pub(crate) use fs_util::*;
 pub(crate) use override_check::*;
+pub(crate) use rebuild_inputs::*;
 pub(crate) use shared::*;
 pub(crate) use squashfs::*;

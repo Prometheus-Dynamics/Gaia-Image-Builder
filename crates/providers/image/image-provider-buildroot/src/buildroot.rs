@@ -260,25 +260,38 @@ pub(crate) fn run_buildroot_with(
             .replacement_digest
             .as_deref()
             .is_some_and(|replacement_digest| {
-                buildroot_state_needs_clean(
-                    output_dir,
-                    ".gaia-buildroot-package-replacements-state",
-                    replacement_digest,
-                )
-            });
-    let config_clean_needed = config_digest.as_deref().is_some_and(|config_digest| {
-        buildroot_state_needs_clean(output_dir, ".gaia-buildroot-config-state", config_digest)
-            && accepted_config_digests
-                .iter()
+                [
+                    Some(replacement_digest),
+                    package_overrides.legacy_replacement_digest.as_deref(),
+                ]
+                .into_iter()
                 .flatten()
-                .all(|older_digest| {
+                .all(|digest| {
                     buildroot_state_needs_clean(
                         output_dir,
-                        ".gaia-buildroot-config-state",
-                        older_digest,
+                        ".gaia-buildroot-package-replacements-state",
+                        digest,
                     )
                 })
-    });
+            });
+    // Compare against the snapshot of the config the tree was built from when
+    // there is one; trees from older Gaia versions only have digests.
+    let config_clean_needed = match config_requires_clean_since_snapshot(output_dir) {
+        Some(changed) => changed,
+        None => config_digest.as_deref().is_some_and(|config_digest| {
+            buildroot_state_needs_clean(output_dir, ".gaia-buildroot-config-state", config_digest)
+                && accepted_config_digests
+                    .iter()
+                    .flatten()
+                    .all(|older_digest| {
+                        buildroot_state_needs_clean(
+                            output_dir,
+                            ".gaia-buildroot-config-state",
+                            older_digest,
+                        )
+                    })
+        }),
+    };
     if buildroot_legacy_disabled(config_overrides) {
         disable_buildroot_legacy_flag(output_dir)?;
     }
@@ -300,9 +313,14 @@ pub(crate) fn run_buildroot_with(
         if let Some(br2_external) = br2_external {
             command.env("BR2_EXTERNAL", br2_external);
         }
+        let label = match (replacement_clean_needed, config_clean_needed) {
+            (true, true) => "buildroot clean: package replacements and effective config changed",
+            (true, false) => "buildroot clean: package replacements changed",
+            _ => "buildroot clean: effective config changed",
+        };
         messages.extend(run_command(
             command,
-            "buildroot clean for package replacements",
+            label,
             command_context.execution,
             command_context.policy,
             command_context.log_sink.clone(),
@@ -341,6 +359,7 @@ pub(crate) fn run_buildroot_with(
     if let Some(config_digest) = config_digest.as_deref() {
         write_buildroot_state(output_dir, ".gaia-buildroot-config-state", config_digest)?;
     }
+    write_config_snapshot(output_dir)?;
     if let Some(script) = options.post_build_script {
         command.arg(post_build_script_override(output_dir, script));
     }
