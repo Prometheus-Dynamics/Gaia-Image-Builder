@@ -307,6 +307,7 @@ pub struct RawCommandProviderPolicyConfig {
     pub shared_output: bool,
     pub shared_output_dir: Option<String>,
     pub override_check: Option<RawBuildrootOverrideCheck>,
+    pub kernel_modules_check: Option<RawBuildrootOverrideCheck>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]

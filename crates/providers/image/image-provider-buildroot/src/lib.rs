@@ -166,6 +166,12 @@ impl ImageProvider for BuildrootImageProvider {
                     command,
                 )?);
             }
+            // Buildroot ignores a failed `modules_install`; catch the gap
+            // before the images are collected and published.
+            messages.extend(check_kernel_modules_installed(
+                &output_dir,
+                policy.kernel_modules_check,
+            )?);
             let matched_expected_images =
                 collect_expected_images(image, &output_dir, &collect_dir)?;
             if let Some(archive_path) = &archive_path
@@ -493,6 +499,7 @@ mod command;
 mod feed;
 mod feed_make;
 mod fs_util;
+mod kernel_modules;
 mod override_check;
 mod rebuild_inputs;
 mod shared;
@@ -508,6 +515,7 @@ pub(crate) use command::*;
 pub(crate) use feed::*;
 pub(crate) use feed_make::*;
 pub(crate) use fs_util::*;
+pub(crate) use kernel_modules::*;
 pub(crate) use override_check::*;
 pub(crate) use rebuild_inputs::*;
 pub(crate) use shared::*;

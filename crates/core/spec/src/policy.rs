@@ -234,6 +234,9 @@ pub struct CommandProviderPolicySpec {
     /// Buildroot only: what to do when `olddefconfig` drops or changes a
     /// requested `config_overrides` entry.
     pub override_check: BuildrootOverrideCheckSpec,
+    /// Buildroot only: what to do when the image holds fewer kernel modules
+    /// than the kernel build produced (an ignored `modules_install` failure).
+    pub kernel_modules_check: BuildrootOverrideCheckSpec,
 }
 
 /// `[providers.buildroot] override_check`: how Gaia reacts when the final

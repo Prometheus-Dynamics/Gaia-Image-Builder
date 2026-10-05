@@ -169,6 +169,7 @@ pub struct ImageExecutionPolicy {
     /// Buildroot: what to do when a requested `config_overrides` entry is
     /// missing or different in the final `.config`.
     pub override_check: BuildrootOverrideCheckSpec,
+    pub kernel_modules_check: BuildrootOverrideCheckSpec,
     pub output_retention: ProcessOutputRetention,
 }
 
@@ -187,6 +188,7 @@ impl Default for ImageExecutionPolicy {
             shared_output: false,
             shared_output_dir: None,
             override_check: BuildrootOverrideCheckSpec::default(),
+            kernel_modules_check: BuildrootOverrideCheckSpec::default(),
             output_retention: ProcessOutputRetention::default(),
         }
     }

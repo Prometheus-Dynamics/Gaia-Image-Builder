@@ -101,6 +101,7 @@ pub(crate) fn image_execution_policy(spec: &ResolvedBuildSpec) -> ImageExecution
             && spec.policy.providers.buildroot.shared_output,
         shared_output_dir: spec.policy.providers.buildroot.shared_output_dir.clone(),
         override_check: spec.policy.providers.buildroot.override_check,
+        kernel_modules_check: spec.policy.providers.buildroot.kernel_modules_check,
         output_retention: process_output_retention(spec),
     }
 }

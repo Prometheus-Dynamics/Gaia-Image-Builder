@@ -123,6 +123,12 @@ versions); these changes are released as 2.1.0.
 
 ### Fixed
 
+- Fixed timeouts, cancellation and Ctrl-C leaving docker containers running.
+  - Gaia stopped only the docker client, so the container kept building with nobody reading its output; its next write then failed. A PhotonVision build shipped 58 of 1898 kernel modules this way, because Buildroot ignores a failed `modules_install`.
+  - Docker runs now use `--init` and `--cidfile`, and a command stopped early has its container force-removed.
+  - `gaia run` now handles Ctrl-C and SIGTERM by cancelling the build, which stops each command and its container; a second Ctrl-C exits at once.
+- Added `[providers.buildroot] kernel_modules_check` (default `"error"`): an image whose `target/lib/modules` holds fewer modules than the kernel build's `modules.order` now fails instead of shipping incomplete.
+- Added `${source.<id>.commit}` for stage env set values and build labels. It resolves to the exact commit each source builds from (lock, full-sha `rev`, import checkout, or a path source's git HEAD with `-dirty`), so images can record their device package and component commits.
 - Fixed spurious full Buildroot cleans (a from-scratch rebuild) after changes that only affect image generation:
   - Gaia now keeps a snapshot of the `.config` each output tree was built from and compares settings semantically, ignoring `BR2_TARGET_ROOTFS_*` (filesystem image formats, sizes, compression), post-image and fakeroot scripts, download/cache locations, job counts and mirrors. Buildroot regenerates images on every `make`, so for example resizing the ext4 rootfs now just repacks it.
   - Package replacement changes are detected by content (relative paths, modes, file contents) instead of timestamps and absolute paths, so re-syncing the override trees or bumping an import source's rev without changing them no longer cleans.

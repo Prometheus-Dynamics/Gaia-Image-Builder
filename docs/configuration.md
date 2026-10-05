@@ -1059,9 +1059,48 @@ emit_report = true
 
 Buildroot fields:
 - `defconfig`
-- `external_tree`
+- `external_tree`: one or more `BR2_EXTERNAL` trees, `:`-separated as
+  Buildroot expects (`"@source:atlas/devices/raze/gaia/buildroot-external:raze/assets/buildroot"`).
+  Each entry is resolved on its own: `@self`, `@source:<id>` and `@alias`
+  tokens may start any entry, and plain relative entries resolve against the
+  workspace root. Every tree needs its own `external.desc` with a unique
+  `name`. Gaia's generated package-override tree (`GAIA_GENERATED`) is
+  appended automatically, so do not reuse that name. A later layer's
+  `external_tree` replaces an earlier one rather than appending, so a layer
+  that adds a tree must list the full combination.
 - `external_tree_mode = "auto" | "required" | "disabled"`
 - `expected_images[]`
+
+Buildroot checks:
+- `[providers.buildroot] override_check = "error" | "warn" | "off"` (default
+  `"error"`): fails before `make` when `olddefconfig` dropped or changed a
+  requested `config_overrides` entry.
+- `[providers.buildroot] kernel_modules_check = "error" | "warn" | "off"`
+  (default `"error"`): after `make`, fails when `target/lib/modules` holds
+  fewer kernel modules than the kernel build's `modules.order` lists.
+  Buildroot's `linux.mk` does not fail when `modules_install` stops part way,
+  so without this an image can ship with most modules missing. Use `"warn"`
+  if a post-build script removes modules on purpose.
+
+Source commits: `${source.<id>.commit}` in stage env set values and build
+labels becomes the exact commit the source builds from: a git source's
+`gaia lock` commit or full-sha `rev`, an import source's checkout commit, or a
+path source's `git rev-parse HEAD` (with `-dirty` for uncommitted tracked
+changes). Use it to record versions in the image, for example:
+
+```toml
+[[stage.env_sets]]
+id = "image-version"
+name = "image-version"
+entries = [
+  ["DEVICE_PACKAGE_COMMIT", "${source.atlas.commit}"],
+  ["ORION_COMMIT", "${source.orion.commit}"],
+]
+```
+
+A git source that follows a branch or tag without a lock has no exact commit
+before it is fetched, so its token is reported as unresolved: pin it with
+`rev` or `gaia lock`.
 
 Expected image formats:
 - `tar`

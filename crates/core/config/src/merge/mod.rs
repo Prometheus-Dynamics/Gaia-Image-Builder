@@ -446,6 +446,7 @@ fn merge_command_policy(
         shared_output: base.shared_output || overlay.shared_output,
         shared_output_dir: overlay.shared_output_dir.or(base.shared_output_dir),
         override_check: overlay.override_check.or(base.override_check),
+        kernel_modules_check: overlay.kernel_modules_check.or(base.kernel_modules_check),
     }
 }
 

@@ -9,6 +9,7 @@ mod merge;
 mod overrides;
 mod raw;
 mod raw_assembly;
+mod source_tokens;
 mod unknown_keys;
 
 pub use compile::compile_config;
@@ -81,6 +82,7 @@ pub fn try_resolve_config_with_options(
     spec.selection.import_sources = import_sources;
     drop_unused_import_sources(&mut spec, &unused_import_sources);
     apply_lockfile(&mut spec);
+    source_tokens::substitute_source_commits(&mut spec);
     tracing::debug!(
         build,
         build_id = spec.identity.id.as_str(),

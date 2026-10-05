@@ -480,3 +480,48 @@ dest = "/boot/overlays/raze.dtbo"
             .any(|source| source.id.as_str() == "atlas")
     );
 }
+
+/// An image can record the exact commit of each source, e.g. the device
+/// package commit, through `${source.<id>.commit}` in a stage env set.
+#[test]
+fn source_commit_tokens_resolve_to_the_imported_commit() {
+    let fixture = Fixture::new("commit-token");
+    let rev = fixture.commits[1].clone();
+    fixture.write_build(
+        r#"{ source = "atlas", path = "devices/raze/gaia/device.toml" }"#,
+        &format!("rev = \"{rev}\""),
+        r#"
+[[stage.env_sets]]
+id = "image-version"
+name = "image-version"
+entries = [
+  ["DEVICE_PACKAGE_COMMIT", "${source.atlas.commit}"],
+  ["UNKNOWN", "${source.nope.commit}"],
+]
+"#,
+    );
+
+    let spec = fixture.resolve(&[]).expect("resolve");
+    let entries = &spec
+        .stage
+        .env_sets
+        .iter()
+        .find(|env_set| env_set.id.as_str() == "image-version")
+        .expect("env set")
+        .entries;
+
+    assert!(entries.contains(&("DEVICE_PACKAGE_COMMIT".to_string(), rev)));
+    assert!(entries.contains(&("UNKNOWN".to_string(), "${source.nope.commit}".to_string())));
+    let unresolved = spec
+        .policy
+        .interpolation
+        .unresolved
+        .iter()
+        .map(|unresolved| unresolved.token.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        !unresolved.contains(&"source.atlas.commit"),
+        "{unresolved:?}"
+    );
+    assert!(unresolved.contains(&"source.nope.commit"), "{unresolved:?}");
+}
