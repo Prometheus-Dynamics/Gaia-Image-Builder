@@ -164,7 +164,7 @@ pub fn run_command_with_timeout_and_retention(
         }
     })?;
     let child_id = child.id();
-    let process_group = ProcessGroup::for_child(&child);
+    let process_group = ProcessGroup::for_child(&child, command);
     tracing::debug!(
         command_label = label,
         command_program = %description.program,
@@ -194,7 +194,7 @@ pub fn run_command_with_timeout_and_retention(
             Ok(Some(status)) => break status,
             Ok(None) => {
                 if cancel_check.as_ref().is_some_and(|cancel| cancel()) {
-                    terminate_child_tree(&mut child, process_group);
+                    terminate_child_tree(&mut child, &process_group);
                     drain_stream_messages_until_idle(
                         &rx,
                         &mut stream_state,
@@ -213,7 +213,7 @@ pub fn run_command_with_timeout_and_retention(
                     });
                 }
                 if start.elapsed() >= timeout {
-                    terminate_child_tree(&mut child, process_group);
+                    terminate_child_tree(&mut child, &process_group);
                     drain_stream_messages_until_idle(
                         &rx,
                         &mut stream_state,
@@ -235,7 +235,7 @@ pub fn run_command_with_timeout_and_retention(
                 wait_for_stream_message(&rx, &mut stream_state, Duration::from_millis(10));
             }
             Err(error) => {
-                terminate_child_tree(&mut child, process_group);
+                terminate_child_tree(&mut child, &process_group);
                 drain_stream_messages_until_idle(
                     &rx,
                     &mut stream_state,
@@ -257,7 +257,7 @@ pub fn run_command_with_timeout_and_retention(
         }
     };
 
-    terminate_leftover_tree(process_group);
+    process_group.finished();
     drain_stream_messages_until_idle(&rx, &mut stream_state, Duration::from_millis(500));
     tracing::debug!(
         command_label = label,
@@ -316,7 +316,7 @@ pub fn run_command_stdout_to_file_with_timeout_and_retention(
         }
     })?;
     let child_id = child.id();
-    let process_group = ProcessGroup::for_child(&child);
+    let process_group = ProcessGroup::for_child(&child, command);
     tracing::debug!(
         command_label = label,
         command_program = %description.program,
@@ -342,7 +342,7 @@ pub fn run_command_stdout_to_file_with_timeout_and_retention(
             Ok(Some(status)) => break status,
             Ok(None) => {
                 if cancel_check.as_ref().is_some_and(|cancel| cancel()) {
-                    terminate_child_tree(&mut child, process_group);
+                    terminate_child_tree(&mut child, &process_group);
                     drain_stream_messages_until_idle(
                         &rx,
                         &mut stream_state,
@@ -361,7 +361,7 @@ pub fn run_command_stdout_to_file_with_timeout_and_retention(
                     });
                 }
                 if start.elapsed() >= timeout {
-                    terminate_child_tree(&mut child, process_group);
+                    terminate_child_tree(&mut child, &process_group);
                     drain_stream_messages_until_idle(
                         &rx,
                         &mut stream_state,
@@ -383,7 +383,7 @@ pub fn run_command_stdout_to_file_with_timeout_and_retention(
                 wait_for_stream_message(&rx, &mut stream_state, Duration::from_millis(10));
             }
             Err(error) => {
-                terminate_child_tree(&mut child, process_group);
+                terminate_child_tree(&mut child, &process_group);
                 drain_stream_messages_until_idle(
                     &rx,
                     &mut stream_state,
@@ -405,7 +405,7 @@ pub fn run_command_stdout_to_file_with_timeout_and_retention(
         }
     };
 
-    terminate_leftover_tree(process_group);
+    process_group.finished();
     drain_stream_messages_until_idle(&rx, &mut stream_state, Duration::from_millis(500));
 
     Ok(ProcessRunResult {
@@ -621,29 +621,47 @@ fn configure_process_group(command: &mut Command) {
 #[cfg(not(unix))]
 fn configure_process_group(_command: &mut Command) {}
 
-#[derive(Debug, Clone, Copy)]
+/// What to stop when a command ends or is stopped early: its process group
+/// and, for `docker run`, the container, which lives outside that group.
+#[derive(Debug, Clone)]
 struct ProcessGroup {
     #[cfg(unix)]
     pgid: libc::pid_t,
+    container: Option<docker::DockerContainer>,
 }
 
 impl ProcessGroup {
-    fn for_child(child: &Child) -> Self {
+    fn for_child(child: &Child, command: &Command) -> Self {
         Self {
             #[cfg(unix)]
             pgid: child.id() as libc::pid_t,
+            container: docker::DockerContainer::for_command(command),
+        }
+    }
+
+    /// The command exited on its own; its container (`--rm`) is gone too.
+    fn finished(&self) {
+        terminate_leftover_tree(self);
+        if let Some(container) = &self.container {
+            container.discard_id_file();
         }
     }
 }
 
-fn terminate_child_tree(child: &mut Child, group: ProcessGroup) {
+/// Stops a command early (timeout, cancellation, failure). Killing the
+/// docker client does not stop its container, so the container is removed
+/// explicitly; otherwise it keeps running with nobody reading its output.
+fn terminate_child_tree(child: &mut Child, group: &ProcessGroup) {
     terminate_leftover_tree(group);
     let _ = child.kill();
     let _ = child.wait();
+    if let Some(container) = &group.container {
+        container.remove();
+    }
 }
 
 #[cfg(unix)]
-fn terminate_leftover_tree(group: ProcessGroup) {
+fn terminate_leftover_tree(group: &ProcessGroup) {
     let process_group_id = -group.pgid;
     // SAFETY: `kill` is called with a negative process-group id obtained from
     // a child this process spawned with `process_group(0)`. Errors are ignored
@@ -654,7 +672,9 @@ fn terminate_leftover_tree(group: ProcessGroup) {
 }
 
 #[cfg(not(unix))]
-fn terminate_leftover_tree(_group: ProcessGroup) {}
+fn terminate_leftover_tree(_group: &ProcessGroup) {}
 
+#[cfg(all(test, unix))]
+mod docker_tests;
 #[cfg(test)]
 mod tests;

@@ -181,12 +181,14 @@ fn execute_plan_with_console_progress(
     plan: &gaia_plan::ExecutionPlan,
     providers: ExecutionProviders<'_>,
 ) -> gaia_exec::ExecutionOutcome {
+    let cancellation = ExecutionCancellation::new();
+    let _interrupt = super::interrupt::cancel_on_interrupt(&cancellation);
     if console_progress_disabled() {
         return execute_plan_with_cancellation_and_observer(
             spec,
             plan,
             providers,
-            &ExecutionCancellation::new(),
+            &cancellation,
             None,
         );
     }
@@ -200,7 +202,7 @@ fn execute_plan_with_console_progress(
         spec,
         plan,
         providers,
-        &ExecutionCancellation::new(),
+        &cancellation,
         Some(event_tx),
     );
     let _ = progress_thread.join();

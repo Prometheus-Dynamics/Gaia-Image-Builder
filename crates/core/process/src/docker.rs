@@ -90,7 +90,16 @@ pub fn docker_run_command(
     }
 
     let mut wrapped = Command::new("docker");
-    wrapped.arg("run").arg("--rm");
+    // `--init` runs a minimal init as PID 1 so signals reach the build and
+    // zombies are reaped. `--cidfile` records the container id: killing the
+    // docker client alone (timeout, cancel, Ctrl-C) leaves the container
+    // running with nobody reading its output, so cleanup removes it by id.
+    wrapped
+        .arg("run")
+        .arg("--rm")
+        .arg("--init")
+        .arg("--cidfile")
+        .arg(new_container_id_file());
     if spec.map_workspace_user {
         wrapped.args(docker_workspace_user_args(&spec.workspace_root));
     }
@@ -120,6 +129,87 @@ pub fn docker_run_command(
     wrapped.arg(command.get_program());
     wrapped.args(command.get_args());
     Ok(wrapped)
+}
+
+/// A fresh path for `docker run --cidfile`; docker refuses an existing file.
+fn new_container_id_file() -> PathBuf {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    std::env::temp_dir().join(format!(
+        "gaia-docker-{}-{nonce}-{count}.cid",
+        std::process::id()
+    ))
+}
+
+/// The container a `docker run --cidfile <file>` command starts, so the
+/// process runner can remove it when it stops the command early.
+#[derive(Debug, Clone)]
+pub(crate) struct DockerContainer {
+    docker: OsString,
+    cidfile: PathBuf,
+}
+
+impl DockerContainer {
+    pub(crate) fn for_command(command: &Command) -> Option<Self> {
+        let program = Path::new(command.get_program());
+        if program.file_name()? != "docker" {
+            return None;
+        }
+        let mut args = command.get_args();
+        if args.next()? != "run" {
+            return None;
+        }
+        let mut args = args.skip_while(|arg| *arg != "--cidfile");
+        args.next()?;
+        Some(Self {
+            docker: command.get_program().to_os_string(),
+            cidfile: PathBuf::from(args.next()?),
+        })
+    }
+
+    /// Force-removes the container (killing it first) after the docker
+    /// client was stopped early. The id file may lag slightly behind a
+    /// container that is just starting, so wait briefly for it.
+    pub(crate) fn remove(&self) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let id = loop {
+            let id = std::fs::read_to_string(&self.cidfile)
+                .map(|contents| contents.trim().to_string())
+                .unwrap_or_default();
+            if !id.is_empty() || std::time::Instant::now() >= deadline {
+                break id;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        };
+        if !id.is_empty() {
+            let result = Command::new(&self.docker)
+                .args(["rm", "--force", &id])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            match result {
+                Ok(status) if status.success() => {
+                    tracing::warn!(container = %id, "removed docker container of a stopped command");
+                }
+                Ok(status) => {
+                    tracing::warn!(container = %id, %status, "failed to remove docker container")
+                }
+                Err(error) => {
+                    tracing::warn!(container = %id, %error, "failed to run docker rm")
+                }
+            }
+        }
+        self.discard_id_file();
+    }
+
+    pub(crate) fn discard_id_file(&self) {
+        let _ = std::fs::remove_file(&self.cidfile);
+    }
 }
 
 pub fn discover_docker_mounts(

@@ -457,6 +457,7 @@ dependencies = [
  "gaia-source-providers",
  "gaia-spec",
  "gaia-validate",
+ "libc",
  "ratatui",
  "serde",
  "serde_json",

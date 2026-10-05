@@ -126,6 +126,15 @@ terminated without waiting for the backend tool to exit on its own. The executor
 stops scheduling new operations after cancellation or first failure, then waits
 for running operations to finish cleanup before recording the cancelled outcome.
 
+`gaia run` turns Ctrl-C and SIGTERM into a cancellation (a second Ctrl-C exits
+immediately), so commands are stopped the same way as on a timeout.
+
+Docker-backed commands run with `docker run --rm --init --cidfile <file>`. When
+a command is stopped early (timeout, cancellation, polling failure), Gaia kills
+the docker client's process group and then force-removes the container by its
+recorded id. Killing the client alone would leave the container running with
+nobody reading its output.
+
 ## Failure Handling
 
 Failure policy is typed:

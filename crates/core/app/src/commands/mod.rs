@@ -1,4 +1,5 @@
 mod clean;
+mod interrupt;
 mod lock;
 mod plan;
 mod resolve;

@@ -21,6 +21,7 @@ gaia-report.workspace = true
 gaia-source-providers.workspace = true
 gaia-spec.workspace = true
 gaia-validate.workspace = true
+libc.workspace = true
 ratatui = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
