@@ -6,11 +6,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
-The workspace version is now `2.2.0` (crates and internal dependency
-versions). Binaries built from `main` during this cycle also reported `2.1.0`
-without everything below (notably the extended MBR, sized partitions, zstd
-and archive assembly features), so build files that rely on them should
-require `gaia_version = ">=2.2.0"`.
+The workspace version is now `2.3.0` (crates and internal dependency
+versions). Earlier builds from `main` in this cycle reported `2.1.0` or
+`2.2.0` without everything below, and keys they do not know on artifacts are
+silently ignored. Build files should require the version that added what they
+use: `gaia_version = ">=2.2.0"` for the extended MBR, sized partitions, zstd
+and archive assembly features, `">=2.3.0"` for rust `build_group` and
+`${source.<id>.path}`.
 
 ### Config safety
 
