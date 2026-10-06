@@ -396,6 +396,68 @@ fn buildroot_config_changes_clean_existing_output_before_make() {
 }
 
 #[test]
+fn buildroot_retry_after_failed_post_image_does_not_clean() {
+    let workspace = temp_path("gaia-buildroot-post-image-retry-workspace");
+    let buildroot_dir = temp_path("gaia-buildroot-post-image-retry-source");
+    let output_dir = temp_path("gaia-buildroot-post-image-retry-output");
+
+    fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
+    // `all` builds packages, then fails in "post-image" while the marker
+    // exists, the way a failing BR2_ROOTFS_POST_IMAGE_SCRIPT ends make.
+    fs::write(
+        buildroot_dir.join("Makefile"),
+        ".DEFAULT_GOAL := all\n%_defconfig:\n\t@mkdir -p $(O)\n\t@printf 'BR2_PACKAGE_FOO=n\\nBR2_ROOTFS_POST_IMAGE_SCRIPT=\"post-image.sh\"\\n' > $(O)/.config\nolddefconfig:\n\t@true\nclean:\n\t@printf clean >> $(O)/cleaned\nall:\n\t@mkdir -p $(O)/target\n\t@printf built > $(O)/target/current\n\t@test ! -f $(O)/post-image-fails\n",
+    )
+    .expect("makefile");
+
+    let mut spec = ResolvedBuildSpec::new("buildroot-post-image-retry");
+    spec.workspace.root_dir = workspace.display().to_string();
+    let image_with = |value: &str| ImageSpec {
+        definition: ImageDefinition::Buildroot(BuildrootImageSpec {
+            defconfig: Some("test_defconfig".into()),
+            config_overrides: vec![("BR2_PACKAGE_FOO".into(), value.into())],
+            ..BuildrootImageSpec::default()
+        }),
+        feed: gaia_spec::ImageFeedSpec::default(),
+        output: ImageOutputSpec::default(),
+        assembly: None,
+    };
+    let execution = test_execution();
+    let policy = ImageExecutionPolicy::default();
+    let run = |image: &ImageSpec| {
+        run_buildroot(BuildrootRunRequest {
+            spec: &spec,
+            image,
+            buildroot_dir: &buildroot_dir,
+            output_dir: &output_dir,
+            command: test_command_context(&execution, &policy),
+        })
+    };
+
+    fs::create_dir_all(&output_dir).expect("output dir");
+    fs::write(output_dir.join("post-image-fails"), "").expect("failure marker");
+    assert!(
+        run(&image_with("y")).is_err(),
+        "post-image failure fails make"
+    );
+    fs::remove_file(output_dir.join("post-image-fails")).expect("fix post-image");
+    run(&image_with("y")).expect("retry");
+    assert!(
+        !output_dir.join("cleaned").exists(),
+        "a retry with the same config must resume, not clean"
+    );
+
+    let messages = run(&image_with("n")).expect("changed config");
+    assert_eq!(
+        fs::read_to_string(output_dir.join("cleaned")).expect("clean marker"),
+        "clean"
+    );
+    assert!(messages.iter().any(|message| {
+        message == "cleaned Buildroot output for changed effective config: BR2_PACKAGE_FOO"
+    }));
+}
+
+#[test]
 fn buildroot_package_override_missing_config_in_fails_before_make() {
     let workspace = temp_path("gaia-buildroot-package-overrides-missing-config-workspace");
     let buildroot_dir = temp_path("gaia-buildroot-package-overrides-missing-config-source");

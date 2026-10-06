@@ -5,7 +5,8 @@
 //! that only affect filesystem image generation (`BR2_TARGET_ROOTFS_*`,
 //! post-image and fakeroot scripts) or where things are downloaded and cached
 //! must not trigger one. Buildroot regenerates images (applying the users
-//! and device tables) on every `make`.
+//! and device tables) on every `make`, and reruns the post-image script, so
+//! editing that script's contents reruns only image generation.
 use super::*;
 use sha2::{Digest, Sha256};
 
@@ -47,32 +48,69 @@ fn setting_requires_clean(key: &str) -> bool {
         })
 }
 
-/// The `.config` lines that can change what packages build, in file order.
-fn rebuild_settings(config: &str) -> Vec<&str> {
+/// `.config` key of a `KEY=value` or `# KEY is not set` line; other comments
+/// are headers.
+fn setting_key(line: &str) -> Option<&str> {
+    match line.strip_prefix("# ") {
+        Some(rest) if rest.ends_with(" is not set") => rest.split(' ').next(),
+        Some(_) => None,
+        None if line.starts_with('#') => None,
+        None => line.split('=').next(),
+    }
+}
+
+/// The checkout directory of an import source is named after its rev
+/// (`.gaia/cache/import-sources/<id>-<rev>`), so a `BR2_EXTERNAL_*_PATH` or
+/// table path into it changes with every rev bump even when nothing that
+/// builds does. What the files there contain is compared elsewhere.
+fn without_import_source_revs(line: &str) -> String {
+    const MARKER: &str = "import-sources/";
+    let mut normalized = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(start) = rest.find(MARKER) {
+        let after = &rest[start + MARKER.len()..];
+        let end = after.find(['/', '"', ' ', ':']).unwrap_or(after.len());
+        normalized.push_str(&rest[..start + MARKER.len()]);
+        normalized.push_str("<checkout>");
+        rest = &after[end..];
+    }
+    normalized.push_str(rest);
+    normalized
+}
+
+/// The `.config` settings that can change what packages build, by key.
+fn rebuild_settings(config: &str) -> BTreeMap<&str, String> {
     config
         .lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .filter(|line| {
-            // `KEY=value` or `# KEY is not set`; other comments are headers.
-            let key = match line.strip_prefix("# ") {
-                Some(rest) if rest.ends_with(" is not set") => rest.split(' ').next(),
-                Some(_) => None,
-                None if line.starts_with('#') => None,
-                None => line.split('=').next(),
-            };
-            key.is_some_and(setting_requires_clean)
+        .filter_map(|line| {
+            let key = setting_key(line).filter(|key| setting_requires_clean(key))?;
+            Some((key, without_import_source_revs(line)))
         })
         .collect()
 }
 
-/// `Some(true)` when the current `.config` differs from the last built one in
-/// a setting that requires a clean, `Some(false)` when it does not, and
-/// `None` when no snapshot exists (trees built by older Gaia versions).
-pub(crate) fn config_requires_clean_since_snapshot(output_dir: &Path) -> Option<bool> {
+/// Keys that were added, removed or changed between two configs.
+fn changed_rebuild_settings(previous: &str, current: &str) -> Vec<String> {
+    let previous = rebuild_settings(previous);
+    let current = rebuild_settings(current);
+    previous
+        .keys()
+        .chain(current.keys())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter(|key| previous.get(*key) != current.get(*key))
+        .map(|key| key.to_string())
+        .collect()
+}
+
+/// The settings requiring a clean that differ between the current `.config`
+/// and the last built one (empty when none do), or `None` when no snapshot
+/// exists (trees built by older Gaia versions).
+pub(crate) fn config_changes_since_snapshot(output_dir: &Path) -> Option<Vec<String>> {
     let previous = fs::read_to_string(output_dir.join(CONFIG_SNAPSHOT)).ok()?;
     let current = fs::read_to_string(output_dir.join(".config")).ok()?;
-    Some(rebuild_settings(&previous) != rebuild_settings(&current))
+    Some(changed_rebuild_settings(&previous, &current))
 }
 
 pub(crate) fn write_config_snapshot(output_dir: &Path) -> Result<(), ImageProviderError> {
@@ -193,6 +231,62 @@ mod tests {
         assert_ne!(rebuild_settings(BASE), rebuild_settings(&enabled));
         let arch = BASE.replace("BR2_aarch64=y", "BR2_arm=y");
         assert_ne!(rebuild_settings(BASE), rebuild_settings(&arch));
+    }
+
+    #[test]
+    fn changed_settings_are_named() {
+        let changed = BASE
+            .replace("# BR2_PACKAGE_FFMPEG is not set", "BR2_PACKAGE_FFMPEG=y")
+            .replace("BR2_PACKAGE_LIBCAMERA=y\n", "")
+            .replace("\"1G\"", "\"2G\"")
+            + "BR2_PACKAGE_HTOP=y\n";
+        assert_eq!(
+            changed_rebuild_settings(BASE, &changed),
+            [
+                "BR2_PACKAGE_FFMPEG",
+                "BR2_PACKAGE_HTOP",
+                "BR2_PACKAGE_LIBCAMERA"
+            ]
+        );
+        assert!(changed_rebuild_settings(BASE, BASE).is_empty());
+    }
+
+    #[test]
+    fn import_source_rev_bumps_do_not_require_a_clean() {
+        let with_external = |checkout: &str| {
+            format!(
+                "BR2_EXTERNAL_RAZE_DEVICE_PATH=\"/work/.gaia/cache/import-sources/{checkout}/devices/raze/external\"\n\
+                 BR2_GLOBAL_PATCH_DIR=\"board/patches /work/.gaia/cache/import-sources/{checkout}/patches\"\n{BASE}"
+            )
+        };
+        assert!(
+            changed_rebuild_settings(
+                &with_external("atlas-c881c60fb03e977c42948a4dd898d032f55d3d92"),
+                &with_external("atlas-fd52491d21bd8a4a6c783df8ff066cf7624bec06"),
+            )
+            .is_empty()
+        );
+        let moved = with_external("atlas-c881c60").replace("/devices/raze/", "/devices/argos/");
+        assert_eq!(
+            changed_rebuild_settings(&with_external("atlas-c881c60"), &moved),
+            ["BR2_EXTERNAL_RAZE_DEVICE_PATH"]
+        );
+    }
+
+    #[test]
+    fn post_image_script_never_requires_a_clean() {
+        let with_script =
+            |script: &str| format!("{BASE}BR2_ROOTFS_POST_IMAGE_SCRIPT=\"{script}\"\n");
+        assert!(
+            changed_rebuild_settings(
+                &with_script("/work/raze/post-image.sh"),
+                &with_script("/work/raze/post-image-v2.sh /work/sign.sh"),
+            )
+            .is_empty()
+        );
+        assert!(
+            changed_rebuild_settings(BASE, &with_script("/work/raze/post-image.sh")).is_empty()
+        );
     }
 
     #[test]

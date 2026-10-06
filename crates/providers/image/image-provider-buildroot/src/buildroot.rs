@@ -250,6 +250,11 @@ pub(crate) fn run_buildroot_with(
         ));
     }
 
+    // The final `.config` edit: everything below compares, records and builds
+    // exactly this config.
+    if buildroot_legacy_disabled(config_overrides) {
+        disable_buildroot_legacy_flag(output_dir)?;
+    }
     let config_digest = buildroot_config_digest(output_dir);
     let accepted_config_digests = [
         buildroot_config_digest_v1(output_dir),
@@ -275,9 +280,11 @@ pub(crate) fn run_buildroot_with(
                 })
             });
     // Compare against the snapshot of the config the tree was built from when
-    // there is one; trees from older Gaia versions only have digests.
-    let config_clean_needed = match config_requires_clean_since_snapshot(output_dir) {
-        Some(changed) => changed,
+    // there is one, naming the changed settings; trees from older Gaia
+    // versions only have digests.
+    let changed_settings = config_changes_since_snapshot(output_dir);
+    let config_clean_needed = match &changed_settings {
+        Some(changed) => !changed.is_empty(),
         None => config_digest.as_deref().is_some_and(|config_digest| {
             buildroot_state_needs_clean(output_dir, ".gaia-buildroot-config-state", config_digest)
                 && accepted_config_digests
@@ -292,9 +299,6 @@ pub(crate) fn run_buildroot_with(
                     })
         }),
     };
-    if buildroot_legacy_disabled(config_overrides) {
-        disable_buildroot_legacy_flag(output_dir)?;
-    }
     // Every config step is done: fail (or warn) about requested overrides
     // that olddefconfig dropped, before the clean and the long make.
     messages.extend(check_buildroot_config_overrides(
@@ -313,14 +317,18 @@ pub(crate) fn run_buildroot_with(
         if let Some(br2_external) = br2_external {
             command.env("BR2_EXTERNAL", br2_external);
         }
+        let config_reason = format!(
+            "effective config changed ({})",
+            describe_changed_settings(changed_settings.as_deref())
+        );
         let label = match (replacement_clean_needed, config_clean_needed) {
-            (true, true) => "buildroot clean: package replacements and effective config changed",
-            (true, false) => "buildroot clean: package replacements changed",
-            _ => "buildroot clean: effective config changed",
+            (true, true) => format!("buildroot clean: package replacements and {config_reason}"),
+            (true, false) => "buildroot clean: package replacements changed".to_string(),
+            _ => format!("buildroot clean: {config_reason}"),
         };
         messages.extend(run_command(
             command,
-            label,
+            &label,
             command_context.execution,
             command_context.policy,
             command_context.log_sink.clone(),
@@ -330,7 +338,10 @@ pub(crate) fn run_buildroot_with(
             messages.push("cleaned Buildroot output for changed package replacements".into());
         }
         if config_clean_needed {
-            messages.push("cleaned Buildroot output for changed effective config".into());
+            messages.push(format!(
+                "cleaned Buildroot output for changed effective config: {}",
+                describe_changed_settings(changed_settings.as_deref())
+            ));
         }
     }
 
@@ -343,12 +354,10 @@ pub(crate) fn run_buildroot_with(
     if let Some(br2_external) = br2_external {
         command.env("BR2_EXTERNAL", br2_external);
     }
-    if buildroot_legacy_disabled(config_overrides) {
-        disable_buildroot_legacy_flag(output_dir)?;
-    }
     // Record the state the output tree now corresponds to before the long
-    // make: if the build fails, retrying with the same inputs must resume it
-    // rather than clean everything again.
+    // make: if the build (or a post-image script, or a later assembly step)
+    // fails, retrying with the same inputs must resume it rather than clean
+    // everything again.
     if let Some(replacement_digest) = package_overrides.replacement_digest.as_deref() {
         write_buildroot_state(
             output_dir,
@@ -386,6 +395,21 @@ pub(crate) fn run_buildroot_with(
         write_shared_pack_state(output_dir)?;
     }
     Ok(messages)
+}
+
+/// The changed settings named in clean messages, so an unexpected clean can
+/// be traced to the setting that caused it.
+fn describe_changed_settings(changed: Option<&[String]>) -> String {
+    const SHOWN: usize = 8;
+    match changed {
+        None => "no snapshot of the previously built config; digest differs".to_string(),
+        Some(keys) if keys.len() > SHOWN => format!(
+            "{} and {} more",
+            keys[..SHOWN].join(", "),
+            keys.len() - SHOWN
+        ),
+        Some(keys) => keys.join(", "),
+    }
 }
 
 /// Settings that only say where to download or cache things, or how many
