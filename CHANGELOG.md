@@ -6,8 +6,11 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
-The workspace version is now `2.1.0` (crates and internal dependency
-versions); these changes are released as 2.1.0.
+The workspace version is now `2.2.0` (crates and internal dependency
+versions). Binaries built from `main` during this cycle also reported `2.1.0`
+without everything below (notably the extended MBR, sized partitions, zstd
+and archive assembly features), so build files that rely on them should
+require `gaia_version = ">=2.2.0"`.
 
 ### Config safety
 

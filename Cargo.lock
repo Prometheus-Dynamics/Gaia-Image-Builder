@@ -434,7 +434,7 @@ dependencies = [
 
 [[package]]
 name = "gaia"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "gaia-app",
  "tracing",
@@ -443,7 +443,7 @@ dependencies = [
 
 [[package]]
 name = "gaia-app"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "crossterm",
  "gaia-artifact-providers",
@@ -467,7 +467,7 @@ dependencies = [
 
 [[package]]
 name = "gaia-artifact-provider-go"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "gaia-artifact-providers",
  "gaia-spec",
@@ -475,7 +475,7 @@ dependencies = [
 
 [[package]]
 name = "gaia-artifact-provider-java"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "gaia-artifact-providers",
  "gaia-spec",
@@ -483,7 +483,7 @@ dependencies = [
 
 [[package]]
 name = "gaia-artifact-provider-node"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "gaia-artifact-providers",
  "gaia-spec",
@@ -491,7 +491,7 @@ dependencies = [
 
 [[package]]
 name = "gaia-artifact-provider-python"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "gaia-artifact-providers",
  "gaia-spec",
@@ -499,7 +499,7 @@ dependencies = [
 
 [[package]]
 name = "gaia-artifact-provider-rust"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "gaia-artifact-providers",
  "gaia-spec",
@@ -507,7 +507,7 @@ dependencies = [
 
 [[package]]
 name = "gaia-artifact-providers"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "gaia-process",
  "gaia-spec",
@@ -516,7 +516,7 @@ dependencies = [
 
 [[package]]
 name = "gaia-config"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "gaia-process",
  "gaia-source-providers",
@@ -530,7 +530,7 @@ dependencies = [
 
 [[package]]
 name = "gaia-default-providers"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "gaia-artifact-provider-go",
  "gaia-artifact-provider-java",
@@ -547,7 +547,7 @@ dependencies = [
 
 [[package]]
 name = "gaia-exec"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "gaia-artifact-providers",
  "gaia-config",
@@ -563,7 +563,7 @@ dependencies = [
 
 [[package]]
 name = "gaia-image-provider-buildroot"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "gaia-image-providers",
  "gaia-process",
@@ -574,7 +574,7 @@ dependencies = [
 
 [[package]]
 name = "gaia-image-provider-starting-point"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "gaia-image-providers",
  "gaia-process",
@@ -585,7 +585,7 @@ dependencies = [
 
 [[package]]
 name = "gaia-image-providers"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "gaia-process",
  "gaia-spec",
@@ -593,7 +593,7 @@ dependencies = [
 
 [[package]]
 name = "gaia-plan"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "gaia-artifact-providers",
  "gaia-config",
@@ -607,7 +607,7 @@ dependencies = [
 
 [[package]]
 name = "gaia-process"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "libc",
  "sha2 0.11.0",
@@ -616,7 +616,7 @@ dependencies = [
 
 [[package]]
 name = "gaia-report"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "gaia-artifact-providers",
  "gaia-config",
@@ -634,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "gaia-source-providers"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "gaia-process",
  "gaia-spec",
@@ -644,11 +644,11 @@ dependencies = [
 
 [[package]]
 name = "gaia-spec"
-version = "2.1.0"
+version = "2.2.0"
 
 [[package]]
 name = "gaia-validate"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "gaia-artifact-providers",
  "gaia-config",
