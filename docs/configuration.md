@@ -1179,6 +1179,25 @@ A git source that follows a branch or tag without a lock has no exact commit
 before it is fetched, so its token is reported as unresolved: pin it with
 `rev` or `gaia lock`.
 
+Project identity: `${project.commit}` and `${project.describe}` describe the
+git repository holding the build file. `${project.commit}` is the full `HEAD`
+sha, suffixed `-dirty` when tracked files have uncommitted changes, and
+`${project.describe}` is `git describe --tags --always --dirty`. They resolve
+during normal interpolation, so they work anywhere `${build.version}` does,
+including `version`, `archive_name`, env sets and archive manifest entries.
+Use them to make image versions unique per build:
+
+```toml
+version = "${input.app_version}+${project.describe}"
+```
+
+Outside a git repository they stay unresolved and validation reports them.
+Anything that embeds them changes with every commit. For example, putting
+them in `version` gives artifacts a new build context on every commit, so
+they rebuild each time. To keep artifact reuse, put the commit only into the
+image's version records (env sets, os-release files, the update bundle
+manifest) rather than `version`.
+
 Source paths: `${source.<id>.path}` becomes the directory holding the
 source's files: an import source's checkout (under
 `.gaia/cache/import-sources/`), a path source's directory, or

@@ -105,6 +105,7 @@ and archive assembly features, `">=2.3.0"` for rust `build_group` and
 
 ### Added
 
+- Added `${project.commit}` (full sha, `-dirty` for uncommitted tracked changes) and `${project.describe}` (`git describe --tags --always --dirty`) for the git repository holding the build file, so image versions and update bundles can be unique per build.
 - `${source.<id>.path}` resolves to the directory holding a source's files
   (an import source's checkout, a path source's directory, or
   `<build_dir>/sources/<id>` for git, archive and download sources). It and

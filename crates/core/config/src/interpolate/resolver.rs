@@ -123,6 +123,10 @@ fn resolve_token(token: &str, raw: &RawBuildConfig, env: &ResolvedEnvironment) -
         "config.root_dir" => config_root_dir(raw),
         "execution.root_dir" => execution_root_dir(),
         "project.root_dir" => project_root_dir(raw, env),
+        "project.commit" | "project.describe" => {
+            super::project_git::resolve(token, &config_root_dir(raw))
+                .unwrap_or_else(|| format!("${{{token}}}"))
+        }
         "workspace.root_dir" => interpolate_string(raw.workspace.root_dir.clone(), raw, env),
         "workspace.build_dir" => interpolate_string(raw.workspace.build_dir.clone(), raw, env),
         "workspace.out_dir" => interpolate_string(raw.workspace.out_dir.clone(), raw, env),

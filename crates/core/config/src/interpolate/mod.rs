@@ -1,4 +1,5 @@
 mod assembly_archives;
+mod project_git;
 mod resolver;
 mod scanner;
 
