@@ -63,7 +63,7 @@ fn slowest_operation_lines(
         .iter()
         .filter(|timing| timing.status != "reused")
         .collect::<Vec<_>>();
-    ran.sort_by(|left, right| right.duration_ms.cmp(&left.duration_ms));
+    ran.sort_by_key(|timing| std::cmp::Reverse(timing.duration_ms));
     ran.into_iter()
         .take(limit)
         .map(|timing| {

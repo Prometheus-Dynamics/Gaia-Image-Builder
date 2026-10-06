@@ -112,6 +112,8 @@ pub enum BuildrootExpectedImageFormatSpec {
     Raw,
     Kernel,
     Erofs,
+    /// `rootfs.xfs`, Buildroot 2026.08+ (`BR2_TARGET_ROOTFS_XFS`).
+    Xfs,
 }
 
 impl BuildrootExpectedImageFormatSpec {
@@ -134,6 +136,7 @@ impl BuildrootExpectedImageFormatSpec {
             Self::Raw => "raw",
             Self::Kernel => "kernel",
             Self::Erofs => "erofs",
+            Self::Xfs => "xfs",
         }
     }
 }

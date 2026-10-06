@@ -731,6 +731,7 @@ pub enum RawBuildrootExpectedImageFormat {
     Raw,
     Kernel,
     Erofs,
+    Xfs,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]

@@ -51,6 +51,8 @@ const SHARED_ROOTFS_TYPES: &[(&str, &str)] = &[
     ("BR2_TARGET_ROOTFS_SQUASHFS", "squashfs"),
     ("BR2_TARGET_ROOTFS_TAR", "tar"),
     ("BR2_TARGET_ROOTFS_UBIFS", "ubifs"),
+    // Buildroot 2026.08+: generated from the target tree like ext2.
+    ("BR2_TARGET_ROOTFS_XFS", "xfs"),
 ];
 
 /// Image types whose generation depends on more than the target tree (an

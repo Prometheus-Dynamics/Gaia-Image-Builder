@@ -339,11 +339,10 @@ impl ConsoleProgress {
     fn print_line(&mut self, operation_id: &str, detail: &str) {
         self.last_status_at = Instant::now();
         let done = self.terminal.len();
-        let percent = if self.total == 0 {
-            100
-        } else {
-            done.saturating_mul(100) / self.total
-        };
+        let percent = done
+            .saturating_mul(100)
+            .checked_div(self.total)
+            .unwrap_or(100);
         eprintln!(
             "run {} {:>3}% {}/{} running={} elapsed={} op={} {}",
             progress_bar(done, self.total),
@@ -360,11 +359,10 @@ impl ConsoleProgress {
 
 fn progress_bar(done: usize, total: usize) -> String {
     const WIDTH: usize = 16;
-    let filled = if total == 0 {
-        WIDTH
-    } else {
-        done.saturating_mul(WIDTH) / total
-    };
+    let filled = done
+        .saturating_mul(WIDTH)
+        .checked_div(total)
+        .unwrap_or(WIDTH);
     format!(
         "[{}{}]",
         "#".repeat(filled),

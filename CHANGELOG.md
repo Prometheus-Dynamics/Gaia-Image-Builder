@@ -14,6 +14,11 @@ use: `gaia_version = ">=2.2.0"` for the extended MBR, sized partitions, zstd
 and archive assembly features, `">=2.3.0"` for rust `build_group` and
 `${source.<id>.path}`.
 
+`2.4.0` moves the toolchain pin and `rust-version` to Rust 1.99.0 (installing
+Gaia now needs Rust 1.99 or newer), upgrades every dependency to its newest
+release, updates the Rust docker images to 1.99.0, and adds the Buildroot
+2026.08 `xfs` root filesystem format.
+
 ### Config safety
 
 - Buildroot `config_overrides` are verified against the final `.config` after
@@ -105,6 +110,7 @@ and archive assembly features, `">=2.3.0"` for rust `build_group` and
 
 ### Added
 
+- Added the `xfs` Buildroot expected-image format (`BR2_TARGET_ROOTFS_XFS`, Buildroot 2026.08+), including shared-output packing. Gaia's Buildroot provider was checked against 2026.08: defconfig handling, the `.config` format used by `override_check`, kernel module install paths, rootfs fakeroot scripts and make targets are unchanged from 2025.11.
 - Added `${project.commit}` (full sha, `-dirty` for uncommitted tracked changes) and `${project.describe}` (`git describe --tags --always --dirty`) for the git repository holding the build file, so image versions and update bundles can be unique per build.
 - `${source.<id>.path}` resolves to the directory holding a source's files
   (an import source's checkout, a path source's directory, or

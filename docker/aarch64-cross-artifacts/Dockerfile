@@ -1,6 +1,6 @@
-FROM rust:1.94.1-trixie
+FROM rust:1.99.0-trixie
 
-ARG RUST_TOOLCHAIN=1.94.1-x86_64-unknown-linux-gnu
+ARG RUST_TOOLCHAIN=1.99.0-x86_64-unknown-linux-gnu
 
 RUN dpkg --add-architecture arm64 \
     && apt-get update \

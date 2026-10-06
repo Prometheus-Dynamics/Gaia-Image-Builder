@@ -1239,6 +1239,7 @@ Expected image formats:
 - `raw`
 - `kernel`
 - `erofs`
+- `xfs` (Buildroot 2026.08 or newer, `BR2_TARGET_ROOTFS_XFS`)
 
 ### Starting Point
 

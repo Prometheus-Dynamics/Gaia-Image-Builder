@@ -30,6 +30,7 @@ fn built_module_count(output_dir: &Path) -> Option<usize> {
                 && !name.starts_with("linux-firmware")
                 && !name.starts_with("linux-headers")
                 && !name.starts_with("linux-tools")
+                && !name.starts_with("linux-backports")
         })
         .filter_map(|entry| fs::read_to_string(entry.path().join("modules.order")).ok())
         .map(|order| order.lines().filter(|line| !line.trim().is_empty()).count())
