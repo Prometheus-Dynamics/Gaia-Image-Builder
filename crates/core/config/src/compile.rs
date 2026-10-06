@@ -6,7 +6,7 @@ mod precedence;
 mod source;
 mod when;
 
-use artifact::compile_artifact;
+use artifact::{compile_artifact, complete_build_groups};
 use checkpoint::{compile_checkpoint, compile_stage_content_origin};
 use image::{
     compile_buildroot_expected_image_format, compile_buildroot_external_tree_mode,
@@ -354,6 +354,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
         })
         .collect();
     spec.artifacts = raw.artifacts.into_iter().map(compile_artifact).collect();
+    complete_build_groups(&mut spec.artifacts);
     spec.install.entries = raw
         .install
         .into_iter()

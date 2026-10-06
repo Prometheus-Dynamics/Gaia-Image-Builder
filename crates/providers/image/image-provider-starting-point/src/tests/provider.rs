@@ -74,6 +74,8 @@ fn starting_point_tar_rootfs_accepts_image_feed_overlay() {
             features: Vec::new(),
             no_default_features: false,
             all_features: false,
+            build_group: None,
+            group_packages: Vec::new(),
         }),
         Some(SourceRef::new("base-rootfs")),
         ArtifactOutputSpec {

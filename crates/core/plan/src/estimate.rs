@@ -219,6 +219,8 @@ mod tests {
                 features: Vec::new(),
                 no_default_features: false,
                 all_features: false,
+                build_group: None,
+                group_packages: Vec::new(),
             }),
             None,
             gaia_spec::ArtifactOutputSpec {

@@ -94,17 +94,59 @@ impl ArtifactDefinition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct RustArtifactSpec {
     pub package: String,
     pub target_name: Option<String>,
     pub variant: ArtifactVariantSpec,
-    /// Passed to cargo as `--features a,b`.
+    /// Passed to cargo as `--features a,b`. For a build group member this is
+    /// the sorted union of every member's features.
     pub features: Vec<String>,
     /// Passed to cargo as `--no-default-features`.
     pub no_default_features: bool,
     /// Passed to cargo as `--all-features`; exclusive with the two above.
     pub all_features: bool,
+    /// Rust artifacts sharing a build group are always built by one cargo
+    /// invocation, so cargo resolves features once for all of them.
+    pub build_group: Option<String>,
+    /// Sorted packages of every member of `build_group` (this one
+    /// included); each is passed to cargo as `-p`. Empty outside a group.
+    pub group_packages: Vec<String>,
+}
+
+impl RustArtifactSpec {
+    /// Packages one cargo invocation for this artifact selects: the whole
+    /// build group, or just the artifact's own package.
+    pub fn cargo_packages(&self) -> Vec<String> {
+        if self.group_packages.is_empty() {
+            vec![self.package.clone()]
+        } else {
+            self.group_packages.clone()
+        }
+    }
+}
+
+// Operation fingerprints hash the Debug output of specs. The build group
+// fields are only printed when set, so artifacts outside a group keep the
+// fingerprints they had before build groups existed.
+impl std::fmt::Debug for RustArtifactSpec {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = formatter.debug_struct("RustArtifactSpec");
+        debug
+            .field("package", &self.package)
+            .field("target_name", &self.target_name)
+            .field("variant", &self.variant)
+            .field("features", &self.features)
+            .field("no_default_features", &self.no_default_features)
+            .field("all_features", &self.all_features);
+        if let Some(build_group) = &self.build_group {
+            debug.field("build_group", build_group);
+        }
+        if !self.group_packages.is_empty() {
+            debug.field("group_packages", &self.group_packages);
+        }
+        debug.finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -316,5 +358,49 @@ mod tests {
             Ok(ArtifactProviderKind::Python)
         );
         assert!("unknown".parse::<ArtifactProviderKind>().is_err());
+    }
+
+    fn rust_spec() -> RustArtifactSpec {
+        RustArtifactSpec {
+            package: "engine".into(),
+            target_name: Some("libengine.so".into()),
+            variant: ArtifactVariantSpec::File,
+            features: vec!["tls".into()],
+            no_default_features: true,
+            all_features: false,
+            build_group: None,
+            group_packages: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn rust_spec_debug_matches_the_derived_format_outside_a_group() {
+        let spec = rust_spec();
+        // What `#[derive(Debug)]` printed before build groups existed.
+        let derived = format!(
+            "RustArtifactSpec {{ package: {:?}, target_name: {:?}, variant: {:?}, features: {:?}, no_default_features: {:?}, all_features: {:?} }}",
+            spec.package,
+            spec.target_name,
+            spec.variant,
+            spec.features,
+            spec.no_default_features,
+            spec.all_features
+        );
+        assert_eq!(format!("{spec:?}"), derived);
+        let pretty = format!("{spec:#?}");
+        assert!(!pretty.contains("build_group") && !pretty.contains("group_packages"));
+    }
+
+    #[test]
+    fn rust_spec_debug_includes_group_fields_when_set() {
+        let mut spec = rust_spec();
+        spec.build_group = Some("engine".into());
+        spec.group_packages = vec!["engine".into(), "plugin".into()];
+        let debug = format!("{spec:?}");
+        assert!(debug.ends_with(
+            "all_features: false, build_group: \"engine\", group_packages: [\"engine\", \"plugin\"] }"
+        ));
+        assert_eq!(spec.cargo_packages(), spec.group_packages);
+        assert_eq!(rust_spec().cargo_packages(), vec!["engine".to_string()]);
     }
 }

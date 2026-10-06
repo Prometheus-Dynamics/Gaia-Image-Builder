@@ -319,3 +319,82 @@ rootfs_path = "/tmp/rootfs"
 
     let _ = std::fs::remove_file(path);
 }
+
+#[test]
+fn build_group_members_share_packages_and_union_features() {
+    let path = write_temp_config(
+        r#"
+build_name = "rust-build-group"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[image]
+kind = "starting-point"
+rootfs_path = "/tmp/rootfs"
+
+[[artifacts]]
+id = "engine"
+kind = "rust"
+package = "helios-engine"
+features = ["tls", "plugins"]
+build_group = "helios"
+output_path = "out/engine"
+
+[[artifacts]]
+id = "vision-plugin"
+kind = "rust"
+package = "vision-plugin"
+target_name = "libvision_plugin.so"
+features = ["simd", "tls"]
+build_group = "helios"
+output_path = "out/libvision_plugin.so"
+
+[[artifacts]]
+id = "alone"
+kind = "rust"
+package = "helios-cli"
+features = ["cli"]
+output_path = "out/alone"
+"#,
+    );
+
+    let spec = resolve_config(path.to_str().expect("temp path utf-8"));
+    let rust = |id: &str| {
+        let artifact = spec
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.id.as_str() == id)
+            .expect("artifact");
+        match &artifact.definition {
+            gaia_spec::ArtifactDefinition::Rust(rust) => rust.clone(),
+            _ => panic!("expected rust artifact"),
+        }
+    };
+
+    let packages = vec!["helios-engine".to_string(), "vision-plugin".to_string()];
+    let features = vec!["plugins".to_string(), "simd".to_string(), "tls".to_string()];
+    for (id, package, target_name) in [
+        ("engine", "helios-engine", None),
+        (
+            "vision-plugin",
+            "vision-plugin",
+            Some("libvision_plugin.so"),
+        ),
+    ] {
+        let member = rust(id);
+        assert_eq!(member.build_group.as_deref(), Some("helios"));
+        assert_eq!(member.group_packages, packages);
+        assert_eq!(member.features, features);
+        assert_eq!(member.package, package);
+        assert_eq!(member.target_name.as_deref(), target_name);
+    }
+    let alone = rust("alone");
+    assert_eq!(alone.build_group, None);
+    assert!(alone.group_packages.is_empty());
+    assert_eq!(alone.features, vec!["cli".to_string()]);
+
+    let _ = std::fs::remove_file(path);
+}

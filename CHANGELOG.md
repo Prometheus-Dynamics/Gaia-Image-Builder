@@ -89,8 +89,30 @@ require `gaia_version = ">=2.2.0"`.
   and are recorded in the artifact backend state when set. Adding the fields
   changes every Rust artifact's fingerprint once, so existing Rust artifacts
   rebuild on the first run after upgrading.
+- Rust build groups: rust artifacts with the same `build_group = "<name>"`
+  are always built by one cargo invocation (`-p` for every member package,
+  the sorted union of the members' features), so an engine binary and its
+  `cdylib` plugins get identical feature resolution for shared crates. The
+  invocation is the same whether members build together or alone, and group
+  members batch without `[providers.rust] batch_builds`. Members must share
+  `source`, `target`, `profile`, `execution` and
+  `no_default_features`/`all_features` (`rust_build_group_conflict`);
+  `build_group` on a non-rust artifact fails config loading. Artifacts
+  outside a group keep their fingerprints. `cdylib` outputs are collected by
+  setting `target_name = "lib<name>.so"`.
 
 ### Added
+
+- `${source.<id>.path}` resolves to the directory holding a source's files
+  (an import source's checkout, a path source's directory, or
+  `<build_dir>/sources/<id>` for git, archive and download sources). It and
+  `${source.<id>.commit}` now also work in Buildroot `config_overrides`
+  values, e.g. `BR2_ROOTFS_USERS_TABLES =
+  "${source.orion.path}/packaging/buildroot/orion-users.table"`. The image
+  operations depend on every source whose directory an override names.
+  `BR2_ROOTFS_USERS_TABLES`, `BR2_ROOTFS_DEVICE_TABLE` and
+  `BR2_ROOTFS_STATIC_DEVICE_TABLE` no longer force a full Buildroot clean
+  when they change.
 
 - Image assembly MBR disks accept more than 4 partitions: partitions 1-3 stay
   primary, slot 4 becomes an extended partition (`0x05`) and the rest become

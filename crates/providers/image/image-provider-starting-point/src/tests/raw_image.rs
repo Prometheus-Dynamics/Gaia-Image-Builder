@@ -66,6 +66,8 @@ fn starting_point_raw_image_rejects_read_only_overlay_before_root_check() {
             features: Vec::new(),
             no_default_features: false,
             all_features: false,
+            build_group: None,
+            group_packages: Vec::new(),
         }),
         None,
         ArtifactOutputSpec {

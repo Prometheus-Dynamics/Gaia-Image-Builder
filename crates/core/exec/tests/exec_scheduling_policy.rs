@@ -195,6 +195,8 @@ impl Harness {
                     features: Vec::new(),
                     no_default_features: false,
                     all_features: false,
+                    build_group: None,
+                    group_packages: Vec::new(),
                 }),
                 None,
                 ArtifactOutputSpec {
@@ -443,6 +445,30 @@ fn batching_is_off_by_default() {
     assert!(journal.batches.is_empty());
     assert_eq!(journal.singles.len(), 2);
     assert_eq!(outcome.completed_ids.len(), 2);
+}
+
+#[test]
+fn build_group_members_batch_without_the_opt_in() {
+    let mut harness = Harness::new(
+        "gaia-batch-group",
+        &[("engine", &[]), ("plugin", &[]), ("alone", &[])],
+    );
+    harness.batchable = true;
+    for artifact in &mut harness.spec.artifacts {
+        if let ArtifactDefinition::Rust(rust) = &mut artifact.definition
+            && artifact.id.as_str() != "alone"
+        {
+            rust.build_group = Some("engine".into());
+        }
+    }
+
+    let (outcome, _, journal) = harness.run();
+
+    let journal = journal.lock().expect("journal");
+    assert_eq!(journal.batches, vec![vec!["engine", "plugin"]]);
+    assert_eq!(journal.singles, vec!["alone"]);
+    assert_eq!(outcome.completed_ids.len(), 3);
+    assert!(outcome.errors.is_empty());
 }
 
 #[test]

@@ -183,6 +183,7 @@ pub(crate) fn validate_artifacts(
             ));
         }
     }
+    crate::build_groups::validate_build_groups(spec, diagnostics);
     diagnostics.extend(validate_artifact_cycles(spec));
     artifact_ids
 }

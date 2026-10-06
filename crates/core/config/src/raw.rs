@@ -437,6 +437,9 @@ pub struct RawArtifactConfig {
     pub dependencies: Vec<String>,
     #[serde(default)]
     pub after_image_prepare: bool,
+    /// Rust only: artifacts naming the same group build in one cargo run.
+    #[serde(default)]
+    pub build_group: Option<String>,
     #[serde(default)]
     pub install_name: Option<String>,
     #[serde(default)]

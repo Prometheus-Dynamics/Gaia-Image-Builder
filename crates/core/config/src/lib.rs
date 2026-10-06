@@ -77,12 +77,13 @@ pub fn try_resolve_config_with_options(
     );
     let interpolated = interpolate_config(with_dynamic_inputs, &env);
     let normalized = normalize_paths(interpolated)?;
+    reject_non_rust_build_groups(&normalized)?;
     let mut spec = compile_config(normalized);
     spec.metadata.config_warnings = unknown_key_warnings;
     spec.selection.import_sources = import_sources;
     drop_unused_import_sources(&mut spec, &unused_import_sources);
     apply_lockfile(&mut spec);
-    source_tokens::substitute_source_commits(&mut spec);
+    source_tokens::substitute_source_tokens(&mut spec);
     tracing::debug!(
         build,
         build_id = spec.identity.id.as_str(),
@@ -439,6 +440,28 @@ fn normalize_paths(mut raw: raw::RawBuildConfig) -> Result<raw::RawBuildConfig, 
         _ => {}
     }
     Ok(raw)
+}
+
+/// `build_group` only means something to cargo; on any other artifact kind
+/// it is a mistake rather than a key to ignore.
+fn reject_non_rust_build_groups(raw: &raw::RawBuildConfig) -> Result<(), ConfigError> {
+    let Some(artifact) = raw.artifacts.iter().find(|artifact| {
+        artifact.build_group.is_some()
+            && !matches!(artifact.definition, raw::RawArtifactDefinition::Rust { .. })
+    }) else {
+        return Ok(());
+    };
+    Err(ConfigError::ConfigShape {
+        path: raw
+            .source_path
+            .as_deref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<unknown>".to_string()),
+        message: format!(
+            "artifact '{}' sets build_group, which is only supported for kind = \"rust\" artifacts",
+            artifact.id
+        ),
+    })
 }
 
 fn config_workspace_root(raw: &raw::RawBuildConfig) -> Option<PathBuf> {

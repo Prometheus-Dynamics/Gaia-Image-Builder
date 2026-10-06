@@ -15,6 +15,7 @@ mod provenance;
 mod reporting;
 mod selection;
 mod source;
+mod source_dirs;
 mod stage;
 mod state;
 mod workspace;
@@ -85,6 +86,7 @@ pub use source::{
     ArchiveSourceSpec, DownloadSourceSpec, GitSourceSpec, PathSourceSpec, SourceDefinition,
     SourcePinPolicySpec, SourceProviderKind, SourceRef, SourceRefreshPolicySpec, SourceSpec,
 };
+pub use source_dirs::{source_checkout_dir, source_materialized_dir};
 pub use stage::{
     StageContentOriginSpec, StageEnvSetSpec, StageFileSpec, StageServiceSpec, StageSpec,
 };

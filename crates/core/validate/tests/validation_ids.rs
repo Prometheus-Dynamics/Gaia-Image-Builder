@@ -27,6 +27,8 @@ fn empty_public_ids_are_validation_errors() {
             features: Vec::new(),
             no_default_features: false,
             all_features: false,
+            build_group: None,
+            group_packages: Vec::new(),
         }),
         None,
         ArtifactOutputSpec {

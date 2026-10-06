@@ -177,6 +177,8 @@ pub fn artifact_failure_spec_with_overrides(
         features: Vec::new(),
         no_default_features: false,
         all_features: false,
+        build_group: None,
+        group_packages: Vec::new(),
     });
     spec.artifacts.push(bad_artifact);
     spec

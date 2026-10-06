@@ -26,6 +26,8 @@ fn rust_provider_fails_for_missing_source_dir_when_nested_build_enabled() {
             features: Vec::new(),
             no_default_features: false,
             all_features: false,
+            build_group: None,
+            group_packages: Vec::new(),
         }),
         None,
         ArtifactOutputSpec {
@@ -64,6 +66,8 @@ fn rust_artifact_state_persists_backend_native_fields() {
             features: Vec::new(),
             no_default_features: false,
             all_features: false,
+            build_group: None,
+            group_packages: Vec::new(),
         }),
         None,
         ArtifactOutputSpec {
@@ -112,6 +116,8 @@ fn nested_rust_build_does_not_accept_stale_existing_output() {
             features: Vec::new(),
             no_default_features: false,
             all_features: false,
+            build_group: None,
+            group_packages: Vec::new(),
         }),
         None,
         ArtifactOutputSpec {
@@ -147,6 +153,8 @@ fn rust_artifact(id: &str, package: &str, output: &Path) -> ArtifactSpec {
             features: Vec::new(),
             no_default_features: false,
             all_features: false,
+            build_group: None,
+            group_packages: Vec::new(),
         }),
         None,
         ArtifactOutputSpec {
@@ -514,3 +522,5 @@ fn no_default_features_reaches_cargo() {
     assert_eq!(error.kind, ArtifactProviderErrorKind::BackendCommand);
     let _ = fs::remove_dir_all(root);
 }
+
+mod groups;

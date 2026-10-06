@@ -4,7 +4,8 @@
 //! A full clean costs a from-scratch rebuild (often over an hour), so changes
 //! that only affect filesystem image generation (`BR2_TARGET_ROOTFS_*`,
 //! post-image and fakeroot scripts) or where things are downloaded and cached
-//! must not trigger one. Buildroot regenerates images on every `make`.
+//! must not trigger one. Buildroot regenerates images (applying the users
+//! and device tables) on every `make`.
 use super::*;
 use sha2::{Digest, Sha256};
 
@@ -29,6 +30,12 @@ const SETTINGS_NOT_REQUIRING_CLEAN: &[&str] = &[
     "BR2_TARGET_ROOTFS_*",
     "BR2_ROOTFS_POST_IMAGE_SCRIPT",
     "BR2_ROOTFS_POST_FAKEROOT_SCRIPT",
+    // Users and device tables are applied whenever rootfs images are
+    // generated, on every `make`. Their paths often name an import-source
+    // checkout, which changes with the source's rev.
+    "BR2_ROOTFS_USERS_TABLES",
+    "BR2_ROOTFS_DEVICE_TABLE",
+    "BR2_ROOTFS_STATIC_DEVICE_TABLE",
 ];
 
 fn setting_requires_clean(key: &str) -> bool {
@@ -151,6 +158,33 @@ mod tests {
             .replace("2025.02 Configuration", "2025.02-5-gabc Configuration")
             + "BR2_TARGET_ROOTFS_SQUASHFS=y\nBR2_ROOTFS_POST_IMAGE_SCRIPT=\"board/post-image.sh\"\n";
         assert_eq!(rebuild_settings(BASE), rebuild_settings(&resized));
+    }
+
+    #[test]
+    fn users_and_device_tables_do_not_require_a_clean() {
+        let with_tables = |checkout: &str| {
+            format!(
+                "{BASE}BR2_ROOTFS_USERS_TABLES=\"/work/.gaia/cache/import-sources/{checkout}/users.table\"\n\
+                 BR2_ROOTFS_DEVICE_TABLE=\"system/device_table.txt {checkout}/device.table\"\n\
+                 BR2_ROOTFS_STATIC_DEVICE_TABLE=\"system/device_table_dev.txt {checkout}/dev.table\"\n"
+            )
+        };
+        assert_eq!(
+            rebuild_settings(&with_tables("orion-rev1")),
+            rebuild_settings(&with_tables("orion-rev2"))
+        );
+        assert_eq!(
+            rebuild_settings(BASE),
+            rebuild_settings(&with_tables("orion-rev1"))
+        );
+        for key in [
+            "BR2_ROOTFS_USERS_TABLES",
+            "BR2_ROOTFS_DEVICE_TABLE",
+            "BR2_ROOTFS_STATIC_DEVICE_TABLE",
+        ] {
+            assert!(!setting_requires_clean(key), "{key}");
+        }
+        assert!(setting_requires_clean("BR2_ROOTFS_OVERLAY"));
     }
 
     #[test]

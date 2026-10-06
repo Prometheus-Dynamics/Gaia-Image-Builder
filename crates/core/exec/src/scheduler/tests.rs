@@ -48,6 +48,8 @@ fn rust_artifact(id: &str, source: &str, output: &str) -> ArtifactSpec {
             features: Vec::new(),
             no_default_features: false,
             all_features: false,
+            build_group: None,
+            group_packages: Vec::new(),
         }),
         Some(SourceRef::new(source)),
         ArtifactOutputSpec {

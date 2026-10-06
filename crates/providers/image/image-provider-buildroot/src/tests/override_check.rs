@@ -228,3 +228,33 @@ fn override_check_warnings_are_deduplicated() {
     ]);
     assert_eq!(warnings, vec!["buildroot config_overrides: BR2_X dropped"]);
 }
+
+/// `${source.<id>.path}` is substituted at config time, so the check sees
+/// plain absolute paths, quoted or not.
+#[test]
+fn substituted_source_paths_compare_against_the_final_config() {
+    let spec = ResolvedBuildSpec::new("source-paths");
+    let table = "/work/.gaia/cache/import-sources/orion-abc/packaging/buildroot/orion-users.table";
+    let config = format!(
+        "BR2_ROOTFS_USERS_TABLES=\"{table}\"\nBR2_ROOTFS_DEVICE_TABLE=\"system/device_table.txt {table}\"\n"
+    );
+    let requested = normalize_buildroot_config_overrides(
+        &spec,
+        &[
+            (
+                "BR2_ROOTFS_USERS_TABLES".to_string(),
+                format!("\"{table}\""),
+            ),
+            (
+                "BR2_ROOTFS_DEVICE_TABLE".to_string(),
+                format!("system/device_table.txt {table}"),
+            ),
+        ],
+    );
+
+    assert!(find_override_mismatches(&config, &requested).is_empty());
+
+    let stale = config.replace("orion-abc", "orion-old");
+    let mismatches = find_override_mismatches(&stale, &requested);
+    assert_eq!(mismatches.len(), 2, "{mismatches:?}");
+}

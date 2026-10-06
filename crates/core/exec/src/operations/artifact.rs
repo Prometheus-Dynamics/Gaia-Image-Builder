@@ -197,8 +197,15 @@ pub(crate) fn artifact_batch_key(
         return None;
     }
     let prepared = prepare_artifact(&operation.id, artifact_id, spec, providers, None).ok()?;
+    // Build group members always batch: their cargo invocation is the same
+    // either way, so batching only saves the repeated no-op builds.
+    let in_build_group = matches!(
+        &prepared.artifact.definition,
+        ArtifactDefinition::Rust(rust) if rust.build_group.is_some()
+    );
     if prepared.artifact.provider_kind() == gaia_spec::ArtifactProviderKind::Rust
         && !spec.policy.providers.rust.batch_builds
+        && !in_build_group
     {
         return None;
     }

@@ -1,4 +1,5 @@
 mod artifacts;
+mod build_groups;
 mod checkpoints;
 mod core;
 mod diagnostics;

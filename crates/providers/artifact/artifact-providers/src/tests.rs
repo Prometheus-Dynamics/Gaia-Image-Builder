@@ -42,6 +42,8 @@ fn default_artifact_execution_fails_instead_of_materializing_placeholder() {
             features: Vec::new(),
             no_default_features: false,
             all_features: false,
+            build_group: None,
+            group_packages: Vec::new(),
         }),
         None,
         ArtifactOutputSpec {
@@ -363,6 +365,8 @@ fn artifact_execution_backend_prefers_explicit_setting_over_global_default() {
             features: Vec::new(),
             no_default_features: false,
             all_features: false,
+            build_group: None,
+            group_packages: Vec::new(),
         }),
         None,
         ArtifactOutputSpec {
@@ -415,6 +419,8 @@ fn artifact_contract_rejects_empty_inherited_docker_image() {
             features: Vec::new(),
             no_default_features: false,
             all_features: false,
+            build_group: None,
+            group_packages: Vec::new(),
         }),
         None,
         ArtifactOutputSpec {
@@ -465,6 +471,8 @@ fn dockerfile_artifact() -> ArtifactSpec {
             features: Vec::new(),
             no_default_features: false,
             all_features: false,
+            build_group: None,
+            group_packages: Vec::new(),
         }),
         None,
         ArtifactOutputSpec {

@@ -459,7 +459,9 @@ to the right artifact. Note that cargo unifies dependency features across all
 packages selected in one invocation, so a batched binary can differ from the
 same package built alone when packages enable different features of a shared
 dependency. It is therefore opt-in; enable it when your packages agree on
-shared dependency features.
+shared dependency features. Artifacts that must agree on features should use
+a [Rust build group](#rust-build-groups) instead: groups always build together,
+with or without `batch_builds`.
 
 Every provider supports:
 - `retry_attempts`
@@ -896,6 +898,8 @@ Artifact kinds:
   - `all_features` (bool, passed as `--all-features`; cannot be combined with
     `features` or `no_default_features`)
 
+  - `build_group` (string; see [Rust build groups](#rust-build-groups))
+
   Feature flags are part of the artifact's identity: changing them rebuilds the
   artifact, and non-default flags are recorded in its backend state. Only
   artifacts with identical flags are batched into one cargo invocation.
@@ -909,6 +913,12 @@ Artifact kinds:
   features = ["metrics"]
   output_path = "out/orion-node"
   ```
+
+  Gaia collects `target/<triple>/<profile>/<target_name>` from the cargo
+  target directory; `target_name` defaults to the file name of
+  `output_path`. For a `cdylib` (or other library) set it to the file cargo
+  writes, for example `target_name = "libvision_plugin.so"` for a package
+  `vision-plugin`.
 - `java`
   - `build_target`
   - `build_args`
@@ -920,6 +930,73 @@ Artifact kinds:
   - `package_dir`
 - `go`
   - `package`
+
+#### Rust build groups
+
+Rust artifacts that name the same `build_group` are always built by one cargo
+invocation, so cargo resolves features once for all of them. Use this when
+binaries and plugins must agree on the features of shared crates, for example
+an engine and the `cdylib` plugins it loads after checking an ABI or feature
+fingerprint: separate `cargo build -p` runs can enable different features of
+a shared dependency and produce incompatible builds.
+
+For every member, Gaia runs `cargo build -p <each member package>` with the
+sorted union of all members' `features`. The command is identical for each
+member, whether the members are built together or one at a time (the second
+build is then an incremental no-op), and members always share one batched
+build without `[providers.rust] batch_builds`. Each member still collects its
+own output (`package`, `target_name`, `output_path`) and has its own install
+identity.
+
+Members must share `source`, `target`, `profile`, `execution` and
+`no_default_features`/`all_features`; validation reports the conflicting
+members otherwise. `build_group` on a non-rust artifact is an error. A group
+of one is allowed. Since one `--features` list serves every selected
+package, prefer `package/feature` names so each feature is enabled on the
+package that defines it.
+
+```toml
+[[artifacts]]
+id = "helios-engine"
+kind = "rust"
+source = "helios"
+package = "helios-engine"
+profile = "release"
+features = ["helios-engine/plugins"]
+build_group = "helios"
+install_name = "helios-engine"
+install_dest_hint = "/usr/bin/helios-engine"
+output_path = "${workspace.out_dir}/artifacts/helios-engine"
+
+[[artifacts]]
+id = "vision-plugin"
+kind = "rust"
+source = "helios"
+package = "vision-plugin"          # [lib] crate-type = ["cdylib"]
+target_name = "libvision_plugin.so"
+profile = "release"
+features = ["vision-plugin/simd"]
+build_group = "helios"
+install_name = "libvision_plugin.so"
+install_class = "library"
+install_dest_hint = "/usr/lib/helios/plugins/libvision_plugin.so"
+output_path = "${workspace.out_dir}/artifacts/libvision_plugin.so"
+
+[[install]]
+id = "install-helios-engine"
+artifact = "helios-engine"
+dest = "/usr/bin/helios-engine"
+mode = 493
+
+[[install]]
+id = "install-vision-plugin"
+artifact = "vision-plugin"
+dest = "/usr/lib/helios/plugins/libvision_plugin.so"
+mode = 420
+```
+
+Both artifacts build with `cargo build -p helios-engine -p vision-plugin
+--features helios-engine/plugins,vision-plugin/simd --release`.
 
 Java artifacts run Maven or Gradle automatically when `build_command` is omitted. Use `build_args` to replace the default Maven/Gradle arguments while keeping tool detection, or use `build_command` for a source-local command such as a wrapper script. `build_env` adds environment variables for either mode. `after_image_prepare = true` schedules the artifact after Buildroot prepare, which is useful when the artifact needs the generated Buildroot sysroot before the final image feed is assembled.
 
@@ -1101,6 +1178,29 @@ entries = [
 A git source that follows a branch or tag without a lock has no exact commit
 before it is fetched, so its token is reported as unresolved: pin it with
 `rev` or `gaia lock`.
+
+Source paths: `${source.<id>.path}` becomes the directory holding the
+source's files: an import source's checkout (under
+`.gaia/cache/import-sources/`), a path source's directory, or
+`<build_dir>/sources/<id>` for git, archive and download sources (where Gaia
+materializes them). Like the commit token it works in stage env set values
+and build labels, and both tokens also work in Buildroot `config_overrides`
+values, so a setting can name a file inside a source:
+
+```toml
+[image]
+kind = "buildroot"
+config_overrides = [
+  ["BR2_ROOTFS_USERS_TABLES", "\"${source.orion.path}/packaging/buildroot/orion-users.table\""],
+]
+```
+
+When an override value names a source's directory, the image operations
+depend on that source, so it is materialized first. `BR2_ROOTFS_USERS_TABLES`,
+`BR2_ROOTFS_DEVICE_TABLE` and `BR2_ROOTFS_STATIC_DEVICE_TABLE` are applied
+when rootfs images are generated on every `make`, so changing them (including
+an import source's checkout path changing with its `rev`) does not force a
+full Buildroot clean.
 
 Expected image formats:
 - `tar`

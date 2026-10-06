@@ -576,6 +576,9 @@ fn interpolate_artifact(
     artifact.profile = artifact
         .profile
         .map(|value| resolver::interpolate_string(value, raw, env));
+    artifact.build_group = artifact
+        .build_group
+        .map(|value| resolver::interpolate_string(value, raw, env));
     artifact.install_name = artifact
         .install_name
         .map(|value| resolver::interpolate_string(value, raw, env));

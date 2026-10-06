@@ -1,6 +1,6 @@
 use super::*;
 use gaia_image_providers::ImageExecutionPolicy;
-use gaia_spec::{KeyValueState, SourceDefinition, StageItemId};
+use gaia_spec::{KeyValueState, StageItemId};
 use std::collections::VecDeque;
 use std::fs as std_fs;
 use std::sync::{Arc, Mutex};
@@ -127,37 +127,13 @@ pub(crate) fn resolve_artifact_source_dir(
         .sources
         .iter()
         .find(|source| source.id == source_ref.id)?;
-    match &source.definition {
-        SourceDefinition::Path(path) => {
-            let candidate = PathBuf::from(&path.path);
-            let resolved = if candidate.is_absolute() {
-                candidate
-            } else {
-                PathBuf::from(&spec.workspace.root_dir).join(candidate)
-            };
-            Some(
-                std_fs::canonicalize(&resolved)
-                    .unwrap_or(resolved)
-                    .display()
-                    .to_string(),
-            )
-        }
-        SourceDefinition::Git(_) | SourceDefinition::Archive(_) | SourceDefinition::Download(_) => {
-            let build_dir = PathBuf::from(&spec.workspace.build_dir);
-            let resolved_build_dir = if build_dir.is_absolute() {
-                build_dir
-            } else {
-                PathBuf::from(&spec.workspace.root_dir).join(build_dir)
-            };
-            let resolved = resolved_build_dir.join("sources").join(source.id.as_str());
-            Some(
-                std_fs::canonicalize(&resolved)
-                    .unwrap_or(resolved)
-                    .display()
-                    .to_string(),
-            )
-        }
-    }
+    let resolved = gaia_spec::source_materialized_dir(&spec.workspace, source);
+    Some(
+        std_fs::canonicalize(&resolved)
+            .unwrap_or(resolved)
+            .display()
+            .to_string(),
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

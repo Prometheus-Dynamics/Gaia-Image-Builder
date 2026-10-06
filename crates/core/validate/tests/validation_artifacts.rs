@@ -125,3 +125,145 @@ output_path = "out/gaia-b"
 
     let _ = fs::remove_file(path);
 }
+
+const GROUP_PREAMBLE: &str = r#"
+build_name = "build-groups"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[image]
+kind = "starting-point"
+rootfs_path = "/tmp/rootfs"
+
+[[sources]]
+id = "engine"
+kind = "path"
+path = "."
+
+[[sources]]
+id = "other"
+kind = "path"
+path = "."
+"#;
+
+fn group_diagnostics(artifacts: &str) -> Vec<(String, String, Option<String>)> {
+    let path = write_temp_config(&format!("{GROUP_PREAMBLE}{artifacts}"));
+    let spec = resolve_config(path.to_str().expect("temp path utf-8"));
+    let _ = fs::remove_file(path);
+    validate_spec(&spec)
+        .diagnostics
+        .into_iter()
+        .filter(|diagnostic| diagnostic.code.starts_with("rust_build_group"))
+        .map(|diagnostic| {
+            (
+                diagnostic.code.to_string(),
+                diagnostic.message,
+                diagnostic.location,
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn build_group_members_must_share_cargo_settings() {
+    let diagnostics = group_diagnostics(
+        r#"
+[[artifacts]]
+id = "engine"
+kind = "rust"
+source = "engine"
+package = "engine"
+build_group = "engine"
+output_path = "out/engine"
+
+[[artifacts]]
+id = "plugin"
+kind = "rust"
+source = "other"
+package = "plugin"
+build_group = "engine"
+target = "aarch64-unknown-linux-gnu"
+profile = "release"
+no_default_features = true
+output_path = "out/plugin"
+"#,
+    );
+
+    for field in ["source", "target", "profile", "no_default_features"] {
+        assert!(
+            diagnostics.iter().any(
+                |(code, message, location)| code == "rust_build_group_conflict"
+                    && message.contains(&format!("share {field} "))
+                    && message.contains("'engine' and 'plugin'")
+                    && location.as_deref() == Some("artifact:plugin")
+            ),
+            "{field}: {diagnostics:?}"
+        );
+    }
+    assert_eq!(diagnostics.len(), 4, "{diagnostics:?}");
+}
+
+#[test]
+fn consistent_build_groups_and_groups_of_one_are_valid() {
+    let diagnostics = group_diagnostics(
+        r#"
+[[artifacts]]
+id = "engine"
+kind = "rust"
+source = "engine"
+package = "engine"
+features = ["tls"]
+build_group = "engine"
+profile = "release"
+output_path = "out/engine"
+
+[[artifacts]]
+id = "plugin"
+kind = "rust"
+source = "engine"
+package = "plugin"
+features = ["simd"]
+build_group = "engine"
+profile = "release"
+output_path = "out/plugin"
+
+[[artifacts]]
+id = "solo"
+kind = "rust"
+source = "other"
+package = "solo"
+build_group = "solo"
+output_path = "out/solo"
+"#,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}
+
+#[test]
+fn build_group_on_a_non_rust_artifact_is_an_error() {
+    let path = write_temp_config(&format!(
+        "{GROUP_PREAMBLE}{}",
+        r#"
+[[artifacts]]
+id = "web"
+kind = "node"
+package_dir = "web"
+build_group = "engine"
+output_path = "out/web"
+"#
+    ));
+
+    let error = gaia_config::try_resolve_config(path.to_str().expect("temp path utf-8"))
+        .expect_err("build_group on a node artifact is rejected");
+    let _ = fs::remove_file(path);
+
+    let message = error.to_string();
+    assert!(
+        message.contains("artifact 'web' sets build_group") && message.contains("kind = \"rust\""),
+        "{message}"
+    );
+}

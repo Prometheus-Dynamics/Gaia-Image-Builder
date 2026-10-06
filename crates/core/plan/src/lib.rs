@@ -285,6 +285,12 @@ pub fn plan_build_with_reuse_state(
                 image_prepare_dependencies.push(OperationId::source(source_id));
                 image_finalize_dependencies.push(OperationId::source(source_id));
             }
+            // A `config_overrides` value naming a file inside a source (via
+            // `${source.<id>.path}`) needs that source materialized first.
+            for source in sources_named_by_overrides(spec, &buildroot.config_overrides) {
+                image_prepare_dependencies.push(OperationId::source(&source.id));
+                image_finalize_dependencies.push(OperationId::source(&source.id));
+            }
         }
         ImageDefinition::StartingPoint(starting_point) => {
             if let Some(source_id) = &starting_point.source {
@@ -444,4 +450,35 @@ pub fn plan_build_with_reuse_state(
     );
     debug_assert!(plan.validate().is_empty(), "generated plan must be valid");
     plan
+}
+
+/// Sources whose checkout directory (see [`gaia_spec::source_checkout_dir`])
+/// appears in a Buildroot `config_overrides` value, as a whole path or a
+/// prefix of one. Derived from the values instead of a spec field, so images
+/// that do not use `${source.<id>.path}` keep their fingerprints.
+fn sources_named_by_overrides<'spec>(
+    spec: &'spec ResolvedBuildSpec,
+    overrides: &[(String, String)],
+) -> Vec<&'spec gaia_spec::SourceSpec> {
+    spec.sources
+        .iter()
+        .filter(|source| {
+            let dir = gaia_spec::source_checkout_dir(spec, source)
+                .display()
+                .to_string();
+            overrides.iter().any(|(_, value)| names_path(value, &dir))
+        })
+        .collect()
+}
+
+/// Whether `value` contains `dir` followed by a path separator, a quote,
+/// whitespace or the end of the value.
+fn names_path(value: &str, dir: &str) -> bool {
+    !dir.is_empty()
+        && value.match_indices(dir).any(|(index, _)| {
+            value[index + dir.len()..]
+                .chars()
+                .next()
+                .is_none_or(|next| next == '/' || next == '"' || next.is_whitespace())
+        })
 }

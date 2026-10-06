@@ -525,3 +525,85 @@ entries = [
     );
     assert!(unresolved.contains(&"source.nope.commit"), "{unresolved:?}");
 }
+
+/// `${source.<id>.path}` names the directory holding a source's files: an
+/// import source's checkout, a path source's directory, or the directory a
+/// git source is materialized into. Buildroot overrides can use it.
+#[test]
+fn source_path_tokens_resolve_for_each_source_kind() {
+    let fixture = Fixture::new("path-token");
+    let rev = fixture.commits[1].clone();
+    fs::create_dir_all(fixture.workspace.join("vendor/tables")).expect("path source");
+    fixture.write_build(
+        r#"{ source = "atlas", path = "devices/raze/gaia/device.toml" }"#,
+        &format!(
+            "rev = \"{rev}\"\n\n[[sources]]\nid = \"local\"\nkind = \"path\"\npath = \"vendor/tables\"\n\n\
+             [[sources]]\nid = \"orion\"\nkind = \"git\"\nrepo = \"https://example.invalid/orion.git\"\n"
+        ),
+        r#"
+[image]
+kind = "buildroot"
+defconfig = "qemu_aarch64_virt_defconfig"
+config_overrides = [
+  ["BR2_ROOTFS_USERS_TABLES", "\"${source.atlas.path}/users.table\""],
+  ["BR2_ROOTFS_DEVICE_TABLE", "\"${source.local.path}/device.table ${source.orion.path}/dev.table\""],
+  ["BR2_UNKNOWN", "${source.nope.path}"],
+]
+
+[[stage.env_sets]]
+id = "paths"
+name = "paths"
+entries = [["ATLAS", "${source.atlas.path}"]]
+"#,
+    );
+
+    let spec = fixture.resolve(&[]).expect("resolve");
+    let gaia_spec::ImageDefinition::Buildroot(buildroot) = &spec.image.definition else {
+        panic!("buildroot image");
+    };
+    let checkout = fixture.checkout(&rev).display().to_string();
+    let local = fixture
+        .workspace
+        .join("vendor/tables")
+        .display()
+        .to_string();
+    let orion = Path::new(&spec.workspace.build_dir)
+        .join("sources/orion")
+        .display()
+        .to_string();
+    let overrides = buildroot
+        .config_overrides
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(
+        overrides["BR2_ROOTFS_USERS_TABLES"],
+        format!("\"{checkout}/users.table\"")
+    );
+    assert_eq!(
+        overrides["BR2_ROOTFS_DEVICE_TABLE"],
+        format!("\"{local}/device.table {orion}/dev.table\"")
+    );
+    assert_eq!(overrides["BR2_UNKNOWN"], "${source.nope.path}");
+    let env_set = spec
+        .stage
+        .env_sets
+        .iter()
+        .find(|env_set| env_set.id.as_str() == "paths")
+        .expect("env set");
+    assert_eq!(env_set.entries, vec![("ATLAS".to_string(), checkout)]);
+    let unresolved = spec
+        .policy
+        .interpolation
+        .unresolved
+        .iter()
+        .map(|unresolved| unresolved.token.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        !unresolved
+            .iter()
+            .any(|token| token.ends_with(".path") && !token.contains("nope")),
+        "{unresolved:?}"
+    );
+    assert!(unresolved.contains(&"source.nope.path"), "{unresolved:?}");
+}

@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) fn compile_artifact(raw: RawArtifactConfig) -> ArtifactSpec {
     let definition = match raw.definition {
@@ -20,6 +21,8 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig) -> ArtifactSpec {
             features,
             no_default_features,
             all_features,
+            build_group: raw.build_group,
+            group_packages: Vec::new(),
         }),
         RawArtifactDefinition::Java {
             build_target,
@@ -59,6 +62,34 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig) -> ArtifactSpec {
         output: ArtifactOutputSpec {
             path: raw.output_path,
         },
+    }
+}
+
+/// Gives every member of a rust build group the same cargo selection: the
+/// sorted packages of all members and the sorted union of their features.
+/// Each member keeps its own `package` and `target_name` for collecting its
+/// output.
+pub(crate) fn complete_build_groups(artifacts: &mut [ArtifactSpec]) {
+    let mut groups = BTreeMap::<String, (BTreeSet<String>, BTreeSet<String>)>::new();
+    for artifact in artifacts.iter() {
+        if let ArtifactDefinition::Rust(rust) = &artifact.definition
+            && let Some(group) = &rust.build_group
+        {
+            let (packages, features) = groups.entry(group.clone()).or_default();
+            packages.insert(rust.package.clone());
+            features.extend(rust.features.iter().cloned());
+        }
+    }
+    for artifact in artifacts.iter_mut() {
+        if let ArtifactDefinition::Rust(rust) = &mut artifact.definition
+            && let Some((packages, features)) = rust
+                .build_group
+                .as_ref()
+                .and_then(|group| groups.get(group))
+        {
+            rust.group_packages = packages.iter().cloned().collect();
+            rust.features = features.iter().cloned().collect();
+        }
     }
 }
 

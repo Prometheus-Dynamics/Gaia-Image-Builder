@@ -86,7 +86,7 @@ impl ArtifactProvider for RustProvider {
         let (build_mode, messages) = if contract.allow_nested_build {
             run_cargo_build(
                 source_dir,
-                std::slice::from_ref(&package),
+                &cargo_packages(artifact, &package),
                 &CargoFeatureFlags::of(artifact),
                 contract,
                 log_sink,
@@ -125,7 +125,9 @@ impl ArtifactProvider for RustProvider {
 
     /// Nested cargo builds from the same workspace, target triple, profile
     /// and execution backend can share one `cargo build -p a -p b ...`
-    /// invocation (one container start, one dependency resolution).
+    /// invocation (one container start, one dependency resolution). Members
+    /// of a build group only batch with each other, so the batched invocation
+    /// stays exactly the group's own.
     fn batch_key(
         &self,
         artifact: &ArtifactSpec,
@@ -138,8 +140,16 @@ impl ArtifactProvider for RustProvider {
         }
         // cargo unifies features across every `-p` in one invocation, so only
         // artifacts with identical feature flags share a build.
+        let group = match &artifact.definition {
+            ArtifactDefinition::Rust(rust) => rust
+                .build_group
+                .as_deref()
+                .map(|group| format!("group={group}|"))
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
         Some(format!(
-            "features={:?}|source={:?}|target={:?}|profile={:?}|backend={:?}|timeout={}|retries={}/{}/{:?}|jobs={:?}|retention={:?}",
+            "{group}features={:?}|source={:?}|target={:?}|profile={:?}|backend={:?}|timeout={}|retries={}/{}/{:?}|jobs={:?}|retention={:?}",
             CargoFeatureFlags::of(artifact),
             contract.source_dir,
             contract.artifact_target,
@@ -185,9 +195,11 @@ impl ArtifactProvider for RustProvider {
             .map(|item| package_and_target(item.artifact, item.contract))
             .collect::<Vec<_>>();
         let mut packages = Vec::<String>::new();
-        for (package, _) in &resolved {
-            if !packages.contains(package) {
-                packages.push(package.clone());
+        for (item, (package, _)) in items.iter().zip(&resolved) {
+            for package in cargo_packages(item.artifact, package) {
+                if !packages.contains(&package) {
+                    packages.push(package);
+                }
             }
         }
         let source_dir = leader.contract.source_dir.as_deref().unwrap_or(".");
@@ -304,6 +316,15 @@ fn package_and_target(
             artifact.id.as_str().to_string(),
             artifact.id.as_str().to_string(),
         ),
+    }
+}
+
+/// Packages one cargo invocation for `artifact` selects: every package of
+/// its build group, so each member resolves features identically.
+fn cargo_packages(artifact: &ArtifactSpec, package: &str) -> Vec<String> {
+    match &artifact.definition {
+        ArtifactDefinition::Rust(rust) => rust.cargo_packages(),
+        _ => vec![package.to_string()],
     }
 }
 
