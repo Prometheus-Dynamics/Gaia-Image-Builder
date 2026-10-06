@@ -1,4 +1,6 @@
 use super::*;
+use crate::raw_assembly::RawAssemblyArchiveConfig;
+use gaia_spec::{AssemblyArchiveMemberSpec, AssemblyArchiveSpec};
 
 pub(crate) fn compile_image_feed(raw: &RawBuildConfig) -> ImageFeedSpec {
     ImageFeedSpec {
@@ -181,6 +183,7 @@ pub(crate) fn compile_image_assembly(
                 src: transform.src.map(Into::into),
                 dest: transform.dest.into(),
                 deterministic: transform.deterministic.unwrap_or(true),
+                level: transform.level,
             })
             .collect(),
         filesystems: raw
@@ -216,10 +219,17 @@ pub(crate) fn compile_image_assembly(
                         kind: partition.kind,
                         type_alias: partition.type_alias,
                         bootable: partition.bootable,
-                        image: partition.image.into(),
+                        image: partition.image.map(Into::into),
+                        size: partition.size,
+                        wipe: partition.wipe,
                     })
                     .collect(),
             })
+            .collect(),
+        archives: raw
+            .archives
+            .into_iter()
+            .map(compile_assembly_archive)
             .collect(),
         busybox_initramfs: raw
             .busybox_initramfs
@@ -239,6 +249,7 @@ fn compile_assembly_transform_kind(raw: RawAssemblyTransformKind) -> AssemblyTra
     match raw {
         RawAssemblyTransformKind::CompileDts => AssemblyTransformKindSpec::CompileDts,
         RawAssemblyTransformKind::Gzip => AssemblyTransformKindSpec::Gzip,
+        RawAssemblyTransformKind::Zstd => AssemblyTransformKindSpec::Zstd,
         RawAssemblyTransformKind::Copy => AssemblyTransformKindSpec::Copy,
     }
 }
@@ -262,5 +273,30 @@ fn compile_assembly_partition_table(raw: RawAssemblyPartitionTable) -> AssemblyP
     match raw {
         RawAssemblyPartitionTable::Mbr => AssemblyPartitionTableSpec::Mbr,
         RawAssemblyPartitionTable::Gpt => AssemblyPartitionTableSpec::Gpt,
+    }
+}
+
+/// `generated` members come first, then `members` in their declared order.
+fn compile_assembly_archive(raw: RawAssemblyArchiveConfig) -> AssemblyArchiveSpec {
+    let generated = raw
+        .generated
+        .into_iter()
+        .map(|generated| AssemblyArchiveMemberSpec {
+            name: generated.name,
+            src: None,
+            entries: Some(generated.entries),
+        });
+    let members = raw
+        .members
+        .into_iter()
+        .map(|member| AssemblyArchiveMemberSpec {
+            name: member.name,
+            src: member.src.map(Into::into),
+            entries: member.entries,
+        });
+    AssemblyArchiveSpec {
+        id: raw.id,
+        output: raw.output.into(),
+        members: generated.chain(members).collect(),
     }
 }

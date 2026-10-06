@@ -455,6 +455,7 @@ fn image_assembly_fingerprint_tracks_transform_inputs() {
             src: Some(source_path.display().to_string().into()),
             dest: "$assembly.work/kernel.img".into(),
             deterministic: true,
+            level: None,
         }],
         ..ImageAssemblySpec::default()
     });
@@ -500,7 +501,9 @@ fn image_assembly_fingerprint_tracks_direct_partition_images() {
                 kind: None,
                 type_alias: Some("linux".into()),
                 bootable: false,
-                image: "@assets/rootfs.img".into(),
+                image: Some("@assets/rootfs.img".into()),
+                size: None,
+                wipe: false,
             }],
         }],
         ..ImageAssemblySpec::default()
@@ -549,7 +552,9 @@ fn image_assembly_fingerprint_tracks_provider_root_partition_images() {
                 kind: None,
                 type_alias: Some("linux".into()),
                 bootable: false,
-                image: "$provider.images/provider-rootfs.img".into(),
+                image: Some("$provider.images/provider-rootfs.img".into()),
+                size: None,
+                wipe: false,
             }],
         }],
         ..ImageAssemblySpec::default()
@@ -594,7 +599,9 @@ fn image_assembly_fingerprint_tracks_missing_partition_image_becoming_present() 
                 kind: None,
                 type_alias: Some("linux".into()),
                 bootable: false,
-                image: "@assets/rootfs.img".into(),
+                image: Some("@assets/rootfs.img".into()),
+                size: None,
+                wipe: false,
             }],
         }],
         ..ImageAssemblySpec::default()
@@ -655,7 +662,9 @@ fn image_assembly_fingerprint_does_not_hash_generated_filesystem_partition_outpu
                 kind: None,
                 type_alias: Some("linux".into()),
                 bootable: false,
-                image: "$assembly.out/rootfs.cpio".into(),
+                image: Some("$assembly.out/rootfs.cpio".into()),
+                size: None,
+                wipe: false,
             }],
         }],
         ..ImageAssemblySpec::default()

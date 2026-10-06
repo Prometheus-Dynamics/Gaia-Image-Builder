@@ -321,21 +321,27 @@ fn assembly_disk_helpers_parse_types_aliases_and_signatures() {
         kind: Some("0x0C".into()),
         type_alias: None,
         bootable: false,
-        image: "boot.vfat".into(),
+        image: Some("boot.vfat".into()),
+        size: None,
+        wipe: false,
     };
     let alias = gaia_spec::AssemblyDiskPartitionSpec {
         name: "alias".into(),
         kind: None,
         type_alias: Some("fat32-lba".into()),
         bootable: false,
-        image: "boot.vfat".into(),
+        image: Some("boot.vfat".into()),
+        size: None,
+        wipe: false,
     };
     let linux = gaia_spec::AssemblyDiskPartitionSpec {
         name: "linux".into(),
         kind: None,
         type_alias: Some("linux".into()),
         bootable: false,
-        image: "rootfs".into(),
+        image: Some("rootfs".into()),
+        size: None,
+        wipe: false,
     };
     let disk = gaia_spec::AssemblyDiskSpec {
         id: "sdcard".into(),

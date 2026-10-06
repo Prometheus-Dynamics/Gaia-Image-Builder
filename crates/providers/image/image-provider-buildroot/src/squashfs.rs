@@ -97,6 +97,12 @@ fn assembly_expected_image_names(image: &ImageSpec) -> BTreeSet<&str> {
         .iter()
         .map(|filesystem| filesystem.output.as_ref())
         .chain(assembly.disks.iter().map(|disk| disk.output.as_ref()))
+        .chain(
+            assembly
+                .archives
+                .iter()
+                .map(|archive| archive.output.as_ref()),
+        )
         .filter_map(|output| Path::new(output).file_name()?.to_str())
         .collect()
 }

@@ -328,6 +328,7 @@ pub fn assembly_transform(
         src: Some(src.to_string().into()),
         dest: dest.to_string().into(),
         deterministic: true,
+        level: None,
     }
 }
 

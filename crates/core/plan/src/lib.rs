@@ -3,6 +3,7 @@ mod graph;
 mod operations;
 mod reuse;
 mod reuse_assembly;
+mod reuse_assembly_archives;
 mod reuse_imports;
 mod reuse_toolchain;
 mod targets;

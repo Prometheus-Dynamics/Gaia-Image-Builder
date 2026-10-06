@@ -424,7 +424,9 @@ fn plan_rebuilds_assembly_when_direct_partition_image_changes() {
                 kind: None,
                 type_alias: Some("linux".into()),
                 bootable: false,
-                image: "@assets/rootfs.img".into(),
+                image: Some("@assets/rootfs.img".into()),
+                size: None,
+                wipe: false,
             }],
         }],
         ..ImageAssemblySpec::default()

@@ -65,8 +65,13 @@ fn image_assembly_output_cleanup_paths(
             paths.push(path);
         }
     }
-    for disk in &assembly.disks {
-        if let Ok(path) = roots.resolve_path(spec, &disk.output) {
+    for output in assembly
+        .disks
+        .iter()
+        .map(|disk| &disk.output)
+        .chain(assembly.archives.iter().map(|archive| &archive.output))
+    {
+        if let Ok(path) = roots.resolve_path(spec, output) {
             paths.push(temporary_assembly_output_path(&path));
             paths.push(temporary_assembly_backup_path(&path));
             paths.push(path);

@@ -297,12 +297,14 @@ fn image_assembly_transform_failure_cleans_prior_outputs() {
                 src: Some(source_dir.join("license.txt").display().to_string().into()),
                 dest: output_dir.join("license.txt").display().to_string().into(),
                 deterministic: true,
+                level: None,
             },
             AssemblyTransformSpec {
                 kind: AssemblyTransformKindSpec::Copy,
                 src: Some(source_dir.join("missing.txt").display().to_string().into()),
                 dest: output_dir.join("missing.txt").display().to_string().into(),
                 deterministic: true,
+                level: None,
             },
         ],
         ..ImageAssemblySpec::default()
@@ -384,11 +386,15 @@ fn image_assembly_disk_failure_cleans_generated_filesystem_output() {
                 kind: None,
                 type_alias: Some("linux".into()),
                 bootable: false,
-                image: output_dir
-                    .join("missing-rootfs.img")
-                    .display()
-                    .to_string()
-                    .into(),
+                image: Some(
+                    output_dir
+                        .join("missing-rootfs.img")
+                        .display()
+                        .to_string()
+                        .into(),
+                ),
+                size: None,
+                wipe: false,
             }],
         }],
         ..ImageAssemblySpec::default()
@@ -446,11 +452,15 @@ fn image_assembly_disk_write_failure_cleans_temp_and_final_outputs() {
                 kind: None,
                 type_alias: Some("linux".into()),
                 bootable: false,
-                image: source_dir
-                    .join("rootfs-directory")
-                    .display()
-                    .to_string()
-                    .into(),
+                image: Some(
+                    source_dir
+                        .join("rootfs-directory")
+                        .display()
+                        .to_string()
+                        .into(),
+                ),
+                size: None,
+                wipe: false,
             }],
         }],
         ..ImageAssemblySpec::default()

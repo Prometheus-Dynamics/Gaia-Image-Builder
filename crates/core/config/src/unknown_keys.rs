@@ -85,6 +85,22 @@ const ASSEMBLY_CHILDREN: &[Section] = &[
         )],
     ),
     section(
+        "archives",
+        struct_fields::<raw_assembly::RawAssemblyArchiveConfig>,
+        &[
+            section(
+                "members",
+                struct_fields::<raw_assembly::RawAssemblyArchiveMemberConfig>,
+                &[],
+            ),
+            section(
+                "generated",
+                struct_fields::<raw_assembly::RawAssemblyArchiveGeneratedConfig>,
+                &[],
+            ),
+        ],
+    ),
+    section(
         "busybox_initramfs",
         struct_fields::<raw_assembly::RawAssemblyBusyboxInitramfsConfig>,
         &[],
@@ -431,6 +447,26 @@ mod tests {
                 "image.assembly.disks[0].partitions[0].label",
                 "image.assembly.disks[0].sector_size",
                 "image.output.archive_format",
+            ]
+        );
+    }
+
+    #[test]
+    fn assembly_archive_tables_are_checked() {
+        assert_eq!(
+            unknown(
+                "[[image.assembly.archives]]\nid = \"b\"\noutput = \"b.tar\"\nformat = \"tar\"\n\
+                 [[image.assembly.archives.members]]\nname = \"a\"\nsrc = \"a\"\nmode = \"0644\"\n\
+                 [[image.assembly.archives.members]]\nname = \"m\"\nentries = [[\"K\", \"v\"]]\n\
+                 [[image.assembly.archives.generated]]\nname = \"g\"\nentries = []\nquote = true\n\
+                 [[image.assembly.disks]]\nid = \"sd\"\noutput = \"sd.img\"\n\
+                 [[image.assembly.disks.partitions]]\nname = \"p\"\nsize = \"2G\"\nwipe = true\n\
+                 [[image.assembly.transforms]]\nkind = \"zstd\"\ndest = \"x.zst\"\nlevel = 19\n"
+            ),
+            vec![
+                "image.assembly.archives[0].format",
+                "image.assembly.archives[0].generated[0].quote",
+                "image.assembly.archives[0].members[0].mode",
             ]
         );
     }

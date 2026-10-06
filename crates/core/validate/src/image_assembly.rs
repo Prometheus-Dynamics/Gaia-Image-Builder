@@ -5,6 +5,7 @@ use gaia_spec::ResolvedBuildSpec;
 
 use crate::ValidationDiagnostic;
 use crate::diagnostics::error;
+use crate::image_assembly_layout;
 
 pub(crate) fn validate_image_assembly(
     spec: &ResolvedBuildSpec,
@@ -331,7 +332,10 @@ pub(crate) fn validate_image_assembly(
                     }
                 }
             }
-            if partition.image.trim().is_empty() {
+            let Some(image) = &partition.image else {
+                continue;
+            };
+            if image.trim().is_empty() {
                 diagnostics.push(error(
                     "assembly_partition_image_empty",
                     format!(
@@ -340,15 +344,15 @@ pub(crate) fn validate_image_assembly(
                     ),
                     Some("image.assembly.disks.partitions".into()),
                 ));
-            } else if !filesystem_outputs.contains(&partition.image)
-                && !uses_supported_provider_variable(spec, &partition.image)
-                && !partition.image.starts_with("@assets/")
+            } else if !filesystem_outputs.contains(image)
+                && !uses_supported_provider_variable(spec, image)
+                && !image.starts_with("@assets/")
             {
                 diagnostics.push(error(
                     "assembly_partition_image_unknown",
                     format!(
                         "assembly disk '{}' partition '{}' image '{}' does not reference a generated filesystem output or supported provider root",
-                        disk.id, partition.name, partition.image
+                        disk.id, partition.name, image
                     ),
                     Some("image.assembly.disks.partitions".into()),
                 ));
@@ -356,12 +360,16 @@ pub(crate) fn validate_image_assembly(
             validate_assembly_path_template(
                 spec,
                 &tree_ids,
-                &partition.image,
+                image,
                 "image.assembly.disks.partitions.image",
                 diagnostics,
             );
         }
+        image_assembly_layout::validate_disk_layout(disk, diagnostics);
     }
+
+    image_assembly_layout::validate_transform_levels(assembly, diagnostics);
+    image_assembly_layout::validate_archives(spec, assembly, &tree_ids, diagnostics);
 
     for initramfs in &assembly.busybox_initramfs {
         if !tree_ids.contains(&initramfs.tree) {
@@ -429,6 +437,12 @@ pub(crate) fn assembly_expected_image_names(spec: &ResolvedBuildSpec) -> HashSet
         .iter()
         .map(|filesystem| filesystem.output.as_str())
         .chain(assembly.disks.iter().map(|disk| disk.output.as_str()))
+        .chain(
+            assembly
+                .archives
+                .iter()
+                .map(|archive| archive.output.as_str()),
+        )
         .filter_map(expected_image_name_from_output)
         .collect()
 }
@@ -438,7 +452,7 @@ fn validate_simple_glob_pattern(pattern: &str, diagnostics: &mut Vec<ValidationD
     let _ = diagnostics;
 }
 
-fn validate_assembly_path_template(
+pub(crate) fn validate_assembly_path_template(
     spec: &ResolvedBuildSpec,
     tree_ids: &HashSet<gaia_spec::AssemblyTreeId>,
     value: &gaia_spec::AssemblyPathTemplate,

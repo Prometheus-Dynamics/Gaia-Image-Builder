@@ -93,14 +93,18 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
                     kind: None,
                     type_alias: Some("fat32-lba".into()),
                     bootable: true,
-                    image: boot_vfat.display().to_string().into(),
+                    image: Some(boot_vfat.display().to_string().into()),
+                    size: None,
+                    wipe: false,
                 },
                 AssemblyDiskPartitionSpec {
                     name: "rootfs".into(),
                     kind: Some("0x83".into()),
                     type_alias: None,
                     bootable: false,
-                    image: rootfs_image.display().to_string().into(),
+                    image: Some(rootfs_image.display().to_string().into()),
+                    size: None,
+                    wipe: false,
                 },
             ],
         }],
@@ -185,14 +189,18 @@ fn executes_image_assembly_archives_single_disk_as_raw_xz() {
                     kind: None,
                     type_alias: Some("fat32-lba".into()),
                     bootable: true,
-                    image: boot_image.display().to_string().into(),
+                    image: Some(boot_image.display().to_string().into()),
+                    size: None,
+                    wipe: false,
                 },
                 AssemblyDiskPartitionSpec {
                     name: "rootfs".into(),
                     kind: Some("0x83".into()),
                     type_alias: None,
                     bootable: false,
-                    image: rootfs_image.display().to_string().into(),
+                    image: Some(rootfs_image.display().to_string().into()),
+                    size: None,
+                    wipe: false,
                 },
             ],
         }],
@@ -351,18 +359,24 @@ fn executes_image_assembly_mbr_disk() {
                     kind: None,
                     type_alias: Some("fat32-lba".into()),
                     bootable: true,
-                    image: image_dir.join("boot.vfat").display().to_string().into(),
+                    image: Some(image_dir.join("boot.vfat").display().to_string().into()),
+                    size: None,
+                    wipe: false,
                 },
                 AssemblyDiskPartitionSpec {
                     name: "rootfs".into(),
                     kind: Some("0x83".into()),
                     type_alias: None,
                     bootable: false,
-                    image: image_dir
-                        .join("rootfs.squashfs")
-                        .display()
-                        .to_string()
-                        .into(),
+                    image: Some(
+                        image_dir
+                            .join("rootfs.squashfs")
+                            .display()
+                            .to_string()
+                            .into(),
+                    ),
+                    size: None,
+                    wipe: false,
                 },
             ],
         }],
@@ -452,18 +466,24 @@ fn executes_image_assembly_mbr_disk_with_explicit_lba_layout() {
                     kind: None,
                     type_alias: Some("fat32-lba".into()),
                     bootable: true,
-                    image: image_dir.join("boot.vfat").display().to_string().into(),
+                    image: Some(image_dir.join("boot.vfat").display().to_string().into()),
+                    size: None,
+                    wipe: false,
                 },
                 AssemblyDiskPartitionSpec {
                     name: "rootfs".into(),
                     kind: Some("0x83".into()),
                     type_alias: None,
                     bootable: false,
-                    image: image_dir
-                        .join("rootfs.squashfs")
-                        .display()
-                        .to_string()
-                        .into(),
+                    image: Some(
+                        image_dir
+                            .join("rootfs.squashfs")
+                            .display()
+                            .to_string()
+                            .into(),
+                    ),
+                    size: None,
+                    wipe: false,
                 },
             ],
         }],
@@ -502,7 +522,7 @@ fn executes_image_assembly_mbr_disk_with_explicit_lba_layout() {
 }
 
 #[test]
-fn image_assembly_mbr_rejects_more_than_four_partitions_before_writing_disk() {
+fn image_assembly_mbr_rejects_bootable_logical_partition_before_writing_disk() {
     let mut spec = test_spec();
     let build_dir = Path::new(&spec.workspace.build_dir);
     let image_dir = build_dir.join("disk-images");
@@ -526,12 +546,16 @@ fn image_assembly_mbr_rejects_more_than_four_partitions_before_writing_disk() {
                     name: format!("part{index}"),
                     kind: Some("0x83".into()),
                     type_alias: None,
-                    bootable: false,
-                    image: image_dir
-                        .join(format!("part{index}.img"))
-                        .display()
-                        .to_string()
-                        .into(),
+                    bootable: index == 4,
+                    image: Some(
+                        image_dir
+                            .join(format!("part{index}.img"))
+                            .display()
+                            .to_string()
+                            .into(),
+                    ),
+                    size: None,
+                    wipe: false,
                 })
                 .collect(),
         }],
@@ -556,6 +580,12 @@ fn image_assembly_mbr_rejects_more_than_four_partitions_before_writing_disk() {
     );
 
     assert_eq!(outcome.errors.len(), 1);
-    assert!(outcome.errors[0].message.contains("MBR supports at most 4"));
+    assert!(
+        outcome.errors[0]
+            .message
+            .contains("bootable is only allowed on primary partitions"),
+        "{}",
+        outcome.errors[0].message
+    );
     assert!(!output.exists());
 }

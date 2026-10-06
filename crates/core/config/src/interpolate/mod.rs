@@ -1,3 +1,4 @@
+mod assembly_archives;
 mod resolver;
 mod scanner;
 
@@ -442,12 +443,22 @@ fn interpolate_image_assembly(
                     partition.type_alias = partition
                         .type_alias
                         .map(|value| resolver::interpolate_string(value, raw, env));
-                    partition.image = resolver::interpolate_string(partition.image, raw, env);
+                    partition.image = partition
+                        .image
+                        .map(|value| resolver::interpolate_string(value, raw, env));
+                    partition.size = partition
+                        .size
+                        .map(|value| resolver::interpolate_string(value, raw, env));
                     partition
                 })
                 .collect();
             disk
         })
+        .collect();
+    assembly.archives = assembly
+        .archives
+        .into_iter()
+        .map(|archive| assembly_archives::interpolate_assembly_archive(archive, raw, env))
         .collect();
     assembly.busybox_initramfs = assembly
         .busybox_initramfs

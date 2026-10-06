@@ -174,6 +174,12 @@ fn assembly_expected_image_names(image: &ImageSpec) -> std::collections::HashSet
         .iter()
         .map(|filesystem| filesystem.output.as_str())
         .chain(assembly.disks.iter().map(|disk| disk.output.as_str()))
+        .chain(
+            assembly
+                .archives
+                .iter()
+                .map(|archive| archive.output.as_str()),
+        )
         .filter_map(|output| {
             Path::new(output)
                 .file_name()
@@ -198,7 +204,7 @@ fn assembly_provider_image_inputs(image: &ImageSpec) -> std::collections::BTreeS
         .iter()
         .flat_map(|disk| &disk.partitions)
         .filter_map(|partition| {
-            let image = partition.image.as_str();
+            let image = partition.image.as_deref()?;
             if generated_outputs.contains(image) {
                 return None;
             }

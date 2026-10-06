@@ -1,6 +1,8 @@
 mod artifact;
 mod assembly;
+mod assembly_archive_spec;
 mod assembly_spec;
+mod byte_size;
 mod checkpoints;
 mod clean;
 mod ids;
@@ -24,14 +26,19 @@ pub use artifact::{
     JavaArtifactSpec, NodeArtifactSpec, PythonArtifactSpec, RustArtifactSpec,
 };
 pub use assembly::{AssemblyRoots, expand_simple_glob, wildcard_match};
+pub use assembly_archive_spec::{
+    AssemblyArchiveMemberSourceSpec, AssemblyArchiveMemberSpec, AssemblyArchiveSpec,
+    AssemblyDigestToken, assembly_digest_tokens,
+};
 pub use assembly_spec::{
     AssemblyBusyboxInitramfsSpec, AssemblyDirSpec, AssemblyDiskPartitionSpec, AssemblyDiskSpec,
     AssemblyFileSpec, AssemblyFilesystemKindSpec, AssemblyFilesystemSpec,
     AssemblyPartitionTableSpec, AssemblyPathTemplate, AssemblyPathTemplateContext,
     AssemblyPathTemplateError, AssemblySymlinkSpec, AssemblyTransformKindSpec,
-    AssemblyTransformSpec, AssemblyTreeSpec, ByteSize, ByteSizeParseError, FileMode,
-    FileModeParseError, ImageAssemblySpec, MbrPartitionType, MbrPartitionTypeParseError,
+    AssemblyTransformSpec, AssemblyTreeSpec, FileMode, FileModeParseError, ImageAssemblySpec,
+    MbrPartitionType, MbrPartitionTypeParseError,
 };
+pub use byte_size::{ByteSize, ByteSizeParseError};
 pub use checkpoints::{
     CheckpointAnchorRef, CheckpointBackendRef, CheckpointId, CheckpointPointSpec, CheckpointPolicy,
     CheckpointSpec,

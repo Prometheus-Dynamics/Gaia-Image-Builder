@@ -123,6 +123,7 @@ fn gzip_transform_failure_reports_bounded_stderr_tail_and_tool_path() {
             src: Some(source_dir.join("kernel").display().to_string().into()),
             dest: output_dir.join("kernel.img").display().to_string().into(),
             deterministic: true,
+            level: None,
         }],
         ..ImageAssemblySpec::default()
     });
@@ -174,6 +175,7 @@ fn gzip_transform_tool_start_failure_is_typed() {
             src: Some(source_dir.join("kernel").display().to_string().into()),
             dest: output_dir.join("kernel.img").display().to_string().into(),
             deterministic: true,
+            level: None,
         }],
         ..ImageAssemblySpec::default()
     });
@@ -231,6 +233,7 @@ fn gzip_transform_honors_assembly_command_timeout() {
             src: Some(source_dir.join("kernel").display().to_string().into()),
             dest: output_dir.join("kernel.img").display().to_string().into(),
             deterministic: true,
+            level: None,
         }],
         ..ImageAssemblySpec::default()
     });
@@ -293,6 +296,7 @@ fn gzip_transform_succeeds_when_tool_version_probe_hangs() {
             src: Some(source_dir.join("kernel").display().to_string().into()),
             dest: dest.display().to_string().into(),
             deterministic: true,
+            level: None,
         }],
         ..ImageAssemblySpec::default()
     });
@@ -360,6 +364,7 @@ fn gzip_transform_honors_execution_cancellation() {
             src: Some(source_dir.join("kernel").display().to_string().into()),
             dest: output_dir.join("kernel.img").display().to_string().into(),
             deterministic: true,
+            level: None,
         }],
         ..ImageAssemblySpec::default()
     });
@@ -429,6 +434,7 @@ fn compile_dts_prefers_provider_host_dtc() {
             src: Some(source_dir.join("overlay.dts").display().to_string().into()),
             dest: dest.display().to_string().into(),
             deterministic: true,
+            level: None,
         }],
         ..ImageAssemblySpec::default()
     });

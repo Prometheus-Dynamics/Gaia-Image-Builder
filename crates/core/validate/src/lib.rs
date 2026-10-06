@@ -4,6 +4,7 @@ mod core;
 mod diagnostics;
 mod image;
 mod image_assembly;
+mod image_assembly_layout;
 mod inputs;
 mod install_stage;
 mod model;

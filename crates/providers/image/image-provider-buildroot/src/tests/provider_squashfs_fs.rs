@@ -341,7 +341,9 @@ fn build_operation_reruns_when_assembly_provider_input_is_missing() {
                 kind: Some("0x83".into()),
                 type_alias: None,
                 bootable: false,
-                image: "$provider.images/rootfs.tar".into(),
+                image: Some("$provider.images/rootfs.tar".into()),
+                size: None,
+                wipe: false,
             }],
         }],
         ..ImageAssemblySpec::default()

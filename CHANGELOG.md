@@ -89,6 +89,23 @@ versions); these changes are released as 2.1.0.
 
 ### Added
 
+- Image assembly MBR disks accept more than 4 partitions: partitions 1-3 stay
+  primary, slot 4 becomes an extended partition (`0x05`) and the rest become
+  logical partitions p5, p6, ... with the standard sfdisk EBR chain. Layouts
+  with 4 or fewer partitions are unchanged. `bootable` is rejected on logical
+  partitions.
+- Assembly disk partitions take an optional `size` (`"128M"`, `"2G"`, plain
+  bytes); the image must fit and the rest stays unwritten (sparse). `image` is
+  optional when `size` is set, giving an empty partition, and `wipe = true`
+  zeroes the first MiB of an empty partition to clear stale filesystem
+  signatures. `ByteSize` values also accept a `T` suffix.
+- `zstd` assembly transform (`zstd -q -c --no-progress -T0`) with an optional
+  `level` (1-19); the tool path and version are recorded like `gzip`.
+- `[[image.assembly.archives]]` builds deterministic ustar archives after the
+  disks from ordered file `members` and generated `KEY=value` files whose
+  values can use `${assembly.sha256:<path>}`. Archives are published
+  atomically, recorded in assembly state, allowed in publish-dir hygiene and
+  covered by reuse fingerprints.
 - Added imports from a git source: `imports = [{ source = "<id>", path = "...", when = {...} }]` reads a layer from the checkout of a pinned (`rev` or lockfile) `kind = "git"` source declared in a local config file, at resolve time, cached in `.gaia/cache/import-sources/<id>-<rev>` and never re-fetched. `@self/...` in any config string resolves to the containing file's directory and `@source:<id>/...` to the source checkout. Nested imports must stay inside the checkout. `--set sources.<id>.path=<dir>` reads the layer from a local directory and materializes the source as a path source. `gaia lock` pins unpinned import sources. The import source identity is folded into the fingerprints of items the layer declares, so changing `rev` rebuilds them.
 - Added `--only <targets>` to `gaia run` and `gaia plan` to execute part of the build graph (a domain such as `artifacts` or `image`, or an operation id such as `artifact:<id>`) plus its dependencies. Partial runs keep the reuse state of operations they skip.
 - Added `gaia tui --builds-dir <dir>` to choose the directory the build picker scans.

@@ -64,7 +64,9 @@ fn collect_expected_images_skips_required_output_generated_by_assembly() {
                 kind: Some("0x83".into()),
                 type_alias: None,
                 bootable: false,
-                image: "$provider.images/rootfs.tar".into(),
+                image: Some("$provider.images/rootfs.tar".into()),
+                size: None,
+                wipe: false,
             }],
         }],
         ..ImageAssemblySpec::default()

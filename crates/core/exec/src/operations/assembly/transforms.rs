@@ -63,36 +63,13 @@ pub(super) fn execute_assembly_transform(
             })
         }
         gaia_spec::AssemblyTransformKindSpec::Gzip => {
-            let tool = resolve_assembly_tool(roots, "gzip")?;
-            tracing::Span::current().record("tool_path", tool.display.as_str());
-            let temp = temporary_assembly_output_path(&dest);
-            let mut command = Command::new(&tool.program);
-            command.arg("-n").arg("-c").arg(&src);
-            let output = run_command_stdout_to_file(
-                spec,
-                &mut command,
-                &temp,
-                process_output_retention(spec),
-                cancel_check,
-            )?;
-            if !output.status.success() {
-                return Err(format!(
-                    "gzip transform failed for '{}' using '{}': {}",
-                    src.display(),
-                    tool.display,
-                    output.failure_context(&command)
-                )
-                .into());
-            }
-            publish_assembly_output(&temp, &dest)?;
-            Ok(AssemblyTransformSummary {
-                src,
-                bytes: file_len(&dest)?,
-                sha256: file_sha256(&dest)?,
-                dest,
-                tool_path: Some(tool.display.clone()),
-                tool_version: tool_version(&tool, ["--version"]),
-            })
+            compress_to_dest(spec, roots, "gzip", &["-n", "-c"], src, dest, cancel_check)
+        }
+        gaia_spec::AssemblyTransformKindSpec::Zstd => {
+            let level = transform.level.map(|level| format!("-{level}"));
+            let mut args = vec!["-q", "-c", "--no-progress", "-T0"];
+            args.extend(level.as_deref());
+            compress_to_dest(spec, roots, "zstd", &args, src, dest, cancel_check)
         }
         gaia_spec::AssemblyTransformKindSpec::CompileDts => {
             let tool = resolve_assembly_tool(roots, "dtc")?;
@@ -135,4 +112,47 @@ pub(super) fn execute_assembly_transform(
             })
         }
     }
+}
+
+/// Runs `<tool> <args> <src>` with stdout published to `dest`.
+fn compress_to_dest(
+    spec: &ResolvedBuildSpec,
+    roots: &AssemblyRoots,
+    tool_name: &str,
+    args: &[&str],
+    src: PathBuf,
+    dest: PathBuf,
+    cancel_check: Option<gaia_process::ProcessCancelCheck>,
+) -> Result<AssemblyTransformSummary, AssemblyError> {
+    let tool = resolve_assembly_tool(roots, tool_name)?;
+    tracing::Span::current().record("tool_path", tool.display.as_str());
+    let temp = temporary_assembly_output_path(&dest);
+    let mut command = Command::new(&tool.program);
+    command.args(args).arg(&src);
+    let output = run_command_stdout_to_file(
+        spec,
+        &mut command,
+        &temp,
+        process_output_retention(spec),
+        cancel_check,
+    )?;
+    if !output.status.success() {
+        let _ = std_fs::remove_file(&temp);
+        return Err(format!(
+            "{tool_name} transform failed for '{}' using '{}': {}",
+            src.display(),
+            tool.display,
+            output.failure_context(&command)
+        )
+        .into());
+    }
+    publish_assembly_output(&temp, &dest)?;
+    Ok(AssemblyTransformSummary {
+        src,
+        bytes: file_len(&dest)?,
+        sha256: file_sha256(&dest)?,
+        dest,
+        tool_path: Some(tool.display.clone()),
+        tool_version: tool_version(&tool, ["--version"]),
+    })
 }

@@ -12,6 +12,7 @@ pub struct RawImageAssemblyConfig {
     pub transforms: Vec<RawAssemblyTransformConfig>,
     pub filesystems: Vec<RawAssemblyFilesystemConfig>,
     pub disks: Vec<RawAssemblyDiskConfig>,
+    pub archives: Vec<RawAssemblyArchiveConfig>,
     pub busybox_initramfs: Vec<RawAssemblyBusyboxInitramfsConfig>,
 }
 
@@ -57,6 +58,7 @@ pub struct RawAssemblyTransformConfig {
     pub src: Option<String>,
     pub dest: String,
     pub deterministic: Option<bool>,
+    pub level: Option<u32>,
 }
 
 impl Default for RawAssemblyTransformConfig {
@@ -66,6 +68,7 @@ impl Default for RawAssemblyTransformConfig {
             src: None,
             dest: String::new(),
             deterministic: None,
+            level: None,
         }
     }
 }
@@ -75,6 +78,7 @@ impl Default for RawAssemblyTransformConfig {
 pub enum RawAssemblyTransformKind {
     CompileDts,
     Gzip,
+    Zstd,
     Copy,
 }
 
@@ -153,7 +157,35 @@ pub struct RawAssemblyDiskPartitionConfig {
     pub kind: Option<String>,
     pub type_alias: Option<String>,
     pub bootable: bool,
-    pub image: String,
+    pub image: Option<String>,
+    pub size: Option<String>,
+    pub wipe: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawAssemblyArchiveConfig {
+    pub id: String,
+    pub output: String,
+    /// Ordered members; each sets `src` (a file) or `entries` (generated).
+    pub members: Vec<RawAssemblyArchiveMemberConfig>,
+    /// Generated members, written before `members`.
+    pub generated: Vec<RawAssemblyArchiveGeneratedConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawAssemblyArchiveMemberConfig {
+    pub name: String,
+    pub src: Option<String>,
+    pub entries: Option<Vec<(String, String)>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawAssemblyArchiveGeneratedConfig {
+    pub name: String,
+    pub entries: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

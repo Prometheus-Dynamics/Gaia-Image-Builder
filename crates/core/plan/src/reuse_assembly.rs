@@ -70,8 +70,14 @@ pub(crate) fn assembly_input_signature(spec: &ResolvedBuildSpec) -> String {
                 path_state_signature(&resolved)
             ));
         }
-        if transform.kind == gaia_spec::AssemblyTransformKindSpec::Gzip {
-            parts.push(command_signature("gzip", ["--version"]));
+        match transform.kind {
+            gaia_spec::AssemblyTransformKindSpec::Gzip => {
+                parts.push(command_signature("gzip", ["--version"]));
+            }
+            gaia_spec::AssemblyTransformKindSpec::Zstd => {
+                parts.push(command_signature("zstd", ["--version"]));
+            }
+            _ => {}
         }
     }
     for initramfs in &assembly.busybox_initramfs {
@@ -91,7 +97,19 @@ pub(crate) fn assembly_input_signature(spec: &ResolvedBuildSpec) -> String {
     }
     for disk in &assembly.disks {
         for partition in &disk.partitions {
-            match roots.resolve_path(spec, &partition.image) {
+            let Some(image) = &partition.image else {
+                // An empty partition has no input file; its size and wipe
+                // flag are covered by the hashed assembly config.
+                parts.push(format!(
+                    "partition-empty:{}:{}:{}:{}",
+                    disk.id,
+                    partition.name,
+                    partition.size.as_deref().unwrap_or(""),
+                    partition.wipe
+                ));
+                continue;
+            };
+            match roots.resolve_path(spec, image) {
                 Ok(resolved) if generated_filesystem_outputs.contains(&resolved) => {
                     generated_partition_images += 1;
                     parts.push(format!(
@@ -117,14 +135,39 @@ pub(crate) fn assembly_input_signature(spec: &ResolvedBuildSpec) -> String {
                         "partition-image-resolution-error:{}:{}:{}:{}",
                         disk.id,
                         partition.name,
-                        partition.image.as_str(),
+                        image.as_str(),
                         error
                     ));
                 }
             }
         }
     }
+    let generated_outputs = generated_filesystem_outputs
+        .into_iter()
+        .chain(
+            assembly
+                .transforms
+                .iter()
+                .filter_map(|transform| roots.resolve_path(spec, &transform.dest).ok()),
+        )
+        .chain(
+            assembly
+                .disks
+                .iter()
+                .filter_map(|disk| roots.resolve_path(spec, &disk.output).ok()),
+        )
+        .collect::<BTreeSet<_>>();
+    let archive_inputs = crate::reuse_assembly_archives::archive_input_parts(
+        spec,
+        &roots,
+        assembly,
+        &generated_outputs,
+    );
+    let archive_input_count = archive_inputs.len();
+    parts.extend(archive_inputs);
     tracing::debug!(
+        archives = assembly.archives.len(),
+        archive_inputs = archive_input_count,
         file_entries = assembly.files.len(),
         transforms = assembly.transforms.len(),
         filesystems = assembly.filesystems.len(),

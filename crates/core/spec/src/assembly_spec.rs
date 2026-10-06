@@ -1,4 +1,7 @@
-use crate::{AssemblyFilesystemId, AssemblyTreeId, ImageProviderKind};
+use crate::{
+    AssemblyArchiveSpec, AssemblyFilesystemId, AssemblyTreeId, ByteSize, ByteSizeParseError,
+    ImageProviderKind,
+};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -14,6 +17,7 @@ pub struct ImageAssemblySpec {
     pub transforms: Vec<AssemblyTransformSpec>,
     pub filesystems: Vec<AssemblyFilesystemSpec>,
     pub disks: Vec<AssemblyDiskSpec>,
+    pub archives: Vec<AssemblyArchiveSpec>,
     pub busybox_initramfs: Vec<AssemblyBusyboxInitramfsSpec>,
 }
 
@@ -28,6 +32,7 @@ impl ImageAssemblySpec {
             && self.transforms.is_empty()
             && self.filesystems.is_empty()
             && self.disks.is_empty()
+            && self.archives.is_empty()
             && self.busybox_initramfs.is_empty()
     }
 }
@@ -134,12 +139,15 @@ pub struct AssemblyTransformSpec {
     pub src: Option<AssemblyPathTemplate>,
     pub dest: AssemblyPathTemplate,
     pub deterministic: bool,
+    /// Compression level for `zstd` (1-19); `None` uses the tool default.
+    pub level: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssemblyTransformKindSpec {
     CompileDts,
     Gzip,
+    Zstd,
     Copy,
 }
 
@@ -148,6 +156,7 @@ impl AssemblyTransformKindSpec {
         match self {
             Self::CompileDts => "compile-dts",
             Self::Gzip => "gzip",
+            Self::Zstd => "zstd",
             Self::Copy => "copy",
         }
     }
@@ -166,61 +175,6 @@ pub struct AssemblyFilesystemSpec {
 impl AssemblyFilesystemSpec {
     pub fn parsed_size(&self) -> Result<Option<ByteSize>, ByteSizeParseError> {
         self.size.as_deref().map(ByteSize::from_str).transpose()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ByteSize(u64);
-
-impl ByteSize {
-    pub const fn from_bytes(bytes: u64) -> Self {
-        Self(bytes)
-    }
-
-    pub fn bytes(self) -> u64 {
-        self.0
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ByteSizeParseError {
-    Empty,
-    InvalidNumber(String),
-    Overflow(String),
-}
-
-impl std::fmt::Display for ByteSizeParseError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Empty => formatter.write_str("byte size cannot be empty"),
-            Self::InvalidNumber(value) => write!(formatter, "invalid byte size '{value}'"),
-            Self::Overflow(value) => write!(formatter, "byte size '{value}' is too large"),
-        }
-    }
-}
-
-impl FromStr for ByteSize {
-    type Err = ByteSizeParseError;
-
-    fn from_str(raw: &str) -> Result<Self, Self::Err> {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            return Err(ByteSizeParseError::Empty);
-        }
-        let (number, multiplier) = match trimmed.as_bytes().last().copied() {
-            Some(b'K' | b'k') => (&trimmed[..trimmed.len() - 1], 1024u64),
-            Some(b'M' | b'm') => (&trimmed[..trimmed.len() - 1], 1024u64 * 1024),
-            Some(b'G' | b'g') => (&trimmed[..trimmed.len() - 1], 1024u64 * 1024 * 1024),
-            _ => (trimmed, 1u64),
-        };
-        let value = number
-            .trim()
-            .parse::<u64>()
-            .map_err(|_| ByteSizeParseError::InvalidNumber(raw.into()))?;
-        let bytes = value
-            .checked_mul(multiplier)
-            .ok_or_else(|| ByteSizeParseError::Overflow(raw.into()))?;
-        Ok(Self(bytes))
     }
 }
 
@@ -274,10 +228,21 @@ pub struct AssemblyDiskPartitionSpec {
     pub kind: Option<String>,
     pub type_alias: Option<String>,
     pub bootable: bool,
-    pub image: AssemblyPathTemplate,
+    /// Image written at the partition start; `None` leaves the partition
+    /// empty, which requires `size`.
+    pub image: Option<AssemblyPathTemplate>,
+    /// Fixed partition size; defaults to the image size.
+    pub size: Option<String>,
+    /// Zero the first MiB of an empty partition so stale filesystem
+    /// signatures from a previous flash do not survive.
+    pub wipe: bool,
 }
 
 impl AssemblyDiskPartitionSpec {
+    pub fn parsed_size(&self) -> Result<Option<ByteSize>, ByteSizeParseError> {
+        self.size.as_deref().map(ByteSize::from_str).transpose()
+    }
+
     pub fn partition_type(&self) -> Result<MbrPartitionType, MbrPartitionTypeParseError> {
         if let Some(kind) = &self.kind {
             return MbrPartitionType::from_raw_hex(kind);
@@ -603,22 +568,6 @@ mod tests {
         assert_eq!("0644".parse::<FileMode>().expect("0644").bits(), 0o0644);
         assert!("0888".parse::<FileMode>().is_err());
         assert!("10000".parse::<FileMode>().is_err());
-    }
-
-    #[test]
-    fn byte_size_parses_suffixes_and_rejects_overflow() {
-        assert_eq!("512".parse::<ByteSize>().expect("bytes").bytes(), 512);
-        assert_eq!("1K".parse::<ByteSize>().expect("kib").bytes(), 1024);
-        assert_eq!(
-            "2M".parse::<ByteSize>().expect("mib").bytes(),
-            2 * 1024 * 1024
-        );
-        assert_eq!(
-            "3G".parse::<ByteSize>().expect("gib").bytes(),
-            3 * 1024 * 1024 * 1024
-        );
-        assert!("not-a-size".parse::<ByteSize>().is_err());
-        assert!(format!("{}G", u64::MAX).parse::<ByteSize>().is_err());
     }
 
     #[test]

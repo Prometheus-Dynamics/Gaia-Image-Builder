@@ -1256,16 +1256,160 @@ Assembly behavior:
 - Glob staging is deterministic and currently supports simple non-recursive `*` filename patterns.
 - `optional = true` skips missing sources without failing the build and records the skip in runtime state.
 - `mode = "0755"` applies Unix file modes on Unix hosts.
-- Transform kinds currently implemented are `copy`, `gzip`, and `compile-dts`.
+- Transform kinds currently implemented are `copy`, `gzip`, `zstd`, and `compile-dts`.
 - `gzip` uses stable name and timestamp behavior for deterministic output.
+- `zstd` runs `zstd -q -c --no-progress -T0 [-<level>] <src>`, resolving `zstd` from provider host tools first, then host `PATH`; the tool path and version are recorded in assembly state. The optional `level` (1-19) is only accepted on `zstd` transforms and defaults to zstd's own default.
 - `compile-dts` resolves `dtc` from provider host tools first, then host `PATH`.
 - `busybox_initramfs` copies the configured BusyBox binary to `bin/busybox`, creates requested applet symlinks in `bin`, and can copy `ldd`-reported runtime libraries when `include_runtime_libs = true`.
 - Runtime library discovery is intended for Linux-style hosts and target binaries that can be inspected by host `ldd`; static BusyBox output skips library copying.
 - Filesystem kinds currently implemented are `vfat`, `cpio`, and `cpio-gzip`.
-- `vfat` uses `mtools` (`mformat` and `mcopy`), resolving provider host tools first, then host `PATH`; `size` accepts byte values or `K`, `M`, and `G` suffixes.
-- Raw MBR disk assembly writes up to four 1 MiB-aligned partitions sequentially from declared partition images.
+- `vfat` uses `mtools` (`mformat` and `mcopy`), resolving provider host tools first, then host `PATH`; `size` accepts byte values or binary `K`, `M`, `G`, and `T` suffixes.
+- Raw MBR disk assembly writes 1 MiB-aligned partitions sequentially (see [Disk partitions](#disk-partitions)).
 - MBR partition `type` accepts raw `0xNN` values; `type_alias` currently supports `fat32-lba` and `linux`.
-- Assembly runtime state is included in provenance and manifest reports with staged file, transform, and filesystem output sizes and digests.
+- Assembly runtime state is included in provenance and manifest reports with staged file, transform, filesystem, disk, and archive output sizes and digests.
+- Assembly order: trees, dirs, symlinks, files, BusyBox initramfs, transforms, filesystems, disks, archives.
+
+#### Disk partitions
+
+`[[image.assembly.disks.partitions]]` fields:
+- `name`: label used in state and errors.
+- `type` (raw `0xNN`) or `type_alias` (`fat32-lba`, `linux`); defaults to `linux` (`0x83`).
+- `bootable`: sets the MBR active flag. Only allowed on primary partitions; validation rejects it on logical partitions (`assembly_partition_bootable_logical`).
+- `image`: file written at the partition start. Optional when `size` is set.
+- `size`: partition size in bytes or with a binary `K`/`M`/`G`/`T` suffix (`"16M"`, `"2G"`). Without it the partition is exactly as large as its image (rounded up to 512-byte sectors). With it the image must fit, otherwise assembly fails before the disk is written; the space after the image is left unwritten.
+- `wipe = true`: only for empty partitions (no `image`). Writes zeros over the first 1 MiB of the partition (less if the partition is smaller) so filesystem signatures left by a previous flash do not survive when the image is written to a device. Validation rejects `wipe` together with `image`, since an image already overwrites the partition start.
+
+Layout:
+- Partitions are placed in declaration order, each starting at the next `alignment_lba` boundary (default 2048 sectors) after `first_lba` (default 2048).
+- With 4 or fewer partitions all of them are primary partitions p1-p4.
+- With more than 4 partitions Gaia writes the standard sfdisk extended layout: partitions 1-3 are primary (p1-p3), MBR slot 4 becomes an extended partition (type `0x05`), and partitions 4.. become logical partitions p5, p6, ... Each logical partition has an EBR in the first sector of its aligned slot and its data starts at the next `alignment_lba` boundary. EBR entry 0 describes the logical partition relative to its EBR; entry 1 links the next EBR, relative to the extended partition start, and spans that EBR through the end of its logical partition. The extended entry spans from the first EBR to the end of the last logical partition.
+- The disk file is created at its full size with unwritten ranges left as holes, so empty and padded partitions take no space on filesystems that support sparse files.
+- Assembly state records each partition's `start_lba`, `sector_count`, image `bytes`, and for layouts with more than 4 partitions the kernel `number` and the `ebr_lba` of logical partitions; empty partitions record `empty=true` and `wipe_bytes`.
+
+#### Archives
+
+`[[image.assembly.archives]]` builds a plain POSIX ustar archive after all disks, written by Gaia itself (no external `tar`):
+- `id`: unique archive id.
+- `output`: path template, like other assembly outputs; it can point into the image collect dir (`$provider.images/...`).
+- `members`: ordered list. Each member has a `name` (path inside the archive) and exactly one of `src` (a path template; the file is copied) or `entries` (a generated file).
+- `generated`: ordered list of generated members (`name`, `entries`). They are written **before** all `members`; to interleave generated and file members, put `entries` directly on a `members` item instead.
+- `entries`: `[["KEY", "value"], ...]`, rendered as one `KEY=value` line per entry in order. Keys must match `[A-Za-z_][A-Za-z0-9_]*`. Values made only of `A-Z a-z 0-9 _ @ % + = : , . / -` are written as-is; anything else (including an empty value) is wrapped in single quotes with embedded `'` written as `'\''`, so the file can be sourced by `sh`. Values cannot contain newlines.
+- Entry values may contain `${assembly.sha256:<path template>}`, replaced at assembly time by the lowercase hex sha256 of that file (an assembly output such as a transform result, or any other file). The file must exist when the archive is built. Normal config interpolation such as `${build.version}` runs first and may also appear inside the path (`${assembly.sha256:$assembly.out/${build.name}.img}`). Any other `${...}` left in a value is a validation error.
+
+Archive output is deterministic: entries appear in the configured order with mtime 0, uid/gid 0, empty user and group names, and mode `0644`. Member names must be relative paths of at most 100 bytes (the ustar name field; prefix splitting is not used) without `.`/`..` components, and must be unique per archive. The archive is written to a temporary file and published atomically; state records `archives.N.output`, `bytes`, `sha256`, and per-member name, source, size, and sha256. Archive outputs are treated as expected outputs, so a bundle in the collect dir is not reported as a large unexpected file. Reuse fingerprints cover the archive config and the state of every member and digest input file.
+
+#### Example: CM5 eMMC A/B layout with an update bundle
+
+A Compute Module 5 eMMC image with a small autoboot partition, A/B boot and root slots, a data partition, and a `.pdupdate` bundle containing a manifest and zstd-compressed slot images:
+
+| Partition | Content |
+| --- | --- |
+| p1 | 16M FAT holding only `autoboot.txt` |
+| p2, p3 | boot A/B, 128M FAT each, both from `boot.vfat` |
+| p4 | extended partition |
+| p5, p6 | root A/B, 2G ext4 each; A from `rootfs.ext4`, B empty and wiped |
+| p7 | `/data` ext4 from a small image |
+
+```toml
+build_name = "helios"
+version = "1.2.3"
+
+[image.assembly]
+work_dir = "${workspace.build_dir}/assembly"
+
+[[image.assembly.trees]]
+id = "autoboot"
+path = "$assembly.work/autoboot"
+
+[[image.assembly.files]]
+tree = "autoboot"
+src = "@assets/autoboot.txt"
+dest = "autoboot.txt"
+
+[[image.assembly.filesystems]]
+id = "autoboot"
+kind = "vfat"
+source_tree = "autoboot"
+output = "$provider.images/autoboot.vfat"
+size = "16M"
+
+[[image.assembly.transforms]]
+kind = "zstd"
+src = "$provider.images/boot.vfat"
+dest = "$assembly.work/boot.vfat.zst"
+
+[[image.assembly.transforms]]
+kind = "zstd"
+src = "$provider.images/rootfs.ext4"
+dest = "$assembly.work/rootfs.ext4.zst"
+level = 19
+
+[[image.assembly.disks]]
+id = "emmc"
+output = "$provider.images/emmc.img"
+partition_table = "mbr"
+
+[[image.assembly.disks.partitions]]
+name = "autoboot"
+type_alias = "fat32-lba"
+bootable = true
+image = "$provider.images/autoboot.vfat"
+size = "16M"
+
+[[image.assembly.disks.partitions]]
+name = "boot-a"
+type_alias = "fat32-lba"
+image = "$provider.images/boot.vfat"
+size = "128M"
+
+[[image.assembly.disks.partitions]]
+name = "boot-b"
+type_alias = "fat32-lba"
+image = "$provider.images/boot.vfat"
+size = "128M"
+
+[[image.assembly.disks.partitions]]
+name = "rootfs-a"
+type_alias = "linux"
+image = "$provider.images/rootfs.ext4"
+size = "2G"
+
+[[image.assembly.disks.partitions]]
+name = "rootfs-b"
+type_alias = "linux"
+size = "2G"
+wipe = true
+
+[[image.assembly.disks.partitions]]
+name = "data"
+type_alias = "linux"
+image = "$provider.images/data.ext4"
+
+[[image.assembly.archives]]
+id = "update"
+output = "$provider.images/${build.name}-${build.version}.pdupdate"
+
+[[image.assembly.archives.members]]
+name = "manifest.env"
+entries = [
+  ["MODEL", "cm5"],
+  ["VERSION", "${build.version}"],
+  ["OS", "HeliOS"],
+  ["BOOT_SHA256", "${assembly.sha256:$assembly.work/boot.vfat.zst}"],
+  ["ROOTFS_SHA256", "${assembly.sha256:$assembly.work/rootfs.ext4.zst}"],
+]
+
+[[image.assembly.archives.members]]
+name = "boot.vfat.zst"
+src = "$assembly.work/boot.vfat.zst"
+
+[[image.assembly.archives.members]]
+name = "rootfs.ext4.zst"
+src = "$assembly.work/rootfs.ext4.zst"
+```
+
+The bundle `helios-1.2.3.pdupdate` is a tar of `manifest.env` (`MODEL`, `VERSION`, `OS`, `BOOT_SHA256`, `ROOTFS_SHA256`) followed by `boot.vfat.zst` and `rootfs.ext4.zst`, where each digest is the sha256 of the compressed member in the bundle.
+
 
 Provider hooks and assembly:
 - Keep provider-native post-image hooks for provider-specific behavior that must run inside the provider build environment.

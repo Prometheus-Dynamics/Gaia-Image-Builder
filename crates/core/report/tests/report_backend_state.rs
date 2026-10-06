@@ -377,3 +377,45 @@ fn output_hygiene_uses_custom_threshold_and_transient_names() {
                 && warning.size_bytes == Some(8))
     );
 }
+
+#[test]
+fn output_hygiene_allows_assembly_archive_outputs() {
+    let mut spec = test_spec();
+    spec.reporting.output_hygiene.large_file_threshold_bytes = 8;
+    let collect_dir = PathBuf::from(spec.image.output.collect_dir.as_ref().expect("collect dir"));
+    spec.image.assembly = Some(ImageAssemblySpec {
+        archives: vec![gaia_spec::AssemblyArchiveSpec {
+            id: "update".into(),
+            output: "$provider.images/helios-1.2.3.pdupdate".into(),
+            members: Vec::new(),
+        }],
+        ..ImageAssemblySpec::default()
+    });
+    let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
+    materialize_reusable_outputs(&spec);
+    fs::create_dir_all(&collect_dir).expect("collect dir");
+    fs::write(collect_dir.join("helios-1.2.3.pdupdate"), b"0123456789").expect("bundle");
+    fs::write(collect_dir.join("stray.bin"), b"0123456789").expect("stray file");
+
+    let validation =
+        validate_spec_with_providers(&spec, &source_catalog, &artifact_catalog, &image_catalog);
+    let plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
+    let outcome = gaia_exec::ExecutionOutcome::default();
+    let report = generate_report(&spec, &validation, &plan, &outcome);
+    let large_files = report
+        .manifest
+        .output_hygiene_warnings
+        .iter()
+        .filter(|warning| warning.code == "publish_large_unexpected_file")
+        .map(|warning| warning.path.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(
+        large_files.iter().any(|path| path.ends_with("stray.bin")),
+        "{large_files:?}"
+    );
+    assert!(
+        large_files.iter().all(|path| !path.ends_with(".pdupdate")),
+        "{large_files:?}"
+    );
+}

@@ -12,17 +12,22 @@ use std::time::Duration;
 
 use super::helpers::{process_output_retention, runtime_state_dir};
 
+mod archives;
 mod busybox;
 mod disks;
 mod files;
 mod filesystems;
+mod mbr;
 mod state;
+mod tar;
 mod transforms;
 
+use archives::*;
 use busybox::*;
 use disks::*;
 use files::*;
 use filesystems::*;
+use mbr::*;
 use state::AssemblyExecutionContext;
 pub(crate) use state::{assembly_state_path, image_assembly_cleanup_paths};
 use transforms::*;
@@ -428,49 +433,7 @@ pub(crate) fn stage_image_assembly(
         tracing::Span::current().record("output_path", summary.output.display().to_string());
         disk_count += 1;
         disk_outputs.push(summary.output.clone());
-        let disk_state = AssemblyStateKey::new("disk", disk_count);
-        state.insert(disk_state.field("id"), disk.id.as_str());
-        state.insert(
-            disk_state.field("partition_table"),
-            disk.partition_table.as_str(),
-        );
-        state.insert(
-            disk_state.field("output"),
-            summary.output.display().to_string(),
-        );
-        state.insert(disk_state.field("bytes"), summary.bytes);
-        state.insert(disk_state.field("sha256"), summary.sha256);
-        state.insert(
-            disk_state.field("partition_count"),
-            summary.partitions.len(),
-        );
-        for (partition_index, partition) in summary.partitions.iter().enumerate() {
-            let index = partition_index + 1;
-            state.insert(
-                disk_state.child_field("partition", index, "name"),
-                &partition.name,
-            );
-            state.insert(
-                disk_state.child_field("partition", index, "type"),
-                format!("0x{:02X}", partition.partition_type),
-            );
-            state.insert(
-                disk_state.child_field("partition", index, "image"),
-                partition.image.display().to_string(),
-            );
-            state.insert(
-                disk_state.child_field("partition", index, "start_lba"),
-                partition.start_lba,
-            );
-            state.insert(
-                disk_state.child_field("partition", index, "sector_count"),
-                partition.sector_count,
-            );
-            state.insert(
-                disk_state.child_field("partition", index, "bytes"),
-                partition.bytes,
-            );
-        }
+        record_disk_state(&mut state, disk_count, disk, &summary);
         messages.push(format!(
             "built assembly disk '{}' at '{}'",
             disk.id,
@@ -478,6 +441,25 @@ pub(crate) fn stage_image_assembly(
         ));
     }
     state.insert("completed_disk_count", disk_count);
+
+    for (index, archive) in assembly.archives.iter().enumerate() {
+        let span = tracing::info_span!(
+            "assembly_archive",
+            operation_id = %operation_id.as_str(),
+            archive_id = %archive.id
+        );
+        let _span_guard = span.enter();
+        let summary = execute_assembly_archive(spec, &roots, archive)?;
+        record_archive_state(&mut state, index + 1, archive, &summary);
+        messages.push(format!(
+            "built assembly archive '{}' at '{}'",
+            archive.id,
+            summary.output.display()
+        ));
+    }
+    if !assembly.archives.is_empty() {
+        state.insert("completed_archive_count", assembly.archives.len());
+    }
 
     let mut cleanup_paths = context.cleanup_paths();
     let mut archive_path = None;

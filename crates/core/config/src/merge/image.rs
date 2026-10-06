@@ -50,6 +50,9 @@ fn merge_image_assembly(
                 filesystem.id.clone()
             }),
             disks: merge_by_key(base.disks, overlay.disks, |disk| disk.id.clone()),
+            archives: merge_by_key(base.archives, overlay.archives, |archive| {
+                archive.id.clone()
+            }),
             busybox_initramfs: [base.busybox_initramfs, overlay.busybox_initramfs].concat(),
         }),
         (None, Some(assembly)) | (Some(assembly), None) => Some(assembly),

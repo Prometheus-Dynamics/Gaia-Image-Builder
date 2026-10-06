@@ -195,6 +195,12 @@ fn expected_publish_filenames(spec: &ResolvedBuildSpec) -> std::collections::Has
             .iter()
             .map(|filesystem| filesystem.output.as_str())
             .chain(assembly.disks.iter().map(|disk| disk.output.as_str()))
+            .chain(
+                assembly
+                    .archives
+                    .iter()
+                    .map(|archive| archive.output.as_str()),
+            )
         {
             if let Some(name) = Path::new(output).file_name().and_then(|name| name.to_str()) {
                 names.insert(name.to_string());
