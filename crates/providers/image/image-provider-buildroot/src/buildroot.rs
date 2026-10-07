@@ -467,6 +467,18 @@ pub(crate) fn run_buildroot_with(
     if let Some(current) = &current_graph {
         current.record(output_dir)?;
     }
+    let cached_packages = restore_cached_packages(RestoreCachedPackages {
+        spec,
+        buildroot_dir,
+        output_dir,
+        br2_external,
+        command_context: &command_context,
+        graph: current_graph
+            .as_ref()
+            .map(|current| current.graph.clone())
+            .or(previous_graph),
+        messages: &mut messages,
+    })?;
     if let Some(script) = options.post_build_script {
         command.arg(post_build_script_override(output_dir, script));
     }
@@ -489,6 +501,9 @@ pub(crate) fn run_buildroot_with(
         command_context.log_sink,
         command_context.cancel_check,
     )?);
+    if let Some(cached) = cached_packages {
+        messages.extend(cached.store(output_dir));
+    }
     if command_context.policy.ccache_enabled
         && let Some(stats) = fs::read_to_string(&ccache_stats_log)
             .ok()
@@ -500,6 +515,136 @@ pub(crate) fn run_buildroot_with(
         write_shared_pack_state(output_dir)?;
     }
     Ok(messages)
+}
+
+struct RestoreCachedPackages<'a, 'b> {
+    spec: &'a ResolvedBuildSpec,
+    buildroot_dir: &'a Path,
+    output_dir: &'a Path,
+    br2_external: Option<&'a str>,
+    command_context: &'a ImageCommandContext<'b>,
+    graph: Option<PackageGraph>,
+    messages: &'a mut Vec<String>,
+}
+
+/// The package cache's work for one `make`: what was restored before it,
+/// and the keys to store what it built under.
+struct CachedPackages {
+    cache: PackageCache,
+    graph: PackageGraph,
+    keys: BTreeMap<String, Option<String>>,
+    restored: Vec<String>,
+}
+
+impl CachedPackages {
+    fn store(&self, output_dir: &Path) -> Vec<String> {
+        let (stored, skipped) =
+            self.cache
+                .store(output_dir, &self.graph, &self.keys, &self.restored);
+        let mut messages = Vec::new();
+        if !stored.is_empty() {
+            messages.push(format!(
+                "stored {} Buildroot package(s) in the package cache: {}",
+                stored.len(),
+                stored.join(", ")
+            ));
+        }
+        for reason in &skipped {
+            tracing::info!(
+                provider_domain = "image.buildroot",
+                "package cache: not stored: {reason}"
+            );
+        }
+        if !skipped.is_empty() {
+            messages.push(format!(
+                "package cache: {} package(s) not stored: {}",
+                skipped.len(),
+                skipped.join("; ")
+            ));
+        }
+        messages.push(format!(
+            "{SUMMARY_NOTE_PREFIX}buildroot package cache: {} restored, {} stored",
+            self.restored.len(),
+            stored.len()
+        ));
+        messages
+    }
+}
+
+/// Restores the packages this tree still has to build from the package
+/// cache, when it is on.
+fn restore_cached_packages(
+    request: RestoreCachedPackages<'_, '_>,
+) -> Result<Option<CachedPackages>, ImageProviderError> {
+    let RestoreCachedPackages {
+        spec,
+        buildroot_dir,
+        output_dir,
+        br2_external,
+        command_context,
+        graph,
+        messages,
+    } = request;
+    let Some(cache) = package_cache(spec, command_context.policy)? else {
+        if command_context.policy.package_cache_enabled {
+            messages.push(
+                "package cache: off, it needs [providers.buildroot] parallel_packages = true"
+                    .to_string(),
+            );
+        }
+        return Ok(None);
+    };
+    let graph = match graph {
+        Some(graph) => graph,
+        None => match query_package_graph(
+            spec,
+            buildroot_dir,
+            output_dir,
+            br2_external,
+            command_context,
+        )? {
+            Some(queried) => {
+                queried.record(output_dir)?;
+                queried.graph
+            }
+            None => {
+                messages.push(
+                    "package cache: off for this run, Buildroot did not report its package graph"
+                        .to_string(),
+                );
+                return Ok(None);
+            }
+        },
+    };
+    let identity = execution_identity(command_context.execution);
+    let keys = package_keys(&KeyInputs {
+        buildroot_dir,
+        output_dir,
+        graph: &graph,
+        execution_identity: &identity,
+    });
+    let restored = cache.restore(output_dir, &graph, &keys);
+    if !restored.is_empty() {
+        let line = format!(
+            "restored {} Buildroot package(s) from the package cache: {}",
+            restored.len(),
+            restored.join(", ")
+        );
+        tracing::info!(provider_domain = "image.buildroot", "{line}");
+        if let Some(log_sink) = &command_context.log_sink {
+            log_sink(gaia_process::ProcessLogLine {
+                stream: gaia_process::ProcessLogStream::Stderr,
+                line: line.clone(),
+            });
+        }
+        messages.push(line);
+    }
+    Ok(Some(CachedPackages {
+        cache,
+        graph,
+        keys,
+        restored,
+    }))
 }
 
 /// ccache's per-compilation statistics for one `make`, which only that

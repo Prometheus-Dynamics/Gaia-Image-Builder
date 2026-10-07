@@ -166,6 +166,10 @@ pub struct ImageExecutionPolicy {
     /// Buildroot: build independent packages concurrently (per-package
     /// directories and a top-level `make -j`).
     pub parallel_packages: bool,
+    /// Buildroot: reuse built packages from a cache shared by every build.
+    pub package_cache_enabled: bool,
+    pub package_cache_dir: Option<String>,
+    pub package_cache_max_size: Option<String>,
     /// Buildroot: share one compiled output tree between builds whose
     /// Buildroot inputs are identical.
     pub shared_output: bool,
@@ -192,6 +196,9 @@ impl Default for ImageExecutionPolicy {
             ccache_dir: None,
             ccache_max_size: None,
             parallel_packages: false,
+            package_cache_enabled: false,
+            package_cache_dir: None,
+            package_cache_max_size: None,
             shared_output: false,
             shared_output_dir: None,
             override_check: BuildrootOverrideCheckSpec::default(),

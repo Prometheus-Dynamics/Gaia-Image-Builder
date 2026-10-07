@@ -59,7 +59,7 @@ pub use inputs::{InputKindSpec, InputOptionSpec, InputSpec};
 pub use install::{InstallEntrySpec, InstallSpec};
 pub use metadata::{BuildMetadataSpec, ProductIdentitySpec};
 pub use policy::{
-    BuildPolicySpec, BuildrootCcachePolicySpec, BuildrootOverrideCheckSpec,
+    BuildPolicySpec, BuildrootCcachePolicySpec, BuildrootPackageCachePolicySpec, BuildrootOverrideCheckSpec,
     CommandProviderPolicySpec, DEFAULT_ARCHIVE_PROVIDER_TIMEOUT_SECONDS,
     DEFAULT_BUILDROOT_PROVIDER_TIMEOUT_SECONDS, DEFAULT_COMMAND_RETRY_ATTEMPTS,
     DEFAULT_COMMAND_RETRY_BACKOFF_MS, DEFAULT_COMMAND_RETRY_BACKOFF_STRATEGY,

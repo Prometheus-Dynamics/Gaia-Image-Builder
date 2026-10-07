@@ -240,6 +240,21 @@ pub struct CommandProviderPolicySpec {
     /// Buildroot only: build independent packages concurrently
     /// (`BR2_PER_PACKAGE_DIRECTORIES=y` and a top-level `make -j`).
     pub parallel_packages: bool,
+    /// Buildroot only: reuse packages built by any build with the same
+    /// inputs (requires `parallel_packages`).
+    pub package_cache: BuildrootPackageCachePolicySpec,
+}
+
+/// `[providers.buildroot.package_cache]`: a cache of built Buildroot
+/// packages shared by every build of the user.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BuildrootPackageCachePolicySpec {
+    pub enabled: bool,
+    /// Defaults to a directory shared by every workspace of the user.
+    pub dir: Option<String>,
+    /// Total size to keep (for example `100G`); least recently used
+    /// packages are evicted beyond it.
+    pub max_size: Option<String>,
 }
 
 /// `[providers.buildroot] override_check`: how Gaia reacts when the final

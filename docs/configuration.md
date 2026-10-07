@@ -532,6 +532,56 @@ when that cannot be created.
   toolchain wrapper or the tree layout, so the next build cleans the output
   tree once.
 
+#### Package cache
+
+```toml
+[providers.buildroot]
+parallel_packages = true          # required
+
+[providers.buildroot.package_cache]
+enabled = true
+# dir = "/srv/buildroot-packages" # default: <user cache root>/buildroot/packages
+max_size = "100G"                 # default; least recently used packages go first
+```
+
+Built packages are cached by content and reused by every build of the user,
+in any project, so a wiped output tree or a second image with the same
+kernel, Mesa or libcamera restores them instead of compiling. After a
+successful `make`, each package built in that run is archived: the files it
+added to its per-package directories (everything that is not a hard link to
+a dependency's file, so also what it installs outside its install steps,
+such as an extracted external toolchain), its image files, file lists and
+stamps. Before the next `make`, packages not yet built are restored,
+dependencies first, when their key is cached and all their dependencies are
+built or restored: as Buildroot's per-package preparation does, their
+dependencies' trees are linked in, then their own files are added, and their
+stamps are recreated in build order so `make` treats them as built.
+
+A package's key covers:
+- Buildroot's package infrastructure and the settings it references
+  (architecture, toolchain, optimisation, hardening, init system);
+- the package's `.mk` directory, `.hash` files, patches, version and
+  download names;
+- the values of the settings its `.mk` references, where a setting naming a
+  file or directory counts by content, not path;
+- the Docker image (or host compiler) it is built with;
+- its dependencies' keys.
+
+It does not depend on where the output tree is, the build name, or packages
+the package does not use.
+
+Packages built from a local directory (`SITE_METHOD = local`,
+`<PKG>_OVERRIDE_SRCDIR`), and everything depending on them, are always
+built. In text files that hold the output tree's path, it is rewritten on
+restore. Packages whose binaries hold it (most host tools) are stored for
+that path only: they are restored when the same build is rebuilt after a
+wipe, and in other trees once they are built there, but not across trees at
+different paths, which keeps their dependents building there too. Running
+builds in Docker with the output tree at a fixed path lifts this. `linux` is
+restored only when nothing still to be built needs its build tree (for
+example out-of-tree kernel modules). The run summary reports
+`buildroot package cache: <n> restored, <m> stored`.
+
 Cache directories outside the workspace are mounted into Docker builds.
 
 Buildroot never rebuilds a built package by itself, so Gaia compares the

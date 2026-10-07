@@ -55,6 +55,11 @@ pub(crate) fn compile_command_policy(
             max_size: raw.ccache.max_size.clone(),
         },
         parallel_packages: raw.parallel_packages,
+        package_cache: gaia_spec::BuildrootPackageCachePolicySpec {
+            enabled: raw.package_cache.enabled,
+            dir: raw.package_cache.dir.clone(),
+            max_size: raw.package_cache.max_size.clone(),
+        },
         shared_output: raw.shared_output,
         shared_output_dir: raw.shared_output_dir.clone(),
         kernel_modules_check: check_mode(raw.kernel_modules_check),

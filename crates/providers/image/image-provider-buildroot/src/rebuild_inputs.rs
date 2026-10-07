@@ -39,7 +39,7 @@ const SETTINGS_NOT_REQUIRING_CLEAN: &[&str] = &[
     "BR2_ROOTFS_STATIC_DEVICE_TABLE",
 ];
 
-fn setting_requires_clean(key: &str) -> bool {
+pub(crate) fn setting_requires_clean(key: &str) -> bool {
     !SETTINGS_NOT_REQUIRING_CLEAN
         .iter()
         .any(|pattern| match pattern.strip_suffix('*') {
@@ -220,7 +220,15 @@ pub(crate) fn changed_override_packages(
         .collect()
 }
 
-fn hex(bytes: &[u8]) -> String {
+/// Content digest of a file or directory tree (paths relative to it, modes,
+/// contents, symlink targets).
+pub(crate) fn path_content_digest(path: &Path) -> String {
+    let mut hasher = Sha256::new();
+    hash_tree(path, path, &mut hasher);
+    hex(&hasher.finalize())
+}
+
+pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 

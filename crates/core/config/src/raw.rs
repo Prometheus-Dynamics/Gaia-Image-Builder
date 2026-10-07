@@ -309,6 +309,7 @@ pub struct RawCommandProviderPolicyConfig {
     pub override_check: Option<RawBuildrootOverrideCheck>,
     pub kernel_modules_check: Option<RawBuildrootOverrideCheck>,
     pub parallel_packages: bool,
+    pub package_cache: RawBuildrootPackageCacheConfig,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -317,6 +318,14 @@ pub enum RawBuildrootOverrideCheck {
     Error,
     Warn,
     Off,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawBuildrootPackageCacheConfig {
+    pub enabled: bool,
+    pub dir: Option<String>,
+    pub max_size: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

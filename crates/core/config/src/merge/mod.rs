@@ -449,6 +449,11 @@ fn merge_command_policy(
         override_check: overlay.override_check.or(base.override_check),
         kernel_modules_check: overlay.kernel_modules_check.or(base.kernel_modules_check),
         parallel_packages: base.parallel_packages || overlay.parallel_packages,
+        package_cache: crate::raw::RawBuildrootPackageCacheConfig {
+            enabled: base.package_cache.enabled || overlay.package_cache.enabled,
+            dir: overlay.package_cache.dir.or(base.package_cache.dir),
+            max_size: overlay.package_cache.max_size.or(base.package_cache.max_size),
+        },
     }
 }
 

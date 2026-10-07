@@ -413,7 +413,7 @@ pub(crate) fn user_cache_root() -> Option<PathBuf> {
 /// `<user cache root>/<relative>`, falling back to
 /// `<workspace>/.gaia/cache/<relative>` when there is no user cache root or
 /// it cannot be created.
-fn default_cache_dir(
+pub(crate) fn default_cache_dir(
     spec: &ResolvedBuildSpec,
     relative: &str,
     label: &str,
@@ -519,7 +519,7 @@ pub(crate) fn buildroot_ccache_dir(
     }
 }
 
-fn ensure_cache_dir(
+pub(crate) fn ensure_cache_dir(
     spec: &ResolvedBuildSpec,
     path: &str,
     label: &str,

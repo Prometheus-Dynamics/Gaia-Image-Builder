@@ -32,11 +32,18 @@ const fn section(key: &'static str, fields: FieldsFn, children: &'static [Sectio
     }
 }
 
-const COMMAND_PROVIDER_CHILDREN: &[Section] = &[section(
-    "ccache",
-    struct_fields::<raw::RawBuildrootCcachePolicyConfig>,
-    &[],
-)];
+const COMMAND_PROVIDER_CHILDREN: &[Section] = &[
+    section(
+        "ccache",
+        struct_fields::<raw::RawBuildrootCcachePolicyConfig>,
+        &[],
+    ),
+    section(
+        "package_cache",
+        struct_fields::<raw::RawBuildrootPackageCacheConfig>,
+        &[],
+    ),
+];
 
 /// For a table whose own keys depend on `kind` (flattened), so only its
 /// plain nested tables are checked.

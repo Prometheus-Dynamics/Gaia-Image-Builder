@@ -405,6 +405,15 @@ fn apply_known_override(
         KnownOverrideKey::PolicyProvidersBuildrootParallelPackages => {
             raw.providers.buildroot.parallel_packages = parse_bool_override(key, value)?
         }
+        KnownOverrideKey::PolicyProvidersBuildrootPackageCacheEnabled => {
+            raw.providers.buildroot.package_cache.enabled = parse_bool_override(key, value)?
+        }
+        KnownOverrideKey::PolicyProvidersBuildrootPackageCacheDir => {
+            raw.providers.buildroot.package_cache.dir = Some(value.to_string())
+        }
+        KnownOverrideKey::PolicyProvidersBuildrootPackageCacheMaxSize => {
+            raw.providers.buildroot.package_cache.max_size = Some(value.to_string())
+        }
         KnownOverrideKey::PolicyProvidersBuildrootSharedOutput => {
             raw.providers.buildroot.shared_output = parse_bool_override(key, value)?
         }

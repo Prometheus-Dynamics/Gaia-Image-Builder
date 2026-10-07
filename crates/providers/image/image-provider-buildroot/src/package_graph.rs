@@ -14,6 +14,13 @@ pub(crate) struct PackageInfo {
     pub version: Option<String>,
     /// Build and stamp directory, relative to the output directory.
     pub stamp_dir: Option<String>,
+    /// Where its `.mk` lives: relative to the Buildroot source, or absolute.
+    pub package_dir: Option<String>,
+    /// Names of the files it downloads (tarballs, extra downloads).
+    pub sources: Vec<String>,
+    /// Its `.hash` files and the patches applied to it.
+    pub hash_files: Vec<String>,
+    pub patches: Vec<String>,
     pub dependencies: BTreeSet<String>,
     pub reverse_dependencies: BTreeSet<String>,
 }
@@ -64,6 +71,25 @@ impl PackageGraph {
                         .unwrap_or(false),
                     version: text(entry, "version"),
                     stamp_dir: text(entry, "stamp_dir"),
+                    package_dir: text(entry, "package_dir"),
+                    sources: entry
+                        .get("downloads")
+                        .and_then(serde_json::Value::as_array)
+                        .map(|downloads| {
+                            downloads
+                                .iter()
+                                .filter_map(|download| text(download, "source"))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    hash_files: strings(entry, "hashes")
+                        .unwrap_or_default()
+                        .into_iter()
+                        .collect(),
+                    patches: strings(entry, "patches")
+                        .unwrap_or_default()
+                        .into_iter()
+                        .collect(),
                     dependencies: strings(entry, "dependencies")?,
                     reverse_dependencies: strings(entry, "reverse_dependencies")?,
                 }

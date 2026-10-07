@@ -75,6 +75,9 @@ pub(super) enum KnownOverrideKey {
     PolicyProvidersBuildrootCcacheDir,
     PolicyProvidersBuildrootCcacheMaxSize,
     PolicyProvidersBuildrootParallelPackages,
+    PolicyProvidersBuildrootPackageCacheEnabled,
+    PolicyProvidersBuildrootPackageCacheDir,
+    PolicyProvidersBuildrootPackageCacheMaxSize,
     PolicyProvidersBuildrootSharedOutput,
     PolicyProvidersBuildrootSharedOutputDir,
     PolicyProvidersBuildrootOverrideCheck,
@@ -283,6 +286,15 @@ impl<'a> OverrideKey<'a> {
             }
             "policy.providers.buildroot.parallel_packages" => {
                 Self::Known(KnownOverrideKey::PolicyProvidersBuildrootParallelPackages)
+            }
+            "policy.providers.buildroot.package_cache.enabled" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersBuildrootPackageCacheEnabled)
+            }
+            "policy.providers.buildroot.package_cache.dir" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersBuildrootPackageCacheDir)
+            }
+            "policy.providers.buildroot.package_cache.max_size" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersBuildrootPackageCacheMaxSize)
             }
             "policy.providers.buildroot.shared_output" => {
                 Self::Known(KnownOverrideKey::PolicyProvidersBuildrootSharedOutput)
