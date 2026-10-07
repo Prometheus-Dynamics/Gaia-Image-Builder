@@ -62,7 +62,7 @@ pub use image::{
 };
 pub use inputs::{InputKindSpec, InputOptionSpec, InputSpec};
 pub use install::{InstallEntrySpec, InstallSpec};
-pub use metadata::{BuildMetadataSpec, ProductIdentitySpec};
+pub use metadata::{BuildMetadataSpec, ExpectedItemsSpec, ProductIdentitySpec};
 pub use policy::{
     BuildPolicySpec, BuildrootCcachePolicySpec, BuildrootOverrideCheckSpec,
     BuildrootPackageCachePolicySpec, CommandProviderPolicySpec,

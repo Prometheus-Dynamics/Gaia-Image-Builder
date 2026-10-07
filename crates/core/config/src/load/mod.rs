@@ -129,6 +129,14 @@ impl Loader<'_> {
         );
         let contents = fs::read_to_string(&canonical_path)
             .map_err(|error| ConfigError::config_read(&canonical_path, error))?;
+        // An empty build file is never intended: most likely a write that
+        // never finished, which would silently drop what the file provides.
+        if contents.trim().is_empty() {
+            return Err(ConfigError::config_shape(
+                &canonical_path,
+                "the file is empty; a config file must set something (was it truncated?)",
+            ));
+        }
         let mut value: toml::Value = toml::from_str(&contents)
             .map_err(|error| ConfigError::config_parse(&canonical_path, error))?;
         crate::gaia_version::check_required_gaia_version(&canonical_path, &value)?;
@@ -145,11 +153,13 @@ impl Loader<'_> {
         }
         validate_raw_toml_shape(&canonical_path, &value)?;
         let unknown_keys = crate::unknown_keys::unknown_config_keys(&value);
+        let sets_nothing = value.as_table().is_some_and(toml::Table::is_empty);
         let mut raw: RawBuildConfig = value
             .try_into()
             .map_err(|error| ConfigError::config_parse(&canonical_path, error))?;
         raw.source_path = Some(canonical_path.clone());
         raw.unknown_keys = unknown_keys;
+        raw.sets_nothing = sets_nothing;
         if raw.build_name.trim().is_empty() {
             raw.build_name = infer_build_name(&canonical_path);
         }

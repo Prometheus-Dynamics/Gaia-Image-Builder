@@ -36,6 +36,8 @@ newest release, and updates the Rust docker images to 1.99.0.
   other parsing or validation; a too-old binary fails with "this build
   requires gaia >=X, but gaia Y is installed; upgrade with: cargo install
   ...".
+- Empty or whitespace-only config files (entrypoint, `extends` parents, imports) fail to load instead of contributing nothing: a truncated payload layer had silently dropped four applications from an image while validation reported no problems. Files that set nothing (only comments) are reported as `config_layer_empty` warnings.
+- Added `[expect] artifacts / installs / sources`: ids the build must have, from any layer; validation fails (`config_expected_missing`) when one is missing.
 - **Unknown keys fail validation** (`config_unknown_key` errors; top level,
   the non-`kind` tables such as `providers.*`, `execution`, `stage`,
   `reporting`, and the image's nested tables), so a typo or a setting this

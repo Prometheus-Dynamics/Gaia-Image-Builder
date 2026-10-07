@@ -63,6 +63,7 @@ pub fn try_resolve_config_with_options(
         "loaded build config"
     );
     let unknown_key_warnings = unknown_keys::collect_unknown_key_warnings(&raw);
+    let empty_layer_warnings = unknown_keys::collect_empty_layer_warnings(&raw);
     let selected = apply_preset_selection(raw, build, options);
     let merged = merge_config(selected);
     let selected = apply_preset_selection(merged, build, options);
@@ -80,6 +81,7 @@ pub fn try_resolve_config_with_options(
     reject_non_rust_build_groups(&normalized)?;
     let mut spec = compile_config(normalized);
     spec.metadata.config_warnings = unknown_key_warnings;
+    spec.metadata.empty_layers = empty_layer_warnings;
     spec.selection.import_sources = import_sources;
     drop_unused_import_sources(&mut spec, &unused_import_sources);
     apply_lockfile(&mut spec);

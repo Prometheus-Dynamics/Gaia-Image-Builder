@@ -105,6 +105,12 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
             sku: raw.product.sku,
         },
         config_warnings: Vec::new(),
+        empty_layers: Vec::new(),
+        expected: gaia_spec::ExpectedItemsSpec {
+            artifacts: raw.expect.artifacts,
+            installs: raw.expect.installs,
+            sources: raw.expect.sources,
+        },
     };
     spec.inputs = InputSpec {
         declared: raw

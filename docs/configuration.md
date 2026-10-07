@@ -151,6 +151,24 @@ Meaning:
 - `labels`
   Free-form metadata pairs.
 
+A config file that is empty or whitespace-only (the entrypoint, an
+`extends` parent or any import) fails to load: it is never intended, and is
+usually a write that did not finish. A file that sets nothing (only
+comments) is reported as a `config_layer_empty` warning.
+
+```toml
+[expect]
+artifacts = ["helios-api", "helios-engine"]
+installs = ["install-helios-api"]
+sources = ["vision-plugin"]
+```
+
+`[expect]` lists ids the build must end up with, in any layer. Validation
+fails (`config_expected_missing`) when one is missing, so a layer that
+stops providing it (deleted, emptied, no longer imported, or its `when` no
+longer matching) cannot silently drop it from the image. Lists from all
+layers are combined.
+
 Unknown keys fail validation (`config_unknown_key` errors, for example
 `unknown key 'build_command' in '<file>': this gaia does not know it`), so a
 typo, or a file written for a newer Gaia, never builds with the setting

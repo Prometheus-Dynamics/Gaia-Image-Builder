@@ -107,3 +107,74 @@ fn known_keys_produce_no_unknown_key_warnings() {
     );
     let _ = std::fs::remove_file(path);
 }
+
+/// A build file importing `layer.toml` with `layer` as its contents.
+fn build_with_layer(name: &str, layer: &str, extra: &str) -> std::path::PathBuf {
+    let dir = support::create_temp_workspace(name);
+    std::fs::write(dir.join("layer.toml"), layer).expect("layer");
+    let build = dir.join("build.toml");
+    std::fs::write(
+        &build,
+        format!("build_name = \"{name}\"\nimports = [\"layer.toml\"]\n{extra}{BASE}"),
+    )
+    .expect("build");
+    build
+}
+
+#[test]
+fn empty_imported_files_fail_to_load() {
+    for contents in ["", "  \n\t\n"] {
+        let build = build_with_layer("empty-layer", contents, "");
+        let error = try_resolve_config(build.to_str().expect("utf-8 path"))
+            .expect_err("an empty layer must fail");
+        let message = error.to_string();
+        assert!(message.contains("layer.toml"), "{message}");
+        assert!(message.contains("is empty"), "{message}");
+        let _ = std::fs::remove_dir_all(build.parent().expect("dir"));
+    }
+}
+
+#[test]
+fn layers_that_set_nothing_are_reported() {
+    let build = build_with_layer("comment-layer", "# backend payloads\n", "");
+    let spec = try_resolve_config(build.to_str().expect("utf-8 path")).expect("config resolves");
+    let report = validate_spec(&spec);
+    let empty = report
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "config_layer_empty")
+        .collect::<Vec<_>>();
+    assert_eq!(empty.len(), 1, "{:?}", report.diagnostics);
+    assert!(empty[0].message.contains("layer.toml"));
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
+    let _ = std::fs::remove_dir_all(build.parent().expect("dir"));
+}
+
+#[test]
+fn expected_items_missing_from_the_build_fail_validation() {
+    let build = build_with_layer(
+        "expect-layer",
+        "[[sources]]\nid = \"backend\"\nkind = \"path\"\npath = \".\"\n",
+        "[expect]\nsources = [\"backend\", \"vision-plugin\"]\nartifacts = [\"helios-api\"]\n",
+    );
+    let spec = try_resolve_config(build.to_str().expect("utf-8 path")).expect("config resolves");
+    let report = validate_spec(&spec);
+    let missing = report
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "config_expected_missing")
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(missing.len(), 2, "{missing:?}");
+    assert!(
+        missing
+            .iter()
+            .any(|message| message.contains("artifact 'helios-api'"))
+    );
+    assert!(
+        missing
+            .iter()
+            .any(|message| message.contains("source 'vision-plugin'"))
+    );
+    let _ = std::fs::remove_dir_all(build.parent().expect("dir"));
+}

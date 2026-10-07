@@ -47,6 +47,7 @@ pub struct RawBuildConfig {
     pub providers: RawProviderPoliciesConfig,
     pub provenance: RawProvenanceConfig,
     pub reporting: RawReportingConfig,
+    pub expect: RawExpectConfig,
     #[serde(skip)]
     pub source_path: Option<PathBuf>,
     #[serde(skip)]
@@ -69,6 +70,20 @@ pub struct RawBuildConfig {
     /// Dotted paths of keys in this file that Gaia does not know.
     #[serde(skip)]
     pub unknown_keys: Vec<String>,
+    /// The file sets nothing at all (only comments).
+    #[serde(skip)]
+    pub sets_nothing: bool,
+}
+
+/// `[expect]`: ids the build must end up with, so a layer that silently
+/// stops providing one (deleted, emptied, no longer imported) fails
+/// validation.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawExpectConfig {
+    pub artifacts: Vec<String>,
+    pub installs: Vec<String>,
+    pub sources: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

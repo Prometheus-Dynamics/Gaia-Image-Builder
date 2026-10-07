@@ -221,6 +221,9 @@ fn merge_two(mut base: RawBuildConfig, overlay: RawBuildConfig) -> RawBuildConfi
     }
 
     base.env_files = merge_string_lists(base.env_files, overlay.env_files);
+    base.expect.artifacts = merge_string_lists(base.expect.artifacts, overlay.expect.artifacts);
+    base.expect.installs = merge_string_lists(base.expect.installs, overlay.expect.installs);
+    base.expect.sources = merge_string_lists(base.expect.sources, overlay.expect.sources);
     base.env.extend(overlay.env);
 
     if !overlay.workspace.root_dir.trim().is_empty() {
