@@ -1,7 +1,7 @@
 use gaia_spec::ResolvedBuildSpec;
 
 use crate::ValidationDiagnostic;
-use crate::diagnostics::warning;
+use crate::diagnostics::{error, warning};
 
 pub(crate) fn validate_reporting(
     spec: &ResolvedBuildSpec,
@@ -19,12 +19,13 @@ pub(crate) fn validate_reporting(
     }
 }
 
-/// Problems the config loader found, such as keys this Gaia does not know.
+/// Keys this Gaia does not know. They are errors: a file using a setting
+/// from a newer Gaia must fail rather than build without it.
 pub(crate) fn validate_config_warnings(
     spec: &ResolvedBuildSpec,
     diagnostics: &mut Vec<ValidationDiagnostic>,
 ) {
     for message in &spec.metadata.config_warnings {
-        diagnostics.push(warning("config_unknown_key", message.clone(), None));
+        diagnostics.push(error("config_unknown_key", message.clone(), None));
     }
 }

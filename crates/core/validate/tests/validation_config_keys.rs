@@ -53,10 +53,10 @@ kind = "future"
 }
 
 #[test]
-fn unknown_keys_become_validation_warnings() {
+fn unknown_keys_fail_validation() {
     let path = write_temp_config(&format!(
         r#"
-gaia_version = ">=2.1.0"
+gaia_version = ">=2.0.0"
 build_name = "unknown-keys"
 build_command = "make all"
 {BASE}
@@ -82,7 +82,15 @@ shared_outptu = true
     assert_eq!(unknown.len(), 2, "{unknown:?}");
     assert!(unknown[0].starts_with("unknown key 'build_command' in '"));
     assert!(unknown[1].starts_with("unknown key 'providers.buildroot.shared_outptu' in '"));
-    assert!(report.errors.is_empty(), "{:?}", report.errors);
+    assert!(
+        report
+            .errors
+            .iter()
+            .all(|error| error.code == "config_unknown_key"),
+        "{:?}",
+        report.errors
+    );
+    assert_eq!(report.errors.len(), 2);
     let _ = std::fs::remove_file(path);
 }
 

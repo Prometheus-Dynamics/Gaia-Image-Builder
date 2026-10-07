@@ -6,24 +6,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
-The workspace version is now `2.3.0` (crates and internal dependency
-versions). Earlier builds from `main` in this cycle reported `2.1.0` or
-`2.2.0` without everything below, and keys they do not know on artifacts are
-silently ignored. Build files should require the version that added what they
-use: `gaia_version = ">=2.2.0"` for the extended MBR, sized partitions, zstd
-and archive assembly features, `">=2.3.0"` for rust `build_group` and
-`${source.<id>.path}`.
+Changes on `main` since 2.0.0. The workspace version stays `2.0.0` until the
+next release; builds from `main` (some of which briefly reported 2.1.0 to
+2.5.0) are identified by commit. Build files should not require unreleased
+versions through `gaia_version`: a binary that lacks a setting now fails
+validation on the unknown key.
 
-`2.4.0` moves the toolchain pin and `rust-version` to Rust 1.99.0 (installing
-Gaia now needs Rust 1.99 or newer), upgrades every dependency to its newest
-release, updates the Rust docker images to 1.99.0, and adds the Buildroot
-2026.08 `xfs` root filesystem format.
-
-`2.5.0` makes Buildroot builds faster from scratch and after changes:
-targeted package rebuilds instead of full cleans, `parallel_packages`,
-downloads and compiler cache shared across projects, and the ccache hit rate
-in the run summary. Build files using `parallel_packages` or
-`ccache.max_size` should require `gaia_version = ">=2.5.0"`.
+This cycle also moves the toolchain pin and `rust-version` to Rust 1.99.0
+(installing Gaia needs Rust 1.99 or newer), upgrades every dependency to its
+newest release, and updates the Rust docker images to 1.99.0.
 
 ### Config safety
 
@@ -40,13 +31,15 @@ in the run summary. Build files using `parallel_packages` or
   `"warn"` to keep building. Warnings appear in the `gaia run` output,
   `summary.json` (`image_warnings`, counted in `warning_count`) and on the
   `manifest.json` image record (`warnings`).
-- Build files accept `gaia_version = ">=2.1.0"` (a semver requirement). It is
-  checked on the raw TOML of every loaded file before any other parsing or
-  validation; a too-old binary fails with "this build requires gaia >=2.1.0,
-  but gaia 2.0.0 is installed; upgrade with: cargo install ...".
-- Unknown keys, which are still ignored when loading, are reported as
-  `config_unknown_key` validation warnings (top level and the non-`kind`
-  tables such as `providers.*`, `execution`, `stage`, `reporting`).
+- Build files accept `gaia_version` (a semver requirement such as
+  `">=2.0.0"`). It is checked on the raw TOML of every loaded file before any
+  other parsing or validation; a too-old binary fails with "this build
+  requires gaia >=X, but gaia Y is installed; upgrade with: cargo install
+  ...".
+- **Unknown keys fail validation** (`config_unknown_key` errors; top level,
+  the non-`kind` tables such as `providers.*`, `execution`, `stage`,
+  `reporting`, and the image's nested tables), so a typo or a setting this
+  binary does not support stops the build instead of being ignored.
 - The Buildroot provider's config steps moved from `buildroot.rs` to
   `buildroot_config.rs`, bringing `buildroot.rs` under the 800-line limit.
 
@@ -208,7 +201,7 @@ in the run summary. Build files using `parallel_packages` or
 - Package override changes are tracked per package (`.gaia-buildroot-package-overrides.digests`), so adding a package to an override tree, or changing one, no longer counts as a change to the others.
 - `BR2_EXTERNAL_*` settings (tree names, paths, `git describe` versions) and `KEY=n` versus unset options are no longer config changes.
 - Fixed a raw disk `archive_name` without `.xz` (for example `board.img`) publishing Buildroot's first expected image, such as a bare `rootfs.ext4`, under the disk's name and reporting it as the primary image output. When typed assembly builds disks, every `.img`/`.raw` archive name (compressed or not) now comes from the assembled disk, and with no archive configured the single assembled disk is reported as the primary output. Without an assembly disk, validation warns (`image_archive_not_a_disk`) when the Buildroot expected images are not a single raw disk image.
-- Unknown-key warnings now cover the image's nested tables (`[image.output]`, `[image.feed]`, `[image.assembly]` and its trees, files, filesystems, disks and partitions), so typos such as `archive_format` are reported instead of silently ignored.
+- The unknown-key check now covers the image's nested tables (`[image.output]`, `[image.feed]`, `[image.assembly]` and its trees, files, filesystems, disks and partitions), so typos such as `archive_format` are reported instead of silently ignored.
 - Fixed imports whose `when` does not match still being loaded: local layers for other targets resolved their `@source:` tokens and fetched the source, so a multi-target build failed for every target when one target's device source was unreachable. Non-matching imports are now skipped entirely, and a git source used only as an import source by non-selected layers is no longer planned. `@self` and `@source:` tokens are also resolved in every entry of a `:`-separated list, not only the first.
 - Added declarative assembly support for creating directories and symlinks before filesystem packing, and expanded assembly glob matching to support versioned parent directories such as Buildroot firmware output paths.
 - Fixed Buildroot image execution so provider-level expected-image reuse no longer bypasses scheduled Buildroot runs, ensuring config fragments, config overrides, `olddefconfig`, and package rebuild decisions are applied when the planner marks image operations dirty.

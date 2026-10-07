@@ -106,7 +106,7 @@ policy) are covered only through the spec parts they change.
 Supported top-level fields:
 
 ```toml
-gaia_version = ">=2.1.0"
+gaia_version = ">=2.0.0"
 build_name = "helios-cm5"
 display_name = "HeliOS CM5"
 version = "v2026.2.0"
@@ -127,8 +127,9 @@ Meaning:
   TOML of every loaded file (including `extends` and imports) before any
   other parsing or validation, so an older binary fails with
   `this build requires gaia >=2.1.0, but gaia 2.0.0 is installed; upgrade with: cargo install ...`
-  instead of misreading the file. Gaia 2.0.0 and older ignore this key, so it
-  only protects against binaries from 2.1.0 on.
+  instead of misreading the file. The version only changes at releases;
+  builds from `main` between releases report the last release. To require a
+  setting added since then, use it: unknown keys fail validation.
 - `build_name`
   Stable canonical identity used for report file naming and persisted state names.
 - `display_name`
@@ -146,9 +147,10 @@ Meaning:
 - `labels`
   Free-form metadata pairs.
 
-Unknown keys are ignored when loading (so a file written for a newer Gaia
-still loads), but validation reports each one as a `config_unknown_key`
-warning, for example `unknown key 'build_command' in '<file>' is ignored`.
+Unknown keys fail validation (`config_unknown_key` errors, for example
+`unknown key 'build_command' in '<file>': this gaia does not know it`), so a
+typo, or a file written for a newer Gaia, never builds with the setting
+silently missing.
 The check covers top-level keys and the `workspace`, `product`,
 `interpolation`, `clean`, `execution`, `failure`, `providers.*`,
 `provenance`, `reporting`, `stage`, `install` and `checkpoints` tables. Tables

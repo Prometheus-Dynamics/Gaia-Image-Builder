@@ -276,8 +276,8 @@ fn collect_into(raw: &RawBuildConfig, warnings: &mut Vec<String>) {
         .unwrap_or_else(|| "<build config>".into());
     for key in &raw.unknown_keys {
         let warning = format!(
-            "unknown key '{key}' in '{path}' is ignored; it may need a newer gaia \
-             (pin one with gaia_version = \">=X.Y.Z\")"
+            "unknown key '{key}' in '{path}': this gaia does not know it \
+             (a typo, or a setting that needs a newer gaia)"
         );
         if !warnings.contains(&warning) {
             warnings.push(warning);
