@@ -237,6 +237,9 @@ pub struct CommandProviderPolicySpec {
     /// Buildroot only: what to do when the image holds fewer kernel modules
     /// than the kernel build produced (an ignored `modules_install` failure).
     pub kernel_modules_check: BuildrootOverrideCheckSpec,
+    /// Buildroot only: build independent packages concurrently
+    /// (`BR2_PER_PACKAGE_DIRECTORIES=y` and a top-level `make -j`).
+    pub parallel_packages: bool,
 }
 
 /// `[providers.buildroot] override_check`: how Gaia reacts when the final
@@ -266,7 +269,11 @@ impl BuildrootOverrideCheckSpec {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BuildrootCcachePolicySpec {
     pub enabled: bool,
+    /// Defaults to a cache shared by every workspace of the user.
     pub dir: Option<String>,
+    /// ccache `max_size` (for example `50G`), written to the cache's
+    /// `ccache.conf`.
+    pub max_size: Option<String>,
 }
 
 impl From<&CommandProviderPolicySpec> for ResolvedCommandPolicySpec {

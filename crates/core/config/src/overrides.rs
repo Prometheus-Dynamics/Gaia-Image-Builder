@@ -399,6 +399,12 @@ fn apply_known_override(
         KnownOverrideKey::PolicyProvidersBuildrootCcacheDir => {
             raw.providers.buildroot.ccache.dir = Some(value.to_string())
         }
+        KnownOverrideKey::PolicyProvidersBuildrootCcacheMaxSize => {
+            raw.providers.buildroot.ccache.max_size = Some(value.to_string())
+        }
+        KnownOverrideKey::PolicyProvidersBuildrootParallelPackages => {
+            raw.providers.buildroot.parallel_packages = parse_bool_override(key, value)?
+        }
         KnownOverrideKey::PolicyProvidersBuildrootSharedOutput => {
             raw.providers.buildroot.shared_output = parse_bool_override(key, value)?
         }

@@ -19,6 +19,12 @@ Gaia now needs Rust 1.99 or newer), upgrades every dependency to its newest
 release, updates the Rust docker images to 1.99.0, and adds the Buildroot
 2026.08 `xfs` root filesystem format.
 
+`2.5.0` makes Buildroot builds faster from scratch and after changes:
+targeted package rebuilds instead of full cleans, `parallel_packages`,
+downloads and compiler cache shared across projects, and the ccache hit rate
+in the run summary. Build files using `parallel_packages` or
+`ccache.max_size` should require `gaia_version = ">=2.5.0"`.
+
 ### Config safety
 
 - Buildroot `config_overrides` are verified against the final `.config` after
@@ -196,6 +202,9 @@ release, updates the Rust docker images to 1.99.0, and adds the Buildroot
   - Packages that gained or lost a dependency (kmod once xz is enabled) are rebuilt.
   - Toolchain, architecture, libc and system-wide settings still clean the tree, as does any change Buildroot cannot report a package graph for.
   - The log names the packages and the settings that caused each rebuild or clean.
+- Added `[providers.buildroot] parallel_packages`: `BR2_PER_PACKAGE_DIRECTORIES=y` and a top-level `make -j<local_jobs> -l<local_jobs>`, so independent packages build concurrently. Targeted rebuilds also remove the packages' per-package directories.
+- Buildroot downloads and the compiler cache default to a cache shared by every workspace of the user (`$GAIA_CACHE_DIR`, else `$XDG_CACHE_HOME/gaia`, else `~/.cache/gaia`; `buildroot/dl`, `buildroot/ccache`), so other projects and rebuilds after a wipe reuse them. Previously downloads were cached per workspace and the compiler cache defaulted to Buildroot's `~/.buildroot-ccache`, which Docker builds lost.
+- `[providers.buildroot.ccache]` sets `BR2_CCACHE_USE_BASEDIR=y` and takes `max_size` (default `50G`, written to the cache's `ccache.conf`). The run summary reports the run's hit rate (`buildroot ccache: 8123/9410 compilations from cache (86.3%)`), counted from a per-run ccache stats log so concurrent builds sharing the cache do not skew it.
 - Package override changes are tracked per package (`.gaia-buildroot-package-overrides.digests`), so adding a package to an override tree, or changing one, no longer counts as a change to the others.
 - `BR2_EXTERNAL_*` settings (tree names, paths, `git describe` versions) and `KEY=n` versus unset options are no longer config changes.
 - Fixed a raw disk `archive_name` without `.xz` (for example `board.img`) publishing Buildroot's first expected image, such as a bare `rootfs.ext4`, under the disk's name and reporting it as the primary image output. When typed assembly builds disks, every `.img`/`.raw` archive name (compressed or not) now comes from the assembled disk, and with no archive configured the single assembled disk is reported as the primary output. Without an assembly disk, validation warns (`image_archive_not_a_disk`) when the Buildroot expected images are not a single raw disk image.

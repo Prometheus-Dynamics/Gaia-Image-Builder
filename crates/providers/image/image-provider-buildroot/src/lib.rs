@@ -262,6 +262,7 @@ impl ImageProvider for BuildrootImageProvider {
             reused: !reuse_details.is_empty(),
             reuse_details,
             warnings: override_check_warnings(&messages),
+            notes: summary_notes(&messages),
             messages,
             state_details: {
                 let mut details = state_details;
@@ -349,6 +350,7 @@ impl ImageProvider for BuildrootImageProvider {
                     reused: false,
                     reuse_details: Vec::new(),
                     warnings: override_check_warnings(&messages),
+                    notes: summary_notes(&messages),
                     messages,
                     state_details: {
                         let mut details = state_details;
@@ -508,6 +510,16 @@ mod shared;
 mod squashfs;
 #[cfg(test)]
 mod tests;
+
+/// Moves the run messages meant for the run summary into
+/// [`ImageExecutionResult::notes`].
+fn summary_notes(messages: &[String]) -> Vec<String> {
+    messages
+        .iter()
+        .filter_map(|message| message.strip_prefix(SUMMARY_NOTE_PREFIX))
+        .map(str::to_string)
+        .collect()
+}
 
 pub(crate) use archive::*;
 pub(crate) use buildroot::*;

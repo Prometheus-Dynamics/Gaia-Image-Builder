@@ -161,6 +161,11 @@ pub struct ImageExecutionPolicy {
     pub download_dir: Option<String>,
     pub ccache_enabled: bool,
     pub ccache_dir: Option<String>,
+    /// ccache `max_size`, such as `50G`.
+    pub ccache_max_size: Option<String>,
+    /// Buildroot: build independent packages concurrently (per-package
+    /// directories and a top-level `make -j`).
+    pub parallel_packages: bool,
     /// Buildroot: share one compiled output tree between builds whose
     /// Buildroot inputs are identical.
     pub shared_output: bool,
@@ -185,6 +190,8 @@ impl Default for ImageExecutionPolicy {
             download_dir: None,
             ccache_enabled: false,
             ccache_dir: None,
+            ccache_max_size: None,
+            parallel_packages: false,
             shared_output: false,
             shared_output_dir: None,
             override_check: BuildrootOverrideCheckSpec::default(),
@@ -206,6 +213,9 @@ pub struct ImageExecutionResult {
     /// Problems worth surfacing in the run output and report even though the
     /// operation succeeded.
     pub warnings: Vec<String>,
+    /// Facts worth a line in the run summary, such as the compiler cache
+    /// hit rate.
+    pub notes: Vec<String>,
     pub state_details: Vec<(String, String)>,
 }
 
@@ -662,6 +672,7 @@ mod tests {
             reuse_details: Vec::new(),
             messages: Vec::new(),
             warnings: Vec::new(),
+            notes: Vec::new(),
             state_details: Vec::new(),
         };
 

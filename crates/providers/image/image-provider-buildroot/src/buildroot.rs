@@ -430,9 +430,23 @@ pub(crate) fn run_buildroot_with(
         .arg(format!("O={}", output_dir.display()))
         .current_dir(buildroot_dir);
     append_make_jobs(&mut command, command_context.policy.local_jobs);
+    if command_context.policy.parallel_packages {
+        // Packages build concurrently, each with BR2_JLEVEL jobs: the load
+        // limit (inherited by every package's make) keeps that from
+        // oversubscribing the machine.
+        command.arg(format!(
+            "-l{}",
+            make_jobs(command_context.policy.local_jobs)
+        ));
+    }
     apply_buildroot_policy_env(&mut command, spec, command_context.policy)?;
     if let Some(br2_external) = br2_external {
         command.env("BR2_EXTERNAL", br2_external);
+    }
+    let ccache_stats_log = output_dir.join(CCACHE_STATS_LOG);
+    if command_context.policy.ccache_enabled {
+        let _ = fs::remove_file(&ccache_stats_log);
+        command.env("CCACHE_STATSLOG", &ccache_stats_log);
     }
     // Record the state the output tree now corresponds to before the long
     // make: if the build (or a post-image script, or a later assembly step)
@@ -475,10 +489,39 @@ pub(crate) fn run_buildroot_with(
         command_context.log_sink,
         command_context.cancel_check,
     )?);
+    if command_context.policy.ccache_enabled
+        && let Some(stats) = fs::read_to_string(&ccache_stats_log)
+            .ok()
+            .and_then(|log| ccache_hit_rate(&log))
+    {
+        messages.push(format!("{SUMMARY_NOTE_PREFIX}{stats}"));
+    }
     if options.shared_tree && !finalize_only {
         write_shared_pack_state(output_dir)?;
     }
     Ok(messages)
+}
+
+/// ccache's per-compilation statistics for one `make`, which only that
+/// make's compilations write, however many builds share the cache.
+const CCACHE_STATS_LOG: &str = ".gaia-ccache-stats.log";
+
+/// Prefix of the run messages the provider moves into
+/// [`ImageExecutionResult::notes`] for the run summary.
+pub(crate) const SUMMARY_NOTE_PREFIX: &str = "summary: ";
+
+/// `buildroot ccache: <hits>/<cacheable> compilations from cache (<n>%)`
+/// from a ccache stats log, or `None` when nothing was compiled.
+pub(crate) fn ccache_hit_rate(log: &str) -> Option<String> {
+    let count = |counter: &str| log.lines().filter(|line| line.trim() == counter).count();
+    let hits = count("direct_cache_hit") + count("preprocessed_cache_hit");
+    let cacheable = hits + count("cache_miss");
+    (cacheable > 0).then(|| {
+        format!(
+            "buildroot ccache: {hits}/{cacheable} compilations from cache ({:.1}%)",
+            hits as f64 * 100.0 / cacheable as f64
+        )
+    })
 }
 
 /// The reasons for a full clean, as named in its label and message, so an

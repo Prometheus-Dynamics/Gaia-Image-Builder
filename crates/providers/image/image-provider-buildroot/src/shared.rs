@@ -172,6 +172,10 @@ pub(crate) fn shared_output_key_material(
         ));
     }
     material.push_str(&format!("ccache={}\n", policy.ccache_enabled));
+    // Only part of the key when on, so existing shared trees keep theirs.
+    if policy.parallel_packages {
+        material.push_str("parallel_packages=true\n");
+    }
     material.push_str(&format!(
         "docker_image={}\n",
         execution.docker_image.as_deref().unwrap_or_default()

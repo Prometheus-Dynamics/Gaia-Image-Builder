@@ -442,11 +442,13 @@ fn merge_command_policy(
         ccache: crate::raw::RawBuildrootCcachePolicyConfig {
             enabled: base.ccache.enabled || overlay.ccache.enabled,
             dir: overlay.ccache.dir.or(base.ccache.dir),
+            max_size: overlay.ccache.max_size.or(base.ccache.max_size),
         },
         shared_output: base.shared_output || overlay.shared_output,
         shared_output_dir: overlay.shared_output_dir.or(base.shared_output_dir),
         override_check: overlay.override_check.or(base.override_check),
         kernel_modules_check: overlay.kernel_modules_check.or(base.kernel_modules_check),
+        parallel_packages: base.parallel_packages || overlay.parallel_packages,
     }
 }
 

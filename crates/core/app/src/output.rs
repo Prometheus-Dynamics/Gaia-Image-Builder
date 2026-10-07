@@ -271,6 +271,9 @@ pub(crate) fn print_outcome(outcome: &CommandOutcome) {
             for warning in &report.summary.image_warnings {
                 println!("warning: {warning}");
             }
+            for note in &report.summary.image_notes {
+                println!("{note}");
+            }
             if !report.summary.image_reuse_details.is_empty() {
                 println!(
                     "image reuse: {}",

@@ -26,33 +26,33 @@ resolver = "3"
 
 [workspace.package]
 edition = "2024"
-version = "2.4.0"
+version = "2.5.0"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Prometheus-Dynamics/Gaia-Image-Builder"
 homepage = "https://github.com/Prometheus-Dynamics/Gaia-Image-Builder"
 rust-version = "1.99"
 
 [workspace.dependencies]
-gaia = { path = "crates/core/gaia", version = "2.4.0" }
-gaia-app = { path = "crates/core/app", version = "2.4.0" }
-gaia-config = { path = "crates/core/config", version = "2.4.0" }
-gaia-process = { path = "crates/core/process", version = "2.4.0" }
-gaia-spec = { path = "crates/core/spec", version = "2.4.0" }
-gaia-validate = { path = "crates/core/validate", version = "2.4.0" }
-gaia-plan = { path = "crates/core/plan", version = "2.4.0" }
-gaia-exec = { path = "crates/core/exec", version = "2.4.0" }
-gaia-report = { path = "crates/core/report", version = "2.4.0" }
-gaia-source-providers = { path = "crates/providers/source/source-providers", version = "2.4.0" }
-gaia-default-providers = { path = "crates/providers/default-providers", version = "2.4.0" }
-gaia-artifact-providers = { path = "crates/providers/artifact/artifact-providers", version = "2.4.0" }
-gaia-image-providers = { path = "crates/providers/image/image-providers", version = "2.4.0" }
-gaia-artifact-provider-rust = { path = "crates/providers/artifact/artifact-provider-rust", version = "2.4.0" }
-gaia-artifact-provider-java = { path = "crates/providers/artifact/artifact-provider-java", version = "2.4.0" }
-gaia-artifact-provider-node = { path = "crates/providers/artifact/artifact-provider-node", version = "2.4.0" }
-gaia-artifact-provider-python = { path = "crates/providers/artifact/artifact-provider-python", version = "2.4.0" }
-gaia-artifact-provider-go = { path = "crates/providers/artifact/artifact-provider-go", version = "2.4.0" }
-gaia-image-provider-buildroot = { path = "crates/providers/image/image-provider-buildroot", version = "2.4.0" }
-gaia-image-provider-starting-point = { path = "crates/providers/image/image-provider-starting-point", version = "2.4.0" }
+gaia = { path = "crates/core/gaia", version = "2.5.0" }
+gaia-app = { path = "crates/core/app", version = "2.5.0" }
+gaia-config = { path = "crates/core/config", version = "2.5.0" }
+gaia-process = { path = "crates/core/process", version = "2.5.0" }
+gaia-spec = { path = "crates/core/spec", version = "2.5.0" }
+gaia-validate = { path = "crates/core/validate", version = "2.5.0" }
+gaia-plan = { path = "crates/core/plan", version = "2.5.0" }
+gaia-exec = { path = "crates/core/exec", version = "2.5.0" }
+gaia-report = { path = "crates/core/report", version = "2.5.0" }
+gaia-source-providers = { path = "crates/providers/source/source-providers", version = "2.5.0" }
+gaia-default-providers = { path = "crates/providers/default-providers", version = "2.5.0" }
+gaia-artifact-providers = { path = "crates/providers/artifact/artifact-providers", version = "2.5.0" }
+gaia-image-providers = { path = "crates/providers/image/image-providers", version = "2.5.0" }
+gaia-artifact-provider-rust = { path = "crates/providers/artifact/artifact-provider-rust", version = "2.5.0" }
+gaia-artifact-provider-java = { path = "crates/providers/artifact/artifact-provider-java", version = "2.5.0" }
+gaia-artifact-provider-node = { path = "crates/providers/artifact/artifact-provider-node", version = "2.5.0" }
+gaia-artifact-provider-python = { path = "crates/providers/artifact/artifact-provider-python", version = "2.5.0" }
+gaia-artifact-provider-go = { path = "crates/providers/artifact/artifact-provider-go", version = "2.5.0" }
+gaia-image-provider-buildroot = { path = "crates/providers/image/image-provider-buildroot", version = "2.5.0" }
+gaia-image-provider-starting-point = { path = "crates/providers/image/image-provider-starting-point", version = "2.5.0" }
 clap = { version = "4", features = ["derive", "env"] }
 crossterm = "0.29"
 libc = "0.2"

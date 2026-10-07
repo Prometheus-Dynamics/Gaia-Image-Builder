@@ -52,7 +52,9 @@ pub(crate) fn compile_command_policy(
         ccache: BuildrootCcachePolicySpec {
             enabled: raw.ccache.enabled,
             dir: raw.ccache.dir.clone(),
+            max_size: raw.ccache.max_size.clone(),
         },
+        parallel_packages: raw.parallel_packages,
         shared_output: raw.shared_output,
         shared_output_dir: raw.shared_output_dir.clone(),
         kernel_modules_check: check_mode(raw.kernel_modules_check),

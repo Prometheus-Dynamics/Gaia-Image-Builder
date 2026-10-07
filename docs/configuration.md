@@ -495,19 +495,41 @@ retry_backoff_ms = 0
 retry_backoff_strategy = "fixed"
 timeout_seconds = 900
 local_jobs = 4
-download_dir = ".gaia/cache/buildroot/dl"
+parallel_packages = true
+# download_dir = "/srv/buildroot-dl"     # default: the user cache below
 
 [providers.buildroot.ccache]
 enabled = true
-dir = ".gaia/cache/buildroot/ccache"
+# dir = "/srv/buildroot-ccache"          # default: the user cache below
+max_size = "50G"                         # default 50G
 ```
 
-For Buildroot, `download_dir` is passed as `BR2_DL_DIR` so source tarballs can be
-shared across clean builds. Without `download_dir`, Gaia still passes
-`BR2_DL_DIR=<workspace>/.gaia/cache/buildroot/dl` through the environment, so
-downloads survive re-fetching the Buildroot source and are shared by every
-build in the workspace. When `providers.buildroot.ccache.enabled = true`,
-Gaia enables `BR2_CCACHE` and passes `BR2_CCACHE_DIR` when `dir` is set.
+Downloads and the compiler cache are shared by every build of every project
+of the user by default, so a second project, or a rebuild after the output
+tree was wiped, reuses them. They live under the user cache root:
+`$GAIA_CACHE_DIR`, else `$XDG_CACHE_HOME/gaia`, else `~/.cache/gaia`
+(`buildroot/dl` and `buildroot/ccache`), or under `<workspace>/.gaia/cache`
+when that cannot be created.
+
+- `download_dir` is passed as `BR2_DL_DIR` (written to `.config` when set,
+  through the environment otherwise), so source tarballs survive clean
+  builds and re-fetching the Buildroot source.
+- `ccache.enabled = true` sets `BR2_CCACHE=y`, `BR2_CCACHE_DIR` and
+  `BR2_CCACHE_USE_BASEDIR=y` (paths relative to the output tree, so trees in
+  other directories share cache entries), and sets `max_size` in the cache's
+  `ccache.conf`. Buildroot keys entries on its toolchain, so builds with the
+  same toolchain share them. The run summary reports how many of the run's
+  compilations came from the cache:
+  `buildroot ccache: 8123/9410 compilations from cache (86.3%)`.
+- `parallel_packages = true` builds independent packages concurrently: it
+  sets `BR2_PER_PACKAGE_DIRECTORIES=y` and runs the top-level `make` with
+  `-j<local_jobs>` and a load limit of the same value (inherited by each
+  package's own `make`, which still uses `BR2_JLEVEL` jobs). Buildroot marks
+  per-package directories experimental; a few packages may not support them.
+- Turning `ccache.enabled` or `parallel_packages` on or off changes the
+  toolchain wrapper or the tree layout, so the next build cleans the output
+  tree once.
+
 Cache directories outside the workspace are mounted into Docker builds.
 
 Buildroot never rebuilds a built package by itself, so Gaia compares the
@@ -570,7 +592,7 @@ at `<shared_output_dir>/<key>`. The key is a digest of:
 - `defconfig`, `defconfig_path` and `config_fragments` (paths and content),
 - `config_overrides`,
 - the external tree and package override directories,
-- `ccache.enabled` and the Docker image.
+- `ccache.enabled`, `parallel_packages` (when on) and the Docker image.
 
 The build name, build directory and image feed are not part of the key, so
 `helios-base-os-cm5` and `helios-full-cm5` share one tree when only their

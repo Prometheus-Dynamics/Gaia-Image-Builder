@@ -81,6 +81,11 @@ pub fn render_summary(
         image_reused: outcome.image_results.iter().any(|result| result.reused),
         image_reuse_details,
         image_warnings,
+        image_notes: outcome
+            .image_results
+            .iter()
+            .flat_map(|result| result.notes.clone())
+            .collect(),
         rolled_back_operations: outcome.rolled_back_ids.len(),
         cleanup_failure_count: outcome.cleanup_failures.len(),
         rollback_on_error: spec.policy.failure.rollback_on_error,

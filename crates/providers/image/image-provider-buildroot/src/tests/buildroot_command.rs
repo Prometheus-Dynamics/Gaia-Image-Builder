@@ -132,6 +132,144 @@ fn buildroot_cache_policy_sets_make_environment_and_creates_dirs() {
 }
 
 #[test]
+fn buildroot_default_caches_are_shared_by_every_workspace() {
+    let policy = ImageExecutionPolicy {
+        ccache_enabled: true,
+        ..ImageExecutionPolicy::default()
+    };
+    let envs = |workspace: &str| {
+        let mut spec = ResolvedBuildSpec::new("buildroot-shared-cache");
+        spec.workspace.root_dir = temp_path(workspace).display().to_string();
+        let mut command = Command::new("make");
+        apply_buildroot_policy_env(&mut command, &spec, &policy).expect("cache env");
+        command
+            .get_envs()
+            .filter_map(|(key, value)| {
+                Some((key.to_string_lossy().to_string(), PathBuf::from(value?)))
+            })
+            .collect::<BTreeMap<_, _>>()
+    };
+    let first = envs("gaia-buildroot-shared-cache-a");
+    let second = envs("gaia-buildroot-shared-cache-b");
+    let root = user_cache_root().expect("user cache root");
+    let root = fs::canonicalize(&root).unwrap_or(root);
+    assert_eq!(first["BR2_DL_DIR"], root.join("buildroot/dl"));
+    assert_eq!(first["BR2_CCACHE_DIR"], root.join("buildroot/ccache"));
+    assert_eq!(first, second);
+}
+
+#[test]
+fn ccache_max_size_is_written_to_the_cache_config() {
+    let dir = temp_path("gaia-ccache-max-size");
+    fs::create_dir_all(&dir).expect("dir");
+    fs::write(
+        dir.join("ccache.conf"),
+        "max_size = 5G\nsloppiness = time_macros\n",
+    )
+    .expect("conf");
+    ensure_ccache_max_size(&dir, None).expect("default size");
+    assert_eq!(
+        fs::read_to_string(dir.join("ccache.conf")).expect("conf"),
+        "sloppiness = time_macros\nmax_size = 50G\n"
+    );
+    ensure_ccache_max_size(&dir, Some("120G")).expect("size");
+    assert!(
+        fs::read_to_string(dir.join("ccache.conf"))
+            .expect("conf")
+            .ends_with("\nmax_size = 120G\n")
+    );
+    assert!(ensure_ccache_max_size(&dir, Some("lots")).is_err());
+    assert!(ensure_ccache_max_size(&dir, Some("50X")).is_err());
+}
+
+#[test]
+fn ccache_hit_rate_counts_this_runs_compilations() {
+    let log = "# a.c\ncache_miss\ndirect_cache_miss\nlocal_storage_miss\n\
+               # a.c\ndirect_cache_hit\nlocal_storage_hit\n\
+               # b.c\ndirect_cache_miss\npreprocessed_cache_hit\n\
+               # c.c\ndirect_cache_hit\n";
+    assert_eq!(
+        ccache_hit_rate(log).as_deref(),
+        Some("buildroot ccache: 3/4 compilations from cache (75.0%)")
+    );
+    assert_eq!(ccache_hit_rate(""), None);
+}
+
+#[test]
+fn buildroot_parallel_packages_and_ccache_configure_and_report() {
+    let workspace = temp_path("gaia-buildroot-parallel-workspace");
+    let buildroot_dir = temp_path("gaia-buildroot-parallel-source");
+    let output_dir = temp_path("gaia-buildroot-parallel-output");
+    let ccache_dir = temp_path("gaia-buildroot-parallel-ccache");
+    fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
+    // `all` records make's flags and writes a ccache stats log like two
+    // compilations, one from the cache.
+    fs::write(
+        buildroot_dir.join("Makefile"),
+        ".DEFAULT_GOAL := all\n%_defconfig:\n\t@mkdir -p $(O)\n\t@printf 'BR2_PACKAGE_FOO=y\\n' > $(O)/.config\n\
+         olddefconfig:\n\t@true\nall:\n\t@echo \"$(MAKEFLAGS)\" > $(O)/makeflags\n\
+         \t@printf '# a.c\\ncache_miss\\n# b.c\\ndirect_cache_hit\\n' > \"$$CCACHE_STATSLOG\"\n",
+    )
+    .expect("makefile");
+    let mut spec = ResolvedBuildSpec::new("buildroot-parallel");
+    spec.workspace.root_dir = workspace.display().to_string();
+    let image = ImageSpec {
+        definition: ImageDefinition::Buildroot(BuildrootImageSpec {
+            defconfig: Some("test_defconfig".into()),
+            ..BuildrootImageSpec::default()
+        }),
+        feed: gaia_spec::ImageFeedSpec::default(),
+        output: ImageOutputSpec::default(),
+        assembly: None,
+    };
+    let execution = test_execution();
+    let policy = ImageExecutionPolicy {
+        local_jobs: 6,
+        parallel_packages: true,
+        ccache_enabled: true,
+        ccache_dir: Some(ccache_dir.display().to_string()),
+        ..ImageExecutionPolicy::default()
+    };
+    let messages = run_buildroot(BuildrootRunRequest {
+        spec: &spec,
+        image: &image,
+        buildroot_dir: &buildroot_dir,
+        output_dir: &output_dir,
+        command: test_command_context(&execution, &policy),
+    })
+    .expect("buildroot run");
+
+    let config = fs::read_to_string(output_dir.join(".config")).expect("config");
+    for setting in [
+        "BR2_PER_PACKAGE_DIRECTORIES=y",
+        "BR2_CCACHE=y",
+        "BR2_CCACHE_USE_BASEDIR=y",
+    ] {
+        assert!(
+            config.contains(setting),
+            "{setting} missing from:\n{config}"
+        );
+    }
+    assert!(config.contains(&format!(
+        "BR2_CCACHE_DIR=\"{}\"",
+        fs::canonicalize(&ccache_dir).expect("ccache dir").display()
+    )));
+    assert_eq!(
+        fs::read_to_string(ccache_dir.join("ccache.conf")).expect("ccache conf"),
+        "max_size = 50G\n"
+    );
+    let makeflags = fs::read_to_string(output_dir.join("makeflags")).expect("makeflags");
+    assert!(makeflags.contains("-l6"), "{makeflags}");
+    assert!(
+        messages
+            .iter()
+            .any(|message| message
+                == "summary: buildroot ccache: 1/2 compilations from cache (50.0%)"),
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn buildroot_kconfig_string_value_escapes_quotes_and_backslashes() {
     let value = kconfig_string_value(r#"/tmp/cache/"quoted"\dir"#).expect("kconfig string");
 

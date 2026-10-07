@@ -84,6 +84,8 @@ fn documented_override_keys_parse_as_typed_keys() {
         "policy.providers.buildroot.download_dir",
         "policy.providers.buildroot.ccache.enabled",
         "policy.providers.buildroot.ccache.dir",
+        "policy.providers.buildroot.ccache.max_size",
+        "policy.providers.buildroot.parallel_packages",
         "policy.providers.buildroot.shared_output",
         "policy.providers.buildroot.shared_output_dir",
         "policy.providers.buildroot.override_check",

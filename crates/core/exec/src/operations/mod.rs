@@ -452,6 +452,7 @@ pub(crate) fn dispatch_operation(
                             reuse_details: Vec::new(),
                             messages: Vec::new(),
                             warnings: Vec::new(),
+                            notes: Vec::new(),
                             state_details: Vec::new(),
                         });
                 }

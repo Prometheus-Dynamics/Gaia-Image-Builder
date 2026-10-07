@@ -32,6 +32,9 @@ pub struct RunSummary {
     /// `config_overrides` that olddefconfig dropped). Counted in
     /// `warning_count`.
     pub image_warnings: Vec<String>,
+    /// Facts image providers reported for the run summary (for example the
+    /// compiler cache hit rate).
+    pub image_notes: Vec<String>,
     pub rolled_back_operations: usize,
     pub cleanup_failure_count: usize,
     pub source_count: usize,
