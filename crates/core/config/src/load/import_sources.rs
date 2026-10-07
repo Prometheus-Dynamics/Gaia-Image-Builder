@@ -17,10 +17,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
-use gaia_spec::{
-    DEFAULT_GIT_PROVIDER_TIMEOUT_SECONDS, GitSourceSpec, ImportSourceSpec, SourcePinPolicySpec,
-    SourceRefreshPolicySpec,
-};
+use gaia_spec::{GitSourceSpec, ImportSourceSpec, SourcePinPolicySpec, SourceRefreshPolicySpec};
 
 use crate::ConfigError;
 use crate::lockfile::{GitLockStatus, GitLockfile};
@@ -36,7 +33,15 @@ pub(super) struct ImportSources {
     /// Ids used as import sources (`source = ...` or `@source:`) by any
     /// local config file, selected or not.
     referenced: BTreeSet<String>,
+    /// `[providers.git] timeout_seconds` of the local config files (the
+    /// largest), or a `--set` override of it.
+    timeout_seconds: Option<u64>,
+    timeout_overridden: bool,
 }
+
+/// Import sources are fetched while the config loads, before any build; a
+/// first clone of a large repository on a busy disk takes minutes.
+const DEFAULT_IMPORT_TIMEOUT_SECONDS: u64 = 1800;
 
 struct Declaration {
     git: GitSourceSpec,
@@ -76,7 +81,24 @@ impl ImportSources {
             resolve_unpinned,
             resolved: BTreeMap::new(),
             referenced: BTreeSet::new(),
+            timeout_seconds: None,
+            timeout_overridden: false,
         }
+    }
+
+    /// `--set policy.providers.git.timeout_seconds=<n>`, which wins over
+    /// the config files.
+    pub(super) fn override_timeout(&mut self, seconds: u64) {
+        self.timeout_seconds = Some(seconds);
+        self.timeout_overridden = true;
+    }
+
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(
+            self.timeout_seconds
+                .filter(|seconds| *seconds > 0)
+                .unwrap_or(DEFAULT_IMPORT_TIMEOUT_SECONDS),
+        )
     }
 
     pub(super) fn note_references(&mut self, ids: BTreeSet<String>) {
@@ -93,8 +115,19 @@ impl ImportSources {
             .collect()
     }
 
-    /// Registers the git `[[sources]]` of a local config file.
+    /// Registers the git `[[sources]]` of a local config file, and its
+    /// `[providers.git] timeout_seconds`.
     pub(super) fn declare_from(&mut self, file: &Path, value: &toml::Value) {
+        if !self.timeout_overridden
+            && let Some(seconds) = value
+                .get("providers")
+                .and_then(|providers| providers.get("git"))
+                .and_then(|git| git.get("timeout_seconds"))
+                .and_then(toml::Value::as_integer)
+                .and_then(|seconds| u64::try_from(seconds).ok())
+        {
+            self.timeout_seconds = Some(self.timeout_seconds.unwrap_or(0).max(seconds));
+        }
         let Some(sources) = value.get("sources").and_then(toml::Value::as_array) else {
             return;
         };
@@ -193,7 +226,7 @@ impl ImportSources {
             ));
         }
         let git = &declaration.git;
-        let timeout = Duration::from_secs(DEFAULT_GIT_PROVIDER_TIMEOUT_SECONDS);
+        let timeout = self.timeout();
         let rev = self.pinned_rev(id, git, referenced_by, timeout)?;
         let dest = self
             .workspace_root
@@ -417,4 +450,48 @@ fn lexically_normalized(path: &Path) -> PathBuf {
         }
     }
     normalized
+}
+
+#[cfg(test)]
+mod timeout_tests {
+    use super::*;
+
+    fn sources() -> ImportSources {
+        ImportSources::new(
+            std::env::temp_dir(),
+            &std::env::temp_dir().join("gaia-import-timeout-build.toml"),
+            BTreeMap::new(),
+            false,
+        )
+    }
+
+    fn config(text: &str) -> toml::Value {
+        toml::from_str(text).expect("toml")
+    }
+
+    #[test]
+    fn import_fetches_use_the_git_provider_timeout() {
+        let mut sources = sources();
+        assert_eq!(
+            sources.timeout(),
+            Duration::from_secs(DEFAULT_IMPORT_TIMEOUT_SECONDS)
+        );
+        sources.declare_from(
+            Path::new("build.toml"),
+            &config("[providers.git]\ntimeout_seconds = 900\n"),
+        );
+        sources.declare_from(
+            Path::new("layer.toml"),
+            &config("[providers.git]\ntimeout_seconds = 120\n"),
+        );
+        assert_eq!(sources.timeout(), Duration::from_secs(900));
+
+        let mut overridden = self::sources();
+        overridden.override_timeout(30);
+        overridden.declare_from(
+            Path::new("build.toml"),
+            &config("[providers.git]\ntimeout_seconds = 900\n"),
+        );
+        assert_eq!(overridden.timeout(), Duration::from_secs(30));
+    }
 }

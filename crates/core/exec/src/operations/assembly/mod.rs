@@ -19,6 +19,7 @@ mod files;
 mod filesystems;
 mod mbr;
 mod state;
+mod steps;
 mod tar;
 mod transforms;
 
@@ -30,6 +31,7 @@ use filesystems::*;
 use mbr::*;
 use state::AssemblyExecutionContext;
 pub(crate) use state::{assembly_state_path, image_assembly_cleanup_paths};
+use steps::{StepRun, ordered_assembly_steps, remove_stale_step_outputs};
 use transforms::*;
 
 const TOOL_VERSION_TIMEOUT_SECONDS: u64 = 2;
@@ -168,298 +170,31 @@ pub(crate) fn stage_image_assembly(
         ));
     }
 
-    let mut dir_count = 0usize;
-    for dir in &assembly.dirs {
-        let tree_path = roots.tree_path(&dir.tree)?;
-        let dest = create_assembly_dir(tree_path, dir)?;
-        dir_count += 1;
-        state.insert(format!("dir.{dir_count}.tree"), dir.tree.as_str());
-        state.insert(format!("dir.{dir_count}.path"), dest.display().to_string());
-        if let Some(mode) = &dir.mode {
-            state.insert(format!("dir.{dir_count}.mode"), mode);
-        }
+    // Every step runs after the steps whose outputs it reads, so for
+    // example a transform compressing a filesystem image sees this run's
+    // image. Outputs from an earlier run are removed first: a dependency
+    // Gaia cannot see fails loudly instead of reading a stale file.
+    let (order, step_paths) = ordered_assembly_steps(spec, assembly, &roots)?;
+    remove_stale_step_outputs(&step_paths)?;
+    let mut run = StepRun::new(
+        spec,
+        assembly,
+        &roots,
+        operation_id,
+        cancel_check.clone(),
+        state,
+        messages,
+    );
+    for step in order {
+        run.run(step)?;
     }
-    state.insert("created_dir_count", dir_count);
-    if dir_count > 0 {
-        messages.push(format!("created {dir_count} assembly dir(s)"));
-    }
-
-    let mut symlink_count = 0usize;
-    for symlink in &assembly.symlinks {
-        let tree_path = roots.tree_path(&symlink.tree)?;
-        let dest = create_assembly_symlink(tree_path, symlink)?;
-        symlink_count += 1;
-        state.insert(
-            format!("symlink.{symlink_count}.tree"),
-            symlink.tree.as_str(),
-        );
-        state.insert(
-            format!("symlink.{symlink_count}.path"),
-            dest.display().to_string(),
-        );
-        state.insert(format!("symlink.{symlink_count}.target"), &symlink.target);
-    }
-    state.insert("created_symlink_count", symlink_count);
-    if symlink_count > 0 {
-        messages.push(format!("created {symlink_count} assembly symlink(s)"));
-    }
-
-    let mut staged_count = 0usize;
-    let mut skipped_count = 0usize;
-    for (entry_index, file) in assembly.files.iter().enumerate() {
-        let span = tracing::info_span!(
-            "assembly_file_stage",
-            operation_id = %operation_id.as_str(),
-            entry_index,
-            tree_id = %file.tree,
-            dest = %file.dest,
-            output_path = tracing::field::Empty
-        );
-        let _span_guard = span.enter();
-        let tree_path = roots.tree_path(&file.tree)?;
-        let sources = assembly_file_sources(spec, &roots, file)?;
-        if sources.is_empty() && file.optional {
-            skipped_count += 1;
-            state.insert(format!("file.{entry_index}.skipped"), "true");
-            state.insert(format!("file.{entry_index}.tree"), &file.tree);
-            continue;
-        }
-        if sources.is_empty() {
-            return Err(format!(
-                "assembly file entry for tree '{}' matched no sources",
-                file.tree
-            )
-            .into());
-        }
-
-        for source in sources {
-            if !source.exists() {
-                if file.optional {
-                    skipped_count += 1;
-                    state.insert(format!("file.{entry_index}.skipped"), source.display());
-                    continue;
-                }
-                return Err(
-                    format!("assembly source '{}' does not exist", source.display()).into(),
-                );
-            }
-            let dest = assembly_file_dest(tree_path, &source, &file.dest)?;
-            tracing::Span::current().record("output_path", dest.display().to_string());
-            copy_assembly_file(&source, &dest, file)?;
-            staged_count += 1;
-            state.insert(
-                format!("file.{staged_count}.src"),
-                source.display().to_string(),
-            );
-            state.insert(
-                format!("file.{staged_count}.dest"),
-                dest.display().to_string(),
-            );
-            state.insert(format!("file.{staged_count}.bytes"), file_len(&dest)?);
-            state.insert(format!("file.{staged_count}.sha256"), file_sha256(&dest)?);
-            if let Some(mode) = &file.mode {
-                state.insert(format!("file.{staged_count}.mode"), mode);
-            }
-        }
-    }
-    state.insert("staged_file_count", staged_count);
-    state.insert("skipped_file_count", skipped_count);
-    messages.push(format!(
-        "staged {staged_count} assembly file(s), skipped {skipped_count}"
-    ));
-
-    let mut busybox_count = 0usize;
-    for initramfs in &assembly.busybox_initramfs {
-        let span = tracing::info_span!(
-            "assembly_busybox_initramfs",
-            operation_id = %operation_id.as_str(),
-            tree_id = %initramfs.tree,
-            busybox = %initramfs.busybox,
-            output_path = tracing::field::Empty
-        );
-        let _span_guard = span.enter();
-        let summary = execute_busybox_initramfs(spec, &roots, initramfs, cancel_check.clone())?;
-        tracing::Span::current().record("output_path", summary.dest.display().to_string());
-        busybox_count += 1;
-        state.insert(
-            format!("busybox.{busybox_count}.tree"),
-            initramfs.tree.as_str(),
-        );
-        state.insert(
-            format!("busybox.{busybox_count}.src"),
-            summary.src.display().to_string(),
-        );
-        state.insert(
-            format!("busybox.{busybox_count}.dest"),
-            summary.dest.display().to_string(),
-        );
-        state.insert(format!("busybox.{busybox_count}.bytes"), summary.bytes);
-        state.insert(format!("busybox.{busybox_count}.sha256"), summary.sha256);
-        state.insert(
-            format!("busybox.{busybox_count}.applet_count"),
-            summary.applets.len(),
-        );
-        for (applet_index, applet) in summary.applets.iter().enumerate() {
-            let index = applet_index + 1;
-            state.insert(format!("busybox.{busybox_count}.applet.{index}"), applet);
-        }
-        state.insert(
-            format!("busybox.{busybox_count}.runtime_linkage"),
-            summary.runtime_linkage.as_str(),
-        );
-        state.insert(
-            format!("busybox.{busybox_count}.runtime_library_count"),
-            summary.runtime_libraries.len(),
-        );
-        for (library_index, library) in summary.runtime_libraries.iter().enumerate() {
-            let index = library_index + 1;
-            state.insert(
-                format!("busybox.{busybox_count}.runtime_library.{index}"),
-                library.display().to_string(),
-            );
-        }
-        messages.push(format!(
-            "prepared busybox initramfs tree '{}' with {} applet(s)",
-            initramfs.tree,
-            summary.applets.len()
-        ));
-    }
-    state.insert("completed_busybox_initramfs_count", busybox_count);
-
-    let mut transform_count = 0usize;
-    for transform in &assembly.transforms {
-        let span = tracing::info_span!(
-            "assembly_transform",
-            operation_id = %operation_id.as_str(),
-            kind = transform.kind.as_str(),
-            dest = %transform.dest,
-            output_path = tracing::field::Empty,
-            tool_path = tracing::field::Empty
-        );
-        let _span_guard = span.enter();
-        let summary = execute_assembly_transform(spec, &roots, transform, cancel_check.clone())?;
-        tracing::Span::current().record("output_path", summary.dest.display().to_string());
-        transform_count += 1;
-        let transform_state = AssemblyStateKey::new("transform", transform_count);
-        state.insert(transform_state.field("kind"), transform.kind.as_str());
-        state.insert(
-            transform_state.field("src"),
-            summary.src.display().to_string(),
-        );
-        state.insert(
-            transform_state.field("dest"),
-            summary.dest.display().to_string(),
-        );
-        state.insert(
-            transform_state.field("deterministic"),
-            transform.deterministic,
-        );
-        state.insert(transform_state.field("bytes"), summary.bytes);
-        state.insert(transform_state.field("sha256"), summary.sha256);
-        if let Some(tool) = summary.tool_path {
-            state.insert(transform_state.field("tool"), tool);
-        }
-        if let Some(tool_version) = summary.tool_version {
-            state.insert(transform_state.field("tool_version"), tool_version);
-        }
-        messages.push(format!(
-            "ran assembly transform '{}' to '{}'",
-            transform.kind.as_str(),
-            summary.dest.display()
-        ));
-    }
-    state.insert("completed_transform_count", transform_count);
-
-    let mut filesystem_count = 0usize;
-    for filesystem in &assembly.filesystems {
-        let span = tracing::info_span!(
-            "assembly_filesystem",
-            operation_id = %operation_id.as_str(),
-            filesystem_id = %filesystem.id,
-            kind = filesystem.kind.as_str(),
-            source_tree = %filesystem.source_tree,
-            output = %filesystem.output,
-            output_path = tracing::field::Empty,
-            tool_path = tracing::field::Empty
-        );
-        let _span_guard = span.enter();
-        let summary = execute_assembly_filesystem(spec, &roots, filesystem, cancel_check.clone())?;
-        tracing::Span::current().record("output_path", summary.output.display().to_string());
-        filesystem_count += 1;
-        let filesystem_state = AssemblyStateKey::new("filesystem", filesystem_count);
-        state.insert(filesystem_state.field("id"), filesystem.id.as_str());
-        state.insert(filesystem_state.field("kind"), filesystem.kind.as_str());
-        state.insert(
-            filesystem_state.field("source_tree"),
-            filesystem.source_tree.as_str(),
-        );
-        state.insert(
-            filesystem_state.field("output"),
-            summary.output.display().to_string(),
-        );
-        state.insert(
-            filesystem_state.field("deterministic"),
-            filesystem.deterministic,
-        );
-        state.insert(filesystem_state.field("bytes"), summary.bytes);
-        state.insert(filesystem_state.field("sha256"), summary.sha256);
-        if let Some(tool) = summary.tool_path {
-            state.insert(filesystem_state.field("tool"), tool);
-        }
-        if let Some(tool_version) = summary.tool_version {
-            state.insert(filesystem_state.field("tool_version"), tool_version);
-        }
-        messages.push(format!(
-            "built assembly filesystem '{}' at '{}'",
-            filesystem.id,
-            summary.output.display()
-        ));
-    }
-    state.insert("completed_filesystem_count", filesystem_count);
-
-    let mut disk_count = 0usize;
-    let mut disk_outputs = Vec::new();
-    for disk in &assembly.disks {
-        let span = tracing::info_span!(
-            "assembly_disk",
-            operation_id = %operation_id.as_str(),
-            disk_id = %disk.id,
-            partition_table = disk.partition_table.as_str(),
-            output = %disk.output,
-            output_path = tracing::field::Empty
-        );
-        let _span_guard = span.enter();
-        let summary = execute_assembly_disk(spec, &roots, disk)?;
-        tracing::Span::current().record("output_path", summary.output.display().to_string());
-        disk_count += 1;
-        disk_outputs.push(summary.output.clone());
-        record_disk_state(&mut state, disk_count, disk, &summary);
-        messages.push(format!(
-            "built assembly disk '{}' at '{}'",
-            disk.id,
-            summary.output.display()
-        ));
-    }
-    state.insert("completed_disk_count", disk_count);
-
-    for (index, archive) in assembly.archives.iter().enumerate() {
-        let span = tracing::info_span!(
-            "assembly_archive",
-            operation_id = %operation_id.as_str(),
-            archive_id = %archive.id
-        );
-        let _span_guard = span.enter();
-        let summary = execute_assembly_archive(spec, &roots, archive)?;
-        record_archive_state(&mut state, index + 1, archive, &summary);
-        messages.push(format!(
-            "built assembly archive '{}' at '{}'",
-            archive.id,
-            summary.output.display()
-        ));
-    }
-    if !assembly.archives.is_empty() {
-        state.insert("completed_archive_count", assembly.archives.len());
-    }
+    run.finish();
+    let StepRun {
+        mut state,
+        mut messages,
+        disk_outputs,
+        ..
+    } = run;
 
     let mut cleanup_paths = context.cleanup_paths();
     let mut archive_path = None;

@@ -1,6 +1,7 @@
 mod artifact;
 mod assembly;
 mod assembly_archive_spec;
+mod assembly_order;
 mod assembly_spec;
 mod byte_size;
 mod checkpoints;
@@ -31,6 +32,10 @@ pub use assembly_archive_spec::{
     AssemblyArchiveMemberSourceSpec, AssemblyArchiveMemberSpec, AssemblyArchiveSpec,
     AssemblyDigestToken, assembly_digest_tokens,
 };
+pub use assembly_order::{
+    AssemblyCycle, AssemblyStep, AssemblyStepPaths, assembly_step_paths,
+    assembly_steps_reading_later_outputs, order_assembly_steps,
+};
 pub use assembly_spec::{
     AssemblyBusyboxInitramfsSpec, AssemblyDirSpec, AssemblyDiskPartitionSpec, AssemblyDiskSpec,
     AssemblyFileSpec, AssemblyFilesystemKindSpec, AssemblyFilesystemSpec,
@@ -59,22 +64,23 @@ pub use inputs::{InputKindSpec, InputOptionSpec, InputSpec};
 pub use install::{InstallEntrySpec, InstallSpec};
 pub use metadata::{BuildMetadataSpec, ProductIdentitySpec};
 pub use policy::{
-    BuildPolicySpec, BuildrootCcachePolicySpec, BuildrootPackageCachePolicySpec, BuildrootOverrideCheckSpec,
-    CommandProviderPolicySpec, DEFAULT_ARCHIVE_PROVIDER_TIMEOUT_SECONDS,
-    DEFAULT_BUILDROOT_PROVIDER_TIMEOUT_SECONDS, DEFAULT_COMMAND_RETRY_ATTEMPTS,
-    DEFAULT_COMMAND_RETRY_BACKOFF_MS, DEFAULT_COMMAND_RETRY_BACKOFF_STRATEGY,
-    DEFAULT_DOWNLOAD_PROVIDER_TIMEOUT_SECONDS, DEFAULT_GIT_PROVIDER_TIMEOUT_SECONDS,
-    DEFAULT_GO_PROVIDER_TIMEOUT_SECONDS, DEFAULT_JAVA_PROVIDER_TIMEOUT_SECONDS,
-    DEFAULT_NODE_PROVIDER_TIMEOUT_SECONDS, DEFAULT_OUTPUT_RETENTION_FAILURE_TAIL_LINES,
-    DEFAULT_OUTPUT_RETENTION_POLICY, DEFAULT_OUTPUT_RETENTION_STDERR_BYTES,
-    DEFAULT_OUTPUT_RETENTION_STDERR_LINES, DEFAULT_OUTPUT_RETENTION_STDOUT_BYTES,
-    DEFAULT_OUTPUT_RETENTION_STDOUT_LINES, DEFAULT_PROVIDER_LOCAL_JOBS,
-    DEFAULT_PYTHON_PROVIDER_TIMEOUT_SECONDS, DEFAULT_RUST_PROVIDER_TIMEOUT_SECONDS,
-    DEFAULT_STARTING_POINT_PROVIDER_TIMEOUT_SECONDS, DockerExecutionSpec, ExecutionPolicySpec,
-    FailureHandlingPolicySpec, GitProviderPolicySpec, InterpolationSpec, OutputRetentionPolicySpec,
-    PrecedenceLayerSpec, PrecedencePolicySpec, PrecedenceSource, PrecedenceTarget,
-    PresetSelectionSpec, ProviderExecutionPolicySpec, ResolvedCommandPolicySpec,
-    RetryBackoffStrategySpec, RollbackDomain, RustProviderPolicySpec, UnresolvedInterpolationSpec,
+    BuildPolicySpec, BuildrootCcachePolicySpec, BuildrootOverrideCheckSpec,
+    BuildrootPackageCachePolicySpec, CommandProviderPolicySpec,
+    DEFAULT_ARCHIVE_PROVIDER_TIMEOUT_SECONDS, DEFAULT_BUILDROOT_PROVIDER_TIMEOUT_SECONDS,
+    DEFAULT_COMMAND_RETRY_ATTEMPTS, DEFAULT_COMMAND_RETRY_BACKOFF_MS,
+    DEFAULT_COMMAND_RETRY_BACKOFF_STRATEGY, DEFAULT_DOWNLOAD_PROVIDER_TIMEOUT_SECONDS,
+    DEFAULT_GIT_PROVIDER_TIMEOUT_SECONDS, DEFAULT_GO_PROVIDER_TIMEOUT_SECONDS,
+    DEFAULT_JAVA_PROVIDER_TIMEOUT_SECONDS, DEFAULT_NODE_PROVIDER_TIMEOUT_SECONDS,
+    DEFAULT_OUTPUT_RETENTION_FAILURE_TAIL_LINES, DEFAULT_OUTPUT_RETENTION_POLICY,
+    DEFAULT_OUTPUT_RETENTION_STDERR_BYTES, DEFAULT_OUTPUT_RETENTION_STDERR_LINES,
+    DEFAULT_OUTPUT_RETENTION_STDOUT_BYTES, DEFAULT_OUTPUT_RETENTION_STDOUT_LINES,
+    DEFAULT_PROVIDER_LOCAL_JOBS, DEFAULT_PYTHON_PROVIDER_TIMEOUT_SECONDS,
+    DEFAULT_RUST_PROVIDER_TIMEOUT_SECONDS, DEFAULT_STARTING_POINT_PROVIDER_TIMEOUT_SECONDS,
+    DockerExecutionSpec, ExecutionPolicySpec, FailureHandlingPolicySpec, GitProviderPolicySpec,
+    InterpolationSpec, OutputRetentionPolicySpec, PrecedenceLayerSpec, PrecedencePolicySpec,
+    PrecedenceSource, PrecedenceTarget, PresetSelectionSpec, ProviderExecutionPolicySpec,
+    ResolvedCommandPolicySpec, RetryBackoffStrategySpec, RollbackDomain, RustProviderPolicySpec,
+    UnresolvedInterpolationSpec,
 };
 pub use provenance::{ProvenanceIdentitySpec, ProvenanceSpec};
 pub use reporting::{

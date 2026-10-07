@@ -370,6 +370,7 @@ pub(crate) fn validate_image_assembly(
 
     image_assembly_layout::validate_transform_levels(assembly, diagnostics);
     image_assembly_layout::validate_archives(spec, assembly, &tree_ids, diagnostics);
+    crate::image_assembly_order::validate_assembly_order(assembly, diagnostics);
 
     for initramfs in &assembly.busybox_initramfs {
         if !tree_ids.contains(&initramfs.tree) {

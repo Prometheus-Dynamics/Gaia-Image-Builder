@@ -52,8 +52,12 @@ rev = "<full commit sha>"   # or an entry in the build's lockfile
   with an error naming the importing file and the source id.
 - The checkout is made in `<workspace>/.gaia/cache/import-sources/<id>-<rev>`,
   through the shared per-repository mirror in `.gaia/cache/git` for remote
-  repositories. An existing checkout is reused without fetching, so use full
-  commit shas for `rev`.
+  repositories. An existing checkout is reused without fetching, and a commit
+  already in the mirror is checked out without a network fetch, so use full
+  commit shas for `rev`. Fetches and clones use `[providers.git]
+  timeout_seconds` (the largest of the local config files, or
+  `--set policy.providers.git.timeout_seconds=<n>`), 1800 seconds when it is
+  not set.
 - `when` behaves exactly as for local imports. An import whose `when` does not
   match is not loaded at all, whether it is local or from a source: nothing in
   it is fetched or token-resolved, so a layer selected for one target may use
@@ -1485,7 +1489,9 @@ Assembly behavior:
 - Raw MBR disk assembly writes 1 MiB-aligned partitions sequentially (see [Disk partitions](#disk-partitions)).
 - MBR partition `type` accepts raw `0xNN` values; `type_alias` currently supports `fat32-lba` and `linux`.
 - Assembly runtime state is included in provenance and manifest reports with staged file, transform, filesystem, disk, and archive output sizes and digests.
-- Assembly order: trees, dirs, symlinks, files, BusyBox initramfs, transforms, filesystems, disks, archives.
+- Assembly order follows dependencies: a step that reads a path another step writes (the same file, a file in a directory it fills, or a glob it matches) runs after it, whatever its kind or position, so for example a transform compressing a filesystem built by the same assembly sees this run's image. Trees are prepared first; steps that do not depend on each other run in the order dirs, symlinks, files, BusyBox initramfs, transforms, filesystems, disks, archives. Steps that read each other's outputs in a cycle are rejected, by validation and at run time.
+- Before the steps run, outputs of transforms, filesystems, disks and archives left from an earlier run are removed, so a step reading one before it is rebuilt fails instead of using a stale file.
+- Validation warns (`assembly_reads_later_output`) when a step reads what a step of a later kind or position produces: Gaia versions before dependency ordering ran it first, on the previous run's file.
 
 #### Disk partitions
 

@@ -52,6 +52,15 @@ pub(crate) fn load_build_config(
         path_overrides,
         options.resolve_unpinned_import_sources,
     );
+    if let Some(seconds) = options
+        .explicit_overrides
+        .iter()
+        .rev()
+        .find(|(key, _)| key == "policy.providers.git.timeout_seconds")
+        .and_then(|(_, value)| value.trim().parse::<u64>().ok())
+    {
+        sources.override_timeout(seconds);
+    }
     declare_local_sources(&entrypoint, &mut sources, &mut BTreeSet::new());
     let mut loader = Loader {
         stack: Vec::new(),

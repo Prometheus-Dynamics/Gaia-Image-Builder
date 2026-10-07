@@ -452,7 +452,10 @@ fn merge_command_policy(
         package_cache: crate::raw::RawBuildrootPackageCacheConfig {
             enabled: base.package_cache.enabled || overlay.package_cache.enabled,
             dir: overlay.package_cache.dir.or(base.package_cache.dir),
-            max_size: overlay.package_cache.max_size.or(base.package_cache.max_size),
+            max_size: overlay
+                .package_cache
+                .max_size
+                .or(base.package_cache.max_size),
         },
     }
 }

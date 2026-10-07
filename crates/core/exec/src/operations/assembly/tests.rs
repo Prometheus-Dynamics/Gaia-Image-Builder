@@ -557,3 +557,109 @@ fn buildroot_assembly_roots_expose_images_target_host_and_staging() {
 
     let _ = fs::remove_dir_all(root);
 }
+
+fn boot_assembly(
+    root: &Path,
+    transforms: Vec<gaia_spec::AssemblyTransformSpec>,
+) -> ImageAssemblySpec {
+    ImageAssemblySpec {
+        work_dir: Some(root.join("build/assembly").display().to_string().into()),
+        trees: vec![AssemblyTreeSpec {
+            id: "boot".into(),
+            path: "$assembly.work/boot".into(),
+        }],
+        files: vec![AssemblyFileSpec {
+            tree: "boot".into(),
+            src: Some("@assets/config.txt".into()),
+            src_glob: None,
+            dest: "config.txt".into(),
+            mode: None,
+            optional: false,
+            preserve_symlink: false,
+        }],
+        transforms,
+        filesystems: vec![gaia_spec::AssemblyFilesystemSpec {
+            id: "boot".into(),
+            kind: gaia_spec::AssemblyFilesystemKindSpec::Cpio,
+            source_tree: "boot".into(),
+            output: "$assembly.work/boot.cpio".into(),
+            size: None,
+            deterministic: true,
+        }],
+        ..ImageAssemblySpec::default()
+    }
+}
+
+fn copy_transform(src: &str, dest: &str) -> gaia_spec::AssemblyTransformSpec {
+    gaia_spec::AssemblyTransformSpec {
+        kind: gaia_spec::AssemblyTransformKindSpec::Copy,
+        src: Some(src.into()),
+        dest: dest.into(),
+        deterministic: true,
+        level: None,
+    }
+}
+
+#[test]
+fn transforms_read_this_runs_filesystem_output() {
+    let root = unique_dir("gaia-assembly-order");
+    let mut spec = test_spec(&root);
+    let source = root.join("assets/config.txt");
+    fs::create_dir_all(source.parent().expect("source parent")).expect("assets");
+    fs::write(&source, "kernel 7.2.9").expect("source");
+    // The previous run's image, which the transform must not pick up.
+    let work = root.join("build/assembly");
+    fs::create_dir_all(&work).expect("work");
+    fs::write(work.join("boot.cpio"), "kernel 6.12.47").expect("stale image");
+
+    // Declared (and of a kind classically run) before the filesystem it reads.
+    spec.image.assembly = Some(boot_assembly(
+        &root,
+        vec![copy_transform(
+            "$assembly.work/boot.cpio",
+            "$assembly.work/boot.cpio.update",
+        )],
+    ));
+    let summary = stage_image_assembly(&spec, &OperationId::image_assembly(), None)
+        .expect("assembly staging");
+
+    let image = fs::read(work.join("boot.cpio")).expect("image");
+    let update = fs::read(work.join("boot.cpio.update")).expect("update");
+    assert_eq!(update, image);
+    assert!(String::from_utf8_lossy(&update).contains("kernel 7.2.9"));
+    let position = |text: &str| {
+        summary
+            .messages
+            .iter()
+            .position(|message| message.contains(text))
+            .unwrap_or_else(|| panic!("no message with '{text}': {:?}", summary.messages))
+    };
+    assert!(position("built assembly filesystem 'boot'") < position("ran assembly transform"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn assembly_steps_reading_each_others_outputs_are_refused() {
+    let root = unique_dir("gaia-assembly-cycle");
+    let mut spec = test_spec(&root);
+    let source = root.join("assets/config.txt");
+    fs::create_dir_all(source.parent().expect("source parent")).expect("assets");
+    fs::write(&source, "config").expect("source");
+    spec.image.assembly = Some(boot_assembly(
+        &root,
+        vec![
+            copy_transform("$assembly.work/a", "$assembly.work/b"),
+            copy_transform("$assembly.work/b", "$assembly.work/a"),
+        ],
+    ));
+    let error =
+        stage_image_assembly(&spec, &OperationId::image_assembly(), None).expect_err("cycle");
+    assert!(error.message.contains("in a cycle"), "{}", error.message);
+    assert!(
+        error
+            .message
+            .contains("copy transform to '$assembly.work/b'")
+    );
+    let _ = fs::remove_dir_all(root);
+}

@@ -269,3 +269,42 @@ src = "$provider.images/a.img"
     ));
     assert_eq!(codes, vec!["assembly_archive_member_name_invalid"]);
 }
+
+#[test]
+fn transforms_reading_a_filesystem_built_later_are_reported() {
+    // The boot filesystem the transform compresses is produced by the
+    // assembly itself (the PhotonVision raze layout).
+    let layout = format!(
+        "{CM5_AB_LAYOUT}
+[[image.assembly.trees]]
+id = \"boot\"
+path = \"$assembly.work/boot\"
+
+[[image.assembly.filesystems]]
+id = \"boot\"
+kind = \"vfat\"
+source_tree = \"boot\"
+output = \"$provider.images/boot.vfat\"
+size = \"128M\"
+"
+    );
+    assert_eq!(assembly_codes(&layout), ["assembly_reads_later_output"]);
+}
+
+#[test]
+fn assembly_steps_reading_each_others_outputs_are_an_error() {
+    let layout = format!(
+        "{CM5_AB_LAYOUT}
+[[image.assembly.transforms]]
+kind = \"copy\"
+src = \"$assembly.work/a\"
+dest = \"$assembly.work/b\"
+
+[[image.assembly.transforms]]
+kind = \"copy\"
+src = \"$assembly.work/b\"
+dest = \"$assembly.work/a\"
+"
+    );
+    assert_eq!(assembly_codes(&layout), ["assembly_step_cycle"]);
+}
