@@ -510,12 +510,36 @@ build in the workspace. When `providers.buildroot.ccache.enabled = true`,
 Gaia enables `BR2_CCACHE` and passes `BR2_CCACHE_DIR` when `dir` is set.
 Cache directories outside the workspace are mounted into Docker builds.
 
-Buildroot's output tree is cleaned when the effective `.config` changes. The
-generated version header and settings that cannot change the build output
-(`BR2_DL_DIR`, `BR2_CCACHE_DIR`, `BR2_JLEVEL`, download mirrors) are ignored
-for that comparison. Squashfs tuning (`BR2_TARGET_ROOTFS_SQUASHFS4_*`, block
-size, padding) is ignored as well, because root filesystem images are
-regenerated on every `make`; switching compression never forces a rebuild.
+Buildroot never rebuilds a built package by itself, so Gaia compares the
+effective `.config` and the package override trees with those the output tree
+was last built from, and rebuilds as little as keeps it correct:
+
+- Settings that cannot change what packages build are ignored: the version
+  header, `BR2_DL_DIR`, `BR2_CCACHE_DIR`, `BR2_JLEVEL`, download mirrors,
+  `BR2_EXTERNAL_*` (tree names, paths, versions), root filesystem image
+  settings (`BR2_TARGET_ROOTFS_*`, post-image and fakeroot scripts, users and
+  device tables) and import-source checkout directories in paths. Root
+  filesystem images are regenerated on every `make`.
+- Newly enabled packages, including new packages in override or external
+  trees, simply build.
+- A built package whose options, override directory contents or version
+  changed is uninstalled (the files it installed in `target/`, `staging/`
+  and `host/` that no other package also installed are removed) and its
+  build directory is removed (`<pkg>-dirclean`), as is every package that
+  depends on it, recursively.
+- A package no longer enabled is uninstalled, and the packages that depended
+  on it are rebuilt.
+- A built package that gained or lost a dependency (for example kmod once xz
+  is enabled) is rebuilt.
+- Toolchain, architecture, libc, init system and other system-wide settings
+  still clean the whole output tree (`make clean`), as does any change when
+  Buildroot cannot report its package graph (`make show-info`, which Gaia
+  runs only when something changed).
+
+Both the clean and the rebuild log what caused them, for example
+`buildroot rebuild of 3 package(s): libcamera, libcamera-apps, photonvision`
+followed by `libcamera changed: BR2_PACKAGE_LIBCAMERA_PIPELINE_RPI_PISP unset
+-> y`.
 
 Gaia delivers the image feed (installs, stage files, env sets, services)
 through Buildroot itself: it stages the feed next to the output tree and

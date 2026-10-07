@@ -319,6 +319,7 @@ fn buildroot_package_overrides_replace_existing_source_packages() {
         fs::read_to_string(output_dir.join("br2_external_defconfig")).expect("defconfig external"),
         "unset"
     );
+    // A tree recorded by no Gaia version: its config is unknown.
     assert_eq!(
         fs::read_to_string(output_dir.join("cleaned")).expect("clean marker"),
         "clean"
@@ -329,13 +330,15 @@ fn buildroot_package_overrides_replace_existing_source_packages() {
             .is_file()
     );
     assert!(
+        fs::read_to_string(output_dir.join(".gaia-buildroot-package-overrides.digests"))
+            .expect("override digests")
+            .starts_with("foo ")
+    );
+    assert!(
         messages
             .iter()
             .any(|message| message.contains("replaced 1 Buildroot source package definition"))
     );
-    assert!(messages.iter().any(|message| {
-        message.contains("cleaned Buildroot output for changed package replacements")
-    }));
 }
 
 #[test]
@@ -391,7 +394,7 @@ fn buildroot_config_changes_clean_existing_output_before_make() {
     );
     assert!(output_dir.join(".gaia-buildroot-config-state").is_file());
     assert!(messages.iter().any(|message| {
-        message.contains("cleaned Buildroot output for changed effective config")
+        message.contains("cleaned Buildroot output: effective config changed (no snapshot")
     }));
 }
 
@@ -406,7 +409,7 @@ fn buildroot_retry_after_failed_post_image_does_not_clean() {
     // exists, the way a failing BR2_ROOTFS_POST_IMAGE_SCRIPT ends make.
     fs::write(
         buildroot_dir.join("Makefile"),
-        ".DEFAULT_GOAL := all\n%_defconfig:\n\t@mkdir -p $(O)\n\t@printf 'BR2_PACKAGE_FOO=n\\nBR2_ROOTFS_POST_IMAGE_SCRIPT=\"post-image.sh\"\\n' > $(O)/.config\nolddefconfig:\n\t@true\nclean:\n\t@printf clean >> $(O)/cleaned\nall:\n\t@mkdir -p $(O)/target\n\t@printf built > $(O)/target/current\n\t@test ! -f $(O)/post-image-fails\n",
+        ".DEFAULT_GOAL := all\n%_defconfig:\n\t@mkdir -p $(O)\n\t@printf 'BR2_PACKAGE_FOO=n\\nBR2_ROOTFS_POST_IMAGE_SCRIPT=\"post-image.sh\"\\n' > $(O)/.config\nolddefconfig:\n\t@true\nclean:\n\t@printf clean >> $(O)/cleaned\nall:\n\t@mkdir -p $(O)/target $(O)/build\n\t@printf built > $(O)/target/current\n\t@test ! -f $(O)/post-image-fails\n",
     )
     .expect("makefile");
 
@@ -452,9 +455,109 @@ fn buildroot_retry_after_failed_post_image_does_not_clean() {
         fs::read_to_string(output_dir.join("cleaned")).expect("clean marker"),
         "clean"
     );
+    // This fake Buildroot has no `show-info`, so the change cannot be
+    // narrowed to packages.
     assert!(messages.iter().any(|message| {
-        message == "cleaned Buildroot output for changed effective config: BR2_PACKAGE_FOO"
+        message.starts_with("cleaned Buildroot output: BR2_PACKAGE_FOO, ")
+            && message.ends_with("did not report its package graph")
     }));
+}
+
+#[test]
+fn buildroot_option_change_rebuilds_only_the_package_and_its_dependents() {
+    let workspace = temp_path("gaia-buildroot-targeted-workspace");
+    let buildroot_dir = temp_path("gaia-buildroot-targeted-source");
+    let output_dir = temp_path("gaia-buildroot-targeted-output");
+
+    fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
+    // bar depends on foo; baz on nothing.
+    let package = |name: &str, dependencies: &str, reverse: &str| {
+        format!(
+            "\"{name}\": {{\"type\": \"target\", \"name\": \"{name}\", \"virtual\": false, \
+             \"version\": \"1\", \"stamp_dir\": \"build/{name}-1\", \
+             \"dependencies\": [{dependencies}], \"reverse_dependencies\": [{reverse}]}}"
+        )
+    };
+    fs::write(
+        buildroot_dir.join("graph.json"),
+        format!(
+            "{{{}, {}, {}}}\n",
+            package("foo", "", "\"bar\""),
+            package("bar", "\"foo\"", ""),
+            package("baz", "", "")
+        ),
+    )
+    .expect("graph");
+    // Each package builds once (until its build directory is removed),
+    // installing usr/bin/<name> and recording it in its file list.
+    fs::write(
+        buildroot_dir.join("Makefile"),
+        ".DEFAULT_GOAL := all\n%_defconfig:\n\t@mkdir -p $(O)\n\t@printf 'BR2_PACKAGE_FOO=y\\nBR2_PACKAGE_BAR=y\\nBR2_PACKAGE_BAZ=y\\n' > $(O)/.config\n\
+         olddefconfig:\n\t@true\nclean:\n\t@printf clean >> $(O)/cleaned\nshow-info:\n\t@cat graph.json\n\
+         all:\n\t@for p in foo bar baz; do test -d $(O)/build/$$p-1 || { mkdir -p $(O)/build/$$p-1 $(O)/target/usr/bin; \
+         echo $$p,./usr/bin/$$p > $(O)/build/$$p-1/.files-list.txt; echo $$p > $(O)/target/usr/bin/$$p; echo $$p >> $(O)/built; }; done\n",
+    )
+    .expect("makefile");
+
+    let mut spec = ResolvedBuildSpec::new("buildroot-targeted");
+    spec.workspace.root_dir = workspace.display().to_string();
+    let image_with = |value: &str| ImageSpec {
+        definition: ImageDefinition::Buildroot(BuildrootImageSpec {
+            defconfig: Some("test_defconfig".into()),
+            config_overrides: vec![("BR2_PACKAGE_FOO_OPTION".into(), value.into())],
+            ..BuildrootImageSpec::default()
+        }),
+        feed: gaia_spec::ImageFeedSpec::default(),
+        output: ImageOutputSpec::default(),
+        assembly: None,
+    };
+    let execution = test_execution();
+    let policy = ImageExecutionPolicy::default();
+    let run = |image: &ImageSpec| {
+        run_buildroot(BuildrootRunRequest {
+            spec: &spec,
+            image,
+            buildroot_dir: &buildroot_dir,
+            output_dir: &output_dir,
+            command: test_command_context(&execution, &policy),
+        })
+        .expect("buildroot run")
+    };
+    let built = || fs::read_to_string(output_dir.join("built")).unwrap_or_default();
+
+    run(&image_with("n"));
+    assert_eq!(built(), "foo\nbar\nbaz\n");
+    assert!(output_dir.join(".gaia-buildroot-packages.json").is_file());
+    // A file foo installed in an earlier build, which its rebuild will not.
+    fs::write(output_dir.join("target/usr/bin/foo-old"), "old").expect("old file");
+    fs::write(
+        output_dir.join("build/foo-1/.files-list.txt"),
+        "foo,./usr/bin/foo\nfoo,./usr/bin/foo-old\n",
+    )
+    .expect("file list");
+
+    let messages = run(&image_with("y"));
+    assert!(!output_dir.join("cleaned").exists(), "no full clean");
+    assert_eq!(built(), "foo\nbar\nbaz\nfoo\nbar\n");
+    assert!(!output_dir.join("target/usr/bin/foo-old").exists());
+    assert!(output_dir.join("target/usr/bin/baz").is_file());
+    assert!(
+        messages
+            .iter()
+            .any(|message| message == "buildroot rebuild of 2 package(s): bar, foo"),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| { message == "foo changed: BR2_PACKAGE_FOO_OPTION unset -> y" }),
+        "{messages:?}"
+    );
+
+    // Nothing changed: nothing is rebuilt and show-info is not run again.
+    fs::write(buildroot_dir.join("graph.json"), "not json\n").expect("graph");
+    run(&image_with("y"));
+    assert_eq!(built(), "foo\nbar\nbaz\nfoo\nbar\n");
 }
 
 #[test]

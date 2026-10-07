@@ -282,10 +282,9 @@ pub(crate) fn run_buildroot_with(
     // Compare against the snapshot of the config the tree was built from when
     // there is one, naming the changed settings; trees from older Gaia
     // versions only have digests.
-    let changed_settings = config_changes_since_snapshot(output_dir);
-    let config_clean_needed = match &changed_settings {
-        Some(changed) => !changed.is_empty(),
-        None => config_digest.as_deref().is_some_and(|config_digest| {
+    let config_changes = config_changes_since_snapshot(output_dir);
+    let unattributed_config_change = config_changes.is_none()
+        && config_digest.as_deref().is_some_and(|config_digest| {
             buildroot_state_needs_clean(output_dir, ".gaia-buildroot-config-state", config_digest)
                 && accepted_config_digests
                     .iter()
@@ -297,7 +296,15 @@ pub(crate) fn run_buildroot_with(
                             older_digest,
                         )
                     })
-        }),
+        });
+    let config_changes = config_changes.unwrap_or_default();
+    let override_digests = package_override_digests(&buildroot_package_override_dirs(spec));
+    let override_changes = match read_package_override_digests(output_dir) {
+        Some(previous) => changed_override_packages(&previous, &override_digests),
+        // Older state has one digest for all override trees: when it
+        // changed, any override package may have.
+        None if replacement_clean_needed => override_digests.keys().cloned().collect(),
+        None => BTreeSet::new(),
     };
     // Every config step is done: fail (or warn) about requested overrides
     // that olddefconfig dropped, before the clean and the long make.
@@ -307,41 +314,114 @@ pub(crate) fn run_buildroot_with(
         config_overrides,
         command_context.policy.override_check,
     )?);
-    if replacement_clean_needed || config_clean_needed {
-        let mut command = Command::new("make");
-        command
-            .arg(format!("O={}", output_dir.display()))
-            .arg("clean")
-            .current_dir(buildroot_dir);
-        apply_buildroot_policy_env(&mut command, spec, command_context.policy)?;
-        if let Some(br2_external) = br2_external {
-            command.env("BR2_EXTERNAL", br2_external);
+
+    let built_before = output_dir.join("build").is_dir() || output_dir.join("target").is_dir();
+    let something_changed = !config_changes.is_empty() || !override_changes.is_empty();
+    let previous_graph = PackageGraph::load(output_dir);
+    let current_graph = if (built_before && something_changed) || previous_graph.is_none() {
+        query_package_graph(
+            spec,
+            buildroot_dir,
+            output_dir,
+            br2_external,
+            &command_context,
+        )?
+    } else {
+        None
+    };
+    let plan = if unattributed_config_change {
+        CleanPlan::Full(vec![
+            "effective config changed (no snapshot of the previously built config)".to_string(),
+        ])
+    } else if !built_before || !something_changed {
+        CleanPlan::Nothing
+    } else if let Some(current) = &current_graph {
+        plan_clean(CleanInputs {
+            config_changes: &config_changes,
+            override_changes: &override_changes,
+            previous: previous_graph.as_ref(),
+            current: &current.graph,
+        })
+    } else {
+        let mut reasons = config_changes
+            .iter()
+            .map(|change| change.key.clone())
+            .chain(
+                override_changes
+                    .iter()
+                    .map(|name| format!("package override {name}")),
+            )
+            .collect::<Vec<_>>();
+        reasons.push("Buildroot did not report its package graph".to_string());
+        CleanPlan::Full(reasons)
+    };
+    match &plan {
+        CleanPlan::Nothing => {}
+        CleanPlan::Full(reasons) => {
+            let mut command = Command::new("make");
+            command
+                .arg(format!("O={}", output_dir.display()))
+                .arg("clean")
+                .current_dir(buildroot_dir);
+            apply_buildroot_policy_env(&mut command, spec, command_context.policy)?;
+            if let Some(br2_external) = br2_external {
+                command.env("BR2_EXTERNAL", br2_external);
+            }
+            let reasons = describe_clean_reasons(reasons);
+            messages.extend(run_command(
+                command,
+                &format!("buildroot clean: {reasons}"),
+                command_context.execution,
+                command_context.policy,
+                command_context.log_sink.clone(),
+                command_context.cancel_check.clone(),
+            )?);
+            messages.push(format!("cleaned Buildroot output: {reasons}"));
         }
-        let config_reason = format!(
-            "effective config changed ({})",
-            describe_changed_settings(changed_settings.as_deref())
-        );
-        let label = match (replacement_clean_needed, config_clean_needed) {
-            (true, true) => format!("buildroot clean: package replacements and {config_reason}"),
-            (true, false) => "buildroot clean: package replacements changed".to_string(),
-            _ => format!("buildroot clean: {config_reason}"),
-        };
-        messages.extend(run_command(
-            command,
-            &label,
-            command_context.execution,
-            command_context.policy,
-            command_context.log_sink.clone(),
-            command_context.cancel_check.clone(),
-        )?);
-        if replacement_clean_needed {
-            messages.push("cleaned Buildroot output for changed package replacements".into());
-        }
-        if config_clean_needed {
-            messages.push(format!(
-                "cleaned Buildroot output for changed effective config: {}",
-                describe_changed_settings(changed_settings.as_deref())
-            ));
+        CleanPlan::Packages(rebuild) => {
+            let summary = format!(
+                "buildroot rebuild of {} package(s){}: {}",
+                rebuild.rebuild.len(),
+                if rebuild.removed.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        ", uninstall of {}",
+                        rebuild
+                            .removed
+                            .iter()
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                },
+                rebuild
+                    .rebuild
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            for line in std::iter::once(summary.clone()).chain(rebuild.reasons.iter().cloned()) {
+                tracing::info!(provider_domain = "image.buildroot", "{line}");
+                if let Some(log_sink) = &command_context.log_sink {
+                    log_sink(gaia_process::ProcessLogLine {
+                        stream: gaia_process::ProcessLogStream::Stderr,
+                        line,
+                    });
+                }
+            }
+            messages.extend(apply_package_rebuild(
+                output_dir,
+                rebuild,
+                previous_graph.as_ref(),
+                current_graph
+                    .as_ref()
+                    .map(|current| &current.graph)
+                    .expect("a package plan comes from the current graph"),
+            )?);
+            messages.push(summary);
+            messages.extend(rebuild.reasons.iter().cloned());
         }
     }
 
@@ -369,6 +449,10 @@ pub(crate) fn run_buildroot_with(
         write_buildroot_state(output_dir, ".gaia-buildroot-config-state", config_digest)?;
     }
     write_config_snapshot(output_dir)?;
+    write_package_override_digests(output_dir, &override_digests)?;
+    if let Some(current) = &current_graph {
+        current.record(output_dir)?;
+    }
     if let Some(script) = options.post_build_script {
         command.arg(post_build_script_override(output_dir, script));
     }
@@ -397,18 +481,18 @@ pub(crate) fn run_buildroot_with(
     Ok(messages)
 }
 
-/// The changed settings named in clean messages, so an unexpected clean can
-/// be traced to the setting that caused it.
-fn describe_changed_settings(changed: Option<&[String]>) -> String {
+/// The reasons for a full clean, as named in its label and message, so an
+/// unexpected clean can be traced to what caused it.
+fn describe_clean_reasons(reasons: &[String]) -> String {
     const SHOWN: usize = 8;
-    match changed {
-        None => "no snapshot of the previously built config; digest differs".to_string(),
-        Some(keys) if keys.len() > SHOWN => format!(
+    if reasons.len() > SHOWN {
+        format!(
             "{} and {} more",
-            keys[..SHOWN].join(", "),
-            keys.len() - SHOWN
-        ),
-        Some(keys) => keys.join(", "),
+            reasons[..SHOWN].join(", "),
+            reasons.len() - SHOWN
+        )
+    } else {
+        reasons.join(", ")
     }
 }
 

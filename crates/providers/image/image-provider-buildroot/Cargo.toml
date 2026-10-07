@@ -12,6 +12,7 @@ description = "Buildroot image provider scaffold for Gaia."
 gaia-image-providers.workspace = true
 gaia-process.workspace = true
 gaia-spec.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 tracing.workspace = true
 
