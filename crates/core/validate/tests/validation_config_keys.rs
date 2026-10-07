@@ -86,7 +86,7 @@ shared_outptu = true
         report
             .errors
             .iter()
-            .all(|error| error.code == "config_unknown_key"),
+            .all(|error| error.contains("unknown key '")),
         "{:?}",
         report.errors
     );
