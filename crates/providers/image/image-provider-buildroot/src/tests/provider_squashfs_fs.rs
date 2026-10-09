@@ -171,7 +171,7 @@ fn build_operation_applies_config_overrides_when_expected_images_exist() {
     .expect("stale config");
     fs::write(
         source_dir.join("Makefile"),
-        "all:\n\t@printf all >> $(O)/buildroot-ran\nclean:\n\t@printf clean >> $(O)/buildroot-ran\nolddefconfig:\n\t@printf olddefconfig >> $(O)/buildroot-ran\n%_defconfig:\n\t@mkdir -p $(O)\n\t@test -f $(O)/.config || printf 'BR2_TARGET_ROOTFS_TAR=y\\nBR2_PACKAGE_BUSYBOX=n\\n' > $(O)/.config\n",
+        "all:\n\t@printf all >> $(O)/buildroot-ran\n\t@mkdir -p $(O)/images && printf image > $(O)/images/rootfs.tar\nclean:\n\t@printf clean >> $(O)/buildroot-ran\nolddefconfig:\n\t@printf olddefconfig >> $(O)/buildroot-ran\n%_defconfig:\n\t@mkdir -p $(O)\n\t@test -f $(O)/.config || printf 'BR2_TARGET_ROOTFS_TAR=y\\nBR2_PACKAGE_BUSYBOX=n\\n' > $(O)/.config\n",
     )
     .expect("buildroot makefile");
 

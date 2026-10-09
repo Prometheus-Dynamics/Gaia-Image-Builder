@@ -339,8 +339,21 @@ pub enum RawBuildrootOverrideCheck {
 #[serde(default)]
 pub struct RawBuildrootPackageCacheConfig {
     pub enabled: bool,
+    pub level: Option<RawPackageCacheLevel>,
+    /// Same as `system_dir` (the name before cache levels).
     pub dir: Option<String>,
+    pub system_dir: Option<String>,
+    pub project_dir: Option<String>,
+    pub project_packages: Vec<String>,
+    pub system_packages: Vec<String>,
     pub max_size: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RawPackageCacheLevel {
+    System,
+    Project,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

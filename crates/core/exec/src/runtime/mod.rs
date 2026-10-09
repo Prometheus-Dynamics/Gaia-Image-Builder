@@ -2,7 +2,6 @@ use gaia_image_providers::ImageExecutionResult;
 use gaia_plan::OperationId;
 use gaia_process::{ProcessLogLine, ProcessLogSink};
 use gaia_spec::{ResolvedBuildSpec, RollbackDomain};
-use std::fs;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::{
@@ -425,13 +424,7 @@ pub fn process_log_sink(
 fn cleanup_paths(operation_id: &OperationId, paths: &[PathBuf]) -> Vec<CleanupFailure> {
     let mut failures = Vec::new();
     for path in paths {
-        let result = if path.is_dir() {
-            fs::remove_dir_all(path)
-        } else if path.exists() {
-            fs::remove_file(path)
-        } else {
-            Ok(())
-        };
+        let result = gaia_process::discard(path);
         if let Err(error) = result {
             failures.push(CleanupFailure {
                 operation_id: operation_id.clone(),

@@ -103,7 +103,7 @@ impl KeyContext<'_> {
         hasher.update(self.inputs.execution_identity);
         let mut symbols = BTreeSet::new();
         for file in &files {
-            let contents = fs::read_to_string(file).unwrap_or_default();
+            let contents = without_gaia_patches(&fs::read_to_string(file).unwrap_or_default());
             hasher.update(
                 file.strip_prefix(buildroot_dir)
                     .unwrap_or(file)

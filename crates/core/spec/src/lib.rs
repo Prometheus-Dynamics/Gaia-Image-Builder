@@ -21,6 +21,7 @@ mod source_dirs;
 mod stage;
 mod state;
 mod target_arch;
+mod user_cache;
 mod workspace;
 
 pub use artifact::{
@@ -79,10 +80,10 @@ pub use policy::{
     DEFAULT_PROVIDER_LOCAL_JOBS, DEFAULT_PYTHON_PROVIDER_TIMEOUT_SECONDS,
     DEFAULT_RUST_PROVIDER_TIMEOUT_SECONDS, DEFAULT_STARTING_POINT_PROVIDER_TIMEOUT_SECONDS,
     DockerExecutionSpec, ExecutionPolicySpec, FailureHandlingPolicySpec, GitProviderPolicySpec,
-    InterpolationSpec, OutputRetentionPolicySpec, PrecedenceLayerSpec, PrecedencePolicySpec,
-    PrecedenceSource, PrecedenceTarget, PresetSelectionSpec, ProviderExecutionPolicySpec,
-    ResolvedCommandPolicySpec, RetryBackoffStrategySpec, RollbackDomain, RustProviderPolicySpec,
-    UnresolvedInterpolationSpec,
+    InterpolationSpec, OutputRetentionPolicySpec, PackageCacheLevelSpec, PrecedenceLayerSpec,
+    PrecedencePolicySpec, PrecedenceSource, PrecedenceTarget, PresetSelectionSpec,
+    ProviderExecutionPolicySpec, ResolvedCommandPolicySpec, RetryBackoffStrategySpec,
+    RollbackDomain, RustProviderPolicySpec, UnresolvedInterpolationSpec,
 };
 pub use provenance::{ProvenanceIdentitySpec, ProvenanceSpec};
 pub use raw_disk_archive::{RawDiskArchive, raw_disk_archive};
@@ -104,6 +105,9 @@ pub use state::{
     RUNTIME_STATE_DIR_NAME,
 };
 pub use target_arch::{TargetArch, target_arch};
+pub use user_cache::{
+    USER_BUILDROOT_CCACHE_DIR, USER_BUILDROOT_PACKAGE_CACHE_DIR, user_cache_root,
+};
 pub use workspace::{
     CleanPolicy, WorkspaceNamedPathSpec, WorkspacePathError, WorkspacePathKindSpec, WorkspaceSpec,
     default_image_collect_dir, resolve_workspace_path,

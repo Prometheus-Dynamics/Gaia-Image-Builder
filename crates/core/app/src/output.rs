@@ -210,6 +210,7 @@ pub(crate) fn print_outcome(outcome: &CommandOutcome) {
                 println!("plan {}: {}", diagnostic.code, diagnostic.message);
             }
         }
+        CommandOutcome::CacheReport { text } => println!("{text}"),
         CommandOutcome::Cleaned { spec, report } => {
             let action = if report.dry_run {
                 "would clean"

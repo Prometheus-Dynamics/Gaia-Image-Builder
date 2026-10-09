@@ -454,7 +454,24 @@ fn merge_command_policy(
         parallel_packages: base.parallel_packages || overlay.parallel_packages,
         package_cache: crate::raw::RawBuildrootPackageCacheConfig {
             enabled: base.package_cache.enabled || overlay.package_cache.enabled,
+            level: overlay.package_cache.level.or(base.package_cache.level),
             dir: overlay.package_cache.dir.or(base.package_cache.dir),
+            system_dir: overlay
+                .package_cache
+                .system_dir
+                .or(base.package_cache.system_dir),
+            project_dir: overlay
+                .package_cache
+                .project_dir
+                .or(base.package_cache.project_dir),
+            project_packages: merge_string_lists(
+                base.package_cache.project_packages,
+                overlay.package_cache.project_packages,
+            ),
+            system_packages: merge_string_lists(
+                base.package_cache.system_packages,
+                overlay.package_cache.system_packages,
+            ),
             max_size: overlay
                 .package_cache
                 .max_size

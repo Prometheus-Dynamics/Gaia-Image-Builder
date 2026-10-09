@@ -100,15 +100,7 @@ pub(crate) fn image_execution_policy(spec: &ResolvedBuildSpec) -> ImageExecution
         ccache_max_size: policy.ccache.max_size,
         parallel_packages: spec.image.provider_kind() == gaia_spec::ImageProviderKind::Buildroot
             && spec.policy.providers.buildroot.parallel_packages,
-        package_cache_enabled: spec.policy.providers.buildroot.package_cache.enabled,
-        package_cache_dir: spec.policy.providers.buildroot.package_cache.dir.clone(),
-        package_cache_max_size: spec
-            .policy
-            .providers
-            .buildroot
-            .package_cache
-            .max_size
-            .clone(),
+        package_cache: spec.policy.providers.buildroot.package_cache.clone(),
         shared_output: spec.image.provider_kind() == gaia_spec::ImageProviderKind::Buildroot
             && spec.policy.providers.buildroot.shared_output,
         shared_output_dir: spec.policy.providers.buildroot.shared_output_dir.clone(),

@@ -401,7 +401,7 @@ pub(crate) fn apply_buildroot_cache_config(
 
 /// Under the user cache root, or the workspace when that is unavailable.
 const DEFAULT_BUILDROOT_DOWNLOAD_DIR: &str = "buildroot/dl";
-const DEFAULT_BUILDROOT_CCACHE_DIR: &str = "buildroot/ccache";
+const DEFAULT_BUILDROOT_CCACHE_DIR: &str = gaia_spec::USER_BUILDROOT_CCACHE_DIR;
 const DEFAULT_CCACHE_MAX_SIZE: &str = "50G";
 
 /// Caches shared by every workspace of the user, so builds of different
@@ -411,14 +411,7 @@ pub(crate) fn user_cache_root() -> Option<PathBuf> {
     if cfg!(test) {
         return Some(std::env::temp_dir().join("gaia-test-user-cache"));
     }
-    let from_env = |key: &str| {
-        std::env::var_os(key)
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
-    };
-    from_env("GAIA_CACHE_DIR")
-        .or_else(|| from_env("XDG_CACHE_HOME").map(|dir| dir.join("gaia")))
-        .or_else(|| from_env("HOME").map(|home| home.join(".cache/gaia")))
+    gaia_spec::user_cache_root()
 }
 
 /// `<user cache root>/<relative>`, falling back to

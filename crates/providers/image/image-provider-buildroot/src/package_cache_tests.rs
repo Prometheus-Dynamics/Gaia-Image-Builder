@@ -126,6 +126,25 @@ fn cache_graph() -> PackageGraph {
     graph
 }
 
+/// A two-level cache under `root` (`system/`, `project/`) storing the
+/// `project_packages` at the project level.
+fn test_cache(root: &Path, project_packages: &[&str]) -> PackageCache {
+    PackageCache {
+        system: Some(root.join("system")),
+        project: root.join("project"),
+        max_size: u64::MAX,
+        policy: gaia_spec::BuildrootPackageCachePolicySpec {
+            enabled: true,
+            project_packages: project_packages
+                .iter()
+                .map(|name| name.to_string())
+                .collect(),
+            ..gaia_spec::BuildrootPackageCachePolicySpec::default()
+        },
+        note: None,
+    }
+}
+
 fn tools_available() -> bool {
     ["cp", "rsync"].iter().all(|tool| {
         Command::new(tool)
@@ -143,11 +162,7 @@ fn packages_round_trip_into_another_tree() {
         return;
     }
     let root = temp("round-trip");
-    let cache = PackageCache {
-        dir: root.join("cache"),
-        max_size: u64::MAX,
-        note: None,
-    };
+    let cache = test_cache(&root, &[]);
     let first = root.join("first");
     built_tree(&first, b"app binary");
     let graph = cache_graph();
@@ -184,7 +199,7 @@ fn packages_round_trip_into_another_tree() {
     );
     assert_eq!(fs::read(app.join("host/opt/tool")).expect("tool"), b"tool");
     // The dependency's file came from the dependency, not app's archive.
-    let archive = cache.entry("app", "k-app", None).0;
+    let archive = entry_in(&root.join("system"), "app", "k-app", None).0;
     assert!(
         !archive
             .join("per-package/app/target/usr/lib/libbase.so")
@@ -214,11 +229,7 @@ fn packages_with_the_path_in_binaries_restore_only_at_that_path() {
         return;
     }
     let root = temp("pinned");
-    let cache = PackageCache {
-        dir: root.join("cache"),
-        max_size: u64::MAX,
-        note: None,
-    };
+    let cache = test_cache(&root, &[]);
     let first = root.join("first");
     let mut binary = b"\0ELF ".to_vec();
     binary.extend_from_slice(first.display().to_string().as_bytes());
@@ -309,5 +320,32 @@ fn stamps_of_unchanged_packages_are_made_newer_than_their_inputs() {
     let refreshed = modified(".stamp_installed");
     refresh_current_stamps(&output, &graph, &keys);
     assert_eq!(modified(".stamp_installed"), refreshed);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn packages_are_stored_at_their_level_and_restored_from_either() {
+    if !tools_available() {
+        return;
+    }
+    let root = temp("levels");
+    let cache = test_cache(&root, &["app"]);
+    let first = root.join("first");
+    built_tree(&first, b"app binary");
+    let graph = cache_graph();
+    let keys = BTreeMap::from([
+        ("base".to_string(), Some("k-base".to_string())),
+        ("app".to_string(), Some("k-app".to_string())),
+    ]);
+    let (stored, _) = cache.store(&first, &graph, &keys, &[]);
+    assert_eq!(stored, ["app", "base"]);
+    // The project's own package stays at the project level.
+    assert!(root.join("project/app/k-app.json").is_file());
+    assert!(!root.join("system/app").exists());
+    assert!(root.join("system/base/k-base.json").is_file());
+
+    let second = root.join("second");
+    fs::create_dir_all(&second).expect("second");
+    assert_eq!(cache.restore(&second, &graph, &keys), ["app", "base"]);
     let _ = fs::remove_dir_all(root);
 }

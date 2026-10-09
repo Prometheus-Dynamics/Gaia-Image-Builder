@@ -15,6 +15,7 @@ pub struct AppArgs {
     pub env_overrides: Vec<(String, String)>,
     pub explicit_overrides: Vec<(String, String)>,
     pub clean: CleanArgs,
+    pub cache: CacheArgs,
     pub lock: LockArgs,
     /// `--only` targets for run/plan: build domains or operation ids.
     pub only: Vec<String>,
@@ -31,6 +32,22 @@ pub struct CleanArgs {
     /// `--all-caches`: with the `caches` target, also remove the shared
     /// git, download, Buildroot download and docker tool caches.
     pub all_caches: bool,
+}
+
+/// `gaia cache`: lists the package cache unless `remove` or `clear` is given.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CacheArgs {
+    /// `--level system|project`: only that level.
+    pub level: Option<String>,
+    /// `--package <glob>`: only matching packages.
+    pub packages: Vec<String>,
+    /// `--remove pkg[@key-prefix],...`: those entries.
+    pub remove: Vec<String>,
+    /// `--clear system|project|ccache`: a whole level, or the compiler cache.
+    pub clear: Option<String>,
+    /// `--remove-legacy`: entries of the first cache format (zstd tarballs).
+    pub remove_legacy: bool,
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -65,6 +82,7 @@ impl AppArgs {
             Some("validate") => Some(AppCommand::Validate),
             Some("plan") => Some(AppCommand::Plan),
             Some("clean") => Some(AppCommand::Clean),
+            Some("cache") => Some(AppCommand::Cache),
             Some("lock") => Some(AppCommand::Lock),
             Some("run") => Some(AppCommand::Run),
             _ => None,
@@ -129,7 +147,24 @@ impl AppArgs {
                         parsed.clean.paths.push(path);
                     }
                 }
-                "--dry-run" => parsed.clean.dry_run = true,
+                "--dry-run" => {
+                    parsed.clean.dry_run = true;
+                    parsed.cache.dry_run = true;
+                }
+                "--list" => {}
+                "--remove-legacy" => parsed.cache.remove_legacy = true,
+                "--level" => parsed.cache.level = value("--level", &mut parsed.usage_errors),
+                "--clear" => parsed.cache.clear = value("--clear", &mut parsed.usage_errors),
+                "--package" | "--remove" => {
+                    if let Some(list) = value(&arg, &mut parsed.usage_errors) {
+                        let list = split_list(&list);
+                        if arg == "--package" {
+                            parsed.cache.packages.extend(list);
+                        } else {
+                            parsed.cache.remove.extend(list);
+                        }
+                    }
+                }
                 "--all-caches" => parsed.clean.all_caches = true,
                 "--update" => {
                     parsed.lock.update = true;
@@ -192,6 +227,7 @@ impl Default for AppArgs {
             env_overrides: Vec::new(),
             explicit_overrides: Vec::new(),
             clean: CleanArgs::default(),
+            cache: CacheArgs::default(),
             lock: LockArgs::default(),
             only: Vec::new(),
             usage_errors: Vec::new(),
@@ -255,6 +291,7 @@ pub enum AppCommand {
     Validate,
     Plan,
     Clean,
+    Cache,
     Lock,
     Run,
 }

@@ -17,11 +17,19 @@ use super::*;
 
 /// `per-package-rsync`'s copy mode in `package/pkg-utils.mk`, as upstream
 /// has it since 2024.08.
-const PPD_COPY_UPSTREAM: &str = "\t\tprintf \"%s/$(2)/\\n\" $(1) | tac \\\n\t\t\t| rsync -a --hard-links --files-from=- --no-R -r $(PER_PACKAGE_DIR) $(3))";
+pub(crate) const PPD_COPY_UPSTREAM: &str = "\t\tprintf \"%s/$(2)/\\n\" $(1) | tac \\\n\t\t\t| rsync -a --hard-links --files-from=- --no-R -r $(PER_PACKAGE_DIR) $(3))";
 
 /// The same, cloning each package's tree in order (the last one wins, as
 /// the reversed list makes it win with `rsync`).
-const PPD_COPY_REFLINK: &str = "\t\t$(foreach pkg,$(1),\\\n\t\t\tcp -a --reflink=auto --remove-destination $(PER_PACKAGE_DIR)/$(pkg)/$(2)/. $(3)/$(sep)))";
+pub(crate) const PPD_COPY_REFLINK: &str = "\t\t$(foreach pkg,$(1),\\\n\t\t\tcp -a --reflink=auto --remove-destination $(PER_PACKAGE_DIR)/$(pkg)/$(2)/. $(3)/$(sep)))";
+
+/// `contents` of a Buildroot file with Gaia's changes put back to the
+/// upstream text. They change how the output tree is assembled, never what
+/// a package builds, so package cache keys hash this: a Gaia version
+/// patching Buildroot differently must not invalidate every cached package.
+pub(crate) fn without_gaia_patches(contents: &str) -> String {
+    contents.replace(PPD_COPY_REFLINK, PPD_COPY_UPSTREAM)
+}
 
 /// Uses reflink clones for the per-package finalize step when the output
 /// directory supports them. Returns a message saying what was done.

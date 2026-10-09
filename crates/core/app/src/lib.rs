@@ -11,7 +11,7 @@ use gaia_source_providers::SourceProviderCatalog;
 use std::any::Any;
 use std::panic::{self, AssertUnwindSafe};
 
-pub use cli::{AppArgs, AppCommand, CleanArgs, LockArgs};
+pub use cli::{AppArgs, AppCommand, CacheArgs, CleanArgs, LockArgs};
 pub use commands::{CommandOutcome, CommandResult, LockChange, LockReport, LockReportEntry};
 use output::print_outcome;
 pub use output::{backend_overview_lines, runtime_overview_lines};

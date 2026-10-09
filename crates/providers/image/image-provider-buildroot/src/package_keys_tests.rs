@@ -152,3 +152,25 @@ fn keys_follow_package_files_settings_and_dependencies() {
     let optimized = fixture.output("o3", &CONFIG.replace("BR2_OPTIMIZE_2", "BR2_OPTIMIZE_3"));
     assert_ne!(changed["zlib"], fixture.keys(&optimized, &graph())["zlib"]);
 }
+
+#[test]
+fn gaia_patches_to_buildroot_do_not_change_keys() {
+    let fixture = Fixture::new("gaia-patches");
+    let output = fixture.output("out", CONFIG);
+    let utils = fixture.buildroot.join("package/pkg-utils.mk");
+    fs::write(
+        &utils,
+        format!("define per-package-rsync\n{PPD_COPY_UPSTREAM}\nendef\n"),
+    )
+    .expect("upstream");
+    let upstream = fixture.keys(&output, &graph());
+    fs::write(
+        &utils,
+        format!("define per-package-rsync\n{PPD_COPY_REFLINK}\nendef\n"),
+    )
+    .expect("patched");
+    assert_eq!(upstream, fixture.keys(&output, &graph()));
+    // Other changes to the infrastructure still count.
+    fs::write(&utils, "something else\n").expect("other");
+    assert_ne!(upstream, fixture.keys(&output, &graph()));
+}

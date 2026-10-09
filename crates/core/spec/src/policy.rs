@@ -250,11 +250,59 @@ pub struct CommandProviderPolicySpec {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BuildrootPackageCachePolicySpec {
     pub enabled: bool,
-    /// Defaults to a directory shared by every workspace of the user.
-    pub dir: Option<String>,
-    /// Total size to keep (for example `100G`); least recently used
-    /// packages are evicted beyond it.
+    /// Where packages are stored unless listed in `project_packages` or
+    /// `system_packages`.
+    pub level: PackageCacheLevelSpec,
+    /// The system level, shared by every project of the user; defaults to
+    /// `<user cache root>/buildroot/packages`.
+    pub system_dir: Option<String>,
+    /// The project level; defaults to `<workspace>/.gaia/cache/buildroot/packages`.
+    pub project_dir: Option<String>,
+    /// Packages (globs) stored at the project level only.
+    pub project_packages: Vec<String>,
+    /// Packages (globs) stored at the system level even when `level` is
+    /// `project`.
+    pub system_packages: Vec<String>,
+    /// Size to keep at each level (for example `100G`); least recently
+    /// used packages are evicted beyond it.
     pub max_size: Option<String>,
+}
+
+impl BuildrootPackageCachePolicySpec {
+    /// The level a package is stored at.
+    pub fn level_of(&self, package: &str) -> PackageCacheLevelSpec {
+        let listed = |patterns: &[String]| {
+            patterns
+                .iter()
+                .any(|pattern| crate::wildcard_match(pattern, package))
+        };
+        if listed(&self.project_packages) {
+            PackageCacheLevelSpec::Project
+        } else if listed(&self.system_packages) {
+            PackageCacheLevelSpec::System
+        } else {
+            self.level
+        }
+    }
+}
+
+/// The two package cache levels.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PackageCacheLevelSpec {
+    /// Shared by every project of the user.
+    #[default]
+    System,
+    /// This project's own.
+    Project,
+}
+
+impl PackageCacheLevelSpec {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Project => "project",
+        }
+    }
 }
 
 /// `[providers.buildroot] override_check`: how Gaia reacts when the final

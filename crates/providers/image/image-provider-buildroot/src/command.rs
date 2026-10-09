@@ -258,3 +258,14 @@ pub(crate) fn command_for_execution(
         ImageProviderError::new(ImageProviderErrorKind::PolicyBlocked, error.to_string())
     })
 }
+
+/// Shows a line in the run's live output and the log.
+pub(crate) fn log_line(command_context: &ImageCommandContext<'_>, line: String) {
+    tracing::info!(provider_domain = "image.buildroot", "{line}");
+    if let Some(log_sink) = &command_context.log_sink {
+        log_sink(gaia_process::ProcessLogLine {
+            stream: gaia_process::ProcessLogStream::Stderr,
+            line,
+        });
+    }
+}

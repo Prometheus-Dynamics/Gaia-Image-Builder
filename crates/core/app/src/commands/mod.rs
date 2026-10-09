@@ -1,3 +1,4 @@
+mod cache;
 mod clean;
 mod interrupt;
 mod lock;
@@ -18,6 +19,7 @@ use std::time::Duration;
 use crate::{AppArgs, AppCommand, AppContext};
 use gaia_config::ResolveOptions;
 
+pub use cache::cache_command;
 pub use clean::{CleanReport, clean_build_command};
 pub use lock::{LockChange, LockReport, LockReportEntry, lock_build_command};
 pub use plan::plan_build_command;
@@ -58,6 +60,9 @@ pub enum CommandOutcome {
     Cleaned {
         spec: ResolvedBuildSpec,
         report: CleanReport,
+    },
+    CacheReport {
+        text: String,
     },
     Locked {
         spec: ResolvedBuildSpec,
@@ -110,6 +115,21 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
     if args.clean.all_caches && args.command != AppCommand::Clean {
         usage_errors.push("--all-caches applies to 'clean'".into());
     }
+    let cache = &args.cache;
+    if (cache.level.is_some()
+        || cache.clear.is_some()
+        || !cache.packages.is_empty()
+        || !cache.remove.is_empty()
+        || cache.remove_legacy)
+        && args.command != AppCommand::Cache
+    {
+        usage_errors.push(
+            "--level, --package, --remove, --remove-legacy and --clear apply to 'cache'".into(),
+        );
+    }
+    if cache.clear.is_some() && (!cache.remove.is_empty() || cache.remove_legacy) {
+        usage_errors.push("use either --remove or --clear".into());
+    }
     if !usage_errors.is_empty() {
         return CommandOutcome::Failed {
             message: format!(
@@ -132,6 +152,7 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
             plan_build_command(context, &args.build, &resolve_options(&args), &targets)
         }
         AppCommand::Clean => clean_build_command(&args.build, &resolve_options(&args), &args.clean),
+        AppCommand::Cache => cache_command(&args.build, &resolve_options(&args), &args.cache),
         AppCommand::Lock => lock_build_command(&args.build, &resolve_options(&args), &args.lock),
         AppCommand::Run => {
             run_build_command(context, &args.build, &resolve_options(&args), &targets)
@@ -176,6 +197,10 @@ fn help_text() -> String {
         "  gaia clean [build-config] --path <path>",
         "  gaia clean [build-config] --dry-run",
         "  gaia clean [build-config] --target caches [--all-caches]",
+        "  gaia cache [build-config] [--list] [--level system|project] [--package <glob>]",
+        "  gaia cache [build-config] --remove <package>[@key-prefix][,...] [--dry-run]",
+        "  gaia cache [build-config] --remove-legacy [--dry-run]",
+        "  gaia cache [build-config] --clear system|project|ccache [--dry-run]",
         "  gaia lock [build-config]",
         "  gaia lock [build-config] --update [source-id[,source-id...]]",
         "  gaia run [build-config]",

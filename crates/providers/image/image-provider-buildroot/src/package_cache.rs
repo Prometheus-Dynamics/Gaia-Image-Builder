@@ -24,7 +24,7 @@ use super::*;
 use sha2::Digest;
 use std::os::unix::fs::MetadataExt;
 
-const DEFAULT_PACKAGE_CACHE_DIR: &str = "buildroot/packages";
+const DEFAULT_PACKAGE_CACHE_DIR: &str = gaia_spec::USER_BUILDROOT_PACKAGE_CACHE_DIR;
 const DEFAULT_PACKAGE_CACHE_MAX_SIZE: &str = "100G";
 
 /// Stamps in the order Buildroot creates them; restored stamps get
@@ -52,8 +52,15 @@ const FILE_LISTS: &[&str] = &[
 ];
 
 pub(crate) struct PackageCache {
-    dir: PathBuf,
+    /// The system level (shared by every project), or `None` when its
+    /// default location cannot clone from this build (then system-level
+    /// packages go to the project level).
+    system: Option<PathBuf>,
+    /// The project level.
+    project: PathBuf,
+    /// Size kept at each level.
     max_size: u64,
+    policy: gaia_spec::BuildrootPackageCachePolicySpec,
     /// Where the cache is, when that needs saying.
     pub(crate) note: Option<String>,
 }
@@ -66,38 +73,47 @@ pub(crate) fn package_cache(
     policy: &ImageExecutionPolicy,
     output_dir: &Path,
 ) -> Result<Option<PackageCache>, ImageProviderError> {
-    if !policy.package_cache_enabled || !policy.parallel_packages {
+    let settings = &policy.package_cache;
+    if !settings.enabled || !policy.parallel_packages {
         return Ok(None);
     }
+    let label = "buildroot package cache";
+    let project = match settings.project_dir.as_deref() {
+        Some(dir) => ensure_cache_dir(spec, dir, label)?,
+        None => ensure_cache_dir(
+            spec,
+            &format!(".gaia/cache/{DEFAULT_PACKAGE_CACHE_DIR}"),
+            label,
+        )?,
+    };
     let mut note = None;
-    let dir = match policy.package_cache_dir.as_deref() {
-        Some(dir) => ensure_cache_dir(spec, dir, "buildroot package cache")?,
+    let system = match settings.system_dir.as_deref() {
+        Some(dir) => Some(ensure_cache_dir(spec, dir, label)?),
         None => {
-            let shared =
-                default_cache_dir(spec, DEFAULT_PACKAGE_CACHE_DIR, "buildroot package cache")?;
+            let shared = default_cache_dir(spec, DEFAULT_PACKAGE_CACHE_DIR, label)?;
             // Storing and restoring clone files; across filesystems that
-            // would copy everything, so stay on the build's filesystem.
-            if reflinks_between(output_dir, &shared) || !supports_reflinks(output_dir) {
-                shared
+            // would copy everything, so the default stays on the build's
+            // filesystem.
+            if shared == project
+                || reflinks_between(output_dir, &shared)
+                || !supports_reflinks(output_dir)
+            {
+                Some(shared)
             } else {
-                let local = ensure_cache_dir(
-                    spec,
-                    &format!(".gaia/cache/{DEFAULT_PACKAGE_CACHE_DIR}"),
-                    "buildroot package cache",
-                )?;
                 note = Some(format!(
-                    "package cache: '{}' is on another filesystem than the build, so this \
-                     workspace uses '{}'; set [providers.buildroot.package_cache] dir to a \
-                     directory on the build's filesystem to share packages between projects",
+                    "package cache: the system level '{}' is on another filesystem than the \
+                     build, so its packages are kept at the project level '{}'; set \
+                     [providers.buildroot.package_cache] system_dir to a directory on the \
+                     build's filesystem to share packages between projects",
                     shared.display(),
-                    local.display()
+                    project.display()
                 ));
-                local
+                None
             }
         }
     };
-    let max_size = policy
-        .package_cache_max_size
+    let max_size = settings
+        .max_size
         .as_deref()
         .unwrap_or(DEFAULT_PACKAGE_CACHE_MAX_SIZE)
         .parse::<gaia_spec::ByteSize>()
@@ -109,16 +125,53 @@ pub(crate) fn package_cache(
         })?
         .bytes();
     Ok(Some(PackageCache {
-        dir,
+        system,
+        project,
         max_size,
+        policy: settings.clone(),
         note,
     }))
 }
 
 impl PackageCache {
     /// A warning when the cache's filesystem cannot hold `max_size` more.
-    pub(crate) fn space_warning(&self) -> Option<String> {
-        cache_space_warning("package cache", &self.dir, self.max_size)
+    pub(crate) fn space_warning(&self) -> Vec<String> {
+        self.levels()
+            .into_iter()
+            .filter_map(|(level, dir)| {
+                cache_space_warning(
+                    &format!("package cache ({} level)", level.as_str()),
+                    dir,
+                    self.max_size,
+                )
+            })
+            .collect()
+    }
+
+    /// The levels in lookup order (the project's own first).
+    fn levels(&self) -> Vec<(gaia_spec::PackageCacheLevelSpec, &Path)> {
+        let mut levels = vec![(
+            gaia_spec::PackageCacheLevelSpec::Project,
+            self.project.as_path(),
+        )];
+        if let Some(system) = self
+            .system
+            .as_deref()
+            .filter(|system| *system != self.project)
+        {
+            levels.push((gaia_spec::PackageCacheLevelSpec::System, system));
+        }
+        levels
+    }
+
+    /// Where a package is stored.
+    fn store_dir(&self, name: &str) -> &Path {
+        match self.policy.level_of(name) {
+            gaia_spec::PackageCacheLevelSpec::System => {
+                self.system.as_deref().unwrap_or(&self.project)
+            }
+            gaia_spec::PackageCacheLevelSpec::Project => &self.project,
+        }
     }
 }
 
@@ -221,29 +274,45 @@ impl PackageCache {
     /// The directory and manifest of a package build: relocatable, or
     /// `pinned` to the output directory it was built in.
     fn entry(&self, name: &str, key: &str, pinned: Option<&Path>) -> (PathBuf, PathBuf) {
-        let dir = self.dir.join(name);
-        let stem = match pinned {
-            None => key.to_string(),
-            Some(output_dir) => {
-                let digest = sha2::Sha256::digest(output_dir.display().to_string().as_bytes());
-                format!("{key}@{}", &hex(&digest)[..16])
-            }
-        };
-        (dir.join(&stem), dir.join(format!("{stem}.json")))
+        entry_in(self.store_dir(name), name, key, pinned)
     }
 
     /// A cached build of the package that can be restored into
-    /// `output_dir`: a relocatable one, or one built at that path.
+    /// `output_dir`, from the project level first, then the system level:
+    /// a relocatable one, or one built at that path.
     fn usable(&self, output_dir: &Path, name: &str, key: &str) -> Option<(PathBuf, Manifest)> {
-        [None, Some(output_dir)].into_iter().find_map(|pinned| {
-            let (archive, manifest) = self.entry(name, key, pinned);
-            let manifest = Manifest::parse(&fs::read_to_string(manifest).ok()?)?;
-            (archive.is_dir()
-                && (manifest.relocatable || Path::new(&manifest.output_dir) == output_dir))
-                .then_some((archive, manifest))
+        self.levels().into_iter().find_map(|(_, level)| {
+            [None, Some(output_dir)].into_iter().find_map(|pinned| {
+                let (archive, manifest) = entry_in(level, name, key, pinned);
+                let manifest = Manifest::parse(&fs::read_to_string(manifest).ok()?)?;
+                (archive.is_dir()
+                    && (manifest.relocatable || Path::new(&manifest.output_dir) == output_dir))
+                    .then_some((archive, manifest))
+            })
         })
     }
+}
 
+/// The directory and manifest of a package build in a cache level:
+/// relocatable, or `pinned` to the output directory it was built in.
+pub(crate) fn entry_in(
+    level: &Path,
+    name: &str,
+    key: &str,
+    pinned: Option<&Path>,
+) -> (PathBuf, PathBuf) {
+    let dir = level.join(name);
+    let stem = match pinned {
+        None => key.to_string(),
+        Some(output_dir) => {
+            let digest = sha2::Sha256::digest(output_dir.display().to_string().as_bytes());
+            format!("{key}@{}", &hex(&digest)[..16])
+        }
+    };
+    (dir.join(&stem), dir.join(format!("{stem}.json")))
+}
+
+impl PackageCache {
     /// Restores, dependencies first, every package that is not built in
     /// `output_dir`, whose key is cached and whose dependencies are all
     /// built or restored. Returns the restored package names.
@@ -408,8 +477,11 @@ impl PackageCache {
 
     /// Recently used entries are evicted last.
     fn mark_used(&self, name: &str, key: &str, output_dir: &Path) {
-        for pinned in [None, Some(output_dir)] {
-            let (_, manifest) = self.entry(name, key, pinned);
+        for (pinned, (_, level)) in [None, Some(output_dir)]
+            .into_iter()
+            .flat_map(|pinned| self.levels().into_iter().map(move |level| (pinned, level)))
+        {
+            let (_, manifest) = entry_in(level, name, key, pinned);
             if let Ok(file) = fs::File::options().append(true).open(&manifest) {
                 let _ = file.set_modified(std::time::SystemTime::now());
             }
@@ -628,41 +700,48 @@ impl PackageCache {
     /// Removes the least recently used entries beyond `max_size`, by their
     /// manifests (size, and last use as the manifest's modification time).
     fn evict(&self) {
-        let mut entries = Vec::new();
-        let mut total = 0u64;
-        for package in fs::read_dir(&self.dir).into_iter().flatten().flatten() {
-            for file in fs::read_dir(package.path()).into_iter().flatten().flatten() {
-                let path = file.path();
-                if path.extension().is_none_or(|extension| extension != "json") {
-                    continue;
-                }
-                let Some(manifest) = fs::read_to_string(&path)
-                    .ok()
-                    .and_then(|text| Manifest::parse(&text))
-                else {
-                    continue;
-                };
-                let used = file
-                    .metadata()
-                    .and_then(|metadata| metadata.modified())
-                    .unwrap_or(std::time::UNIX_EPOCH);
-                total += manifest.size;
-                entries.push((used, manifest.size, path));
-            }
+        for (_, level) in self.levels() {
+            evict_level(level, self.max_size);
         }
-        if total <= self.max_size {
-            return;
+    }
+}
+
+/// Removes a level's least recently used entries beyond `max_size`.
+fn evict_level(level: &Path, max_size: u64) {
+    let mut entries = Vec::new();
+    let mut total = 0u64;
+    for package in fs::read_dir(level).into_iter().flatten().flatten() {
+        for file in fs::read_dir(package.path()).into_iter().flatten().flatten() {
+            let path = file.path();
+            if path.extension().is_none_or(|extension| extension != "json") {
+                continue;
+            }
+            let Some(manifest) = fs::read_to_string(&path)
+                .ok()
+                .and_then(|text| Manifest::parse(&text))
+            else {
+                continue;
+            };
+            let used = file
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            total += manifest.size;
+            entries.push((used, manifest.size, path));
         }
-        entries.sort();
-        let target = self.max_size / 10 * 9;
-        for (_, size, manifest) in entries {
-            if total <= target {
-                break;
-            }
-            let _ = fs::remove_dir_all(manifest.with_extension(""));
-            if fs::remove_file(&manifest).is_ok() {
-                total = total.saturating_sub(size);
-            }
+    }
+    if total <= max_size {
+        return;
+    }
+    entries.sort();
+    let target = max_size / 10 * 9;
+    for (_, size, manifest) in entries {
+        if total <= target {
+            break;
+        }
+        let _ = gaia_process::discard(&manifest.with_extension(""));
+        if fs::remove_file(&manifest).is_ok() {
+            total = total.saturating_sub(size);
         }
     }
 }

@@ -409,7 +409,23 @@ fn apply_known_override(
             raw.providers.buildroot.package_cache.enabled = parse_bool_override(key, value)?
         }
         KnownOverrideKey::PolicyProvidersBuildrootPackageCacheDir => {
-            raw.providers.buildroot.package_cache.dir = Some(value.to_string())
+            raw.providers.buildroot.package_cache.system_dir = Some(value.to_string())
+        }
+        KnownOverrideKey::PolicyProvidersBuildrootPackageCacheLevel => {
+            raw.providers.buildroot.package_cache.level = Some(match value {
+                "system" => crate::raw::RawPackageCacheLevel::System,
+                "project" => crate::raw::RawPackageCacheLevel::Project,
+                _ => {
+                    return Err(ConfigError::invalid_override_value(
+                        key,
+                        value,
+                        "one of: system, project",
+                    ));
+                }
+            })
+        }
+        KnownOverrideKey::PolicyProvidersBuildrootPackageCacheProjectDir => {
+            raw.providers.buildroot.package_cache.project_dir = Some(value.to_string())
         }
         KnownOverrideKey::PolicyProvidersBuildrootPackageCacheMaxSize => {
             raw.providers.buildroot.package_cache.max_size = Some(value.to_string())

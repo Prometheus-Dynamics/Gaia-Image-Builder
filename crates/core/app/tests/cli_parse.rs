@@ -182,3 +182,24 @@ fn help_flag_after_command_shows_help() {
     let args = AppArgs::parse_from(["run", "a.toml", "--help"]);
     assert_eq!(args.command, AppCommand::Help);
 }
+
+#[test]
+fn parses_cache_flags() {
+    let args = AppArgs::parse_from([
+        "cache",
+        "cm5.toml",
+        "--level",
+        "project",
+        "--package",
+        "mesa*",
+        "--remove",
+        "mesa3d,linux@ab12",
+        "--dry-run",
+    ]);
+    assert_eq!(args.command, AppCommand::Cache);
+    assert_eq!(args.build, "cm5.toml");
+    assert_eq!(args.cache.level.as_deref(), Some("project"));
+    assert_eq!(args.cache.packages, vec!["mesa*"]);
+    assert_eq!(args.cache.remove, vec!["mesa3d", "linux@ab12"]);
+    assert!(args.cache.dry_run);
+}

@@ -72,7 +72,7 @@ pub(crate) fn restore_cached_packages(
         messages,
     } = request;
     let Some(cache) = package_cache(spec, command_context.policy, output_dir)? else {
-        if command_context.policy.package_cache_enabled {
+        if command_context.policy.package_cache.enabled {
             messages.push(
                 "package cache: off, it needs [providers.buildroot] parallel_packages = true"
                     .to_string(),

@@ -511,6 +511,7 @@ mod rebuild_inputs;
 mod rootfs_inputs;
 mod shared;
 mod squashfs;
+mod symbol_use;
 #[cfg(test)]
 mod tests;
 
@@ -546,3 +547,4 @@ pub(crate) use rebuild_inputs::*;
 pub(crate) use rootfs_inputs::*;
 pub(crate) use shared::*;
 pub(crate) use squashfs::*;
+pub(crate) use symbol_use::*;

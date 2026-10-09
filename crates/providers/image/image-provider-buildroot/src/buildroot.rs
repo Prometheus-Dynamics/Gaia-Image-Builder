@@ -320,6 +320,8 @@ pub(crate) fn run_buildroot_with(
         command_context.policy.override_check,
     )?);
 
+    // Finish deleting what an earlier clean moved aside.
+    gaia_process::purge_trash(&output_dir.join(gaia_process::TRASH_DIR));
     // `make defconfig` already creates `build/`; only a build creates these.
     let built_before = ["target", "host", "per-package"]
         .iter()
@@ -346,11 +348,15 @@ pub(crate) fn run_buildroot_with(
     } else if !built_before || !something_changed {
         CleanPlan::Nothing
     } else if let Some(current) = &current_graph {
+        let graphs = [Some(&current.graph), previous_graph.as_ref()];
+        let symbols = SymbolIndex::load(buildroot_dir, br2_external, &graphs);
         plan_clean(CleanInputs {
             config_changes: &config_changes,
             override_changes: &override_changes,
             previous: previous_graph.as_ref(),
             current: &current.graph,
+            symbol_use: &|key| symbols.symbol_use(key),
+            per_package: command_context.policy.parallel_packages,
         })
     } else {
         let mut reasons = config_changes
@@ -367,7 +373,33 @@ pub(crate) fn run_buildroot_with(
     };
     match &plan {
         CleanPlan::Nothing => {}
+        CleanPlan::Finalize {
+            reasons,
+            refresh_target,
+        } => {
+            for line in reasons {
+                log_line(&command_context, line.clone());
+            }
+            if *refresh_target {
+                discard_output_dirs(output_dir, &["target"])?;
+            }
+            messages.extend(reasons.iter().cloned());
+        }
         CleanPlan::Full(reasons) => {
+            // Move the big trees aside first: `make clean` deleting them
+            // could hold the build up for hours on a busy disk.
+            discard_output_dirs(
+                output_dir,
+                &[
+                    "build",
+                    "per-package",
+                    "host",
+                    "target",
+                    "images",
+                    "legal-info",
+                    "graphs",
+                ],
+            )?;
             let mut command = Command::new("make");
             command
                 .arg(format!("O={}", output_dir.display()))
@@ -389,37 +421,9 @@ pub(crate) fn run_buildroot_with(
             messages.push(format!("cleaned Buildroot output: {reasons}"));
         }
         CleanPlan::Packages(rebuild) => {
-            let summary = format!(
-                "buildroot rebuild of {} package(s){}: {}",
-                rebuild.rebuild.len(),
-                if rebuild.removed.is_empty() {
-                    String::new()
-                } else {
-                    format!(
-                        ", uninstall of {}",
-                        rebuild
-                            .removed
-                            .iter()
-                            .cloned()
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )
-                },
-                rebuild
-                    .rebuild
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
+            let summary = rebuild_summary(rebuild);
             for line in std::iter::once(summary.clone()).chain(rebuild.reasons.iter().cloned()) {
-                tracing::info!(provider_domain = "image.buildroot", "{line}");
-                if let Some(log_sink) = &command_context.log_sink {
-                    log_sink(gaia_process::ProcessLogLine {
-                        stream: gaia_process::ProcessLogStream::Stderr,
-                        line,
-                    });
-                }
+                log_line(&command_context, line);
             }
             messages.extend(apply_package_rebuild(
                 output_dir,
@@ -430,6 +434,9 @@ pub(crate) fn run_buildroot_with(
                     .map(|current| &current.graph)
                     .expect("a package plan comes from the current graph"),
             )?);
+            if rebuild.refresh_target {
+                discard_output_dirs(output_dir, &["target"])?;
+            }
             messages.push(summary);
             messages.extend(rebuild.reasons.iter().cloned());
         }

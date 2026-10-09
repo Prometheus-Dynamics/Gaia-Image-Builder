@@ -572,13 +572,17 @@ parallel_packages = true          # required
 
 [providers.buildroot.package_cache]
 enabled = true
-# dir = "/srv/buildroot-packages" # default: see below
-max_size = "100G"                 # default; least recently used packages go first
+# level = "system"                # default level for packages: "system" | "project"
+# system_dir = "/srv/buildroot-packages"   # default: see below
+# project_dir = ".gaia/cache/buildroot/packages"
+# project_packages = ["photonvision*", "my-app"]  # kept in this project only
+# system_packages = []            # shared even when level = "project"
+max_size = "100G"                 # per level; least recently used packages go first
 ```
 
-Built packages are cached by content and reused by every build of the user,
-in any project, so a wiped output tree or a second image with the same
-kernel, Mesa or libcamera restores them instead of compiling. After a
+Built packages are cached by content, so a wiped output tree or a second
+image with the same kernel, Mesa or libcamera restores them instead of
+compiling. After a
 successful `make`, each package built in that run is stored as a
 directory: the files it added to its per-package directories (everything
 that is not a hard link to the same path in a direct dependency's trees, so
@@ -586,11 +590,45 @@ also what it installs outside its install steps, such as an extracted
 external toolchain), its image files, file lists, kconfig `.config` and
 stamps. Files are cloned with `cp --reflink=auto`: when the cache is on the
 build's filesystem and that supports reflinks (btrfs, XFS), storing and
-restoring copy no file data. The default directory is
-`<user cache root>/buildroot/packages` when that is on the build's
-filesystem, otherwise `<workspace>/.gaia/cache/buildroot/packages` (with a
-note in the run output); to share packages between projects, set `dir` to a
-directory on the build disk. Before the next `make`, packages not yet built are restored,
+restoring copy no file data.
+
+The cache has two levels:
+
+- the **system level**, shared by every project of the user:
+  `system_dir`, by default `<user cache root>/buildroot/packages` (the user
+  cache root is `$GAIA_CACHE_DIR`, else `$XDG_CACHE_HOME/gaia`, else
+  `~/.cache/gaia`). When that default is on another filesystem than the
+  build, it would copy every file, so its packages go to the project level
+  instead (with a note in the run output); set `system_dir` to a directory on
+  the build disk to share packages between projects.
+- the **project level**: `project_dir`, by default
+  `<workspace>/.gaia/cache/buildroot/packages`.
+
+Packages are stored at `level` (default `system`), except those matching
+`project_packages` (stored at the project level, for the project's own,
+frequently changing packages) or `system_packages` (stored at the system
+level when `level = "project"`). Restores look in the project level first,
+then the system level. `dir` is accepted as an alias of `system_dir`.
+
+`gaia cache` manages the cache entry by entry, so one bad package never
+means wiping everything:
+
+```sh
+gaia cache build.toml                          # list entries, largest first, with totals per level
+gaia cache build.toml --level project --package 'mesa*'
+gaia cache build.toml --remove mesa3d          # every cached build of a package
+gaia cache build.toml --remove linux@ab12cd    # one build, by key prefix
+gaia cache build.toml --clear project          # a whole level (or system, or ccache)
+gaia cache build.toml --remove mesa3d --dry-run
+```
+
+To build without the cache for one run, pass
+`--set policy.providers.buildroot.package_cache.enabled=false`.
+
+The keys ignore Gaia's own patches to Buildroot (such as the reflink copy of
+per-package directories), so a build with and without them shares entries.
+
+Before the next `make`, packages not yet built are restored,
 dependencies first, when their key is cached and all their dependencies are
 built or restored: as Buildroot's per-package preparation does, their
 dependencies' trees are linked in, then their own files are added, and their
@@ -647,6 +685,28 @@ was last built from, and rebuilds as little as keeps it correct:
   on it are rebuilt.
 - A built package that gained or lost a dependency (for example kmod once xz
   is enabled) is rebuilt.
+- A setting that belongs to no package (an external tree's own option, for
+  example) is looked up in what reads it:
+  - Buildroot's infrastructure (`Makefile`, `package/Makefile.in`,
+    `package/pkg-*.mk`, `toolchain/`, `arch/`, `system/system.mk`), an
+    architecture or CPU choice, or an `external.mk` using it for something
+    Gaia cannot follow (an `include`, a rule, a global variable such as
+    `TARGET_CFLAGS`): the whole output tree is cleaned.
+  - Package `.mk` files, or `<PKG>_*` variables and hooks an `external.mk`
+    sets from it (directly or through its own variables): those packages
+    are rebuilt.
+  - Only target finalization: `BR2_ROOTFS_OVERLAY`,
+    `BR2_ROOTFS_POST_BUILD_SCRIPT`, the hostname, issue and root password,
+    or an `external.mk` feeding it to `PACKAGES_USERS`,
+    `PACKAGES_PERMISSIONS_TABLE`, `PACKAGES_DEVICES_TABLE` or
+    `TARGET_FINALIZE_HOOKS`. No package is rebuilt; with per-package
+    directories `target/` is removed and reassembled from them, so files of
+    a removed overlay go too (without them, the tree is cleaned).
+  - Nothing at all: no package is rebuilt.
+
+  Each decision is logged with its reason, for example
+  `BR2_RAZE_LEMNOS_USERS_TABLE unset -> "/x/lemnos-users.table": only read
+  when finalizing the target, no package rebuilt`.
 - Toolchain, architecture, libc, init system and other system-wide settings
   still clean the whole output tree (`make clean`), as does any change when
   Buildroot cannot report its package graph (`make show-info`, which Gaia

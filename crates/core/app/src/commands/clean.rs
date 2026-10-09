@@ -333,7 +333,7 @@ fn guard_clean_path(spec: &ResolvedBuildSpec, path: &Path) -> Result<(), String>
 fn remove_path(path: &Path) -> std::io::Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.is_dir() && !metadata.file_type().is_symlink() {
-        fs::remove_dir_all(path)
+        gaia_process::discard(path)
     } else {
         fs::remove_file(path)
     }

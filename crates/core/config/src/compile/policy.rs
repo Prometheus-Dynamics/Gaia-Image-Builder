@@ -57,7 +57,20 @@ pub(crate) fn compile_command_policy(
         parallel_packages: raw.parallel_packages,
         package_cache: gaia_spec::BuildrootPackageCachePolicySpec {
             enabled: raw.package_cache.enabled,
-            dir: raw.package_cache.dir.clone(),
+            level: match raw.package_cache.level {
+                Some(crate::raw::RawPackageCacheLevel::Project) => {
+                    gaia_spec::PackageCacheLevelSpec::Project
+                }
+                _ => gaia_spec::PackageCacheLevelSpec::System,
+            },
+            system_dir: raw
+                .package_cache
+                .system_dir
+                .clone()
+                .or_else(|| raw.package_cache.dir.clone()),
+            project_dir: raw.package_cache.project_dir.clone(),
+            project_packages: raw.package_cache.project_packages.clone(),
+            system_packages: raw.package_cache.system_packages.clone(),
             max_size: raw.package_cache.max_size.clone(),
         },
         shared_output: raw.shared_output,

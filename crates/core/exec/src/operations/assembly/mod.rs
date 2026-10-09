@@ -147,7 +147,7 @@ pub(crate) fn stage_image_assembly(
         let path = roots.tree_path(&tree.id)?;
         tracing::Span::current().record("output_path", path.display().to_string());
         if path.exists() {
-            std_fs::remove_dir_all(path).map_err(|error| {
+            gaia_process::discard(path).map_err(|error| {
                 format!(
                     "failed to clean assembly tree '{}' at '{}': {error}",
                     tree.id,
