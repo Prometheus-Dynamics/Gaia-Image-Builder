@@ -236,21 +236,49 @@ pub(crate) fn command_for_execution(
     }
     let mut spec =
         DockerRunSpec::discovered_mounts(image.clone(), execution.workspace_root.clone(), command);
-    // Cache and external-tree directories reach Buildroot through the
-    // environment, which mount discovery does not scan. Without mounting
-    // them, a cache outside the workspace would live only inside the --rm
-    // container and be lost after every build.
+    // Cache and external-tree directories, and the output tree's own
+    // directories (for commands run without `O=`, such as filesystem image
+    // scripts), reach commands through the environment, which mount
+    // discovery does not scan. Without mounting them, a cache outside the
+    // workspace would live only inside the --rm container and be lost after
+    // every build, and an output tree outside it (a RAM tree) would be
+    // missing.
     for (key, value) in command.get_envs() {
         let (Some(key), Some(value)) = (key.to_str(), value) else {
             continue;
         };
-        if !matches!(key, "BR2_DL_DIR" | "BR2_CCACHE_DIR" | "BR2_EXTERNAL") {
+        if !matches!(
+            key,
+            "BR2_DL_DIR"
+                | "BR2_CCACHE_DIR"
+                | "BR2_EXTERNAL"
+                | "BASE_DIR"
+                | "BUILD_DIR"
+                | "BINARIES_DIR"
+                | "TARGET_DIR"
+                | "HOST_DIR"
+                | "STAGING_DIR"
+                | "BR2_CONFIG"
+                | "CCACHE_STATSLOG"
+        ) {
             continue;
         }
         for part in value.to_string_lossy().split([':', ' ']) {
             let path = Path::new(part);
-            if path.is_absolute() && path.is_dir() && !spec.mounts.iter().any(|m| m == path) {
-                spec.mounts.push(path.to_path_buf());
+            if !path.is_absolute() {
+                continue;
+            }
+            // A file (a config, a log to write) is reached through its
+            // directory.
+            let dir = if path.is_dir() {
+                Some(path)
+            } else {
+                path.parent()
+            };
+            if let Some(dir) = dir.filter(|dir| dir.is_dir())
+                && !spec.mounts.iter().any(|mount| dir.starts_with(mount))
+            {
+                spec.mounts.push(dir.to_path_buf());
             }
         }
     }

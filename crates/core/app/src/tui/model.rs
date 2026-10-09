@@ -5,6 +5,17 @@ pub(crate) enum Screen {
     Picker,
     Setup,
     Monitor,
+    /// A `gaia run` another process started: its status and recent output.
+    Attach,
+}
+
+/// Which section of the start screen the cursor is in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PickerFocus {
+    /// The running builds, from anywhere on the system.
+    Runs,
+    /// The build configs of this directory.
+    Builds,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

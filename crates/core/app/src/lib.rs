@@ -37,6 +37,7 @@ impl AppContext {
 }
 
 pub fn run() -> i32 {
+    commands::run_registry::enable_recording();
     let args = AppArgs::from_env();
     let outcome = run_with_args(args);
     print_outcome(&outcome);
@@ -81,6 +82,16 @@ impl CommandOutcome {
                 || !plan_diagnostics.is_empty() =>
             {
                 4
+            }
+            // Cancelled (Ctrl-C, `gaia cancel`), like a shell's SIGINT exit.
+            Self::Ran { report, .. }
+                if report
+                    .summary
+                    .operation_timings
+                    .iter()
+                    .any(|timing| timing.status == "cancelled") =>
+            {
+                130
             }
             _ => 0,
         }

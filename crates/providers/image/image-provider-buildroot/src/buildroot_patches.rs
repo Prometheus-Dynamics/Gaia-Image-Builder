@@ -42,9 +42,20 @@ pub(crate) fn apply_reflink_finalize(
         return Ok(None);
     };
     if contents.contains(PPD_COPY_REFLINK) {
-        return Ok(Some(
-            "buildroot per-package finalize uses reflink clones".to_string(),
-        ));
+        if supports_reflinks(output_dir) {
+            return Ok(Some(
+                "buildroot per-package finalize uses reflink clones".to_string(),
+            ));
+        }
+        // The tree moved to a filesystem without reflinks (a RAM tree):
+        // back to Buildroot's own copy.
+        fs::write(&makefile, without_gaia_patches(&contents)).map_err(|error| {
+            ImageProviderError::backend_command(format!(
+                "failed to patch '{}': {error}",
+                makefile.display()
+            ))
+        })?;
+        return Ok(None);
     }
     if !contents.contains(PPD_COPY_UPSTREAM) {
         return Ok(Some(

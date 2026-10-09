@@ -452,6 +452,17 @@ fn merge_command_policy(
         override_check: overlay.override_check.or(base.override_check),
         kernel_modules_check: overlay.kernel_modules_check.or(base.kernel_modules_check),
         parallel_packages: base.parallel_packages || overlay.parallel_packages,
+        work_dir: overlay.work_dir.or(base.work_dir),
+        ram_budget: overlay.ram_budget.or(base.ram_budget),
+        keep_ram_tree: overlay.keep_ram_tree.or(base.keep_ram_tree),
+        host_tools: {
+            let mut tools = base.host_tools.tools;
+            tools.extend(overlay.host_tools.tools);
+            crate::raw::RawBuildrootHostToolsConfig {
+                default: overlay.host_tools.default.or(base.host_tools.default),
+                tools,
+            }
+        },
         package_cache: crate::raw::RawBuildrootPackageCacheConfig {
             enabled: base.package_cache.enabled || overlay.package_cache.enabled,
             level: overlay.package_cache.level.or(base.package_cache.level),

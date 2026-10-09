@@ -134,6 +134,10 @@ impl ImageProvider for BuildrootImageProvider {
         }
         if let Some(buildroot_dir) = resolve_buildroot_dir(spec, image) {
             let output_dir = buildroot_output_dir(spec);
+            // The tree's real directory: the output dir, or the RAM or work
+            // dir it links to (what Buildroot and Docker builds are given).
+            let mut tree_dir = output_dir.clone();
+            let mut ram_work = None;
             let command = ImageCommandContext {
                 execution: &execution,
                 policy,
@@ -158,29 +162,42 @@ impl ImageProvider for BuildrootImageProvider {
                 state_details.push(("buildroot_shared_key".to_string(), shared.key.clone()));
             } else {
                 messages.extend(leave_shared_view(&output_dir)?);
+                let work = place_work_dir(&output_dir, policy)?;
+                messages.extend(work.messages.iter().cloned());
+                // A RAM build stops cleanly when memory runs low.
+                let watchdog = work
+                    .ram
+                    .then(|| RamWatchdog::start(&work.dir, cancel_check.clone(), log_sink.clone()));
+                let command = ImageCommandContext {
+                    cancel_check: watchdog
+                        .as_ref()
+                        .map(|(_, check)| check.clone())
+                        .or_else(|| cancel_check.clone()),
+                    ..command
+                };
+                let (source, note) = buildroot_source_for(&buildroot_dir, &work);
+                messages.extend(note);
                 messages.extend(build_with_private_output(
-                    spec,
-                    image,
-                    &buildroot_dir,
-                    &output_dir,
-                    command,
+                    spec, image, &source, &work.dir, command,
                 )?);
+                drop(watchdog);
+                tree_dir = work.dir.clone();
+                ram_work = Some(work);
             }
             // Buildroot ignores a failed `modules_install`; catch the gap
             // before the images are collected and published.
             messages.extend(check_kernel_modules_installed(
-                &output_dir,
+                &tree_dir,
                 policy.kernel_modules_check,
             )?);
-            let matched_expected_images =
-                collect_expected_images(image, &output_dir, &collect_dir)?;
+            let matched_expected_images = collect_expected_images(image, &tree_dir, &collect_dir)?;
             if let Some(archive_path) = &archive_path
                 && should_archive_buildroot_output(image, archive_path)
             {
                 messages.extend(archive_buildroot_output(BuildrootArchiveRequest {
                     image,
                     collect_dir: &collect_dir,
-                    output_dir: &output_dir,
+                    output_dir: &tree_dir,
                     matched_expected_images: &matched_expected_images,
                     archive_path,
                     reuse_details: &mut reuse_details,
@@ -195,6 +212,14 @@ impl ImageProvider for BuildrootImageProvider {
                 messages.push(format!(
                     "deferred raw image archive '{}' to typed image assembly",
                     archive_path.display()
+                ));
+            }
+            // The images are collected: a RAM tree can be recorded or dropped.
+            if let Some(work) = &ram_work {
+                messages.extend(finish_ram_tree(
+                    &output_dir,
+                    work,
+                    policy.work_dir.keep_ram_tree,
                 ));
             }
             state_details.push(("backend_mode".to_string(), "buildroot".to_string()));
@@ -333,11 +358,29 @@ impl ImageProvider for BuildrootImageProvider {
                     })?
                 } else {
                     let mut messages = leave_shared_view(&output_dir)?;
+                    let work = place_work_dir(&output_dir, request.policy)?;
+                    messages.extend(work.messages.iter().cloned());
+                    let watchdog = work.ram.then(|| {
+                        RamWatchdog::start(
+                            &work.dir,
+                            command.cancel_check.clone(),
+                            command.log_sink.clone(),
+                        )
+                    });
+                    let command = ImageCommandContext {
+                        cancel_check: watchdog
+                            .as_ref()
+                            .map(|(_, check)| check.clone())
+                            .or_else(|| command.cancel_check.clone()),
+                        ..command
+                    };
+                    let (source, note) = buildroot_source_for(&buildroot_dir, &work);
+                    messages.extend(note);
                     messages.extend(run_buildroot(BuildrootRunRequest {
                         spec: request.spec,
                         image: request.image,
-                        buildroot_dir: &buildroot_dir,
-                        output_dir: &output_dir,
+                        buildroot_dir: &source,
+                        output_dir: &work.dir,
                         command,
                     })?);
                     messages
@@ -501,6 +544,7 @@ mod command;
 mod feed;
 mod feed_make;
 mod fs_util;
+mod host_tools;
 mod interrupted_make;
 mod kernel_modules;
 mod make_progress;
@@ -509,6 +553,7 @@ mod package_cache;
 mod package_cache_files;
 mod package_graph;
 mod package_keys;
+mod ram_tree;
 mod rebuild_inputs;
 mod rootfs_inputs;
 mod shared;
@@ -539,6 +584,7 @@ pub(crate) use command::*;
 pub(crate) use feed::*;
 pub(crate) use feed_make::*;
 pub(crate) use fs_util::*;
+pub(crate) use host_tools::*;
 pub(crate) use interrupted_make::*;
 pub(crate) use kernel_modules::*;
 pub(crate) use make_progress::*;
@@ -547,6 +593,7 @@ pub(crate) use package_cache::*;
 pub(crate) use package_cache_files::*;
 pub(crate) use package_graph::*;
 pub(crate) use package_keys::*;
+pub(crate) use ram_tree::*;
 pub(crate) use rebuild_inputs::*;
 pub(crate) use rootfs_inputs::*;
 pub(crate) use shared::*;

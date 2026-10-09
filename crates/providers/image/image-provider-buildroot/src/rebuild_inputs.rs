@@ -17,6 +17,9 @@ const CONFIG_SNAPSHOT: &str = ".gaia-buildroot-config.last";
 
 /// Settings (exact names or `prefix*`) that never require rebuilding packages.
 const SETTINGS_NOT_REQUIRING_CLEAN: &[&str] = &[
+    // Where the defconfig was read from: its settings are compared, not its
+    // path (which moves with the Buildroot source, e.g. into a RAM tree).
+    "BR2_DEFCONFIG",
     "BR2_DL_DIR",
     "BR2_CCACHE_DIR",
     "BR2_CCACHE_INITIAL_SETUP",
@@ -290,6 +293,8 @@ mod tests {
 
     #[test]
     fn rootfs_image_settings_do_not_require_a_clean() {
+        // Where the defconfig was read from moves with the Buildroot source.
+        assert!(!setting_requires_clean("BR2_DEFCONFIG"));
         let resized = BASE
             .replace("\"1G\"", "\"600M\"")
             .replace("2025.02 Configuration", "2025.02-5-gabc Configuration")

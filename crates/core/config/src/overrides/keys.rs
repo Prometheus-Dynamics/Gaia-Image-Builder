@@ -80,6 +80,12 @@ pub(super) enum KnownOverrideKey {
     PolicyProvidersBuildrootPackageCacheLevel,
     PolicyProvidersBuildrootPackageCacheProjectDir,
     PolicyProvidersBuildrootPackageCacheMaxSize,
+    PolicyProvidersBuildrootWorkDir,
+    PolicyProvidersBuildrootRamBudget,
+    PolicyProvidersBuildrootKeepRamTree,
+    PolicyProvidersBuildrootHostToolsDefault,
+    PolicyProvidersBuildrootHostToolsCcache,
+    PolicyProvidersBuildrootHostToolsPkgconf,
     PolicyProvidersBuildrootSharedOutput,
     PolicyProvidersBuildrootSharedOutputDir,
     PolicyProvidersBuildrootOverrideCheck,
@@ -304,6 +310,24 @@ impl<'a> OverrideKey<'a> {
             }
             "policy.providers.buildroot.package_cache.max_size" => {
                 Self::Known(KnownOverrideKey::PolicyProvidersBuildrootPackageCacheMaxSize)
+            }
+            "policy.providers.buildroot.work_dir" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersBuildrootWorkDir)
+            }
+            "policy.providers.buildroot.ram_budget" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersBuildrootRamBudget)
+            }
+            "policy.providers.buildroot.keep_ram_tree" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersBuildrootKeepRamTree)
+            }
+            "policy.providers.buildroot.host_tools.default" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersBuildrootHostToolsDefault)
+            }
+            "policy.providers.buildroot.host_tools.ccache" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersBuildrootHostToolsCcache)
+            }
+            "policy.providers.buildroot.host_tools.pkgconf" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersBuildrootHostToolsPkgconf)
             }
             "policy.providers.buildroot.shared_output" => {
                 Self::Known(KnownOverrideKey::PolicyProvidersBuildrootSharedOutput)

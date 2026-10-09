@@ -129,6 +129,32 @@ fn pause_until_continued() {
 #[cfg(not(unix))]
 fn pause_until_continued() {}
 
+/// The pid in `pid_file`, when it is a live process named gaia.
+#[cfg(unix)]
+pub(crate) fn running_gaia(pid_file: &std::path::Path) -> Option<libc::pid_t> {
+    let pid = std::fs::read_to_string(pid_file)
+        .ok()?
+        .trim()
+        .parse::<libc::pid_t>()
+        .ok()?;
+    gaia_process_alive(pid)
+}
+
+/// `pid` when it is a live process named gaia. A pid since reused by another
+/// program is not one.
+#[cfg(unix)]
+pub(crate) fn gaia_process_alive(pid: libc::pid_t) -> Option<libc::pid_t> {
+    if pid <= 0 {
+        return None;
+    }
+    // SAFETY: signal 0 only checks that the process exists.
+    if unsafe { libc::kill(pid, 0) } != 0 {
+        return None;
+    }
+    let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default();
+    (comm.is_empty() || comm.trim().starts_with("gaia")).then_some(pid)
+}
+
 /// Publishes this run's pid in `<build_dir>/.gaia-run.pid` until dropped.
 pub(crate) fn publish_run(build_dir: &std::path::Path) -> RunPidGuard {
     let path = build_dir.join(RUN_PID_FILE);

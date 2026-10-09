@@ -101,6 +101,8 @@ pub(crate) fn image_execution_policy(spec: &ResolvedBuildSpec) -> ImageExecution
         parallel_packages: spec.image.provider_kind() == gaia_spec::ImageProviderKind::Buildroot
             && spec.policy.providers.buildroot.parallel_packages,
         package_cache: spec.policy.providers.buildroot.package_cache.clone(),
+        work_dir: spec.policy.providers.buildroot.work_dir.clone(),
+        host_tools: spec.policy.providers.buildroot.host_tools.clone(),
         shared_output: spec.image.provider_kind() == gaia_spec::ImageProviderKind::Buildroot
             && spec.policy.providers.buildroot.shared_output,
         shared_output_dir: spec.policy.providers.buildroot.shared_output_dir.clone(),

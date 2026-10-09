@@ -15,19 +15,23 @@ impl<'a> TuiState<'a> {
             Screen::Picker => self.handle_picker_key(code),
             Screen::Setup => self.handle_setup_key(code, modifiers),
             Screen::Monitor => self.handle_monitor_key(code, modifiers),
+            Screen::Attach => self.handle_attach_key(code),
         }
     }
 
     pub(crate) fn handle_picker_key(&mut self, code: KeyCode) {
         match code {
-            KeyCode::Char('j') | KeyCode::Down => self.select_next_build(),
-            KeyCode::Char('k') | KeyCode::Up => self.select_prev_build(),
-            KeyCode::Enter => self.open_selected_build(),
+            KeyCode::Char('j') | KeyCode::Down => self.picker_down(),
+            KeyCode::Char('k') | KeyCode::Up => self.picker_up(),
+            KeyCode::Enter => self.open_picker_selection(),
             KeyCode::Char('r') => {
                 self.build_entries =
                     discover_build_entries(&self.build, self.builds_dir.as_deref());
+                self.build_dirs.clear();
+                self.picker_polled_at = None;
                 self.ensure_build_selection();
-                self.set_status("reloaded build list");
+                self.ensure_picker_selection();
+                self.set_status("reloaded build list and running builds");
             }
             KeyCode::Esc => self.set_status("picker escape ignored; press Enter to load a build"),
             _ => {}
@@ -40,7 +44,7 @@ impl<'a> TuiState<'a> {
             return;
         }
         match code {
-            KeyCode::Char('b') => self.screen = Screen::Picker,
+            KeyCode::Char('b') => self.open_picker(),
             KeyCode::Char('p') => self.refresh(),
             KeyCode::Char('r') | KeyCode::Char('s') => self.start_run(),
             KeyCode::Char('m') => {

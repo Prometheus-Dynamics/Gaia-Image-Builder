@@ -389,6 +389,40 @@ fn resolves_buildroot_cache_policy() {
 }
 
 #[test]
+fn resolves_buildroot_work_dir_policy() {
+    let defaults = gaia_config::resolve_config(&default_config_path());
+    assert_eq!(
+        defaults.policy.providers.buildroot.work_dir.work_dir,
+        "disk"
+    );
+    assert_eq!(
+        defaults.policy.providers.buildroot.work_dir.ram_budget,
+        None
+    );
+    assert!(defaults.policy.providers.buildroot.work_dir.keep_ram_tree);
+
+    let spec = gaia_config::resolve_config_with_options(
+        &default_config_path(),
+        &gaia_config::ResolveOptions {
+            explicit_overrides: vec![
+                ("policy.providers.buildroot.work_dir".into(), "ram".into()),
+                ("policy.providers.buildroot.ram_budget".into(), "60G".into()),
+                (
+                    "policy.providers.buildroot.keep_ram_tree".into(),
+                    "false".into(),
+                ),
+            ],
+            ..gaia_config::ResolveOptions::default()
+        },
+    );
+
+    let work_dir = &spec.policy.providers.buildroot.work_dir;
+    assert_eq!(work_dir.work_dir, "ram");
+    assert_eq!(work_dir.ram_budget.as_deref(), Some("60G"));
+    assert!(!work_dir.keep_ram_tree);
+}
+
+#[test]
 fn resolves_clean_profiles() {
     let config = write_temp_config(
         r#"
@@ -488,4 +522,43 @@ overrides = [
     );
 
     let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn resolves_buildroot_host_tools_policy() {
+    let defaults = gaia_config::resolve_config(&default_config_path());
+    assert_eq!(
+        defaults.policy.providers.buildroot.host_tools,
+        gaia_spec::BuildrootHostToolsPolicySpec::default()
+    );
+
+    let spec = gaia_config::resolve_config_with_options(
+        &default_config_path(),
+        &gaia_config::ResolveOptions {
+            explicit_overrides: vec![
+                (
+                    "policy.providers.buildroot.host_tools.default".into(),
+                    "fail".into(),
+                ),
+                (
+                    "policy.providers.buildroot.host_tools.ccache".into(),
+                    "system,build".into(),
+                ),
+            ],
+            ..gaia_config::ResolveOptions::default()
+        },
+    );
+
+    let host_tools = &spec.policy.providers.buildroot.host_tools;
+    assert_eq!(
+        host_tools.steps_for("ccache"),
+        &[
+            gaia_spec::HostToolStepSpec::System,
+            gaia_spec::HostToolStepSpec::Build,
+        ]
+    );
+    assert_eq!(
+        host_tools.steps_for("pkgconf"),
+        &[gaia_spec::HostToolStepSpec::Fail]
+    );
 }

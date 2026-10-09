@@ -203,3 +203,24 @@ fn parses_cache_flags() {
     assert_eq!(args.cache.remove, vec!["mesa3d", "linux@ab12"]);
     assert!(args.cache.dry_run);
 }
+
+#[test]
+fn run_selectors_are_optional_for_status_and_control_commands() {
+    // No run named: the registry decides, so no build config is implied.
+    for command in ["status", "pause", "resume", "cancel"] {
+        let args = AppArgs::parse_from([command]);
+        assert!(!args.build_explicit, "{command} names no build");
+        let follow = AppArgs::parse_from(["status", "-f"]);
+        assert!(follow.follow && !follow.build_explicit);
+    }
+    // A number, a name or a config path is the named run.
+    for selector in ["2", "Cm5 image", "configs/builds/cm5.toml"] {
+        let args = AppArgs::parse_from(["status", selector, "--follow"]);
+        assert!(args.build_explicit);
+        assert_eq!(args.build, selector);
+        assert!(args.follow);
+    }
+    let cancel = AppArgs::parse_from(["cancel", "1"]);
+    assert_eq!(cancel.command, AppCommand::Cancel);
+    assert_eq!((cancel.build_explicit, cancel.build.as_str()), (true, "1"));
+}

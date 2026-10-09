@@ -105,7 +105,12 @@ pub(crate) fn restore_cached_packages(
     messages.extend(cache.space_warning());
     messages.extend(cache.note.clone());
     let started = std::time::Instant::now();
-    let identity = execution_identity(command_context.execution);
+    // Host tools taken from the system are part of every key.
+    let mut identity = execution_identity(command_context.execution);
+    let system_tools = recorded_host_tools(output_dir);
+    if !system_tools.is_empty() {
+        identity = format!("{identity} {system_tools}");
+    }
     let keys = package_keys(&KeyInputs {
         buildroot_dir,
         output_dir,
@@ -114,6 +119,7 @@ pub(crate) fn restore_cached_packages(
     });
     let restored = cache.restore(output_dir, &graph, &keys);
     refresh_current_stamps(output_dir, &graph, &keys);
+    pin_restored_linux_version(output_dir, &graph)?;
     messages.push(gaia_process::step_time_message(
         "package cache keys and restore",
         started.elapsed(),
@@ -161,4 +167,73 @@ pub(crate) fn ccache_hit_rate(log: &str) -> Option<String> {
             hits as f64 * 100.0 / cacheable as f64
         )
     })
+}
+
+const LINUX_PIN_BEGIN: &str = "# BEGIN gaia restored linux (generated; do not edit)";
+const LINUX_PIN_END: &str = "# END gaia restored linux";
+
+/// A `linux` restored from the package cache has no kernel source tree, so
+/// Buildroot cannot ask it for the kernel release (`LINUX_VERSION_PROBED`,
+/// `make kernelrelease`), and target finalization would run `depmod` for the
+/// build machine's kernel. While the tree is missing, the release is pinned
+/// in `local.mk` from the modules directory the package installed.
+fn pin_restored_linux_version(
+    output_dir: &Path,
+    graph: &PackageGraph,
+) -> Result<(), ImageProviderError> {
+    let pin = restored_linux_release(output_dir, graph)
+        .map(|release| format!("override LINUX_VERSION_PROBED = {release}\n"))
+        .unwrap_or_default();
+    write_local_mk_section(output_dir, LINUX_PIN_BEGIN, LINUX_PIN_END, &pin)
+}
+
+/// The kernel release of an installed `linux` whose build dir has no kernel
+/// source.
+fn restored_linux_release(output_dir: &Path, graph: &PackageGraph) -> Option<String> {
+    let build_dir = output_dir.join(graph.get("linux")?.stamp_dir.as_ref()?);
+    if !build_dir.join(".stamp_installed").exists() || build_dir.join("Makefile").exists() {
+        return None;
+    }
+    let mut releases = fs::read_dir(output_dir.join("per-package/linux/target/lib/modules"))
+        .ok()?
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+        .collect::<Vec<_>>();
+    (releases.len() == 1).then(|| releases.remove(0))
+}
+
+#[cfg(test)]
+mod linux_pin_tests {
+    use super::*;
+
+    #[test]
+    fn a_restored_kernel_without_its_source_pins_its_release() {
+        let output = std::env::temp_dir().join(format!("gaia-linux-pin-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&output);
+        let build = output.join("build/linux-custom");
+        fs::create_dir_all(&build).expect("build");
+        fs::write(build.join(".stamp_installed"), "").expect("stamp");
+        fs::create_dir_all(output.join("per-package/linux/target/lib/modules/6.12.25-v8-16k"))
+            .expect("modules");
+        let mut graph = PackageGraph::default();
+        graph.packages.insert(
+            "linux".to_string(),
+            PackageInfo {
+                stamp_dir: Some("build/linux-custom".to_string()),
+                ..PackageInfo::default()
+            },
+        );
+        pin_restored_linux_version(&output, &graph).expect("pin");
+        let local = fs::read_to_string(output.join("local.mk")).expect("local.mk");
+        assert!(
+            local.contains("override LINUX_VERSION_PROBED = 6.12.25-v8-16k\n"),
+            "{local}"
+        );
+        // Built again from source: the pin goes.
+        fs::write(build.join("Makefile"), "").expect("kernel source");
+        pin_restored_linux_version(&output, &graph).expect("unpin");
+        assert!(!output.join("local.mk").exists());
+        let _ = fs::remove_dir_all(output);
+    }
 }

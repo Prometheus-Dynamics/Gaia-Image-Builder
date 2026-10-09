@@ -7,6 +7,7 @@ impl<'a> TuiState<'a> {
             Screen::Picker => DetailView::Overview,
             Screen::Setup => self.selected_setup_item().detail_view(),
             Screen::Monitor => self.selected_monitor_view().detail_view(),
+            Screen::Attach => DetailView::Overview,
         }
     }
 

@@ -1,14 +1,17 @@
 mod cache;
 mod clean;
 #[cfg(unix)]
-mod control;
+pub(crate) mod control;
 mod interrupt;
+pub(crate) mod live_status;
 mod lock;
 mod plan;
 mod progress;
 mod resolve;
 mod run;
+pub(crate) mod run_registry;
 mod state;
+pub(crate) mod status;
 mod validate;
 
 use gaia_exec::ExecutionError;
@@ -110,6 +113,9 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
             Err(error) => usage_errors.push(error),
         }
     }
+    if args.follow && args.command != AppCommand::Status {
+        usage_errors.push("--follow applies to 'status'".into());
+    }
     if !args.only.is_empty() && !matches!(args.command, AppCommand::Run | AppCommand::Plan) {
         usage_errors.push("--only applies to 'run' and 'plan'".into());
     }
@@ -142,6 +148,9 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
             ),
         };
     }
+    // The build named on the command line; `None` when the command runs
+    // without one (status, pause, resume and cancel then use the registry).
+    let explicit_build = args.build_explicit.then_some(args.build.as_str());
     match args.command {
         AppCommand::Help => CommandOutcome::Help { text: help_text() },
         AppCommand::Version => CommandOutcome::Version {
@@ -158,12 +167,15 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
         AppCommand::Clean => clean_build_command(&args.build, &resolve_options(&args), &args.clean),
         #[cfg(unix)]
         AppCommand::Pause | AppCommand::Resume | AppCommand::Cancel => {
-            control::control_command(&args.build, &resolve_options(&args), args.command)
+            control::control_command(explicit_build, &resolve_options(&args), args.command)
         }
         #[cfg(not(unix))]
         AppCommand::Pause | AppCommand::Resume | AppCommand::Cancel => CommandOutcome::Failed {
             message: "pause, resume and cancel need a Unix system".into(),
         },
+        AppCommand::Status => {
+            status::status_command(explicit_build, &resolve_options(&args), args.follow)
+        }
         AppCommand::Cache => cache_command(&args.build, &resolve_options(&args), &args.cache),
         AppCommand::Lock => lock_build_command(&args.build, &resolve_options(&args), &args.lock),
         AppCommand::Run => {
@@ -213,9 +225,11 @@ fn help_text() -> String {
         "  gaia cache [build-config] --remove <package>[@key-prefix][,...] [--dry-run]",
         "  gaia cache [build-config] --remove-legacy [--dry-run]",
         "  gaia cache [build-config] --clear system|project|ccache [--dry-run]",
-        "  gaia pause [build-config]      (or Ctrl-Z in the running gaia run)",
-        "  gaia resume [build-config]     (or fg)",
-        "  gaia cancel [build-config]     (or Ctrl-C; finished work is kept)",
+        "  gaia pause [run]               (or Ctrl-Z in the running gaia run)",
+        "  gaia resume [run]              (or fg)",
+        "  gaia cancel [run]              (or Ctrl-C; finished work is kept)",
+        "  gaia status [run] [--follow]   (lists every gaia run; or one of them)",
+        "  gaia status <build-config> [--follow]",
         "  gaia lock [build-config]",
         "  gaia lock [build-config] --update [source-id[,source-id...]]",
         "  gaia run [build-config]",
@@ -231,6 +245,11 @@ fn help_text() -> String {
         "--only runs part of the build graph plus its dependencies. Targets are",
         "domains (sources, artifacts, install, stage, image, checkpoints) or",
         "operation ids from 'gaia plan'. Reuse state for the rest is kept.",
+        "",
+        "'pause', 'resume', 'cancel' and 'status' find the gaia runs on this system",
+        "from any directory: with no run named, 'status' lists them all, and the",
+        "signal commands act on the one live run. A run is named by its number in",
+        "the 'status' list, its build name or its build config path.",
         "",
         "'gaia lock' records the commit of every git source in <build>.gaia.lock",
         "next to the build file; builds then check out exactly those commits.",

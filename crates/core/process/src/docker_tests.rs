@@ -118,3 +118,39 @@ fn finished_docker_run_only_discards_the_id_file() {
     assert!(!cidfile.exists(), "container id file should be removed");
     let _ = fs::remove_dir_all(dir);
 }
+
+#[test]
+fn links_in_mounted_dirs_to_outside_dirs_mount_their_targets() {
+    let root = std::env::temp_dir().join(format!("gaia-docker-links-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let workspace = root.join("workspace");
+    let outside = root.join("ram/tree");
+    std::fs::create_dir_all(workspace.join("build/image")).expect("workspace");
+    std::fs::create_dir_all(outside.join("host")).expect("outside");
+    std::os::unix::fs::symlink(&outside, workspace.join("build/image/buildroot-output"))
+        .expect("link");
+    let mut command = Command::new("cmake");
+    command
+        .arg(format!(
+            "-DCMAKE_TOOLCHAIN_FILE={}/build/image/buildroot-output/host/toolchainfile.cmake",
+            workspace.display()
+        ))
+        // A link outside the mounts is not followed.
+        .env("PATH", "/bin:/usr/bin");
+    let spec = DockerRunSpec::discovered_mounts("image:latest", &workspace, &command);
+    let wrapped = docker_run_command(&command, &spec).expect("docker command");
+    let args = wrapped
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let target = std::fs::canonicalize(&outside).expect("canonical");
+    assert!(
+        args.contains(&format!("{}:{}", target.display(), target.display())),
+        "{args:?}"
+    );
+    assert!(
+        !args.iter().any(|arg| arg.starts_with("/usr/bin:")),
+        "{args:?}"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}

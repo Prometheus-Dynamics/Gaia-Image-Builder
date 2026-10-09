@@ -1,5 +1,6 @@
 mod artifacts;
 mod build_groups;
+mod buildroot_policy;
 mod checkpoints;
 mod core;
 mod diagnostics;

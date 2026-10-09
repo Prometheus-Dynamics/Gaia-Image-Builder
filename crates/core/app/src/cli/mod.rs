@@ -19,6 +19,8 @@ pub struct AppArgs {
     pub lock: LockArgs,
     /// `--only` targets for run/plan: build domains or operation ids.
     pub only: Vec<String>,
+    /// `--follow` / `-f` for status: refresh until the run ends.
+    pub follow: bool,
     /// Problems found while parsing; dispatch refuses to run when non-empty.
     pub usage_errors: Vec<String>,
 }
@@ -86,6 +88,7 @@ impl AppArgs {
             Some("pause") => Some(AppCommand::Pause),
             Some("resume") => Some(AppCommand::Resume),
             Some("cancel") => Some(AppCommand::Cancel),
+            Some("status") => Some(AppCommand::Status),
             Some("lock") => Some(AppCommand::Lock),
             Some("run") => Some(AppCommand::Run),
             _ => None,
@@ -169,6 +172,7 @@ impl AppArgs {
                     }
                 }
                 "--all-caches" => parsed.clean.all_caches = true,
+                "--follow" | "-f" => parsed.follow = true,
                 "--update" => {
                     parsed.lock.update = true;
                     // `--update [source-id]`: an optional value, taken only
@@ -233,6 +237,7 @@ impl Default for AppArgs {
             cache: CacheArgs::default(),
             lock: LockArgs::default(),
             only: Vec::new(),
+            follow: false,
             usage_errors: Vec::new(),
         }
     }
@@ -299,6 +304,8 @@ pub enum AppCommand {
     Pause,
     Resume,
     Cancel,
+    /// Show what the running `gaia run` of a build is doing.
+    Status,
     Lock,
     Run,
 }

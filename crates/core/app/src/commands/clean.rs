@@ -62,7 +62,9 @@ fn clean_build(spec: &ResolvedBuildSpec, clean_args: &CleanArgs) -> Result<Clean
         if removed.iter().any(|done: &PathBuf| path.starts_with(done)) {
             continue;
         }
-        if !path.exists() {
+        // A link whose target is gone (a RAM tree after a reboot) is still
+        // removed.
+        if !path.exists() && fs::symlink_metadata(&path).is_err() {
             if !missing.contains(&path) {
                 missing.push(path);
             }
@@ -332,6 +334,15 @@ fn guard_clean_path(spec: &ResolvedBuildSpec, path: &Path) -> Result<(), String>
 
 fn remove_path(path: &Path) -> std::io::Result<()> {
     let metadata = fs::symlink_metadata(path)?;
+    // A Buildroot tree built in RAM or a work dir is a link to it: remove
+    // the tree too, not only the link.
+    for link in [path.to_path_buf(), path.join("image/buildroot-output")] {
+        if let Ok(target) = fs::read_link(&link)
+            && target.ends_with("buildroot-output")
+        {
+            gaia_process::discard(&target)?;
+        }
+    }
     if metadata.is_dir() && !metadata.file_type().is_symlink() {
         gaia_process::discard(path)
     } else {

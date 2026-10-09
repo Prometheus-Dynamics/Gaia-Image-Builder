@@ -243,6 +243,104 @@ pub struct CommandProviderPolicySpec {
     /// Buildroot only: reuse packages built by any build with the same
     /// inputs (requires `parallel_packages`).
     pub package_cache: BuildrootPackageCachePolicySpec,
+    /// Buildroot only: where the output tree is built.
+    pub work_dir: BuildrootWorkDirPolicySpec,
+    /// Buildroot only: where each host tool (ccache, pkgconf) comes from.
+    pub host_tools: BuildrootHostToolsPolicySpec,
+}
+
+/// Where the Buildroot output tree is built.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildrootWorkDirPolicySpec {
+    /// "disk" (the build dir, default), "ram" (tmpfs), or a directory.
+    pub work_dir: String,
+    /// Most RAM a "ram" tree may use, e.g. "60G".
+    pub ram_budget: Option<String>,
+    /// Keep a "ram" tree after a build for fast rebuilds.
+    pub keep_ram_tree: bool,
+}
+
+impl Default for BuildrootWorkDirPolicySpec {
+    fn default() -> Self {
+        Self {
+            work_dir: "disk".into(),
+            ram_budget: None,
+            keep_ram_tree: true,
+        }
+    }
+}
+
+/// Host tools a `[providers.buildroot.host_tools]` policy can name.
+pub const KNOWN_HOST_TOOLS: &[&str] = &["ccache", "pkgconf"];
+
+/// Where Buildroot's host tools come from: the build environment's own
+/// ("system"), Buildroot's build ("build"), or an error ("fail"), tried in
+/// order, per tool.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildrootHostToolsPolicySpec {
+    /// Policy for tools not listed in `tools`, e.g. ["build"].
+    pub default: Vec<HostToolStepSpec>,
+    /// Per tool, e.g. "ccache" -> [System, Build].
+    pub tools: std::collections::BTreeMap<String, Vec<HostToolStepSpec>>,
+    /// Policy strings that did not parse, as (key, raw text) pairs; the key
+    /// is `default` or a tool name. Their steps compile to `[Fail]`, and
+    /// validation reports them.
+    pub invalid: Vec<(String, String)>,
+}
+
+impl Default for BuildrootHostToolsPolicySpec {
+    fn default() -> Self {
+        Self {
+            default: vec![HostToolStepSpec::Build],
+            tools: std::collections::BTreeMap::new(),
+            invalid: Vec::new(),
+        }
+    }
+}
+
+impl BuildrootHostToolsPolicySpec {
+    pub fn steps_for(&self, tool: &str) -> &[HostToolStepSpec] {
+        self.tools
+            .get(tool)
+            .map(Vec::as_slice)
+            .unwrap_or(&self.default)
+    }
+}
+
+/// One step of a host tool policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum HostToolStepSpec {
+    System,
+    Build,
+    Fail,
+}
+
+impl HostToolStepSpec {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Build => "build",
+            Self::Fail => "fail",
+        }
+    }
+
+    /// Parses a comma-separated, non-empty list of steps such as
+    /// `system,build`.
+    pub fn parse_list(text: &str) -> Result<Vec<Self>, String> {
+        if text.trim().is_empty() {
+            return Err("the policy is empty; list at least one of system, build, fail".into());
+        }
+        text.split(',')
+            .map(|part| match part.trim() {
+                "system" => Ok(Self::System),
+                "build" => Ok(Self::Build),
+                "fail" => Ok(Self::Fail),
+                other => Err(format!(
+                    "unknown step `{other}` (expected system, build or fail)"
+                )),
+            })
+            .collect()
+    }
 }
 
 /// `[providers.buildroot.package_cache]`: a cache of built Buildroot
@@ -499,5 +597,50 @@ mod tests {
             providers.source_command_policy(SourceProviderKind::Path),
             ResolvedCommandPolicySpec::default()
         );
+    }
+}
+
+#[cfg(test)]
+mod host_tool_tests {
+    use super::*;
+
+    #[test]
+    fn parses_ordered_step_lists() {
+        assert_eq!(
+            HostToolStepSpec::parse_list("system,build").expect("list"),
+            vec![HostToolStepSpec::System, HostToolStepSpec::Build]
+        );
+        assert_eq!(
+            HostToolStepSpec::parse_list(" fail ").expect("single"),
+            vec![HostToolStepSpec::Fail]
+        );
+        assert_eq!(
+            HostToolStepSpec::parse_list("build, system").expect("spaces"),
+            vec![HostToolStepSpec::Build, HostToolStepSpec::System]
+        );
+    }
+
+    #[test]
+    fn rejects_empty_lists_and_unknown_steps() {
+        assert!(HostToolStepSpec::parse_list("").is_err());
+        assert!(HostToolStepSpec::parse_list("  ").is_err());
+        assert!(HostToolStepSpec::parse_list("system,").is_err());
+        assert!(HostToolStepSpec::parse_list("system,host").is_err());
+        assert!(HostToolStepSpec::parse_list("System").is_err());
+    }
+
+    #[test]
+    fn steps_for_falls_back_to_the_default_policy() {
+        let mut policy = BuildrootHostToolsPolicySpec::default();
+        assert_eq!(policy.steps_for("ccache"), &[HostToolStepSpec::Build]);
+        policy.tools.insert(
+            "ccache".into(),
+            vec![HostToolStepSpec::System, HostToolStepSpec::Build],
+        );
+        assert_eq!(
+            policy.steps_for("ccache"),
+            &[HostToolStepSpec::System, HostToolStepSpec::Build]
+        );
+        assert_eq!(policy.steps_for("pkgconf"), &[HostToolStepSpec::Build]);
     }
 }

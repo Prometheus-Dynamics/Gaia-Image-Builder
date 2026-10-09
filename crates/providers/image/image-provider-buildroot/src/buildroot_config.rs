@@ -451,7 +451,7 @@ pub(crate) fn cache_space_warning(label: &str, dir: &Path, max_size: u64) -> Opt
 }
 
 /// Free bytes on the filesystem holding `dir` (`df -Pk`).
-fn filesystem_available_bytes(dir: &Path) -> Option<u64> {
+pub(crate) fn filesystem_available_bytes(dir: &Path) -> Option<u64> {
     let output = Command::new("df")
         .arg("-Pk")
         .arg(dir)

@@ -13,6 +13,7 @@ pub fn validate_spec(spec: &ResolvedBuildSpec) -> ValidationReport {
     crate::checkpoints::validate_checkpoints(spec, &mut diagnostics);
     crate::image::validate_image_contract(spec, &mut diagnostics);
     crate::reporting::validate_reporting(spec, &mut diagnostics);
+    crate::buildroot_policy::validate_buildroot_policy(spec, &mut diagnostics);
 
     let warnings = diagnostics
         .iter()

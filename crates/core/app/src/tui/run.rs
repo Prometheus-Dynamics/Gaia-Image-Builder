@@ -1,4 +1,5 @@
 use super::*;
+use crate::commands::live_status::live_run;
 
 impl<'a> TuiState<'a> {
     pub(crate) fn poll_run_completion(&mut self) {
@@ -137,6 +138,19 @@ impl<'a> TuiState<'a> {
         }
         if self.pending_refresh_at.is_some() || self.refresh_receiver.is_some() {
             self.refresh();
+        }
+        // Two runs of one build dir would fight over its state.
+        let running = self
+            .spec
+            .as_ref()
+            .and_then(|spec| live_run(std::path::Path::new(&spec.workspace.build_dir)));
+        if let Some(run) = running {
+            self.attach_if_live();
+            self.set_status(format!(
+                "cannot run: gaia run {} is already running this build",
+                run.pid
+            ));
+            return;
         }
 
         let (Some(_spec), Some(validation), Some(_plan)) = (

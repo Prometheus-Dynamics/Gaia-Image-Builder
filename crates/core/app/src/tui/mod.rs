@@ -59,7 +59,14 @@ fn launch_tui(
     options: &ResolveOptions,
 ) -> io::Result<(i32, String)> {
     let mut state = TuiState::new(context, launch, options);
-    state.refresh();
+    // Outside a project the picker opens with no build to load: it shows the
+    // running builds only.
+    if state.screen != Screen::Picker || Path::new(&state.build).is_file() {
+        state.refresh();
+    }
+    if state.screen != Screen::Picker {
+        state.attach_if_live();
+    }
 
     let mut terminal = setup_terminal()?;
     let result = run_loop(&mut terminal, &mut state);
@@ -121,6 +128,7 @@ fn run_loop(
     }
 }
 
+mod attach;
 mod details;
 mod discovery;
 mod events;
@@ -133,6 +141,7 @@ mod setup;
 mod state;
 mod status;
 
+pub(crate) use attach::*;
 pub(crate) use discovery::*;
 pub(crate) use events::*;
 pub(crate) use model::*;

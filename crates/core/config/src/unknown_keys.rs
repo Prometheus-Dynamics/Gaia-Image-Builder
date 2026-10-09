@@ -43,7 +43,19 @@ const COMMAND_PROVIDER_CHILDREN: &[Section] = &[
         struct_fields::<raw::RawBuildrootPackageCacheConfig>,
         &[],
     ),
+    // Per-tool keys are flattened into a map: the tools Gaia knows.
+    section("host_tools", host_tools_fields, &[]),
 ];
+
+fn host_tools_fields() -> Option<&'static [&'static str]> {
+    const FIELDS: &[&str] = &["default", "ccache", "pkgconf"];
+    debug_assert!(
+        gaia_spec::KNOWN_HOST_TOOLS
+            .iter()
+            .all(|tool| FIELDS.contains(tool))
+    );
+    Some(FIELDS)
+}
 
 /// For a table whose own keys depend on `kind` (flattened), so only its
 /// plain nested tables are checked.
@@ -447,6 +459,17 @@ mod tests {
                  [[sources]]\nid = \"s\"\nkind = \"path\"\npath = \".\"\nwhatever = 1\n"
             )
             .is_empty()
+        );
+    }
+
+    #[test]
+    fn unknown_host_tools_are_reported() {
+        assert_eq!(
+            unknown(
+                "[providers.buildroot.host_tools]\ndefault = \"build\"\n\
+                 ccache = \"system,build\"\ncache = \"system\"\n"
+            ),
+            vec!["providers.buildroot.host_tools.cache"]
         );
     }
 

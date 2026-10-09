@@ -264,7 +264,7 @@ fn buildroot_parallel_packages_and_ccache_configure_and_report() {
         "max_size = 50G\n"
     );
     let makeflags = fs::read_to_string(output_dir.join("makeflags")).expect("makeflags");
-    assert!(makeflags.contains("-l6"), "{makeflags}");
+    assert!(!makeflags.contains("-l"), "{makeflags}");
     assert!(
         messages
             .iter()

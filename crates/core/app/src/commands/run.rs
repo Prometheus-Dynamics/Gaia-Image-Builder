@@ -20,7 +20,9 @@ use std::time::Instant;
 
 use crate::AppContext;
 
+use super::live_status::{LiveRecorder, LiveRunInfo, run_outcome_label, unix_now};
 use super::progress::{ConsoleProgress, console_progress_disabled};
+use super::run_registry::{RegisteredRun, RunRegistration, recording_enabled};
 use super::{CommandOutcome, RunArtifacts, load_reuse_state, save_reuse_state};
 
 const DEFAULT_POST_BUILD_HOOK_TIMEOUT_SECONDS: u64 = 300;
@@ -153,6 +155,7 @@ fn collect_run_artifacts(
             artifact_catalog: &context.artifact_catalog,
             image_catalog: &context.image_catalog,
         },
+        build,
     );
     tracing::debug!(
         completed = outcome.completed_operations,
@@ -193,29 +196,37 @@ fn collect_run_artifacts(
     })
 }
 
+/// Executes the plan while printing its progress (unless
+/// `GAIA_RUN_PROGRESS=quiet`) and keeping the run's live status files in the
+/// build dir, from the same event stream. The run is listed in the registry
+/// (see `run_registry`) from its start until it ends; `build` is its build
+/// config as given.
 fn execute_plan_with_console_progress(
     spec: &gaia_spec::ResolvedBuildSpec,
     plan: &gaia_plan::ExecutionPlan,
     providers: ExecutionProviders<'_>,
+    build: &str,
 ) -> gaia_exec::ExecutionOutcome {
     let cancellation = ExecutionCancellation::new();
     let _interrupt = super::interrupt::cancel_on_interrupt(&cancellation);
-    let _run = super::interrupt::publish_run(std::path::Path::new(&spec.workspace.build_dir));
-    if console_progress_disabled() {
-        return execute_plan_with_cancellation_and_observer(
-            spec,
-            plan,
-            providers,
-            &cancellation,
-            None,
-        );
-    }
+    let build_dir = std::path::Path::new(&spec.workspace.build_dir);
+    let _run = super::interrupt::publish_run(build_dir);
+    let registration =
+        recording_enabled().then(|| RunRegistration::begin(RegisteredRun::for_run(spec, build)));
 
     let (event_tx, event_rx) = mpsc::channel::<ExecutionEvent>();
     let operation_count = plan.operations.len();
-    let progress_thread = thread::spawn(move || {
-        ConsoleProgress::new(operation_count, event_rx).run();
-    });
+    let live = LiveRecorder::new(
+        build_dir,
+        LiveRunInfo {
+            build_name: spec.build_name().to_string(),
+            display_name: spec.display_name().to_string(),
+            ops_total: operation_count,
+        },
+    );
+    let print = !console_progress_disabled();
+    let progress_thread =
+        thread::spawn(move || ConsoleProgress::new(operation_count, print, event_rx, live).run());
     let outcome = execute_plan_with_cancellation_and_observer(
         spec,
         plan,
@@ -223,7 +234,14 @@ fn execute_plan_with_console_progress(
         &cancellation,
         Some(event_tx),
     );
-    let _ = progress_thread.join();
+    // The sender is gone once execution returns, so the progress thread
+    // finishes its queue and hands back the recorder.
+    if let Ok(live) = progress_thread.join() {
+        live.finish(run_outcome_label(&outcome));
+    }
+    if let Some(registration) = registration {
+        registration.end(unix_now());
+    }
     outcome
 }
 

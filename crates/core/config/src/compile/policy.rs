@@ -38,6 +38,39 @@ fn nonzero_u64_or(value: u64, default: u64) -> u64 {
     if value == 0 { default } else { value }
 }
 
+/// Compiles `[providers.buildroot.host_tools]`. Compilation cannot fail, so an
+/// invalid policy string compiles to `fail` (the build stops and names the
+/// tool) and is also recorded in `invalid`, so validation reports it before
+/// anything runs; unknown tool names are ignored, like other unknown keys.
+fn compile_host_tools(
+    raw: &crate::raw::RawBuildrootHostToolsConfig,
+) -> gaia_spec::BuildrootHostToolsPolicySpec {
+    let mut invalid = Vec::new();
+    let mut parse = |key: &str, text: &str| match gaia_spec::HostToolStepSpec::parse_list(text) {
+        Ok(steps) => steps,
+        Err(_) => {
+            invalid.push((key.to_string(), text.to_string()));
+            vec![gaia_spec::HostToolStepSpec::Fail]
+        }
+    };
+    let defaults = gaia_spec::BuildrootHostToolsPolicySpec::default();
+    let default = match raw.default.as_deref() {
+        Some(text) => parse("default", text),
+        None => defaults.default,
+    };
+    let tools = raw
+        .tools
+        .iter()
+        .filter(|(tool, _)| gaia_spec::KNOWN_HOST_TOOLS.contains(&tool.as_str()))
+        .map(|(tool, text)| (tool.clone(), parse(tool, text)))
+        .collect();
+    gaia_spec::BuildrootHostToolsPolicySpec {
+        default,
+        tools,
+        invalid,
+    }
+}
+
 pub(crate) fn compile_command_policy(
     raw: &crate::raw::RawCommandProviderPolicyConfig,
     default_timeout_seconds: u64,
@@ -55,6 +88,12 @@ pub(crate) fn compile_command_policy(
             max_size: raw.ccache.max_size.clone(),
         },
         parallel_packages: raw.parallel_packages,
+        work_dir: gaia_spec::BuildrootWorkDirPolicySpec {
+            work_dir: raw.work_dir.clone().unwrap_or_else(|| "disk".to_string()),
+            ram_budget: raw.ram_budget.clone(),
+            keep_ram_tree: raw.keep_ram_tree.unwrap_or(true),
+        },
+        host_tools: compile_host_tools(&raw.host_tools),
         package_cache: gaia_spec::BuildrootPackageCachePolicySpec {
             enabled: raw.package_cache.enabled,
             level: match raw.package_cache.level {

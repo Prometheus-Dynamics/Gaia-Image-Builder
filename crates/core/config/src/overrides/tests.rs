@@ -92,6 +92,12 @@ fn documented_override_keys_parse_as_typed_keys() {
         "policy.providers.buildroot.package_cache.project_dir",
         "policy.providers.buildroot.package_cache.level",
         "policy.providers.buildroot.package_cache.max_size",
+        "policy.providers.buildroot.work_dir",
+        "policy.providers.buildroot.ram_budget",
+        "policy.providers.buildroot.keep_ram_tree",
+        "policy.providers.buildroot.host_tools.default",
+        "policy.providers.buildroot.host_tools.ccache",
+        "policy.providers.buildroot.host_tools.pkgconf",
         "policy.providers.buildroot.shared_output",
         "policy.providers.buildroot.shared_output_dir",
         "policy.providers.buildroot.override_check",
@@ -131,4 +137,44 @@ fn dynamic_override_prefixes_remain_explicit() {
         OverrideKey::parse("workspace.paths.cache"),
         OverrideKey::WorkspacePath("cache")
     ));
+}
+
+#[test]
+fn host_tools_overrides_store_valid_policies_and_reject_bad_steps() {
+    let mut raw = raw::RawBuildConfig::default();
+    apply_override(
+        &mut raw,
+        "policy.providers.buildroot.host_tools.ccache",
+        "system,build",
+    )
+    .expect("ccache policy");
+    apply_override(
+        &mut raw,
+        "policy.providers.buildroot.host_tools.default",
+        "build",
+    )
+    .expect("default policy");
+    let host_tools = &raw.providers.buildroot.host_tools;
+    assert_eq!(
+        host_tools.tools.get("ccache").map(String::as_str),
+        Some("system,build")
+    );
+    assert_eq!(host_tools.default.as_deref(), Some("build"));
+
+    assert!(
+        apply_override(
+            &mut raw,
+            "policy.providers.buildroot.host_tools.pkgconf",
+            "system,bogus",
+        )
+        .is_err()
+    );
+    assert!(apply_override(&mut raw, "policy.providers.buildroot.host_tools.ccache", "",).is_err());
+    assert!(
+        !raw.providers
+            .buildroot
+            .host_tools
+            .tools
+            .contains_key("pkgconf")
+    );
 }

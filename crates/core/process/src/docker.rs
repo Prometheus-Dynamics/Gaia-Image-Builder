@@ -103,7 +103,7 @@ pub fn docker_run_command(
     if spec.map_workspace_user {
         wrapped.args(docker_workspace_user_args(&spec.workspace_root));
     }
-    for mount in normalized_docker_mounts(&spec.mounts) {
+    for mount in normalized_docker_mounts(&spec.mounts, command) {
         wrapped
             .arg("-v")
             .arg(format!("{}:{}", mount.display(), mount.display()));
@@ -270,13 +270,62 @@ pub fn normalize_docker_mount_path(path: &Path) -> PathBuf {
     }
 }
 
-fn normalized_docker_mounts(mounts: &[PathBuf]) -> Vec<PathBuf> {
-    mounts
-        .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect()
+/// Directories every container of this process mounts at their own path:
+/// trees Gaia placed outside the workspace (a Buildroot tree in RAM) that
+/// paths in the workspace reach through links.
+static EXTRA_MOUNTS: std::sync::Mutex<BTreeSet<PathBuf>> = std::sync::Mutex::new(BTreeSet::new());
+
+/// Mounts `dir` into every container this process runs from now on.
+pub fn register_docker_mount(dir: &Path) {
+    EXTRA_MOUNTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(dir.to_path_buf());
+}
+
+/// The spec's mounts, the registered ones, and the targets of links inside
+/// them that paths in the command's arguments and environment go through
+/// (a link in the workspace to a directory outside it would otherwise
+/// dangle in the container). Links outside the mounts (`/bin` -> `/usr/bin`)
+/// are never followed.
+fn normalized_docker_mounts(mounts: &[PathBuf], command: &Command) -> Vec<PathBuf> {
+    let mut all = mounts.iter().cloned().collect::<BTreeSet<_>>();
+    all.extend(
+        EXTRA_MOUNTS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .cloned(),
+    );
+    let named = command
+        .get_args()
+        .chain(command.get_envs().filter_map(|(_, value)| value))
+        .flat_map(|text| {
+            text.to_string_lossy()
+                .split([':', ' ', '='])
+                .filter(|part| part.starts_with('/'))
+                .map(PathBuf::from)
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let mut targets = Vec::new();
+    for path in &named {
+        for ancestor in path.ancestors() {
+            let inside = all
+                .iter()
+                .any(|mount| ancestor.starts_with(mount) && ancestor != mount);
+            if inside
+                && std::fs::symlink_metadata(ancestor)
+                    .is_ok_and(|metadata| metadata.file_type().is_symlink())
+                && let Ok(target) = std::fs::canonicalize(ancestor)
+                && target.is_dir()
+            {
+                targets.push(target);
+            }
+        }
+    }
+    all.extend(targets);
+    all.into_iter().collect()
 }
 
 fn docker_workspace_user_args(workspace_root: &Path) -> Vec<String> {

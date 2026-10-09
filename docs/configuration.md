@@ -564,6 +564,63 @@ when that cannot be created.
   toolchain wrapper or the tree layout, so the next build cleans the output
   tree once.
 
+#### Work directory
+
+```toml
+[providers.buildroot]
+work_dir = "disk"                 # "disk" (default), "ram", or a directory
+ram_budget = "60G"                # most RAM a "ram" tree may use
+keep_ram_tree = true              # keep the tree after a build for fast rebuilds
+```
+
+`work_dir = "ram"` builds the output tree on tmpfs under `/dev/shm`, which
+makes compiles and tree writes much faster. The tree is kept for rebuilds
+unless `keep_ram_tree = false`, and the build falls back to disk when RAM is
+short (`ram_budget` caps the RAM the tree may take).
+
+#### Host tools
+
+```toml
+[providers.buildroot.host_tools]
+default = "build"                 # policy for tools not listed below
+ccache = "system,build"           # per tool
+pkgconf = "system,build"
+```
+
+Each policy is a comma-separated, non-empty list of steps tried in order:
+`system` uses the build environment's own tool, `build` uses the tool
+Buildroot builds for itself, and `fail` stops the build with an error naming
+the tool and what was required. `"system,build"` uses the system tool when
+one is usable and builds it otherwise; `"build,system"` prefers the built
+tool. A `--set` value with an unknown step is rejected. In the TOML file, an
+invalid policy compiles to `fail` (the build stops rather than silently
+choosing a default), and tool names other than `ccache` and `pkgconf` are
+ignored.
+
+`system` currently applies to `ccache` and `pkgconf`. For `ccache`, Gaia uses
+the build environment's `ccache` 4.x through a wrapper in `HOST_DIR/bin` that
+points it at `BR2_CCACHE_DIR`, and removes Buildroot's `host-ccache` and its
+`host-zstd`, `host-hiredis`, `host-xxhash` and `host-blake3` dependencies.
+The decision and the system tool's version enter the package cache keys, so
+switching a tool between `system` and `build` does not reuse packages built
+the other way.
+
+For `pkgconf`, Gaia uses the build environment's `pkgconf` 1.8 or newer and
+keeps Buildroot's own `pkg-config` wrapper (the same install and `sed` steps,
+with the static or shared variant), so the wrapper's environment and flags
+are unchanged. Only `HOST_DIR/bin/pkgconf`, the binary the wrapper runs, is
+replaced by a script that executes the system `pkgconf`; `host-pkgconf`'s
+configure, build and other installed files are skipped. The system's
+`pkg.m4` is copied into `HOST_DIR/share/aclocal` when present, so
+`PKG_CHECK_MODULES` in host autotools packages still works. Two things differ
+from Buildroot's own tool: Buildroot's pkgconf 2.3.0 carries a patch that
+applies the sysroot only to a few variables (`includedir`, `libdir`, ...),
+which the system pkgconf does not do, so a `pkg-config --variable` of another
+path can come out prefixed with the staging directory; and the system's
+`pkgconf` may differ in its defaults. The version floor is the oldest one
+whose options the wrapper uses (`--keep-system-libs`, `--static`) and the
+build image's 1.8.1 has.
+
 #### Package cache
 
 ```toml

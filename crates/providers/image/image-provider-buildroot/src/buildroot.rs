@@ -304,13 +304,16 @@ pub(crate) fn run_buildroot_with(
         });
     let config_changes = config_changes.unwrap_or_default();
     let override_digests = package_override_digests(&buildroot_package_override_dirs(spec));
-    let override_changes = match read_package_override_digests(output_dir) {
+    let mut override_changes = match read_package_override_digests(output_dir) {
         Some(previous) => changed_override_packages(&previous, &override_digests),
         // Older state has one digest for all override trees: when it
         // changed, any override package may have.
         None if replacement_clean_needed => override_digests.keys().cloned().collect(),
         None => BTreeSet::new(),
     };
+    let host_tools = apply_host_tools(output_dir, &command_context)?;
+    messages.extend(host_tools.messages);
+    override_changes.extend(host_tools.changed_packages);
     // Every config step is done: fail (or warn) about requested overrides
     // that olddefconfig dropped, before the clean and the long make.
     messages.extend(check_buildroot_config_overrides(
@@ -450,16 +453,11 @@ pub(crate) fn run_buildroot_with(
     command
         .arg(format!("O={}", output_dir.display()))
         .current_dir(buildroot_dir);
+    // No load limit (`-l`): it counts every process on the machine, so on a
+    // machine busy with other work it held every package's make to one job
+    // at a time. Concurrent packages each running BR2_JLEVEL jobs are left to
+    // the scheduler.
     append_make_jobs(&mut command, command_context.policy.local_jobs);
-    if command_context.policy.parallel_packages {
-        // Packages build concurrently, each with BR2_JLEVEL jobs: the load
-        // limit (inherited by every package's make) keeps that from
-        // oversubscribing the machine.
-        command.arg(format!(
-            "-l{}",
-            make_jobs(command_context.policy.local_jobs)
-        ));
-    }
     apply_buildroot_policy_env(&mut command, spec, command_context.policy)?;
     if let Some(br2_external) = br2_external {
         command.env("BR2_EXTERNAL", br2_external);

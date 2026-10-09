@@ -325,6 +325,23 @@ pub struct RawCommandProviderPolicyConfig {
     pub kernel_modules_check: Option<RawBuildrootOverrideCheck>,
     pub parallel_packages: bool,
     pub package_cache: RawBuildrootPackageCacheConfig,
+    /// "disk" (default), "ram", or a directory.
+    pub work_dir: Option<String>,
+    /// Most RAM a "ram" work dir may use, such as "60G".
+    pub ram_budget: Option<String>,
+    /// Keep a "ram" tree after a build (default true).
+    pub keep_ram_tree: Option<bool>,
+    pub host_tools: RawBuildrootHostToolsConfig,
+}
+
+/// `[providers.buildroot.host_tools]`: `default` plus one policy string per
+/// tool (for example `ccache = "system,build"`).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawBuildrootHostToolsConfig {
+    pub default: Option<String>,
+    #[serde(flatten)]
+    pub tools: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]

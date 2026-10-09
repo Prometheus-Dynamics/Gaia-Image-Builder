@@ -31,7 +31,7 @@ pub use build_progress::{
 pub use docker::{
     DockerRunError, DockerRunSpec, absolute_docker_mount_candidate, discover_docker_mounts,
     docker_build_context_hash, docker_image_build_command, docker_image_id_command,
-    docker_local_image_tag, docker_run_command, normalize_docker_mount_path,
+    docker_local_image_tag, docker_run_command, normalize_docker_mount_path, register_docker_mount,
 };
 pub use pause::{ActiveClock, is_paused, paused_total, request_pause, request_resume};
 use retention::{

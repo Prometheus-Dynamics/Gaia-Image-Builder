@@ -430,6 +430,38 @@ fn apply_known_override(
         KnownOverrideKey::PolicyProvidersBuildrootPackageCacheMaxSize => {
             raw.providers.buildroot.package_cache.max_size = Some(value.to_string())
         }
+        KnownOverrideKey::PolicyProvidersBuildrootWorkDir => {
+            raw.providers.buildroot.work_dir = Some(value.to_string())
+        }
+        KnownOverrideKey::PolicyProvidersBuildrootRamBudget => {
+            value.parse::<gaia_spec::ByteSize>().map_err(|_| {
+                ConfigError::invalid_override_value(key, value, "a byte size such as 60G")
+            })?;
+            raw.providers.buildroot.ram_budget = Some(value.to_string())
+        }
+        KnownOverrideKey::PolicyProvidersBuildrootKeepRamTree => {
+            raw.providers.buildroot.keep_ram_tree = Some(parse_bool_override(key, value)?)
+        }
+        KnownOverrideKey::PolicyProvidersBuildrootHostToolsDefault => {
+            parse_host_tool_steps_override(key, value)?;
+            raw.providers.buildroot.host_tools.default = Some(value.to_string())
+        }
+        KnownOverrideKey::PolicyProvidersBuildrootHostToolsCcache => {
+            parse_host_tool_steps_override(key, value)?;
+            raw.providers
+                .buildroot
+                .host_tools
+                .tools
+                .insert("ccache".to_string(), value.to_string());
+        }
+        KnownOverrideKey::PolicyProvidersBuildrootHostToolsPkgconf => {
+            parse_host_tool_steps_override(key, value)?;
+            raw.providers
+                .buildroot
+                .host_tools
+                .tools
+                .insert("pkgconf".to_string(), value.to_string());
+        }
         KnownOverrideKey::PolicyProvidersBuildrootSharedOutput => {
             raw.providers.buildroot.shared_output = parse_bool_override(key, value)?
         }
@@ -502,6 +534,19 @@ pub(crate) fn collect_selected_inputs(raw: &raw::RawBuildConfig) -> Vec<(String,
         }
     }
     selected
+}
+
+/// Checks a `host_tools` policy such as `system,build` before it is stored.
+fn parse_host_tool_steps_override(key: &str, value: &str) -> Result<(), ConfigError> {
+    gaia_spec::HostToolStepSpec::parse_list(value)
+        .map(|_| ())
+        .map_err(|_| {
+            ConfigError::invalid_override_value(
+                key,
+                value,
+                "a comma-separated list of: system, build, fail",
+            )
+        })
 }
 
 fn parse_bool_override(key: &str, value: &str) -> Result<bool, ConfigError> {

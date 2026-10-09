@@ -378,6 +378,7 @@ impl PackageCache {
             }
         }
         let mut restored = BTreeSet::new();
+        let mut listings = TreeListings::default();
         for name in plan_list {
             let Some(package) = graph.get(&name) else {
                 continue;
@@ -393,7 +394,7 @@ impl PackageCache {
             let Some(Some(key)) = keys.get(&name) else {
                 continue;
             };
-            match self.restore_one(output_dir, graph, &name, key) {
+            match self.restore_one(output_dir, graph, &name, key, &mut listings) {
                 Ok(()) => {
                     restored.insert(name);
                 }
@@ -412,6 +413,7 @@ impl PackageCache {
         graph: &PackageGraph,
         name: &str,
         key: &str,
+        listings: &mut TreeListings,
     ) -> Result<(), String> {
         let (archive, manifest) = self
             .usable(output_dir, name, key)
@@ -424,25 +426,17 @@ impl PackageCache {
         // What Buildroot's prepare-per-package-directory does before a
         // package's configure step: its dependencies' trees first.
         let per_package = output_dir.join("per-package");
-        for dependency in recursive_dependencies(graph, name) {
-            for tree in ["host", "target"] {
-                let source = per_package.join(&dependency).join(tree);
-                if !source.is_dir() {
-                    continue;
-                }
-                let destination = per_package.join(name).join(tree);
-                fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
-                let status = Command::new("rsync")
-                    .arg("-a")
-                    .arg(format!("--link-dest={}/", source.display()))
-                    .arg(format!("{}/", source.display()))
-                    .arg(format!("{}/", destination.display()))
-                    .status()
-                    .map_err(|error| format!("rsync: {error}"))?;
-                if !status.success() {
-                    return Err(format!("rsync of {dependency} exited with {status}"));
-                }
+        let dependencies = recursive_dependencies(graph, name);
+        for tree in ["host", "target"] {
+            let sources = dependencies
+                .iter()
+                .map(|dependency| per_package.join(dependency).join(tree))
+                .filter(|source| source.is_dir())
+                .collect::<Vec<_>>();
+            if sources.is_empty() {
+                continue;
             }
+            listings.link(&per_package.join(name).join(tree), &sources)?;
         }
         clone_members(&archive, output_dir, &manifest.dirs, &manifest.files)?;
         let new_output = output_dir.display().to_string();

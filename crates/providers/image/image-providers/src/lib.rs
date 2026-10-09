@@ -178,6 +178,10 @@ pub struct ImageExecutionPolicy {
     pub parallel_packages: bool,
     /// Buildroot: reuse built packages from a cache shared by every build.
     pub package_cache: gaia_spec::BuildrootPackageCachePolicySpec,
+    /// Buildroot: where the output tree is built (disk, ram, or a directory).
+    pub work_dir: gaia_spec::BuildrootWorkDirPolicySpec,
+    /// Buildroot: where each host tool (ccache, pkgconf) comes from.
+    pub host_tools: gaia_spec::BuildrootHostToolsPolicySpec,
     /// Buildroot: share one compiled output tree between builds whose
     /// Buildroot inputs are identical.
     pub shared_output: bool,
@@ -205,6 +209,8 @@ impl Default for ImageExecutionPolicy {
             ccache_max_size: None,
             parallel_packages: false,
             package_cache: gaia_spec::BuildrootPackageCachePolicySpec::default(),
+            work_dir: gaia_spec::BuildrootWorkDirPolicySpec::default(),
+            host_tools: gaia_spec::BuildrootHostToolsPolicySpec::default(),
             shared_output: false,
             shared_output_dir: None,
             override_check: BuildrootOverrideCheckSpec::default(),

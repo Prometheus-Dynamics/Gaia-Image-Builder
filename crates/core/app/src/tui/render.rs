@@ -1,4 +1,5 @@
 use super::*;
+use crate::commands::live_status::unix_now;
 
 pub(crate) fn render(frame: &mut Frame<'_>, state: &mut TuiState<'_>) {
     let layout = Layout::default()
@@ -10,6 +11,7 @@ pub(crate) fn render(frame: &mut Frame<'_>, state: &mut TuiState<'_>) {
         Screen::Picker => render_picker(frame, layout[0], state),
         Screen::Setup => render_setup(frame, layout[0], state),
         Screen::Monitor => render_monitor(frame, layout[0], state),
+        Screen::Attach => render_attach(frame, layout[0], state),
     }
     render_footer(frame, layout[1], state);
     if state.show_help {
@@ -22,9 +24,12 @@ const HELP_GLOBAL: &[(&str, &str)] = &[
     ("q / Ctrl+C", "quit (asks first while a build is running)"),
 ];
 const HELP_PICKER: &[(&str, &str)] = &[
-    ("j/k Up/Down", "move"),
-    ("Enter", "open build"),
-    ("r", "rescan build files"),
+    (
+        "j/k Up/Down",
+        "move through running builds and build configs",
+    ),
+    ("Enter", "attach to a running build, or open a build config"),
+    ("r", "rescan build files and running builds"),
 ];
 const HELP_SETUP: &[(&str, &str)] = &[
     ("j/k Up/Down", "move through setup items"),
@@ -35,6 +40,14 @@ const HELP_SETUP: &[(&str, &str)] = &[
     ("b", "pick a different build"),
     ("p", "refresh resolve/validate/plan"),
     ("PgUp/PgDn", "scroll detail panel"),
+];
+const HELP_ATTACH: &[(&str, &str)] = &[
+    ("p", "pause the build (its commands stop)"),
+    ("r", "resume the build"),
+    ("c", "cancel the build (press c or y to confirm)"),
+    ("b", "pick another build"),
+    ("PgUp/PgDn Home/End", "scroll the recent output"),
+    ("q", "leave the monitor; the build keeps running"),
 ];
 const HELP_MONITOR: &[(&str, &str)] = &[
     ("j/k Up/Down", "select operation (turns follow off)"),
@@ -54,6 +67,7 @@ pub(crate) fn render_help(frame: &mut Frame<'_>, area: Rect, state: &TuiState<'_
         Screen::Picker => HELP_PICKER,
         Screen::Setup => HELP_SETUP,
         Screen::Monitor => HELP_MONITOR,
+        Screen::Attach => HELP_ATTACH,
     };
     let mut lines = Vec::new();
     for (key, action) in screen_keys.iter().chain(HELP_GLOBAL) {
@@ -89,12 +103,15 @@ pub(crate) fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &TuiState<
         "[Type] edit  [Backspace] delete  [Enter] apply  [Esc] cancel"
     } else {
         match state.screen {
-            Screen::Picker => "[Enter] open  [r] rescan  [?] help  [q] quit",
+            Screen::Picker => "[Enter] open/attach  [j/k] move  [r] rescan  [?] help  [q] quit",
             Screen::Setup => {
                 "[Enter] select/edit  [Left/Right] value  [s] start  [?] help  [q] quit"
             }
             Screen::Monitor => {
                 "[Left/Right] view  [f] follow  [c] cancel  [Esc] setup  [?] help  [q] quit"
+            }
+            Screen::Attach => {
+                "[p] pause  [r] resume  [c] cancel  [b] builds  [PgUp/PgDn] scroll  [?] help  [q] leave monitor"
             }
         }
     };
@@ -112,22 +129,86 @@ pub(crate) fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &TuiState<
     frame.render_widget(footer, area);
 }
 
+/// The start screen: the running gaia builds of the whole system above the
+/// build configs of this directory. Without running builds it is the build
+/// picker alone.
 pub(crate) fn render_picker(frame: &mut Frame<'_>, area: Rect, state: &mut TuiState<'_>) {
+    if state.runs.is_empty() {
+        render_build_picker(frame, area, state);
+        return;
+    }
+    let runs_height = (state.runs.len() as u16 + 2).min((area.height / 2).max(3));
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(runs_height), Constraint::Min(3)])
+        .split(area);
+    render_running_builds(frame, rows[0], state);
+    render_build_picker(frame, rows[1], state);
+}
+
+fn picker_highlight() -> Style {
+    Style::default()
+        .fg(Color::Black)
+        .bg(Color::LightYellow)
+        .add_modifier(Modifier::BOLD)
+}
+
+fn render_running_builds(frame: &mut Frame<'_>, area: Rect, state: &mut TuiState<'_>) {
+    let now = unix_now();
+    let live = state.runs.iter().filter(|run| run.is_live()).count();
+    let items = state
+        .runs
+        .iter()
+        .map(|run| ListItem::new(registered_run_line(run, now)))
+        .collect::<Vec<_>>();
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .title(format!("Running builds ({live} live)"))
+                .borders(Borders::ALL),
+        )
+        .highlight_symbol(">> ")
+        .highlight_style(picker_highlight());
+    if state.picker_focus == PickerFocus::Runs {
+        frame.render_stateful_widget(list, area, &mut state.run_list);
+    } else {
+        frame.render_stateful_widget(list, area, &mut ListState::default());
+    }
+}
+
+fn render_build_picker(frame: &mut Frame<'_>, area: Rect, state: &mut TuiState<'_>) {
+    if state.build_entries.is_empty() {
+        let text = vec![
+            Line::from("No build configs in this directory."),
+            Line::from("Run gaia tui from a project directory, or use --builds-dir <dir>."),
+        ];
+        frame.render_widget(
+            Paragraph::new(Text::from(text))
+                .block(Block::default().title("Build Picker").borders(Borders::ALL)),
+            area,
+        );
+        return;
+    }
     let items = state
         .build_entries
         .iter()
-        .map(|entry| ListItem::new(entry.label.clone()))
+        .map(|entry| {
+            ListItem::new(picker_line(
+                &entry.label,
+                state.live_marks.get(&entry.path),
+                unix_now(),
+            ))
+        })
         .collect::<Vec<_>>();
     let list = List::new(items)
         .block(Block::default().title("Build Picker").borders(Borders::ALL))
         .highlight_symbol(">> ")
-        .highlight_style(
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::LightYellow)
-                .add_modifier(Modifier::BOLD),
-        );
-    frame.render_stateful_widget(list, area, &mut state.build_list);
+        .highlight_style(picker_highlight());
+    if state.picker_focus == PickerFocus::Builds {
+        frame.render_stateful_widget(list, area, &mut state.build_list);
+    } else {
+        frame.render_stateful_widget(list, area, &mut ListState::default());
+    }
 }
 
 pub(crate) fn render_setup(frame: &mut Frame<'_>, area: Rect, state: &mut TuiState<'_>) {

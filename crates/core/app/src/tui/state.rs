@@ -1,4 +1,6 @@
 use super::*;
+use crate::commands::live_status::LiveRun;
+use crate::commands::run_registry::{ListedRun, list_runs};
 const SETUP_REFRESH_DEBOUNCE: Duration = Duration::from_millis(200);
 
 pub(crate) struct TuiState<'a> {
@@ -38,6 +40,17 @@ pub(crate) struct TuiState<'a> {
     pub(crate) refresh_receiver: Option<Receiver<RefreshThreadMessage>>,
     pub(crate) refresh_revision: u64,
     pub(crate) detail_follow_tail: bool,
+    /// The monitor of a run another process started, when attached.
+    pub(crate) attach: Option<AttachState>,
+    /// Builds of the picker with a live run, by build path.
+    pub(crate) live_marks: std::collections::BTreeMap<String, LiveRun>,
+    /// Build dir of each picker entry, resolved once per scan.
+    pub(crate) build_dirs: std::collections::BTreeMap<String, Option<PathBuf>>,
+    pub(crate) picker_polled_at: Option<Instant>,
+    /// Every gaia run registered on this system, live and recently ended.
+    pub(crate) runs: Vec<ListedRun>,
+    pub(crate) run_list: ListState,
+    pub(crate) picker_focus: PickerFocus,
 }
 
 impl<'a> TuiState<'a> {
@@ -56,7 +69,6 @@ impl<'a> TuiState<'a> {
             .map(|entry| entry.path.clone());
         // Without an explicit build, let the user choose unless there is only
         // one candidate.
-        let should_open_picker = !launch.build_explicit && build_entries.len() > 1;
         let selected_build = if launch.build_explicit {
             build.to_string()
         } else {
@@ -64,6 +76,14 @@ impl<'a> TuiState<'a> {
                 .or_else(|| build_entries.first().map(|entry| entry.path.clone()))
                 .unwrap_or_else(|| build.to_string())
         };
+        // The start screen is the picker unless the build was named, or this
+        // directory has exactly one build and no other build is running.
+        let runs = list_runs();
+        let other_live_run = runs
+            .iter()
+            .any(|run| run.is_live() && !run.run.is_config(&selected_build));
+        let should_open_picker =
+            !launch.build_explicit && (build_entries.len() != 1 || other_live_run);
         if !build_entries.is_empty() {
             let selected = build_entries
                 .iter()
@@ -71,6 +91,17 @@ impl<'a> TuiState<'a> {
                 .unwrap_or(0);
             build_list.select(Some(selected));
         }
+        let mut run_list = ListState::default();
+        if !runs.is_empty() {
+            run_list.select(Some(0));
+        }
+        let picker_focus = if runs.iter().any(ListedRun::is_live)
+            || build_entries.is_empty() && !runs.is_empty()
+        {
+            PickerFocus::Runs
+        } else {
+            PickerFocus::Builds
+        };
 
         let mut setup_list = ListState::default();
         setup_list.select(Some(0));
@@ -113,6 +144,13 @@ impl<'a> TuiState<'a> {
             refresh_receiver: None,
             refresh_revision: 0,
             detail_follow_tail: true,
+            attach: None,
+            live_marks: Default::default(),
+            build_dirs: Default::default(),
+            picker_polled_at: None,
+            runs,
+            run_list,
+            picker_focus,
         }
     }
 
@@ -178,6 +216,7 @@ impl<'a> TuiState<'a> {
         }
         self.poll_refresh_completion();
         self.start_pending_refresh();
+        self.poll_live();
     }
 
     /// Handles q / Ctrl+C. Returns an exit code when the TUI should close now.

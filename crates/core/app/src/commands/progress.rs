@@ -1,10 +1,21 @@
 //! The live progress lines of `gaia run`: completed operations, the running
 //! ones and their latest output, and for a Buildroot `make` its packages.
+//!
+//! The same event stream also feeds the live status files (see
+//! `live_status`), so `gaia status` and the TUI can follow a run started
+//! elsewhere even when the console output is turned off.
 
 use gaia_exec::ExecutionEvent;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
+
+use super::live_status::LiveRecorder;
+
+/// How often the progress thread wakes up without events.
+const TICK: Duration = Duration::from_secs(1);
+/// Silence after which a heartbeat line says what is still running.
+const HEARTBEAT_AFTER: Duration = Duration::from_secs(10);
 
 pub(super) fn console_progress_disabled() -> bool {
     std::env::var("GAIA_RUN_PROGRESS")
@@ -19,6 +30,8 @@ pub(super) fn console_progress_disabled() -> bool {
 
 pub(super) struct ConsoleProgress {
     total: usize,
+    /// False when `GAIA_RUN_PROGRESS=quiet`: the status files still record.
+    print: bool,
     rx: mpsc::Receiver<ExecutionEvent>,
     started_at: Instant,
     running: BTreeMap<String, Instant>,
@@ -27,12 +40,20 @@ pub(super) struct ConsoleProgress {
     /// Inner progress (Buildroot packages) of running operations.
     build_progress: BTreeMap<String, gaia_process::BuildProgress>,
     last_status_at: Instant,
+    last_event_at: Instant,
+    live: LiveRecorder,
 }
 
 impl ConsoleProgress {
-    pub(super) fn new(total: usize, rx: mpsc::Receiver<ExecutionEvent>) -> Self {
+    pub(super) fn new(
+        total: usize,
+        print: bool,
+        rx: mpsc::Receiver<ExecutionEvent>,
+        live: LiveRecorder,
+    ) -> Self {
         Self {
             total,
+            print,
             rx,
             started_at: Instant::now(),
             running: BTreeMap::new(),
@@ -40,15 +61,29 @@ impl ConsoleProgress {
             last_log: BTreeMap::new(),
             build_progress: BTreeMap::new(),
             last_status_at: Instant::now() - Duration::from_secs(30),
+            last_event_at: Instant::now(),
+            live,
         }
     }
 
-    pub(super) fn run(mut self) {
+    /// Consumes events until the run's sender is dropped, then returns the
+    /// status recorder so the caller can record the run's outcome.
+    pub(super) fn run(mut self) -> LiveRecorder {
+        self.live.flush(Instant::now());
         self.print_line("run", "starting execution plan");
         loop {
-            match self.rx.recv_timeout(Duration::from_secs(10)) {
-                Ok(event) => self.handle_event(event),
-                Err(RecvTimeoutError::Timeout) => self.print_heartbeat(),
+            match self.rx.recv_timeout(TICK) {
+                Ok(event) => {
+                    self.last_event_at = Instant::now();
+                    self.live.record(&event);
+                    self.handle_event(&event);
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    if self.last_event_at.elapsed() >= HEARTBEAT_AFTER {
+                        self.print_heartbeat();
+                        self.last_event_at = Instant::now();
+                    }
+                }
                 Err(RecvTimeoutError::Disconnected) => {
                     if !self.running.is_empty() {
                         self.print_heartbeat();
@@ -56,10 +91,12 @@ impl ConsoleProgress {
                     break;
                 }
             }
+            self.live.flush(Instant::now());
         }
+        self.live
     }
 
-    fn handle_event(&mut self, event: ExecutionEvent) {
+    fn handle_event(&mut self, event: &ExecutionEvent) {
         match event {
             ExecutionEvent::Started { operation_id } => {
                 let id = operation_id.as_str().to_string();
@@ -71,12 +108,12 @@ impl ConsoleProgress {
                 message,
             } => {
                 let id = operation_id.as_str().to_string();
-                if let Some(progress) = gaia_process::parse_build_progress(&message) {
+                if let Some(progress) = gaia_process::parse_build_progress(message) {
                     if self.running.contains_key(&id) {
                         self.build_progress.insert(id, progress);
                     }
                 } else if self.running.contains_key(&id) {
-                    self.last_log.insert(id, compact_log_line(&message));
+                    self.last_log.insert(id, compact_log_line(message));
                     if self.last_status_at.elapsed() >= Duration::from_secs(12) {
                         self.print_heartbeat();
                     }
@@ -95,14 +132,14 @@ impl ConsoleProgress {
                 operation_id,
                 message,
             } => {
-                let message = compact_log_line(&message);
+                let message = compact_log_line(message);
                 self.finish_operation(operation_id.as_str(), &format!("failed: {message}"));
             }
             ExecutionEvent::Skipped {
                 operation_id,
                 reason,
             } => {
-                self.finish_operation(operation_id.as_str(), &reason);
+                self.finish_operation(operation_id.as_str(), reason);
             }
         }
     }
@@ -143,6 +180,9 @@ impl ConsoleProgress {
 
     fn print_line(&mut self, operation_id: &str, detail: &str) {
         self.last_status_at = Instant::now();
+        if !self.print {
+            return;
+        }
         let done = self.terminal.len();
         let percent = done
             .saturating_mul(100)
@@ -182,7 +222,7 @@ impl ConsoleProgress {
 }
 
 /// `[####----]  41% 120/290 packages eta ~35m00s building=linux,mesa3d +2`.
-fn build_progress_summary(progress: &gaia_process::BuildProgress) -> String {
+pub(super) fn build_progress_summary(progress: &gaia_process::BuildProgress) -> String {
     const SHOWN: usize = 3;
     let percent = progress
         .done
@@ -217,7 +257,7 @@ fn build_progress_summary(progress: &gaia_process::BuildProgress) -> String {
     summary
 }
 
-fn progress_bar(done: usize, total: usize) -> String {
+pub(super) fn progress_bar(done: usize, total: usize) -> String {
     const WIDTH: usize = 16;
     let filled = done
         .saturating_mul(WIDTH)
@@ -230,7 +270,7 @@ fn progress_bar(done: usize, total: usize) -> String {
     )
 }
 
-fn format_progress_elapsed(duration: Duration) -> String {
+pub(super) fn format_progress_elapsed(duration: Duration) -> String {
     let seconds = duration.as_secs();
     let hours = seconds / 3600;
     let minutes = (seconds % 3600) / 60;
@@ -242,7 +282,7 @@ fn format_progress_elapsed(duration: Duration) -> String {
     }
 }
 
-fn compact_log_line(line: &str) -> String {
+pub(super) fn compact_log_line(line: &str) -> String {
     let mut cleaned = strip_ansi(line)
         .split_whitespace()
         .collect::<Vec<_>>()

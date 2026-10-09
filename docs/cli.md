@@ -12,10 +12,11 @@ gaia clean <build.toml>
 gaia lock <build.toml>
 gaia cache <build.toml>
 gaia run <build.toml>
-gaia pause <build.toml>
-gaia resume <build.toml>
-gaia cancel <build.toml>
-gaia tui <build.toml>
+gaia pause [run]
+gaia resume [run]
+gaia cancel [run]
+gaia status [run]
+gaia tui [build.toml]
 ```
 
 If no command is provided, Gaia treats the first positional argument as a build path and defaults to `run`.
@@ -211,6 +212,18 @@ Prints live execution progress while the plan runs, then:
 Set `GAIA_RUN_PROGRESS=quiet` to disable live progress output for scripts that
 only want the final summary.
 
+Diagnostic logging goes to stderr. By default only `WARN` and `ERROR` events
+are printed, one line each, without span context and without ANSI colors when
+stderr is not a terminal (`NO_COLOR` also disables colors). To see more, set
+`RUST_LOG` to a `tracing` filter, for example:
+
+```bash
+RUST_LOG=info gaia run configs/build.toml     # INFO events too (e.g. operation reused/succeeded)
+RUST_LOG=gaia_exec=debug gaia run configs/build.toml
+```
+
+The `tui` subcommand writes its logs nowhere, so they do not disturb the screen.
+
 After execution completes, prints:
 - execution summary
 - skipped operations (with `policy.failure.keep_going`)
@@ -223,8 +236,21 @@ After execution completes, prints:
 
 ### `pause`, `resume`, `cancel`
 
-Signal the running `gaia run` of a build (found through the pid it keeps in
-`<build_dir>/.gaia-run.pid`), from another terminal or a script:
+Signal a running `gaia run`, from another terminal or a script. With no
+argument, the one live run on the system is used, from any directory. When
+several are live, the command lists them and exits with status 1; name one
+with its number from `gaia status`, its build name or id, or its build config
+path:
+
+```bash
+gaia pause              # the only live run
+gaia pause 2            # run 2 of `gaia status`
+gaia cancel cm5         # by build name
+```
+
+The run is found through the registry (see [`status`](#status)); a build config
+no registered run uses falls back to the pid the run keeps in
+`<build_dir>/.gaia-run.pid`. The signals:
 
 - `gaia pause` is Ctrl-Z in the running `gaia run`: every running command is
   stopped (its process group gets SIGSTOP, its docker container is paused)
@@ -237,6 +263,51 @@ Signal the running `gaia run` of a build (found through the pid it keeps in
 
 The next `gaia run` with the same inputs says it resumes, reuses the finished
 operations and continues the Buildroot build where it stopped.
+
+### `status`
+
+Shows what the `gaia run`s on this system are doing now, from any directory,
+another terminal or a script. With no argument it lists every run, one line
+each: name, pid, elapsed time, `PAUSED` when paused, operations finished out of
+the total, Buildroot packages with the estimated time left, and the current
+operation. Live runs come first; a run that ended in the last 24 hours follows,
+with its outcome:
+
+```bash
+gaia status                   # every run: live, and ended in the last 24 hours
+gaia status 2                 # run 2 of that list
+gaia status cm5               # by build name or id
+gaia status configs/builds/cm5.toml --follow  # a build config, refreshed every second
+```
+
+A number, a build name or id, or a build config path selects one run and shows
+its detail. Names are matched against the registry first; a build config that no
+registered run uses is resolved, and its build dir is read as before. `--follow`
+refreshes every second: for one run until it ends, for the list until no run is
+live.
+
+Every `gaia run` registers itself in a per-user registry while it runs: one
+JSON file per run in `$GAIA_RUNS_DIR`, else `$XDG_RUNTIME_DIR/gaia/runs`, else
+`${XDG_STATE_HOME:-~/.local/state}/gaia/runs`. It records the pid, build id and
+name, the absolute build config path, the working directory, the command line,
+the build dir and the paths of the run's status files. The entry is removed when
+the run ends, so a paused run keeps it. A run that ended is kept for 24 hours
+under `ended/`, pointing at its final snapshot. Entries of runs that are gone
+(a dead pid, or a pid since used by another program) are removed when the
+registry is read.
+
+While a run executes, `gaia run` keeps `<build_dir>/.gaia-run.status.json`
+up to date (at most once a second, and at every operation start and finish),
+also with `GAIA_RUN_PROGRESS=quiet`.
+
+A live run shows its elapsed time, whether it is paused, the operations
+finished out of the total (done, reused, failed, cancelled, skipped), the
+Buildroot packages with their estimated time left while a `make` runs, the
+running operations with their elapsed time and last output line, and the last
+10 log lines. Without a live run, it says so and prints how the last run ended
+(`completed`, `failed` or `cancelled`), from `<build_dir>/.gaia-run.last.json`.
+`--follow` only applies to `status`. Like `pause`, `resume` and `cancel`, it
+needs a Unix system.
 
 ### `tui`
 
@@ -253,6 +324,26 @@ gaia tui configs/builds/cm5.toml      # open one build directly
 
 Without an explicit build, the TUI opens the build picker when more than one
 entrypoint is found and goes straight to setup when there is only one.
+
+The picker starts with a **Running builds** section, from anywhere on the
+system: every `gaia run` in the registry (see [`status`](#status)), live ones
+first and runs that ended in the last 24 hours dimmed. Selecting one attaches to
+its monitor through the status file the run registered; no build config is
+resolved. Outside a project, `gaia tui` opens the picker with only the running
+builds, and says so when there are none. `j`/`k` move between the running
+builds and the build configs of the directory, `Enter` attaches or opens, and
+`r` rescans both.
+
+Runs started from the setup screen of the TUI itself are not registered and
+do not appear to other processes; start them with `gaia run`.
+
+When a build already has a `gaia run` in progress (started from another terminal
+or a script), the TUI attaches to it instead of offering to start one, and the
+picker marks such builds, for example `● running 12m, 83% packages`. The attached
+monitor shows the same summary as `gaia status`, refreshed every second, and the
+recent output (`PgUp`/`PgDn` scroll, `End` follows). `p` pauses the run, `r`
+resumes it, and `c` cancels it (press `c` or `y` again to confirm). `q` leaves
+the monitor and the build keeps running; `b` returns to the picker.
 
 Screens:
 - **Picker** lists build entrypoints.
@@ -280,6 +371,7 @@ Current behavior:
 - invalid arguments and config load failures return `1`
 - validation failure returns a non-zero validation code
 - execution failure returns a non-zero execution code
+- a cancelled run (Ctrl-C, `gaia cancel`) returns `130`
 
 The important practical distinction is:
 - validation errors stop before planning/execution

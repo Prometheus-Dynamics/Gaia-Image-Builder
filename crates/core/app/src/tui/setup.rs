@@ -11,7 +11,7 @@ impl<'a> TuiState<'a> {
             SetupItem::Profile => self.cycle_profile(1),
             SetupItem::Input(name) => self.activate_input(&name, 1),
             SetupItem::Jobs => self.begin_edit(SetupEditField::Jobs, self.current_jobs_value()),
-            SetupItem::PickBuild => self.screen = Screen::Picker,
+            SetupItem::PickBuild => self.open_picker(),
             SetupItem::Refresh => self.refresh(),
             _ => {}
         }
@@ -496,7 +496,9 @@ impl<'a> TuiState<'a> {
         self.build = path;
         self.refresh();
         self.screen = Screen::Setup;
-        self.set_status(format!("loaded build {label}"));
+        if !self.attach_if_live() {
+            self.set_status(format!("loaded build {label}"));
+        }
     }
 
     pub(crate) fn ensure_build_selection(&mut self) {
@@ -511,6 +513,80 @@ impl<'a> TuiState<'a> {
                 }
             }
         }
+    }
+
+    /// Keeps the cursor of the start screen on a row that exists: the running
+    /// builds section is left when it empties, and entered when the build
+    /// configs of this directory are none.
+    pub(crate) fn ensure_picker_selection(&mut self) {
+        let runs = self.runs.len();
+        if runs == 0 {
+            self.run_list.select(None);
+            if self.picker_focus == PickerFocus::Runs {
+                self.picker_focus = PickerFocus::Builds;
+            }
+        } else {
+            match self.run_list.selected() {
+                None => self.run_list.select(Some(0)),
+                Some(index) if index >= runs => self.run_list.select(Some(runs - 1)),
+                Some(_) => {}
+            }
+        }
+        if self.build_entries.is_empty() && runs > 0 {
+            self.picker_focus = PickerFocus::Runs;
+        }
+    }
+
+    /// Moves the start screen's cursor down: through the running builds, then
+    /// into the build configs.
+    pub(crate) fn picker_down(&mut self) {
+        if self.picker_focus == PickerFocus::Builds {
+            self.select_next_build();
+            return;
+        }
+        let last = self.runs.len().saturating_sub(1);
+        match self.run_list.selected() {
+            Some(index) if index < last => self.run_list.select(Some(index + 1)),
+            _ if !self.build_entries.is_empty() => {
+                self.picker_focus = PickerFocus::Builds;
+                self.ensure_build_selection();
+            }
+            _ => {}
+        }
+    }
+
+    /// Moves the start screen's cursor up: out of the build configs into the
+    /// running builds when the first config is selected.
+    pub(crate) fn picker_up(&mut self) {
+        if self.picker_focus == PickerFocus::Runs {
+            let index = self.run_list.selected().unwrap_or(0);
+            self.run_list.select(Some(index.saturating_sub(1)));
+            return;
+        }
+        if self.build_list.selected().unwrap_or(0) == 0 && !self.runs.is_empty() {
+            self.picker_focus = PickerFocus::Runs;
+            self.run_list.select(Some(self.runs.len() - 1));
+        } else {
+            self.select_prev_build();
+        }
+    }
+
+    /// Enter on the start screen: attaches to the selected running build, or
+    /// opens the selected build config.
+    pub(crate) fn open_picker_selection(&mut self) {
+        if self.picker_focus == PickerFocus::Runs {
+            let Some(run) = self
+                .run_list
+                .selected()
+                .and_then(|index| self.runs.get(index))
+                .map(|run| run.run.clone())
+            else {
+                return;
+            };
+            self.attach_registered(&run);
+            return;
+        }
+        self.open_selected_build();
     }
 }
 
