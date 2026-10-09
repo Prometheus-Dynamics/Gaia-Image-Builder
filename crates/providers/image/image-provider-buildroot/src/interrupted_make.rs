@@ -44,6 +44,7 @@ pub(crate) fn finish_make(
     if !killed {
         let _ = fs::remove_file(output_dir.join(MAKE_RUNNING));
     }
+    record_package_durations(output_dir);
     if result.is_err()
         && let Some(cached) = cached
     {
@@ -112,7 +113,7 @@ pub(crate) fn redo_interrupted_packages(
 }
 
 /// A package build directory with some steps done but not the last.
-fn in_progress(dir: &Path) -> bool {
+pub(crate) fn in_progress(dir: &Path) -> bool {
     let has_stamps = fs::read_dir(dir)
         .into_iter()
         .flatten()

@@ -16,6 +16,7 @@ const STREAM_READ_BUFFER_BYTES: usize = 8 * 1024;
 const MAX_RETAINED_LINE_BYTES: usize = 64 * 1024;
 const STREAM_MESSAGE_QUEUE_BOUND: usize = 64;
 
+mod build_progress;
 mod docker;
 mod pause;
 mod retention;
@@ -24,6 +25,9 @@ mod stream;
 mod tar;
 mod trash;
 
+pub use build_progress::{
+    BUILD_PROGRESS_PREFIX, BuildProgress, build_progress_message, parse_build_progress,
+};
 pub use docker::{
     DockerRunError, DockerRunSpec, absolute_docker_mount_candidate, discover_docker_mounts,
     docker_build_context_hash, docker_image_build_command, docker_image_id_command,

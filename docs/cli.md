@@ -201,6 +201,12 @@ Prints live execution progress while the plan runs, then:
 - elapsed time
 - current operation id
 - throttled heartbeat lines with the latest provider output for long-running commands
+- while a Buildroot `make` runs, its own progress first: packages built out of
+  the config's packages, the packages being built, and an estimate of the
+  time left (from how long each remaining package took when it was last
+  built, kept in `<output>/.gaia-package-durations` across cleans, scaled by
+  this run's pace), followed by the operation count, e.g.
+  `run [######----------]  41% 120/290 packages eta ~35m00s building=linux,mesa3d,openjdk +1 | ops 15/130 ...`
 
 Set `GAIA_RUN_PROGRESS=quiet` to disable live progress output for scripts that
 only want the final summary.

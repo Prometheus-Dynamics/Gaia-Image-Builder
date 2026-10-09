@@ -9,18 +9,18 @@ use gaia_report::{generate_report, write_report_bundle};
 use gaia_validate::validate_spec_with_providers;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
 use crate::AppContext;
 
+use super::progress::{ConsoleProgress, console_progress_disabled};
 use super::{CommandOutcome, RunArtifacts, load_reuse_state, save_reuse_state};
 
 const DEFAULT_POST_BUILD_HOOK_TIMEOUT_SECONDS: u64 = 300;
@@ -225,216 +225,6 @@ fn execute_plan_with_console_progress(
     );
     let _ = progress_thread.join();
     outcome
-}
-
-fn console_progress_disabled() -> bool {
-    std::env::var("GAIA_RUN_PROGRESS")
-        .map(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "0" | "false" | "off" | "quiet" | "none"
-            )
-        })
-        .unwrap_or(false)
-}
-
-struct ConsoleProgress {
-    total: usize,
-    rx: mpsc::Receiver<ExecutionEvent>,
-    started_at: Instant,
-    running: BTreeMap<String, Instant>,
-    terminal: BTreeSet<String>,
-    last_log: BTreeMap<String, String>,
-    last_status_at: Instant,
-}
-
-impl ConsoleProgress {
-    fn new(total: usize, rx: mpsc::Receiver<ExecutionEvent>) -> Self {
-        Self {
-            total,
-            rx,
-            started_at: Instant::now(),
-            running: BTreeMap::new(),
-            terminal: BTreeSet::new(),
-            last_log: BTreeMap::new(),
-            last_status_at: Instant::now() - Duration::from_secs(30),
-        }
-    }
-
-    fn run(mut self) {
-        self.print_line("run", "starting execution plan");
-        loop {
-            match self.rx.recv_timeout(Duration::from_secs(10)) {
-                Ok(event) => self.handle_event(event),
-                Err(RecvTimeoutError::Timeout) => self.print_heartbeat(),
-                Err(RecvTimeoutError::Disconnected) => {
-                    if !self.running.is_empty() {
-                        self.print_heartbeat();
-                    }
-                    break;
-                }
-            }
-        }
-    }
-
-    fn handle_event(&mut self, event: ExecutionEvent) {
-        match event {
-            ExecutionEvent::Started { operation_id } => {
-                let id = operation_id.as_str().to_string();
-                self.running.insert(id.clone(), Instant::now());
-                self.print_line(&id, "started");
-            }
-            ExecutionEvent::Log {
-                operation_id,
-                message,
-            } => {
-                let id = operation_id.as_str().to_string();
-                if self.running.contains_key(&id) {
-                    self.last_log.insert(id, compact_log_line(&message));
-                    if self.last_status_at.elapsed() >= Duration::from_secs(12) {
-                        self.print_heartbeat();
-                    }
-                }
-            }
-            ExecutionEvent::Succeeded { operation_id } => {
-                self.finish_operation(operation_id.as_str(), "done");
-            }
-            ExecutionEvent::Reused { operation_id } => {
-                self.finish_operation(operation_id.as_str(), "reused");
-            }
-            ExecutionEvent::Cancelled { operation_id } => {
-                self.finish_operation(operation_id.as_str(), "cancelled");
-            }
-            ExecutionEvent::Failed {
-                operation_id,
-                message,
-            } => {
-                let message = compact_log_line(&message);
-                self.finish_operation(operation_id.as_str(), &format!("failed: {message}"));
-            }
-            ExecutionEvent::Skipped {
-                operation_id,
-                reason,
-            } => {
-                self.finish_operation(operation_id.as_str(), &reason);
-            }
-        }
-    }
-
-    fn finish_operation(&mut self, operation_id: &str, status: &str) {
-        let status = match self.running.get(operation_id) {
-            Some(started_at) if status == "done" => format!(
-                "{status} in {}",
-                gaia_plan::format_duration_short(started_at.elapsed())
-            ),
-            _ => status.to_string(),
-        };
-        let status = status.as_str();
-        self.running.remove(operation_id);
-        self.last_log.remove(operation_id);
-        self.terminal.insert(operation_id.to_string());
-        self.print_line(operation_id, status);
-    }
-
-    fn print_heartbeat(&mut self) {
-        let Some((operation_id, started_at)) = self
-            .running
-            .iter()
-            .max_by_key(|(_, started_at)| started_at.elapsed())
-        else {
-            return;
-        };
-        let elapsed = format_progress_elapsed(started_at.elapsed());
-        let detail = self
-            .last_log
-            .get(operation_id)
-            .map(|line| format!("running {elapsed}; last: {line}"))
-            .unwrap_or_else(|| format!("running {elapsed}"));
-        let operation_id = operation_id.clone();
-        self.print_line(&operation_id, &detail);
-    }
-
-    fn print_line(&mut self, operation_id: &str, detail: &str) {
-        self.last_status_at = Instant::now();
-        let done = self.terminal.len();
-        let percent = done
-            .saturating_mul(100)
-            .checked_div(self.total)
-            .unwrap_or(100);
-        eprintln!(
-            "run {} {:>3}% {}/{} running={} elapsed={} op={} {}",
-            progress_bar(done, self.total),
-            percent,
-            done,
-            self.total,
-            self.running.len(),
-            format_progress_elapsed(self.started_at.elapsed()),
-            operation_id,
-            detail
-        );
-    }
-}
-
-fn progress_bar(done: usize, total: usize) -> String {
-    const WIDTH: usize = 16;
-    let filled = done
-        .saturating_mul(WIDTH)
-        .checked_div(total)
-        .unwrap_or(WIDTH);
-    format!(
-        "[{}{}]",
-        "#".repeat(filled),
-        "-".repeat(WIDTH.saturating_sub(filled))
-    )
-}
-
-fn format_progress_elapsed(duration: Duration) -> String {
-    let seconds = duration.as_secs();
-    let hours = seconds / 3600;
-    let minutes = (seconds % 3600) / 60;
-    let secs = seconds % 60;
-    if hours > 0 {
-        format!("{hours:02}:{minutes:02}:{secs:02}")
-    } else {
-        format!("{minutes:02}:{secs:02}")
-    }
-}
-
-fn compact_log_line(line: &str) -> String {
-    let mut cleaned = strip_ansi(line)
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    const MAX_LEN: usize = 140;
-    if cleaned.len() > MAX_LEN {
-        let truncate_at = cleaned
-            .char_indices()
-            .map(|(index, _)| index)
-            .take_while(|index| *index <= MAX_LEN.saturating_sub(3))
-            .last()
-            .unwrap_or(0);
-        cleaned.truncate(truncate_at);
-        cleaned.push_str("...");
-    }
-    cleaned
-}
-
-fn strip_ansi(input: &str) -> String {
-    let mut output = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
-            chars.next();
-            for next in chars.by_ref() {
-                if next.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-        } else {
-            output.push(ch);
-        }
-    }
-    output
 }
 
 fn run_artifacts_without_execution(
@@ -736,27 +526,5 @@ fn is_executable_file(path: &Path) -> bool {
     #[cfg(not(unix))]
     {
         true
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn progress_bar_renders_completed_fraction() {
-        assert_eq!(progress_bar(0, 4), "[----------------]");
-        assert_eq!(progress_bar(2, 4), "[########--------]");
-        assert_eq!(progress_bar(4, 4), "[################]");
-    }
-
-    #[test]
-    fn compact_log_line_strips_ansi_and_bounds_output() {
-        let line = format!("\u{1b}[31mERROR\u{1b}[0m {}", "x ".repeat(200));
-        let compact = compact_log_line(&line);
-
-        assert!(compact.starts_with("ERROR"));
-        assert!(compact.len() <= 140);
-        assert!(!compact.contains('\u{1b}'));
     }
 }

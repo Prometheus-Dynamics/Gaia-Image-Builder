@@ -5,6 +5,7 @@ mod control;
 mod interrupt;
 mod lock;
 mod plan;
+mod progress;
 mod resolve;
 mod run;
 mod state;

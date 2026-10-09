@@ -534,6 +534,7 @@ pub(crate) fn run_buildroot_with(
     }
     let make_started = std::time::SystemTime::now();
     mark_make_running(output_dir)?;
+    let progress = MakeProgress::start(output_dir, command_context.log_sink.clone());
     let make = run_command(
         command,
         "buildroot make",
@@ -542,6 +543,7 @@ pub(crate) fn run_buildroot_with(
         command_context.log_sink.clone(),
         command_context.cancel_check.clone(),
     );
+    drop(progress);
     messages.extend(
         finish_make(output_dir, make, cached_packages.as_ref())
             // Which packages a failed or interrupted make spent its time on.
