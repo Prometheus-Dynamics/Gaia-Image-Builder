@@ -3,6 +3,47 @@
 //! order packages and their stamps are restored in.
 use super::*;
 
+/// The cache key a package's build directory was made or restored with.
+const PACKAGE_KEY_FILE: &str = ".gaia-package-key";
+
+pub(crate) fn record_package_key(stamp_dir: &Path, key: &str) {
+    let _ = fs::write(stamp_dir.join(PACKAGE_KEY_FILE), key);
+}
+
+/// Makes the stamps of every built package whose inputs are unchanged (its
+/// recorded key is its current key) newer than anything they depend on,
+/// keeping their order. A key covers the content of everything a package's
+/// steps read, so a newer modification time on unchanged content (sources
+/// copied again, for example) must not make `make` redo steps: for a
+/// restored package that has no sources to redo them from, it would fail.
+pub(crate) fn refresh_current_stamps(
+    output_dir: &Path,
+    graph: &PackageGraph,
+    keys: &BTreeMap<String, Option<String>>,
+) {
+    let now = std::time::SystemTime::now();
+    for name in graph.package_names() {
+        let (Some(Some(key)), Some(stamp_dir)) = (
+            keys.get(name),
+            graph
+                .get(name)
+                .and_then(|package| package.stamp_dir.as_deref()),
+        ) else {
+            continue;
+        };
+        let stamp_dir = output_dir.join(stamp_dir);
+        let recorded = fs::read_to_string(stamp_dir.join(PACKAGE_KEY_FILE)).unwrap_or_default();
+        if recorded.trim() != key || !stamp_dir.join(".stamp_installed").is_file() {
+            continue;
+        }
+        for (index, stamp) in stamps_in(&stamp_dir).iter().enumerate() {
+            if let Ok(file) = fs::File::options().append(true).open(stamp_dir.join(stamp)) {
+                let _ = file.set_modified(now + Duration::from_millis(10 * index as u64));
+            }
+        }
+    }
+}
+
 /// Package names, each after all its dependencies.
 pub(crate) fn dependency_order(graph: &PackageGraph) -> Vec<String> {
     fn visit(

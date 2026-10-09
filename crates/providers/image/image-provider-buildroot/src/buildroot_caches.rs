@@ -113,6 +113,7 @@ pub(crate) fn restore_cached_packages(
         execution_identity: &identity,
     });
     let restored = cache.restore(output_dir, &graph, &keys);
+    refresh_current_stamps(output_dir, &graph, &keys);
     messages.push(gaia_process::step_time_message(
         "package cache keys and restore",
         started.elapsed(),

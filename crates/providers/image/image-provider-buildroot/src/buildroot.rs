@@ -492,6 +492,24 @@ pub(crate) fn run_buildroot_with(
     if let Some(script) = options.post_build_script {
         command.arg(post_build_script_override(output_dir, script));
     }
+    // With per-package directories, build only up to target-finalize first:
+    // the filesystem images and post-image step run afterwards, and only
+    // when what they read changed (see rootfs_inputs).
+    let images_command =
+        (command_context.policy.parallel_packages && !options.shared_tree).then(|| {
+            let mut images = gaia_process::clone_command(&command);
+            // Without finalizing (and building packages) again.
+            images.args([
+                "-o",
+                "target-finalize",
+                "-o",
+                "host-finalize",
+                "-o",
+                "staging-finalize",
+            ]);
+            command.arg("target-finalize");
+            images
+        });
     let mut finalize_only = false;
     if options.shared_tree {
         let config = fs::read_to_string(output_dir.join(".config")).unwrap_or_default();
@@ -510,8 +528,8 @@ pub(crate) fn run_buildroot_with(
             "buildroot make",
             command_context.execution,
             command_context.policy,
-            command_context.log_sink,
-            command_context.cancel_check,
+            command_context.log_sink.clone(),
+            command_context.cancel_check.clone(),
         )
         // Which packages a failed or interrupted make spent its time on.
         .map_err(|error| {
@@ -527,6 +545,15 @@ pub(crate) fn run_buildroot_with(
         make_started,
         std::time::SystemTime::now(),
     ));
+    if let Some(images_command) = images_command {
+        messages.extend(run_images_if_inputs_changed(
+            images_command,
+            image,
+            buildroot_dir,
+            output_dir,
+            &command_context,
+        )?);
+    }
     if let Some(cached) = cached_packages {
         let started = std::time::Instant::now();
         messages.extend(cached.store(output_dir));

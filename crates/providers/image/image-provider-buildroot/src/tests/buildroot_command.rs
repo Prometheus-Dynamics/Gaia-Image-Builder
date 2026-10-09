@@ -202,13 +202,18 @@ fn buildroot_parallel_packages_and_ccache_configure_and_report() {
     let output_dir = temp_path("gaia-buildroot-parallel-output");
     let ccache_dir = temp_path("gaia-buildroot-parallel-ccache");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
-    // `all` records make's flags and writes a ccache stats log like two
-    // compilations, one from the cache.
+    // Like Buildroot: `target-finalize` builds (recording make's flags, a
+    // ccache stats log like two compilations, one from the cache, and the
+    // target tree from `app-version`); `all` also writes the images.
+    fs::write(buildroot_dir.join("app-version"), "1").expect("app version");
     fs::write(
         buildroot_dir.join("Makefile"),
         ".DEFAULT_GOAL := all\n%_defconfig:\n\t@mkdir -p $(O)\n\t@printf 'BR2_PACKAGE_FOO=y\\n' > $(O)/.config\n\
-         olddefconfig:\n\t@true\nall:\n\t@echo \"$(MAKEFLAGS)\" > $(O)/makeflags\n\
-         \t@printf '# a.c\\ncache_miss\\n# b.c\\ndirect_cache_hit\\n' > \"$$CCACHE_STATSLOG\"\n",
+         olddefconfig:\n\t@true\ntarget-finalize:\n\t@echo \"$(MAKEFLAGS)\" > $(O)/makeflags\n\
+         \t@printf '# a.c\\ncache_miss\\n# b.c\\ndirect_cache_hit\\n' > \"$$CCACHE_STATSLOG\"\n\
+         \t@mkdir -p $(O)/target/usr/bin && cp app-version $(O)/target/usr/bin/app\n\
+         all: target-finalize\n\t@mkdir -p $(O)/images && cp $(O)/target/usr/bin/app $(O)/images/rootfs.img\n\
+         \t@echo images >> $(O)/images-ran\n",
     )
     .expect("makefile");
     let mut spec = ResolvedBuildSpec::new("buildroot-parallel");
@@ -266,6 +271,36 @@ fn buildroot_parallel_packages_and_ccache_configure_and_report() {
             .any(|message| message
                 == "summary: buildroot ccache: 1/2 compilations from cache (50.0%)"),
         "{messages:?}"
+    );
+    let images_ran = || fs::read_to_string(output_dir.join("images-ran")).expect("images ran");
+    assert_eq!(images_ran(), "images\n");
+
+    // Nothing the images read changed: the image step is skipped.
+    let run_again = || {
+        run_buildroot(BuildrootRunRequest {
+            spec: &spec,
+            image: &image,
+            buildroot_dir: &buildroot_dir,
+            output_dir: &output_dir,
+            command: test_command_context(&execution, &policy),
+        })
+        .expect("buildroot run")
+    };
+    let messages = run_again();
+    assert_eq!(images_ran(), "images\n");
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.starts_with("skipped buildroot filesystem images")),
+        "{messages:?}"
+    );
+    // The target changed: the images are made again.
+    fs::write(buildroot_dir.join("app-version"), "2").expect("app version");
+    run_again();
+    assert_eq!(images_ran(), "images\nimages\n");
+    assert_eq!(
+        fs::read_to_string(output_dir.join("images/rootfs.img")).expect("image"),
+        "2"
     );
 }
 

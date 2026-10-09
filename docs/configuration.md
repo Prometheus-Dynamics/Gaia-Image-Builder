@@ -550,6 +550,16 @@ when that cannot be created.
   `-j<local_jobs>` and a load limit of the same value (inherited by each
   package's own `make`, which still uses `BR2_JLEVEL` jobs). Buildroot marks
   per-package directories experimental; a few packages may not support them.
+  It also splits the `make`: Gaia builds up to `target-finalize`, digests
+  everything the filesystem image step reads (the finalized target tree by
+  content, the images packages installed such as the kernel and device
+  trees, the whole `.config`, the post-image and fakeroot scripts, users and
+  device tables and the directories they are in, Buildroot's `fs/` and
+  `support/scripts`, and the host packages built), and runs the rootfs
+  images and post-image script only when that digest differs from the one
+  recorded with the current images, or an expected image is missing. A
+  rebuild where nothing those read changed skips EROFS, ext4, squashfs and
+  genimage entirely.
 - Turning `ccache.enabled` or `parallel_packages` on or off changes the
   toolchain wrapper or the tree layout, so the next build cleans the output
   tree once.
@@ -601,7 +611,10 @@ the package does not use.
 
 Packages built from a local directory (`SITE_METHOD = local`,
 `<PKG>_OVERRIDE_SRCDIR`), and everything depending on them, are always
-built. In text files that hold the output tree's path, it is rewritten on
+built. Before each `make`, the stamps of every built package whose key is
+unchanged are made newer than its inputs, so sources copied again (newer
+files, same content) neither rebuild packages nor break restored kconfig
+packages, which have no sources to redo a step from. In text files that hold the output tree's path, it is rewritten on
 restore. Packages whose binaries hold it (most host tools) are stored for
 that path only: they are restored when the same build is rebuilt after a
 wipe, and in other trees once they are built there, but not across trees at

@@ -268,3 +268,46 @@ fn caches_larger_than_their_free_space_are_reported() {
     assert_eq!(cache_space_warning("package cache", &dir, 1), None);
     let _ = fs::remove_dir_all(dir);
 }
+
+#[test]
+fn stamps_of_unchanged_packages_are_made_newer_than_their_inputs() {
+    let root = temp("refresh");
+    let output = root.join("out");
+    let stamps = output.join("build/app-1");
+    fs::create_dir_all(&stamps).expect("stamps");
+    let old = std::time::SystemTime::now() - Duration::from_secs(3600);
+    for (offset, stamp) in [
+        (0, ".stamp_dotconfig"),
+        (1, ".stamp_configured"),
+        (2, ".stamp_installed"),
+    ] {
+        let file = fs::File::create(stamps.join(stamp)).expect("stamp");
+        file.set_modified(old + Duration::from_secs(offset))
+            .expect("mtime");
+    }
+    let graph = cache_graph();
+    let mut keys = BTreeMap::from([("app".to_string(), Some("k-app".to_string()))]);
+    let modified = |stamp: &str| {
+        fs::metadata(stamps.join(stamp))
+            .and_then(|metadata| metadata.modified())
+            .expect("mtime")
+    };
+
+    // No recorded key: left alone.
+    refresh_current_stamps(&output, &graph, &keys);
+    assert!(modified(".stamp_installed") < std::time::SystemTime::now() - Duration::from_secs(60));
+
+    record_package_key(&stamps, "k-app");
+    let before = std::time::SystemTime::now() - Duration::from_secs(1);
+    refresh_current_stamps(&output, &graph, &keys);
+    assert!(modified(".stamp_dotconfig") > before);
+    assert!(modified(".stamp_dotconfig") < modified(".stamp_configured"));
+    assert!(modified(".stamp_configured") < modified(".stamp_installed"));
+
+    // A changed key (changed inputs): left for make to rebuild.
+    keys.insert("app".to_string(), Some("k-app-2".to_string()));
+    let refreshed = modified(".stamp_installed");
+    refresh_current_stamps(&output, &graph, &keys);
+    assert_eq!(modified(".stamp_installed"), refreshed);
+    let _ = fs::remove_dir_all(root);
+}

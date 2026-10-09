@@ -401,6 +401,7 @@ impl PackageCache {
             file.set_modified(start + Duration::from_millis(10 * index as u64))
                 .map_err(|error| error.to_string())?;
         }
+        record_package_key(&stamp_dir, key);
         self.mark_used(name, key, output_dir);
         Ok(())
     }
@@ -453,6 +454,9 @@ impl PackageCache {
             {
                 continue;
             }
+            // The key this build of the package was made with, so later runs
+            // can tell its stamps still describe its inputs.
+            record_package_key(&output_dir.join(stamp_dir), key);
             if self.usable(output_dir, name, key).is_some() {
                 self.mark_used(name, key, output_dir);
                 continue;

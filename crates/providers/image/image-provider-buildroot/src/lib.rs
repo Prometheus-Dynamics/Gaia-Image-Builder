@@ -508,6 +508,7 @@ mod package_cache_files;
 mod package_graph;
 mod package_keys;
 mod rebuild_inputs;
+mod rootfs_inputs;
 mod shared;
 mod squashfs;
 #[cfg(test)]
@@ -542,5 +543,6 @@ pub(crate) use package_cache_files::*;
 pub(crate) use package_graph::*;
 pub(crate) use package_keys::*;
 pub(crate) use rebuild_inputs::*;
+pub(crate) use rootfs_inputs::*;
 pub(crate) use shared::*;
 pub(crate) use squashfs::*;
