@@ -267,3 +267,57 @@ output_path = "out/web"
         "{message}"
     );
 }
+
+fn target_codes(target: &str) -> Vec<String> {
+    let path = write_temp_config(&format!(
+        r#"
+build_name = "artifact-targets"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[image]
+kind = "buildroot"
+defconfig = "dummy_defconfig"
+
+[[artifacts]]
+id = "lemnosd"
+kind = "rust"
+package = "lemnosd"
+target = "{target}"
+output_path = "out/lemnosd"
+
+[[install]]
+id = "install-lemnosd"
+artifact = "lemnosd"
+dest = "/usr/bin/lemnosd"
+"#
+    ));
+    let spec = resolve_config(path.to_str().expect("temp path utf-8"));
+    let report = validate_spec(&spec);
+    let _ = fs::remove_file(path);
+    report
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code.starts_with("artifact_target"))
+        .map(|diagnostic| diagnostic.code.to_string())
+        .collect()
+}
+
+#[test]
+fn installed_artifact_targets_must_be_verifiable_before_building() {
+    for target in [
+        "aarch64-unknown-linux-musl",
+        "aarch64-unknown-linux-gnu",
+        "armv7-unknown-linux-musleabihf",
+        "x86_64-unknown-linux-musl",
+    ] {
+        assert!(target_codes(target).is_empty(), "{target}");
+    }
+    assert_eq!(
+        target_codes("mips-unknown-linux-gnu"),
+        ["artifact_target_unverifiable"]
+    );
+}

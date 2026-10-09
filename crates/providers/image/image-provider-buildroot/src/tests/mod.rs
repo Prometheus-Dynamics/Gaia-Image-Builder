@@ -64,6 +64,7 @@ fn test_command_context<'a>(
     }
 }
 
+mod artifact_target;
 mod buildroot_command;
 mod config_digest;
 mod feed_archive;

@@ -19,6 +19,7 @@ mod source;
 mod source_dirs;
 mod stage;
 mod state;
+mod target_arch;
 mod workspace;
 
 pub use artifact::{
@@ -100,6 +101,7 @@ pub use state::{
     IMAGE_ASSEMBLY_STATE_FILE_NAME, IMAGE_ASSEMBLY_STATE_KIND, KeyValueState,
     RUNTIME_STATE_DIR_NAME,
 };
+pub use target_arch::{TargetArch, target_arch};
 pub use workspace::{
     CleanPolicy, WorkspaceNamedPathSpec, WorkspacePathError, WorkspacePathKindSpec, WorkspaceSpec,
     default_image_collect_dir, resolve_workspace_path,

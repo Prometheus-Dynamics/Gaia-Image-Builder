@@ -452,26 +452,15 @@ impl ElfMachine {
     }
 }
 
+/// The ELF machine of a declared target, by architecture: any vendor, OS
+/// and C library (gnu, musl, gnueabihf, ...) of a known architecture.
 pub(crate) fn expected_elf_machine_for_target(target: &str) -> Option<ElfMachine> {
-    let lowered = target.trim().to_ascii_lowercase();
-    if lowered == "aarch64-unknown-linux-gnu" || lowered == "linux/arm64" {
-        return Some(ElfMachine::AArch64);
-    }
-    if lowered == "x86_64-unknown-linux-gnu" || lowered == "linux/amd64" {
-        return Some(ElfMachine::X86_64);
-    }
-    if lowered == "riscv64gc-unknown-linux-gnu" || lowered == "linux/riscv64" {
-        return Some(ElfMachine::RiscV64);
-    }
-    if lowered == "linux/arm"
-        || lowered.starts_with("linux/arm/")
-        || lowered.starts_with("arm-unknown-linux-")
-        || lowered.starts_with("armv7-unknown-linux-")
-        || lowered.starts_with("armv6-unknown-linux-")
-    {
-        return Some(ElfMachine::Arm);
-    }
-    None
+    Some(match gaia_spec::target_arch(target)? {
+        gaia_spec::TargetArch::X86_64 => ElfMachine::X86_64,
+        gaia_spec::TargetArch::Arm => ElfMachine::Arm,
+        gaia_spec::TargetArch::AArch64 => ElfMachine::AArch64,
+        gaia_spec::TargetArch::RiscV64 => ElfMachine::RiscV64,
+    })
 }
 
 pub(crate) fn detect_elf_machine(path: &Path) -> Option<ElfMachine> {

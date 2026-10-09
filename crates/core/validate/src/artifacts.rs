@@ -68,6 +68,29 @@ pub(crate) fn validate_artifacts(
                 Some(format!("artifact:{}", artifact.id.as_str())),
             ));
         }
+        // The Buildroot feed checks each installed binary's ELF machine
+        // against its declared target; refuse targets it cannot check now
+        // rather than after the image build.
+        if let Some(target) = &artifact.target
+            && !target.trim().is_empty()
+            && gaia_spec::target_arch(target).is_none()
+            && spec.image.provider_kind() == gaia_spec::ImageProviderKind::Buildroot
+            && spec
+                .install
+                .entries
+                .iter()
+                .any(|entry| entry.artifact.id == artifact.id)
+        {
+            diagnostics.push(error(
+                "artifact_target_unverifiable",
+                format!(
+                    "artifact '{}' declares target '{target}', whose architecture Gaia cannot \
+                     check installed binaries against (known: x86_64, aarch64, arm, riscv64)",
+                    artifact.id.as_str()
+                ),
+                Some(format!("artifact:{}", artifact.id.as_str())),
+            ));
+        }
         if let Some(identity) = &artifact.install_identity {
             if identity.install_name.trim().is_empty() {
                 diagnostics.push(error(
