@@ -162,6 +162,7 @@ pub(crate) fn query_package_graph(
         command.env("BR2_EXTERNAL", br2_external);
     }
     let output_path = output_dir.join(".gaia-buildroot-show-info.tmp");
+    let started = std::time::Instant::now();
     let output = command_stdout_to_file_with_timeout(CommandStdoutToFileRequest {
         command: &mut command,
         output_path: &output_path,
@@ -173,6 +174,11 @@ pub(crate) fn query_package_graph(
         log_sink: None,
         cancel_check: command_context.cancel_check.clone(),
     });
+    tracing::info!(
+        provider_domain = "image.buildroot",
+        elapsed_ms = started.elapsed().as_millis(),
+        "buildroot show-info"
+    );
     let raw = fs::read_to_string(&output_path).unwrap_or_default();
     let _ = fs::remove_file(&output_path);
     match output {

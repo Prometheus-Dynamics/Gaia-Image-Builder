@@ -9,6 +9,11 @@ on:
       - master
   pull_request:
 
+# A newer push to the same branch or pull request supersedes a running one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   workspace:
     runs-on: ubuntu-latest
@@ -17,10 +22,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      - name: Install Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
 
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
@@ -47,10 +50,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      - name: Install Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
 
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
@@ -63,19 +64,6 @@ jobs:
 
       - name: Build docs
         run: cargo doc --workspace --no-deps
-
-  package-surface:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust artifacts
-        uses: Swatinem/rust-cache@v2
 
       - name: Validate package surface
         run: cargo package --workspace --allow-dirty --no-verify

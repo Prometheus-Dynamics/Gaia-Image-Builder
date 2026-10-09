@@ -50,6 +50,8 @@ pub struct OperationTiming {
     pub operation_id: OperationId,
     pub duration: Duration,
     pub status: OperationTimingStatus,
+    /// Steps inside the operation that reported their wall time, in order.
+    pub steps: Vec<(String, Duration)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,10 +131,19 @@ impl ExecutionRuntime {
         } else {
             OperationTimingStatus::Built
         };
+        let steps = result
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                ExecutionEvent::Log { message, .. } => gaia_process::parse_step_time(message),
+                _ => None,
+            })
+            .collect();
         self.outcome.operation_timings.push(OperationTiming {
             operation_id: result.operation_id.clone(),
             duration,
             status,
+            steps,
         });
         self.record(result);
     }

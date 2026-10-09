@@ -18,6 +18,7 @@ const STREAM_MESSAGE_QUEUE_BOUND: usize = 64;
 
 mod docker;
 mod retention;
+mod step_time;
 mod stream;
 mod tar;
 
@@ -30,6 +31,7 @@ use retention::{
     StreamDrainState, drain_stream_messages, drain_stream_messages_until_idle,
     wait_for_stream_message,
 };
+pub use step_time::{STEP_TIME_PREFIX, parse_step_time, step_time_message};
 use stream::spawn_stream_reader;
 pub use tar::{TarArchiveValidationError, validate_tar_archive_entries};
 

@@ -114,6 +114,14 @@ pub fn render_summary(
                 operation_id: timing.operation_id.as_str().to_string(),
                 duration_ms: u64::try_from(timing.duration.as_millis()).unwrap_or(u64::MAX),
                 status: timing.status.as_str().to_string(),
+                steps: timing
+                    .steps
+                    .iter()
+                    .map(|(step, duration)| crate::model::StepTimingRecord {
+                        step: step.clone(),
+                        duration_ms: u64::try_from(duration.as_millis()).unwrap_or(u64::MAX),
+                    })
+                    .collect(),
             })
             .collect(),
     }

@@ -35,3 +35,6 @@ fi
 
 echo "==> Building docs"
 cargo doc --workspace --no-deps
+
+echo "==> Validating package surface"
+cargo package --workspace --allow-dirty --no-verify

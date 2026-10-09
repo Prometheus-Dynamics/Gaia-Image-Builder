@@ -10,6 +10,7 @@ pub(crate) fn run_command(
 ) -> Result<Vec<String>, ImageProviderError> {
     let attempts = policy.retry_attempts.max(1);
     let timeout = Duration::from_secs(policy.timeout_seconds.max(1));
+    let started = std::time::Instant::now();
     let mut last_error = String::new();
     for attempt in 1..=attempts {
         tracing::debug!(
@@ -40,7 +41,10 @@ pub(crate) fn run_command(
                 attempts,
                 "image provider command succeeded"
             );
-            return Ok(Vec::new());
+            return Ok(vec![gaia_process::step_time_message(
+                label,
+                started.elapsed(),
+            )]);
         }
         last_error = format!(
             "{label} failed on attempt {attempt}/{attempts}: {}",

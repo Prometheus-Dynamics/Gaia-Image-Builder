@@ -398,7 +398,7 @@ fn direct_squashfs_refresh_reuses_prepared_target_without_make() {
     fs::write(staged_target_dir.join("prepared-marker"), "keep-me").expect("prepared staged file");
     write_executable(
         &host_bin_dir.join("fakeroot"),
-        "#!/bin/sh\nPATH=\"$(dirname \"$0\"):$PATH\" exec \"$@\"\n",
+        "#!/bin/sh\n[ \"$1\" = -- ] && shift\nPATH=\"$(dirname \"$0\"):$PATH\" exec \"$@\"\n",
     );
     write_executable(&host_bin_dir.join("chown"), "#!/bin/sh\nexit 0\n");
     write_executable(

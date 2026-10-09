@@ -933,7 +933,11 @@ fn refresh_buildroot_images_after_feed_overlay_runs_target_post_image_for_non_ta
         output_dir.join("images/rootfs.squashfs").is_file(),
         "expected target-post-image to refresh non-tar image"
     );
-    assert!(messages.is_empty());
+    assert!(
+        messages
+            .iter()
+            .all(|message| message.starts_with(gaia_process::STEP_TIME_PREFIX))
+    );
 }
 
 #[test]
@@ -1160,7 +1164,11 @@ fn apply_buildroot_config_fragments_merges_fragments_and_runs_olddefconfig() {
     .expect("fragment merge should succeed");
 
     let merged = fs::read_to_string(output_dir.join(".config")).expect("merged config");
-    assert!(messages.is_empty());
+    assert!(
+        messages
+            .iter()
+            .all(|message| message.starts_with(gaia_process::STEP_TIME_PREFIX))
+    );
     assert!(merged.contains("BR2_TARGET_ROOTFS_TAR=y"));
     assert!(merged.contains("BR2_PACKAGE_BUSYBOX=y"));
     assert!(merged.contains("BR2_PACKAGE_DROPBEAR=y"));
@@ -1208,7 +1216,11 @@ fn apply_buildroot_config_overrides_merges_overrides_and_runs_olddefconfig() {
     .expect("override merge should succeed");
 
     let merged = fs::read_to_string(output_dir.join(".config")).expect("merged config");
-    assert!(messages.is_empty());
+    assert!(
+        messages
+            .iter()
+            .all(|message| message.starts_with(gaia_process::STEP_TIME_PREFIX))
+    );
     assert!(merged.contains("BR2_PACKAGE_BUSYBOX=y"));
     assert!(!merged.contains("BR2_PACKAGE_BUSYBOX=n"));
     assert!(merged.contains("BR2_TARGET_GENERIC_HOSTNAME=\"gaia\""));

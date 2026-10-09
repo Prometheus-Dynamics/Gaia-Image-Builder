@@ -31,6 +31,7 @@ fn plan_estimate_lines_report_critical_path_and_untimed_operations() {
 #[test]
 fn slowest_operations_skip_reused_and_sort_descending() {
     let record = |id: &str, ms: u64, status: &str| gaia_report::OperationTimingRecord {
+        steps: Vec::new(),
         operation_id: id.into(),
         duration_ms: ms,
         status: status.into(),
@@ -48,6 +49,40 @@ fn slowest_operations_skip_reused_and_sort_descending() {
         vec![
             "operation time: 1m05s c (failed)".to_string(),
             "operation time: 5s a (built)".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn slowest_steps_span_operations_and_sort_descending() {
+    let step = |name: &str, ms: u64| gaia_report::StepTimingRecord {
+        step: name.into(),
+        duration_ms: ms,
+    };
+    let record = |id: &str, steps| gaia_report::OperationTimingRecord {
+        steps,
+        operation_id: id.into(),
+        duration_ms: 0,
+        status: "built".into(),
+    };
+    let lines = slowest_step_lines(
+        &[
+            record(
+                "image:build",
+                vec![
+                    step("buildroot make", 3_600_000),
+                    step("package cache store", 90_000),
+                ],
+            ),
+            record("image:assemble", vec![step("zstd transform", 120_000)]),
+        ],
+        2,
+    );
+    assert_eq!(
+        lines,
+        vec![
+            "step time: 1h00m image:build > buildroot make".to_string(),
+            "step time: 2m00s image:assemble > zstd transform".to_string(),
         ]
     );
 }

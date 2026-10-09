@@ -494,9 +494,12 @@ fn should_archive_buildroot_output(image: &ImageSpec, archive_path: &Path) -> bo
 }
 
 mod archive;
+mod build_times;
 mod buildroot;
+mod buildroot_caches;
 mod buildroot_config;
 mod buildroot_external;
+mod buildroot_patches;
 mod clean_plan;
 mod command;
 mod feed;
@@ -524,9 +527,12 @@ fn summary_notes(messages: &[String]) -> Vec<String> {
 }
 
 pub(crate) use archive::*;
+pub(crate) use build_times::*;
 pub(crate) use buildroot::*;
+pub(crate) use buildroot_caches::*;
 pub(crate) use buildroot_config::*;
 pub(crate) use buildroot_external::*;
+pub(crate) use buildroot_patches::*;
 pub(crate) use clean_plan::*;
 pub(crate) use command::*;
 pub(crate) use feed::*;

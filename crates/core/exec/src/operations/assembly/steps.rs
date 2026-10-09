@@ -99,6 +99,20 @@ impl<'a> StepRun<'a> {
     }
 
     pub(super) fn run(&mut self, step: AssemblyStep) -> Result<(), AssemblyError> {
+        let started = std::time::Instant::now();
+        self.run_step(step)?;
+        // Only steps that take a noticeable time are worth a line.
+        let elapsed = started.elapsed();
+        if elapsed >= Duration::from_millis(100) {
+            self.messages.push(gaia_process::step_time_message(
+                &format!("assembly {}", step.describe(self.assembly)),
+                elapsed,
+            ));
+        }
+        Ok(())
+    }
+
+    fn run_step(&mut self, step: AssemblyStep) -> Result<(), AssemblyError> {
         match step {
             AssemblyStep::Dir(index) => self.dir(index),
             AssemblyStep::Symlink(index) => self.symlink(index),

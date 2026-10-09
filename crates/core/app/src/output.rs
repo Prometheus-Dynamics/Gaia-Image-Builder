@@ -79,6 +79,32 @@ fn slowest_operation_lines(
         .collect()
 }
 
+/// The `limit` slowest steps inside operations, slowest first, so a run
+/// shows where its time went (the Buildroot make, a package cache restore,
+/// an assembly step, the slowest Buildroot packages).
+fn slowest_step_lines(timings: &[gaia_report::OperationTimingRecord], limit: usize) -> Vec<String> {
+    let mut steps = timings
+        .iter()
+        .flat_map(|timing| {
+            timing
+                .steps
+                .iter()
+                .map(move |step| (step.duration_ms, &timing.operation_id, &step.step))
+        })
+        .collect::<Vec<_>>();
+    steps.sort_by_key(|(duration_ms, _, _)| std::cmp::Reverse(*duration_ms));
+    steps
+        .into_iter()
+        .take(limit)
+        .map(|(duration_ms, operation_id, step)| {
+            format!(
+                "step time: {} {operation_id} > {step}",
+                gaia_plan::format_duration_short(std::time::Duration::from_millis(duration_ms))
+            )
+        })
+        .collect()
+}
+
 pub(crate) fn print_outcome(outcome: &CommandOutcome) {
     match outcome {
         CommandOutcome::Help { text } | CommandOutcome::Version { text } => {
@@ -288,6 +314,9 @@ pub(crate) fn print_outcome(outcome: &CommandOutcome) {
                 );
             }
             for line in slowest_operation_lines(&report.summary.operation_timings, 5) {
+                println!("{line}");
+            }
+            for line in slowest_step_lines(&report.summary.operation_timings, 10) {
                 println!("{line}");
             }
             if report.summary.rolled_back_operations > 0 {

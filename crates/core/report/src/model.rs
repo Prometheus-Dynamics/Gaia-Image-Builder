@@ -63,6 +63,15 @@ pub struct OperationTimingRecord {
     pub duration_ms: u64,
     /// `built`, `reused`, `failed` or `cancelled`.
     pub status: String,
+    /// Steps inside the operation that reported their wall time.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub steps: Vec<StepTimingRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StepTimingRecord {
+    pub step: String,
+    pub duration_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
