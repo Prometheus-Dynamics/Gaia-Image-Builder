@@ -13,6 +13,7 @@ mod install;
 mod metadata;
 mod policy;
 mod provenance;
+mod raw_disk_archive;
 mod reporting;
 mod selection;
 mod source;
@@ -84,6 +85,7 @@ pub use policy::{
     UnresolvedInterpolationSpec,
 };
 pub use provenance::{ProvenanceIdentitySpec, ProvenanceSpec};
+pub use raw_disk_archive::{RawDiskArchive, raw_disk_archive};
 pub use reporting::{
     DEFAULT_LARGE_UNEXPECTED_OUTPUT_BYTES, DEFAULT_TRANSIENT_DIR_NAMES, OutputHygieneSpec,
     PostBuildHookSpec, ReportingOutputsSpec, ReportingSpec, SecretMaskingSpec,

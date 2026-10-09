@@ -44,8 +44,9 @@ pub(crate) fn archive_buildroot_output(
     if entries.len() == 1 {
         let source_path = collect_dir.join(&entries[0]);
         if source_path.is_file() {
-            if raw_xz_archive_path(archive_path) {
+            if let Some(kind) = compressed_raw_archive(archive_path) {
                 return compress_primary_image(
+                    kind,
                     &source_path,
                     archive_path,
                     command_context.execution,
@@ -294,13 +295,17 @@ pub(crate) fn archive_directory(
     run_command(command, label, execution, policy, log_sink, cancel_check)
 }
 
-pub(crate) fn raw_xz_archive_path(path: &Path) -> bool {
+/// The compression of a compressed raw disk archive name (`.img.xz`,
+/// `.img.zst`, ...).
+pub(crate) fn compressed_raw_archive(path: &Path) -> Option<gaia_spec::RawDiskArchive> {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.ends_with(".img.xz") || name.ends_with(".raw.xz"))
+        .and_then(gaia_spec::raw_disk_archive)
+        .filter(|kind| *kind != gaia_spec::RawDiskArchive::Plain)
 }
 
 fn compress_primary_image(
+    kind: gaia_spec::RawDiskArchive,
     source_path: &Path,
     archive_path: &Path,
     execution: &ImageExecutionContext,
@@ -309,7 +314,7 @@ fn compress_primary_image(
     cancel_check: Option<ProcessCancelCheck>,
 ) -> Result<Vec<String>, ImageProviderError> {
     compress_primary_image_with_program(
-        Path::new("xz"),
+        (kind, None),
         source_path,
         archive_path,
         execution,
@@ -319,8 +324,10 @@ fn compress_primary_image(
     )
 }
 
+/// Compresses a disk image with `kind`'s compressor, or the given program
+/// in its place (tests).
 pub(crate) fn compress_primary_image_with_program(
-    xz_program: &Path,
+    (kind, program): (gaia_spec::RawDiskArchive, Option<&Path>),
     source_path: &Path,
     archive_path: &Path,
     execution: &ImageExecutionContext,
@@ -337,14 +344,12 @@ pub(crate) fn compress_primary_image_with_program(
         })?;
     }
     let temp_archive = temporary_archive_output_path(archive_path);
-    let mut command = Command::new(xz_program);
-    // `local_jobs = 0` means all cores. The fixed block size keeps output
-    // identical for any thread count.
-    command
-        .arg(format!("-T{}", policy.local_jobs))
-        .arg("--block-size=24MiB")
-        .arg("-c")
-        .arg(source_path);
+    // `local_jobs = 0` means all cores.
+    let (compressor, args) = kind.compressor(policy.local_jobs).ok_or_else(|| {
+        ImageProviderError::backend_command("an uncompressed disk archive is not compressed")
+    })?;
+    let mut command = Command::new(program.unwrap_or(Path::new(compressor)));
+    command.args(args).arg(source_path);
     let output = command_stdout_to_file_with_timeout(CommandStdoutToFileRequest {
         command: &mut command,
         output_path: &temp_archive,

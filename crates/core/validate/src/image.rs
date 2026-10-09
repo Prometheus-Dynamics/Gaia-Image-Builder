@@ -409,10 +409,7 @@ fn validate_raw_archive_source(
     let Some(name) = spec.image.output.archive_name.as_deref() else {
         return;
     };
-    let lowered = name.to_ascii_lowercase();
-    let raw_disk_name = [".img", ".raw", ".img.xz", ".raw.xz"]
-        .iter()
-        .any(|suffix| lowered.ends_with(suffix));
+    let raw_disk_name = gaia_spec::raw_disk_archive(name).is_some();
     let assembly_builds_disks = spec
         .image
         .assembly

@@ -1261,6 +1261,14 @@ archive_name = "${build.name}-${build.version}.img.xz"
 emit_report = true
 ```
 
+An `archive_name` ending in `.img`/`.raw` publishes the raw disk image
+itself; `.img.xz`/`.raw.xz` compresses it with xz (smallest, slow) and
+`.img.zst`/`.raw.zst` with zstd (several times faster to compress and
+decompress, a little larger). Both use every core and give the same bytes
+for any core count. A common split is zstd for development images and xz
+for releases, for example
+`archive_name = "${build.name}-${build.version}.img.${input.compression}"`.
+
 Buildroot fields:
 - `defconfig`
 - `external_tree`: one or more `BR2_EXTERNAL` trees, `:`-separated as

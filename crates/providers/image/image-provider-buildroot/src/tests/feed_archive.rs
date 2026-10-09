@@ -180,7 +180,7 @@ fn compress_primary_image_timeout_preserves_existing_archive() {
 
     let started = Instant::now();
     let error = compress_primary_image_with_program(
-        &fake_xz,
+        (gaia_spec::RawDiskArchive::Xz, Some(&fake_xz)),
         &source_path,
         &archive_path,
         &execution,
@@ -223,7 +223,7 @@ fn compress_primary_image_failure_preserves_existing_archive() {
     let policy = ImageExecutionPolicy::default();
 
     let error = compress_primary_image_with_program(
-        &fake_xz,
+        (gaia_spec::RawDiskArchive::Xz, Some(&fake_xz)),
         &source_path,
         &archive_path,
         &execution,
@@ -274,7 +274,7 @@ fn compress_primary_image_streams_logs_and_uses_policy_threads() {
     });
 
     compress_primary_image_with_program(
-        &fake_xz,
+        (gaia_spec::RawDiskArchive::Xz, Some(&fake_xz)),
         &source_path,
         &archive_path,
         &execution,

@@ -249,7 +249,11 @@ fn archive_assembly_disk_output(
     let Some(archive_path) = assembly_archive_path(spec) else {
         return Ok(None);
     };
-    let Some(compressed) = raw_archive_kind(&archive_path) else {
+    let Some(kind) = archive_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(gaia_spec::raw_disk_archive)
+    else {
         return Ok(None);
     };
     if disk_outputs.is_empty() {
@@ -264,7 +268,7 @@ fn archive_assembly_disk_output(
     }
     let source = &disk_outputs[0];
     let temp_archive = temporary_assembly_output_path(&archive_path);
-    if !compressed {
+    let Some((compressor, args)) = kind.compressor(0) else {
         // An uncompressed `.img`/`.raw` archive is the assembled disk itself.
         std_fs::copy(source, &temp_archive).map_err(|error| {
             let _ = std_fs::remove_file(&temp_archive);
@@ -281,15 +285,10 @@ fn archive_assembly_disk_output(
             bytes: file_len(&archive_path)?,
             sha256: file_sha256(&archive_path)?,
         }));
-    }
-    let mut command = Command::new("xz");
-    // All cores; the fixed block size keeps output identical for any thread
-    // count, so archives stay reproducible across machines.
-    command
-        .arg("-T0")
-        .arg("--block-size=24MiB")
-        .arg("-c")
-        .arg(source);
+    };
+    // All cores; the output is the same for any thread count.
+    let mut command = Command::new(compressor);
+    command.args(args).arg(source);
     let output = run_command_stdout_to_file(
         spec,
         &mut command,
@@ -322,19 +321,6 @@ fn assembly_archive_path(spec: &ResolvedBuildSpec) -> Option<PathBuf> {
     let collect_dir = spec.image.output.collect_dir.as_ref()?;
     let archive_name = spec.image.output.archive_name.as_ref()?;
     Some(PathBuf::from(collect_dir).join(archive_name))
-}
-
-/// `Some(true)` for a compressed raw disk archive name (`.img.xz`,
-/// `.raw.xz`), `Some(false)` for an uncompressed one (`.img`, `.raw`).
-fn raw_archive_kind(path: &Path) -> Option<bool> {
-    let name = path.file_name()?.to_str()?;
-    if name.ends_with(".img.xz") || name.ends_with(".raw.xz") {
-        Some(true)
-    } else if name.ends_with(".img") || name.ends_with(".raw") {
-        Some(false)
-    } else {
-        None
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

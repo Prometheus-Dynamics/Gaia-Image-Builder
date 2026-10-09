@@ -481,11 +481,7 @@ fn should_archive_buildroot_output(image: &ImageSpec, archive_path: &Path) -> bo
     let raw_disk_name = archive_path
         .file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| {
-            [".img", ".raw", ".img.xz", ".raw.xz"]
-                .iter()
-                .any(|suffix| name.ends_with(suffix))
-        });
+        .is_some_and(|name| gaia_spec::raw_disk_archive(name).is_some());
     !(image
         .assembly
         .as_ref()

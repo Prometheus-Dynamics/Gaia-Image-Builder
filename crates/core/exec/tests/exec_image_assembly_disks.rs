@@ -163,11 +163,22 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
 
 #[test]
 fn executes_image_assembly_archives_single_disk_as_raw_xz() {
+    archives_single_disk("published.img.xz", "xz");
+}
+
+#[test]
+fn executes_image_assembly_archives_single_disk_as_raw_zstd() {
+    archives_single_disk("published.img.zst", "zstd");
+}
+
+/// Assembles one disk published as `archive_name`, then checks that
+/// `decompressor -dc` gives back the disk.
+fn archives_single_disk(archive_name: &str, decompressor: &str) {
     let mut spec = test_spec();
     let build_dir = Path::new(&spec.workspace.build_dir);
     let collect_dir = Path::new(&spec.workspace.out_dir).join("images");
     spec.image.output.collect_dir = Some(collect_dir.display().to_string());
-    spec.image.output.archive_name = Some("published.img.xz".into());
+    spec.image.output.archive_name = Some(archive_name.into());
     let boot_image = build_dir.join("boot.img");
     let rootfs_image = build_dir.join("rootfs.img");
     fs::create_dir_all(build_dir).expect("build dir");
@@ -225,13 +236,13 @@ fn executes_image_assembly_archives_single_disk_as_raw_xz() {
     );
 
     assert!(outcome.errors.is_empty(), "{:?}", outcome.errors);
-    let archive = collect_dir.join("published.img.xz");
+    let archive = collect_dir.join(archive_name);
     assert!(archive.is_file(), "missing archive {}", archive.display());
-    let decompressed = Command::new("xz")
+    let decompressed = Command::new(decompressor)
         .arg("-dc")
         .arg(&archive)
         .output()
-        .expect("xz decompress");
+        .expect("decompress");
     assert!(
         decompressed.status.success(),
         "{}",
