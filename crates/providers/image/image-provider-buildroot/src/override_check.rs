@@ -125,7 +125,8 @@ pub(crate) fn override_check_warnings(messages: &[String]) -> Vec<String> {
     for message in messages {
         if let Some(warning) = message.strip_prefix("warning: ")
             && (message.starts_with(OVERRIDE_CHECK_WARNING_PREFIX)
-                || message.starts_with(KERNEL_MODULES_WARNING_PREFIX))
+                || message.starts_with(KERNEL_MODULES_WARNING_PREFIX)
+                || message.starts_with(CACHE_SPACE_WARNING_PREFIX))
             && !warnings.iter().any(|existing| existing == warning)
         {
             warnings.push(warning.to_string());

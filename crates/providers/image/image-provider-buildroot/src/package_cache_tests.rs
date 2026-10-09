@@ -255,3 +255,14 @@ fn output_paths_are_rewritten_everywhere() {
     );
     assert_eq!(find_bytes(b"abc", b""), None);
 }
+
+#[test]
+fn caches_larger_than_their_free_space_are_reported() {
+    let dir = temp("space");
+    fs::create_dir_all(&dir).expect("dir");
+    let warning = cache_space_warning("package cache", &dir, u64::MAX).expect("warning");
+    assert!(warning.starts_with(CACHE_SPACE_WARNING_PREFIX), "{warning}");
+    assert!(warning.contains("GiB free"), "{warning}");
+    assert_eq!(cache_space_warning("package cache", &dir, 1), None);
+    let _ = fs::remove_dir_all(dir);
+}

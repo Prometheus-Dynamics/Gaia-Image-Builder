@@ -73,3 +73,4 @@ mod feed_archive_overlay;
 mod override_check;
 mod provider_squashfs_fs;
 mod single_pass_shared;
+mod step_times;

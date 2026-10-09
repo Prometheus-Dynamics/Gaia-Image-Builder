@@ -132,6 +132,16 @@ impl OperationExecutionResult {
         self.cleanup_domain = Some(cleanup_domain);
         self
     }
+
+    /// Adds log messages ahead of the result's own events.
+    fn with_log_messages(mut self, messages: Vec<String>) -> Self {
+        let logs = messages.into_iter().map(|message| ExecutionEvent::Log {
+            operation_id: self.operation_id.clone(),
+            message,
+        });
+        self.events.splice(0..0, logs.collect::<Vec<_>>());
+        self
+    }
 }
 
 pub(crate) fn dispatch_operation(
@@ -371,26 +381,29 @@ pub(crate) fn dispatch_operation(
                 ) {
                     Ok(result) => result,
                     Err(message) => {
-                        if matches!(
+                        let result = if matches!(
                             message.kind,
                             gaia_image_providers::ImageProviderErrorKind::Cancelled
                         ) {
-                            return cancelled_with_cleanup(
+                            cancelled_with_cleanup(
                                 operation.id.clone(),
-                                message.message,
+                                message.message.clone(),
                                 RollbackDomain::Images,
                                 image_definition_cleanup_paths(spec),
-                            );
-                        }
-                        return failure_with_cleanup_and_tail(
-                            operation.id.clone(),
-                            "image_execution_failed",
-                            execution_error_kind_from_image(&message.kind),
-                            message.message.clone(),
-                            tail.failure_tail(&message.message, spec),
-                            RollbackDomain::Images,
-                            image_definition_cleanup_paths(spec),
-                        );
+                            )
+                        } else {
+                            failure_with_cleanup_and_tail(
+                                operation.id.clone(),
+                                "image_execution_failed",
+                                execution_error_kind_from_image(&message.kind),
+                                message.message.clone(),
+                                tail.failure_tail(&message.message, spec),
+                                RollbackDomain::Images,
+                                image_definition_cleanup_paths(spec),
+                            )
+                        };
+                        // Where the time went before the failure.
+                        return result.with_log_messages(message.step_times);
                     }
                 };
                 let image_cleanup = image_cleanup_paths(&image_result);

@@ -114,6 +114,10 @@ pub enum ImageProviderErrorKind {
 pub struct ImageProviderError {
     pub kind: ImageProviderErrorKind,
     pub message: String,
+    /// Step time messages (`gaia_process::step_time_message`) of the work
+    /// done before the failure, so a failed or cancelled operation still
+    /// shows where its time went.
+    pub step_times: Vec<String>,
 }
 
 impl ImageProviderError {
@@ -121,7 +125,13 @@ impl ImageProviderError {
         Self {
             kind,
             message: message.into(),
+            step_times: Vec::new(),
         }
+    }
+
+    pub fn with_step_times(mut self, step_times: impl IntoIterator<Item = String>) -> Self {
+        self.step_times.extend(step_times);
+        self
     }
 
     pub fn backend_command(message: impl Into<String>) -> Self {

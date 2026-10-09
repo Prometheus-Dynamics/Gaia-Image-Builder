@@ -84,6 +84,13 @@ pub(crate) fn package_cache(
     Ok(Some(PackageCache { dir, max_size }))
 }
 
+impl PackageCache {
+    /// A warning when the cache's filesystem cannot hold `max_size` more.
+    pub(crate) fn space_warning(&self) -> Option<String> {
+        cache_space_warning("package cache", &self.dir, self.max_size)
+    }
+}
+
 /// What packages are built with, as part of every key: the Docker image
 /// (by id when Docker can tell) or the host compiler.
 pub(crate) fn execution_identity(execution: &ImageExecutionContext) -> String {

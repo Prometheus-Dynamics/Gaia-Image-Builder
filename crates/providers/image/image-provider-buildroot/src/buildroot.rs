@@ -499,14 +499,24 @@ pub(crate) fn run_buildroot_with(
         }
     }
     let make_started = std::time::SystemTime::now();
-    messages.extend(run_command(
-        command,
-        "buildroot make",
-        command_context.execution,
-        command_context.policy,
-        command_context.log_sink,
-        command_context.cancel_check,
-    )?);
+    messages.extend(
+        run_command(
+            command,
+            "buildroot make",
+            command_context.execution,
+            command_context.policy,
+            command_context.log_sink,
+            command_context.cancel_check,
+        )
+        // Which packages a failed or interrupted make spent its time on.
+        .map_err(|error| {
+            error.with_step_times(buildroot_build_time_steps(
+                output_dir,
+                make_started,
+                std::time::SystemTime::now(),
+            ))
+        })?,
+    );
     messages.extend(buildroot_build_time_steps(
         output_dir,
         make_started,

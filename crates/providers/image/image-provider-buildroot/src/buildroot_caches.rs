@@ -102,6 +102,7 @@ pub(crate) fn restore_cached_packages(
             }
         },
     };
+    messages.extend(cache.space_warning());
     let started = std::time::Instant::now();
     let identity = execution_identity(command_context.execution);
     let keys = package_keys(&KeyInputs {

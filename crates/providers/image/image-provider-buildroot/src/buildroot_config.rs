@@ -320,12 +320,23 @@ pub(crate) fn apply_buildroot_cache_config(
     }
     let policy = command_context.policy;
     let mut overrides = Vec::new();
+    let mut warnings = Vec::new();
     if let Some(download_dir) = configured_download_dir(spec, policy)? {
         overrides.push(("BR2_DL_DIR".to_string(), quoted_path_value(&download_dir)?));
     }
     if policy.ccache_enabled {
         let ccache_dir = buildroot_ccache_dir(spec, policy)?;
         ensure_ccache_max_size(&ccache_dir, policy.ccache_max_size.as_deref())?;
+        let max_size = policy
+            .ccache_max_size
+            .as_deref()
+            .unwrap_or(DEFAULT_CCACHE_MAX_SIZE)
+            .trim_end_matches('i')
+            .parse::<gaia_spec::ByteSize>()
+            .map(gaia_spec::ByteSize::bytes);
+        if let Ok(max_size) = max_size {
+            warnings.extend(cache_space_warning("ccache", &ccache_dir, max_size));
+        }
         overrides.push(("BR2_CCACHE".to_string(), "y".to_string()));
         overrides.push((
             "BR2_CCACHE_DIR".to_string(),
@@ -339,7 +350,7 @@ pub(crate) fn apply_buildroot_cache_config(
         overrides.push(("BR2_PER_PACKAGE_DIRECTORIES".to_string(), "y".to_string()));
     }
     if overrides.is_empty() {
-        return Ok(Vec::new());
+        return Ok(warnings);
     }
 
     let original = fs::read_to_string(&config_path).map_err(|error| {
@@ -353,7 +364,7 @@ pub(crate) fn apply_buildroot_cache_config(
     })?;
     let merged = merge_buildroot_config_assignments(&original, &overrides);
     if merged == original {
-        return Ok(Vec::new());
+        return Ok(warnings);
     }
     fs::write(&config_path, merged).map_err(|error| {
         ImageProviderError::new(
@@ -424,6 +435,47 @@ pub(crate) fn default_cache_dir(
         return Ok(dir);
     }
     ensure_cache_dir(spec, &format!(".gaia/cache/{relative}"), label)
+}
+
+/// Prefix of the run messages that warn about cache sizes; the provider
+/// moves them into [`ImageExecutionResult::warnings`].
+pub(crate) const CACHE_SPACE_WARNING_PREFIX: &str = "warning: buildroot cache: ";
+
+/// A warning when the filesystem holding a cache has less free space than
+/// the cache may grow to, so filling it up is a matter of time.
+pub(crate) fn cache_space_warning(label: &str, dir: &Path, max_size: u64) -> Option<String> {
+    let available = filesystem_available_bytes(dir)?;
+    (available < max_size).then(|| {
+        let gib = |bytes: u64| bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+        format!(
+            "{CACHE_SPACE_WARNING_PREFIX}{label} at '{}' may grow to {:.0} GiB but its \
+             filesystem has {:.0} GiB free; lower its max_size or move it to a larger disk",
+            dir.display(),
+            gib(max_size),
+            gib(available)
+        )
+    })
+}
+
+/// Free bytes on the filesystem holding `dir` (`df -Pk`).
+fn filesystem_available_bytes(dir: &Path) -> Option<u64> {
+    let output = Command::new("df")
+        .arg("-Pk")
+        .arg(dir)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let available_kib = text
+        .lines()
+        .nth(1)?
+        .split_whitespace()
+        .nth(3)?
+        .parse::<u64>()
+        .ok()?;
+    Some(available_kib * 1024)
 }
 
 /// Sets ccache's `max_size` in the cache's own `ccache.conf`, which every

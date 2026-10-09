@@ -1,16 +1,33 @@
 use super::*;
 
+/// Runs a command (with the policy's retries and timeout), returning its
+/// step time; a failure carries it too.
 pub(crate) fn run_command(
-    mut command: Command,
+    command: Command,
     label: &str,
     execution: &ImageExecutionContext,
     policy: &ImageExecutionPolicy,
     log_sink: Option<ProcessLogSink>,
     cancel_check: Option<ProcessCancelCheck>,
 ) -> Result<Vec<String>, ImageProviderError> {
+    let started = std::time::Instant::now();
+    let step_time = || gaia_process::step_time_message(label, started.elapsed());
+    match run_command_attempts(command, label, execution, policy, log_sink, cancel_check) {
+        Ok(()) => Ok(vec![step_time()]),
+        Err(error) => Err(error.with_step_times([step_time()])),
+    }
+}
+
+fn run_command_attempts(
+    mut command: Command,
+    label: &str,
+    execution: &ImageExecutionContext,
+    policy: &ImageExecutionPolicy,
+    log_sink: Option<ProcessLogSink>,
+    cancel_check: Option<ProcessCancelCheck>,
+) -> Result<(), ImageProviderError> {
     let attempts = policy.retry_attempts.max(1);
     let timeout = Duration::from_secs(policy.timeout_seconds.max(1));
-    let started = std::time::Instant::now();
     let mut last_error = String::new();
     for attempt in 1..=attempts {
         tracing::debug!(
@@ -41,10 +58,7 @@ pub(crate) fn run_command(
                 attempts,
                 "image provider command succeeded"
             );
-            return Ok(vec![gaia_process::step_time_message(
-                label,
-                started.elapsed(),
-            )]);
+            return Ok(());
         }
         last_error = format!(
             "{label} failed on attempt {attempt}/{attempts}: {}",
