@@ -328,6 +328,10 @@ pub(crate) fn run_buildroot_with(
         .any(|dir| output_dir.join(dir).is_dir());
     let something_changed = !config_changes.is_empty() || !override_changes.is_empty();
     let previous_graph = PackageGraph::load(output_dir);
+    messages.extend(redo_interrupted_packages(
+        output_dir,
+        &[previous_graph.as_ref()],
+    )?);
     let current_graph = if (built_before && something_changed) || previous_graph.is_none() {
         query_package_graph(
             spec,
@@ -529,23 +533,25 @@ pub(crate) fn run_buildroot_with(
         }
     }
     let make_started = std::time::SystemTime::now();
+    mark_make_running(output_dir)?;
+    let make = run_command(
+        command,
+        "buildroot make",
+        command_context.execution,
+        command_context.policy,
+        command_context.log_sink.clone(),
+        command_context.cancel_check.clone(),
+    );
     messages.extend(
-        run_command(
-            command,
-            "buildroot make",
-            command_context.execution,
-            command_context.policy,
-            command_context.log_sink.clone(),
-            command_context.cancel_check.clone(),
-        )
-        // Which packages a failed or interrupted make spent its time on.
-        .map_err(|error| {
-            error.with_step_times(buildroot_build_time_steps(
-                output_dir,
-                make_started,
-                std::time::SystemTime::now(),
-            ))
-        })?,
+        finish_make(output_dir, make, cached_packages.as_ref())
+            // Which packages a failed or interrupted make spent its time on.
+            .map_err(|error| {
+                error.with_step_times(buildroot_build_time_steps(
+                    output_dir,
+                    make_started,
+                    std::time::SystemTime::now(),
+                ))
+            })?,
     );
     messages.extend(buildroot_build_time_steps(
         output_dir,

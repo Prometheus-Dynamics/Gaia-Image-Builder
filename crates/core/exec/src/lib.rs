@@ -235,6 +235,7 @@ pub fn execute_plan_with_cancellation_and_observer(
                 index,
                 result,
                 duration,
+                paused,
                 unit_finished,
                 heavy,
             }) = result_rx.recv()
@@ -264,7 +265,7 @@ pub fn execute_plan_with_cancellation_and_observer(
                     result.cleanup_domain,
                     result.cleanup_paths.clone(),
                 ));
-                runtime.record_timed(result, duration);
+                runtime.record_timed(result, duration, paused);
                 continue;
             }
 
@@ -313,7 +314,7 @@ pub fn execute_plan_with_cancellation_and_observer(
                 }
             }
 
-            runtime.record_timed(result, duration);
+            runtime.record_timed(result, duration, paused);
         }
     });
 

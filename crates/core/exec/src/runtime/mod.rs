@@ -47,7 +47,10 @@ pub struct ExecutionOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationTiming {
     pub operation_id: OperationId,
+    /// Time it ran, not counting time the build was paused.
     pub duration: Duration,
+    /// Time the build was paused while it ran.
+    pub paused: Duration,
     pub status: OperationTimingStatus,
     /// Steps inside the operation that reported their wall time, in order.
     pub steps: Vec<(String, Duration)>,
@@ -119,8 +122,14 @@ impl ExecutionRuntime {
         &self.context
     }
 
-    /// Records a result together with the wall-clock time it took.
-    pub fn record_timed(&mut self, result: OperationExecutionResult, duration: Duration) {
+    /// Records a result together with the time it took and the time the
+    /// build was paused meanwhile.
+    pub fn record_timed(
+        &mut self,
+        result: OperationExecutionResult,
+        duration: Duration,
+        paused: Duration,
+    ) {
         let status = if result.error.is_some() {
             OperationTimingStatus::Failed
         } else if result.cancelled {
@@ -141,6 +150,7 @@ impl ExecutionRuntime {
         self.outcome.operation_timings.push(OperationTiming {
             operation_id: result.operation_id.clone(),
             duration,
+            paused,
             status,
             steps,
         });

@@ -67,8 +67,18 @@ fn slowest_operation_lines(
     ran.into_iter()
         .take(limit)
         .map(|timing| {
+            let paused = if timing.paused_ms > 0 {
+                format!(
+                    ", paused {}",
+                    gaia_plan::format_duration_short(std::time::Duration::from_millis(
+                        timing.paused_ms
+                    ))
+                )
+            } else {
+                String::new()
+            };
             format!(
-                "operation time: {} {} ({})",
+                "operation time: {} {} ({}{paused})",
                 gaia_plan::format_duration_short(std::time::Duration::from_millis(
                     timing.duration_ms
                 )),
@@ -210,7 +220,7 @@ pub(crate) fn print_outcome(outcome: &CommandOutcome) {
                 println!("plan {}: {}", diagnostic.code, diagnostic.message);
             }
         }
-        CommandOutcome::CacheReport { text } => println!("{text}"),
+        CommandOutcome::Text { text } => println!("{text}"),
         CommandOutcome::Cleaned { spec, report } => {
             let action = if report.dry_run {
                 "would clean"
@@ -319,6 +329,10 @@ pub(crate) fn print_outcome(outcome: &CommandOutcome) {
             }
             for line in slowest_step_lines(&report.summary.operation_timings, 10) {
                 println!("{line}");
+            }
+            let paused = gaia_process::paused_total();
+            if !paused.is_zero() {
+                println!("paused: {}", gaia_plan::format_duration_short(paused));
             }
             if report.summary.rolled_back_operations > 0 {
                 println!(

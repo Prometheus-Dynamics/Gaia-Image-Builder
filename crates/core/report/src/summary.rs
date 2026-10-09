@@ -113,6 +113,7 @@ pub fn render_summary(
             .map(|timing| OperationTimingRecord {
                 operation_id: timing.operation_id.as_str().to_string(),
                 duration_ms: u64::try_from(timing.duration.as_millis()).unwrap_or(u64::MAX),
+                paused_ms: u64::try_from(timing.paused.as_millis()).unwrap_or(u64::MAX),
                 status: timing.status.as_str().to_string(),
                 steps: timing
                     .steps

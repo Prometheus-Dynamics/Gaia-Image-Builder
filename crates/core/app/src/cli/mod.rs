@@ -83,6 +83,9 @@ impl AppArgs {
             Some("plan") => Some(AppCommand::Plan),
             Some("clean") => Some(AppCommand::Clean),
             Some("cache") => Some(AppCommand::Cache),
+            Some("pause") => Some(AppCommand::Pause),
+            Some("resume") => Some(AppCommand::Resume),
+            Some("cancel") => Some(AppCommand::Cancel),
             Some("lock") => Some(AppCommand::Lock),
             Some("run") => Some(AppCommand::Run),
             _ => None,
@@ -292,6 +295,10 @@ pub enum AppCommand {
     Plan,
     Clean,
     Cache,
+    /// Signal the running `gaia run` of a build.
+    Pause,
+    Resume,
+    Cancel,
     Lock,
     Run,
 }

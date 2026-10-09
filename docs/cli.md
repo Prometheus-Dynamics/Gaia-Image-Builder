@@ -10,7 +10,11 @@ gaia validate <build.toml>
 gaia plan <build.toml>
 gaia clean <build.toml>
 gaia lock <build.toml>
+gaia cache <build.toml>
 gaia run <build.toml>
+gaia pause <build.toml>
+gaia resume <build.toml>
+gaia cancel <build.toml>
 gaia tui <build.toml>
 ```
 
@@ -210,6 +214,23 @@ After execution completes, prints:
 - failure-class summary
 - checkpoint built/reused counts
 - report file paths and sizes
+
+### `pause`, `resume`, `cancel`
+
+Signal the running `gaia run` of a build (found through the pid it keeps in
+`<build_dir>/.gaia-run.pid`), from another terminal or a script:
+
+- `gaia pause` is Ctrl-Z in the running `gaia run`: every running command is
+  stopped (its process group gets SIGSTOP, its docker container is paused)
+  and Gaia itself stops. No timeout runs while paused, and operation times
+  exclude the pause (`paused_ms` in `summary.json`, `paused` in the run
+  summary).
+- `gaia resume` is `fg`: the commands continue where they were.
+- `gaia cancel` is Ctrl-C: the build stops, keeping its work (see
+  [Cancellation](execution.md#cancellation)). It continues a paused run first.
+
+The next `gaia run` with the same inputs says it resumes, reuses the finished
+operations and continues the Buildroot build where it stopped.
 
 ### `tui`
 

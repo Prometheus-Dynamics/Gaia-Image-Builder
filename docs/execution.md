@@ -128,6 +128,24 @@ for running operations to finish cleanup before recording the cancelled outcome.
 
 `gaia run` turns Ctrl-C and SIGTERM into a cancellation (a second Ctrl-C exits
 immediately), so commands are stopped the same way as on a timeout.
+`gaia cancel <build>` does the same from another terminal, and Ctrl-Z or
+`gaia pause` pauses the build instead (see [`pause`](cli.md)).
+
+A cancelled run keeps its work:
+- operations that finished are recorded in the reuse state and reused by the
+  next run; rollback only removes the collected images and archives of the
+  run, never the Buildroot output tree;
+- Buildroot packages that finished are kept in the output tree and stored in
+  the package cache before the operation ends;
+- packages Buildroot was in the middle of when its `make` was killed (by a
+  cancel, a timeout, or Gaia itself stopping) are built again from the start
+  by the next run, since a step cut short can leave half-applied patches or a
+  half-configured tree. Gaia tells them apart with a marker it writes before
+  `make` and removes when `make` exits on its own; after a normal build
+  failure the next run continues at the failed step as before.
+
+The config snapshot, package graph and override digests are recorded before
+`make`, so an interruption alone never causes a clean.
 
 Docker-backed commands run with `docker run --rm --init --cidfile <file>`. When
 a command is stopped early (timeout, cancellation, polling failure), Gaia kills
@@ -162,7 +180,8 @@ are cleaned per the policy above. Cancellation still rolls back as usual.
 
 ## Timing
 
-Every operation's wall-clock duration is recorded in the run outcome and in
+Time spent paused is excluded from every timeout and duration and recorded
+separately (`paused_ms`). Every operation's wall-clock duration is recorded in the run outcome and in
 `summary.json` (`operation_timings`), and `gaia run` prints the slowest
 operations. The last duration of each operation that executed is saved in the
 reuse state (`dur=<operation id>;<ms>` lines). `gaia plan` and the TUI Plan

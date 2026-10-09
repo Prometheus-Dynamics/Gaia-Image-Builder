@@ -1,5 +1,7 @@
 mod cache;
 mod clean;
+#[cfg(unix)]
+mod control;
 mod interrupt;
 mod lock;
 mod plan;
@@ -61,7 +63,8 @@ pub enum CommandOutcome {
         spec: ResolvedBuildSpec,
         report: CleanReport,
     },
-    CacheReport {
+    /// A command's plain-text report (`gaia cache`, `gaia pause`, ...).
+    Text {
         text: String,
     },
     Locked {
@@ -152,6 +155,14 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
             plan_build_command(context, &args.build, &resolve_options(&args), &targets)
         }
         AppCommand::Clean => clean_build_command(&args.build, &resolve_options(&args), &args.clean),
+        #[cfg(unix)]
+        AppCommand::Pause | AppCommand::Resume | AppCommand::Cancel => {
+            control::control_command(&args.build, &resolve_options(&args), args.command)
+        }
+        #[cfg(not(unix))]
+        AppCommand::Pause | AppCommand::Resume | AppCommand::Cancel => CommandOutcome::Failed {
+            message: "pause, resume and cancel need a Unix system".into(),
+        },
         AppCommand::Cache => cache_command(&args.build, &resolve_options(&args), &args.cache),
         AppCommand::Lock => lock_build_command(&args.build, &resolve_options(&args), &args.lock),
         AppCommand::Run => {
@@ -201,6 +212,9 @@ fn help_text() -> String {
         "  gaia cache [build-config] --remove <package>[@key-prefix][,...] [--dry-run]",
         "  gaia cache [build-config] --remove-legacy [--dry-run]",
         "  gaia cache [build-config] --clear system|project|ccache [--dry-run]",
+        "  gaia pause [build-config]      (or Ctrl-Z in the running gaia run)",
+        "  gaia resume [build-config]     (or fg)",
+        "  gaia cancel [build-config]     (or Ctrl-C; finished work is kept)",
         "  gaia lock [build-config]",
         "  gaia lock [build-config] --update [source-id[,source-id...]]",
         "  gaia run [build-config]",

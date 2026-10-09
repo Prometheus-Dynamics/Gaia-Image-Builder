@@ -410,6 +410,7 @@ mod tests {
             steps: Vec::new(),
             operation_id: gaia_plan::OperationId::new(id),
             duration: std::time::Duration::from_millis(ms),
+            paused: std::time::Duration::ZERO,
             status,
         };
         let outcome = ExecutionOutcome {

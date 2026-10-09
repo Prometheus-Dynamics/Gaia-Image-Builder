@@ -25,6 +25,10 @@ use super::{CommandOutcome, RunArtifacts, load_reuse_state, save_reuse_state};
 
 const DEFAULT_POST_BUILD_HOOK_TIMEOUT_SECONDS: u64 = 300;
 
+/// Marks, under the build dir, a run that was cancelled, so the next one
+/// says it resumes.
+const RUN_INTERRUPTED_FILE: &str = ".gaia-run-interrupted";
+
 pub fn run_build_command(
     context: &AppContext,
     build: &str,
@@ -133,6 +137,14 @@ fn collect_run_artifacts(
             plan_diagnostics,
         );
     }
+    let interrupted_marker =
+        std::path::Path::new(&spec.workspace.build_dir).join(RUN_INTERRUPTED_FILE);
+    if interrupted_marker.is_file() {
+        eprintln!(
+            "resuming: the last run was interrupted; finished operations are reused and \
+             Buildroot continues where it stopped"
+        );
+    }
     let outcome = execute_plan_with_console_progress(
         &spec,
         &plan,
@@ -152,6 +164,11 @@ fn collect_run_artifacts(
     // Record finished work before anything else can fail, including after a
     // failed or cancelled run.
     save_reuse_state(&spec, &plan, &outcome, reuse_state.as_ref());
+    if outcome.cancelled {
+        let _ = std::fs::write(&interrupted_marker, "");
+    } else {
+        let _ = std::fs::remove_file(&interrupted_marker);
+    }
     let report = generate_report(&spec, &validation, &plan, &outcome);
     let report_outputs = write_report_outputs(&spec, &report)?;
     let run_duration = started_at.elapsed();
@@ -183,6 +200,7 @@ fn execute_plan_with_console_progress(
 ) -> gaia_exec::ExecutionOutcome {
     let cancellation = ExecutionCancellation::new();
     let _interrupt = super::interrupt::cancel_on_interrupt(&cancellation);
+    let _run = super::interrupt::publish_run(std::path::Path::new(&spec.workspace.build_dir));
     if console_progress_disabled() {
         return execute_plan_with_cancellation_and_observer(
             spec,

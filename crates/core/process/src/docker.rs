@@ -207,6 +207,23 @@ impl DockerContainer {
         self.discard_id_file();
     }
 
+    /// `docker pause` or `docker unpause` the container, when it has
+    /// started.
+    pub(crate) fn set_paused(&self, paused: bool) {
+        let id = std::fs::read_to_string(&self.cidfile)
+            .map(|contents| contents.trim().to_string())
+            .unwrap_or_default();
+        if id.is_empty() {
+            return;
+        }
+        let _ = Command::new(&self.docker)
+            .args([if paused { "pause" } else { "unpause" }, &id])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+
     pub(crate) fn discard_id_file(&self) {
         let _ = std::fs::remove_file(&self.cidfile);
     }

@@ -17,6 +17,7 @@ const MAX_RETAINED_LINE_BYTES: usize = 64 * 1024;
 const STREAM_MESSAGE_QUEUE_BOUND: usize = 64;
 
 mod docker;
+mod pause;
 mod retention;
 mod step_time;
 mod stream;
@@ -28,6 +29,7 @@ pub use docker::{
     docker_build_context_hash, docker_image_build_command, docker_image_id_command,
     docker_local_image_tag, docker_run_command, normalize_docker_mount_path,
 };
+pub use pause::{ActiveClock, is_paused, paused_total, request_pause, request_resume};
 use retention::{
     StreamDrainState, drain_stream_messages, drain_stream_messages_until_idle,
     wait_for_stream_message,
@@ -191,12 +193,15 @@ pub fn run_command_with_timeout_and_retention(
 
     let mut stream_state = StreamDrainState::with_retention(retention);
 
-    let start = Instant::now();
+    // Timeouts count only time not paused (see `pause`).
+    let start = ActiveClock::start();
+    let mut stopped = false;
     let status = loop {
         drain_stream_messages(&rx, &mut stream_state);
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) => {
+                stopped = follow_pause(&process_group, stopped);
                 if cancel_check.as_ref().is_some_and(|cancel| cancel()) {
                     terminate_child_tree(&mut child, &process_group);
                     drain_stream_messages_until_idle(
@@ -339,12 +344,15 @@ pub fn run_command_stdout_to_file_with_timeout_and_retention(
     let mut stream_state = StreamDrainState::with_retention(retention);
     stream_state.stdout_done = true;
 
-    let start = Instant::now();
+    // Timeouts count only time not paused (see `pause`).
+    let start = ActiveClock::start();
+    let mut stopped = false;
     let status = loop {
         drain_stream_messages(&rx, &mut stream_state);
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) => {
+                stopped = follow_pause(&process_group, stopped);
                 if cancel_check.as_ref().is_some_and(|cancel| cancel()) {
                     terminate_child_tree(&mut child, &process_group);
                     drain_stream_messages_until_idle(
@@ -643,6 +651,26 @@ impl ProcessGroup {
         }
     }
 
+    /// Stops (SIGSTOP, `docker pause`) or continues the command.
+    fn set_paused(&self, paused: bool) {
+        if paused && let Some(container) = &self.container {
+            container.set_paused(true);
+        }
+        #[cfg(unix)]
+        // SAFETY: a negative process-group id from a child this process
+        // spawned with `process_group(0)`; errors (an empty group) are
+        // ignored.
+        unsafe {
+            libc::kill(
+                -self.pgid,
+                if paused { libc::SIGSTOP } else { libc::SIGCONT },
+            );
+        }
+        if !paused && let Some(container) = &self.container {
+            container.set_paused(false);
+        }
+    }
+
     /// The command exited on its own; its container (`--rm`) is gone too.
     fn finished(&self) {
         terminate_leftover_tree(self);
@@ -652,10 +680,24 @@ impl ProcessGroup {
     }
 }
 
+/// Stops or continues the command when the build is paused or resumed;
+/// returns whether it is stopped now.
+fn follow_pause(group: &ProcessGroup, stopped: bool) -> bool {
+    let paused = is_paused();
+    if paused != stopped {
+        group.set_paused(paused);
+    }
+    paused
+}
+
 /// Stops a command early (timeout, cancellation, failure). Killing the
 /// docker client does not stop its container, so the container is removed
 /// explicitly; otherwise it keeps running with nobody reading its output.
 fn terminate_child_tree(child: &mut Child, group: &ProcessGroup) {
+    // A paused container cannot be removed; continue it first.
+    if is_paused() {
+        group.set_paused(false);
+    }
     terminate_leftover_tree(group);
     let _ = child.kill();
     let _ = child.wait();

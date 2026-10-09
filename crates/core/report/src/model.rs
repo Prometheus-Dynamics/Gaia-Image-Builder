@@ -60,7 +60,11 @@ pub struct RunSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct OperationTimingRecord {
     pub operation_id: String,
+    /// Time it ran, not counting time the build was paused.
     pub duration_ms: u64,
+    /// Time the build was paused while it ran.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub paused_ms: u64,
     /// `built`, `reused`, `failed` or `cancelled`.
     pub status: String,
     /// Steps inside the operation that reported their wall time.
@@ -377,4 +381,8 @@ impl ReportFileKind {
             Self::RebuildReasons => "rebuild-reasons",
         }
     }
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }

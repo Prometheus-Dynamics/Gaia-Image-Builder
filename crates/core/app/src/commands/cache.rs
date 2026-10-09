@@ -41,7 +41,7 @@ pub fn cache_command(build: &str, options: &ResolveOptions, args: &CacheArgs) ->
         }
     };
     match run_cache_command(&spec, args) {
-        Ok(text) => CommandOutcome::CacheReport { text },
+        Ok(text) => CommandOutcome::Text { text },
         Err(message) => CommandOutcome::Failed { message },
     }
 }

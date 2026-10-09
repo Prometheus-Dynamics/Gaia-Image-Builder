@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use gaia_plan::{
     ExecutionPlan, OperationId, OperationParallelismDomain, OperationParallelismMode,
@@ -73,6 +73,8 @@ pub(crate) struct ScheduledResult {
     pub(crate) result: OperationExecutionResult,
     /// Wall-clock time of the unit that produced this result.
     pub(crate) duration: Duration,
+    /// Time the build spent paused while it ran.
+    pub(crate) paused: Duration,
     /// Set on the last result of a unit: its job slot is free again.
     pub(crate) unit_finished: bool,
     pub(crate) heavy: bool,
@@ -168,7 +170,8 @@ pub(crate) fn schedule_ready_operations<'scope, 'env>(
             job_budget,
         };
         scope.spawn(move || {
-            let started = Instant::now();
+            // Operation time excludes time the build spent paused.
+            let started = gaia_process::ActiveClock::start();
             let results = if let [(index, operation)] = unit.as_slice() {
                 vec![(
                     *index,
@@ -190,12 +193,14 @@ pub(crate) fn schedule_ready_operations<'scope, 'env>(
                     .collect()
             };
             let duration = started.elapsed();
+            let paused = started.paused();
             let last = results.len().saturating_sub(1);
             for (position, (index, result)) in results.into_iter().enumerate() {
                 let _ = tx.send(ScheduledResult {
                     index,
                     result,
                     duration,
+                    paused,
                     unit_finished: position == last,
                     heavy,
                 });

@@ -34,6 +34,7 @@ fn slowest_operations_skip_reused_and_sort_descending() {
         steps: Vec::new(),
         operation_id: id.into(),
         duration_ms: ms,
+        paused_ms: 0,
         status: status.into(),
     };
     let lines = slowest_operation_lines(
@@ -63,6 +64,7 @@ fn slowest_steps_span_operations_and_sort_descending() {
         steps,
         operation_id: id.into(),
         duration_ms: 0,
+        paused_ms: 0,
         status: "built".into(),
     };
     let lines = slowest_step_lines(
