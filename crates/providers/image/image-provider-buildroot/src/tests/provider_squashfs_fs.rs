@@ -161,6 +161,8 @@ fn build_operation_applies_config_overrides_when_expected_images_exist() {
 
     fs::create_dir_all(&source_dir).expect("source dir");
     fs::create_dir_all(&images_dir).expect("images dir");
+    // A tree that was built: it has a target directory.
+    fs::create_dir_all(output_dir.join("target")).expect("target dir");
     fs::write(images_dir.join("rootfs.tar"), "existing image").expect("expected image");
     fs::write(
         output_dir.join(".config"),

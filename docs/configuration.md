@@ -562,18 +562,25 @@ parallel_packages = true          # required
 
 [providers.buildroot.package_cache]
 enabled = true
-# dir = "/srv/buildroot-packages" # default: <user cache root>/buildroot/packages
+# dir = "/srv/buildroot-packages" # default: see below
 max_size = "100G"                 # default; least recently used packages go first
 ```
 
 Built packages are cached by content and reused by every build of the user,
 in any project, so a wiped output tree or a second image with the same
 kernel, Mesa or libcamera restores them instead of compiling. After a
-successful `make`, each package built in that run is archived: the files it
-added to its per-package directories (everything that is not a hard link to
-a dependency's file, so also what it installs outside its install steps,
-such as an extracted external toolchain), its image files, file lists and
-stamps. Before the next `make`, packages not yet built are restored,
+successful `make`, each package built in that run is stored as a
+directory: the files it added to its per-package directories (everything
+that is not a hard link to the same path in a direct dependency's trees, so
+also what it installs outside its install steps, such as an extracted
+external toolchain), its image files, file lists, kconfig `.config` and
+stamps. Files are cloned with `cp --reflink=auto`: when the cache is on the
+build's filesystem and that supports reflinks (btrfs, XFS), storing and
+restoring copy no file data. The default directory is
+`<user cache root>/buildroot/packages` when that is on the build's
+filesystem, otherwise `<workspace>/.gaia/cache/buildroot/packages` (with a
+note in the run output); to share packages between projects, set `dir` to a
+directory on the build disk. Before the next `make`, packages not yet built are restored,
 dependencies first, when their key is cached and all their dependencies are
 built or restored: as Buildroot's per-package preparation does, their
 dependencies' trees are linked in, then their own files are added, and their

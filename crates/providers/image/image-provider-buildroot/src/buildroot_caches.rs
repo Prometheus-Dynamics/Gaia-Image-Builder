@@ -71,7 +71,7 @@ pub(crate) fn restore_cached_packages(
         graph,
         messages,
     } = request;
-    let Some(cache) = package_cache(spec, command_context.policy)? else {
+    let Some(cache) = package_cache(spec, command_context.policy, output_dir)? else {
         if command_context.policy.package_cache_enabled {
             messages.push(
                 "package cache: off, it needs [providers.buildroot] parallel_packages = true"
@@ -103,6 +103,7 @@ pub(crate) fn restore_cached_packages(
         },
     };
     messages.extend(cache.space_warning());
+    messages.extend(cache.note.clone());
     let started = std::time::Instant::now();
     let identity = execution_identity(command_context.execution);
     let keys = package_keys(&KeyInputs {

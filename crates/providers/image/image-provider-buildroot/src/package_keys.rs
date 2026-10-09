@@ -19,7 +19,8 @@
 use super::*;
 use sha2::{Digest, Sha256};
 
-const KEY_FORMAT: &str = "gaia-buildroot-package-v1";
+/// Bumped with the cache's entry format, so old entries are never read.
+const KEY_FORMAT: &str = "gaia-buildroot-package-v2";
 
 /// Infrastructure directories every package build uses, by content.
 const INFRA_DIRS: &[&str] = &["support/scripts", "system/skeleton", "toolchain"];

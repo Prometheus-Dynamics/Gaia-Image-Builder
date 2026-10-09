@@ -1,15 +1,16 @@
 //! A cache of built Buildroot packages shared by every build of the user,
 //! like Yocto's sstate for Buildroot packages.
 //!
-//! After a successful `make`, each package built in this run is archived:
-//! the files it installed (Buildroot's per-package `.files-list*.txt`), read
-//! from its per-package directories (`BR2_PER_PACKAGE_DIRECTORIES`), its
-//! file lists, and the names of its stamps. The archive is stored under the
-//! package's key ([`package_keys`]). Before the next `make` of any build,
-//! packages that are not built yet and whose key is cached are restored
-//! instead: their files are extracted, the output directory path is
-//! rewritten in the text files that held the old one, and their stamps are
-//! recreated in order, so `make` treats them as built.
+//! After a successful `make`, each package built in this run is stored as
+//! a directory under its key ([`package_keys`]): the files it added to its
+//! per-package trees (`BR2_PER_PACKAGE_DIRECTORIES`), its image files, file
+//! lists and kconfig `.config`, with a manifest of them and of its stamps.
+//! Files are cloned (`cp --reflink=auto`): on the build's own filesystem
+//! with reflinks (btrfs, XFS) storing and restoring copy no data. Before the
+//! next `make` of any build, packages that are not built yet and whose key
+//! is cached are restored instead: their files are cloned back, the output
+//! directory path is rewritten in the text files that held the old one, and
+//! their stamps are recreated in order, so `make` treats them as built.
 //!
 //! A package is restored only once all its dependencies are built or
 //! restored: like Buildroot's per-package preparation, its per-package
@@ -28,7 +29,7 @@ const DEFAULT_PACKAGE_CACHE_MAX_SIZE: &str = "100G";
 
 /// Stamps in the order Buildroot creates them; restored stamps get
 /// increasing modification times in this order.
-const STAMP_ORDER: &[&str] = &[
+pub(crate) const STAMP_ORDER: &[&str] = &[
     ".stamp_downloaded",
     ".stamp_rsynced",
     ".stamp_extracted",
@@ -53,6 +54,8 @@ const FILE_LISTS: &[&str] = &[
 pub(crate) struct PackageCache {
     dir: PathBuf,
     max_size: u64,
+    /// Where the cache is, when that needs saying.
+    pub(crate) note: Option<String>,
 }
 
 /// The configured package cache, or `None` when it is off. It needs
@@ -61,13 +64,37 @@ pub(crate) struct PackageCache {
 pub(crate) fn package_cache(
     spec: &ResolvedBuildSpec,
     policy: &ImageExecutionPolicy,
+    output_dir: &Path,
 ) -> Result<Option<PackageCache>, ImageProviderError> {
     if !policy.package_cache_enabled || !policy.parallel_packages {
         return Ok(None);
     }
+    let mut note = None;
     let dir = match policy.package_cache_dir.as_deref() {
         Some(dir) => ensure_cache_dir(spec, dir, "buildroot package cache")?,
-        None => default_cache_dir(spec, DEFAULT_PACKAGE_CACHE_DIR, "buildroot package cache")?,
+        None => {
+            let shared =
+                default_cache_dir(spec, DEFAULT_PACKAGE_CACHE_DIR, "buildroot package cache")?;
+            // Storing and restoring clone files; across filesystems that
+            // would copy everything, so stay on the build's filesystem.
+            if reflinks_between(output_dir, &shared) || !supports_reflinks(output_dir) {
+                shared
+            } else {
+                let local = ensure_cache_dir(
+                    spec,
+                    &format!(".gaia/cache/{DEFAULT_PACKAGE_CACHE_DIR}"),
+                    "buildroot package cache",
+                )?;
+                note = Some(format!(
+                    "package cache: '{}' is on another filesystem than the build, so this \
+                     workspace uses '{}'; set [providers.buildroot.package_cache] dir to a \
+                     directory on the build's filesystem to share packages between projects",
+                    shared.display(),
+                    local.display()
+                ));
+                local
+            }
+        }
     };
     let max_size = policy
         .package_cache_max_size
@@ -81,7 +108,11 @@ pub(crate) fn package_cache(
             )
         })?
         .bytes();
-    Ok(Some(PackageCache { dir, max_size }))
+    Ok(Some(PackageCache {
+        dir,
+        max_size,
+        note,
+    }))
 }
 
 impl PackageCache {
@@ -122,6 +153,12 @@ pub(crate) fn execution_identity(execution: &ImageExecutionContext) -> String {
 
 struct Manifest {
     output_dir: String,
+    /// Directories (with their modes) and files of the entry, relative to
+    /// the output directory.
+    dirs: Vec<(String, u32)>,
+    files: Vec<String>,
+    /// Bytes of its files.
+    size: u64,
     stamps: Vec<String>,
     /// Archive paths of text files that hold `output_dir`.
     rewrite: Vec<String>,
@@ -136,6 +173,9 @@ impl Manifest {
             "package": name,
             "version": version,
             "output_dir": self.output_dir,
+            "dirs": self.dirs,
+            "files": self.files,
+            "size": self.size,
             "stamps": self.stamps,
             "rewrite": self.rewrite,
             "relocatable": self.relocatable,
@@ -153,8 +193,23 @@ impl Manifest {
                 .map(|item| item.as_str().map(str::to_string))
                 .collect()
         };
+        let dirs = value
+            .get("dirs")?
+            .as_array()?
+            .iter()
+            .map(|pair| {
+                let pair = pair.as_array()?;
+                Some((
+                    pair.first()?.as_str()?.to_string(),
+                    u32::try_from(pair.get(1)?.as_u64()?).ok()?,
+                ))
+            })
+            .collect::<Option<Vec<_>>>()?;
         Some(Self {
             output_dir: value.get("output_dir")?.as_str()?.to_string(),
+            dirs,
+            files: strings("files")?,
+            size: value.get("size")?.as_u64()?,
             stamps: strings("stamps")?,
             rewrite: strings("rewrite")?,
             relocatable: value.get("relocatable")?.as_bool()?,
@@ -163,7 +218,7 @@ impl Manifest {
 }
 
 impl PackageCache {
-    /// The archive and manifest of a package build: relocatable, or
+    /// The directory and manifest of a package build: relocatable, or
     /// `pinned` to the output directory it was built in.
     fn entry(&self, name: &str, key: &str, pinned: Option<&Path>) -> (PathBuf, PathBuf) {
         let dir = self.dir.join(name);
@@ -174,10 +229,7 @@ impl PackageCache {
                 format!("{key}@{}", &hex(&digest)[..16])
             }
         };
-        (
-            dir.join(format!("{stem}.tar.zst")),
-            dir.join(format!("{stem}.json")),
-        )
+        (dir.join(&stem), dir.join(format!("{stem}.json")))
     }
 
     /// A cached build of the package that can be restored into
@@ -186,7 +238,7 @@ impl PackageCache {
         [None, Some(output_dir)].into_iter().find_map(|pinned| {
             let (archive, manifest) = self.entry(name, key, pinned);
             let manifest = Manifest::parse(&fs::read_to_string(manifest).ok()?)?;
-            (archive.is_file()
+            (archive.is_dir()
                 && (manifest.relocatable || Path::new(&manifest.output_dir) == output_dir))
                 .then_some((archive, manifest))
         })
@@ -323,18 +375,7 @@ impl PackageCache {
                 }
             }
         }
-        let status = Command::new("tar")
-            .arg("-I")
-            .arg("zstd -d -q")
-            .arg("-xf")
-            .arg(&archive)
-            .arg("-C")
-            .arg(output_dir)
-            .status()
-            .map_err(|error| format!("tar: {error}"))?;
-        if !status.success() {
-            return Err(format!("tar exited with {status}"));
-        }
+        clone_members(&archive, output_dir, &manifest.dirs, &manifest.files)?;
         let new_output = output_dir.display().to_string();
         if manifest.output_dir != new_output {
             for relative in &manifest.rewrite {
@@ -360,11 +401,18 @@ impl PackageCache {
             file.set_modified(start + Duration::from_millis(10 * index as u64))
                 .map_err(|error| error.to_string())?;
         }
-        // Recently used entries are evicted last.
-        if let Ok(file) = fs::File::options().append(true).open(&archive) {
-            let _ = file.set_modified(std::time::SystemTime::now());
-        }
+        self.mark_used(name, key, output_dir);
         Ok(())
+    }
+
+    /// Recently used entries are evicted last.
+    fn mark_used(&self, name: &str, key: &str, output_dir: &Path) {
+        for pinned in [None, Some(output_dir)] {
+            let (_, manifest) = self.entry(name, key, pinned);
+            if let Ok(file) = fs::File::options().append(true).open(&manifest) {
+                let _ = file.set_modified(std::time::SystemTime::now());
+            }
+        }
     }
 
     fn discard_partial(&self, output_dir: &Path, graph: &PackageGraph, name: &str) {
@@ -387,7 +435,6 @@ impl PackageCache {
         keys: &BTreeMap<String, Option<String>>,
         restored: &[String],
     ) -> (Vec<String>, Vec<String>) {
-        let mut inodes = InodeIndex::default();
         let mut stored = Vec::new();
         let mut skipped = Vec::new();
         for name in graph.package_names() {
@@ -406,13 +453,11 @@ impl PackageCache {
             {
                 continue;
             }
-            if let Some((archive, _)) = self.usable(output_dir, name, key) {
-                if let Ok(file) = fs::File::options().append(true).open(&archive) {
-                    let _ = file.set_modified(std::time::SystemTime::now());
-                }
+            if self.usable(output_dir, name, key).is_some() {
+                self.mark_used(name, key, output_dir);
                 continue;
             }
-            match self.store_one(output_dir, graph, name, key, stamp_dir, &mut inodes) {
+            match self.store_one(output_dir, graph, name, key, stamp_dir) {
                 Ok(()) => stored.push(name.to_string()),
                 Err(reason) => skipped.push(format!("{name}: {reason}")),
             }
@@ -430,39 +475,42 @@ impl PackageCache {
         name: &str,
         key: &str,
         stamp_dir: &str,
-        inodes: &mut InodeIndex,
     ) -> Result<(), String> {
         let per_package = format!("per-package/{name}");
         if !output_dir.join(&per_package).is_dir() {
             return Err("no per-package directory".to_string());
         }
         let output_text = output_dir.display().to_string();
-        let mut members = BTreeSet::new();
-        let mut rewrite = Vec::new();
-        let mut relocatable = true;
-        // Its own files: everything in its per-package trees that is not a
-        // hard link to a dependency's file (how Buildroot copies those in).
-        // This includes what it installs outside its install steps, such as
-        // an external toolchain extracted into the host directory.
-        let dependency_files = graph
+        let dependencies = graph
             .get(name)
             .map(|package| package.dependencies.iter().cloned().collect::<Vec<_>>())
-            .unwrap_or_default()
-            .into_iter()
-            .map(|dependency| inodes.of(output_dir, &dependency))
-            .collect::<Vec<_>>();
+            .unwrap_or_default();
+        // Its own files: everything in its per-package trees that is not a
+        // hard link to the file at the same path in a direct dependency's
+        // trees (how Buildroot copies dependencies in; those hold their own
+        // dependencies' files the same way). This includes what it
+        // installs outside its install steps, such as an external
+        // toolchain extracted into the host directory.
         let mut own = Vec::new();
         for tree in ["host", "target"] {
-            walk_files(
-                output_dir,
-                &format!("{per_package}/{tree}"),
-                &mut |member, metadata| {
-                    let inode = (metadata.dev(), metadata.ino());
-                    if !dependency_files.iter().any(|files| files.contains(&inode)) {
-                        own.push((member, metadata.is_file()));
-                    }
-                },
-            );
+            let root = format!("{per_package}/{tree}");
+            walk_files(output_dir, &root, &mut |member, metadata| {
+                let relative = &member[root.len() + 1..];
+                let inode = (metadata.dev(), metadata.ino());
+                let from_dependency = dependencies.iter().any(|dependency| {
+                    fs::symlink_metadata(
+                        output_dir
+                            .join("per-package")
+                            .join(dependency)
+                            .join(tree)
+                            .join(relative),
+                    )
+                    .is_ok_and(|other| (other.dev(), other.ino()) == inode)
+                });
+                if !from_dependency {
+                    own.push((member, metadata.is_file(), metadata.len()));
+                }
+            });
         }
         if let Ok(images) =
             fs::read_to_string(output_dir.join(stamp_dir).join(".files-list-images.txt"))
@@ -476,292 +524,143 @@ impl PackageCache {
                     .components()
                     .all(|component| matches!(component, Component::Normal(_)));
                 let member = format!("images/{path}");
-                if owner == name && normal && output_dir.join(&member).exists() {
-                    own.push((member, true));
+                if owner == name
+                    && normal
+                    && let Ok(metadata) = fs::symlink_metadata(output_dir.join(&member))
+                {
+                    own.push((member, metadata.is_file(), metadata.len()));
                 }
             }
         }
-        for (member, regular) in own {
+        // Build-tree files Buildroot or Gaia read after the build: the file
+        // lists, the kernel's module list, a kconfig package's `.config`.
+        for file in FILE_LISTS.iter().chain(&["modules.order", ".config"]) {
+            let member = format!("{stamp_dir}/{file}");
+            if let Ok(metadata) = fs::symlink_metadata(output_dir.join(&member)) {
+                own.push((member, metadata.is_file(), metadata.len()));
+            }
+        }
+        let mut files = BTreeSet::new();
+        let mut rewrite = Vec::new();
+        let mut relocatable = true;
+        let mut size = 0u64;
+        for (member, regular, length) in own {
             if regular {
-                let contents = fs::read(output_dir.join(&member))
-                    .map_err(|error| format!("{member}: {error}"))?;
-                if find_bytes(&contents, output_text.as_bytes()).is_some() {
-                    if contents.contains(&0) {
-                        relocatable = false;
-                    } else {
-                        rewrite.push(member.clone());
-                    }
+                size += length;
+                match file_holds(&output_dir.join(&member), output_text.as_bytes()) {
+                    Ok(Holds::Text) => rewrite.push(member.clone()),
+                    Ok(Holds::Binary) => relocatable = false,
+                    Ok(Holds::No) => {}
+                    Err(error) => return Err(format!("{member}: {error}")),
                 }
             }
-            members.insert(member);
-        }
-        for list in FILE_LISTS {
-            if output_dir.join(stamp_dir).join(list).is_file() {
-                members.insert(format!("{stamp_dir}/{list}"));
-            }
-        }
-        // Build-tree files Gaia or Buildroot read after the build: the
-        // kernel's module list and a kconfig package's configuration.
-        for file in ["modules.order", ".config"] {
-            if output_dir.join(stamp_dir).join(file).is_file() {
-                members.insert(format!("{stamp_dir}/{file}"));
-            }
+            files.insert(member);
         }
         // Directories too, so empty ones the package created survive.
+        let mut dir_names = BTreeSet::new();
         for root in ["target", "host"] {
-            collect_dirs(output_dir, &format!("{per_package}/{root}"), &mut members);
+            collect_dirs(output_dir, &format!("{per_package}/{root}"), &mut dir_names);
         }
+        for file in &files {
+            let mut parent = Path::new(file).parent();
+            while let Some(dir) = parent.filter(|dir| !dir.as_os_str().is_empty()) {
+                dir_names.insert(dir.to_string_lossy().into_owned());
+                parent = dir.parent();
+            }
+        }
+        let dirs = dir_names
+            .into_iter()
+            .map(|dir| {
+                let mode = fs::metadata(output_dir.join(&dir))
+                    .map(|metadata| metadata.mode() & 0o7777)
+                    .unwrap_or(0o755);
+                (dir, mode)
+            })
+            .collect::<Vec<_>>();
+        let files = files.into_iter().collect::<Vec<_>>();
         let stamps = stamps_in(&output_dir.join(stamp_dir));
 
-        let (archive, manifest_path) = self.entry(name, key, (!relocatable).then_some(output_dir));
-        let entry_dir = archive.parent().ok_or("no cache directory")?;
-        fs::create_dir_all(entry_dir).map_err(|error| error.to_string())?;
-        let temporary = entry_dir.join(format!(".{key}.{}.tmp", std::process::id()));
-        let list_path = entry_dir.join(format!(".{key}.{}.list", std::process::id()));
-        let list = members
-            .iter()
-            .flat_map(|member| member.bytes().chain(std::iter::once(0)))
-            .collect::<Vec<_>>();
-        fs::write(&list_path, list).map_err(|error| error.to_string())?;
-        // `-C` applies to the names that follow it, so it comes first.
-        let status = Command::new("tar")
-            .arg("-C")
-            .arg(output_dir)
-            .arg("--null")
-            .arg("--no-recursion")
-            .arg("-T")
-            .arg(&list_path)
-            .arg("-I")
-            .arg("zstd -T0 -3 -q")
-            .arg("-cf")
-            .arg(&temporary)
-            .stdin(std::process::Stdio::null())
-            .output();
-        let _ = fs::remove_file(&list_path);
-        match status {
-            Ok(output) if output.status.success() => {}
-            Ok(output) => {
-                let _ = fs::remove_file(&temporary);
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(format!(
-                    "tar exited with {}: {}",
-                    output.status,
-                    stderr.lines().take(3).collect::<Vec<_>>().join(" | ")
-                ));
-            }
-            Err(error) => {
-                let _ = fs::remove_file(&temporary);
-                return Err(format!("tar: {error}"));
-            }
-        }
+        let (entry, manifest_path) = self.entry(name, key, (!relocatable).then_some(output_dir));
+        let parent = entry.parent().ok_or("no cache directory")?;
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        let temporary = parent.join(format!(
+            ".{}.{}.tmp",
+            entry.file_name().unwrap_or_default().to_string_lossy(),
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&temporary);
+        clone_members(output_dir, &temporary, &dirs, &files).inspect_err(|_| {
+            let _ = fs::remove_dir_all(&temporary);
+        })?;
         let manifest = Manifest {
             output_dir: output_text,
+            dirs,
+            files,
+            size,
             stamps,
             rewrite,
             relocatable,
         };
-        fs::write(
-            &manifest_path,
-            manifest.to_json(
-                name,
-                graph
-                    .get(name)
-                    .and_then(|package| package.version.as_deref()),
-            ),
-        )
-        .and_then(|()| fs::rename(&temporary, &archive))
-        .map_err(|error| {
-            let _ = fs::remove_file(&temporary);
-            let _ = fs::remove_file(&manifest_path);
-            error.to_string()
-        })
+        let _ = fs::remove_dir_all(&entry);
+        fs::rename(&temporary, &entry)
+            .and_then(|()| {
+                fs::write(
+                    &manifest_path,
+                    manifest.to_json(
+                        name,
+                        graph
+                            .get(name)
+                            .and_then(|package| package.version.as_deref()),
+                    ),
+                )
+            })
+            .map_err(|error| {
+                let _ = fs::remove_dir_all(&temporary);
+                let _ = fs::remove_dir_all(&entry);
+                error.to_string()
+            })
     }
 
-    /// Removes the least recently used archives beyond `max_size`.
+    /// Removes the least recently used entries beyond `max_size`, by their
+    /// manifests (size, and last use as the manifest's modification time).
     fn evict(&self) {
-        let mut archives = Vec::new();
+        let mut entries = Vec::new();
         let mut total = 0u64;
         for package in fs::read_dir(&self.dir).into_iter().flatten().flatten() {
-            for entry in fs::read_dir(package.path()).into_iter().flatten().flatten() {
-                let path = entry.path();
-                if !path.to_string_lossy().ends_with(".tar.zst") {
+            for file in fs::read_dir(package.path()).into_iter().flatten().flatten() {
+                let path = file.path();
+                if path.extension().is_none_or(|extension| extension != "json") {
                     continue;
                 }
-                if let Ok(metadata) = entry.metadata() {
-                    total += metadata.len();
-                    let used = metadata.modified().unwrap_or(std::time::UNIX_EPOCH);
-                    archives.push((used, metadata.len(), path));
-                }
+                let Some(manifest) = fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|text| Manifest::parse(&text))
+                else {
+                    continue;
+                };
+                let used = file
+                    .metadata()
+                    .and_then(|metadata| metadata.modified())
+                    .unwrap_or(std::time::UNIX_EPOCH);
+                total += manifest.size;
+                entries.push((used, manifest.size, path));
             }
         }
         if total <= self.max_size {
             return;
         }
-        archives.sort();
+        entries.sort();
         let target = self.max_size / 10 * 9;
-        for (_, size, archive) in archives {
+        for (_, size, manifest) in entries {
             if total <= target {
                 break;
             }
-            let _ = fs::remove_file(archive.with_extension("").with_extension("json"));
-            if fs::remove_file(&archive).is_ok() {
+            let _ = fs::remove_dir_all(manifest.with_extension(""));
+            if fs::remove_file(&manifest).is_ok() {
                 total = total.saturating_sub(size);
             }
         }
     }
-}
-
-/// Package names, each after all its dependencies.
-fn dependency_order(graph: &PackageGraph) -> Vec<String> {
-    fn visit(
-        graph: &PackageGraph,
-        name: &str,
-        seen: &mut BTreeSet<String>,
-        order: &mut Vec<String>,
-    ) {
-        if !seen.insert(name.to_string()) {
-            return;
-        }
-        if let Some(package) = graph.get(name) {
-            for dependency in &package.dependencies {
-                visit(graph, dependency, seen, order);
-            }
-            order.push(name.to_string());
-        }
-    }
-    let mut seen = BTreeSet::new();
-    let mut order = Vec::new();
-    for name in graph.package_names() {
-        visit(graph, name, &mut seen, &mut order);
-    }
-    order
-}
-
-/// Every package `name` depends on, directly or not.
-fn recursive_dependencies(graph: &PackageGraph, name: &str) -> BTreeSet<String> {
-    let mut all = BTreeSet::new();
-    let mut queue = graph
-        .get(name)
-        .map(|package| package.dependencies.iter().cloned().collect::<Vec<_>>())
-        .unwrap_or_default();
-    while let Some(dependency) = queue.pop() {
-        if all.insert(dependency.clone())
-            && let Some(package) = graph.get(&dependency)
-        {
-            queue.extend(package.dependencies.iter().cloned());
-        }
-    }
-    all
-}
-
-/// Inodes of the files in each package's per-package trees, computed once.
-#[derive(Default)]
-struct InodeIndex {
-    packages: BTreeMap<String, std::collections::HashSet<(u64, u64)>>,
-}
-
-impl InodeIndex {
-    fn of(&mut self, output_dir: &Path, name: &str) -> std::collections::HashSet<(u64, u64)> {
-        self.packages
-            .entry(name.to_string())
-            .or_insert_with(|| {
-                let mut inodes = std::collections::HashSet::new();
-                for tree in ["host", "target"] {
-                    walk_files(
-                        output_dir,
-                        &format!("per-package/{name}/{tree}"),
-                        &mut |_, metadata| {
-                            inodes.insert((metadata.dev(), metadata.ino()));
-                        },
-                    );
-                }
-                inodes
-            })
-            .clone()
-    }
-}
-
-/// Calls `visit` with the path (relative to `output_dir`) and metadata of
-/// every file and symlink under `relative`.
-fn walk_files(output_dir: &Path, relative: &str, visit: &mut dyn FnMut(String, fs::Metadata)) {
-    let Ok(entries) = fs::read_dir(output_dir.join(relative)) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-            continue;
-        };
-        let member = format!("{relative}/{name}");
-        let Ok(metadata) = fs::symlink_metadata(entry.path()) else {
-            continue;
-        };
-        if metadata.is_dir() {
-            walk_files(output_dir, &member, visit);
-        } else {
-            visit(member, metadata);
-        }
-    }
-}
-
-fn collect_dirs(output_dir: &Path, relative: &str, members: &mut BTreeSet<String>) {
-    let Ok(entries) = fs::read_dir(output_dir.join(relative)) else {
-        return;
-    };
-    members.insert(relative.to_string());
-    for entry in entries.flatten() {
-        if entry.file_type().is_ok_and(|kind| kind.is_dir())
-            && let Some(name) = entry.file_name().to_str()
-        {
-            collect_dirs(output_dir, &format!("{relative}/{name}"), members);
-        }
-    }
-}
-
-/// A package's stamps in the order its build created them (by modification
-/// time, then Buildroot's usual order).
-fn stamps_in(dir: &Path) -> Vec<String> {
-    let mut stamps = fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name().to_str()?.to_string();
-            let modified = entry.metadata().ok()?.modified().ok()?;
-            name.starts_with(".stamp_").then_some((modified, name))
-        })
-        .collect::<Vec<_>>();
-    stamps.sort_by_key(|(modified, name)| {
-        (
-            *modified,
-            STAMP_ORDER
-                .iter()
-                .position(|known| known == name)
-                .unwrap_or(STAMP_ORDER.len() - 1),
-            name.clone(),
-        )
-    });
-    stamps.into_iter().map(|(_, name)| name).collect()
-}
-
-fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() {
-        return None;
-    }
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
-}
-
-fn replace_bytes(haystack: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
-    let mut result = Vec::with_capacity(haystack.len());
-    let mut rest = haystack;
-    while let Some(index) = find_bytes(rest, from) {
-        result.extend_from_slice(&rest[..index]);
-        result.extend_from_slice(to);
-        rest = &rest[index + from.len()..];
-    }
-    result.extend_from_slice(rest);
-    result
 }
 
 #[cfg(test)]

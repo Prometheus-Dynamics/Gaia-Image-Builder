@@ -63,8 +63,30 @@ pub(crate) fn apply_reflink_finalize(
     ))
 }
 
+/// Whether a file in `from` can be cloned into `to` (`cp --reflink=always`):
+/// both on one filesystem that supports reflinks.
+pub(crate) fn reflinks_between(from: &Path, to: &Path) -> bool {
+    if fs::create_dir_all(from).is_err() || fs::create_dir_all(to).is_err() {
+        return false;
+    }
+    let probe = from.join(format!(".gaia-reflink-probe-{}", std::process::id()));
+    let clone = to.join(format!(".gaia-reflink-probe-{}.clone", std::process::id()));
+    let supported = fs::write(&probe, b"gaia").is_ok()
+        && Command::new("cp")
+            .arg("--reflink=always")
+            .arg(&probe)
+            .arg(&clone)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+    let _ = fs::remove_file(&probe);
+    let _ = fs::remove_file(&clone);
+    supported
+}
+
 /// Whether `dir`'s filesystem can clone files (`cp --reflink=always`).
-fn supports_reflinks(dir: &Path) -> bool {
+pub(crate) fn supports_reflinks(dir: &Path) -> bool {
     if fs::create_dir_all(dir).is_err() {
         return false;
     }

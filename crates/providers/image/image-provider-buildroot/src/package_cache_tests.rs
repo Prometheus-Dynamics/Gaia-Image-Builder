@@ -127,7 +127,7 @@ fn cache_graph() -> PackageGraph {
 }
 
 fn tools_available() -> bool {
-    ["tar", "zstd", "rsync"].iter().all(|tool| {
+    ["cp", "rsync"].iter().all(|tool| {
         Command::new(tool)
             .arg("--version")
             .stdout(std::process::Stdio::null())
@@ -146,6 +146,7 @@ fn packages_round_trip_into_another_tree() {
     let cache = PackageCache {
         dir: root.join("cache"),
         max_size: u64::MAX,
+        note: None,
     };
     let first = root.join("first");
     built_tree(&first, b"app binary");
@@ -184,14 +185,14 @@ fn packages_round_trip_into_another_tree() {
     assert_eq!(fs::read(app.join("host/opt/tool")).expect("tool"), b"tool");
     // The dependency's file came from the dependency, not app's archive.
     let archive = cache.entry("app", "k-app", None).0;
-    let listing = Command::new("tar")
-        .arg("-tf")
-        .arg(&archive)
-        .output()
-        .expect("tar");
-    let listing = String::from_utf8_lossy(&listing.stdout);
-    assert!(!listing.contains("libbase.so"), "{listing}");
-    assert!(listing.contains("per-package/app/host/opt/tool"));
+    assert!(
+        !archive
+            .join("per-package/app/target/usr/lib/libbase.so")
+            .exists()
+    );
+    assert!(archive.join("per-package/app/host/opt/tool").is_file());
+    // Its empty directory is kept.
+    assert!(archive.join("per-package/app/target/var/lib/app").is_dir());
     let stamps = second.join("build/app-1");
     let modified = |stamp: &str| {
         fs::metadata(stamps.join(stamp))
@@ -216,6 +217,7 @@ fn packages_with_the_path_in_binaries_restore_only_at_that_path() {
     let cache = PackageCache {
         dir: root.join("cache"),
         max_size: u64::MAX,
+        note: None,
     };
     let first = root.join("first");
     let mut binary = b"\0ELF ".to_vec();

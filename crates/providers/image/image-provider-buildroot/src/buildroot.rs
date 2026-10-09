@@ -320,7 +320,10 @@ pub(crate) fn run_buildroot_with(
         command_context.policy.override_check,
     )?);
 
-    let built_before = output_dir.join("build").is_dir() || output_dir.join("target").is_dir();
+    // `make defconfig` already creates `build/`; only a build creates these.
+    let built_before = ["target", "host", "per-package"]
+        .iter()
+        .any(|dir| output_dir.join(dir).is_dir());
     let something_changed = !config_changes.is_empty() || !override_changes.is_empty();
     let previous_graph = PackageGraph::load(output_dir);
     let current_graph = if (built_before && something_changed) || previous_graph.is_none() {
@@ -334,7 +337,9 @@ pub(crate) fn run_buildroot_with(
     } else {
         None
     };
-    let plan = if unattributed_config_change {
+    let plan = if !built_before {
+        CleanPlan::Nothing
+    } else if unattributed_config_change {
         CleanPlan::Full(vec![
             "effective config changed (no snapshot of the previously built config)".to_string(),
         ])
