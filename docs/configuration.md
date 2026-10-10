@@ -1752,6 +1752,7 @@ Assembly behavior:
 - Declared `trees` are cleaned and recreated before staging.
 - File entries use exactly one of `src` or `src_glob`.
 - Glob staging is deterministic and currently supports simple non-recursive `*` filename patterns.
+- A `dest` of `.` or ending in `/` is a directory the sources are copied into; any other `dest` is the file a single source is copied to. A `src_glob` that matches several files needs a directory `dest` (otherwise every match would land on one file) and fails without one.
 - `optional = true` skips missing sources without failing the build and records the skip in runtime state.
 - `mode = "0755"` applies Unix file modes on Unix hosts.
 - Transform kinds currently implemented are `copy`, `gzip`, `zstd`, and `compile-dts`.

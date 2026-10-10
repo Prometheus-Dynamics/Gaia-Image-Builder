@@ -228,6 +228,15 @@ impl<'a> StepRun<'a> {
             )
             .into());
         }
+        if sources.len() > 1 && !assembly_dest_is_directory(&file.dest) {
+            return Err(format!(
+                "assembly file entry for tree '{}' matches {} files but its dest '{}' names one file: end it with '/' to copy them into that directory",
+                file.tree,
+                sources.len(),
+                file.dest
+            )
+            .into());
+        }
         for source in sources {
             if !source.exists() {
                 if file.optional {

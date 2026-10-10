@@ -580,3 +580,72 @@ fn image_assembly_filesystem_failure_cleans_temp_and_final_outputs() {
     assert!(!output_dir.join("boot.vfat").exists());
     assert!(!output_dir.join(".boot.vfat.gaia-tmp").exists());
 }
+
+/// A glob matching several files into a dest without a trailing '/' would
+/// copy every match onto one file; it is refused. With '/', the matches go
+/// into that directory.
+#[test]
+fn a_multi_file_glob_needs_a_directory_dest() {
+    let run = |dest: &str| {
+        let mut spec = test_spec();
+        let build_dir = Path::new(&spec.workspace.build_dir).to_path_buf();
+        let glob_dir = build_dir.join("assembly-sources/overlays");
+        fs::create_dir_all(&glob_dir).expect("glob source dir");
+        fs::write(glob_dir.join("a.dtbo"), "a").expect("a");
+        fs::write(glob_dir.join("b.dtbo"), "b").expect("b");
+        let tree_dir = build_dir.join("assembly/boot");
+        spec.image.assembly = Some(ImageAssemblySpec {
+            work_dir: Some(build_dir.join("assembly").display().to_string().into()),
+            trees: vec![AssemblyTreeSpec {
+                id: "boot".into(),
+                path: tree_dir.display().to_string().into(),
+            }],
+            files: vec![AssemblyFileSpec {
+                tree: "boot".into(),
+                src: None,
+                src_glob: Some(glob_dir.join("*.dtbo").display().to_string().into()),
+                dest: dest.into(),
+                mode: None,
+                optional: false,
+                preserve_symlink: false,
+            }],
+            ..ImageAssemblySpec::default()
+        });
+        let plan = gaia_plan::ExecutionPlan {
+            build_id: spec.identity.id.clone(),
+            operations: vec![PlannedOperation::new(
+                OperationId::image_assembly(),
+                OperationKind::AssembleImage,
+            )],
+        };
+        let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
+        let outcome = execute_plan(
+            &spec,
+            &plan,
+            ExecutionProviders {
+                source_catalog: &source_catalog,
+                artifact_catalog: &artifact_catalog,
+                image_catalog: &image_catalog,
+            },
+        );
+        (outcome, tree_dir)
+    };
+
+    let (outcome, _) = run("overlays");
+    let message = format!("{:?}", outcome.errors);
+    assert!(
+        message.contains("matches 2 files") && message.contains("end it with '/'"),
+        "{message}"
+    );
+
+    let (outcome, tree_dir) = run("overlays/");
+    assert!(outcome.errors.is_empty(), "{:?}", outcome.errors);
+    assert_eq!(
+        fs::read_to_string(tree_dir.join("overlays/a.dtbo")).unwrap(),
+        "a"
+    );
+    assert_eq!(
+        fs::read_to_string(tree_dir.join("overlays/b.dtbo")).unwrap(),
+        "b"
+    );
+}

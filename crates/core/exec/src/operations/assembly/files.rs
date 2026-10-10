@@ -15,6 +15,12 @@ pub(super) fn assembly_file_sources(
     gaia_spec::expand_simple_glob(spec, roots, src_glob)
 }
 
+/// Whether a file entry's `dest` names a directory the sources are copied
+/// into (`.` or a trailing `/`) rather than the file they are copied to.
+pub(super) fn assembly_dest_is_directory(dest: &str) -> bool {
+    dest == "." || dest.ends_with('/')
+}
+
 pub(super) fn assembly_file_dest(
     tree_path: &Path,
     source: &Path,
@@ -27,7 +33,7 @@ pub(super) fn assembly_file_dest(
             dest
         )
     })?;
-    let dest_path = if dest == "." || dest.ends_with('/') {
+    let dest_path = if assembly_dest_is_directory(dest) {
         tree_path.join(dest).join(source_name)
     } else if dest.contains('*') {
         return Err(format!("assembly destination '{dest}' cannot contain '*'"));

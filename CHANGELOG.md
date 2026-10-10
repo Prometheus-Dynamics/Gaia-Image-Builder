@@ -66,6 +66,13 @@ newest release, and updates the Rust docker images to 1.99.0.
 - The config steps ran `olddefconfig` three times on a PhotonVision tree (after defconfig, after the config overrides, and after the download, compiler cache and parallel build settings). Each `make` is a container start with the docker backend (about 5 s each). The overrides and cache settings are now merged into `.config` together and applied by one `olddefconfig`, so the steps run defconfig and then one `olddefconfig` (two when there are fragments, as before). The final `.config` is byte-identical to the three-run sequence on a PhotonVision tree, with and without fragments; the cache settings still win a key the overrides also set.
 - Cache-space warnings from the config steps now reach the step messages on a fresh configuration (they were dropped when the cache settings were applied in their own run).
 
+### Globs into one file are refused
+
+- An `[[image.assembly.files]]` entry whose `src_glob` matched several files
+  and whose `dest` had no trailing `/` copied every match onto that one file
+  (386 overlays became one file called `overlays`). It now fails and says
+  to end `dest` with `/`; a single match can still be renamed.
+
 ### Small vfat images are FAT16
 
 - `mformat` formats images under 16 MiB as FAT12, which the Raspberry Pi
