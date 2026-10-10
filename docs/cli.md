@@ -12,7 +12,7 @@ gaia preview <build.toml>
 gaia clean <build.toml>
 gaia lock <build.toml>
 gaia cache <build.toml>
-gaia run <build.toml> [--export <dir>]
+gaia run <build.toml> [--export <dir> | --no-export]
 gaia pause [run]
 gaia resume [run]
 gaia cancel [run]
@@ -330,8 +330,24 @@ exported: /home/me/images/photonvision-full-raze-dev-v2027.0.0-alpha-2-94-gc9548
 ```
 
 A failed or cancelled run exports nothing and says so with
-`export: skipped, the run did not succeed; nothing was exported`. The export
-is CLI-only (`--export` is not a build config key). A copy that fails exits `1`.
+`export: skipped, the run did not succeed; nothing was exported`. A copy that
+fails exits `1`.
+
+The directory can also come from the build config, so `--export` is not needed
+on every run:
+
+- `[image.output] export_dir = "<dir>"` for one build;
+- `[workspace] export_dir = "<dir>"` for every build in the workspace, used
+  when the build sets none.
+
+Both are also `--set image.output.export_dir=<dir>` and
+`--set workspace.export_dir=<dir>`. An absolute path is used as written, `~/`
+expands to the home directory, and any other relative path is taken from the
+workspace root. An empty value is an error. Precedence, highest first:
+`--export <dir>`, then the build's `export_dir`, then the workspace's.
+`--export` paths are relative to the current directory. `--no-export` skips
+any configured export for that run; combining it with `--export` is a usage
+error.
 
 #### Resuming a failed or cancelled run
 

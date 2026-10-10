@@ -50,20 +50,20 @@ use gaia_spec::{
     DEFAULT_JAVA_PROVIDER_TIMEOUT_SECONDS, DEFAULT_NODE_PROVIDER_TIMEOUT_SECONDS,
     DEFAULT_PYTHON_PROVIDER_TIMEOUT_SECONDS, DEFAULT_RUST_PROVIDER_TIMEOUT_SECONDS,
     DEFAULT_STARTING_POINT_PROVIDER_TIMEOUT_SECONDS, DockerArtifactExecutionSpec,
-    DockerExecutionSpec, ExecutionPolicySpec, FailureHandlingPolicySpec, GitProviderPolicySpec,
-    GitSourceSpec, GoArtifactSpec, ImageAssemblySpec, ImageDefinition, ImageFeedSpec,
-    ImageOutputSpec, ImageSpec, InputKindSpec, InputOptionSpec, InputSpec, InstallEntrySpec,
-    InstallId, InterpolationSpec, JavaArtifactSpec, NodeArtifactSpec, OutputHygieneSpec,
-    OutputRetentionPolicySpec, PathSourceSpec, PostBuildHookSpec, PrecedenceLayerSpec,
-    PrecedencePolicySpec, PrecedenceSource, PrecedenceTarget, PresetSelectionSpec,
-    ProductIdentitySpec, ProvenanceIdentitySpec, ProvenanceSpec, ProviderExecutionPolicySpec,
-    PythonArtifactSpec, ReportingOutputsSpec, ReportingSpec, ResolvedBuildSpec,
-    RetryBackoffStrategySpec, RollbackDomain, RustArtifactSpec, RustProviderPolicySpec,
-    SecretMaskingSpec, SelectionSpec, SourceDefinition, SourcePinPolicySpec, SourceRef,
-    SourceRefreshPolicySpec, SourceSpec, StageContentOriginSpec, StageEnvSetSpec, StageFileSpec,
-    StageItemId, StageServiceSpec, StartingPointImageSpec, StartingPointOutputModeSpec,
-    StartingPointRootfsValidationModeSpec, UnresolvedInterpolationSpec, WorkspaceNamedPathSpec,
-    WorkspacePathKindSpec, WorkspaceSpec,
+    DockerExecutionSpec, ExecutionPolicySpec, ExportSpec, FailureHandlingPolicySpec,
+    GitProviderPolicySpec, GitSourceSpec, GoArtifactSpec, ImageAssemblySpec, ImageDefinition,
+    ImageFeedSpec, ImageOutputSpec, ImageSpec, InputKindSpec, InputOptionSpec, InputSpec,
+    InstallEntrySpec, InstallId, InterpolationSpec, JavaArtifactSpec, NodeArtifactSpec,
+    OutputHygieneSpec, OutputRetentionPolicySpec, PathSourceSpec, PostBuildHookSpec,
+    PrecedenceLayerSpec, PrecedencePolicySpec, PrecedenceSource, PrecedenceTarget,
+    PresetSelectionSpec, ProductIdentitySpec, ProvenanceIdentitySpec, ProvenanceSpec,
+    ProviderExecutionPolicySpec, PythonArtifactSpec, ReportingOutputsSpec, ReportingSpec,
+    ResolvedBuildSpec, RetryBackoffStrategySpec, RollbackDomain, RustArtifactSpec,
+    RustProviderPolicySpec, SecretMaskingSpec, SelectionSpec, SourceDefinition,
+    SourcePinPolicySpec, SourceRef, SourceRefreshPolicySpec, SourceSpec, StageContentOriginSpec,
+    StageEnvSetSpec, StageFileSpec, StageItemId, StageServiceSpec, StartingPointImageSpec,
+    StartingPointOutputModeSpec, StartingPointRootfsValidationModeSpec,
+    UnresolvedInterpolationSpec, WorkspaceNamedPathSpec, WorkspacePathKindSpec, WorkspaceSpec,
 };
 
 pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
@@ -247,6 +247,10 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                 )
             })
             .collect(),
+    };
+    spec.export = ExportSpec {
+        image_dir: raw.image.output.export_dir.clone(),
+        workspace_dir: raw.workspace.export_dir.clone(),
     };
     spec.workspace = WorkspaceSpec {
         root_dir: raw.workspace.root_dir,

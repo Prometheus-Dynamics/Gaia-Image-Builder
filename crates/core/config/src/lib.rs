@@ -413,6 +413,22 @@ fn normalize_paths(mut raw: raw::RawBuildConfig) -> Result<raw::RawBuildConfig, 
                 .to_string(),
         );
     }
+    let source_path = raw
+        .source_path
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("<unknown>"));
+    raw.image.output.export_dir = normalize_export_dir(
+        raw.image.output.export_dir.take(),
+        "image.output.export_dir",
+        &source_path,
+        &workspace_root,
+    )?;
+    raw.workspace.export_dir = normalize_export_dir(
+        raw.workspace.export_dir.take(),
+        "workspace.export_dir",
+        &source_path,
+        &workspace_root,
+    )?;
     match &mut raw.image.definition {
         raw::RawImageDefinition::Buildroot {
             external_tree: Some(external_tree),
@@ -442,6 +458,46 @@ fn normalize_paths(mut raw: raw::RawBuildConfig) -> Result<raw::RawBuildConfig, 
         _ => {}
     }
     Ok(raw)
+}
+
+/// An export directory: empty is an error, `~` and `~/` expand to the home
+/// directory, and any other relative path is taken from the workspace root.
+fn normalize_export_dir(
+    value: Option<String>,
+    key: &str,
+    source_path: &Path,
+    workspace_root: &Path,
+) -> Result<Option<String>, ConfigError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(ConfigError::config_shape(
+            source_path,
+            format!("{key} cannot be empty; remove it or set a directory"),
+        ));
+    }
+    let expanded = match value.strip_prefix('~') {
+        Some(rest) if rest.is_empty() || rest.starts_with('/') => {
+            let home = std::env::var_os("HOME")
+                .filter(|home| !home.is_empty())
+                .ok_or_else(|| {
+                    ConfigError::config_shape(
+                        source_path,
+                        format!("{key} '{value}' uses '~', but HOME is not set"),
+                    )
+                })?;
+            PathBuf::from(home)
+                .join(rest.trim_start_matches('/'))
+                .display()
+                .to_string()
+        }
+        _ => value.to_string(),
+    };
+    Ok(Some(
+        absolutize(workspace_root, &expanded).display().to_string(),
+    ))
 }
 
 /// `build_group` only means something to cargo; on any other artifact kind

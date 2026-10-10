@@ -150,6 +150,8 @@ pub struct RawWorkspaceConfig {
     pub root_dir: String,
     pub build_dir: String,
     pub out_dir: String,
+    /// Default `gaia run --export` directory for every build in the workspace.
+    pub export_dir: Option<String>,
     pub named_paths: Vec<RawWorkspaceNamedPathConfig>,
 }
 
@@ -824,6 +826,8 @@ pub enum RawStartingPointOutputMode {
 pub struct RawImageOutputConfig {
     pub collect_dir: Option<String>,
     pub archive_name: Option<String>,
+    /// Where `gaia run` copies the primary image after a successful run.
+    pub export_dir: Option<String>,
     pub emit_report: bool,
 }
 

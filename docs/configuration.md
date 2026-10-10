@@ -997,6 +997,10 @@ Fields:
   Mutable build workspace.
 - `out_dir`
   Mutable published output location.
+- `export_dir`
+  Optional default directory for `gaia run --export` in every build of the
+  workspace. A build's own `image.output.export_dir` takes precedence. See
+  [Image output](#image) and [`gaia run --export`](cli.md#exporting-the-image).
 
 Named path kinds:
 - `host`
@@ -1451,8 +1455,18 @@ required = true
 [image.output]
 collect_dir = "${workspace.out_dir}/images"
 archive_name = "${build.name}-${build.version}.img.xz"
+export_dir = "~/images/gaia"
 emit_report = true
 ```
+
+`export_dir` is where a successful `gaia run` copies the primary image (see
+[Exporting the image](cli.md#exporting-the-image)). It is set per build here
+and falls back to `[workspace] export_dir`. A path that is not absolute and
+does not start with `~/` is taken from the workspace root; `~` and `~/...`
+expand to the home directory. An empty value is an error. `gaia run --export
+<dir>` overrides both, and `gaia run --no-export` skips the configured
+export for one run. The `--set` keys are `image.output.export_dir` and
+`workspace.export_dir`.
 
 An `archive_name` ending in `.img`/`.raw` publishes the raw disk image
 itself; `.img.xz`/`.raw.xz` compresses it with xz (smallest, slow) and

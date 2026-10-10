@@ -6,6 +6,7 @@ mod assembly_spec;
 mod byte_size;
 mod checkpoints;
 mod clean;
+mod export;
 mod ids;
 mod image;
 mod inputs;
@@ -53,6 +54,7 @@ pub use checkpoints::{
     CheckpointSpec,
 };
 pub use clean::{CleanProfileSpec, CleanSpec};
+pub use export::ExportSpec;
 pub use ids::{
     ArtifactId, AssemblyFilesystemId, AssemblyTreeId, BuildId, IdError, InstallId, SourceId,
     StageItemId,
@@ -124,6 +126,7 @@ pub struct ResolvedBuildSpec {
     pub clean: CleanSpec,
     pub provenance: ProvenanceSpec,
     pub workspace: WorkspaceSpec,
+    pub export: ExportSpec,
     pub sources: Vec<SourceSpec>,
     pub artifacts: Vec<ArtifactSpec>,
     pub install: InstallSpec,
@@ -159,6 +162,7 @@ impl ResolvedBuildSpec {
             clean: CleanSpec::default(),
             provenance: ProvenanceSpec::default(),
             workspace: WorkspaceSpec::default(),
+            export: ExportSpec::default(),
             sources: Vec::new(),
             artifacts: Vec::new(),
             install: InstallSpec::default(),

@@ -107,6 +107,14 @@ impl TarArchiveMode {
 }
 
 impl TarArchiveMode {
+    /// The compression named in the step-time line (`archive <name> (<label>)`).
+    fn log_label(self) -> &'static str {
+        match self {
+            Self::Plain => "tar",
+            Self::Xz => "xz",
+        }
+    }
+
     fn create_arg(self) -> &'static str {
         match self {
             Self::Plain => "-cf",
@@ -244,6 +252,10 @@ pub(crate) fn archive_files(
             ))
         })?;
     }
+    let input_bytes = entries
+        .iter()
+        .map(|entry| tree_bytes(&source_dir.join(entry)))
+        .sum();
     let mut command = Command::new("tar");
     if matches!(mode, TarArchiveMode::Xz) {
         command.env("XZ_OPT", "-T0 --block-size=24MiB");
@@ -256,7 +268,8 @@ pub(crate) fn archive_files(
     for entry in entries {
         command.arg(entry);
     }
-    let messages = run_command(
+    let clock = gaia_process::ActiveClock::start();
+    let mut messages = run_command(
         command,
         label,
         command_context.execution,
@@ -265,6 +278,12 @@ pub(crate) fn archive_files(
         command_context.cancel_check,
     )?;
     write_archive_signature(source_dir, entries, archive_path, mode)?;
+    messages.extend(archive_log_messages(
+        archive_path,
+        mode.log_label(),
+        Some(input_bytes),
+        clock.elapsed(),
+    ));
     Ok(messages)
 }
 
@@ -292,7 +311,78 @@ pub(crate) fn archive_directory(
         .arg("-C")
         .arg(source_dir)
         .arg(".");
-    run_command(command, label, execution, policy, log_sink, cancel_check)
+    // The input is the whole source tree, which is not worth walking for a
+    // size line, so only the output size is reported.
+    let clock = gaia_process::ActiveClock::start();
+    let mut messages = run_command(command, label, execution, policy, log_sink, cancel_check)?;
+    messages.extend(archive_log_messages(
+        archive_path,
+        TarArchiveMode::Plain.log_label(),
+        None,
+        clock.elapsed(),
+    ));
+    Ok(messages)
+}
+
+/// The step time and size lines of a finished archive: `archive <name>
+/// (<label>)` with its wall time, and `archived <name>: <in> -> <out> in
+/// <secs>s` (just the output size when the input is not known).
+pub(crate) fn archive_log_messages(
+    archive_path: &Path,
+    label: &str,
+    input_bytes: Option<u64>,
+    elapsed: Duration,
+) -> Vec<String> {
+    let name = archive_path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| archive_path.display().to_string());
+    let output_bytes = fs::metadata(archive_path).map_or(0, |metadata| metadata.len());
+    let sizes = match input_bytes {
+        Some(input) => format!(
+            "{} -> {}",
+            format_archive_bytes(input),
+            format_archive_bytes(output_bytes)
+        ),
+        None => format_archive_bytes(output_bytes),
+    };
+    vec![
+        gaia_process::step_time_message(&format!("archive {name} ({label})"), elapsed),
+        format!("archived {name}: {sizes} in {}s", elapsed.as_secs()),
+    ]
+}
+
+/// Total size of a file, or of every file under a directory (symlinks count
+/// as their own size).
+fn tree_bytes(path: &Path) -> u64 {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return 0;
+    };
+    if !metadata.is_dir() {
+        return metadata.len();
+    }
+    fs::read_dir(path).map_or(0, |entries| {
+        entries
+            .flatten()
+            .map(|entry| tree_bytes(&entry.path()))
+            .sum()
+    })
+}
+
+/// `1.4 GiB`, `142 MiB`, `812 B`.
+fn format_archive_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    match unit {
+        0 => format!("{bytes} B"),
+        _ if value >= 100.0 => format!("{value:.0} {}", UNITS[unit]),
+        _ => format!("{value:.1} {}", UNITS[unit]),
+    }
 }
 
 /// The compression of a compressed raw disk archive name (`.img.xz`,
@@ -350,6 +440,7 @@ pub(crate) fn compress_primary_image_with_program(
     })?;
     let mut command = Command::new(program.unwrap_or(Path::new(compressor)));
     command.args(args).arg(source_path);
+    let clock = gaia_process::ActiveClock::start();
     let output = command_stdout_to_file_with_timeout(CommandStdoutToFileRequest {
         command: &mut command,
         output_path: &temp_archive,
@@ -372,11 +463,20 @@ pub(crate) fn compress_primary_image_with_program(
         )));
     }
     publish_archive_output(&temp_archive, archive_path)?;
-    Ok(vec![format!(
+    let mut messages = vec![format!(
         "compressed primary buildroot image '{}' to '{}'",
         source_path.display(),
         archive_path.display()
-    )])
+    )];
+    messages.extend(archive_log_messages(
+        archive_path,
+        compressor,
+        fs::metadata(source_path)
+            .ok()
+            .map(|metadata| metadata.len()),
+        clock.elapsed(),
+    ));
+    Ok(messages)
 }
 
 pub(crate) fn temporary_archive_output_path(output: &Path) -> PathBuf {
@@ -386,4 +486,73 @@ pub(crate) fn temporary_archive_output_path(output: &Path) -> PathBuf {
 fn publish_archive_output(temp: &Path, output: &Path) -> Result<(), ImageProviderError> {
     gaia_image_providers::publish_replace_output(temp, output, "image archive", "image-archive")
         .map_err(|message| ImageProviderError::new(ImageProviderErrorKind::RuntimeState, message))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tool_installed(tool: &str) -> bool {
+        Command::new(tool).arg("--version").output().is_ok()
+    }
+
+    #[test]
+    fn compressed_raw_archives_log_a_step_time_and_sizes() {
+        for (kind, tool, extension) in [
+            (gaia_spec::RawDiskArchive::Xz, "xz", "xz"),
+            (gaia_spec::RawDiskArchive::Zstd, "zstd", "zst"),
+        ] {
+            if !tool_installed(tool) {
+                eprintln!("skipping archive step-time test: '{tool}' is not installed");
+                continue;
+            }
+            let dir = std::env::temp_dir().join(format!(
+                "gaia-archive-step-time-{tool}-{}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&dir).expect("test dir");
+            let source = dir.join("helios.img");
+            fs::write(&source, "raw image ".repeat(4096)).expect("raw image");
+            let archive = dir.join(format!("helios.img.{extension}"));
+            let execution = ImageExecutionContext {
+                workspace_root: dir.clone(),
+                docker_image: None,
+            };
+            let policy = ImageExecutionPolicy::default();
+
+            let messages = compress_primary_image_with_program(
+                (kind, None),
+                &source,
+                &archive,
+                &execution,
+                &policy,
+                None,
+                None,
+            )
+            .expect("compression should succeed");
+
+            let step = format!("archive helios.img.{extension} ({tool})");
+            assert!(
+                messages.iter().any(|message| {
+                    gaia_process::parse_step_time(message).is_some_and(|(name, _)| name == step)
+                }),
+                "missing step time '{step}' in {messages:?}"
+            );
+            assert!(
+                messages.iter().any(|message| {
+                    message.starts_with(&format!("archived helios.img.{extension}: "))
+                        && message.contains(" -> ")
+                }),
+                "missing size line in {messages:?}"
+            );
+            fs::remove_dir_all(&dir).expect("cleanup");
+        }
+    }
+
+    #[test]
+    fn format_archive_bytes_uses_binary_units() {
+        assert_eq!(format_archive_bytes(812), "812 B");
+        assert_eq!(format_archive_bytes(142 * 1024 * 1024), "142 MiB");
+        assert_eq!(format_archive_bytes(1_503_238_553), "1.4 GiB");
+    }
 }

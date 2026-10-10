@@ -70,6 +70,7 @@ pub fn run_build_command(
         validation: run.validation,
         plan_diagnostics: run.plan_diagnostics,
         execution_errors: run.outcome.errors,
+        configured_export_dir: run.spec.export.configured_dir().map(str::to_string),
     }
 }
 

@@ -289,6 +289,7 @@ pub(crate) fn print_outcome(outcome: &CommandOutcome) {
             validation,
             plan_diagnostics,
             execution_errors,
+            ..
         } => {
             if let Some(output) = post_build_output
                 && !output.trim().is_empty()

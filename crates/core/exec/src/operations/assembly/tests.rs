@@ -663,3 +663,45 @@ fn assembly_steps_reading_each_others_outputs_are_refused() {
     );
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn assembly_disk_archives_log_a_step_time_and_sizes() {
+    for (archive_name, tool, label) in [
+        ("helios.img.xz", "xz", "xz"),
+        ("helios.img.zst", "zstd", "zstd"),
+    ] {
+        if Command::new(tool).arg("--version").output().is_err() {
+            eprintln!("skipping assembly archive step-time test: '{tool}' is not installed");
+            continue;
+        }
+        let root = unique_dir("gaia-assembly-archive-step-time");
+        let mut spec = test_spec(&root);
+        spec.image.output.archive_name = Some(archive_name.into());
+        let images = root.join("out/images");
+        fs::create_dir_all(&images).expect("images dir");
+        let source = images.join("sdcard.img");
+        fs::write(&source, "raw disk ".repeat(4096)).expect("disk");
+
+        let mut messages = Vec::new();
+        let summary =
+            archive_assembly_disk_output(&spec, std::slice::from_ref(&source), None, &mut messages)
+                .expect("archive should succeed")
+                .expect("archive summary");
+        assert_eq!(summary.output, images.join(archive_name));
+
+        let step = format!("archive {archive_name} ({label})");
+        assert!(
+            messages.iter().any(|message| {
+                gaia_process::parse_step_time(message).is_some_and(|(name, _)| name == step)
+            }),
+            "missing step time '{step}' in {messages:?}"
+        );
+        assert!(
+            messages.iter().any(|message| message
+                .starts_with(&format!("archived {archive_name}: "))
+                && message.contains(" -> ")),
+            "missing size line in {messages:?}"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+}

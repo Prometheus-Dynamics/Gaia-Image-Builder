@@ -28,6 +28,9 @@ pub struct AppArgs {
     /// `--export <dir>` for run: copy the primary image output there after a
     /// successful run.
     pub export_dir: Option<String>,
+    /// `--no-export` for run: skip the configured export (`image.output.export_dir`
+    /// or `workspace.export_dir`) for this run.
+    pub no_export: bool,
     /// Problems found while parsing; dispatch refuses to run when non-empty.
     pub usage_errors: Vec<String>,
 }
@@ -184,6 +187,7 @@ impl AppArgs {
                 "--json" => parsed.json = true,
                 "--fail-on-clean" => parsed.fail_on_clean = true,
                 "--export" => parsed.export_dir = value("--export", &mut parsed.usage_errors),
+                "--no-export" => parsed.no_export = true,
                 "--update" => {
                     parsed.lock.update = true;
                     // `--update [source-id]`: an optional value, taken only
@@ -229,6 +233,11 @@ impl AppArgs {
         if !parsed.build_explicit {
             parsed.build = default_build_config();
         }
+        if parsed.export_dir.is_some() && parsed.no_export {
+            parsed
+                .usage_errors
+                .push("--export and --no-export cannot be used together".into());
+        }
         // `gaia run --dry-run` is `gaia preview`.
         if parsed.command == AppCommand::Run && parsed.clean.dry_run {
             parsed.command = AppCommand::Preview;
@@ -256,6 +265,7 @@ impl Default for AppArgs {
             json: false,
             fail_on_clean: false,
             export_dir: None,
+            no_export: false,
             usage_errors: Vec::new(),
         }
     }

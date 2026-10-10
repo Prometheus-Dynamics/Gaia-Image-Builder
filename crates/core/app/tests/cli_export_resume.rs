@@ -247,3 +247,173 @@ fn export_collisions_keep_both_images_and_the_resume_hint_is_absent_on_success()
     );
     let _ = fs::remove_dir_all(export_dir);
 }
+
+/// The `--set` words that point a run's export at `dir` at one config level.
+fn export_set(key: &str, dir: &Path) -> Vec<String> {
+    vec!["--set".to_string(), format!("{key}={}", dir.display())]
+}
+
+fn as_refs(words: &[String]) -> Vec<&str> {
+    words.iter().map(String::as_str).collect()
+}
+
+#[test]
+fn workspace_export_dir_exports_without_the_export_flag() {
+    let roots = fresh_roots("gaia-export-cfg-ws");
+    let dest = PathBuf::from(unique_dir("gaia-export-cfg-ws-dest"));
+    let set = export_set("workspace.export_dir", &dest);
+    let (args, outcome) = successful_run(&roots, &as_refs(&set));
+
+    assert_eq!(outcome.exit_code(), 0, "{outcome:?}");
+    let finish = run_finish(&args, &outcome);
+    assert!(!finish.export_failed, "{:?}", finish.lines);
+    assert_eq!(file_names(&dest).len(), 1, "{:?}", file_names(&dest));
+    assert!(
+        finish
+            .lines
+            .iter()
+            .any(|line| line.starts_with("exported: ")),
+        "{:?}",
+        finish.lines
+    );
+    let _ = fs::remove_dir_all(dest);
+}
+
+#[test]
+fn image_export_dir_beats_the_workspace_default() {
+    let roots = fresh_roots("gaia-export-cfg-img");
+    let workspace_dest = PathBuf::from(unique_dir("gaia-export-cfg-ws-loses"));
+    let image_dest = PathBuf::from(unique_dir("gaia-export-cfg-img-wins"));
+    let mut set = export_set("workspace.export_dir", &workspace_dest);
+    set.extend(export_set("image.output.export_dir", &image_dest));
+    let (args, outcome) = successful_run(&roots, &as_refs(&set));
+
+    assert_eq!(outcome.exit_code(), 0, "{outcome:?}");
+    let finish = run_finish(&args, &outcome);
+    assert!(!finish.export_failed, "{:?}", finish.lines);
+    assert_eq!(file_names(&image_dest).len(), 1);
+    assert!(
+        !workspace_dest.exists(),
+        "the workspace default is not used when the build sets its own"
+    );
+    let _ = fs::remove_dir_all(image_dest);
+}
+
+#[test]
+fn export_flag_beats_the_configured_directory() {
+    let roots = fresh_roots("gaia-export-cfg-flag");
+    let flag_dest = PathBuf::from(unique_dir("gaia-export-cfg-flag-wins"));
+    let config_dest = PathBuf::from(unique_dir("gaia-export-cfg-flag-loses"));
+    let flag = flag_dest.display().to_string();
+    let set = export_set("image.output.export_dir", &config_dest);
+    let mut words = as_refs(&set);
+    words.extend(["--export", flag.as_str()]);
+    let (args, outcome) = successful_run(&roots, &words);
+
+    assert_eq!(outcome.exit_code(), 0, "{outcome:?}");
+    let finish = run_finish(&args, &outcome);
+    assert!(!finish.export_failed, "{:?}", finish.lines);
+    assert_eq!(file_names(&flag_dest).len(), 1);
+    assert!(
+        !config_dest.exists(),
+        "the configured directory is not used"
+    );
+    let _ = fs::remove_dir_all(flag_dest);
+}
+
+#[test]
+fn no_export_suppresses_a_configured_export_for_one_run() {
+    let roots = fresh_roots("gaia-export-cfg-none");
+    let dest = PathBuf::from(unique_dir("gaia-export-cfg-none-dest"));
+    let set = export_set("workspace.export_dir", &dest);
+    let mut words = as_refs(&set);
+    words.push("--no-export");
+    let (args, outcome) = successful_run(&roots, &words);
+
+    assert_eq!(outcome.exit_code(), 0, "{outcome:?}");
+    assert!(args.usage_errors.is_empty(), "{:?}", args.usage_errors);
+    assert!(args.no_export);
+    let finish = run_finish(&args, &outcome);
+    assert!(!finish.export_failed);
+    assert!(
+        finish
+            .lines
+            .iter()
+            .all(|line| !line.starts_with("exported: ")),
+        "{:?}",
+        finish.lines
+    );
+    assert!(!dest.exists(), "a suppressed export creates no directory");
+}
+
+#[test]
+fn relative_configured_export_dir_is_taken_from_the_workspace_root() {
+    let roots = fresh_roots("gaia-export-cfg-rel");
+    let set = vec![
+        "--set".to_string(),
+        "image.output.export_dir=exports/images".to_string(),
+    ];
+    let (args, outcome) = successful_run(&roots, &as_refs(&set));
+
+    assert_eq!(outcome.exit_code(), 0, "{outcome:?}");
+    let finish = run_finish(&args, &outcome);
+    assert!(!finish.export_failed, "{:?}", finish.lines);
+    let dest = PathBuf::from(&roots.root).join("exports/images");
+    assert_eq!(file_names(&dest).len(), 1, "{:?}", file_names(&dest));
+    let _ = fs::remove_dir_all(dest);
+}
+
+#[test]
+fn a_failed_run_with_a_configured_export_exports_nothing() {
+    let roots = Roots {
+        root: unique_dir("gaia-export-cfg-fail-root"),
+        out: unique_dir("gaia-export-cfg-fail-out"),
+        build: unique_dir("gaia-export-cfg-fail-build"),
+    };
+    fs::create_dir_all(&roots.root).expect("workspace root");
+    seed_default_assets(&roots.root);
+    let dest = PathBuf::from(unique_dir("gaia-export-cfg-fail-dest"));
+    // The same invocation as the failing run in cli_run_failures, plus a
+    // configured export: no `image.allow_fallback`, so the run fails.
+    let mut words = vec![
+        "run".to_string(),
+        config_path(),
+        "--preset".to_string(),
+        "ci".to_string(),
+        "--set".to_string(),
+        format!("workspace.root_dir={}", roots.root),
+        "--set".to_string(),
+        format!("workspace.out_dir={}", roots.out),
+        "--set".to_string(),
+        format!("workspace.build_dir={}", roots.build),
+    ];
+    words.extend(export_set("workspace.export_dir", &dest));
+    let args = AppArgs::parse_from(words);
+    let outcome = run_with_args(args.clone());
+    assert_eq!(outcome.exit_code(), 4, "run should fail");
+
+    let finish = run_finish(&args, &outcome);
+    assert!(!dest.exists(), "a failed run creates no export dir");
+    assert_eq!(
+        finish.lines.first().map(String::as_str),
+        Some("export: skipped, the run did not succeed; nothing was exported")
+    );
+}
+
+#[test]
+fn export_and_no_export_together_are_a_usage_error() {
+    let args = AppArgs::parse_from(vec![
+        "run".to_string(),
+        config_path(),
+        "--export".to_string(),
+        "/tmp/x".to_string(),
+        "--no-export".to_string(),
+    ]);
+    assert!(
+        args.usage_errors
+            .iter()
+            .any(|error| error.contains("--export and --no-export")),
+        "{:?}",
+        args.usage_errors
+    );
+}

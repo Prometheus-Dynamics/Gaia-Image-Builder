@@ -304,12 +304,27 @@ impl<'a> StepRun<'a> {
             tool_path = tracing::field::Empty
         );
         let _span_guard = span.enter();
+        let clock = gaia_process::ActiveClock::start();
         let summary = execute_assembly_transform(
             self.spec,
             self.roots,
             transform,
             self.cancel_check.clone(),
         )?;
+        if matches!(
+            transform.kind,
+            gaia_spec::AssemblyTransformKindSpec::Gzip | gaia_spec::AssemblyTransformKindSpec::Zstd
+        ) {
+            let input_bytes = std_fs::metadata(&summary.src)
+                .ok()
+                .map(|metadata| metadata.len());
+            self.messages.extend(archive_log_messages(
+                &summary.dest,
+                transform.kind.as_str(),
+                input_bytes,
+                clock.elapsed(),
+            ));
+        }
         tracing::Span::current().record("output_path", summary.dest.display().to_string());
         self.transform_count += 1;
         let key = AssemblyStateKey::new("transform", self.transform_count);
@@ -410,7 +425,15 @@ impl<'a> StepRun<'a> {
             archive_id = %archive.id
         );
         let _span_guard = span.enter();
+        let clock = gaia_process::ActiveClock::start();
         let summary = execute_assembly_archive(self.spec, self.roots, archive)?;
+        let member_bytes = summary.members.iter().map(|member| member.bytes).sum();
+        self.messages.extend(archive_log_messages(
+            &summary.output,
+            "tar",
+            Some(member_bytes),
+            clock.elapsed(),
+        ));
         self.archive_count += 1;
         record_archive_state(&mut self.state, self.archive_count, archive, &summary);
         self.messages.push(format!(

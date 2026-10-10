@@ -90,6 +90,9 @@ pub enum CommandOutcome {
         validation: ValidationReport,
         plan_diagnostics: Vec<PlanDiagnostic>,
         execution_errors: Vec<ExecutionError>,
+        /// The export directory the config sets for this build, if any; a
+        /// `--export` on the command line takes precedence over it.
+        configured_export_dir: Option<String>,
     },
     Failed {
         message: String,

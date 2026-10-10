@@ -4,6 +4,7 @@ mod operations;
 mod reuse;
 mod reuse_assembly;
 mod reuse_assembly_archives;
+mod reuse_details;
 mod reuse_explain;
 mod reuse_imports;
 mod reuse_toolchain;
@@ -20,6 +21,7 @@ pub use reuse::{
     operation_content_signature, operation_fingerprint, operation_input_signature,
     operation_output_signature, spec_fingerprint,
 };
+pub use reuse_details::{fingerprint_change_detail, operation_components};
 pub use reuse_explain::{InvalidationSummary, invalidation_summary};
 pub use targets::{PlanDomain, PlanTarget};
 

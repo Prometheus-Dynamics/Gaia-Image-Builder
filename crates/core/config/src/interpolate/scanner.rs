@@ -60,6 +60,11 @@ pub(crate) fn collect_unresolved_tokens(raw: &RawBuildConfig) -> Vec<RawUnresolv
         &mut unresolved,
     );
     scan_string("workspace.out_dir", &raw.workspace.out_dir, &mut unresolved);
+    scan_optional(
+        "workspace.export_dir",
+        raw.workspace.export_dir.as_deref(),
+        &mut unresolved,
+    );
     for entry in &raw.workspace.named_paths {
         scan_string(
             &format!("workspace.paths.{}.alias", entry.alias),
@@ -546,6 +551,11 @@ pub(crate) fn collect_unresolved_tokens(raw: &RawBuildConfig) -> Vec<RawUnresolv
     scan_optional(
         "image.output.collect_dir",
         raw.image.output.collect_dir.as_deref(),
+        &mut unresolved,
+    );
+    scan_optional(
+        "image.output.export_dir",
+        raw.image.output.export_dir.as_deref(),
         &mut unresolved,
     );
     scan_optional(

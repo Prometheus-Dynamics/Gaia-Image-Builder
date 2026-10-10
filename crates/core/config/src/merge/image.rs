@@ -27,6 +27,7 @@ pub(super) fn merge_image(base: RawImageConfig, overlay: RawImageConfig) -> RawI
         output: RawImageOutputConfig {
             collect_dir: overlay.output.collect_dir.or(base.output.collect_dir),
             archive_name: overlay.output.archive_name.or(base.output.archive_name),
+            export_dir: overlay.output.export_dir.or(base.output.export_dir),
             emit_report: base.output.emit_report || overlay.output.emit_report,
         },
         assembly: merge_image_assembly(base.assembly, overlay.assembly),

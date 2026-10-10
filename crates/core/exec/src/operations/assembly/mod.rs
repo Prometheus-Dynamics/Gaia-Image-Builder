@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use super::helpers::{process_output_retention, runtime_state_dir};
 
+mod archive_log;
 mod archives;
 mod busybox;
 mod disks;
@@ -23,6 +24,7 @@ mod steps;
 mod tar;
 mod transforms;
 
+use archive_log::*;
 use archives::*;
 use busybox::*;
 use disks::*;
@@ -198,7 +200,8 @@ pub(crate) fn stage_image_assembly(
 
     let mut cleanup_paths = context.cleanup_paths();
     let mut archive_path = None;
-    if let Some(summary) = archive_assembly_disk_output(spec, &disk_outputs, cancel_check.clone())?
+    if let Some(summary) =
+        archive_assembly_disk_output(spec, &disk_outputs, cancel_check.clone(), &mut messages)?
     {
         state.insert("archive.path", summary.output.display().to_string());
         state.insert("archive.source", summary.source.display().to_string());
@@ -245,6 +248,7 @@ fn archive_assembly_disk_output(
     spec: &ResolvedBuildSpec,
     disk_outputs: &[PathBuf],
     cancel_check: Option<gaia_process::ProcessCancelCheck>,
+    messages: &mut Vec<String>,
 ) -> Result<Option<AssemblyArchiveSummary>, AssemblyError> {
     let Some(archive_path) = assembly_archive_path(spec) else {
         return Ok(None);
@@ -289,6 +293,7 @@ fn archive_assembly_disk_output(
     // All cores; the output is the same for any thread count.
     let mut command = Command::new(compressor);
     command.args(args).arg(source);
+    let clock = gaia_process::ActiveClock::start();
     let output = run_command_stdout_to_file(
         spec,
         &mut command,
@@ -309,6 +314,12 @@ fn archive_assembly_disk_output(
         )));
     }
     publish_assembly_output(&temp_archive, &archive_path)?;
+    messages.extend(archive_log_messages(
+        &archive_path,
+        compressor,
+        std_fs::metadata(source).ok().map(|metadata| metadata.len()),
+        clock.elapsed(),
+    ));
     Ok(Some(AssemblyArchiveSummary {
         output: archive_path.clone(),
         source: source.clone(),

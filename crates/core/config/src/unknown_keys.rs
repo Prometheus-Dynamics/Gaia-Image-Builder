@@ -503,6 +503,17 @@ mod tests {
     }
 
     #[test]
+    fn export_dir_keys_are_known() {
+        assert_eq!(
+            unknown(
+                "[workspace]\nexport_dir = \"exports\"\n\
+                 [image.output]\nexport_dir = \"~/images\"\n"
+            ),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
     fn nested_image_tables_are_checked_but_kind_keys_are_not() {
         assert_eq!(
             unknown(

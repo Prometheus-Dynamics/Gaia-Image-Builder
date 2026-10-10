@@ -356,7 +356,10 @@ pub fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
     hasher.finish()
 }
 
-fn source_backend_signature(spec: &ResolvedBuildSpec, source: &gaia_spec::SourceSpec) -> String {
+pub(crate) fn source_backend_signature(
+    spec: &ResolvedBuildSpec,
+    source: &gaia_spec::SourceSpec,
+) -> String {
     match &source.definition {
         SourceDefinition::Git(git) => format!(
             "{}|{}",
@@ -382,7 +385,7 @@ fn source_backend_signature(spec: &ResolvedBuildSpec, source: &gaia_spec::Source
 
 /// Content hash of a Dockerfile-built execution image, so editing the
 /// Dockerfile or its context rebuilds the artifact.
-fn artifact_docker_build_signature(
+pub(crate) fn artifact_docker_build_signature(
     spec: &ResolvedBuildSpec,
     artifact: &gaia_spec::ArtifactSpec,
 ) -> Option<String> {
@@ -407,7 +410,10 @@ fn artifact_docker_build_signature(
     )
 }
 
-fn image_backend_signature(spec: &ResolvedBuildSpec, image: &gaia_spec::ImageSpec) -> String {
+pub(crate) fn image_backend_signature(
+    spec: &ResolvedBuildSpec,
+    image: &gaia_spec::ImageSpec,
+) -> String {
     match &image.definition {
         ImageDefinition::Buildroot(_buildroot) => {
             let buildroot_dir = env::var("GAIA_BUILDROOT_DIR")
@@ -706,8 +712,8 @@ pub fn operation_content_signature(
         OperationKind::InstallArtifact { install_id, .. } => Some(provider_state_signature(
             &install_state_path(spec, install_id),
         )),
-        // Image outputs have no content-hashed state yet; use the
-        // conservative output signature.
+        // Prepare's signature is its Buildroot .config; build's is the
+        // collected image content. Both are already content-based.
         OperationKind::PrepareImage | OperationKind::BuildImage => {
             operation_output_signature(spec, kind)
         }
@@ -810,28 +816,10 @@ pub fn operation_output_signature(
             .collect_dir
             .as_deref()
             .map(|_| content_state_signature(&buildroot_output_dir(spec).join(".config"))),
-        OperationKind::BuildImage => {
-            let mut parts = Vec::new();
-            if let Some(collect_dir) = spec.image.output.collect_dir.as_deref() {
-                let collect_dir = resolve_workspace_path(spec, collect_dir);
-                parts.push(provider_state_signature(
-                    &collect_dir.join(".gaia-image-state.txt"),
-                ));
-                parts.push(content_state_signature(
-                    &collect_dir.join("image-provider.txt"),
-                ));
-            }
-            if let (Some(collect_dir), Some(archive_name)) = (
-                spec.image.output.collect_dir.as_deref(),
-                spec.image.output.archive_name.as_deref(),
-            ) {
-                parts.push(content_state_signature(
-                    &resolve_workspace_path(spec, collect_dir).join(archive_name),
-                ));
-            }
-            (!parts.is_empty()).then(|| parts.join("|"))
-        }
-        OperationKind::AssembleImage => Some(provider_state_signature(&assembly_state_path(spec))),
+        // Content of the collected images and archive, never the provider's
+        // rewritten state file (see reuse_content).
+        OperationKind::BuildImage => content::image_build_content_signature(spec),
+        OperationKind::AssembleImage => Some(content::image_assembly_content_signature(spec)),
         OperationKind::CaptureCheckpoint { checkpoint_id } => Some(provider_state_signature(
             &checkpoint_state_path(spec, checkpoint_id),
         )),
@@ -960,6 +948,9 @@ pub(crate) fn checkpoint_optionality(
         }
     }
 }
+
+#[path = "reuse_content.rs"]
+pub(crate) mod content;
 
 #[cfg(test)]
 #[path = "reuse_tests.rs"]

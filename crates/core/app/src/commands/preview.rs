@@ -5,14 +5,22 @@
 use gaia_config::{ResolveOptions, try_resolve_config_with_options};
 use gaia_image_providers::{ImagePreview, ImageProviderOperation};
 use gaia_plan::{
-    InvalidationSummary, OperationKind, OperationReuse, PlanTarget, invalidation_summary,
-    plan_build_with_reuse_state,
+    ExecutionPlan, InvalidationSummary, OperationKind, OperationReuse, PlanTarget,
+    PlannedOperation, ReuseState, fingerprint_change_detail, invalidation_summary,
+    operation_components, plan_build_with_reuse_state,
 };
+use gaia_spec::ResolvedBuildSpec;
 use gaia_validate::validate_spec_with_providers;
+use std::collections::BTreeMap;
 
 use crate::AppContext;
 
+use super::state::{RecordedComponents, load_operation_components};
 use super::{CommandOutcome, load_reuse_state};
+
+/// Message of a fingerprint change with no recorded input detail (state
+/// written before per-input records existed, or records that do not match).
+const NO_DETAIL: &str = "fingerprint changed (no detail recorded)";
 
 /// How many deletions the human report lists before counting the rest.
 const LISTED_DELETIONS: usize = 25;
@@ -160,17 +168,22 @@ pub(crate) fn preview_resolved(
         ));
     }
     let reuse_state = load_reuse_state(spec);
-    let plan = plan_build_with_reuse_state(
+    let full_plan = plan_build_with_reuse_state(
         spec,
         &context.source_catalog,
         &context.artifact_catalog,
         &context.image_catalog,
         reuse_state.as_ref(),
     );
-    let plan = if targets.is_empty() {
-        plan
+    let recorded = if reuse_state.is_some() {
+        load_operation_components(spec)
     } else {
-        plan.restrict_to(targets)?
+        BTreeMap::new()
+    };
+    let plan = if targets.is_empty() {
+        full_plan.clone()
+    } else {
+        full_plan.restrict_to(targets)?
     };
     let invalidation = reuse_state.is_some().then(|| invalidation_summary(&plan));
 
@@ -181,7 +194,18 @@ pub(crate) fn preview_resolved(
             OperationReuse::Execute(reason) => PreviewOperation {
                 id: operation.id.as_str().to_string(),
                 executes: true,
-                reason: format!("{}: {}", reason.code, reason.message),
+                reason: format!(
+                    "{}: {}",
+                    reason.code,
+                    explained_message(
+                        spec,
+                        &full_plan,
+                        reuse_state.as_ref(),
+                        &recorded,
+                        operation,
+                        &reason.message,
+                    )
+                ),
             },
             OperationReuse::Reuse { source } => PreviewOperation {
                 id: operation.id.as_str().to_string(),
@@ -268,6 +292,36 @@ pub(crate) fn preview_resolved(
 }
 
 /// Prints the report: JSON with `--json`, otherwise the readable report.
+/// The reason of an operation that executes. A fingerprint change with no
+/// recorded detail is explained by the named inputs that differ from the
+/// recorded ones, when the recorded inputs belong to the fingerprint the
+/// state still holds (a stale record is ignored).
+fn explained_message(
+    spec: &ResolvedBuildSpec,
+    full_plan: &ExecutionPlan,
+    reuse_state: Option<&ReuseState>,
+    recorded: &BTreeMap<String, RecordedComponents>,
+    operation: &PlannedOperation,
+    message: &str,
+) -> String {
+    if !message.contains(NO_DETAIL) {
+        return message.to_string();
+    }
+    let id = operation.id.as_str();
+    let (Some(state), Some(record)) = (reuse_state, recorded.get(id)) else {
+        return message.to_string();
+    };
+    if state.operation_fingerprints.get(id) != Some(&record.fingerprint) {
+        return message.to_string();
+    }
+    let current = operation_components(spec, full_plan, operation);
+    fingerprint_change_detail(id, &record.components, &current).unwrap_or_else(|| {
+        format!(
+            "operation '{id}' will execute because its fingerprint changed (no named input differs)"
+        )
+    })
+}
+
 pub(crate) fn print_preview(report: &PreviewReport) {
     if report.json {
         println!("{}", preview_json(report));
@@ -419,7 +473,7 @@ mod tests {
         digests
     }
 
-    fn scratch_root(name: &str) -> PathBuf {
+    pub(super) fn scratch_root(name: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_nanos())
@@ -573,7 +627,10 @@ mod tests {
 
     /// Records the reuse state a finished run of `plan` leaves, in the format
     /// `load_reuse_state` reads, with every operation recorded as completed.
-    fn record_reuse_state(spec: &gaia_spec::ResolvedBuildSpec, plan: &gaia_plan::ExecutionPlan) {
+    pub(super) fn record_reuse_state(
+        spec: &gaia_spec::ResolvedBuildSpec,
+        plan: &gaia_plan::ExecutionPlan,
+    ) {
         let hex = |signature: &str| {
             signature
                 .bytes()
@@ -724,3 +781,7 @@ mod tests {
         assert_eq!(exit(report(true, PreviewCleanKind::Nothing)), 0);
     }
 }
+
+#[cfg(test)]
+#[path = "preview_detail_tests.rs"]
+mod detail_tests;

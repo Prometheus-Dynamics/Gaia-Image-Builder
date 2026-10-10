@@ -15,9 +15,28 @@ pub struct RunFinish {
     /// Printed in order, after the outcome itself; the last line is the
     /// resume hint when the run failed or was cancelled.
     pub lines: Vec<String>,
-    /// True when `--export` was asked for and copying failed; the process
-    /// then exits 1.
+    /// True when an export was asked for (`--export` or a configured
+    /// directory) and copying failed; the process then exits 1.
     pub export_failed: bool,
+}
+
+/// The directory this run exports to. `--no-export` turns exports off for
+/// the run; `--export <dir>` beats the configured directory, which is the
+/// build's `image.output.export_dir` before the workspace's `workspace.export_dir`.
+fn export_dir_for(args: &AppArgs, outcome: &CommandOutcome) -> Option<String> {
+    if args.no_export {
+        return None;
+    }
+    if let Some(export_dir) = &args.export_dir {
+        return Some(export_dir.clone());
+    }
+    match outcome {
+        CommandOutcome::Ran {
+            configured_export_dir,
+            ..
+        } => configured_export_dir.clone(),
+        _ => None,
+    }
 }
 
 /// The lines for the outcome of `args`. Only `gaia run` has any: exports
@@ -34,10 +53,10 @@ pub fn run_finish(args: &AppArgs, outcome: &CommandOutcome) -> RunFinish {
     };
     let succeeded = report.is_some() && outcome.exit_code() == 0;
 
-    if let Some(export_dir) = &args.export_dir {
+    if let Some(export_dir) = export_dir_for(args, outcome) {
         match (succeeded, report) {
             (true, Some(report)) => {
-                let (lines, failed) = export_lines(report, export_dir);
+                let (lines, failed) = export_lines(report, &export_dir);
                 finish.lines.extend(lines);
                 finish.export_failed = failed;
             }
@@ -142,6 +161,13 @@ fn resume_command(
     if !args.only.is_empty() {
         words.extend(["--only".into(), shell_quote(&args.only.join(","))]);
     }
+    // The resumed run exports as this one would have.
+    if let Some(dir) = &args.export_dir {
+        words.extend(["--export".into(), shell_quote(dir)]);
+    }
+    if args.no_export {
+        words.push("--no-export".into());
+    }
     (words.join(" "), masked)
 }
 
@@ -203,6 +229,18 @@ mod tests {
              --set image.defconfig=raze_defconfig --set build.version=9.9.9 --only image,install"
         );
         assert!(!masked);
+    }
+
+    #[test]
+    fn resume_command_repeats_export_flags() {
+        let mut args = AppArgs::parse_from(["run", "b.toml", "--export", "out dir"]);
+        assert!(
+            resume_command(&args, &[], &[])
+                .0
+                .ends_with("--export 'out dir'")
+        );
+        args = AppArgs::parse_from(["run", "b.toml", "--no-export"]);
+        assert!(resume_command(&args, &[], &[]).0.ends_with("--no-export"));
     }
 
     #[test]

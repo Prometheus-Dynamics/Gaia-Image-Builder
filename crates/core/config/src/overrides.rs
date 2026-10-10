@@ -153,6 +153,7 @@ fn apply_known_override(
         KnownOverrideKey::WorkspaceRootDir => raw.workspace.root_dir = value.to_string(),
         KnownOverrideKey::WorkspaceBuildDir => raw.workspace.build_dir = value.to_string(),
         KnownOverrideKey::WorkspaceOutDir => raw.workspace.out_dir = value.to_string(),
+        KnownOverrideKey::WorkspaceExportDir => raw.workspace.export_dir = Some(value.to_string()),
         KnownOverrideKey::ImageFeedInstallEntries => {
             raw.image.feed.install_entries = split_csv(value)
         }
@@ -275,6 +276,9 @@ fn apply_known_override(
         }
         KnownOverrideKey::ImageOutputArchiveName => {
             raw.image.output.archive_name = Some(value.to_string())
+        }
+        KnownOverrideKey::ImageOutputExportDir => {
+            raw.image.output.export_dir = Some(value.to_string())
         }
         KnownOverrideKey::ReportingPostBuildTimeoutSeconds => {
             if let Some(post_build) = &mut raw.reporting.post_build {

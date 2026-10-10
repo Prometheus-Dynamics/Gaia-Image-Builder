@@ -1,4 +1,5 @@
 mod assembly_archives;
+mod export;
 mod project_git;
 mod resolver;
 mod scanner;
@@ -258,6 +259,7 @@ pub fn interpolate_config(raw: RawBuildConfig, env: &ResolvedEnvironment) -> Raw
         .collect_dir
         .clone()
         .map(|value| resolver::interpolate_string(value, &snapshot, env));
+    export::interpolate_export_dirs(&snapshot, &mut interpolated, env);
     interpolated.image.output.archive_name = snapshot
         .image
         .output

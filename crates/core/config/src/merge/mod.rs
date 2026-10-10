@@ -235,6 +235,9 @@ fn merge_two(mut base: RawBuildConfig, overlay: RawBuildConfig) -> RawBuildConfi
     if !overlay.workspace.out_dir.trim().is_empty() {
         base.workspace.out_dir = overlay.workspace.out_dir;
     }
+    if overlay.workspace.export_dir.is_some() {
+        base.workspace.export_dir = overlay.workspace.export_dir;
+    }
     base.workspace.named_paths =
         merge_workspace_named_paths(base.workspace.named_paths, overlay.workspace.named_paths);
 

@@ -16,6 +16,7 @@ pub(super) enum KnownOverrideKey {
     WorkspaceRootDir,
     WorkspaceBuildDir,
     WorkspaceOutDir,
+    WorkspaceExportDir,
     ImageFeedInstallEntries,
     ImageFeedStageFiles,
     ImageFeedStageEnvSets,
@@ -32,6 +33,7 @@ pub(super) enum KnownOverrideKey {
     ImageStartingPointOutputMode,
     ImageOutputCollectDir,
     ImageOutputArchiveName,
+    ImageOutputExportDir,
     ReportingPostBuildTimeoutSeconds,
     ProvenanceIdentityProject,
     ProvenanceIdentityVendor,
@@ -136,6 +138,7 @@ impl<'a> OverrideKey<'a> {
             "workspace.root_dir" => Self::Known(KnownOverrideKey::WorkspaceRootDir),
             "workspace.build_dir" => Self::Known(KnownOverrideKey::WorkspaceBuildDir),
             "workspace.out_dir" => Self::Known(KnownOverrideKey::WorkspaceOutDir),
+            "workspace.export_dir" => Self::Known(KnownOverrideKey::WorkspaceExportDir),
             "image.feed.install_entries" => Self::Known(KnownOverrideKey::ImageFeedInstallEntries),
             "image.feed.stage_files" => Self::Known(KnownOverrideKey::ImageFeedStageFiles),
             "image.feed.stage_env_sets" => Self::Known(KnownOverrideKey::ImageFeedStageEnvSets),
@@ -168,6 +171,7 @@ impl<'a> OverrideKey<'a> {
             }
             "image.output.collect_dir" => Self::Known(KnownOverrideKey::ImageOutputCollectDir),
             "image.output.archive_name" => Self::Known(KnownOverrideKey::ImageOutputArchiveName),
+            "image.output.export_dir" => Self::Known(KnownOverrideKey::ImageOutputExportDir),
             "reporting.post_build.timeout_seconds" => {
                 Self::Known(KnownOverrideKey::ReportingPostBuildTimeoutSeconds)
             }

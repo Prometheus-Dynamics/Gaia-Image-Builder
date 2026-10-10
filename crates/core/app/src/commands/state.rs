@@ -30,6 +30,85 @@ fn parse_operation_durations(contents: &str) -> BTreeMap<String, u64> {
         .collect()
 }
 
+/// The named inputs an operation had when it last finished, and the operation
+/// fingerprint they were recorded under. Read from the `.details` sidecar of
+/// the reuse state, which older Gaia versions never read or write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordedComponents {
+    pub fingerprint: u64,
+    /// `(name, digest)` pairs as `gaia_plan::operation_components` lists them.
+    pub components: Vec<(String, String)>,
+}
+
+/// Recorded inputs per operation id. Missing or unreadable details yield an
+/// empty map, so the preview falls back to naming no input.
+pub fn load_operation_components(spec: &ResolvedBuildSpec) -> BTreeMap<String, RecordedComponents> {
+    fs::read_to_string(reuse_details_path(spec))
+        .map(|contents| parse_operation_components(&contents))
+        .unwrap_or_default()
+}
+
+/// Lines are `op\t<operation id>\t<fingerprint>` and
+/// `part\t<operation id>\t<name>\t<digest>`. Parts of an unknown operation and
+/// malformed lines are skipped.
+fn parse_operation_components(contents: &str) -> BTreeMap<String, RecordedComponents> {
+    let mut records = BTreeMap::<String, RecordedComponents>::new();
+    for line in contents.lines() {
+        let fields = line.split('\t').collect::<Vec<_>>();
+        match fields.as_slice() {
+            ["op", id, fingerprint] => {
+                if let Ok(fingerprint) = fingerprint.parse::<u64>()
+                    && !id.is_empty()
+                {
+                    records.insert(
+                        (*id).to_string(),
+                        RecordedComponents {
+                            fingerprint,
+                            components: Vec::new(),
+                        },
+                    );
+                }
+            }
+            ["part", id, name, digest] => {
+                if let Some(record) = records.get_mut(*id) {
+                    record
+                        .components
+                        .push(((*name).to_string(), (*digest).to_string()));
+                }
+            }
+            _ => {}
+        }
+    }
+    records
+}
+
+/// Appends one operation's recorded components to the details body.
+fn push_operation_components(
+    body: &mut String,
+    id: &str,
+    fingerprint: u64,
+    components: &[(String, String)],
+) {
+    body.push_str(&format!("op\t{}\t{fingerprint}\n", record_field(id)));
+    for (name, digest) in components {
+        body.push_str(&format!(
+            "part\t{}\t{}\t{}\n",
+            record_field(id),
+            record_field(name),
+            record_field(digest)
+        ));
+    }
+}
+
+/// A tab or line break inside a recorded field would corrupt the line format.
+fn record_field(text: &str) -> String {
+    text.replace(['\t', '\n', '\r'], " ")
+}
+
+fn reuse_details_path(spec: &ResolvedBuildSpec) -> PathBuf {
+    PathBuf::from(format!("{}.details", reuse_state_path(spec).display()))
+}
+
 pub fn load_reuse_state(spec: &ResolvedBuildSpec) -> Option<ReuseState> {
     let path = reuse_state_path(spec);
     let contents = fs::read_to_string(path).ok()?;
@@ -125,6 +204,8 @@ pub fn save_reuse_state(
         .filter(|id| !rolled_back.contains(id))
         .collect::<BTreeSet<_>>();
     let attempted = attempted_operation_ids(outcome);
+    let previous_components = load_operation_components(spec);
+    let mut components_body = String::new();
 
     let mut body = format!("fingerprint={}\n", spec_fingerprint(spec));
     for operation in &plan.operations {
@@ -142,6 +223,12 @@ pub fn save_reuse_state(
             "in={id};{}\n",
             gaia_plan::operation_input_signature(spec, plan, operation)
         ));
+        push_operation_components(
+            &mut components_body,
+            id,
+            operation.fingerprint,
+            &gaia_plan::operation_components(spec, plan, operation),
+        );
     }
     if let Some(previous) = previous {
         for id in &previous.completed_operation_ids {
@@ -162,6 +249,14 @@ pub fn save_reuse_state(
             if let Some(signature) = previous.operation_input_signatures.get(id) {
                 body.push_str(&format!("in={id};{signature}\n"));
             }
+            if let Some(record) = previous_components.get(id) {
+                push_operation_components(
+                    &mut components_body,
+                    id,
+                    record.fingerprint,
+                    &record.components,
+                );
+            }
         }
     }
     // Durations are estimates only: keep them for every operation, including
@@ -171,6 +266,18 @@ pub fn save_reuse_state(
     }
     // Write-then-rename so an interrupted save never leaves a truncated file.
     let temporary = path.with_extension("reuse-state.tmp");
+    if fs::write(&temporary, body).is_ok() && fs::rename(&temporary, &path).is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    write_reuse_details(spec, &components_body);
+}
+
+/// Writes the components sidecar with the same write-then-rename as the state.
+/// Each record carries its fingerprint, so a sidecar left behind by an older
+/// run never describes a state entry it does not belong to.
+fn write_reuse_details(spec: &ResolvedBuildSpec, body: &str) {
+    let path = reuse_details_path(spec);
+    let temporary = PathBuf::from(format!("{}.tmp", path.display()));
     if fs::write(&temporary, body).is_ok() && fs::rename(&temporary, &path).is_err() {
         let _ = fs::remove_file(&temporary);
     }
@@ -597,5 +704,92 @@ mod tests {
         let state = load_reuse_state(&spec).expect("reuse state");
 
         assert!(!state.completed_operation_ids.contains("artifact:unwound"));
+    }
+
+    #[test]
+    fn components_round_trip_through_the_details_sidecar() {
+        let spec = test_spec();
+        let context = crate::AppContext::with_defaults();
+        let plan = gaia_plan::plan_build(
+            &spec,
+            &context.source_catalog,
+            &context.artifact_catalog,
+            &context.image_catalog,
+        );
+        let outcome = ExecutionOutcome {
+            completed_ids: plan
+                .operations
+                .iter()
+                .map(|operation| operation.id.clone())
+                .collect(),
+            ..ExecutionOutcome::default()
+        };
+
+        // Taken before the save: writing the state can touch a path source
+        // tree, which would change the expected digests.
+        let expected = plan
+            .operations
+            .iter()
+            .map(|operation| {
+                (
+                    operation.id.as_str().to_string(),
+                    gaia_plan::operation_components(&spec, &plan, operation),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        save_reuse_state(&spec, &plan, &outcome, None);
+        let recorded = load_operation_components(&spec);
+
+        assert_eq!(recorded.len(), plan.operations.len());
+        assert!(
+            recorded
+                .values()
+                .any(|record| !record.components.is_empty())
+        );
+        for operation in &plan.operations {
+            let record = recorded
+                .get(operation.id.as_str())
+                .expect("every finished operation has a record");
+            assert_eq!(record.fingerprint, operation.fingerprint);
+            assert_eq!(&record.components, &expected[operation.id.as_str()]);
+        }
+        // The state file itself is unchanged in shape: it still loads.
+        assert!(load_reuse_state(&spec).is_some());
+    }
+
+    #[test]
+    fn a_state_without_details_and_junk_in_the_details_still_load() {
+        let spec = test_spec();
+        let path = reuse_state_path(&spec);
+        fs::create_dir_all(path.parent().expect("parent")).expect("reuse state dir");
+        fs::write(&path, "fingerprint=7\nimage:build\nop=image:build;9\n").expect("state");
+
+        let details = reuse_details_path(&spec);
+        let _ = fs::remove_file(&details);
+        assert!(load_reuse_state(&spec).is_some());
+        assert!(load_operation_components(&spec).is_empty());
+
+        fs::write(
+            &details,
+            concat!(
+                "junk\n",
+                "part\timage:build\tdefconfig\tbeef\n",
+                "op\timage:build\t9\n",
+                "part\timage:build\tdefconfig\tabc\n",
+                "part\tunknown:op\tdefconfig\tabc\n",
+                "op\tbroken\tnot-a-number\n",
+            ),
+        )
+        .expect("details");
+        let recorded = load_operation_components(&spec);
+
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(
+            recorded.get("image:build"),
+            Some(&RecordedComponents {
+                fingerprint: 9,
+                components: vec![("defconfig".to_string(), "abc".to_string())],
+            })
+        );
     }
 }
