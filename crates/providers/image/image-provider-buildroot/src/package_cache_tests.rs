@@ -33,7 +33,7 @@ fn stamps_are_recorded_in_build_order() {
     let _ = fs::remove_dir_all(dir);
 }
 
-fn temp(label: &str) -> PathBuf {
+pub(super) fn temp(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "gaia-package-cache-{label}-{}-{}",
         std::process::id(),
@@ -51,7 +51,7 @@ fn write(path: &Path, contents: &[u8]) {
 
 /// A tree where `base` (a dependency) and `app` were built: per-package
 /// directories (app's holds a copy of base's files), file lists, stamps.
-fn built_tree(output: &Path, app_binary: &[u8]) {
+pub(super) fn built_tree(output: &Path, app_binary: &[u8]) {
     let out = output.display().to_string();
     write(
         &output.join("per-package/base/target/usr/lib/libbase.so"),
@@ -109,7 +109,7 @@ fn built_tree(output: &Path, app_binary: &[u8]) {
         .expect("staging link");
 }
 
-fn cache_graph() -> PackageGraph {
+pub(super) fn cache_graph() -> PackageGraph {
     let mut graph = PackageGraph::default();
     for (name, dependencies, reverse) in
         [("base", vec![], vec!["app"]), ("app", vec!["base"], vec![])]
@@ -130,7 +130,7 @@ fn cache_graph() -> PackageGraph {
 
 /// A two-level cache under `root` (`system/`, `project/`) storing the
 /// `project_packages` at the project level.
-fn test_cache(root: &Path, project_packages: &[&str]) -> PackageCache {
+pub(super) fn test_cache(root: &Path, project_packages: &[&str]) -> PackageCache {
     PackageCache {
         system: Some(root.join("system")),
         project: root.join("project"),
@@ -147,7 +147,7 @@ fn test_cache(root: &Path, project_packages: &[&str]) -> PackageCache {
     }
 }
 
-fn tools_available() -> bool {
+pub(super) fn tools_available() -> bool {
     ["cp", "rsync"].iter().all(|tool| {
         Command::new(tool)
             .arg("--version")

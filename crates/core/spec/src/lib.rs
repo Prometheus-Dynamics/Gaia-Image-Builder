@@ -80,11 +80,11 @@ pub use policy::{
     DEFAULT_OUTPUT_RETENTION_STDOUT_LINES, DEFAULT_PROVIDER_LOCAL_JOBS,
     DEFAULT_PYTHON_PROVIDER_TIMEOUT_SECONDS, DEFAULT_RUST_PROVIDER_TIMEOUT_SECONDS,
     DEFAULT_STARTING_POINT_PROVIDER_TIMEOUT_SECONDS, DockerExecutionSpec, ExecutionPolicySpec,
-    FailureHandlingPolicySpec, GitProviderPolicySpec, HostToolStepSpec, InterpolationSpec,
-    KNOWN_HOST_TOOLS, OutputRetentionPolicySpec, PackageCacheLevelSpec, PrecedenceLayerSpec,
-    PrecedencePolicySpec, PrecedenceSource, PrecedenceTarget, PresetSelectionSpec,
-    ProviderExecutionPolicySpec, ResolvedCommandPolicySpec, RetryBackoffStrategySpec,
-    RollbackDomain, RustProviderPolicySpec, UnresolvedInterpolationSpec,
+    FailureHandlingPolicySpec, GitProviderPolicySpec, GradleHomeSpec, HostToolStepSpec,
+    InterpolationSpec, KNOWN_HOST_TOOLS, OutputRetentionPolicySpec, PackageCacheLevelSpec,
+    PrecedenceLayerSpec, PrecedencePolicySpec, PrecedenceSource, PrecedenceTarget,
+    PresetSelectionSpec, ProviderExecutionPolicySpec, ResolvedCommandPolicySpec,
+    RetryBackoffStrategySpec, RollbackDomain, RustProviderPolicySpec, UnresolvedInterpolationSpec,
 };
 pub use provenance::{ProvenanceIdentitySpec, ProvenanceSpec};
 pub use raw_disk_archive::{RawDiskArchive, raw_disk_archive};

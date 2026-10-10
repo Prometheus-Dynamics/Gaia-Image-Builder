@@ -578,3 +578,68 @@ fn resolves_buildroot_host_tools_policy() {
         &[gaia_spec::HostToolStepSpec::Fail]
     );
 }
+
+#[test]
+fn java_gradle_home_defaults_to_workspace_and_is_configurable() {
+    let spec = resolve_config(&default_config_path());
+    assert_eq!(
+        spec.policy.providers.java.gradle_home,
+        gaia_spec::GradleHomeSpec::Workspace
+    );
+    assert_eq!(spec.policy.providers.java.gradle_home_invalid, None);
+
+    let path = write_temp_config(
+        r#"
+build_name = "java-gradle-home"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[providers.java]
+gradle_home = "user-cache"
+
+[image]
+kind = "starting-point"
+rootfs_path = "/tmp/rootfs"
+"#,
+    );
+    let spec = resolve_config(path.to_str().expect("temp path should be utf-8"));
+    assert_eq!(
+        spec.policy.providers.java.gradle_home,
+        gaia_spec::GradleHomeSpec::UserCache
+    );
+
+    let spec = gaia_config::resolve_config_with_options(
+        &default_config_path(),
+        &gaia_config::ResolveOptions {
+            explicit_overrides: vec![(
+                "policy.providers.java.gradle_home".into(),
+                "user-cache".into(),
+            )],
+            ..gaia_config::ResolveOptions::default()
+        },
+    );
+    assert_eq!(
+        spec.policy.providers.java.gradle_home,
+        gaia_spec::GradleHomeSpec::UserCache
+    );
+}
+
+#[test]
+fn java_gradle_home_override_rejects_unknown_values() {
+    let error = gaia_config::try_resolve_config_with_options(
+        &default_config_path(),
+        &gaia_config::ResolveOptions {
+            explicit_overrides: vec![("policy.providers.java.gradle_home".into(), "cache".into())],
+            ..gaia_config::ResolveOptions::default()
+        },
+    )
+    .expect_err("unknown gradle_home should be rejected");
+    assert!(
+        error
+            .to_string()
+            .contains("policy.providers.java.gradle_home")
+    );
+}

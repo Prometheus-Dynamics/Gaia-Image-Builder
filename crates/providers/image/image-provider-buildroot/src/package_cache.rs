@@ -335,17 +335,50 @@ impl PackageCache {
         keys: &BTreeMap<String, Option<String>>,
         excluded: &BTreeSet<String>,
     ) -> Vec<String> {
-        let built = |name: &str| {
-            graph
-                .get(name)
-                .and_then(|package| package.stamp_dir.as_deref())
-                .is_some_and(|stamp_dir| {
-                    output_dir
-                        .join(stamp_dir)
-                        .join(".stamp_installed")
-                        .is_file()
-                })
-        };
+        let plan_list = self.restore_plan(output_dir, graph, keys, excluded, &|name| {
+            stamp_built(output_dir, graph, name)
+        });
+        let mut restored = BTreeSet::new();
+        let mut listings = TreeListings::default();
+        for name in plan_list {
+            let Some(package) = graph.get(&name) else {
+                continue;
+            };
+            // A dependency that failed to restore will be built instead.
+            if !package.dependencies.iter().all(|dependency| {
+                restored.contains(dependency) || stamp_built(output_dir, graph, dependency)
+            }) {
+                continue;
+            }
+            let Some(Some(key)) = keys.get(&name) else {
+                continue;
+            };
+            match self.restore_one(output_dir, graph, &name, key, &mut listings) {
+                Ok(()) => {
+                    restored.insert(name);
+                }
+                Err(error) => {
+                    tracing::warn!(package = %name, %error, "package cache restore failed");
+                    self.discard_partial(output_dir, graph, &name);
+                }
+            }
+        }
+        restored.into_iter().collect()
+    }
+
+    /// The packages [`Self::restore_except`] restores, in the order it
+    /// restores them (dependencies first), given `built`: whether a package
+    /// is built in the tree as it is, or as it would be. Pure: nothing is
+    /// restored. A restore that fails is not taken back out of the plan;
+    /// the caller skips the dependents of a failed one.
+    pub(crate) fn restore_plan(
+        &self,
+        output_dir: &Path,
+        graph: &PackageGraph,
+        keys: &BTreeMap<String, Option<String>>,
+        excluded: &BTreeSet<String>,
+        built: &dyn Fn(&str) -> bool,
+    ) -> Vec<String> {
         let order = dependency_order(graph);
         let plan = |excluded: &BTreeSet<String>| {
             let mut ready = order
@@ -392,34 +425,7 @@ impl PackageCache {
                 plan_list = plan(&without_linux);
             }
         }
-        let mut restored = BTreeSet::new();
-        let mut listings = TreeListings::default();
-        for name in plan_list {
-            let Some(package) = graph.get(&name) else {
-                continue;
-            };
-            // A dependency that failed to restore will be built instead.
-            if !package
-                .dependencies
-                .iter()
-                .all(|dependency| restored.contains(dependency) || built(dependency))
-            {
-                continue;
-            }
-            let Some(Some(key)) = keys.get(&name) else {
-                continue;
-            };
-            match self.restore_one(output_dir, graph, &name, key, &mut listings) {
-                Ok(()) => {
-                    restored.insert(name);
-                }
-                Err(error) => {
-                    tracing::warn!(package = %name, %error, "package cache restore failed");
-                    self.discard_partial(output_dir, graph, &name);
-                }
-            }
-        }
-        restored.into_iter().collect()
+        plan_list
     }
 
     fn restore_one(
@@ -710,54 +716,34 @@ impl PackageCache {
     /// manifests (size, and last use as the manifest's modification time).
     fn evict(&self) {
         for (_, level) in self.levels() {
-            evict_level(level, self.max_size);
+            evict::evict_level(level, self.max_size);
         }
     }
 }
 
-/// Removes a level's least recently used entries beyond `max_size`.
-fn evict_level(level: &Path, max_size: u64) {
-    let mut entries = Vec::new();
-    let mut total = 0u64;
-    for package in fs::read_dir(level).into_iter().flatten().flatten() {
-        for file in fs::read_dir(package.path()).into_iter().flatten().flatten() {
-            let path = file.path();
-            if path.extension().is_none_or(|extension| extension != "json") {
-                continue;
-            }
-            let Some(manifest) = fs::read_to_string(&path)
-                .ok()
-                .and_then(|text| Manifest::parse(&text))
-            else {
-                continue;
-            };
-            let used = file
-                .metadata()
-                .and_then(|metadata| metadata.modified())
-                .unwrap_or(std::time::UNIX_EPOCH);
-            total += manifest.size;
-            entries.push((used, manifest.size, path));
-        }
-    }
-    if total <= max_size {
-        return;
-    }
-    entries.sort();
-    let target = max_size / 10 * 9;
-    for (_, size, manifest) in entries {
-        if total <= target {
-            break;
-        }
-        let _ = gaia_process::discard(&manifest.with_extension(""));
-        if fs::remove_file(&manifest).is_ok() {
-            total = total.saturating_sub(size);
-        }
-    }
+/// Whether `name` is built in `output_dir`: its install stamp is there.
+pub(crate) fn stamp_built(output_dir: &Path, graph: &PackageGraph, name: &str) -> bool {
+    graph
+        .get(name)
+        .and_then(|package| package.stamp_dir.as_deref())
+        .is_some_and(|stamp_dir| {
+            output_dir
+                .join(stamp_dir)
+                .join(".stamp_installed")
+                .is_file()
+        })
 }
+
+#[path = "package_cache_evict.rs"]
+mod evict;
 
 #[cfg(test)]
 #[path = "package_cache_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "package_cache_plan_tests.rs"]
+mod plan_tests;
 
 #[path = "package_cache_preview.rs"]
 mod preview;

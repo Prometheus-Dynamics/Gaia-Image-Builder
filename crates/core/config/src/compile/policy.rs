@@ -71,6 +71,13 @@ fn compile_host_tools(
     }
 }
 
+/// Compiles `[providers.java] gradle_home`. An unknown value compiles to
+/// `workspace` and is reported by validation (see `gradle_home_invalid`).
+fn compile_gradle_home(text: Option<&str>) -> gaia_spec::GradleHomeSpec {
+    text.and_then(gaia_spec::GradleHomeSpec::parse)
+        .unwrap_or_default()
+}
+
 pub(crate) fn compile_command_policy(
     raw: &crate::raw::RawCommandProviderPolicyConfig,
     default_timeout_seconds: u64,
@@ -94,6 +101,13 @@ pub(crate) fn compile_command_policy(
             keep_ram_tree: raw.keep_ram_tree.unwrap_or(true),
         },
         host_tools: compile_host_tools(&raw.host_tools),
+        gradle_home: compile_gradle_home(raw.gradle_home.as_deref()),
+        gradle_home_configured: raw.gradle_home.is_some(),
+        gradle_home_invalid: raw
+            .gradle_home
+            .as_deref()
+            .filter(|text| gaia_spec::GradleHomeSpec::parse(text).is_none())
+            .map(str::to_string),
         package_cache: gaia_spec::BuildrootPackageCachePolicySpec {
             enabled: raw.package_cache.enabled,
             level: match raw.package_cache.level {

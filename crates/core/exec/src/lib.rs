@@ -258,6 +258,7 @@ pub fn execute_plan_with_cancellation_and_observer(
             else {
                 break;
             };
+            let result = result.into_cancelled_if_stopped();
             running[index] = false;
             completed[index] = true;
             running_count = running_count.saturating_sub(1);
@@ -275,12 +276,28 @@ pub fn execute_plan_with_cancellation_and_observer(
                     cleanup_paths = result.cleanup_paths.len(),
                     "operation cancelled"
                 );
-                cancellation_pending = true;
-                cancelled_cleanup = Some((
-                    result.operation_id.clone(),
-                    result.cleanup_domain,
-                    result.cleanup_paths.clone(),
-                ));
+                if first_failure.is_some() {
+                    // Stopped only because a sibling failed. Its partial
+                    // outputs follow the same rules as the failed operation's
+                    // (preserve_failed_outputs, rollback_on_error, domains),
+                    // and the operation is not recorded as completed.
+                    if spec.policy.failure.rollback_on_error {
+                        runtime.clean_failed_outputs(
+                            &result.operation_id,
+                            result.cleanup_domain,
+                            &result.cleanup_paths,
+                            spec.policy.failure.preserve_failed_outputs,
+                            &spec.policy.failure.rollback_domains,
+                        );
+                    }
+                } else {
+                    cancellation_pending = true;
+                    cancelled_cleanup = Some((
+                        result.operation_id.clone(),
+                        result.cleanup_domain,
+                        result.cleanup_paths.clone(),
+                    ));
+                }
                 runtime.record_timed(result, duration, paused);
                 continue;
             }

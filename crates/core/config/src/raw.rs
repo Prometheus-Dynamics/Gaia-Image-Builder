@@ -333,6 +333,8 @@ pub struct RawCommandProviderPolicyConfig {
     /// Keep a "ram" tree after a build (default true).
     pub keep_ram_tree: Option<bool>,
     pub host_tools: RawBuildrootHostToolsConfig,
+    /// Java only: "workspace" (default) or "user-cache".
+    pub gradle_home: Option<String>,
 }
 
 /// `[providers.buildroot.host_tools]`: `default` plus one policy string per

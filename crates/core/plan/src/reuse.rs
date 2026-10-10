@@ -356,9 +356,10 @@ fn source_backend_signature(spec: &ResolvedBuildSpec, source: &gaia_spec::Source
         SourceDefinition::Download(_) => command_signature("curl", ["--version"]),
         SourceDefinition::Path(path) => format!(
             "path-source|{}",
-            path_state_signature_with_ignores(
+            gaia_source_providers::path_source_fingerprint(
+                &spec.workspace,
                 &resolve_workspace_path(spec, &path.path),
-                &workspace_path_ignores(spec),
+                &path.identity_ignore,
             )
         ),
     }
@@ -562,12 +563,6 @@ pub(crate) fn path_state_signature(path: &Path) -> String {
     format!("{:016x}", hasher.finish())
 }
 
-fn path_state_signature_with_ignores(path: &Path, ignored_names: &[String]) -> String {
-    let mut hasher = DefaultHasher::new();
-    hash_path_state(path, &mut hasher, ignored_names);
-    format!("{:016x}", hasher.finish())
-}
-
 fn hash_path_state(path: &Path, hasher: &mut DefaultHasher, ignored_names: &[String]) {
     if path
         .file_name()
@@ -612,31 +607,6 @@ fn hash_path_state(path: &Path, hasher: &mut DefaultHasher, ignored_names: &[Str
             hash_path_state(&entry, hasher, ignored_names);
         }
     }
-}
-
-fn workspace_path_ignores(spec: &ResolvedBuildSpec) -> Vec<String> {
-    let mut ignored = [
-        "target",
-        ".git",
-        ".gaia",
-        "build",
-        "out",
-        "node_modules",
-        "__pycache__",
-        ".gaia-pack",
-        ".gaia-wheelhouse",
-    ]
-    .map(str::to_string)
-    .to_vec();
-    for path in [&spec.workspace.build_dir, &spec.workspace.out_dir] {
-        let candidate = Path::new(path);
-        if let Some(name) = candidate.file_name().and_then(|name| name.to_str())
-            && !ignored.iter().any(|ignored_name| ignored_name == name)
-        {
-            ignored.push(name.to_string());
-        }
-    }
-    ignored
 }
 
 fn operation_outputs_present(spec: &ResolvedBuildSpec, kind: &OperationKind) -> bool {

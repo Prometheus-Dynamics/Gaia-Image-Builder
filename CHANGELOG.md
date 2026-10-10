@@ -69,6 +69,14 @@ newest release, and updates the Rust docker images to 1.99.0.
   the first run after upgrading.
 - Host tool probes check `PATH` first, so a missing tool no longer logs a
   process start failure (its signature is unchanged).
+- Path sources fingerprint their tree by names and file contents (plus mode,
+  length and symlink targets), not directory timestamps or sizes. Gaia's own
+  state inside the tree (`.gaia`, `.gaia-trash`, `.gaia-run*`, and the
+  workspace build and out dirs) is skipped, so a `source:workspace-root` at
+  the workspace root no longer rebuilds on the first run after a fresh
+  workspace. Real edits, additions and removals under the root still change
+  the fingerprint, and the planner and the source provider share one rule.
+  The fingerprint format changed, so path sources rebuild once after upgrading.
 
 ### Executor and runtime
 
@@ -136,6 +144,17 @@ newest release, and updates the Rust docker images to 1.99.0.
 
 ### Added
 
+- Added `[providers.java] gradle_home = "workspace" | "user-cache"` (also
+  `--set policy.providers.java.gradle_home=...`): `user-cache` moves a Docker
+  Java build's Gradle user home to the per-user Gaia cache
+  (`<user cache root>/gradle-home`), mounted into the container at the same
+  path. Any other value is a validation error. The `GAIA_GRADLE_HOME`
+  environment variable still overrides the setting but is deprecated; an
+  unknown value fails the build. `gradle_home` set under another provider
+  table is a validation warning. Java artifacts' `build_env` now also applies
+  to default Maven and Gradle builds (it was ignored unless `build_args` or
+  `build_command` was set).
+
 - Added `gaia status [build] [--follow]`, which shows what a running `gaia run` of a build is doing from another terminal: the operations, Buildroot packages, running operations and recent output, read from `.gaia-run.status.json` in the build dir (also written with `GAIA_RUN_PROGRESS=quiet`; the final outcome lands in `.gaia-run.last.json`). `gaia tui <build>` attaches to a build that is already running (`p`/`r`/`c` to pause, resume or cancel, `q` to leave the monitor), and the picker marks running builds. Every `gaia run` now registers itself in a per-user registry (`$GAIA_RUNS_DIR`, else `$XDG_RUNTIME_DIR/gaia/runs`, else `~/.local/state/gaia/runs`), so the runs on the system can be found from any directory: `gaia status` with no argument lists them all (live runs, and runs that ended in the last 24 hours), `gaia status <n|name|build config>` shows one, and `gaia pause|resume|cancel` with no argument act on the only live run (they list the runs and fail when several are live). `gaia tui` from anywhere starts with a Running builds section, attaches to any of them, and opens even outside a project.
 - Added the `xfs` Buildroot expected-image format (`BR2_TARGET_ROOTFS_XFS`, Buildroot 2026.08+), including shared-output packing. Gaia's Buildroot provider was checked against 2026.08: defconfig handling, the `.config` format used by `override_check`, kernel module install paths, rootfs fakeroot scripts and make targets are unchanged from 2025.11.
 - Added `${project.commit}` (full sha, `-dirty` for uncommitted tracked changes) and `${project.describe}` (`git describe --tags --always --dirty`) for the git repository holding the build file, so image versions and update bundles can be unique per build.
@@ -201,6 +220,13 @@ newest release, and updates the Rust docker images to 1.99.0.
 
 ### Fixed
 
+- Fixed operations stopped by the first failure's stop signal keeping their
+  partial outputs. Their outputs are now cleaned under the failed operation's
+  rules (`preserve_failed_outputs`, `rollback_on_error`, `rollback_domains`),
+  and they are not recorded as completed, so the next run redoes them. Any
+  operation whose error has kind `Cancelled` (stopped by the stop or cancel
+  signal) is reported as cancelled, not as a second failure; a cancelled
+  assembly step that used to report an error now reports the run as cancelled.
 - Fixed timeouts, cancellation and Ctrl-C leaving docker containers running.
   - Gaia stopped only the docker client, so the container kept building with nobody reading its output; its next write then failed. A PhotonVision build shipped 58 of 1898 kernel modules this way, because Buildroot ignores a failed `modules_install`.
   - Docker runs now use `--init` and `--cidfile`, and a command stopped early has its container force-removed.

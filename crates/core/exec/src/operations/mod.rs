@@ -129,6 +129,30 @@ impl OperationExecutionResult {
         }
     }
 
+    /// A failure whose error kind is `Cancelled` was stopped by the stop or
+    /// cancel signal (provider and process errors of that kind), not by a
+    /// fault of its own. It becomes a cancelled result, so its partial outputs
+    /// are cleaned under the same rules and it is neither recorded as
+    /// completed nor counted as a failure.
+    pub(crate) fn into_cancelled_if_stopped(mut self) -> Self {
+        let Some(error) = self.error.as_ref() else {
+            return self;
+        };
+        if error.kind != ExecutionErrorKind::Cancelled {
+            return self;
+        }
+        let message = error.message.clone();
+        self.error = None;
+        self.cancelled = true;
+        self.events
+            .retain(|event| !matches!(event, ExecutionEvent::Failed { .. }));
+        self.events.push(ExecutionEvent::Log {
+            operation_id: self.operation_id.clone(),
+            message,
+        });
+        self
+    }
+
     fn with_cleanup_domain(mut self, cleanup_domain: RollbackDomain) -> Self {
         self.cleanup_domain = Some(cleanup_domain);
         self
@@ -534,5 +558,52 @@ pub(crate) fn dispatch_operation(
                 OperationExecutionResult::success(operation.id.clone(), "emitted report".into())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gaia_spec::RollbackDomain;
+
+    #[test]
+    fn cancelled_kind_failure_becomes_cancelled_result_with_cleanup() {
+        let result = helpers::failure_with_cleanup(
+            OperationId::new("source:slow"),
+            "stopped",
+            ExecutionErrorKind::Cancelled,
+            "slow cancelled".into(),
+            RollbackDomain::Sources,
+            vec![PathBuf::from("build/sources/slow")],
+        )
+        .into_cancelled_if_stopped();
+
+        assert!(result.error.is_none(), "{:?}", result.error);
+        assert!(result.cancelled);
+        assert_eq!(result.cleanup_domain, Some(RollbackDomain::Sources));
+        assert_eq!(
+            result.cleanup_paths,
+            vec![PathBuf::from("build/sources/slow")]
+        );
+        assert!(
+            !result
+                .events
+                .iter()
+                .any(|event| matches!(event, ExecutionEvent::Failed { .. }))
+        );
+    }
+
+    #[test]
+    fn other_failure_kinds_stay_failures() {
+        let result = helpers::failure_with_kind(
+            OperationId::new("source:fail"),
+            "backend",
+            ExecutionErrorKind::BackendCommand,
+            "boom".into(),
+        )
+        .into_cancelled_if_stopped();
+
+        assert!(!result.cancelled);
+        assert!(result.error.is_some());
     }
 }

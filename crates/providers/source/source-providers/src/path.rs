@@ -38,7 +38,7 @@ impl SourceProvider for PathSourceProvider {
             &format!(
                 "path={}\npath_digest={}\ncontent_identity_mode={}\nlink_mode={}\n",
                 resolved.display(),
-                path_source_digest(&resolved, &path.identity_ignore),
+                path_source_fingerprint(&spec.workspace, &resolved, &path.identity_ignore),
                 "live-reference",
                 if link_path.exists() {
                     "symlink"

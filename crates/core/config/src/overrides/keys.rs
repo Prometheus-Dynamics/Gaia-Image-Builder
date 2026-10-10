@@ -64,6 +64,7 @@ pub(super) enum KnownOverrideKey {
     PolicyProvidersGoTimeoutSeconds,
     PolicyProvidersJavaRetryAttempts,
     PolicyProvidersJavaTimeoutSeconds,
+    PolicyProvidersJavaGradleHome,
     PolicyProvidersNodeRetryAttempts,
     PolicyProvidersNodeTimeoutSeconds,
     PolicyProvidersPythonRetryAttempts,
@@ -262,6 +263,9 @@ impl<'a> OverrideKey<'a> {
             }
             "policy.providers.java.timeout_seconds" => {
                 Self::Known(KnownOverrideKey::PolicyProvidersJavaTimeoutSeconds)
+            }
+            "policy.providers.java.gradle_home" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersJavaGradleHome)
             }
             "policy.providers.node.retry_attempts" => {
                 Self::Known(KnownOverrideKey::PolicyProvidersNodeRetryAttempts)

@@ -247,6 +247,44 @@ pub struct CommandProviderPolicySpec {
     pub work_dir: BuildrootWorkDirPolicySpec,
     /// Buildroot only: where each host tool (ccache, pkgconf) comes from.
     pub host_tools: BuildrootHostToolsPolicySpec,
+    /// Java only: where Gradle's user home lives for Docker builds.
+    pub gradle_home: GradleHomeSpec,
+    /// Java only: the configured `gradle_home` text when it is not a known
+    /// value. Compilation falls back to `workspace`; validation reports it.
+    pub gradle_home_invalid: Option<String>,
+    /// Whether `gradle_home` is set in this provider's table. Only the Java
+    /// table reads it; validation warns about it anywhere else.
+    pub gradle_home_configured: bool,
+}
+
+/// Where Gradle's user home (dependency and wrapper caches) lives for
+/// Docker-built Java artifacts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GradleHomeSpec {
+    /// `<workspace>/.gaia/docker-home/.gradle`, per workspace (default).
+    #[default]
+    Workspace,
+    /// `<user cache root>/gradle-home`, shared by the user's workspaces and
+    /// mounted into the container at the same path.
+    UserCache,
+}
+
+impl GradleHomeSpec {
+    /// Parses a `gradle_home` value (`workspace` or `user-cache`).
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "workspace" => Some(Self::Workspace),
+            "user-cache" => Some(Self::UserCache),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Workspace => "workspace",
+            Self::UserCache => "user-cache",
+        }
+    }
 }
 
 /// Where the Buildroot output tree is built.

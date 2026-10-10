@@ -1,7 +1,7 @@
 use crate::*;
 use gaia_spec::{
     ArtifactDefinition, ArtifactExecutionSpec, ArtifactOutputSpec, ArtifactVariantSpec,
-    DockerExecutionSpec,
+    DockerExecutionSpec, GradleHomeSpec,
 };
 use std::ffi::OsStr;
 use std::fs;
@@ -84,6 +84,7 @@ fn materialize_artifact_output_cleans_temp_file_when_rename_fails() {
         artifact_target: None,
         allow_nested_build: false,
         job_budget: None,
+        gradle_home: GradleHomeSpec::default(),
         retry_attempts: 1,
         retry_backoff_ms: 0,
         retry_backoff_strategy: RetryBackoffStrategySpec::Fixed,
@@ -158,6 +159,7 @@ fn materialize_artifact_marker_and_state_writes_both_files() {
         artifact_target: None,
         allow_nested_build: false,
         job_budget: None,
+        gradle_home: GradleHomeSpec::default(),
         retry_attempts: 1,
         retry_backoff_ms: 0,
         retry_backoff_strategy: RetryBackoffStrategySpec::Fixed,
@@ -243,6 +245,7 @@ fn command_for_execution_wraps_docker_backend() {
         build_profile: None,
         allow_nested_build: false,
         job_budget: None,
+        gradle_home: GradleHomeSpec::default(),
         retry_attempts: 1,
         retry_backoff_ms: 0,
         retry_backoff_strategy: RetryBackoffStrategySpec::Fixed,
@@ -321,6 +324,7 @@ fn run_command_with_retries_reuses_contract_retry_policy() {
         artifact_target: None,
         allow_nested_build: false,
         job_budget: None,
+        gradle_home: GradleHomeSpec::default(),
         retry_attempts: 2,
         retry_backoff_ms: 0,
         retry_backoff_strategy: RetryBackoffStrategySpec::Fixed,

@@ -422,3 +422,49 @@ impl SourceProvider for FailThenCancelAwarePathSourceProvider {
         Ok(vec![format!("slept for {}", source.id.as_str())])
     }
 }
+
+/// Source `fail` fails after a short delay. Every other source writes a partial
+/// output, then waits until it is cancelled by the stop signal.
+pub struct FailAndLeavePartialSourceProvider;
+
+impl SourceProvider for FailAndLeavePartialSourceProvider {
+    fn id(&self) -> &'static str {
+        "source.path.fail-and-leave-partial"
+    }
+
+    fn kind(&self) -> gaia_spec::SourceProviderKind {
+        gaia_spec::SourceProviderKind::Path
+    }
+
+    fn execute_source(
+        &self,
+        spec: &gaia_spec::ResolvedBuildSpec,
+        source: &gaia_spec::SourceSpec,
+        log_sink: Option<gaia_source_providers::ProcessLogSink>,
+        cancel_check: Option<gaia_source_providers::ProcessCancelCheck>,
+    ) -> Result<Vec<String>, gaia_source_providers::SourceProviderError> {
+        let _ = log_sink;
+        if source.id.as_str() == "fail" {
+            thread::sleep(Duration::from_millis(50));
+            return Err(gaia_source_providers::SourceProviderError::backend_command(
+                "intentional source failure",
+            ));
+        }
+        let source_dir = Path::new(&spec.workspace.build_dir)
+            .join("sources")
+            .join(source.id.as_str());
+        fs::create_dir_all(&source_dir).expect("partial source dir");
+        fs::write(source_dir.join("partial.txt"), "half written").expect("partial output");
+        for _ in 0..200 {
+            if cancel_check.as_ref().is_some_and(|cancel| cancel()) {
+                return Err(gaia_source_providers::SourceProviderError::new(
+                    gaia_source_providers::SourceProviderErrorKind::Cancelled,
+                    format!("{} cancelled", source.id.as_str()),
+                ));
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        fs::write(source_dir.join("source.txt"), "ok").expect("source marker");
+        Ok(vec![format!("finished {}", source.id.as_str())])
+    }
+}

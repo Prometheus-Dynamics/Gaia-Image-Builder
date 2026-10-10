@@ -463,6 +463,15 @@ mod tests {
     }
 
     #[test]
+    fn java_gradle_home_is_a_known_key() {
+        assert!(unknown("[providers.java]\ngradle_home = \"user-cache\"\n").is_empty());
+        assert_eq!(
+            unknown("[providers.java]\ngradle_hme = \"user-cache\"\n"),
+            vec!["providers.java.gradle_hme"]
+        );
+    }
+
+    #[test]
     fn unknown_host_tools_are_reported() {
         assert_eq!(
             unknown(

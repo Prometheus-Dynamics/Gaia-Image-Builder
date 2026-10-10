@@ -393,13 +393,10 @@ fn gzip_transform_honors_execution_cancellation() {
         &cancellation,
     );
 
-    assert_eq!(outcome.errors.len(), 1);
-    assert_eq!(outcome.errors[0].kind, ExecutionErrorKind::Cancelled);
-    assert!(
-        outcome.errors[0].message.contains("cancelled"),
-        "{}",
-        outcome.errors[0].message
-    );
+    // A cancelled tool is a cancellation, not a failure: the run reports
+    // cancelled and no operation error.
+    assert!(outcome.cancelled, "{outcome:#?}");
+    assert!(outcome.errors.is_empty(), "{:#?}", outcome.errors);
 }
 
 #[cfg(unix)]

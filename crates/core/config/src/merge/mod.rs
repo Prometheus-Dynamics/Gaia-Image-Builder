@@ -456,6 +456,7 @@ fn merge_command_policy(
         work_dir: overlay.work_dir.or(base.work_dir),
         ram_budget: overlay.ram_budget.or(base.ram_budget),
         keep_ram_tree: overlay.keep_ram_tree.or(base.keep_ram_tree),
+        gradle_home: overlay.gradle_home.or(base.gradle_home),
         host_tools: {
             let mut tools = base.host_tools.tools;
             tools.extend(overlay.host_tools.tools);

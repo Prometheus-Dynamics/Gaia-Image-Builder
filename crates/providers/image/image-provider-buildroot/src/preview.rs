@@ -109,14 +109,6 @@ fn has_built_dirs(tree: &Path) -> bool {
         .any(|dir| tree.join(dir).is_dir())
 }
 
-/// Whether `name` has its stamp in `tree`, the stamp `restore_except` checks.
-fn stamp_built(tree: &Path, graph: &PackageGraph, name: &str) -> bool {
-    graph
-        .get(name)
-        .and_then(|package| package.stamp_dir.as_deref())
-        .is_some_and(|stamp_dir| tree.join(stamp_dir).join(".stamp_installed").is_file())
-}
-
 fn blocked(mut preview: ImagePreview, message: impl Into<String>) -> ImagePreview {
     let message = message.into();
     preview.verdict = format!("BLOCKED: {message}");
@@ -161,28 +153,6 @@ fn config_change_line(change: &ConfigChange) -> String {
         value(&change.previous),
         value(&change.current)
     )
-}
-
-/// The packages whose build directory the image reads, read only: the
-/// selection `packages_with_read_sources` makes before it removes anything.
-/// Keep the two in step.
-fn packages_read_by_image(spec: &ResolvedBuildSpec, graph: &PackageGraph) -> BTreeSet<String> {
-    let dirs = referenced_build_dirs(&format!("{:?}", spec.image));
-    graph
-        .packages
-        .iter()
-        .filter(|(_, package)| {
-            package
-                .stamp_dir
-                .as_deref()
-                .and_then(|stamp_dir| stamp_dir.strip_prefix("build/"))
-                .is_some_and(|dir| {
-                    dirs.iter()
-                        .any(|pattern| gaia_spec::wildcard_match(pattern, dir))
-                })
-        })
-        .map(|(name, _)| name.clone())
-        .collect()
 }
 
 /// The preview of a Buildroot image operation.
@@ -539,7 +509,7 @@ pub(crate) fn preview_buildroot(
                 graph,
                 execution_identity: &identity,
             });
-            let read_by_image = packages_read_by_image(spec, graph);
+            let read_by_image = packages_reading_sources(spec, graph);
             let rebuilt = match &clean {
                 CleanPlan::Packages(rebuild) => rebuild
                     .rebuild
@@ -556,7 +526,9 @@ pub(crate) fn preview_buildroot(
                         .as_deref()
                         .is_some_and(|dir| stamp_built(dir, graph, name))
             };
-            let restored = cache.preview_restore(&tree, graph, &keys, &read_by_image, &built_after);
+            let mut restored =
+                cache.restore_plan(&tree, graph, &keys, &read_by_image, &built_after);
+            restored.sort();
             let mut reused = Vec::new();
             let mut built = Vec::new();
             for (name, package) in &graph.packages {
@@ -591,6 +563,15 @@ pub(crate) fn preview_buildroot(
                 ));
             }
             cache_lines.push(format!("reused in place ({})", reused.len()));
+            for (name, build_dir) in source_less_build_dirs(&tree, graph, &read_by_image) {
+                preview.deletions.push(deletion(
+                    PreviewDeletionKind::Package,
+                    &build_dir,
+                    format!(
+                        "{name} built again: the image reads its sources, which the cache does not hold"
+                    ),
+                ));
+            }
             for eviction in cache.preview_evictions() {
                 preview.deletions.push(deletion(
                     PreviewDeletionKind::Cache,

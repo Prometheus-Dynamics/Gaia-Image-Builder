@@ -110,6 +110,14 @@ Gaia compares:
 
 A reused operation must still have matching state and expected materialized outputs.
 
+Path sources (`kind = "path"`, including a source at the workspace root) are
+fingerprinted by their tree's names, file contents, file modes and symlink
+targets. Directory timestamps and sizes are not part of it. Gaia's own state
+inside the tree is skipped: `.gaia`, `.gaia-trash`, `.gaia-run*` run files, and
+the workspace `build_dir` and `out_dir`. A first run that creates them therefore
+does not invalidate the source for the next plan. `identity_ignore` entries are
+skipped too. Any other change under the root still changes the fingerprint.
+
 ## Cancellation
 
 Executor supports cancellation-aware execution.
@@ -188,6 +196,11 @@ work is kept for the next run in both modes.
 Cancellation follows the same rules: the cancelled operation's partial outputs
 are cleaned, and completed work is kept and recorded for reuse unless
 `rollback_completed = true`.
+
+Operations that were still running when a sibling failed are cancelled by that
+stop signal. Their own partial outputs are handled like the failed operation's
+(`preserve_failed_outputs`, `rollback_on_error`, `rollback_domains`), and they
+are never recorded as completed, so the next run runs them again.
 
 The run summary states what happened, for example
 `rollback: kept 3 completed operation(s) for reuse; cleaned the failed operation's outputs`.

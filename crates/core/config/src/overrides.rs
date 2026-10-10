@@ -372,6 +372,16 @@ fn apply_known_override(
         KnownOverrideKey::PolicyProvidersJavaTimeoutSeconds => {
             raw.providers.java.timeout_seconds = parse_u64_override(key, value)?
         }
+        KnownOverrideKey::PolicyProvidersJavaGradleHome => {
+            if gaia_spec::GradleHomeSpec::parse(value).is_none() {
+                return Err(ConfigError::invalid_override_value(
+                    key,
+                    value,
+                    "one of: workspace, user-cache",
+                ));
+            }
+            raw.providers.java.gradle_home = Some(value.to_string())
+        }
         KnownOverrideKey::PolicyProvidersNodeRetryAttempts => {
             raw.providers.node.retry_attempts = parse_u32_override(key, value)?
         }

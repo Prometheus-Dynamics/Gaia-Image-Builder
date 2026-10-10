@@ -1,7 +1,8 @@
 use gaia_spec::{
     ArtifactDefinition, ArtifactExecutionSpec, ArtifactProviderKind, ArtifactRef, ArtifactSpec,
-    ArtifactVariantSpec, BuildModeSpec, DockerExecutionSpec, OutputRetentionPolicySpec,
-    ResolvedBuildSpec, ResolvedCommandPolicySpec, RetryBackoffStrategySpec, SourceRef,
+    ArtifactVariantSpec, BuildModeSpec, DockerExecutionSpec, GradleHomeSpec,
+    OutputRetentionPolicySpec, ResolvedBuildSpec, ResolvedCommandPolicySpec,
+    RetryBackoffStrategySpec, SourceRef,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -36,6 +37,9 @@ pub struct ArtifactExecutionContract {
     /// `CMAKE_BUILD_PARALLEL_LEVEL` unless the command or the environment
     /// already sets them. Never part of recorded state.
     pub job_budget: Option<usize>,
+    /// Java only: where Gradle's user home lives for Docker builds, from
+    /// `[providers.java] gradle_home`.
+    pub gradle_home: GradleHomeSpec,
 }
 
 impl ArtifactExecutionContract {
@@ -94,6 +98,7 @@ impl ArtifactExecutionContract {
                 .collect(),
             output: ArtifactOutputContract::from_spec(artifact),
             job_budget: None,
+            gradle_home: GradleHomeSpec::default(),
         }
     }
 
@@ -112,6 +117,7 @@ impl ArtifactExecutionContract {
     }
 
     fn apply_build_context(&mut self, spec: &ResolvedBuildSpec) {
+        self.gradle_home = spec.policy.providers.java.gradle_home;
         let workspace_root = resolve_workspace_root(spec);
         self.workspace_root = Some(workspace_root.clone());
         if Path::new(&self.output.path).is_relative() {

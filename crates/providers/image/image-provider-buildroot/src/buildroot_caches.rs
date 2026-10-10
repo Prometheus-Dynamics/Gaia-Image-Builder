@@ -117,7 +117,15 @@ pub(crate) fn restore_cached_packages(
         graph: &graph,
         execution_identity: &identity,
     });
-    let keep_source = packages_with_read_sources(spec, output_dir, &graph);
+    let keep_source = packages_reading_sources(spec, &graph);
+    for (name, build_dir) in source_less_build_dirs(output_dir, &graph, &keep_source) {
+        let _ = gaia_process::discard(&build_dir);
+        let _ = gaia_process::discard(&output_dir.join("per-package").join(&name));
+        tracing::info!(
+            provider_domain = "image.buildroot",
+            "building {name} again: its sources are read by the image and the cache does not hold them"
+        );
+    }
     let restored = cache.restore_except(output_dir, &graph, &keys, &keep_source);
     refresh_current_stamps(output_dir, &graph, &keys);
     pin_restored_linux_version(output_dir, &graph)?;
@@ -241,47 +249,54 @@ mod linux_pin_tests {
 
 /// Packages whose build directory the build reads later (an assembly
 /// source under `buildroot-output/build/<dir>/`): a cache entry holds a
-/// package's installed files, not its sources, so these are built, and a
-/// source-less build directory left by an earlier restore is removed so
-/// Buildroot builds the package again.
-fn packages_with_read_sources(
+/// package's installed files, not its sources, so these are built instead
+/// of restored. Pure: see [`source_less_build_dirs`] for the build
+/// directories a run removes before it restores.
+pub(crate) fn packages_reading_sources(
     spec: &ResolvedBuildSpec,
-    output_dir: &Path,
     graph: &PackageGraph,
 ) -> BTreeSet<String> {
-    let text = format!("{:?}", spec.image);
-    let dirs = referenced_build_dirs(&text);
-    let mut packages = BTreeSet::new();
-    for (name, package) in &graph.packages {
-        let Some(stamp_dir) = package.stamp_dir.as_deref() else {
-            continue;
-        };
-        let Some(dir) = stamp_dir.strip_prefix("build/") else {
-            continue;
-        };
-        if !dirs
-            .iter()
-            .any(|pattern| gaia_spec::wildcard_match(pattern, dir))
-        {
-            continue;
-        }
-        packages.insert(name.clone());
-        let build_dir = output_dir.join(stamp_dir);
-        let has_sources = fs::read_dir(&build_dir)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .any(|entry| !entry.file_name().to_string_lossy().starts_with('.'));
-        if build_dir.join(".stamp_installed").exists() && !has_sources {
-            let _ = gaia_process::discard(&build_dir);
-            let _ = gaia_process::discard(&output_dir.join("per-package").join(name));
-            tracing::info!(
-                provider_domain = "image.buildroot",
-                "building {name} again: its sources are read by the image and the cache does not hold them"
-            );
-        }
-    }
+    let dirs = referenced_build_dirs(&format!("{:?}", spec.image));
+    graph
+        .packages
+        .iter()
+        .filter(|(_, package)| {
+            package
+                .stamp_dir
+                .as_deref()
+                .and_then(|stamp_dir| stamp_dir.strip_prefix("build/"))
+                .is_some_and(|dir| {
+                    dirs.iter()
+                        .any(|pattern| gaia_spec::wildcard_match(pattern, dir))
+                })
+        })
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
+/// Of `packages` (see [`packages_reading_sources`]), those installed in
+/// `output_dir` whose build directory has no sources left, with that build
+/// directory. A source-less build directory left by an earlier restore is
+/// removed before the restore, so Buildroot builds the package again.
+pub(crate) fn source_less_build_dirs(
+    output_dir: &Path,
+    graph: &PackageGraph,
+    packages: &BTreeSet<String>,
+) -> Vec<(String, PathBuf)> {
     packages
+        .iter()
+        .filter_map(|name| {
+            let stamp_dir = graph.get(name)?.stamp_dir.as_deref()?;
+            let build_dir = output_dir.join(stamp_dir);
+            let has_sources = fs::read_dir(&build_dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .any(|entry| !entry.file_name().to_string_lossy().starts_with('.'));
+            (build_dir.join(".stamp_installed").exists() && !has_sources)
+                .then(|| (name.clone(), build_dir))
+        })
+        .collect()
 }
 
 /// `<dir>` (possibly a glob) of every `buildroot-output/build/<dir>/` or

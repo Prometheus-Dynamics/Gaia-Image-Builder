@@ -6,7 +6,7 @@ use gaia_artifact_providers::{
     render_artifact_backend_state, run_command_with_retries,
 };
 use gaia_process::register_docker_mount;
-use gaia_spec::{ArtifactDefinition, ArtifactSpec, ResolvedBuildSpec};
+use gaia_spec::{ArtifactDefinition, ArtifactSpec, GradleHomeSpec, ResolvedBuildSpec};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -83,8 +83,18 @@ impl ArtifactProvider for JavaProvider {
             _ => artifact.id.as_str().to_string(),
         };
         let source_dir = contract.source_dir.as_deref().unwrap_or(".");
-        let (build_tool, mut messages) =
-            run_java_build(artifact, source_dir, contract, log_sink, cancel_check)?;
+        let gradle_home = effective_gradle_home(
+            contract.gradle_home,
+            std::env::var(GRADLE_HOME_SETTING_ENV).ok().as_deref(),
+        )?;
+        let (build_tool, mut messages) = run_java_build(
+            artifact,
+            source_dir,
+            contract,
+            gradle_home,
+            log_sink,
+            cancel_check,
+        )?;
         let built_path = resolve_java_built_path(source_dir, &build_target)?;
         let output_path = artifact_output_path(contract, source_dir);
         copy_artifact_file_to_output(&built_path, &output_path, "built java artifact")?;
@@ -121,16 +131,24 @@ fn run_java_build(
     artifact: &ArtifactSpec,
     source_dir: &str,
     contract: &ArtifactExecutionContract,
+    gradle_home: GradleHomeSpec,
     log_sink: Option<ProcessLogSink>,
     cancel_check: Option<ProcessCancelCheck>,
 ) -> Result<(String, Vec<String>), ArtifactProviderError> {
     let source_dir = Path::new(source_dir);
+    let user_cache = gaia_spec::user_cache_root();
     if let ArtifactDefinition::Java(java) = &artifact.definition
         && let Some((program, args)) = java.build_command.split_first()
     {
         let mut command = Command::new(program);
         command.args(args);
-        apply_build_env(&mut command, &java.build_env, contract);
+        apply_java_build_env(
+            &mut command,
+            artifact,
+            contract,
+            gradle_home,
+            user_cache.as_deref(),
+        );
         command.current_dir(source_dir);
         return Ok((
             "custom-command".to_string(),
@@ -151,10 +169,16 @@ fn run_java_build(
         let mut command = Command::new("mvn");
         if let Some(java) = custom {
             command.args(&java.build_args);
-            apply_build_env(&mut command, &java.build_env, contract);
         } else {
             command.arg("-q").arg("-DskipTests").arg("package");
         }
+        apply_java_build_env(
+            &mut command,
+            artifact,
+            contract,
+            gradle_home,
+            user_cache.as_deref(),
+        );
         command.current_dir(source_dir);
         return Ok((
             "maven".to_string(),
@@ -172,10 +196,16 @@ fn run_java_build(
         let mut command = Command::new(source_dir.join("gradlew"));
         if let Some(java) = custom {
             command.args(&java.build_args);
-            apply_build_env(&mut command, &java.build_env, contract);
         } else {
             command.arg("build").arg("-q");
         }
+        apply_java_build_env(
+            &mut command,
+            artifact,
+            contract,
+            gradle_home,
+            user_cache.as_deref(),
+        );
         command.current_dir(source_dir);
         return Ok((
             "gradle-wrapper".to_string(),
@@ -193,10 +223,16 @@ fn run_java_build(
         let mut command = Command::new("gradle");
         if let Some(java) = custom {
             command.args(&java.build_args);
-            apply_build_env(&mut command, &java.build_env, contract);
         } else {
             command.arg("build").arg("-q");
         }
+        apply_java_build_env(
+            &mut command,
+            artifact,
+            contract,
+            gradle_home,
+            user_cache.as_deref(),
+        );
         command.current_dir(source_dir);
         return Ok((
             "gradle".to_string(),
@@ -219,29 +255,64 @@ fn run_java_build(
     ))
 }
 
-/// Environment variable choosing where Gradle's user home (dependency and
-/// wrapper caches) lives for Docker-built Java artifacts: `user-cache`
-/// moves it to the per-user Gaia cache; unset or `workspace` keeps it in
-/// `<workspace>/.gaia/docker-home`.
+/// Deprecated environment override for `[providers.java] gradle_home`. When
+/// set to `workspace` or `user-cache` it wins over the configured value; any
+/// other value fails the build rather than being ignored.
 const GRADLE_HOME_SETTING_ENV: &str = "GAIA_GRADLE_HOME";
-const GRADLE_HOME_USER_CACHE: &str = "user-cache";
+
+/// The Gradle home mode a build uses: the `GAIA_GRADLE_HOME` override when
+/// it is set and non-empty, else the configured `gradle_home`.
+fn effective_gradle_home(
+    configured: GradleHomeSpec,
+    env_override: Option<&str>,
+) -> Result<GradleHomeSpec, ArtifactProviderError> {
+    match env_override.filter(|text| !text.is_empty()) {
+        None => Ok(configured),
+        Some(text) => GradleHomeSpec::parse(text).ok_or_else(|| {
+            ArtifactProviderError::new(
+                ArtifactProviderErrorKind::PolicyBlocked,
+                format!(
+                    "{GRADLE_HOME_SETTING_ENV}='{text}' is not a Gradle home mode; \
+                     use 'workspace' or 'user-cache' (or set [providers.java] gradle_home)"
+                ),
+            )
+        }),
+    }
+}
+
+/// Applies the artifact's `build_env` (and the Gradle home redirect) to a
+/// build command. Every Java build branch goes through here, so the same
+/// environment applies whether or not the build sets its own arguments.
+fn apply_java_build_env(
+    command: &mut Command,
+    artifact: &ArtifactSpec,
+    contract: &ArtifactExecutionContract,
+    gradle_home: GradleHomeSpec,
+    user_cache: Option<&Path>,
+) {
+    let env: &[(String, String)] = match &artifact.definition {
+        ArtifactDefinition::Java(java) => &java.build_env,
+        _ => &[],
+    };
+    apply_build_env(command, env, contract, gradle_home, user_cache);
+}
 
 fn apply_build_env(
     command: &mut Command,
     env: &[(String, String)],
     contract: &ArtifactExecutionContract,
+    gradle_home: GradleHomeSpec,
+    user_cache: Option<&Path>,
 ) {
     let docker = matches!(
         contract.execution_backend,
         ArtifactExecutionBackend::Docker(_)
     );
-    let user_cache_setting = std::env::var(GRADLE_HOME_SETTING_ENV).ok();
-    let user_cache = gaia_spec::user_cache_root();
     let (env, redirected) = redirect_gradle_home(
         env,
         docker,
-        user_cache_setting.as_deref() == Some(GRADLE_HOME_USER_CACHE),
-        user_cache.as_deref(),
+        gradle_home == GradleHomeSpec::UserCache,
+        user_cache,
     );
     if let Some(dir) = &redirected {
         // The container mounts Gradle's home at its host path, so the
@@ -255,10 +326,11 @@ fn apply_build_env(
     }
 }
 
-/// Points `GRADLE_USER_HOME` at `<user cache>/gradle-home` when the user
-/// asked for it, the build runs in Docker and the spec puts Gradle's home in
-/// the workspace's `.gaia/docker-home`. Returns the rewritten environment and
-/// the directory to mount, if any. Every other case keeps the spec's values.
+/// Points `GRADLE_USER_HOME` at `<user cache>/gradle-home` when the build's
+/// Gradle home mode is `user-cache`, the build runs in Docker and the spec
+/// puts Gradle's home in the workspace's `.gaia/docker-home`. Returns the
+/// rewritten environment and the directory to mount, if any. Every other case
+/// keeps the spec's values.
 fn redirect_gradle_home(
     env: &[(String, String)],
     docker: bool,
@@ -405,266 +477,4 @@ fn artifact_state_contents(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn temp_path(prefix: &str) -> PathBuf {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time")
-            .as_nanos();
-        std::env::temp_dir()
-            .join("gaia-tests")
-            .join(format!("{prefix}-{nonce}"))
-    }
-
-    #[test]
-    fn run_command_reports_missing_tool() {
-        let error = run_command(
-            Command::new("gaia-missing-java-tool"),
-            "java build",
-            &ArtifactExecutionContract::from_spec(
-                &ArtifactSpec::new(
-                    "java-missing-tool",
-                    ArtifactDefinition::Java(gaia_spec::JavaArtifactSpec {
-                        build_target: "app.jar".into(),
-                        build_args: Vec::new(),
-                        build_command: Vec::new(),
-                        build_env: Vec::new(),
-                    }),
-                    None,
-                    gaia_spec::ArtifactOutputSpec {
-                        path: "out/app.jar".into(),
-                    },
-                ),
-                None,
-                false,
-                ArtifactExecutionContract::default_command_policy(),
-                gaia_spec::OutputRetentionPolicySpec::default(),
-            ),
-            None,
-            None,
-        )
-        .expect_err("missing tool should fail");
-
-        assert_eq!(
-            error.kind,
-            gaia_artifact_providers::ArtifactProviderErrorKind::ToolStart
-        );
-        assert!(error.message.contains("failed to start java build"));
-    }
-
-    #[test]
-    fn java_artifact_state_persists_backend_native_fields() {
-        let output_path = temp_path("gaia-java-provider-state");
-        fs::write(&output_path, "artifact").expect("output");
-        let artifact = ArtifactSpec::new(
-            "java-artifact",
-            ArtifactDefinition::Java(gaia_spec::JavaArtifactSpec {
-                build_target: "build/libs/app.jar".into(),
-                build_args: Vec::new(),
-                build_command: Vec::new(),
-                build_env: Vec::new(),
-            }),
-            None,
-            gaia_spec::ArtifactOutputSpec {
-                path: output_path.display().to_string(),
-            },
-        );
-        let contract = ArtifactExecutionContract::from_spec(
-            &artifact,
-            Some(temp_path("gaia-java-provider-src").display().to_string()),
-            false,
-            ArtifactExecutionContract::default_command_policy(),
-            gaia_spec::OutputRetentionPolicySpec::default(),
-        );
-
-        let state = artifact_state_contents(
-            "artifact.java",
-            artifact.id.as_str(),
-            &contract,
-            "build/libs/app.jar",
-            "maven",
-        );
-
-        assert!(state.contains("resolved_identifier_kind=build-target"));
-        assert!(state.contains("resolved_identifier=build/libs/app.jar"));
-        assert!(state.contains("output_class=jar"));
-        assert!(state.contains("build_tool=maven"));
-        assert!(state.contains("build_target=build/libs/app.jar"));
-    }
-
-    #[test]
-    fn execute_artifact_uses_custom_build_command() {
-        let source_dir = temp_path("gaia-java-provider-custom-src");
-        let output_path = temp_path("gaia-java-provider-custom-out").join("app.jar");
-        fs::create_dir_all(&source_dir).expect("source dir");
-        let artifact = ArtifactSpec::new(
-            "java-custom-command",
-            ArtifactDefinition::Java(gaia_spec::JavaArtifactSpec {
-                build_target: "build/libs/app.jar".into(),
-                build_args: Vec::new(),
-                build_command: vec![
-                    "bash".into(),
-                    "-c".into(),
-                    "mkdir -p build/libs && printf custom > build/libs/app.jar".into(),
-                ],
-                build_env: Vec::new(),
-            }),
-            None,
-            gaia_spec::ArtifactOutputSpec {
-                path: output_path.display().to_string(),
-            },
-        );
-        let contract = ArtifactExecutionContract::from_spec(
-            &artifact,
-            Some(source_dir.display().to_string()),
-            false,
-            ArtifactExecutionContract::default_command_policy(),
-            gaia_spec::OutputRetentionPolicySpec::default(),
-        );
-
-        JavaProvider
-            .execute_artifact(&artifact, &contract, None, None)
-            .expect("custom command artifact");
-
-        assert_eq!(
-            fs::read_to_string(&output_path).expect("copied artifact"),
-            "custom"
-        );
-    }
-
-    fn gradle_env(home: &str) -> Vec<(String, String)> {
-        vec![
-            ("GRADLE_USER_HOME".into(), home.into()),
-            ("MAVEN_LOCAL_REPO".into(), "/ws/build/m2".into()),
-        ]
-    }
-
-    #[test]
-    fn gradle_home_stays_in_workspace_by_default() {
-        let env = gradle_env("/ws/.gaia/docker-home/.gradle");
-        let cache = Path::new("/home/u/.cache/gaia");
-        let (rewritten, mount) = redirect_gradle_home(&env, true, false, Some(cache));
-        assert_eq!(rewritten, env);
-        assert_eq!(mount, None);
-    }
-
-    #[test]
-    fn gradle_home_moves_to_user_cache_when_requested_for_docker() {
-        let env = gradle_env("/ws/.gaia/docker-home/.gradle");
-        let cache = Path::new("/home/u/.cache/gaia");
-        let (rewritten, mount) = redirect_gradle_home(&env, true, true, Some(cache));
-        let expected = PathBuf::from("/home/u/.cache/gaia/gradle-home");
-        assert_eq!(mount.as_deref(), Some(expected.as_path()));
-        assert_eq!(rewritten[0].1, expected.display().to_string());
-        // Other variables pass through untouched.
-        assert_eq!(rewritten[1], env[1]);
-    }
-
-    #[test]
-    fn gradle_home_redirect_ignores_host_builds_and_custom_homes() {
-        let cache = Path::new("/home/u/.cache/gaia");
-        let workspace_home = gradle_env("/ws/.gaia/docker-home/.gradle");
-        // Host builds keep the spec's home.
-        assert_eq!(
-            redirect_gradle_home(&workspace_home, false, true, Some(cache)).0,
-            workspace_home
-        );
-        // A home the spec placed elsewhere is not moved.
-        let elsewhere = gradle_env("/opt/gradle-home");
-        assert_eq!(
-            redirect_gradle_home(&elsewhere, true, true, Some(cache)).0,
-            elsewhere
-        );
-        // No user cache root: keep the spec's home.
-        assert_eq!(
-            redirect_gradle_home(&workspace_home, true, true, None).0,
-            workspace_home
-        );
-    }
-
-    #[test]
-    fn gradle_wrapper_version_comes_from_properties_file() {
-        let dir = temp_path("gaia-java-wrapper-version");
-        fs::create_dir_all(dir.join("gradle/wrapper")).expect("wrapper dir");
-        fs::write(
-            dir.join("gradle/wrapper/gradle-wrapper.properties"),
-            "distributionBase=GRADLE_USER_HOME\ndistributionUrl=https\\://services.gradle.org/distributions/gradle-9.1.0-bin.zip\n",
-        )
-        .expect("properties");
-
-        assert_eq!(
-            gradle_wrapper_version_line(&dir),
-            "gradle-wrapper distributionUrl=https\\://services.gradle.org/distributions/gradle-9.1.0-bin.zip"
-        );
-        assert_eq!(
-            gradle_wrapper_version_line(&temp_path("gaia-java-no-wrapper")),
-            "unavailable"
-        );
-    }
-
-    #[test]
-    fn validate_artifact_rejects_target_override() {
-        let mut artifact = ArtifactSpec::new(
-            "java-targeted",
-            ArtifactDefinition::Java(gaia_spec::JavaArtifactSpec {
-                build_target: "build/libs/app.jar".into(),
-                build_args: Vec::new(),
-                build_command: Vec::new(),
-                build_env: Vec::new(),
-            }),
-            None,
-            gaia_spec::ArtifactOutputSpec {
-                path: "out/app.jar".into(),
-            },
-        );
-        artifact.target = Some("aarch64-unknown-linux-gnu".into());
-
-        let issues = JavaProvider.validate_artifact(&artifact);
-
-        assert!(
-            issues
-                .iter()
-                .any(|issue| issue.code == "java_artifact_target_unsupported")
-        );
-    }
-
-    #[test]
-    fn execute_artifact_rejects_target_override() {
-        let mut artifact = ArtifactSpec::new(
-            "java-targeted",
-            ArtifactDefinition::Java(gaia_spec::JavaArtifactSpec {
-                build_target: "build/libs/app.jar".into(),
-                build_args: Vec::new(),
-                build_command: Vec::new(),
-                build_env: Vec::new(),
-            }),
-            None,
-            gaia_spec::ArtifactOutputSpec {
-                path: "out/app.jar".into(),
-            },
-        );
-        artifact.target = Some("aarch64-unknown-linux-gnu".into());
-        let contract = ArtifactExecutionContract::from_spec(
-            &artifact,
-            Some(temp_path("gaia-java-provider-src").display().to_string()),
-            false,
-            ArtifactExecutionContract::default_command_policy(),
-            gaia_spec::OutputRetentionPolicySpec::default(),
-        );
-
-        let error = JavaProvider
-            .execute_artifact(&artifact, &contract, None, None)
-            .expect_err("targeted java artifact should fail");
-
-        assert_eq!(error.kind, ArtifactProviderErrorKind::PolicyBlocked);
-        assert!(
-            error
-                .message
-                .contains("target-aware builds are not supported yet")
-        );
-    }
-}
+mod tests;

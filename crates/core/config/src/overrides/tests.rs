@@ -75,6 +75,7 @@ fn documented_override_keys_parse_as_typed_keys() {
         "policy.providers.go.timeout_seconds",
         "policy.providers.java.retry_attempts",
         "policy.providers.java.timeout_seconds",
+        "policy.providers.java.gradle_home",
         "policy.providers.node.retry_attempts",
         "policy.providers.node.timeout_seconds",
         "policy.providers.python.retry_attempts",

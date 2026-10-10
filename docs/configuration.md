@@ -477,9 +477,10 @@ When several CPU-heavy operations (artifact builds, Buildroot prepare/build) run
 
 Provider policy lives under `[providers.*]`.
 
-Rust and Git have extra specialized fields:
+Rust, Git and Java have extra specialized fields:
 - Rust: `allow_nested_build`, `batch_builds`
 - Git: `allow_remote_resolution`
+- Java: `gradle_home` (see [Java and Gradle](#java-and-gradle))
 
 `batch_builds` (default `false`) builds nested cargo artifacts that share a
 source workspace, target triple, profile, feature flags and execution backend
@@ -903,6 +904,34 @@ image is regenerated.
 Retry strategies:
 - `fixed`
 - `exponential`
+
+### Java and Gradle
+
+`[providers.java] gradle_home` chooses where Gradle's user home (its
+dependency and wrapper caches) lives for Java artifacts built in Docker:
+
+- `"workspace"` (default): `<workspace>/.gaia/docker-home/.gradle`, kept per
+  workspace.
+- `"user-cache"`: `<user cache root>/gradle-home`, in the per-user Gaia cache
+  (`$GAIA_CACHE_DIR`, else `$XDG_CACHE_HOME/gaia`, else `~/.cache/gaia`) and
+  shared by every workspace of the user. Gaia mounts it into the container at
+  the same path.
+
+The first build in `user-cache` mode is cold: Gradle downloads its
+distribution and dependencies again. The redirect applies only to Docker
+builds whose `GRADLE_USER_HOME` (set with `build_env`) points into
+`.gaia/docker-home`; host builds keep Gradle's own home.
+
+```toml
+[providers.java]
+gradle_home = "user-cache"
+```
+
+Deprecated: the environment variable `GAIA_GRADLE_HOME=workspace|user-cache`
+still overrides `gradle_home` when it is set, so existing setups keep working
+during the transition. Any other value fails the build. Set
+`[providers.java] gradle_home` (or `--set policy.providers.java.gradle_home=...`)
+instead.
 
 ## Provenance
 
