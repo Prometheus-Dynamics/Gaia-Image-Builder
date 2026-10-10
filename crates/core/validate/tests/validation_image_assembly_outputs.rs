@@ -92,8 +92,8 @@ fn codes(contents: &str) -> Vec<&'static str> {
 }
 
 #[test]
-fn flasher_boot_image_validates_with_only_the_reads_later_output_warning() {
-    assert_eq!(codes(FLASHER), vec!["assembly_reads_later_output"]);
+fn flasher_boot_image_validates_cleanly() {
+    assert!(codes(FLASHER).is_empty());
 }
 
 #[test]

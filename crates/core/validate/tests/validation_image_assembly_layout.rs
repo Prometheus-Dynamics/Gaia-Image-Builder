@@ -271,7 +271,7 @@ src = "$provider.images/a.img"
 }
 
 #[test]
-fn transforms_reading_a_filesystem_built_later_are_reported() {
+fn transforms_reading_a_filesystem_built_later_are_accepted() {
     // The boot filesystem the transform compresses is produced by the
     // assembly itself (the PhotonVision raze layout).
     let layout = format!(
@@ -288,7 +288,8 @@ output = \"$provider.images/boot.vfat\"
 size = \"128M\"
 "
     );
-    assert_eq!(assembly_codes(&layout), ["assembly_reads_later_output"]);
+    // It runs after the filesystem: nothing to report.
+    assert!(assembly_codes(&layout).is_empty());
 }
 
 #[test]

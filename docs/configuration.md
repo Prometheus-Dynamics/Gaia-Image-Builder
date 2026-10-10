@@ -1783,7 +1783,6 @@ Assembly behavior:
 - Assembly runtime state is included in provenance and manifest reports with staged file, transform, filesystem, disk, and archive output sizes and digests.
 - Assembly order follows dependencies: a step that reads a path another step writes (the same file, a file in a directory it fills, or a glob it matches) runs after it, whatever its kind or position, so for example a transform compressing a filesystem built by the same assembly sees this run's image. Trees are prepared first; steps that do not depend on each other run in the order dirs, symlinks, files, BusyBox initramfs, kernel modules, transforms, filesystems, disks, archives. Steps that read each other's outputs in a cycle are rejected, by validation and at run time.
 - Before the steps run, outputs of transforms, filesystems, disks and archives left from an earlier run are removed, so a step reading one before it is rebuilt fails instead of using a stale file.
-- Validation warns (`assembly_reads_later_output`) when a step reads what a step of a later kind or position produces: Gaia versions before dependency ordering ran it first, on the previous run's file.
 
 #### Work directory and RAM
 
@@ -2086,7 +2085,7 @@ size = "64M"
 publish = true
 ```
 
-The boot tree's `config.txt` carries the line `initramfs initramfs.cpio.zst followkernel`, which tells the firmware to load the initramfs next to the kernel. The boot tree reads the `cpio-zstd` output, so validation warns `assembly_reads_later_output` once: that step runs after the initramfs is packed, as it must.
+The boot tree's `config.txt` carries the line `initramfs initramfs.cpio.zst followkernel`, which tells the firmware to load the initramfs next to the kernel. The boot tree reads the `cpio-zstd` output, so it runs after the initramfs is packed.
 
 ## Checkpoints
 
