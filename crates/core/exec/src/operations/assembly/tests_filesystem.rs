@@ -349,6 +349,10 @@ fn vfat_auto_size_builds_an_image_that_holds_the_tree() {
     let image = root.join("build/assembly/boot.vfat");
     // 17 bytes of content is one 4 KiB cluster: 3 MiB.
     assert_eq!(fs::metadata(&image).expect("image").len(), 3 * MIB);
+    // FAT16, not mformat's FAT12 for small images (the boot sector's
+    // file-system type field, offset 54).
+    let boot_sector = fs::read(&image).expect("image bytes");
+    assert_eq!(&boot_sector[54..62], b"FAT16   ");
     let copied = Command::new("mcopy")
         .arg("-i")
         .arg(&image)
@@ -360,4 +364,14 @@ fn vfat_auto_size_builds_an_image_that_holds_the_tree() {
     assert_eq!(copied.stdout, b"initramfs config\n");
     assert!(outcome.state.render().contains("filesystem.1.bytes="));
     let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn small_vfat_images_ask_for_fat16_clusters() {
+    assert_eq!(vfat_sectors_per_cluster(2 * MIB), None);
+    assert_eq!(vfat_sectors_per_cluster(3 * MIB), Some(1));
+    assert_eq!(vfat_sectors_per_cluster(12 * MIB), Some(1));
+    assert_eq!(vfat_sectors_per_cluster(16 * MIB - 1), Some(1));
+    assert_eq!(vfat_sectors_per_cluster(16 * MIB), None);
+    assert_eq!(vfat_sectors_per_cluster(128 * MIB), None);
 }

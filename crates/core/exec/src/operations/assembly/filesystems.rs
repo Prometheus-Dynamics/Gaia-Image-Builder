@@ -187,6 +187,24 @@ struct VfatWriteContext<'a> {
     cancel_check: Option<gaia_process::ProcessCancelCheck>,
 }
 
+/// Images from this size up get FAT16 or FAT32 from `mformat`'s own choice.
+const VFAT_FAT16_DEFAULT_FROM_BYTES: u64 = 16 * MIB;
+/// The smallest image where one sector per cluster still gives FAT16's
+/// minimum of 4085 clusters, with room for the FATs and root directory.
+const VFAT_FAT16_MIN_BYTES: u64 = 3 * MIB;
+
+/// The cluster size to ask `mformat` for, if not its own. Below 16 MiB it
+/// picks FAT12, which the Raspberry Pi firmware is not known to boot from (a
+/// USB-boot `boot.img` on FAT12 never started its kernel, the same files on
+/// FAT16 are what the vendor image uses): one sector per cluster makes those
+/// images FAT16. Images too small for FAT16, and images of 16 MiB or more,
+/// keep `mformat`'s choice.
+pub(super) fn vfat_sectors_per_cluster(bytes: u64) -> Option<u32> {
+    (VFAT_FAT16_MIN_BYTES..VFAT_FAT16_DEFAULT_FROM_BYTES)
+        .contains(&bytes)
+        .then_some(1)
+}
+
 /// The image size for `size = "auto"`: the content (each file rounded up to
 /// a cluster, each directory costing one) plus the fixed FAT overhead plus a
 /// margin, rounded up to 1 MiB. It depends only on the tree's content, so the
@@ -273,6 +291,11 @@ fn write_vfat_filesystem(context: VfatWriteContext<'_>) -> Result<(), AssemblyEr
     drop(image);
 
     let mut format_command = Command::new(&mformat.program);
+    if let Some(sectors_per_cluster) = vfat_sectors_per_cluster(bytes) {
+        format_command
+            .arg("-c")
+            .arg(sectors_per_cluster.to_string());
+    }
     format_command.arg("-i").arg(output).arg("::");
     let format_output =
         run_command_capture_tail(spec, &mut format_command, retention, cancel_check.clone())?;
