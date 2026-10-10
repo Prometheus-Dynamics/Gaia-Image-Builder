@@ -19,6 +19,7 @@ pub struct ImageAssemblySpec {
     pub disks: Vec<AssemblyDiskSpec>,
     pub archives: Vec<AssemblyArchiveSpec>,
     pub busybox_initramfs: Vec<AssemblyBusyboxInitramfsSpec>,
+    pub kernel_modules: Vec<AssemblyKernelModulesSpec>,
 }
 
 impl ImageAssemblySpec {
@@ -34,6 +35,7 @@ impl ImageAssemblySpec {
             && self.disks.is_empty()
             && self.archives.is_empty()
             && self.busybox_initramfs.is_empty()
+            && self.kernel_modules.is_empty()
     }
 }
 
@@ -170,11 +172,29 @@ pub struct AssemblyFilesystemSpec {
     pub output: AssemblyPathTemplate,
     pub size: Option<String>,
     pub deterministic: bool,
+    /// zstd level for `cpio-zstd` (1-19); `None` uses the default.
+    pub compression_level: Option<u32>,
+    /// Also copy the image to `$assembly.out/<file name of output>`, the
+    /// image output dir, where it is published as an image of the run.
+    pub publish: bool,
 }
 
 impl AssemblyFilesystemSpec {
     pub fn parsed_size(&self) -> Result<Option<ByteSize>, ByteSizeParseError> {
         self.size.as_deref().map(ByteSize::from_str).transpose()
+    }
+
+    /// Where a published filesystem image is copied: the image output dir
+    /// (`$assembly.out`) under the output's file name. `None` when the
+    /// filesystem is not published or the output has no file name.
+    pub fn publish_template(&self) -> Option<AssemblyPathTemplate> {
+        if !self.publish {
+            return None;
+        }
+        let name = std::path::Path::new(self.output.as_str())
+            .file_name()?
+            .to_str()?;
+        Some(AssemblyPathTemplate::new(format!("$assembly.out/{name}")))
     }
 }
 
@@ -183,6 +203,7 @@ pub enum AssemblyFilesystemKindSpec {
     Vfat,
     Cpio,
     CpioGzip,
+    CpioZstd,
 }
 
 impl AssemblyFilesystemKindSpec {
@@ -191,8 +212,24 @@ impl AssemblyFilesystemKindSpec {
             Self::Vfat => "vfat",
             Self::Cpio => "cpio",
             Self::CpioGzip => "cpio-gzip",
+            Self::CpioZstd => "cpio-zstd",
         }
     }
+}
+
+/// Modules copied from a kernel's module tree into a tree, with their
+/// dependency closure, and `depmod` run over the result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssemblyKernelModulesSpec {
+    pub tree: AssemblyTreeId,
+    /// The directory holding the `<kernel version>` directories.
+    pub from: AssemblyPathTemplate,
+    /// Required when `from` holds more than one kernel version directory.
+    pub kernel_version: Option<String>,
+    /// Module names, `-` and `_` equivalent, with or without a `.ko` suffix.
+    pub modules: Vec<String>,
+    /// The `depmod` to run; `None` takes the provider's, then the host's.
+    pub depmod: Option<AssemblyPathTemplate>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

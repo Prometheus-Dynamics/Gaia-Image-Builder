@@ -590,6 +590,8 @@ fn boot_assembly(
             output: "$assembly.work/boot.cpio".into(),
             size: None,
             deterministic: true,
+            compression_level: None,
+            publish: false,
         }],
         ..ImageAssemblySpec::default()
     }
@@ -710,6 +712,12 @@ fn assembly_disk_archives_log_a_step_time_and_sizes() {
         let _ = fs::remove_dir_all(root);
     }
 }
+
+#[path = "tests_filesystem.rs"]
+mod tests_filesystem;
+
+#[path = "tests_kernel_modules.rs"]
+mod tests_kernel_modules;
 
 #[path = "tests_ram.rs"]
 mod ram;

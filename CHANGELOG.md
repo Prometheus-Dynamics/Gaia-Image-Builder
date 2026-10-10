@@ -16,6 +16,13 @@ This cycle also moves the toolchain pin and `rust-version` to Rust 1.99.0
 (installing Gaia needs Rust 1.99 or newer), upgrades every dependency to its
 newest release, and updates the Rust docker images to 1.99.0.
 
+### Image assembly: cpio-zstd, kernel modules, published filesystem images
+
+- `[[image.assembly.filesystems]]` takes `kind = "cpio-zstd"`: a newc cpio of the tree, compressed with zstd. The optional `compression_level` (1-19, default 19) is accepted only there. Output is deterministic, as for the other cpio kinds.
+- `[[image.assembly.kernel_modules]]` copies named kernel modules, with their `modules.dep` dependency closure, from a kernel's module directory into a tree, copies `modules.order`, `modules.builtin` and `modules.builtin.modinfo`, and runs `depmod` over the tree. Built-in modules are skipped with a message; an unknown module fails the build. The step runs before the filesystems that pack the tree.
+- `publish = true` on a filesystem copies its image to the image output dir under the output's file name, and reports it like a raw disk (run summary, image sizes, content digests). Validation rejects a published name that collides with another output. Works in disk and RAM work dirs.
+- The flasher boot image example is in `docs/configuration.md` (Image Assembly).
+
 ### Buildroot source mirror kept while the source is unchanged
 
 - A RAM build's Buildroot source mirror is no longer copied again on every operation when the source is unchanged. `rsync` had to stat every file of the source on a busy disk (36 s in one run). The mirror is kept when its marker (`.gaia-mirror-source`, the source's recorded tree digest and its top-level entries' metadata) matches the source; the run reports "buildroot source mirror: unchanged". A missing or incomplete mirror, a changed source, or a source with no recorded tree digest is copied in full, as before.

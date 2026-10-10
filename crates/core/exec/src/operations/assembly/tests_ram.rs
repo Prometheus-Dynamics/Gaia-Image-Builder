@@ -64,6 +64,8 @@ fn ram_test_assembly(work_dir: &str) -> ImageAssemblySpec {
             output: "$provider.images/boot.cpio".into(),
             size: None,
             deterministic: true,
+            compression_level: None,
+            publish: false,
         }],
         disks: vec![gaia_spec::AssemblyDiskSpec {
             id: "sdcard".into(),

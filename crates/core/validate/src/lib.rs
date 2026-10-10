@@ -9,6 +9,7 @@ mod image_assembly;
 mod image_assembly_collected;
 mod image_assembly_layout;
 mod image_assembly_order;
+mod image_assembly_outputs;
 mod inputs;
 mod install_stage;
 mod java_policy;

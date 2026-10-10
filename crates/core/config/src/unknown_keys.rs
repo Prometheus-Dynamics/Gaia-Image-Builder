@@ -124,6 +124,11 @@ const ASSEMBLY_CHILDREN: &[Section] = &[
         struct_fields::<raw_assembly::RawAssemblyBusyboxInitramfsConfig>,
         &[],
     ),
+    section(
+        "kernel_modules",
+        struct_fields::<raw_assembly::RawAssemblyKernelModulesConfig>,
+        &[],
+    ),
 ];
 
 const SECTIONS: &[Section] = &[

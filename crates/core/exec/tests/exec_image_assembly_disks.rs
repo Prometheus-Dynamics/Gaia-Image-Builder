@@ -78,6 +78,8 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
             output: boot_vfat.display().to_string().into(),
             size: Some("1M".into()),
             deterministic: false,
+            compression_level: None,
+            publish: false,
         }],
         disks: vec![AssemblyDiskSpec {
             id: "sdcard".into(),
@@ -323,6 +325,8 @@ fn vfat_filesystem_honors_mformat_timeout() {
             output: boot_vfat.display().to_string().into(),
             size: Some("1M".into()),
             deterministic: false,
+            compression_level: None,
+            publish: false,
         }],
         ..ImageAssemblySpec::default()
     });

@@ -1,5 +1,5 @@
 //! Running the assembly steps (dirs, symlinks, files, busybox initramfs,
-//! transforms, filesystems, disks, archives) in dependency order: a step
+//! kernel modules, transforms, filesystems, disks, archives) in dependency order: a step
 //! that reads another step's output runs after it
 //! ([`gaia_spec::order_assembly_steps`]).
 
@@ -24,6 +24,9 @@ pub(super) struct StepRun<'a> {
     filesystem_count: usize,
     disk_count: usize,
     archive_count: usize,
+    kernel_modules_count: usize,
+    /// Where each published filesystem image is published, in build order.
+    pub(super) filesystem_published: Vec<PathBuf>,
     /// Where each built disk's bytes are (RAM in a RAM run).
     pub(super) disk_outputs: Vec<PathBuf>,
     /// Where each built disk is published, in the same order.
@@ -99,6 +102,8 @@ impl<'a> StepRun<'a> {
             filesystem_count: 0,
             disk_count: 0,
             archive_count: 0,
+            kernel_modules_count: 0,
+            filesystem_published: Vec::new(),
             disk_outputs: Vec::new(),
             disk_published: Vec::new(),
             disk_publish: Vec::new(),
@@ -125,6 +130,7 @@ impl<'a> StepRun<'a> {
             AssemblyStep::Symlink(index) => self.symlink(index),
             AssemblyStep::File(index) => self.file(index),
             AssemblyStep::BusyboxInitramfs(index) => self.busybox(index),
+            AssemblyStep::KernelModules(index) => self.kernel_modules(index),
             AssemblyStep::Transform(index) => self.transform(index),
             AssemblyStep::Filesystem(index) => self.filesystem(index),
             AssemblyStep::Disk(index) => self.disk(index),
@@ -154,6 +160,7 @@ impl<'a> StepRun<'a> {
             self.staged_count, self.skipped_count
         ));
         state.insert("completed_busybox_initramfs_count", self.busybox_count);
+        state.insert("completed_kernel_modules_count", self.kernel_modules_count);
         state.insert("completed_transform_count", self.transform_count);
         state.insert("completed_filesystem_count", self.filesystem_count);
         state.insert("completed_disk_count", self.disk_count);
@@ -300,6 +307,59 @@ impl<'a> StepRun<'a> {
         Ok(())
     }
 
+    fn kernel_modules(&mut self, index: usize) -> Result<(), AssemblyError> {
+        let modules = &self.assembly.kernel_modules[index];
+        let span = tracing::info_span!(
+            "assembly_kernel_modules",
+            operation_id = %self.operation_id.as_str(),
+            tree_id = %modules.tree
+        );
+        let _span_guard = span.enter();
+        let summary =
+            execute_kernel_modules(self.spec, self.roots, modules, self.cancel_check.clone())?;
+        self.kernel_modules_count += 1;
+        let count = self.kernel_modules_count;
+        let state = &mut self.state;
+        state.insert(
+            format!("kernel_modules.{count}.tree"),
+            modules.tree.as_str(),
+        );
+        state.insert(
+            format!("kernel_modules.{count}.kernel_version"),
+            &summary.kernel_version,
+        );
+        state.insert(
+            format!("kernel_modules.{count}.copied_count"),
+            summary.copied.len(),
+        );
+        state.insert(
+            format!("kernel_modules.{count}.builtin_count"),
+            summary.builtin.len(),
+        );
+        state.insert(format!("kernel_modules.{count}.depmod"), &summary.depmod);
+        if let Some(version) = &summary.depmod_version {
+            state.insert(format!("kernel_modules.{count}.depmod_version"), version);
+        }
+        for (module_index, module) in summary.copied.iter().enumerate() {
+            state.insert(
+                format!("kernel_modules.{count}.module.{}", module_index + 1),
+                module,
+            );
+        }
+        self.messages.push(format!(
+            "installed {} kernel module file(s) for tree '{}' (kernel {}) and ran depmod",
+            summary.copied.len(),
+            modules.tree,
+            summary.kernel_version
+        ));
+        for name in &summary.builtin {
+            self.messages.push(format!(
+                "kernel module '{name}' is built into the kernel; nothing copied"
+            ));
+        }
+        Ok(())
+    }
+
     fn transform(&mut self, index: usize) -> Result<(), AssemblyError> {
         let transform = &self.assembly.transforms[index];
         let span = tracing::info_span!(
@@ -375,10 +435,26 @@ impl<'a> StepRun<'a> {
             filesystem,
             self.cancel_check.clone(),
         )?;
+        // A published copy goes to the image output dir under the output's
+        // file name, as a raw disk does; the bytes are the same.
+        let published = match filesystem.publish_template() {
+            Some(template) => {
+                let target = self.roots.resolve_path(self.spec, template.as_str())?;
+                if target != summary.output {
+                    publish_copy_to_disk(&summary.output, &target)?;
+                }
+                self.filesystem_published.push(target.clone());
+                Some(target)
+            }
+            None => None,
+        };
         tracing::Span::current().record("output_path", summary.output.display().to_string());
         self.filesystem_count += 1;
         let key = AssemblyStateKey::new("filesystem", self.filesystem_count);
         let state = &mut self.state;
+        if let Some(target) = &published {
+            state.insert(key.field("published"), target.display().to_string());
+        }
         state.insert(key.field("id"), filesystem.id.as_str());
         state.insert(key.field("kind"), filesystem.kind.as_str());
         state.insert(key.field("source_tree"), filesystem.source_tree.as_str());
@@ -397,6 +473,13 @@ impl<'a> StepRun<'a> {
             filesystem.id,
             summary.output.display()
         ));
+        if let Some(target) = published {
+            self.messages.push(format!(
+                "published assembly filesystem '{}' as '{}'",
+                filesystem.id,
+                target.display()
+            ));
+        }
         Ok(())
     }
 

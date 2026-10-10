@@ -15,11 +15,24 @@ pub(crate) fn assembly_input_entries(spec: &ResolvedBuildSpec) -> Vec<(String, S
         return vec![("assembly".into(), "assembly:root_resolution_failed".into())];
     };
     let mut parts = Vec::new();
-    let generated_filesystem_outputs = assembly
+    let mut generated_filesystem_outputs = assembly
         .filesystems
         .iter()
         .filter_map(|filesystem| roots.resolve_path(spec, &filesystem.output).ok())
         .collect::<BTreeSet<_>>();
+    for filesystem in &assembly.filesystems {
+        let Some(template) = filesystem.publish_template() else {
+            continue;
+        };
+        let target = roots
+            .resolve_path(spec, template.as_str())
+            .unwrap_or_else(|_| PathBuf::from(template.as_str()));
+        parts.push((
+            format!("published {} {}", filesystem.id, target.display()),
+            format!("published:{}:{}", filesystem.id, target.display()),
+        ));
+        generated_filesystem_outputs.insert(target);
+    }
     let mut glob_match_count = 0usize;
     let mut generated_partition_images = 0usize;
     let mut direct_partition_images = 0usize;
@@ -124,6 +137,53 @@ pub(crate) fn assembly_input_entries(spec: &ResolvedBuildSpec) -> Vec<(String, S
             parts.push(("tool ldd".into(), command_signature("ldd", ["--version"])));
         }
     }
+    for filesystem in &assembly.filesystems {
+        if filesystem.kind == gaia_spec::AssemblyFilesystemKindSpec::CpioZstd {
+            parts.push((
+                format!("tool zstd (cpio-zstd {})", filesystem.id),
+                command_signature("zstd", ["--version"]),
+            ));
+        }
+    }
+    for modules in &assembly.kernel_modules {
+        let from = roots
+            .resolve_path(spec, &modules.from)
+            .unwrap_or_else(|_| PathBuf::from(modules.from.as_str()));
+        // The kernel's own module index: Buildroot rewrites it whenever the
+        // modules are installed, so it stands for the module files.
+        let kernel_dir = match &modules.kernel_version {
+            Some(version) => from.join(version),
+            None => single_subdir(&from).unwrap_or_else(|| from.clone()),
+        };
+        let mut names = modules.modules.clone();
+        names.sort();
+        parts.push((
+            format!("kernel-modules {} {}", modules.tree, kernel_dir.display()),
+            format!(
+                "kernel-modules:{}:{}:dep={}:builtin={}:modules={}",
+                modules.tree,
+                kernel_dir.display(),
+                path_state_signature(&kernel_dir.join("modules.dep")),
+                path_state_signature(&kernel_dir.join("modules.builtin")),
+                names.join(",")
+            ),
+        ));
+        match modules.depmod.as_ref() {
+            Some(template) => {
+                let depmod = roots
+                    .resolve_path(spec, template.as_str())
+                    .unwrap_or_else(|_| PathBuf::from(template.as_str()));
+                parts.push((
+                    format!("tool depmod {}", depmod.display()),
+                    format!("depmod-file:{}", path_state_signature(&depmod)),
+                ));
+            }
+            None => parts.push((
+                "tool depmod".into(),
+                command_signature("depmod", ["--version"]),
+            )),
+        }
+    }
     for disk in &assembly.disks {
         for partition in &disk.partitions {
             let key = format!("partition {}/{}", disk.id, partition.name);
@@ -225,6 +285,17 @@ pub(crate) fn assembly_input_entries(spec: &ResolvedBuildSpec) -> Vec<(String, S
     parts
 }
 
+/// The only subdirectory of `dir`, when it has exactly one.
+fn single_subdir(dir: &std::path::Path) -> Option<PathBuf> {
+    let mut subdirs = std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir());
+    let only = subdirs.next()?;
+    subdirs.next().is_none().then_some(only)
+}
+
 /// The fingerprint's input signature: every entry's part, in order.
 pub(crate) fn assembly_input_signature(spec: &ResolvedBuildSpec) -> String {
     assembly_input_entries(spec)
@@ -232,4 +303,60 @@ pub(crate) fn assembly_input_signature(spec: &ResolvedBuildSpec) -> String {
         .map(|(_, part)| part)
         .collect::<Vec<_>>()
         .join("|")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kernel_modules_and_published_copies_enter_the_fingerprint() {
+        use gaia_spec::{
+            AssemblyFilesystemKindSpec, AssemblyFilesystemSpec, AssemblyKernelModulesSpec,
+            AssemblyTreeSpec, ImageAssemblySpec,
+        };
+        let root = std::env::temp_dir().join(format!("gaia-reuse-kernel-{}", std::process::id()));
+        let kernel = root.join("images/modules/6.12.0");
+        std::fs::create_dir_all(&kernel).expect("kernel dir");
+        std::fs::write(kernel.join("modules.dep"), "kernel/a.ko:\n").expect("modules.dep");
+        let mut spec = ResolvedBuildSpec::new("reuse-kernel-modules");
+        spec.workspace.root_dir = root.display().to_string();
+        spec.workspace.build_dir = root.join("build").display().to_string();
+        spec.workspace.out_dir = root.join("out").display().to_string();
+        spec.image.output.collect_dir = Some(root.join("images").display().to_string());
+        spec.image.assembly = Some(ImageAssemblySpec {
+            trees: vec![AssemblyTreeSpec {
+                id: "initramfs".into(),
+                path: "$assembly.work/initramfs".into(),
+            }],
+            kernel_modules: vec![AssemblyKernelModulesSpec {
+                tree: "initramfs".into(),
+                from: "$provider.images/modules".into(),
+                kernel_version: Some("6.12.0".into()),
+                modules: vec!["libcomposite".into()],
+                depmod: None,
+            }],
+            filesystems: vec![AssemblyFilesystemSpec {
+                id: "boot".into(),
+                kind: AssemblyFilesystemKindSpec::CpioZstd,
+                source_tree: "initramfs".into(),
+                output: "$assembly.work/boot.cpio.zst".into(),
+                size: None,
+                deterministic: true,
+                compression_level: None,
+                publish: true,
+            }],
+            ..ImageAssemblySpec::default()
+        });
+        let before = assembly_input_signature(&spec);
+        assert!(before.contains("kernel-modules:initramfs:"), "{before}");
+        assert!(before.contains("published:boot:"), "{before}");
+        if let Some(assembly) = spec.image.assembly.as_mut() {
+            assembly.kernel_modules[0]
+                .modules
+                .push("usb_f_mass_storage".into());
+        }
+        assert_ne!(before, assembly_input_signature(&spec));
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

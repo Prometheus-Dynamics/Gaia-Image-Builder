@@ -200,6 +200,8 @@ pub(crate) fn compile_image_assembly(
                 deterministic: filesystem
                     .deterministic
                     .unwrap_or_else(|| default_assembly_filesystem_deterministic(filesystem.kind)),
+                compression_level: filesystem.compression_level,
+                publish: filesystem.publish,
             })
             .collect(),
         disks: raw
@@ -251,6 +253,17 @@ pub(crate) fn compile_image_assembly(
                 applets: initramfs.applets,
             })
             .collect(),
+        kernel_modules: raw
+            .kernel_modules
+            .into_iter()
+            .map(|modules| AssemblyKernelModulesSpec {
+                tree: modules.tree.into(),
+                from: modules.from.into(),
+                kernel_version: modules.kernel_version,
+                modules: modules.modules,
+                depmod: modules.depmod.map(Into::into),
+            })
+            .collect(),
     };
     Some(assembly)
 }
@@ -275,12 +288,15 @@ fn compile_assembly_filesystem_kind(raw: RawAssemblyFilesystemKind) -> AssemblyF
         RawAssemblyFilesystemKind::Vfat => AssemblyFilesystemKindSpec::Vfat,
         RawAssemblyFilesystemKind::Cpio => AssemblyFilesystemKindSpec::Cpio,
         RawAssemblyFilesystemKind::CpioGzip => AssemblyFilesystemKindSpec::CpioGzip,
+        RawAssemblyFilesystemKind::CpioZstd => AssemblyFilesystemKindSpec::CpioZstd,
     }
 }
 
 fn default_assembly_filesystem_deterministic(raw: RawAssemblyFilesystemKind) -> bool {
     match raw {
-        RawAssemblyFilesystemKind::Cpio | RawAssemblyFilesystemKind::CpioGzip => true,
+        RawAssemblyFilesystemKind::Cpio
+        | RawAssemblyFilesystemKind::CpioGzip
+        | RawAssemblyFilesystemKind::CpioZstd => true,
         RawAssemblyFilesystemKind::Vfat => false,
     }
 }

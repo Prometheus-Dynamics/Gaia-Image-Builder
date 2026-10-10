@@ -372,6 +372,8 @@ fn image_assembly_disk_failure_cleans_generated_filesystem_output() {
                 .into(),
             size: None,
             deterministic: true,
+            compression_level: None,
+            publish: false,
         }],
         disks: vec![AssemblyDiskSpec {
             id: "sdcard".into(),
@@ -545,6 +547,8 @@ fn image_assembly_filesystem_failure_cleans_temp_and_final_outputs() {
             output: output_dir.join("boot.vfat").display().to_string().into(),
             size: Some("1M".into()),
             deterministic: false,
+            compression_level: None,
+            publish: false,
         }],
         ..ImageAssemblySpec::default()
     });

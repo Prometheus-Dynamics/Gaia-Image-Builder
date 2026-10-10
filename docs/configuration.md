@@ -1759,13 +1759,23 @@ Assembly behavior:
 - `zstd` runs `zstd -q -c --no-progress -T0 [-<level>] <src>`, resolving `zstd` from provider host tools first, then host `PATH`; the tool path and version are recorded in assembly state. The optional `level` (1-19) is only accepted on `zstd` transforms and defaults to zstd's own default.
 - `compile-dts` resolves `dtc` from provider host tools first, then host `PATH`.
 - `busybox_initramfs` copies the configured BusyBox binary to `bin/busybox`, creates requested applet symlinks in `bin`, and can copy `ldd`-reported runtime libraries when `include_runtime_libs = true`.
+- `kernel_modules` copies the named kernel modules, and the modules they depend on, from a kernel's `modules.dep` into a tree under `lib/modules/<kernel version>/` at the same relative paths. It also copies `modules.order`, `modules.builtin` and `modules.builtin.modinfo` when present, then runs `depmod -b <tree> <kernel version>`, so the tree's module index covers exactly the copied set. Each entry takes:
+  - `tree`: the tree to fill.
+  - `from`: the directory holding the `<kernel version>` directories, such as `$provider.target/lib/modules`.
+  - `modules`: module names. `-` and `_` are the same, and a name may carry `.ko`, `.ko.xz`, `.ko.zst` and similar suffixes or a path.
+  - `kernel_version` (optional): the version directory to use. Required when `from` holds more than one.
+  - `depmod` (optional): a path template for `depmod`. Unset, it takes the provider's `sbin/depmod`, then the host's `depmod` from `PATH`; a missing depmod fails the build.
+
+  A module the kernel has built in (listed in `modules.builtin`) is skipped and noted. A name that is neither in `modules.dep` nor built in fails the build, naming it. The step runs with the other tree-populating steps, before the filesystems that pack the tree.
 - Runtime library discovery is intended for Linux-style hosts and target binaries that can be inspected by host `ldd`; static BusyBox output skips library copying.
-- Filesystem kinds currently implemented are `vfat`, `cpio`, and `cpio-gzip`.
+- Filesystem kinds currently implemented are `vfat`, `cpio`, `cpio-gzip`, and `cpio-zstd`.
+- `cpio` kinds write a newc archive with uid and gid 0, entries in sorted order and zero timestamps, so the same tree packs to the same bytes. `cpio-zstd` compresses that archive with `zstd -q -c --no-progress -T0 -<compression_level>`, resolving `zstd` like the zstd transform; `compression_level` (1-19) is only accepted on `cpio-zstd` and defaults to 19.
+- `publish = true` on a filesystem also copies its image to the image output dir (`$assembly.out`, the collect dir by default) under the output's file name, and the published image is reported like a raw disk: in the run summary, its image sizes, and the content digests. The name must not collide with another output or published copy. In a RAM work dir the image is built in RAM and copied to the image output dir when built.
 - `vfat` uses `mtools` (`mformat` and `mcopy`), resolving provider host tools first, then host `PATH`; `size` accepts byte values or binary `K`, `M`, `G`, and `T` suffixes.
 - Raw MBR disk assembly writes 1 MiB-aligned partitions sequentially (see [Disk partitions](#disk-partitions)).
 - MBR partition `type` accepts raw `0xNN` values; `type_alias` currently supports `fat32-lba` and `linux`.
 - Assembly runtime state is included in provenance and manifest reports with staged file, transform, filesystem, disk, and archive output sizes and digests.
-- Assembly order follows dependencies: a step that reads a path another step writes (the same file, a file in a directory it fills, or a glob it matches) runs after it, whatever its kind or position, so for example a transform compressing a filesystem built by the same assembly sees this run's image. Trees are prepared first; steps that do not depend on each other run in the order dirs, symlinks, files, BusyBox initramfs, transforms, filesystems, disks, archives. Steps that read each other's outputs in a cycle are rejected, by validation and at run time.
+- Assembly order follows dependencies: a step that reads a path another step writes (the same file, a file in a directory it fills, or a glob it matches) runs after it, whatever its kind or position, so for example a transform compressing a filesystem built by the same assembly sees this run's image. Trees are prepared first; steps that do not depend on each other run in the order dirs, symlinks, files, BusyBox initramfs, kernel modules, transforms, filesystems, disks, archives. Steps that read each other's outputs in a cycle are rejected, by validation and at run time.
 - Before the steps run, outputs of transforms, filesystems, disks and archives left from an earlier run are removed, so a step reading one before it is rebuilt fails instead of using a stale file.
 - Validation warns (`assembly_reads_later_output`) when a step reads what a step of a later kind or position produces: Gaia versions before dependency ordering ran it first, on the previous run's file.
 
@@ -1785,7 +1795,8 @@ partition cost no disk writes. The RAM copies are removed when
 the assembly ends, whether it succeeded or not.
 
 In RAM mode a filesystem image such as `boot.vfat` is an intermediate and is
-not left in the collect dir; use `"disk"` to keep it there.
+not left in the collect dir; use `"disk"` to keep it there, or set `publish = true`
+on the filesystem to copy it to the image output dir.
 
 When `work_dir` is unset it follows `[providers.buildroot] work_dir`: RAM when
 that is `"ram"`, disk otherwise. A path, such as the PhotonVision project's
@@ -1984,6 +1995,92 @@ name = "rootfs"
 type_alias = "linux"
 image = "$provider.buildroot_output/images/rootfs.ext4"
 ```
+
+#### Example: flasher boot image with an initramfs
+
+A flasher image boots a kernel with an initramfs that loads USB gadget modules
+and runs the flashing script. The initramfs is packed as `cpio-zstd` and
+placed in a FAT boot image, which is published as an image of the build:
+
+```toml
+build_name = "flasher"
+version = "1.0.0"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[image]
+kind = "buildroot"
+defconfig = "flasher_defconfig"
+
+[[image.assembly.trees]]
+id = "initramfs"
+path = "$assembly.work/initramfs"
+
+[[image.assembly.trees]]
+id = "boot"
+path = "$assembly.work/boot"
+
+# BusyBox and the kernel modules the gadget needs, with their dependencies.
+[[image.assembly.busybox_initramfs]]
+tree = "initramfs"
+busybox = "$provider.target/bin/busybox"
+include_runtime_libs = false
+applets = ["sh", "mount", "mkdir", "modprobe", "switch_root"]
+
+[[image.assembly.kernel_modules]]
+tree = "initramfs"
+from = "$provider.target/lib/modules"
+modules = ["libcomposite", "usb-f-mass-storage"]
+
+[[image.assembly.files]]
+tree = "initramfs"
+src = "@assets/flasher/init"
+dest = "init"
+mode = "0755"
+
+# The initramfs, compressed with zstd level 19 (the default).
+[[image.assembly.filesystems]]
+id = "initramfs"
+kind = "cpio-zstd"
+source_tree = "initramfs"
+output = "$assembly.work/initramfs.cpio.zst"
+compression_level = 19
+
+# The boot tree: kernel, device tree, config.txt and the initramfs.
+[[image.assembly.files]]
+tree = "boot"
+src = "$provider.images/Image"
+dest = "Image"
+
+[[image.assembly.files]]
+tree = "boot"
+src = "$provider.images/bcm2711-rpi-4-b.dtb"
+dest = "bcm2711-rpi-4-b.dtb"
+
+[[image.assembly.files]]
+tree = "boot"
+src = "@assets/flasher/config.txt"
+dest = "config.txt"
+
+[[image.assembly.files]]
+tree = "boot"
+src = "$assembly.work/initramfs.cpio.zst"
+dest = "initramfs.cpio.zst"
+
+# boot.img, published to $provider.images/boot.img.
+[[image.assembly.filesystems]]
+id = "boot"
+kind = "vfat"
+source_tree = "boot"
+output = "$assembly.work/boot.img"
+size = "64M"
+publish = true
+```
+
+The boot tree's `config.txt` carries the line `initramfs initramfs.cpio.zst followkernel`, which tells the firmware to load the initramfs next to the kernel. The boot tree reads the `cpio-zstd` output, so validation warns `assembly_reads_later_output` once: that step runs after the initramfs is packed, as it must.
 
 ## Checkpoints
 

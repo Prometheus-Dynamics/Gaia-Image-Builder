@@ -22,6 +22,8 @@ fn roots_for(root: &Path) -> (ResolvedBuildSpec, AssemblyRoots) {
             output: "$provider.images/boot.vfat".into(),
             size: Some("4M".into()),
             deterministic: true,
+            compression_level: None,
+            publish: false,
         }],
         ..ImageAssemblySpec::default()
     });

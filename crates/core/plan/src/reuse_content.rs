@@ -60,6 +60,11 @@ pub(crate) fn image_assembly_content_signature(spec: &ResolvedBuildSpec) -> Stri
     let Ok(roots) = AssemblyRoots::new(spec, assembly) else {
         return "assembly:root_resolution_failed".into();
     };
+    let published = assembly
+        .filesystems
+        .iter()
+        .filter_map(|filesystem| filesystem.publish_template())
+        .collect::<Vec<_>>();
     let outputs = assembly
         .transforms
         .iter()
@@ -76,7 +81,8 @@ pub(crate) fn image_assembly_content_signature(spec: &ResolvedBuildSpec) -> Stri
                 .archives
                 .iter()
                 .map(|archive| ("archive", &archive.output)),
-        );
+        )
+        .chain(published.iter().map(|template| ("published", template)));
     outputs
         .map(|(kind, template)| output_part(spec, &roots, kind, template))
         .collect::<Vec<_>>()

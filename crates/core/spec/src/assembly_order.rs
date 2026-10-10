@@ -2,8 +2,8 @@
 //! writes (the same path, a file inside a directory it fills, or a
 //! directory it writes into) runs after it, whatever their kinds or
 //! declaration order. Steps that do not depend on each other keep the
-//! classic order: dirs, symlinks, files, busybox initramfs, transforms,
-//! filesystems, disks, archives, each in declaration order.
+//! classic order: dirs, symlinks, files, busybox initramfs, kernel modules,
+//! transforms, filesystems, disks, archives, each in declaration order.
 
 use std::path::{Path, PathBuf};
 
@@ -16,6 +16,7 @@ pub enum AssemblyStep {
     Symlink(usize),
     File(usize),
     BusyboxInitramfs(usize),
+    KernelModules(usize),
     Transform(usize),
     Filesystem(usize),
     Disk(usize),
@@ -39,6 +40,10 @@ impl AssemblyStep {
                     assembly.busybox_initramfs[index].tree
                 )
             }
+            Self::KernelModules(index) => format!(
+                "kernel modules for tree '{}'",
+                assembly.kernel_modules[index].tree
+            ),
             Self::Transform(index) => {
                 let transform = &assembly.transforms[index];
                 format!(
@@ -125,6 +130,13 @@ pub fn assembly_step_paths(
             vec![tree(initramfs.tree.as_str())],
         );
     }
+    for (index, modules) in assembly.kernel_modules.iter().enumerate() {
+        push(
+            AssemblyStep::KernelModules(index),
+            vec![resolve(&modules.from)],
+            vec![tree(modules.tree.as_str())],
+        );
+    }
     for (index, transform) in assembly.transforms.iter().enumerate() {
         push(
             AssemblyStep::Transform(index),
@@ -133,10 +145,14 @@ pub fn assembly_step_paths(
         );
     }
     for (index, filesystem) in assembly.filesystems.iter().enumerate() {
+        let mut writes = vec![resolve(&filesystem.output)];
+        if let Some(publish) = filesystem.publish_template() {
+            writes.push(resolve(&publish));
+        }
         push(
             AssemblyStep::Filesystem(index),
             vec![tree(filesystem.source_tree.as_str())],
-            vec![resolve(&filesystem.output)],
+            writes,
         );
     }
     for (index, disk) in assembly.disks.iter().enumerate() {
@@ -393,6 +409,98 @@ mod tests {
         assert_eq!(
             order_assembly_steps(&steps),
             Ok(vec![AssemblyStep::File(0), AssemblyStep::Filesystem(0)])
+        );
+    }
+
+    #[test]
+    fn kernel_modules_fill_the_tree_before_it_is_packed_and_published_copies_are_writes() {
+        use crate::{
+            AssemblyFileSpec, AssemblyFilesystemKindSpec, AssemblyFilesystemSpec,
+            AssemblyKernelModulesSpec, AssemblyTreeSpec,
+        };
+        let assembly = ImageAssemblySpec {
+            trees: vec![
+                AssemblyTreeSpec {
+                    id: "initramfs".into(),
+                    path: "/work/initramfs".into(),
+                },
+                AssemblyTreeSpec {
+                    id: "boot".into(),
+                    path: "/work/boot".into(),
+                },
+            ],
+            files: vec![AssemblyFileSpec {
+                tree: "boot".into(),
+                src: Some("$assembly.out/boot.img".into()),
+                src_glob: None,
+                dest: "boot.img".into(),
+                mode: None,
+                optional: false,
+                preserve_symlink: false,
+            }],
+            kernel_modules: vec![AssemblyKernelModulesSpec {
+                tree: "initramfs".into(),
+                from: "/provider/target/lib/modules".into(),
+                kernel_version: None,
+                modules: vec!["libcomposite".into()],
+                depmod: None,
+            }],
+            filesystems: vec![AssemblyFilesystemSpec {
+                id: "boot".into(),
+                kind: AssemblyFilesystemKindSpec::CpioZstd,
+                source_tree: "initramfs".into(),
+                output: "/work/boot.img".into(),
+                size: None,
+                deterministic: true,
+                compression_level: None,
+                publish: true,
+            }],
+            ..ImageAssemblySpec::default()
+        };
+        let paths = assembly_step_paths(
+            &assembly,
+            &|template| Some(PathBuf::from(template.as_str())),
+            &|id| match id {
+                "initramfs" => Some(PathBuf::from("/work/initramfs")),
+                "boot" => Some(PathBuf::from("/work/boot")),
+                _ => None,
+            },
+        );
+        // The filesystem reads the tree the modules fill, and the file in
+        // another tree reads the published copy the filesystem writes.
+        assert_eq!(
+            order_assembly_steps(&paths),
+            Ok(vec![
+                AssemblyStep::KernelModules(0),
+                AssemblyStep::Filesystem(0),
+                AssemblyStep::File(0),
+            ])
+        );
+        assert!(
+            AssemblyStep::KernelModules(0)
+                .describe(&assembly)
+                .contains("initramfs")
+        );
+    }
+
+    #[test]
+    fn published_filesystem_images_go_to_the_output_dir_under_their_file_name() {
+        use crate::{AssemblyFilesystemKindSpec, AssemblyFilesystemSpec};
+        let mut filesystem = AssemblyFilesystemSpec {
+            id: "boot".into(),
+            kind: AssemblyFilesystemKindSpec::Vfat,
+            source_tree: "boot".into(),
+            output: "$assembly.work/sub/boot.img".into(),
+            size: None,
+            deterministic: false,
+            compression_level: None,
+            publish: false,
+        };
+        assert_eq!(filesystem.publish_template(), None);
+        filesystem.publish = true;
+        assert_eq!(
+            filesystem.publish_template().expect("published").as_str(),
+            "$assembly.out/boot.img"
         );
     }
 }

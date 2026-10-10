@@ -18,6 +18,7 @@ mod busybox;
 mod disks;
 mod files;
 mod filesystems;
+mod kernel_modules;
 mod mbr;
 mod placement;
 mod state;
@@ -31,6 +32,7 @@ use busybox::*;
 use disks::*;
 use files::*;
 use filesystems::*;
+use kernel_modules::*;
 use mbr::*;
 use placement::*;
 use state::AssemblyExecutionContext;
@@ -46,7 +48,7 @@ pub(crate) struct AssemblyStagingSummary {
     pub messages: Vec<String>,
     pub cleanup_paths: Vec<PathBuf>,
     pub archive_path: Option<PathBuf>,
-    /// The raw disk images published by this run, in spec order.
+    /// The raw disk images and published filesystem images of this run.
     pub disk_images: Vec<PathBuf>,
 }
 
@@ -212,6 +214,7 @@ fn stage_steps(
         .with("filesystem_count", assembly.filesystems.len())
         .with("disk_count", assembly.disks.len())
         .with("busybox_initramfs_count", assembly.busybox_initramfs.len())
+        .with("kernel_modules_count", assembly.kernel_modules.len())
         .with(
             "work_dir.placement",
             if view.ram.is_some() { "ram" } else { "disk" },
@@ -282,6 +285,7 @@ fn stage_steps(
         mut messages,
         disk_outputs,
         disk_published,
+        filesystem_published,
         ..
     } = run;
 
@@ -320,7 +324,10 @@ fn stage_steps(
         messages,
         cleanup_paths,
         archive_path,
-        disk_images: disk_published,
+        disk_images: disk_published
+            .into_iter()
+            .chain(filesystem_published)
+            .collect(),
     })
 }
 

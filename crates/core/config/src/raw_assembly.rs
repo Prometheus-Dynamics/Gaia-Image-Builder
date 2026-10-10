@@ -14,6 +14,7 @@ pub struct RawImageAssemblyConfig {
     pub disks: Vec<RawAssemblyDiskConfig>,
     pub archives: Vec<RawAssemblyArchiveConfig>,
     pub busybox_initramfs: Vec<RawAssemblyBusyboxInitramfsConfig>,
+    pub kernel_modules: Vec<RawAssemblyKernelModulesConfig>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -91,6 +92,10 @@ pub struct RawAssemblyFilesystemConfig {
     pub output: String,
     pub size: Option<String>,
     pub deterministic: Option<bool>,
+    /// zstd level for `cpio-zstd`; defaults to 19.
+    pub compression_level: Option<u32>,
+    /// Copy the image to the image output dir under its file name.
+    pub publish: bool,
 }
 
 impl Default for RawAssemblyFilesystemConfig {
@@ -102,6 +107,8 @@ impl Default for RawAssemblyFilesystemConfig {
             output: String::new(),
             size: None,
             deterministic: None,
+            compression_level: None,
+            publish: false,
         }
     }
 }
@@ -112,6 +119,7 @@ pub enum RawAssemblyFilesystemKind {
     Vfat,
     Cpio,
     CpioGzip,
+    CpioZstd,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -205,6 +213,16 @@ pub struct RawAssemblyArchiveMemberConfig {
 pub struct RawAssemblyArchiveGeneratedConfig {
     pub name: String,
     pub entries: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawAssemblyKernelModulesConfig {
+    pub tree: String,
+    pub from: String,
+    pub kernel_version: Option<String>,
+    pub modules: Vec<String>,
+    pub depmod: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

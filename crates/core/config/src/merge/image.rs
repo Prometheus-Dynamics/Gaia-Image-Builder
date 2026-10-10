@@ -55,6 +55,7 @@ fn merge_image_assembly(
                 archive.id.clone()
             }),
             busybox_initramfs: [base.busybox_initramfs, overlay.busybox_initramfs].concat(),
+            kernel_modules: [base.kernel_modules, overlay.kernel_modules].concat(),
         }),
         (None, Some(assembly)) | (Some(assembly), None) => Some(assembly),
         (None, None) => None,

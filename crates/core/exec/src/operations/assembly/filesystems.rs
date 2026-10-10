@@ -1,5 +1,8 @@
 use super::*;
 
+/// The zstd level of a `cpio-zstd` image when the spec sets none.
+const CPIO_ZSTD_DEFAULT_LEVEL: u32 = 19;
+
 pub(super) struct AssemblyFilesystemSummary {
     pub(super) output: PathBuf,
     pub(super) bytes: u64,
@@ -68,6 +71,52 @@ pub(super) fn execute_assembly_filesystem(
                     source_tree.display(),
                     tool.display,
                     gzip_output.failure_context(&command)
+                )
+                .into());
+            }
+            publish_assembly_output(&temp, &output)?;
+            Ok(AssemblyFilesystemSummary {
+                bytes: file_len(&output)?,
+                sha256: file_sha256(&output)?,
+                output,
+                tool_path: Some(tool.display.clone()),
+                tool_version: tool_version(&tool, ["--version"]),
+            })
+        }
+        gaia_spec::AssemblyFilesystemKindSpec::CpioZstd => {
+            let tool = resolve_assembly_tool(roots, "zstd")?;
+            tracing::Span::current().record("tool_path", tool.display.as_str());
+            let temp = temporary_assembly_output_path(&output);
+            let temp_cpio = temp.with_extension("cpio.tmp");
+            write_newc_archive(source_tree, &temp_cpio)?;
+            // Same flags as the zstd transform; the level is fixed by the
+            // spec, so the output is the same for any thread count.
+            let level = filesystem
+                .compression_level
+                .unwrap_or(CPIO_ZSTD_DEFAULT_LEVEL);
+            let mut command = Command::new(&tool.program);
+            command
+                .args(["-q", "-c", "--no-progress", "-T0"])
+                .arg(format!("-{level}"))
+                .arg(&temp_cpio);
+            let zstd_output = run_command_stdout_to_file(
+                spec,
+                &mut command,
+                &temp,
+                process_output_retention(spec),
+                cancel_check,
+            )
+            .inspect_err(|_| {
+                let _ = std_fs::remove_file(&temp);
+            })?;
+            let _ = std_fs::remove_file(&temp_cpio);
+            if !zstd_output.status.success() {
+                let _ = std_fs::remove_file(&temp);
+                return Err(format!(
+                    "cpio-zstd compressor failed for '{}' using '{}': {}",
+                    source_tree.display(),
+                    tool.display,
+                    zstd_output.failure_context(&command)
                 )
                 .into());
             }

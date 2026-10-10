@@ -657,6 +657,8 @@ fn image_assembly_fingerprint_does_not_hash_generated_filesystem_partition_outpu
             output: "$assembly.out/rootfs.cpio".into(),
             size: None,
             deterministic: true,
+            compression_level: None,
+            publish: false,
         }],
         disks: vec![AssemblyDiskSpec {
             id: "sdcard".into(),

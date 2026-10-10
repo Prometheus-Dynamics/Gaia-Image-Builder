@@ -57,10 +57,21 @@ fn image_assembly_output_cleanup_paths(
     for filesystem in &assembly.filesystems {
         if let Ok(path) = roots.resolve_path(spec, &filesystem.output) {
             let temp = temporary_assembly_output_path(&path);
-            if filesystem.kind == gaia_spec::AssemblyFilesystemKindSpec::CpioGzip {
+            if matches!(
+                filesystem.kind,
+                gaia_spec::AssemblyFilesystemKindSpec::CpioGzip
+                    | gaia_spec::AssemblyFilesystemKindSpec::CpioZstd
+            ) {
                 paths.push(temp.with_extension("cpio.tmp"));
             }
             paths.push(temp);
+            paths.push(temporary_assembly_backup_path(&path));
+            paths.push(path);
+        }
+        if let Some(template) = filesystem.publish_template()
+            && let Ok(path) = roots.resolve_path(spec, template.as_str())
+        {
+            paths.push(temporary_assembly_output_path(&path));
             paths.push(temporary_assembly_backup_path(&path));
             paths.push(path);
         }

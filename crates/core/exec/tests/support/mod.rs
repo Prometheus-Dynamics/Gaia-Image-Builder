@@ -347,6 +347,8 @@ pub fn assembly_filesystem(
         output: output.to_string().into(),
         size: None,
         deterministic: kind != gaia_spec::AssemblyFilesystemKindSpec::Vfat,
+        compression_level: None,
+        publish: false,
     }
 }
 

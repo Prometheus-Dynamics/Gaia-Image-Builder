@@ -8,8 +8,9 @@
 //! Buildroot tree (`[providers.buildroot] work_dir = "ram"`). A path, or
 //! `"disk"`, keeps the intermediates on disk as before.
 //!
-//! The published outputs stay on disk: the archive, and every raw disk image
-//! at its spec path. A raw disk is built in RAM and copied to its place on
+//! The published outputs stay on disk: the archive, every raw disk image at
+//! its spec path, and every published filesystem image in the image output
+//! dir. A raw disk is built in RAM and copied to its place on
 //! disk when built (sparse, so unwritten space costs nothing). The RAM copies
 //! are re-creatable and are removed when the assembly ends.
 //!
@@ -357,6 +358,10 @@ fn rewrite_assembly(
     for file in &mut rewritten.files {
         file.src = absolute_opt(&file.src)?;
         file.src_glob = absolute_opt(&file.src_glob)?;
+    }
+    for modules in &mut rewritten.kernel_modules {
+        modules.from = absolute(&modules.from)?;
+        modules.depmod = absolute_opt(&modules.depmod)?;
     }
     for transform in &mut rewritten.transforms {
         transform.src = absolute_opt(&transform.src)?;
