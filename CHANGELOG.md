@@ -16,6 +16,30 @@ This cycle also moves the toolchain pin and `rust-version` to Rust 1.99.0
 (installing Gaia needs Rust 1.99 or newer), upgrades every dependency to its
 newest release, and updates the Rust docker images to 1.99.0.
 
+### Run explains its rebuilds by input
+
+- `gaia run` now names the changed inputs of a rebuild, as `gaia preview` does: the run log and `<build>.rebuild-reasons.json` say, for example, "config_overrides changed (BR2_A)" instead of "fingerprint changed (no detail recorded)". Both commands share one explanation, read from the recorded inputs before the run overwrites them.
+- A Buildroot run whose clean plan cleans anything adds one run summary note (in the run output and `image_notes`): "buildroot clean: rebuild linux, linux-headers (...)", "buildroot clean: full (...)", or "buildroot clean: finalize only (...)", with the reasons.
+
+### Host tools probe reused when its inputs are unchanged
+
+- The "host tools probe" step asked the build environment for each system
+  host tool (`command -v`, then `--version`). With a docker execution backend
+  that is one `docker run` per tool, ~2.5 s each (5.0 s in `image:prepare`, 3.0 s
+  in `image:build` on a PhotonVision build). The answers are now recorded in
+  `.gaia-host-tools-probe` in the output tree with a key: Gaia's version and
+  binary, the backend (for docker, the image id), `PATH` and locale, each tool's
+  config symbol and policy, and for host probes each `PATH` entry up to the
+  tool's binary with its inode, size, mode, mtime and ctime (ns). A matching key
+  reuses the answers and reports "host tools probe: reused (inputs unchanged)".
+  A changed input, a missing or corrupt file, or an unreadable input probes as
+  before.
+
+### Buildroot config overrides and cache settings in one olddefconfig run
+
+- The config steps ran `olddefconfig` three times on a PhotonVision tree (after defconfig, after the config overrides, and after the download, compiler cache and parallel build settings). Each `make` is a container start with the docker backend (about 5 s each). The overrides and cache settings are now merged into `.config` together and applied by one `olddefconfig`, so the steps run defconfig and then one `olddefconfig` (two when there are fragments, as before). The final `.config` is byte-identical to the three-run sequence on a PhotonVision tree, with and without fragments; the cache settings still win a key the overrides also set.
+- Cache-space warnings from the config steps now reach the step messages on a fresh configuration (they were dropped when the cache settings were applied in their own run).
+
 ### Buildroot host-finalize skipped when nothing changed
 
 - Every Buildroot `make` ran `host-finalize`, which copies each package's

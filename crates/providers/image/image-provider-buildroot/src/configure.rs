@@ -153,26 +153,15 @@ pub(crate) fn configure_tree(
                 command_context.clone(),
             )?);
         }
-        if !config_overrides.is_empty() {
-            messages.extend(apply_buildroot_config_overrides(
-                BuildrootConfigOverrideRequest {
-                    spec,
-                    output_dir,
-                    overrides: config_overrides,
-                    external_tree: br2,
-                    buildroot_dir,
-                    command: command_context.clone(),
-                },
-            )?);
-        }
-        messages.extend(apply_buildroot_cache_config(
+        messages.extend(apply_buildroot_config_settings(BuildrootSettingsRequest {
             spec,
-            buildroot_dir,
             output_dir,
-            br2,
-            command_context.clone(),
+            overrides: config_overrides,
+            external_tree: br2,
+            buildroot_dir,
+            command: command_context.clone(),
             dry_run,
-        )?);
+        })?);
     } else if !has_defconfig && (!config_fragments.is_empty() || !config_overrides.is_empty()) {
         return Err(ImageProviderError::new(
             ImageProviderErrorKind::PolicyBlocked,

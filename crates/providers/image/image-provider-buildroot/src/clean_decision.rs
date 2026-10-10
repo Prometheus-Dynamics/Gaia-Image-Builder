@@ -165,6 +165,56 @@ pub(crate) fn decide_clean(input: CleanDecisionInput<'_>) -> CleanPlan {
     CleanPlan::Full(reasons)
 }
 
+/// Reasons a summary note names before it counts the rest.
+const NOTE_REASONS_SHOWN: usize = 8;
+
+/// The run summary note of a clean plan that cleans anything: what is rebuilt
+/// or uninstalled, or that only the target is reassembled, and why. `None`
+/// when the tree is left as it is.
+pub(crate) fn clean_summary_note(plan: &CleanPlan) -> Option<String> {
+    let names = |set: &BTreeSet<String>| set.iter().cloned().collect::<Vec<_>>().join(", ");
+    let note = |head: String, reasons: &[String]| {
+        if reasons.is_empty() {
+            format!("buildroot clean: {head}")
+        } else {
+            format!("buildroot clean: {head} ({})", summarize_reasons(reasons))
+        }
+    };
+    match plan {
+        CleanPlan::Nothing => None,
+        CleanPlan::Full(reasons) => Some(note("full".to_string(), reasons)),
+        CleanPlan::Finalize { reasons, .. } => Some(note("finalize only".to_string(), reasons)),
+        CleanPlan::Packages(rebuild)
+            if rebuild.rebuild.is_empty() && rebuild.removed.is_empty() =>
+        {
+            Some(note("finalize only".to_string(), &rebuild.reasons))
+        }
+        CleanPlan::Packages(rebuild) => {
+            let mut head = Vec::new();
+            if !rebuild.rebuild.is_empty() {
+                head.push(format!("rebuild {}", names(&rebuild.rebuild)));
+            }
+            if !rebuild.removed.is_empty() {
+                head.push(format!("uninstall {}", names(&rebuild.removed)));
+            }
+            Some(note(head.join(", "), &rebuild.reasons))
+        }
+    }
+}
+
+/// The reasons joined by `; `, the first few named and the rest counted.
+fn summarize_reasons(reasons: &[String]) -> String {
+    if reasons.len() > NOTE_REASONS_SHOWN {
+        format!(
+            "{}; and {} more",
+            reasons[..NOTE_REASONS_SHOWN].join("; "),
+            reasons.len() - NOTE_REASONS_SHOWN
+        )
+    } else {
+        reasons.join("; ")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -349,5 +399,51 @@ mod tests {
             BTreeSet::from(["bar".to_string(), "foo".to_string()])
         );
         assert!(rebuild.removed.is_empty());
+    }
+
+    #[test]
+    fn the_clean_summary_note_names_what_is_cleaned_and_why() {
+        assert_eq!(clean_summary_note(&CleanPlan::Nothing), None);
+        assert_eq!(
+            clean_summary_note(&CleanPlan::Full(vec!["toolchain changed".to_string()])),
+            Some("buildroot clean: full (toolchain changed)".to_string())
+        );
+        let finalize = CleanPlan::Finalize {
+            reasons: vec!["overlay file changed".to_string()],
+            refresh_target: true,
+        };
+        assert_eq!(
+            clean_summary_note(&finalize),
+            Some("buildroot clean: finalize only (overlay file changed)".to_string())
+        );
+        let rebuild = PackageRebuild {
+            rebuild: BTreeSet::from(["linux".to_string(), "linux-headers".to_string()]),
+            removed: BTreeSet::from(["old".to_string()]),
+            reasons: vec![
+                "BR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE a -> b".to_string(),
+                "external file RAZE:board/linux.fragment changed".to_string(),
+            ],
+            refresh_target: false,
+        };
+        assert_eq!(
+            clean_summary_note(&CleanPlan::Packages(rebuild.clone())),
+            Some(
+                "buildroot clean: rebuild linux, linux-headers, uninstall old \
+                 (BR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE a -> b; external file RAZE:board/linux.fragment changed)"
+                    .to_string()
+            )
+        );
+        let no_reasons = PackageRebuild {
+            rebuild: BTreeSet::from(["zlib".to_string()]),
+            ..PackageRebuild::default()
+        };
+        assert_eq!(
+            clean_summary_note(&CleanPlan::Packages(no_reasons)),
+            Some("buildroot clean: rebuild zlib".to_string())
+        );
+        let many = CleanPlan::Full((1..=10).map(|n| format!("reason {n}")).collect());
+        let note = clean_summary_note(&many).expect("a note");
+        assert!(note.ends_with("; and 2 more)"), "{note}");
+        assert_eq!(note.matches("; ").count(), 8, "{note}");
     }
 }

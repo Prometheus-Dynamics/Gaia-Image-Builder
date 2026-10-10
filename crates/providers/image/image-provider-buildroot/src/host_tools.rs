@@ -14,6 +14,7 @@
 //! Which tools come from the system, and their versions, are part of every
 //! package cache key, so a tree built with a system tool never shares cache
 //! entries with one built with Buildroot's.
+use super::host_tools_probe::{ProbeBackend, ProbeTool, decide_with_probe_cache, probe_key_now};
 use super::*;
 use gaia_spec::HostToolStepSpec;
 
@@ -29,6 +30,8 @@ pub(crate) struct HostTools {
     /// Packages whose source (system or built) changed since the last build.
     pub(crate) changed_packages: BTreeSet<String>,
     pub(crate) messages: Vec<String>,
+    /// Whether the probe answers came from the cache (no probe ran).
+    pub(crate) reused: bool,
 }
 
 /// A host tool Gaia can take from the system.
@@ -224,19 +227,58 @@ pub(crate) fn write_host_tools(
 }
 
 /// Decides the host tools of the output tree and writes them. Runs after the
-/// config is final and before the package graph is read.
+/// config is final and before the package graph is read. The probes are
+/// reused when their inputs are unchanged (see `host_tools_probe`).
 pub(crate) fn apply_host_tools(
     output_dir: &Path,
     command_context: &ImageCommandContext<'_>,
 ) -> Result<HostTools, ImageProviderError> {
     let config = fs::read_to_string(output_dir.join(".config")).unwrap_or_default();
     let previous = fs::read_to_string(output_dir.join(DECISIONS_FILE)).unwrap_or_default();
-    let decision = decide_host_tools_probed(&config, &previous, command_context)?;
-    write_host_tools(output_dir, &decision)?;
+    let policy = &command_context.policy.host_tools;
+    let tools = probe_tools(&config, policy);
+    let backend = match command_context.execution.docker_image.as_deref() {
+        Some(image) => ProbeBackend::Docker(image),
+        None => ProbeBackend::Host,
+    };
+    let key = probe_key_now(&tools, &backend);
+    let cached = decide_with_probe_cache(
+        output_dir,
+        &config,
+        policy,
+        &previous,
+        key.as_deref(),
+        &mut |name, min_version| {
+            let tool = TOOLS
+                .iter()
+                .find(|tool| tool.name == name)
+                .expect("probed tools are known");
+            probe(tool, min_version, command_context)
+        },
+    )?;
+    write_host_tools(output_dir, &cached.decision)?;
     Ok(HostTools {
-        changed_packages: decision.changed_packages,
-        messages: decision.messages,
+        changed_packages: cached.decision.changed_packages,
+        messages: cached.decision.messages,
+        reused: cached.reused,
     })
+}
+
+/// Each tool, with what its probe depends on from the config and policy.
+fn probe_tools(config: &str, policy: &gaia_spec::BuildrootHostToolsPolicySpec) -> Vec<ProbeTool> {
+    TOOLS
+        .iter()
+        .map(|tool| {
+            let steps = policy.steps_for(tool.name);
+            ProbeTool {
+                name: tool.name,
+                min_version: tool.min_version,
+                enabled: (tool.enabled)(config),
+                system: steps.contains(&HostToolStepSpec::System),
+                steps: format!("{steps:?}"),
+            }
+        })
+        .collect()
 }
 
 /// The system tools recorded for the last build, for the package keys

@@ -69,6 +69,7 @@ mod buildroot_command;
 mod buildroot_preview;
 mod config_digest;
 mod config_inputs_skip;
+mod config_settings;
 mod feed_archive;
 mod feed_archive_expected_images;
 mod feed_archive_overlay;

@@ -2,28 +2,48 @@
 //! and compiler cache settings, and the environment every `make` gets.
 use super::*;
 
-pub(crate) struct BuildrootConfigOverrideRequest<'a> {
+/// What the config steps write after defconfig and the fragments: the config
+/// overrides, then the download, compiler cache and parallel build settings.
+pub(crate) struct BuildrootSettingsRequest<'a> {
     pub(crate) spec: &'a ResolvedBuildSpec,
     pub(crate) output_dir: &'a Path,
     pub(crate) overrides: &'a [(String, String)],
     pub(crate) external_tree: Option<&'a str>,
     pub(crate) buildroot_dir: &'a Path,
     pub(crate) command: ImageCommandContext<'a>,
+    /// A preview writes no compiler cache config.
+    pub(crate) dry_run: bool,
 }
 
-pub(crate) fn apply_buildroot_config_overrides(
-    request: BuildrootConfigOverrideRequest<'_>,
+/// Merges the config overrides and the cache settings into `.config` and runs
+/// one olddefconfig over the result. The overrides are merged first, so the
+/// cache settings win a shared key, as when they were applied in a pass of
+/// their own.
+///
+/// This used to be two olddefconfig runs. A run's values stay put in later
+/// runs, so a default that depended on a cache setting would be frozen at its
+/// value without the setting. The Buildroot Kconfig tree has none (the cache
+/// symbols appear only in their own definitions and in the `if BR2_CCACHE`
+/// block that holds the settings Gaia writes itself), and the PhotonVision
+/// tree's `.config` came out byte-identical. An external tree whose Kconfig
+/// reads these symbols in a default would need the two runs back.
+pub(crate) fn apply_buildroot_config_settings(
+    request: BuildrootSettingsRequest<'_>,
 ) -> Result<Vec<String>, ImageProviderError> {
-    let BuildrootConfigOverrideRequest {
+    let BuildrootSettingsRequest {
         spec,
         output_dir,
         overrides,
         external_tree,
         buildroot_dir,
         command: command_context,
+        dry_run,
     } = request;
     let config_path = output_dir.join(".config");
     if !config_path.is_file() {
+        if overrides.is_empty() {
+            return Ok(Vec::new());
+        }
         return Err(ImageProviderError::new(
             ImageProviderErrorKind::RuntimeState,
             format!(
@@ -32,8 +52,10 @@ pub(crate) fn apply_buildroot_config_overrides(
             ),
         ));
     }
+    let (cache_overrides, warnings) =
+        buildroot_cache_overrides(spec, command_context.policy, dry_run)?;
 
-    let mut merged = fs::read_to_string(&config_path).map_err(|error| {
+    let original = fs::read_to_string(&config_path).map_err(|error| {
         ImageProviderError::new(
             ImageProviderErrorKind::RuntimeState,
             format!(
@@ -43,12 +65,18 @@ pub(crate) fn apply_buildroot_config_overrides(
         )
     })?;
     let normalized_overrides = normalize_buildroot_config_overrides(spec, overrides);
-    merged = merge_buildroot_config_assignments(&merged, &normalized_overrides);
+    let merged = merge_buildroot_config_assignments(
+        &merge_buildroot_config_assignments(&original, &normalized_overrides),
+        &cache_overrides,
+    );
+    if overrides.is_empty() && merged == original {
+        return Ok(warnings);
+    }
     fs::write(&config_path, merged).map_err(|error| {
         ImageProviderError::new(
             ImageProviderErrorKind::RuntimeState,
             format!(
-                "failed to write overridden buildroot config '{}': {error}",
+                "failed to write buildroot config '{}': {error}",
                 config_path.display()
             ),
         )
@@ -63,14 +91,22 @@ pub(crate) fn apply_buildroot_config_overrides(
     if let Some(external_tree) = external_tree {
         command.env("BR2_EXTERNAL", external_tree);
     }
-    run_command(
+    let mut messages = run_command(
         command,
         "buildroot olddefconfig",
         command_context.execution,
         command_context.policy,
         command_context.log_sink,
         command_context.cancel_check,
-    )
+    )?;
+    if !cache_overrides.is_empty() {
+        messages.push(
+            "applied buildroot download/compiler cache and parallel build configuration"
+                .to_string(),
+        );
+    }
+    messages.extend(warnings);
+    Ok(messages)
 }
 
 pub(crate) fn merge_buildroot_config_assignments(
@@ -310,7 +346,7 @@ pub(crate) fn append_make_jobs(command: &mut Command, jobs: u32) {
 /// `.config` assignments, as key and value.
 pub(crate) type CacheOverrides = Vec<(String, String)>;
 
-/// The settings [`apply_buildroot_cache_config`] writes, and the cache space
+/// The settings [`apply_buildroot_config_settings`] writes, and the cache space
 /// warnings for them. `dry_run` writes no compiler cache config.
 pub(crate) fn buildroot_cache_overrides(
     spec: &ResolvedBuildSpec,
@@ -350,71 +386,6 @@ pub(crate) fn buildroot_cache_overrides(
         overrides.push(("BR2_PER_PACKAGE_DIRECTORIES".to_string(), "y".to_string()));
     }
     Ok((overrides, warnings))
-}
-
-/// The download, compiler cache and parallel-build settings, applied to the
-/// tree's `.config`. `dry_run` (a preview) writes no compiler cache config.
-pub(crate) fn apply_buildroot_cache_config(
-    spec: &ResolvedBuildSpec,
-    buildroot_dir: &Path,
-    output_dir: &Path,
-    external_tree: Option<&str>,
-    command_context: ImageCommandContext<'_>,
-    dry_run: bool,
-) -> Result<Vec<String>, ImageProviderError> {
-    let config_path = output_dir.join(".config");
-    if !config_path.is_file() {
-        return Ok(Vec::new());
-    }
-    let (overrides, warnings) = buildroot_cache_overrides(spec, command_context.policy, dry_run)?;
-    if overrides.is_empty() {
-        return Ok(warnings);
-    }
-
-    let original = fs::read_to_string(&config_path).map_err(|error| {
-        ImageProviderError::new(
-            ImageProviderErrorKind::RuntimeState,
-            format!(
-                "failed to read buildroot config '{}': {error}",
-                config_path.display()
-            ),
-        )
-    })?;
-    let merged = merge_buildroot_config_assignments(&original, &overrides);
-    if merged == original {
-        return Ok(warnings);
-    }
-    fs::write(&config_path, merged).map_err(|error| {
-        ImageProviderError::new(
-            ImageProviderErrorKind::RuntimeState,
-            format!(
-                "failed to write buildroot cache config '{}': {error}",
-                config_path.display()
-            ),
-        )
-    })?;
-
-    let mut command = Command::new("make");
-    command
-        .arg(format!("O={}", output_dir.display()))
-        .arg("olddefconfig")
-        .current_dir(buildroot_dir);
-    apply_buildroot_policy_env(&mut command, spec, command_context.policy)?;
-    if let Some(external_tree) = external_tree {
-        command.env("BR2_EXTERNAL", external_tree);
-    }
-    let mut messages = run_command(
-        command,
-        "buildroot cache config olddefconfig",
-        command_context.execution,
-        command_context.policy,
-        command_context.log_sink,
-        command_context.cancel_check,
-    )?;
-    messages.push(
-        "applied buildroot download/compiler cache and parallel build configuration".to_string(),
-    );
-    Ok(messages)
 }
 
 /// Under the user cache root, or the workspace when that is unavailable.

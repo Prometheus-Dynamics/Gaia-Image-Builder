@@ -143,7 +143,12 @@ pub(crate) fn run_buildroot_with(
     let override_digests = changes.override_digests.clone();
     let clock = gaia_process::ActiveClock::start();
     let host_tools = apply_host_tools(output_dir, &command_context)?;
-    messages.push(phase_step_message("host tools probe", &clock, &[]));
+    let probe_step = if host_tools.reused {
+        "host tools probe: reused (inputs unchanged)"
+    } else {
+        "host tools probe"
+    };
+    messages.push(phase_step_message(probe_step, &clock, &[]));
     messages.extend(host_tools.messages);
     changes.override_changes.extend(host_tools.changed_packages);
     // Every config step is done: fail (or warn) about requested overrides
@@ -223,6 +228,9 @@ pub(crate) fn run_buildroot_with(
         current_graph.as_ref().map(|current| &current.graph),
     )?;
     let plan = with_requested_rebuilds(plan, &requested);
+    if let Some(note) = clean_summary_note(&plan) {
+        messages.push(format!("{SUMMARY_NOTE_PREFIX}{note}"));
+    }
     host_tree_changed |= matches!(plan, CleanPlan::Full(_) | CleanPlan::Packages(_));
     let clean_clock = gaia_process::ActiveClock::start();
     let clean_messages_from = messages.len();

@@ -643,6 +643,7 @@ mod feed_make;
 mod finalize_state;
 mod fs_util;
 mod host_tools;
+mod host_tools_probe;
 mod interrupted_make;
 mod kernel_modules;
 mod make_progress;

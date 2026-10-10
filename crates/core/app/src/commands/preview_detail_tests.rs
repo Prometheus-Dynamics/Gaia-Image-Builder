@@ -212,3 +212,53 @@ fn a_changed_build_env_key_is_previewed_by_name() {
     );
     let _ = fs::remove_dir_all(&root);
 }
+
+/// What `gaia run` does: the reasons come from the plan explained before the
+/// run saves its state, and the rebuild-reasons report carries them.
+#[test]
+fn a_run_names_the_changed_input_in_its_rebuild_reasons() {
+    let root = scratch_root("run-reasons");
+    let context = AppContext::with_defaults();
+    let spec = buildroot_spec(&root, &[("BR2_TARGET_GENERIC_ISSUE", "one")]);
+    let baseline = gaia_plan::plan_build(
+        &spec,
+        &context.source_catalog,
+        &context.artifact_catalog,
+        &context.image_catalog,
+    );
+    record_finished_run(&spec, &baseline);
+
+    let changed = buildroot_spec(&root, &[("BR2_TARGET_GENERIC_ISSUE", "two")]);
+    let reuse_state = load_reuse_state(&changed);
+    let recorded = recorded_for_explanation(&changed, reuse_state.as_ref());
+    let mut plan = gaia_plan::plan_build_with_rebuilds(
+        &changed,
+        &context.source_catalog,
+        &context.artifact_catalog,
+        &context.image_catalog,
+        reuse_state.as_ref(),
+        &RebuildRequest::default(),
+    );
+    explain_rebuild_reasons(&changed, &mut plan, reuse_state.as_ref(), &recorded);
+
+    let outcome = gaia_exec::ExecutionOutcome::default();
+    let reasons = gaia_report::render_rebuild_reasons(&changed, &plan, &outcome);
+    let image = reasons
+        .iter()
+        .find(|reason| reason.operation_id == "image:build")
+        .expect("image rebuild reason");
+    assert_eq!(image.code, "operation_fingerprint_mismatch");
+    assert!(
+        image
+            .message
+            .contains("config_overrides changed (BR2_TARGET_GENERIC_ISSUE)"),
+        "{}",
+        image.message
+    );
+    assert!(
+        !image.message.contains("no detail recorded"),
+        "{}",
+        image.message
+    );
+    let _ = fs::remove_dir_all(&root);
+}

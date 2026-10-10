@@ -10,6 +10,7 @@ mod preview;
 mod progress;
 mod rebuild;
 mod resolve;
+mod reuse_reasons;
 mod run;
 pub(crate) mod run_registry;
 mod state;

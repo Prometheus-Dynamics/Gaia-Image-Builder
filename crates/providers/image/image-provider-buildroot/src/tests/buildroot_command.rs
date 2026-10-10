@@ -343,14 +343,15 @@ fn buildroot_cache_config_escapes_kconfig_paths() {
     };
     let execution = test_execution();
 
-    apply_buildroot_cache_config(
-        &spec,
-        &buildroot_dir,
-        &output_dir,
-        None,
-        test_command_context(&execution, &policy),
-        false,
-    )
+    apply_buildroot_config_settings(BuildrootSettingsRequest {
+        spec: &spec,
+        output_dir: &output_dir,
+        overrides: &[],
+        external_tree: None,
+        buildroot_dir: &buildroot_dir,
+        command: test_command_context(&execution, &policy),
+        dry_run: false,
+    })
     .expect("cache config");
 
     let config = fs::read_to_string(output_dir.join(".config")).expect("config");
@@ -1223,7 +1224,7 @@ fn apply_buildroot_config_fragments_merges_fragments_and_runs_olddefconfig() {
 }
 
 #[test]
-fn apply_buildroot_config_overrides_merges_overrides_and_runs_olddefconfig() {
+fn apply_buildroot_config_settings_merges_overrides_and_runs_olddefconfig() {
     let buildroot_dir = temp_path("gaia-buildroot-override-buildroot");
     let output_dir = temp_path("gaia-buildroot-override-output");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
@@ -1249,13 +1250,14 @@ fn apply_buildroot_config_overrides_merges_overrides_and_runs_olddefconfig() {
     ];
     let execution = test_execution();
     let policy = ImageExecutionPolicy::default();
-    let messages = apply_buildroot_config_overrides(BuildrootConfigOverrideRequest {
+    let messages = apply_buildroot_config_settings(BuildrootSettingsRequest {
         spec: &spec,
         output_dir: &output_dir,
         overrides: &overrides,
         external_tree: None,
         buildroot_dir: &buildroot_dir,
         command: test_command_context(&execution, &policy),
+        dry_run: false,
     })
     .expect("override merge should succeed");
 

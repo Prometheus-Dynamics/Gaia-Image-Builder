@@ -22,6 +22,7 @@ use crate::AppContext;
 use super::live_status::{LiveRecorder, LiveRunInfo, run_errors, run_outcome_label, unix_now};
 use super::progress::{ConsoleProgress, console_progress_disabled};
 use super::rebuild::check_rebuild_request;
+use super::reuse_reasons::{explain_rebuild_reasons, recorded_for_explanation};
 use super::run_registry::{RegisteredRun, RunRegistration, recording_enabled};
 use super::{CommandOutcome, RunArtifacts, load_reuse_state, save_reuse_state};
 
@@ -105,7 +106,10 @@ fn collect_run_artifacts(
         "validated run build spec"
     );
     let reuse_state = load_reuse_state(&spec);
-    let plan = plan_build_with_rebuilds(
+    // Read before this run saves its state, which overwrites the details the
+    // rebuild reasons are explained from.
+    let recorded = recorded_for_explanation(&spec, reuse_state.as_ref());
+    let mut plan = plan_build_with_rebuilds(
         &spec,
         &context.source_catalog,
         &context.artifact_catalog,
@@ -114,6 +118,7 @@ fn collect_run_artifacts(
         rebuild,
     );
     check_rebuild_request(&spec, &plan, rebuild)?;
+    explain_rebuild_reasons(&spec, &mut plan, reuse_state.as_ref(), &recorded);
     let plan = if targets.is_empty() {
         plan
     } else {
