@@ -112,10 +112,10 @@ pub(crate) fn run_buildroot_with(
         _ => &[][..],
     };
 
-    if command_context.policy.parallel_packages
-        && let Some(message) = apply_reflink_finalize(buildroot_dir, output_dir)?
-    {
-        messages.push(message);
+    if command_context.policy.parallel_packages {
+        let clock = gaia_process::ActiveClock::start();
+        messages.extend(apply_reflink_finalize(buildroot_dir, output_dir)?);
+        messages.push(phase_step_message("reflink finalize", &clock, &[]));
     }
     let configured = configure_tree(
         spec,
@@ -128,43 +128,56 @@ pub(crate) fn run_buildroot_with(
     messages.extend(configured.messages.iter().cloned());
     let br2_external = configured.br2_external.as_deref();
     let package_overrides = &configured.package_overrides;
+    let clock = gaia_process::ActiveClock::start();
     let mut changes = tree_changes(output_dir, spec, &configured);
+    messages.push(phase_step_message("tree changes", &clock, &[]));
     let config_digest = changes.config_digest.clone();
     let override_digests = changes.override_digests.clone();
+    let clock = gaia_process::ActiveClock::start();
     let host_tools = apply_host_tools(output_dir, &command_context)?;
+    messages.push(phase_step_message("host tools probe", &clock, &[]));
     messages.extend(host_tools.messages);
     changes.override_changes.extend(host_tools.changed_packages);
     // Every config step is done: fail (or warn) about requested overrides
     // that olddefconfig dropped, before the clean and the long make.
-    messages.extend(check_buildroot_config_overrides(
-        spec,
-        output_dir,
-        config_overrides,
-        command_context.policy.override_check,
-    )?);
+    messages.extend(timed_phase("config override check", || {
+        check_buildroot_config_overrides(
+            spec,
+            output_dir,
+            config_overrides,
+            command_context.policy.override_check,
+        )
+    })?);
 
     // Finish deleting what an earlier clean moved aside.
+    let clock = gaia_process::ActiveClock::start();
     gaia_process::purge_trash(&output_dir.join(gaia_process::TRASH_DIR));
+    messages.push(phase_step_message("trash purge", &clock, &[]));
     // `make defconfig` already creates `build/`; only a build creates these.
     let built_before = ["target", "host", "per-package"]
         .iter()
         .any(|dir| output_dir.join(dir).is_dir());
+    let clock = gaia_process::ActiveClock::start();
     let previous_graph = PackageGraph::load(output_dir);
-    messages.extend(redo_interrupted_packages(
-        output_dir,
-        &[previous_graph.as_ref()],
-    )?);
+    messages.push(phase_step_message("package graph load", &clock, &[]));
+    messages.extend(timed_phase("interrupted packages", || {
+        redo_interrupted_packages(output_dir, &[previous_graph.as_ref()])
+    })?);
     let current_graph = if needs_current_graph(built_before, &changes, previous_graph.is_none()) {
-        query_package_graph(
+        let clock = gaia_process::ActiveClock::start();
+        let queried = query_package_graph(
             spec,
             buildroot_dir,
             output_dir,
             br2_external,
             &command_context,
-        )?
+        )?;
+        messages.push(phase_step_message("package graph show-info", &clock, &[]));
+        queried
     } else {
         None
     };
+    let clock = gaia_process::ActiveClock::start();
     let symbols = current_graph.as_ref().map(|current| {
         SymbolIndex::load(
             buildroot_dir,
@@ -172,12 +185,14 @@ pub(crate) fn run_buildroot_with(
             &[Some(&current.graph), previous_graph.as_ref()],
         )
     });
+    messages.push(phase_step_message("symbol index", &clock, &[]));
     let symbol_use = |key: &str| {
         symbols
             .as_ref()
             .map(|symbols| symbols.symbol_use(key))
             .unwrap_or_default()
     };
+    let clock = gaia_process::ActiveClock::start();
     let plan = decide_clean(CleanDecisionInput {
         built_before,
         changes: &changes,
@@ -186,6 +201,9 @@ pub(crate) fn run_buildroot_with(
         symbol_use: &symbol_use,
         per_package: command_context.policy.parallel_packages,
     });
+    messages.push(phase_step_message("clean planning", &clock, &[]));
+    let clean_clock = gaia_process::ActiveClock::start();
+    let clean_messages_from = messages.len();
     match &plan {
         CleanPlan::Nothing => {}
         CleanPlan::Finalize {
@@ -245,6 +263,14 @@ pub(crate) fn run_buildroot_with(
             messages.extend(rebuild.reasons.iter().cloned());
         }
     }
+    if !matches!(plan, CleanPlan::Nothing) {
+        let nested = messages[clean_messages_from..].to_vec();
+        messages.push(phase_step_message(
+            "clean application",
+            &clean_clock,
+            &nested,
+        ));
+    }
 
     let mut command = Command::new("make");
     command
@@ -268,6 +294,7 @@ pub(crate) fn run_buildroot_with(
     // make: if the build (or a post-image script, or a later assembly step)
     // fails, retrying with the same inputs must resume it rather than clean
     // everything again.
+    let clock = gaia_process::ActiveClock::start();
     if let Some(replacement_digest) = package_overrides.replacement_digest.as_deref() {
         write_buildroot_state(
             output_dir,
@@ -283,6 +310,7 @@ pub(crate) fn run_buildroot_with(
     if let Some(current) = &current_graph {
         current.record(output_dir)?;
     }
+    messages.push(phase_step_message("build state records", &clock, &[]));
     // Before the restore: a tree whose every package is installed, with
     // nothing to clean, makes nothing but its finalize (see finalize_state).
     let make_was_running = output_dir.join(MAKE_RUNNING).is_file();
@@ -293,6 +321,8 @@ pub(crate) fn run_buildroot_with(
             .map(|current| &current.graph)
             .or(previous_graph.as_ref())
             .is_some_and(|graph| all_packages_installed(output_dir, graph));
+    let clock = gaia_process::ActiveClock::start();
+    let restore_messages_from = messages.len();
     let cached_packages = restore_cached_packages(RestoreCachedPackages {
         spec,
         buildroot_dir,
@@ -305,6 +335,8 @@ pub(crate) fn run_buildroot_with(
             .or(previous_graph),
         messages: &mut messages,
     })?;
+    let nested = messages[restore_messages_from..].to_vec();
+    messages.push(phase_step_message("package cache setup", &clock, &nested));
     if let Some(script) = options.post_build_script {
         command.arg(post_build_script_override(output_dir, script));
     }
@@ -380,17 +412,18 @@ pub(crate) fn run_buildroot_with(
         command_context.cancel_check.clone(),
     );
     drop(progress);
-    messages.extend(
-        finish_make(output_dir, make, cached_packages.as_ref())
-            // Which packages a failed or interrupted make spent its time on.
-            .map_err(|error| {
-                error.with_step_times(buildroot_build_time_steps(
-                    output_dir,
-                    make_started,
-                    std::time::SystemTime::now(),
-                ))
-            })?,
-    );
+    let clock = gaia_process::ActiveClock::start();
+    let finished = finish_make(output_dir, make, cached_packages.as_ref())
+        // Which packages a failed or interrupted make spent its time on.
+        .map_err(|error| {
+            error.with_step_times(buildroot_build_time_steps(
+                output_dir,
+                make_started,
+                std::time::SystemTime::now(),
+            ))
+        })?;
+    messages.push(phase_step_message("make finish", &clock, &finished));
+    messages.extend(finished);
     // A make that stopped after the finalize (or ran it first) left the tree
     // finalized for this config.
     if (options.finalize_only || split_images)
@@ -609,37 +642,64 @@ fn write_buildroot_state(
 }
 
 pub(crate) fn buildroot_state_digest(image: &ImageSpec, output_dir: &Path) -> String {
+    buildroot_state_digest_with(image, output_dir, &BTreeMap::new())
+}
+
+/// [`buildroot_state_digest`], given the digests `collected` already holds
+/// for expected images by name (see `collect_expected_images_hashed`): the
+/// image the collect copied is not read again.
+pub(crate) fn buildroot_state_digest_with(
+    image: &ImageSpec,
+    output_dir: &Path,
+    collected: &BTreeMap<String, String>,
+) -> String {
     let mut hasher = DefaultHasher::new();
     output_dir
         .join(".config")
         .display()
         .to_string()
         .hash(&mut hasher);
-    file_state_for_digest(&output_dir.join(".config")).hash(&mut hasher);
+    file_state_for_digest(&output_dir.join(".config"), None).hash(&mut hasher);
     image_feed_signature_path(output_dir)
         .display()
         .to_string()
         .hash(&mut hasher);
-    file_state_for_digest(&image_feed_signature_path(output_dir)).hash(&mut hasher);
+    file_state_for_digest(&image_feed_signature_path(output_dir), None).hash(&mut hasher);
     if let ImageDefinition::Buildroot(buildroot) = &image.definition {
         for expected in &buildroot.expected_images {
             expected.name.hash(&mut hasher);
             expected.format.as_str().hash(&mut hasher);
             expected.required.hash(&mut hasher);
-            file_state_for_digest(&output_dir.join("images").join(&expected.name))
-                .hash(&mut hasher);
-            file_state_for_digest(&output_dir.join(&expected.name)).hash(&mut hasher);
+            let images_path = output_dir.join("images").join(&expected.name);
+            let root_path = output_dir.join(&expected.name);
+            // Collection copies the first of these that exists.
+            let copied = if images_path.exists() {
+                Some(&images_path)
+            } else if root_path.exists() {
+                Some(&root_path)
+            } else {
+                None
+            };
+            for path in [&images_path, &root_path] {
+                let known = collected
+                    .get(&expected.name)
+                    .filter(|_| copied == Some(path))
+                    .map(String::as_str);
+                file_state_for_digest(path, known).hash(&mut hasher);
+            }
         }
     }
     format!("{:016x}", hasher.finish())
 }
 
-fn file_state_for_digest(path: &Path) -> String {
+fn file_state_for_digest(path: &Path, known_digest: Option<&str>) -> String {
     match fs::metadata(path) {
         Ok(metadata) if metadata.is_file() => format!(
             "file:{}:{}",
             metadata.len(),
-            file_sha256_or_placeholder(path)
+            known_digest
+                .map(str::to_string)
+                .unwrap_or_else(|| file_sha256_or_placeholder(path))
         ),
         Ok(metadata) if metadata.is_dir() => format!("dir:{}", metadata.len()),
         Ok(_) => "other".to_string(),

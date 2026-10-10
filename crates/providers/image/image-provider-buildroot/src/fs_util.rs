@@ -1,4 +1,36 @@
 use super::*;
+use sha2::{Digest, Sha256};
+use std::io::{Read, Write};
+
+/// Copies `from` to `to` (permissions kept) and returns the sha256 of the
+/// copied bytes: one read of the source serves the copy and the digest.
+pub(crate) fn copy_with_sha256(from: &Path, to: &Path) -> std::io::Result<String> {
+    let mut reader = fs::File::open(from)?;
+    let permissions = reader.metadata()?.permissions();
+    let mut writer = fs::File::create(to)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; 1024 * 1024];
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+        writer.write_all(&buffer[..read])?;
+    }
+    writer.set_permissions(permissions)?;
+    Ok(hex(&hasher.finalize()))
+}
+
+/// Records the digest of a file just copied into a collect dir, so the
+/// content manifest does not hash it again. Best effort: a missing entry
+/// only costs a later hash.
+pub(crate) fn record_copied_digest(collect_dir: &Path, copied: &Path, digest: &str) {
+    let _ = gaia_image_providers::record_content_digests_known(
+        collect_dir,
+        vec![(copied.to_path_buf(), Some(digest.to_string()))],
+    );
+}
 
 pub(crate) fn rootfs_path(rootfs_dir: &Path, image_path: &str) -> PathBuf {
     let trimmed = image_path.trim_start_matches('/');

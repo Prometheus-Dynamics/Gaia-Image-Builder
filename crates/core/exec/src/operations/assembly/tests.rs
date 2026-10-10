@@ -705,3 +705,6 @@ fn assembly_disk_archives_log_a_step_time_and_sizes() {
         let _ = fs::remove_dir_all(root);
     }
 }
+
+#[path = "tests_ram.rs"]
+mod ram;

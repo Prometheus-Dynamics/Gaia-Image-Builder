@@ -6,6 +6,33 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+/// The keywords `[image.assembly] work_dir` accepts in place of a path:
+/// `ram` keeps the assembly's intermediates in RAM when the build allows it,
+/// `disk` keeps them in the build dir (the default).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssemblyWorkDirKeyword {
+    Ram,
+    Disk,
+}
+
+impl AssemblyWorkDirKeyword {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ram => "ram",
+            Self::Disk => "disk",
+        }
+    }
+}
+
+/// The keyword a `work_dir` value is, if it is one (not a path).
+pub fn assembly_work_dir_keyword(raw: &str) -> Option<AssemblyWorkDirKeyword> {
+    match raw {
+        "ram" => Some(AssemblyWorkDirKeyword::Ram),
+        "disk" => Some(AssemblyWorkDirKeyword::Disk),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssemblyRoots {
     pub assembly_work: PathBuf,
@@ -41,17 +68,22 @@ impl AssemblyRoots {
             spec,
             &format!("{}/assembly", spec.workspace.build_dir),
         )?;
+        // `ram` and `disk` choose where the work dir is placed at run time
+        // (see `assembly_work_dir_keyword`); the spec's own view of it is
+        // the build dir's default.
         let assembly_work = match assembly.work_dir.as_deref() {
-            Some(work_dir) => resolve_assembly_path_without_trees(
-                spec,
-                work_dir,
-                &provider_images,
-                &provider_target,
-                provider_host.as_deref(),
-                provider_staging.as_deref(),
-                &provider_images,
-            )?,
-            None => default_assembly_work,
+            Some(work_dir) if assembly_work_dir_keyword(work_dir).is_none() => {
+                resolve_assembly_path_without_trees(
+                    spec,
+                    work_dir,
+                    &provider_images,
+                    &provider_target,
+                    provider_host.as_deref(),
+                    provider_staging.as_deref(),
+                    &provider_images,
+                )?
+            }
+            _ => default_assembly_work,
         };
         let assembly_out = match assembly.out_dir.as_deref() {
             Some(out_dir) => resolve_assembly_path_without_trees(
@@ -384,5 +416,36 @@ mod tests {
         let error = AssemblyRoots::new(&spec, &assembly).expect_err("self reference");
 
         assert!(error.contains("unknown tree 'boot'"), "{error}");
+    }
+
+    #[test]
+    fn work_dir_keywords_are_not_paths() {
+        assert_eq!(
+            assembly_work_dir_keyword("ram"),
+            Some(AssemblyWorkDirKeyword::Ram)
+        );
+        assert_eq!(
+            assembly_work_dir_keyword("disk"),
+            Some(AssemblyWorkDirKeyword::Disk)
+        );
+        assert_eq!(assembly_work_dir_keyword("$provider.images/work"), None);
+
+        // `ram` is not a relative directory: the spec's view of the work dir
+        // is the build dir's default, as with no work_dir at all.
+        let spec = spec_with_image(ImageSpec::new(crate::ImageDefinition::Buildroot(
+            crate::BuildrootImageSpec::default(),
+        )));
+        let keyword = ImageAssemblySpec {
+            work_dir: Some("ram".into()),
+            ..ImageAssemblySpec::default()
+        };
+        let unset = ImageAssemblySpec::default();
+        let with_keyword = AssemblyRoots::new(&spec, &keyword).expect("keyword roots");
+        let without = AssemblyRoots::new(&spec, &unset).expect("default roots");
+        assert_eq!(with_keyword.assembly_work, without.assembly_work);
+        assert_eq!(
+            with_keyword.assembly_work,
+            PathBuf::from("/workspace/build/assembly")
+        );
     }
 }

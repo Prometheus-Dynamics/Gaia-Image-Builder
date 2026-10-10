@@ -75,6 +75,35 @@ pub(crate) fn buildroot_build_time_steps(
     steps
 }
 
+/// The step time of a phase that started at `clock`, less the step times of
+/// the steps its own `nested` messages already report (the commands it ran),
+/// so a command's time is never counted twice in one operation.
+pub(crate) fn phase_step_message(
+    step: &str,
+    clock: &gaia_process::ActiveClock,
+    nested: &[String],
+) -> String {
+    let reported: Duration = nested
+        .iter()
+        .filter_map(|message| gaia_process::parse_step_time(message))
+        .map(|(_, duration)| duration)
+        .sum();
+    gaia_process::step_time_message(step, clock.elapsed().saturating_sub(reported))
+}
+
+/// Runs a phase that returns run messages, appending its step time (see
+/// [`phase_step_message`]) to them.
+pub(crate) fn timed_phase<E>(
+    step: &str,
+    phase: impl FnOnce() -> Result<Vec<String>, E>,
+) -> Result<Vec<String>, E> {
+    let clock = gaia_process::ActiveClock::start();
+    let mut messages = phase()?;
+    let line = phase_step_message(step, &clock, &messages);
+    messages.push(line);
+    Ok(messages)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

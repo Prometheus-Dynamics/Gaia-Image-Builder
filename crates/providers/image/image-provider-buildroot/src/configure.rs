@@ -35,11 +35,17 @@ pub(crate) fn configure_tree(
             _ => (None, None, &[][..], &[][..], None),
         };
 
+    let clock = gaia_process::ActiveClock::start();
     let package_overrides =
         materialize_buildroot_package_overrides(spec, buildroot_dir, output_dir)?;
     if package_overrides.generated_external_tree.is_some() {
         ensure_no_generated_external_name_conflict(external_tree)?;
     }
+    messages.push(phase_step_message("package overrides", &clock, &[]));
+    // The config steps: everything after the overrides, less the commands
+    // they ran (which report their own step times).
+    let config_clock = gaia_process::ActiveClock::start();
+    let config_messages_from = messages.len();
     let br2_external = buildroot_external_tree_value(
         spec,
         external_tree,
@@ -184,6 +190,13 @@ pub(crate) fn configure_tree(
     if let Some(digest) = config_inputs.as_deref().filter(|_| !config_current) {
         record_config_steps(output_dir, digest)?;
     }
+    let step = if config_current {
+        "config steps skipped"
+    } else {
+        "config steps"
+    };
+    let nested = messages[config_messages_from..].to_vec();
+    messages.push(phase_step_message(step, &config_clock, &nested));
     Ok(ConfiguredTree {
         package_overrides,
         br2_external,

@@ -24,7 +24,12 @@ pub(super) struct StepRun<'a> {
     filesystem_count: usize,
     disk_count: usize,
     archive_count: usize,
+    /// Where each built disk's bytes are (RAM in a RAM run).
     pub(super) disk_outputs: Vec<PathBuf>,
+    /// Where each built disk is published, in the same order.
+    pub(super) disk_published: Vec<PathBuf>,
+    /// Per disk: the on-disk path it is copied to when built in RAM.
+    pub(super) disk_publish: Vec<PathBuf>,
 }
 
 /// The steps in the order they must run, with every step's resolved paths.
@@ -95,6 +100,8 @@ impl<'a> StepRun<'a> {
             disk_count: 0,
             archive_count: 0,
             disk_outputs: Vec::new(),
+            disk_published: Vec::new(),
+            disk_publish: Vec::new(),
         }
     }
 
@@ -404,10 +411,18 @@ impl<'a> StepRun<'a> {
             output_path = tracing::field::Empty
         );
         let _span_guard = span.enter();
-        let summary = execute_assembly_disk(self.spec, self.roots, disk)?;
+        let mut summary = execute_assembly_disk(self.spec, self.roots, disk)?;
+        let source = summary.output.clone();
+        // A raw disk built in RAM is copied to its published place now; the
+        // copy is the same bytes, so the summary's digest stands.
+        if let Some(target) = self.disk_publish.get(index).cloned() {
+            publish_copy_to_disk(&source, &target)?;
+            summary.output = target;
+        }
         tracing::Span::current().record("output_path", summary.output.display().to_string());
         self.disk_count += 1;
-        self.disk_outputs.push(summary.output.clone());
+        self.disk_outputs.push(source);
+        self.disk_published.push(summary.output.clone());
         record_disk_state(&mut self.state, self.disk_count, disk, &summary);
         self.messages.push(format!(
             "built assembly disk '{}' at '{}'",

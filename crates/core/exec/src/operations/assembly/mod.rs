@@ -1,6 +1,6 @@
 use super::*;
-use gaia_spec::AssemblyRoots;
 use gaia_spec::KeyValueState;
+use gaia_spec::{AssemblyRoots, ImageAssemblySpec};
 use sha2::{Digest, Sha256};
 use std::fs as std_fs;
 #[cfg(test)]
@@ -19,6 +19,7 @@ mod disks;
 mod files;
 mod filesystems;
 mod mbr;
+mod placement;
 mod state;
 mod steps;
 mod tar;
@@ -31,6 +32,7 @@ use disks::*;
 use files::*;
 use filesystems::*;
 use mbr::*;
+use placement::*;
 use state::AssemblyExecutionContext;
 pub(crate) use state::{assembly_state_path, image_assembly_cleanup_paths};
 use steps::{StepRun, ordered_assembly_steps, remove_stale_step_outputs};
@@ -95,6 +97,84 @@ pub(crate) fn stage_image_assembly(
     operation_id: &OperationId,
     cancel_check: Option<gaia_process::ProcessCancelCheck>,
 ) -> Result<AssemblyStagingSummary, AssemblyError> {
+    stage_image_assembly_with(spec, operation_id, cancel_check, PlacementEnv::system)
+}
+
+/// The paths a run's steps use. `roots` and `assembly` are the run's own
+/// view (intermediates in RAM when `ram` is set); `disk_roots` and
+/// `disk_assembly` are the spec's view, for cleanup and for what is published.
+struct AssemblyView<'a> {
+    assembly: &'a ImageAssemblySpec,
+    roots: &'a AssemblyRoots,
+    disk_assembly: &'a ImageAssemblySpec,
+    disk_roots: &'a AssemblyRoots,
+    ram: Option<&'a RamPlacement>,
+}
+
+/// Stages the assembly. `env` supplies the RAM and tmpfs facts; it is read
+/// only when the work dir asks for RAM.
+pub(crate) fn stage_image_assembly_with(
+    spec: &ResolvedBuildSpec,
+    operation_id: &OperationId,
+    cancel_check: Option<gaia_process::ProcessCancelCheck>,
+    env: impl FnOnce() -> PlacementEnv,
+) -> Result<AssemblyStagingSummary, AssemblyError> {
+    let Some(assembly) = &spec.image.assembly else {
+        return Ok(AssemblyStagingSummary {
+            state: KeyValueState::new().with("kind", gaia_spec::IMAGE_ASSEMBLY_STATE_KIND),
+            messages: vec!["image assembly has no configured actions".into()],
+            cleanup_paths: Vec::new(),
+            archive_path: None,
+        });
+    };
+    let disk_roots = AssemblyRoots::new(spec, assembly)?;
+    match decide_placement(spec, assembly, &disk_roots, env) {
+        AssemblyPlacement::Disk { messages } => stage_steps(
+            spec,
+            operation_id,
+            cancel_check,
+            AssemblyView {
+                assembly,
+                roots: &disk_roots,
+                disk_assembly: assembly,
+                disk_roots: &disk_roots,
+                ram: None,
+            },
+            messages,
+        ),
+        AssemblyPlacement::Ram(ram) => {
+            // Copies left by an earlier run (or a crash) are re-created.
+            discard_ram_root(&ram.root);
+            for path in &ram.stale {
+                let _ = gaia_process::discard(path);
+            }
+            let messages = ram.messages.clone();
+            let result = stage_steps(
+                spec,
+                operation_id,
+                cancel_check,
+                AssemblyView {
+                    assembly: &ram.assembly,
+                    roots: &ram.roots,
+                    disk_assembly: assembly,
+                    disk_roots: &disk_roots,
+                    ram: Some(&ram),
+                },
+                messages,
+            );
+            discard_ram_root(&ram.root);
+            result
+        }
+    }
+}
+
+fn stage_steps(
+    spec: &ResolvedBuildSpec,
+    operation_id: &OperationId,
+    cancel_check: Option<gaia_process::ProcessCancelCheck>,
+    view: AssemblyView<'_>,
+    mut messages: Vec<String>,
+) -> Result<AssemblyStagingSummary, AssemblyError> {
     let span = tracing::info_span!(
         "image_assembly_stage",
         operation_id = %operation_id.as_str(),
@@ -107,14 +187,8 @@ pub(crate) fn stage_image_assembly(
         disk_count = tracing::field::Empty
     );
     let _stage_span_guard = span.enter();
-    let Some(assembly) = &spec.image.assembly else {
-        return Ok(AssemblyStagingSummary {
-            state: KeyValueState::new().with("kind", gaia_spec::IMAGE_ASSEMBLY_STATE_KIND),
-            messages: vec!["image assembly has no configured actions".into()],
-            cleanup_paths: Vec::new(),
-            archive_path: None,
-        });
-    };
+    let assembly = view.assembly;
+    let roots = view.roots;
 
     tracing::Span::current().record("tree_count", assembly.trees.len());
     tracing::Span::current().record("dir_count", assembly.dirs.len());
@@ -124,8 +198,7 @@ pub(crate) fn stage_image_assembly(
     tracing::Span::current().record("filesystem_count", assembly.filesystems.len());
     tracing::Span::current().record("disk_count", assembly.disks.len());
 
-    let roots = AssemblyRoots::new(spec, assembly)?;
-    let context = AssemblyExecutionContext::new(spec, assembly, &roots);
+    let context = AssemblyExecutionContext::new(spec, view.disk_assembly, view.disk_roots);
     let mut state = KeyValueState::new()
         .with("kind", gaia_spec::IMAGE_ASSEMBLY_STATE_KIND)
         .with("tree_count", assembly.trees.len())
@@ -135,8 +208,15 @@ pub(crate) fn stage_image_assembly(
         .with("transform_count", assembly.transforms.len())
         .with("filesystem_count", assembly.filesystems.len())
         .with("disk_count", assembly.disks.len())
-        .with("busybox_initramfs_count", assembly.busybox_initramfs.len());
-    let mut messages = Vec::new();
+        .with("busybox_initramfs_count", assembly.busybox_initramfs.len())
+        .with(
+            "work_dir.placement",
+            if view.ram.is_some() { "ram" } else { "disk" },
+        );
+    if let Some(ram) = view.ram {
+        state.insert("work_dir.path", ram.root.display().to_string());
+        state.insert("work_dir.expected_bytes", ram.expected_bytes);
+    }
 
     for tree in &assembly.trees {
         let span = tracing::info_span!(
@@ -176,17 +256,20 @@ pub(crate) fn stage_image_assembly(
     // example a transform compressing a filesystem image sees this run's
     // image. Outputs from an earlier run are removed first: a dependency
     // Gaia cannot see fails loudly instead of reading a stale file.
-    let (order, step_paths) = ordered_assembly_steps(spec, assembly, &roots)?;
+    let (order, step_paths) = ordered_assembly_steps(spec, assembly, roots)?;
     remove_stale_step_outputs(&step_paths)?;
     let mut run = StepRun::new(
         spec,
         assembly,
-        &roots,
+        roots,
         operation_id,
         cancel_check.clone(),
         state,
         messages,
     );
+    if let Some(ram) = view.ram {
+        run.disk_publish = ram.disk_publish.clone();
+    }
     for step in order {
         run.run(step)?;
     }
@@ -195,6 +278,7 @@ pub(crate) fn stage_image_assembly(
         mut state,
         mut messages,
         disk_outputs,
+        disk_published,
         ..
     } = run;
 
@@ -214,7 +298,7 @@ pub(crate) fn stage_image_assembly(
             summary.source.display(),
             summary.output.display()
         ));
-    } else if let [disk] = disk_outputs.as_slice() {
+    } else if let [disk] = disk_published.as_slice() {
         // Without a raw archive, the single assembled disk is still the
         // deliverable: report it as the primary image output rather than
         // letting an intermediate rootfs image stand in for it.
@@ -274,7 +358,7 @@ fn archive_assembly_disk_output(
     let temp_archive = temporary_assembly_output_path(&archive_path);
     let Some((compressor, args)) = kind.compressor(0) else {
         // An uncompressed `.img`/`.raw` archive is the assembled disk itself.
-        std_fs::copy(source, &temp_archive).map_err(|error| {
+        copy_sparse(source, &temp_archive).map_err(|error| {
             let _ = std_fs::remove_file(&temp_archive);
             AssemblyError::runtime(format!(
                 "failed to copy assembly disk '{}' to '{}': {error}",

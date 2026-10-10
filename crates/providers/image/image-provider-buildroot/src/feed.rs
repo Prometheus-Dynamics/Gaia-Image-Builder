@@ -1,18 +1,39 @@
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// What collecting the expected images found and copied.
+#[derive(Default)]
+pub(crate) struct CollectedImages {
+    /// The expected images collected, by name.
+    pub(crate) matched: Vec<String>,
+    /// The sha256 of each collected expected image, by name: the bytes that
+    /// were copied, so nothing reads them again to hash them.
+    pub(crate) digests: BTreeMap<String, String>,
+}
+
+#[cfg(test)]
 pub(crate) fn collect_expected_images(
     image: &ImageSpec,
     output_dir: &Path,
     collect_dir: &Path,
 ) -> Result<Vec<String>, ImageProviderError> {
+    collect_expected_images_hashed(image, output_dir, collect_dir)
+        .map(|collected| collected.matched)
+}
+
+pub(crate) fn collect_expected_images_hashed(
+    image: &ImageSpec,
+    output_dir: &Path,
+    collect_dir: &Path,
+) -> Result<CollectedImages, ImageProviderError> {
     let ImageDefinition::Buildroot(buildroot) = &image.definition else {
-        return Ok(Vec::new());
+        return Ok(CollectedImages::default());
     };
     let images_dir = output_dir.join("images");
     let assembly_expected = assembly_expected_image_names(image);
     let mut collected = std::collections::BTreeSet::new();
     let mut matched = Vec::new();
+    let mut digests = BTreeMap::new();
     for expected in &buildroot.expected_images {
         if assembly_expected.contains(&expected.name) {
             continue;
@@ -34,7 +55,7 @@ pub(crate) fn collect_expected_images(
                     )
                 })?;
                 let dest = collect_dir.join(&expected.name);
-                fs::copy(&found_path, &dest).map_err(|error| {
+                let digest = copy_with_sha256(&found_path, &dest).map_err(|error| {
                     ImageProviderError::new(
                         ImageProviderErrorKind::RuntimeState,
                         format!(
@@ -44,6 +65,8 @@ pub(crate) fn collect_expected_images(
                         ),
                     )
                 })?;
+                record_copied_digest(collect_dir, &dest, &digest);
+                digests.insert(expected.name.clone(), digest);
                 collected.insert(PathBuf::from(&expected.name));
                 matched.push(expected.name.clone());
             }
@@ -85,7 +108,7 @@ pub(crate) fn collect_expected_images(
                 )
             })?;
         }
-        fs::copy(&found_path, &dest).map_err(|error| {
+        let digest = copy_with_sha256(&found_path, &dest).map_err(|error| {
             ImageProviderError::new(
                 ImageProviderErrorKind::RuntimeState,
                 format!(
@@ -95,8 +118,9 @@ pub(crate) fn collect_expected_images(
                 ),
             )
         })?;
+        record_copied_digest(collect_dir, &dest, &digest);
     }
-    Ok(matched)
+    Ok(CollectedImages { matched, digests })
 }
 
 pub(crate) fn materialize_fallback_rootfs(

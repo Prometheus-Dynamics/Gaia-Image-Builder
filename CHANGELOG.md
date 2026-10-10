@@ -241,6 +241,10 @@ newest release, and updates the Rust docker images to 1.99.0.
 - Download sources with a `sha256` are kept in a content-addressed cache (`.gaia/cache/downloads/sha256/<sha>`) after verification and restored from it on re-materialization instead of being downloaded again; each download is hashed once instead of twice.
 - Tool version probes used in fingerprints run once per process with a 10 second timeout, instead of per artifact with a 2 second timeout whose expiry forced rebuilds on loaded machines.
 - Opt-in `[providers.rust] shared_target_dir = true` builds the cargo artifacts of every source into one target dir per toolchain, target, profile and execution backend under the user cache, so sources reuse each other's compiled dependencies (synthetic two-source build: the second source compiled only its own crate, 5.5-7.4 s for both instead of 11-12.5 s; under docker the same). A source whose local package name and version collide with another directory's package in that dir keeps its own dir, because cargo would otherwise reuse the other package's binary. Off by default.
+- Buildroot operations report step times for nearly every phase (work dir placement, the RAM tree's source mirror, config steps, host tools probe, package graph, clean planning and application, build state records, collect expected images, state digest, archive checks, image output digests, and the feed phases), so an operation's steps add up to its duration. Steps derived from `make`'s log (`buildroot package <name>` and `buildroot finalize and images`) overlap the make and are not part of that sum.
+- Buildroot hashes each collected image once. The copy into the collect dir computes the digest as it writes, and the state digest, the collect dir's content manifest and a tar archive's signature reuse it. Before, an expected image was read by `sha256sum` for the state digest, again to hash the collect copy, and again for the archive signature.
+- File digests (the target tree, package directories, archive entries) hash in-process instead of spawning `sha256sum` per file: about 1.4 ms per file on the development machine.
+- A RAM tree's placement uses the size recorded when it was last built instead of walking the whole tree; the walk still happens once at the end of a RAM build to record that size.
 
 ### Fixed
 
@@ -321,6 +325,14 @@ newest release, and updates the Rust docker images to 1.99.0.
 - Fixed the Buildroot provider's default collect dir (`out/images/buildroot`) resolving against the process working directory; without `image.output.collect_dir` it is now `<workspace.out_dir>/images/buildroot`, and relative collect dirs resolve against the workspace root, matching planning and assembly.
 - Fixed intermittent "Text file busy" (ETXTBSY) failures: generated fakeroot scripts run through `/bin/sh`, and the Buildroot provider tests create fake tools through a helper that never holds a write descriptor a concurrently forked test could inherit.
 - Added typed assembly MBR layout controls for `first_lba` and `alignment_lba`, allowing board images to preserve firmware-sensitive partition layouts instead of always using 1 MiB partition alignment.
+
+### Image assembly in RAM
+
+- `[image.assembly] work_dir = "ram"` keeps an assembly's intermediates (trees, filesystem images such as `boot.vfat`, transform outputs under the work dir, and raw disk images) in tmpfs under `/dev/shm/gaia-<user>/<hash>/assembly`. The archive is compressed from the RAM copy of the raw disk, and every raw disk image is copied to its spec path on disk when built, as a sparse copy. Published outputs keep the same bytes and digests as disk mode. The RAM copies are removed when the assembly ends.
+- Unset `work_dir` follows `[providers.buildroot] work_dir`: RAM when that is `"ram"`. A path keeps the intermediates on disk, as before.
+- RAM is used only when the spec's expected intermediate size fits in `MemAvailable` and the tmpfs with 4 GiB to spare; otherwise the assembly runs on disk and the run reports why.
+- Behavior change: `work_dir = "disk"` and `work_dir = "ram"` now mean the placement above, not directories named `disk` or `ram` under the workspace. In RAM mode a filesystem image such as `boot.vfat` is no longer left in the collect dir.
+- The assembly state records `work_dir.placement`, `work_dir.path` and `work_dir.expected_bytes`.
 
 ## [2.0.0] - 2026-05-01
 

@@ -14,6 +14,16 @@ use gaia_spec::{
     RetryBackoffStrategySpec,
 };
 pub use materialize::{finalize_temp_image_output, materialize_image_output};
+
+/// Records digests the caller already computed from the files' current bytes
+/// (see [`recorded_sha256`]), so no file is hashed again. Entries whose
+/// digest is `None` are hashed here.
+pub fn record_content_digests_known(
+    base: &Path,
+    items: Vec<(PathBuf, Option<String>)>,
+) -> std::io::Result<()> {
+    content_digests::record_content_entries(base, items)
+}
 pub use preview::{
     ImagePreview, PreviewCleanKind, PreviewDeletion, PreviewDeletionKind, PreviewSection,
 };
@@ -21,7 +31,6 @@ use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::UNIX_EPOCH;
 
 pub trait ImageProvider: Send + Sync {
@@ -365,23 +374,14 @@ fn join_ids<'a>(ids: impl Iterator<Item = &'a str>) -> String {
     ids.collect::<Vec<_>>().join(",")
 }
 
+/// Hex sha256 of a file, hashed in-process (the same digest `sha256sum`
+/// prints). A `sha256sum` process per file cost more than the hashing for a
+/// target tree's or a package directory's many small files.
 pub fn file_sha256_or_placeholder(path: &Path) -> String {
-    let output = Command::new("sha256sum").arg(path).output().ok();
-    let Some(output) = output else {
-        return format!("sha256-unavailable:{}", path.display());
-    };
-    if !output.status.success() {
-        return format!(
-            "sha256-error:{}:{}",
-            path.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
+    match content_digests::sha256_hex(path) {
+        Ok(digest) => digest,
+        Err(error) => format!("sha256-error:{}:{error}", path.display()),
     }
-    String::from_utf8_lossy(&output.stdout)
-        .split_whitespace()
-        .next()
-        .unwrap_or_default()
-        .to_string()
 }
 
 pub fn path_bytes(path: &Path) -> u64 {

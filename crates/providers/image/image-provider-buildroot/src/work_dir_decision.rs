@@ -257,7 +257,15 @@ pub(crate) fn work_dir_facts(
             })?
             .bytes();
         facts.need = recorded_tree_size(output_dir).unwrap_or(DEFAULT_RAM_NEED);
-        facts.present = if tree_exists { tree_size(&tree) } else { 0 };
+        // The size recorded when the tree was last built: a walk of a RAM tree
+        // with about a million files costs seconds on every build. A tree a
+        // failed build grew past its record only makes the need look bigger,
+        // which errs toward disk.
+        facts.present = if tree_exists {
+            recorded_tree_size(output_dir).unwrap_or_else(|| tree_size(&tree))
+        } else {
+            0
+        };
         facts.available_memory = mem_available().unwrap_or(0);
         facts.tmpfs_free = base
             .as_deref()

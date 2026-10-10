@@ -1765,6 +1765,38 @@ Assembly behavior:
 - Before the steps run, outputs of transforms, filesystems, disks and archives left from an earlier run are removed, so a step reading one before it is rebuilt fails instead of using a stale file.
 - Validation warns (`assembly_reads_later_output`) when a step reads what a step of a later kind or position produces: Gaia versions before dependency ordering ran it first, on the previous run's file.
 
+#### Work directory and RAM
+
+`[image.assembly] work_dir` takes a path (the intermediates' directory, as
+above), `"disk"` (the build dir's `assembly` directory, the default) or
+`"ram"`.
+
+With `"ram"` the intermediates go to tmpfs under
+`/dev/shm/gaia-<user>/<hash>/assembly`: the trees, filesystem images such as
+`boot.vfat`, transform outputs under the work dir, and raw disk images. The
+published outputs stay on disk. The archive is compressed from the RAM copy
+of the raw disk. Every raw disk image is built in RAM and copied to its spec
+path on disk when built; the copy is sparse, so the zeros of an unwritten
+partition cost no disk writes. The RAM copies are removed when
+the assembly ends, whether it succeeded or not.
+
+In RAM mode a filesystem image such as `boot.vfat` is an intermediate and is
+not left in the collect dir; use `"disk"` to keep it there.
+
+When `work_dir` is unset it follows `[providers.buildroot] work_dir`: RAM when
+that is `"ram"`, disk otherwise. A path, such as the PhotonVision project's
+`${workspace.build_dir}/assembly`, keeps the intermediates on disk even when
+the Buildroot tree is in RAM; set `work_dir = "ram"` to move them.
+
+RAM is used only when the expected size of the intermediates fits in
+`MemAvailable` and in the free space on `/dev/shm` with 4 GiB to spare. The
+expected size is an upper bound from the spec: the disks' layouts, the
+filesystems' `size` and the transform inputs. Otherwise the assembly runs on
+disk and the run says why (`assembly work dir falls back to disk: ...`).
+
+The assembly state records `work_dir.placement` (`ram` or `disk`),
+`work_dir.path` and `work_dir.expected_bytes`.
+
 #### Disk partitions
 
 `[[image.assembly.disks.partitions]]` fields:

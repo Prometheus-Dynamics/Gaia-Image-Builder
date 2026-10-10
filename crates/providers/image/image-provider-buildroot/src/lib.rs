@@ -159,15 +159,19 @@ impl ImageProvider for BuildrootImageProvider {
                 cancel_check: cancel_check.clone(),
             };
             if policy.shared_output {
+                let clock = gaia_process::ActiveClock::start();
                 let shared =
                     shared_buildroot_output(spec, image, &buildroot_dir, policy, &execution)?;
-                messages.extend(build_with_shared_output(SharedBuildRequest {
-                    spec,
-                    image,
-                    buildroot_dir: &buildroot_dir,
-                    output_dir: &output_dir,
-                    shared: &shared,
-                    command,
+                messages.push(phase_step_message("shared output key", &clock, &[]));
+                messages.extend(timed_phase("shared build", || {
+                    build_with_shared_output(SharedBuildRequest {
+                        spec,
+                        image,
+                        buildroot_dir: &buildroot_dir,
+                        output_dir: &output_dir,
+                        shared: &shared,
+                        command,
+                    })
                 })?);
                 state_details.push((
                     "buildroot_shared_output_dir".to_string(),
@@ -175,52 +179,57 @@ impl ImageProvider for BuildrootImageProvider {
                 ));
                 state_details.push(("buildroot_shared_key".to_string(), shared.key.clone()));
             } else {
-                messages.extend(leave_shared_view(&output_dir)?);
-                let work = place_work_dir(&output_dir, policy)?;
-                messages.extend(work.messages.iter().cloned());
-                // A RAM build stops cleanly when memory runs low.
-                let watchdog = work
-                    .ram
-                    .then(|| RamWatchdog::start(&work.dir, cancel_check.clone(), log_sink.clone()));
+                let tree = place_private_tree(
+                    &output_dir,
+                    &buildroot_dir,
+                    policy,
+                    cancel_check.clone(),
+                    log_sink.clone(),
+                )?;
+                messages.extend(tree.messages.iter().cloned());
                 let command = ImageCommandContext {
-                    cancel_check: watchdog
-                        .as_ref()
-                        .map(|(_, check)| check.clone())
-                        .or_else(|| cancel_check.clone()),
+                    cancel_check: tree.cancel_check.clone(),
                     ..command
                 };
-                let (source, note) = buildroot_source_for(&buildroot_dir, &work);
-                messages.extend(note);
                 messages.extend(build_with_private_output(
-                    spec, image, &source, &work.dir, command,
+                    spec,
+                    image,
+                    &tree.source,
+                    &tree.work.dir,
+                    command,
                 )?);
-                drop(watchdog);
-                tree_dir = work.dir.clone();
-                ram_work = Some(work);
+                drop(tree.watchdog);
+                tree_dir = tree.work.dir.clone();
+                ram_work = Some(tree.work);
             }
             // Buildroot ignores a failed `modules_install`; catch the gap
             // before the images are collected and published.
-            messages.extend(check_kernel_modules_installed(
-                &tree_dir,
-                policy.kernel_modules_check,
-            )?);
-            let matched_expected_images = collect_expected_images(image, &tree_dir, &collect_dir)?;
+            messages.extend(timed_phase("kernel modules check", || {
+                check_kernel_modules_installed(&tree_dir, policy.kernel_modules_check)
+            })?);
+            let clock = gaia_process::ActiveClock::start();
+            let collected = collect_expected_images_hashed(image, &tree_dir, &collect_dir)?;
+            messages.push(phase_step_message("collect expected images", &clock, &[]));
+            let matched_expected_images = collected.matched;
+            let collected_digests = collected.digests;
             if let Some(archive_path) = &archive_path
                 && should_archive_buildroot_output(image, archive_path)
             {
-                messages.extend(archive_buildroot_output(BuildrootArchiveRequest {
-                    image,
-                    collect_dir: &collect_dir,
-                    output_dir: &tree_dir,
-                    matched_expected_images: &matched_expected_images,
-                    archive_path,
-                    reuse_details: &mut reuse_details,
-                    command: ImageCommandContext {
-                        execution: &execution,
-                        policy,
-                        log_sink: log_sink.clone(),
-                        cancel_check: cancel_check.clone(),
-                    },
+                messages.extend(timed_phase("buildroot archive checks", || {
+                    archive_buildroot_output(BuildrootArchiveRequest {
+                        image,
+                        collect_dir: &collect_dir,
+                        output_dir: &tree_dir,
+                        matched_expected_images: &matched_expected_images,
+                        archive_path,
+                        reuse_details: &mut reuse_details,
+                        command: ImageCommandContext {
+                            execution: &execution,
+                            policy,
+                            log_sink: log_sink.clone(),
+                            cancel_check: cancel_check.clone(),
+                        },
+                    })
                 })?);
             } else if let Some(archive_path) = &archive_path {
                 messages.push(format!(
@@ -236,15 +245,15 @@ impl ImageProvider for BuildrootImageProvider {
                     policy.work_dir.keep_ram_tree,
                 ));
             }
+            let clock = gaia_process::ActiveClock::start();
+            let output_digest = buildroot_state_digest_with(image, &output_dir, &collected_digests);
+            messages.push(phase_step_message("buildroot state digest", &clock, &[]));
             state_details.push(("backend_mode".to_string(), "buildroot".to_string()));
             state_details.push((
                 "buildroot_dir".to_string(),
                 buildroot_dir.display().to_string(),
             ));
-            state_details.push((
-                "buildroot_output_digest".to_string(),
-                buildroot_state_digest(image, &output_dir),
-            ));
+            state_details.push(("buildroot_output_digest".to_string(), output_digest));
             state_details.push((
                 "buildroot_output_dir".to_string(),
                 output_dir.display().to_string(),
@@ -293,7 +302,7 @@ impl ImageProvider for BuildrootImageProvider {
             ));
         }
 
-        let result = ImageExecutionResult {
+        let mut result = ImageExecutionResult {
             provider_id: self.id().into(),
             collect_dir: Some(collect_dir),
             archive_path,
@@ -310,7 +319,8 @@ impl ImageProvider for BuildrootImageProvider {
                 details
             },
         };
-        materialize_image_output(&result)?;
+        let steps = materialize_image_output(&result)?;
+        result.messages.extend(steps);
         Ok(result)
     }
 
@@ -354,7 +364,8 @@ impl ImageProvider for BuildrootImageProvider {
                     log_sink: request.log_sink,
                     cancel_check: request.cancel_check,
                 };
-                let messages = if request.policy.shared_output {
+                let mut messages = if request.policy.shared_output {
+                    let clock = gaia_process::ActiveClock::start();
                     let shared = shared_buildroot_output(
                         request.spec,
                         request.image,
@@ -362,44 +373,45 @@ impl ImageProvider for BuildrootImageProvider {
                         request.policy,
                         &execution,
                     )?;
-                    prepare_with_shared_output(SharedBuildRequest {
-                        spec: request.spec,
-                        image: request.image,
-                        buildroot_dir: &buildroot_dir,
-                        output_dir: &output_dir,
-                        shared: &shared,
-                        command,
-                    })?
+                    let mut messages = vec![phase_step_message("shared output key", &clock, &[])];
+                    messages.extend(timed_phase("shared prepare", || {
+                        prepare_with_shared_output(SharedBuildRequest {
+                            spec: request.spec,
+                            image: request.image,
+                            buildroot_dir: &buildroot_dir,
+                            output_dir: &output_dir,
+                            shared: &shared,
+                            command,
+                        })
+                    })?);
+                    messages
                 } else {
-                    let mut messages = leave_shared_view(&output_dir)?;
-                    let work = place_work_dir(&output_dir, request.policy)?;
-                    messages.extend(work.messages.iter().cloned());
-                    let watchdog = work.ram.then(|| {
-                        RamWatchdog::start(
-                            &work.dir,
-                            command.cancel_check.clone(),
-                            command.log_sink.clone(),
-                        )
-                    });
+                    let tree = place_private_tree(
+                        &output_dir,
+                        &buildroot_dir,
+                        request.policy,
+                        command.cancel_check.clone(),
+                        command.log_sink.clone(),
+                    )?;
                     let command = ImageCommandContext {
-                        cancel_check: watchdog
-                            .as_ref()
-                            .map(|(_, check)| check.clone())
-                            .or_else(|| command.cancel_check.clone()),
+                        cancel_check: tree.cancel_check.clone(),
                         ..command
                     };
-                    let (source, note) = buildroot_source_for(&buildroot_dir, &work);
-                    messages.extend(note);
+                    let mut messages = tree.messages;
                     messages.extend(run_buildroot(BuildrootRunRequest {
                         spec: request.spec,
                         image: request.image,
-                        buildroot_dir: &source,
-                        output_dir: &work.dir,
+                        buildroot_dir: &tree.source,
+                        output_dir: &tree.work.dir,
                         command,
                     })?);
+                    drop(tree.watchdog);
                     messages
                 };
-                let result = ImageExecutionResult {
+                let clock = gaia_process::ActiveClock::start();
+                let output_digest = buildroot_state_digest(request.image, &output_dir);
+                messages.push(phase_step_message("buildroot state digest", &clock, &[]));
+                let mut result = ImageExecutionResult {
                     provider_id: self.id().into(),
                     collect_dir: Some(collect_dir),
                     archive_path: None,
@@ -416,16 +428,14 @@ impl ImageProvider for BuildrootImageProvider {
                             "buildroot_dir".to_string(),
                             buildroot_dir.display().to_string(),
                         ));
-                        details.push((
-                            "buildroot_output_digest".to_string(),
-                            buildroot_state_digest(request.image, &output_dir),
-                        ));
+                        details.push(("buildroot_output_digest".to_string(), output_digest));
                         details.extend(build_state_details(request.spec));
                         details.extend(build_image_contract_state_details(request.image));
                         details
                     },
                 };
-                materialize_image_output(&result)?;
+                let steps = materialize_image_output(&result)?;
+                result.messages.extend(steps);
                 Ok(result)
             }
             ImageProviderOperation::Build => self.execute_image(
@@ -440,6 +450,56 @@ impl ImageProvider for BuildrootImageProvider {
     }
 }
 
+/// A tree a build works in outside the shared views (see [`place_work_dir`]):
+/// placed, watched while it is in RAM, and given the Buildroot source it
+/// reads (a mirror of it for a RAM tree).
+struct PrivateTree {
+    work: WorkDir,
+    source: PathBuf,
+    /// Stops the tree's commands when memory runs low (RAM trees only).
+    watchdog: Option<RamWatchdog>,
+    /// The cancel check of the tree's commands: the caller's, or the
+    /// watchdog's, which also reports low memory.
+    cancel_check: Option<ProcessCancelCheck>,
+    messages: Vec<String>,
+}
+
+fn place_private_tree(
+    output_dir: &Path,
+    buildroot_dir: &Path,
+    policy: &ImageExecutionPolicy,
+    cancel_check: Option<ProcessCancelCheck>,
+    log_sink: Option<ProcessLogSink>,
+) -> Result<PrivateTree, ImageProviderError> {
+    let clock = gaia_process::ActiveClock::start();
+    let mut messages = leave_shared_view(output_dir)?;
+    let work = place_work_dir(output_dir, policy)?;
+    messages.extend(work.messages.iter().cloned());
+    messages.push(phase_step_message("work dir placement", &clock, &[]));
+    let clock = gaia_process::ActiveClock::start();
+    let watchdog = work
+        .ram
+        .then(|| RamWatchdog::start(&work.dir, cancel_check.clone(), log_sink));
+    if work.ram {
+        messages.push(phase_step_message("ram watchdog start", &clock, &[]));
+    }
+    let cancel_check = watchdog
+        .as_ref()
+        .map(|(_, check)| check.clone())
+        .or(cancel_check);
+    let clock = gaia_process::ActiveClock::start();
+    let (source, note) = buildroot_source_for(buildroot_dir, &work);
+    messages.extend(note);
+    messages.push(phase_step_message("buildroot source mirror", &clock, &[]));
+    Ok(PrivateTree {
+        work,
+        source,
+        watchdog: watchdog.map(|(watchdog, _)| watchdog),
+        cancel_check,
+        messages,
+    })
+}
+
 /// Private output tree: one `make` with the image feed delivered by a
 /// post-build script, so every image is packed once with the feed included.
 /// If Buildroot did not run the script, the feed is applied to `target/` and
@@ -452,7 +512,9 @@ fn build_with_private_output(
     command: ImageCommandContext<'_>,
 ) -> Result<Vec<String>, ImageProviderError> {
     let target_dir = output_dir.join("target");
+    let clock = gaia_process::ActiveClock::start();
     let staged_feed = stage_image_feed_for_make(spec, image, output_dir)?;
+    let staging_step = phase_step_message("image feed staging", &clock, &[]);
     let mut messages = run_buildroot_with(
         BuildrootRunRequest {
             spec,
@@ -467,13 +529,16 @@ fn build_with_private_output(
             finalize_only: false,
         },
     )?;
+    messages.push(staging_step);
     let Some(staged_feed) = staged_feed else {
+        let clock = gaia_process::ActiveClock::start();
         remove_path_if_exists(&image_feed_signature_path(output_dir))?;
         if image_feed_managed_paths_path(output_dir).is_file() && target_dir.is_dir() {
             invalidate_finalized(output_dir);
             prune_stale_image_feed_outputs(spec, image, &target_dir, output_dir)?;
         }
         remove_path_if_exists(&image_feed_managed_paths_path(output_dir))?;
+        messages.push(phase_step_message("image feed cleanup", &clock, &[]));
         return Ok(messages);
     };
     if staged_feed.applied() {
@@ -489,8 +554,9 @@ fn build_with_private_output(
             "Buildroot did not run the image feed post-build script; applied the feed after make"
                 .into(),
         );
+        let clock = gaia_process::ActiveClock::start();
         apply_image_feed_to_rootfs(spec, image, &target_dir)?;
-        messages.extend(refresh_buildroot_images_after_feed_overlay(
+        let refreshed = refresh_buildroot_images_after_feed_overlay(
             spec,
             image,
             buildroot_dir,
@@ -499,12 +565,18 @@ fn build_with_private_output(
             command.policy,
             command.log_sink.clone(),
             command.cancel_check.clone(),
-        )?);
+        )?;
+        messages.push(phase_step_message("image feed apply", &clock, &refreshed));
+        messages.extend(refreshed);
     }
+    let clock = gaia_process::ActiveClock::start();
     refresh_expected_tar_images(image, &target_dir, output_dir, command.execution)?;
+    messages.push(phase_step_message("expected tar images", &clock, &[]));
+    let clock = gaia_process::ActiveClock::start();
     write_image_feed_managed_paths(output_dir, spec, image)?;
     write_image_feed_signature(output_dir, &staged_feed.signature)?;
     remove_path_if_exists(&staged_image_feed_dir(output_dir))?;
+    messages.push(phase_step_message("image feed records", &clock, &[]));
     Ok(messages)
 }
 

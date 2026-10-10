@@ -190,17 +190,24 @@ pub(crate) fn finish_ram_tree(output_dir: &Path, work: &WorkDir, keep: bool) -> 
     if !work.ram {
         return Vec::new();
     }
+    let clock = gaia_process::ActiveClock::start();
     let size = tree_size(&work.dir);
+    let mut messages = vec![gaia_process::step_time_message(
+        "ram tree size",
+        clock.elapsed(),
+    )];
+    let clock = gaia_process::ActiveClock::start();
     keep_package_durations(&work.dir, output_dir.parent());
     if let Some(parent) = output_dir.parent() {
         let _ = fs::write(parent.join(RAM_SIZE_FILE), size.to_string());
     }
-    let mut messages = vec![format!("RAM tree size: {}", gib(size))];
+    messages.push(format!("RAM tree size: {}", gib(size)));
     if !keep {
         let _ = fs::remove_file(output_dir);
         let _ = gaia_process::discard(&work.dir);
         messages.push("dropped the RAM tree (keep_ram_tree = false)".to_string());
     }
+    messages.push(phase_step_message("ram tree finish", &clock, &[]));
     messages
 }
 

@@ -31,7 +31,10 @@ pub use artifact::{
     ArtifactSpec, ArtifactVariantSpec, BuildModeSpec, DockerArtifactExecutionSpec, GoArtifactSpec,
     JavaArtifactSpec, NodeArtifactSpec, PythonArtifactSpec, RustArtifactSpec,
 };
-pub use assembly::{AssemblyRoots, expand_simple_glob, wildcard_match};
+pub use assembly::{
+    AssemblyRoots, AssemblyWorkDirKeyword, assembly_work_dir_keyword, expand_simple_glob,
+    wildcard_match,
+};
 pub use assembly_archive_spec::{
     AssemblyArchiveMemberSourceSpec, AssemblyArchiveMemberSpec, AssemblyArchiveSpec,
     AssemblyDigestToken, assembly_digest_tokens,

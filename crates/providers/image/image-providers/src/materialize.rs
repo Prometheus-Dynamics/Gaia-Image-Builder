@@ -9,17 +9,43 @@ use crate::{
 use std::fs;
 use std::path::Path;
 
-pub fn materialize_image_output(result: &ImageExecutionResult) -> Result<(), ImageProviderError> {
+/// Writes the outputs and records their digests. Returns the step times of
+/// the work (`gaia_process::step_time_message`) for the caller's messages.
+pub fn materialize_image_output(
+    result: &ImageExecutionResult,
+) -> Result<Vec<String>, ImageProviderError> {
+    let mut steps = Vec::new();
     // One hash of the archive serves both the state's archive_sha256 and the
     // content manifest.
+    let clock = gaia_process::ActiveClock::start();
     let archive_digest = result
         .archive_path
         .as_ref()
         .filter(|path| path.is_file())
         .and_then(|path| sha256_hex(path).ok());
+    if result
+        .archive_path
+        .as_ref()
+        .is_some_and(|path| path.is_file())
+    {
+        steps.push(gaia_process::step_time_message(
+            "image archive digest",
+            clock.elapsed(),
+        ));
+    }
+    let clock = gaia_process::ActiveClock::start();
     write_image_output(result, archive_digest.as_deref())?;
+    steps.push(gaia_process::step_time_message(
+        "image output files",
+        clock.elapsed(),
+    ));
+    let clock = gaia_process::ActiveClock::start();
     record_image_output_digests(result, archive_digest);
-    Ok(())
+    steps.push(gaia_process::step_time_message(
+        "image content digests",
+        clock.elapsed(),
+    ));
+    Ok(steps)
 }
 
 /// Records the content digests of the collect dir and archive, so the next

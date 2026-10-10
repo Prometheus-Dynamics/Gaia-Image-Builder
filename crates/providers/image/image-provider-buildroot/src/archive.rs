@@ -63,6 +63,7 @@ pub(crate) fn archive_buildroot_output(
                     ))
                 })?;
             }
+            let clock = gaia_process::ActiveClock::start();
             fs::copy(&source_path, archive_path).map_err(|error| {
                 ImageProviderError::new(
                     ImageProviderErrorKind::RuntimeState,
@@ -73,11 +74,14 @@ pub(crate) fn archive_buildroot_output(
                     ),
                 )
             })?;
-            return Ok(vec![format!(
-                "copied primary buildroot image '{}' to '{}'",
-                source_path.display(),
-                archive_path.display()
-            )]);
+            return Ok(vec![
+                format!(
+                    "copied primary buildroot image '{}' to '{}'",
+                    source_path.display(),
+                    archive_path.display()
+                ),
+                gaia_process::step_time_message("copy primary image", clock.elapsed()),
+            ]);
         }
     }
     archive_directory(
@@ -179,14 +183,20 @@ pub(crate) fn archive_signature(
     let mut signature = format!("gaia-archive-v1\nmode={}\n", mode.as_str());
     for entry in entries {
         let path = source_dir.join(entry);
-        signature.push_str(&format!("{entry}={}\n", archive_entry_digest(&path)));
+        signature.push_str(&format!(
+            "{entry}={}\n",
+            archive_entry_digest(source_dir, &path)
+        ));
     }
     signature
 }
 
-pub(crate) fn archive_entry_digest(path: &Path) -> String {
+/// The digest of an archive entry. A file in the source dir (the collect
+/// dir) whose digest its content manifest records is not read again.
+pub(crate) fn archive_entry_digest(base: &Path, path: &Path) -> String {
     if path.is_file() {
-        file_sha256_or_placeholder(path)
+        gaia_image_providers::recorded_sha256(base, path)
+            .unwrap_or_else(|| file_sha256_or_placeholder(path))
     } else {
         dir_digest(path)
     }
