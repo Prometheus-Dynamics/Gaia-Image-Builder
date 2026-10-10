@@ -464,6 +464,7 @@ fn build_with_private_output(
         BuildrootMakeOptions {
             post_build_script: staged_feed.as_ref().map(|feed| feed.script.as_path()),
             shared_tree: false,
+            finalize_only: false,
         },
     )?;
     let Some(staged_feed) = staged_feed else {

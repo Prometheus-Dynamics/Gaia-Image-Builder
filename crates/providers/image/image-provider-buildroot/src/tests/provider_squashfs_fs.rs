@@ -96,7 +96,7 @@ fn prepare_operation_reruns_even_when_expected_buildroot_images_exist() {
     fs::create_dir_all(&images_dir).expect("images dir");
     fs::write(
         source_dir.join("Makefile"),
-        "%_defconfig:\n\t@mkdir -p $(O)/target\n\t@echo defconfig > $(O)/target/marker\nall:\n\t@echo make >> $(O)/target/marker\n",
+        "%_defconfig:\n\t@mkdir -p $(O)/target\n\t@echo defconfig > $(O)/target/marker\ntarget-finalize: all\nall:\n\t@echo make >> $(O)/target/marker\n",
     )
     .expect("buildroot makefile");
     fs::write(target_dir.join("marker"), "stale").expect("prepared marker");
@@ -171,7 +171,7 @@ fn build_operation_applies_config_overrides_when_expected_images_exist() {
     .expect("stale config");
     fs::write(
         source_dir.join("Makefile"),
-        "all:\n\t@printf all >> $(O)/buildroot-ran\n\t@mkdir -p $(O)/images && printf image > $(O)/images/rootfs.tar\nclean:\n\t@printf clean >> $(O)/buildroot-ran\nolddefconfig:\n\t@printf olddefconfig >> $(O)/buildroot-ran\n%_defconfig:\n\t@mkdir -p $(O)\n\t@test -f $(O)/.config || printf 'BR2_TARGET_ROOTFS_TAR=y\\nBR2_PACKAGE_BUSYBOX=n\\n' > $(O)/.config\n",
+        "target-finalize: all\nall:\n\t@printf all >> $(O)/buildroot-ran\n\t@mkdir -p $(O)/images && printf image > $(O)/images/rootfs.tar\nclean:\n\t@printf clean >> $(O)/buildroot-ran\nolddefconfig:\n\t@printf olddefconfig >> $(O)/buildroot-ran\n%_defconfig:\n\t@mkdir -p $(O)\n\t@test -f $(O)/.config || printf 'BR2_TARGET_ROOTFS_TAR=y\\nBR2_PACKAGE_BUSYBOX=n\\n' > $(O)/.config\n",
     )
     .expect("buildroot makefile");
 
@@ -245,7 +245,7 @@ fn prepare_operation_does_not_reuse_partial_target_tree() {
     fs::create_dir_all(&target_dir).expect("target dir");
     fs::write(
         source_dir.join("Makefile"),
-        "%_defconfig:\n\t@mkdir -p $(O)/target\n\t@echo defconfig > $(O)/target/marker\nall:\n\t@echo make >> $(O)/target/marker\n",
+        "%_defconfig:\n\t@mkdir -p $(O)/target\n\t@echo defconfig > $(O)/target/marker\ntarget-finalize: all\nall:\n\t@echo make >> $(O)/target/marker\n",
     )
     .expect("buildroot makefile");
     fs::write(target_dir.join("marker"), "stale").expect("partial marker");
@@ -305,7 +305,7 @@ fn build_operation_reruns_when_assembly_provider_input_is_missing() {
     fs::write(images_dir.join("sdcard.img"), "stale assembly output").expect("assembly output");
     fs::write(
         source_dir.join("Makefile"),
-        "%_defconfig:\n\t@mkdir -p $(O)\n\t@echo defconfig > $(O)/buildroot-ran\nall:\n\t@echo all >> $(O)/buildroot-ran\n",
+        "%_defconfig:\n\t@mkdir -p $(O)\n\t@echo defconfig > $(O)/buildroot-ran\ntarget-finalize: all\nall:\n\t@echo all >> $(O)/buildroot-ran\n",
     )
     .expect("buildroot makefile");
 

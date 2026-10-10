@@ -8,7 +8,7 @@ fn run_buildroot_reports_make_failures() {
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     fs::write(
             buildroot_dir.join("Makefile"),
-            "bad_defconfig:\n\t@echo defconfig failed 1>&2\n\t@false\nall:\n\t@echo build failed 1>&2\n\t@false\n",
+            "bad_defconfig:\n\t@echo defconfig failed 1>&2\n\t@false\ntarget-finalize: all\nall:\n\t@echo build failed 1>&2\n\t@false\n",
         )
         .expect("makefile");
     let image = ImageSpec {
@@ -235,13 +235,17 @@ fn buildroot_parallel_packages_and_ccache_configure_and_report() {
         ccache_dir: Some(ccache_dir.display().to_string()),
         ..ImageExecutionPolicy::default()
     };
-    let messages = run_buildroot(BuildrootRunRequest {
-        spec: &spec,
-        image: &image,
-        buildroot_dir: &buildroot_dir,
-        output_dir: &output_dir,
-        command: test_command_context(&execution, &policy),
-    })
+    let messages = run_buildroot_with(
+        BuildrootRunRequest {
+            spec: &spec,
+            image: &image,
+            buildroot_dir: &buildroot_dir,
+            output_dir: &output_dir,
+            command: test_command_context(&execution, &policy),
+        },
+        // The build operation, which makes the images.
+        BuildrootMakeOptions::default(),
+    )
     .expect("buildroot run");
 
     let config = fs::read_to_string(output_dir.join(".config")).expect("config");
@@ -277,13 +281,17 @@ fn buildroot_parallel_packages_and_ccache_configure_and_report() {
 
     // Nothing the images read changed: the image step is skipped.
     let run_again = || {
-        run_buildroot(BuildrootRunRequest {
-            spec: &spec,
-            image: &image,
-            buildroot_dir: &buildroot_dir,
-            output_dir: &output_dir,
-            command: test_command_context(&execution, &policy),
-        })
+        run_buildroot_with(
+            BuildrootRunRequest {
+                spec: &spec,
+                image: &image,
+                buildroot_dir: &buildroot_dir,
+                output_dir: &output_dir,
+                command: test_command_context(&execution, &policy),
+            },
+            // The build operation, which makes the images.
+            BuildrootMakeOptions::default(),
+        )
         .expect("buildroot run")
     };
     let messages = run_again();
@@ -366,7 +374,7 @@ fn buildroot_package_overrides_are_staged_as_external_tree() {
     fs::write(override_pkg.join("foo.mk"), "FOO_VERSION = gaia\n").expect("override mk");
     fs::write(
         buildroot_dir.join("Makefile"),
-        "%_defconfig:\n\t@mkdir -p $(O)\n\t@printf '%s' \"$$BR2_EXTERNAL\" > $(O)/br2_external_defconfig\n\t@touch $(O)/.config\nall:\n\t@printf '%s' \"$$BR2_EXTERNAL\" > $(O)/br2_external_make\n",
+        "%_defconfig:\n\t@mkdir -p $(O)\n\t@printf '%s' \"$$BR2_EXTERNAL\" > $(O)/br2_external_defconfig\n\t@touch $(O)/.config\ntarget-finalize: all\nall:\n\t@printf '%s' \"$$BR2_EXTERNAL\" > $(O)/br2_external_make\n",
     )
     .expect("makefile");
 
@@ -452,7 +460,7 @@ fn buildroot_package_overrides_replace_existing_source_packages() {
     .expect("source config");
     fs::write(
         buildroot_dir.join("Makefile"),
-        "%_defconfig:\n\t@mkdir -p $(O)\n\t@printf '%s' \"$${BR2_EXTERNAL-unset}\" > $(O)/br2_external_defconfig\n\t@touch $(O)/.config\nclean:\n\t@printf clean > $(O)/cleaned\nall:\n\t@printf '%s' \"$${BR2_EXTERNAL-unset}\" > $(O)/br2_external_make\n",
+        "%_defconfig:\n\t@mkdir -p $(O)\n\t@printf '%s' \"$${BR2_EXTERNAL-unset}\" > $(O)/br2_external_defconfig\n\t@touch $(O)/.config\nclean:\n\t@printf clean > $(O)/cleaned\ntarget-finalize: all\nall:\n\t@printf '%s' \"$${BR2_EXTERNAL-unset}\" > $(O)/br2_external_make\n",
     )
     .expect("makefile");
 
@@ -527,7 +535,7 @@ fn buildroot_config_changes_clean_existing_output_before_make() {
     fs::write(output_dir.join("target/stale"), "stale\n").expect("stale target file");
     fs::write(
         buildroot_dir.join("Makefile"),
-        ".DEFAULT_GOAL := all\n%_defconfig:\n\t@mkdir -p $(O)\n\t@test -f $(O)/.config || printf 'BR2_PACKAGE_FOO=n\\n' > $(O)/.config\nolddefconfig:\n\t@true\nclean:\n\t@rm -rf $(O)/target\n\t@printf clean > $(O)/cleaned\nall:\n\t@mkdir -p $(O)/target\n\t@printf built > $(O)/target/current\n",
+        ".DEFAULT_GOAL := all\n%_defconfig:\n\t@mkdir -p $(O)\n\t@test -f $(O)/.config || printf 'BR2_PACKAGE_FOO=n\\n' > $(O)/.config\nolddefconfig:\n\t@true\nclean:\n\t@rm -rf $(O)/target\n\t@printf clean > $(O)/cleaned\ntarget-finalize: all\nall:\n\t@mkdir -p $(O)/target\n\t@printf built > $(O)/target/current\n",
     )
     .expect("makefile");
 
@@ -583,7 +591,7 @@ fn buildroot_retry_after_failed_post_image_does_not_clean() {
     // exists, the way a failing BR2_ROOTFS_POST_IMAGE_SCRIPT ends make.
     fs::write(
         buildroot_dir.join("Makefile"),
-        ".DEFAULT_GOAL := all\n%_defconfig:\n\t@mkdir -p $(O)\n\t@printf 'BR2_PACKAGE_FOO=n\\nBR2_ROOTFS_POST_IMAGE_SCRIPT=\"post-image.sh\"\\n' > $(O)/.config\nolddefconfig:\n\t@true\nclean:\n\t@printf clean >> $(O)/cleaned\nall:\n\t@mkdir -p $(O)/target $(O)/build\n\t@printf built > $(O)/target/current\n\t@test ! -f $(O)/post-image-fails\n",
+        ".DEFAULT_GOAL := all\n%_defconfig:\n\t@mkdir -p $(O)\n\t@printf 'BR2_PACKAGE_FOO=n\\nBR2_ROOTFS_POST_IMAGE_SCRIPT=\"post-image.sh\"\\n' > $(O)/.config\nolddefconfig:\n\t@true\nclean:\n\t@printf clean >> $(O)/cleaned\ntarget-finalize: all\nall:\n\t@mkdir -p $(O)/target $(O)/build\n\t@printf built > $(O)/target/current\n\t@test ! -f $(O)/post-image-fails\n",
     )
     .expect("makefile");
 
@@ -668,7 +676,7 @@ fn buildroot_option_change_rebuilds_only_the_package_and_its_dependents() {
         buildroot_dir.join("Makefile"),
         ".DEFAULT_GOAL := all\n%_defconfig:\n\t@mkdir -p $(O)\n\t@printf 'BR2_PACKAGE_FOO=y\\nBR2_PACKAGE_BAR=y\\nBR2_PACKAGE_BAZ=y\\n' > $(O)/.config\n\
          olddefconfig:\n\t@true\nclean:\n\t@printf clean >> $(O)/cleaned\nshow-info:\n\t@cat graph.json\n\
-         all:\n\t@for p in foo bar baz; do test -d $(O)/build/$$p-1 || { mkdir -p $(O)/build/$$p-1 $(O)/target/usr/bin; \
+         target-finalize: all\nall:\n\t@for p in foo bar baz; do test -d $(O)/build/$$p-1 || { mkdir -p $(O)/build/$$p-1 $(O)/target/usr/bin; \
          echo $$p,./usr/bin/$$p > $(O)/build/$$p-1/.files-list.txt; echo $$p > $(O)/target/usr/bin/$$p; echo $$p >> $(O)/built; }; done\n",
     )
     .expect("makefile");
@@ -746,7 +754,7 @@ fn buildroot_package_override_missing_config_in_fails_before_make() {
     fs::write(override_pkg.join("foo.mk"), "FOO_VERSION = gaia\n").expect("override mk");
     fs::write(
         buildroot_dir.join("Makefile"),
-        "%_defconfig:\n\t@touch should-not-run\nall:\n\t@touch should-not-run\n",
+        "%_defconfig:\n\t@touch should-not-run\ntarget-finalize: all\nall:\n\t@touch should-not-run\n",
     )
     .expect("makefile");
 
@@ -801,7 +809,7 @@ fn buildroot_package_override_detects_generated_external_name_conflict() {
     .expect("user external desc");
     fs::write(
         buildroot_dir.join("Makefile"),
-        "%_defconfig:\n\t@touch should-not-run\nall:\n\t@touch should-not-run\n",
+        "%_defconfig:\n\t@touch should-not-run\ntarget-finalize: all\nall:\n\t@touch should-not-run\n",
     )
     .expect("makefile");
 

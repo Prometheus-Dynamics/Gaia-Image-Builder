@@ -18,6 +18,7 @@ newest release, and updates the Rust docker images to 1.99.0.
 
 ### Previews
 
+- The Buildroot prepare operation stops after `target-finalize`; only the build operation (which adds the image feed and so changes the target tree) makes the filesystem images. Before, both did, and the prepare operation's images were always discarded (about 2.5 minutes per PhotonVision build).
 - `gaia preview <build.toml>` (also `gaia run <build.toml> --dry-run`) shows,
   before a run, which operations run or are reused and why, and for a
   Buildroot image: the work dir placement (a disk tree moved into RAM is

@@ -70,12 +70,23 @@ pub(crate) struct BuildrootMakeOptions<'a> {
     /// current config, only `make target-finalize` runs, because every build
     /// packs its own images.
     pub(crate) shared_tree: bool,
+    /// Stop after `target-finalize`: the prepare operation only readies the
+    /// target tree; the build operation, which adds the image feed and so
+    /// changes the tree, makes the filesystem images.
+    pub(crate) finalize_only: bool,
 }
 
+/// The prepare operation: packages and target finalization, no images.
 pub(crate) fn run_buildroot(
     request: BuildrootRunRequest<'_>,
 ) -> Result<Vec<String>, ImageProviderError> {
-    run_buildroot_with(request, BuildrootMakeOptions::default())
+    run_buildroot_with(
+        request,
+        BuildrootMakeOptions {
+            finalize_only: true,
+            ..BuildrootMakeOptions::default()
+        },
+    )
 }
 
 pub(crate) fn run_buildroot_with(
@@ -290,8 +301,13 @@ pub(crate) fn run_buildroot_with(
     // With per-package directories, build only up to target-finalize first:
     // the filesystem images and post-image step run afterwards, and only
     // when what they read changed (see rootfs_inputs).
-    let images_command =
-        (command_context.policy.parallel_packages && !options.shared_tree).then(|| {
+    if options.finalize_only {
+        command.arg("target-finalize");
+    }
+    let images_command = (command_context.policy.parallel_packages
+        && !options.shared_tree
+        && !options.finalize_only)
+        .then(|| {
             let mut images = gaia_process::clone_command(&command);
             // Without finalizing (and building packages) again.
             images.args([

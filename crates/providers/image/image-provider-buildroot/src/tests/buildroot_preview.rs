@@ -83,7 +83,7 @@ impl Fixture {
             buildroot_dir.join("Makefile"),
             ".DEFAULT_GOAL := all\n%_defconfig:\n\t@mkdir -p $(O)\n\t@printf 'BR2_PACKAGE_FOO=n\\n' > $(O)/.config\n\
              olddefconfig:\n\t@true\nclean:\n\t@printf clean >> $(O)/cleaned\nshow-info:\n\t@cat graph.json\n\
-             all:\n\t@for p in foo bar baz; do test -d $(O)/build/$$p-1 || { mkdir -p $(O)/build/$$p-1 $(O)/target/usr/bin; \
+             target-finalize: all\nall:\n\t@for p in foo bar baz; do test -d $(O)/build/$$p-1 || { mkdir -p $(O)/build/$$p-1 $(O)/target/usr/bin; \
              echo $$p,./usr/bin/$$p > $(O)/build/$$p-1/.files-list.txt; echo $$p > $(O)/target/usr/bin/$$p; echo $$p >> $(O)/built; \
              touch $(O)/build/$$p-1/.stamp_installed; }; done\n",
         )

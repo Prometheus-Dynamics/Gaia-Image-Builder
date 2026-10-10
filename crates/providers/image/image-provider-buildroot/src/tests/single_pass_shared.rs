@@ -3,11 +3,11 @@ use super::*;
 /// A fake Buildroot: `make` installs a base file, runs the post-build
 /// scripts named on the command line (as Buildroot's target-finalize does),
 /// then "packs" the target into a listing and counts the packs.
-pub(super) const SINGLE_PASS_MAKEFILE: &str = "%_defconfig:\n\t@mkdir -p $(O)\n\t@printf 'BR2_TARGET_ROOTFS_SQUASHFS=y\\n' > $(O)/.config\nall:\n\t@mkdir -p $(O)/target/usr/bin $(O)/images\n\t@printf base > $(O)/target/usr/bin/base\n\t@for s in $(BR2_ROOTFS_POST_BUILD_SCRIPT); do $$s $(O)/target; done\n\t@(cd $(O)/target && find . -mindepth 1 | LC_ALL=C sort) > $(O)/images/rootfs.squashfs\n\t@printf x >> $(O)/pack-count\nclean:\n\t@:\n";
+pub(super) const SINGLE_PASS_MAKEFILE: &str = "%_defconfig:\n\t@mkdir -p $(O)\n\t@printf 'BR2_TARGET_ROOTFS_SQUASHFS=y\\n' > $(O)/.config\ntarget-finalize: all\nall:\n\t@mkdir -p $(O)/target/usr/bin $(O)/images\n\t@printf base > $(O)/target/usr/bin/base\n\t@for s in $(BR2_ROOTFS_POST_BUILD_SCRIPT); do $$s $(O)/target; done\n\t@(cd $(O)/target && find . -mindepth 1 | LC_ALL=C sort) > $(O)/images/rootfs.squashfs\n\t@printf x >> $(O)/pack-count\nclean:\n\t@:\n";
 
 /// Like [`SINGLE_PASS_MAKEFILE`] but ignores post-build scripts, so Gaia
 /// must fall back to refreshing the images after make.
-const NO_POST_BUILD_MAKEFILE: &str = "%_defconfig:\n\t@mkdir -p $(O)\n\t@printf 'BR2_TARGET_ROOTFS_SQUASHFS=y\\n' > $(O)/.config\nall:\n\t@mkdir -p $(O)/target/usr/bin $(O)/images\n\t@printf base > $(O)/target/usr/bin/base\n\t@(cd $(O)/target && find . -mindepth 1 | LC_ALL=C sort) > $(O)/images/rootfs.squashfs\n\t@printf x >> $(O)/pack-count\ntarget-post-image:\n\t@(cd $(O)/target && find . -mindepth 1 | LC_ALL=C sort) > $(O)/images/rootfs.squashfs\n\t@printf r >> $(O)/pack-count\n";
+const NO_POST_BUILD_MAKEFILE: &str = "%_defconfig:\n\t@mkdir -p $(O)\n\t@printf 'BR2_TARGET_ROOTFS_SQUASHFS=y\\n' > $(O)/.config\ntarget-finalize: all\nall:\n\t@mkdir -p $(O)/target/usr/bin $(O)/images\n\t@printf base > $(O)/target/usr/bin/base\n\t@(cd $(O)/target && find . -mindepth 1 | LC_ALL=C sort) > $(O)/images/rootfs.squashfs\n\t@printf x >> $(O)/pack-count\ntarget-post-image:\n\t@(cd $(O)/target && find . -mindepth 1 | LC_ALL=C sort) > $(O)/images/rootfs.squashfs\n\t@printf r >> $(O)/pack-count\n";
 
 /// A fake Buildroot for shared trees: a full `make` compiles (logs `all`),
 /// installs a target with Buildroot's warning file, and generates a
