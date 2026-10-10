@@ -34,9 +34,21 @@ fn build_into(
     .expect("cargo build succeeds");
     collect_cargo_output(&source, &target.dir, package, contract, package)
         .expect("output collected");
-    let output = Command::new(artifact_output_path(contract, &source))
-        .output()
-        .expect("built binary runs");
+    // A freshly copied binary can be briefly busy (ETXTBSY) while another
+    // test thread forks; retry like Gaia's own command runner does.
+    let binary = artifact_output_path(contract, &source);
+    let mut attempt = 0;
+    let output = loop {
+        match Command::new(&binary).output() {
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ExecutableFileBusy && attempt < 20 =>
+            {
+                attempt += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10 * attempt));
+            }
+            result => break result.expect("built binary runs"),
+        }
+    };
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 

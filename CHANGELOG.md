@@ -22,6 +22,10 @@ newest release, and updates the Rust docker images to 1.99.0.
 - Buildroot's `make` and its scripts get `SOURCE_DATE_EPOCH` from the environment, else from the workspace git `HEAD` commit time. Package cache keys do not include it.
 - The package cache reports installed packages it cannot key (for example packages with local sources). Installed packages with a key but no cache entry are already stored by the store step.
 
+### Content digests
+
+- Gaia records the sha256 of the files it writes (collected images, the image archive and assembly outputs) in a `.gaia-content-digests` manifest next to them. Each line holds the relative path, size, mtime in nanoseconds and digest. Later plans, previews and runs use a recorded digest while the file's size and mtime still match, so they no longer re-read multi-GB images. A file whose size or mtime differs is hashed again. The trust limit is (size, mtime): an edit that keeps both is not seen. The manifest is skipped by the collect-dir digest, so writing it does not change reuse decisions.
+
 ### Previews
 
 - The Buildroot prepare operation stops after `target-finalize`; only the build operation (which adds the image feed and so changes the target tree) makes the filesystem images. Before, both did, and the prepare operation's images were always discarded (about 2.5 minutes per PhotonVision build).

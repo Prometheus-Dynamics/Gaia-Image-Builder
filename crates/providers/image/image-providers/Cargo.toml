@@ -11,6 +11,7 @@ description = "Shared image provider contracts and catalogs for Gaia."
 [dependencies]
 gaia-process.workspace = true
 gaia-spec.workspace = true
+sha2.workspace = true
 
 [lints]
 workspace = true

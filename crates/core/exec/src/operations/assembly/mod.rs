@@ -362,7 +362,19 @@ fn temporary_assembly_output_path(output: &Path) -> PathBuf {
 }
 
 fn publish_assembly_output(temp: &Path, output: &Path) -> Result<(), String> {
-    gaia_image_providers::publish_replace_output(temp, output, "assembly output", "assembly-output")
+    gaia_image_providers::publish_replace_output(
+        temp,
+        output,
+        "assembly output",
+        "assembly-output",
+    )?;
+    // Record the output's digest in its directory's content manifest so the
+    // next plan does not read it again. Best effort: a missing entry only
+    // costs one re-hash.
+    if let (true, Some(parent)) = (output.is_file(), output.parent()) {
+        let _ = gaia_image_providers::record_content_digests(parent, &[output.to_path_buf()]);
+    }
+    Ok(())
 }
 
 fn temporary_assembly_backup_path(output: &Path) -> PathBuf {
