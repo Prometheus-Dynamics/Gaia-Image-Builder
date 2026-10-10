@@ -156,6 +156,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
             rollback_on_error: raw.failure.rollback_on_error.unwrap_or(true),
             preserve_failed_outputs: raw.failure.preserve_failed_outputs.unwrap_or(false),
             rollback_domains: compile_rollback_domains(raw.failure.rollback_domains),
+            rollback_completed: raw.failure.rollback_completed.unwrap_or(false),
             keep_going: raw.failure.keep_going.unwrap_or(false),
         },
         providers: ProviderExecutionPolicySpec {

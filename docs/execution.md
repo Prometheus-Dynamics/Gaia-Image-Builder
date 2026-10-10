@@ -160,23 +160,37 @@ Failure policy is typed:
 ```toml
 [failure]
 rollback_on_error = true
+rollback_completed = false
 preserve_failed_outputs = false
 rollback_domains = ["artifacts", "images"]
 ```
 
 Behavior:
-- when `rollback_on_error = true`, Gaia rolls back completed current-run outputs
+- when `rollback_on_error = true` (the default), a failure cleans only the failed
+  operation's own partial outputs. Operations that completed earlier in the run
+  keep their outputs and are recorded in the reuse state, so the next run reuses
+  them and redoes only what failed or changed.
+- `rollback_completed = true` restores the older behavior: after a failure or
+  cancellation, every completed current-run output is also unwound (within
+  `rollback_domains`). Those operations are then not recorded for reuse.
 - when `preserve_failed_outputs = true`, the failed op’s partial outputs are kept
-- `rollback_domains` restrict which completed domains get cleaned up
+- `rollback_domains` restrict which domains get cleaned up. Completed outputs in
+  a domain that is not listed are kept, even with `rollback_completed = true`.
 - when `rollback_on_error = false`, Gaia leaves current-run outputs in place
 
 By default the first failure stops every running sibling. With
 `keep_going = true`, independent operations keep running to completion;
 operations that depend on a failed one are skipped (a `Skipped` event and
-`skipped_operation_ids` in the run summary), and the run still fails. Finished
-work is not rolled back under `keep_going`: it is recorded in the reuse state
-so the next run reuses it, and only the failed operations' own partial outputs
-are cleaned per the policy above. Cancellation still rolls back as usual.
+`skipped_operation_ids` in the run summary), and the run still fails. The
+default failure handling above applies to the failed operations, so finished
+work is kept for the next run in both modes.
+
+Cancellation follows the same rules: the cancelled operation's partial outputs
+are cleaned, and completed work is kept and recorded for reuse unless
+`rollback_completed = true`.
+
+The run summary states what happened, for example
+`rollback: kept 3 completed operation(s) for reuse; cleaned the failed operation's outputs`.
 
 ## Timing
 

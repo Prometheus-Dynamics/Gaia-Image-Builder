@@ -59,3 +59,51 @@ fn command_signature_times_out_hanging_tools() {
 
     let _ = fs::remove_file(script);
 }
+
+#[test]
+fn content_state_signature_ignores_path_and_mtime() {
+    use super::content_state_signature;
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("gaia-content-signature-{nonce}"));
+    let first_dir = root.join("first");
+    let second_dir = root.join("second");
+    fs::create_dir_all(&first_dir).expect("first dir");
+    fs::create_dir_all(&second_dir).expect("second dir");
+    let first = first_dir.join(".config");
+    let second = second_dir.join(".config");
+    fs::write(&first, "BR2_x86_64=y\n").expect("first config");
+    fs::write(&second, "BR2_x86_64=y\n").expect("second config");
+
+    let before = content_state_signature(&first);
+    let timestamp = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    fs::File::options()
+        .write(true)
+        .open(&first)
+        .expect("open")
+        .set_modified(timestamp)
+        .expect("set mtime");
+
+    // Same contents at another path and mtime: same signature.
+    assert_eq!(before, content_state_signature(&second));
+    assert_eq!(before, content_state_signature(&first));
+    assert!(before.starts_with("sha256:"));
+
+    // A symlink to the same file (as used for a RAM tree) hashes its contents.
+    #[cfg(unix)]
+    {
+        let link = root.join("link");
+        std::os::unix::fs::symlink(&second, &link).expect("symlink");
+        assert_eq!(before, content_state_signature(&link));
+    }
+
+    fs::write(&second, "BR2_x86_64=n\n").expect("changed config");
+    assert_ne!(before, content_state_signature(&second));
+    assert_eq!(
+        content_state_signature(&root.join("absent")),
+        "missing:absent"
+    );
+    let _ = fs::remove_dir_all(root);
+}

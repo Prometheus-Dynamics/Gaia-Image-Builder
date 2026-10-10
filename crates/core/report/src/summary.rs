@@ -91,6 +91,7 @@ pub fn render_summary(
         rollback_on_error: spec.policy.failure.rollback_on_error,
         preserve_failed_outputs: spec.policy.failure.preserve_failed_outputs,
         rollback_domains: rollback_domains(spec),
+        rollback_completed: spec.policy.failure.rollback_completed,
         source_count: spec.sources.len(),
         artifact_count: spec.artifacts.len(),
         install_count: spec.install.entries.len(),

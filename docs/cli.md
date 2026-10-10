@@ -8,6 +8,7 @@ gaia --version
 gaia resolve <build.toml>
 gaia validate <build.toml>
 gaia plan <build.toml>
+gaia preview <build.toml>
 gaia clean <build.toml>
 gaia lock <build.toml>
 gaia cache <build.toml>
@@ -117,6 +118,47 @@ Prints selection/overview context, then:
 - an estimate from the durations recorded by earlier runs: the critical path
   (longest dependency chain), total work, and any operations with no timing yet
 - runtime domain summaries
+
+### `preview`
+
+Shows what `gaia run` would do, without changing anything: the same plan as
+`gaia plan`, then for each operation whether it runs or is reused, and why.
+`gaia run <build.toml> --dry-run` is the same command.
+
+For a Buildroot image that would run, it adds:
+- the work dir: the build dir, RAM, or another directory; whether a RAM tree
+  is created, kept, or whether a disk tree would be moved into RAM (which
+  discards it), or RAM is too small and the build falls back to disk
+- the config: what the defconfig, fragments, overrides and cache settings
+  change against the last build
+- host tools: which ones come from the system and which are built
+- the clean a run would make, from the same decision the run acts on: nothing,
+  finalize only, the packages rebuilt and uninstalled with reasons, or a full
+  clean with its reasons
+- the package cache: which packages would be restored, built, or built because
+  the image reads their sources, and which cache entries would be evicted
+- every path the run would remove or move aside, and the leftovers of an
+  earlier clean that would be purged
+
+The config steps run on a scratch copy of the tree's state files in the
+temporary directory, so the real output tree is not touched. A preview cannot
+see files a `make` creates later, the post-image steps, or the output of
+assembly; those are not previewed. It may create the empty download and cache
+directories a run would create.
+
+The last line is the verdict, for example:
+
+```text
+preview: no clean, 3 packages rebuilt (mesa3d, openjdk, qt6base), 412 deleted paths
+preview: FULL CLEAN of /run/media/.../image/buildroot-output (reason: effective config changed (no snapshot of the previously built config))
+```
+
+Options:
+- `--json` prints the whole report as JSON, including every deletion path.
+- `--fail-on-clean` exits with `3` when a run would clean the whole tree or
+  delete anything other than leftovers of an earlier clean. Use it in scripts
+  and CI to stop before a surprising clean.
+- `--only`, `--set`, `--env` and `--preset` apply as for `run` and `plan`.
 
 ### `clean`
 
@@ -372,6 +414,8 @@ Current behavior:
 - validation failure returns a non-zero validation code
 - execution failure returns a non-zero execution code
 - a cancelled run (Ctrl-C, `gaia cancel`) returns `130`
+- `gaia preview --fail-on-clean` returns `3` when a run would clean the whole
+  tree or delete something other than leftovers of an earlier clean
 
 The important practical distinction is:
 - validation errors stop before planning/execution

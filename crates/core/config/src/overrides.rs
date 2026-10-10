@@ -324,6 +324,9 @@ fn apply_known_override(
         KnownOverrideKey::PolicyFailureKeepGoing => {
             raw.failure.keep_going = Some(parse_bool_override(key, value)?)
         }
+        KnownOverrideKey::PolicyFailureRollbackCompleted => {
+            raw.failure.rollback_completed = Some(parse_bool_override(key, value)?)
+        }
         KnownOverrideKey::PolicyProvidersRustAllowNestedBuild => {
             raw.providers.rust.allow_nested_build = parse_bool_override(key, value)?
         }

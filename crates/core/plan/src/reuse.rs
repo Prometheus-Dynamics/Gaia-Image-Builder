@@ -6,10 +6,12 @@ use gaia_spec::{
     CheckpointAnchorRef, ImageDefinition, ResolvedBuildSpec, SourceDefinition, SourcePinPolicySpec,
     SourceRefreshPolicySpec,
 };
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
@@ -814,7 +816,7 @@ pub fn operation_output_signature(
                 format!(
                     "{}|{}",
                     provider_state_signature(&collect_dir.join(".gaia-image-state.txt")),
-                    path_state_signature(&buildroot_output_dir(spec).join(".config")),
+                    content_state_signature(&buildroot_output_dir(spec).join(".config")),
                 )
             })
         }
@@ -825,7 +827,7 @@ pub fn operation_output_signature(
                 parts.push(provider_state_signature(
                     &collect_dir.join(".gaia-image-state.txt"),
                 ));
-                parts.push(path_state_signature(
+                parts.push(content_state_signature(
                     &collect_dir.join("image-provider.txt"),
                 ));
             }
@@ -833,7 +835,7 @@ pub fn operation_output_signature(
                 spec.image.output.collect_dir.as_deref(),
                 spec.image.output.archive_name.as_deref(),
             ) {
-                parts.push(path_state_signature(
+                parts.push(content_state_signature(
                     &resolve_workspace_path(spec, collect_dir).join(archive_name),
                 ));
             }
@@ -870,6 +872,38 @@ fn artifact_state_path(output_path: &Path) -> PathBuf {
 
 fn buildroot_output_dir(spec: &ResolvedBuildSpec) -> PathBuf {
     resolve_workspace_path(spec, &spec.workspace.build_dir).join("image/buildroot-output")
+}
+
+/// SHA-256 of a file's contents, never its mtime or absolute path.
+///
+/// Used for outputs that are rewritten with identical content on every run
+/// (for example Buildroot's `.config` after defconfig/olddefconfig) and for
+/// outputs that may be reached through a symlink into a RAM tree, where the
+/// path and timestamps differ between otherwise identical builds. Only the
+/// file name is recorded for missing or unreadable files.
+pub(crate) fn content_state_signature(path: &Path) -> String {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("file");
+    let Ok(mut file) = fs::File::open(path) else {
+        return format!("missing:{name}");
+    };
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; 64 * 1024];
+    loop {
+        match file.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => hasher.update(&buffer[..read]),
+            Err(_) => return format!("unreadable:{name}"),
+        }
+    }
+    let digest: String = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("sha256:{digest}")
 }
 
 fn provider_state_signature(path: &Path) -> String {

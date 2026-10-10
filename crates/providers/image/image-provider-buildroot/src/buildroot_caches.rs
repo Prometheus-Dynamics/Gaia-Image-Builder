@@ -117,7 +117,8 @@ pub(crate) fn restore_cached_packages(
         graph: &graph,
         execution_identity: &identity,
     });
-    let restored = cache.restore(output_dir, &graph, &keys);
+    let keep_source = packages_with_read_sources(spec, output_dir, &graph);
+    let restored = cache.restore_except(output_dir, &graph, &keys, &keep_source);
     refresh_current_stamps(output_dir, &graph, &keys);
     pin_restored_linux_version(output_dir, &graph)?;
     messages.push(gaia_process::step_time_message(
@@ -235,5 +236,87 @@ mod linux_pin_tests {
         pin_restored_linux_version(&output, &graph).expect("unpin");
         assert!(!output.join("local.mk").exists());
         let _ = fs::remove_dir_all(output);
+    }
+}
+
+/// Packages whose build directory the build reads later (an assembly
+/// source under `buildroot-output/build/<dir>/`): a cache entry holds a
+/// package's installed files, not its sources, so these are built, and a
+/// source-less build directory left by an earlier restore is removed so
+/// Buildroot builds the package again.
+fn packages_with_read_sources(
+    spec: &ResolvedBuildSpec,
+    output_dir: &Path,
+    graph: &PackageGraph,
+) -> BTreeSet<String> {
+    let text = format!("{:?}", spec.image);
+    let dirs = referenced_build_dirs(&text);
+    let mut packages = BTreeSet::new();
+    for (name, package) in &graph.packages {
+        let Some(stamp_dir) = package.stamp_dir.as_deref() else {
+            continue;
+        };
+        let Some(dir) = stamp_dir.strip_prefix("build/") else {
+            continue;
+        };
+        if !dirs
+            .iter()
+            .any(|pattern| gaia_spec::wildcard_match(pattern, dir))
+        {
+            continue;
+        }
+        packages.insert(name.clone());
+        let build_dir = output_dir.join(stamp_dir);
+        let has_sources = fs::read_dir(&build_dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|entry| !entry.file_name().to_string_lossy().starts_with('.'));
+        if build_dir.join(".stamp_installed").exists() && !has_sources {
+            let _ = gaia_process::discard(&build_dir);
+            let _ = gaia_process::discard(&output_dir.join("per-package").join(name));
+            tracing::info!(
+                provider_domain = "image.buildroot",
+                "building {name} again: its sources are read by the image and the cache does not hold them"
+            );
+        }
+    }
+    packages
+}
+
+/// `<dir>` (possibly a glob) of every `buildroot-output/build/<dir>/` or
+/// `buildroot_output/build/<dir>/` (the `$provider.buildroot_output`
+/// variable of assembly sources) in `text`.
+pub(crate) fn referenced_build_dirs(text: &str) -> BTreeSet<String> {
+    ["buildroot-output/build/", "buildroot_output/build/"]
+        .iter()
+        .flat_map(|marker| {
+            text.match_indices(marker)
+                .map(move |(start, _)| start + marker.len())
+        })
+        .filter_map(|start| {
+            let rest = &text[start..];
+            let end = rest.find('/')?;
+            let dir = &rest[..end];
+            (!dir.is_empty() && !dir.contains(['"', ' ', '\\'])).then(|| dir.to_string())
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod read_sources_tests {
+    use super::*;
+
+    #[test]
+    fn build_dirs_read_by_the_image_are_found() {
+        let text = r#"source: "/w/build/image/buildroot-output/build/rpi-firmware-1.2/boot/start4.elf", other: "/w/build/image/buildroot-output/images/Image", x: "buildroot-output/build/linux-custom/arch/arm64/boot/dts/x.dtb", y: "$provider.buildroot_output/build/rpi-eeprom-*/firmware/x.bin""#;
+        assert_eq!(
+            referenced_build_dirs(text),
+            BTreeSet::from([
+                "rpi-firmware-1.2".to_string(),
+                "linux-custom".to_string(),
+                "rpi-eeprom-*".to_string()
+            ])
+        );
     }
 }

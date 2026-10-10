@@ -21,6 +21,10 @@ pub struct AppArgs {
     pub only: Vec<String>,
     /// `--follow` / `-f` for status: refresh until the run ends.
     pub follow: bool,
+    /// `--json` for preview: the report as JSON.
+    pub json: bool,
+    /// `--fail-on-clean` for preview: exit 3 when a run would clean or delete.
+    pub fail_on_clean: bool,
     /// Problems found while parsing; dispatch refuses to run when non-empty.
     pub usage_errors: Vec<String>,
 }
@@ -83,6 +87,7 @@ impl AppArgs {
             Some("tui") => Some(AppCommand::Tui),
             Some("validate") => Some(AppCommand::Validate),
             Some("plan") => Some(AppCommand::Plan),
+            Some("preview") => Some(AppCommand::Preview),
             Some("clean") => Some(AppCommand::Clean),
             Some("cache") => Some(AppCommand::Cache),
             Some("pause") => Some(AppCommand::Pause),
@@ -173,6 +178,8 @@ impl AppArgs {
                 }
                 "--all-caches" => parsed.clean.all_caches = true,
                 "--follow" | "-f" => parsed.follow = true,
+                "--json" => parsed.json = true,
+                "--fail-on-clean" => parsed.fail_on_clean = true,
                 "--update" => {
                     parsed.lock.update = true;
                     // `--update [source-id]`: an optional value, taken only
@@ -218,6 +225,10 @@ impl AppArgs {
         if !parsed.build_explicit {
             parsed.build = default_build_config();
         }
+        // `gaia run --dry-run` is `gaia preview`.
+        if parsed.command == AppCommand::Run && parsed.clean.dry_run {
+            parsed.command = AppCommand::Preview;
+        }
         parsed
     }
 }
@@ -238,6 +249,8 @@ impl Default for AppArgs {
             lock: LockArgs::default(),
             only: Vec::new(),
             follow: false,
+            json: false,
+            fail_on_clean: false,
             usage_errors: Vec::new(),
         }
     }
@@ -308,6 +321,8 @@ pub enum AppCommand {
     Status,
     Lock,
     Run,
+    /// What `gaia run` would do, without changing anything.
+    Preview,
 }
 
 #[cfg(test)]
@@ -351,5 +366,46 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    fn parse(args: &[&str]) -> AppArgs {
+        AppArgs::parse_from(args.iter().map(|arg| arg.to_string()))
+    }
+
+    #[test]
+    fn preview_takes_the_plan_options_and_its_own_flags() {
+        let args = parse(&[
+            "preview",
+            "examples/default-workspace/configs/default.toml",
+            "--set",
+            "image.defconfig=x",
+            "--only",
+            "image",
+            "--json",
+            "--fail-on-clean",
+        ]);
+        assert_eq!(args.command, AppCommand::Preview);
+        assert!(args.json && args.fail_on_clean);
+        assert_eq!(args.only, ["image"]);
+        assert_eq!(
+            args.explicit_overrides,
+            [("image.defconfig".to_string(), "x".to_string())]
+        );
+        assert!(args.usage_errors.is_empty(), "{:?}", args.usage_errors);
+    }
+
+    #[test]
+    fn run_with_dry_run_is_preview_and_clean_keeps_its_own_dry_run() {
+        let run = parse(&["run", "build.toml", "--dry-run"]);
+        assert_eq!(run.command, AppCommand::Preview);
+        assert!(run.clean.dry_run);
+        let clean = parse(&["clean", "build.toml", "--dry-run"]);
+        assert_eq!(clean.command, AppCommand::Clean);
+        assert!(clean.clean.dry_run);
+        assert_eq!(parse(&["run", "build.toml"]).command, AppCommand::Run);
+        assert_eq!(
+            parse(&["--dry-run", "build.toml"]).command,
+            AppCommand::Preview
+        );
     }
 }

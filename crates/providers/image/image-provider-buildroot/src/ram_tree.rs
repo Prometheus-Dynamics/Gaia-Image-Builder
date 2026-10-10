@@ -26,18 +26,18 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-const GIB: u64 = 1024 * 1024 * 1024;
+pub(crate) const GIB: u64 = 1024 * 1024 * 1024;
 /// RAM assumed for a tree never built in RAM before.
-const DEFAULT_RAM_NEED: u64 = 30 * GIB;
-const DEFAULT_RAM_BUDGET: &str = "60G";
+pub(crate) const DEFAULT_RAM_NEED: u64 = 30 * GIB;
+pub(crate) const DEFAULT_RAM_BUDGET: &str = "60G";
 /// Available memory left to everything else when a RAM build starts.
-const RAM_MARGIN: u64 = 8 * GIB;
+pub(crate) const RAM_MARGIN: u64 = 8 * GIB;
 /// The watchdog stops the build below this much available memory or tmpfs
 /// space.
 const RAM_LOW: u64 = 4 * GIB;
 /// Size of the last RAM tree, next to the output path on disk.
 const RAM_SIZE_FILE: &str = ".gaia-ram-tree-size";
-const RAM_BASE: &str = "/dev/shm";
+pub(crate) const RAM_BASE: &str = "/dev/shm";
 
 /// Where this build's tree is.
 pub(crate) struct WorkDir {
@@ -54,142 +54,73 @@ pub(crate) fn place_work_dir(
     output_dir: &Path,
     policy: &ImageExecutionPolicy,
 ) -> Result<WorkDir, ImageProviderError> {
-    let settings = &policy.work_dir;
-    let base = match settings.work_dir.trim() {
-        "" | "disk" => return disk_work_dir(output_dir),
-        "ram" => PathBuf::from(RAM_BASE),
-        path => PathBuf::from(path),
-    };
-    let ram = settings.work_dir.trim() == "ram";
-    let dir = tree_dir(&base, output_dir);
-    let mut messages = Vec::new();
-    if ram {
-        let budget = settings
-            .ram_budget
-            .as_deref()
-            .unwrap_or(DEFAULT_RAM_BUDGET)
-            .parse::<gaia_spec::ByteSize>()
-            .map_err(|error| {
-                ImageProviderError::new(
-                    ImageProviderErrorKind::PolicyBlocked,
-                    format!("providers.buildroot.ram_budget: {error}"),
-                )
-            })?
-            .bytes();
-        let need = recorded_tree_size(output_dir).unwrap_or(DEFAULT_RAM_NEED);
-        // A tree already in RAM is already counted as used memory.
-        let present = if dir.is_dir() { tree_size(&dir) } else { 0 };
-        let more = need.saturating_sub(present);
-        let available = mem_available().unwrap_or(0);
-        let tmpfs_free = filesystem_available_bytes(&base).unwrap_or(0);
-        let allowed = budget
-            .saturating_sub(present)
-            .min(available.saturating_sub(RAM_MARGIN))
-            .min(tmpfs_free);
-        if need > budget || more > allowed {
-            messages.push(format!(
-                "RAM build: the tree needs about {} and {} more is not free (budget {}, \
-                 available memory {}, {} free in {}); building on disk",
-                gib(need),
-                gib(more),
-                gib(budget),
-                gib(available),
-                gib(tmpfs_free),
-                base.display()
-            ));
-            let mut disk = disk_work_dir(output_dir)?;
-            messages.append(&mut disk.messages);
-            disk.messages = messages;
-            return Ok(disk);
-        }
-    }
+    let facts = work_dir_facts(output_dir, policy)?;
+    let decision = decide_work_dir(&facts);
+    let messages = work_dir_messages(&decision, output_dir);
     let error = |action: &str, path: &Path, error: std::io::Error| {
         ImageProviderError::backend_command(format!(
             "failed to {action} '{}': {error}",
             path.display()
         ))
     };
-    let pointing_here = fs::read_link(output_dir).is_ok_and(|target| target == dir);
-    if !pointing_here {
-        match fs::symlink_metadata(output_dir) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
+    match decision {
+        WorkDirDecision::Disk { dropped } | WorkDirDecision::RamFallback { dropped, .. } => {
+            // The usual tree in the build dir. A link left by an earlier RAM
+            // or work dir build goes together with its tree.
+            if let Some(target) = dropped {
+                fs::remove_file(output_dir).map_err(|e| error("remove", output_dir, e))?;
+                let _ = gaia_process::discard(&target);
+            }
+            Ok(WorkDir {
+                dir: output_dir.to_path_buf(),
+                ram: false,
+                messages,
+            })
+        }
+        WorkDirDecision::Tree(placement) => {
+            let dir = placement.dir.clone();
+            if placement.replaced_link {
                 fs::remove_file(output_dir).map_err(|e| error("remove", output_dir, e))?;
             }
-            Ok(_) => {
+            if placement.moved_from_disk {
                 // A tree built on disk: start over in the work dir, restoring
                 // packages from the package cache.
                 keep_package_durations(output_dir, output_dir.parent());
                 gaia_process::discard(output_dir).map_err(|e| error("remove", output_dir, e))?;
-                messages.push(format!(
-                    "moved the Buildroot tree from '{}' to '{}'; packages are restored \
-                     from the package cache",
-                    output_dir.display(),
-                    dir.display()
-                ));
             }
-            Err(_) => {}
+            if placement.relink
+                && let Some(parent) = output_dir.parent()
+            {
+                fs::create_dir_all(parent).map_err(|e| error("create", parent, e))?;
+            }
+            if placement.create {
+                fs::create_dir_all(&dir).map_err(|e| error("create", &dir, e))?;
+            }
+            if placement.relink {
+                std::os::unix::fs::symlink(&dir, output_dir)
+                    .map_err(|e| error("link", output_dir, e))?;
+            }
+            // Package times for the progress estimate survive a lost tree.
+            if let Some(parent) = output_dir.parent()
+                && !dir.join(PACKAGE_DURATIONS).exists()
+            {
+                let _ = fs::copy(parent.join(PACKAGE_DURATIONS), dir.join(PACKAGE_DURATIONS));
+            }
+            // Containers reach the tree through the link in the build dir.
+            if let Some(parent) = dir.parent() {
+                gaia_process::register_docker_mount(parent);
+            }
+            Ok(WorkDir {
+                dir,
+                ram: placement.ram,
+                messages,
+            })
         }
-        if let Some(parent) = output_dir.parent() {
-            fs::create_dir_all(parent).map_err(|e| error("create", parent, e))?;
-        }
     }
-    if !dir.is_dir() {
-        fs::create_dir_all(&dir).map_err(|e| error("create", &dir, e))?;
-        if pointing_here {
-            messages.push(format!(
-                "the RAM tree '{}' was gone (a reboot?); starting a fresh one",
-                dir.display()
-            ));
-        }
-    }
-    if !pointing_here {
-        std::os::unix::fs::symlink(&dir, output_dir).map_err(|e| error("link", output_dir, e))?;
-    }
-    // Package times for the progress estimate survive a lost tree.
-    if let Some(parent) = output_dir.parent()
-        && !dir.join(PACKAGE_DURATIONS).exists()
-    {
-        let _ = fs::copy(parent.join(PACKAGE_DURATIONS), dir.join(PACKAGE_DURATIONS));
-    }
-    // Containers reach the tree through the link in the build dir.
-    if let Some(parent) = dir.parent() {
-        gaia_process::register_docker_mount(parent);
-    }
-    messages.push(format!(
-        "building the Buildroot tree in {} at '{}'",
-        if ram { "RAM" } else { "the work dir" },
-        dir.display()
-    ));
-    Ok(WorkDir { dir, ram, messages })
-}
-
-/// The usual tree in the build dir; a link left by an earlier RAM or work
-/// dir build is removed together with that tree.
-fn disk_work_dir(output_dir: &Path) -> Result<WorkDir, ImageProviderError> {
-    let mut messages = Vec::new();
-    if let Ok(target) = fs::read_link(output_dir) {
-        fs::remove_file(output_dir).map_err(|error| {
-            ImageProviderError::backend_command(format!(
-                "failed to remove '{}': {error}",
-                output_dir.display()
-            ))
-        })?;
-        let _ = gaia_process::discard(&target);
-        messages.push(format!(
-            "dropped the Buildroot tree at '{}'; building in '{}'",
-            target.display(),
-            output_dir.display()
-        ));
-    }
-    Ok(WorkDir {
-        dir: output_dir.to_path_buf(),
-        ram: false,
-        messages,
-    })
 }
 
 /// `<base>/gaia-<user>/<hash of output_dir>/buildroot-output`.
-fn tree_dir(base: &Path, output_dir: &Path) -> PathBuf {
+pub(crate) fn tree_dir(base: &Path, output_dir: &Path) -> PathBuf {
     let user = std::env::var("USER")
         .ok()
         .filter(|user| !user.is_empty() && !user.contains('/'))
@@ -280,7 +211,7 @@ fn keep_package_durations(tree: &Path, to: Option<&Path>) {
     }
 }
 
-fn recorded_tree_size(output_dir: &Path) -> Option<u64> {
+pub(crate) fn recorded_tree_size(output_dir: &Path) -> Option<u64> {
     fs::read_to_string(output_dir.parent()?.join(RAM_SIZE_FILE))
         .ok()?
         .trim()
@@ -289,7 +220,7 @@ fn recorded_tree_size(output_dir: &Path) -> Option<u64> {
 }
 
 /// Bytes in the files under `dir` (hard links once).
-fn tree_size(dir: &Path) -> u64 {
+pub(crate) fn tree_size(dir: &Path) -> u64 {
     use std::os::unix::fs::MetadataExt;
     let mut seen = BTreeSet::new();
     let mut total = 0;
@@ -325,7 +256,7 @@ fn parse_mem_available(meminfo: &str) -> Option<u64> {
         .map(|kib| kib * 1024)
 }
 
-fn gib(bytes: u64) -> String {
+pub(crate) fn gib(bytes: u64) -> String {
     format!("{:.1} GiB", bytes as f64 / GIB as f64)
 }
 

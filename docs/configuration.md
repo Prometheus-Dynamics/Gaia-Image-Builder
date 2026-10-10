@@ -412,14 +412,22 @@ If unresolved tokens remain:
 ```toml
 [failure]
 rollback_on_error = true
+rollback_completed = false
 preserve_failed_outputs = false
 rollback_domains = ["sources", "artifacts", "installs", "stage", "images", "checkpoints"]
 keep_going = false
 ```
 
 Meaning:
-- `rollback_on_error`
-  Roll back completed current-run outputs on failure.
+- `rollback_on_error` (default `true`)
+  On failure or cancellation, clean the failed operation's own partial outputs.
+  Completed operations' outputs are kept and recorded for reuse. Set `false` to
+  leave all current-run outputs in place.
+- `rollback_completed` (default `false`)
+  Also unwind every completed current-run output on failure or cancellation,
+  within `rollback_domains`. This was the default before finished work was kept.
+  Only meaningful when `rollback_on_error = true`. Override with
+  `--set policy.failure.rollback_completed=true`.
 - `preserve_failed_outputs`
   Keep the failed operation’s partial outputs for debugging.
 - `rollback_domains`

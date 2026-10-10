@@ -456,6 +456,11 @@ pub struct FailureHandlingPolicySpec {
     pub rollback_on_error: bool,
     pub preserve_failed_outputs: bool,
     pub rollback_domains: Vec<RollbackDomain>,
+    /// After a failure or cancellation, also clean the outputs of operations
+    /// that completed earlier in the run (within `rollback_domains`). Off by
+    /// default: finished work is kept and recorded for reuse, and only the
+    /// failed operation's own partial outputs are cleaned.
+    pub rollback_completed: bool,
     /// After a failure, let independent operations finish; only dependents
     /// of the failed operation are skipped. The run still fails.
     pub keep_going: bool,
@@ -466,6 +471,7 @@ impl Default for FailureHandlingPolicySpec {
         Self {
             rollback_on_error: true,
             preserve_failed_outputs: false,
+            rollback_completed: false,
             keep_going: false,
             rollback_domains: RollbackDomain::all(),
         }

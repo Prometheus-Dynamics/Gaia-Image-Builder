@@ -55,6 +55,50 @@ pub(crate) fn finish_make(
     result
 }
 
+/// A package a killed `make` was in the middle of.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct InterruptedBuild {
+    /// Its build directory.
+    pub(crate) dir: PathBuf,
+    /// The package name the graphs give the directory, when they name it.
+    pub(crate) package: Option<String>,
+    /// The name to report: the package, or the directory name.
+    pub(crate) name: String,
+}
+
+/// The packages a killed `make` was in the middle of. Read only; empty when
+/// no make was killed.
+pub(crate) fn interrupted_builds(
+    output_dir: &Path,
+    graphs: &[Option<&PackageGraph>],
+) -> Vec<InterruptedBuild> {
+    if !output_dir.join(MAKE_RUNNING).is_file() {
+        return Vec::new();
+    }
+    let names = graphs
+        .iter()
+        .flatten()
+        .flat_map(|graph| graph.packages.iter())
+        .filter_map(|(name, package)| Some((package.stamp_dir.clone()?, name.clone())))
+        .collect::<BTreeMap<_, _>>();
+    let mut builds = Vec::new();
+    for entry in fs::read_dir(output_dir.join("build"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let dir = entry.path();
+        if !dir.is_dir() || !in_progress(&dir) {
+            continue;
+        }
+        let dir_name = entry.file_name().to_string_lossy().into_owned();
+        let package = names.get(&format!("build/{dir_name}")).cloned();
+        let name = package.clone().unwrap_or(dir_name);
+        builds.push(InterruptedBuild { dir, package, name });
+    }
+    builds
+}
+
 /// After a killed `make`, removes the packages it was in the middle of
 /// (their build directory and per-package directory) so they build again
 /// from the start. Packages with no step done yet and finished packages are
@@ -67,27 +111,11 @@ pub(crate) fn redo_interrupted_packages(
     if !marker.is_file() {
         return Ok(Vec::new());
     }
-    let names = graphs
-        .iter()
-        .flatten()
-        .flat_map(|graph| graph.packages.iter())
-        .filter_map(|(name, package)| Some((package.stamp_dir.clone()?, name.clone())))
-        .collect::<BTreeMap<_, _>>();
     let mut redone = Vec::new();
-    for entry in fs::read_dir(output_dir.join("build"))
-        .into_iter()
-        .flatten()
-        .flatten()
-    {
-        let dir = entry.path();
-        if !dir.is_dir() || !in_progress(&dir) {
-            continue;
-        }
-        let dir_name = entry.file_name().to_string_lossy().into_owned();
-        let name = names.get(&format!("build/{dir_name}")).cloned();
-        let mut paths = vec![dir];
-        if let Some(name) = &name {
-            paths.push(output_dir.join("per-package").join(name));
+    for build in interrupted_builds(output_dir, graphs) {
+        let mut paths = vec![build.dir.clone()];
+        if let Some(package) = &build.package {
+            paths.push(output_dir.join("per-package").join(package));
         }
         for path in paths {
             gaia_process::discard(&path).map_err(|error| {
@@ -97,7 +125,7 @@ pub(crate) fn redo_interrupted_packages(
                 ))
             })?;
         }
-        redone.push(name.unwrap_or(dir_name));
+        redone.push(build.name);
     }
     let _ = fs::remove_file(&marker);
     redone.sort();

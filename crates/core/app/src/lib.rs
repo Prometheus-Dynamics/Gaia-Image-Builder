@@ -72,6 +72,7 @@ impl CommandOutcome {
             Self::Failed { .. } => 1,
             Self::Validated { validation, .. } if !validation.errors.is_empty() => 2,
             Self::Planned { diagnostics, .. } if !diagnostics.is_empty() => 3,
+            Self::Previewed { report } if report.fail_on_clean && report.tripped() => 3,
             Self::Ran {
                 report,
                 validation,

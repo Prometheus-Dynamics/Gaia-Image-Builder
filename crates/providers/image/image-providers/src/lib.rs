@@ -1,9 +1,13 @@
+mod preview;
 pub use gaia_process::{
     ProcessCancelCheck, ProcessLogLine, ProcessLogSink, ProcessOutputRetention,
 };
 use gaia_spec::{
     BuildrootOverrideCheckSpec, ImageDefinition, ImageProviderKind, ImageSpec, ResolvedBuildSpec,
     RetryBackoffStrategySpec,
+};
+pub use preview::{
+    ImagePreview, PreviewCleanKind, PreviewDeletion, PreviewDeletionKind, PreviewSection,
 };
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
@@ -26,6 +30,17 @@ pub trait ImageProvider: Send + Sync {
     }
     fn validate_image(&self, _image: &ImageSpec) -> Vec<ImageProviderValidationIssue> {
         Vec::new()
+    }
+    /// What running `operation` would do to this provider's state, changing
+    /// nothing. `None` when the provider has no preview.
+    fn preview_image(
+        &self,
+        _spec: &ResolvedBuildSpec,
+        _image: &ImageSpec,
+        _policy: &ImageExecutionPolicy,
+        _operation: ImageProviderOperation,
+    ) -> Result<Option<ImagePreview>, ImageProviderError> {
+        Ok(None)
     }
     fn execute_image(
         &self,
@@ -722,5 +737,52 @@ mod tests {
             "previous"
         );
         assert!(!temporary_publish_backup_path(&output, "output").exists());
+    }
+
+    #[test]
+    fn a_provider_without_a_preview_says_so_instead_of_failing() {
+        let spec = ResolvedBuildSpec::new("preview-default");
+        let image = ImageSpec {
+            definition: ImageDefinition::Buildroot(BuildrootImageSpec::default()),
+            feed: gaia_spec::ImageFeedSpec::default(),
+            output: gaia_spec::ImageOutputSpec::default(),
+            assembly: None,
+        };
+        let preview = DummyImageProvider.preview_image(
+            &spec,
+            &image,
+            &ImageExecutionPolicy::default(),
+            ImageProviderOperation::Build,
+        );
+        assert_eq!(preview.expect("no error"), None);
+    }
+
+    #[test]
+    fn preview_deletions_outside_trash_decide_fail_on_clean() {
+        let deletion = |kind| PreviewDeletion {
+            kind,
+            path: "/x".into(),
+            reason: "test".into(),
+        };
+        let mut preview = ImagePreview {
+            provider_id: "image.test".into(),
+            sections: Vec::new(),
+            clean: PreviewCleanKind::Nothing,
+            clean_reasons: Vec::new(),
+            rebuilt_packages: Vec::new(),
+            uninstalled_packages: Vec::new(),
+            deletions: vec![deletion(PreviewDeletionKind::Trash)],
+            blocked: None,
+            verdict: String::new(),
+        };
+        // Leftovers of an earlier clean are purged either way.
+        assert_eq!(preview.deletions_outside_trash(), 0);
+        assert!(!preview.trips_fail_on_clean());
+        preview.deletions.push(deletion(PreviewDeletionKind::Cache));
+        assert!(preview.trips_fail_on_clean());
+        preview.deletions.clear();
+        preview.clean = PreviewCleanKind::Full;
+        assert!(preview.trips_fail_on_clean());
+        assert_eq!(PreviewCleanKind::Packages.as_str(), "packages");
     }
 }

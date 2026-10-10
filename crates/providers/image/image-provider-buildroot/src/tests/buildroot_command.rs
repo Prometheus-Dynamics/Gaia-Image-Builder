@@ -341,6 +341,7 @@ fn buildroot_cache_config_escapes_kconfig_paths() {
         &output_dir,
         None,
         test_command_context(&execution, &policy),
+        false,
     )
     .expect("cache config");
 

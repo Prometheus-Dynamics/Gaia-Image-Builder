@@ -16,6 +16,18 @@ This cycle also moves the toolchain pin and `rust-version` to Rust 1.99.0
 (installing Gaia needs Rust 1.99 or newer), upgrades every dependency to its
 newest release, and updates the Rust docker images to 1.99.0.
 
+### Previews
+
+- `gaia preview <build.toml>` (also `gaia run <build.toml> --dry-run`) shows,
+  before a run, which operations run or are reused and why, and for a
+  Buildroot image: the work dir placement (a disk tree moved into RAM is
+  discarded), the config changes, host tool decisions, the clean a run would
+  make (nothing, finalize, package rebuilds with reasons, or a full clean),
+  the package cache restores and builds, and every path a run would delete.
+  It works on a scratch copy of the tree's state and never changes the real
+  output tree. `--json` prints the report; `--fail-on-clean` exits `3` when a
+  run would clean the whole tree or delete something outside trash.
+
 ### Config safety
 
 - Buildroot `config_overrides` are verified against the final `.config` after
@@ -108,6 +120,19 @@ newest release, and updates the Rust docker images to 1.99.0.
   `build_group` on a non-rust artifact fails config loading. Artifacts
   outside a group keep their fingerprints. `cdylib` outputs are collected by
   setting `target_name = "lib<name>.so"`.
+
+### Changed
+
+- A failed or cancelled `gaia run` now keeps the work that finished. The
+  default is `policy.failure.rollback_on_error = true` with the new
+  `policy.failure.rollback_completed = false`: only the failed operation's own
+  partial outputs are cleaned (`preserve_failed_outputs` still applies), and
+  completed operations keep their outputs and are recorded in the reuse state,
+  so the next run reuses them. Before, every completed operation of the run
+  was rolled back and the next run rebuilt it. To get the old unwinding, set
+  `[failure] rollback_completed = true` or pass
+  `--set policy.failure.rollback_completed=true`. The run summary says which
+  behavior applied.
 
 ### Added
 

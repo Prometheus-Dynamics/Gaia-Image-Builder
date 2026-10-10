@@ -307,15 +307,34 @@ impl ExecutionRuntime {
                 });
             }
         }
-        self.outcome.completed_operations = 0;
-        self.outcome.completed_ids.clear();
-        self.outcome.image_results.clear();
+        self.forget_rolled_back();
     }
 
+    /// Drops rolled-back operations from the completed set. Operations whose
+    /// outputs were kept (for example because their domain is not rolled
+    /// back) stay completed, so they are recorded for reuse.
+    fn forget_rolled_back(&mut self) {
+        let rolled_back = &self.outcome.rolled_back_ids;
+        self.outcome
+            .completed_ids
+            .retain(|id| !rolled_back.contains(id));
+        self.outcome.completed_operations = self.outcome.completed_ids.len();
+        if !self.outcome.rolled_back_ids.is_empty() {
+            // Image results are not tied to an operation id here; once any
+            // completed output was unwound, the image result may be stale.
+            self.outcome.image_results.clear();
+        }
+    }
+
+    /// Stops the run after a cancellation. The cancelled operation's partial
+    /// outputs are cleaned when `rollback_on_error` is set. Completed
+    /// operations are unwound only when `rollback_completed` is set; otherwise
+    /// they are kept and recorded for reuse.
     pub fn cancel(
         &mut self,
         operation_id: &OperationId,
         rollback_on_error: bool,
+        rollback_completed: bool,
         rollback_domains: &[RollbackDomain],
         cancelled_cleanup_domain: Option<RollbackDomain>,
         cancelled_cleanup_paths: &[PathBuf],
@@ -329,21 +348,22 @@ impl ExecutionRuntime {
             operation_id: operation_id.clone(),
             message: "execution cancelled".into(),
         });
-        if rollback_on_error {
-            if !cancelled_cleanup_paths.is_empty()
-                && cleanup_domain_enabled(cancelled_cleanup_domain, rollback_domains)
-            {
-                let failures = cleanup_paths(operation_id, cancelled_cleanup_paths);
-                self.outcome.cleanup_failures.extend(failures.clone());
-                self.emit_event(ExecutionEvent::Log {
-                    operation_id: operation_id.clone(),
-                    message: format!(
-                        "{} from cancelled operation",
-                        cleanup_message("cleaned", cancelled_cleanup_paths.len(), failures.len())
-                    ),
-                });
-                self.emit_cleanup_failure_events(operation_id, &failures);
-            }
+        if rollback_on_error
+            && !cancelled_cleanup_paths.is_empty()
+            && cleanup_domain_enabled(cancelled_cleanup_domain, rollback_domains)
+        {
+            let failures = cleanup_paths(operation_id, cancelled_cleanup_paths);
+            self.outcome.cleanup_failures.extend(failures.clone());
+            self.emit_event(ExecutionEvent::Log {
+                operation_id: operation_id.clone(),
+                message: format!(
+                    "{} from cancelled operation",
+                    cleanup_message("cleaned", cancelled_cleanup_paths.len(), failures.len())
+                ),
+            });
+            self.emit_cleanup_failure_events(operation_id, &failures);
+        }
+        if rollback_on_error && rollback_completed {
             while let Some((completed_operation_id, cleanup_domain, cleanup_paths_for_op)) =
                 self.cleanup_stack.pop()
             {
@@ -367,9 +387,7 @@ impl ExecutionRuntime {
                     self.emit_cleanup_failure_events(&completed_operation_id, &failures);
                 }
             }
-            self.outcome.completed_operations = 0;
-            self.outcome.completed_ids.clear();
-            self.outcome.image_results.clear();
+            self.forget_rolled_back();
         }
     }
 

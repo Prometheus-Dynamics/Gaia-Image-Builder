@@ -1,6 +1,6 @@
 use gaia_image_providers::{
-    ImageExecutionPolicy, ImageExecutionResult, ImageOutputContract, ImagePlan, ImageProvider,
-    ImageProviderError, ImageProviderErrorKind, ImageProviderOperation,
+    ImageExecutionPolicy, ImageExecutionResult, ImageOutputContract, ImagePlan, ImagePreview,
+    ImageProvider, ImageProviderError, ImageProviderErrorKind, ImageProviderOperation,
     ImageProviderValidationIssue, ProcessCancelCheck, ProcessLogSink, ProcessOutputRetention,
     build_image_contract_state_details, build_state_details, dir_digest,
     file_sha256_or_placeholder, materialize_image_output,
@@ -61,6 +61,20 @@ impl ImageProvider for BuildrootImageProvider {
             _ => vec![ImageProviderOperation::Build],
         };
         ImagePlan { operations, output }
+    }
+
+    fn preview_image(
+        &self,
+        spec: &ResolvedBuildSpec,
+        image: &ImageSpec,
+        policy: &ImageExecutionPolicy,
+        _operation: ImageProviderOperation,
+    ) -> Result<Option<ImagePreview>, ImageProviderError> {
+        // Prepare and build plan the same tree, so one preview covers both.
+        if !matches!(image.definition, ImageDefinition::Buildroot(_)) {
+            return Ok(None);
+        }
+        preview::preview_buildroot(spec, image, policy).map(Some)
     }
 
     fn validate_image(&self, image: &ImageSpec) -> Vec<ImageProviderValidationIssue> {
@@ -539,8 +553,10 @@ mod buildroot_caches;
 mod buildroot_config;
 mod buildroot_external;
 mod buildroot_patches;
+mod clean_decision;
 mod clean_plan;
 mod command;
+mod configure;
 mod feed;
 mod feed_make;
 mod fs_util;
@@ -553,6 +569,7 @@ mod package_cache;
 mod package_cache_files;
 mod package_graph;
 mod package_keys;
+mod preview;
 mod ram_tree;
 mod rebuild_inputs;
 mod rootfs_inputs;
@@ -561,6 +578,7 @@ mod squashfs;
 mod symbol_use;
 #[cfg(test)]
 mod tests;
+mod work_dir_decision;
 
 /// Moves the run messages meant for the run summary into
 /// [`ImageExecutionResult::notes`].
@@ -579,8 +597,10 @@ pub(crate) use buildroot_caches::*;
 pub(crate) use buildroot_config::*;
 pub(crate) use buildroot_external::*;
 pub(crate) use buildroot_patches::*;
+pub(crate) use clean_decision::*;
 pub(crate) use clean_plan::*;
 pub(crate) use command::*;
+pub(crate) use configure::*;
 pub(crate) use feed::*;
 pub(crate) use feed_make::*;
 pub(crate) use fs_util::*;
@@ -599,3 +619,4 @@ pub(crate) use rootfs_inputs::*;
 pub(crate) use shared::*;
 pub(crate) use squashfs::*;
 pub(crate) use symbol_use::*;
+pub(crate) use work_dir_decision::*;

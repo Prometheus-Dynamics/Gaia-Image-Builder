@@ -6,6 +6,7 @@ mod interrupt;
 pub(crate) mod live_status;
 mod lock;
 mod plan;
+mod preview;
 mod progress;
 mod resolve;
 mod run;
@@ -29,6 +30,8 @@ pub use cache::cache_command;
 pub use clean::{CleanReport, clean_build_command};
 pub use lock::{LockChange, LockReport, LockReportEntry, lock_build_command};
 pub use plan::plan_build_command;
+pub(crate) use preview::print_preview;
+pub use preview::{PreviewReport, preview_build_command};
 pub use resolve::resolve_build_command;
 pub use run::run_build_command;
 pub use state::{load_operation_durations, load_reuse_state, save_reuse_state};
@@ -62,6 +65,10 @@ pub enum CommandOutcome {
         diagnostics: Vec<PlanDiagnostic>,
         /// Duration estimate from the last recorded operation timings.
         estimate: gaia_plan::PlanEstimate,
+    },
+    /// `gaia preview`: what a run would do.
+    Previewed {
+        report: PreviewReport,
     },
     Cleaned {
         spec: ResolvedBuildSpec,
@@ -116,8 +123,17 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
     if args.follow && args.command != AppCommand::Status {
         usage_errors.push("--follow applies to 'status'".into());
     }
-    if !args.only.is_empty() && !matches!(args.command, AppCommand::Run | AppCommand::Plan) {
-        usage_errors.push("--only applies to 'run' and 'plan'".into());
+    if !args.only.is_empty()
+        && !matches!(
+            args.command,
+            AppCommand::Run | AppCommand::Plan | AppCommand::Preview
+        )
+    {
+        usage_errors.push("--only applies to 'run', 'plan' and 'preview'".into());
+    }
+    if (args.json || args.fail_on_clean) && args.command != AppCommand::Preview {
+        usage_errors
+            .push("--json and --fail-on-clean apply to 'preview' (or 'run --dry-run')".into());
     }
     if args.lock.update && args.command != AppCommand::Lock {
         usage_errors.push("--update applies to 'lock'".into());
@@ -164,6 +180,14 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
         AppCommand::Plan => {
             plan_build_command(context, &args.build, &resolve_options(&args), &targets)
         }
+        AppCommand::Preview => preview_build_command(
+            context,
+            &args.build,
+            &resolve_options(&args),
+            &targets,
+            args.fail_on_clean,
+            args.json,
+        ),
         AppCommand::Clean => clean_build_command(&args.build, &resolve_options(&args), &args.clean),
         #[cfg(unix)]
         AppCommand::Pause | AppCommand::Resume | AppCommand::Cancel => {
@@ -239,8 +263,16 @@ fn help_text() -> String {
         "  gaia run [build-config] --set key=value",
         "  gaia run [build-config] --only artifacts[,image,...]",
         "  gaia plan [build-config] --only artifact:<id>",
+        "  gaia preview [build-config] [--set key=value] [--only ...] [--json] [--fail-on-clean]",
+        "  gaia run [build-config] --dry-run     (same as 'gaia preview')",
         "  gaia --help",
         "  gaia --version",
+        "",
+        "'preview' shows what 'run' would do without changing anything: which",
+        "operations run or are reused and why, what the Buildroot clean would",
+        "delete or rebuild, which packages come from the cache, and every path a",
+        "run would remove. --fail-on-clean exits 3 when a run would clean the",
+        "whole tree or delete anything but leftovers of an earlier clean.",
         "",
         "--only runs part of the build graph plus its dependencies. Targets are",
         "domains (sources, artifacts, install, stage, image, checkpoints) or",

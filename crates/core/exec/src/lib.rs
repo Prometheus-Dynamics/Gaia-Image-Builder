@@ -26,7 +26,7 @@ use scheduler::{
 
 pub use operations::{
     ExecutionCleanupStatus, ExecutionError, ExecutionErrorKind, ExecutionEvent,
-    OperationExecutionResult,
+    OperationExecutionResult, image_execution_policy,
 };
 pub use runtime::{
     CleanupFailure, ExecutionCancellation, ExecutionContext, ExecutionOutcome, OperationTiming,
@@ -77,6 +77,7 @@ pub fn execute_plan_with_cancellation_and_observer(
         operations = plan.operations.len(),
         max_parallel_jobs,
         rollback_on_error = spec.policy.failure.rollback_on_error,
+        rollback_completed = spec.policy.failure.rollback_completed,
         keep_going = spec.policy.failure.keep_going,
     );
     let _guard = span.enter();
@@ -196,14 +197,28 @@ pub fn execute_plan_with_cancellation_and_observer(
                 if let Some((failed_operation_id, failed_cleanup_domain, failed_cleanup_paths)) =
                     first_failure.take()
                 {
+                    // By default only the failed operation's partial outputs
+                    // are cleaned; finished work is kept for reuse. With
+                    // `rollback_completed`, every completed operation is
+                    // unwound as well.
                     if spec.policy.failure.rollback_on_error {
-                        runtime.rollback(
-                            &failed_operation_id,
-                            failed_cleanup_domain,
-                            &failed_cleanup_paths,
-                            spec.policy.failure.preserve_failed_outputs,
-                            &spec.policy.failure.rollback_domains,
-                        );
+                        if spec.policy.failure.rollback_completed {
+                            runtime.rollback(
+                                &failed_operation_id,
+                                failed_cleanup_domain,
+                                &failed_cleanup_paths,
+                                spec.policy.failure.preserve_failed_outputs,
+                                &spec.policy.failure.rollback_domains,
+                            );
+                        } else {
+                            runtime.clean_failed_outputs(
+                                &failed_operation_id,
+                                failed_cleanup_domain,
+                                &failed_cleanup_paths,
+                                spec.policy.failure.preserve_failed_outputs,
+                                &spec.policy.failure.rollback_domains,
+                            );
+                        }
                     }
                 } else if cancellation_pending {
                     let cancelled_operation_id = cancelled_cleanup
@@ -223,6 +238,7 @@ pub fn execute_plan_with_cancellation_and_observer(
                     runtime.cancel(
                         &cancelled_operation_id,
                         spec.policy.failure.rollback_on_error,
+                        spec.policy.failure.rollback_completed,
                         &spec.policy.failure.rollback_domains,
                         cancelled_cleanup_domain,
                         &cancelled_cleanup_paths,

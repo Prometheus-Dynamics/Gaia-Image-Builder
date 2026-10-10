@@ -316,11 +316,24 @@ impl PackageCache {
     /// Restores, dependencies first, every package that is not built in
     /// `output_dir`, whose key is cached and whose dependencies are all
     /// built or restored. Returns the restored package names.
+    #[cfg(test)]
     pub(crate) fn restore(
         &self,
         output_dir: &Path,
         graph: &PackageGraph,
         keys: &BTreeMap<String, Option<String>>,
+    ) -> Vec<String> {
+        self.restore_except(output_dir, graph, keys, &BTreeSet::new())
+    }
+
+    /// [`Self::restore`], building the `excluded` packages instead (their
+    /// build directories, which entries do not hold, are read later).
+    pub(crate) fn restore_except(
+        &self,
+        output_dir: &Path,
+        graph: &PackageGraph,
+        keys: &BTreeMap<String, Option<String>>,
+        excluded: &BTreeSet<String>,
     ) -> Vec<String> {
         let built = |name: &str| {
             graph
@@ -364,7 +377,7 @@ impl PackageCache {
             }
             plan
         };
-        let mut plan_list = plan(&BTreeSet::new());
+        let mut plan_list = plan(excluded);
         // Out-of-tree kernel modules build against the kernel build tree,
         // which an archive does not hold.
         if plan_list.iter().any(|name| name == "linux") {
@@ -374,7 +387,9 @@ impl PackageCache {
                 })
             });
             if !dependents_ready {
-                plan_list = plan(&BTreeSet::from(["linux".to_string()]));
+                let mut without_linux = excluded.clone();
+                without_linux.insert("linux".to_string());
+                plan_list = plan(&without_linux);
             }
         }
         let mut restored = BTreeSet::new();
@@ -743,3 +758,6 @@ fn evict_level(level: &Path, max_size: u64) {
 #[cfg(test)]
 #[path = "package_cache_tests.rs"]
 mod tests;
+
+#[path = "package_cache_preview.rs"]
+mod preview;

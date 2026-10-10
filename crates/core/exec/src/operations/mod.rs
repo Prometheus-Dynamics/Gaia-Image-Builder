@@ -1,6 +1,7 @@
 mod artifact;
 mod assembly;
 mod helpers;
+pub use helpers::image_execution_policy;
 
 pub(crate) use artifact::{artifact_batch_key, dispatch_artifact_batch};
 

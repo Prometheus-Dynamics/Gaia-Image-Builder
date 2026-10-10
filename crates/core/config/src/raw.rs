@@ -259,6 +259,7 @@ pub struct RawFailurePolicyConfig {
     pub rollback_on_error: Option<bool>,
     pub preserve_failed_outputs: Option<bool>,
     pub rollback_domains: Option<Vec<RawRollbackDomain>>,
+    pub rollback_completed: Option<bool>,
     pub keep_going: Option<bool>,
 }
 

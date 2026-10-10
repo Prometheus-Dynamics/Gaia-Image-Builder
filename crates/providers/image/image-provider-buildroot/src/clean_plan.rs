@@ -405,15 +405,23 @@ const FILE_LISTS: &[(&str, &str)] = &[
     (".files-list-host.txt", "host"),
 ];
 
-/// Uninstalls the packages (removing the files they installed that no other
-/// package also installed) and removes their build directories, so the
-/// next `make` builds them again from scratch.
-pub(crate) fn apply_package_rebuild(
+/// Everything [`apply_package_rebuild`] removes, read without removing
+/// anything: installed files that only the rebuilt packages installed, and
+/// their build and per-package directories (which may not exist).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct PackageRebuildRemovals {
+    /// Installed files in `target/`, `staging/` or `host/` that exist now.
+    pub(crate) files: Vec<PathBuf>,
+    pub(crate) dirs: Vec<PathBuf>,
+}
+
+/// The removals of [`apply_package_rebuild`] for `plan`.
+pub(crate) fn package_rebuild_removals(
     output_dir: &Path,
     plan: &PackageRebuild,
     previous: Option<&PackageGraph>,
     current: &PackageGraph,
-) -> Result<Vec<String>, ImageProviderError> {
+) -> PackageRebuildRemovals {
     let targets = plan
         .rebuild
         .iter()
@@ -439,7 +447,7 @@ pub(crate) fn apply_package_rebuild(
             }
         }
     }
-    let mut removed_files = 0usize;
+    let mut removals = PackageRebuildRemovals::default();
     for ((index, path), packages) in &owners {
         let ours = packages.iter().all(|package| targets.contains(package));
         let relative = Path::new(path);
@@ -450,10 +458,8 @@ pub(crate) fn apply_package_rebuild(
             continue;
         }
         let file = output_dir.join(FILE_LISTS[*index].1).join(relative);
-        if fs::symlink_metadata(&file).is_ok_and(|metadata| !metadata.is_dir())
-            && fs::remove_file(&file).is_ok()
-        {
-            removed_files += 1;
+        if fs::symlink_metadata(&file).is_ok_and(|metadata| !metadata.is_dir()) {
+            removals.files.push(file);
         }
     }
 
@@ -473,13 +479,34 @@ pub(crate) fn apply_package_rebuild(
             {
                 continue;
             }
-            remove_dir_if_present(&output_dir.join(relative))?;
+            removals.dirs.push(output_dir.join(relative));
         }
-        remove_dir_if_present(&per_package.join(name))?;
+        removals.dirs.push(per_package.join(name));
     }
+    removals
+}
+
+/// Uninstalls the packages (removing the files they installed that no other
+/// package also installed) and removes their build directories, so the
+/// next `make` builds them again from scratch.
+pub(crate) fn apply_package_rebuild(
+    output_dir: &Path,
+    plan: &PackageRebuild,
+    previous: Option<&PackageGraph>,
+    current: &PackageGraph,
+) -> Result<Vec<String>, ImageProviderError> {
+    let removals = package_rebuild_removals(output_dir, plan, previous, current);
+    let removed_files = removals
+        .files
+        .iter()
+        .filter(|file| fs::remove_file(file).is_ok())
+        .count();
+    for dir in &removals.dirs {
+        remove_dir_if_present(dir)?;
+    }
+    let packages = plan.rebuild.union(&plan.removed).count();
     Ok(vec![format!(
-        "uninstalled {} Buildroot package(s) ({removed_files} installed file(s)) for rebuild",
-        targets.len()
+        "uninstalled {packages} Buildroot package(s) ({removed_files} installed file(s)) for rebuild"
     )])
 }
 
@@ -512,6 +539,17 @@ pub(crate) fn rebuild_summary(rebuild: &PackageRebuild) -> String {
         join(&rebuild.rebuild)
     )
 }
+
+/// What a full clean moves aside first: the big trees of the output dir.
+pub(crate) const FULL_CLEAN_DIRS: &[&str] = &[
+    "build",
+    "per-package",
+    "host",
+    "target",
+    "images",
+    "legal-info",
+    "graphs",
+];
 
 /// Removes output tree directories at once (see [`gaia_process::discard`]).
 pub(crate) fn discard_output_dirs(

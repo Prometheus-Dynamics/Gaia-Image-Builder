@@ -82,7 +82,8 @@ pub(crate) fn output_tail(lines: &[String], spec: &ResolvedBuildSpec) -> Vec<Str
     lines[start..].to_vec()
 }
 
-pub(crate) fn image_execution_policy(spec: &ResolvedBuildSpec) -> ImageExecutionPolicy {
+/// The policy an image operation of `spec` runs with (also used by previews).
+pub fn image_execution_policy(spec: &ResolvedBuildSpec) -> ImageExecutionPolicy {
     let policy = spec
         .policy
         .providers

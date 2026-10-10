@@ -49,6 +49,10 @@ pub struct RunSummary {
     pub rollback_on_error: bool,
     pub preserve_failed_outputs: bool,
     pub rollback_domains: Vec<String>,
+    /// Whether completed operations are unwound after a failure or
+    /// cancellation (`policy.failure.rollback_completed`). When false, they
+    /// are kept and recorded for reuse.
+    pub rollback_completed: bool,
     pub failure_classes: Vec<FailureClassCount>,
     pub keep_going: bool,
     /// Operations not run because a dependency failed (`keep_going`).

@@ -96,224 +96,33 @@ pub(crate) fn run_buildroot_with(
         ))
     })?;
     let mut messages = Vec::new();
-
-    let (defconfig, defconfig_path, config_fragments, config_overrides, external_tree) =
-        match &image.definition {
-            ImageDefinition::Buildroot(buildroot) => (
-                buildroot.defconfig.as_deref(),
-                buildroot.defconfig_path.as_deref(),
-                buildroot.config_fragments.as_slice(),
-                buildroot.config_overrides.as_slice(),
-                buildroot.external_tree.as_deref(),
-            ),
-            _ => (None, None, &[][..], &[][..], None),
-        };
+    let config_overrides = match &image.definition {
+        ImageDefinition::Buildroot(buildroot) => buildroot.config_overrides.as_slice(),
+        _ => &[][..],
+    };
 
     if command_context.policy.parallel_packages
         && let Some(message) = apply_reflink_finalize(buildroot_dir, output_dir)?
     {
         messages.push(message);
     }
-    let package_overrides =
-        materialize_buildroot_package_overrides(spec, buildroot_dir, output_dir)?;
-    if package_overrides.generated_external_tree.is_some() {
-        ensure_no_generated_external_name_conflict(external_tree)?;
-    }
-    let br2_external = buildroot_external_tree_value(
+    let configured = configure_tree(
         spec,
-        external_tree,
-        package_overrides
-            .generated_external_tree
-            .as_ref()
-            .map(|generated| generated.path.as_path()),
-    );
-    let br2_external = br2_external.as_deref();
-    if let Some(generated_external_tree) = &package_overrides.generated_external_tree {
-        messages.push(format!(
-            "staged {} generated Buildroot external package override(s) at '{}'",
-            generated_external_tree.package_count,
-            generated_external_tree.path.display()
-        ));
-    }
-    if package_overrides.replacement_count > 0 {
-        messages.push(format!(
-            "replaced {} Buildroot source package definition(s)",
-            package_overrides.replacement_count
-        ));
-    }
-
-    if let Some(defconfig_path) = defconfig_path {
-        let resolved_defconfig_path = resolve_workspace_path(
-            &ResolvedBuildSpec {
-                workspace: spec.workspace.clone(),
-                ..spec.clone()
-            },
-            defconfig_path,
-        )?;
-        materialize_defconfig_support_files(&resolved_defconfig_path, output_dir)?;
-        let mut command = Command::new("make");
-        command
-            .arg(format!("O={}", output_dir.display()))
-            .arg("defconfig")
-            .arg(format!(
-                "BR2_DEFCONFIG={}",
-                resolved_defconfig_path.display()
-            ))
-            .current_dir(buildroot_dir);
-        apply_buildroot_policy_env(&mut command, spec, command_context.policy)?;
-        if let Some(br2_external) = br2_external {
-            command.env("BR2_EXTERNAL", br2_external);
-        }
-        messages.extend(run_command(
-            command,
-            "buildroot defconfig",
-            command_context.execution,
-            command_context.policy,
-            command_context.log_sink.clone(),
-            command_context.cancel_check.clone(),
-        )?);
-        if !config_fragments.is_empty() {
-            messages.extend(apply_buildroot_config_fragments(
-                spec,
-                buildroot_dir,
-                output_dir,
-                config_fragments,
-                br2_external,
-                command_context.clone(),
-            )?);
-        }
-        if !config_overrides.is_empty() {
-            messages.extend(apply_buildroot_config_overrides(
-                BuildrootConfigOverrideRequest {
-                    spec,
-                    output_dir,
-                    overrides: config_overrides,
-                    external_tree: br2_external,
-                    buildroot_dir,
-                    command: command_context.clone(),
-                },
-            )?);
-        }
-        messages.extend(apply_buildroot_cache_config(
-            spec,
-            buildroot_dir,
-            output_dir,
-            br2_external,
-            command_context.clone(),
-        )?);
-    } else if let Some(defconfig) = defconfig {
-        let mut command = Command::new("make");
-        command
-            .arg(format!("O={}", output_dir.display()))
-            .arg(defconfig)
-            .current_dir(buildroot_dir);
-        apply_buildroot_policy_env(&mut command, spec, command_context.policy)?;
-        if let Some(br2_external) = br2_external {
-            command.env("BR2_EXTERNAL", br2_external);
-        }
-        messages.extend(run_command(
-            command,
-            "buildroot defconfig",
-            command_context.execution,
-            command_context.policy,
-            command_context.log_sink.clone(),
-            command_context.cancel_check.clone(),
-        )?);
-        if !config_fragments.is_empty() {
-            messages.extend(apply_buildroot_config_fragments(
-                spec,
-                buildroot_dir,
-                output_dir,
-                config_fragments,
-                br2_external,
-                command_context.clone(),
-            )?);
-        }
-        if !config_overrides.is_empty() {
-            messages.extend(apply_buildroot_config_overrides(
-                BuildrootConfigOverrideRequest {
-                    spec,
-                    output_dir,
-                    overrides: config_overrides,
-                    external_tree: br2_external,
-                    buildroot_dir,
-                    command: command_context.clone(),
-                },
-            )?);
-        }
-        messages.extend(apply_buildroot_cache_config(
-            spec,
-            buildroot_dir,
-            output_dir,
-            br2_external,
-            command_context.clone(),
-        )?);
-    } else if !config_fragments.is_empty() || !config_overrides.is_empty() {
-        return Err(ImageProviderError::new(
-            ImageProviderErrorKind::PolicyBlocked,
-            "buildroot config_fragments/config_overrides require defconfig or defconfig_path",
-        ));
-    }
-
-    // The final `.config` edit: everything below compares, records and builds
-    // exactly this config.
-    if buildroot_legacy_disabled(config_overrides) {
-        disable_buildroot_legacy_flag(output_dir)?;
-    }
-    let config_digest = buildroot_config_digest(output_dir);
-    let accepted_config_digests = [
-        buildroot_config_digest_v1(output_dir),
-        buildroot_legacy_config_digest(output_dir),
-    ];
-    let replacement_clean_needed =
-        package_overrides
-            .replacement_digest
-            .as_deref()
-            .is_some_and(|replacement_digest| {
-                [
-                    Some(replacement_digest),
-                    package_overrides.legacy_replacement_digest.as_deref(),
-                ]
-                .into_iter()
-                .flatten()
-                .all(|digest| {
-                    buildroot_state_needs_clean(
-                        output_dir,
-                        ".gaia-buildroot-package-replacements-state",
-                        digest,
-                    )
-                })
-            });
-    // Compare against the snapshot of the config the tree was built from when
-    // there is one, naming the changed settings; trees from older Gaia
-    // versions only have digests.
-    let config_changes = config_changes_since_snapshot(output_dir);
-    let unattributed_config_change = config_changes.is_none()
-        && config_digest.as_deref().is_some_and(|config_digest| {
-            buildroot_state_needs_clean(output_dir, ".gaia-buildroot-config-state", config_digest)
-                && accepted_config_digests
-                    .iter()
-                    .flatten()
-                    .all(|older_digest| {
-                        buildroot_state_needs_clean(
-                            output_dir,
-                            ".gaia-buildroot-config-state",
-                            older_digest,
-                        )
-                    })
-        });
-    let config_changes = config_changes.unwrap_or_default();
-    let override_digests = package_override_digests(&buildroot_package_override_dirs(spec));
-    let mut override_changes = match read_package_override_digests(output_dir) {
-        Some(previous) => changed_override_packages(&previous, &override_digests),
-        // Older state has one digest for all override trees: when it
-        // changed, any override package may have.
-        None if replacement_clean_needed => override_digests.keys().cloned().collect(),
-        None => BTreeSet::new(),
-    };
+        image,
+        buildroot_dir,
+        output_dir,
+        &command_context,
+        false,
+    )?;
+    messages.extend(configured.messages.iter().cloned());
+    let br2_external = configured.br2_external.as_deref();
+    let package_overrides = &configured.package_overrides;
+    let mut changes = tree_changes(output_dir, spec, &configured);
+    let config_digest = changes.config_digest.clone();
+    let override_digests = changes.override_digests.clone();
     let host_tools = apply_host_tools(output_dir, &command_context)?;
     messages.extend(host_tools.messages);
-    override_changes.extend(host_tools.changed_packages);
+    changes.override_changes.extend(host_tools.changed_packages);
     // Every config step is done: fail (or warn) about requested overrides
     // that olddefconfig dropped, before the clean and the long make.
     messages.extend(check_buildroot_config_overrides(
@@ -329,13 +138,12 @@ pub(crate) fn run_buildroot_with(
     let built_before = ["target", "host", "per-package"]
         .iter()
         .any(|dir| output_dir.join(dir).is_dir());
-    let something_changed = !config_changes.is_empty() || !override_changes.is_empty();
     let previous_graph = PackageGraph::load(output_dir);
     messages.extend(redo_interrupted_packages(
         output_dir,
         &[previous_graph.as_ref()],
     )?);
-    let current_graph = if (built_before && something_changed) || previous_graph.is_none() {
+    let current_graph = if needs_current_graph(built_before, &changes, previous_graph.is_none()) {
         query_package_graph(
             spec,
             buildroot_dir,
@@ -346,38 +154,27 @@ pub(crate) fn run_buildroot_with(
     } else {
         None
     };
-    let plan = if !built_before {
-        CleanPlan::Nothing
-    } else if unattributed_config_change {
-        CleanPlan::Full(vec![
-            "effective config changed (no snapshot of the previously built config)".to_string(),
-        ])
-    } else if !built_before || !something_changed {
-        CleanPlan::Nothing
-    } else if let Some(current) = &current_graph {
-        let graphs = [Some(&current.graph), previous_graph.as_ref()];
-        let symbols = SymbolIndex::load(buildroot_dir, br2_external, &graphs);
-        plan_clean(CleanInputs {
-            config_changes: &config_changes,
-            override_changes: &override_changes,
-            previous: previous_graph.as_ref(),
-            current: &current.graph,
-            symbol_use: &|key| symbols.symbol_use(key),
-            per_package: command_context.policy.parallel_packages,
-        })
-    } else {
-        let mut reasons = config_changes
-            .iter()
-            .map(|change| change.key.clone())
-            .chain(
-                override_changes
-                    .iter()
-                    .map(|name| format!("package override {name}")),
-            )
-            .collect::<Vec<_>>();
-        reasons.push("Buildroot did not report its package graph".to_string());
-        CleanPlan::Full(reasons)
+    let symbols = current_graph.as_ref().map(|current| {
+        SymbolIndex::load(
+            buildroot_dir,
+            br2_external,
+            &[Some(&current.graph), previous_graph.as_ref()],
+        )
+    });
+    let symbol_use = |key: &str| {
+        symbols
+            .as_ref()
+            .map(|symbols| symbols.symbol_use(key))
+            .unwrap_or_default()
     };
+    let plan = decide_clean(CleanDecisionInput {
+        built_before,
+        changes: &changes,
+        previous: previous_graph.as_ref(),
+        current: current_graph.as_ref().map(|current| &current.graph),
+        symbol_use: &symbol_use,
+        per_package: command_context.policy.parallel_packages,
+    });
     match &plan {
         CleanPlan::Nothing => {}
         CleanPlan::Finalize {
@@ -395,18 +192,7 @@ pub(crate) fn run_buildroot_with(
         CleanPlan::Full(reasons) => {
             // Move the big trees aside first: `make clean` deleting them
             // could hold the build up for hours on a busy disk.
-            discard_output_dirs(
-                output_dir,
-                &[
-                    "build",
-                    "per-package",
-                    "host",
-                    "target",
-                    "images",
-                    "legal-info",
-                    "graphs",
-                ],
-            )?;
+            discard_output_dirs(output_dir, FULL_CLEAN_DIRS)?;
             let mut command = Command::new("make");
             command
                 .arg(format!("O={}", output_dir.display()))
@@ -637,7 +423,7 @@ pub(crate) fn buildroot_config_digest(output_dir: &Path) -> Option<String> {
 
 /// The digest written before squashfs tuning was excluded; still accepted so
 /// an upgrade does not force a full Buildroot clean.
-fn buildroot_config_digest_v1(output_dir: &Path) -> Option<String> {
+pub(crate) fn buildroot_config_digest_v1(output_dir: &Path) -> Option<String> {
     buildroot_settings_digest(output_dir, false).map(|hex| format!("settings-sha256:{hex}"))
 }
 
@@ -670,7 +456,7 @@ fn buildroot_settings_digest(output_dir: &Path, skip_squashfs_tuning: bool) -> O
 
 /// Whole-file digest written by earlier Gaia versions; still accepted so an
 /// upgrade does not force a full Buildroot clean.
-fn buildroot_legacy_config_digest(output_dir: &Path) -> Option<String> {
+pub(crate) fn buildroot_legacy_config_digest(output_dir: &Path) -> Option<String> {
     let config_path = output_dir.join(".config");
     config_path
         .is_file()
@@ -684,7 +470,11 @@ fn is_buildroot_config_header(line: &str) -> bool {
         || (trimmed.starts_with("# Buildroot ") && trimmed.ends_with(" Configuration"))
 }
 
-fn buildroot_state_needs_clean(output_dir: &Path, state_file: &str, digest: &str) -> bool {
+pub(crate) fn buildroot_state_needs_clean(
+    output_dir: &Path,
+    state_file: &str,
+    digest: &str,
+) -> bool {
     let state_path = output_dir.join(state_file);
     match fs::read_to_string(state_path) {
         Ok(state) => state.trim() != digest,

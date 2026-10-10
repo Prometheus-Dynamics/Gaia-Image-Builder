@@ -501,4 +501,101 @@ mod tests {
         let state = load_reuse_state(&spec).expect("reuse state");
         assert!(!state.completed_operation_ids.contains("image:build"));
     }
+
+    fn started(id: &str) -> gaia_exec::ExecutionEvent {
+        gaia_exec::ExecutionEvent::Started {
+            operation_id: gaia_plan::OperationId::new(id),
+        }
+    }
+
+    #[test]
+    fn save_keeps_completed_operations_of_a_failed_run_for_reuse() {
+        let spec = test_spec();
+        let kept = gaia_plan::PlannedOperation::new(
+            gaia_plan::OperationId::new("artifact:kept"),
+            gaia_plan::OperationKind::ResolveBuild,
+        );
+        let kept_fingerprint = kept.fingerprint;
+        let failed = gaia_plan::PlannedOperation::new(
+            gaia_plan::OperationId::new("artifact:bad"),
+            gaia_plan::OperationKind::ResolveBuild,
+        );
+        let plan = ExecutionPlan {
+            build_id: spec.identity.id.clone(),
+            operations: vec![kept, failed],
+        };
+        // The kept operation completed, so it also emitted `Started`; that
+        // must not make it count as merely attempted.
+        let outcome = ExecutionOutcome {
+            completed_operations: 1,
+            completed_ids: vec![gaia_plan::OperationId::new("artifact:kept")],
+            events: vec![started("artifact:kept"), started("artifact:bad")],
+            ..ExecutionOutcome::default()
+        };
+
+        save_reuse_state(&spec, &plan, &outcome, None);
+        let state = load_reuse_state(&spec).expect("reuse state");
+
+        assert!(state.completed_operation_ids.contains("artifact:kept"));
+        assert!(!state.completed_operation_ids.contains("artifact:bad"));
+        assert_eq!(
+            state.operation_fingerprints.get("artifact:kept"),
+            Some(&kept_fingerprint)
+        );
+    }
+
+    #[test]
+    fn save_keeps_completed_operations_of_a_cancelled_run_for_reuse() {
+        let spec = test_spec();
+        let plan = ExecutionPlan {
+            build_id: spec.identity.id.clone(),
+            operations: vec![
+                gaia_plan::PlannedOperation::new(
+                    gaia_plan::OperationId::new("artifact:done"),
+                    gaia_plan::OperationKind::ResolveBuild,
+                ),
+                gaia_plan::PlannedOperation::new(
+                    gaia_plan::OperationId::new("artifact:slow"),
+                    gaia_plan::OperationKind::ResolveBuild,
+                ),
+            ],
+        };
+        let outcome = ExecutionOutcome {
+            cancelled: true,
+            cancelled_operation_id: Some(gaia_plan::OperationId::new("artifact:slow")),
+            completed_operations: 1,
+            completed_ids: vec![gaia_plan::OperationId::new("artifact:done")],
+            events: vec![started("artifact:done"), started("artifact:slow")],
+            ..ExecutionOutcome::default()
+        };
+
+        save_reuse_state(&spec, &plan, &outcome, None);
+        let state = load_reuse_state(&spec).expect("reuse state");
+
+        assert!(state.completed_operation_ids.contains("artifact:done"));
+        assert!(!state.completed_operation_ids.contains("artifact:slow"));
+    }
+
+    #[test]
+    fn save_drops_rolled_back_operations_from_reuse_state() {
+        let spec = test_spec();
+        let plan = ExecutionPlan {
+            build_id: spec.identity.id.clone(),
+            operations: vec![gaia_plan::PlannedOperation::new(
+                gaia_plan::OperationId::new("artifact:unwound"),
+                gaia_plan::OperationKind::ResolveBuild,
+            )],
+        };
+        let outcome = ExecutionOutcome {
+            completed_ids: vec![gaia_plan::OperationId::new("artifact:unwound")],
+            rolled_back_ids: vec![gaia_plan::OperationId::new("artifact:unwound")],
+            events: vec![started("artifact:unwound")],
+            ..ExecutionOutcome::default()
+        };
+
+        save_reuse_state(&spec, &plan, &outcome, None);
+        let state = load_reuse_state(&spec).expect("reuse state");
+
+        assert!(!state.completed_operation_ids.contains("artifact:unwound"));
+    }
 }

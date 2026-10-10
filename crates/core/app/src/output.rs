@@ -220,6 +220,7 @@ pub(crate) fn print_outcome(outcome: &CommandOutcome) {
                 println!("plan {}: {}", diagnostic.code, diagnostic.message);
             }
         }
+        CommandOutcome::Previewed { report } => crate::commands::print_preview(report),
         CommandOutcome::Text { text } => println!("{text}"),
         CommandOutcome::Cleaned { spec, report } => {
             let action = if report.dry_run {
@@ -334,19 +335,36 @@ pub(crate) fn print_outcome(outcome: &CommandOutcome) {
             if !paused.is_zero() {
                 println!("paused: {}", gaia_plan::format_duration_short(paused));
             }
+            let interrupted = report.summary.error_count > 0
+                || report
+                    .summary
+                    .operation_timings
+                    .iter()
+                    .any(|timing| timing.status == "cancelled");
             if report.summary.rolled_back_operations > 0 {
                 println!(
-                    "rollback: operations={}",
+                    "rollback: operations={} (completed operations unwound by policy rollback_completed)",
                     report.summary.rolled_back_operations
                 );
-            } else if report.summary.error_count > 0 && !report.summary.rollback_on_error {
+            } else if interrupted && !report.summary.rollback_on_error {
                 println!("rollback: disabled-by-policy");
+            } else if interrupted && report.summary.rollback_on_error {
+                println!(
+                    "rollback: kept {} completed operation(s) for reuse; {} the failed operation's outputs",
+                    report.summary.completed_operations,
+                    if report.summary.preserve_failed_outputs {
+                        "preserved"
+                    } else {
+                        "cleaned"
+                    }
+                );
             }
             println!(
-                "failure policy: rollback_on_error={} preserve_failed_outputs={} rollback_domains={}",
+                "failure policy: rollback_on_error={} preserve_failed_outputs={} rollback_domains={} rollback_completed={}",
                 report.summary.rollback_on_error,
                 report.summary.preserve_failed_outputs,
                 rollback_domains_display(&report.summary.rollback_domains),
+                report.summary.rollback_completed,
             );
             println!(
                 "provenance: sources={} artifacts={} image={:?}",
@@ -611,7 +629,7 @@ pub fn backend_overview_lines(spec: &ResolvedBuildSpec) -> Vec<String> {
             .unwrap_or_else(|| "host".to_string())
     ));
     lines.push(format!(
-        "failure policy: rollback_on_error={} preserve_failed_outputs={} rollback_domains={}",
+        "failure policy: rollback_on_error={} preserve_failed_outputs={} rollback_domains={} rollback_completed={}",
         spec.policy.failure.rollback_on_error,
         spec.policy.failure.preserve_failed_outputs,
         rollback_domains_display(
@@ -622,7 +640,8 @@ pub fn backend_overview_lines(spec: &ResolvedBuildSpec) -> Vec<String> {
                 .iter()
                 .map(|domain| domain.as_str().to_string())
                 .collect::<Vec<_>>(),
-        )
+        ),
+        spec.policy.failure.rollback_completed,
     ));
     if let Some(install) = spec.install.entries.first() {
         lines.push(format!(

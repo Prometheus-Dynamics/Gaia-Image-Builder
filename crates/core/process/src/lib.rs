@@ -158,6 +158,10 @@ pub fn run_command_with_timeout_and_retention(
         "starting process"
     );
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    // Commands run in their own process group: one reading the terminal
+    // would be stopped (SIGTTIN) and hang until its timeout. Nothing Gaia
+    // runs takes input.
+    command.stdin(Stdio::null());
     configure_process_group(command);
     let mut child = spawn_retrying_busy_executable(command).map_err(|error| {
         tracing::warn!(
@@ -313,6 +317,10 @@ pub fn run_command_stdout_to_file_with_timeout_and_retention(
         ),
     })?;
     command.stdout(Stdio::from(stdout)).stderr(Stdio::piped());
+    // Commands run in their own process group: one reading the terminal
+    // would be stopped (SIGTTIN) and hang until its timeout. Nothing Gaia
+    // runs takes input.
+    command.stdin(Stdio::null());
     configure_process_group(command);
     let mut child = spawn_retrying_busy_executable(command).map_err(|error| {
         tracing::warn!(

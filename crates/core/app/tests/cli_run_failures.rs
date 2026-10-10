@@ -40,13 +40,16 @@ fn run_command_surfaces_execution_failures_from_backend_errors() {
             assert!(plan_diagnostics.is_empty());
             assert!(!execution_errors.is_empty(), "expected execution errors");
             assert!(report.summary.error_count > 0);
-            assert!(report.summary.rolled_back_operations > 0);
+            // Default policy: finished work is kept for reuse; only the failed
+            // operation's partial outputs are cleaned.
+            assert_eq!(report.summary.rolled_back_operations, 0);
             assert!(report.summary.rollback_on_error);
+            assert!(!report.summary.rollback_completed);
             assert!(!report.summary.preserve_failed_outputs);
             assert!(!report.summary.failure_classes.is_empty());
             assert!(!report.execution_failures.is_empty());
             assert!(
-                report
+                !report
                     .rebuild_reasons
                     .iter()
                     .any(|reason| reason.code == "rollback_performed")
@@ -123,6 +126,51 @@ fn run_command_reports_when_rollback_is_disabled_by_policy() {
             );
             assert!(
                 PathBuf::from(&run_build_dir)
+                    .join("sources/gaia-upstream")
+                    .exists()
+            );
+        }
+        outcome => panic!("expected ran outcome, got {outcome:?}"),
+    }
+}
+
+#[test]
+fn run_command_unwinds_completed_outputs_when_rollback_completed_is_set() {
+    let missing_root_dir = unique_dir("gaia-cli-unwind-root");
+    let run_out_dir = unique_dir("gaia-cli-unwind-out");
+    let run_build_dir = unique_dir("gaia-cli-unwind-build");
+    fs::create_dir_all(&missing_root_dir).expect("workspace root");
+    seed_default_assets(&missing_root_dir);
+
+    let run = run_with_args(AppArgs::parse_from(vec![
+        "run".to_string(),
+        config_path(),
+        "--preset".to_string(),
+        "ci".to_string(),
+        "--set".to_string(),
+        "policy.failure.rollback_completed=true".to_string(),
+        "--set".to_string(),
+        format!("workspace.root_dir={missing_root_dir}"),
+        "--set".to_string(),
+        format!("workspace.out_dir={run_out_dir}"),
+        "--set".to_string(),
+        format!("workspace.build_dir={run_build_dir}"),
+    ]));
+
+    assert_eq!(run.exit_code(), 4);
+
+    match run {
+        CommandOutcome::Ran { report, .. } => {
+            assert!(report.summary.rollback_completed);
+            assert!(report.summary.rolled_back_operations > 0);
+            assert!(
+                report
+                    .rebuild_reasons
+                    .iter()
+                    .any(|reason| reason.code == "rollback_performed")
+            );
+            assert!(
+                !PathBuf::from(&run_build_dir)
                     .join("sources/gaia-upstream")
                     .exists()
             );

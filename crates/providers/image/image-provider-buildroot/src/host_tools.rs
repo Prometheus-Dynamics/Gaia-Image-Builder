@@ -21,7 +21,7 @@ const BLOCK_BEGIN: &str = "# BEGIN gaia host tools (generated; do not edit)";
 const BLOCK_END: &str = "# END gaia host tools";
 /// The decisions of the last build, to rebuild a tool's package when they
 /// change.
-const DECISIONS_FILE: &str = ".gaia-host-tools";
+pub(crate) const DECISIONS_FILE: &str = ".gaia-host-tools";
 
 /// What was decided for this build.
 #[derive(Debug, Default)]
@@ -105,27 +105,44 @@ fn pkgconf_stub(path: &str) -> String {
     )
 }
 
-/// Decides each tool's source, writes the `local.mk` stubs and returns the
-/// decisions. Runs after the config is final and before the package graph
-/// is read.
-pub(crate) fn apply_host_tools(
-    output_dir: &Path,
-    command_context: &ImageCommandContext<'_>,
-) -> Result<HostTools, ImageProviderError> {
-    let config = fs::read_to_string(output_dir.join(".config")).unwrap_or_default();
-    let policy = &command_context.policy.host_tools;
+/// The build environment's probe of a tool: its path and version, when it is
+/// there and new enough. Arguments: the tool name and its minimum version.
+pub(crate) type ProbeFn<'a> =
+    dyn FnMut(&str, &str) -> Result<Option<(String, String)>, ImageProviderError> + 'a;
+
+/// What the host tools come to for one config: each tool's decision, the
+/// `local.mk` stubs for the system ones, and what to rebuild.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct HostToolsDecision {
+    /// `ccache=system:4.8:/usr/bin/ccache`, `pkgconf=build`, ...
+    pub(crate) decisions: String,
+    /// The `local.mk` stubs of the tools taken from the system.
+    pub(crate) stubs: String,
+    pub(crate) messages: Vec<String>,
+    /// Packages whose source (system or built) changed since the last build.
+    pub(crate) changed_packages: BTreeSet<String>,
+}
+
+/// Decides each tool's source for `config`, given the decisions of the last
+/// build (`previous`) and a probe of the build environment. Changes nothing.
+pub(crate) fn decide_host_tools(
+    config: &str,
+    policy: &gaia_spec::BuildrootHostToolsPolicySpec,
+    previous: &str,
+    probe: &mut ProbeFn<'_>,
+) -> Result<HostToolsDecision, ImageProviderError> {
     let mut decisions = Vec::new();
     let mut stubs = String::new();
     let mut messages = Vec::new();
     for tool in TOOLS {
-        if !(tool.enabled)(&config) {
+        if !(tool.enabled)(config) {
             continue;
         }
         let mut decision = None;
         for step in policy.steps_for(tool.name) {
             match step {
                 HostToolStepSpec::System => {
-                    if let Some((path, version)) = probe(tool, command_context)? {
+                    if let Some((path, version)) = probe(tool.name, tool.min_version)? {
                         stubs.push_str(&(tool.stub)(&path));
                         messages.push(format!(
                             "host tool {}: system {version} ({path}) instead of {}",
@@ -154,34 +171,83 @@ pub(crate) fn apply_host_tools(
         }
         decisions.push(decision.unwrap_or_else(|| format!("{}=build", tool.name)));
     }
-    write_local_mk_block(output_dir, &stubs)?;
-
     let identity = decisions.join(" ");
-    let previous = fs::read_to_string(output_dir.join(DECISIONS_FILE)).unwrap_or_default();
     let changed_packages = TOOLS
         .iter()
-        .filter(|tool| decision_of(&previous, tool.name) != decision_of(&identity, tool.name))
+        .filter(|tool| decision_of(previous, tool.name) != decision_of(&identity, tool.name))
         // A tree never built has nothing to rebuild.
         .filter(|_| !previous.is_empty())
         .map(|tool| tool.package.to_string())
         .collect();
-    fs::write(output_dir.join(DECISIONS_FILE), &identity).map_err(|error| {
+    Ok(HostToolsDecision {
+        decisions: identity,
+        stubs,
+        messages,
+        changed_packages,
+    })
+}
+
+/// [`decide_host_tools`] with the build environment probed, for the config
+/// `config` and the decisions `previous` of the last build.
+pub(crate) fn decide_host_tools_probed(
+    config: &str,
+    previous: &str,
+    command_context: &ImageCommandContext<'_>,
+) -> Result<HostToolsDecision, ImageProviderError> {
+    decide_host_tools(
+        config,
+        &command_context.policy.host_tools,
+        previous,
+        &mut |name, min_version| {
+            let tool = TOOLS
+                .iter()
+                .find(|tool| tool.name == name)
+                .expect("probed tools are known");
+            probe(tool, min_version, command_context)
+        },
+    )
+}
+
+/// Writes a decision into the tree: the stubs into `local.mk`, the decisions
+/// into the tree's state.
+pub(crate) fn write_host_tools(
+    output_dir: &Path,
+    decision: &HostToolsDecision,
+) -> Result<(), ImageProviderError> {
+    write_local_mk_block(output_dir, &decision.stubs)?;
+    fs::write(output_dir.join(DECISIONS_FILE), &decision.decisions).map_err(|error| {
         ImageProviderError::backend_command(format!(
             "failed to write '{}': {error}",
             output_dir.join(DECISIONS_FILE).display()
         ))
-    })?;
+    })
+}
+
+/// Decides the host tools of the output tree and writes them. Runs after the
+/// config is final and before the package graph is read.
+pub(crate) fn apply_host_tools(
+    output_dir: &Path,
+    command_context: &ImageCommandContext<'_>,
+) -> Result<HostTools, ImageProviderError> {
+    let config = fs::read_to_string(output_dir.join(".config")).unwrap_or_default();
+    let previous = fs::read_to_string(output_dir.join(DECISIONS_FILE)).unwrap_or_default();
+    let decision = decide_host_tools_probed(&config, &previous, command_context)?;
+    write_host_tools(output_dir, &decision)?;
     Ok(HostTools {
-        changed_packages,
-        messages,
+        changed_packages: decision.changed_packages,
+        messages: decision.messages,
     })
 }
 
 /// The system tools recorded for the last build, for the package keys
 /// (tools Buildroot builds add nothing, so existing keys stay valid).
 pub(crate) fn recorded_host_tools(output_dir: &Path) -> String {
-    fs::read_to_string(output_dir.join(DECISIONS_FILE))
-        .unwrap_or_default()
+    system_host_tools(&fs::read_to_string(output_dir.join(DECISIONS_FILE)).unwrap_or_default())
+}
+
+/// The system tools among `decisions` (see [`recorded_host_tools`]).
+pub(crate) fn system_host_tools(decisions: &str) -> String {
+    decisions
         .split_whitespace()
         .filter(|decision| decision.contains("=system:"))
         .collect::<Vec<_>>()
@@ -198,6 +264,7 @@ fn decision_of<'a>(decisions: &'a str, tool: &str) -> Option<&'a str> {
 /// and new enough.
 fn probe(
     tool: &Tool,
+    min_version: &str,
     command_context: &ImageCommandContext<'_>,
 ) -> Result<Option<(String, String)>, ImageProviderError> {
     let mut command = Command::new("sh");
@@ -219,7 +286,7 @@ fn probe(
     }
     Ok(parse_probe(
         &String::from_utf8_lossy(&output.stdout),
-        tool.min_version,
+        min_version,
     ))
 }
 
@@ -398,5 +465,77 @@ mod tests {
         );
         assert_eq!(decision_of(decisions, "pkgconf"), Some("build"));
         assert_eq!(decision_of("", "ccache"), None);
+    }
+
+    fn probe_found(name: &str, _min: &str) -> Result<Option<(String, String)>, ImageProviderError> {
+        Ok(match name {
+            "ccache" => Some(("/usr/bin/ccache".to_string(), "4.10.2".to_string())),
+            _ => None,
+        })
+    }
+
+    /// The policy `ccache = [System, Build]`, `pkgconf = [Build]`.
+    fn system_first_policy() -> gaia_spec::BuildrootHostToolsPolicySpec {
+        let mut policy = gaia_spec::BuildrootHostToolsPolicySpec::default();
+        policy.tools.insert(
+            "ccache".to_string(),
+            vec![HostToolStepSpec::System, HostToolStepSpec::Build],
+        );
+        policy
+    }
+
+    #[test]
+    fn host_tool_decisions_take_the_system_tool_when_found_and_build_otherwise() {
+        let config = "BR2_CCACHE=y\nBR2_PACKAGE_HOST_PKGCONF=y\n";
+        let policy = system_first_policy();
+        let decision = decide_host_tools(config, &policy, "", &mut probe_found).expect("decision");
+        assert!(
+            decision
+                .decisions
+                .contains("ccache=system:4.10.2:/usr/bin/ccache")
+        );
+        assert!(decision.decisions.contains("pkgconf=build"));
+        assert!(decision.stubs.contains("HOST_CCACHE_INSTALL_CMDS"));
+        assert!(!decision.stubs.contains("HOST_PKGCONF"));
+        // A tree never built has nothing to rebuild.
+        assert!(decision.changed_packages.is_empty());
+        assert_eq!(
+            system_host_tools(&decision.decisions),
+            "ccache=system:4.10.2:/usr/bin/ccache"
+        );
+    }
+
+    #[test]
+    fn host_tool_changes_rebuild_only_the_tool_whose_decision_changed() {
+        let config = "BR2_CCACHE=y\nBR2_PACKAGE_HOST_PKGCONF=y\n";
+        let policy = system_first_policy();
+        let previous = "ccache=build pkgconf=build";
+        let decision =
+            decide_host_tools(config, &policy, previous, &mut probe_found).expect("decision");
+        assert_eq!(
+            decision.changed_packages,
+            BTreeSet::from(["host-ccache".to_string()])
+        );
+        // Nothing probed, nothing changed: an unchanged decision is no change.
+        let same = decide_host_tools(
+            config,
+            &policy,
+            "ccache=system:4.10.2:/usr/bin/ccache pkgconf=build",
+            &mut probe_found,
+        )
+        .expect("decision");
+        assert!(same.changed_packages.is_empty());
+    }
+
+    #[test]
+    fn host_tools_the_build_environment_lacks_are_built() {
+        let config = "BR2_CCACHE=y\n";
+        let policy = gaia_spec::BuildrootHostToolsPolicySpec::default();
+        let mut nothing_found = |_: &str, _: &str| Ok(None);
+        let decision =
+            decide_host_tools(config, &policy, "", &mut nothing_found).expect("decision");
+        assert_eq!(decision.decisions, "ccache=build");
+        assert!(decision.stubs.is_empty());
+        assert!(decision.messages.is_empty());
     }
 }

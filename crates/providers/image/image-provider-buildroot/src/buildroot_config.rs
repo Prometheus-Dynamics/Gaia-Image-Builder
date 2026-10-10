@@ -307,12 +307,15 @@ pub(crate) fn append_make_jobs(command: &mut Command, jobs: u32) {
     command.arg(format!("-j{}", make_jobs(jobs)));
 }
 
+/// The download, compiler cache and parallel-build settings, applied to the
+/// tree's `.config`. `dry_run` (a preview) writes no compiler cache config.
 pub(crate) fn apply_buildroot_cache_config(
     spec: &ResolvedBuildSpec,
     buildroot_dir: &Path,
     output_dir: &Path,
     external_tree: Option<&str>,
     command_context: ImageCommandContext<'_>,
+    dry_run: bool,
 ) -> Result<Vec<String>, ImageProviderError> {
     let config_path = output_dir.join(".config");
     if !config_path.is_file() {
@@ -326,7 +329,9 @@ pub(crate) fn apply_buildroot_cache_config(
     }
     if policy.ccache_enabled {
         let ccache_dir = buildroot_ccache_dir(spec, policy)?;
-        ensure_ccache_max_size(&ccache_dir, policy.ccache_max_size.as_deref())?;
+        if !dry_run {
+            ensure_ccache_max_size(&ccache_dir, policy.ccache_max_size.as_deref())?;
+        }
         let max_size = policy
             .ccache_max_size
             .as_deref()

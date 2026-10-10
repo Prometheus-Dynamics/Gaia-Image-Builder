@@ -48,6 +48,7 @@ pub(super) enum KnownOverrideKey {
     PolicyFailurePreserveFailedOutputs,
     PolicyFailureRollbackDomains,
     PolicyFailureKeepGoing,
+    PolicyFailureRollbackCompleted,
     PolicyProvidersRustAllowNestedBuild,
     PolicyProvidersRustBatchBuilds,
     PolicyProvidersRustRetryAttempts,
@@ -214,6 +215,9 @@ impl<'a> OverrideKey<'a> {
                 Self::Known(KnownOverrideKey::PolicyFailureRollbackDomains)
             }
             "policy.failure.keep_going" => Self::Known(KnownOverrideKey::PolicyFailureKeepGoing),
+            "policy.failure.rollback_completed" => {
+                Self::Known(KnownOverrideKey::PolicyFailureRollbackCompleted)
+            }
             "policy.providers.rust.allow_nested_build" => {
                 Self::Known(KnownOverrideKey::PolicyProvidersRustAllowNestedBuild)
             }

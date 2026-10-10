@@ -235,6 +235,13 @@ impl Harness {
     }
 
     fn run(&self) -> (ExecutionOutcome, Vec<ExecutionEvent>, Arc<Mutex<Journal>>) {
+        self.run_with_cancellation(&ExecutionCancellation::new())
+    }
+
+    fn run_with_cancellation(
+        &self,
+        cancellation: &ExecutionCancellation,
+    ) -> (ExecutionOutcome, Vec<ExecutionEvent>, Arc<Mutex<Journal>>) {
         let journal = Arc::new(Mutex::new(Journal::default()));
         let mut artifact_catalog = ArtifactProviderCatalog::new();
         artifact_catalog.register(Box::new(ScriptedProvider {
@@ -253,7 +260,7 @@ impl Harness {
                 artifact_catalog: &artifact_catalog,
                 image_catalog: &image_catalog,
             },
-            &ExecutionCancellation::new(),
+            cancellation,
             Some(tx),
         );
         let observed = rx.try_iter().collect();
@@ -278,6 +285,93 @@ fn default_policy_stops_siblings_after_a_failure() {
     assert_eq!(ids(&outcome.completed_ids), Vec::<&str>::new());
     assert!(outcome.skipped_ids.is_empty());
     assert_eq!(outcome.errors.len(), 1);
+}
+
+#[test]
+fn failure_keeps_completed_operations_by_default() {
+    // `good` finishes before `bad` (which depends on it) fails.
+    let harness = Harness::new(
+        "gaia-fail-keep",
+        &[("good", &[]), ("bad", &["good"]), ("after", &["bad"])],
+    )
+    .script("bad", Script::Fail);
+
+    let (outcome, _, _) = harness.run();
+
+    assert_eq!(
+        ids(&outcome
+            .errors
+            .iter()
+            .map(|e| e.operation_id.clone())
+            .collect::<Vec<_>>()),
+        ["artifact:bad"]
+    );
+    assert_eq!(ids(&outcome.completed_ids), ["artifact:good"]);
+    assert_eq!(outcome.completed_operations, 1);
+    assert!(outcome.rolled_back_ids.is_empty());
+}
+
+#[test]
+fn rollback_completed_unwinds_completed_operations_after_failure() {
+    let mut harness = Harness::new(
+        "gaia-fail-unwind",
+        &[("good", &[]), ("bad", &["good"]), ("after", &["bad"])],
+    )
+    .script("bad", Script::Fail);
+    harness.spec.policy.failure.rollback_completed = true;
+
+    let (outcome, _, _) = harness.run();
+
+    assert_eq!(ids(&outcome.rolled_back_ids), ["artifact:good"]);
+    assert!(outcome.completed_ids.is_empty());
+    assert_eq!(outcome.completed_operations, 0);
+}
+
+#[test]
+fn cancel_keeps_completed_operations_by_default() {
+    let harness = Harness::new("gaia-cancel-keep", &[("done", &[]), ("slow", &[])])
+        .script("slow", Script::Slow(Duration::from_secs(20)));
+    let cancellation = ExecutionCancellation::new();
+    let trigger = cancellation.clone();
+    let canceller = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(300));
+        trigger.cancel();
+    });
+
+    let (outcome, _, _) = harness.run_with_cancellation(&cancellation);
+    canceller.join().expect("canceller");
+
+    assert!(outcome.cancelled);
+    assert_eq!(
+        outcome
+            .cancelled_operation_id
+            .as_ref()
+            .map(|id| id.as_str()),
+        Some("artifact:slow")
+    );
+    assert_eq!(ids(&outcome.completed_ids), ["artifact:done"]);
+    assert_eq!(outcome.completed_operations, 1);
+    assert!(outcome.rolled_back_ids.is_empty());
+}
+
+#[test]
+fn cancel_with_rollback_completed_unwinds_completed_operations() {
+    let mut harness = Harness::new("gaia-cancel-unwind", &[("done", &[]), ("slow", &[])])
+        .script("slow", Script::Slow(Duration::from_secs(20)));
+    harness.spec.policy.failure.rollback_completed = true;
+    let cancellation = ExecutionCancellation::new();
+    let trigger = cancellation.clone();
+    let canceller = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(300));
+        trigger.cancel();
+    });
+
+    let (outcome, _, _) = harness.run_with_cancellation(&cancellation);
+    canceller.join().expect("canceller");
+
+    assert!(outcome.cancelled);
+    assert_eq!(ids(&outcome.rolled_back_ids), ["artifact:done"]);
+    assert!(outcome.completed_ids.is_empty());
 }
 
 #[test]

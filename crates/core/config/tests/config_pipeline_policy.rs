@@ -282,6 +282,22 @@ fn resolves_global_docker_execution_backend() {
 }
 
 #[test]
+fn failure_rollback_completed_defaults_off_and_is_overridable() {
+    let default_spec = resolve_config(&default_config_path());
+    assert!(default_spec.policy.failure.rollback_on_error);
+    assert!(!default_spec.policy.failure.rollback_completed);
+
+    let spec = gaia_config::resolve_config_with_options(
+        &default_config_path(),
+        &gaia_config::ResolveOptions {
+            explicit_overrides: vec![("policy.failure.rollback_completed".into(), "true".into())],
+            ..gaia_config::ResolveOptions::default()
+        },
+    );
+    assert!(spec.policy.failure.rollback_completed);
+}
+
+#[test]
 fn resolves_execution_output_retention_overrides() {
     let spec = gaia_config::resolve_config_with_options(
         &default_config_path(),

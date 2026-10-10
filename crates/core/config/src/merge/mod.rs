@@ -392,6 +392,7 @@ fn merge_failure_policy(
             .preserve_failed_outputs
             .or(base.preserve_failed_outputs),
         rollback_domains: overlay.rollback_domains.or(base.rollback_domains),
+        rollback_completed: overlay.rollback_completed.or(base.rollback_completed),
         keep_going: overlay.keep_going.or(base.keep_going),
     }
 }

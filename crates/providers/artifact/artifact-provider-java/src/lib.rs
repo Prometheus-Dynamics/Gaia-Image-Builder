@@ -1,10 +1,11 @@
 use gaia_artifact_providers::{
-    ArtifactBackendState, ArtifactExecutionContract, ArtifactPlan, ArtifactProvider,
-    ArtifactProviderError, ArtifactProviderErrorKind, ArtifactProviderOperation,
+    ArtifactBackendState, ArtifactExecutionBackend, ArtifactExecutionContract, ArtifactPlan,
+    ArtifactProvider, ArtifactProviderError, ArtifactProviderErrorKind, ArtifactProviderOperation,
     ArtifactProviderValidationIssue, ProcessCancelCheck, ProcessLogSink, artifact_output_path,
     command_version_line, copy_artifact_file_to_output, materialize_artifact_marker_and_state,
     render_artifact_backend_state, run_command_with_retries,
 };
+use gaia_process::register_docker_mount;
 use gaia_spec::{ArtifactDefinition, ArtifactSpec, ResolvedBuildSpec};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -129,7 +130,7 @@ fn run_java_build(
     {
         let mut command = Command::new(program);
         command.args(args);
-        apply_build_env(&mut command, &java.build_env);
+        apply_build_env(&mut command, &java.build_env, contract);
         command.current_dir(source_dir);
         return Ok((
             "custom-command".to_string(),
@@ -150,7 +151,7 @@ fn run_java_build(
         let mut command = Command::new("mvn");
         if let Some(java) = custom {
             command.args(&java.build_args);
-            apply_build_env(&mut command, &java.build_env);
+            apply_build_env(&mut command, &java.build_env, contract);
         } else {
             command.arg("-q").arg("-DskipTests").arg("package");
         }
@@ -171,7 +172,7 @@ fn run_java_build(
         let mut command = Command::new(source_dir.join("gradlew"));
         if let Some(java) = custom {
             command.args(&java.build_args);
-            apply_build_env(&mut command, &java.build_env);
+            apply_build_env(&mut command, &java.build_env, contract);
         } else {
             command.arg("build").arg("-q");
         }
@@ -192,7 +193,7 @@ fn run_java_build(
         let mut command = Command::new("gradle");
         if let Some(java) = custom {
             command.args(&java.build_args);
-            apply_build_env(&mut command, &java.build_env);
+            apply_build_env(&mut command, &java.build_env, contract);
         } else {
             command.arg("build").arg("-q");
         }
@@ -218,10 +219,98 @@ fn run_java_build(
     ))
 }
 
-fn apply_build_env(command: &mut Command, env: &[(String, String)]) {
-    for (key, value) in env {
+/// Environment variable choosing where Gradle's user home (dependency and
+/// wrapper caches) lives for Docker-built Java artifacts: `user-cache`
+/// moves it to the per-user Gaia cache; unset or `workspace` keeps it in
+/// `<workspace>/.gaia/docker-home`.
+const GRADLE_HOME_SETTING_ENV: &str = "GAIA_GRADLE_HOME";
+const GRADLE_HOME_USER_CACHE: &str = "user-cache";
+
+fn apply_build_env(
+    command: &mut Command,
+    env: &[(String, String)],
+    contract: &ArtifactExecutionContract,
+) {
+    let docker = matches!(
+        contract.execution_backend,
+        ArtifactExecutionBackend::Docker(_)
+    );
+    let user_cache_setting = std::env::var(GRADLE_HOME_SETTING_ENV).ok();
+    let user_cache = gaia_spec::user_cache_root();
+    let (env, redirected) = redirect_gradle_home(
+        env,
+        docker,
+        user_cache_setting.as_deref() == Some(GRADLE_HOME_USER_CACHE),
+        user_cache.as_deref(),
+    );
+    if let Some(dir) = &redirected {
+        // The container mounts Gradle's home at its host path, so the
+        // redirected home is visible there under the same path. If the
+        // directory cannot be created, Gradle reports the failure itself.
+        let _ = std::fs::create_dir_all(dir);
+        register_docker_mount(dir);
+    }
+    for (key, value) in &env {
         command.env(key, value);
     }
+}
+
+/// Points `GRADLE_USER_HOME` at `<user cache>/gradle-home` when the user
+/// asked for it, the build runs in Docker and the spec puts Gradle's home in
+/// the workspace's `.gaia/docker-home`. Returns the rewritten environment and
+/// the directory to mount, if any. Every other case keeps the spec's values.
+fn redirect_gradle_home(
+    env: &[(String, String)],
+    docker: bool,
+    user_cache_requested: bool,
+    user_cache: Option<&Path>,
+) -> (Vec<(String, String)>, Option<PathBuf>) {
+    let unchanged = || env.to_vec();
+    if !docker || !user_cache_requested {
+        return (unchanged(), None);
+    }
+    let Some(cache) = user_cache else {
+        return (unchanged(), None);
+    };
+    let Some(home) = env
+        .iter()
+        .find(|(key, _)| key == "GRADLE_USER_HOME")
+        .map(|(_, value)| value)
+    else {
+        return (unchanged(), None);
+    };
+    if !home.contains("/.gaia/docker-home") {
+        return (unchanged(), None);
+    }
+    let dir = cache.join("gradle-home");
+    let rewritten = env
+        .iter()
+        .map(|(key, value)| {
+            if key == "GRADLE_USER_HOME" {
+                (key.clone(), dir.display().to_string())
+            } else {
+                (key.clone(), value.clone())
+            }
+        })
+        .collect();
+    (rewritten, Some(dir))
+}
+
+/// Records the Gradle wrapper's distribution from its properties file. Running
+/// `gradlew --version` here would start a second Gradle on the host (and
+/// could download the distribution) just to name a version the wrapper file
+/// already pins.
+fn gradle_wrapper_version_line(source_dir: &Path) -> String {
+    let properties = source_dir.join("gradle/wrapper/gradle-wrapper.properties");
+    let Ok(contents) = std::fs::read_to_string(properties) else {
+        return "unavailable".to_string();
+    };
+    contents
+        .lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix("distributionUrl="))
+        .map(|url| format!("gradle-wrapper distributionUrl={}", url.trim()))
+        .unwrap_or_else(|| "unavailable".to_string())
 }
 
 fn resolve_java_built_path(
@@ -298,7 +387,7 @@ fn artifact_state_contents(
         "maven" => command_version_line("mvn", &["-version"]),
         "gradle-wrapper" => {
             let source_dir = contract.source_dir.as_deref().unwrap_or(".");
-            command_version_line(Path::new(source_dir).join("gradlew"), &["--version"])
+            gradle_wrapper_version_line(Path::new(source_dir))
         }
         _ => command_version_line("gradle", &["--version"]),
     };
@@ -444,6 +533,76 @@ mod tests {
         assert_eq!(
             fs::read_to_string(&output_path).expect("copied artifact"),
             "custom"
+        );
+    }
+
+    fn gradle_env(home: &str) -> Vec<(String, String)> {
+        vec![
+            ("GRADLE_USER_HOME".into(), home.into()),
+            ("MAVEN_LOCAL_REPO".into(), "/ws/build/m2".into()),
+        ]
+    }
+
+    #[test]
+    fn gradle_home_stays_in_workspace_by_default() {
+        let env = gradle_env("/ws/.gaia/docker-home/.gradle");
+        let cache = Path::new("/home/u/.cache/gaia");
+        let (rewritten, mount) = redirect_gradle_home(&env, true, false, Some(cache));
+        assert_eq!(rewritten, env);
+        assert_eq!(mount, None);
+    }
+
+    #[test]
+    fn gradle_home_moves_to_user_cache_when_requested_for_docker() {
+        let env = gradle_env("/ws/.gaia/docker-home/.gradle");
+        let cache = Path::new("/home/u/.cache/gaia");
+        let (rewritten, mount) = redirect_gradle_home(&env, true, true, Some(cache));
+        let expected = PathBuf::from("/home/u/.cache/gaia/gradle-home");
+        assert_eq!(mount.as_deref(), Some(expected.as_path()));
+        assert_eq!(rewritten[0].1, expected.display().to_string());
+        // Other variables pass through untouched.
+        assert_eq!(rewritten[1], env[1]);
+    }
+
+    #[test]
+    fn gradle_home_redirect_ignores_host_builds_and_custom_homes() {
+        let cache = Path::new("/home/u/.cache/gaia");
+        let workspace_home = gradle_env("/ws/.gaia/docker-home/.gradle");
+        // Host builds keep the spec's home.
+        assert_eq!(
+            redirect_gradle_home(&workspace_home, false, true, Some(cache)).0,
+            workspace_home
+        );
+        // A home the spec placed elsewhere is not moved.
+        let elsewhere = gradle_env("/opt/gradle-home");
+        assert_eq!(
+            redirect_gradle_home(&elsewhere, true, true, Some(cache)).0,
+            elsewhere
+        );
+        // No user cache root: keep the spec's home.
+        assert_eq!(
+            redirect_gradle_home(&workspace_home, true, true, None).0,
+            workspace_home
+        );
+    }
+
+    #[test]
+    fn gradle_wrapper_version_comes_from_properties_file() {
+        let dir = temp_path("gaia-java-wrapper-version");
+        fs::create_dir_all(dir.join("gradle/wrapper")).expect("wrapper dir");
+        fs::write(
+            dir.join("gradle/wrapper/gradle-wrapper.properties"),
+            "distributionBase=GRADLE_USER_HOME\ndistributionUrl=https\\://services.gradle.org/distributions/gradle-9.1.0-bin.zip\n",
+        )
+        .expect("properties");
+
+        assert_eq!(
+            gradle_wrapper_version_line(&dir),
+            "gradle-wrapper distributionUrl=https\\://services.gradle.org/distributions/gradle-9.1.0-bin.zip"
+        );
+        assert_eq!(
+            gradle_wrapper_version_line(&temp_path("gaia-java-no-wrapper")),
+            "unavailable"
         );
     }
 
