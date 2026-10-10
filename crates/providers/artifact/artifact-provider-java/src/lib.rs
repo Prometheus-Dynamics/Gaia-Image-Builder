@@ -327,10 +327,11 @@ fn apply_build_env(
 }
 
 /// Points `GRADLE_USER_HOME` at `<user cache>/gradle-home` when the build's
-/// Gradle home mode is `user-cache`, the build runs in Docker and the spec
-/// puts Gradle's home in the workspace's `.gaia/docker-home`. Returns the
-/// rewritten environment and the directory to mount, if any. Every other case
-/// keeps the spec's values.
+/// Gradle home mode is `user-cache` and the build runs in Docker, unless the
+/// build sets its own home outside the workspace's `.gaia/docker-home`. A
+/// build that sets no home would otherwise use one inside the `--rm`
+/// container and start with a cold cache every time. Returns the environment
+/// and the directory to mount, if any.
 fn redirect_gradle_home(
     env: &[(String, String)],
     docker: bool,
@@ -344,27 +345,28 @@ fn redirect_gradle_home(
     let Some(cache) = user_cache else {
         return (unchanged(), None);
     };
-    let Some(home) = env
+    let home = env
         .iter()
         .find(|(key, _)| key == "GRADLE_USER_HOME")
-        .map(|(_, value)| value)
-    else {
-        return (unchanged(), None);
-    };
-    if !home.contains("/.gaia/docker-home") {
+        .map(|(_, value)| value);
+    if home.is_some_and(|home| !home.contains("/.gaia/docker-home")) {
         return (unchanged(), None);
     }
     let dir = cache.join("gradle-home");
-    let rewritten = env
+    let value = dir.display().to_string();
+    let mut rewritten = env
         .iter()
-        .map(|(key, value)| {
+        .map(|(key, existing)| {
             if key == "GRADLE_USER_HOME" {
-                (key.clone(), dir.display().to_string())
-            } else {
                 (key.clone(), value.clone())
+            } else {
+                (key.clone(), existing.clone())
             }
         })
-        .collect();
+        .collect::<Vec<_>>();
+    if home.is_none() {
+        rewritten.push(("GRADLE_USER_HOME".to_string(), value));
+    }
     (rewritten, Some(dir))
 }
 

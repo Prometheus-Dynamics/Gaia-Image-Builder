@@ -288,25 +288,50 @@ fn default_gradle_build_redirects_gradle_home_when_configured() {
 }
 
 #[test]
-fn default_build_without_build_env_is_unchanged() {
+fn default_build_without_build_env_gets_a_persistent_gradle_home_only_in_user_cache_mode() {
     let cache = temp_path("gaia-java-default-no-env-cache");
-    for gradle_home in [GradleHomeSpec::Workspace, GradleHomeSpec::UserCache] {
-        let artifact = default_gradle_artifact(Vec::new());
-        let contract = docker_contract(&artifact);
-        let mut command = Command::new("gradle");
-        command.arg("build").arg("-q");
+    let artifact = default_gradle_artifact(Vec::new());
+    let contract = docker_contract(&artifact);
 
-        apply_java_build_env(
-            &mut command,
-            &artifact,
-            &contract,
-            gradle_home,
-            Some(&cache),
-        );
-
-        assert_eq!(command.get_envs().count(), 0, "{gradle_home:?}");
-    }
+    // Workspace mode: the build's environment is left as it is.
+    let mut command = Command::new("gradle");
+    apply_java_build_env(
+        &mut command,
+        &artifact,
+        &contract,
+        GradleHomeSpec::Workspace,
+        Some(&cache),
+    );
+    assert_eq!(command.get_envs().count(), 0);
     assert!(!cache.join("gradle-home").exists());
+
+    // User-cache mode: without a home of its own, Gradle would use one inside
+    // the --rm container and start cold every build.
+    let mut command = Command::new("gradle");
+    apply_java_build_env(
+        &mut command,
+        &artifact,
+        &contract,
+        GradleHomeSpec::UserCache,
+        Some(&cache),
+    );
+    let envs = command
+        .get_envs()
+        .map(|(key, value)| {
+            (
+                key.to_string_lossy().into_owned(),
+                value.map(|value| value.to_string_lossy().into_owned()),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        envs,
+        [(
+            "GRADLE_USER_HOME".to_string(),
+            Some(cache.join("gradle-home").display().to_string())
+        )]
+    );
+    assert!(cache.join("gradle-home").is_dir());
 }
 
 #[test]
