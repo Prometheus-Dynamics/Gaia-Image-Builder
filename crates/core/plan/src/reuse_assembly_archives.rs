@@ -3,17 +3,17 @@ use gaia_spec::{AssemblyArchiveMemberSourceSpec, AssemblyRoots, ResolvedBuildSpe
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-/// Fingerprint parts for archive inputs. The archive config itself is
-/// covered by the hashed assembly spec; this adds the state of every file a
-/// member or `${assembly.sha256:...}` token reads. Files produced earlier in
-/// the same assembly are recorded by path only, since their own inputs are
-/// already fingerprinted.
-pub(crate) fn archive_input_parts(
+/// Fingerprint entries for archive inputs, as `(name, part)` pairs. The
+/// archive config itself is covered by the hashed assembly spec; this adds the
+/// state of every file a member or `${assembly.sha256:...}` token reads. Files
+/// produced earlier in the same assembly are recorded by path only, since
+/// their own inputs are already fingerprinted.
+pub(crate) fn archive_input_entries(
     spec: &ResolvedBuildSpec,
     roots: &AssemblyRoots,
     assembly: &gaia_spec::ImageAssemblySpec,
     generated_outputs: &BTreeSet<PathBuf>,
-) -> Vec<String> {
+) -> Vec<(String, String)> {
     let mut parts = Vec::new();
     for archive in &assembly.archives {
         for member in &archive.members {
@@ -64,13 +64,20 @@ fn input_part(
     member: &str,
     path: PathBuf,
     generated_outputs: &BTreeSet<PathBuf>,
-) -> String {
+) -> (String, String) {
+    let name = format!("archive {archive_id}/{member} {}", path.display());
     if generated_outputs.contains(&path) {
-        return format!("{kind}-generated:{archive_id}:{member}:{}", path.display());
+        return (
+            name,
+            format!("{kind}-generated:{archive_id}:{member}:{}", path.display()),
+        );
     }
-    format!(
-        "{kind}:{archive_id}:{member}:{}:{}",
-        path.display(),
-        path_state_signature(Path::new(&path))
+    (
+        name,
+        format!(
+            "{kind}:{archive_id}:{member}:{}:{}",
+            path.display(),
+            path_state_signature(Path::new(&path))
+        ),
     )
 }

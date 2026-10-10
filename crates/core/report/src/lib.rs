@@ -1,3 +1,4 @@
+mod image_sizes;
 mod manifest;
 mod masking;
 mod model;

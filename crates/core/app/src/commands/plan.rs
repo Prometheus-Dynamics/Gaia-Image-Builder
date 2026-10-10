@@ -1,9 +1,10 @@
 use gaia_config::{ResolveOptions, try_resolve_config_with_options};
-use gaia_plan::{PlanTarget, plan_build_with_reuse_state};
+use gaia_plan::{PlanTarget, RebuildRequest, plan_build_with_rebuilds};
 use gaia_validate::validate_spec_with_providers;
 
 use crate::AppContext;
 
+use super::rebuild::check_rebuild_request;
 use super::{CommandOutcome, load_operation_durations, load_reuse_state};
 
 pub fn plan_build_command(
@@ -11,6 +12,7 @@ pub fn plan_build_command(
     build: &str,
     options: &ResolveOptions,
     targets: &[PlanTarget],
+    rebuild: &RebuildRequest,
 ) -> CommandOutcome {
     let spec = match try_resolve_config_with_options(build, options) {
         Ok(spec) => spec,
@@ -37,13 +39,17 @@ pub fn plan_build_command(
     }
 
     let reuse_state = load_reuse_state(&spec);
-    let plan = plan_build_with_reuse_state(
+    let plan = plan_build_with_rebuilds(
         &spec,
         &context.source_catalog,
         &context.artifact_catalog,
         &context.image_catalog,
         reuse_state.as_ref(),
+        rebuild,
     );
+    if let Err(message) = check_rebuild_request(&spec, &plan, rebuild) {
+        return CommandOutcome::Failed { message };
+    }
     let plan = if targets.is_empty() {
         plan
     } else {

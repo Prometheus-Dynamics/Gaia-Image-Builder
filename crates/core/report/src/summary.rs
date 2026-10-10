@@ -4,6 +4,7 @@ use gaia_spec::ResolvedBuildSpec;
 use gaia_validate::ValidationReport;
 use std::collections::BTreeMap;
 
+use crate::image_sizes::{image_size_note, image_size_records, summary_image_paths};
 use crate::model::{
     CleanupStatus, ExecutionFailureReport, FailureClass, FailureClassCount, OperationTimingRecord,
     RunSummary,
@@ -63,6 +64,19 @@ pub fn render_summary(
             image_warnings.push(warning.clone());
         }
     }
+    let image_sizes = image_size_records(&summary_image_paths(
+        primary_image_output.as_deref(),
+        outcome
+            .image_results
+            .iter()
+            .flat_map(|result| result.disk_images.clone()),
+    ));
+    let mut image_notes: Vec<String> = outcome
+        .image_results
+        .iter()
+        .flat_map(|result| result.notes.clone())
+        .collect();
+    image_notes.extend(image_sizes.iter().map(image_size_note));
     RunSummary {
         build_name: spec.identity.display_name.clone(),
         build_version: spec.identity.version.clone(),
@@ -81,11 +95,7 @@ pub fn render_summary(
         image_reused: outcome.image_results.iter().any(|result| result.reused),
         image_reuse_details,
         image_warnings,
-        image_notes: outcome
-            .image_results
-            .iter()
-            .flat_map(|result| result.notes.clone())
-            .collect(),
+        image_notes,
         rolled_back_operations: outcome.rolled_back_ids.len(),
         cleanup_failure_count: outcome.cleanup_failures.len(),
         rollback_on_error: spec.policy.failure.rollback_on_error,
@@ -126,6 +136,7 @@ pub fn render_summary(
                     .collect(),
             })
             .collect(),
+        image_sizes,
     }
 }
 

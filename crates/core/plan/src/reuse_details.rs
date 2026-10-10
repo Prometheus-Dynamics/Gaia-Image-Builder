@@ -12,10 +12,10 @@ use crate::reuse::{
     artifact_docker_build_signature, image_backend_signature, operation_content_signature,
     path_state_signature, resolve_workspace_path, source_backend_signature,
 };
-use crate::reuse_assembly::assembly_input_signature;
+use crate::reuse_assembly::assembly_input_entries;
 use crate::reuse_imports::import_source_signature;
 use crate::reuse_toolchain::artifact_backend_signature;
-use crate::{ExecutionPlan, OperationKind, PlannedOperation};
+use crate::{ExecutionPlan, OperationKind, PlannedOperation, operation_fingerprint};
 use gaia_spec::{
     ArtifactDefinition, ArtifactSpec, ImageDefinition, ResolvedBuildSpec, SourceDefinition,
     SourceSpec,
@@ -86,7 +86,10 @@ pub fn operation_components(
         OperationKind::PrepareImage | OperationKind::BuildImage => image_parts(spec, &mut parts),
         OperationKind::AssembleImage => {
             parts.raw("assembly", format!("{:?}", spec.image.assembly));
-            parts.raw("assembly inputs", assembly_input_signature(spec));
+            // One part per input (`assembly inputs[src <path>]`), so the
+            // input that changed is named. Their digests cover everything
+            // the fingerprint's input signature hashes.
+            parts.map("assembly inputs", &assembly_input_entries(spec));
         }
         OperationKind::CaptureCheckpoint { checkpoint_id } => {
             if let Some(checkpoint) = spec
@@ -187,6 +190,11 @@ fn artifact_parts(spec: &ResolvedBuildSpec, artifact: &ArtifactSpec, parts: &mut
             parts.raw("build target", &java.build_target);
             parts.raw("build args", format!("{:?}", java.build_args));
             parts.raw("build command", format!("{:?}", java.build_command));
+            for (name, digest) in
+                crate::reuse_build_inputs::build_command_components(spec, artifact)
+            {
+                parts.raw(name, digest);
+            }
             parts.map("build_env", &java.build_env);
         }
         other => parts.raw("definition", format!("{other:?}")),
@@ -238,12 +246,30 @@ fn image_parts(spec: &ResolvedBuildSpec, parts: &mut Parts) {
         }
     }
     parts.raw("toolchain", image_backend_signature(spec, image));
+    for (name, digest) in crate::reuse_build_inputs::buildroot_image_components(spec) {
+        parts.raw(name, digest);
+    }
     let buildroot_policy = &spec.policy.providers.buildroot;
     if buildroot_policy.shared_output {
         parts.raw(
             "shared output",
             format!("{:?}", buildroot_policy.shared_output_dir),
         );
+    }
+}
+
+/// The fingerprint an operation is recorded under when a run finishes.
+///
+/// An operation's fingerprint is taken when the plan is made, before the run.
+/// Image assembly hashes its build's outputs and the Buildroot files it
+/// reads, and the build rewrites those during the run. Its components and
+/// input signature are recorded after the run, so its fingerprint is taken
+/// then too: otherwise the next plan compares a fingerprint of the old outputs
+/// with the new ones and reruns an assembly nothing changed.
+pub fn recorded_fingerprint(spec: &ResolvedBuildSpec, operation: &PlannedOperation) -> u64 {
+    match operation.kind {
+        OperationKind::AssembleImage => operation_fingerprint(spec, &operation.kind),
+        _ => operation.fingerprint,
     }
 }
 

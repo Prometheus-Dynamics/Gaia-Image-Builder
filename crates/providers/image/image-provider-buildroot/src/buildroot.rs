@@ -1,4 +1,5 @@
 use super::*;
+use crate::requested_rebuilds::{requested_package_rebuilds, with_requested_rebuilds};
 use sha2::{Digest, Sha256};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -131,6 +132,10 @@ pub(crate) fn run_buildroot_with(
     let clock = gaia_process::ActiveClock::start();
     let mut changes = tree_changes(output_dir, spec, &configured);
     messages.push(phase_step_message("tree changes", &clock, &[]));
+    for line in &changes.external_reasons {
+        log_line(&command_context, line.clone());
+        messages.push(line.clone());
+    }
     let config_digest = changes.config_digest.clone();
     let override_digests = changes.override_digests.clone();
     let clock = gaia_process::ActiveClock::start();
@@ -163,7 +168,10 @@ pub(crate) fn run_buildroot_with(
     messages.extend(timed_phase("interrupted packages", || {
         redo_interrupted_packages(output_dir, &[previous_graph.as_ref()])
     })?);
-    let current_graph = if needs_current_graph(built_before, &changes, previous_graph.is_none()) {
+    // `--rebuild-package` needs the graph to name packages and to clean them.
+    let current_graph = if needs_current_graph(built_before, &changes, previous_graph.is_none())
+        || !command_context.policy.rebuild_packages.is_empty()
+    {
         let clock = gaia_process::ActiveClock::start();
         let queried = query_package_graph(
             spec,
@@ -202,6 +210,11 @@ pub(crate) fn run_buildroot_with(
         per_package: command_context.policy.parallel_packages,
     });
     messages.push(phase_step_message("clean planning", &clock, &[]));
+    let requested = requested_package_rebuilds(
+        command_context.policy,
+        current_graph.as_ref().map(|current| &current.graph),
+    )?;
+    let plan = with_requested_rebuilds(plan, &requested);
     let clean_clock = gaia_process::ActiveClock::start();
     let clean_messages_from = messages.len();
     match &plan {
@@ -307,6 +320,7 @@ pub(crate) fn run_buildroot_with(
     }
     write_config_snapshot(output_dir)?;
     write_package_override_digests(output_dir, &override_digests)?;
+    write_external_files_state(output_dir, &changes.external_files)?;
     if let Some(current) = &current_graph {
         current.record(output_dir)?;
     }

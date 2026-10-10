@@ -80,6 +80,34 @@ gaia plan configs/builds/cm5.toml --only artifact:helios-engine
 A partial run keeps the reuse state of operations it did not execute, so an
 artifacts-only run does not force the next full run to rebuild the image.
 
+## Forcing Rebuilds
+
+`--rebuild <targets>` executes the named operations whatever the reuse state
+says. Targets take the same forms as `--only` (a domain or an operation id),
+and an id may end in `*` to match several (`--rebuild 'artifact:*'`). Each
+forced operation shows the reason `rebuild_requested` in `gaia preview`, and
+its dependents follow the normal rules: they execute as `dependency_rebuilt`,
+and content-based reuse still skips any whose rebuilt inputs turn out
+unchanged. An unknown id is an error that suggests the close matches.
+
+`--rebuild-package <package>[,...]` is for Buildroot images. The named packages
+are uninstalled and their build directories removed before `make`, they are
+not restored from the package cache in that run, and the cache entry is stored
+again from the new build. It also makes `image:prepare` and `image:build`
+execute. `gaia preview` lists the packages it would clean. Only the named
+packages are cleaned, not the packages that depend on them.
+
+```bash
+# rebuild the jar and everything that consumes it
+gaia run configs/builds/cm5.toml --rebuild artifact:photonvision-jar
+
+# rebuild one Buildroot package from source, showing what that would clean
+gaia preview configs/builds/cm5.toml --rebuild-package libcamera
+```
+
+`gaia resume` does not repeat either flag: a resumed run should not redo the
+work that already finished.
+
 Examples:
 
 ```bash

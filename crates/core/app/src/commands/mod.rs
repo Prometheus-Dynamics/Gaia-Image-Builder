@@ -8,6 +8,7 @@ mod lock;
 mod plan;
 mod preview;
 mod progress;
+mod rebuild;
 mod resolve;
 mod run;
 pub(crate) mod run_registry;
@@ -17,7 +18,7 @@ mod validate;
 
 use gaia_exec::ExecutionError;
 use gaia_exec::ExecutionOutcome;
-use gaia_plan::{ExecutionPlan, PlanDiagnostic, PlanTarget};
+use gaia_plan::{ExecutionPlan, PlanDiagnostic, PlanTarget, RebuildRequest};
 use gaia_report::{ReportBundle, ReportOutputBundle};
 use gaia_spec::ResolvedBuildSpec;
 use gaia_validate::ValidationReport;
@@ -123,6 +124,25 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
             Err(error) => usage_errors.push(error),
         }
     }
+    let mut rebuild = RebuildRequest {
+        targets: Vec::new(),
+        packages: args.rebuild_packages.clone(),
+    };
+    for target in &args.rebuild {
+        match target.parse::<PlanTarget>() {
+            Ok(target) => rebuild.targets.push(target),
+            Err(error) => usage_errors.push(error),
+        }
+    }
+    if !rebuild.is_empty()
+        && !matches!(
+            args.command,
+            AppCommand::Run | AppCommand::Plan | AppCommand::Preview
+        )
+    {
+        usage_errors
+            .push("--rebuild and --rebuild-package apply to 'run', 'plan' and 'preview'".into());
+    }
     if args.follow && args.command != AppCommand::Status {
         usage_errors.push("--follow applies to 'status'".into());
     }
@@ -183,14 +203,19 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
         AppCommand::Validate => {
             validate_build_command(context, &args.build, &resolve_options(&args))
         }
-        AppCommand::Plan => {
-            plan_build_command(context, &args.build, &resolve_options(&args), &targets)
-        }
+        AppCommand::Plan => plan_build_command(
+            context,
+            &args.build,
+            &resolve_options(&args),
+            &targets,
+            &rebuild,
+        ),
         AppCommand::Preview => preview_build_command(
             context,
             &args.build,
             &resolve_options(&args),
             &targets,
+            &rebuild,
             args.fail_on_clean,
             args.json,
         ),
@@ -208,9 +233,13 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
         }
         AppCommand::Cache => cache_command(&args.build, &resolve_options(&args), &args.cache),
         AppCommand::Lock => lock_build_command(&args.build, &resolve_options(&args), &args.lock),
-        AppCommand::Run => {
-            run_build_command(context, &args.build, &resolve_options(&args), &targets)
-        }
+        AppCommand::Run => run_build_command(
+            context,
+            &args.build,
+            &resolve_options(&args),
+            &targets,
+            &rebuild,
+        ),
     }
 }
 
@@ -268,6 +297,8 @@ fn help_text() -> String {
         "  gaia run [build-config] --env KEY=VALUE",
         "  gaia run [build-config] --set key=value",
         "  gaia run [build-config] --only artifacts[,image,...]",
+        "  gaia run [build-config] --rebuild <operation>[,...]  (run these even if reusable)",
+        "  gaia run [build-config] --rebuild-package <package>[,...]  (Buildroot)",
         "  gaia run [build-config] --export <dir>  (copy the image after a successful run)",
         "  gaia plan [build-config] --only artifact:<id>",
         "  gaia preview [build-config] [--set key=value] [--only ...] [--json] [--fail-on-clean]",
@@ -284,6 +315,14 @@ fn help_text() -> String {
         "--only runs part of the build graph plus its dependencies. Targets are",
         "domains (sources, artifacts, install, stage, image, checkpoints) or",
         "operation ids from 'gaia plan'. Reuse state for the rest is kept.",
+        "",
+        "--rebuild runs the named operations (ids, domains, or an id with '*' such",
+        "as artifact:*) whatever the reuse state says, with the reason rebuild_requested.",
+        "Their dependents follow as usual: content-based reuse may still skip what",
+        "the rebuilt outputs leave unchanged. --rebuild-package dircleans the named",
+        "Buildroot packages before make and builds them again instead of restoring",
+        "them from the package cache, and so makes image:prepare and image:build run.",
+        "'gaia resume' does not repeat --rebuild or --rebuild-package.",
         "",
         "'pause', 'resume', 'cancel' and 'status' find the gaia runs on this system",
         "from any directory: with no run named, 'status' lists them all, and the",

@@ -6,8 +6,8 @@ use gaia_config::{ResolveOptions, try_resolve_config_with_options};
 use gaia_image_providers::{ImagePreview, ImageProviderOperation};
 use gaia_plan::{
     ExecutionPlan, InvalidationSummary, OperationKind, OperationReuse, PlanTarget,
-    PlannedOperation, ReuseState, fingerprint_change_detail, invalidation_summary,
-    operation_components, plan_build_with_reuse_state,
+    PlannedOperation, RebuildRequest, ReuseState, fingerprint_change_detail, invalidation_summary,
+    operation_components, plan_build_with_rebuilds,
 };
 use gaia_spec::ResolvedBuildSpec;
 use gaia_validate::validate_spec_with_providers;
@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 
 use crate::AppContext;
 
+use super::rebuild::check_rebuild_request;
 use super::state::{RecordedComponents, load_operation_components};
 use super::{CommandOutcome, load_reuse_state};
 
@@ -124,10 +125,19 @@ pub fn preview_build_command(
     build: &str,
     options: &ResolveOptions,
     targets: &[PlanTarget],
+    rebuild: &RebuildRequest,
     fail_on_clean: bool,
     json: bool,
 ) -> CommandOutcome {
-    match preview_report(context, build, options, targets, fail_on_clean, json) {
+    match preview_report(
+        context,
+        build,
+        options,
+        targets,
+        rebuild,
+        fail_on_clean,
+        json,
+    ) {
         Ok(report) => CommandOutcome::Previewed { report },
         Err(message) => CommandOutcome::Failed { message },
     }
@@ -138,19 +148,22 @@ fn preview_report(
     build: &str,
     options: &ResolveOptions,
     targets: &[PlanTarget],
+    rebuild: &RebuildRequest,
     fail_on_clean: bool,
     json: bool,
 ) -> Result<PreviewReport, String> {
     let spec =
         try_resolve_config_with_options(build, options).map_err(|error| error.to_string())?;
-    preview_resolved(context, &spec, targets, fail_on_clean, json)
+    preview_resolved(context, &spec, targets, rebuild, fail_on_clean, json)
 }
 
-/// The preview of a resolved build (what `gaia preview` shows for it).
+/// The preview of a resolved build (what `gaia preview` shows for it), with
+/// what the `--rebuild` request would execute.
 pub(crate) fn preview_resolved(
     context: &AppContext,
     spec: &gaia_spec::ResolvedBuildSpec,
     targets: &[PlanTarget],
+    rebuild: &RebuildRequest,
     fail_on_clean: bool,
     json: bool,
 ) -> Result<PreviewReport, String> {
@@ -168,13 +181,15 @@ pub(crate) fn preview_resolved(
         ));
     }
     let reuse_state = load_reuse_state(spec);
-    let full_plan = plan_build_with_reuse_state(
+    let full_plan = plan_build_with_rebuilds(
         spec,
         &context.source_catalog,
         &context.artifact_catalog,
         &context.image_catalog,
         reuse_state.as_ref(),
+        rebuild,
     );
+    check_rebuild_request(spec, &full_plan, rebuild)?;
     let recorded = if reuse_state.is_some() {
         load_operation_components(spec)
     } else {
@@ -251,7 +266,8 @@ pub(crate) fn preview_resolved(
                 } else {
                     ImageProviderOperation::Build
                 };
-                let policy = gaia_exec::image_execution_policy(spec);
+                let mut policy = gaia_exec::image_execution_policy(spec);
+                policy.rebuild_packages.clone_from(&rebuild.packages);
                 let (preview, note) =
                     match provider.preview_image(spec, &spec.image, &policy, operation) {
                         Ok(Some(preview)) => (Some(preview), None),
@@ -316,117 +332,7 @@ fn explained_message(
     }
     let current = operation_components(spec, full_plan, operation);
     fingerprint_change_detail(id, &record.components, &current).unwrap_or_else(|| {
-        format!(
-            "operation '{id}' will execute because its fingerprint changed (no named input differs)"
-        )
-    })
-}
-
-pub(crate) fn print_preview(report: &PreviewReport) {
-    if report.json {
-        println!("{}", preview_json(report));
-        return;
-    }
-    println!(
-        "preview of '{}': {} operation(s), {} would execute",
-        report.build_name,
-        report.operations.len(),
-        report.operations.iter().filter(|op| op.executes).count()
-    );
-    println!("preview: {}", report.invalidation_line());
-    for operation in &report.operations {
-        let state = if operation.executes { "run  " } else { "reuse" };
-        println!("{state} {}: {}", operation.id, operation.reason);
-    }
-    for image in &report.images {
-        println!();
-        println!(
-            "image {} ({}):",
-            if image.provider_id.is_empty() {
-                "-"
-            } else {
-                image.provider_id.as_str()
-            },
-            image.operations.join(", ")
-        );
-        if let Some(note) = &image.note {
-            println!("  {note}");
-        }
-        let Some(preview) = &image.preview else {
-            continue;
-        };
-        if let Some(reason) = &preview.blocked {
-            println!("  blocked: {reason}");
-        }
-        for section in &preview.sections {
-            println!("  {}:", section.title);
-            for line in &section.lines {
-                println!("    {line}");
-            }
-        }
-        let outside = preview.deletions_outside_trash();
-        println!(
-            "  deletions: {outside} outside trash, {} in trash",
-            preview.deletions.len() - outside
-        );
-        for deletion in preview.deletions.iter().take(LISTED_DELETIONS) {
-            println!(
-                "    {:<8} {}  ({})",
-                deletion.kind.as_str(),
-                deletion.path,
-                deletion.reason
-            );
-        }
-        if preview.deletions.len() > LISTED_DELETIONS {
-            println!(
-                "    ... and {} more (--json lists every path)",
-                preview.deletions.len() - LISTED_DELETIONS
-            );
-        }
-    }
-    println!();
-    println!("preview: {}", report.verdict());
-}
-
-/// The report as JSON, for scripts.
-pub(crate) fn preview_json(report: &PreviewReport) -> serde_json::Value {
-    serde_json::json!({
-        "build": report.build_name,
-        "verdict": report.verdict(),
-        "invalidation": report.invalidation.as_ref().map(|summary| serde_json::json!({
-            "line": report.invalidation_line(),
-            "direct": summary.direct,
-            "cascaded": summary.cascaded,
-        })),
-        "fail_on_clean": report.fail_on_clean,
-        "trips_fail_on_clean": report.tripped(),
-        "operations": report.operations.iter().map(|operation| serde_json::json!({
-            "id": operation.id,
-            "executes": operation.executes,
-            "reason": operation.reason,
-        })).collect::<Vec<_>>(),
-        "images": report.images.iter().map(|image| serde_json::json!({
-            "provider": image.provider_id,
-            "operations": image.operations,
-            "note": image.note,
-            "blocked": image.preview.as_ref().and_then(|preview| preview.blocked.clone()),
-            "verdict": image.preview.as_ref().map(|preview| preview.verdict.clone()),
-            "clean": image.preview.as_ref().map(|preview| preview.clean.as_str()),
-            "clean_reasons": image.preview.as_ref().map(|preview| preview.clean_reasons.clone()),
-            "rebuilt_packages": image.preview.as_ref().map(|preview| preview.rebuilt_packages.clone()),
-            "uninstalled_packages": image.preview.as_ref().map(|preview| preview.uninstalled_packages.clone()),
-            "sections": image.preview.as_ref().map(|preview| preview.sections.iter().map(|section| serde_json::json!({
-                "title": section.title,
-                "lines": section.lines,
-            })).collect::<Vec<_>>()),
-            "deletions_outside_trash": image.preview.as_ref().map(ImagePreview::deletions_outside_trash),
-            "deletions": image.preview.as_ref().map(|preview| preview.deletions.iter().map(|deletion| serde_json::json!({
-                "kind": deletion.kind.as_str(),
-                "path": deletion.path,
-                "reason": deletion.reason,
-            })).collect::<Vec<_>>()),
-            "trips_fail_on_clean": image.preview.as_ref().map(ImagePreview::trips_fail_on_clean),
-        })).collect::<Vec<_>>(),
+        format!("operation '{id}' will execute because its fingerprint changed, yet every recorded input matches")
     })
 }
 
@@ -554,8 +460,15 @@ mod tests {
 
         let context = AppContext::with_defaults();
         let before = tree_digest(&root.join("build"));
-        let report = preview_resolved(&context, &spec, &[], true, false)
-            .expect("the preview of a valid build succeeds");
+        let report = preview_resolved(
+            &context,
+            &spec,
+            &[],
+            &RebuildRequest::default(),
+            true,
+            false,
+        )
+        .expect("the preview of a valid build succeeds");
         assert_eq!(
             tree_digest(&root.join("build")),
             before,
@@ -686,8 +599,15 @@ mod tests {
 
         let mut bumped = spec.clone();
         bumped.sources[0] = upstream_git_source(NEW_COMMIT);
-        let report = preview_resolved(&context, &bumped, &[], false, false)
-            .expect("the preview of a valid build succeeds");
+        let report = preview_resolved(
+            &context,
+            &bumped,
+            &[],
+            &RebuildRequest::default(),
+            false,
+            false,
+        )
+        .expect("the preview of a valid build succeeds");
 
         let invalidation = report.invalidation.as_ref().expect("a reuse state exists");
         assert!(
@@ -781,6 +701,10 @@ mod tests {
         assert_eq!(exit(report(true, PreviewCleanKind::Nothing)), 0);
     }
 }
+
+#[path = "preview_render.rs"]
+mod render;
+pub(crate) use render::print_preview;
 
 #[cfg(test)]
 #[path = "preview_detail_tests.rs"]

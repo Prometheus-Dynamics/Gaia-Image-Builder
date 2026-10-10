@@ -83,7 +83,7 @@ fn package_symbols(name: &str) -> Vec<String> {
 /// starts (`BR2_PACKAGE_LIBCAMERA_PIPELINE_RPI` is libcamera's).
 /// `BR2_PACKAGE_HAS_<X>` and `BR2_PACKAGE_PROVIDES_<X>` belong to virtual
 /// package `<x>`.
-fn owning_package<'a>(key: &str, names: &BTreeSet<&'a str>) -> Option<&'a str> {
+pub(crate) fn owning_package<'a>(key: &str, names: &BTreeSet<&'a str>) -> Option<&'a str> {
     let key = ["BR2_PACKAGE_HAS_", "BR2_PACKAGE_PROVIDES_"]
         .iter()
         .find_map(|prefix| key.strip_prefix(prefix))

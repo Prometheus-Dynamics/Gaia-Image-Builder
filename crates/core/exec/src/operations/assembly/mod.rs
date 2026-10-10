@@ -46,6 +46,8 @@ pub(crate) struct AssemblyStagingSummary {
     pub messages: Vec<String>,
     pub cleanup_paths: Vec<PathBuf>,
     pub archive_path: Option<PathBuf>,
+    /// The raw disk images published by this run, in spec order.
+    pub disk_images: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,6 +127,7 @@ pub(crate) fn stage_image_assembly_with(
             messages: vec!["image assembly has no configured actions".into()],
             cleanup_paths: Vec::new(),
             archive_path: None,
+            disk_images: Vec::new(),
         });
     };
     let disk_roots = AssemblyRoots::new(spec, assembly)?;
@@ -317,6 +320,7 @@ fn stage_steps(
         messages,
         cleanup_paths,
         archive_path,
+        disk_images: disk_published,
     })
 }
 

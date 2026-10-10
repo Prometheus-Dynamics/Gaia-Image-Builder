@@ -25,6 +25,7 @@ fn partition(
         image: image.map(|path| path.display().to_string().into()),
         size: size.map(str::to_string),
         wipe: false,
+        materialize: true,
     }
 }
 
@@ -37,6 +38,8 @@ fn disk(output: &Path, partitions: Vec<AssemblyDiskPartitionSpec>) -> AssemblyDi
         signature_text: None,
         first_lba: None,
         alignment_lba: None,
+        truncate: None,
+        ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
         partitions,
     }
 }

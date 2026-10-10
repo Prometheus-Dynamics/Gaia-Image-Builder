@@ -69,6 +69,20 @@ pub fn execute_plan_with_cancellation_and_observer(
     cancellation: &ExecutionCancellation,
     event_sender: Option<Sender<ExecutionEvent>>,
 ) -> ExecutionOutcome {
+    execute_plan_with_rebuilds(spec, plan, providers, cancellation, event_sender, &[])
+}
+
+/// [`execute_plan_with_cancellation_and_observer`], with `rebuild_packages`
+/// (Buildroot packages named by `--rebuild-package`) dircleaned before make
+/// and not restored from the package cache.
+pub fn execute_plan_with_rebuilds(
+    spec: &ResolvedBuildSpec,
+    plan: &ExecutionPlan,
+    providers: ExecutionProviders<'_>,
+    cancellation: &ExecutionCancellation,
+    event_sender: Option<Sender<ExecutionEvent>>,
+    rebuild_packages: &[String],
+) -> ExecutionOutcome {
     let max_parallel_jobs = resolve_parallel_jobs(spec);
     let span = tracing::info_span!(
         "execute_plan",
@@ -139,6 +153,7 @@ pub fn execute_plan_with_cancellation_and_observer(
         event_sender: observer.clone(),
         cancel_check: cancel_check.clone(),
         max_parallel_jobs,
+        rebuild_packages,
     };
 
     thread::scope(|scope| {

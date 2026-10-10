@@ -215,6 +215,7 @@ impl ImageProvider for StartingPointImageProvider {
                 messages
             },
             warnings: Vec::new(),
+            disk_images: Vec::new(),
             notes: Vec::new(),
             state_details: {
                 let mut details = state_details;

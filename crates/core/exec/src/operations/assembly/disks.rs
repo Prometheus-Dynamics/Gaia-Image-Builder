@@ -72,11 +72,28 @@ fn plan_mbr_partitions(
     let mut planned = Vec::new();
     let alignment_lba = disk.alignment_lba.unwrap_or(2048).max(1);
     let mut next_lba = disk.first_lba.unwrap_or(2048);
+    let packed = extended && disk.ebr_placement == gaia_spec::AssemblyEbrPlacementSpec::Packed;
+    // Packed: the EBR chain takes the first sectors of the extended
+    // partition, one per logical partition; data starts after it.
+    let mut packed_extended = None;
     for (index, partition) in disk.partitions.iter().enumerate() {
         let logical = extended && index >= MBR_EXTENDED_SLOT;
+        if packed && index == MBR_EXTENDED_SLOT {
+            let extended_lba = align_to(next_lba, alignment_lba);
+            let logical_count = (disk.partitions.len() - MBR_EXTENDED_SLOT) as u64;
+            // Sector of the last EBR in the chain.
+            packed_extended = Some((extended_lba, extended_lba + logical_count - 1));
+            next_lba = align_to(extended_lba + logical_count, alignment_lba);
+        }
         if logical && partition.bootable {
             return Err(format!(
                 "assembly disk '{}' partition '{}' is a logical partition; bootable is only allowed on primary partitions",
+                disk.id, partition.name
+            ));
+        }
+        if !partition.materialize && (partition.image.is_some() || partition.wipe) {
+            return Err(format!(
+                "assembly disk '{}' partition '{}' is not materialized, so it cannot have an image or wipe",
                 disk.id, partition.name
             ));
         }
@@ -87,12 +104,23 @@ fn plan_mbr_partitions(
             .transpose()?;
         let bytes = image.as_deref().map(file_len).transpose()?.unwrap_or(0);
         let sector_count = partition_sector_count(disk, partition, image.as_deref(), bytes)?;
-        let (ebr_lba, start_lba) = if logical {
-            let ebr_lba = align_to(next_lba, alignment_lba);
-            (Some(ebr_lba), align_to(ebr_lba + 1, alignment_lba))
-        } else {
-            (None, align_to(next_lba, alignment_lba))
-        };
+        let (ebr_lba, start_lba) =
+            if let (true, Some((extended_lba, last_ebr_lba))) = (logical, packed_extended) {
+                let ebr_lba = extended_lba + (index - MBR_EXTENDED_SLOT) as u64;
+                let start_lba = align_to(next_lba, alignment_lba);
+                if start_lba <= last_ebr_lba {
+                    return Err(format!(
+                        "assembly disk '{}' partition '{}' has no room after its packed EBR chain",
+                        disk.id, partition.name
+                    ));
+                }
+                (Some(ebr_lba), start_lba)
+            } else if logical {
+                let ebr_lba = align_to(next_lba, alignment_lba);
+                (Some(ebr_lba), align_to(ebr_lba + 1, alignment_lba))
+            } else {
+                (None, align_to(next_lba, alignment_lba))
+            };
         let end_lba = start_lba
             .checked_add(sector_count)
             .ok_or_else(|| format!("assembly disk '{}' partition layout is too large", disk.id))?;
@@ -176,16 +204,24 @@ fn write_mbr_disk(
     let total_bytes = total_sectors
         .checked_mul(512)
         .ok_or_else(|| format!("assembly disk '{}' is too large", disk.id))?;
+    let file_bytes = match disk.truncate {
+        None => total_bytes,
+        Some(gaia_spec::AssemblyDiskTruncateSpec::LastData) => {
+            last_data_bytes(disk, partitions, total_bytes)
+        }
+    };
     let mut output_file = std_fs::File::create(output).map_err(|error| {
         format!(
             "failed to create assembly disk '{}': {error}",
             output.display()
         )
     })?;
-    // Sized up front so unwritten partition space stays sparse.
-    output_file.set_len(total_bytes).map_err(|error| {
+    // Sized up front so unwritten partition space stays sparse. Every write
+    // below lies inside `file_bytes`, so a truncated disk ends at its last
+    // written byte.
+    output_file.set_len(file_bytes).map_err(|error| {
         format!(
-            "failed to size assembly disk '{}' to {total_bytes} bytes: {error}",
+            "failed to size assembly disk '{}' to {file_bytes} bytes: {error}",
             output.display()
         )
     })?;
@@ -227,6 +263,34 @@ fn write_mbr_disk(
     }
 
     write_mbr_tables(&mut output_file, output, disk, partitions)
+}
+
+/// Length of a `truncate = "last-data"` disk: the end of the partition table
+/// sectors (the MBR and each EBR), of every partition's image, or of every
+/// wiped partition, rounded up to the alignment and capped at the full size.
+/// The table itself is written from the full layout, so it still lists every
+/// partition at its full size.
+fn last_data_bytes(
+    disk: &gaia_spec::AssemblyDiskSpec,
+    partitions: &[AssemblyDiskPartitionSummary],
+    total_bytes: u64,
+) -> u64 {
+    let mut end = 512u64;
+    for partition in partitions {
+        let start = partition.start_lba as u64 * 512;
+        if let Some(ebr_lba) = partition.ebr_lba {
+            end = end.max((ebr_lba as u64 + 1) * 512);
+        }
+        if partition.image.is_some() {
+            end = end.max(start + partition.bytes);
+        } else if partition.wipe_bytes > 0 {
+            end = end.max(start + partition.sector_count as u64 * 512);
+        }
+    }
+    let alignment = disk.alignment_lba.unwrap_or(2048).max(1) * 512;
+    end.div_ceil(alignment)
+        .saturating_mul(alignment)
+        .min(total_bytes)
 }
 
 fn write_zeros(

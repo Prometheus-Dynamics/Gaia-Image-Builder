@@ -214,3 +214,69 @@ entries = [["IMAGE_SHA256", "v${build.version}:${assembly.sha256:$provider.image
     assert_eq!(archive.members[1].name, "rootfs.ext4");
     assert_eq!(archive.members[1].entries, None);
 }
+
+#[test]
+fn resolves_disk_truncate_ebr_placement_and_materialize() {
+    let path = write_temp_config(
+        r#"
+build_name = "trunc"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[image]
+kind = "buildroot"
+defconfig = "dummy_defconfig"
+
+[[image.assembly.disks]]
+id = "emmc"
+output = "$provider.images/emmc.img"
+partition_table = "mbr"
+truncate = "last-data"
+ebr_placement = "packed"
+
+[[image.assembly.disks.partitions]]
+name = "boot"
+type_alias = "fat32-lba"
+image = "$provider.images/boot.vfat"
+
+[[image.assembly.disks.partitions]]
+name = "data"
+type_alias = "linux"
+size = "16M"
+materialize = false
+
+[[image.assembly.disks]]
+id = "plain"
+output = "$provider.images/plain.img"
+
+[[image.assembly.disks.partitions]]
+name = "root"
+image = "$provider.images/rootfs.ext4"
+"#,
+    );
+    let spec = resolve_config(path.to_str().expect("temp path should be utf-8"));
+    let _ = std::fs::remove_file(path);
+    let assembly = spec.image.assembly.as_ref().expect("assembly");
+
+    let emmc = &assembly.disks[0];
+    assert_eq!(
+        emmc.truncate,
+        Some(gaia_spec::AssemblyDiskTruncateSpec::LastData)
+    );
+    assert_eq!(
+        emmc.ebr_placement,
+        gaia_spec::AssemblyEbrPlacementSpec::Packed
+    );
+    assert!(emmc.partitions[0].materialize);
+    assert!(!emmc.partitions[1].materialize);
+    let plain = &assembly.disks[1];
+    assert_eq!(plain.truncate, None);
+    assert_eq!(
+        plain.ebr_placement,
+        gaia_spec::AssemblyEbrPlacementSpec::Default
+    );
+    assert!(plain.partitions[0].materialize);
+}

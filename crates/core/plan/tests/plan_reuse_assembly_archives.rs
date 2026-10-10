@@ -1,8 +1,9 @@
 pub mod support;
 
 use gaia_plan::{
-    OperationReuse, ReuseState, operation_output_signature, plan_build,
-    plan_build_with_reuse_state, spec_fingerprint,
+    ExecutionPlan, OperationReuse, ReuseState, fingerprint_change_detail, operation_components,
+    operation_output_signature, plan_build, plan_build_with_reuse_state, recorded_fingerprint,
+    spec_fingerprint,
 };
 use gaia_spec::{
     AssemblyArchiveMemberSpec, AssemblyArchiveSpec, AssemblyDiskPartitionSpec, AssemblyDiskSpec,
@@ -84,6 +85,8 @@ fn spec_with_archive(name: &str) -> (ResolvedBuildSpec, PathBuf) {
             signature_text: None,
             first_lba: None,
             alignment_lba: None,
+            truncate: None,
+            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "spare".into(),
                 kind: None,
@@ -92,6 +95,7 @@ fn spec_with_archive(name: &str) -> (ResolvedBuildSpec, PathBuf) {
                 image: None,
                 size: Some("2G".into()),
                 wipe: true,
+                materialize: true,
             }],
         }],
         archives: vec![AssemblyArchiveSpec {
@@ -140,4 +144,105 @@ fn unchanged_archive_and_empty_partition_inputs_keep_the_fingerprint() {
         assembly_reuse_code(&spec, &state).as_deref(),
         Some("operation_fingerprint_mismatch")
     );
+}
+
+/// The state a finished run records: the fingerprint of each completed
+/// operation as the state left by the run has it, see `recorded_fingerprint`.
+fn state_recorded_after_run(
+    spec: &ResolvedBuildSpec,
+    plan: &ExecutionPlan,
+    fingerprint_of: impl Fn(&gaia_plan::PlannedOperation) -> u64,
+) -> ReuseState {
+    let operation = plan
+        .operations
+        .iter()
+        .find(|operation| operation.id.as_str() == "image:assembly")
+        .expect("assembly operation");
+    ReuseState {
+        spec_fingerprint: spec_fingerprint(spec),
+        completed_operation_ids: ["image:assembly".to_string()].into_iter().collect(),
+        operation_fingerprints: [("image:assembly".to_string(), fingerprint_of(operation))]
+            .into_iter()
+            .collect(),
+        operation_output_signatures: operation_output_signature(spec, &operation.kind)
+            .map(|signature| ("image:assembly".to_string(), signature))
+            .into_iter()
+            .collect(),
+        operation_input_signatures: Default::default(),
+    }
+}
+
+fn plan_of(spec: &ResolvedBuildSpec) -> ExecutionPlan {
+    let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
+    plan_build(spec, &source_catalog, &artifact_catalog, &image_catalog)
+}
+
+#[test]
+fn an_assembly_recorded_after_its_input_settles_is_not_rerun() {
+    // The build rewrites an assembly input during the run. The planned
+    // fingerprint still holds the input as it was before the run, so the
+    // state must hold the fingerprint of the input as the run left it.
+    let (spec, member) = spec_with_archive("gaia-plan-assembly-settled");
+    let planned_before = plan_of(&spec);
+    fs::write(&member, "rewritten by the build").expect("rewritten input");
+
+    let recorded = state_recorded_after_run(&spec, &plan_of(&spec), recorded_fingerprint_of(&spec));
+    let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
+    let plan = plan_build_with_reuse_state(
+        &spec,
+        &source_catalog,
+        &artifact_catalog,
+        &image_catalog,
+        Some(&recorded),
+    );
+    let reason = plan
+        .operations
+        .iter()
+        .find(|operation| operation.id.as_str() == "image:assembly")
+        .map(|operation| match &operation.reuse {
+            OperationReuse::Execute(reason) => reason.code.to_string(),
+            other => format!("{other:?}"),
+        });
+    assert_ne!(reason.as_deref(), Some("operation_fingerprint_mismatch"));
+
+    // Control: the fingerprint planned before the run is what the bug recorded.
+    let stale = state_recorded_after_run(&spec, &planned_before, |operation| operation.fingerprint);
+    assert_eq!(
+        assembly_reuse_code(&spec, &stale).as_deref(),
+        Some("operation_fingerprint_mismatch")
+    );
+}
+
+fn recorded_fingerprint_of(
+    spec: &ResolvedBuildSpec,
+) -> impl Fn(&gaia_plan::PlannedOperation) -> u64 + '_ {
+    move |operation| recorded_fingerprint(spec, operation)
+}
+
+#[test]
+fn a_changed_assembly_input_is_named_in_the_fingerprint_change() {
+    let (spec, member) = spec_with_archive("gaia-plan-assembly-named");
+    let before_plan = plan_of(&spec);
+    let before = components_of_assembly(&spec, &before_plan);
+
+    fs::write(&member, "two").expect("updated member");
+
+    let after_plan = plan_of(&spec);
+    let after = components_of_assembly(&spec, &after_plan);
+    let message = fingerprint_change_detail("image:assembly", &before, &after)
+        .expect("a changed input is named");
+    assert!(
+        message.contains("assembly inputs changed (archive update/rootfs.ext4 "),
+        "{message}"
+    );
+    assert!(!message.contains("no named input"), "{message}");
+}
+
+fn components_of_assembly(spec: &ResolvedBuildSpec, plan: &ExecutionPlan) -> Vec<(String, String)> {
+    let operation = plan
+        .operations
+        .iter()
+        .find(|operation| operation.id.as_str() == "image:assembly")
+        .expect("assembly operation");
+    operation_components(spec, plan, operation)
 }

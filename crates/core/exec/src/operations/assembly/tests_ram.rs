@@ -40,6 +40,7 @@ fn ram_test_assembly(work_dir: &str) -> ImageAssemblySpec {
             image: image.map(Into::into),
             size: size.map(str::to_string),
             wipe,
+            materialize: true,
         }
     };
     ImageAssemblySpec {
@@ -72,6 +73,8 @@ fn ram_test_assembly(work_dir: &str) -> ImageAssemblySpec {
             signature_text: None,
             first_lba: None,
             alignment_lba: None,
+            truncate: None,
+            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
             partitions: vec![
                 partition("boot", Some("$provider.images/boot.cpio"), None, false),
                 partition("copy", Some("$assembly.work/part-copy.bin"), None, false),

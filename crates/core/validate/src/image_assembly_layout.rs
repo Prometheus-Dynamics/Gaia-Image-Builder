@@ -57,6 +57,38 @@ pub(crate) fn validate_disk_layout(
                 location(),
             ));
         }
+        if !partition.materialize {
+            if partition.size.is_none() {
+                diagnostics.push(error(
+                    "assembly_partition_unmaterialized_size_required",
+                    format!(
+                        "assembly disk '{}' partition '{}' sets materialize = false and no size; an unmaterialized partition needs a size to be placed in the table",
+                        disk.id, partition.name
+                    ),
+                    location(),
+                ));
+            }
+            if partition.image.is_some() {
+                diagnostics.push(error(
+                    "assembly_partition_unmaterialized_image",
+                    format!(
+                        "assembly disk '{}' partition '{}' sets materialize = false and an image; an unmaterialized partition is not written",
+                        disk.id, partition.name
+                    ),
+                    location(),
+                ));
+            }
+            if partition.wipe {
+                diagnostics.push(error(
+                    "assembly_partition_unmaterialized_wipe",
+                    format!(
+                        "assembly disk '{}' partition '{}' sets materialize = false and wipe = true; an unmaterialized partition is not written, so it cannot be wiped",
+                        disk.id, partition.name
+                    ),
+                    location(),
+                ));
+            }
+        }
         if extended && index >= 3 && partition.bootable {
             diagnostics.push(error(
                 "assembly_partition_bootable_logical",

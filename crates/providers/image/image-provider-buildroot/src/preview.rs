@@ -8,6 +8,9 @@
 //! [`decide_clean`], ...). What the run would delete or move is then read
 //! from the real tree, and the package cache is planned read-only.
 use super::*;
+use crate::requested_rebuilds::{
+    excluded_from_restore, requested_package_rebuilds, with_requested_rebuilds,
+};
 use gaia_image_providers::{
     ImagePreview, PreviewCleanKind, PreviewDeletion, PreviewDeletionKind, PreviewSection,
 };
@@ -338,7 +341,9 @@ pub(crate) fn preview_buildroot(
             ));
         }
     }
-    let current = if needs_current_graph(built_before, &changes, previous_graph.is_none()) {
+    let current = if needs_current_graph(built_before, &changes, previous_graph.is_none())
+        || !policy.rebuild_packages.is_empty()
+    {
         match query_package_graph(
             spec,
             &buildroot_dir,
@@ -373,10 +378,15 @@ pub(crate) fn preview_buildroot(
         symbol_use: &symbol_use,
         per_package: policy.parallel_packages,
     });
+    let requested =
+        requested_package_rebuilds(policy, current.as_ref().map(|current| &current.graph))?;
+    let clean = with_requested_rebuilds(clean, &requested);
     let graph = current
         .as_ref()
         .map(|current| &current.graph)
         .or(previous_graph.as_ref());
+    // Changed external tree files, named whatever the clean is.
+    clean_lines.extend(changes.external_reasons.iter().cloned());
     let (kind, reasons) = match &clean {
         CleanPlan::Nothing => (PreviewCleanKind::Nothing, Vec::new()),
         CleanPlan::Finalize { reasons, .. } => (PreviewCleanKind::Finalize, reasons.clone()),
@@ -503,11 +513,13 @@ pub(crate) fn preview_buildroot(
             if !system_tools.is_empty() {
                 identity = format!("{identity} {system_tools}");
             }
+            let external = external_package_key_digests(spec);
             let keys = package_keys(&KeyInputs {
                 buildroot_dir: &buildroot_dir,
                 output_dir: &scratch.tree,
                 graph,
                 execution_identity: &identity,
+                external: &external,
             });
             let read_by_image = packages_reading_sources(spec, graph);
             let rebuilt = match &clean {
@@ -526,8 +538,13 @@ pub(crate) fn preview_buildroot(
                         .as_deref()
                         .is_some_and(|dir| stamp_built(dir, graph, name))
             };
-            let mut restored =
-                cache.restore_plan(&tree, graph, &keys, &read_by_image, &built_after);
+            let mut restored = cache.restore_plan(
+                &tree,
+                graph,
+                &keys,
+                &excluded_from_restore(&read_by_image, &requested),
+                &built_after,
+            );
             restored.sort();
             let mut reused = Vec::new();
             let mut built = Vec::new();

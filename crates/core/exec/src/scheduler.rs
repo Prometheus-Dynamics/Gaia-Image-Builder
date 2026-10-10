@@ -52,6 +52,8 @@ pub(crate) struct ScheduleReadyContext<'env> {
     pub(crate) event_sender: Option<Sender<ExecutionEvent>>,
     pub(crate) cancel_check: ProcessCancelCheck,
     pub(crate) max_parallel_jobs: usize,
+    /// Buildroot packages named by `--rebuild-package` (see `DispatchContext`).
+    pub(crate) rebuild_packages: &'env [String],
 }
 
 pub(crate) struct ScheduleReadyState<'a> {
@@ -168,6 +170,7 @@ pub(crate) fn schedule_ready_operations<'scope, 'env>(
             event_sender: context.event_sender.clone(),
             cancel_check: Some(context.cancel_check.clone()),
             job_budget,
+            rebuild_packages: context.rebuild_packages.to_vec(),
         };
         scope.spawn(move || {
             // Operation time excludes time the build spent paused.

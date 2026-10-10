@@ -53,6 +53,8 @@ fn ram_moves_intermediates_and_keeps_published_disks_on_disk() {
         signature_text: None,
         first_lba: None,
         alignment_lba: None,
+        truncate: None,
+        ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
         partitions: vec![gaia_spec::AssemblyDiskPartitionSpec {
             name: "boot".into(),
             kind: None,
@@ -61,6 +63,7 @@ fn ram_moves_intermediates_and_keeps_published_disks_on_disk() {
             image: Some("$provider.images/boot.vfat".into()),
             size: None,
             wipe: false,
+            materialize: true,
         }],
     });
     spec.image.assembly = Some(assembly.clone());
@@ -294,6 +297,8 @@ fn a_raw_disk_under_the_work_dir_is_still_published_to_its_path() {
         signature_text: None,
         first_lba: None,
         alignment_lba: None,
+        truncate: None,
+        ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
         partitions: Vec::new(),
     });
     spec.image.assembly = Some(assembly.clone());

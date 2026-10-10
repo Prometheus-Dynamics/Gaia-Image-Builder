@@ -381,6 +381,8 @@ fn image_assembly_disk_failure_cleans_generated_filesystem_output() {
             signature_text: None,
             first_lba: None,
             alignment_lba: None,
+            truncate: None,
+            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "missing".into(),
                 kind: None,
@@ -395,6 +397,7 @@ fn image_assembly_disk_failure_cleans_generated_filesystem_output() {
                 ),
                 size: None,
                 wipe: false,
+                materialize: true,
             }],
         }],
         ..ImageAssemblySpec::default()
@@ -447,6 +450,8 @@ fn image_assembly_disk_write_failure_cleans_temp_and_final_outputs() {
             signature_text: None,
             first_lba: None,
             alignment_lba: None,
+            truncate: None,
+            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "rootfs".into(),
                 kind: None,
@@ -461,6 +466,7 @@ fn image_assembly_disk_write_failure_cleans_temp_and_final_outputs() {
                 ),
                 size: None,
                 wipe: false,
+                materialize: true,
             }],
         }],
         ..ImageAssemblySpec::default()

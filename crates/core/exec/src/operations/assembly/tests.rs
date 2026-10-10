@@ -324,6 +324,7 @@ fn assembly_disk_helpers_parse_types_aliases_and_signatures() {
         image: Some("boot.vfat".into()),
         size: None,
         wipe: false,
+        materialize: true,
     };
     let alias = gaia_spec::AssemblyDiskPartitionSpec {
         name: "alias".into(),
@@ -333,6 +334,7 @@ fn assembly_disk_helpers_parse_types_aliases_and_signatures() {
         image: Some("boot.vfat".into()),
         size: None,
         wipe: false,
+        materialize: true,
     };
     let linux = gaia_spec::AssemblyDiskPartitionSpec {
         name: "linux".into(),
@@ -342,6 +344,7 @@ fn assembly_disk_helpers_parse_types_aliases_and_signatures() {
         image: Some("rootfs".into()),
         size: None,
         wipe: false,
+        materialize: true,
     };
     let disk = gaia_spec::AssemblyDiskSpec {
         id: "sdcard".into(),
@@ -351,6 +354,8 @@ fn assembly_disk_helpers_parse_types_aliases_and_signatures() {
         signature_text: None,
         first_lba: None,
         alignment_lba: None,
+        truncate: None,
+        ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
         partitions: Vec::new(),
     };
 

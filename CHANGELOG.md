@@ -16,6 +16,13 @@ This cycle also moves the toolchain pin and `rust-version` to Rust 1.99.0
 (installing Gaia needs Rust 1.99 or newer), upgrades every dependency to its
 newest release, and updates the Rust docker images to 1.99.0.
 
+### Smaller raw disk images
+
+- `[[image.assembly.disks]] truncate = "last-data"` ends the raw file after the last written byte (rounded up to the alignment) while the partition table still lists every partition at its full size. MBR only.
+- `[[image.assembly.disks.partitions]] materialize = false` keeps a partition in the table at its full size with nothing written (no image, no wipe). Validation rejects `image` or `wipe` with it.
+- `[[image.assembly.disks]] ebr_placement = "packed"` writes the MBR extended partition's EBR chain in consecutive sectors at its start, so logical partitions stay in the table when the file is truncated. `"default"` (the default) keeps today's layout.
+- The run summary reports `image_sizes` (raw file length and content bytes per published image) and a note per image.
+
 ### Buildroot reuse and reproducibility
 
 - The build operation no longer repeats the prepare operation's config steps (defconfig, fragments, overrides, cache settings) when their inputs and the resulting `.config` are unchanged, and, for builds without an image feed, no longer repeats the `target-finalize` (about 40 s on a PhotonVision tree with nothing to build) when every package is installed, the config is unchanged and nothing was built since the last finalize. A build with an image feed still finalizes, since the feed is applied by a post-build script inside `target-finalize`.
@@ -100,6 +107,10 @@ newest release, and updates the Rust docker images to 1.99.0.
   the fingerprint, and the planner and the source provider share one rule.
   The fingerprint format changed, so path sources rebuild once after upgrading.
 - Image build and image assembly fingerprints hash content instead of provider state. The build's signature is the digests of the files in its collect dir (the collected images, the provider marker and the archive), and assembly's is the digests of its transform, filesystem, disk and archive outputs, keyed by the spec's output templates. The provider rewrites `.gaia-image-state.txt` on every build (mtime digests, absolute paths, `reused=`), so before this a rebuild that produced identical images still re-ran assembly and everything after it. Identical rebuilds now keep assembly reused; a changed image byte or assembly output still re-runs it. The signature format changed, so image assembly re-runs once after upgrading. Digests are cached per process by path, size and mtime.
+- Image assembly is recorded under the fingerprint its inputs have after the run. The build rewrites the Buildroot files and collect dir that assembly fingerprints, so the planned fingerprint (taken before the run) differed from the next plan's, and `gaia preview` reported `image:assembly` as changed with nothing changed. The state now keeps the post-run fingerprint, with the components and input signature recorded from the same state. Assembly inputs are also named per input (`assembly inputs[src <path>]`, `archive <id>/<member> <path>`), so a changed input is named in the explanation; an explanation no longer says "no named input differs".
+- The reuse planner decides operations in dependency order. An artifact planned before its dependency (for example one that waits for the image prepare step) used to read that dependency as rebuilding, so it and its dependents showed `dependency_rebuilt` even when the dependency was reused. The cascade message also dropped the dependency's reason. Now a dependent cascades only when a dependency finally runs.
+
+- Edits to files a build reads now invalidate it. A Java artifact's `build_command` fingerprints the contents of each argument that names a file in the workspace, plus the files a shell script sources by a relative path (`build command script <path>`). Buildroot image operations fingerprint the post-build, post-image and post-fakeroot scripts (with the regular files beside each) and every file of each `BR2_EXTERNAL` tree (`post-image script <path>`, `external file <tree>:<path>`). A changed external file names the Buildroot packages its `.mk` assignments touch (for example `HOST_EROFS_UTILS_CONF_OPTS` names `host-erofs-utils`): those packages are rebuilt, and their package cache keys include the external files that touch them. A changed external file that touches no package no longer forces a full Buildroot clean. Gaia classifies it by what the configured tree reads it through: a file a package setting names (a kernel config fragment, a package config file) rebuilds that package, and a `patches/<package>/` patch rebuilds that package at any depth; a file under an overlay, a device or users table, or beside the post-build script reassembles `target/` without rebuilding packages; Kconfig, documentation and metadata files clean nothing; a `.mk` file, which may assign anything, still forces a full clean, and any other file reassembles `target/`. Trees built before this change record no external files: their current files become the baseline (nothing is rebuilt, and the run says so), and the next run compares them. Image operations rerun once after upgrading when the tree has an external tree or post scripts.
 
 ### Executor and runtime
 
@@ -166,6 +177,8 @@ newest release, and updates the Rust docker images to 1.99.0.
   behavior applied.
 
 ### Added
+
+- Added `--rebuild <operation>[,...]` to `gaia run`, `gaia plan` and `gaia preview`: the named operations (ids, domains, or `artifact:*` globs) execute regardless of reuse state, with reason `rebuild_requested`, and their dependents follow the usual `dependency_rebuilt` logic. Added `--rebuild-package <package>[,...]` for Buildroot images: the named packages are dircleaned before `make`, are not restored from the package cache in that run (the cache entry is stored again), and make `image:prepare` and `image:build` execute. `gaia preview` shows which packages would be cleaned. `gaia resume` does not repeat either flag. See `docs/cli.md`.
 
 - Added `[providers.java] gradle_home = "workspace" | "user-cache"` (also
   `--set policy.providers.java.gradle_home=...`): `user-cache` moves a Docker

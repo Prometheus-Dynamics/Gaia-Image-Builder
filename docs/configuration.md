@@ -1806,6 +1806,7 @@ The assembly state records `work_dir.placement` (`ram` or `disk`),
 - `image`: file written at the partition start. Optional when `size` is set.
 - `size`: partition size in bytes or with a binary `K`/`M`/`G`/`T` suffix (`"16M"`, `"2G"`). Without it the partition is exactly as large as its image (rounded up to 512-byte sectors). With it the image must fit, otherwise assembly fails before the disk is written; the space after the image is left unwritten.
 - `wipe = true`: only for empty partitions (no `image`). Writes zeros over the first 1 MiB of the partition (less if the partition is smaller) so filesystem signatures left by a previous flash do not survive when the image is written to a device. Validation rejects `wipe` together with `image`, since an image already overwrites the partition start.
+- `materialize = false`: the partition is in the table at its full `size`, but nothing is written to it (no image, no wipe). It needs `size`; validation rejects `image` or `wipe` with it (`assembly_partition_unmaterialized_image`, `assembly_partition_unmaterialized_wipe`). Pair it with `truncate = "last-data"` to leave the partition past the end of the file so it is created on first boot. Defaults to `true`.
 
 Layout:
 - Partitions are placed in declaration order, each starting at the next `alignment_lba` boundary (default 2048 sectors) after `first_lba` (default 2048).
@@ -1813,6 +1814,18 @@ Layout:
 - With more than 4 partitions Gaia writes the standard sfdisk extended layout: partitions 1-3 are primary (p1-p3), MBR slot 4 becomes an extended partition (type `0x05`), and partitions 4.. become logical partitions p5, p6, ... Each logical partition has an EBR in the first sector of its aligned slot and its data starts at the next `alignment_lba` boundary. EBR entry 0 describes the logical partition relative to its EBR; entry 1 links the next EBR, relative to the extended partition start, and spans that EBR through the end of its logical partition. The extended entry spans from the first EBR to the end of the last logical partition.
 - The disk file is created at its full size with unwritten ranges left as holes, so empty and padded partitions take no space on filesystems that support sparse files.
 - Assembly state records each partition's `start_lba`, `sector_count`, image `bytes`, and for layouts with more than 4 partitions the kernel `number` and the `ebr_lba` of logical partitions; empty partitions record `empty=true` and `wipe_bytes`.
+
+#### Truncated disks
+
+`[[image.assembly.disks]]` options that make the raw file shorter than the disk:
+- `truncate = "last-data"`: the file ends after the last written byte instead of at the end of the full-size layout. The end is the largest of: the partition table sectors (the MBR and every EBR), each materialized partition's image end (its start plus the image's size, not the partition size), and the full size of each `wipe = true` partition. The result is rounded up to `alignment_lba` (1 MiB by default) and capped at the full size. Unset (the default) keeps the full size. Only `mbr` is supported; `gpt` with `truncate` is a validation error, since a GPT backup header lives at the end of the full-size disk.
+- The partition table still lists every partition at its full size. The bytes past the end are not written, so the partitions beyond it are blank until the disk is written to a device of its full size (or repaired with `sfdisk`/`partx` after the first boot).
+- The size checks still apply against the partition size: an image larger than its partition fails before the disk is written.
+- The RAM path, the archives (xz, zstd, gzip, raw) and the content digests all use the shorter file. The summary reports the raw and written sizes per image (see below).
+- `ebr_placement = "default"` (the default) puts each EBR right before its logical partition, so a logical partition with no data at the end of the disk pulls its EBR, and so the file, a little further out. Nothing is cut off: the file always covers every EBR.
+- `ebr_placement = "packed"`: the EBR chain of the extended partition is written in consecutive sectors at its start (EBR n at the extended start plus n sectors). Logical data starts after the chain, so with `truncate` the file ends after the last logical data and every logical partition is still described at its full size. Each EBR's first entry describes its logical partition relative to that EBR; its second entry links the next EBR, relative to the extended start. The planner errors if the chain leaves no room for the first logical partition. Only affects layouts with more than four partitions; use it with `truncate` when logical partitions are unmaterialized at the end of the disk.
+
+Assembly results report, per published raw disk image (and the primary image), `raw_bytes` (file length) and `content_bytes` (bytes the filesystem allocates, from `st_blocks`, so holes are excluded). The run summary has them in `image_sizes` and adds a note such as `sdcard.img: 1.36 GB raw, 412.00 MB written`.
 
 #### Archives
 

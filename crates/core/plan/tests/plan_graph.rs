@@ -496,6 +496,8 @@ fn image_assembly_fingerprint_tracks_direct_partition_images() {
             signature_text: None,
             first_lba: None,
             alignment_lba: None,
+            truncate: None,
+            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "rootfs".into(),
                 kind: None,
@@ -504,6 +506,7 @@ fn image_assembly_fingerprint_tracks_direct_partition_images() {
                 image: Some("@assets/rootfs.img".into()),
                 size: None,
                 wipe: false,
+                materialize: true,
             }],
         }],
         ..ImageAssemblySpec::default()
@@ -547,6 +550,8 @@ fn image_assembly_fingerprint_tracks_provider_root_partition_images() {
             signature_text: None,
             first_lba: None,
             alignment_lba: None,
+            truncate: None,
+            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "rootfs".into(),
                 kind: None,
@@ -555,6 +560,7 @@ fn image_assembly_fingerprint_tracks_provider_root_partition_images() {
                 image: Some("$provider.images/provider-rootfs.img".into()),
                 size: None,
                 wipe: false,
+                materialize: true,
             }],
         }],
         ..ImageAssemblySpec::default()
@@ -594,6 +600,8 @@ fn image_assembly_fingerprint_tracks_missing_partition_image_becoming_present() 
             signature_text: None,
             first_lba: None,
             alignment_lba: None,
+            truncate: None,
+            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "rootfs".into(),
                 kind: None,
@@ -602,6 +610,7 @@ fn image_assembly_fingerprint_tracks_missing_partition_image_becoming_present() 
                 image: Some("@assets/rootfs.img".into()),
                 size: None,
                 wipe: false,
+                materialize: true,
             }],
         }],
         ..ImageAssemblySpec::default()
@@ -657,6 +666,8 @@ fn image_assembly_fingerprint_does_not_hash_generated_filesystem_partition_outpu
             signature_text: None,
             first_lba: None,
             alignment_lba: None,
+            truncate: None,
+            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "rootfs".into(),
                 kind: None,
@@ -665,6 +676,7 @@ fn image_assembly_fingerprint_does_not_hash_generated_filesystem_partition_outpu
                 image: Some("$assembly.out/rootfs.cpio".into()),
                 size: None,
                 wipe: false,
+                materialize: true,
             }],
         }],
         ..ImageAssemblySpec::default()

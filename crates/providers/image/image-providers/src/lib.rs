@@ -1,6 +1,15 @@
+mod buildroot_external_files;
+mod buildroot_scripts;
 mod content_digests;
 mod materialize;
 mod preview;
+
+pub use buildroot_external_files::{
+    ExternalChanges, ExternalFile, ExternalTree, decode_external_state, encode_external_state,
+    external_changes, external_package_digests, external_tree_files, external_trees,
+    packages_assigned_by, resolve_tree_path,
+};
+pub use buildroot_scripts::{POST_SCRIPT_SETTINGS, expand_external_paths, post_script_components};
 pub use content_digests::{
     COLLECT_STATE_FILE, CONTENT_DIGESTS_FILE, TEMP_FILE_SUFFIX, collect_content_files,
     is_content_walk_excluded, record_collect_dir_digests, record_content_digests, recorded_sha256,
@@ -224,6 +233,9 @@ pub struct ImageExecutionPolicy {
     pub override_check: BuildrootOverrideCheckSpec,
     pub kernel_modules_check: BuildrootOverrideCheckSpec,
     pub output_retention: ProcessOutputRetention,
+    /// Buildroot: packages named by `--rebuild-package`. They are dircleaned
+    /// before make and not restored from the package cache in this run.
+    pub rebuild_packages: Vec<String>,
 }
 
 impl Default for ImageExecutionPolicy {
@@ -248,6 +260,7 @@ impl Default for ImageExecutionPolicy {
             override_check: BuildrootOverrideCheckSpec::default(),
             kernel_modules_check: BuildrootOverrideCheckSpec::default(),
             output_retention: ProcessOutputRetention::default(),
+            rebuild_packages: Vec::new(),
         }
     }
 }
@@ -268,6 +281,9 @@ pub struct ImageExecutionResult {
     /// hit rate.
     pub notes: Vec<String>,
     pub state_details: Vec<(String, String)>,
+    /// Raw disk images the run published, for the run summary's per-image
+    /// raw and content sizes.
+    pub disk_images: Vec<PathBuf>,
 }
 
 pub fn build_state_details(spec: &ResolvedBuildSpec) -> Vec<(String, String)> {
@@ -606,6 +622,7 @@ mod tests {
             reuse_details: Vec::new(),
             messages: Vec::new(),
             warnings: Vec::new(),
+            disk_images: Vec::new(),
             notes: Vec::new(),
             state_details: Vec::new(),
         };

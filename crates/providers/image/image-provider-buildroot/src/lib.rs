@@ -310,6 +310,7 @@ impl ImageProvider for BuildrootImageProvider {
             reused: !reuse_details.is_empty(),
             reuse_details,
             warnings: override_check_warnings(&messages),
+            disk_images: Vec::new(),
             notes: summary_notes(&messages),
             messages,
             state_details: {
@@ -419,6 +420,7 @@ impl ImageProvider for BuildrootImageProvider {
                     reused: false,
                     reuse_details: Vec::new(),
                     warnings: override_check_warnings(&messages),
+                    disk_images: Vec::new(),
                     notes: summary_notes(&messages),
                     messages,
                     state_details: {
@@ -634,6 +636,8 @@ mod clean_plan;
 mod command;
 mod config_inputs;
 mod configure;
+mod external_classify;
+mod external_inputs;
 mod feed;
 mod feed_make;
 mod finalize_state;
@@ -650,6 +654,7 @@ mod package_keys;
 mod preview;
 mod ram_tree;
 mod rebuild_inputs;
+mod requested_rebuilds;
 mod rootfs_inputs;
 mod shared;
 mod source_date;
@@ -681,6 +686,8 @@ pub(crate) use clean_plan::*;
 pub(crate) use command::*;
 pub(crate) use config_inputs::*;
 pub(crate) use configure::*;
+pub(crate) use external_classify::*;
+pub(crate) use external_inputs::*;
 pub(crate) use feed::*;
 pub(crate) use feed_make::*;
 pub(crate) use finalize_state::*;

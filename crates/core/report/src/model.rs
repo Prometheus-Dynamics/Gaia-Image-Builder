@@ -59,6 +59,18 @@ pub struct RunSummary {
     pub skipped_operation_ids: Vec<String>,
     /// Wall-clock time of every operation that ran, in completion order.
     pub operation_timings: Vec<OperationTimingRecord>,
+    /// Raw and content sizes of the primary image and each raw disk image the
+    /// run published. Empty for a reused image.
+    pub image_sizes: Vec<ImageSizeRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImageSizeRecord {
+    pub path: String,
+    /// File length.
+    pub raw_bytes: u64,
+    /// Bytes the filesystem allocates for the file: the data actually written.
+    pub content_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

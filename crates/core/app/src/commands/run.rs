@@ -1,9 +1,8 @@
 use gaia_config::{ResolveOptions, try_resolve_config_with_options};
 use gaia_exec::{
-    ExecutionCancellation, ExecutionEvent, ExecutionProviders,
-    execute_plan_with_cancellation_and_observer,
+    ExecutionCancellation, ExecutionEvent, ExecutionProviders, execute_plan_with_rebuilds,
 };
-use gaia_plan::{PlanTarget, plan_build_with_reuse_state};
+use gaia_plan::{PlanTarget, RebuildRequest, plan_build_with_rebuilds};
 use gaia_process::ProcessRunErrorKind;
 use gaia_report::{generate_report, write_report_bundle};
 use gaia_validate::validate_spec_with_providers;
@@ -22,6 +21,7 @@ use crate::AppContext;
 
 use super::live_status::{LiveRecorder, LiveRunInfo, run_outcome_label, unix_now};
 use super::progress::{ConsoleProgress, console_progress_disabled};
+use super::rebuild::check_rebuild_request;
 use super::run_registry::{RegisteredRun, RunRegistration, recording_enabled};
 use super::{CommandOutcome, RunArtifacts, load_reuse_state, save_reuse_state};
 
@@ -36,8 +36,9 @@ pub fn run_build_command(
     build: &str,
     options: &ResolveOptions,
     targets: &[PlanTarget],
+    rebuild: &RebuildRequest,
 ) -> CommandOutcome {
-    let run = match collect_run_artifacts(context, build, options, targets) {
+    let run = match collect_run_artifacts(context, build, options, targets, rebuild) {
         Ok(run) => run,
         Err(message) => return CommandOutcome::Failed { message },
     };
@@ -79,6 +80,7 @@ fn collect_run_artifacts(
     build: &str,
     options: &ResolveOptions,
     targets: &[PlanTarget],
+    rebuild: &RebuildRequest,
 ) -> Result<RunArtifacts, String> {
     let span = tracing::info_span!("run_build", build);
     let _guard = span.enter();
@@ -103,13 +105,15 @@ fn collect_run_artifacts(
         "validated run build spec"
     );
     let reuse_state = load_reuse_state(&spec);
-    let plan = plan_build_with_reuse_state(
+    let plan = plan_build_with_rebuilds(
         &spec,
         &context.source_catalog,
         &context.artifact_catalog,
         &context.image_catalog,
         reuse_state.as_ref(),
+        rebuild,
     );
+    check_rebuild_request(&spec, &plan, rebuild)?;
     let plan = if targets.is_empty() {
         plan
     } else {
@@ -157,6 +161,7 @@ fn collect_run_artifacts(
             image_catalog: &context.image_catalog,
         },
         build,
+        &rebuild.packages,
     );
     tracing::debug!(
         completed = outcome.completed_operations,
@@ -207,6 +212,7 @@ fn execute_plan_with_console_progress(
     plan: &gaia_plan::ExecutionPlan,
     providers: ExecutionProviders<'_>,
     build: &str,
+    rebuild_packages: &[String],
 ) -> gaia_exec::ExecutionOutcome {
     let cancellation = ExecutionCancellation::new();
     let _interrupt = super::interrupt::cancel_on_interrupt(&cancellation);
@@ -228,12 +234,13 @@ fn execute_plan_with_console_progress(
     let print = !console_progress_disabled();
     let progress_thread =
         thread::spawn(move || ConsoleProgress::new(operation_count, print, event_rx, live).run());
-    let outcome = execute_plan_with_cancellation_and_observer(
+    let outcome = execute_plan_with_rebuilds(
         spec,
         plan,
         providers,
         &cancellation,
         Some(event_tx),
+        rebuild_packages,
     );
     // The sender is gone once execution returns, so the progress thread
     // finishes its queue and hands back the recorder.

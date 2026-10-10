@@ -4,7 +4,7 @@ use crate::reuse_explain::{
 };
 use crate::{
     ExecutionPlan, OperationId, OperationKind, OperationOptionality, OperationReuse,
-    PlannedOperation, ReuseState,
+    PlannedOperation, REBUILD_REQUESTED, RebuildRequest, ReuseState,
 };
 use gaia_spec::{
     CheckpointAnchorRef, ImageDefinition, ResolvedBuildSpec, SourceDefinition, SourcePinPolicySpec,
@@ -35,8 +35,10 @@ pub(crate) fn apply_reuse_state(
     mut plan: ExecutionPlan,
     spec: &ResolvedBuildSpec,
     reuse_state: Option<&ReuseState>,
+    rebuild: &RebuildRequest,
 ) -> ExecutionPlan {
     let Some(reuse_state) = reuse_state else {
+        rebuild.mark(&mut plan);
         return plan;
     };
     let mut decisions = HashMap::<String, bool>::new();
@@ -44,55 +46,64 @@ pub(crate) fn apply_reuse_state(
     let mut executing_codes = HashMap::<String, &'static str>::new();
     // Dependency kinds, for computing input signatures while `plan` is mutated.
     let snapshot = plan.clone();
-
-    for operation in &mut plan.operations {
+    // Decisions are read per dependency, so every dependency must be decided
+    // before its dependents. Operations are pushed in planning order, which
+    // does not always put a dependency first (an artifact after an image
+    // prepare step is pushed before it).
+    for index in evaluation_order(&plan.operations) {
+        let operation = &mut plan.operations[index];
         let operation_id = operation.id.as_str().to_string();
-        let should_execute = match &operation.kind {
-            OperationKind::ResolveBuild => true,
-            OperationKind::EmitReport => true,
-            _ => {
-                let fingerprint_mismatch = reuse_state
-                    .operation_fingerprints
-                    .get(&operation_id)
-                    .copied()
-                    != Some(operation.fingerprint);
-                let source_refresh_reason = source_refresh_rebuild_reason(spec, &operation.kind);
-                let outputs_missing = !operation_outputs_present(spec, &operation.kind);
-                let output_signature_mismatch = reuse_state
-                    .operation_output_signatures
-                    .get(&operation_id)
-                    .map(String::as_str)
-                    != operation_output_signature(spec, &operation.kind).as_deref();
-                let dependency_rebuilding = operation.depends_on.iter().any(|dependency| {
-                    if dependency.as_str() == OperationId::resolve().as_str() {
-                        return false;
-                    }
-                    !decisions.get(dependency.as_str()).copied().unwrap_or(false)
-                });
-                if !reuse_state.completed_operation_ids.contains(&operation_id)
-                    || source_refresh_reason.is_some()
-                    || fingerprint_mismatch
-                    || outputs_missing
-                    || output_signature_mismatch
-                    || dependency_rebuilding
-                {
-                    true
-                } else {
-                    // Dependencies are all reused, but they may have changed
-                    // since this operation last consumed them (for example
-                    // after a partial `--only` run).
-                    reuse_state
-                        .operation_input_signatures
+        let requested = rebuild.reason(&operation_id, &operation.kind);
+        let should_execute = requested.is_some()
+            || match &operation.kind {
+                OperationKind::ResolveBuild => true,
+                OperationKind::EmitReport => true,
+                _ => {
+                    let fingerprint_mismatch = reuse_state
+                        .operation_fingerprints
                         .get(&operation_id)
-                        .is_some_and(|recorded| {
-                            *recorded != operation_input_signature(spec, &snapshot, operation)
-                        })
+                        .copied()
+                        != Some(operation.fingerprint);
+                    let source_refresh_reason =
+                        source_refresh_rebuild_reason(spec, &operation.kind);
+                    let outputs_missing = !operation_outputs_present(spec, &operation.kind);
+                    let output_signature_mismatch = reuse_state
+                        .operation_output_signatures
+                        .get(&operation_id)
+                        .map(String::as_str)
+                        != operation_output_signature(spec, &operation.kind).as_deref();
+                    let dependency_rebuilding = operation.depends_on.iter().any(|dependency| {
+                        if dependency.as_str() == OperationId::resolve().as_str() {
+                            return false;
+                        }
+                        !decisions.get(dependency.as_str()).copied().unwrap_or(false)
+                    });
+                    if !reuse_state.completed_operation_ids.contains(&operation_id)
+                        || source_refresh_reason.is_some()
+                        || fingerprint_mismatch
+                        || outputs_missing
+                        || output_signature_mismatch
+                        || dependency_rebuilding
+                    {
+                        true
+                    } else {
+                        // Dependencies are all reused, but they may have changed
+                        // since this operation last consumed them (for example
+                        // after a partial `--only` run).
+                        reuse_state
+                            .operation_input_signatures
+                            .get(&operation_id)
+                            .is_some_and(|recorded| {
+                                *recorded != operation_input_signature(spec, &snapshot, operation)
+                            })
+                    }
                 }
-            }
-        };
+            };
 
         if should_execute {
-            if !reuse_state.completed_operation_ids.contains(&operation_id) {
+            if let Some(message) = requested {
+                operation.reuse = OperationReuse::execute(REBUILD_REQUESTED, message);
+            } else if !reuse_state.completed_operation_ids.contains(&operation_id) {
                 operation.reuse = OperationReuse::execute(
                     "not_in_reuse_state",
                     format!(
@@ -190,6 +201,49 @@ pub(crate) fn apply_reuse_state(
     plan
 }
 
+/// Indices of `operations` with every dependency before its dependents. Ties
+/// keep planning order, so an already ordered plan is evaluated as pushed. A
+/// dependency missing from the plan is ignored here (`validate` reports it),
+/// and operations on a cycle (also reported by `validate`) keep planning order
+/// at the end.
+fn evaluation_order(operations: &[PlannedOperation]) -> Vec<usize> {
+    let index_of: HashMap<&str, usize> = operations
+        .iter()
+        .enumerate()
+        .map(|(index, operation)| (operation.id.as_str(), index))
+        .collect();
+    let mut pending = vec![0usize; operations.len()];
+    let mut dependents = vec![Vec::new(); operations.len()];
+    for (index, operation) in operations.iter().enumerate() {
+        for dependency in &operation.depends_on {
+            if let Some(&dependency_index) = index_of.get(dependency.as_str()) {
+                pending[index] += 1;
+                dependents[dependency_index].push(index);
+            }
+        }
+    }
+    let mut ready = std::collections::BinaryHeap::new();
+    for (index, count) in pending.iter().enumerate() {
+        if *count == 0 {
+            ready.push(std::cmp::Reverse(index));
+        }
+    }
+    let mut order = Vec::with_capacity(operations.len());
+    let mut placed = vec![false; operations.len()];
+    while let Some(std::cmp::Reverse(index)) = ready.pop() {
+        placed[index] = true;
+        order.push(index);
+        for &dependent in &dependents[index] {
+            pending[dependent] -= 1;
+            if pending[dependent] == 0 {
+                ready.push(std::cmp::Reverse(dependent));
+            }
+        }
+    }
+    order.extend((0..operations.len()).filter(|index| !placed[*index]));
+    order
+}
+
 fn source_refresh_rebuild_reason(
     spec: &ResolvedBuildSpec,
     kind: &OperationKind,
@@ -285,6 +339,11 @@ pub fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
                 if let Some(image) = artifact_docker_build_signature(spec, artifact) {
                     image.hash(&mut hasher);
                 }
+                // The contents of build command scripts (see reuse_build_inputs).
+                let scripts = crate::reuse_build_inputs::build_command_components(spec, artifact);
+                if !scripts.is_empty() {
+                    format!("{scripts:?}").hash(&mut hasher);
+                }
             }
         }
         OperationKind::InstallArtifact { install_id, .. } => {
@@ -323,6 +382,12 @@ pub fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
             image.assembly = None;
             format!("{image:?}").hash(&mut hasher);
             image_backend_signature(spec, &spec.image).hash(&mut hasher);
+            // Post scripts and BR2_EXTERNAL files by content (see
+            // reuse_build_inputs); only hashed when there are some.
+            let content = crate::reuse_build_inputs::buildroot_image_components(spec);
+            if !content.is_empty() {
+                format!("{content:?}").hash(&mut hasher);
+            }
             // Only hashed when enabled so existing fingerprints stay valid.
             let buildroot_policy = &spec.policy.providers.buildroot;
             if buildroot_policy.shared_output {

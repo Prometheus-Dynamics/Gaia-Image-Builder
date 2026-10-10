@@ -745,5 +745,9 @@ mod tests;
 #[path = "package_cache_plan_tests.rs"]
 mod plan_tests;
 
+#[cfg(test)]
+#[path = "package_cache_rebuild_tests.rs"]
+mod rebuild_tests;
+
 #[path = "package_cache_preview.rs"]
 mod preview;

@@ -63,8 +63,15 @@ fn a_changed_override_key_is_previewed_by_name() {
             ("BR2_TARGET_GENERIC_ISSUE", "two"),
         ],
     );
-    let report = preview_resolved(&context, &changed, &[], false, false)
-        .expect("the preview of a valid build succeeds");
+    let report = preview_resolved(
+        &context,
+        &changed,
+        &[],
+        &RebuildRequest::default(),
+        false,
+        false,
+    )
+    .expect("the preview of a valid build succeeds");
 
     let image = report
         .operations
@@ -110,8 +117,15 @@ fn a_state_recorded_without_details_says_no_detail_recorded() {
     record_reuse_state(&spec, &baseline);
 
     let changed = buildroot_spec(&root, &[("BR2_TARGET_GENERIC_ISSUE", "two")]);
-    let report = preview_resolved(&context, &changed, &[], false, false)
-        .expect("the preview of a valid build succeeds");
+    let report = preview_resolved(
+        &context,
+        &changed,
+        &[],
+        &RebuildRequest::default(),
+        false,
+        false,
+    )
+    .expect("the preview of a valid build succeeds");
 
     let image = report
         .operations
@@ -168,8 +182,15 @@ fn a_changed_build_env_key_is_previewed_by_name() {
     );
     record_finished_run(&spec, &baseline);
 
-    let report = preview_resolved(&context, &java("/cache/b"), &[], false, false)
-        .expect("the preview of a valid build succeeds");
+    let report = preview_resolved(
+        &context,
+        &java("/cache/b"),
+        &[],
+        &RebuildRequest::default(),
+        false,
+        false,
+    )
+    .expect("the preview of a valid build succeeds");
 
     let artifact = report
         .operations

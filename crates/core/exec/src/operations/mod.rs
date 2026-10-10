@@ -27,6 +27,8 @@ pub(crate) struct DispatchContext {
     /// CPU budget for the spawned build tool when several CPU-heavy
     /// operations run at once; `None` keeps the tool defaults.
     pub(crate) job_budget: Option<usize>,
+    /// Buildroot packages named by `--rebuild-package`.
+    pub(crate) rebuild_packages: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -388,6 +390,9 @@ pub(crate) fn dispatch_operation(
                 let tail = LogTail::for_spec(spec);
                 let log_sink = tail.sink(operation.id.clone(), event_sender.clone());
                 let mut image_policy = image_execution_policy(spec);
+                image_policy
+                    .rebuild_packages
+                    .clone_from(&context.rebuild_packages);
                 if let Some(jobs) = context.job_budget
                     && image_policy.local_jobs == 0
                 {
@@ -479,17 +484,25 @@ pub(crate) fn dispatch_operation(
                     RollbackDomain::Images,
                     [summary.cleanup_paths, vec![assembly_state_path(spec)]].concat(),
                 );
-                if let Some(archive_path) = summary.archive_path {
+                // Without an archive the collect dir is not this run's
+                // deliverable, so it stays unset; the disks still report.
+                if summary.archive_path.is_some() || !summary.disk_images.is_empty() {
+                    let collect_dir = summary
+                        .archive_path
+                        .is_some()
+                        .then(|| spec.image.output.collect_dir.as_ref().map(PathBuf::from))
+                        .flatten();
                     success =
                         success.with_image_result(gaia_image_providers::ImageExecutionResult {
                             provider_id: format!("image.{}", spec.image.provider_kind().as_str()),
-                            collect_dir: spec.image.output.collect_dir.as_ref().map(PathBuf::from),
-                            archive_path: Some(archive_path),
+                            collect_dir,
+                            archive_path: summary.archive_path,
                             emit_report: spec.image.output.emit_report,
                             reused: false,
                             reuse_details: Vec::new(),
                             messages: Vec::new(),
                             warnings: Vec::new(),
+                            disk_images: summary.disk_images,
                             notes: Vec::new(),
                             state_details: Vec::new(),
                         });

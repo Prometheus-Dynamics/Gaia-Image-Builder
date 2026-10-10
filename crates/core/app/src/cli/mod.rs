@@ -19,6 +19,12 @@ pub struct AppArgs {
     pub lock: LockArgs,
     /// `--only` targets for run/plan: build domains or operation ids.
     pub only: Vec<String>,
+    /// `--rebuild` for run/plan/preview: operations (ids, `*` globs or
+    /// domains) that execute regardless of reuse state.
+    pub rebuild: Vec<String>,
+    /// `--rebuild-package` for run/plan/preview: Buildroot packages to
+    /// dirclean and build again instead of restoring them from the cache.
+    pub rebuild_packages: Vec<String>,
     /// `--follow` / `-f` for status: refresh until the run ends.
     pub follow: bool,
     /// `--json` for preview: the report as JSON.
@@ -206,6 +212,16 @@ impl AppArgs {
                         .sources
                         .extend(split_list(&update["--update=".len()..]));
                 }
+                "--rebuild" => {
+                    if let Some(targets) = value("--rebuild", &mut parsed.usage_errors) {
+                        parsed.rebuild.extend(split_list(&targets));
+                    }
+                }
+                "--rebuild-package" => {
+                    if let Some(names) = value("--rebuild-package", &mut parsed.usage_errors) {
+                        parsed.rebuild_packages.extend(split_list(&names));
+                    }
+                }
                 "--only" => {
                     if let Some(targets) = value("--only", &mut parsed.usage_errors) {
                         parsed.only.extend(
@@ -261,6 +277,8 @@ impl Default for AppArgs {
             cache: CacheArgs::default(),
             lock: LockArgs::default(),
             only: Vec::new(),
+            rebuild: Vec::new(),
+            rebuild_packages: Vec::new(),
             follow: false,
             json: false,
             fail_on_clean: false,
@@ -407,6 +425,30 @@ mod tests {
             [("image.defconfig".to_string(), "x".to_string())]
         );
         assert!(args.usage_errors.is_empty(), "{:?}", args.usage_errors);
+    }
+
+    #[test]
+    fn rebuild_flags_take_comma_lists_and_repeat() {
+        let args = parse(&[
+            "run",
+            "build.toml",
+            "--rebuild",
+            "artifact:photonvision-jar,image",
+            "--rebuild",
+            "artifact:*",
+            "--rebuild-package",
+            "libfoo,bar",
+            "--rebuild-package",
+            "baz",
+        ]);
+        assert!(args.usage_errors.is_empty(), "{:?}", args.usage_errors);
+        assert_eq!(
+            args.rebuild,
+            ["artifact:photonvision-jar", "image", "artifact:*"]
+        );
+        assert_eq!(args.rebuild_packages, ["libfoo", "bar", "baz"]);
+        let missing = parse(&["plan", "build.toml", "--rebuild"]);
+        assert_eq!(missing.usage_errors, ["--rebuild requires a value"]);
     }
 
     #[test]

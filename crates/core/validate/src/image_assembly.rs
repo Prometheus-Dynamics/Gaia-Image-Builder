@@ -267,6 +267,19 @@ pub(crate) fn validate_image_assembly(
                 Some("image.assembly.disks".into()),
             ));
         }
+        if disk.truncate.is_some()
+            && disk.partition_table != gaia_spec::AssemblyPartitionTableSpec::Mbr
+        {
+            diagnostics.push(error(
+                "assembly_disk_truncate_partition_table_unsupported",
+                format!(
+                    "assembly disk '{}' sets truncate with partition table '{}'; truncate is only supported for mbr, because a gpt backup header lives at the end of the full-size disk",
+                    disk.id,
+                    disk.partition_table.as_str()
+                ),
+                Some("image.assembly.disks".into()),
+            ));
+        }
         if disk.signature.is_some() && disk.signature_text.is_some() {
             diagnostics.push(error(
                 "assembly_disk_signature_invalid",

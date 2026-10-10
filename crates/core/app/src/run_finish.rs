@@ -232,6 +232,22 @@ mod tests {
     }
 
     #[test]
+    fn resume_command_does_not_repeat_rebuild_requests() {
+        let args = parse(&[
+            "run",
+            "b.toml",
+            "--only",
+            "image",
+            "--rebuild",
+            "artifact:*",
+            "--rebuild-package",
+            "libfoo",
+        ]);
+        let (command, _) = resume_command(&args, &[], &[]);
+        assert_eq!(command, "gaia run b.toml --only image");
+    }
+
+    #[test]
     fn resume_command_repeats_export_flags() {
         let mut args = AppArgs::parse_from(["run", "b.toml", "--export", "out dir"]);
         assert!(

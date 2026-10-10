@@ -45,11 +45,11 @@ pub use assembly_order::{
 };
 pub use assembly_spec::{
     AssemblyBusyboxInitramfsSpec, AssemblyDirSpec, AssemblyDiskPartitionSpec, AssemblyDiskSpec,
-    AssemblyFileSpec, AssemblyFilesystemKindSpec, AssemblyFilesystemSpec,
-    AssemblyPartitionTableSpec, AssemblyPathTemplate, AssemblyPathTemplateContext,
-    AssemblyPathTemplateError, AssemblySymlinkSpec, AssemblyTransformKindSpec,
-    AssemblyTransformSpec, AssemblyTreeSpec, FileMode, FileModeParseError, ImageAssemblySpec,
-    MbrPartitionType, MbrPartitionTypeParseError,
+    AssemblyDiskTruncateSpec, AssemblyEbrPlacementSpec, AssemblyFileSpec,
+    AssemblyFilesystemKindSpec, AssemblyFilesystemSpec, AssemblyPartitionTableSpec,
+    AssemblyPathTemplate, AssemblyPathTemplateContext, AssemblyPathTemplateError,
+    AssemblySymlinkSpec, AssemblyTransformKindSpec, AssemblyTransformSpec, AssemblyTreeSpec,
+    FileMode, FileModeParseError, ImageAssemblySpec, MbrPartitionType, MbrPartitionTypeParseError,
 };
 pub use byte_size::{ByteSize, ByteSizeParseError};
 pub use checkpoints::{

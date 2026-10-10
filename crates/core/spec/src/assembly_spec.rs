@@ -204,7 +204,43 @@ pub struct AssemblyDiskSpec {
     pub signature_text: Option<String>,
     pub first_lba: Option<u64>,
     pub alignment_lba: Option<u64>,
+    /// `None` keeps the full disk size. `LastData` ends the file after the
+    /// last written byte, rounded up to the alignment; the partition table
+    /// still describes every partition at its full size.
+    pub truncate: Option<AssemblyDiskTruncateSpec>,
+    /// Where the MBR extended partition's EBR chain goes. `Default` puts each
+    /// EBR right before its logical partition; `Packed` writes the whole
+    /// chain in the first sectors of the extended partition.
+    pub ebr_placement: AssemblyEbrPlacementSpec,
     pub partitions: Vec<AssemblyDiskPartitionSpec>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssemblyEbrPlacementSpec {
+    Default,
+    Packed,
+}
+
+impl AssemblyEbrPlacementSpec {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Packed => "packed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssemblyDiskTruncateSpec {
+    LastData,
+}
+
+impl AssemblyDiskTruncateSpec {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LastData => "last-data",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -236,6 +272,9 @@ pub struct AssemblyDiskPartitionSpec {
     /// Zero the first MiB of an empty partition so stale filesystem
     /// signatures from a previous flash do not survive.
     pub wipe: bool,
+    /// `false` keeps the partition in the table at its full size with
+    /// nothing written: no image and no wipe. Requires `size`.
+    pub materialize: bool,
 }
 
 impl AssemblyDiskPartitionSpec {

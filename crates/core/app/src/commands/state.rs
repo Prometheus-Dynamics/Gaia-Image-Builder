@@ -215,7 +215,9 @@ pub fn save_reuse_state(
         }
         body.push_str(id);
         body.push('\n');
-        body.push_str(&format!("op={id};{}\n", operation.fingerprint));
+        // Recorded from the state the run left, as the components are.
+        let fingerprint = gaia_plan::recorded_fingerprint(spec, operation);
+        body.push_str(&format!("op={id};{fingerprint}\n"));
         if let Some(signature) = gaia_plan::operation_output_signature(spec, &operation.kind) {
             body.push_str(&format!("out={id};{}\n", encode_signature(&signature)));
         }
@@ -226,7 +228,7 @@ pub fn save_reuse_state(
         push_operation_components(
             &mut components_body,
             id,
-            operation.fingerprint,
+            fingerprint,
             &gaia_plan::operation_components(spec, plan, operation),
         );
     }
@@ -358,6 +360,9 @@ mod tests {
     use gaia_config::{ResolveOptions, resolve_config_with_options};
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[path = "state_assembly_tests.rs"]
+    mod assembly_tests;
 
     static UNIQUE_COUNTER: AtomicU64 = AtomicU64::new(0);
 

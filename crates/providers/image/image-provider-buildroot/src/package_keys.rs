@@ -31,6 +31,9 @@ pub(crate) struct KeyInputs<'a> {
     pub graph: &'a PackageGraph,
     /// The Docker image or host compiler packages are built with.
     pub execution_identity: &'a str,
+    /// Per package, the digest of the external tree files that touch it (see
+    /// `external_package_key_digests`). Empty when there are none.
+    pub external: &'a BTreeMap<String, String>,
 }
 
 /// Every package's key, or `None` when it cannot be cached.
@@ -194,6 +197,12 @@ impl KeyContext<'_> {
         for source in &package.sources {
             hasher.update(b"source\0");
             hasher.update(source);
+        }
+        // External tree files that assign this package's variables (for
+        // example an external.mk), which live outside its own directory.
+        if let Some(external) = self.inputs.external.get(name) {
+            hasher.update(b"external\0");
+            hasher.update(external);
         }
         for dependency in &package.dependencies {
             let dependency_key = self.key(dependency, visiting)?;

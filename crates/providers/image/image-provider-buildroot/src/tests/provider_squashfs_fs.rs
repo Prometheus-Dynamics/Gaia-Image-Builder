@@ -338,6 +338,8 @@ fn build_operation_reruns_when_assembly_provider_input_is_missing() {
             signature_text: None,
             first_lba: None,
             alignment_lba: None,
+            truncate: None,
+            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "rootfs".into(),
                 kind: Some("0x83".into()),
@@ -346,6 +348,7 @@ fn build_operation_reruns_when_assembly_provider_input_is_missing() {
                 image: Some("$provider.images/rootfs.tar".into()),
                 size: None,
                 wipe: false,
+                materialize: true,
             }],
         }],
         ..ImageAssemblySpec::default()

@@ -212,6 +212,13 @@ pub(crate) fn compile_image_assembly(
                 signature_text: disk.signature_text,
                 first_lba: disk.first_lba,
                 alignment_lba: disk.alignment_lba,
+                truncate: disk.truncate.map(compile_assembly_disk_truncate),
+                ebr_placement: match disk.ebr_placement {
+                    None | Some(RawAssemblyEbrPlacement::Default) => {
+                        AssemblyEbrPlacementSpec::Default
+                    }
+                    Some(RawAssemblyEbrPlacement::Packed) => AssemblyEbrPlacementSpec::Packed,
+                },
                 partitions: disk
                     .partitions
                     .into_iter()
@@ -223,6 +230,7 @@ pub(crate) fn compile_image_assembly(
                         image: partition.image.map(Into::into),
                         size: partition.size,
                         wipe: partition.wipe,
+                        materialize: partition.materialize.unwrap_or(true),
                     })
                     .collect(),
             })
@@ -244,6 +252,12 @@ pub(crate) fn compile_image_assembly(
             .collect(),
     };
     Some(assembly)
+}
+
+fn compile_assembly_disk_truncate(raw: RawAssemblyDiskTruncate) -> AssemblyDiskTruncateSpec {
+    match raw {
+        RawAssemblyDiskTruncate::LastData => AssemblyDiskTruncateSpec::LastData,
+    }
 }
 
 fn compile_assembly_transform_kind(raw: RawAssemblyTransformKind) -> AssemblyTransformKindSpec {

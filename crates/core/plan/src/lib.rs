@@ -1,9 +1,11 @@
 mod estimate;
 mod graph;
 mod operations;
+mod rebuild;
 mod reuse;
 mod reuse_assembly;
 mod reuse_assembly_archives;
+mod reuse_build_inputs;
 mod reuse_details;
 mod reuse_explain;
 mod reuse_imports;
@@ -17,11 +19,12 @@ pub use operations::{
     OperationParallelismDomain, OperationParallelismMode, OperationReuse, PlannedOperation,
     RebuildReason,
 };
+pub use rebuild::{REBUILD_REQUESTED, RebuildRequest};
 pub use reuse::{
     operation_content_signature, operation_fingerprint, operation_input_signature,
     operation_output_signature, spec_fingerprint,
 };
-pub use reuse_details::{fingerprint_change_detail, operation_components};
+pub use reuse_details::{fingerprint_change_detail, operation_components, recorded_fingerprint};
 pub use reuse_explain::{InvalidationSummary, invalidation_summary};
 pub use targets::{PlanDomain, PlanTarget};
 
@@ -50,6 +53,26 @@ pub fn plan_build_with_reuse_state(
     artifact_catalog: &ArtifactProviderCatalog,
     image_catalog: &ImageProviderCatalog,
     reuse_state: Option<&ReuseState>,
+) -> ExecutionPlan {
+    plan_build_with_rebuilds(
+        spec,
+        source_catalog,
+        artifact_catalog,
+        image_catalog,
+        reuse_state,
+        &RebuildRequest::default(),
+    )
+}
+
+/// [`plan_build_with_reuse_state`], with the operations named by `rebuild`
+/// executing regardless of reuse state.
+pub fn plan_build_with_rebuilds(
+    spec: &ResolvedBuildSpec,
+    source_catalog: &SourceProviderCatalog,
+    artifact_catalog: &ArtifactProviderCatalog,
+    image_catalog: &ImageProviderCatalog,
+    reuse_state: Option<&ReuseState>,
+    rebuild: &RebuildRequest,
 ) -> ExecutionPlan {
     let span = tracing::info_span!(
         "plan_build",
@@ -446,7 +469,7 @@ pub fn plan_build_with_reuse_state(
         build_id: spec.identity.id.clone(),
         operations,
     };
-    let plan = apply_reuse_state(plan, spec, reuse_state);
+    let plan = apply_reuse_state(plan, spec, reuse_state, rebuild);
     tracing::debug!(
         operations = plan.operations.len(),
         diagnostics = plan.validate().len(),

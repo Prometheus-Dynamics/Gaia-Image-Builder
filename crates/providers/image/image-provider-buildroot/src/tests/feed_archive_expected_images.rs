@@ -59,6 +59,8 @@ fn collect_expected_images_skips_required_output_generated_by_assembly() {
             signature_text: None,
             first_lba: None,
             alignment_lba: None,
+            truncate: None,
+            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "rootfs".into(),
                 kind: Some("0x83".into()),
@@ -67,6 +69,7 @@ fn collect_expected_images_skips_required_output_generated_by_assembly() {
                 image: Some("$provider.images/rootfs.tar".into()),
                 size: None,
                 wipe: false,
+                materialize: true,
             }],
         }],
         ..ImageAssemblySpec::default()

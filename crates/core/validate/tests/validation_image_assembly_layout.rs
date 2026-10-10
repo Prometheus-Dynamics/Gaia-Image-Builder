@@ -308,3 +308,91 @@ dest = \"$assembly.work/a\"
     );
     assert_eq!(assembly_codes(&layout), ["assembly_step_cycle"]);
 }
+
+/// One MBR or GPT disk with the given disk fields and partitions.
+fn single_disk_codes(disk_fields: &str, partitions: &str) -> Vec<&'static str> {
+    assembly_codes(&format!(
+        r#"
+build_name = "trunc"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[image]
+kind = "buildroot"
+defconfig = "dummy_defconfig"
+
+[[image.assembly.disks]]
+id = "emmc"
+output = "$provider.images/emmc.img"
+{disk_fields}
+{partitions}
+"#
+    ))
+}
+
+#[test]
+fn unmaterialized_partitions_reject_image_wipe_and_missing_size() {
+    let codes = single_disk_codes(
+        r#"partition_table = "mbr""#,
+        r#"[[image.assembly.disks.partitions]]
+name = "with-image"
+type_alias = "linux"
+image = "$provider.images/rootfs.ext4"
+materialize = false
+size = "2G"
+
+[[image.assembly.disks.partitions]]
+name = "wiped"
+type_alias = "linux"
+size = "1M"
+wipe = true
+materialize = false
+
+[[image.assembly.disks.partitions]]
+name = "no-size"
+type_alias = "linux"
+materialize = false
+"#,
+    );
+    assert!(
+        codes.contains(&"assembly_partition_unmaterialized_image"),
+        "{codes:?}"
+    );
+    assert!(
+        codes.contains(&"assembly_partition_unmaterialized_wipe"),
+        "{codes:?}"
+    );
+    assert!(
+        codes.contains(&"assembly_partition_unmaterialized_size_required"),
+        "{codes:?}"
+    );
+}
+
+#[test]
+fn truncate_is_rejected_for_gpt_and_accepted_for_mbr() {
+    let partitions = r#"[[image.assembly.disks.partitions]]
+name = "data"
+type_alias = "linux"
+size = "16M"
+materialize = false
+"#;
+    let gpt = single_disk_codes(
+        r#"partition_table = "gpt"
+truncate = "last-data""#,
+        partitions,
+    );
+    assert!(
+        gpt.contains(&"assembly_disk_truncate_partition_table_unsupported"),
+        "{gpt:?}"
+    );
+    let mbr = single_disk_codes(
+        r#"partition_table = "mbr"
+truncate = "last-data"
+ebr_placement = "packed""#,
+        partitions,
+    );
+    assert_eq!(mbr, Vec::<&str>::new());
+}

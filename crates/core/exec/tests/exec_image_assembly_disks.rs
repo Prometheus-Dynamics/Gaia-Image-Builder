@@ -87,6 +87,8 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
             signature_text: None,
             first_lba: None,
             alignment_lba: None,
+            truncate: None,
+            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
             partitions: vec![
                 AssemblyDiskPartitionSpec {
                     name: "boot".into(),
@@ -96,6 +98,7 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
                     image: Some(boot_vfat.display().to_string().into()),
                     size: None,
                     wipe: false,
+                    materialize: true,
                 },
                 AssemblyDiskPartitionSpec {
                     name: "rootfs".into(),
@@ -105,6 +108,7 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
                     image: Some(rootfs_image.display().to_string().into()),
                     size: None,
                     wipe: false,
+                    materialize: true,
                 },
             ],
         }],
@@ -194,6 +198,8 @@ fn archives_single_disk(archive_name: &str, decompressor: &str) {
             signature_text: Some("GAIA".into()),
             first_lba: None,
             alignment_lba: None,
+            truncate: None,
+            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
             partitions: vec![
                 AssemblyDiskPartitionSpec {
                     name: "boot".into(),
@@ -203,6 +209,7 @@ fn archives_single_disk(archive_name: &str, decompressor: &str) {
                     image: Some(boot_image.display().to_string().into()),
                     size: None,
                     wipe: false,
+                    materialize: true,
                 },
                 AssemblyDiskPartitionSpec {
                     name: "rootfs".into(),
@@ -212,6 +219,7 @@ fn archives_single_disk(archive_name: &str, decompressor: &str) {
                     image: Some(rootfs_image.display().to_string().into()),
                     size: None,
                     wipe: false,
+                    materialize: true,
                 },
             ],
         }],
@@ -364,6 +372,8 @@ fn executes_image_assembly_mbr_disk() {
             signature_text: None,
             first_lba: None,
             alignment_lba: None,
+            truncate: None,
+            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
             partitions: vec![
                 AssemblyDiskPartitionSpec {
                     name: "boot".into(),
@@ -373,6 +383,7 @@ fn executes_image_assembly_mbr_disk() {
                     image: Some(image_dir.join("boot.vfat").display().to_string().into()),
                     size: None,
                     wipe: false,
+                    materialize: true,
                 },
                 AssemblyDiskPartitionSpec {
                     name: "rootfs".into(),
@@ -388,6 +399,7 @@ fn executes_image_assembly_mbr_disk() {
                     ),
                     size: None,
                     wipe: false,
+                    materialize: true,
                 },
             ],
         }],
@@ -471,6 +483,8 @@ fn executes_image_assembly_mbr_disk_with_explicit_lba_layout() {
             signature_text: None,
             first_lba: Some(1),
             alignment_lba: Some(1),
+            truncate: None,
+            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
             partitions: vec![
                 AssemblyDiskPartitionSpec {
                     name: "boot".into(),
@@ -480,6 +494,7 @@ fn executes_image_assembly_mbr_disk_with_explicit_lba_layout() {
                     image: Some(image_dir.join("boot.vfat").display().to_string().into()),
                     size: None,
                     wipe: false,
+                    materialize: true,
                 },
                 AssemblyDiskPartitionSpec {
                     name: "rootfs".into(),
@@ -495,6 +510,7 @@ fn executes_image_assembly_mbr_disk_with_explicit_lba_layout() {
                     ),
                     size: None,
                     wipe: false,
+                    materialize: true,
                 },
             ],
         }],
@@ -552,6 +568,8 @@ fn image_assembly_mbr_rejects_bootable_logical_partition_before_writing_disk() {
             signature_text: None,
             first_lba: None,
             alignment_lba: None,
+            truncate: None,
+            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
             partitions: (0..5)
                 .map(|index| AssemblyDiskPartitionSpec {
                     name: format!("part{index}"),
@@ -567,6 +585,7 @@ fn image_assembly_mbr_rejects_bootable_logical_partition_before_writing_disk() {
                     ),
                     size: None,
                     wipe: false,
+                    materialize: true,
                 })
                 .collect(),
         }],

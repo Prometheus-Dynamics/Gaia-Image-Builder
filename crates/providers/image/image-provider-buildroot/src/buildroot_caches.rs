@@ -2,6 +2,7 @@
 //! restoring cached packages before it, storing what it built, and the
 //! ccache hit rate of the run.
 use super::*;
+use crate::requested_rebuilds::{excluded_from_restore, requested_package_rebuilds};
 
 pub(crate) struct RestoreCachedPackages<'a, 'b> {
     pub(crate) spec: &'a ResolvedBuildSpec,
@@ -134,11 +135,13 @@ pub(crate) fn restore_cached_packages(
     if !system_tools.is_empty() {
         identity = format!("{identity} {system_tools}");
     }
+    let external = external_package_key_digests(spec);
     let keys = package_keys(&KeyInputs {
         buildroot_dir,
         output_dir,
         graph: &graph,
         execution_identity: &identity,
+        external: &external,
     });
     let keep_source = packages_reading_sources(spec, &graph);
     for (name, build_dir) in source_less_build_dirs(output_dir, &graph, &keep_source) {
@@ -149,7 +152,14 @@ pub(crate) fn restore_cached_packages(
             "building {name} again: its sources are read by the image and the cache does not hold them"
         );
     }
-    let restored = cache.restore_except(output_dir, &graph, &keys, &keep_source);
+    // `--rebuild-package` packages are built again, never restored.
+    let requested = requested_package_rebuilds(command_context.policy, Some(&graph))?;
+    let restored = cache.restore_except(
+        output_dir,
+        &graph,
+        &keys,
+        &excluded_from_restore(&keep_source, &requested),
+    );
     refresh_current_stamps(output_dir, &graph, &keys);
     pin_restored_linux_version(output_dir, &graph)?;
     messages.push(gaia_process::step_time_message(

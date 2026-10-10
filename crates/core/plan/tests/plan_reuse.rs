@@ -419,6 +419,8 @@ fn plan_rebuilds_assembly_when_direct_partition_image_changes() {
             signature_text: None,
             first_lba: None,
             alignment_lba: None,
+            truncate: None,
+            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "rootfs".into(),
                 kind: None,
@@ -427,6 +429,7 @@ fn plan_rebuilds_assembly_when_direct_partition_image_changes() {
                 image: Some("@assets/rootfs.img".into()),
                 size: None,
                 wipe: false,
+                materialize: true,
             }],
         }],
         ..ImageAssemblySpec::default()

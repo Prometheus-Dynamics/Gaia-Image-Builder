@@ -3,12 +3,16 @@ use gaia_spec::ResolvedBuildSpec;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-pub(crate) fn assembly_input_signature(spec: &ResolvedBuildSpec) -> String {
+/// The image assembly's external inputs as `(name, part)` pairs. The name
+/// says which input a part is (`src <path>`, `partition <disk>/<name>`, ...),
+/// so a changed input can be named; the parts, joined in order, are the
+/// fingerprint's input signature (see [`assembly_input_signature`]).
+pub(crate) fn assembly_input_entries(spec: &ResolvedBuildSpec) -> Vec<(String, String)> {
     let Some(assembly) = &spec.image.assembly else {
-        return "assembly:none".into();
+        return vec![("assembly".into(), "assembly:none".into())];
     };
     let Ok(roots) = gaia_spec::AssemblyRoots::new(spec, assembly) else {
-        return "assembly:root_resolution_failed".into();
+        return vec![("assembly".into(), "assembly:root_resolution_failed".into())];
     };
     let mut parts = Vec::new();
     let generated_filesystem_outputs = assembly
@@ -21,17 +25,23 @@ pub(crate) fn assembly_input_signature(spec: &ResolvedBuildSpec) -> String {
     let mut direct_partition_images = 0usize;
     let mut partition_resolution_errors = 0usize;
     for dir in &assembly.dirs {
-        parts.push(format!(
-            "dir:{}:{}:{}",
-            dir.tree,
-            dir.path,
-            dir.mode.as_deref().unwrap_or("")
+        parts.push((
+            format!("dir {}:{}", dir.tree, dir.path),
+            format!(
+                "dir:{}:{}:{}",
+                dir.tree,
+                dir.path,
+                dir.mode.as_deref().unwrap_or("")
+            ),
         ));
     }
     for symlink in &assembly.symlinks {
-        parts.push(format!(
-            "symlink:{}:{}:{}",
-            symlink.tree, symlink.path, symlink.target
+        parts.push((
+            format!("symlink {}:{}", symlink.tree, symlink.path),
+            format!(
+                "symlink:{}:{}:{}",
+                symlink.tree, symlink.path, symlink.target
+            ),
         ));
     }
     for file in &assembly.files {
@@ -39,21 +49,30 @@ pub(crate) fn assembly_input_signature(spec: &ResolvedBuildSpec) -> String {
             let resolved = roots
                 .resolve_path(spec, src)
                 .unwrap_or_else(|_| PathBuf::from(src.as_str()));
-            parts.push(format!(
-                "src:{}:{}",
-                resolved.display(),
-                path_state_signature(&resolved)
+            parts.push((
+                format!("src {}", resolved.display()),
+                format!(
+                    "src:{}:{}",
+                    resolved.display(),
+                    path_state_signature(&resolved)
+                ),
             ));
         }
         if let Some(src_glob) = &file.src_glob {
             let matches = gaia_spec::expand_simple_glob(spec, &roots, src_glob).unwrap_or_default();
             glob_match_count += matches.len();
-            parts.push(format!("glob:{src_glob}:count={}", matches.len()));
+            parts.push((
+                format!("glob {src_glob}"),
+                format!("glob:{src_glob}:count={}", matches.len()),
+            ));
             for matched in matches {
-                parts.push(format!(
-                    "glob-match:{}:{}",
-                    matched.display(),
-                    path_state_signature(&matched)
+                parts.push((
+                    format!("glob-match {}", matched.display()),
+                    format!(
+                        "glob-match:{}:{}",
+                        matched.display(),
+                        path_state_signature(&matched)
+                    ),
                 ));
             }
         }
@@ -63,19 +82,26 @@ pub(crate) fn assembly_input_signature(spec: &ResolvedBuildSpec) -> String {
             let resolved = roots
                 .resolve_path(spec, src)
                 .unwrap_or_else(|_| PathBuf::from(src.as_str()));
-            parts.push(format!(
-                "transform:{}:{}:{}",
-                transform.kind.as_str(),
-                resolved.display(),
-                path_state_signature(&resolved)
+            parts.push((
+                format!(
+                    "transform {} {}",
+                    transform.kind.as_str(),
+                    resolved.display()
+                ),
+                format!(
+                    "transform:{}:{}:{}",
+                    transform.kind.as_str(),
+                    resolved.display(),
+                    path_state_signature(&resolved)
+                ),
             ));
         }
         match transform.kind {
             gaia_spec::AssemblyTransformKindSpec::Gzip => {
-                parts.push(command_signature("gzip", ["--version"]));
+                parts.push(("tool gzip".into(), command_signature("gzip", ["--version"])));
             }
             gaia_spec::AssemblyTransformKindSpec::Zstd => {
-                parts.push(command_signature("zstd", ["--version"]));
+                parts.push(("tool zstd".into(), command_signature("zstd", ["--version"])));
             }
             _ => {}
         }
@@ -84,59 +110,75 @@ pub(crate) fn assembly_input_signature(spec: &ResolvedBuildSpec) -> String {
         let resolved = roots
             .resolve_path(spec, &initramfs.busybox)
             .unwrap_or_else(|_| PathBuf::from(initramfs.busybox.as_str()));
-        parts.push(format!(
-            "busybox:{}:{}:{}:{}",
-            initramfs.tree,
-            resolved.display(),
-            path_state_signature(&resolved),
-            initramfs.applets.join(",")
+        parts.push((
+            format!("busybox {} {}", initramfs.tree, resolved.display()),
+            format!(
+                "busybox:{}:{}:{}:{}",
+                initramfs.tree,
+                resolved.display(),
+                path_state_signature(&resolved),
+                initramfs.applets.join(",")
+            ),
         ));
         if initramfs.include_runtime_libs {
-            parts.push(command_signature("ldd", ["--version"]));
+            parts.push(("tool ldd".into(), command_signature("ldd", ["--version"])));
         }
     }
     for disk in &assembly.disks {
         for partition in &disk.partitions {
+            let key = format!("partition {}/{}", disk.id, partition.name);
             let Some(image) = &partition.image else {
                 // An empty partition has no input file; its size and wipe
                 // flag are covered by the hashed assembly config.
-                parts.push(format!(
-                    "partition-empty:{}:{}:{}:{}",
-                    disk.id,
-                    partition.name,
-                    partition.size.as_deref().unwrap_or(""),
-                    partition.wipe
+                parts.push((
+                    key,
+                    format!(
+                        "partition-empty:{}:{}:{}:{}",
+                        disk.id,
+                        partition.name,
+                        partition.size.as_deref().unwrap_or(""),
+                        partition.wipe
+                    ),
                 ));
                 continue;
             };
             match roots.resolve_path(spec, image) {
                 Ok(resolved) if generated_filesystem_outputs.contains(&resolved) => {
                     generated_partition_images += 1;
-                    parts.push(format!(
-                        "partition-image-generated:{}:{}:{}",
-                        disk.id,
-                        partition.name,
-                        resolved.display()
+                    parts.push((
+                        key,
+                        format!(
+                            "partition-image-generated:{}:{}:{}",
+                            disk.id,
+                            partition.name,
+                            resolved.display()
+                        ),
                     ));
                 }
                 Ok(resolved) => {
                     direct_partition_images += 1;
-                    parts.push(format!(
-                        "partition-image:{}:{}:{}:{}",
-                        disk.id,
-                        partition.name,
-                        resolved.display(),
-                        path_state_signature(&resolved)
+                    parts.push((
+                        key,
+                        format!(
+                            "partition-image:{}:{}:{}:{}",
+                            disk.id,
+                            partition.name,
+                            resolved.display(),
+                            path_state_signature(&resolved)
+                        ),
                     ));
                 }
                 Err(error) => {
                     partition_resolution_errors += 1;
-                    parts.push(format!(
-                        "partition-image-resolution-error:{}:{}:{}:{}",
-                        disk.id,
-                        partition.name,
-                        image.as_str(),
-                        error
+                    parts.push((
+                        key,
+                        format!(
+                            "partition-image-resolution-error:{}:{}:{}:{}",
+                            disk.id,
+                            partition.name,
+                            image.as_str(),
+                            error
+                        ),
                     ));
                 }
             }
@@ -157,7 +199,7 @@ pub(crate) fn assembly_input_signature(spec: &ResolvedBuildSpec) -> String {
                 .filter_map(|disk| roots.resolve_path(spec, &disk.output).ok()),
         )
         .collect::<BTreeSet<_>>();
-    let archive_inputs = crate::reuse_assembly_archives::archive_input_parts(
+    let archive_inputs = crate::reuse_assembly_archives::archive_input_entries(
         spec,
         &roots,
         assembly,
@@ -180,5 +222,14 @@ pub(crate) fn assembly_input_signature(spec: &ResolvedBuildSpec) -> String {
         fingerprint_parts = parts.len(),
         "computed image assembly reuse fingerprint inputs"
     );
-    parts.join("|")
+    parts
+}
+
+/// The fingerprint's input signature: every entry's part, in order.
+pub(crate) fn assembly_input_signature(spec: &ResolvedBuildSpec) -> String {
+    assembly_input_entries(spec)
+        .into_iter()
+        .map(|(_, part)| part)
+        .collect::<Vec<_>>()
+        .join("|")
 }

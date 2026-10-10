@@ -36,6 +36,8 @@ fn spec_with_work_dir(work_dir: &str) -> ResolvedBuildSpec {
             signature_text: None,
             first_lba: None,
             alignment_lba: None,
+            truncate: None,
+            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "boot".into(),
                 kind: Some("0x83".into()),
@@ -44,6 +46,7 @@ fn spec_with_work_dir(work_dir: &str) -> ResolvedBuildSpec {
                 image: Some("$assembly.work/boot/config.txt".into()),
                 size: Some("1M".into()),
                 wipe: false,
+                materialize: true,
             }],
         }],
         ..ImageAssemblySpec::default()

@@ -124,6 +124,8 @@ pub struct RawAssemblyDiskConfig {
     pub signature_text: Option<String>,
     pub first_lba: Option<u64>,
     pub alignment_lba: Option<u64>,
+    pub truncate: Option<RawAssemblyDiskTruncate>,
+    pub ebr_placement: Option<RawAssemblyEbrPlacement>,
     pub partitions: Vec<RawAssemblyDiskPartitionConfig>,
 }
 
@@ -137,9 +139,24 @@ impl Default for RawAssemblyDiskConfig {
             signature_text: None,
             first_lba: None,
             alignment_lba: None,
+            truncate: None,
+            ebr_placement: None,
             partitions: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum RawAssemblyDiskTruncate {
+    LastData,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum RawAssemblyEbrPlacement {
+    Default,
+    Packed,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -160,6 +177,8 @@ pub struct RawAssemblyDiskPartitionConfig {
     pub image: Option<String>,
     pub size: Option<String>,
     pub wipe: bool,
+    /// Defaults to true; `false` leaves the partition unwritten.
+    pub materialize: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

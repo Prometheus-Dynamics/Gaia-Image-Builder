@@ -254,18 +254,39 @@ pub(crate) fn tree_changes(
                     })
         });
     let override_digests = package_override_digests(&buildroot_package_override_dirs(spec));
-    let override_changes = match read_package_override_digests(output_dir) {
+    let mut override_changes = match read_package_override_digests(output_dir) {
         Some(previous) => changed_override_packages(&previous, &override_digests),
         // Older state has one digest for all override trees: when it
         // changed, any override package may have.
         None if replacement_clean_needed => override_digests.keys().cloned().collect(),
         None => BTreeSet::new(),
     };
+    // BR2_EXTERNAL files: the packages they touch are rebuilt. A changed file
+    // that touches none is classified by what the configured tree reads it
+    // through (see external_classify); only a `.mk` file is a full clean.
+    let trees = external_trees_of(spec);
+    let external_files = current_external_files(spec);
+    let external = external_changes_since_build(output_dir, &external_files);
+    let config = fs::read_to_string(output_dir.join(".config")).unwrap_or_default();
+    let previous_graph = PackageGraph::load(output_dir);
+    let known = previous_graph
+        .as_ref()
+        .map(|graph| graph.package_names().collect::<BTreeSet<_>>())
+        .unwrap_or_default();
+    let classified = classify_external_changes(&external.unmapped, &trees, &config, &known);
+    override_changes.extend(external.packages);
+    override_changes.extend(classified.packages);
+    let mut external_reasons = external.reasons;
+    external_reasons.extend(classified.reasons);
     TreeChanges {
         config_digest,
         config_changes: snapshot_changes.unwrap_or_default(),
         unattributed_config_change,
         override_digests,
         override_changes,
+        external_files,
+        external_unmapped: classified.unmapped,
+        external_finalize: classified.finalize,
+        external_reasons,
     }
 }

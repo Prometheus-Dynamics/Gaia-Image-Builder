@@ -57,6 +57,7 @@ impl Fixture {
             output_dir: output,
             graph,
             execution_identity: "host:test",
+            external: &BTreeMap::new(),
         })
     }
 }
