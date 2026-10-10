@@ -308,16 +308,13 @@ fn apply_build_env(
         contract.execution_backend,
         ArtifactExecutionBackend::Docker(_)
     );
-    let (env, redirected) = redirect_gradle_home(
-        env,
-        docker,
-        gradle_home == GradleHomeSpec::UserCache,
-        user_cache,
-    );
-    if let Some(dir) = &redirected {
-        // The container mounts Gradle's home at its host path, so the
-        // redirected home is visible there under the same path. If the
-        // directory cannot be created, Gradle reports the failure itself.
+    let user_cache_requested = gradle_home == GradleHomeSpec::UserCache;
+    let (env, redirected) = redirect_gradle_home(env, docker, user_cache_requested, user_cache);
+    let (env, home) = persistent_home(&env, docker, user_cache_requested, user_cache);
+    for dir in redirected.iter().chain(&home) {
+        // The container mounts these at their host paths, so they are
+        // visible there under the same paths. If a directory cannot be
+        // created, the build reports the failure itself.
         let _ = std::fs::create_dir_all(dir);
         register_docker_mount(dir);
     }
@@ -366,6 +363,46 @@ fn redirect_gradle_home(
         .collect::<Vec<_>>();
     if home.is_none() {
         rewritten.push(("GRADLE_USER_HOME".to_string(), value));
+    }
+    (rewritten, Some(dir))
+}
+
+/// Gives a Docker build in `user-cache` mode a persistent `HOME`
+/// (`<user cache>/java-home`), unless the build sets its own outside the
+/// workspace's `.gaia/docker-home`. Tools a Java build runs keep their caches
+/// under `HOME` (pnpm's store, npm, Python virtualenvs); inside the `--rm`
+/// container they would start cold on every build. Returns the environment
+/// and the directory to mount, if any.
+fn persistent_home(
+    env: &[(String, String)],
+    docker: bool,
+    user_cache_requested: bool,
+    user_cache: Option<&Path>,
+) -> (Vec<(String, String)>, Option<PathBuf>) {
+    let (Some(cache), true) = (user_cache, docker && user_cache_requested) else {
+        return (env.to_vec(), None);
+    };
+    let home = env
+        .iter()
+        .find(|(key, _)| key == "HOME")
+        .map(|(_, value)| value);
+    if home.is_some_and(|home| !home.contains("/.gaia/docker-home")) {
+        return (env.to_vec(), None);
+    }
+    let dir = cache.join("java-home");
+    let value = dir.display().to_string();
+    let mut rewritten = env
+        .iter()
+        .map(|(key, existing)| {
+            if key == "HOME" {
+                (key.clone(), value.clone())
+            } else {
+                (key.clone(), existing.clone())
+            }
+        })
+        .collect::<Vec<_>>();
+    if home.is_none() {
+        rewritten.push(("HOME".to_string(), value));
     }
     (rewritten, Some(dir))
 }

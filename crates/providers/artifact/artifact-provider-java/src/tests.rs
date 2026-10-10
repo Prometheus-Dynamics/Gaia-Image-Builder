@@ -279,10 +279,14 @@ fn default_gradle_build_redirects_gradle_home_when_configured() {
     );
 
     let expected = cache.join("gradle-home");
+    let home = cache.join("java-home");
     let envs = command.get_envs().collect::<Vec<_>>();
     assert_eq!(
         envs,
-        vec![(OsStr::new("GRADLE_USER_HOME"), Some(expected.as_os_str()))]
+        vec![
+            (OsStr::new("GRADLE_USER_HOME"), Some(expected.as_os_str())),
+            (OsStr::new("HOME"), Some(home.as_os_str())),
+        ]
     );
     assert!(expected.is_dir(), "redirected home should be created");
 }
@@ -326,12 +330,19 @@ fn default_build_without_build_env_gets_a_persistent_gradle_home_only_in_user_ca
         .collect::<Vec<_>>();
     assert_eq!(
         envs,
-        [(
-            "GRADLE_USER_HOME".to_string(),
-            Some(cache.join("gradle-home").display().to_string())
-        )]
+        [
+            (
+                "GRADLE_USER_HOME".to_string(),
+                Some(cache.join("gradle-home").display().to_string())
+            ),
+            (
+                "HOME".to_string(),
+                Some(cache.join("java-home").display().to_string())
+            ),
+        ]
     );
     assert!(cache.join("gradle-home").is_dir());
+    assert!(cache.join("java-home").is_dir());
 }
 
 #[test]
@@ -413,5 +424,33 @@ fn execute_artifact_rejects_target_override() {
         error
             .message
             .contains("target-aware builds are not supported yet")
+    );
+}
+
+#[test]
+fn persistent_home_keeps_a_build_s_own_home_and_ignores_host_builds() {
+    let cache = temp_path("gaia-java-home-cache");
+    let own = vec![("HOME".to_string(), "/opt/builder".to_string())];
+    assert_eq!(
+        persistent_home(&own, true, true, Some(&cache)),
+        (own.clone(), None)
+    );
+    assert_eq!(
+        persistent_home(&[], false, true, Some(&cache)),
+        (Vec::new(), None)
+    );
+    assert_eq!(
+        persistent_home(&[], true, false, Some(&cache)),
+        (Vec::new(), None)
+    );
+    let workspace = vec![("HOME".to_string(), "/w/.gaia/docker-home".to_string())];
+    let (env, dir) = persistent_home(&workspace, true, true, Some(&cache));
+    assert_eq!(dir, Some(cache.join("java-home")));
+    assert_eq!(
+        env,
+        [(
+            "HOME".to_string(),
+            cache.join("java-home").display().to_string()
+        )]
     );
 }

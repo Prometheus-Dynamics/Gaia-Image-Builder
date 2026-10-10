@@ -943,10 +943,14 @@ dependency and wrapper caches) lives for Java artifacts built in Docker:
   shared by every workspace of the user. Gaia mounts it into the container at
   the same path.
 
-The first build in `user-cache` mode is cold: Gradle downloads its
-distribution and dependencies again. The redirect applies only to Docker
-builds whose `GRADLE_USER_HOME` (set with `build_env`) points into
-`.gaia/docker-home`; host builds keep Gradle's own home.
+In `user-cache` mode, Docker builds also get a persistent `HOME`
+(`<user cache root>/java-home`, mounted at the same path), so the caches of
+tools the build runs under `HOME` (pnpm's store, npm, Python virtualenvs)
+survive the `--rm` container. A build whose `build_env` sets its own
+`GRADLE_USER_HOME` or `HOME` outside `.gaia/docker-home` keeps it; one that
+sets none, or one inside `.gaia/docker-home`, gets the user-cache paths. Host
+builds keep their own homes. The first build in `user-cache` mode is cold:
+Gradle and the other tools download their caches again.
 
 ```toml
 [providers.java]
