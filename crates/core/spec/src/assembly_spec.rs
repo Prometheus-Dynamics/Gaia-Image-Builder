@@ -170,6 +170,7 @@ pub struct AssemblyFilesystemSpec {
     pub kind: AssemblyFilesystemKindSpec,
     pub source_tree: AssemblyTreeId,
     pub output: AssemblyPathTemplate,
+    /// Byte size, or `"auto"` for vfat (sized from the tree).
     pub size: Option<String>,
     pub deterministic: bool,
     /// zstd level for `cpio-zstd` (1-19); `None` uses the default.
@@ -390,6 +391,8 @@ pub struct AssemblyBusyboxInitramfsSpec {
     pub tree: AssemblyTreeId,
     pub busybox: AssemblyPathTemplate,
     pub include_runtime_libs: bool,
+    /// Target root for the runtime libraries; `None` derives it from `busybox`.
+    pub sysroot: Option<AssemblyPathTemplate>,
     pub applets: Vec<String>,
 }
 

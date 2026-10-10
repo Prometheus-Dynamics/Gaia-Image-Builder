@@ -372,6 +372,7 @@ fn rewrite_assembly(
     }
     for initramfs in &mut rewritten.busybox_initramfs {
         initramfs.busybox = absolute(&initramfs.busybox)?;
+        initramfs.sysroot = absolute_opt(&initramfs.sysroot)?;
     }
     for disk in &mut rewritten.disks {
         disk.output = absolute(&disk.output)?;

@@ -604,6 +604,7 @@ fn executes_busybox_initramfs_and_packs_cpio_gzip() {
             tree: "initramfs".into(),
             busybox: busybox.display().to_string().into(),
             include_runtime_libs: false,
+            sysroot: None,
             applets: vec!["sh".into(), "mount".into(), "insmod".into()],
         }],
         filesystems: vec![assembly_filesystem(

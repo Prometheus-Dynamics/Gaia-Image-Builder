@@ -270,8 +270,7 @@ impl<'a> StepRun<'a> {
             output_path = tracing::field::Empty
         );
         let _span_guard = span.enter();
-        let summary =
-            execute_busybox_initramfs(self.spec, self.roots, initramfs, self.cancel_check.clone())?;
+        let summary = execute_busybox_initramfs(self.spec, self.roots, initramfs)?;
         tracing::Span::current().record("output_path", summary.dest.display().to_string());
         self.busybox_count += 1;
         let prefix = format!("busybox.{}", self.busybox_count);

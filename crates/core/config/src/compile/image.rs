@@ -250,6 +250,7 @@ pub(crate) fn compile_image_assembly(
                 tree: initramfs.tree.into(),
                 busybox: initramfs.busybox.into(),
                 include_runtime_libs: initramfs.include_runtime_libs,
+                sysroot: initramfs.sysroot.map(Into::into),
                 applets: initramfs.applets,
             })
             .collect(),

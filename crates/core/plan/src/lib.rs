@@ -1,3 +1,4 @@
+mod elf;
 mod estimate;
 mod graph;
 mod operations;
@@ -10,6 +11,7 @@ mod reuse_details;
 mod reuse_explain;
 mod reuse_imports;
 mod reuse_toolchain;
+mod runtime_libs;
 mod targets;
 
 pub use estimate::{PlanEstimate, estimate_plan, format_duration_short};
@@ -26,6 +28,7 @@ pub use reuse::{
 };
 pub use reuse_details::{fingerprint_change_detail, operation_components, recorded_fingerprint};
 pub use reuse_explain::{InvalidationSummary, invalidation_summary};
+pub use runtime_libs::{RuntimeClosure, RuntimeEntry, derive_sysroot, resolve_runtime_closure};
 pub use targets::{PlanDomain, PlanTarget};
 
 use gaia_artifact_providers::{ArtifactProviderCatalog, ArtifactProviderOperation};

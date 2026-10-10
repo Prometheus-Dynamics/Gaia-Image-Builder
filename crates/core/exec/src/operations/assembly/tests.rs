@@ -8,7 +8,6 @@ use gaia_spec::{
 use std::fs;
 use std::path::{Path, PathBuf};
 #[cfg(unix)]
-use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn unique_dir(prefix: &str) -> PathBuf {
@@ -387,134 +386,6 @@ fn busybox_applet_symlink_points_to_busybox() {
 
     let _ = fs::remove_dir_all(root);
 }
-
-#[test]
-fn ldd_parser_extracts_dynamic_library_paths_and_skips_vdso() {
-    assert_eq!(
-        parse_ldd_library_path("libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0xabc)")
-            .expect("libc"),
-        PathBuf::from("/lib/x86_64-linux-gnu/libc.so.6")
-    );
-    assert_eq!(
-        parse_ldd_library_path("/lib64/ld-linux-x86-64.so.2 (0xabc)").expect("loader"),
-        PathBuf::from("/lib64/ld-linux-x86-64.so.2")
-    );
-    assert!(parse_ldd_library_path("linux-vdso.so.1 (0xabc)").is_none());
-    assert!(parse_ldd_library_path("libmissing.so => not found").is_none());
-}
-
-#[test]
-fn busybox_runtime_parser_distinguishes_static_dynamic_and_failed_resolution() {
-    let busybox = Path::new("/tmp/busybox");
-
-    assert!(
-        parse_busybox_runtime_libraries_from_ldd("not a dynamic executable", false, busybox)
-            .expect("static busybox")
-            .is_empty()
-    );
-    assert_eq!(
-        parse_busybox_runtime_libraries_from_ldd(
-            "libc.so.6 => /lib/libc.so.6 (0x1)\n/lib64/ld-linux.so.2 (0x2)\n",
-            true,
-            busybox,
-        )
-        .expect("dynamic busybox"),
-        vec![
-            PathBuf::from("/lib/libc.so.6"),
-            PathBuf::from("/lib64/ld-linux.so.2")
-        ]
-    );
-    assert!(
-        parse_busybox_runtime_libraries_from_ldd("libmissing.so => not found", false, busybox)
-            .expect_err("failed ldd")
-            .contains("failed to resolve busybox runtime libraries")
-    );
-}
-
-/// Writes an executable script without leaving a writable descriptor on
-/// the final path: the content is written and closed under a temporary name,
-/// made executable, then renamed into place. Spawning also retries `ETXTBSY`
-/// (see `gaia_process`), which covers descriptors inherited by a concurrent
-/// fork in another test thread.
-#[cfg(unix)]
-fn write_fake_executable(path: &Path, contents: &str) {
-    use std::io::Write;
-    use std::os::unix::fs::PermissionsExt;
-
-    let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
-    {
-        let mut file = fs::File::create(&temporary).expect("fake executable");
-        file.write_all(contents.as_bytes())
-            .expect("fake executable contents");
-        file.sync_all().expect("fake executable sync");
-    }
-    fs::set_permissions(&temporary, fs::Permissions::from_mode(0o755))
-        .expect("fake executable mode");
-    fs::rename(&temporary, path).expect("fake executable rename");
-}
-
-#[cfg(unix)]
-#[test]
-fn busybox_runtime_resolver_honors_assembly_command_timeout() {
-    let root = unique_dir("gaia-busybox-ldd-timeout");
-    let mut spec = test_spec(&root);
-    spec.policy.providers.buildroot.timeout_seconds = 1;
-    let busybox = root.join("busybox");
-    fs::write(&busybox, "busybox").expect("busybox");
-    let ldd = root.join("ldd");
-    write_fake_executable(&ldd, "#!/bin/sh\nsleep 10\n");
-
-    let started = Instant::now();
-    let error = resolve_busybox_runtime_libraries_with_program(&spec, &busybox, &ldd, None)
-        .expect_err("ldd should time out");
-
-    assert!(started.elapsed().as_secs() < 5, "{error:?}");
-    assert_eq!(error.kind, ExecutionErrorKind::Timeout);
-    assert!(error.message.contains("timed out after 1s"), "{error:?}");
-
-    let _ = fs::remove_dir_all(root);
-}
-
-#[cfg(unix)]
-#[test]
-fn busybox_runtime_resolver_honors_cancellation() {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    };
-    use std::thread;
-    use std::time::Duration;
-
-    let root = unique_dir("gaia-busybox-ldd-cancel");
-    let mut spec = test_spec(&root);
-    spec.policy.providers.buildroot.timeout_seconds = 30;
-    let busybox = root.join("busybox");
-    fs::write(&busybox, "busybox").expect("busybox");
-    let ldd = root.join("ldd");
-    write_fake_executable(&ldd, "#!/bin/sh\nsleep 10\n");
-    let cancelled = Arc::new(AtomicBool::new(false));
-    let cancel_check: gaia_process::ProcessCancelCheck = {
-        let cancelled = cancelled.clone();
-        Arc::new(move || cancelled.load(Ordering::SeqCst))
-    };
-    let trigger = cancelled.clone();
-    thread::spawn(move || {
-        thread::sleep(Duration::from_millis(50));
-        trigger.store(true, Ordering::SeqCst);
-    });
-
-    let started = Instant::now();
-    let error =
-        resolve_busybox_runtime_libraries_with_program(&spec, &busybox, &ldd, Some(cancel_check))
-            .expect_err("ldd should be cancelled");
-
-    assert!(started.elapsed().as_secs() < 5, "{error:?}");
-    assert_eq!(error.kind, ExecutionErrorKind::Cancelled);
-    assert!(error.message.contains("cancelled"), "{error:?}");
-
-    let _ = fs::remove_dir_all(root);
-}
-
 #[test]
 fn buildroot_assembly_roots_expose_images_target_host_and_staging() {
     let root = unique_dir("gaia-buildroot-assembly-roots");
@@ -713,6 +584,8 @@ fn assembly_disk_archives_log_a_step_time_and_sizes() {
     }
 }
 
+#[path = "tests_busybox.rs"]
+mod tests_busybox;
 #[path = "tests_filesystem.rs"]
 mod tests_filesystem;
 

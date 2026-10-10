@@ -1,4 +1,5 @@
 use super::*;
+use gaia_plan::RuntimeEntry;
 
 pub(super) struct BusyboxInitramfsSummary {
     pub(super) src: PathBuf,
@@ -31,7 +32,6 @@ pub(super) fn execute_busybox_initramfs(
     spec: &ResolvedBuildSpec,
     roots: &AssemblyRoots,
     initramfs: &gaia_spec::AssemblyBusyboxInitramfsSpec,
-    cancel_check: Option<gaia_process::ProcessCancelCheck>,
 ) -> Result<BusyboxInitramfsSummary, AssemblyError> {
     let tree = roots.tree_path(&initramfs.tree)?;
     let src = roots.resolve_path(spec, &initramfs.busybox)?;
@@ -72,12 +72,17 @@ pub(super) fn execute_busybox_initramfs(
     }
 
     let (runtime_linkage, runtime_libraries) = if initramfs.include_runtime_libs {
-        let dependencies = resolve_busybox_runtime_libraries(spec, &src, cancel_check)?;
-        if dependencies.is_empty() {
-            (BusyboxRuntimeLinkage::Static, Vec::new())
-        } else {
-            let copied = copy_busybox_runtime_libraries(tree, &dependencies)?;
+        let sysroot = initramfs
+            .sysroot
+            .as_ref()
+            .map(|template| roots.resolve_path(spec, template))
+            .transpose()?;
+        let closure = gaia_plan::resolve_runtime_closure(&src, sysroot.as_deref())?;
+        if closure.dynamic {
+            let copied = copy_busybox_runtime_closure(tree, &closure)?;
             (BusyboxRuntimeLinkage::Dynamic, copied)
+        } else {
+            (BusyboxRuntimeLinkage::Static, Vec::new())
         }
     } else {
         (BusyboxRuntimeLinkage::NotRequested, Vec::new())
@@ -131,127 +136,70 @@ pub(super) fn create_busybox_applet_symlink(tree: &Path, applet: &str) -> Result
     }
 }
 
-fn resolve_busybox_runtime_libraries(
-    spec: &ResolvedBuildSpec,
-    busybox: &Path,
-    cancel_check: Option<gaia_process::ProcessCancelCheck>,
-) -> Result<Vec<PathBuf>, AssemblyError> {
-    resolve_busybox_runtime_libraries_with_program(spec, busybox, Path::new("ldd"), cancel_check)
-}
-
-pub(super) fn resolve_busybox_runtime_libraries_with_program(
-    spec: &ResolvedBuildSpec,
-    busybox: &Path,
-    ldd_program: &Path,
-    cancel_check: Option<gaia_process::ProcessCancelCheck>,
-) -> Result<Vec<PathBuf>, AssemblyError> {
-    let mut command = Command::new(ldd_program);
-    command.arg(busybox);
-    let output = run_command_capture_tail(
-        spec,
-        &mut command,
-        process_output_retention(spec),
-        cancel_check,
-    )
-    .map_err(|error| AssemblyError {
-        kind: error.kind,
-        message: format!(
-            "failed to resolve busybox runtime libraries for '{}': {}",
-            busybox.display(),
-            error.message
-        ),
-    })?;
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    Ok(parse_busybox_runtime_libraries_from_ldd(
-        &combined,
-        output.status.success(),
-        busybox,
-    )?)
-}
-
-pub(super) fn parse_busybox_runtime_libraries_from_ldd(
-    combined: &str,
-    success: bool,
-    busybox: &Path,
-) -> Result<Vec<PathBuf>, String> {
-    let lowered = combined.to_ascii_lowercase();
-    if lowered.contains("not a dynamic executable") || lowered.contains("statically linked") {
-        return Ok(Vec::new());
-    }
-    if !success {
-        return Err(format!(
-            "failed to resolve busybox runtime libraries for '{}': {}",
-            busybox.display(),
-            combined.trim()
-        ));
-    }
-    let mut libraries = Vec::new();
-    for line in combined.lines() {
-        if let Some(path) = parse_ldd_library_path(line)
-            && !libraries.iter().any(|existing| existing == &path)
-        {
-            libraries.push(path);
-        }
-    }
-    if libraries.is_empty() {
-        return Err(format!(
-            "busybox runtime library resolver produced no libraries for '{}'",
-            busybox.display()
-        ));
-    }
-    Ok(libraries)
-}
-
-pub(super) fn parse_ldd_library_path(line: &str) -> Option<PathBuf> {
-    let trimmed = line.trim();
-    if trimmed.is_empty() || trimmed.starts_with("linux-vdso") {
-        return None;
-    }
-    if let Some((_, right)) = trimmed.split_once("=>") {
-        let path = right.split_whitespace().next()?;
-        if path.starts_with('/') {
-            return Some(PathBuf::from(path));
-        }
-        return None;
-    }
-    let path = trimmed.split_whitespace().next()?;
-    path.starts_with('/').then(|| PathBuf::from(path))
-}
-
-fn copy_busybox_runtime_libraries(
+/// Writes a resolved runtime closure into the tree at its absolute paths:
+/// the interpreter and each library as a copy of the sysroot's file, and each
+/// symlink crossed on the way as a symlink with the sysroot's target text.
+/// Returns the tree paths of the copied files.
+pub(super) fn copy_busybox_runtime_closure(
     tree: &Path,
-    libraries: &[PathBuf],
+    closure: &gaia_plan::RuntimeClosure,
 ) -> Result<Vec<PathBuf>, String> {
     let mut copied = Vec::new();
-    for library in libraries {
-        if !library.is_file() {
-            return Err(format!(
-                "busybox runtime library '{}' does not exist or is not a file",
-                library.display()
-            ));
-        }
-        let relative = library.strip_prefix("/").unwrap_or(library);
-        let dest = tree.join(relative);
+    for entry in &closure.entries {
+        let dest = tree.join(entry.guest().trim_start_matches('/'));
         if let Some(parent) = dest.parent() {
             std_fs::create_dir_all(parent).map_err(|error| {
                 format!(
-                    "failed to create busybox runtime library dir '{}': {error}",
+                    "failed to create busybox runtime dir '{}': {error}",
                     parent.display()
                 )
             })?;
         }
-        std_fs::copy(library, &dest).map_err(|error| {
-            format!(
-                "failed to copy busybox runtime library '{}' to '{}': {error}",
-                library.display(),
-                dest.display()
-            )
-        })?;
-        copied.push(dest);
+        if let Ok(metadata) = dest.symlink_metadata() {
+            if metadata.is_dir() {
+                return Err(format!(
+                    "busybox runtime path '{}' is a directory in the tree, but the sysroot needs it as a link or file; do not create that directory in the tree",
+                    dest.display()
+                ));
+            }
+            std_fs::remove_file(&dest).map_err(|error| {
+                format!(
+                    "failed to replace busybox runtime path '{}': {error}",
+                    dest.display()
+                )
+            })?;
+        }
+        match entry {
+            RuntimeEntry::File { source, .. } => {
+                std_fs::copy(source, &dest).map_err(|error| {
+                    format!(
+                        "failed to copy busybox runtime file '{}' to '{}': {error}",
+                        source.display(),
+                        dest.display()
+                    )
+                })?;
+                copied.push(dest);
+            }
+            RuntimeEntry::Symlink { target, .. } => create_runtime_symlink(target, &dest)?,
+        }
     }
     Ok(copied)
+}
+
+#[cfg(unix)]
+fn create_runtime_symlink(target: &str, dest: &Path) -> Result<(), String> {
+    std::os::unix::fs::symlink(target, dest).map_err(|error| {
+        format!(
+            "failed to create busybox runtime link '{}' -> '{target}': {error}",
+            dest.display()
+        )
+    })
+}
+
+#[cfg(not(unix))]
+fn create_runtime_symlink(_target: &str, dest: &Path) -> Result<(), String> {
+    Err(format!(
+        "busybox runtime link '{}' needs a Unix host to create symlinks",
+        dest.display()
+    ))
 }

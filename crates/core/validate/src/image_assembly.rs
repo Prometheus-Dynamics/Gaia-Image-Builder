@@ -237,7 +237,18 @@ pub(crate) fn validate_image_assembly(
                 diagnostics,
             );
         }
-        if let Err(parse_error) = filesystem.parsed_size() {
+        if filesystem.size.as_deref() == Some("auto") {
+            if filesystem.kind != gaia_spec::AssemblyFilesystemKindSpec::Vfat {
+                diagnostics.push(error(
+                    "assembly_filesystem_size_auto_unsupported",
+                    format!(
+                        "assembly filesystem '{}' uses size = \"auto\", which is only supported for kind 'vfat'",
+                        filesystem.id
+                    ),
+                    Some("image.assembly.filesystems".into()),
+                ));
+            }
+        } else if let Err(parse_error) = filesystem.parsed_size() {
             diagnostics.push(error(
                 "assembly_filesystem_size_invalid",
                 format!(
@@ -444,6 +455,22 @@ pub(crate) fn validate_image_assembly(
             "image.assembly.busybox_initramfs.busybox",
             diagnostics,
         );
+        if let Some(sysroot) = &initramfs.sysroot {
+            if sysroot.as_str().trim().is_empty() {
+                diagnostics.push(error(
+                    "assembly_busybox_sysroot_empty",
+                    "busybox initramfs sysroot cannot be empty".into(),
+                    Some("image.assembly.busybox_initramfs".into()),
+                ));
+            }
+            validate_assembly_path_template(
+                spec,
+                &tree_ids,
+                sysroot,
+                "image.assembly.busybox_initramfs.sysroot",
+                diagnostics,
+            );
+        }
     }
 
     if let Some(work_dir) = &assembly.work_dir {

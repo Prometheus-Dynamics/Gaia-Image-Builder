@@ -16,6 +16,16 @@ This cycle also moves the toolchain pin and `rust-version` to Rust 1.99.0
 (installing Gaia needs Rust 1.99 or newer), upgrades every dependency to its
 newest release, and updates the Rust docker images to 1.99.0.
 
+### BusyBox runtime libraries come from the target sysroot
+
+- `[[image.assembly.busybox_initramfs]] include_runtime_libs = true` no longer runs the host's `ldd`. A cross-compiled BusyBox (for example an aarch64 glibc binary from a Buildroot target tree on an x86_64 host) was reported "not a dynamic executable" by the host `ldd`, so Gaia shipped it as static and the initramfs panicked at `/init`. A host-architecture binary got the host's libraries instead.
+- Gaia now reads the binary's ELF headers (program interpreter, `DT_NEEDED`, `DT_RUNPATH`/`DT_RPATH`) and resolves each library under a new `sysroot` path template (default: the directory above the binary's `bin/` or `sbin/`, or two levels up from `usr/bin/` or `usr/sbin/`). Symlinks inside the sysroot are followed and recreated in the tree, the interpreter goes at its exact path, a missing library fails the build naming every missing name, and a static binary copies nothing. Libraries of another class, byte order or machine are skipped.
+- The reuse fingerprint covers the sysroot, the interpreter, the symlinks and the digest of every library file, so a changed libc rebuilds the assembly. The `ldd --version` probe is gone.
+
+### vfat images sized automatically
+
+- `[[image.assembly.filesystems]] kind = "vfat"` accepts `size = "auto"`: the image is the content (each file and directory rounded up to 4 KiB) plus 1 MiB for FAT overhead plus a margin of 5% (at least 1 MiB), rounded up to a MiB. The size depends only on the tree's content. `size = "auto"` is rejected for other kinds. Omitting `size` still gives 32M.
+
 ### Image assembly: cpio-zstd, kernel modules, published filesystem images
 
 - `[[image.assembly.filesystems]]` takes `kind = "cpio-zstd"`: a newc cpio of the tree, compressed with zstd. The optional `compression_level` (1-19, default 19) is accepted only there. Output is deterministic, as for the other cpio kinds.

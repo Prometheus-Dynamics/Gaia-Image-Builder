@@ -2,6 +2,17 @@ use super::*;
 
 /// The zstd level of a `cpio-zstd` image when the spec sets none.
 const CPIO_ZSTD_DEFAULT_LEVEL: u32 = 19;
+/// The size of a vfat image when the spec sets none.
+const VFAT_DEFAULT_BYTES: u64 = 32 * 1024 * 1024;
+/// The cluster size `size = "auto"` assumes for every file and directory:
+/// the last cluster of each is counted whole.
+const VFAT_AUTO_CLUSTER_BYTES: u64 = 4 * 1024;
+/// Room for the boot sector, the FAT tables and the root directory.
+const VFAT_AUTO_FIXED_OVERHEAD_BYTES: u64 = 1024 * 1024;
+/// The least free space `size = "auto"` leaves, or 5% of the content when
+/// that is more.
+const VFAT_AUTO_MIN_MARGIN_BYTES: u64 = 1024 * 1024;
+const MIB: u64 = 1024 * 1024;
 
 pub(super) struct AssemblyFilesystemSummary {
     pub(super) output: PathBuf,
@@ -134,11 +145,14 @@ pub(super) fn execute_assembly_filesystem(
             let mcopy = resolve_assembly_tool(roots, "mcopy")?;
             let tool_path = format!("mformat={};mcopy={}", mformat.display, mcopy.display);
             tracing::Span::current().record("tool_path", tool_path.as_str());
-            let bytes = filesystem
-                .parsed_size()
-                .map_err(|error| error.to_string())?
-                .unwrap_or(gaia_spec::ByteSize::from_bytes(32 * 1024 * 1024))
-                .bytes();
+            let bytes = if filesystem.size.as_deref() == Some("auto") {
+                vfat_auto_bytes(source_tree)?
+            } else {
+                filesystem
+                    .parsed_size()
+                    .map_err(|error| error.to_string())?
+                    .map_or(VFAT_DEFAULT_BYTES, |size| size.bytes())
+            };
             let temp = temporary_assembly_output_path(&output);
             write_vfat_filesystem(VfatWriteContext {
                 spec,
@@ -171,6 +185,66 @@ struct VfatWriteContext<'a> {
     mcopy: &'a ResolvedTool,
     retention: gaia_process::ProcessOutputRetention,
     cancel_check: Option<gaia_process::ProcessCancelCheck>,
+}
+
+/// The image size for `size = "auto"`: the content (each file rounded up to
+/// a cluster, each directory costing one) plus the fixed FAT overhead plus a
+/// margin, rounded up to 1 MiB. It depends only on the tree's content, so the
+/// same tree gives the same size. A tree that overruns the estimate fails
+/// when `mcopy` runs out of space, rather than silently truncating.
+pub(super) fn vfat_auto_bytes(source_tree: &Path) -> Result<u64, String> {
+    let content = vfat_content_bytes(source_tree)?;
+    let margin = (content / 20).max(VFAT_AUTO_MIN_MARGIN_BYTES);
+    let total = content + VFAT_AUTO_FIXED_OVERHEAD_BYTES + margin;
+    Ok(total.div_ceil(MIB) * MIB)
+}
+
+fn vfat_content_bytes(dir: &Path) -> Result<u64, String> {
+    let mut total = 0u64;
+    let mut children = std_fs::read_dir(dir)
+        .map_err(|error| {
+            format!(
+                "failed to read vfat source tree '{}': {error}",
+                dir.display()
+            )
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| {
+            format!(
+                "failed to read vfat source tree '{}': {error}",
+                dir.display()
+            )
+        })?;
+    children.sort_by_key(|entry| entry.path());
+    for child in children {
+        let path = child.path();
+        let metadata = std_fs::symlink_metadata(&path)
+            .map_err(|error| format!("failed to read vfat source '{}': {error}", path.display()))?;
+        // mcopy follows symlinks, so a link is sized by its target.
+        let followed = if metadata.file_type().is_symlink() {
+            std_fs::metadata(&path).ok()
+        } else {
+            Some(metadata)
+        };
+        match followed {
+            Some(target) if target.is_file() => {
+                total += target.len().div_ceil(VFAT_AUTO_CLUSTER_BYTES) * VFAT_AUTO_CLUSTER_BYTES;
+            }
+            Some(target) if target.is_dir() => {
+                total += VFAT_AUTO_CLUSTER_BYTES;
+                // A link to a directory is not followed again, so a loop
+                // of links cannot recurse forever.
+                if !path
+                    .symlink_metadata()
+                    .is_ok_and(|m| m.file_type().is_symlink())
+                {
+                    total += vfat_content_bytes(&path)?;
+                }
+            }
+            _ => total += VFAT_AUTO_CLUSTER_BYTES,
+        }
+    }
+    Ok(total)
 }
 
 fn write_vfat_filesystem(context: VfatWriteContext<'_>) -> Result<(), AssemblyError> {

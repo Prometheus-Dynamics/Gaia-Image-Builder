@@ -231,5 +231,7 @@ pub struct RawAssemblyBusyboxInitramfsConfig {
     pub tree: String,
     pub busybox: String,
     pub include_runtime_libs: bool,
+    /// Root for the runtime libraries; derived from `busybox` when unset.
+    pub sysroot: Option<String>,
     pub applets: Vec<String>,
 }

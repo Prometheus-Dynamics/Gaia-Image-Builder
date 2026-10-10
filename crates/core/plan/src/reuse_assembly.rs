@@ -1,7 +1,9 @@
 use crate::reuse::{command_signature, path_state_signature};
 use gaia_spec::ResolvedBuildSpec;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 /// The image assembly's external inputs as `(name, part)` pairs. The name
 /// says which input a part is (`src <path>`, `partition <disk>/<name>`, ...),
@@ -134,7 +136,11 @@ pub(crate) fn assembly_input_entries(spec: &ResolvedBuildSpec) -> Vec<(String, S
             ),
         ));
         if initramfs.include_runtime_libs {
-            parts.push(("tool ldd".into(), command_signature("ldd", ["--version"])));
+            let sysroot = initramfs
+                .sysroot
+                .as_ref()
+                .and_then(|template| roots.resolve_path(spec, template).ok());
+            parts.extend(busybox_runtime_parts(&resolved, sysroot.as_deref()));
         }
     }
     for filesystem in &assembly.filesystems {
@@ -358,5 +364,142 @@ mod tests {
         }
         assert_ne!(before, assembly_input_signature(&spec));
         let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+/// The inputs a BusyBox's runtime libraries add: the sysroot, the
+/// interpreter, every symlink and every library file with its content digest.
+/// A changed libc under the sysroot therefore invalidates the assembly. A
+/// closure that cannot be resolved is named by its error, so the fingerprint
+/// never matches a run that could not have been built.
+fn busybox_runtime_parts(binary: &Path, sysroot: Option<&Path>) -> Vec<(String, String)> {
+    let closure = match crate::resolve_runtime_closure(binary, sysroot) {
+        Ok(closure) => closure,
+        Err(error) => {
+            return vec![(
+                format!("busybox runtime {}", binary.display()),
+                format!("busybox-runtime:error:{error}"),
+            )];
+        }
+    };
+    let mut parts = Vec::new();
+    let sysroot_text = closure
+        .sysroot
+        .as_ref()
+        .map_or_else(|| "none".to_string(), |path| path.display().to_string());
+    parts.push((
+        "busybox runtime sysroot".into(),
+        format!(
+            "busybox-runtime:sysroot:{sysroot_text}:dynamic={}",
+            closure.dynamic
+        ),
+    ));
+    if let Some(interpreter) = &closure.interpreter {
+        parts.push((
+            format!("busybox runtime interpreter {interpreter}"),
+            format!("busybox-runtime:interpreter:{interpreter}"),
+        ));
+    }
+    for entry in &closure.entries {
+        let part = match entry {
+            crate::RuntimeEntry::File { guest, source } => match file_digest(source) {
+                Ok(digest) => format!("file:{guest}:sha256={digest}"),
+                Err(error) => format!("file:{guest}:error:{error}"),
+            },
+            crate::RuntimeEntry::Symlink { guest, target } => {
+                format!("link:{guest}->{target}")
+            }
+        };
+        parts.push((
+            format!("busybox runtime {}", entry.guest()),
+            format!("busybox-runtime:{part}"),
+        ));
+    }
+    parts
+}
+
+fn file_digest(path: &Path) -> Result<String, String> {
+    let bytes = fs::read(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    Ok(Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+#[cfg(test)]
+mod busybox_runtime_tests {
+    use super::busybox_runtime_parts;
+    use crate::elf::tests::{EM_AARCH64, ElfFixture, build_elf};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_root(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "gaia-reuse-busybox-{name}-{}-{nanos}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("temp root");
+        dir
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_changed_library_in_the_sysroot_changes_the_busybox_inputs() {
+        let root = temp_root("libc");
+        let sysroot = root.join("target");
+        let busybox = sysroot.join("bin/busybox");
+        fs::create_dir_all(busybox.parent().expect("bin")).expect("bin dir");
+        fs::write(
+            &busybox,
+            build_elf(&ElfFixture {
+                interpreter: Some("/lib/ld-fp.so.1"),
+                ..ElfFixture::dynamic(EM_AARCH64, &["libc.so.6"])
+            }),
+        )
+        .expect("busybox");
+        fs::create_dir_all(sysroot.join("lib")).expect("lib dir");
+        let loader = build_elf(&ElfFixture::dynamic(EM_AARCH64, &[]));
+        fs::write(sysroot.join("lib/ld-fp.so.1"), &loader).expect("loader");
+        let libc = sysroot.join("lib/libc.so.6");
+        fs::write(&libc, build_elf(&ElfFixture::dynamic(EM_AARCH64, &[]))).expect("libc");
+
+        let before = busybox_runtime_parts(&busybox, None);
+        assert!(
+            before.iter().all(|(_, part)| !part.contains("error:")),
+            "{before:?}"
+        );
+        assert!(
+            before
+                .iter()
+                .any(|(name, _)| name == "busybox runtime /lib/libc.so.6"),
+            "{before:?}"
+        );
+
+        // A new libc (a different file with the same name) must change the inputs.
+        fs::write(
+            &libc,
+            build_elf(&ElfFixture {
+                runpath: Some("/usr/lib"),
+                ..ElfFixture::dynamic(EM_AARCH64, &[])
+            }),
+        )
+        .expect("new libc");
+        let after = busybox_runtime_parts(&busybox, None);
+        assert_ne!(before, after);
+
+        // A missing library makes the inputs an error, which never matches a reuse.
+        fs::remove_file(&libc).expect("remove libc");
+        let missing = busybox_runtime_parts(&busybox, None);
+        assert_eq!(missing.len(), 1);
+        assert!(
+            missing[0].1.starts_with("busybox-runtime:error:"),
+            "{missing:?}"
+        );
+        let _ = fs::remove_dir_all(root);
     }
 }

@@ -254,3 +254,87 @@ kernel_version = "6.12/x"
         ]
     );
 }
+
+#[test]
+fn vfat_size_auto_is_accepted_and_only_for_vfat() {
+    let vfat = format!(
+        r#"{HEADER}
+[[image.assembly.trees]]
+id = "boot"
+path = "$assembly.work/boot"
+
+[[image.assembly.filesystems]]
+id = "boot"
+kind = "vfat"
+source_tree = "boot"
+output = "$assembly.work/boot.vfat"
+size = "auto"
+"#
+    );
+    assert!(codes(&vfat).is_empty(), "{:?}", assembly_diagnostics(&vfat));
+
+    let cpio = format!(
+        r#"{HEADER}
+[[image.assembly.trees]]
+id = "t"
+path = "$assembly.work/t"
+
+[[image.assembly.filesystems]]
+id = "c"
+kind = "cpio-zstd"
+source_tree = "t"
+output = "$assembly.work/c.cpio.zst"
+size = "auto"
+"#
+    );
+    assert_eq!(
+        codes(&cpio),
+        vec!["assembly_filesystem_size_auto_unsupported"]
+    );
+}
+
+#[test]
+fn busybox_sysroot_is_parsed_and_its_path_template_is_checked() {
+    let good = format!(
+        r#"{HEADER}
+[[image.assembly.trees]]
+id = "initramfs"
+path = "$assembly.work/initramfs"
+
+[[image.assembly.busybox_initramfs]]
+tree = "initramfs"
+busybox = "$provider.target/bin/busybox"
+include_runtime_libs = true
+sysroot = "$provider.target"
+applets = ["sh"]
+"#
+    );
+    assert!(codes(&good).is_empty(), "{:?}", assembly_diagnostics(&good));
+    let path = write_temp_config(&good);
+    let spec = resolve_config(path.to_str().expect("temp path should be utf-8"));
+    let _ = fs::remove_file(path);
+    let assembly = spec.image.assembly.expect("assembly");
+    assert_eq!(
+        assembly.busybox_initramfs[0]
+            .sysroot
+            .as_ref()
+            .map(|template| template.as_str()),
+        Some("$provider.target")
+    );
+
+    let bad = format!(
+        r#"{HEADER}
+[[image.assembly.trees]]
+id = "initramfs"
+path = "$assembly.work/initramfs"
+
+[[image.assembly.busybox_initramfs]]
+tree = "initramfs"
+busybox = "$provider.target/bin/busybox"
+include_runtime_libs = true
+sysroot = "$provider.nonsense"
+applets = ["sh"]
+"#
+    );
+    assert_eq!(codes(&bad), vec!["assembly_path_template_invalid"]);
+}

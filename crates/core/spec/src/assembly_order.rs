@@ -124,9 +124,13 @@ pub fn assembly_step_paths(
         );
     }
     for (index, initramfs) in assembly.busybox_initramfs.iter().enumerate() {
+        let mut reads = vec![resolve(&initramfs.busybox)];
+        if let Some(sysroot) = &initramfs.sysroot {
+            reads.push(resolve(sysroot));
+        }
         push(
             AssemblyStep::BusyboxInitramfs(index),
-            vec![resolve(&initramfs.busybox)],
+            reads,
             vec![tree(initramfs.tree.as_str())],
         );
     }

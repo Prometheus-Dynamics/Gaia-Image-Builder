@@ -135,6 +135,9 @@ pub(super) fn interpolate_image_assembly(
         .map(|mut initramfs| {
             initramfs.tree = resolver::interpolate_string(initramfs.tree, raw, env);
             initramfs.busybox = resolver::interpolate_string(initramfs.busybox, raw, env);
+            initramfs.sysroot = initramfs
+                .sysroot
+                .map(|value| resolver::interpolate_string(value, raw, env));
             initramfs.applets = initramfs
                 .applets
                 .into_iter()

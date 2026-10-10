@@ -265,3 +265,99 @@ fn published_filesystem_image_in_ram_is_published_as_the_same_bytes() {
         let _ = fs::remove_dir_all(path);
     }
 }
+
+const MIB: u64 = 1024 * 1024;
+
+#[test]
+fn vfat_auto_size_is_content_plus_overhead_and_margin_rounded_to_a_mib() {
+    let root = unique_dir("gaia-vfat-auto-size");
+    let empty = root.join("empty");
+    fs::create_dir_all(&empty).expect("empty tree");
+    // No content: the fixed overhead and the minimum margin, 2 MiB.
+    assert_eq!(vfat_auto_bytes(&empty).expect("empty"), 2 * MIB);
+
+    let one_byte = root.join("one");
+    fs::create_dir_all(one_byte.join("etc")).expect("tree");
+    fs::write(one_byte.join("etc/a"), b"x").expect("file");
+    // One cluster of content: 4 KiB + 1 MiB + 1 MiB, rounded up to 3 MiB.
+    assert_eq!(vfat_auto_bytes(&one_byte).expect("one byte"), 3 * MIB);
+
+    let large = root.join("large");
+    fs::create_dir_all(&large).expect("large tree");
+    fs::File::create(large.join("kernel.img"))
+        .and_then(|file| file.set_len(50 * MIB))
+        .expect("sparse kernel");
+    // 50 MiB content, 5% margin (2.5 MiB), fixed overhead 1 MiB: 53.5 MiB, to 54.
+    let size = vfat_auto_bytes(&large).expect("large");
+    assert_eq!(size, 54 * MIB);
+    assert_eq!(size % MIB, 0);
+    assert_eq!(vfat_auto_bytes(&large).expect("again"), size);
+
+    // A link to a directory is counted, not followed: a link back to the
+    // tree does not recurse forever.
+    #[cfg(unix)]
+    {
+        let looped = root.join("looped");
+        fs::create_dir_all(looped.join("dir")).expect("looped tree");
+        std::os::unix::fs::symlink(&looped, looped.join("dir/back")).expect("loop link");
+        // 8 KiB of content (two directories), 1 MiB margin and overhead: 3 MiB.
+        assert_eq!(vfat_auto_bytes(&looped).expect("loop"), 3 * MIB);
+    }
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn vfat_auto_size_builds_an_image_that_holds_the_tree() {
+    if !tool_runs("mformat") || !tool_runs("mcopy") {
+        return;
+    }
+    let root = unique_dir("gaia-assembly-vfat-auto");
+    write_assets(&root);
+    let mut spec = test_spec(&root);
+    spec.image.assembly = Some(ImageAssemblySpec {
+        work_dir: Some("$assembly.work".into()),
+        trees: vec![AssemblyTreeSpec {
+            id: "boot".into(),
+            path: "$assembly.work/boot".into(),
+        }],
+        files: vec![AssemblyFileSpec {
+            tree: "boot".into(),
+            src: Some("@assets/config.txt".into()),
+            src_glob: None,
+            dest: "etc/config.txt".into(),
+            mode: None,
+            optional: false,
+            preserve_symlink: false,
+        }],
+        filesystems: vec![gaia_spec::AssemblyFilesystemSpec {
+            id: "boot".into(),
+            kind: gaia_spec::AssemblyFilesystemKindSpec::Vfat,
+            source_tree: "boot".into(),
+            output: "$assembly.work/boot.vfat".into(),
+            size: Some("auto".into()),
+            deterministic: false,
+            compression_level: None,
+            publish: false,
+        }],
+        ..ImageAssemblySpec::default()
+    });
+    let operation = OperationId::image_assembly();
+
+    let outcome = stage_image_assembly_with(&spec, &operation, None, disk_env_panic)
+        .expect("vfat assembly with auto size");
+
+    let image = root.join("build/assembly/boot.vfat");
+    // 17 bytes of content is one 4 KiB cluster: 3 MiB.
+    assert_eq!(fs::metadata(&image).expect("image").len(), 3 * MIB);
+    let copied = Command::new("mcopy")
+        .arg("-i")
+        .arg(&image)
+        .arg("::etc/config.txt")
+        .arg("-")
+        .output()
+        .expect("mcopy out");
+    assert!(copied.status.success(), "{copied:?}");
+    assert_eq!(copied.stdout, b"initramfs config\n");
+    assert!(outcome.state.render().contains("filesystem.1.bytes="));
+    let _ = fs::remove_dir_all(root);
+}
