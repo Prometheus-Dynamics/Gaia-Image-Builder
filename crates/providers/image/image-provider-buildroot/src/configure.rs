@@ -64,16 +64,20 @@ pub(crate) fn configure_tree(
     }
 
     // The `make` arguments selecting the defconfig, when there is one.
-    let defconfig_args = match (defconfig_path, defconfig) {
-        (Some(defconfig_path), _) => {
-            let resolved_defconfig_path = resolve_workspace_path(
+    let resolved_defconfig = defconfig_path
+        .map(|defconfig_path| {
+            resolve_workspace_path(
                 &ResolvedBuildSpec {
                     workspace: spec.workspace.clone(),
                     ..spec.clone()
                 },
                 defconfig_path,
-            )?;
-            materialize_defconfig_support_files(&resolved_defconfig_path, output_dir)?;
+            )
+        })
+        .transpose()?;
+    let defconfig_args = match (&resolved_defconfig, defconfig) {
+        (Some(resolved_defconfig_path), _) => {
+            materialize_defconfig_support_files(resolved_defconfig_path, output_dir)?;
             Some(vec![
                 "defconfig".to_string(),
                 format!("BR2_DEFCONFIG={}", resolved_defconfig_path.display()),
@@ -82,7 +86,40 @@ pub(crate) fn configure_tree(
         (None, Some(defconfig)) => Some(vec![defconfig.to_string()]),
         (None, None) => None,
     };
-    if let Some(args) = defconfig_args {
+    // The config steps rebuild `.config` from their inputs: when those and
+    // the `.config` they left are unchanged, the steps are skipped (see
+    // config_inputs). Previews always run them.
+    let has_defconfig = defconfig_args.is_some();
+    let config_inputs = if has_defconfig && !dry_run {
+        let fragment_paths = config_fragments
+            .iter()
+            .map(|fragment| resolve_workspace_path(spec, fragment))
+            .collect::<Result<Vec<_>, _>>()?;
+        let normalized_overrides = normalize_buildroot_config_overrides(spec, config_overrides);
+        let (cache_overrides, _) = buildroot_cache_overrides(spec, command_context.policy, true)?;
+        Some(config_inputs_digest(&ConfigInputs {
+            buildroot_dir,
+            external_tree: br2.map(Path::new),
+            defconfig_file: resolved_defconfig.as_deref(),
+            defconfig_name: defconfig.filter(|_| resolved_defconfig.is_none()),
+            fragments: &fragment_paths,
+            overrides: &normalized_overrides,
+            cache_overrides: &cache_overrides,
+            package_replacements: package_overrides.replacement_digest.as_deref(),
+        }))
+    } else {
+        None
+    };
+    let config_current = config_inputs
+        .as_deref()
+        .is_some_and(|digest| config_steps_current(output_dir, digest));
+    if config_current {
+        messages.push(
+            "buildroot config unchanged since the last configuration; config steps skipped"
+                .to_string(),
+        );
+    }
+    if let Some(args) = defconfig_args.filter(|_| !config_current) {
         let mut command = Command::new("make");
         command
             .arg(format!("O={}", output_dir.display()))
@@ -130,7 +167,7 @@ pub(crate) fn configure_tree(
             command_context.clone(),
             dry_run,
         )?);
-    } else if !config_fragments.is_empty() || !config_overrides.is_empty() {
+    } else if !has_defconfig && (!config_fragments.is_empty() || !config_overrides.is_empty()) {
         return Err(ImageProviderError::new(
             ImageProviderErrorKind::PolicyBlocked,
             "buildroot config_fragments/config_overrides require defconfig or defconfig_path",
@@ -141,6 +178,11 @@ pub(crate) fn configure_tree(
     // builds exactly this config.
     if buildroot_legacy_disabled(config_overrides) {
         disable_buildroot_legacy_flag(output_dir)?;
+    }
+    // Only a run that wrote the config steps' `.config` records their inputs;
+    // a skipped run keeps the record it has.
+    if let Some(digest) = config_inputs.as_deref().filter(|_| !config_current) {
+        record_config_steps(output_dir, digest)?;
     }
     Ok(ConfiguredTree {
         package_overrides,

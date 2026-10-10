@@ -12,7 +12,7 @@ gaia preview <build.toml>
 gaia clean <build.toml>
 gaia lock <build.toml>
 gaia cache <build.toml>
-gaia run <build.toml>
+gaia run <build.toml> [--export <dir>]
 gaia pause [run]
 gaia resume [run]
 gaia cancel [run]
@@ -108,6 +108,17 @@ Prints high-level resolved build context:
 ### `validate`
 
 Prints the same selection/overview context, then validation counts and diagnostics.
+The last line is the verdict, so `gaia validate build.toml | tail -1` tells a
+pass from a failure:
+
+```text
+validate: ok (0 error(s), 1 warning(s))
+validate: FAILED (2 error(s), 0 warning(s))
+```
+
+The exit code is unchanged: `0` when valid, `2` for validation errors. A build
+config that does not resolve at all fails with `validate: FAILED (the build
+config did not resolve)` on stderr, after the error, and exit code `1`.
 
 ### `plan`
 
@@ -159,6 +170,27 @@ Options:
   delete anything other than leftovers of an earlier clean. Use it in scripts
   and CI to stop before a surprising clean.
 - `--only`, `--set`, `--env` and `--preset` apply as for `run` and `plan`.
+
+Pin bumps: when an earlier run left a reuse state, the line after the header
+says what the changes invalidate. A direct operation has an input of its own
+that changed; a cascaded one runs only because a dependency runs. A changed
+git pin reports its rev, and a dependent says which dependency runs:
+
+```text
+preview of 'app-rev': 4 operation(s), 4 would execute
+preview: pin/input changes invalidate 2 operation(s) (2 direct, 0 cascaded): source:upstream, image:build
+run   resolve-build: plan_resolution_required: build resolution always executes for a fresh plan
+run   source:upstream: operation_fingerprint_mismatch: operation 'source:upstream' will execute because its rev changed: 3175ad9 -> e565dcf
+run   image:build: materialized_output_missing: operation 'image:build' will execute because its expected materialized outputs are missing
+run   report:emit: report_emission_required: report emission always runs at the end of a plan
+```
+
+A dependent of a re-materialized git source reads `because source:upstream runs
+(operation_fingerprint_mismatch)`, naming the dependency's own reason; with several
+dependencies it lists the first three and counts the rest.
+It is reused when the new checkout has the same files (same tree digest), which
+only the run can check, so the preview lists it as cascaded. Without an earlier
+run the line reads `no earlier run recorded: N operation(s) run`.
 
 ### `clean`
 
@@ -275,6 +307,47 @@ After execution completes, prints:
 - failure-class summary
 - checkpoint built/reused counts
 - report file paths and sizes
+
+#### Exporting the image
+
+`gaia run <build.toml> --export <dir>` copies the run's primary image output
+into `<dir>` after a successful run (no errors, not cancelled). The primary
+output is the image archive the report lists, or, when the build leaves its
+output as a collect directory, the disk images inside it. Each copy gets a
+versioned name:
+
+- a name that already carries a version number (such as `v2027.0.0` or `9.9.9`) is kept, so
+  `photonvision-full-raze-dev-v2027.0.0-alpha-2-94-gc9548d91.img.xz` stays as it is;
+- otherwise the name becomes `<build-name>-<version>.<ext>`, or
+  `<build-name>-<UTC run time>.<ext>` when the build has no version.
+
+An existing file with different content is never overwritten: the copy takes
+`-1`, `-2`, ... before the extension. A file with identical content is reused.
+Each exported file prints one line:
+
+```text
+exported: /home/me/images/photonvision-full-raze-dev-v2027.0.0-alpha-2-94-gc9548d91.img.xz  sha256 <hex>  412345678 bytes
+```
+
+A failed or cancelled run exports nothing and says so with
+`export: skipped, the run did not succeed; nothing was exported`. The export
+is CLI-only (`--export` is not a build config key). A copy that fails exits `1`.
+
+#### Resuming a failed or cancelled run
+
+When a `gaia run` fails or is cancelled, its last line is the command that
+picks the run back up, with the same build path and the same `--preset`,
+`--env-file`, `--env`, `--set` and `--only` arguments:
+
+```text
+resume: gaia run configs/heli.toml --preset ci --set workspace.out_dir=/srv/out  # finished work is reused
+```
+
+Finished work is reused by the next run, so the resume line repeats the
+invocation rather than starting over. When a rollback unwound completed
+operations (`policy.failure.rollback_completed`), the comment says those run
+again instead. Secret values in `--env` and `--set` are masked as the report
+shows them (`***`); the line then says to enter them again.
 
 ### `pause`, `resume`, `cancel`
 

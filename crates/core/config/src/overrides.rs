@@ -333,6 +333,9 @@ fn apply_known_override(
         KnownOverrideKey::PolicyProvidersRustBatchBuilds => {
             raw.providers.rust.batch_builds = Some(parse_bool_override(key, value)?)
         }
+        KnownOverrideKey::PolicyProvidersRustSharedTargetDir => {
+            raw.providers.rust.shared_target_dir = Some(parse_bool_override(key, value)?)
+        }
         KnownOverrideKey::PolicyProvidersRustRetryAttempts => {
             raw.providers.rust.retry_attempts = parse_u32_override(key, value)?
         }

@@ -187,6 +187,9 @@ pub(crate) fn run_images_if_inputs_changed(
         );
         return Ok(messages);
     }
+    // The images make applies the image feed to `target/`: the tree is no
+    // longer the finalized one.
+    invalidate_finalized(output_dir);
     // Not current until the images are written again.
     record_rootfs_inputs(output_dir, None)?;
     messages.extend(run_command(

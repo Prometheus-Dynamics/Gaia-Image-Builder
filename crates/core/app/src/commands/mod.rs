@@ -135,6 +135,9 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
         usage_errors
             .push("--json and --fail-on-clean apply to 'preview' (or 'run --dry-run')".into());
     }
+    if args.export_dir.is_some() && args.command != AppCommand::Run {
+        usage_errors.push("--export applies to 'run'".into());
+    }
     if args.lock.update && args.command != AppCommand::Lock {
         usage_errors.push("--update applies to 'lock'".into());
     }
@@ -262,6 +265,7 @@ fn help_text() -> String {
         "  gaia run [build-config] --env KEY=VALUE",
         "  gaia run [build-config] --set key=value",
         "  gaia run [build-config] --only artifacts[,image,...]",
+        "  gaia run [build-config] --export <dir>  (copy the image after a successful run)",
         "  gaia plan [build-config] --only artifact:<id>",
         "  gaia preview [build-config] [--set key=value] [--only ...] [--json] [--fail-on-clean]",
         "  gaia run [build-config] --dry-run     (same as 'gaia preview')",

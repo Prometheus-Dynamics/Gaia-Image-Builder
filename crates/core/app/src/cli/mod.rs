@@ -25,6 +25,9 @@ pub struct AppArgs {
     pub json: bool,
     /// `--fail-on-clean` for preview: exit 3 when a run would clean or delete.
     pub fail_on_clean: bool,
+    /// `--export <dir>` for run: copy the primary image output there after a
+    /// successful run.
+    pub export_dir: Option<String>,
     /// Problems found while parsing; dispatch refuses to run when non-empty.
     pub usage_errors: Vec<String>,
 }
@@ -180,6 +183,7 @@ impl AppArgs {
                 "--follow" | "-f" => parsed.follow = true,
                 "--json" => parsed.json = true,
                 "--fail-on-clean" => parsed.fail_on_clean = true,
+                "--export" => parsed.export_dir = value("--export", &mut parsed.usage_errors),
                 "--update" => {
                     parsed.lock.update = true;
                     // `--update [source-id]`: an optional value, taken only
@@ -251,6 +255,7 @@ impl Default for AppArgs {
             follow: false,
             json: false,
             fail_on_clean: false,
+            export_dir: None,
             usage_errors: Vec::new(),
         }
     }

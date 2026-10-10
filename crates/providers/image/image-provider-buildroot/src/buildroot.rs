@@ -283,6 +283,16 @@ pub(crate) fn run_buildroot_with(
     if let Some(current) = &current_graph {
         current.record(output_dir)?;
     }
+    // Before the restore: a tree whose every package is installed, with
+    // nothing to clean, makes nothing but its finalize (see finalize_state).
+    let make_was_running = output_dir.join(MAKE_RUNNING).is_file();
+    let nothing_to_build_before_restore = matches!(plan, CleanPlan::Nothing)
+        && !make_was_running
+        && current_graph
+            .as_ref()
+            .map(|current| &current.graph)
+            .or(previous_graph.as_ref())
+            .is_some_and(|graph| all_packages_installed(output_dir, graph));
     let cached_packages = restore_cached_packages(RestoreCachedPackages {
         spec,
         buildroot_dir,
@@ -301,26 +311,52 @@ pub(crate) fn run_buildroot_with(
     // With per-package directories, build only up to target-finalize first:
     // the filesystem images and post-image step run afterwards, and only
     // when what they read changed (see rootfs_inputs).
+    // The split build: a first make that finalizes, then the images make.
+    let split_images =
+        command_context.policy.parallel_packages && !options.shared_tree && !options.finalize_only;
+    let restored_any = cached_packages
+        .as_ref()
+        .is_some_and(CachedPackages::restored_any);
+    let nothing_to_build = nothing_to_build_before_restore && !restored_any;
+    // The marker survives only a make that finalizes a tree building nothing.
+    let keeps_marker =
+        nothing_to_build && !options.shared_tree && (options.finalize_only || split_images);
+    if !keeps_marker {
+        invalidate_finalized(output_dir);
+    }
+    // Post-build scripts (the image feed) run inside target-finalize: a
+    // build with one must finalize, or the feed would not be applied.
+    let skip_finalize = split_images
+        && keeps_marker
+        && options.post_build_script.is_none()
+        && config_digest
+            .as_deref()
+            .is_some_and(|digest| finalized_for(output_dir, digest));
+    if skip_finalize {
+        command.args(["-o", "target-finalize"]);
+        messages.push(
+            "skipped target-finalize: the tree was finalized after its last build and nothing \
+             has been built since"
+                .to_string(),
+        );
+    }
     if options.finalize_only {
         command.arg("target-finalize");
     }
-    let images_command = (command_context.policy.parallel_packages
-        && !options.shared_tree
-        && !options.finalize_only)
-        .then(|| {
-            let mut images = gaia_process::clone_command(&command);
-            // Without finalizing (and building packages) again.
-            images.args([
-                "-o",
-                "target-finalize",
-                "-o",
-                "host-finalize",
-                "-o",
-                "staging-finalize",
-            ]);
-            command.arg("target-finalize");
-            images
-        });
+    let images_command = split_images.then(|| {
+        let mut images = gaia_process::clone_command(&command);
+        // Without finalizing (and building packages) again.
+        images.args([
+            "-o",
+            "target-finalize",
+            "-o",
+            "host-finalize",
+            "-o",
+            "staging-finalize",
+        ]);
+        command.arg("target-finalize");
+        images
+    });
     let mut finalize_only = false;
     if options.shared_tree {
         let config = fs::read_to_string(output_dir.join(".config")).unwrap_or_default();
@@ -355,6 +391,14 @@ pub(crate) fn run_buildroot_with(
                 ))
             })?,
     );
+    // A make that stopped after the finalize (or ran it first) left the tree
+    // finalized for this config.
+    if (options.finalize_only || split_images)
+        && !options.shared_tree
+        && let Some(digest) = config_digest.as_deref()
+    {
+        record_finalized(output_dir, digest);
+    }
     messages.extend(buildroot_build_time_steps(
         output_dir,
         make_started,

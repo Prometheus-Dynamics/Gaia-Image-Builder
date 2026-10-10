@@ -3,9 +3,7 @@
 use crate::{CommandOutcome, commands};
 use gaia_report::{mask_pairs, mask_value};
 use gaia_spec::ResolvedBuildSpec;
-use sha2::{Digest, Sha256};
 use std::fs;
-use std::io::Read;
 use std::path::Path;
 use std::time::Duration;
 
@@ -155,6 +153,8 @@ pub(crate) fn print_outcome(outcome: &CommandOutcome) {
                     .unwrap_or_default();
                 println!("{}{}: {}", diagnostic.code, location, diagnostic.message);
             }
+            // Last line, so `gaia validate ... | tail -1` gives the verdict.
+            println!("{}", validate_verdict_line(validation));
         }
         CommandOutcome::Planned {
             spec,
@@ -550,6 +550,21 @@ pub(crate) fn print_outcome(outcome: &CommandOutcome) {
     }
 }
 
+/// The final `gaia validate` line: `validate: ok (...)` or
+/// `validate: FAILED (...)`, with the counts the output above also shows.
+pub(crate) fn validate_verdict_line(validation: &gaia_validate::ValidationReport) -> String {
+    let verdict = if validation.errors.is_empty() {
+        "ok"
+    } else {
+        "FAILED"
+    };
+    format!(
+        "validate: {verdict} ({} error(s), {} warning(s))",
+        validation.errors.len(),
+        validation.warnings.len()
+    )
+}
+
 fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
@@ -578,21 +593,7 @@ fn format_elapsed(duration: Duration) -> String {
 }
 
 fn sha256_file(path: &Path) -> std::io::Result<String> {
-    let mut file = fs::File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 8192];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    Ok(hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
+    crate::export::sha256_file(path)
 }
 
 pub fn backend_overview_lines(spec: &ResolvedBuildSpec) -> Vec<String> {

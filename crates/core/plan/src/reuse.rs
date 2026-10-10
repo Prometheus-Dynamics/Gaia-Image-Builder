@@ -1,3 +1,7 @@
+use crate::reuse_explain::{
+    describe_rebuilding, fingerprint_change_message, rebuilding_dependencies,
+    source_tree_content_signature,
+};
 use crate::{
     ExecutionPlan, OperationId, OperationKind, OperationOptionality, OperationReuse,
     PlannedOperation, ReuseState,
@@ -36,6 +40,8 @@ pub(crate) fn apply_reuse_state(
         return plan;
     };
     let mut decisions = HashMap::<String, bool>::new();
+    // Reason code of each operation that executes, for naming a cascade's cause.
+    let mut executing_codes = HashMap::<String, &'static str>::new();
     // Dependency kinds, for computing input signatures while `plan` is mutated.
     let snapshot = plan.clone();
 
@@ -106,10 +112,7 @@ pub(crate) fn apply_reuse_state(
             {
                 operation.reuse = OperationReuse::execute(
                     "operation_fingerprint_mismatch",
-                    format!(
-                        "operation '{}' will execute because its persisted fingerprint does not match current inputs",
-                        operation.id.as_str()
-                    ),
+                    fingerprint_change_message(spec, &operation.id, &operation.kind),
                 );
             } else if !operation_outputs_present(spec, &operation.kind) {
                 operation.reuse = OperationReuse::execute(
@@ -145,11 +148,20 @@ pub(crate) fn apply_reuse_state(
                         && !decisions.get(dependency.as_str()).copied().unwrap_or(false)
                 });
                 if dependency_rebuilding {
+                    let rebuilding = describe_rebuilding(
+                        &rebuilding_dependencies(operation, &decisions),
+                        &executing_codes,
+                    );
+                    let cutoff_note = if recorded_input.is_some() {
+                        "; reused instead if the rebuilt inputs turn out unchanged"
+                    } else {
+                        ""
+                    };
                     operation.reuse = OperationReuse::execute(
                         "dependency_rebuilt",
                         format!(
-                            "operation '{}' will execute because one or more dependencies are rebuilding",
-                            operation.id.as_str()
+                            "operation '{}' will execute because {rebuilding}{cutoff_note}",
+                            operation.id.as_str(),
                         ),
                     );
                     operation.cutoff_input_signature = recorded_input;
@@ -162,6 +174,9 @@ pub(crate) fn apply_reuse_state(
                         ),
                     );
                 }
+            }
+            if let OperationReuse::Execute(reason) = &operation.reuse {
+                executing_codes.insert(operation_id.clone(), reason.code);
             }
             decisions.insert(operation_id, false);
         } else {
@@ -515,7 +530,7 @@ impl EmptyFallback for String {
     }
 }
 
-fn resolve_workspace_path(spec: &ResolvedBuildSpec, value: &str) -> PathBuf {
+pub(crate) fn resolve_workspace_path(spec: &ResolvedBuildSpec, value: &str) -> PathBuf {
     gaia_spec::resolve_workspace_path(&spec.workspace, value).unwrap_or_else(|_| {
         let path = PathBuf::from(value);
         if path.is_absolute() {
@@ -696,8 +711,13 @@ pub fn operation_content_signature(
         OperationKind::PrepareImage | OperationKind::BuildImage => {
             operation_output_signature(spec, kind)
         }
-        OperationKind::MaterializeSource { .. }
-        | OperationKind::RenderStageFile { .. }
+        // Dependents consume a git source's checked-out tree, not its commit,
+        // so a rev bump with identical files does not invalidate them.
+        OperationKind::MaterializeSource { source_id } => {
+            source_tree_content_signature(spec, source_id.as_str())
+                .or_else(|| operation_output_signature(spec, kind))
+        }
+        OperationKind::RenderStageFile { .. }
         | OperationKind::RenderStageEnvSet { .. }
         | OperationKind::RenderStageService { .. }
         | OperationKind::AssembleImage
@@ -780,16 +800,16 @@ pub fn operation_output_signature(
         OperationKind::RenderStageService { item_id } => Some(provider_state_signature(
             &stage_state_path(spec, "service", item_id),
         )),
-        OperationKind::PrepareImage => {
-            spec.image.output.collect_dir.as_deref().map(|collect_dir| {
-                let collect_dir = resolve_workspace_path(spec, collect_dir);
-                format!(
-                    "{}|{}",
-                    provider_state_signature(&collect_dir.join(".gaia-image-state.txt")),
-                    content_state_signature(&buildroot_output_dir(spec).join(".config")),
-                )
-            })
-        }
+        // Prepare's output is the Buildroot tree, summarized by its .config.
+        // The collect dir state file is not part of it: the image build
+        // rewrites that shared file on every run (archive hashes, mtime
+        // digests), which would otherwise invalidate prepare's dependents.
+        OperationKind::PrepareImage => spec
+            .image
+            .output
+            .collect_dir
+            .as_deref()
+            .map(|_| content_state_signature(&buildroot_output_dir(spec).join(".config"))),
         OperationKind::BuildImage => {
             let mut parts = Vec::new();
             if let Some(collect_dir) = spec.image.output.collect_dir.as_deref() {

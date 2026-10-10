@@ -88,3 +88,25 @@ fn slowest_steps_span_operations_and_sort_descending() {
         ]
     );
 }
+
+#[test]
+fn validate_verdict_line_states_pass_or_fail_with_the_counts() {
+    let passed = gaia_validate::ValidationReport {
+        warnings: vec!["unused preset".into()],
+        errors: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    assert_eq!(
+        validate_verdict_line(&passed),
+        "validate: ok (0 error(s), 1 warning(s))"
+    );
+    let failed = gaia_validate::ValidationReport {
+        warnings: Vec::new(),
+        errors: vec!["missing image".into(), "bad path".into()],
+        diagnostics: Vec::new(),
+    };
+    assert_eq!(
+        validate_verdict_line(&failed),
+        "validate: FAILED (2 error(s), 0 warning(s))"
+    );
+}

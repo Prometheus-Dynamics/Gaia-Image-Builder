@@ -36,6 +36,7 @@ fn command_args(artifact: &ArtifactSpec, package: &str, source: &Path) -> Vec<St
         &cargo_packages(artifact, package),
         &CargoFeatureFlags::of(artifact),
         &contract,
+        &source.join(".gaia/cargo-target"),
     )
     .get_args()
     .map(|arg| arg.to_string_lossy().into_owned())

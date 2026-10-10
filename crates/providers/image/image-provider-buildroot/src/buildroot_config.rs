@@ -307,21 +307,16 @@ pub(crate) fn append_make_jobs(command: &mut Command, jobs: u32) {
     command.arg(format!("-j{}", make_jobs(jobs)));
 }
 
-/// The download, compiler cache and parallel-build settings, applied to the
-/// tree's `.config`. `dry_run` (a preview) writes no compiler cache config.
-pub(crate) fn apply_buildroot_cache_config(
+/// `.config` assignments, as key and value.
+pub(crate) type CacheOverrides = Vec<(String, String)>;
+
+/// The settings [`apply_buildroot_cache_config`] writes, and the cache space
+/// warnings for them. `dry_run` writes no compiler cache config.
+pub(crate) fn buildroot_cache_overrides(
     spec: &ResolvedBuildSpec,
-    buildroot_dir: &Path,
-    output_dir: &Path,
-    external_tree: Option<&str>,
-    command_context: ImageCommandContext<'_>,
+    policy: &ImageExecutionPolicy,
     dry_run: bool,
-) -> Result<Vec<String>, ImageProviderError> {
-    let config_path = output_dir.join(".config");
-    if !config_path.is_file() {
-        return Ok(Vec::new());
-    }
-    let policy = command_context.policy;
+) -> Result<(CacheOverrides, Vec<String>), ImageProviderError> {
     let mut overrides = Vec::new();
     let mut warnings = Vec::new();
     if let Some(download_dir) = configured_download_dir(spec, policy)? {
@@ -354,6 +349,24 @@ pub(crate) fn apply_buildroot_cache_config(
     if policy.parallel_packages {
         overrides.push(("BR2_PER_PACKAGE_DIRECTORIES".to_string(), "y".to_string()));
     }
+    Ok((overrides, warnings))
+}
+
+/// The download, compiler cache and parallel-build settings, applied to the
+/// tree's `.config`. `dry_run` (a preview) writes no compiler cache config.
+pub(crate) fn apply_buildroot_cache_config(
+    spec: &ResolvedBuildSpec,
+    buildroot_dir: &Path,
+    output_dir: &Path,
+    external_tree: Option<&str>,
+    command_context: ImageCommandContext<'_>,
+    dry_run: bool,
+) -> Result<Vec<String>, ImageProviderError> {
+    let config_path = output_dir.join(".config");
+    if !config_path.is_file() {
+        return Ok(Vec::new());
+    }
+    let (overrides, warnings) = buildroot_cache_overrides(spec, command_context.policy, dry_run)?;
     if overrides.is_empty() {
         return Ok(warnings);
     }
@@ -542,6 +555,11 @@ pub(crate) fn apply_buildroot_policy_env(
         None => default_cache_dir(spec, DEFAULT_BUILDROOT_DOWNLOAD_DIR, "buildroot download")?,
     };
     command.env("BR2_DL_DIR", download_dir);
+    // Reproducible timestamps for Buildroot and its post-build scripts; not
+    // part of any package cache key (see source_date).
+    if let Some(epoch) = source_date_epoch(spec) {
+        command.env("SOURCE_DATE_EPOCH", epoch);
+    }
     if policy.ccache_enabled {
         command.env("BR2_CCACHE_DIR", buildroot_ccache_dir(spec, policy)?);
     }

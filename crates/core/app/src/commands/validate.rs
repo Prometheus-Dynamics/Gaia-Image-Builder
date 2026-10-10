@@ -14,7 +14,7 @@ pub fn validate_build_command(
         Ok(spec) => spec,
         Err(error) => {
             return CommandOutcome::Failed {
-                message: error.to_string(),
+                message: format!("{error}\nvalidate: FAILED (the build config did not resolve)"),
             };
         }
     };

@@ -40,6 +40,10 @@ pub struct ArtifactExecutionContract {
     /// Java only: where Gradle's user home lives for Docker builds, from
     /// `[providers.java] gradle_home`.
     pub gradle_home: GradleHomeSpec,
+    /// Rust only: `[providers.rust] shared_target_dir`. Cargo builds go into
+    /// the shared per-toolchain target dir under the user cache instead of
+    /// each source's own `.gaia/cargo-target`. Never part of recorded state.
+    pub rust_shared_target_dir: bool,
 }
 
 impl ArtifactExecutionContract {
@@ -99,6 +103,7 @@ impl ArtifactExecutionContract {
             output: ArtifactOutputContract::from_spec(artifact),
             job_budget: None,
             gradle_home: GradleHomeSpec::default(),
+            rust_shared_target_dir: false,
         }
     }
 
@@ -118,6 +123,7 @@ impl ArtifactExecutionContract {
 
     fn apply_build_context(&mut self, spec: &ResolvedBuildSpec) {
         self.gradle_home = spec.policy.providers.java.gradle_home;
+        self.rust_shared_target_dir = spec.policy.providers.rust.shared_target_dir;
         let workspace_root = resolve_workspace_root(spec);
         self.workspace_root = Some(workspace_root.clone());
         if Path::new(&self.output.path).is_relative() {

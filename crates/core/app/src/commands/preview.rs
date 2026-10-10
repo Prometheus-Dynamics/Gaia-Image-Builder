@@ -4,7 +4,10 @@
 
 use gaia_config::{ResolveOptions, try_resolve_config_with_options};
 use gaia_image_providers::{ImagePreview, ImageProviderOperation};
-use gaia_plan::{OperationKind, OperationReuse, PlanTarget, plan_build_with_reuse_state};
+use gaia_plan::{
+    InvalidationSummary, OperationKind, OperationReuse, PlanTarget, invalidation_summary,
+    plan_build_with_reuse_state,
+};
 use gaia_validate::validate_spec_with_providers;
 
 use crate::AppContext;
@@ -39,6 +42,9 @@ pub struct PreviewReport {
     pub build_name: String,
     pub operations: Vec<PreviewOperation>,
     pub images: Vec<PreviewImage>,
+    /// Which operations a run invalidates, direct or cascaded. `None` when no
+    /// earlier run left a reuse state, so every operation runs.
+    pub invalidation: Option<InvalidationSummary>,
     /// `--fail-on-clean`: exit 3 when a run would clean or delete.
     pub fail_on_clean: bool,
     /// `--json`: print the report as JSON.
@@ -46,6 +52,30 @@ pub struct PreviewReport {
 }
 
 impl PreviewReport {
+    /// The top line of the report: what changed and what it invalidates. A
+    /// cascaded operation runs only because a dependency runs, so it is
+    /// counted apart from the direct ones.
+    pub fn invalidation_line(&self) -> String {
+        let Some(summary) = &self.invalidation else {
+            let executing = self.operations.iter().filter(|op| op.executes).count();
+            return format!("no earlier run recorded: {executing} operation(s) run");
+        };
+        let total = summary.direct.len() + summary.cascaded.len();
+        if total == 0 {
+            return "no input changes: no operation is invalidated".to_string();
+        }
+        let direct = if summary.direct.is_empty() {
+            "none".to_string()
+        } else {
+            summary.direct.join(", ")
+        };
+        format!(
+            "pin/input changes invalidate {total} operation(s) ({} direct, {} cascaded): {direct}",
+            summary.direct.len(),
+            summary.cascaded.len(),
+        )
+    }
+
     /// Whether `--fail-on-clean` should fail: a full clean, or a deletion
     /// other than leftovers of an earlier clean.
     pub fn tripped(&self) -> bool {
@@ -142,6 +172,7 @@ pub(crate) fn preview_resolved(
     } else {
         plan.restrict_to(targets)?
     };
+    let invalidation = reuse_state.is_some().then(|| invalidation_summary(&plan));
 
     let operations = plan
         .operations
@@ -230,6 +261,7 @@ pub(crate) fn preview_resolved(
         build_name: spec.build_name().to_string(),
         operations,
         images,
+        invalidation,
         fail_on_clean,
         json,
     })
@@ -247,6 +279,7 @@ pub(crate) fn print_preview(report: &PreviewReport) {
         report.operations.len(),
         report.operations.iter().filter(|op| op.executes).count()
     );
+    println!("preview: {}", report.invalidation_line());
     for operation in &report.operations {
         let state = if operation.executes { "run  " } else { "reuse" };
         println!("{state} {}: {}", operation.id, operation.reason);
@@ -306,6 +339,11 @@ pub(crate) fn preview_json(report: &PreviewReport) -> serde_json::Value {
     serde_json::json!({
         "build": report.build_name,
         "verdict": report.verdict(),
+        "invalidation": report.invalidation.as_ref().map(|summary| serde_json::json!({
+            "line": report.invalidation_line(),
+            "direct": summary.direct,
+            "cascaded": summary.cascaded,
+        })),
         "fail_on_clean": report.fail_on_clean,
         "trips_fail_on_clean": report.tripped(),
         "operations": report.operations.iter().map(|operation| serde_json::json!({
@@ -502,6 +540,7 @@ mod tests {
                 reason: "fresh".into(),
             }],
             images: Vec::new(),
+            invalidation: None,
             fail_on_clean: true,
             json: false,
         };
@@ -509,6 +548,148 @@ mod tests {
         assert_eq!(
             report.verdict(),
             "no image operation would run, 0 deleted paths"
+        );
+    }
+
+    const OLD_COMMIT: &str = "3175ad9c0ffee00000000000000000000000001a";
+    const NEW_COMMIT: &str = "e565dcf0ddba11000000000000000000000000b2";
+
+    fn upstream_git_source(commit: &str) -> gaia_spec::SourceSpec {
+        gaia_spec::SourceSpec::new(
+            "upstream",
+            gaia_spec::SourceDefinition::Git(gaia_spec::GitSourceSpec {
+                repo: "https://example.invalid/upstream.git".into(),
+                branch: None,
+                tag: None,
+                rev: None,
+                subdir: None,
+                update: false,
+                refresh_policy: gaia_spec::SourceRefreshPolicySpec::Never,
+                pin_policy: gaia_spec::SourcePinPolicySpec::Locked,
+                locked_commit: Some(commit.into()),
+            }),
+        )
+    }
+
+    /// Records the reuse state a finished run of `plan` leaves, in the format
+    /// `load_reuse_state` reads, with every operation recorded as completed.
+    fn record_reuse_state(spec: &gaia_spec::ResolvedBuildSpec, plan: &gaia_plan::ExecutionPlan) {
+        let hex = |signature: &str| {
+            signature
+                .bytes()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        };
+        let mut body = format!("fingerprint={}\n", gaia_plan::spec_fingerprint(spec));
+        for operation in &plan.operations {
+            let id = operation.id.as_str();
+            body.push_str(&format!("{id}\nop={id};{}\n", operation.fingerprint));
+            if let Some(signature) = gaia_plan::operation_output_signature(spec, &operation.kind) {
+                body.push_str(&format!("out={id};hex:{}\n", hex(&signature)));
+            }
+        }
+        let out_dir = gaia_spec::resolve_workspace_path(&spec.workspace, &spec.workspace.out_dir)
+            .expect("out dir");
+        let path = out_dir
+            .join(".gaia")
+            .join(format!("{}.reuse-state", spec.build_name()));
+        fs::create_dir_all(path.parent().expect("state dir")).expect("state dir");
+        fs::write(path, body).expect("reuse state");
+    }
+
+    #[test]
+    fn a_rev_bump_is_previewed_with_the_source_it_invalidates() {
+        let root = scratch_root("rev-bump");
+        let mut spec = gaia_spec::ResolvedBuildSpec::new("app-rev");
+        spec.workspace.root_dir = root.display().to_string();
+        spec.workspace.build_dir = "build".into();
+        spec.workspace.out_dir = "out".into();
+        spec.image.definition = ImageDefinition::Buildroot(BuildrootImageSpec {
+            defconfig: Some("test_defconfig".into()),
+            ..BuildrootImageSpec::default()
+        });
+        spec.sources.push(upstream_git_source(OLD_COMMIT));
+        // The last materialization checked out the old commit.
+        let source_dir = root.join("build/sources/upstream");
+        fs::create_dir_all(&source_dir).expect("source dir");
+        fs::write(source_dir.join("source.txt"), "ok").expect("source marker");
+        fs::write(
+            source_dir.join(".gaia-source-state.txt"),
+            format!("resolved_commit_sha={OLD_COMMIT}\nmaterialized_tree_digest=tree-1\n"),
+        )
+        .expect("source state");
+        let context = AppContext::with_defaults();
+        let baseline = gaia_plan::plan_build(
+            &spec,
+            &context.source_catalog,
+            &context.artifact_catalog,
+            &context.image_catalog,
+        );
+        record_reuse_state(&spec, &baseline);
+
+        let mut bumped = spec.clone();
+        bumped.sources[0] = upstream_git_source(NEW_COMMIT);
+        let report = preview_resolved(&context, &bumped, &[], false, false)
+            .expect("the preview of a valid build succeeds");
+
+        let invalidation = report.invalidation.as_ref().expect("a reuse state exists");
+        assert!(
+            invalidation.direct.contains(&"source:upstream".to_string()),
+            "{invalidation:?}"
+        );
+        assert!(
+            report
+                .invalidation_line()
+                .starts_with("pin/input changes invalidate ")
+                && report.invalidation_line().contains("source:upstream"),
+            "{}",
+            report.invalidation_line()
+        );
+        let source = report
+            .operations
+            .iter()
+            .find(|operation| operation.id == "source:upstream")
+            .expect("source operation");
+        assert!(source.executes);
+        assert!(
+            source.reason.contains("rev changed: 3175ad9 -> e565dcf"),
+            "{}",
+            source.reason
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn invalidation_line_counts_direct_and_cascaded_operations() {
+        let mut report = PreviewReport {
+            build_name: "lines".into(),
+            operations: Vec::new(),
+            images: Vec::new(),
+            invalidation: Some(InvalidationSummary {
+                direct: vec!["source:upstream".into()],
+                cascaded: vec!["artifact:app".into(), "image:build".into()],
+            }),
+            fail_on_clean: false,
+            json: false,
+        };
+        assert_eq!(
+            report.invalidation_line(),
+            "pin/input changes invalidate 3 operation(s) (1 direct, 2 cascaded): source:upstream"
+        );
+        report.invalidation = Some(InvalidationSummary::default());
+        assert_eq!(
+            report.invalidation_line(),
+            "no input changes: no operation is invalidated"
+        );
+        report.invalidation = None;
+        report.operations = vec![PreviewOperation {
+            id: "source:upstream".into(),
+            executes: true,
+            reason: "fresh".into(),
+        }];
+        assert_eq!(
+            report.invalidation_line(),
+            "no earlier run recorded: 1 operation(s) run"
         );
     }
 
@@ -533,6 +714,7 @@ mod tests {
                 }),
                 note: None,
             }],
+            invalidation: None,
             fail_on_clean,
             json: false,
         };

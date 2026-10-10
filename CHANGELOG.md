@@ -16,6 +16,12 @@ This cycle also moves the toolchain pin and `rust-version` to Rust 1.99.0
 (installing Gaia needs Rust 1.99 or newer), upgrades every dependency to its
 newest release, and updates the Rust docker images to 1.99.0.
 
+### Buildroot reuse and reproducibility
+
+- The build operation no longer repeats the prepare operation's config steps (defconfig, fragments, overrides, cache settings) when their inputs and the resulting `.config` are unchanged, and, for builds without an image feed, no longer repeats the `target-finalize` (about 40 s on a PhotonVision tree with nothing to build) when every package is installed, the config is unchanged and nothing was built since the last finalize. A build with an image feed still finalizes, since the feed is applied by a post-build script inside `target-finalize`.
+- Buildroot's `make` and its scripts get `SOURCE_DATE_EPOCH` from the environment, else from the workspace git `HEAD` commit time. Package cache keys do not include it.
+- The package cache reports installed packages it cannot key (for example packages with local sources). Installed packages with a key but no cache entry are already stored by the store step.
+
 ### Previews
 
 - The Buildroot prepare operation stops after `target-finalize`; only the build operation (which adds the image feed and so changes the target tree) makes the filesystem images. Before, both did, and the prepare operation's images were always discarded (about 2.5 minutes per PhotonVision build).
@@ -28,6 +34,13 @@ newest release, and updates the Rust docker images to 1.99.0.
   It works on a scratch copy of the tree's state and never changes the real
   output tree. `--json` prints the report; `--fail-on-clean` exits `3` when a
   run would clean the whole tree or delete something outside trash.
+- `gaia preview` and `gaia plan` name the change behind each rerun: a git source whose locked commit moved reports `rev <old> -> <new>`, a dependent reads `because <op> runs`, and a top line counts the operations a change invalidates, direct and cascaded. A git source's dependents now key on its checked-out tree digest rather than its commit, so a rev bump with identical files reuses them at run time (the run checks this after the source is fetched; dependents of git sources rebuild once after upgrading). The prepare operation's output is now its Buildroot `.config` alone: the image build rewrites the shared collect-dir state on every run, which used to rerun the artifacts after prepare (prepare and its dependents rerun once after upgrading).
+
+### Run output
+
+- `gaia validate` ends with a verdict line, `validate: ok (N error(s), W warning(s))` or `validate: FAILED (...)`, so `gaia validate build.toml | tail -1` tells a pass from a failure. Exit codes are unchanged (`0`, `2` for validation errors); a build config that does not resolve ends with `validate: FAILED` on stderr.
+- `gaia run <build.toml> --export <dir>` copies the primary image output (the image archive or the collect directory's disk images) into `<dir>` after a successful run, under a versioned name (the existing name when it already carries a version number, otherwise `<build>-<version>.<ext>` or `<build>-<UTC time>.<ext>`), and prints `exported: <path>  sha256 <hex>  <size>` per file. An existing file with different content is never overwritten (`-1`, `-2`, ...). A failed or cancelled run exports nothing and says so. The export is CLI-only; it is not a build config key.
+- A failed or cancelled `gaia run` ends with `resume: gaia run <build> <same --preset/--env-file/--env/--set/--only>  # finished work is reused`, so the invocation to pick the run back up is at the bottom of the output. Secret values stay masked.
 
 ### Config safety
 
@@ -218,6 +231,7 @@ newest release, and updates the Rust docker images to 1.99.0.
 - With `shared_output`, builds that differ only in their image feed (for example HeliOS `base-os` and `full`) share one ~16 GB Buildroot tree; after the first full `make`, the shared tree only runs `make target-finalize` and each build packs its own images once.
 - Download sources with a `sha256` are kept in a content-addressed cache (`.gaia/cache/downloads/sha256/<sha>`) after verification and restored from it on re-materialization instead of being downloaded again; each download is hashed once instead of twice.
 - Tool version probes used in fingerprints run once per process with a 10 second timeout, instead of per artifact with a 2 second timeout whose expiry forced rebuilds on loaded machines.
+- Opt-in `[providers.rust] shared_target_dir = true` builds the cargo artifacts of every source into one target dir per toolchain, target, profile and execution backend under the user cache, so sources reuse each other's compiled dependencies (synthetic two-source build: the second source compiled only its own crate, 5.5-7.4 s for both instead of 11-12.5 s; under docker the same). A source whose local package name and version collide with another directory's package in that dir keeps its own dir, because cargo would otherwise reuse the other package's binary. Off by default.
 
 ### Fixed
 

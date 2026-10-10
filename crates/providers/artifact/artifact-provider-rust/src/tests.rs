@@ -255,6 +255,7 @@ fn cargo_build_command_selects_every_batched_package() {
         &["alpha".to_string(), "beta".to_string()],
         &CargoFeatureFlags::default(),
         &contract,
+        &source.join(".gaia/cargo-target"),
     );
     let args = command
         .get_args()
@@ -390,6 +391,7 @@ fn cargo_command_passes_feature_flags_through() {
         &["orion-node".to_string()],
         &CargoFeatureFlags::of(&artifact),
         &contract,
+        &source.join(".gaia/cargo-target"),
     )
     .get_args()
     .map(|arg| arg.to_string_lossy().into_owned())
@@ -412,6 +414,7 @@ fn cargo_command_passes_feature_flags_through() {
         &["orion-node".to_string()],
         &CargoFeatureFlags::of(&all),
         &contract,
+        &source.join(".gaia/cargo-target"),
     )
     .get_args()
     .map(|arg| arg.to_string_lossy().into_owned())
@@ -524,3 +527,4 @@ fn no_default_features_reaches_cargo() {
 }
 
 mod groups;
+mod shared_target;

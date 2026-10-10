@@ -173,6 +173,13 @@ pub struct RustProviderPolicySpec {
     /// profile and execution backend with one `cargo build -p a -p b ...`.
     /// Opt-in: cargo unifies dependency features across the batch.
     pub batch_builds: bool,
+    /// Build every source's cargo artifacts into one target dir per
+    /// toolchain, target triple, profile and execution backend under the user
+    /// cache, so sources share compiled dependencies. Opt-in. A package whose
+    /// name and version another source already built from a different
+    /// directory keeps that source's own target dir (cargo would otherwise
+    /// reuse the other package's outputs).
+    pub shared_target_dir: bool,
     pub retry_attempts: u32,
     pub retry_backoff_ms: u64,
     pub retry_backoff_strategy: RetryBackoffStrategySpec,

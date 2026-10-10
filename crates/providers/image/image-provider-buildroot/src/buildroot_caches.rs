@@ -23,6 +23,11 @@ pub(crate) struct CachedPackages {
 }
 
 impl CachedPackages {
+    /// Whether this make restored any package from the cache.
+    pub(crate) fn restored_any(&self) -> bool {
+        !self.restored.is_empty()
+    }
+
     pub(crate) fn store(&self, output_dir: &Path) -> Vec<String> {
         let (stored, skipped) =
             self.cache
@@ -46,6 +51,24 @@ impl CachedPackages {
                 "package cache: {} package(s) not stored: {}",
                 skipped.len(),
                 skipped.join("; ")
+            ));
+        }
+        // Installed packages without a key (local sources, for example) can
+        // never be stored: say so rather than leave them out silently.
+        let uncached = self
+            .graph
+            .package_names()
+            .filter(|name| {
+                matches!(self.keys.get(*name), Some(None))
+                    && stamp_built(output_dir, &self.graph, name)
+            })
+            .collect::<Vec<_>>();
+        if !uncached.is_empty() {
+            messages.push(format!(
+                "package cache: {} installed package(s) have no cache key (for example local \
+                 sources), so they are not cached: {}",
+                uncached.len(),
+                uncached.join(", ")
             ));
         }
         messages.push(format!(

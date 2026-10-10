@@ -515,7 +515,10 @@ name = "gaia-artifact-provider-rust"
 version = "2.0.0"
 dependencies = [
  "gaia-artifact-providers",
+ "gaia-process",
  "gaia-spec",
+ "serde_json",
+ "sha2 0.11.0",
 ]
 
 [[package]]

@@ -470,6 +470,7 @@ fn build_with_private_output(
     let Some(staged_feed) = staged_feed else {
         remove_path_if_exists(&image_feed_signature_path(output_dir))?;
         if image_feed_managed_paths_path(output_dir).is_file() && target_dir.is_dir() {
+            invalidate_finalized(output_dir);
             prune_stale_image_feed_outputs(spec, image, &target_dir, output_dir)?;
         }
         remove_path_if_exists(&image_feed_managed_paths_path(output_dir))?;
@@ -478,6 +479,8 @@ fn build_with_private_output(
     if staged_feed.applied() {
         messages.push("applied image feed through a Buildroot post-build script".into());
     } else {
+        // The feed is applied to target/ below: no longer the finalized tree.
+        invalidate_finalized(output_dir);
         tracing::warn!(
             output_dir = %output_dir.display(),
             "Buildroot did not run the image feed post-build script; refreshing images after make"
@@ -557,9 +560,11 @@ mod buildroot_patches;
 mod clean_decision;
 mod clean_plan;
 mod command;
+mod config_inputs;
 mod configure;
 mod feed;
 mod feed_make;
+mod finalize_state;
 mod fs_util;
 mod host_tools;
 mod interrupted_make;
@@ -575,6 +580,7 @@ mod ram_tree;
 mod rebuild_inputs;
 mod rootfs_inputs;
 mod shared;
+mod source_date;
 mod squashfs;
 mod symbol_use;
 #[cfg(test)]
@@ -601,9 +607,11 @@ pub(crate) use buildroot_patches::*;
 pub(crate) use clean_decision::*;
 pub(crate) use clean_plan::*;
 pub(crate) use command::*;
+pub(crate) use config_inputs::*;
 pub(crate) use configure::*;
 pub(crate) use feed::*;
 pub(crate) use feed_make::*;
+pub(crate) use finalize_state::*;
 pub(crate) use fs_util::*;
 pub(crate) use host_tools::*;
 pub(crate) use interrupted_make::*;
@@ -618,6 +626,7 @@ pub(crate) use ram_tree::*;
 pub(crate) use rebuild_inputs::*;
 pub(crate) use rootfs_inputs::*;
 pub(crate) use shared::*;
+pub(crate) use source_date::*;
 pub(crate) use squashfs::*;
 pub(crate) use symbol_use::*;
 pub(crate) use work_dir_decision::*;

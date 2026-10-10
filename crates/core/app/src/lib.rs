@@ -1,6 +1,8 @@
 mod cli;
 mod commands;
+mod export;
 mod output;
+mod run_finish;
 #[cfg(feature = "tui")]
 pub mod tui;
 
@@ -15,6 +17,7 @@ pub use cli::{AppArgs, AppCommand, CacheArgs, CleanArgs, LockArgs};
 pub use commands::{CommandOutcome, CommandResult, LockChange, LockReport, LockReportEntry};
 use output::print_outcome;
 pub use output::{backend_overview_lines, runtime_overview_lines};
+pub use run_finish::{RunFinish, run_finish};
 
 #[derive(Default)]
 pub struct AppContext {
@@ -39,9 +42,17 @@ impl AppContext {
 pub fn run() -> i32 {
     commands::run_registry::enable_recording();
     let args = AppArgs::from_env();
-    let outcome = run_with_args(args);
+    let outcome = run_with_args(args.clone());
     print_outcome(&outcome);
-    outcome.exit_code()
+    let finish = run_finish(&args, &outcome);
+    for line in &finish.lines {
+        println!("{line}");
+    }
+    if finish.export_failed {
+        1
+    } else {
+        outcome.exit_code()
+    }
 }
 
 pub fn run_with_args(args: AppArgs) -> CommandOutcome {

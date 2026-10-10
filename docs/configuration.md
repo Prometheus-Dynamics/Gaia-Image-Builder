@@ -478,7 +478,7 @@ When several CPU-heavy operations (artifact builds, Buildroot prepare/build) run
 Provider policy lives under `[providers.*]`.
 
 Rust, Git and Java have extra specialized fields:
-- Rust: `allow_nested_build`, `batch_builds`
+- Rust: `allow_nested_build`, `batch_builds`, `shared_target_dir`
 - Git: `allow_remote_resolution`
 - Java: `gradle_home` (see [Java and Gradle](#java-and-gradle))
 
@@ -496,6 +496,31 @@ shared dependency features. Artifacts that must agree on features should use
 a [Rust build group](#rust-build-groups) instead: groups always build together,
 with or without `batch_builds`.
 
+`shared_target_dir` (default `false`) builds the nested cargo artifacts of
+every source into one cargo target directory per toolchain, target triple,
+profile and execution backend, under the user cache:
+`<user cache>/cargo-target/<key>` (`$GAIA_CACHE_DIR`, else
+`$XDG_CACHE_HOME/gaia`, else `~/.cache/gaia`). Sources built with the same
+toolchain then reuse each other's compiled dependencies. By default each
+source builds into `<source>/.gaia/cargo-target` and compiles its dependencies
+again. Docker builds mount the shared directory at its own path. The build log
+names the directory in use.
+
+Cargo identifies a package by name and version, so two sources cannot share
+one directory when they have a local (path or workspace) package with the same
+name and version in different directories: cargo would reuse the first
+package's outputs for the second. A source whose local packages collide with
+packages already built from another directory keeps its own directory, and the
+build log says why. Registry and git packages are shared without this check.
+Gaia lists a source's packages with `cargo metadata`, run on the host; if that
+fails, the source keeps its own directory.
+
+Notes: concurrent builds in one shared directory wait for cargo's build lock,
+and that wait counts toward `timeout_seconds`. The directory is not cleaned up
+automatically; delete it under the user cache to reclaim space. Build outputs
+and recorded artifact state do not depend on the directory, so switching the
+setting does not invalidate recorded artifacts. It is opt-in for now.
+
 Every provider supports:
 - `retry_attempts`
 - `retry_backoff_ms`
@@ -510,6 +535,7 @@ Example:
 [providers.rust]
 allow_nested_build = false
 batch_builds = true  # opt-in; see above
+shared_target_dir = true  # opt-in; see above
 retry_attempts = 2
 retry_backoff_ms = 500
 retry_backoff_strategy = "exponential"
@@ -1542,6 +1568,34 @@ Expected image formats:
 - `kernel`
 - `erofs`
 - `xfs` (Buildroot 2026.08 or newer, `BR2_TARGET_ROOTFS_XFS`)
+
+Buildroot run notes:
+- Config steps are reused. The build operation repeats the prepare operation's
+  defconfig, fragments, `config_overrides` and cache settings only when their
+  inputs changed: the defconfig and fragment files, the overrides, the cache
+  settings Gaia writes, the Buildroot version (`Makefile`) and every Kconfig
+  file of the Buildroot and `BR2_EXTERNAL` trees (by content). The state is
+  `.gaia-buildroot-config-inputs` in the output tree; a `.config` edited
+  outside Gaia is rebuilt. The run message is `buildroot config unchanged
+  since the last configuration; config steps skipped`.
+- `target-finalize` is reused. Each `make` that reaches it copies every
+  package's per-package tree into `target/` and patches the ELF files of
+  `host/` (about 40 s on a PhotonVision tree, with nothing to build). After a
+  prepare (or build) finalize, the build operation skips it when every
+  package is installed, the config is unchanged and nothing has been built
+  since; the images step then runs as before. The marker
+  `.gaia-target-finalized` is removed when a make may build, and when the
+  image feed is applied to `target/`. The run message is `skipped
+  target-finalize: ...`.
+- `SOURCE_DATE_EPOCH` is set for Buildroot's `make` and its post-build and
+  post-image scripts: the caller's own `SOURCE_DATE_EPOCH` when the
+  environment sets one, else the commit time of the workspace git `HEAD`
+  (stable for a commit, changes with each commit; nothing is set outside a
+  git workspace). It is not part of the package cache keys, so a package
+  restored from the cache keeps the timestamps of the epoch it was built
+  with until it is rebuilt.
+- The package cache reports installed packages it cannot key (for example
+  packages with local sources) instead of leaving them out silently.
 
 ### Starting Point
 

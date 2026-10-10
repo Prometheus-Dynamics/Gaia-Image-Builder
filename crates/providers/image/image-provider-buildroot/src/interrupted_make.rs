@@ -16,7 +16,7 @@
 use super::*;
 
 /// Present while a `make` runs, and after one that was killed.
-const MAKE_RUNNING: &str = ".gaia-make-running";
+pub(crate) const MAKE_RUNNING: &str = ".gaia-make-running";
 
 pub(crate) fn mark_make_running(output_dir: &Path) -> Result<(), ImageProviderError> {
     fs::write(output_dir.join(MAKE_RUNNING), "").map_err(|error| {

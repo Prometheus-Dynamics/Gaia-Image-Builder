@@ -405,6 +405,10 @@ fn merge_provider_policies(
         rust: RawRustProviderPolicyConfig {
             allow_nested_build: base.rust.allow_nested_build || overlay.rust.allow_nested_build,
             batch_builds: overlay.rust.batch_builds.or(base.rust.batch_builds),
+            shared_target_dir: overlay
+                .rust
+                .shared_target_dir
+                .or(base.rust.shared_target_dir),
             retry_attempts: base.rust.retry_attempts.max(overlay.rust.retry_attempts),
             retry_backoff_ms: base
                 .rust

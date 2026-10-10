@@ -60,6 +60,7 @@ fn documented_override_keys_parse_as_typed_keys() {
         "policy.failure.rollback_domains",
         "policy.providers.rust.allow_nested_build",
         "policy.providers.rust.batch_builds",
+        "policy.providers.rust.shared_target_dir",
         "policy.failure.keep_going",
         "policy.failure.rollback_completed",
         "policy.providers.rust.retry_attempts",

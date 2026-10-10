@@ -48,3 +48,31 @@ fn preview_only_flags_are_refused_for_other_commands() {
         "{outcome:?}"
     );
 }
+
+#[test]
+fn first_preview_has_no_earlier_run_to_invalidate() {
+    let outcome = run_with_args(AppArgs {
+        command: AppCommand::Preview,
+        build: starting_point_raw_image_example_build_path(),
+        explicit_overrides: vec![
+            (
+                "workspace.build_dir".into(),
+                support::unique_dir("cli-preview-build"),
+            ),
+            (
+                "workspace.out_dir".into(),
+                support::unique_dir("cli-preview-out"),
+            ),
+        ],
+        ..AppArgs::default()
+    });
+    let CommandOutcome::Previewed { report } = &outcome else {
+        panic!("expected a preview, got {outcome:?}");
+    };
+    assert!(report.invalidation.is_none(), "{report:?}");
+    let executing = report.operations.iter().filter(|op| op.executes).count();
+    assert_eq!(
+        report.invalidation_line(),
+        format!("no earlier run recorded: {executing} operation(s) run")
+    );
+}
