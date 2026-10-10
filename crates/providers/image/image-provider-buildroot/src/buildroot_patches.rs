@@ -28,7 +28,67 @@ pub(crate) const PPD_COPY_REFLINK: &str = "\t\t$(foreach pkg,$(1),\\\n\t\t\tcp -
 /// a package builds, so package cache keys hash this: a Gaia version
 /// patching Buildroot differently must not invalidate every cached package.
 pub(crate) fn without_gaia_patches(contents: &str) -> String {
-    contents.replace(PPD_COPY_REFLINK, PPD_COPY_UPSTREAM)
+    contents
+        .replace(PPD_COPY_REFLINK, PPD_COPY_UPSTREAM)
+        .replace(HOST_FINALIZE_SKIP, HOST_FINALIZE_UPSTREAM)
+}
+
+/// The rsync of `host-finalize` in the top-level `Makefile`, as upstream has
+/// it (`BR2_PER_PACKAGE_DIRECTORIES`).
+pub(crate) const HOST_FINALIZE_UPSTREAM: &str =
+    "\t$(call per-package-rsync,$(sort $(PACKAGES)),host,$(HOST_DIR),copy)\n";
+
+/// The same rsync, skipped while nothing it would copy has changed since the
+/// last one: the `host/.gaia-host-finalized` marker holds the package list
+/// that copy covered, and it is newer than every package's installed stamp
+/// and than everything under `per-package/` (a file removed and added back
+/// changes its directory). The marker is written only after the rsync
+/// succeeds, so a killed rsync leaves it older than the change that asked for
+/// it. The rest of `host-finalize` (`fix-rpath`, the path fix-up) still runs:
+/// it is idempotent and is not what the skip covers.
+pub(crate) const HOST_FINALIZE_SKIP: &str = concat!(
+    "\t$(if $(shell M=$(HOST_DIR)/.gaia-host-finalized; [ -f \"$$M\" ] && ",
+    "printf '%s\\n' $(sort $(PACKAGES)) | cmp -s - \"$$M\" && ",
+    "[ -z \"$$(find $(BUILD_DIR)/ -maxdepth 2 -name '.stamp_*installed' -newer \"$$M\" -print -quit)\" ] && ",
+    "[ -z \"$$(find $(PER_PACKAGE_DIR) -newer \"$$M\" -print -quit)\" ] && echo unchanged),",
+    "@echo \"host directory unchanged since the last finalize (Gaia)\",",
+    "$(call per-package-rsync,$(sort $(PACKAGES)),host,$(HOST_DIR),copy))\n",
+    "\t$(Q)printf '%s\\n' $(sort $(PACKAGES)) > $(HOST_DIR)/.gaia-host-finalized\n",
+);
+
+/// Makes `host-finalize` skip its rsync when nothing it copies changed (see
+/// [`HOST_FINALIZE_SKIP`]). Applied to the top-level `Makefile` of the tree
+/// the make runs from, like the reflink change. Returns a message saying what
+/// was done.
+pub(crate) fn apply_host_finalize_skip(
+    buildroot_dir: &Path,
+) -> Result<Option<String>, ImageProviderError> {
+    let makefile = buildroot_dir.join("Makefile");
+    let Ok(contents) = fs::read_to_string(&makefile) else {
+        return Ok(None);
+    };
+    if !contents.contains(HOST_FINALIZE_SKIP) {
+        if contents.matches(HOST_FINALIZE_UPSTREAM).count() != 1 {
+            return Ok(Some(
+                "buildroot host finalize left as is: Makefile differs from the upstream text \
+                 Gaia patches"
+                    .to_string(),
+            ));
+        }
+        fs::write(
+            &makefile,
+            contents.replace(HOST_FINALIZE_UPSTREAM, HOST_FINALIZE_SKIP),
+        )
+        .map_err(|error| {
+            ImageProviderError::backend_command(format!(
+                "failed to patch '{}': {error}",
+                makefile.display()
+            ))
+        })?;
+    }
+    Ok(Some(
+        "buildroot host finalize skips an unchanged host directory".to_string(),
+    ))
 }
 
 /// Uses reflink clones for the per-package finalize step when the output
@@ -169,5 +229,42 @@ mod tests {
         assert!(message.is_some_and(|message| message.contains("left as is")));
         let _ = fs::remove_dir_all(buildroot);
         let _ = fs::remove_dir_all(output);
+    }
+
+    #[test]
+    fn host_finalize_skip_is_applied_once_and_reverts_to_upstream() {
+        let buildroot = temp("host-finalize");
+        fs::create_dir_all(&buildroot).expect("buildroot dir");
+        let upstream = format!(
+            "host-finalize: $(PACKAGES) $(HOST_DIR)\n\t@$(call MESSAGE,\"Finalizing host directory\")\n{HOST_FINALIZE_UPSTREAM}\t$(Q)PARALLEL_JOBS=1 \\\n"
+        );
+        fs::write(buildroot.join("Makefile"), &upstream).expect("makefile");
+
+        let message = apply_host_finalize_skip(&buildroot).expect("patch");
+        let patched = fs::read_to_string(buildroot.join("Makefile")).expect("read");
+        assert!(message.is_some_and(|message| message.contains("skips an unchanged")));
+        assert!(patched.contains(HOST_FINALIZE_SKIP));
+        assert!(!patched.contains(HOST_FINALIZE_UPSTREAM));
+        assert!(HOST_FINALIZE_SKIP.contains(HOST_FINALIZED_MARKER));
+
+        // Applying it again changes nothing.
+        apply_host_finalize_skip(&buildroot).expect("again");
+        assert_eq!(
+            fs::read_to_string(buildroot.join("Makefile")).expect("read"),
+            patched
+        );
+
+        // What the cache keys hash is the upstream text again.
+        assert_eq!(without_gaia_patches(&patched), upstream);
+
+        // Text that is not upstream's is left alone, with a message.
+        fs::write(buildroot.join("Makefile"), "host-finalize: other\n").expect("other");
+        let message = apply_host_finalize_skip(&buildroot).expect("unknown text");
+        assert!(message.is_some_and(|message| message.contains("left as is")));
+        assert_eq!(
+            fs::read_to_string(buildroot.join("Makefile")).expect("read"),
+            "host-finalize: other\n"
+        );
+        let _ = fs::remove_dir_all(buildroot);
     }
 }

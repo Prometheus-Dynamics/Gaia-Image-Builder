@@ -6,6 +6,7 @@ mod core;
 mod diagnostics;
 mod image;
 mod image_assembly;
+mod image_assembly_collected;
 mod image_assembly_layout;
 mod image_assembly_order;
 mod inputs;

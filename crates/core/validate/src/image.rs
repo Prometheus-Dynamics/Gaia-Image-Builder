@@ -517,6 +517,7 @@ fn validate_buildroot_expected_images_against_defconfig(
             BuildrootExpectedImageFormatSpec::Erofs => {
                 defconfig_contents.contains("BR2_TARGET_ROOTFS_EROFS=y")
             }
+            BuildrootExpectedImageFormatSpec::File => true,
             BuildrootExpectedImageFormatSpec::Xfs => {
                 defconfig_contents.contains("BR2_TARGET_ROOTFS_XFS=y")
             }
@@ -573,5 +574,6 @@ fn expected_image_name_matches_format(
         }
         BuildrootExpectedImageFormatSpec::Erofs => name.ends_with(".erofs"),
         BuildrootExpectedImageFormatSpec::Xfs => name.ends_with(".xfs"),
+        BuildrootExpectedImageFormatSpec::File => true,
     }
 }

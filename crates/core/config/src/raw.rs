@@ -794,6 +794,9 @@ pub enum RawBuildrootExpectedImageFormat {
     Kernel,
     Erofs,
     Xfs,
+    /// Any plain file Buildroot writes: the name is not checked against a
+    /// format, and the defconfig need not enable a filesystem for it.
+    File,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]

@@ -117,6 +117,9 @@ pub(crate) fn run_buildroot_with(
         let clock = gaia_process::ActiveClock::start();
         messages.extend(apply_reflink_finalize(buildroot_dir, output_dir)?);
         messages.push(phase_step_message("reflink finalize", &clock, &[]));
+        let clock = gaia_process::ActiveClock::start();
+        messages.extend(apply_host_finalize_skip(buildroot_dir)?);
+        messages.push(phase_step_message("host finalize patch", &clock, &[]));
     }
     let configured = configure_tree(
         spec,
@@ -162,6 +165,11 @@ pub(crate) fn run_buildroot_with(
     let built_before = ["target", "host", "per-package"]
         .iter()
         .any(|dir| output_dir.join(dir).is_dir());
+    // Whether this run changes what `host-finalize` copies: the make rule
+    // skips the copy after a finalize that left the marker, so the marker
+    // goes before the make when this is set. A killed make (its marker is
+    // still there) may have left the copy half done.
+    let mut host_tree_changed = output_dir.join(MAKE_RUNNING).is_file();
     let clock = gaia_process::ActiveClock::start();
     let previous_graph = PackageGraph::load(output_dir);
     messages.push(phase_step_message("package graph load", &clock, &[]));
@@ -215,6 +223,7 @@ pub(crate) fn run_buildroot_with(
         current_graph.as_ref().map(|current| &current.graph),
     )?;
     let plan = with_requested_rebuilds(plan, &requested);
+    host_tree_changed |= matches!(plan, CleanPlan::Full(_) | CleanPlan::Packages(_));
     let clean_clock = gaia_process::ActiveClock::start();
     let clean_messages_from = messages.len();
     match &plan {
@@ -235,6 +244,7 @@ pub(crate) fn run_buildroot_with(
             // Move the big trees aside first: `make clean` deleting them
             // could hold the build up for hours on a busy disk.
             discard_output_dirs(output_dir, FULL_CLEAN_DIRS)?;
+            invalidate_host_finalized(output_dir);
             let mut command = Command::new("make");
             command
                 .arg(format!("O={}", output_dir.display()))
@@ -351,6 +361,10 @@ pub(crate) fn run_buildroot_with(
     })?;
     let nested = messages[restore_messages_from..].to_vec();
     messages.push(phase_step_message("package cache setup", &clock, &nested));
+    // Restored files and stamps carry the cache's modification times.
+    host_tree_changed |= cached_packages
+        .as_ref()
+        .is_some_and(CachedPackages::restored_any);
     if let Some(script) = options.post_build_script {
         command.arg(post_build_script_override(output_dir, script));
     }
@@ -413,6 +427,9 @@ pub(crate) fn run_buildroot_with(
         } else {
             clear_shared_pack_state(output_dir)?;
         }
+    }
+    if host_tree_changed {
+        invalidate_host_finalized(output_dir);
     }
     let make_started = std::time::SystemTime::now();
     mark_make_running(output_dir)?;

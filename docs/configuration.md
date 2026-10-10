@@ -1586,6 +1586,10 @@ Expected image formats:
 - `kernel`
 - `erofs`
 - `xfs` (Buildroot 2026.08 or newer, `BR2_TARGET_ROOTFS_XFS`)
+- `file`: any plain file Buildroot writes. The name is not checked against a
+  format (`flash-id` is accepted as is), and the defconfig need not enable a
+  filesystem for it. Use it for images that Buildroot's post-image scripts
+  produce under a name without a format suffix.
 
 Buildroot run notes:
 - Config steps are reused. The build operation repeats the prepare operation's
@@ -1978,7 +1982,7 @@ signature_text = "GAIA"
 [[image.assembly.disks.partitions]]
 name = "rootfs"
 type_alias = "linux"
-image = "$provider.images/buildroot-output/images/rootfs.ext4"
+image = "$provider.buildroot_output/images/rootfs.ext4"
 ```
 
 ## Checkpoints

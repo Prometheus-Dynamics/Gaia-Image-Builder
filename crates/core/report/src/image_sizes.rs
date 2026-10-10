@@ -7,11 +7,16 @@ use crate::model::ImageSizeRecord;
 use std::path::{Path, PathBuf};
 
 /// Records for `paths` that are files, in the given order. A path that is
-/// missing or not a file is skipped rather than failing the report.
+/// missing or not a file is skipped rather than failing the report, and so is
+/// a compressed archive: its length says nothing about the disk it holds, and
+/// the sparse-hole comparison does not apply to it.
 pub(crate) fn image_size_records(paths: &[PathBuf]) -> Vec<ImageSizeRecord> {
     paths
         .iter()
         .filter_map(|path| {
+            if is_compressed_archive(path) {
+                return None;
+            }
             let metadata = std::fs::metadata(path).ok()?;
             if !metadata.is_file() {
                 return None;
@@ -24,6 +29,23 @@ pub(crate) fn image_size_records(paths: &[PathBuf]) -> Vec<ImageSizeRecord> {
             })
         })
         .collect()
+}
+
+/// Whether `path` names a compressed archive (`.xz`, `.zst`, `.gz`, `.bz2`,
+/// `.lz4`, `.lzma`, `.zip`, `.tgz`, or any `.tar.*`).
+pub(crate) fn is_compressed_archive(path: &Path) -> bool {
+    let Some(name) = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_ascii_lowercase())
+    else {
+        return false;
+    };
+    const SUFFIXES: [&str; 9] = [
+        ".xz", ".zst", ".gz", ".bz2", ".lz4", ".lzma", ".zip", ".tgz", ".tar.",
+    ];
+    SUFFIXES
+        .iter()
+        .any(|suffix| name.ends_with(suffix) || name.contains(".tar."))
 }
 
 /// One human line per image, such as `sdcard.img: 1.36 GB raw, 412 MB written`.
@@ -139,6 +161,22 @@ mod tests {
             paths,
             vec![PathBuf::from("/out/a.img"), PathBuf::from("/out/b.img")]
         );
+    }
+
+    #[test]
+    fn compressed_archives_get_no_size_record() {
+        let dir =
+            std::env::temp_dir().join(format!("gaia-image-sizes-{}-archive", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let archive = dir.join("disk.img.zst");
+        std::fs::write(&archive, [7u8; 64]).expect("write");
+        let tar = dir.join("rootfs.tar.gz");
+        std::fs::write(&tar, [7u8; 64]).expect("write");
+        assert!(is_compressed_archive(&archive));
+        assert!(is_compressed_archive(&tar));
+        assert!(!is_compressed_archive(&dir.join("sdcard.img")));
+        assert!(image_size_records(&[archive, tar]).is_empty());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

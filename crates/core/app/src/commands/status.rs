@@ -315,6 +315,14 @@ pub(crate) fn last_run_lines(last: &LastRun, now: u64) -> Vec<String> {
     if !status.failed.is_empty() {
         lines.push(format!("failed: {}", status.failed.join(", ")));
     }
+    for error in &last.errors {
+        lines.push(format!(
+            "error {} ({}): {}",
+            error.operation_id,
+            error.code,
+            error.message.lines().collect::<Vec<_>>().join(" / ")
+        ));
+    }
     lines
 }
 
@@ -393,6 +401,7 @@ mod tests {
             outcome: "failed".into(),
             ended_at: 1_500,
             status,
+            errors: Vec::new(),
         }
     }
 
@@ -558,5 +567,24 @@ mod tests {
         let text = numbered_lines(&runs, 1_100, true);
         assert!(text.starts_with(" 2  New"), "{text}");
         assert!(!text.contains("Old"));
+    }
+
+    #[test]
+    fn ended_run_lists_the_error_message_of_each_failed_operation() {
+        use crate::commands::live_status::RunError;
+
+        let mut last = ended_fixture();
+        last.errors = vec![RunError {
+            operation_id: "image:assembly".into(),
+            code: "assembly_execution_failed".into(),
+            message: "assembly source 'out/flash-id' does not exist\nsecond line".into(),
+        }];
+        let lines = last_run_lines(&last, 1_600);
+        assert_eq!(
+            lines.last().map(String::as_str),
+            Some(
+                "error image:assembly (assembly_execution_failed): assembly source 'out/flash-id' does not exist / second line"
+            )
+        );
     }
 }

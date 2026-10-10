@@ -527,3 +527,85 @@ fn unmaterialized_partition_with_an_image_is_refused() {
     assert!(message.contains("partition 'boot'"), "{message}");
     assert!(message.contains("not materialized"), "{message}");
 }
+
+/// The PhotonVision Raze layout: three primaries, then rootfs-a with an
+/// image and two unmaterialized logical partitions, 1 MiB aligned.
+#[test]
+fn raze_layout_with_unmaterialized_logical_partitions_assembles() {
+    let mut spec = test_spec();
+    let build_dir = PathBuf::from(&spec.workspace.build_dir);
+    let (boot, rootfs) = write_images(&build_dir);
+    let output = build_dir.join("out").join("sdcard.img");
+    let mut disk = mbr_disk(
+        &output,
+        Some(AssemblyDiskTruncateSpec::LastData),
+        AssemblyEbrPlacementSpec::Packed,
+        vec![
+            partition(
+                "autoboot",
+                Some("fat32-lba"),
+                true,
+                Some(&boot),
+                Some("16M"),
+                false,
+                true,
+            ),
+            partition(
+                "boot-a",
+                Some("fat32-lba"),
+                false,
+                Some(&boot),
+                Some("128M"),
+                false,
+                true,
+            ),
+            partition(
+                "boot-b",
+                Some("fat32-lba"),
+                false,
+                Some(&boot),
+                Some("128M"),
+                false,
+                true,
+            ),
+            partition(
+                "rootfs-a",
+                Some("linux"),
+                false,
+                Some(&rootfs),
+                Some("512M"),
+                false,
+                true,
+            ),
+            partition(
+                "rootfs-b",
+                Some("linux"),
+                false,
+                None,
+                Some("512M"),
+                false,
+                false,
+            ),
+            partition(
+                "data",
+                Some("linux"),
+                false,
+                None,
+                Some("64M"),
+                false,
+                false,
+            ),
+        ],
+    );
+    disk.signature = Some("0x5056525a".into());
+    disk.signature_text = None;
+    disk.first_lba = Some(2048);
+    disk.alignment_lba = Some(2048);
+
+    let outcome = assemble(&mut spec, disk, None);
+
+    assert!(outcome.errors.is_empty(), "{:?}", outcome.errors);
+    let image = fs::read(&output).expect("disk");
+    assert_eq!(logical_partitions(&image).len(), 3);
+    assert!(disk_len(&output) < 300 * MIB, "{}", disk_len(&output));
+}

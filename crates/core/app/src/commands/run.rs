@@ -19,7 +19,7 @@ use std::time::Instant;
 
 use crate::AppContext;
 
-use super::live_status::{LiveRecorder, LiveRunInfo, run_outcome_label, unix_now};
+use super::live_status::{LiveRecorder, LiveRunInfo, run_errors, run_outcome_label, unix_now};
 use super::progress::{ConsoleProgress, console_progress_disabled};
 use super::rebuild::check_rebuild_request;
 use super::run_registry::{RegisteredRun, RunRegistration, recording_enabled};
@@ -245,7 +245,7 @@ fn execute_plan_with_console_progress(
     // The sender is gone once execution returns, so the progress thread
     // finishes its queue and hands back the recorder.
     if let Ok(live) = progress_thread.join() {
-        live.finish(run_outcome_label(&outcome));
+        live.finish(run_outcome_label(&outcome), run_errors(&outcome));
     }
     if let Some(registration) = registration {
         registration.end(unix_now());

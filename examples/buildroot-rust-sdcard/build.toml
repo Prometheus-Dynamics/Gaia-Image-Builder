@@ -113,7 +113,7 @@ signature_text = "GAIA"
 [[image.assembly.disks.partitions]]
 name = "rootfs"
 type_alias = "linux"
-image = "$provider.images/buildroot-output/images/rootfs.ext4"
+image = "$provider.buildroot_output/images/rootfs.ext4"
 
 [execution]
 jobs = 0

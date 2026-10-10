@@ -83,7 +83,11 @@ pub fn operation_components(
                 );
             }
         }
-        OperationKind::PrepareImage | OperationKind::BuildImage => image_parts(spec, &mut parts),
+        OperationKind::PrepareImage | OperationKind::BuildImage => image_parts(
+            spec,
+            matches!(operation.kind, OperationKind::BuildImage),
+            &mut parts,
+        ),
         OperationKind::AssembleImage => {
             parts.raw("assembly", format!("{:?}", spec.image.assembly));
             // One part per input (`assembly inputs[src <path>]`), so the
@@ -213,7 +217,7 @@ fn artifact_parts(spec: &ResolvedBuildSpec, artifact: &ArtifactSpec, parts: &mut
     );
 }
 
-fn image_parts(spec: &ResolvedBuildSpec, parts: &mut Parts) {
+fn image_parts(spec: &ResolvedBuildSpec, include_post_image: bool, parts: &mut Parts) {
     let image = &spec.image;
     parts.raw("feed", format!("{:?}", image.feed));
     parts.raw("output", format!("{:?}", image.output));
@@ -246,7 +250,9 @@ fn image_parts(spec: &ResolvedBuildSpec, parts: &mut Parts) {
         }
     }
     parts.raw("toolchain", image_backend_signature(spec, image));
-    for (name, digest) in crate::reuse_build_inputs::buildroot_image_components(spec) {
+    for (name, digest) in
+        crate::reuse_build_inputs::buildroot_image_components(spec, include_post_image)
+    {
         parts.raw(name, digest);
     }
     let buildroot_policy = &spec.policy.providers.buildroot;
@@ -355,6 +361,24 @@ pub fn fingerprint_change_detail(
 
     let mut phrases = Vec::new();
     for base in bases {
+        // A component the recorded state never named (a kind of input a newer
+        // Gaia started to record) is new, not changed: its earlier value is
+        // unknown.
+        let recorded_before = recorded_map.contains_key(base)
+            || recorded_map.keys().any(|name| key_of(name, base).is_some());
+        if !recorded_before {
+            phrases.push(format!(
+                "{base} has no earlier record (first run with this Gaia)"
+            ));
+            continue;
+        }
+        // An input the recorded state had and this operation no longer has.
+        let current_before = current_map.contains_key(base)
+            || current_map.keys().any(|name| key_of(name, base).is_some());
+        if !current_before {
+            phrases.push(format!("{base} is no longer an input"));
+            continue;
+        }
         let whole_changed = recorded_map.get(base) != current_map.get(base);
         let mut keys = Vec::<&str>::new();
         for name in names() {
@@ -431,6 +455,44 @@ mod tests {
             Some(
                 "operation 'artifact:app' will execute because fragments changed; build_env changed (K, L)"
             )
+        );
+    }
+
+    #[test]
+    fn a_component_with_no_earlier_record_is_not_called_changed() {
+        let recorded = parts(&[("defconfig", "a")]);
+        let current = parts(&[
+            ("defconfig", "a"),
+            ("build command script raze/build.sh", "s"),
+            ("external file tree/x", "f"),
+        ]);
+        assert_eq!(
+            fingerprint_change_detail("image", &recorded, &current).as_deref(),
+            Some(
+                "operation 'image' will execute because build command script raze/build.sh has no earlier record (first run with this Gaia); external file tree/x has no earlier record (first run with this Gaia)"
+            )
+        );
+    }
+
+    #[test]
+    fn a_recorded_component_that_is_gone_is_not_called_changed() {
+        let recorded = parts(&[("defconfig", "a"), ("post-image script x.sh", "s")]);
+        let current = parts(&[("defconfig", "a")]);
+        assert_eq!(
+            fingerprint_change_detail("image:prepare", &recorded, &current).as_deref(),
+            Some(
+                "operation 'image:prepare' will execute because post-image script x.sh is no longer an input"
+            )
+        );
+    }
+
+    #[test]
+    fn a_recorded_component_that_changed_is_still_changed() {
+        let recorded = parts(&[("post-image", "old")]);
+        let current = parts(&[("post-image", "new")]);
+        assert_eq!(
+            fingerprint_change_detail("image", &recorded, &current).as_deref(),
+            Some("operation 'image' will execute because post-image changed")
         );
     }
 

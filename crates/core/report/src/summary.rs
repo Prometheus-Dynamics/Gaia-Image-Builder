@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use crate::image_sizes::{image_size_note, image_size_records, summary_image_paths};
 use crate::model::{
     CleanupStatus, ExecutionFailureReport, FailureClass, FailureClassCount, OperationTimingRecord,
-    RunSummary,
+    RunSummary, SummaryErrorRecord,
 };
 use crate::state::{output_hygiene_warnings, rollback_domains};
 
@@ -112,6 +112,7 @@ pub fn render_summary(
         checkpoint_built_count,
         checkpoint_reused_count,
         failure_classes,
+        errors: summarize_errors(&outcome.errors),
         keep_going: spec.policy.failure.keep_going,
         skipped_operation_ids: outcome
             .skipped_ids
@@ -172,6 +173,18 @@ fn cleanup_status(status: gaia_exec::ExecutionCleanupStatus) -> CleanupStatus {
         gaia_exec::ExecutionCleanupStatus::DomainDisabled => CleanupStatus::DomainDisabled,
         gaia_exec::ExecutionCleanupStatus::Failed => CleanupStatus::Failed,
     }
+}
+
+fn summarize_errors(errors: &[ExecutionError]) -> Vec<SummaryErrorRecord> {
+    errors
+        .iter()
+        .map(|error| SummaryErrorRecord {
+            operation_id: error.operation_id.as_str().to_string(),
+            code: error.code.to_string(),
+            class: classify_execution_error(error),
+            message: error.message.clone(),
+        })
+        .collect()
 }
 
 fn summarize_failure_classes(errors: &[ExecutionError]) -> Vec<FailureClassCount> {

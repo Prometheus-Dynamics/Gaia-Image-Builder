@@ -96,6 +96,31 @@ pub(crate) struct LastRun {
     /// Unix seconds when the run ended.
     pub ended_at: u64,
     pub status: LiveStatus,
+    /// The errors that ended operations, in the order they were raised. Empty
+    /// for a snapshot written before errors were kept.
+    #[serde(default)]
+    pub errors: Vec<RunError>,
+}
+
+/// One error that ended an operation, with its message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct RunError {
+    pub operation_id: String,
+    pub code: String,
+    pub message: String,
+}
+
+/// The errors of an execution outcome, for the last-run file.
+pub(crate) fn run_errors(outcome: &ExecutionOutcome) -> Vec<RunError> {
+    outcome
+        .errors
+        .iter()
+        .map(|error| RunError {
+            operation_id: error.operation_id.as_str().to_string(),
+            code: error.code.to_string(),
+            message: error.message.clone(),
+        })
+        .collect()
 }
 
 /// A `gaia run` found alive through its pid file.
@@ -266,13 +291,14 @@ impl LiveRecorder {
         }
     }
 
-    /// Ends the run: leaves its final snapshot and outcome in the last-run
-    /// file and removes the live status file.
-    pub(crate) fn finish(self, outcome: &str) {
+    /// Ends the run: leaves its final snapshot, outcome and errors in the
+    /// last-run file and removes the live status file.
+    pub(crate) fn finish(self, outcome: &str, errors: Vec<RunError>) {
         let last = LastRun {
             outcome: outcome.to_string(),
             ended_at: unix_now(),
             status: self.snapshot(false),
+            errors,
         };
         let _ = write_json_atomic(&self.last_path, &last);
         let _ = fs::remove_file(&self.status_path);
@@ -478,6 +504,7 @@ mod tests {
             outcome: "cancelled".into(),
             ended_at: 1_200,
             status,
+            errors: Vec::new(),
         };
         let json = serde_json::to_string(&last).expect("encode");
         let decoded: LastRun = serde_json::from_str(&json).expect("decode");
@@ -555,12 +582,35 @@ mod tests {
         live.flush(Instant::now());
         assert!(dir.join(STATUS_FILE).exists());
 
-        live.finish("failed");
+        let errors = vec![RunError {
+            operation_id: "a".into(),
+            code: "backend_command_failed".into(),
+            message: "boom".into(),
+        }];
+        live.finish("failed", errors.clone());
         assert!(!dir.join(STATUS_FILE).exists());
         let last = read_last(&dir).expect("last snapshot");
         assert_eq!(last.outcome, "failed");
         assert_eq!(last.status.finished.failed, 1);
         assert_eq!(last.status.failed, vec!["a".to_string()]);
+        assert_eq!(last.errors, errors);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn last_snapshot_without_errors_field_still_reads() {
+        let dir = temp_dir("old-last");
+        let mut value = serde_json::to_value(LastRun {
+            outcome: "failed".into(),
+            ended_at: 1_200,
+            status: fixture_status(),
+            errors: Vec::new(),
+        })
+        .expect("encode");
+        value.as_object_mut().expect("object").remove("errors");
+        fs::write(dir.join(LAST_FILE), value.to_string()).expect("write");
+        let last = read_last(&dir).expect("old snapshot");
+        assert!(last.errors.is_empty());
         let _ = fs::remove_dir_all(dir);
     }
 

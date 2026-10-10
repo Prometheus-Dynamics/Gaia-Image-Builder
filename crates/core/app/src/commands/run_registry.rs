@@ -438,6 +438,7 @@ mod tests {
                 failed: Vec::new(),
                 logs: Vec::new(),
             },
+            errors: Vec::new(),
         }
     }
 

@@ -495,6 +495,7 @@ pub(crate) fn apply_package_rebuild(
     previous: Option<&PackageGraph>,
     current: &PackageGraph,
 ) -> Result<Vec<String>, ImageProviderError> {
+    invalidate_host_finalized(output_dir);
     let removals = package_rebuild_removals(output_dir, plan, previous, current);
     let removed_files = removals
         .files

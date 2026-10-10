@@ -54,6 +54,8 @@ pub struct RunSummary {
     /// are kept and recorded for reuse.
     pub rollback_completed: bool,
     pub failure_classes: Vec<FailureClassCount>,
+    /// The error of each failed operation, with its message.
+    pub errors: Vec<SummaryErrorRecord>,
     pub keep_going: bool,
     /// Operations not run because a dependency failed (`keep_going`).
     pub skipped_operation_ids: Vec<String>,
@@ -92,6 +94,14 @@ pub struct OperationTimingRecord {
 pub struct StepTimingRecord {
     pub step: String,
     pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SummaryErrorRecord {
+    pub operation_id: String,
+    pub code: String,
+    pub class: FailureClass,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -5,6 +5,7 @@ use gaia_spec::ResolvedBuildSpec;
 
 use crate::ValidationDiagnostic;
 use crate::diagnostics::error;
+use crate::image_assembly_collected::validate_collected_reference;
 use crate::image_assembly_layout;
 
 pub(crate) fn validate_image_assembly(
@@ -87,7 +88,7 @@ pub(crate) fn validate_image_assembly(
         }
     }
 
-    for file in &assembly.files {
+    for (index, file) in assembly.files.iter().enumerate() {
         if !tree_ids.contains(&file.tree) {
             diagnostics.push(error(
                 "assembly_file_tree_unknown",
@@ -101,19 +102,35 @@ pub(crate) fn validate_image_assembly(
                 "assembly file entries must set exactly one of src or src_glob".into(),
                 Some("image.assembly.files".into()),
             )),
-            (Some(src), None) => validate_assembly_path_template(
-                spec,
-                &tree_ids,
-                src,
-                "image.assembly.files.src",
-                diagnostics,
-            ),
+            (Some(src), None) => {
+                validate_assembly_path_template(
+                    spec,
+                    &tree_ids,
+                    src,
+                    "image.assembly.files.src",
+                    diagnostics,
+                );
+                validate_collected_reference(
+                    spec,
+                    src,
+                    &format!("files[{index}].src"),
+                    "image.assembly.files",
+                    diagnostics,
+                );
+            }
             (None, Some(src_glob)) => {
                 validate_assembly_path_template(
                     spec,
                     &tree_ids,
                     src_glob,
                     "image.assembly.files.src_glob",
+                    diagnostics,
+                );
+                validate_collected_reference(
+                    spec,
+                    src_glob,
+                    &format!("files[{index}].src_glob"),
+                    "image.assembly.files",
                     diagnostics,
                 );
                 validate_simple_glob_pattern(src_glob, diagnostics);
@@ -129,7 +146,7 @@ pub(crate) fn validate_image_assembly(
         }
     }
 
-    for transform in &assembly.transforms {
+    for (index, transform) in assembly.transforms.iter().enumerate() {
         if transform.dest.trim().is_empty() {
             diagnostics.push(error(
                 "assembly_transform_dest_empty",
@@ -153,6 +170,13 @@ pub(crate) fn validate_image_assembly(
                 &tree_ids,
                 src,
                 "image.assembly.transforms.src",
+                diagnostics,
+            );
+            validate_collected_reference(
+                spec,
+                src,
+                &format!("transforms[{index}].src"),
+                "image.assembly.transforms",
                 diagnostics,
             );
         }
@@ -375,6 +399,13 @@ pub(crate) fn validate_image_assembly(
                 &tree_ids,
                 image,
                 "image.assembly.disks.partitions.image",
+                diagnostics,
+            );
+            validate_collected_reference(
+                spec,
+                image,
+                &format!("disks[{}].partitions[{}].image", disk.id, partition.name),
+                "image.assembly.disks.partitions",
                 diagnostics,
             );
         }

@@ -88,6 +88,7 @@ pub(crate) fn compile_buildroot_expected_image_format(
         RawBuildrootExpectedImageFormat::Kernel => BuildrootExpectedImageFormatSpec::Kernel,
         RawBuildrootExpectedImageFormat::Erofs => BuildrootExpectedImageFormatSpec::Erofs,
         RawBuildrootExpectedImageFormat::Xfs => BuildrootExpectedImageFormatSpec::Xfs,
+        RawBuildrootExpectedImageFormat::File => BuildrootExpectedImageFormatSpec::File,
     }
 }
 

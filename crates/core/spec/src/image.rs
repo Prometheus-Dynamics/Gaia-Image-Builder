@@ -114,6 +114,8 @@ pub enum BuildrootExpectedImageFormatSpec {
     Erofs,
     /// `rootfs.xfs`, Buildroot 2026.08+ (`BR2_TARGET_ROOTFS_XFS`).
     Xfs,
+    /// A plain file with any name (`format = "file"`).
+    File,
 }
 
 impl BuildrootExpectedImageFormatSpec {
@@ -137,6 +139,7 @@ impl BuildrootExpectedImageFormatSpec {
             Self::Kernel => "kernel",
             Self::Erofs => "erofs",
             Self::Xfs => "xfs",
+            Self::File => "file",
         }
     }
 }

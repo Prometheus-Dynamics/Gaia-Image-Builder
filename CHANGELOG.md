@@ -16,6 +16,27 @@ This cycle also moves the toolchain pin and `rust-version` to Rust 1.99.0
 (installing Gaia needs Rust 1.99 or newer), upgrades every dependency to its
 newest release, and updates the Rust docker images to 1.99.0.
 
+### Buildroot host-finalize skipped when nothing changed
+
+- Every Buildroot `make` ran `host-finalize`, which copies each package's
+  per-package host tree into `host/`: on a real tree (130 packages) it walks
+  ~770,000 entries to write ~25,000 files, ~14 s, even with nothing to build.
+  Gaia's Buildroot patch now skips that copy while a marker in `host/` is newer
+  than every installed stamp and everything under `per-package/` and lists the
+  same packages. Gaia removes the marker whenever it changes those trees itself
+  (package cache restores, package rebuilds and dircleans, full cleans, redone
+  interrupted packages); refreshing the stamps of unchanged cached packages
+  keeps it current. Measured: `make target-finalize` 24 s -> 13 s.
+
+### Failure text and assembly checks
+
+- The run summary (`<out>/.gaia/reports/<build>.summary.json`) has an `errors` array with each failed operation's `operation_id`, `code`, `class` and `message`. The last-run file (`<build_dir>/.gaia-run.last.json`) has an `errors` array with the same operation, code and message; `gaia status` and the TUI's finished-run view list them. Older last-run files read as having no errors.
+- Assembly references into `$provider.images/<name>` (`files.src`, `files.src_glob`, `transforms.src`, partition `image`, archive member `src`) are validated against the Buildroot `expected_images` when that list is not empty: a name that is neither collected nor produced by the assembly is an `assembly_provider_image_not_collected` error. A glob is checked only when no expected name can match its literal prefix.
+- `[[image.expected_images]] format = "file"` accepts a plain file of any name (no defconfig support needed). Use it for images Buildroot's post-image scripts write under a name without a format suffix. The other formats keep their name checks.
+- Preview says a reuse component the recorded state never named "has no earlier record (first run with this Gaia)" instead of "changed".
+- `image:prepare` no longer depends on `BR2_ROOTFS_POST_IMAGE_SCRIPT`: prepare stops at target-finalize, so only `image:build` takes the post-image script into its fingerprint. Post-build, post-fakeroot and external files still count for both. The first run after upgrading reruns prepare once if the build sets a post-image script, since its fingerprint changes.
+- The run summary's `image_sizes` and size notes skip compressed archives (`.xz`, `.zst`, `.gz`, `.bz2`, `.lz4`, `.lzma`, `.zip`, `.tgz`, `.tar.*`): their file length says nothing about the disk inside.
+
 ### Smaller raw disk images
 
 - `[[image.assembly.disks]] truncate = "last-data"` ends the raw file after the last written byte (rounded up to the alignment) while the partition table still lists every partition at its full size. MBR only.

@@ -128,6 +128,7 @@ pub(crate) fn redo_interrupted_packages(
         redone.push(build.name);
     }
     let _ = fs::remove_file(&marker);
+    invalidate_host_finalized(output_dir);
     redone.sort();
     Ok(vec![if redone.is_empty() {
         "resuming an interrupted Buildroot make: no package was half built".to_string()
@@ -244,7 +245,11 @@ mod tests {
             None,
         );
         assert!(cancelled.is_err());
+        // A host copy from before the killed make is not current any more.
+        fs::create_dir_all(output.join("host")).expect("host");
+        fs::write(output.join("host").join(HOST_FINALIZED_MARKER), "x").expect("marker");
         let messages = redo_interrupted_packages(&output, &[Some(&graph)]).expect("redo");
+        assert!(!output.join("host").join(HOST_FINALIZED_MARKER).exists());
         assert_eq!(
             messages,
             [

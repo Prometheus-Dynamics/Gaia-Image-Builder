@@ -478,6 +478,7 @@ mod tests {
                 outcome: "completed".into(),
                 ended_at: 1_500,
                 status,
+                errors: Vec::new(),
             }),
         }
     }

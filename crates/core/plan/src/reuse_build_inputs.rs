@@ -127,10 +127,21 @@ fn sourced_paths(contents: &str) -> Vec<String> {
         .collect()
 }
 
+/// The label of the post-image script component (see
+/// [`post_script_components`]).
+const POST_IMAGE_LABEL: &str = "post-image script ";
+
 /// The Buildroot components of an image operation: each post script (see
 /// [`post_script_components`]) and each file of each `BR2_EXTERNAL` tree. Empty
 /// for a non-Buildroot image or a build with no external tree or scripts.
-pub(crate) fn buildroot_image_components(spec: &ResolvedBuildSpec) -> Vec<(String, String)> {
+///
+/// The post-image script runs only in `image:build` (`include_post_image`):
+/// `image:prepare` stops at target-finalize and never reaches it, so a change
+/// to that script must not make prepare run.
+pub(crate) fn buildroot_image_components(
+    spec: &ResolvedBuildSpec,
+    include_post_image: bool,
+) -> Vec<(String, String)> {
     let ImageDefinition::Buildroot(buildroot) = &spec.image.definition else {
         return Vec::new();
     };
@@ -142,6 +153,9 @@ pub(crate) fn buildroot_image_components(spec: &ResolvedBuildSpec) -> Vec<(Strin
     let trees = external_trees(&spec.workspace, buildroot.external_tree.as_deref());
     let mut components =
         post_script_components(&spec.workspace, buildroot, &trees, buildroot_dir.as_deref());
+    if !include_post_image {
+        components.retain(|(name, _)| !name.starts_with(POST_IMAGE_LABEL));
+    }
     components.extend(
         external_tree_files(&trees)
             .into_iter()
@@ -275,6 +289,27 @@ mod tests {
     }
 
     #[test]
+    fn a_post_image_script_change_does_not_flip_the_prepare_fingerprint() {
+        let root = workspace_dir("post-image-prepare");
+        let script = root.join("board/raze/post-image.sh");
+        write(&script, "#!/bin/sh\necho one\n");
+        let spec = buildroot_spec(&root, None, "board/raze/post-image.sh");
+        let prepare = operation_fingerprint(&spec, &OperationKind::PrepareImage);
+        let build = operation_fingerprint(&spec, &OperationKind::BuildImage);
+        write(&script, "#!/bin/sh\necho two\n");
+        assert_eq!(
+            prepare,
+            operation_fingerprint(&spec, &OperationKind::PrepareImage),
+            "prepare stops before post-image"
+        );
+        assert_ne!(
+            build,
+            operation_fingerprint(&spec, &OperationKind::BuildImage)
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn an_external_mk_change_flips_the_image_fingerprints_and_names_its_file() {
         let root = workspace_dir("external-mk");
         let external = root.join("ext");
@@ -287,7 +322,7 @@ mod tests {
         let spec = buildroot_spec(&root, Some("ext"), "board/none.sh");
         let before_prepare = operation_fingerprint(&spec, &OperationKind::PrepareImage);
         let before_build = operation_fingerprint(&spec, &OperationKind::BuildImage);
-        let components = buildroot_image_components(&spec);
+        let components = buildroot_image_components(&spec, true);
         assert!(
             components
                 .iter()

@@ -145,6 +145,7 @@ pub(crate) fn restore_cached_packages(
     });
     let keep_source = packages_reading_sources(spec, &graph);
     for (name, build_dir) in source_less_build_dirs(output_dir, &graph, &keep_source) {
+        invalidate_host_finalized(output_dir);
         let _ = gaia_process::discard(&build_dir);
         let _ = gaia_process::discard(&output_dir.join("per-package").join(&name));
         tracing::info!(
@@ -160,13 +161,23 @@ pub(crate) fn restore_cached_packages(
         &keys,
         &excluded_from_restore(&keep_source, &requested),
     );
+    let host_current = host_finalized_current(output_dir);
     refresh_current_stamps(output_dir, &graph, &keys);
+    if host_current {
+        // The refreshed stamps lie at most 10 ms per stamp ahead; make
+        // itself takes seconds to start, so anything it installs is later.
+        keep_host_finalized_after(
+            output_dir,
+            std::time::SystemTime::now() + std::time::Duration::from_secs(1),
+        );
+    }
     pin_restored_linux_version(output_dir, &graph)?;
     messages.push(gaia_process::step_time_message(
         "package cache keys and restore",
         started.elapsed(),
     ));
     if !restored.is_empty() {
+        invalidate_host_finalized(output_dir);
         let line = format!(
             "restored {} Buildroot package(s) from the package cache: {}",
             restored.len(),

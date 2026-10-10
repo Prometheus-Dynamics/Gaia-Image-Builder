@@ -384,7 +384,10 @@ pub fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
             image_backend_signature(spec, &spec.image).hash(&mut hasher);
             // Post scripts and BR2_EXTERNAL files by content (see
             // reuse_build_inputs); only hashed when there are some.
-            let content = crate::reuse_build_inputs::buildroot_image_components(spec);
+            let content = crate::reuse_build_inputs::buildroot_image_components(
+                spec,
+                matches!(kind, OperationKind::BuildImage),
+            );
             if !content.is_empty() {
                 format!("{content:?}").hash(&mut hasher);
             }

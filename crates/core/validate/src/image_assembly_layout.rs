@@ -5,6 +5,7 @@ use gaia_spec::{AssemblyArchiveMemberSourceSpec, ImageAssemblySpec, ResolvedBuil
 use crate::ValidationDiagnostic;
 use crate::diagnostics::error;
 use crate::image_assembly::validate_assembly_path_template;
+use crate::image_assembly_collected::validate_collected_reference;
 
 /// ustar `name` field length; longer names are rejected rather than split
 /// into the `prefix` field.
@@ -214,6 +215,13 @@ pub(crate) fn validate_archives(
                         tree_ids,
                         src,
                         "image.assembly.archives.members.src",
+                        diagnostics,
+                    );
+                    validate_collected_reference(
+                        spec,
+                        src,
+                        &format!("archives[{}].members[{}].src", archive.id, member.name),
+                        "image.assembly.archives.members",
                         diagnostics,
                     );
                 }
