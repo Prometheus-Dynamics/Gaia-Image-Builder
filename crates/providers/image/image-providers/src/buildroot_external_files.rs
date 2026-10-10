@@ -196,6 +196,16 @@ fn package_of_path(relative: &str) -> BTreeSet<String> {
     if parts.len() >= 3 && parts[0] == "package" {
         packages.insert(parts[1].to_string());
     }
+    // Buildroot's `linux/` directory of an external tree holds the kernel
+    // extensions (`linux-ext-*.mk`, `Config.ext.in`, the kernel's config
+    // fragments and patches): all of it belongs to the linux package.
+    if parts.len() >= 2 && parts[0] == "linux" {
+        packages.insert("linux".to_string());
+    }
+    // `<name>/patches/<file>` at the top: the patches of package `<name>`.
+    if parts.len() >= 3 && parts[1] == "patches" {
+        packages.insert(parts[0].to_string());
+    }
     // `<name>/<file>` below a `patches` directory: the file is at least two
     // components past it.
     for (index, part) in parts.iter().enumerate() {
@@ -413,6 +423,32 @@ mod tests {
         );
         // A `patches` directory with no file below a package names none.
         assert!(package_of_path("board/raze/patches/linux").is_empty());
+    }
+
+    #[test]
+    fn linux_extensions_and_top_level_package_patches_name_their_package() {
+        // The raze tree's kernel patch: a linux post-patch hook in external.mk
+        // applies linux/patches/*.patch, and no BR2_ setting names it.
+        assert_eq!(
+            package_of_path(
+                "linux/patches/0001-misc-ws2812-pio-rp1-clear_on_probe-parameter.patch"
+            ),
+            BTreeSet::from(["linux".to_string()])
+        );
+        assert_eq!(
+            package_of_path("linux/ov9782/0001-media-i2c-ov9282-add-ov9782-variant-draft.patch"),
+            BTreeSet::from(["linux".to_string()])
+        );
+        assert_eq!(
+            package_of_path("linux/raze.config"),
+            BTreeSet::from(["linux".to_string()])
+        );
+        assert_eq!(
+            package_of_path("libcamera/patches/0001-fix.patch"),
+            BTreeSet::from(["libcamera".to_string()])
+        );
+        // A patch directory below a board names no package.
+        assert!(package_of_path("board/raze/patches/0001-fix.patch").is_empty());
     }
 
     #[test]

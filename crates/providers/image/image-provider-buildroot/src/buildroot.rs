@@ -133,7 +133,7 @@ pub(crate) fn run_buildroot_with(
     let br2_external = configured.br2_external.as_deref();
     let package_overrides = &configured.package_overrides;
     let clock = gaia_process::ActiveClock::start();
-    let mut changes = tree_changes(output_dir, spec, &configured);
+    let mut changes = tree_changes(output_dir, buildroot_dir, spec, &configured);
     messages.push(phase_step_message("tree changes", &clock, &[]));
     for line in &changes.external_reasons {
         log_line(&command_context, line.clone());

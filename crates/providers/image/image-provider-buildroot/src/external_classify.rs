@@ -1,9 +1,10 @@
 //! What a changed `BR2_EXTERNAL` file that the package mapping names no
 //! package for affects, so a change to it cleans no more than it must:
 //! - a file a package's `.config` setting names (a kernel config fragment,
-//!   a package's config file) rebuilds that package (`owning_package`), and
-//!   the skeleton of `BR2_ROOTFS_SKELETON_CUSTOM_PATH` rebuilds
-//!   `skeleton-custom`;
+//!   a package's config file, `BR2_LINUX_KERNEL_PATCH`) rebuilds that package
+//!   (`owning_package`), a file under a `BR2_GLOBAL_PATCH_DIR` entry rebuilds
+//!   the package of the subdirectory it is in, and the skeleton of
+//!   `BR2_ROOTFS_SKELETON_CUSTOM_PATH` rebuilds `skeleton-custom`;
 //! - a file under an overlay, a device or users table, or beside the
 //!   post-build or post-fakeroot script is installed by target finalization:
 //!   `target/` is reassembled, no package rebuilds;
@@ -38,6 +39,8 @@ const FINALIZE_SCRIPT_SETTINGS: &[&str] = &[
 const POST_IMAGE_SCRIPT_SETTING: &str = "BR2_ROOTFS_POST_IMAGE_SCRIPT";
 const SKELETON_SETTING: &str = "BR2_ROOTFS_SKELETON_CUSTOM_PATH";
 const SKELETON_PACKAGE: &str = "skeleton-custom";
+/// Directories whose `<package>/` subdirectories hold that package's patches.
+const GLOBAL_PATCH_DIR_SETTING: &str = "BR2_GLOBAL_PATCH_DIR";
 
 /// What the changed external files of a tree affect.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -94,8 +97,10 @@ fn normal_path(path: &Path) -> PathBuf {
     }
 }
 
-/// The settings of a `.config` (`KEY=value` lines), with their paths.
-fn settings(config: &str, trees: &[ExternalTree]) -> Vec<Setting> {
+/// The settings of a `.config` (`KEY=value` lines), with their paths. A
+/// relative path is relative to the Buildroot top directory, as Buildroot
+/// reads it.
+fn settings(config: &str, trees: &[ExternalTree], buildroot_dir: &Path) -> Vec<Setting> {
     config
         .lines()
         .filter_map(|line| {
@@ -107,9 +112,14 @@ fn settings(config: &str, trees: &[ExternalTree]) -> Vec<Setting> {
             let value = expand_external_paths(value.trim().trim_matches('"'), trees);
             let paths = value
                 .split_whitespace()
-                .map(Path::new)
-                .filter(|path| path.is_absolute())
-                .map(normal_path)
+                .map(|entry| {
+                    let path = Path::new(entry);
+                    if path.is_absolute() {
+                        normal_path(path)
+                    } else {
+                        normal_path(&buildroot_dir.join(path))
+                    }
+                })
                 .collect();
             Some(Setting {
                 key: key.to_string(),
@@ -132,6 +142,20 @@ fn is_metadata(relative: &str) -> bool {
         || parts.iter().any(|part| *part == "docs" || *part == "doc")
 }
 
+/// The known package a file under a `BR2_GLOBAL_PATCH_DIR` entry patches:
+/// the first directory below the entry (`<patchdir>/<pkg>/[<version>/]*`).
+fn global_patch_package<'a>(
+    setting: &Setting,
+    path: &Path,
+    known: &BTreeSet<&'a str>,
+) -> Option<&'a str> {
+    setting.paths.iter().find_map(|entry| {
+        let rest = path.strip_prefix(entry).ok()?;
+        let first = rest.components().next()?.as_os_str().to_str()?;
+        known.get(first).copied()
+    })
+}
+
 fn classify_file(
     key: &str,
     path: &Path,
@@ -146,6 +170,11 @@ fn classify_file(
         if setting.key == SKELETON_SETTING {
             packages.insert(SKELETON_PACKAGE.to_string());
             read_by.push(setting.key.clone());
+        } else if setting.key == GLOBAL_PATCH_DIR_SETTING {
+            if let Some(package) = global_patch_package(setting, path, known) {
+                packages.insert(package.to_string());
+                read_by.push(setting.key.clone());
+            }
         } else if let Some(package) = owning_package(&setting.key, known) {
             packages.insert(package.to_string());
             read_by.push(setting.key.clone());
@@ -211,13 +240,16 @@ fn classify_file(
 
 /// The classification of changed external files: `unmapped` are the keys
 /// the package mapping named no package for (see `external_changes`).
+/// `buildroot_dir` is the Buildroot top directory, which relative setting
+/// paths are relative to.
 pub(crate) fn classify_external_changes(
     unmapped: &[String],
     trees: &[ExternalTree],
     config: &str,
     known: &BTreeSet<&str>,
+    buildroot_dir: &Path,
 ) -> ExternalClassification {
-    let settings = settings(config, trees);
+    let settings = settings(config, trees, buildroot_dir);
     let mut classification = ExternalClassification::default();
     for key in unmapped {
         let (tree_name, relative) = key.split_once(':').unwrap_or(("", key));
@@ -263,8 +295,65 @@ mod tests {
     }
 
     fn classify(keys: &[&str], config: &str) -> ExternalClassification {
+        classify_in(Path::new("/nonexistent-buildroot"), keys, config)
+    }
+
+    fn classify_in(buildroot: &Path, keys: &[&str], config: &str) -> ExternalClassification {
         let keys = keys.iter().map(|key| key.to_string()).collect::<Vec<_>>();
-        classify_external_changes(&keys, &trees(), config, &known())
+        classify_external_changes(&keys, &trees(), config, &known(), buildroot)
+    }
+
+    #[test]
+    fn a_global_patch_dir_subdirectory_names_its_package() {
+        let classification = classify(
+            &["RAZE:patchset/linux/0001-fix.patch"],
+            "BR2_GLOBAL_PATCH_DIR=\"$(BR2_EXTERNAL_RAZE_PATH)/patchset\"\n",
+        );
+        assert_eq!(
+            classification.packages,
+            BTreeSet::from(["linux".to_string()])
+        );
+        assert_eq!(classification.reasons.len(), 1, "{classification:?}");
+        assert!(classification.finalize.is_empty());
+        assert!(classification.unmapped.is_empty());
+    }
+
+    #[test]
+    fn a_relative_global_patch_dir_is_relative_to_the_buildroot_top() {
+        // The top directory is the external tree's own directory here, so the
+        // relative entry lies in the tree.
+        let classification = classify_in(
+            Path::new("/nonexistent-workspace/raze"),
+            &["RAZE:patchset/zlib/0001-fix.patch"],
+            "BR2_GLOBAL_PATCH_DIR=\"patchset\"\n",
+        );
+        assert_eq!(
+            classification.packages,
+            BTreeSet::from(["zlib".to_string()])
+        );
+    }
+
+    #[test]
+    fn a_global_patch_subdirectory_that_is_no_package_reassembles_the_target() {
+        let classification = classify(
+            &["RAZE:patchset/not-a-package/0001-fix.patch"],
+            "BR2_GLOBAL_PATCH_DIR=\"$(BR2_EXTERNAL_RAZE_PATH)/patchset\"\n",
+        );
+        assert!(classification.packages.is_empty());
+        assert_eq!(classification.finalize.len(), 1, "{classification:?}");
+    }
+
+    #[test]
+    fn a_kernel_patch_directory_rebuilds_linux() {
+        let classification = classify(
+            &["RAZE:linux/patches/0001-misc-ws2812-pio-rp1-clear_on_probe-parameter.patch"],
+            "BR2_LINUX_KERNEL_PATCH=\"$(BR2_EXTERNAL_RAZE_PATH)/linux/patches\"\n",
+        );
+        assert_eq!(
+            classification.packages,
+            BTreeSet::from(["linux".to_string()])
+        );
+        assert!(classification.finalize.is_empty());
     }
 
     #[test]

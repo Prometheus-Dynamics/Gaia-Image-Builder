@@ -136,14 +136,134 @@ pub(crate) fn tree_dir(base: &Path, output_dir: &Path) -> PathBuf {
         .join("buildroot-output")
 }
 
+/// Written in a mirror after its copy succeeds: the identity of the source it
+/// was copied from. A later mirror with the same identity is skipped.
+const MIRROR_SOURCE_MARKER: &str = ".gaia-mirror-source";
+
+/// Keys of the source provider's state (`.gaia-source-state.txt`) that name
+/// the source's content. Per-build fields (build version, profile, ...) are
+/// left out.
+const SOURCE_CONTENT_KEYS: &[&str] = &[
+    "resolved_commit_sha",
+    "materialized_head_commit",
+    "materialized_tree_digest",
+    "extracted_tree_digest",
+    "archive_sha256",
+];
+
+/// The content keys that are a digest of the whole tree. A source with none
+/// of them recorded has no trusted identity (a path source is a live
+/// reference, its recorded fingerprint says nothing about later edits).
+const SOURCE_TREE_DIGEST_KEYS: &[&str] = &[
+    "materialized_tree_digest",
+    "extracted_tree_digest",
+    "archive_sha256",
+];
+
+/// Entries of the source the mirror does not copy: the source provider's
+/// own files, and the download and output directories `rsync` excludes.
+const MIRROR_SKIPPED: &[&str] = &[
+    ".git",
+    ".gaia",
+    "source.txt",
+    ".gaia-source-state.txt",
+    "dl",
+    "output",
+];
+
+/// Identity of a Buildroot source for its mirror: the content the source
+/// provider recorded, and the metadata of the source directory and its
+/// top-level entries, which changes when the source is materialized again.
+/// Taken before anything is copied, so a source that changes during a copy
+/// differs from the recorded identity next time.
+struct SourceIdentity {
+    /// Stored in the mirror's marker; compared as text.
+    text: String,
+    /// Top-level entries the mirror must hold.
+    names: Vec<std::ffi::OsString>,
+}
+
+fn source_identity(buildroot_dir: &Path) -> Option<SourceIdentity> {
+    use std::os::unix::fs::MetadataExt;
+    let state = fs::read_to_string(buildroot_dir.join(".gaia-source-state.txt")).ok()?;
+    let state = gaia_spec::KeyValueState::parse(&state).into_map();
+    let recorded = |key: &str| state.get(key).filter(|value| !value.trim().is_empty());
+    if !SOURCE_TREE_DIGEST_KEYS
+        .iter()
+        .any(|key| recorded(key).is_some())
+    {
+        return None;
+    }
+    let stamp = |metadata: &fs::Metadata| {
+        format!(
+            "{}:{}:{}.{}:{}.{}",
+            metadata.dev(),
+            metadata.ino(),
+            metadata.mtime(),
+            metadata.mtime_nsec(),
+            metadata.ctime(),
+            metadata.ctime_nsec()
+        )
+    };
+    let mut text = String::new();
+    for key in SOURCE_CONTENT_KEYS {
+        if let Some(value) = recorded(key) {
+            text.push_str(&format!("{key}={value}\n"));
+        }
+    }
+    text.push_str(&format!(
+        "dir={}\n",
+        stamp(&fs::symlink_metadata(buildroot_dir).ok()?)
+    ));
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(buildroot_dir).ok()?.flatten() {
+        let name = entry.file_name();
+        if name
+            .to_str()
+            .is_some_and(|name| MIRROR_SKIPPED.contains(&name))
+        {
+            continue;
+        }
+        let metadata = entry.metadata().ok()?;
+        entries.push((name, stamp(&metadata)));
+    }
+    entries.sort();
+    for (name, entry_stamp) in &entries {
+        text.push_str(&format!("entry={}:{entry_stamp}\n", name.to_string_lossy()));
+    }
+    Some(SourceIdentity {
+        text,
+        names: entries.into_iter().map(|(name, _)| name).collect(),
+    })
+}
+
+/// Whether a mirror holds exactly the source with this identity: its marker
+/// matches, and every top-level entry of the source is in it.
+fn mirror_is_current(mirror: &Path, identity: &SourceIdentity) -> bool {
+    fs::read_to_string(mirror.join(MIRROR_SOURCE_MARKER))
+        .is_ok_and(|marker| marker == identity.text)
+        && identity
+            .names
+            .iter()
+            .all(|name| fs::symlink_metadata(mirror.join(name)).is_ok())
+}
+
 /// For a RAM tree, a mirror of the Buildroot source next to it: `make`
 /// parses every package's `.mk` on each run, which on a busy disk can stall
 /// a build for minutes. Kept in step with `rsync`; the source itself when
 /// the mirror cannot be made.
+///
+/// A mirror whose source has the same recorded identity (see
+/// [`source_identity`]) is not copied again: `rsync` would stat every file of
+/// the source, which on a slow disk takes far longer than the build step it
+/// serves. The patches Gaia applies to the mirror afterwards are idempotent;
+/// when this run applies none (`parallel_packages` off), the mirror's Gaia
+/// patches are reverted, as a copy would have them.
 pub(crate) fn buildroot_source_for(
     buildroot_dir: &Path,
     work: &WorkDir,
-) -> (PathBuf, Option<String>) {
+    parallel_packages: bool,
+) -> (PathBuf, Vec<String>) {
     let Some(mirror) = work
         .ram
         .then(|| {
@@ -153,8 +273,20 @@ pub(crate) fn buildroot_source_for(
         })
         .flatten()
     else {
-        return (buildroot_dir.to_path_buf(), None);
+        return (buildroot_dir.to_path_buf(), Vec::new());
     };
+    let identity = source_identity(buildroot_dir);
+    if let Some(identity) = &identity
+        && mirror_is_current(&mirror, identity)
+        && (parallel_packages || revert_gaia_patches(&mirror).is_ok())
+    {
+        return (
+            mirror,
+            vec!["buildroot source mirror: unchanged".to_string()],
+        );
+    }
+    // The marker goes first: a copy that is interrupted leaves no marker.
+    let _ = fs::remove_file(mirror.join(MIRROR_SOURCE_MARKER));
     let synced = fs::create_dir_all(&mirror).is_ok()
         && Command::new("rsync")
             .args([
@@ -171,15 +303,18 @@ pub(crate) fn buildroot_source_for(
             .status()
             .is_ok_and(|status| status.success());
     if synced {
-        (mirror, None)
+        if let Some(identity) = &identity {
+            let _ = fs::write(mirror.join(MIRROR_SOURCE_MARKER), &identity.text);
+        }
+        (mirror, Vec::new())
     } else {
         (
             buildroot_dir.to_path_buf(),
-            Some(format!(
+            vec![format!(
                 "could not mirror the Buildroot source into '{}'; reading it from '{}'",
                 mirror.display(),
                 buildroot_dir.display()
-            )),
+            )],
         )
     }
 }
@@ -441,5 +576,149 @@ mod tests {
         assert!(ram_low(Some(GIB), Some(30 * GIB)).is_some());
         assert!(ram_low(Some(64 * GIB), Some(GIB)).is_some());
         assert!(ram_low(None, None).is_none());
+    }
+
+    /// A Buildroot source as a source provider materializes it, recording
+    /// `digest`.
+    fn materialized_source(root: &Path, digest: &str) -> PathBuf {
+        let source = root.join("source");
+        fs::create_dir_all(source.join("package")).expect("source dirs");
+        fs::write(source.join("Makefile"), "all:\n").expect("makefile");
+        fs::write(source.join("package/pkg-utils.mk"), "# pkg\n").expect("pkg-utils");
+        fs::write(
+            source.join(".gaia-source-state.txt"),
+            format!("materialized_tree_digest={digest}\nbuild_version=1\n"),
+        )
+        .expect("state");
+        source
+    }
+
+    fn ram_work(root: &Path) -> WorkDir {
+        WorkDir {
+            dir: root.join("tree/buildroot-output"),
+            ram: true,
+            messages: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn an_unchanged_source_is_not_copied_again() {
+        let root = temp("mirror-skip");
+        let source = materialized_source(&root, "tree-1");
+        let work = ram_work(&root);
+        let (mirror, notes) = buildroot_source_for(&source, &work, true);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(
+            fs::read_to_string(mirror.join("Makefile")).expect("mirror"),
+            "all:\n"
+        );
+
+        // A copy would restore this; the skipped mirror keeps it.
+        fs::write(mirror.join("Makefile"), "kept by the test\n").expect("sentinel");
+        let (again, notes) = buildroot_source_for(&source, &work, true);
+        assert_eq!(again, mirror);
+        assert_eq!(notes, ["buildroot source mirror: unchanged"]);
+        assert_eq!(
+            fs::read_to_string(mirror.join("Makefile")).expect("kept"),
+            "kept by the test\n"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_changed_digest_or_entry_copies_the_source_again() {
+        let root = temp("mirror-changed");
+        let source = materialized_source(&root, "tree-1");
+        let work = ram_work(&root);
+        let (mirror, _) = buildroot_source_for(&source, &work, true);
+        fs::write(mirror.join("Makefile"), "kept by the test\n").expect("sentinel");
+
+        // Re-materialized with another digest: copied.
+        fs::write(
+            source.join(".gaia-source-state.txt"),
+            "materialized_tree_digest=tree-2\n",
+        )
+        .expect("new digest");
+        let (_, notes) = buildroot_source_for(&source, &work, true);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(
+            fs::read_to_string(mirror.join("Makefile")).expect("copied"),
+            "all:\n"
+        );
+
+        // A new top-level entry, with the same digest: copied.
+        fs::write(mirror.join("Makefile"), "kept by the test\n").expect("sentinel");
+        fs::write(source.join("extra.txt"), "new\n").expect("entry");
+        buildroot_source_for(&source, &work, true);
+        assert_eq!(
+            fs::read_to_string(mirror.join("Makefile")).expect("copied"),
+            "all:\n"
+        );
+        assert!(mirror.join("extra.txt").is_file());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_missing_mirror_is_copied_in_full() {
+        let root = temp("mirror-missing");
+        let source = materialized_source(&root, "tree-1");
+        let work = ram_work(&root);
+        let (mirror, _) = buildroot_source_for(&source, &work, true);
+        // Cleared, as after a reboot, while the source is unchanged.
+        fs::remove_dir_all(&mirror).expect("reboot");
+        let (mirror, notes) = buildroot_source_for(&source, &work, true);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert!(mirror.join("Makefile").is_file());
+        assert!(mirror.join("package/pkg-utils.mk").is_file());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_source_without_a_trusted_identity_is_copied_every_time() {
+        let root = temp("mirror-untrusted");
+        let source = materialized_source(&root, "tree-1");
+        // A path-only record names no content.
+        fs::write(
+            source.join(".gaia-source-state.txt"),
+            "path=/somewhere\npath_digest=abc\n",
+        )
+        .expect("state");
+        let work = ram_work(&root);
+        let (mirror, _) = buildroot_source_for(&source, &work, true);
+        fs::write(mirror.join("Makefile"), "kept by the test\n").expect("sentinel");
+        let (_, notes) = buildroot_source_for(&source, &work, true);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(
+            fs::read_to_string(mirror.join("Makefile")).expect("copied"),
+            "all:\n"
+        );
+        assert!(!mirror.join(MIRROR_SOURCE_MARKER).exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_skipped_mirror_reverts_gaia_patches_when_no_patches_apply() {
+        let root = temp("mirror-patches");
+        let source = materialized_source(&root, "tree-1");
+        let work = ram_work(&root);
+        let (mirror, _) = buildroot_source_for(&source, &work, true);
+        // What an earlier parallel run left in the mirror.
+        let patched = format!("{HOST_FINALIZE_SKIP}\n");
+        fs::write(mirror.join("Makefile"), &patched).expect("patched");
+
+        // Parallel packages: the patches stay, the next patch step keeps them.
+        buildroot_source_for(&source, &work, true);
+        assert_eq!(
+            fs::read_to_string(mirror.join("Makefile")).expect("kept"),
+            patched
+        );
+        // Not parallel: the mirror reads as a fresh copy would.
+        let (_, notes) = buildroot_source_for(&source, &work, false);
+        assert_eq!(notes, ["buildroot source mirror: unchanged"]);
+        assert_eq!(
+            fs::read_to_string(mirror.join("Makefile")).expect("reverted"),
+            HOST_FINALIZE_UPSTREAM.to_string() + "\n"
+        );
+        let _ = fs::remove_dir_all(root);
     }
 }

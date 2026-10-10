@@ -196,6 +196,7 @@ pub(crate) fn configure_tree(
 /// Compares a configured tree with the state its last build recorded.
 pub(crate) fn tree_changes(
     output_dir: &Path,
+    buildroot_dir: &Path,
     spec: &ResolvedBuildSpec,
     configured: &ConfiguredTree,
 ) -> TreeChanges {
@@ -262,7 +263,8 @@ pub(crate) fn tree_changes(
         .as_ref()
         .map(|graph| graph.package_names().collect::<BTreeSet<_>>())
         .unwrap_or_default();
-    let classified = classify_external_changes(&external.unmapped, &trees, &config, &known);
+    let classified =
+        classify_external_changes(&external.unmapped, &trees, &config, &known, buildroot_dir);
     override_changes.extend(external.packages);
     override_changes.extend(classified.packages);
     let mut external_reasons = external.reasons;

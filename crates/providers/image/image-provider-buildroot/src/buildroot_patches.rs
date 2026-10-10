@@ -142,6 +142,28 @@ pub(crate) fn apply_reflink_finalize(
     ))
 }
 
+/// Puts the files Gaia patches back to upstream's text, as a fresh copy of the
+/// source holds them. For a mirror kept without a copy when this run applies
+/// no patches.
+pub(crate) fn revert_gaia_patches(buildroot_dir: &Path) -> Result<(), ImageProviderError> {
+    for relative in ["Makefile", "package/pkg-utils.mk"] {
+        let path = buildroot_dir.join(relative);
+        let Ok(contents) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let upstream = without_gaia_patches(&contents);
+        if upstream != contents {
+            fs::write(&path, upstream).map_err(|error| {
+                ImageProviderError::backend_command(format!(
+                    "failed to patch '{}': {error}",
+                    path.display()
+                ))
+            })?;
+        }
+    }
+    Ok(())
+}
+
 /// Whether a file in `from` can be cloned into `to` (`cp --reflink=always`):
 /// both on one filesystem that supports reflinks.
 pub(crate) fn reflinks_between(from: &Path, to: &Path) -> bool {

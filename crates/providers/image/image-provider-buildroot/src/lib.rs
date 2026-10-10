@@ -490,8 +490,8 @@ fn place_private_tree(
         .map(|(_, check)| check.clone())
         .or(cancel_check);
     let clock = gaia_process::ActiveClock::start();
-    let (source, note) = buildroot_source_for(buildroot_dir, &work);
-    messages.extend(note);
+    let (source, notes) = buildroot_source_for(buildroot_dir, &work, policy.parallel_packages);
+    messages.extend(notes);
     messages.push(phase_step_message("buildroot source mirror", &clock, &[]));
     Ok(PrivateTree {
         work,

@@ -16,6 +16,15 @@ This cycle also moves the toolchain pin and `rust-version` to Rust 1.99.0
 (installing Gaia needs Rust 1.99 or newer), upgrades every dependency to its
 newest release, and updates the Rust docker images to 1.99.0.
 
+### Buildroot source mirror kept while the source is unchanged
+
+- A RAM build's Buildroot source mirror is no longer copied again on every operation when the source is unchanged. `rsync` had to stat every file of the source on a busy disk (36 s in one run). The mirror is kept when its marker (`.gaia-mirror-source`, the source's recorded tree digest and its top-level entries' metadata) matches the source; the run reports "buildroot source mirror: unchanged". A missing or incomplete mirror, a changed source, or a source with no recorded tree digest is copied in full, as before.
+
+### External files of a kernel extension rebuild linux
+
+- A changed file under an external tree's `linux/` directory (Buildroot's kernel-extension directory, such as `linux/patches/*.patch` applied by a linux post-patch hook) now rebuilds `linux`, instead of reassembling the target as a file that "maps to no package". A `<name>/patches/<file>` path names package `<name>`.
+- A file under a `BR2_GLOBAL_PATCH_DIR` entry names the package of the subdirectory it is in, when that package is known.
+
 ### Run explains its rebuilds by input
 
 - `gaia run` now names the changed inputs of a rebuild, as `gaia preview` does: the run log and `<build>.rebuild-reasons.json` say, for example, "config_overrides changed (BR2_A)" instead of "fingerprint changed (no detail recorded)". Both commands share one explanation, read from the recorded inputs before the run overwrites them.

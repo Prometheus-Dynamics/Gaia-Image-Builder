@@ -272,7 +272,7 @@ pub(crate) fn preview_buildroot(
         .filter(|message| !message.starts_with(gaia_process::STEP_TIME_PREFIX))
         .cloned()
         .collect::<Vec<_>>();
-    let mut changes = tree_changes(&scratch.tree, spec, &configured);
+    let mut changes = tree_changes(&scratch.tree, &buildroot_dir, spec, &configured);
     let config = fs::read_to_string(scratch.tree.join(".config")).unwrap_or_default();
     let previous_decisions =
         fs::read_to_string(scratch.tree.join(DECISIONS_FILE)).unwrap_or_default();
