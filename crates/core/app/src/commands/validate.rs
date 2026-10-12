@@ -1,28 +1,84 @@
-use gaia_config::{ResolveOptions, try_resolve_config_with_options};
-use gaia_validate::validate_spec_with_providers;
+use gaia_config::{ResolveOptions, resolve_variant_specs};
+use gaia_spec::ResolvedBuildSpec;
+use gaia_validate::{ValidationReport, validate_spec_with_providers};
 
 use crate::AppContext;
 
 use super::CommandOutcome;
+use super::variants::{VariantSource, prepare_variants, selected_variants, variant_id};
 
+/// Validates the build. A build with `[[variants]]` is validated as every
+/// variant (or the ones `--variant` names), each resolved the way `run` and
+/// `preview` resolve it, with every diagnostic prefixed by its variant.
 pub fn validate_build_command(
     context: &AppContext,
     build: &str,
     options: &ResolveOptions,
+    variants: &[String],
 ) -> CommandOutcome {
-    let spec = match try_resolve_config_with_options(build, options) {
-        Ok(spec) => spec,
+    let specs = match resolve_variant_specs(build, options) {
+        Ok(specs) => specs,
         Err(error) => {
             return CommandOutcome::Failed {
                 message: format!("{error}\nvalidate: FAILED (the build config did not resolve)"),
             };
         }
     };
-    let validation = validate_spec_with_providers(
-        &spec,
+    let has_variants = specs[0].selection.variant.is_some();
+    if !has_variants {
+        if !variants.is_empty() {
+            return CommandOutcome::Failed {
+                message: format!(
+                    "--variant needs a build that declares [[variants]]; '{build}' declares none"
+                ),
+            };
+        }
+        let spec = specs.into_iter().next().expect("one spec");
+        let validation = validate_one(context, &spec);
+        return CommandOutcome::Validated { spec, validation };
+    }
+    let selected = match selected_variants(&specs, variants) {
+        Ok(selected) => selected,
+        Err(message) => return CommandOutcome::Failed { message },
+    };
+    let mut validation = ValidationReport::default();
+    for index in selected {
+        let spec = &specs[index];
+        let id = variant_id(spec).to_string();
+        let report = validate_one(context, spec);
+        merge_prefixed(&mut validation, report, &id);
+    }
+    let spec = specs[0].clone();
+    // What `run` and `preview` check next across all variants: which
+    // operations are shared, sources the base needs that a variant changes,
+    // and colliding outputs once paths are scoped.
+    if validation.errors.is_empty()
+        && let Err(message) = prepare_variants(context, VariantSource { build, options }, specs)
+    {
+        validation.errors.push(message);
+    }
+    CommandOutcome::Validated { spec, validation }
+}
+
+fn validate_one(context: &AppContext, spec: &ResolvedBuildSpec) -> ValidationReport {
+    validate_spec_with_providers(
+        spec,
         &context.source_catalog,
         &context.artifact_catalog,
         &context.image_catalog,
-    );
-    CommandOutcome::Validated { spec, validation }
+    )
+}
+
+/// Adds `report` to `into`, each message prefixed with `variant <id>: `.
+pub(crate) fn merge_prefixed(into: &mut ValidationReport, report: ValidationReport, id: &str) {
+    let prefix = |message: &str| format!("variant {id}: {message}");
+    into.errors
+        .extend(report.errors.iter().map(|message| prefix(message)));
+    into.warnings
+        .extend(report.warnings.iter().map(|message| prefix(message)));
+    into.diagnostics
+        .extend(report.diagnostics.into_iter().map(|mut diagnostic| {
+            diagnostic.message = prefix(&diagnostic.message);
+            diagnostic
+        }));
 }

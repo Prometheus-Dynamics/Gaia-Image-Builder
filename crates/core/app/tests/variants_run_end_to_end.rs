@@ -404,3 +404,48 @@ fn selecting_one_variant_runs_its_own_operations_and_reuses_shared_ones() {
         other => panic!("expected a failure, got {other:?}"),
     }
 }
+
+/// `gaia validate` checks every variant as `run` resolves it: a variant
+/// publishing to the default variant's archive is reported, with the
+/// variant named, and `--variant` must name a declared variant.
+#[test]
+fn validate_checks_every_variant() {
+    let scenario = scenario("validate");
+    let validate = |extra: &[&str]| {
+        let mut args = vec!["validate".to_string(), scenario.build.display().to_string()];
+        args.extend(extra.iter().map(|item| (*item).to_string()));
+        run_with_args(AppArgs::parse_from(args))
+    };
+
+    match validate(&[]) {
+        CommandOutcome::Validated { validation, .. } => {
+            assert!(validation.errors.is_empty(), "{:?}", validation.errors);
+        }
+        other => panic!("expected a validation, got {other:?}"),
+    }
+
+    // v2 publishing the default variant's archive name collides.
+    let colliding = fs::read_to_string(&scenario.build)
+        .expect("build file")
+        .replace("\"variant-e2e-v2.tar\"", "\"variant-e2e-1.0.0.tar\"");
+    fs::write(&scenario.build, colliding).expect("colliding build file");
+    match validate(&[]) {
+        CommandOutcome::Validated { validation, .. } => {
+            let errors = validation.errors.join("\n");
+            assert!(
+                errors
+                    .contains("variants 'default' and 'v2' would publish to the same image output"),
+                "{errors}"
+            );
+        }
+        other => panic!("expected a validation, got {other:?}"),
+    }
+
+    match validate(&["--variant", "nope"]) {
+        CommandOutcome::Failed { message } => {
+            assert!(message.contains("unknown variant 'nope'"), "{message}");
+        }
+        other => panic!("expected a failure, got {other:?}"),
+    }
+    let _ = fs::remove_dir_all(&scenario.root);
+}

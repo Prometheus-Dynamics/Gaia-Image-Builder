@@ -88,6 +88,9 @@ pub(crate) fn prepare_variants(
     source: VariantSource<'_>,
     mut specs: Vec<ResolvedBuildSpec>,
 ) -> Result<(Vec<ResolvedBuildSpec>, VariantSplit), String> {
+    // Every declared variant must be valid, whatever `--variant` selects:
+    // which operations are shared is decided across all of them.
+    let mut errors = Vec::new();
     for spec in specs.iter() {
         let validation = validate_spec_with_providers(
             spec,
@@ -95,14 +98,20 @@ pub(crate) fn prepare_variants(
             &context.artifact_catalog,
             &context.image_catalog,
         );
-        if !validation.errors.is_empty() {
-            return Err(format!(
-                "variant '{}' of build '{}' has {} validation error(s); run 'gaia validate' with it to see them",
-                variant_id(spec),
-                specs[0].display_name(),
-                validation.errors.len()
-            ));
-        }
+        errors.extend(
+            validation
+                .errors
+                .iter()
+                .map(|error| format!("variant {}: {error}", variant_id(spec))),
+        );
+    }
+    if !errors.is_empty() {
+        return Err(format!(
+            "build '{}' has {} validation error(s) in its variants (every variant must be valid, since what they share is decided across all of them):\n{}",
+            specs[0].display_name(),
+            errors.len(),
+            errors.join("\n")
+        ));
     }
     let split = classify(context, &specs)?;
     if !split.variant_sources.is_empty() {

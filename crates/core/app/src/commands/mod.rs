@@ -215,9 +215,12 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
         },
         AppCommand::Tui => run_tui_command(context, &args),
         AppCommand::Resolve => resolve_build_command(&args.build, &resolve_options(&args)),
-        AppCommand::Validate => {
-            validate_build_command(context, &args.build, &resolve_options(&args))
-        }
+        AppCommand::Validate => validate_build_command(
+            context,
+            &args.build,
+            &resolve_options(&args),
+            &args.variants,
+        ),
         AppCommand::Plan => plan_build_command(
             context,
             &args.build,
