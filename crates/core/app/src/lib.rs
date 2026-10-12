@@ -2,6 +2,7 @@ mod cli;
 mod commands;
 mod export;
 mod output;
+mod output_variants;
 mod run_finish;
 #[cfg(feature = "tui")]
 pub mod tui;
@@ -14,7 +15,9 @@ use std::any::Any;
 use std::panic::{self, AssertUnwindSafe};
 
 pub use cli::{AppArgs, AppCommand, CacheArgs, CleanArgs, LockArgs};
-pub use commands::{CommandOutcome, CommandResult, LockChange, LockReport, LockReportEntry};
+pub use commands::{
+    CommandOutcome, CommandResult, LockChange, LockReport, LockReportEntry, VariantOutcome,
+};
 use output::print_outcome;
 pub use output::{backend_overview_lines, runtime_overview_lines};
 pub use run_finish::{RunFinish, run_finish};
@@ -78,6 +81,12 @@ fn panic_message(payload: &(dyn Any + Send)) -> String {
 impl CommandOutcome {
     pub fn exit_code(&self) -> i32 {
         match self {
+            // The worst of the variants: a run stops at its first failure.
+            Self::Variants { outcomes, .. } => outcomes
+                .iter()
+                .map(|item| item.outcome.exit_code())
+                .max()
+                .unwrap_or(0),
             Self::Help { .. } | Self::Version { .. } => 0,
             Self::TuiExited { exit_code, .. } => *exit_code,
             Self::Failed { .. } => 1,

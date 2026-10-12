@@ -60,6 +60,10 @@ Semantics:
   Add one or more runtime env overrides.
 - `--set`
   Apply explicit top-level override values.
+- `--variant <id>[,<id>]`
+  For `run`, `preview` and `plan` on a build that declares `[[variants]]`:
+  build only the named variants (`default` is the base config). Without it,
+  every variant is built. Using it on a build with no variants is an error.
 
 ## Running Part Of A Build
 

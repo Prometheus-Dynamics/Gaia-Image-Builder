@@ -116,7 +116,9 @@ pub(crate) fn build_artifact_output_metadata(
 }
 
 pub(crate) fn runtime_state_dir(spec: &ResolvedBuildSpec) -> PathBuf {
-    PathBuf::from(&spec.workspace.out_dir).join(gaia_spec::RUNTIME_STATE_DIR_NAME)
+    PathBuf::from(&spec.workspace.out_dir).join(gaia_spec::runtime_state_dir_name(
+        spec.selection.variant.as_deref(),
+    ))
 }
 
 pub(crate) fn output_hygiene_warnings(spec: &ResolvedBuildSpec) -> Vec<OutputHygieneWarningRecord> {

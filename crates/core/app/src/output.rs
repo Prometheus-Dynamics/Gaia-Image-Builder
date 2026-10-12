@@ -1,5 +1,6 @@
 //! Human-readable command output: outcome printing and overview lines.
 
+use crate::output_variants::print_variants;
 use crate::{CommandOutcome, commands};
 use gaia_report::{mask_pairs, mask_value};
 use gaia_spec::ResolvedBuildSpec;
@@ -115,6 +116,7 @@ fn slowest_step_lines(timings: &[gaia_report::OperationTimingRecord], limit: usi
 
 pub(crate) fn print_outcome(outcome: &CommandOutcome) {
     match outcome {
+        CommandOutcome::Variants { header, outcomes } => print_variants(header, outcomes),
         CommandOutcome::Help { text } | CommandOutcome::Version { text } => {
             println!("{text}");
         }

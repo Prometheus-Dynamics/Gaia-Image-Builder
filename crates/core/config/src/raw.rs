@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use serde::{Deserialize, Deserializer, de};
 
 use crate::raw_assembly::RawImageAssemblyConfig;
+pub use crate::raw_variant::RawVariantConfig;
+pub use crate::raw_when::{RawWhenConfig, RawWhenImageKind};
 
 #[path = "raw_inputs.rs"]
 mod raw_inputs;
@@ -29,6 +31,8 @@ pub struct RawBuildConfig {
     pub inputs: BTreeMap<String, RawInputOptionConfig>,
     pub preset: Option<String>,
     pub presets: BTreeMap<String, RawPresetConfig>,
+    /// `[[variants]]`: overrides that make one more image from this build.
+    pub variants: Vec<RawVariantConfig>,
     pub extends: Option<String>,
     pub imports: Vec<RawImportConfig>,
     pub env_files: Vec<String>,
@@ -648,25 +652,6 @@ pub struct RawStageServiceConfig {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
-#[serde(default, deny_unknown_fields)]
-pub struct RawWhenConfig {
-    pub target: Option<String>,
-    pub profile: Option<String>,
-    pub branch: Option<String>,
-    pub image_kind: Option<RawWhenImageKind>,
-    pub all: Vec<RawWhenConfig>,
-    pub any: Vec<RawWhenConfig>,
-    pub not: Option<Box<RawWhenConfig>>,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum RawWhenImageKind {
-    Buildroot,
-    StartingPoint,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct RawImageConfig {
     #[serde(flatten)]
@@ -698,6 +683,8 @@ pub enum RawImageDefinition {
         external_tree_mode: Option<RawBuildrootExternalTreeMode>,
         #[serde(default)]
         expected_images: Vec<RawBuildrootExpectedImageConfig>,
+        #[serde(default)]
+        rootfs: RawBuildrootRootfsConfig,
     },
     StartingPoint {
         #[serde(default)]
@@ -731,6 +718,7 @@ impl Default for RawImageDefinition {
             external_tree: None,
             external_tree_mode: None,
             expected_images: Vec::new(),
+            rootfs: RawBuildrootRootfsConfig::default(),
         }
     }
 }
@@ -751,6 +739,14 @@ pub struct RawBuildrootExpectedImageConfig {
     pub format: RawBuildrootExpectedImageFormat,
     #[serde(default)]
     pub required: bool,
+}
+
+/// `[image.rootfs]` of a Buildroot image.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawBuildrootRootfsConfig {
+    /// Buildroot packages whose files are left out of the root filesystem.
+    pub exclude_packages: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

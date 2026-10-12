@@ -9,6 +9,7 @@ pub(crate) fn apply_when_selection(raw: &mut RawBuildConfig) {
             RawImageDefinition::Buildroot { .. } => RawWhenImageKind::Buildroot,
             RawImageDefinition::StartingPoint { .. } => RawWhenImageKind::StartingPoint,
         },
+        inputs: raw.selected_inputs.iter().cloned().collect(),
     };
     let install_ids_before = raw
         .install
@@ -102,6 +103,7 @@ struct WhenContext {
     profile: Option<String>,
     branch: Option<String>,
     image_kind: RawWhenImageKind,
+    inputs: std::collections::BTreeMap<String, String>,
 }
 
 fn when_matches(when: Option<&RawWhenConfig>, context: &WhenContext) -> bool {
@@ -139,11 +141,16 @@ fn when_matches(when: Option<&RawWhenConfig>, context: &WhenContext) -> bool {
         .not
         .as_ref()
         .is_none_or(|item| !when_matches(Some(item.as_ref()), context));
+    let input_matches = when
+        .input
+        .iter()
+        .all(|(name, expected)| context.inputs.get(name) == Some(expected));
 
     target_matches
         && profile_matches
         && branch_matches
         && image_kind_matches
+        && input_matches
         && all_matches
         && any_matches
         && not_matches

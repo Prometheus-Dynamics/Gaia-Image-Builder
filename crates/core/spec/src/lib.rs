@@ -23,6 +23,7 @@ mod stage;
 mod state;
 mod target_arch;
 mod user_cache;
+mod variant;
 mod workspace;
 
 pub use artifact::{
@@ -103,7 +104,9 @@ pub use source::{
     ArchiveSourceSpec, DownloadSourceSpec, GitSourceSpec, PathSourceSpec, SourceDefinition,
     SourcePinPolicySpec, SourceProviderKind, SourceRef, SourceRefreshPolicySpec, SourceSpec,
 };
-pub use source_dirs::{source_checkout_dir, source_materialized_dir};
+pub use source_dirs::{
+    source_build_dir, source_build_dir_by_id, source_checkout_dir, source_materialized_dir,
+};
 pub use stage::{
     StageContentOriginSpec, StageEnvSetSpec, StageFileSpec, StageServiceSpec, StageSpec,
 };
@@ -114,6 +117,10 @@ pub use state::{
 pub use target_arch::{TargetArch, target_arch};
 pub use user_cache::{
     USER_BUILDROOT_CCACHE_DIR, USER_BUILDROOT_PACKAGE_CACHE_DIR, user_cache_root,
+};
+pub use variant::{
+    DEFAULT_VARIANT_ID, VariantSpec, is_valid_variant_id, runtime_state_dir_name,
+    variant_name_suffix,
 };
 pub use workspace::{
     CleanPolicy, WorkspaceNamedPathSpec, WorkspacePathError, WorkspacePathKindSpec, WorkspaceSpec,
@@ -179,6 +186,26 @@ impl ResolvedBuildSpec {
 
     pub fn build_name(&self) -> &str {
         &self.identity.build_name
+    }
+
+    /// The name of the build's reuse state file (without `.reuse-state`):
+    /// the build name, with `@<variant>` for a variant.
+    pub fn state_name(&self) -> String {
+        format!(
+            "{}{}",
+            self.identity.build_name,
+            variant_name_suffix(self.selection.variant.as_deref())
+        )
+    }
+
+    /// The name report files are written under: the build name, with
+    /// `@<variant>` when the spec builds a variant.
+    pub fn report_name(&self) -> String {
+        format!(
+            "{}{}",
+            self.identity.build_name,
+            variant_name_suffix(self.selection.variant.as_deref())
+        )
     }
 
     pub fn display_name(&self) -> &str {

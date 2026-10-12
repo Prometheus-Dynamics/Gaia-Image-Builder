@@ -267,15 +267,19 @@ pub(crate) fn shell_quote(value: &str) -> String {
 }
 
 /// The value to pass as `BR2_ROOTFS_POST_BUILD_SCRIPT` on the make command
-/// line: the configured scripts followed by `script`.
-pub(crate) fn post_build_script_override(output_dir: &Path, script: &Path) -> String {
+/// line: `first` (the rootfs exclusion), the configured scripts, then `last`
+/// (the image feed).
+pub(crate) fn post_build_script_override(
+    output_dir: &Path,
+    first: Option<&Path>,
+    last: Option<&Path>,
+) -> String {
     let config = fs::read_to_string(output_dir.join(".config")).unwrap_or_default();
     let configured =
         buildroot_config_value(&config, "BR2_ROOTFS_POST_BUILD_SCRIPT").unwrap_or_default();
-    let mut scripts = configured
-        .split_whitespace()
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    scripts.push(script.display().to_string());
+    let mut scripts = Vec::new();
+    scripts.extend(first.map(|script| script.display().to_string()));
+    scripts.extend(configured.split_whitespace().map(str::to_string));
+    scripts.extend(last.map(|script| script.display().to_string()));
     format!("BR2_ROOTFS_POST_BUILD_SCRIPT={}", scripts.join(" "))
 }

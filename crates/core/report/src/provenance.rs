@@ -1,6 +1,5 @@
 use gaia_exec::ExecutionOutcome;
 use gaia_spec::ResolvedBuildSpec;
-use std::path::PathBuf;
 
 use crate::masking::{mask_pairs, mask_value};
 use crate::model::{
@@ -148,9 +147,7 @@ pub fn render_provenance(spec: &ResolvedBuildSpec, outcome: &ExecutionOutcome) -
             .map(|source| BackendStateRecord {
                 id: source.id.as_str().to_string(),
                 state: read_backend_state(
-                    &PathBuf::from(&spec.workspace.build_dir)
-                        .join("sources")
-                        .join(source.id.as_str())
+                    &gaia_spec::source_build_dir(&spec.workspace, source)
                         .join(".gaia-source-state.txt"),
                 ),
             })

@@ -5,6 +5,11 @@ use std::path::Path;
 pub struct SourceSpec {
     pub id: SourceId,
     pub definition: SourceDefinition,
+    /// The variant this source is checked out for, when the variants of a
+    /// build check it out differently (a changed rev, for example). Its
+    /// files then live under `sources/variants/<variant>/<id>`; `None` keeps
+    /// the shared `sources/<id>`.
+    pub variant_scope: Option<String>,
 }
 
 impl SourceSpec {
@@ -12,6 +17,7 @@ impl SourceSpec {
         Self {
             id: id.into(),
             definition,
+            variant_scope: None,
         }
     }
 

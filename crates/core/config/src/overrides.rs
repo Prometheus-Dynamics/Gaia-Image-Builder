@@ -34,34 +34,54 @@ pub(crate) fn apply_cli_overrides(
     Ok(raw)
 }
 
-pub(crate) fn apply_selected_preset(
+/// Applies the selected preset, or a variant's presets in place of it (in
+/// the order the variant names them). The last one is the selected preset.
+pub(crate) fn apply_selected_presets(
     mut raw: raw::RawBuildConfig,
+    variant_presets: &[String],
 ) -> Result<raw::RawBuildConfig, ConfigError> {
-    let Some(selected_preset) = raw.preset.clone() else {
-        return Ok(raw);
+    let chain = if variant_presets.is_empty() {
+        raw.preset.clone().into_iter().collect::<Vec<_>>()
+    } else {
+        raw.preset = variant_presets.last().cloned();
+        variant_presets.to_vec()
     };
+    for selected_preset in chain {
+        let preset =
+            raw.presets
+                .get(&selected_preset)
+                .cloned()
+                .ok_or(ConfigError::MissingPreset {
+                    preset: selected_preset,
+                })?;
 
-    let preset = raw
-        .presets
-        .get(&selected_preset)
-        .cloned()
-        .ok_or(ConfigError::MissingPreset {
-            preset: selected_preset,
-        })?;
-
-    for env_file in preset.env_files {
-        if !raw.env_files.contains(&env_file) {
-            raw.env_files.push(env_file);
+        for env_file in preset.env_files {
+            if !raw.env_files.contains(&env_file) {
+                raw.env_files.push(env_file);
+            }
         }
-    }
-    raw.env.extend(preset.env);
-    for (key, value) in preset.overrides {
-        apply_override(&mut raw, &key, &value)?;
+        raw.env.extend(preset.env);
+        for (key, value) in preset.overrides {
+            apply_override(&mut raw, &key, &value)?;
+        }
     }
 
     raw.selected_inputs = collect_selected_inputs(&raw);
 
     Ok(raw)
+}
+
+/// Why a `[[variants]]` override key cannot be applied to this build, if it
+/// cannot. Unlike `--set`, which ignores keys it does not know, a variant
+/// names its keys in the file, so a misspelled one is an error.
+pub(crate) fn variant_override_key_problem(raw: &raw::RawBuildConfig, key: &str) -> Option<String> {
+    match OverrideKey::parse(key) {
+        OverrideKey::Unknown => Some(format!("unknown override key '{key}'")),
+        OverrideKey::Input(name) if !raw.inputs.contains_key(name) => Some(format!(
+            "override '{key}' names an input the build does not declare"
+        )),
+        _ => None,
+    }
 }
 
 fn apply_override(
@@ -185,6 +205,11 @@ fn apply_known_override(
         KnownOverrideKey::ImageBuildrootSource => {
             if let raw::RawImageDefinition::Buildroot { source, .. } = &mut raw.image.definition {
                 *source = Some(value.to_string());
+            }
+        }
+        KnownOverrideKey::ImageRootfsExcludePackages => {
+            if let raw::RawImageDefinition::Buildroot { rootfs, .. } = &mut raw.image.definition {
+                rootfs.exclude_packages = split_csv(value);
             }
         }
         KnownOverrideKey::ImageBuildrootExternalTreeMode => {
@@ -599,7 +624,7 @@ fn parse_usize_override(key: &str, value: &str) -> Result<usize, ConfigError> {
         .map_err(|_| ConfigError::invalid_override_value(key, value, "an unsigned integer"))
 }
 
-fn upsert_pair(entries: &mut Vec<(String, String)>, key: &str, value: &str) {
+pub(crate) fn upsert_pair(entries: &mut Vec<(String, String)>, key: &str, value: &str) {
     if let Some((_, existing)) = entries.iter_mut().find(|(entry_key, _)| entry_key == key) {
         *existing = value.to_string();
     } else {

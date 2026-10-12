@@ -79,6 +79,16 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
         .clone()
         .unwrap_or_else(|| spec.identity.build_name.clone());
     spec.identity.version = raw.version;
+    let variants = raw
+        .variants
+        .iter()
+        .map(|variant| gaia_spec::VariantSpec {
+            id: variant.id.clone(),
+            description: variant.description.clone(),
+            presets: crate::variants::variant_presets(variant),
+            overrides: variant.overrides.clone(),
+        })
+        .collect();
     spec.selection = SelectionSpec {
         requested_build: raw.requested_build,
         selected_build_file: raw
@@ -92,6 +102,8 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
         explicit_overrides: raw.explicit_overrides,
         precedence_order,
         import_sources: Vec::new(),
+        variant: None,
+        variants,
     };
     spec.metadata = BuildMetadataSpec {
         version: spec.identity.version.clone(),
@@ -425,6 +437,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                 external_tree,
                 external_tree_mode,
                 expected_images,
+                rootfs,
             } => ImageDefinition::Buildroot(BuildrootImageSpec {
                 source: source.map(gaia_spec::SourceId::new),
                 defconfig,
@@ -442,6 +455,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                         required: image.required,
                     })
                     .collect(),
+                rootfs_exclude_packages: rootfs.exclude_packages,
             }),
             RawImageDefinition::StartingPoint {
                 source,

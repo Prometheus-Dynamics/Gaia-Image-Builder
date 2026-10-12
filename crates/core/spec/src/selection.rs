@@ -10,6 +10,10 @@ pub struct SelectionSpec {
     pub precedence_order: Vec<String>,
     /// Git sources whose files were imported into the config at resolve time.
     pub import_sources: Vec<ImportSourceSpec>,
+    /// The variant this spec builds (`None` when the build declares none).
+    pub variant: Option<String>,
+    /// Every variant the build declares, in file order (empty when none).
+    pub variants: Vec<crate::VariantSpec>,
 }
 
 // Fingerprints hash the Debug output of the spec. `import_sources` is only
@@ -29,6 +33,14 @@ impl std::fmt::Debug for SelectionSpec {
             .field("precedence_order", &self.precedence_order);
         if !self.import_sources.is_empty() {
             debug.field("import_sources", &self.import_sources);
+        }
+        // Variant fields are printed only when set, so builds without
+        // variants keep the fingerprints they had before variants existed.
+        if let Some(variant) = &self.variant {
+            debug.field("variant", variant);
+        }
+        if !self.variants.is_empty() {
+            debug.field("variants", &self.variants);
         }
         debug.finish()
     }

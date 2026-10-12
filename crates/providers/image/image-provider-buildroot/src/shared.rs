@@ -490,6 +490,7 @@ fn make_shared_tree(request: &SharedBuildRequest<'_>) -> Result<Vec<String>, Ima
             post_build_script: None,
             shared_tree: true,
             finalize_only: false,
+            rootfs_exclude: None,
         },
     )?);
     messages.push(format!(

@@ -158,6 +158,11 @@ impl ImageProvider for BuildrootImageProvider {
                 log_sink: log_sink.clone(),
                 cancel_check: cancel_check.clone(),
             };
+            if policy.shared_output && !rootfs_exclude_names(image).is_empty() {
+                return Err(ImageProviderError::backend_command(
+                    "image.rootfs.exclude_packages cannot be used with shared Buildroot output (policy.providers.buildroot.shared_output): the tree is shared by every image",
+                ));
+            }
             if policy.shared_output {
                 let clock = gaia_process::ActiveClock::start();
                 let shared =
@@ -514,6 +519,13 @@ fn build_with_private_output(
     command: ImageCommandContext<'_>,
 ) -> Result<Vec<String>, ImageProviderError> {
     let target_dir = output_dir.join("target");
+    let rootfs_names = rootfs_exclude_names(image);
+    if !rootfs_names.is_empty() && !command.policy.parallel_packages {
+        return Err(ImageProviderError::backend_command(
+            "image.rootfs.exclude_packages needs per-package directories (policy.providers.buildroot.parallel_packages): without them Buildroot copies the excluded files back into target/ on every finalize",
+        ));
+    }
+    let rootfs_exclude = stage_rootfs_exclude(output_dir, &rootfs_names)?;
     let clock = gaia_process::ActiveClock::start();
     let staged_feed = stage_image_feed_for_make(spec, image, output_dir)?;
     let staging_step = phase_step_message("image feed staging", &clock, &[]);
@@ -529,6 +541,7 @@ fn build_with_private_output(
             post_build_script: staged_feed.as_ref().map(|feed| feed.script.as_path()),
             shared_tree: false,
             finalize_only: false,
+            rootfs_exclude: rootfs_exclude.as_ref(),
         },
     )?;
     messages.push(staging_step);
@@ -656,6 +669,8 @@ mod preview;
 mod ram_tree;
 mod rebuild_inputs;
 mod requested_rebuilds;
+mod rootfs_exclude;
+mod rootfs_exclude_elf;
 mod rootfs_inputs;
 mod shared;
 mod source_date;
@@ -704,6 +719,7 @@ pub(crate) use package_graph::*;
 pub(crate) use package_keys::*;
 pub(crate) use ram_tree::*;
 pub(crate) use rebuild_inputs::*;
+pub(crate) use rootfs_exclude::*;
 pub(crate) use rootfs_inputs::*;
 pub(crate) use shared::*;
 pub(crate) use source_date::*;

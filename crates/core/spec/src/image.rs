@@ -58,6 +58,9 @@ pub struct BuildrootImageSpec {
     pub external_tree: Option<String>,
     pub external_tree_mode: BuildrootExternalTreeModeSpec,
     pub expected_images: Vec<BuildrootExpectedImageSpec>,
+    /// Buildroot packages whose files are left out of `target/` before the
+    /// filesystem images are made (`[image.rootfs] exclude_packages`).
+    pub rootfs_exclude_packages: Vec<String>,
 }
 
 impl BuildrootImageSpec {
@@ -82,6 +85,7 @@ impl Default for BuildrootImageSpec {
             external_tree: None,
             external_tree_mode: BuildrootExternalTreeModeSpec::Auto,
             expected_images: Vec::new(),
+            rootfs_exclude_packages: Vec::new(),
         }
     }
 }

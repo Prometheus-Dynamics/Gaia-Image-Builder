@@ -105,6 +105,43 @@ attribution is by id, so a local item overriding an id the layer also declares
 is rebuilt too; and values a layer contributes without an id (env, inputs,
 policy) are covered only through the spec parts they change.
 
+## When Conditions
+
+A `when` table selects an import, an artifact, an install, or a stage item.
+Its keys all have to match (AND); `all`, `any` and `not` combine nested
+conditions:
+
+- `target`, `profile`, `branch`: the build's value (`${build.*}` is allowed
+  in the expected value of an import's `when`)
+- `image_kind`: `buildroot` or `starting-point`
+- `input = { name = "value", ... }`: each named input must have that value,
+  compared as a string. A boolean or integer is written as it reads in TOML
+  (`input = { flag = true }` matches the input value `"true"`). The names
+  must be inputs some file of the build declares; any other name is an
+  error.
+
+Inputs are the values the build selects: the declared defaults, then the
+selected preset's `input` overrides (the variant's `preset`/`presets` for a
+variant), then `--set`, then a variant's overrides. Import `when` conditions
+see the entrypoint's selection, also from files they import, so
+`{ path = "styx.toml", when = { input = { backend = "styx" } } }` follows
+`--set input.backend=styx`, a preset, or the variant that sets it. The presets
+that set those inputs must be defined in the entrypoint file.
+
+```toml
+imports = [
+  { path = "raze/photonvision-styx.toml", when = { input = { backend = "styx" } } },
+]
+
+[[artifacts]]
+id = "styx-helper"
+# ...
+when = { input = { backend = "styx" } }
+```
+
+Each variant resolves its own imports, so two variants with different
+`backend` values get different layers.
+
 ## Top-Level Build Fields
 
 Supported top-level fields:
@@ -375,6 +412,87 @@ Preset order:
 - process env
 - CLI env overrides
 - CLI `--set`
+
+## Variants
+
+One build file can make several images from one shared base. A variant is
+a set of overrides, in the same `key = value` form as `--set`:
+
+```toml
+[inputs.pv]
+kind = "enum"
+default = "2027"
+choices = ["2026", "2027"]
+
+[[variants]]
+id = "pv2026"
+description = "PhotonVision 2026"
+overrides = [
+  ["input.pv", "2026"],
+]
+```
+
+A variant can also apply presets, like `--preset` does for one variant. Its
+presets replace the command line's `--preset` for that variant; its own
+`overrides` then apply on top:
+
+```toml
+[presets.pv2026]
+overrides = [
+  ["input.pv", "2026"],
+  ["input.raze_photonvision_rev", "d11961bd119e2c22101fa9cfe7a7b01f8436aabc"],
+]
+
+[[variants]]
+id = "pv2026"
+preset = "pv2026"            # or presets = ["a", "b"], applied in order
+```
+
+Running the file builds the base config as variant `default` and then each
+declared variant, in order. `gaia run --variant pv2026` builds only that one
+(`--variant default` names the base; several ids may be given, comma
+separated). Without `--variant` every variant is built.
+
+Rules:
+- Ids use `[a-z0-9][a-z0-9-]*`, are unique, and `default` is reserved.
+- An override key must be one Gaia knows, or `input.<name>` for an input the
+  build declares. Unlike `--set`, a misspelled key is an error.
+- Override order, last wins: the base file and the selected preset (or the
+  variant's `preset`/`presets`), the variant's overrides, then the command
+  line's `--set`. A `--set` therefore applies to every variant and beats
+  their overrides.
+- A `preset` or `presets` entry must name a preset the build defines.
+
+What the variants share:
+- An operation that is the same in every variant, and depends only on shared
+  operations, runs once. In the first variant that needs it, and later
+  variants reuse it. That covers sources and the Buildroot base
+  (`image:prepare`), and any artifact whose inputs do not change.
+- A source a variant checks out differently (its rev, say) is checked out
+  per variant, under `build/sources/variants/<id>/<source>`. Everything that
+  reads the source sees the variant's checkout, including
+  `${source.<id>.path}` and `${source.<id>.commit}`. Artifacts built from it
+  run per variant; artifacts built from the other sources stay shared.
+- Everything else runs per variant. Each variant gets its own artifact
+  outputs (`variants/<id>/` next to the configured path), its own install and
+  stage records, its own image build, its own default image collect dir
+  (`<out>/images/buildroot/<id>`) and its own reports (`<build>@<id>.*`).
+
+Limits:
+- A source that the Buildroot base (`image:prepare`) or the image reads must
+  be the same in every variant, and so must the Buildroot base itself. A
+  difference there is an error; it belongs in a separate build.
+- A shared operation records the build's identity (version, target, profile,
+  branch) in its state. A variant that changes that identity therefore makes
+  the shared operations rebuild in each variant, instead of being reused.
+  Keep identity the same across variants when the shared work should be
+  reused.
+- Variants that would publish the same image file (same collect dir, export
+  dir, image name and version, or assembly output) are an error. Give each a
+  different `input` that changes the image name or version, or its own
+  `image.output.archive_name`.
+- Variants run one after another in one process. A failing variant stops the
+  run; the variants before it keep their outputs.
 
 ## Interpolation
 
@@ -1618,6 +1736,49 @@ Buildroot run notes:
   with until it is rebuilt.
 - The package cache reports installed packages it cannot key (for example
   packages with local sources) instead of leaving them out silently.
+
+#### Leaving packages out of the rootfs
+
+```toml
+[image.rootfs]
+exclude_packages = ["libcamera", "libpisp", "opencv4"]   # Buildroot package names
+```
+
+One Buildroot tree can build every package while an image leaves some of them
+out of its root filesystem, without a second tree. `image:build` removes the
+files of the listed packages from `target/` before the image's post-build
+scripts and before the filesystem images, so `rootfs.*` does not contain them.
+Names are lowercase Buildroot package names; a name listed twice is an error.
+`--set image.rootfs.exclude_packages=libcamera,libpisp` sets the list (a
+variant can set it the same way). Layered configs concatenate their lists.
+The image:prepare operation does not apply it.
+
+Checks, before anything is removed:
+- each name is a target package of the Buildroot tree: an unknown name and a
+  `host-*` package are errors;
+- no kept target package depends on an excluded one, directly or through
+  other packages. The error names the chain, for example `app -> libcamera ->
+  libpisp`. `skeleton` and the toolchain are not counted.
+
+After the make, before the images:
+- every removed path is gone, and no object left in `target/` needs a shared
+  object name that only a removed file provides. The check reads each ELF
+  object's `DT_NEEDED` and `DT_SONAME`.
+
+Run notes:
+- Only the files `build/packages-file-list.txt` lists for an excluded package
+  are removed. A path a kept package also lists stays and is reported.
+  Directories go when the removal empties them.
+- The exclusion needs `policy.providers.buildroot.parallel_packages` (per-package
+  directories): without them Buildroot copies the files back into `target/`
+  on every finalize, and the build refuses. It is refused with shared
+  Buildroot output, which one tree serves to every image.
+- The checks do not see runtime loads that are not `DT_NEEDED` entries, such as
+  a library opened by path with `dlopen` or a plugin directory. Leave those
+  packages in, or remove what loads them too.
+- The run message is `rootfs: left out N packages (...): M files, X MiB`;
+  `gaia preview` shows the names, the checks on the last build's graph, and the
+  files that build lists for them.
 
 ### Starting Point
 

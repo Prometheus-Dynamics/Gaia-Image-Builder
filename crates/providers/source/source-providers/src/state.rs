@@ -1,10 +1,7 @@
 use super::*;
 
 pub(crate) fn materialized_dir(spec: &ResolvedBuildSpec, source: &SourceSpec) -> PathBuf {
-    spec.workspace
-        .build_path()
-        .join("sources")
-        .join(source.id.as_str())
+    gaia_spec::source_build_dir(&spec.workspace, source)
 }
 
 /// Moves a materialized source's `.gaia` dir aside so wiping and re-cloning

@@ -12,6 +12,18 @@ use crate::diagnostics::{error, warning};
 use crate::image_assembly::{assembly_expected_image_names, validate_image_assembly};
 use crate::workspace::resolve_workspace_path;
 
+/// A Buildroot package name: lowercase letters, digits and `+._-`, starting
+/// with a letter or digit (as Buildroot's package directories are named).
+fn is_buildroot_package_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|first| first.is_ascii_lowercase() || first.is_ascii_digit())
+        && chars.all(|c| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '+' | '.' | '_' | '-')
+        })
+}
+
 pub(crate) fn validate_image_contract(
     spec: &ResolvedBuildSpec,
     diagnostics: &mut Vec<ValidationDiagnostic>,
@@ -19,6 +31,24 @@ pub(crate) fn validate_image_contract(
     let assembly_expected_image_names = assembly_expected_image_names(spec);
     match &spec.image.definition {
         ImageDefinition::Buildroot(buildroot) => {
+            for (index, name) in buildroot.rootfs_exclude_packages.iter().enumerate() {
+                let path = Some("image.rootfs.exclude_packages".to_string());
+                if !is_buildroot_package_name(name) {
+                    diagnostics.push(error(
+                        "buildroot_rootfs_exclude_package_invalid",
+                        format!(
+                            "image.rootfs.exclude_packages entry '{name}' is not a Buildroot package name"
+                        ),
+                        path,
+                    ));
+                } else if buildroot.rootfs_exclude_packages[..index].contains(name) {
+                    diagnostics.push(error(
+                        "buildroot_rootfs_exclude_package_duplicate",
+                        format!("image.rootfs.exclude_packages lists '{name}' more than once"),
+                        path,
+                    ));
+                }
+            }
             if buildroot.defconfig.is_none()
                 && buildroot.defconfig_path.is_none()
                 && buildroot.external_tree.is_none()

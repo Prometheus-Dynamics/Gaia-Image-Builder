@@ -7,27 +7,56 @@ use crate::{ResolvedBuildSpec, SourceDefinition, SourceSpec, WorkspaceSpec};
 
 /// Directory a source's files are read from when it is built from:
 /// - path source: its directory (canonical when it exists);
-/// - git, archive and download sources: `<build_dir>/sources/<id>`, where
-///   the source is materialized.
+/// - git, archive and download sources: [`source_build_dir`], where the
+///   source is materialized.
 pub fn source_materialized_dir(workspace: &WorkspaceSpec, source: &SourceSpec) -> PathBuf {
-    let in_workspace = |path: &str| {
-        let candidate = PathBuf::from(path);
-        if candidate.is_absolute() {
-            candidate
-        } else {
-            PathBuf::from(&workspace.root_dir).join(candidate)
-        }
-    };
     match &source.definition {
         SourceDefinition::Path(path) => {
-            let resolved = in_workspace(&path.path);
+            let resolved = in_workspace(workspace, &path.path);
             std::fs::canonicalize(&resolved).unwrap_or(resolved)
         }
         SourceDefinition::Git(_) | SourceDefinition::Archive(_) | SourceDefinition::Download(_) => {
-            in_workspace(&workspace.build_dir)
-                .join("sources")
-                .join(source.id.as_str())
+            source_build_dir(workspace, source)
         }
+    }
+}
+
+/// The build-dir location of a source Gaia materializes:
+/// `<build_dir>/sources/<id>`, or `<build_dir>/sources/variants/<variant>/<id>`
+/// for a source a variant checks out for itself. Path sources use it too,
+/// for the link that points at their directory.
+pub fn source_build_dir(workspace: &WorkspaceSpec, source: &SourceSpec) -> PathBuf {
+    let sources = in_workspace(workspace, &workspace.build_dir).join("sources");
+    match &source.variant_scope {
+        Some(variant) => sources
+            .join("variants")
+            .join(variant)
+            .join(source.id.as_str()),
+        None => sources.join(source.id.as_str()),
+    }
+}
+
+/// [`source_build_dir`] of the source with this id. A source the spec does
+/// not declare has no variant scope, so it gets the shared location.
+pub fn source_build_dir_by_id(spec: &ResolvedBuildSpec, source_id: &str) -> PathBuf {
+    match spec
+        .sources
+        .iter()
+        .find(|source| source.id.as_str() == source_id)
+    {
+        Some(source) => source_build_dir(&spec.workspace, source),
+        None => in_workspace(&spec.workspace, &spec.workspace.build_dir)
+            .join("sources")
+            .join(source_id),
+    }
+}
+
+fn in_workspace(workspace: &WorkspaceSpec, path: &str) -> PathBuf {
+    let candidate = PathBuf::from(path);
+    if candidate.is_absolute() {
+        candidate
+    } else {
+        PathBuf::from(&workspace.root_dir).join(candidate)
     }
 }
 

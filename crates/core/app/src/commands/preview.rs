@@ -3,7 +3,7 @@
 //! previewed by its provider, without changing anything.
 
 use crate::AppContext;
-use gaia_config::{ResolveOptions, try_resolve_config_with_options};
+use gaia_config::{ResolveOptions, resolve_variant_specs};
 use gaia_image_providers::{ImagePreview, ImageProviderOperation};
 use gaia_plan::{
     InvalidationSummary, OperationKind, OperationReuse, PlanTarget, RebuildRequest,
@@ -11,9 +11,10 @@ use gaia_plan::{
 };
 use gaia_validate::validate_spec_with_providers;
 
+use super::CommandOutcome;
 use super::rebuild::check_rebuild_request;
 use super::reuse_reasons::{explain_rebuild_reasons, recorded_for_explanation};
-use super::{CommandOutcome, load_reuse_state};
+use super::variants::{ReuseScope, scoped_reuse_state};
 
 /// How many deletions the human report lists before counting the rest.
 const LISTED_DELETIONS: usize = 25;
@@ -112,6 +113,8 @@ impl PreviewReport {
     }
 }
 
+// The flags are the command's own; a struct would only move them.
+#[allow(clippy::too_many_arguments)]
 pub fn preview_build_command(
     context: &AppContext,
     build: &str,
@@ -120,33 +123,39 @@ pub fn preview_build_command(
     rebuild: &RebuildRequest,
     fail_on_clean: bool,
     json: bool,
+    variants: &[String],
 ) -> CommandOutcome {
-    match preview_report(
-        context,
-        build,
-        options,
-        targets,
-        rebuild,
-        fail_on_clean,
-        json,
-    ) {
+    let mut specs = match resolve_variant_specs(build, options) {
+        Ok(specs) => specs,
+        Err(error) => {
+            return CommandOutcome::Failed {
+                message: error.to_string(),
+            };
+        }
+    };
+    if specs[0].selection.variant.is_some() {
+        return super::variants::preview_variants(
+            context,
+            super::variants::VariantSource { build, options },
+            variants,
+            targets,
+            rebuild,
+            fail_on_clean,
+            json,
+        );
+    }
+    if !variants.is_empty() {
+        return CommandOutcome::Failed {
+            message: format!(
+                "--variant needs a build that declares [[variants]]; '{build}' declares none"
+            ),
+        };
+    }
+    let spec = specs.remove(0);
+    match preview_resolved(context, &spec, targets, rebuild, fail_on_clean, json) {
         Ok(report) => CommandOutcome::Previewed { report },
         Err(message) => CommandOutcome::Failed { message },
     }
-}
-
-fn preview_report(
-    context: &AppContext,
-    build: &str,
-    options: &ResolveOptions,
-    targets: &[PlanTarget],
-    rebuild: &RebuildRequest,
-    fail_on_clean: bool,
-    json: bool,
-) -> Result<PreviewReport, String> {
-    let spec =
-        try_resolve_config_with_options(build, options).map_err(|error| error.to_string())?;
-    preview_resolved(context, &spec, targets, rebuild, fail_on_clean, json)
 }
 
 /// The preview of a resolved build (what `gaia preview` shows for it), with
@@ -158,6 +167,28 @@ pub(crate) fn preview_resolved(
     rebuild: &RebuildRequest,
     fail_on_clean: bool,
     json: bool,
+) -> Result<PreviewReport, String> {
+    preview_resolved_scoped(
+        context,
+        spec,
+        targets,
+        rebuild,
+        fail_on_clean,
+        json,
+        ReuseScope::Build,
+    )
+}
+
+/// [`preview_resolved`] for one variant of a build with variants: `scope`
+/// names the reuse state the preview reads.
+pub(crate) fn preview_resolved_scoped(
+    context: &AppContext,
+    spec: &gaia_spec::ResolvedBuildSpec,
+    targets: &[PlanTarget],
+    rebuild: &RebuildRequest,
+    fail_on_clean: bool,
+    json: bool,
+    scope: ReuseScope<'_>,
 ) -> Result<PreviewReport, String> {
     let validation = validate_spec_with_providers(
         spec,
@@ -172,7 +203,7 @@ pub(crate) fn preview_resolved(
             validation.errors.len()
         ));
     }
-    let reuse_state = load_reuse_state(spec);
+    let reuse_state = scoped_reuse_state(spec, scope);
     let mut full_plan = plan_build_with_rebuilds(
         spec,
         &context.source_catalog,

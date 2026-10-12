@@ -584,8 +584,9 @@ pub(crate) fn prune_stale_image_feed_outputs(
 fn stale_runtime_state_managed_paths(
     spec: &ResolvedBuildSpec,
 ) -> Result<BTreeSet<String>, ImageProviderError> {
-    let runtime_dir =
-        PathBuf::from(&spec.workspace.out_dir).join(gaia_spec::RUNTIME_STATE_DIR_NAME);
+    let runtime_dir = PathBuf::from(&spec.workspace.out_dir).join(
+        gaia_spec::runtime_state_dir_name(spec.selection.variant.as_deref()),
+    );
     let entries = match fs::read_dir(&runtime_dir) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeSet::new()),

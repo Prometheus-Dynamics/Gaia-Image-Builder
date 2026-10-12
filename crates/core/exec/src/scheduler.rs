@@ -545,9 +545,7 @@ fn resolve_artifact_parallel_source_dir(
         | gaia_spec::SourceDefinition::Archive(_)
         | gaia_spec::SourceDefinition::Download(_) => Some(ResourcePath::host(
             &spec.workspace.root_dir,
-            PathBuf::from(&spec.workspace.build_dir)
-                .join("sources")
-                .join(source.id.as_str()),
+            gaia_spec::source_build_dir(&spec.workspace, source),
         )),
     }
 }

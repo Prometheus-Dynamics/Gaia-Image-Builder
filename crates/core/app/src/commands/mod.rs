@@ -16,6 +16,7 @@ pub(crate) mod run_registry;
 mod state;
 pub(crate) mod status;
 mod validate;
+mod variants;
 
 use gaia_exec::ExecutionError;
 use gaia_exec::ExecutionOutcome;
@@ -84,6 +85,12 @@ pub enum CommandOutcome {
         spec: ResolvedBuildSpec,
         report: LockReport,
     },
+    /// Several variants of one build (`[[variants]]`), each with its own
+    /// outcome. `header` lines come first; the outcomes follow in run order.
+    Variants {
+        header: Vec<String>,
+        outcomes: Vec<VariantOutcome>,
+    },
     Ran {
         report: ReportBundle,
         report_outputs: ReportOutputBundle,
@@ -99,6 +106,13 @@ pub enum CommandOutcome {
     Failed {
         message: String,
     },
+}
+
+/// The outcome of one variant of a build.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VariantOutcome {
+    pub id: String,
+    pub outcome: CommandOutcome,
 }
 
 pub type CommandResult = CommandOutcome;
@@ -210,6 +224,7 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
             &resolve_options(&args),
             &targets,
             &rebuild,
+            &args.variants,
         ),
         AppCommand::Preview => preview_build_command(
             context,
@@ -219,6 +234,7 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
             &rebuild,
             args.fail_on_clean,
             args.json,
+            &args.variants,
         ),
         AppCommand::Clean => clean_build_command(&args.build, &resolve_options(&args), &args.clean),
         #[cfg(unix)]
@@ -240,6 +256,7 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
             &resolve_options(&args),
             &targets,
             &rebuild,
+            &args.variants,
         ),
     }
 }
@@ -297,6 +314,7 @@ fn help_text() -> String {
         "  gaia run [build-config] --env-file <path>",
         "  gaia run [build-config] --env KEY=VALUE",
         "  gaia run [build-config] --set key=value",
+        "  gaia run [build-config] --variant <id>[,<id>]  (a build with [[variants]]; default = base)",
         "  gaia run [build-config] --only artifacts[,image,...]",
         "  gaia run [build-config] --rebuild <operation>[,...]  (run these even if reusable)",
         "  gaia run [build-config] --rebuild-package <package>[,...]  (Buildroot)",
@@ -350,6 +368,7 @@ fn resolve_options(args: &AppArgs) -> ResolveOptions {
         env_files: args.env_files.clone(),
         env_overrides: args.env_overrides.clone(),
         explicit_overrides: args.explicit_overrides.clone(),
+        variant_presets: Vec::new(),
         resolve_unpinned_import_sources: false,
     }
 }

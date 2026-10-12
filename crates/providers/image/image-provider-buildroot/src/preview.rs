@@ -605,6 +605,48 @@ pub(crate) fn preview_buildroot(
         title: "clean".into(),
         lines: clean_lines,
     });
+    // The packages the image leaves out of the rootfs (image.rootfs), with the
+    // checks the run makes, on the graph of the last build.
+    let rootfs_names = rootfs_exclude_names(image);
+    if !rootfs_names.is_empty() {
+        let mut rootfs_lines = vec![format!("leaves out: {}", rootfs_names.join(", "))];
+        if let Ok(list) = fs::read_to_string(output_dir.join("build/packages-file-list.txt")) {
+            let files = list
+                .lines()
+                .filter(|line| {
+                    line.split_once(',')
+                        .is_some_and(|(pkg, _)| rootfs_names.iter().any(|name| name == pkg))
+                })
+                .count();
+            rootfs_lines.push(format!(
+                "the last build lists {files} files of these packages; they are removed from target/"
+            ));
+        }
+        if policy.parallel_packages {
+            rootfs_lines.push(match &previous_graph {
+                Some(graph) => match check_rootfs_exclude_graph(graph, &rootfs_names) {
+                    Ok(()) => "checks: target packages, and no kept package needs them".into(),
+                    Err(error) => format!("checks fail: {}", error.message),
+                },
+                None => {
+                    "checks: no package graph recorded yet; they run when the image builds".into()
+                }
+            });
+        } else {
+            rootfs_lines.push(
+                "blocked: needs per-package directories (policy.providers.buildroot.parallel_packages)"
+                    .into(),
+            );
+        }
+        rootfs_lines.push(
+            "the ELF check runs after the make: an object left in target/ must not need a removed library"
+                .into(),
+        );
+        preview.sections.push(PreviewSection {
+            title: "rootfs".into(),
+            lines: rootfs_lines,
+        });
+    }
     preview.sections.push(PreviewSection {
         title: "package cache".into(),
         lines: cache_lines,

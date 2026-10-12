@@ -14,6 +14,9 @@ pub struct AppArgs {
     pub env_files: Vec<String>,
     pub env_overrides: Vec<(String, String)>,
     pub explicit_overrides: Vec<(String, String)>,
+    /// `--variant <id>[,<id>]` for run/preview/plan on a build with
+    /// `[[variants]]`; `default` names the base config. Empty selects all.
+    pub variants: Vec<String>,
     pub clean: CleanArgs,
     pub cache: CacheArgs,
     pub lock: LockArgs,
@@ -132,6 +135,11 @@ impl AppArgs {
                     return parsed;
                 }
                 "--preset" => parsed.preset = value("--preset", &mut parsed.usage_errors),
+                "--variant" => {
+                    if let Some(ids) = value("--variant", &mut parsed.usage_errors) {
+                        parsed.variants.extend(split_list(&ids));
+                    }
+                }
                 "--builds-dir" => {
                     parsed.builds_dir = value("--builds-dir", &mut parsed.usage_errors)
                 }
@@ -273,6 +281,7 @@ impl Default for AppArgs {
             env_files: Vec::new(),
             env_overrides: Vec::new(),
             explicit_overrides: Vec::new(),
+            variants: Vec::new(),
             clean: CleanArgs::default(),
             cache: CacheArgs::default(),
             lock: LockArgs::default(),

@@ -557,8 +557,10 @@ fn interpolate_image_definition(
             external_tree,
             external_tree_mode,
             expected_images,
+            rootfs,
         } => RawImageDefinition::Buildroot {
             source: source.map(|value| resolver::interpolate_string(value, raw, env)),
+            rootfs,
             defconfig: defconfig.map(|value| resolver::interpolate_string(value, raw, env)),
             defconfig_path: defconfig_path
                 .map(|value| resolver::interpolate_string(value, raw, env)),

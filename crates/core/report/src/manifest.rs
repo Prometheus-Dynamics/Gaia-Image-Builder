@@ -1,7 +1,6 @@
 use gaia_exec::ExecutionOutcome;
 use gaia_plan::ExecutionPlan;
 use gaia_spec::ResolvedBuildSpec;
-use std::path::PathBuf;
 
 use crate::model::{
     ManifestArtifactRecord, ManifestCheckpointRecord, ManifestImageOutputRecord,
@@ -67,9 +66,7 @@ pub fn render_manifest(spec: &ResolvedBuildSpec, plan: &ExecutionPlan) -> Manife
                 id: source.id.as_str().to_string(),
                 provider: format!("{:?}", source.provider_kind()),
                 backend_state: read_backend_state(
-                    &PathBuf::from(&spec.workspace.build_dir)
-                        .join("sources")
-                        .join(source.id.as_str())
+                    &gaia_spec::source_build_dir(&spec.workspace, source)
                         .join(".gaia-source-state.txt"),
                 ),
             })

@@ -1,10 +1,11 @@
-use gaia_config::{ResolveOptions, try_resolve_config_with_options};
+use gaia_config::{ResolveOptions, resolve_variant_specs};
 use gaia_exec::{
     ExecutionCancellation, ExecutionEvent, ExecutionProviders, execute_plan_with_rebuilds,
 };
 use gaia_plan::{PlanTarget, RebuildRequest, plan_build_with_rebuilds};
 use gaia_process::ProcessRunErrorKind;
 use gaia_report::{generate_report, write_report_bundle};
+use gaia_spec::ResolvedBuildSpec;
 use gaia_validate::validate_spec_with_providers;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -24,7 +25,8 @@ use super::progress::{ConsoleProgress, console_progress_disabled};
 use super::rebuild::check_rebuild_request;
 use super::reuse_reasons::{explain_rebuild_reasons, recorded_for_explanation};
 use super::run_registry::{RegisteredRun, RunRegistration, recording_enabled};
-use super::{CommandOutcome, RunArtifacts, load_reuse_state, save_reuse_state};
+use super::variants::{ReuseScope, save_shared_state, scoped_reuse_state};
+use super::{CommandOutcome, RunArtifacts, save_reuse_state};
 
 const DEFAULT_POST_BUILD_HOOK_TIMEOUT_SECONDS: u64 = 300;
 
@@ -38,8 +40,47 @@ pub fn run_build_command(
     options: &ResolveOptions,
     targets: &[PlanTarget],
     rebuild: &RebuildRequest,
+    variants: &[String],
 ) -> CommandOutcome {
-    let run = match collect_run_artifacts(context, build, options, targets, rebuild) {
+    let mut specs = match resolve_variant_specs(build, options) {
+        Ok(specs) => specs,
+        Err(error) => {
+            return CommandOutcome::Failed {
+                message: error.to_string(),
+            };
+        }
+    };
+    if specs[0].selection.variant.is_some() {
+        return super::variants::run_variants(
+            context,
+            super::variants::VariantSource { build, options },
+            specs,
+            variants,
+            targets,
+            rebuild,
+        );
+    }
+    if !variants.is_empty() {
+        return CommandOutcome::Failed {
+            message: format!(
+                "--variant needs a build that declares [[variants]]; '{build}' declares none"
+            ),
+        };
+    }
+    let spec = specs.remove(0);
+    run_outcome(collect_run_artifacts_for_spec(
+        context,
+        build,
+        spec,
+        targets,
+        rebuild,
+        ReuseScope::Build,
+    ))
+}
+
+/// The outcome of a run: its report, or why it did not run.
+pub(super) fn run_outcome(run: Result<RunArtifacts, String>) -> CommandOutcome {
+    let run = match run {
         Ok(run) => run,
         Err(message) => return CommandOutcome::Failed { message },
     };
@@ -76,18 +117,19 @@ pub fn run_build_command(
     }
 }
 
-fn collect_run_artifacts(
+/// Plans and runs one resolved spec (a build, or one variant of one), with
+/// the reuse state `scope` names.
+pub(super) fn collect_run_artifacts_for_spec(
     context: &AppContext,
     build: &str,
-    options: &ResolveOptions,
+    spec: ResolvedBuildSpec,
     targets: &[PlanTarget],
     rebuild: &RebuildRequest,
+    scope: ReuseScope<'_>,
 ) -> Result<RunArtifacts, String> {
     let span = tracing::info_span!("run_build", build);
     let _guard = span.enter();
     let started_at = Instant::now();
-    let spec =
-        try_resolve_config_with_options(build, options).map_err(|error| error.to_string())?;
     tracing::debug!(
         build_id = spec.identity.id.as_str(),
         build_name = spec.identity.build_name.as_str(),
@@ -105,7 +147,7 @@ fn collect_run_artifacts(
         diagnostics = validation.diagnostics.len(),
         "validated run build spec"
     );
-    let reuse_state = load_reuse_state(&spec);
+    let reuse_state = scoped_reuse_state(&spec, scope);
     // Read before this run saves its state, which overwrites the details the
     // rebuild reasons are explained from.
     let recorded = recorded_for_explanation(&spec, reuse_state.as_ref());
@@ -178,6 +220,9 @@ fn collect_run_artifacts(
     // Record finished work before anything else can fail, including after a
     // failed or cancelled run.
     save_reuse_state(&spec, &plan, &outcome, reuse_state.as_ref());
+    if let ReuseScope::Variant { shared } = scope {
+        save_shared_state(&spec, &plan, &outcome, shared);
+    }
     if outcome.cancelled {
         let _ = std::fs::write(&interrupted_marker, "");
     } else {

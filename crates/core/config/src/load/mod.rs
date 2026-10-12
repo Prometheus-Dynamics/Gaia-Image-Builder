@@ -1,7 +1,7 @@
 mod import_sources;
 mod path_tokens;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -67,6 +67,7 @@ pub(crate) fn load_build_config(
         sources,
         build,
         options,
+        global_inputs: BTreeMap::new(),
     };
     let config = loader.load(&entrypoint, None, true)?;
     tracing::debug!(
@@ -97,6 +98,9 @@ struct Loader<'a> {
     sources: ImportSources,
     build: &'a str,
     options: &'a ResolveOptions,
+    /// The input values the entrypoint selects, which every file's `when`
+    /// conditions see (set while the entrypoint's imports are read).
+    global_inputs: BTreeMap<String, String>,
 }
 
 impl Loader<'_> {
@@ -190,6 +194,10 @@ impl Loader<'_> {
             );
             raw.extends_config = Some(Box::new(self.load(&extends_path, origin, false)?));
         }
+        if entrypoint {
+            let selected = crate::apply_preset_selection(raw.clone(), self.build, self.options);
+            self.global_inputs = crate::merge::selected_inputs_for_imports(&selected);
+        }
         let mut imported_configs = Vec::new();
         for import in raw.imports.clone() {
             // Merging drops an import whose `when` does not match, so do not
@@ -249,7 +257,7 @@ impl Loader<'_> {
         if entrypoint {
             context = crate::apply_preset_selection(context, self.build, self.options);
         }
-        crate::merge::import_applies(&context, when)
+        crate::merge::import_applies(&context, when, &self.global_inputs)
     }
 }
 

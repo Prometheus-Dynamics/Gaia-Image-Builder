@@ -380,6 +380,17 @@ pub fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
             // layout change must not re-run the Buildroot build.
             let mut image = spec.image.clone();
             image.assembly = None;
+            // Where and under what name images are collected and archived is
+            // image:build's business: the prepare step neither collects nor
+            // archives, so a renamed image must not re-run it.
+            if matches!(kind, OperationKind::PrepareImage) {
+                image.output = Default::default();
+                // Leaving packages out of the rootfs is applied to the image's
+                // target by image:build only; prepare finalizes without it.
+                if let ImageDefinition::Buildroot(buildroot) = &mut image.definition {
+                    buildroot.rootfs_exclude_packages.clear();
+                }
+            }
             format!("{image:?}").hash(&mut hasher);
             image_backend_signature(spec, &spec.image).hash(&mut hasher);
             // Post scripts and BR2_EXTERNAL files by content (see
@@ -702,9 +713,7 @@ fn operation_outputs_present(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
     match kind {
         OperationKind::ResolveBuild | OperationKind::EmitReport => true,
         OperationKind::MaterializeSource { source_id } => {
-            resolve_workspace_path(spec, &spec.workspace.build_dir)
-                .join("sources")
-                .join(source_id.as_str())
+            gaia_spec::source_build_dir_by_id(spec, source_id.as_str())
                 .join("source.txt")
                 .is_file()
         }
@@ -832,9 +841,7 @@ pub fn operation_output_signature(
     match kind {
         OperationKind::ResolveBuild | OperationKind::EmitReport => None,
         OperationKind::MaterializeSource { source_id } => {
-            let materialized_dir = resolve_workspace_path(spec, &spec.workspace.build_dir)
-                .join("sources")
-                .join(source_id.as_str());
+            let materialized_dir = gaia_spec::source_build_dir_by_id(spec, source_id.as_str());
             let state = materialized_dir.join(".gaia-source-state.txt");
             Some(provider_state_signature(&state))
         }
@@ -964,7 +971,9 @@ fn provider_state_signature(path: &Path) -> String {
 }
 
 fn runtime_state_dir(spec: &ResolvedBuildSpec) -> PathBuf {
-    resolve_workspace_path(spec, &spec.workspace.out_dir).join(gaia_spec::RUNTIME_STATE_DIR_NAME)
+    resolve_workspace_path(spec, &spec.workspace.out_dir).join(gaia_spec::runtime_state_dir_name(
+        spec.selection.variant.as_deref(),
+    ))
 }
 
 fn install_state_path(spec: &ResolvedBuildSpec, install_id: &gaia_spec::InstallId) -> PathBuf {

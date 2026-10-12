@@ -18,7 +18,7 @@ pub fn write_report_bundle(
     );
     fs::create_dir_all(&report_dir)?;
 
-    let build_name = spec.build_name().replace(['/', '\\', ' '], "-");
+    let build_name = spec.report_name().replace(['/', '\\', ' '], "-");
     let files = vec![
         write_json_file(
             &report_dir,

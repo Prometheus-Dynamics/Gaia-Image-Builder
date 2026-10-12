@@ -9,18 +9,24 @@ mod merge;
 mod overrides;
 mod raw;
 mod raw_assembly;
+mod raw_variant;
+mod raw_when;
 mod source_tokens;
 mod unknown_keys;
+mod variants;
 
 pub use compile::compile_config;
 pub use gaia_version::GAIA_VERSION;
+pub use variants::{
+    resolve_variant_specs, resolve_variant_specs_scoped, variant_output_collisions,
+};
 
 use dynamic_inputs::resolve_dynamic_inputs;
 use env::resolve_environment;
 use interpolate::interpolate_config;
 use load::{discover_build_root, load_build_config};
 use merge::merge_config;
-use overrides::{apply_cli_overrides, apply_selected_preset, collect_selected_inputs};
+use overrides::{apply_cli_overrides, apply_selected_presets, collect_selected_inputs};
 
 use gaia_spec::ResolvedBuildSpec;
 use std::fmt;
@@ -42,6 +48,22 @@ pub fn try_resolve_config_with_options(
     build: &str,
     options: &ResolveOptions,
 ) -> Result<ResolvedBuildSpec, ConfigError> {
+    resolve_build(build, options, &VariantResolution::default())
+}
+
+/// What a spec is resolved as, when it is one variant of a build: its id and
+/// the sources it checks out for itself.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct VariantResolution {
+    pub(crate) id: Option<String>,
+    pub(crate) scoped_sources: std::collections::BTreeSet<String>,
+}
+
+pub(crate) fn resolve_build(
+    build: &str,
+    options: &ResolveOptions,
+    variant: &VariantResolution,
+) -> Result<ResolvedBuildSpec, ConfigError> {
     let span = tracing::info_span!(
         "resolve_config",
         build,
@@ -57,6 +79,14 @@ pub fn try_resolve_config_with_options(
         import_sources,
         unused_import_sources,
     } = load_build_config(build, options)?;
+    if let Some(name) = raw_when::unknown_when_input(&raw) {
+        return Err(ConfigError::ConfigShape {
+            path: build.to_string(),
+            message: format!(
+                "a 'when' condition names input '{name}', which no file of the build declares"
+            ),
+        });
+    }
     tracing::debug!(
         build,
         import_sources = import_sources.len(),
@@ -66,8 +96,9 @@ pub fn try_resolve_config_with_options(
     let empty_layer_warnings = unknown_keys::collect_empty_layer_warnings(&raw);
     let selected = apply_preset_selection(raw, build, options);
     let merged = merge_config(selected);
+    variants::validate_declared(&merged)?;
     let selected = apply_preset_selection(merged, build, options);
-    let preset_applied = apply_selected_preset(selected)?;
+    let preset_applied = apply_selected_presets(selected, &options.variant_presets)?;
     let overridden = apply_cli_overrides(preset_applied, options)?;
     let with_dynamic_inputs = resolve_dynamic_inputs(overridden)?;
     let env = resolve_environment(&with_dynamic_inputs)?;
@@ -80,6 +111,15 @@ pub fn try_resolve_config_with_options(
     let normalized = normalize_paths(interpolated)?;
     reject_non_rust_build_groups(&normalized)?;
     let mut spec = compile_config(normalized);
+    if let Some(id) = &variant.id {
+        for source in spec
+            .sources
+            .iter_mut()
+            .filter(|source| variant.scoped_sources.contains(source.id.as_str()))
+        {
+            source.variant_scope = Some(id.clone());
+        }
+    }
     spec.metadata.config_warnings = unknown_key_warnings;
     spec.metadata.empty_layers = empty_layer_warnings;
     spec.selection.import_sources = import_sources;
@@ -149,6 +189,9 @@ pub struct ResolveOptions {
     pub env_files: Vec<String>,
     pub env_overrides: Vec<(String, String)>,
     pub explicit_overrides: Vec<(String, String)>,
+    /// Presets a variant applies in place of `preset`, in order. Set by the
+    /// variant resolution only.
+    pub variant_presets: Vec<String>,
     /// Resolve import sources that have neither `rev` nor a lockfile entry
     /// to their current commit instead of failing. Used by `gaia lock`.
     pub resolve_unpinned_import_sources: bool,
@@ -369,6 +412,32 @@ fn apply_preset_selection(
     raw.explicit_overrides = options.explicit_overrides.clone();
     if let Some(preset) = &options.preset {
         raw.preset = Some(preset.clone());
+    }
+    // A variant's presets replace the selected preset; the last one is the
+    // selected preset. Their `input` overrides select the inputs that
+    // imports and `when` conditions see.
+    let chain = if options.variant_presets.is_empty() {
+        raw.preset.clone().into_iter().collect::<Vec<_>>()
+    } else {
+        raw.preset = options.variant_presets.last().cloned();
+        options.variant_presets.clone()
+    };
+    for name in chain {
+        let Some(preset) = raw.presets.get(&name) else {
+            continue;
+        };
+        let inputs = preset
+            .overrides
+            .iter()
+            .filter_map(|(key, value)| {
+                key.strip_prefix("input.")
+                    .or_else(|| key.strip_prefix("inputs."))
+                    .map(|input| (input.to_string(), value.clone()))
+            })
+            .collect::<Vec<_>>();
+        for (input, value) in inputs {
+            overrides::upsert_pair(&mut raw.selected_inputs, &input, &value);
+        }
     }
     raw.selected_inputs = collect_selected_inputs(&raw);
     raw

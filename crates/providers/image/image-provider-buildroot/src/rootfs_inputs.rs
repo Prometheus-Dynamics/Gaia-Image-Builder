@@ -33,6 +33,13 @@ const IMAGE_FILE_SETTINGS: &[&str] = &[
 pub(crate) fn rootfs_inputs_digest(buildroot_dir: &Path, output_dir: &Path) -> String {
     let mut hasher = Sha256::new();
     hash_target_tree(&output_dir.join("target"), &mut hasher);
+    // The packages left out of target/ (image.rootfs.exclude_packages): the
+    // images change with them even where the tree listing alone would not.
+    let excluded = applied_rootfs_exclude(output_dir);
+    if !excluded.is_empty() {
+        hasher.update(b"\0rootfs-exclude\0");
+        hasher.update(excluded.as_bytes());
+    }
 
     // Images packages installed (kernel, device trees, bootloaders).
     let mut package_images = BTreeSet::new();

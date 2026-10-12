@@ -1,6 +1,6 @@
 use crate::raw::{
-    RawImageConfig, RawImageDefinition, RawImageFeedConfig, RawImageOutputConfig,
-    RawStartingPointPackagesConfig,
+    RawBuildrootRootfsConfig, RawImageConfig, RawImageDefinition, RawImageFeedConfig,
+    RawImageOutputConfig, RawStartingPointPackagesConfig,
 };
 use crate::raw_assembly::RawImageAssemblyConfig;
 
@@ -78,6 +78,7 @@ fn merge_image_definition(
                 external_tree: base_external_tree,
                 external_tree_mode: base_external_tree_mode,
                 expected_images: base_expected_images,
+                rootfs: base_rootfs,
             },
             RawImageDefinition::Buildroot {
                 source: overlay_source,
@@ -89,6 +90,7 @@ fn merge_image_definition(
                 external_tree: overlay_external_tree,
                 external_tree_mode: overlay_external_tree_mode,
                 expected_images: overlay_expected_images,
+                rootfs: overlay_rootfs,
             },
         ) => RawImageDefinition::Buildroot {
             source: overlay_source.or(base_source),
@@ -100,6 +102,15 @@ fn merge_image_definition(
             external_tree: overlay_external_tree.or(base_external_tree),
             external_tree_mode: overlay_external_tree_mode.or(base_external_tree_mode),
             expected_images: merge_expected_images(base_expected_images, overlay_expected_images),
+            // Kept as written (not merged as a set): validation reports a
+            // name listed twice, and the provider dedups when it applies them.
+            rootfs: RawBuildrootRootfsConfig {
+                exclude_packages: base_rootfs
+                    .exclude_packages
+                    .into_iter()
+                    .chain(overlay_rootfs.exclude_packages)
+                    .collect(),
+            },
         },
         (
             RawImageDefinition::StartingPoint {
@@ -177,10 +188,12 @@ fn merge_image_definition(
                 external_tree: None,
                 external_tree_mode: None,
                 expected_images,
+                rootfs,
             },
         ) if expected_images.is_empty()
             && config_fragments.is_empty()
-            && config_overrides.is_empty() =>
+            && config_overrides.is_empty()
+            && rootfs.exclude_packages.is_empty() =>
         {
             base_definition
         }
@@ -247,6 +260,7 @@ mod tests {
                     format: RawBuildrootExpectedImageFormat::Squashfs,
                     required: true,
                 }],
+                rootfs: Default::default(),
             },
             RawImageDefinition::Buildroot {
                 source: None,
@@ -258,6 +272,7 @@ mod tests {
                 external_tree: None,
                 external_tree_mode: None,
                 expected_images: vec![],
+                rootfs: Default::default(),
             },
         );
 

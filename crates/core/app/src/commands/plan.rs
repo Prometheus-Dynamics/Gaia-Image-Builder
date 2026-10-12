@@ -1,11 +1,13 @@
-use gaia_config::{ResolveOptions, try_resolve_config_with_options};
+use gaia_config::{ResolveOptions, resolve_variant_specs};
 use gaia_plan::{PlanTarget, RebuildRequest, plan_build_with_rebuilds};
+use gaia_spec::ResolvedBuildSpec;
 use gaia_validate::validate_spec_with_providers;
 
 use crate::AppContext;
 
 use super::rebuild::check_rebuild_request;
-use super::{CommandOutcome, load_operation_durations, load_reuse_state};
+use super::variants::{ReuseScope, plan_variants, scoped_reuse_state};
+use super::{CommandOutcome, load_operation_durations};
 
 pub fn plan_build_command(
     context: &AppContext,
@@ -13,15 +15,46 @@ pub fn plan_build_command(
     options: &ResolveOptions,
     targets: &[PlanTarget],
     rebuild: &RebuildRequest,
+    variants: &[String],
 ) -> CommandOutcome {
-    let spec = match try_resolve_config_with_options(build, options) {
-        Ok(spec) => spec,
+    let mut specs = match resolve_variant_specs(build, options) {
+        Ok(specs) => specs,
         Err(error) => {
             return CommandOutcome::Failed {
                 message: error.to_string(),
             };
         }
     };
+    if specs[0].selection.variant.is_some() {
+        return plan_variants(
+            context,
+            super::variants::VariantSource { build, options },
+            specs,
+            variants,
+            targets,
+            rebuild,
+        );
+    }
+    if !variants.is_empty() {
+        return CommandOutcome::Failed {
+            message: format!(
+                "--variant needs a build that declares [[variants]]; '{build}' declares none"
+            ),
+        };
+    }
+    let spec = specs.remove(0);
+    plan_resolved(context, spec, targets, rebuild, ReuseScope::Build)
+}
+
+/// The plan of one resolved spec (a build, or one variant of one), with the
+/// reuse state `scope` names.
+pub(crate) fn plan_resolved(
+    context: &AppContext,
+    spec: ResolvedBuildSpec,
+    targets: &[PlanTarget],
+    rebuild: &RebuildRequest,
+    scope: ReuseScope<'_>,
+) -> CommandOutcome {
     let validation = validate_spec_with_providers(
         &spec,
         &context.source_catalog,
@@ -38,7 +71,7 @@ pub fn plan_build_command(
         };
     }
 
-    let reuse_state = load_reuse_state(&spec);
+    let reuse_state = scoped_reuse_state(&spec, scope);
     let plan = plan_build_with_rebuilds(
         &spec,
         &context.source_catalog,

@@ -158,10 +158,8 @@ fn source_state(
     spec: &ResolvedBuildSpec,
     source_id: &str,
 ) -> Option<std::collections::BTreeMap<String, String>> {
-    let path: PathBuf = crate::reuse::resolve_workspace_path(spec, &spec.workspace.build_dir)
-        .join("sources")
-        .join(source_id)
-        .join(".gaia-source-state.txt");
+    let path: PathBuf =
+        gaia_spec::source_build_dir_by_id(spec, source_id).join(".gaia-source-state.txt");
     let contents = fs::read_to_string(path).ok()?;
     Some(gaia_spec::KeyValueState::parse(&contents).into_map())
 }

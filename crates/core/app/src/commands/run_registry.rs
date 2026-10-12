@@ -97,7 +97,10 @@ impl RegisteredRun {
             pid: std::process::id(),
             build_id: spec.identity.id.as_str().to_string(),
             build_name: spec.build_name().to_string(),
-            display_name: spec.display_name().to_string(),
+            display_name: match spec.selection.variant.as_deref() {
+                Some(variant) => format!("{} (variant {variant})", spec.display_name()),
+                None => spec.display_name().to_string(),
+            },
             build_config: absolute(Path::new(build_config)),
             cwd: env::current_dir().unwrap_or_default(),
             argv: env::args().collect(),

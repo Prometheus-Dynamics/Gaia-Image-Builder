@@ -249,7 +249,9 @@ pub(crate) fn stage_result(
 }
 
 pub(crate) fn runtime_state_dir(spec: &ResolvedBuildSpec) -> PathBuf {
-    PathBuf::from(&spec.workspace.out_dir).join(gaia_spec::RUNTIME_STATE_DIR_NAME)
+    PathBuf::from(&spec.workspace.out_dir).join(gaia_spec::runtime_state_dir_name(
+        spec.selection.variant.as_deref(),
+    ))
 }
 
 pub(crate) fn install_state_path(
@@ -515,11 +517,7 @@ pub(crate) fn source_cleanup_paths(
     spec: &ResolvedBuildSpec,
     source: &gaia_spec::SourceSpec,
 ) -> Vec<PathBuf> {
-    vec![
-        PathBuf::from(&spec.workspace.build_dir)
-            .join("sources")
-            .join(source.id.as_str()),
-    ]
+    vec![gaia_spec::source_build_dir(&spec.workspace, source)]
 }
 
 pub(crate) fn artifact_cleanup_paths(contract: &ArtifactExecutionContract) -> Vec<PathBuf> {

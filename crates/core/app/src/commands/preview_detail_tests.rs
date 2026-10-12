@@ -3,6 +3,7 @@
 
 use super::tests::{record_reuse_state, scratch_root};
 use super::*;
+use crate::commands::load_reuse_state;
 use gaia_spec::{BuildrootImageSpec, ImageDefinition};
 use std::fs;
 use std::path::Path;

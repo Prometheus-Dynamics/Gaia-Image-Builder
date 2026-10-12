@@ -2,6 +2,7 @@ mod image;
 
 use std::collections::BTreeMap;
 
+use crate::overrides::collect_selected_inputs;
 use crate::raw::{
     RawBuildConfig, RawBuildrootExpectedImageConfig, RawExecutionPolicyConfig,
     RawFailurePolicyConfig, RawGitProviderPolicyConfig, RawImageDefinition, RawInputOptionConfig,
@@ -14,27 +15,56 @@ use crate::raw::{
 use image::merge_image;
 
 pub fn merge_config(raw: RawBuildConfig) -> RawBuildConfig {
+    let global = selected_inputs_for_imports(&raw);
+    merge_config_with(raw, &global)
+}
+
+/// `merge_config` for a file of the tree. `global` holds the input values the
+/// entrypoint selects (defaults, presets, `--set`, variant overrides); every
+/// file's `when` sees them, so an import in an imported file follows them too.
+fn merge_config_with(raw: RawBuildConfig, global: &BTreeMap<String, String>) -> RawBuildConfig {
     let mut merged = raw
         .extends_config
         .as_deref()
         .cloned()
-        .map(merge_config)
+        .map(|extends| merge_config_with(extends, global))
         .unwrap_or_default();
 
-    let context = ImportWhenContext::from_raw(&raw);
+    let context = ImportWhenContext::from_raw(&raw, global);
     for imported in &raw.imported_configs {
         if import_when_matches(imported.import.when.as_ref(), &context) {
-            merged = merge_two(merged, merge_config(imported.config.clone()));
+            merged = merge_two(merged, merge_config_with(imported.config.clone(), global));
         }
     }
 
     merge_two(merged, strip_loaded_children(raw))
 }
 
+/// The input values a file's `when` conditions see: its own inputs (defaults
+/// and selections) with the entrypoint's `global` values on top.
+pub(crate) fn scoped_inputs(
+    raw: &RawBuildConfig,
+    global: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let mut inputs = collect_selected_inputs(raw)
+        .into_iter()
+        .collect::<BTreeMap<_, _>>();
+    inputs.extend(
+        global
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone())),
+    );
+    inputs
+}
+
 /// Whether an import with `when` declared in `raw` is merged, as decided by
-/// `merge_config` for that file.
-pub(crate) fn import_applies(raw: &RawBuildConfig, when: &RawWhenConfig) -> bool {
-    import_when_matches(Some(when), &ImportWhenContext::from_raw(raw))
+/// `merge_config` for that file. `global` as in `merge_config_with`.
+pub(crate) fn import_applies(
+    raw: &RawBuildConfig,
+    when: &RawWhenConfig,
+    global: &BTreeMap<String, String>,
+) -> bool {
+    import_when_matches(Some(when), &ImportWhenContext::from_raw(raw, global))
 }
 
 struct ImportWhenContext {
@@ -42,10 +72,11 @@ struct ImportWhenContext {
     profile: Option<String>,
     branch: Option<String>,
     image_kind: RawWhenImageKind,
+    inputs: BTreeMap<String, String>,
 }
 
 impl ImportWhenContext {
-    fn from_raw(raw: &RawBuildConfig) -> Self {
+    fn from_raw(raw: &RawBuildConfig, global: &BTreeMap<String, String>) -> Self {
         let selected_inputs = selected_inputs_for_imports(raw);
         let mut target = raw
             .target
@@ -81,6 +112,7 @@ impl ImportWhenContext {
                 RawImageDefinition::Buildroot { .. } => RawWhenImageKind::Buildroot,
                 RawImageDefinition::StartingPoint { .. } => RawWhenImageKind::StartingPoint,
             },
+            inputs: scoped_inputs(raw, global),
         }
     }
 
@@ -132,17 +164,22 @@ fn import_when_matches(when: Option<&RawWhenConfig>, context: &ImportWhenContext
         .not
         .as_ref()
         .is_none_or(|item| !import_when_matches(Some(item.as_ref()), context));
+    let input_matches = when
+        .input
+        .iter()
+        .all(|(name, expected)| context.inputs.get(name) == Some(expected));
 
     target_matches
         && profile_matches
         && branch_matches
         && image_kind_matches
+        && input_matches
         && all_matches
         && any_matches
         && not_matches
 }
 
-fn selected_inputs_for_imports(raw: &RawBuildConfig) -> BTreeMap<String, String> {
+pub(crate) fn selected_inputs_for_imports(raw: &RawBuildConfig) -> BTreeMap<String, String> {
     let mut selected = raw
         .selected_inputs
         .iter()
@@ -216,6 +253,7 @@ fn merge_two(mut base: RawBuildConfig, overlay: RawBuildConfig) -> RawBuildConfi
         base.preset = overlay.preset;
     }
     base.presets = merge_presets(base.presets, overlay.presets);
+    base.variants = merge_variants(base.variants, overlay.variants);
     if overlay.source_path.is_some() {
         base.source_path = overlay.source_path;
     }
@@ -520,6 +558,21 @@ fn merge_product(base: RawProductConfig, overlay: RawProductConfig) -> RawProduc
         name: overlay.name.or(base.name),
         sku: overlay.sku.or(base.sku),
     }
+}
+
+/// Variants by id: the overlay's entries replace base entries with the same
+/// id. Duplicates within one file are kept, so validation can report them.
+fn merge_variants(
+    mut base: Vec<crate::raw::RawVariantConfig>,
+    overlay: Vec<crate::raw::RawVariantConfig>,
+) -> Vec<crate::raw::RawVariantConfig> {
+    let overlay_ids = overlay
+        .iter()
+        .map(|variant| variant.id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    base.retain(|variant| !overlay_ids.contains(&variant.id));
+    base.extend(overlay);
+    base
 }
 
 fn merge_presets(

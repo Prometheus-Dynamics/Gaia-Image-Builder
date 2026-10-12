@@ -16,6 +16,26 @@ This cycle also moves the toolchain pin and `rust-version` to Rust 1.99.0
 (installing Gaia needs Rust 1.99 or newer), upgrades every dependency to its
 newest release, and updates the Rust docker images to 1.99.0.
 
+### Conditional layers keyed on inputs
+
+- A `when` table takes `input = { name = "value" }`: every named input must have that value (compared as a string; booleans and integers as written). It applies to imports, artifacts, installs and stage items. An undeclared input name is an error.
+- Import conditions see the selected inputs: declared defaults, the preset's `input` overrides, `--set`, and a variant's overrides and presets. Each variant resolves its own imports, so `[[variants]]` can pick different layers per input value.
+- `[[variants]]` accepts `preset`/`presets`; see "Variants" below.
+
+### Build variants
+
+- A build file can declare `[[variants]]`: each is an `id` and `overrides` in the `--set` form. One `gaia run` then builds the base config (variant `default`) and each variant, in order, from one shared base. `gaia run --variant pv2026[,...]` builds a subset; `preview` and `plan` show each variant. See "Variants" in `docs/configuration.md`.
+- Operations that are the same in every variant (sources, the Buildroot base, unchanged artifacts) run once and are recorded in the shared state `<build>.reuse-state`. Variant-specific operations write to `variants/<id>/` paths, keep their state in `<build>@<id>.reuse-state` and their install and stage records in `.gaia/runtime@<id>`, and report as `<build>@<id>.*`.
+- A source a variant checks out differently (for example another `rev` through an input) is checked out per variant under `build/sources/variants/<id>/<source>`; `${source.<id>.path}` and `${source.<id>.commit}` name the variant's own checkout. The shared git mirror stays shared. A source the Buildroot base or the image reads, or a differing Buildroot base, is an error.
+- `[[variants]]` takes `preset = "name"` or `presets = [..]`: the variant applies those presets in place of the command line's `--preset`, then its own overrides.
+- Errors: a variant id that is malformed, reserved (`default`) or repeated, an override key Gaia does not know, a preset the build does not define, and two variants that would publish the same image file.
+
+### Buildroot images can leave packages out of the rootfs
+
+- `[image.rootfs] exclude_packages` (kind `buildroot`; `--set image.rootfs.exclude_packages=a,b`) removes the files of the listed Buildroot packages from `target/` during `image:build`, before the post-build scripts and the filesystem images. One Buildroot tree serves every image; the excluded files are copied back into `target/` on each finalize of an image without the exclusion.
+- Checks before the removal: unknown names, `host-*` packages, and kept target packages that depend on an excluded one (the error names the chain). Checks after the make and before the images: no object left in `target/` needs a shared object name that only a removed file provides (ELF `DT_NEEDED`/`DT_SONAME`).
+- Refused without per-package directories (`parallel_packages`) and with shared Buildroot output. `image:prepare` does not apply it, and its fingerprint ignores the list. `gaia preview` shows the names and the checks. See "Leaving packages out of the rootfs" in `docs/configuration.md`.
+
 ### BusyBox runtime libraries come from the target sysroot
 
 - `[[image.assembly.busybox_initramfs]] include_runtime_libs = true` no longer runs the host's `ldd`. A cross-compiled BusyBox (for example an aarch64 glibc binary from a Buildroot target tree on an x86_64 host) was reported "not a dynamic executable" by the host `ldd`, so Gaia shipped it as static and the initramfs panicked at `/init`. A host-architecture binary got the host's libraries instead.

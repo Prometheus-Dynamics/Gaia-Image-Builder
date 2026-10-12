@@ -351,7 +351,7 @@ fn reuse_state_path(spec: &ResolvedBuildSpec) -> PathBuf {
             }
         })
         .join(".gaia")
-        .join(format!("{}.reuse-state", spec.build_name()))
+        .join(format!("{}.reuse-state", spec.state_name()))
 }
 
 #[cfg(test)]

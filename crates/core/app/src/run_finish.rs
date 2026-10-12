@@ -44,6 +44,20 @@ fn export_dir_for(args: &AppArgs, outcome: &CommandOutcome) -> Option<String> {
 /// resume hint. Exports are copied here, so calling this has side effects.
 pub fn run_finish(args: &AppArgs, outcome: &CommandOutcome) -> RunFinish {
     let mut finish = RunFinish::default();
+    if let CommandOutcome::Variants { outcomes, .. } = outcome {
+        // Each variant exports and hints on its own; its lines name it.
+        for item in outcomes {
+            let inner = run_finish(args, &item.outcome);
+            finish.lines.extend(
+                inner
+                    .lines
+                    .iter()
+                    .map(|line| format!("variant {}: {line}", item.id)),
+            );
+            finish.export_failed |= inner.export_failed;
+        }
+        return finish;
+    }
     if args.command != AppCommand::Run {
         return finish;
     }

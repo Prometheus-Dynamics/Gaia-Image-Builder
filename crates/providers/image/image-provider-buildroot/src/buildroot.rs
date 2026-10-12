@@ -75,6 +75,9 @@ pub(crate) struct BuildrootMakeOptions<'a> {
     /// target tree; the build operation, which adds the image feed and so
     /// changes the tree, makes the filesystem images.
     pub(crate) finalize_only: bool,
+    /// The image's rootfs exclusion (see `rootfs_exclude`): its script runs
+    /// first among the post-build scripts, and the make is checked after it.
+    pub(crate) rootfs_exclude: Option<&'a StagedRootfsExclude>,
 }
 
 /// The prepare operation: packages and target finalization, no images.
@@ -184,6 +187,7 @@ pub(crate) fn run_buildroot_with(
     // `--rebuild-package` needs the graph to name packages and to clean them.
     let current_graph = if needs_current_graph(built_before, &changes, previous_graph.is_none())
         || !command_context.policy.rebuild_packages.is_empty()
+        || options.rootfs_exclude.is_some()
     {
         let clock = gaia_process::ActiveClock::start();
         let queried = query_package_graph(
@@ -198,6 +202,18 @@ pub(crate) fn run_buildroot_with(
     } else {
         None
     };
+    // The exclusion's graph checks, before anything is removed.
+    if let Some(exclude) = options.rootfs_exclude {
+        let graph = current_graph
+            .as_ref()
+            .map(|current| &current.graph)
+            .ok_or_else(|| {
+                ImageProviderError::backend_command(
+                    "image.rootfs.exclude_packages: Buildroot did not report its package graph, so the exclusion cannot be checked",
+                )
+            })?;
+        check_rootfs_exclude_graph(graph, &exclude.names)?;
+    }
     let clock = gaia_process::ActiveClock::start();
     let symbols = current_graph.as_ref().map(|current| {
         SymbolIndex::load(
@@ -373,8 +389,14 @@ pub(crate) fn run_buildroot_with(
     host_tree_changed |= cached_packages
         .as_ref()
         .is_some_and(CachedPackages::restored_any);
-    if let Some(script) = options.post_build_script {
-        command.arg(post_build_script_override(output_dir, script));
+    if options.post_build_script.is_some() || options.rootfs_exclude.is_some() {
+        command.arg(post_build_script_override(
+            output_dir,
+            options
+                .rootfs_exclude
+                .map(|exclude| exclude.script.as_path()),
+            options.post_build_script,
+        ));
     }
     // With per-package directories, build only up to target-finalize first:
     // the filesystem images and post-image step run afterwards, and only
@@ -397,6 +419,8 @@ pub(crate) fn run_buildroot_with(
     let skip_finalize = split_images
         && keeps_marker
         && options.post_build_script.is_none()
+        && options.rootfs_exclude.is_none()
+        && applied_rootfs_exclude(output_dir).is_empty()
         && config_digest
             .as_deref()
             .is_some_and(|digest| finalized_for(output_dir, digest));
@@ -463,13 +487,29 @@ pub(crate) fn run_buildroot_with(
         })?;
     messages.push(phase_step_message("make finish", &clock, &finished));
     messages.extend(finished);
+    // The exclusion the make ran: its removals are checked before the images.
+    if let Some(exclude) = options.rootfs_exclude {
+        match exclude.verify() {
+            Ok(summary) => {
+                messages.push(format!("{SUMMARY_NOTE_PREFIX}{}", summary.message()));
+                if let Some(shared) = summary.shared_message() {
+                    messages.push(format!("{SUMMARY_NOTE_PREFIX}{shared}"));
+                }
+            }
+            Err(error) => {
+                invalidate_finalized(output_dir);
+                return Err(error);
+            }
+        }
+    }
     // A make that stopped after the finalize (or ran it first) left the tree
-    // finalized for this config.
+    // finalized for this config, with the exclusion it applied.
     if (options.finalize_only || split_images)
         && !options.shared_tree
         && let Some(digest) = config_digest.as_deref()
     {
         record_finalized(output_dir, digest);
+        record_applied_rootfs_exclude(output_dir, &applied_digest_for(options.rootfs_exclude))?;
     }
     messages.extend(buildroot_build_time_steps(
         output_dir,
