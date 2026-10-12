@@ -256,9 +256,10 @@ fn classify(context: &AppContext, specs: &[ResolvedBuildSpec]) -> Result<Variant
                 if same {
                     shared.insert(id.clone());
                 } else {
-                    errors.push(
-                        "the variants change the Buildroot base (image:prepare); the base tree is shared, so variants may change only the image's feed and output".to_string(),
-                    );
+                    errors.push(format!(
+                        "the variants change the Buildroot base (image:prepare); the base tree is shared, so variants may change only the image's feed and output: {}",
+                        operation_differences(specs, &plans, id)
+                    ));
                 }
             }
             OperationKind::BuildArtifact { .. } => {
@@ -587,3 +588,82 @@ pub(crate) fn plan_variants(
 #[cfg(test)]
 #[path = "variants_tests.rs"]
 mod tests;
+
+/// What differs in operation `id` between the first variant and each other
+/// one: its named fingerprint inputs and its dependencies.
+fn operation_differences(specs: &[ResolvedBuildSpec], plans: &[ExecutionPlan], id: &str) -> String {
+    let find = |plan: &ExecutionPlan| {
+        plan.operations
+            .iter()
+            .find(|operation| operation.id.as_str() == id)
+            .cloned()
+    };
+    let (Some(base_spec), Some(base_plan)) = (specs.first(), plans.first()) else {
+        return String::new();
+    };
+    let Some(base) = find(base_plan) else {
+        return String::new();
+    };
+    let base_parts = gaia_plan::operation_components(base_spec, base_plan, &base)
+        .into_iter()
+        .collect::<BTreeMap<_, _>>();
+    let base_deps = base
+        .depends_on
+        .iter()
+        .map(|dependency| dependency.as_str().to_string())
+        .collect::<BTreeSet<_>>();
+    let mut out = Vec::new();
+    for (spec, plan) in specs.iter().zip(plans).skip(1) {
+        let Some(operation) = find(plan) else {
+            out.push(format!("variant {} has no {id}", variant_id(spec)));
+            continue;
+        };
+        let parts = gaia_plan::operation_components(spec, plan, &operation)
+            .into_iter()
+            .collect::<BTreeMap<_, _>>();
+        let mut changed = parts
+            .iter()
+            .filter(|(name, digest)| base_parts.get(*name) != Some(*digest))
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        changed.extend(
+            base_parts
+                .keys()
+                .filter(|name| !parts.contains_key(*name))
+                .map(|name| format!("{name} (removed)")),
+        );
+        let deps = operation
+            .depends_on
+            .iter()
+            .map(|dependency| dependency.as_str().to_string())
+            .collect::<BTreeSet<_>>();
+        let added = deps.difference(&base_deps).cloned().collect::<Vec<_>>();
+        let removed = base_deps.difference(&deps).cloned().collect::<Vec<_>>();
+        let mut items = Vec::new();
+        if operation.fingerprint != base.fingerprint {
+            if changed.is_empty() {
+                items.push("its fingerprint (no named input differs)".to_string());
+            } else {
+                items.push(format!("inputs {}", changed.join(", ")));
+            }
+        }
+        if !added.is_empty() {
+            items.push(format!("added dependencies {}", added.join(", ")));
+        }
+        if !removed.is_empty() {
+            items.push(format!("removed dependencies {}", removed.join(", ")));
+        }
+        if items.is_empty() && operation.depends_on != base.depends_on {
+            items.push("the order of its dependencies".to_string());
+        }
+        if items.is_empty() {
+            continue;
+        }
+        out.push(format!(
+            "variant {} differs in {}",
+            variant_id(spec),
+            items.join("; ")
+        ));
+    }
+    out.join("; ")
+}

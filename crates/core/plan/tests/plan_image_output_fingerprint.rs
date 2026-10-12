@@ -22,3 +22,22 @@ fn image_output_naming_changes_only_the_build_fingerprint() {
         operation_fingerprint(&renamed, &OperationKind::BuildImage)
     );
 }
+
+/// The image feed (what installs, stage files and services an image adds)
+/// is applied by image:build's post-build step only: an image variant with
+/// other stage files shares the prepared Buildroot base.
+#[test]
+fn image_feed_changes_only_the_build_fingerprint() {
+    let spec = test_spec();
+    let mut fed = spec.clone();
+    fed.image.feed.stage_files.push("extra-file".into());
+
+    assert_eq!(
+        operation_fingerprint(&spec, &OperationKind::PrepareImage),
+        operation_fingerprint(&fed, &OperationKind::PrepareImage)
+    );
+    assert_ne!(
+        operation_fingerprint(&spec, &OperationKind::BuildImage),
+        operation_fingerprint(&fed, &OperationKind::BuildImage)
+    );
+}

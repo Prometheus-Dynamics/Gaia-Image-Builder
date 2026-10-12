@@ -385,6 +385,9 @@ pub fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
             // archives, so a renamed image must not re-run it.
             if matches!(kind, OperationKind::PrepareImage) {
                 image.output = Default::default();
+                // The image feed (installs, stage files, services) is applied
+                // by image:build's post-build step; prepare runs no feed.
+                image.feed = Default::default();
                 // Leaving packages out of the rootfs is applied to the image's
                 // target by image:build only; prepare finalizes without it.
                 if let ImageDefinition::Buildroot(buildroot) = &mut image.definition {

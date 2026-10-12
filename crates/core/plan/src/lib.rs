@@ -335,11 +335,14 @@ pub fn plan_build_with_rebuilds(
     image_finalize_dependencies.dedup_by(|left, right| left.as_str() == right.as_str());
     // Prepare runs the same full Buildroot make as Build. It only earns its
     // cost when an artifact must build against the prepared sysroot before
-    // the final image; otherwise Build alone does the work once.
-    let prepare_needed = spec
-        .artifacts
-        .iter()
-        .any(|artifact| artifact.after_image_prepare);
+    // the final image; otherwise Build alone does the work once. A build with
+    // variants always prepares: the Buildroot base is then one operation all
+    // variants share, whichever of them build against it.
+    let prepare_needed = !spec.selection.variants.is_empty()
+        || spec
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.after_image_prepare);
     let has_image_prepare = prepare_needed
         && image_plan
             .operations

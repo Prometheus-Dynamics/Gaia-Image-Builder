@@ -1,6 +1,8 @@
 use gaia_config::{ResolveOptions, resolve_variant_specs};
 use gaia_spec::ResolvedBuildSpec;
-use gaia_validate::{ValidationReport, validate_spec_with_providers};
+use gaia_validate::{
+    DiagnosticSeverity, ValidationDiagnostic, ValidationReport, validate_spec_with_providers,
+};
 
 use crate::AppContext;
 
@@ -55,6 +57,13 @@ pub fn validate_build_command(
     if validation.errors.is_empty()
         && let Err(message) = prepare_variants(context, VariantSource { build, options }, specs)
     {
+        // Printed from the diagnostics, like every other error.
+        validation.diagnostics.push(ValidationDiagnostic {
+            severity: DiagnosticSeverity::Error,
+            code: "variants_invalid",
+            message: message.clone(),
+            location: Some("variants".into()),
+        });
         validation.errors.push(message);
     }
     CommandOutcome::Validated { spec, validation }

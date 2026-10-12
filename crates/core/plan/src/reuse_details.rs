@@ -219,8 +219,20 @@ fn artifact_parts(spec: &ResolvedBuildSpec, artifact: &ArtifactSpec, parts: &mut
 
 fn image_parts(spec: &ResolvedBuildSpec, include_post_image: bool, parts: &mut Parts) {
     let image = &spec.image;
-    parts.raw("feed", format!("{:?}", image.feed));
-    parts.raw("output", format!("{:?}", image.output));
+    // As the fingerprint: the feed, image naming and the rootfs package
+    // exclusion are image:build's inputs only (see `operation_fingerprint`).
+    if include_post_image {
+        parts.raw("feed", format!("{:?}", image.feed));
+        parts.raw("output", format!("{:?}", image.output));
+        if let ImageDefinition::Buildroot(buildroot) = &image.definition
+            && !buildroot.rootfs_exclude_packages.is_empty()
+        {
+            parts.raw(
+                "rootfs exclude packages",
+                format!("{:?}", buildroot.rootfs_exclude_packages),
+            );
+        }
+    }
     match &image.definition {
         ImageDefinition::Buildroot(buildroot) => {
             parts.raw(

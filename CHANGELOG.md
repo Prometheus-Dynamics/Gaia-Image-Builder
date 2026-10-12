@@ -29,6 +29,12 @@ newest release, and updates the Rust docker images to 1.99.0.
 - A source a variant checks out differently (for example another `rev` through an input) is checked out per variant under `build/sources/variants/<id>/<source>`; `${source.<id>.path}` and `${source.<id>.commit}` name the variant's own checkout. The shared git mirror stays shared. A source the Buildroot base or the image reads, or a differing Buildroot base, is an error.
 - `[[variants]]` takes `preset = "name"` or `presets = [..]`: the variant applies those presets in place of the command line's `--preset`, then its own overrides.
 - Errors: a variant id that is malformed, reserved (`default`) or repeated, an override key Gaia does not know, a preset the build does not define, and two variants that would publish the same image file.
+- A build with variants always plans image:prepare, so the Buildroot base
+  is one operation shared by every variant (before, variants without an
+  artifact building against the prepared sysroot had none, and the base
+  could not be shared). image:prepare's fingerprint no longer includes the
+  image feed (prepare applies none), nor image naming or rootfs exclusions.
+  A refused image:prepare says which variant differs in what.
 - `gaia validate` validates every variant (or those `--variant` names) as
   `run` resolves them, each diagnostic prefixed `variant <id>:`, plus the
   checks across variants (shared operations, sources the base needs,
