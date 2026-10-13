@@ -321,3 +321,38 @@ fn installed_artifact_targets_must_be_verifiable_before_building() {
         ["artifact_target_unverifiable"]
     );
 }
+
+#[test]
+fn explicit_source_that_is_not_declared_is_a_validation_error() {
+    let path = write_temp_config(
+        r#"
+build_name = "rust-unknown-extra-source"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[[artifacts]]
+id = "node"
+kind = "rust"
+package = "orion-node"
+sources = ["missing"]
+output_path = "out/node"
+
+[image]
+kind = "starting-point"
+rootfs_path = "/tmp/rootfs"
+"#,
+    );
+
+    let spec = resolve_config(path.to_str().expect("temp path utf-8"));
+    let report = validate_spec(&spec);
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "unknown_artifact_source"
+            && diagnostic.location.as_deref() == Some("artifact:node")
+            && diagnostic.message.contains("'missing'")
+    }));
+
+    let _ = std::fs::remove_file(path);
+}

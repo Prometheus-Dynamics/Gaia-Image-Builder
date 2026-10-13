@@ -40,6 +40,19 @@ pub(crate) fn validate_artifacts(
                 Some(format!("artifact:{}", artifact.id.as_str())),
             ));
         }
+        for source in &artifact.extra_sources {
+            if !source_ids.contains(source.as_str()) {
+                diagnostics.push(error(
+                    "unknown_artifact_source",
+                    format!(
+                        "artifact '{}' references unknown source '{}'",
+                        artifact.id.as_str(),
+                        source.as_str()
+                    ),
+                    Some(format!("artifact:{}", artifact.id.as_str())),
+                ));
+            }
+        }
         for dependency in &artifact.dependencies {
             if dependency.id.as_str() == artifact.id.as_str() {
                 diagnostics.push(error(

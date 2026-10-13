@@ -26,12 +26,18 @@
 //! variant checks out for itself resolves to that variant's checkout
 //! (`<build_dir>/sources/variants/<variant>/<id>`); a source every variant
 //! shares resolves to the shared one.
+//!
+//! An artifact whose build fields name another source this way depends on
+//! that source (its `extra_sources`), so the artifact rebuilds when the
+//! source's content changes even though the substituted path stays the same.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use gaia_spec::{ArtifactDefinition, ImageDefinition, ResolvedBuildSpec, SourceDefinition};
+use gaia_spec::{
+    ArtifactDefinition, ImageDefinition, ResolvedBuildSpec, SourceDefinition, SourceId,
+};
 
 const PREFIX: &str = "source.";
 const COMMIT_SUFFIX: &str = ".commit";
@@ -46,27 +52,34 @@ pub(crate) fn substitute_source_tokens(spec: &mut ResolvedBuildSpec) {
     }
     for env_set in &mut spec.stage.env_sets {
         for (_, value) in &mut env_set.entries {
-            *value = substitute(value, &values);
+            *value = substitute(value, &values, &mut BTreeSet::new());
         }
     }
     for (_, value) in &mut spec.metadata.labels {
-        *value = substitute(value, &values);
+        *value = substitute(value, &values, &mut BTreeSet::new());
     }
     if let ImageDefinition::Buildroot(buildroot) = &mut spec.image.definition {
         for (_, value) in &mut buildroot.config_overrides {
-            *value = substitute(value, &values);
+            *value = substitute(value, &values, &mut BTreeSet::new());
         }
     }
+    let declared = spec
+        .sources
+        .iter()
+        .map(|source| source.id.clone())
+        .collect::<BTreeSet<SourceId>>();
     for artifact in &mut spec.artifacts {
+        let mut referenced = BTreeSet::new();
         if let ArtifactDefinition::Java(java) = &mut artifact.definition {
-            java.build_target = substitute(&java.build_target, &values);
+            java.build_target = substitute(&java.build_target, &values, &mut referenced);
             for value in java.build_args.iter_mut().chain(&mut java.build_command) {
-                *value = substitute(value, &values);
+                *value = substitute(value, &values, &mut referenced);
             }
             for (_, value) in &mut java.build_env {
-                *value = substitute(value, &values);
+                *value = substitute(value, &values, &mut referenced);
             }
         }
+        add_extra_sources(artifact, referenced, &declared);
     }
     spec.policy
         .interpolation
@@ -74,14 +87,43 @@ pub(crate) fn substitute_source_tokens(spec: &mut ResolvedBuildSpec) {
         .retain(|unresolved| !values.contains_key(&unresolved.token));
 }
 
-fn is_source_token(token: &str) -> bool {
-    token
-        .strip_prefix(PREFIX)
-        .is_some_and(|rest| rest.ends_with(COMMIT_SUFFIX) || rest.ends_with(PATH_SUFFIX))
+/// The source id of a `source.<id>.commit` or `source.<id>.path` token.
+fn source_token_id(token: &str) -> Option<&str> {
+    let rest = token.strip_prefix(PREFIX)?;
+    rest.strip_suffix(COMMIT_SUFFIX)
+        .or_else(|| rest.strip_suffix(PATH_SUFFIX))
+}
+
+/// Records the artifact's extra sources: the declared sources its build
+/// fields name, other than its own `source`. Sorted, without duplicates.
+fn add_extra_sources(
+    artifact: &mut gaia_spec::ArtifactSpec,
+    referenced: BTreeSet<SourceId>,
+    declared: &BTreeSet<SourceId>,
+) {
+    let own = artifact.source.as_ref().map(|source| &source.id);
+    let mut extra = artifact
+        .extra_sources
+        .iter()
+        .cloned()
+        .chain(
+            referenced
+                .into_iter()
+                .filter(|id| declared.contains(id) && Some(id) != own),
+        )
+        .collect::<BTreeSet<_>>();
+    extra.retain(|id| Some(id) != own);
+    artifact.extra_sources = extra.into_iter().collect();
 }
 
 /// Replaces every `${token}` with a known value; anything else is kept.
-fn substitute(value: &str, values: &BTreeMap<String, String>) -> String {
+/// Every source id named by a source token (resolved or not) is added to
+/// `referenced`.
+fn substitute(
+    value: &str,
+    values: &BTreeMap<String, String>,
+    referenced: &mut BTreeSet<SourceId>,
+) -> String {
     let mut output = String::new();
     let mut rest = value;
     while let Some(start) = rest.find("${") {
@@ -92,6 +134,9 @@ fn substitute(value: &str, values: &BTreeMap<String, String>) -> String {
             return output;
         };
         let token = &remainder[..end];
+        if let Some(id) = source_token_id(token) {
+            referenced.insert(SourceId::new(id));
+        }
         match values.get(token).filter(|_| is_source_token(token)) {
             Some(resolved) => output.push_str(resolved),
             None => output.push_str(&rest[start..start + 2 + end + 1]),
@@ -100,6 +145,10 @@ fn substitute(value: &str, values: &BTreeMap<String, String>) -> String {
     }
     output.push_str(rest);
     output
+}
+
+fn is_source_token(token: &str) -> bool {
+    source_token_id(token).is_some()
 }
 
 /// Every resolvable token, keyed without `${}` (`source.<id>.commit`).
@@ -191,10 +240,12 @@ mod tests {
             ("source.atlas.path".to_string(), "/work/atlas".to_string()),
             ("x".to_string(), "not a source token".to_string()),
         ]);
+        let mut referenced = BTreeSet::new();
         assert_eq!(
             substitute(
                 "device_package.commit=${source.atlas.commit} other=${source.orion.commit} v=${x}",
-                &values
+                &values,
+                &mut referenced
             ),
             format!(
                 "device_package.commit={} other=${{source.orion.commit}} v=${{x}}",
@@ -204,9 +255,51 @@ mod tests {
         assert_eq!(
             substitute(
                 "\"${source.atlas.path}/users.table ${source.orion.path}/x\"",
-                &values
+                &values,
+                &mut referenced
             ),
             "\"/work/atlas/users.table ${source.orion.path}/x\""
+        );
+        // Named by a source token, resolved or not; `${x}` is not a source.
+        assert_eq!(
+            referenced,
+            BTreeSet::from([SourceId::new("atlas"), SourceId::new("orion")])
+        );
+    }
+
+    #[test]
+    fn extra_sources_are_declared_sources_other_than_the_artifact_source() {
+        use gaia_spec::{
+            ArtifactDefinition, ArtifactOutputSpec, ArtifactSpec, JavaArtifactSpec, SourceRef,
+        };
+        let mut artifact = ArtifactSpec::new(
+            "app",
+            ArtifactDefinition::Java(JavaArtifactSpec {
+                build_target: String::new(),
+                build_args: Vec::new(),
+                build_command: Vec::new(),
+                build_env: Vec::new(),
+            }),
+            Some(SourceRef::new("atlas")),
+            ArtifactOutputSpec {
+                path: "app.jar".into(),
+            },
+        );
+        artifact.extra_sources = vec![SourceId::new("zeta")];
+        let declared = BTreeSet::from([
+            SourceId::new("atlas"),
+            SourceId::new("eidos"),
+            SourceId::new("zeta"),
+        ]);
+        let referenced = BTreeSet::from([
+            SourceId::new("atlas"),
+            SourceId::new("eidos"),
+            SourceId::new("orion"),
+        ]);
+        add_extra_sources(&mut artifact, referenced, &declared);
+        assert_eq!(
+            artifact.extra_sources,
+            vec![SourceId::new("eidos"), SourceId::new("zeta")]
         );
     }
 

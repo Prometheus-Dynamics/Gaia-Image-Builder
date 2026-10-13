@@ -1,7 +1,9 @@
 use super::*;
+use gaia_spec::SourceId;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) fn compile_artifact(raw: RawArtifactConfig) -> ArtifactSpec {
+    let extra_sources = compile_extra_sources(&raw.sources, raw.source.as_deref());
     let definition = match raw.definition {
         RawArtifactDefinition::Rust {
             package,
@@ -47,6 +49,7 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig) -> ArtifactSpec {
         id: raw.id.into(),
         definition,
         source: raw.source.map(SourceRef::new),
+        extra_sources,
         execution: compile_artifact_execution(raw.execution),
         target: raw.target,
         build_mode: raw.profile.map(compile_build_mode),
@@ -63,6 +66,19 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig) -> ArtifactSpec {
             path: raw.output_path,
         },
     }
+}
+
+/// The `sources` an artifact names, sorted and without duplicates, and
+/// without its own `source` (which it already depends on).
+pub(crate) fn compile_extra_sources(sources: &[String], own: Option<&str>) -> Vec<SourceId> {
+    let mut extra = sources
+        .iter()
+        .filter(|id| Some(id.as_str()) != own)
+        .map(|id| SourceId::new(id.as_str()))
+        .collect::<Vec<_>>();
+    extra.sort();
+    extra.dedup();
+    extra
 }
 
 /// Gives every member of a rust build group the same cargo selection: the

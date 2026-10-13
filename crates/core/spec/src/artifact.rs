@@ -1,11 +1,15 @@
-use crate::{ArtifactId, SourceRef};
+use crate::{ArtifactId, SourceId, SourceRef};
 use std::path::Path;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ArtifactSpec {
     pub id: ArtifactId,
     pub definition: ArtifactDefinition,
     pub source: Option<SourceRef>,
+    /// Sources other than `source` the artifact reads: named by `sources`
+    /// in its config, or by a `${source.<id>.*}` token in its build fields.
+    /// Sorted and without duplicates; the artifact depends on each source.
+    pub extra_sources: Vec<SourceId>,
     pub execution: Option<ArtifactExecutionSpec>,
     pub target: Option<String>,
     pub build_mode: Option<BuildModeSpec>,
@@ -13,6 +17,30 @@ pub struct ArtifactSpec {
     pub after_image_prepare: bool,
     pub output: ArtifactOutputSpec,
     pub install_identity: Option<ArtifactInstallIdentitySpec>,
+}
+
+// Operation fingerprints hash the Debug output of specs. `extra_sources` is
+// only printed when set, so artifacts without extra sources keep the
+// fingerprints they had before the field existed.
+impl std::fmt::Debug for ArtifactSpec {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = formatter.debug_struct("ArtifactSpec");
+        debug
+            .field("id", &self.id)
+            .field("definition", &self.definition)
+            .field("source", &self.source)
+            .field("execution", &self.execution)
+            .field("target", &self.target)
+            .field("build_mode", &self.build_mode)
+            .field("dependencies", &self.dependencies)
+            .field("after_image_prepare", &self.after_image_prepare)
+            .field("output", &self.output)
+            .field("install_identity", &self.install_identity);
+        if !self.extra_sources.is_empty() {
+            debug.field("extra_sources", &self.extra_sources);
+        }
+        debug.finish()
+    }
 }
 
 impl ArtifactSpec {
@@ -26,6 +54,7 @@ impl ArtifactSpec {
             id: id.into(),
             definition,
             source,
+            extra_sources: Vec::new(),
             execution: None,
             target: None,
             build_mode: None,
@@ -358,6 +387,39 @@ mod tests {
             Ok(ArtifactProviderKind::Python)
         );
         assert!("unknown".parse::<ArtifactProviderKind>().is_err());
+    }
+
+    #[test]
+    fn artifact_spec_debug_prints_extra_sources_only_when_set() {
+        let mut spec = ArtifactSpec::new(
+            "app",
+            ArtifactDefinition::Go(GoArtifactSpec {
+                package: "./cmd/app".into(),
+            }),
+            None,
+            ArtifactOutputSpec {
+                path: "out/app".into(),
+            },
+        );
+        // What `#[derive(Debug)]` printed before `extra_sources` existed.
+        let derived = format!(
+            "ArtifactSpec {{ id: {:?}, definition: {:?}, source: {:?}, execution: {:?}, target: {:?}, build_mode: {:?}, dependencies: {:?}, after_image_prepare: {:?}, output: {:?}, install_identity: {:?} }}",
+            spec.id,
+            spec.definition,
+            spec.source,
+            spec.execution,
+            spec.target,
+            spec.build_mode,
+            spec.dependencies,
+            spec.after_image_prepare,
+            spec.output,
+            spec.install_identity
+        );
+        assert_eq!(format!("{spec:?}"), derived);
+
+        spec.extra_sources = vec![SourceId::new("eidos")];
+        let debug = format!("{spec:?}");
+        assert!(debug.ends_with("install_identity: None, extra_sources: [SourceId(\"eidos\")] }"));
     }
 
     fn rust_spec() -> RustArtifactSpec {

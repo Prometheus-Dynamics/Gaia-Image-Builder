@@ -455,6 +455,11 @@ fn interpolate_artifact(
         .into_iter()
         .map(|value| resolver::interpolate_string(value, raw, env))
         .collect();
+    artifact.sources = artifact
+        .sources
+        .into_iter()
+        .map(|value| resolver::interpolate_string(value, raw, env))
+        .collect();
     artifact.output_path = resolver::interpolate_string(artifact.output_path, raw, env);
     artifact.definition = match artifact.definition {
         RawArtifactDefinition::Rust {

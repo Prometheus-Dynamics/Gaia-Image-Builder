@@ -503,6 +503,10 @@ pub struct RawArtifactConfig {
     pub when: Option<RawWhenConfig>,
     #[serde(default)]
     pub source: Option<String>,
+    /// Sources the artifact reads besides `source`: the artifact is rebuilt
+    /// when one of them changes.
+    #[serde(default)]
+    pub sources: Vec<String>,
     #[serde(default)]
     pub execution: RawArtifactExecutionConfig,
     #[serde(default)]

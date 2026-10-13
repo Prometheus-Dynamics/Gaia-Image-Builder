@@ -16,6 +16,13 @@ This cycle also moves the toolchain pin and `rust-version` to Rust 1.99.0
 (installing Gaia needs Rust 1.99 or newer), upgrades every dependency to its
 newest release, and updates the Rust docker images to 1.99.0.
 
+### Artifacts rebuild when a source they read changes
+
+- An artifact whose Java build fields name another source through `${source.<id>.path}` or `${source.<id>.commit}` (for example `build_env = [["EIDOS_PATH", "${source.eidos.path}"]]`) now depends on that source. Before, a changed source re-materialized but the artifact was reused, shipping a stale jar.
+- New artifact key `sources = ["eidos"]` names sources an artifact reads besides its own `source`; an undeclared id is a validation error.
+- The rebuild reason names the source (`source:eidos runs ...`). An artifact still skips its rebuild when the source's files hash the same after a rev bump.
+- Artifacts that name extra sources get a new fingerprint, so each rebuilds once after upgrading. Artifacts without them keep their fingerprints.
+
 ### Git sources use host git and credentials
 
 - A `kind = "git"` source runs its git commands (mirror, fetch, `ls-remote`, clone, checkout) on the host with the user's environment, so private repositories work when the build runs in docker. Builds still run in docker. `git_backend = "execution"` restores the old behaviour per source; without host git the source falls back to the execution backend with a note. See "Git source credentials" in `docs/configuration.md`.

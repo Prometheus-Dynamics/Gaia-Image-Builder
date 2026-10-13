@@ -165,6 +165,13 @@ pub fn plan_build_with_rebuilds(
             if let Some(source) = &artifact.source {
                 planned = planned.with_dependency(OperationId::source(&source.id));
             }
+            // Sources the build reads beyond its own, named by `sources` or by
+            // a `${source.<id>.*}` token: a change to one rebuilds the artifact.
+            for source in &artifact.extra_sources {
+                if artifact.source.as_ref().map(|own| &own.id) != Some(source) {
+                    planned = planned.with_dependency(OperationId::source(source));
+                }
+            }
             for dependency in &artifact.dependencies {
                 planned = planned.with_dependency(OperationId::artifact(&dependency.id));
             }

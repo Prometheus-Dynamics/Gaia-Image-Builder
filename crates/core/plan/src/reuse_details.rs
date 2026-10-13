@@ -180,6 +180,14 @@ fn source_parts(spec: &ResolvedBuildSpec, source: &SourceSpec, parts: &mut Parts
 
 fn artifact_parts(spec: &ResolvedBuildSpec, artifact: &ArtifactSpec, parts: &mut Parts) {
     parts.raw("source", format!("{:?}", artifact.source));
+    if !artifact.extra_sources.is_empty() {
+        let names = artifact
+            .extra_sources
+            .iter()
+            .map(|source| source.as_str())
+            .collect::<Vec<_>>();
+        parts.raw("extra sources", names.join(","));
+    }
     parts.raw("execution", format!("{:?}", artifact.execution));
     parts.raw(
         "toolchain",

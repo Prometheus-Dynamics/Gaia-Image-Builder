@@ -1355,6 +1355,7 @@ Artifact common fields:
 - `source`
 - `profile`
 - `dependencies`
+- `sources`
 - `after_image_prepare`
 - `install_name`
 - `install_class`
@@ -1403,6 +1404,15 @@ Artifact kinds:
   - `package_dir`
 - `go`
   - `package`
+
+`sources = ["eidos"]` names sources the artifact reads besides its own
+`source`. The artifact depends on each of them, so when one re-materializes
+with changed content the artifact rebuilds, and the rebuild reason names the
+source. A `${source.<id>.path}` or `${source.<id>.commit}` token in a Java
+artifact's build fields adds its source automatically (the artifact depends on
+it without listing it), so `sources` is for a source the artifact reads some
+other way, such as files it opens inside that source. Each name must be a
+declared source.
 
 #### Rust build groups
 
