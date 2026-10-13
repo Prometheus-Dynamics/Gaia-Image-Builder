@@ -437,8 +437,16 @@ fn split_summary(split: &VariantSplit) -> String {
             )
         })
         .collect::<Vec<_>>();
+    // Each variant's plan below lists every operation it has, shared ones
+    // included (run once, by the first variant, then reused): name them.
+    let shared = split
+        .shared
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(", ");
     format!(
-        "variants: {} shared operation(s); {}",
+        "variants: {} shared operation(s); {}\nshared (run once, reused by the other variants): {shared}",
         split.shared.len(),
         parts.join("; ")
     )
