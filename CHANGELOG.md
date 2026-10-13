@@ -68,6 +68,7 @@ newest release, and updates the Rust docker images to 1.99.0.
   instead of only counting them.
 
 - `${source.<id>.path}` and `${source.<id>.commit}` are also substituted in Java artifacts' `build_target`, `build_args`, `build_command` and `build_env`; with variants they name the variant's own checkout of a source it checks out for itself, or the shared one.
+- `exclude_packages` reruns the host `depmod` for each kernel version that lost a kernel module (Buildroot indexes modules in target-finalize, before the exclusion), so leaving out an out-of-tree module package keeps `modules.dep` exact. With it, a variant matrix can build such a module once in the shared base and leave it out of the variants that must not ship it.
 ### Buildroot images can leave packages out of the rootfs
 
 - `[image.rootfs] exclude_packages` (kind `buildroot`; `--set image.rootfs.exclude_packages=a,b`) removes the files of the listed Buildroot packages from `target/` during `image:build`, before the post-build scripts and the filesystem images. One Buildroot tree serves every image; the excluded files are copied back into `target/` on each finalize of an image without the exclusion.

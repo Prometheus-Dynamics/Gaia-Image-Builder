@@ -374,3 +374,80 @@ fn dry_analysis_of_a_real_tree() {
         }
     }
 }
+
+/// A left-out out-of-tree kernel module (`updates/`) is dropped from the
+/// module index again: Buildroot ran depmod before this script, so the
+/// script reruns the host depmod for that kernel version.
+#[cfg(unix)]
+#[test]
+fn excluding_a_kernel_module_reruns_depmod_for_its_kernel() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root_scratch = scratch("kmod");
+    let root = root_scratch.path();
+    put(
+        root,
+        "build/packages-file-list.txt",
+        b"styx-ov9282,./lib/modules/7.2.9-v8-16k/updates/ov9282.ko\n\
+          linux,./lib/modules/7.2.9-v8-16k/kernel/drivers/media/i2c/ov9282.ko\n\
+          libpisp,./usr/lib/libpisp.so.1\n",
+    );
+    put(
+        root,
+        "target/lib/modules/7.2.9-v8-16k/updates/ov9282.ko",
+        b"styx",
+    );
+    put(
+        root,
+        "target/lib/modules/7.2.9-v8-16k/kernel/drivers/media/i2c/ov9282.ko",
+        b"stock",
+    );
+    put(
+        root,
+        "target/lib/modules/7.2.9-v8-16k/modules.dep",
+        b"stale\n",
+    );
+    put(root, "target/usr/lib/libpisp.so.1", b"pisp");
+    // A host depmod that records how it was called.
+    let host = root.join("host");
+    let calls = root.join("depmod-calls");
+    put(
+        &host,
+        "sbin/depmod",
+        format!("#!/bin/sh\necho \"$@\" >> {}\n", calls.display()).as_bytes(),
+    );
+    fs::set_permissions(host.join("sbin/depmod"), fs::Permissions::from_mode(0o755))
+        .expect("executable depmod");
+
+    let staged = stage(root, &["styx-ov9282"]);
+    let status = Command::new("sh")
+        .arg(&staged.script)
+        .arg(root.join("target"))
+        .env("HOST_DIR", &host)
+        .status()
+        .expect("sh runs the script");
+    assert!(status.success());
+
+    let modules = root.join("target/lib/modules/7.2.9-v8-16k");
+    assert!(
+        !modules.join("updates").exists(),
+        "the left-out module and its dir are gone"
+    );
+    assert!(modules.join("kernel/drivers/media/i2c/ov9282.ko").is_file());
+    assert_eq!(
+        fs::read_to_string(&calls).expect("depmod ran"),
+        format!("-a -b {} 7.2.9-v8-16k\n", root.join("target").display())
+    );
+
+    // Leaving out a package with no kernel modules runs no depmod.
+    fs::remove_file(&calls).expect("reset calls");
+    let staged = stage(root, &["libpisp"]);
+    let status = Command::new("sh")
+        .arg(&staged.script)
+        .arg(root.join("target"))
+        .env("HOST_DIR", &host)
+        .status()
+        .expect("sh runs the script");
+    assert!(status.success());
+    assert!(!calls.exists(), "no depmod without a removed module");
+}

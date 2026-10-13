@@ -78,6 +78,24 @@ while IFS=$tab read -r action pkg rel; do
         dir=$(dirname -- "$dir")
     done
 done < "$removals"
+# Buildroot ran depmod in target-finalize, before this script: a removed
+# kernel module would stay in modules.dep. Index again every kernel version
+# that lost a module.
+kvers=$(awk -F "$tab" '$1 == "remove" && $3 ~ /^(usr\/)?lib\/modules\/[^\/]+\/.*\.ko/ {
+    n = split($3, parts, "/"); for (i = 1; i < n; i++) if (parts[i] == "modules") { print parts[i + 1]; break }
+}' "$removals" | sort -u)
+if [ -n "$kvers" ]; then
+    depmod_bin=${HOST_DIR:-}/sbin/depmod
+    [ -x "$depmod_bin" ] || depmod_bin=depmod
+    for kver in $kvers; do
+        if [ -d "$target/lib/modules/$kver" ] || [ -d "$target/usr/lib/modules/$kver" ]; then
+            "$depmod_bin" -a -b "$target" "$kver" || {
+                echo "Gaia: depmod failed for kernel $kver after leaving modules out of the rootfs" >&2
+                exit 1
+            }
+        fi
+    done
+fi
 printf '%s\n' @NONCE@ > "$marker"
 "#;
 
