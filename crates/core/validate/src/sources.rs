@@ -144,7 +144,7 @@ fn validate_git_source_refs(spec: &ResolvedBuildSpec, diagnostics: &mut Vec<Vali
                         "git sources '{id}' ({}) and '{other_id}' ({}) use the same repo '{}' at different refs",
                         git.ref_selector(),
                         other.ref_selector(),
-                        git.repo
+                        gaia_spec::redact_url_userinfo(&git.repo)
                     ),
                     Some(format!("source:{other_id}")),
                 ));
@@ -186,7 +186,7 @@ fn validate_git_lockfile(spec: &ResolvedBuildSpec, diagnostics: &mut Vec<Validat
                     source.id.as_str(),
                     entry.repo,
                     entry.reference,
-                    git.repo,
+                    gaia_spec::redact_url_userinfo(&git.repo),
                     git.ref_selector(),
                     source.id.as_str()
                 ),

@@ -136,15 +136,16 @@ fn ensure_import_mirror(
 }
 
 fn run_git(mut command: Command, timeout: Duration, label: &str) -> Result<(), String> {
-    let output = gaia_process::run_command_with_timeout(&mut command, timeout, label, None, None)
-        .map_err(|error| error.message)?
+    let label = redact_url_userinfo(label);
+    let output = gaia_process::run_command_with_timeout(&mut command, timeout, &label, None, None)
+        .map_err(|error| redact_url_userinfo(&error.message))?
         .output;
     if output.status.success() {
         Ok(())
     } else {
-        Err(format!(
+        Err(redact_url_userinfo(&format!(
             "{label} failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
-        ))
+        )))
     }
 }

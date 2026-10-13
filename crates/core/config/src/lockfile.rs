@@ -6,7 +6,7 @@
 //! `GitSourceSpec::locked_commit` so materialization checks out that exact
 //! commit. Without a lockfile, sources behave as before.
 
-use gaia_spec::{GitSourceSpec, ResolvedBuildSpec, SourceDefinition};
+use gaia_spec::{GitSourceSpec, ResolvedBuildSpec, SourceDefinition, redact_url_userinfo};
 use serde::Deserialize;
 use std::fmt::Write as _;
 use std::fs;
@@ -40,16 +40,18 @@ impl GitLockEntry {
     pub fn new(source: &str, git: &GitSourceSpec, commit: impl Into<String>) -> Self {
         Self {
             source: source.to_string(),
-            repo: git.repo.clone(),
+            // Credentials embedded in a URL never reach the lockfile.
+            repo: redact_url_userinfo(&git.repo),
             reference: git.ref_selector(),
             commit: commit.into(),
         }
     }
 
     /// True when this entry was recorded for the same repository and ref the
-    /// source is configured with now.
+    /// source is configured with now. Both sides are compared redacted, since
+    /// the entry stores the redacted repository.
     pub fn matches(&self, git: &GitSourceSpec) -> bool {
-        self.repo == git.repo && self.reference == git.ref_selector()
+        self.repo == redact_url_userinfo(&git.repo) && self.reference == git.ref_selector()
     }
 }
 
@@ -180,6 +182,7 @@ mod tests {
             refresh_policy: gaia_spec::SourceRefreshPolicySpec::Auto,
             pin_policy: gaia_spec::SourcePinPolicySpec::Locked,
             locked_commit: None,
+            git_backend: gaia_spec::GitBackendSpec::Host,
         }
     }
 
@@ -231,5 +234,24 @@ mod tests {
     #[test]
     fn rejects_unknown_versions() {
         assert!(GitLockfile::parse("version = 9\n").is_err());
+    }
+
+    #[test]
+    fn lockfile_never_stores_url_credentials() {
+        let mut secret = git("main");
+        secret.repo = "https://ghp_secret_token@example.invalid/orion.git".into();
+        let entry = GitLockEntry::new("orion", &secret, "c".repeat(40));
+        assert_eq!(entry.repo, "https://***@example.invalid/orion.git");
+        let rendered = GitLockfile {
+            version: LOCKFILE_VERSION,
+            git: vec![entry.clone()],
+        }
+        .render();
+        assert!(!rendered.contains("ghp_secret_token"), "{rendered}");
+        // The configured URL still matches the entry written for it.
+        assert!(entry.matches(&secret));
+        let mut other = secret.clone();
+        other.repo = "https://example.invalid/orion.git".into();
+        assert!(!entry.matches(&other));
     }
 }

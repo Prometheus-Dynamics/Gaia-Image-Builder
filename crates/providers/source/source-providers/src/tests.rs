@@ -1,5 +1,5 @@
 use super::*;
-use gaia_spec::{CleanPolicy, SourceSpec, WorkspaceSpec};
+use gaia_spec::{CleanPolicy, GitBackendSpec, SourceSpec, WorkspaceSpec};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn temp_path(prefix: &str) -> PathBuf {
@@ -190,6 +190,7 @@ fn git_provider_persists_resolved_commit_and_selected_ref() {
             refresh_policy: SourceRefreshPolicySpec::Always,
             pin_policy: SourcePinPolicySpec::Floating,
             locked_commit: None,
+            git_backend: GitBackendSpec::Host,
         }),
     );
 
@@ -448,6 +449,7 @@ fn git_source(repo: String, locked_commit: Option<String>) -> SourceSpec {
             refresh_policy: SourceRefreshPolicySpec::Auto,
             pin_policy: SourcePinPolicySpec::Locked,
             locked_commit,
+            git_backend: GitBackendSpec::Host,
         }),
     )
 }

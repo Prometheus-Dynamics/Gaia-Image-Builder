@@ -15,6 +15,7 @@ mod metadata;
 mod policy;
 mod provenance;
 mod raw_disk_archive;
+mod redact;
 mod reporting;
 mod selection;
 mod source;
@@ -95,14 +96,16 @@ pub use policy::{
 };
 pub use provenance::{ProvenanceIdentitySpec, ProvenanceSpec};
 pub use raw_disk_archive::{RawDiskArchive, raw_disk_archive};
+pub use redact::redact_url_userinfo;
 pub use reporting::{
     DEFAULT_LARGE_UNEXPECTED_OUTPUT_BYTES, DEFAULT_TRANSIENT_DIR_NAMES, OutputHygieneSpec,
     PostBuildHookSpec, ReportingOutputsSpec, ReportingSpec, SecretMaskingSpec,
 };
 pub use selection::{ImportSourceSpec, SelectionSpec};
 pub use source::{
-    ArchiveSourceSpec, DownloadSourceSpec, GitSourceSpec, PathSourceSpec, SourceDefinition,
-    SourcePinPolicySpec, SourceProviderKind, SourceRef, SourceRefreshPolicySpec, SourceSpec,
+    ArchiveSourceSpec, DownloadSourceSpec, GitBackendSpec, GitSourceSpec, PathSourceSpec,
+    SourceDefinition, SourcePinPolicySpec, SourceProviderKind, SourceRef, SourceRefreshPolicySpec,
+    SourceSpec,
 };
 pub use source_dirs::{
     source_build_dir, source_build_dir_by_id, source_checkout_dir, source_materialized_dir,

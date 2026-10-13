@@ -96,6 +96,10 @@ pub(crate) fn read_backend_state(path: &Path) -> BTreeMap<String, String> {
         .ok()
         .map(|contents| parse_backend_state(&contents))
         .unwrap_or_default()
+        .into_iter()
+        // Reports are shared: redact URLs written by older builds too.
+        .map(|(key, value)| (key, gaia_spec::redact_url_userinfo(&value)))
+        .collect()
 }
 
 pub(crate) fn build_artifact_output_metadata(

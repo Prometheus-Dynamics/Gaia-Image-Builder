@@ -6,9 +6,9 @@ use gaia_process::{
 };
 pub use gaia_process::{ProcessCancelCheck, ProcessLogLine, ProcessLogSink};
 use gaia_spec::{
-    ArchiveSourceSpec, GitSourceSpec, ResolvedBuildSpec, RetryBackoffStrategySpec,
+    ArchiveSourceSpec, GitBackendSpec, GitSourceSpec, ResolvedBuildSpec, RetryBackoffStrategySpec,
     SourceDefinition, SourcePinPolicySpec, SourceProviderKind, SourceRefreshPolicySpec, SourceSpec,
-    WorkspaceSpec,
+    WorkspaceSpec, redact_url_userinfo,
 };
 #[cfg(test)]
 use gaia_spec::{DownloadSourceSpec, PathSourceSpec};
@@ -19,6 +19,7 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 pub trait SourceProvider: Send + Sync {
@@ -150,6 +151,8 @@ mod command;
 mod digest;
 mod download;
 mod git;
+#[cfg(test)]
+mod git_backend_tests;
 mod git_helpers;
 mod git_import;
 mod path;

@@ -16,11 +16,19 @@ This cycle also moves the toolchain pin and `rust-version` to Rust 1.99.0
 (installing Gaia needs Rust 1.99 or newer), upgrades every dependency to its
 newest release, and updates the Rust docker images to 1.99.0.
 
+### Git sources use host git and credentials
+
+- A `kind = "git"` source runs its git commands (mirror, fetch, `ls-remote`, clone, checkout) on the host with the user's environment, so private repositories work when the build runs in docker. Builds still run in docker. `git_backend = "execution"` restores the old behaviour per source; without host git the source falls back to the execution backend with a note. See "Git source credentials" in `docs/configuration.md`.
+- Git runs with `GIT_TERMINAL_PROMPT=0` and `GCM_INTERACTIVE=never`: a missing credential fails with the source id and a hint instead of prompting.
+- URL credentials (`https://user:token@host/...`) are redacted to `https://***@host/...` in logs, errors, source state files, reports and `<build>.gaia.lock`. Lockfile entries keep their match with the configured URL.
+- Source fingerprints do not change, so builds upgraded from 2.0.0 keep their materialized sources.
+
 ### Conditional layers keyed on inputs
 
 - A `when` table takes `input = { name = "value" }`: every named input must have that value (compared as a string; booleans and integers as written). It applies to imports, artifacts, installs and stage items. An undeclared input name is an error.
 - Import conditions see the selected inputs: declared defaults, the preset's `input` overrides, `--set`, and a variant's overrides and presets. Each variant resolves its own imports, so `[[variants]]` can pick different layers per input value.
 - `[[variants]]` accepts `preset`/`presets`; see "Variants" below.
+- `--set sources.<id>.path=DIR` names a source that an input-gated import declares. It is checked against the config the resolution selects after presets, variants and conditional imports, not the base file alone. A variant applies it to the variants that declare the source; it is an error only when no selected variant (or the base, when selected) declares it, and the message lists the declared sources.
 
 ### Build variants
 

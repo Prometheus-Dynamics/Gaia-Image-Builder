@@ -372,6 +372,7 @@ fn resolve_options(args: &AppArgs) -> ResolveOptions {
         env_overrides: args.env_overrides.clone(),
         explicit_overrides: args.explicit_overrides.clone(),
         variant_presets: Vec::new(),
+        selected_variants: args.variants.clone(),
         resolve_unpinned_import_sources: false,
     }
 }

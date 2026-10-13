@@ -514,6 +514,7 @@ mod tests {
                 refresh_policy: gaia_spec::SourceRefreshPolicySpec::Never,
                 pin_policy: gaia_spec::SourcePinPolicySpec::Locked,
                 locked_commit: Some(commit.into()),
+                git_backend: gaia_spec::GitBackendSpec::Host,
             }),
         )
     }

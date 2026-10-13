@@ -356,6 +356,7 @@ fn interpolate_source(
             update,
             refresh,
             pin,
+            git_backend,
         } => RawSourceDefinition::Git {
             repo: resolver::interpolate_string(repo, raw, env),
             branch: branch.map(|value| resolver::interpolate_string(value, raw, env)),
@@ -365,6 +366,7 @@ fn interpolate_source(
             update,
             refresh,
             pin,
+            git_backend,
         },
         RawSourceDefinition::Path {
             path,

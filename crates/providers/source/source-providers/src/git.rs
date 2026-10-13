@@ -22,14 +22,62 @@ impl SourceProvider for GitSourceProvider {
                 format!("source '{}' was not a git source", source.id.as_str()),
             ));
         };
+        let (execution, backend_note) = git_command_execution(spec, git, source.id.as_str());
+        let mut result = self.materialize(
+            spec,
+            source,
+            git,
+            &execution,
+            backend_note,
+            log_sink,
+            cancel_check,
+        );
+        if let Err(error) = &mut result
+            && error.kind == SourceProviderErrorKind::BackendCommand
+            && execution.docker.is_none()
+            && !is_local_git_repo(&git.repo)
+        {
+            error.message = format!(
+                "{} (git source '{}' from '{}', git ran on the host; GIT_TERMINAL_PROMPT=0 is set so missing credentials fail instead of prompting. For a private repository configure a git credential helper (for example `gh auth setup-git`) or an ssh key loaded in ssh-agent for this host. To run git through the execution backend instead, set `git_backend = \"execution\"` on the source.)",
+                error.message,
+                source.id.as_str(),
+                redact_url_userinfo(&git.repo),
+            );
+        }
+        // Credentials embedded in a URL never leave through a message.
+        result
+            .map(|messages| {
+                messages
+                    .into_iter()
+                    .map(|message| redact_url_userinfo(&message))
+                    .collect()
+            })
+            .map_err(|mut error| {
+                error.message = redact_url_userinfo(&error.message);
+                error
+            })
+    }
+}
+
+impl GitSourceProvider {
+    #[allow(clippy::too_many_arguments)]
+    fn materialize(
+        &self,
+        spec: &ResolvedBuildSpec,
+        source: &SourceSpec,
+        git: &GitSourceSpec,
+        execution: &SourceExecutionContext,
+        backend_note: Option<String>,
+        log_sink: Option<ProcessLogSink>,
+        cancel_check: Option<ProcessCancelCheck>,
+    ) -> Result<Vec<String>, SourceProviderError> {
         let materialized_dir = materialized_dir(spec, source);
         // Build state kept inside the checkout (such as .gaia/cargo-target)
         // survives the re-clone; restored when this guard drops.
         let _preserved = PreservedGaiaDir::stash(&materialized_dir)?;
         prepare_materialized_dir(&materialized_dir)?;
-        let execution = execution_context(spec);
 
-        let mut messages = Vec::new();
+        let mut messages: Vec<String> = backend_note.into_iter().collect();
         let git_policy = SourceCommandPolicy {
             attempts: spec.policy.providers.git.retry_attempts.max(1),
             retry_backoff_ms: spec.policy.providers.git.retry_backoff_ms,
@@ -41,7 +89,7 @@ impl SourceProvider for GitSourceProvider {
             clone_or_update_local_git_source(
                 git,
                 &materialized_dir,
-                &execution,
+                execution,
                 git_policy,
                 log_sink.clone(),
                 cancel_check.clone(),
@@ -80,7 +128,7 @@ impl SourceProvider for GitSourceProvider {
             clone_or_update_local_git_source(
                 git,
                 &materialized_dir,
-                &execution,
+                execution,
                 git_policy,
                 log_sink.clone(),
                 cancel_check.clone(),
@@ -119,7 +167,7 @@ impl SourceProvider for GitSourceProvider {
                     git.repo
                 );
                 let fallback = materialized_dir.join("remote-resolution-error.txt");
-                fs::write(&fallback, &reason).map_err(|write_error| {
+                fs::write(&fallback, redact_url_userinfo(&reason)).map_err(|write_error| {
                     format!(
                         "failed to write remote git fallback '{}': {write_error}",
                         fallback.display()
@@ -145,7 +193,7 @@ impl SourceProvider for GitSourceProvider {
             } else {
                 match resolve_remote_git_refs(
                     git,
-                    &execution,
+                    execution,
                     git_policy,
                     log_sink.clone(),
                     cancel_check.clone(),
@@ -154,7 +202,7 @@ impl SourceProvider for GitSourceProvider {
                         clone_or_update_local_git_source(
                             git,
                             &materialized_dir,
-                            &execution,
+                            execution,
                             git_policy,
                             log_sink.clone(),
                             cancel_check.clone(),
@@ -205,7 +253,7 @@ impl SourceProvider for GitSourceProvider {
                             clone_or_update_local_git_source(
                                 git,
                                 &materialized_dir,
-                                &execution,
+                                execution,
                                 git_policy,
                                 log_sink.clone(),
                                 cancel_check.clone(),
@@ -236,12 +284,14 @@ impl SourceProvider for GitSourceProvider {
                             )?;
                         } else {
                             let fallback = materialized_dir.join("remote-resolution-error.txt");
-                            fs::write(&fallback, &error.message).map_err(|write_error| {
-                                format!(
-                                    "failed to write remote git fallback '{}': {write_error}",
-                                    fallback.display()
-                                )
-                            })?;
+                            fs::write(&fallback, redact_url_userinfo(&error.message)).map_err(
+                                |write_error| {
+                                    format!(
+                                        "failed to write remote git fallback '{}': {write_error}",
+                                        fallback.display()
+                                    )
+                                },
+                            )?;
                             messages.push(format!(
                                 "git source '{}' could not resolve remote refs and fell back to metadata-only materialization",
                                 source.id.as_str()

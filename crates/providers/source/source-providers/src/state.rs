@@ -111,8 +111,22 @@ pub(crate) fn write_source_marker(
         .with("pin_policy", pin_policy.as_str())
         .with("resolved_refresh_decision", refresh_policy.as_str())
         .with("resolved_pin_decision", pin_policy.as_str());
+    if let SourceDefinition::Git(git) = &source.definition {
+        // Where the git commands ran: the configured backend, and docker
+        // when host git was missing and the execution backend was used.
+        let (git_execution, _) = git_command_execution(spec, git, source.id.as_str());
+        state = state.with("git_backend", git.git_backend.as_str()).with(
+            "git_command_backend",
+            if git_execution.docker.is_some() {
+                "docker"
+            } else {
+                "host"
+            },
+        );
+    }
     state.extend_pairs(gaia_spec::KeyValueState::parse(extra).into_map());
-    let state = state.render();
+    // The state is copied into reports; credentials in a URL never reach it.
+    let state = redact_url_userinfo(&state.render());
     fs::write(&marker_path, &state).map_err(|error| {
         SourceProviderError::runtime_state(format!(
             "failed to write source marker '{}': {error}",

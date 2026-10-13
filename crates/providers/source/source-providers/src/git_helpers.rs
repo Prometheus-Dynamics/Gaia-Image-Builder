@@ -42,6 +42,7 @@ pub(crate) fn clone_or_update_local_git_source(
             log_sink.clone(),
             cancel_check.clone(),
         )?;
+        scrub_checkout_origin(output_dir, &git.repo)?;
         let mut checkout = git_command();
         checkout
             .arg("-C")
@@ -83,6 +84,7 @@ pub(crate) fn clone_or_update_local_git_source(
         log_sink.clone(),
         cancel_check.clone(),
     )?;
+    scrub_checkout_origin(output_dir, &git.repo)?;
 
     if let Some(branch) = &git.branch {
         let mut checkout = git_command();
@@ -125,6 +127,41 @@ pub(crate) fn clone_or_update_local_git_source(
         )?;
     }
     write_selected_subdir_marker(git, output_dir)
+}
+
+/// A clone records its origin URL in `.git/config`. When that URL carries
+/// credentials, replace it with the redacted form: the checkout is never
+/// fetched from again, so nothing needs the stored URL.
+fn scrub_checkout_origin(output_dir: &Path, repo: &str) -> Result<(), SourceProviderError> {
+    let redacted = redact_url_userinfo(repo);
+    if redacted == repo {
+        return Ok(());
+    }
+    let output = git_command()
+        .arg("-C")
+        .arg(output_dir)
+        .arg("remote")
+        .arg("set-url")
+        .arg("origin")
+        .arg(&redacted)
+        .output()
+        .map_err(|error| {
+            SourceProviderError::runtime_state(format!(
+                "failed to run git remote set-url in '{}': {error}",
+                output_dir.display()
+            ))
+        })?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(SourceProviderError::runtime_state(redact_url_userinfo(
+            &format!(
+                "failed to redact the origin URL of '{}': {}",
+                output_dir.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        )))
+    }
 }
 
 fn write_selected_subdir_marker(
@@ -246,20 +283,21 @@ pub fn resolve_git_source_commit(git: &GitSourceSpec, timeout: Duration) -> Resu
             vec!["HEAD".into()]
         }
     };
+    let shown_repo = redact_url_userinfo(repo);
     let output = gaia_process::run_command_with_timeout(
         &mut command,
         timeout,
-        &format!("git ls-remote for '{repo}'"),
+        &format!("git ls-remote for '{shown_repo}'"),
         None,
         None,
     )
-    .map_err(|error| error.message)?
+    .map_err(|error| redact_url_userinfo(&error.message))?
     .output;
     if !output.status.success() {
-        return Err(format!(
-            "git ls-remote failed for '{repo}': {}",
+        return Err(redact_url_userinfo(&format!(
+            "git ls-remote failed for '{shown_repo}': {}",
             String::from_utf8_lossy(&output.stderr).trim()
-        ));
+        )));
     }
     let listing = String::from_utf8_lossy(&output.stdout);
     let refs = listing
@@ -276,7 +314,7 @@ pub fn resolve_git_source_commit(git: &GitSourceSpec, timeout: Duration) -> Resu
                 .find(|(_, candidate)| candidate == name)
                 .map(|(sha, _)| sha.clone())
         })
-        .ok_or_else(|| format!("{kind} '{value}' was not found in '{repo}'"))
+        .ok_or_else(|| format!("{kind} '{value}' was not found in '{shown_repo}'"))
 }
 
 pub(crate) fn resolve_remote_git_refs(
@@ -296,7 +334,7 @@ pub(crate) fn resolve_remote_git_refs(
             &mut command,
             execution,
             Duration::from_secs(policy.timeout_seconds.max(1)),
-            &format!("git ls-remote for '{}'", git.repo),
+            &format!("git ls-remote for '{}'", redact_url_userinfo(&git.repo)),
             policy.output_retention,
             log_sink.clone(),
             cancel_check.clone(),
@@ -304,13 +342,13 @@ pub(crate) fn resolve_remote_git_refs(
         if output.status.success() {
             return Ok(String::from_utf8_lossy(&output.stdout).to_string());
         }
-        last_error = Some(format!(
+        last_error = Some(redact_url_userinfo(&format!(
             "git ls-remote failed for '{}' on attempt {}/{}: {}",
             git.repo,
             attempt,
             attempts,
             String::from_utf8_lossy(&output.stderr).trim()
-        ));
+        )));
         if attempt < attempts {
             let retry_backoff = retry_backoff_duration(
                 policy.retry_backoff_strategy,
@@ -367,7 +405,64 @@ pub(crate) fn git_head_commit(repo_dir: &Path) -> Option<String> {
 pub(crate) fn git_command() -> Command {
     let mut command = Command::new("git");
     command.arg("-c").arg("safe.directory=*");
+    // Git runs unattended: a missing credential fails fast instead of
+    // prompting on the terminal and hanging the build.
     command
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never");
+    command
+}
+
+/// Whether `git` runs on the host. Probed once per process.
+pub(crate) fn host_git_available() -> bool {
+    static HOST_GIT: OnceLock<bool> = OnceLock::new();
+    *HOST_GIT.get_or_init(|| {
+        Command::new("git")
+            .arg("--version")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    })
+}
+
+/// Execution context for the git commands of one git source, and a note
+/// when the configured backend could not be honoured.
+pub(crate) fn git_command_execution(
+    spec: &ResolvedBuildSpec,
+    git: &GitSourceSpec,
+    source_id: &str,
+) -> (SourceExecutionContext, Option<String>) {
+    git_command_execution_with(
+        execution_context(spec),
+        git,
+        source_id,
+        host_git_available(),
+    )
+}
+
+/// Pure selection rule behind [`git_command_execution`]. With
+/// `git_backend = "host"` (the default) git runs on the host even when the
+/// build executes in docker, so it sees the user's credentials. It falls
+/// back to the execution backend only when host git is missing.
+pub(crate) fn git_command_execution_with(
+    mut execution: SourceExecutionContext,
+    git: &GitSourceSpec,
+    source_id: &str,
+    host_git: bool,
+) -> (SourceExecutionContext, Option<String>) {
+    if git.git_backend == GitBackendSpec::Execution || execution.docker.is_none() {
+        return (execution, None);
+    }
+    if host_git {
+        execution.docker = None;
+        return (execution, None);
+    }
+    let note = format!(
+        "git is not installed on the host, so git for source '{source_id}' runs through the docker execution backend (host git credentials are not available there)"
+    );
+    (execution, Some(note))
 }
 
 pub(crate) fn parse_resolved_remote_ref(contents: &str) -> Option<(String, String)> {

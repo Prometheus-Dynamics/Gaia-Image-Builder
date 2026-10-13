@@ -11,7 +11,10 @@ use gaia_spec::{DEFAULT_VARIANT_ID, ResolvedBuildSpec, is_valid_variant_id};
 
 use crate::overrides::variant_override_key_problem;
 use crate::raw::{RawBuildConfig, RawVariantConfig};
-use crate::{ConfigError, ResolveOptions, VariantResolution, resolve_build};
+use crate::{
+    ConfigError, ResolveOptions, ResolvedBuild, VariantResolution, resolve_build_checked,
+    undeclared_source_error,
+};
 
 /// Checks the declared `[[variants]]` of a merged build config: ids are
 /// well-formed, unique and not `default`, and every override key names
@@ -86,20 +89,48 @@ pub fn resolve_variant_specs(
 /// `scoped_sources` for itself (`sources/variants/<variant>/<id>`), so the
 /// variants' checkouts, and what reads them, differ. A variant's presets
 /// replace the selected preset, then its overrides apply.
+///
+/// A `--set sources.<id>.path` names a source that each variant may or may
+/// not declare: it applies to the variants that do. It is an error only when
+/// no selected variant declares it (the base counts as selected when the
+/// selection is empty or names `default`).
 pub fn resolve_variant_specs_scoped(
     build: &str,
     options: &ResolveOptions,
     scoped_sources: &BTreeSet<String>,
 ) -> Result<Vec<ResolvedBuildSpec>, ConfigError> {
+    let is_selected = |id: &str| {
+        options.selected_variants.is_empty()
+            || options.selected_variants.iter().any(|name| name == id)
+    };
     let base_scope = VariantResolution {
         id: Some(DEFAULT_VARIANT_ID.to_string()),
         scoped_sources: scoped_sources.clone(),
     };
-    let mut base = resolve_build(build, options, &base_scope)?;
-    let declared = base.selection.variants.clone();
+    let base = resolve_build_checked(build, options, &base_scope)?;
+    let declared = base.spec.selection.variants.clone();
     if declared.is_empty() {
-        return Ok(vec![base]);
+        return Ok(vec![base.into_checked_spec()?]);
     }
+    // What the selected specs declare, and which `--set` source overrides
+    // some of them apply or do not.
+    let mut selected_declared = BTreeSet::new();
+    let mut applied = BTreeSet::new();
+    let mut unapplied = BTreeSet::new();
+    let mut track = |resolved: &ResolvedBuild| {
+        selected_declared.extend(resolved.declared_sources.iter().cloned());
+        for (key, _) in &options.explicit_overrides {
+            if resolved.undeclared_sources.iter().any(|(k, _)| k == key) {
+                unapplied.insert(key.clone());
+            } else {
+                applied.insert(key.clone());
+            }
+        }
+    };
+    if is_selected(DEFAULT_VARIANT_ID) {
+        track(&base);
+    }
+    let mut base = base.spec;
     base.selection.variant = Some(DEFAULT_VARIANT_ID.to_string());
     let mut specs = vec![base];
     for variant in declared {
@@ -116,9 +147,34 @@ pub fn resolve_variant_specs_scoped(
             id: Some(variant.id.clone()),
             scoped_sources: scoped_sources.clone(),
         };
-        let mut spec = resolve_build(build, &variant_options, &scope)?;
+        let resolved = resolve_build_checked(build, &variant_options, &scope)?;
+        // A source the variant's own file names must be declared by it.
+        if let Some((key, _)) = variant.overrides.iter().find(|(key, _)| {
+            resolved
+                .undeclared_sources
+                .iter()
+                .any(|(undeclared, _)| undeclared == key)
+        }) {
+            return Err(undeclared_source_error(
+                key,
+                &format!("variant '{}'", variant.id),
+                resolved.declared_sources.clone(),
+            ));
+        }
+        if is_selected(&variant.id) {
+            track(&resolved);
+        }
+        let mut spec = resolved.spec;
         spec.selection.variant = Some(variant.id.clone());
         specs.push(spec);
+    }
+    // An override only needs to be applied by one selected spec.
+    if let Some(key) = unapplied.iter().find(|key| !applied.contains(*key)) {
+        return Err(undeclared_source_error(
+            key,
+            "any selected variant",
+            selected_declared.into_iter().collect(),
+        ));
     }
     Ok(specs)
 }

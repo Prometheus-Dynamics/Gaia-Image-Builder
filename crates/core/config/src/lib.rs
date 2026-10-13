@@ -59,11 +59,56 @@ pub(crate) struct VariantResolution {
     pub(crate) scoped_sources: std::collections::BTreeSet<String>,
 }
 
+/// A resolved spec, and the `--set sources.<id>.path` overrides it could not
+/// apply because the config it resolved does not declare that source.
+pub(crate) struct ResolvedBuild {
+    pub(crate) spec: ResolvedBuildSpec,
+    pub(crate) undeclared_sources: Vec<(String, String)>,
+    pub(crate) declared_sources: Vec<String>,
+}
+
+impl ResolvedBuild {
+    /// The spec, if no override named an undeclared source.
+    pub(crate) fn into_checked_spec(self) -> Result<ResolvedBuildSpec, ConfigError> {
+        match self.undeclared_sources.first() {
+            Some((key, _)) => Err(undeclared_source_error(
+                key,
+                "the selected config",
+                self.declared_sources,
+            )),
+            None => Ok(self.spec),
+        }
+    }
+}
+
+pub(crate) fn undeclared_source_error(
+    key: &str,
+    scope: &str,
+    declared: Vec<String>,
+) -> ConfigError {
+    ConfigError::UndeclaredSourceOverride {
+        key: key.to_string(),
+        source_id: overrides::source_path_override_id(key)
+            .unwrap_or_default()
+            .to_string(),
+        scope: scope.to_string(),
+        declared,
+    }
+}
+
 pub(crate) fn resolve_build(
     build: &str,
     options: &ResolveOptions,
     variant: &VariantResolution,
 ) -> Result<ResolvedBuildSpec, ConfigError> {
+    resolve_build_checked(build, options, variant)?.into_checked_spec()
+}
+
+pub(crate) fn resolve_build_checked(
+    build: &str,
+    options: &ResolveOptions,
+    variant: &VariantResolution,
+) -> Result<ResolvedBuild, ConfigError> {
     let span = tracing::info_span!(
         "resolve_config",
         build,
@@ -99,7 +144,8 @@ pub(crate) fn resolve_build(
     variants::validate_declared(&merged)?;
     let selected = apply_preset_selection(merged, build, options);
     let preset_applied = apply_selected_presets(selected, &options.variant_presets)?;
-    let overridden = apply_cli_overrides(preset_applied, options)?;
+    let (overridden, undeclared_sources) = apply_cli_overrides(preset_applied, options)?;
+    let declared_sources = overrides::declared_source_ids(&overridden);
     let with_dynamic_inputs = resolve_dynamic_inputs(overridden)?;
     let env = resolve_environment(&with_dynamic_inputs)?;
     tracing::debug!(
@@ -131,7 +177,11 @@ pub(crate) fn resolve_build(
         build_id = spec.identity.id.as_str(),
         "compiled resolved build spec"
     );
-    Ok(spec)
+    Ok(ResolvedBuild {
+        spec,
+        undeclared_sources,
+        declared_sources,
+    })
 }
 
 /// Removes sources declared only for importing config into layers this
@@ -192,6 +242,9 @@ pub struct ResolveOptions {
     /// Presets a variant applies in place of `preset`, in order. Set by the
     /// variant resolution only.
     pub variant_presets: Vec<String>,
+    /// The variants the command acts on, by id; empty selects all. An
+    /// override of `sources.<id>.path` must be declared by one of them.
+    pub selected_variants: Vec<String>,
     /// Resolve import sources that have neither `rev` nor a lockfile entry
     /// to their current commit instead of failing. Used by `gaia lock`.
     pub resolve_unpinned_import_sources: bool,
@@ -243,6 +296,15 @@ pub enum ConfigError {
         key: String,
         value: String,
         expected: &'static str,
+    },
+    /// `sources.<id>.path` names a source that no config the build selects
+    /// declares. `scope` names what was searched, such as "the selected
+    /// config" or "any selected variant".
+    UndeclaredSourceOverride {
+        key: String,
+        source_id: String,
+        scope: String,
+        declared: Vec<String>,
     },
     /// The build file's `gaia_version` requirement does not match this
     /// binary.
@@ -378,6 +440,22 @@ impl fmt::Display for ConfigError {
                 formatter,
                 "invalid override value for '{key}': '{value}' (expected {expected})"
             ),
+            Self::UndeclaredSourceOverride {
+                key,
+                source_id,
+                scope,
+                declared,
+            } => {
+                let declared = if declared.is_empty() {
+                    "none".to_string()
+                } else {
+                    declared.join(", ")
+                };
+                write!(
+                    formatter,
+                    "override '{key}' names source '{source_id}', which is not declared by {scope} (declared sources: {declared})"
+                )
+            }
             Self::GaiaVersionUnsupported {
                 path,
                 required,

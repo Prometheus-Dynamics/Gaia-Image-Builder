@@ -29,7 +29,7 @@ pub(crate) fn command_output_with_timeout(
     log_sink: Option<ProcessLogSink>,
     cancel_check: Option<ProcessCancelCheck>,
 ) -> Result<Output, SourceProviderError> {
-    let label = label.to_string();
+    let label = redact_url_userinfo(label);
     let wrapped_sink = log_sink.map(|sink| label_process_log_sink(label.clone(), sink));
     let mut exec_command = command_for_execution(command, execution)?;
     run_command_with_timeout_and_retention(
@@ -108,6 +108,8 @@ pub(crate) fn run_command_with_policy(
     log_sink: Option<ProcessLogSink>,
     cancel_check: Option<ProcessCancelCheck>,
 ) -> Result<(), SourceProviderError> {
+    let description = redact_url_userinfo(description);
+    let description = description.as_str();
     let attempts = policy.attempts.max(1);
     let timeout = Duration::from_secs(policy.timeout_seconds.max(1));
     let mut last_error = String::new();
@@ -146,10 +148,10 @@ pub(crate) fn run_command_with_policy(
             );
             return Ok(());
         }
-        last_error = format!(
+        last_error = redact_url_userinfo(&format!(
             "{description} failed on attempt {attempt}/{attempts}: {}",
             String::from_utf8_lossy(&output.stderr).trim()
-        );
+        ));
         if attempt < attempts {
             let retry_backoff = retry_backoff_duration(
                 policy.retry_backoff_strategy,

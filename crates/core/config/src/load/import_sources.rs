@@ -154,6 +154,7 @@ impl ImportSources {
                 refresh_policy: SourceRefreshPolicySpec::Auto,
                 pin_policy: SourcePinPolicySpec::Locked,
                 locked_commit: None,
+                git_backend: gaia_spec::GitBackendSpec::Host,
             };
             match self.declared.get_mut(&id) {
                 Some(existing) if existing.git != git && existing.conflict.is_none() => {
@@ -243,7 +244,10 @@ impl ImportSources {
             import_error(
                 id,
                 referenced_by,
-                format!("failed to check out '{}' at '{rev}': {error}", git.repo),
+                format!(
+                    "failed to check out '{}' at '{rev}': {error}",
+                    gaia_spec::redact_url_userinfo(&git.repo)
+                ),
             )
         })?;
         let root = fs::canonicalize(&dest).map_err(|error| {
@@ -254,7 +258,7 @@ impl ImportSources {
             )
         })?;
         Ok(Resolved::new(
-            format!("git:{}@{commit}", git.repo),
+            format!("git:{}@{commit}", gaia_spec::redact_url_userinfo(&git.repo)),
             root,
             false,
         ))

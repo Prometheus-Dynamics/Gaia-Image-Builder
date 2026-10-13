@@ -5,10 +5,13 @@ mod keys;
 pub(crate) use keys::source_path_override_id;
 use keys::{KnownOverrideKey, OverrideKey};
 
+/// Applies the `--set` overrides. Returns the overrides that name a source
+/// the merged config does not declare (`sources.<id>.path`), unapplied: the
+/// caller decides whether that is an error, since a variant may declare it.
 pub(crate) fn apply_cli_overrides(
     mut raw: raw::RawBuildConfig,
     options: &ResolveOptions,
-) -> Result<raw::RawBuildConfig, ConfigError> {
+) -> Result<(raw::RawBuildConfig, Vec<(String, String)>), ConfigError> {
     for env_file in &options.env_files {
         if !raw.env_files.contains(env_file) {
             raw.env_files.push(env_file.clone());
@@ -17,8 +20,11 @@ pub(crate) fn apply_cli_overrides(
     for (key, value) in &options.env_overrides {
         raw.env.insert(key.clone(), value.clone());
     }
+    let mut undeclared = Vec::new();
     for (key, value) in &options.explicit_overrides {
-        apply_override(&mut raw, key, value)?;
+        if !apply_override(&mut raw, key, value)? {
+            undeclared.push((key.clone(), value.clone()));
+        }
     }
     if raw.source_path.is_some()
         && raw
@@ -31,7 +37,7 @@ pub(crate) fn apply_cli_overrides(
             .or_insert_with(|| raw.requested_build.clone().unwrap_or_default());
     }
     raw.selected_inputs = collect_selected_inputs(&raw);
-    Ok(raw)
+    Ok((raw, undeclared))
 }
 
 /// Applies the selected preset, or a variant's presets in place of it (in
@@ -47,13 +53,11 @@ pub(crate) fn apply_selected_presets(
         variant_presets.to_vec()
     };
     for selected_preset in chain {
-        let preset =
-            raw.presets
-                .get(&selected_preset)
-                .cloned()
-                .ok_or(ConfigError::MissingPreset {
-                    preset: selected_preset,
-                })?;
+        let preset = raw.presets.get(&selected_preset).cloned().ok_or_else(|| {
+            ConfigError::MissingPreset {
+                preset: selected_preset.clone(),
+            }
+        })?;
 
         for env_file in preset.env_files {
             if !raw.env_files.contains(&env_file) {
@@ -62,7 +66,16 @@ pub(crate) fn apply_selected_presets(
         }
         raw.env.extend(preset.env);
         for (key, value) in preset.overrides {
-            apply_override(&mut raw, &key, &value)?;
+            if !apply_override(&mut raw, &key, &value)? {
+                return Err(ConfigError::UndeclaredSourceOverride {
+                    source_id: source_path_override_id(&key)
+                        .unwrap_or_default()
+                        .to_string(),
+                    scope: "the selected config".to_string(),
+                    declared: declared_source_ids(&raw),
+                    key,
+                });
+            }
         }
     }
 
@@ -84,11 +97,18 @@ pub(crate) fn variant_override_key_problem(raw: &raw::RawBuildConfig, key: &str)
     }
 }
 
+/// The ids of the sources the merged config declares.
+pub(crate) fn declared_source_ids(raw: &raw::RawBuildConfig) -> Vec<String> {
+    raw.sources.iter().map(|source| source.id.clone()).collect()
+}
+
+/// Applies one override. Returns `false`, and applies nothing, when it sets
+/// `sources.<id>.path` for an id the merged config does not declare.
 fn apply_override(
     raw: &mut raw::RawBuildConfig,
     key: &str,
     value: &str,
-) -> Result<(), ConfigError> {
+) -> Result<bool, ConfigError> {
     match OverrideKey::parse(key) {
         OverrideKey::Known(known) => apply_known_override(raw, known, key, value)?,
         OverrideKey::Input(name) => {
@@ -127,13 +147,9 @@ fn apply_override(
         OverrideKey::SourcePath(id) => {
             // The source keeps its id but materializes from the local
             // directory, which import resolution also reads from.
-            let source = raw
-                .sources
-                .iter_mut()
-                .find(|source| source.id == id)
-                .ok_or_else(|| {
-                    ConfigError::invalid_override_value(key, value, "the id of a declared source")
-                })?;
+            let Some(source) = raw.sources.iter_mut().find(|source| source.id == id) else {
+                return Ok(false);
+            };
             let refresh = match &source.definition {
                 raw::RawSourceDefinition::Git { refresh, .. }
                 | raw::RawSourceDefinition::Path { refresh, .. }
@@ -149,7 +165,7 @@ fn apply_override(
         }
         OverrideKey::Unknown => {}
     }
-    Ok(())
+    Ok(true)
 }
 
 fn apply_known_override(

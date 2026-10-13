@@ -90,6 +90,7 @@ mod tests {
                 refresh_policy: crate::SourceRefreshPolicySpec::Auto,
                 pin_policy: crate::SourcePinPolicySpec::Floating,
                 locked_commit: None,
+                git_backend: crate::GitBackendSpec::Host,
             }),
         )
     }

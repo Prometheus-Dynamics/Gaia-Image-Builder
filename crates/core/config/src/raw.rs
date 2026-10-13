@@ -441,6 +441,9 @@ pub enum RawSourceDefinition {
         refresh: Option<RawSourceRefreshPolicy>,
         #[serde(default)]
         pin: Option<RawSourcePinPolicy>,
+        /// Where git runs: "host" (default, user's credentials) or "execution".
+        #[serde(default)]
+        git_backend: Option<RawGitBackend>,
     },
     Path {
         path: String,
@@ -477,6 +480,13 @@ pub enum RawSourceRefreshPolicy {
     Auto,
     Always,
     Never,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RawGitBackend {
+    Host,
+    Execution,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]

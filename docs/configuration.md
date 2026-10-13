@@ -1217,6 +1217,33 @@ Policies:
 each machine keeps whatever commit it fetched first. To pin git sources to
 the same commit everywhere, use a lockfile.
 
+#### Git source credentials
+
+Git sources run their git commands (mirror clone and fetch, `ls-remote`,
+clone, checkout) on the host with your own environment: git config,
+credential helpers (for example `gh auth setup-git`), the ssh agent and
+`GIT_*` variables. This holds even when the build runs in docker, which is
+why a private repository works with `[policy.execution] docker`. Builds
+still run in docker; only git runs on the host.
+
+- `git_backend = "host" | "execution"` on a `kind = "git"` source. The default
+  is `"host"`. `"execution"` runs the git commands through the execution
+  backend (docker, when configured) as older versions did.
+- If `git` is not installed on the host, a `"host"` source falls back to the
+  execution backend and the build log says so.
+- Git runs with `GIT_TERMINAL_PROMPT=0` and `GCM_INTERACTIVE=never`: a
+  missing credential fails at once with the source id and the redacted URL,
+  and the error suggests a credential helper or an ssh key. It does not
+  prompt or hang. ssh keys that need a passphrase must be loaded in ssh-agent.
+- Credentials in a URL (`https://user:token@host/...`) are never written by
+  Gaia. Logs, errors, `.gaia-source-state.txt`, the source marker, the
+  provenance and manifest reports and `<build>.gaia.lock` show them as
+  `https://***@host/...`. Prefer a credential helper over embedding a token;
+  a token in the URL is still stored in the mirror's `.git/config` under
+  `.gaia/cache/git` (the checkout's copy is redacted).
+- The `git_backend` setting does not change source fingerprints: a build
+  upgraded to this version keeps its materialized sources.
+
 ### Git Source Lockfile
 
 `gaia lock <build.toml>` writes `<build>.gaia.lock` next to the build

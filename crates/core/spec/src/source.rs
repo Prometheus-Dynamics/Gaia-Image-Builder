@@ -59,6 +59,30 @@ pub struct GitSourceSpec {
     /// materialization checks out exactly this commit instead of the
     /// configured branch/tag tip.
     pub locked_commit: Option<String>,
+    /// Where the git commands for this source run. Not part of the Debug
+    /// output: operation fingerprints hash that, and where git runs does not
+    /// change the checkout it produces.
+    pub git_backend: GitBackendSpec,
+}
+
+/// Where a git source's git commands (clone, fetch, ls-remote, checkout) run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GitBackendSpec {
+    /// On the host, with the user's environment: git config, credential
+    /// helpers, ssh agent and `GIT_*` variables.
+    #[default]
+    Host,
+    /// Through the build's execution backend (docker when configured).
+    Execution,
+}
+
+impl GitBackendSpec {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Host => "host",
+            Self::Execution => "execution",
+        }
+    }
 }
 
 impl GitSourceSpec {

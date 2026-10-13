@@ -114,7 +114,7 @@ fn lock_build(
                 let commit = resolve(git).map_err(|error| {
                     format!(
                         "failed to resolve git source '{id}' ({}): {error}",
-                        git.repo
+                        gaia_spec::redact_url_userinfo(&git.repo)
                     )
                 })?;
                 GitLockEntry::new(id, git, commit)
@@ -173,6 +173,7 @@ mod tests {
                     refresh_policy: SourceRefreshPolicySpec::Auto,
                     pin_policy: SourcePinPolicySpec::Locked,
                     locked_commit: None,
+                    git_backend: gaia_spec::GitBackendSpec::Host,
                 }),
             ));
         }

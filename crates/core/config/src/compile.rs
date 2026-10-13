@@ -25,7 +25,7 @@ use when::apply_when_selection;
 use crate::raw::{
     RawArtifactConfig, RawArtifactDefinition, RawArtifactInstallClass, RawBuildConfig,
     RawBuildrootExpectedImageFormat, RawBuildrootExternalTreeMode, RawCheckpointConfig,
-    RawCheckpointPolicy, RawImageDefinition, RawRollbackDomain, RawSourceDefinition,
+    RawCheckpointPolicy, RawGitBackend, RawImageDefinition, RawRollbackDomain, RawSourceDefinition,
     RawSourcePinPolicy, RawSourceRefreshPolicy, RawStageContentOrigin, RawStartingPointOutputMode,
     RawStartingPointRootfsValidationMode, RawWhenConfig, RawWhenImageKind, RawWorkspacePathKind,
 };
@@ -52,9 +52,9 @@ use gaia_spec::{
     DEFAULT_PYTHON_PROVIDER_TIMEOUT_SECONDS, DEFAULT_RUST_PROVIDER_TIMEOUT_SECONDS,
     DEFAULT_STARTING_POINT_PROVIDER_TIMEOUT_SECONDS, DockerArtifactExecutionSpec,
     DockerExecutionSpec, ExecutionPolicySpec, ExportSpec, FailureHandlingPolicySpec,
-    GitProviderPolicySpec, GitSourceSpec, GoArtifactSpec, ImageAssemblySpec, ImageDefinition,
-    ImageFeedSpec, ImageOutputSpec, ImageSpec, InputKindSpec, InputOptionSpec, InputSpec,
-    InstallEntrySpec, InstallId, InterpolationSpec, JavaArtifactSpec, NodeArtifactSpec,
+    GitBackendSpec, GitProviderPolicySpec, GitSourceSpec, GoArtifactSpec, ImageAssemblySpec,
+    ImageDefinition, ImageFeedSpec, ImageOutputSpec, ImageSpec, InputKindSpec, InputOptionSpec,
+    InputSpec, InstallEntrySpec, InstallId, InterpolationSpec, JavaArtifactSpec, NodeArtifactSpec,
     OutputHygieneSpec, OutputRetentionPolicySpec, PathSourceSpec, PostBuildHookSpec,
     PrecedenceLayerSpec, PrecedencePolicySpec, PrecedenceSource, PrecedenceTarget,
     PresetSelectionSpec, ProductIdentitySpec, ProvenanceIdentitySpec, ProvenanceSpec,
@@ -298,6 +298,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                     update,
                     refresh,
                     pin,
+                    git_backend,
                 } => {
                     let default_pin_policy = if rev.is_some() || tag.is_some() {
                         SourcePinPolicySpec::Locked
@@ -321,6 +322,10 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                         ),
                         pin_policy: compile_source_pin_policy(pin, default_pin_policy),
                         locked_commit: None,
+                        git_backend: match git_backend {
+                            Some(RawGitBackend::Execution) => GitBackendSpec::Execution,
+                            Some(RawGitBackend::Host) | None => GitBackendSpec::Host,
+                        },
                     })
                 }
                 RawSourceDefinition::Path {
