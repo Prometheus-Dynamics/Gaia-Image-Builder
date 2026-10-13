@@ -20,14 +20,18 @@
 //! `<build_dir>/sources/<id>` for sources Gaia materializes. The planner
 //! makes the image depend on a source whose directory an override names.
 //!
-//! Both tokens are substituted in stage env set values, build labels and
-//! Buildroot `config_overrides` values.
+//! Both tokens are substituted in stage env set values, build labels,
+//! Buildroot `config_overrides` values and Java artifacts' build target,
+//! arguments, command and environment. With build variants, a source a
+//! variant checks out for itself resolves to that variant's checkout
+//! (`<build_dir>/sources/variants/<variant>/<id>`); a source every variant
+//! shares resolves to the shared one.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use gaia_spec::{ImageDefinition, ResolvedBuildSpec, SourceDefinition};
+use gaia_spec::{ArtifactDefinition, ImageDefinition, ResolvedBuildSpec, SourceDefinition};
 
 const PREFIX: &str = "source.";
 const COMMIT_SUFFIX: &str = ".commit";
@@ -51,6 +55,17 @@ pub(crate) fn substitute_source_tokens(spec: &mut ResolvedBuildSpec) {
     if let ImageDefinition::Buildroot(buildroot) = &mut spec.image.definition {
         for (_, value) in &mut buildroot.config_overrides {
             *value = substitute(value, &values);
+        }
+    }
+    for artifact in &mut spec.artifacts {
+        if let ArtifactDefinition::Java(java) = &mut artifact.definition {
+            java.build_target = substitute(&java.build_target, &values);
+            for value in java.build_args.iter_mut().chain(&mut java.build_command) {
+                *value = substitute(value, &values);
+            }
+            for (_, value) in &mut java.build_env {
+                *value = substitute(value, &values);
+            }
         }
     }
     spec.policy

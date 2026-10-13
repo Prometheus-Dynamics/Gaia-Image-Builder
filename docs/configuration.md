@@ -1693,9 +1693,13 @@ Source paths: `${source.<id>.path}` becomes the directory holding the
 source's files: an import source's checkout (under
 `.gaia/cache/import-sources/`), a path source's directory, or
 `<build_dir>/sources/<id>` for git, archive and download sources (where Gaia
-materializes them). Like the commit token it works in stage env set values
-and build labels, and both tokens also work in Buildroot `config_overrides`
-values, so a setting can name a file inside a source:
+materializes them; with build variants, `<build_dir>/sources/variants/<variant>/<id>`
+for a source a variant checks out for itself). Like the commit token it works
+in stage env set values and build labels; both tokens also work in Java
+artifacts' `build_target`, `build_args`, `build_command` and `build_env`
+(for example `build_env = [["EIDOS_PATH", "${source.eidos.path}"]]`) and in
+Buildroot `config_overrides` values, so a setting can name a file inside a
+source:
 
 ```toml
 [image]

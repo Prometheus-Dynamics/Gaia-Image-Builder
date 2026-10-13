@@ -286,3 +286,67 @@ fn path_of(contents: &str) -> String {
         .expect("utf-8 temp path")
         .to_string()
 }
+
+#[test]
+fn a_java_artifacts_build_env_names_the_variants_checkout() {
+    let contents = build_with_variants(
+        r#"
+[[variants]]
+id = "pv2026"
+overrides = [["input.pv", "2026"]]
+
+[[artifacts]]
+id = "styx-jar"
+kind = "java"
+source = "app-source"
+build_target = "build/libs/app.jar"
+build_command = ["./build.sh", "--eidos", "${source.app-source.path}"]
+build_env = [["EIDOS_PATH", "${source.app-source.path}"], ["EIDOS_REV", "${source.app-source.commit}"]]
+output_path = "out/app.jar"
+"#,
+    )
+    .replace(
+        "kind = \"path\"\npath = \"app\"",
+        "kind = \"git\"\nrepo = \"file:///nonexistent-repo\"\nrev = \"0123456789abcdef0123456789abcdef01234567\"",
+    );
+    let java = |spec: &ResolvedBuildSpec| {
+        let artifact = spec
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.id.as_str() == "styx-jar")
+            .expect("styx-jar");
+        match &artifact.definition {
+            gaia_spec::ArtifactDefinition::Java(java) => java.clone(),
+            other => panic!("not java: {other:?}"),
+        }
+    };
+
+    let scoped = std::collections::BTreeSet::from(["app-source".to_string()]);
+    let specs = gaia_config::resolve_variant_specs_scoped(
+        path_of(&contents).as_str(),
+        &ResolveOptions::default(),
+        &scoped,
+    )
+    .expect("resolves");
+    let pv2026 = java(&specs[1]);
+    let eidos = &pv2026.build_env[0].1;
+    assert!(
+        eidos.ends_with("build/sources/variants/pv2026/app-source"),
+        "{eidos}"
+    );
+    assert_eq!(pv2026.build_command[2], *eidos);
+    assert_eq!(
+        pv2026.build_env[1].1,
+        "0123456789abcdef0123456789abcdef01234567"
+    );
+
+    // Shared (no scope): the shared checkout.
+    let shared = resolve(&contents, &ResolveOptions::default()).expect("resolves");
+    assert!(
+        java(&shared[0]).build_env[0]
+            .1
+            .ends_with("build/sources/app-source"),
+        "{:?}",
+        java(&shared[0]).build_env
+    );
+}
