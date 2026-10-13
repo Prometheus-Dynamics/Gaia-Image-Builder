@@ -1,15 +1,12 @@
 use gaia_config::resolve_config;
+use gaia_testkit::TempDir;
 use gaia_validate::validate_spec;
 use std::fs;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
 fn buildroot_expected_image_name_mismatch_is_an_error() {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("gaia-buildroot-name-validate-{nonce}"));
+    let scratch = TempDir::new("gaia-buildroot-name-validate");
+    let root = scratch.join("root");
     fs::create_dir_all(root.join("assets")).expect("assets dir");
     let defconfig = root.join("assets/test.defconfig");
     fs::write(&defconfig, "BR2_TARGET_ROOTFS_TAR=y\n").expect("defconfig");
@@ -49,8 +46,6 @@ required = true
             .iter()
             .any(|diagnostic| diagnostic.code == "buildroot_expected_image_name_mismatch")
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -62,11 +57,8 @@ fn buildroot_cpio_expected_image_names_are_accepted() {
         "rootfs.cpio.zst",
         "rootfs.cpio.lz4",
     ] {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("gaia-buildroot-cpio-name-{nonce}"));
+        let scratch = TempDir::new("gaia-buildroot-cpio-name");
+        let root = scratch.join("root");
         fs::create_dir_all(root.join("assets")).expect("assets dir");
         let defconfig = root.join("assets/test.defconfig");
         fs::write(&defconfig, "BR2_TARGET_ROOTFS_CPIO=y\n").expect("defconfig");
@@ -107,18 +99,13 @@ required = true
                 .any(|diagnostic| diagnostic.code == "buildroot_expected_image_name_mismatch"),
             "{name} should be accepted"
         );
-
-        let _ = fs::remove_dir_all(root);
     }
 }
 
 #[test]
 fn buildroot_cpio_expected_image_name_mismatch_is_an_error() {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("gaia-buildroot-cpio-name-invalid-{nonce}"));
+    let scratch = TempDir::new("gaia-buildroot-cpio-name-invalid");
+    let root = scratch.join("root");
     fs::create_dir_all(root.join("assets")).expect("assets dir");
     let defconfig = root.join("assets/test.defconfig");
     fs::write(&defconfig, "BR2_TARGET_ROOTFS_CPIO=y\n").expect("defconfig");
@@ -158,17 +145,12 @@ required = true
             .iter()
             .any(|diagnostic| diagnostic.code == "buildroot_expected_image_name_mismatch")
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn buildroot_cpio_expected_image_requires_defconfig_support() {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("gaia-buildroot-cpio-defconfig-{nonce}"));
+    let scratch = TempDir::new("gaia-buildroot-cpio-defconfig");
+    let root = scratch.join("root");
     fs::create_dir_all(root.join("assets")).expect("assets dir");
     let defconfig = root.join("assets/test.defconfig");
     fs::write(&defconfig, "BR2_TARGET_ROOTFS_TAR=y\n").expect("defconfig");
@@ -208,8 +190,6 @@ required = true
             .iter()
             .any(|diagnostic| diagnostic.code == "buildroot_expected_image_format_not_enabled")
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -226,11 +206,8 @@ fn buildroot_ext2_and_ext3_expected_image_names_are_accepted() {
             "BR2_TARGET_ROOTFS_EXT2=y\nBR2_TARGET_ROOTFS_EXT2_3=y\n",
         ),
     ] {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("gaia-buildroot-{format_name}-name-{nonce}"));
+        let scratch = TempDir::new("gaia-buildroot-name");
+        let root = scratch.join("root");
         fs::create_dir_all(root.join("assets")).expect("assets dir");
         let defconfig = root.join("assets/test.defconfig");
         fs::write(&defconfig, defconfig_contents).expect("defconfig");
@@ -278,8 +255,6 @@ required = true
                 .any(|diagnostic| diagnostic.code == "buildroot_expected_image_format_not_enabled"),
             "{format_name} defconfig should be accepted"
         );
-
-        let _ = fs::remove_dir_all(root);
     }
 }
 
@@ -297,12 +272,8 @@ fn buildroot_ext2_and_ext3_expected_image_name_mismatches_are_errors() {
             "BR2_TARGET_ROOTFS_EXT2=y\nBR2_TARGET_ROOTFS_EXT2_3=y\n",
         ),
     ] {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos();
-        let root =
-            std::env::temp_dir().join(format!("gaia-buildroot-{format_name}-name-invalid-{nonce}"));
+        let scratch = TempDir::new("gaia-buildroot-name-invalid");
+        let root = scratch.join("root");
         fs::create_dir_all(root.join("assets")).expect("assets dir");
         let defconfig = root.join("assets/test.defconfig");
         fs::write(&defconfig, defconfig_contents).expect("defconfig");
@@ -343,20 +314,14 @@ required = true
                 .any(|diagnostic| diagnostic.code == "buildroot_expected_image_name_mismatch"),
             "{image_name} should be rejected for {format_name}"
         );
-
-        let _ = fs::remove_dir_all(root);
     }
 }
 
 #[test]
 fn buildroot_ext2_and_ext3_expected_images_require_defconfig_support() {
     for (format_name, image_name) in [("ext2", "rootfs.ext2"), ("ext3", "rootfs.ext3")] {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos();
-        let root =
-            std::env::temp_dir().join(format!("gaia-buildroot-{format_name}-defconfig-{nonce}"));
+        let scratch = TempDir::new("gaia-buildroot-defconfig");
+        let root = scratch.join("root");
         fs::create_dir_all(root.join("assets")).expect("assets dir");
         let defconfig = root.join("assets/test.defconfig");
         fs::write(&defconfig, "BR2_TARGET_ROOTFS_TAR=y\n").expect("defconfig");
@@ -397,7 +362,5 @@ required = true
                 .any(|diagnostic| diagnostic.code == "buildroot_expected_image_format_not_enabled"),
             "{format_name} should require defconfig support"
         );
-
-        let _ = fs::remove_dir_all(root);
     }
 }

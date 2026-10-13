@@ -169,8 +169,8 @@ mod tests {
     use gaia_spec::{
         ArtifactOutputSpec, DockerArtifactExecutionSpec, DockerExecutionSpec, JavaArtifactSpec,
     };
+    use gaia_testkit::TempDir;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn java_artifact(execution: Option<ArtifactExecutionSpec>) -> ArtifactSpec {
         let mut artifact = ArtifactSpec::new(
@@ -198,14 +198,8 @@ mod tests {
         }))
     }
 
-    fn fake_docker() -> std::path::PathBuf {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time")
-            .as_nanos();
-        let dir = std::env::temp_dir()
-            .join("gaia-tests")
-            .join(format!("fake-docker-{}-{nonce}", std::process::id()));
+    fn fake_docker(scratch: &TempDir) -> std::path::PathBuf {
+        let dir = scratch.join("fake-docker");
         fs::create_dir_all(&dir).expect("dir");
         let staged = dir.join("docker.body");
         fs::write(
@@ -289,7 +283,8 @@ mod tests {
 
     #[test]
     fn docker_image_signature_uses_the_image_id_or_a_stable_missing_marker() {
-        let docker = fake_docker();
+        let scratch = TempDir::new("gaia-plan");
+        let docker = fake_docker(&scratch);
         assert_eq!(
             docker_image_signature_with(docker.as_os_str(), "maven:3"),
             "docker-image:sha256:abc123"
@@ -302,7 +297,6 @@ mod tests {
             docker_image_signature_with(OsStr::new("/nonexistent/docker"), "maven:3"),
             "image-missing:maven:3"
         );
-        let _ = fs::remove_dir_all(docker.parent().expect("dir"));
     }
 
     #[test]

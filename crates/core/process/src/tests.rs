@@ -1,12 +1,10 @@
 use super::*;
 use crate::retention::RetainedStream;
+use gaia_testkit::TempDir;
 use std::fs;
-use std::path::PathBuf;
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-
-static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[test]
 fn command_description_captures_program_args_and_cwd() {
@@ -90,7 +88,8 @@ fn run_command_does_not_hang_when_child_leaves_inherited_stdio_open() {
 #[cfg(unix)]
 #[test]
 fn run_command_timeout_kills_spawned_descendants() {
-    let dir = unique_dir("process-tree-timeout");
+    let scratch = TempDir::new("gaia-process-test");
+    let dir = scratch.join("process-tree-timeout");
     fs::create_dir_all(&dir).expect("create test dir");
     let marker = dir.join("descendant-survived");
     let script = format!(
@@ -110,7 +109,6 @@ fn run_command_timeout_kills_spawned_descendants() {
     assert_eq!(error.kind, ProcessRunErrorKind::Timeout);
     thread::sleep(Duration::from_millis(1_300));
     assert!(!marker.exists(), "descendant survived process-tree kill");
-    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -392,10 +390,11 @@ fn run_command_retains_blank_line_bytes() {
 #[cfg(unix)]
 #[test]
 fn run_command_retries_while_executable_is_busy() {
+    let scratch = TempDir::new("gaia-process-test");
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
 
-    let dir = unique_dir("etxtbsy");
+    let dir = scratch.join("etxtbsy");
     fs::create_dir_all(&dir).expect("dir");
     let script = dir.join("tool.sh");
     let mut writer = fs::File::create(&script).expect("script");
@@ -423,7 +422,6 @@ fn run_command_retries_while_executable_is_busy() {
 
     assert!(result.output.status.success());
     assert_eq!(result.stdout_lines, vec!["ready".to_string()]);
-    let _ = fs::remove_dir_all(dir);
 }
 
 #[cfg(unix)]
@@ -474,12 +472,4 @@ fn retained_stream_keeps_newest_lines_and_bytes() {
     disabled.push_bytes(b"ignored");
     assert!(disabled.take_lines().is_empty());
     assert!(disabled.take_bytes().is_empty());
-}
-
-fn unique_dir(name: &str) -> PathBuf {
-    let counter = TEST_DIR_COUNTER.fetch_add(1, Ordering::SeqCst);
-    std::env::temp_dir().join("gaia-tests").join(format!(
-        "gaia-process-{name}-{}-{counter}",
-        std::process::id()
-    ))
 }

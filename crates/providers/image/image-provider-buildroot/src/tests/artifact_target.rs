@@ -34,7 +34,8 @@ fn elf(path: &Path, machine: u16) {
 
 #[test]
 fn static_musl_and_other_libc_targets_are_verified_by_architecture() {
-    let dir = temp_path("gaia-artifact-target");
+    let dir_scratch = TempDir::new("gaia-artifact-target");
+    let dir = dir_scratch.join("dir");
     fs::create_dir_all(&dir).expect("dir");
     let aarch64 = dir.join("lemnosd");
     elf(&aarch64, 0xB7);
@@ -63,5 +64,4 @@ fn static_musl_and_other_libc_targets_are_verified_by_architecture() {
     let error = verify_install_artifact_target(&artifact("mips-unknown-linux-gnu"), &armv7)
         .expect_err("unknown");
     assert!(error.message.contains("cannot verify"), "{}", error.message);
-    let _ = fs::remove_dir_all(dir);
 }

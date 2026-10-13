@@ -54,8 +54,6 @@ output_path = "out/photonvision.jar"
 
     let spec = resolve_config(path.to_str().expect("temp path utf-8"));
     assert_eq!(extra_sources(&spec, "photonvision-jar"), ["eidos"]);
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -105,6 +103,4 @@ rootfs_path = "/tmp/rootfs"
             .extra_sources
             .contains(&SourceId::new("eidos"))
     );
-
-    let _ = std::fs::remove_file(path);
 }

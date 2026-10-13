@@ -340,6 +340,7 @@ mod tests {
     use super::*;
     use crate::commands::live_status::fixture_status;
     use crate::commands::run_registry::fixture_registered_run;
+    use gaia_testkit::TempDir;
     use ratatui::backend::TestBackend;
 
     fn live_fixture(stopped: bool) -> LiveRun {
@@ -484,10 +485,10 @@ mod tests {
     }
 
     /// A picker over an empty directory: no build configs of its own.
-    fn picker_without_project(runs: Vec<ListedRun>) -> TuiState<'static> {
+    fn picker_without_project(runs: Vec<ListedRun>) -> (TempDir, TuiState<'static>) {
         let context: &'static AppContext = Box::leak(Box::new(AppContext::with_defaults()));
-        let empty = std::env::temp_dir().join(format!("gaia-tui-empty-{}", std::process::id()));
-        fs::create_dir_all(&empty).expect("empty dir");
+        let scratch = TempDir::new("gaia-tui-empty");
+        let empty = scratch.path();
         let mut state = TuiState::new(
             context,
             TuiLaunch {
@@ -500,12 +501,12 @@ mod tests {
         state.screen = Screen::Picker;
         state.runs = runs;
         state.ensure_picker_selection();
-        state
+        (scratch, state)
     }
 
     #[test]
     fn start_screen_shows_running_builds_without_a_project() {
-        let mut state = picker_without_project(vec![
+        let (_scratch, mut state) = picker_without_project(vec![
             listed_live("Cm5 image", 4242),
             listed_ended("Pi zero", 99),
         ]);
@@ -532,7 +533,7 @@ mod tests {
 
     #[test]
     fn start_screen_without_runs_or_projects_still_opens() {
-        let mut state = picker_without_project(Vec::new());
+        let (_scratch, mut state) = picker_without_project(Vec::new());
         let mut terminal =
             ratatui::Terminal::new(TestBackend::new(110, 16)).expect("test terminal");
         terminal
@@ -548,7 +549,7 @@ mod tests {
 
     #[test]
     fn cursor_moves_through_running_builds_then_build_configs() {
-        let mut state =
+        let (_scratch, mut state) =
             picker_without_project(vec![listed_live("One", 4242), listed_live("Two", 4343)]);
         // A build config of this directory, below the running builds.
         state.build_entries = vec![BuildEntry {
@@ -569,7 +570,7 @@ mod tests {
 
     #[test]
     fn enter_on_a_running_build_attaches_through_its_registry_entry() {
-        let mut state = picker_without_project(vec![listed_live("Cm5 image", 4242)]);
+        let (_scratch, mut state) = picker_without_project(vec![listed_live("Cm5 image", 4242)]);
         state.handle_key(KeyCode::Enter, KeyModifiers::empty());
         assert_eq!(state.screen, Screen::Attach);
         let attach = state.attach.as_ref().expect("attached");

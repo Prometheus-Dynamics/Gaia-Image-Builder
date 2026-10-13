@@ -1,15 +1,17 @@
 pub mod support;
 
 use gaia_app::{AppArgs, CommandOutcome, run_with_args};
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::PathBuf;
-use support::{config_path, seed_default_assets, unique_dir};
+use support::{config_path, seed_default_assets};
 
 #[test]
 fn run_command_surfaces_execution_failures_from_backend_errors() {
-    let missing_root_dir = unique_dir("gaia-cli-missing-root");
-    let run_out_dir = unique_dir("gaia-cli-fail-out");
-    let run_build_dir = unique_dir("gaia-cli-fail-build");
+    let scratch = TempDir::new("gaia-cli-missing");
+    let missing_root_dir = scratch.join("root").display().to_string();
+    let run_out_dir = scratch.join("out").display().to_string();
+    let run_build_dir = scratch.join("build").display().to_string();
     fs::create_dir_all(&missing_root_dir).expect("workspace root");
     seed_default_assets(&missing_root_dir);
 
@@ -78,9 +80,10 @@ fn run_command_surfaces_execution_failures_from_backend_errors() {
 
 #[test]
 fn run_command_reports_when_rollback_is_disabled_by_policy() {
-    let missing_root_dir = unique_dir("gaia-cli-no-rollback-root");
-    let run_out_dir = unique_dir("gaia-cli-no-rollback-out");
-    let run_build_dir = unique_dir("gaia-cli-no-rollback-build");
+    let scratch = TempDir::new("gaia-cli-no-rollback");
+    let missing_root_dir = scratch.join("root").display().to_string();
+    let run_out_dir = scratch.join("out").display().to_string();
+    let run_build_dir = scratch.join("build").display().to_string();
     fs::create_dir_all(&missing_root_dir).expect("workspace root");
     seed_default_assets(&missing_root_dir);
 
@@ -136,9 +139,10 @@ fn run_command_reports_when_rollback_is_disabled_by_policy() {
 
 #[test]
 fn run_command_unwinds_completed_outputs_when_rollback_completed_is_set() {
-    let missing_root_dir = unique_dir("gaia-cli-unwind-root");
-    let run_out_dir = unique_dir("gaia-cli-unwind-out");
-    let run_build_dir = unique_dir("gaia-cli-unwind-build");
+    let scratch = TempDir::new("gaia-cli-unwind");
+    let missing_root_dir = scratch.join("root").display().to_string();
+    let run_out_dir = scratch.join("out").display().to_string();
+    let run_build_dir = scratch.join("build").display().to_string();
     fs::create_dir_all(&missing_root_dir).expect("workspace root");
     seed_default_assets(&missing_root_dir);
 

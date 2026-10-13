@@ -2,38 +2,15 @@
 //! with `sh` on a fake output tree, so the removal is what Buildroot would run.
 use super::*;
 use crate::rootfs_exclude_elf::tests::elf64_object;
+use gaia_testkit::TempDir;
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// A fresh output dir with `build/` and `target/`, removed when dropped.
-struct Scratch(PathBuf);
-
-impl std::ops::Deref for Scratch {
-    type Target = PathBuf;
-
-    fn deref(&self) -> &PathBuf {
-        &self.0
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-fn scratch(tag: &str) -> Scratch {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("time")
-        .as_nanos();
-    let root = env::temp_dir().join(format!(
-        "gaia-rootfs-exclude-{tag}-{}-{nanos}",
-        std::process::id()
-    ));
-    fs::create_dir_all(root.join("build")).expect("build dir");
-    fs::create_dir_all(root.join("target")).expect("target dir");
-    Scratch(root)
+fn scratch(tag: &str) -> TempDir {
+    let dir = TempDir::new(&format!("gaia-rootfs-exclude-{tag}"));
+    fs::create_dir_all(dir.join("build")).expect("build dir");
+    fs::create_dir_all(dir.join("target")).expect("target dir");
+    dir
 }
 
 fn put(root: &Path, rel: &str, contents: &[u8]) {
@@ -68,9 +45,10 @@ fn graph(json: &str) -> PackageGraph {
 
 #[test]
 fn removes_excluded_files_keeps_shared_ones_and_prunes_emptied_directories() {
-    let root = scratch("remove");
+    let root_scratch = scratch("remove");
+    let root = root_scratch.path();
     put(
-        &root,
+        root,
         "build/packages-file-list.txt",
         b"libcamera,./usr/lib/libcamera.so.0.7\n\
           libcamera,./usr/share/libcamera/ipa/a.json\n\
@@ -86,11 +64,11 @@ fn removes_excluded_files_keeps_shared_ones_and_prunes_emptied_directories() {
         "etc/kept.conf",
         "usr/include/libpisp/x.hpp",
     ] {
-        put(&root, &format!("target/{rel}"), b"data");
+        put(root, &format!("target/{rel}"), b"data");
     }
 
-    let staged = stage(&root, &["libcamera", "libpisp"]);
-    run_script(&staged, &root);
+    let staged = stage(root, &["libcamera", "libpisp"]);
+    run_script(&staged, root);
     assert!(staged.applied(), "the script leaves its marker");
     let summary = staged.verify().expect("the removal verifies");
 
@@ -158,27 +136,28 @@ fn the_graph_check_refuses_unknown_and_host_packages() {
 
 #[test]
 fn a_removed_library_still_needed_by_a_kept_binary_is_an_error() {
-    let root = scratch("needed");
+    let root_scratch = scratch("needed");
+    let root = root_scratch.path();
     put(
-        &root,
+        root,
         "build/packages-file-list.txt",
         b"libcamera,./usr/lib/libcamera.so.0.7\nkept,./usr/bin/app\n",
     );
     let library = elf64_object(&[], Some("libcamera.so.0.7"));
-    put(&root, "target/usr/lib/libcamera.so.0.7", &library);
+    put(root, "target/usr/lib/libcamera.so.0.7", &library);
     put(
-        &root,
+        root,
         "per-package/libcamera/target/usr/lib/libcamera.so.0.7",
         &library,
     );
     put(
-        &root,
+        root,
         "target/usr/bin/app",
         &elf64_object(&["libc.so.6", "libcamera.so.0.7"], None),
     );
 
-    let staged = stage(&root, &["libcamera"]);
-    run_script(&staged, &root);
+    let staged = stage(root, &["libcamera"]);
+    run_script(&staged, root);
     let error = staged
         .verify()
         .expect_err("app needs a library that is left out");
@@ -193,47 +172,49 @@ fn a_removed_library_still_needed_by_a_kept_binary_is_an_error() {
 
 #[test]
 fn a_kept_object_providing_the_needed_name_passes_the_elf_check() {
-    let root = scratch("provided");
+    let root_scratch = scratch("provided");
+    let root = root_scratch.path();
     put(
-        &root,
+        root,
         "build/packages-file-list.txt",
         b"libcamera,./usr/lib/libcamera.so.0.7\nkept,./usr/bin/app\nkept,./usr/lib/compat/libcamera.so.0.7\n",
     );
     let library = elf64_object(&[], Some("libcamera.so.0.7"));
-    put(&root, "target/usr/lib/libcamera.so.0.7", &library);
+    put(root, "target/usr/lib/libcamera.so.0.7", &library);
     put(
-        &root,
+        root,
         "per-package/libcamera/target/usr/lib/libcamera.so.0.7",
         &library,
     );
     put(
-        &root,
+        root,
         "target/usr/bin/app",
         &elf64_object(&["libcamera.so.0.7"], None),
     );
     // A kept compatibility library with the same soname.
     put(
-        &root,
+        root,
         "target/usr/lib/compat/libcamera.so.0.7",
         &elf64_object(&[], Some("libcamera.so.0.7")),
     );
 
-    let staged = stage(&root, &["libcamera"]);
-    run_script(&staged, &root);
+    let staged = stage(root, &["libcamera"]);
+    run_script(&staged, root);
     let summary = staged.verify().expect("the kept library provides the name");
     assert_eq!(summary.files, 1);
 }
 
 #[test]
 fn a_script_that_did_not_run_is_an_error() {
-    let root = scratch("not-run");
+    let root_scratch = scratch("not-run");
+    let root = root_scratch.path();
     put(
-        &root,
+        root,
         "build/packages-file-list.txt",
         b"libcamera,./usr/lib/x.so\n",
     );
-    put(&root, "target/usr/lib/x.so", b"data");
-    let staged = stage(&root, &["libcamera"]);
+    put(root, "target/usr/lib/x.so", b"data");
+    let staged = stage(root, &["libcamera"]);
     let error = staged.verify().expect_err("the script never ran");
     assert!(error.message.contains("did not run"), "{}", error.message);
     assert!(

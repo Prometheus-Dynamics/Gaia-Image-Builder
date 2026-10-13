@@ -9,10 +9,11 @@ use gaia_spec::{
     AssemblyArchiveMemberSpec, AssemblyArchiveSpec, AssemblyDiskPartitionSpec, AssemblyDiskSpec,
     AssemblyPartitionTableSpec, ImageAssemblySpec, ResolvedBuildSpec,
 };
+use gaia_testkit::TempDir;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
-use support::{provider_catalogs, test_spec_with_root, unique_dir};
+use support::{provider_catalogs, test_spec_with_root};
 
 fn reuse_state_for_assembly(spec: &ResolvedBuildSpec) -> ReuseState {
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
@@ -61,10 +62,10 @@ fn assembly_reuse_code(spec: &ResolvedBuildSpec, state: &ReuseState) -> Option<S
         })
 }
 
-fn spec_with_archive(name: &str) -> (ResolvedBuildSpec, PathBuf) {
-    let root_dir = unique_dir(name);
+fn spec_with_archive(scratch: &TempDir, name: &str) -> (ResolvedBuildSpec, PathBuf) {
+    let root_dir = scratch.join(name).display().to_string();
     fs::create_dir_all(&root_dir).expect("root dir");
-    let mut spec = test_spec_with_root(root_dir);
+    let mut spec = test_spec_with_root(scratch, root_dir);
     let member = gaia_spec::resolve_workspace_path(&spec.workspace, "@assets/rootfs.ext4")
         .expect("asset path");
     fs::create_dir_all(member.parent().expect("asset parent")).expect("assets dir");
@@ -124,7 +125,8 @@ fn spec_with_archive(name: &str) -> (ResolvedBuildSpec, PathBuf) {
 
 #[test]
 fn plan_rebuilds_assembly_when_archive_member_changes() {
-    let (spec, member) = spec_with_archive("gaia-plan-assembly-archive-member");
+    let scratch = TempDir::new("gaia-plan-test");
+    let (spec, member) = spec_with_archive(&scratch, "gaia-plan-assembly-archive-member");
     let state = reuse_state_for_assembly(&spec);
 
     fs::write(&member, "two").expect("updated member");
@@ -137,7 +139,8 @@ fn plan_rebuilds_assembly_when_archive_member_changes() {
 
 #[test]
 fn unchanged_archive_and_empty_partition_inputs_keep_the_fingerprint() {
-    let (spec, _member) = spec_with_archive("gaia-plan-assembly-archive-stable");
+    let scratch = TempDir::new("gaia-plan-test");
+    let (spec, _member) = spec_with_archive(&scratch, "gaia-plan-assembly-archive-stable");
     let state = reuse_state_for_assembly(&spec);
 
     assert_ne!(
@@ -179,10 +182,11 @@ fn plan_of(spec: &ResolvedBuildSpec) -> ExecutionPlan {
 
 #[test]
 fn an_assembly_recorded_after_its_input_settles_is_not_rerun() {
+    let scratch = TempDir::new("gaia-plan-test");
     // The build rewrites an assembly input during the run. The planned
     // fingerprint still holds the input as it was before the run, so the
     // state must hold the fingerprint of the input as the run left it.
-    let (spec, member) = spec_with_archive("gaia-plan-assembly-settled");
+    let (spec, member) = spec_with_archive(&scratch, "gaia-plan-assembly-settled");
     let planned_before = plan_of(&spec);
     fs::write(&member, "rewritten by the build").expect("rewritten input");
 
@@ -221,7 +225,8 @@ fn recorded_fingerprint_of(
 
 #[test]
 fn a_changed_assembly_input_is_named_in_the_fingerprint_change() {
-    let (spec, member) = spec_with_archive("gaia-plan-assembly-named");
+    let scratch = TempDir::new("gaia-plan-test");
+    let (spec, member) = spec_with_archive(&scratch, "gaia-plan-assembly-named");
     let before_plan = plan_of(&spec);
     let before = components_of_assembly(&spec, &before_plan);
 

@@ -1,6 +1,7 @@
 //! Build groups: every member's cargo invocation selects the whole group.
 
 use super::*;
+use gaia_testkit::TempDir;
 
 /// Members of build group `group`, completed the way config compilation
 /// completes them: shared sorted packages and union features.
@@ -45,7 +46,8 @@ fn command_args(artifact: &ArtifactSpec, package: &str, source: &Path) -> Vec<St
 
 #[test]
 fn group_member_cargo_command_selects_every_group_package_and_union_features() {
-    let source = temp_path("gaia-rust-group-command");
+    let scratch = TempDir::new("gaia-rust-group-command");
+    let source = scratch.join("gaia-rust-group-command");
     let packages = ["engine", "plugin"];
     let features = ["engine/fast", "plugin/simd"];
     let engine = group_member(
@@ -93,7 +95,8 @@ fn group_member_cargo_command_selects_every_group_package_and_union_features() {
 
 #[test]
 fn group_members_batch_only_with_their_own_group() {
-    let source = temp_path("gaia-rust-group-batch-key");
+    let scratch = TempDir::new("gaia-rust-group-batch-key");
+    let source = scratch.join("gaia-rust-group-batch-key");
     let packages = ["engine", "plugin"];
     let engine = group_member(
         "engine",
@@ -134,8 +137,9 @@ fn group_members_batch_only_with_their_own_group() {
 /// their own feature enabled, so a build succeeds only when the union
 /// features reach cargo. The cdylib output is collected via
 /// `target_name = "libplugin.so"`.
-fn engine_and_plugin_workspace(prefix: &str) -> PathBuf {
-    let root = temp_path(prefix);
+fn engine_and_plugin_workspace(prefix: &str) -> TempDir {
+    let scratch = TempDir::new(prefix);
+    let root = scratch.path().to_path_buf();
     let write = |path: &str, contents: &str| {
         let path = root.join(path);
         fs::create_dir_all(path.parent().expect("parent")).expect("dir");
@@ -161,12 +165,13 @@ fn engine_and_plugin_workspace(prefix: &str) -> PathBuf {
         "plugin/src/lib.rs",
         "#[cfg(not(feature = \"simd\"))]\ncompile_error!(\"simd missing\");\n#[no_mangle]\npub extern \"C\" fn plugin_abi() -> u32 { 1 }\n",
     );
-    root
+    scratch
 }
 
 #[test]
 fn group_builds_engine_binary_and_cdylib_plugin() {
-    let workspace = engine_and_plugin_workspace("gaia-rust-group-cdylib");
+    let workspace_scratch = engine_and_plugin_workspace("gaia-rust-group-cdylib");
+    let workspace = workspace_scratch.path();
     let packages = ["engine", "plugin"];
     let features = ["engine/fast", "plugin/simd"];
     let engine = group_member(
@@ -185,8 +190,8 @@ fn group_builds_engine_binary_and_cdylib_plugin() {
         &packages,
         &features,
     );
-    let engine_contract = nested_contract(&engine, &workspace);
-    let plugin_contract = nested_contract(&plugin, &workspace);
+    let engine_contract = nested_contract(&engine, workspace);
+    let plugin_contract = nested_contract(&plugin, workspace);
 
     let results = RustProvider.execute_artifact_batch(
         &[
@@ -215,5 +220,4 @@ fn group_builds_engine_binary_and_cdylib_plugin() {
         .execute_artifact(&plugin, &plugin_contract, None, None)
         .expect("plugin builds alone with the group's invocation");
     assert!(workspace.join("out/libplugin.so").is_file());
-    let _ = fs::remove_dir_all(workspace);
 }

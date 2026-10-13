@@ -1,15 +1,17 @@
 pub mod support;
 
 use gaia_app::{AppArgs, CommandOutcome, run_with_args};
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::{Path, PathBuf};
-use support::{config_path, seed_default_assets, seed_reuse_state, unique_dir, write_temp_build};
+use support::{config_path, seed_default_assets, seed_reuse_state, write_temp_build};
 
 #[test]
 fn validate_and_run_commands_preserve_masked_selection_and_outputs() {
-    let run_root_dir = unique_dir("gaia-cli-root");
-    let run_out_dir = unique_dir("gaia-cli-out");
-    let run_build_dir = unique_dir("gaia-cli-build");
+    let scratch = TempDir::new("gaia-cli-run");
+    let run_root_dir = scratch.join("root").display().to_string();
+    let run_out_dir = scratch.join("out").display().to_string();
+    let run_build_dir = scratch.join("build").display().to_string();
     fs::create_dir_all(&run_root_dir).expect("cli root dir");
     fs::write(PathBuf::from(&run_root_dir).join("tracked.txt"), "cli-root")
         .expect("cli root tracked file");
@@ -147,13 +149,14 @@ fn validate_and_run_commands_preserve_masked_selection_and_outputs() {
 
 #[test]
 fn run_command_executes_post_build_hook_with_payload() {
-    let run_root_dir = unique_dir("gaia-cli-hook-root");
-    let run_out_dir = unique_dir("gaia-cli-hook-out");
-    let run_build_dir = unique_dir("gaia-cli-hook-build");
+    let scratch = TempDir::new("gaia-cli-hook");
+    let run_root_dir = scratch.join("root").display().to_string();
+    let run_out_dir = scratch.join("out").display().to_string();
+    let run_build_dir = scratch.join("build").display().to_string();
     fs::create_dir_all(&run_root_dir).expect("hook root dir");
     seed_default_assets(&run_root_dir);
-    let payload_capture = PathBuf::from(unique_dir("gaia-cli-hook-payload"));
-    let script_path = PathBuf::from(unique_dir("gaia-cli-hook-script")).with_extension("sh");
+    let payload_capture = scratch.join("payload");
+    let script_path = scratch.join("hook.sh");
     fs::write(
         &script_path,
         format!(
@@ -173,11 +176,14 @@ fn run_command_executes_post_build_hook_with_payload() {
     }
 
     seed_reuse_state(&run_root_dir, &run_build_dir, &run_out_dir);
-    let hook_build = write_temp_build(&format!(
-        "build_name = \"default\"\nextends = \"{}\"\n\n[reporting.post_build]\nscript = \"{}\"\n",
-        config_path(),
-        script_path.display()
-    ));
+    let hook_build = write_temp_build(
+        &scratch,
+        &format!(
+            "build_name = \"default\"\nextends = \"{}\"\n\n[reporting.post_build]\nscript = \"{}\"\n",
+            config_path(),
+            script_path.display()
+        ),
+    );
 
     let run = run_with_args(AppArgs::parse_from(vec![
         "run".to_string(),
@@ -216,7 +222,9 @@ fn run_command_executes_post_build_hook_with_payload() {
 
 #[test]
 fn run_command_times_out_hanging_post_build_hook() {
+    let scratch = TempDir::new("gaia-cli-hook-script");
     let script_path = write_hook_script(
+        &scratch,
         "gaia-cli-hook-timeout-script",
         "#!/usr/bin/env bash\nsleep 5\n",
         true,
@@ -234,7 +242,9 @@ fn run_command_times_out_hanging_post_build_hook() {
 
 #[test]
 fn run_command_executes_non_executable_post_build_hook_via_bash() {
+    let scratch = TempDir::new("gaia-cli-hook-script");
     let script_path = write_hook_script(
+        &scratch,
         "gaia-cli-hook-bash-fallback-script",
         "#!/usr/bin/env bash\nprintf 'fallback hook summary'\n",
         false,
@@ -256,7 +266,9 @@ fn run_command_executes_non_executable_post_build_hook_via_bash() {
 
 #[test]
 fn run_command_reports_failed_post_build_hook_status() {
+    let scratch = TempDir::new("gaia-cli-hook-script");
     let script_path = write_hook_script(
+        &scratch,
         "gaia-cli-hook-failure-script",
         "#!/usr/bin/env bash\nprintf 'hook failed detail' >&2\nexit 42\n",
         true,
@@ -274,7 +286,9 @@ fn run_command_reports_failed_post_build_hook_status() {
 
 #[test]
 fn run_command_bounds_noisy_post_build_hook_output() {
+    let scratch = TempDir::new("gaia-cli-hook-script");
     let script_path = write_hook_script(
+        &scratch,
         "gaia-cli-hook-noisy-script",
         "#!/usr/bin/env bash\nfor i in $(seq 1 20000); do printf 'line-%05d\\n' \"$i\"; done\nprintf 'done'\n",
         true,
@@ -297,18 +311,22 @@ fn run_command_bounds_noisy_post_build_hook_output() {
 }
 
 fn run_with_hook(script_path: &Path, extra_hook_config: &str) -> CommandOutcome {
-    let run_root_dir = unique_dir("gaia-cli-hook-root");
-    let run_out_dir = unique_dir("gaia-cli-hook-out");
-    let run_build_dir = unique_dir("gaia-cli-hook-build");
+    let scratch = TempDir::new("gaia-cli-hook");
+    let run_root_dir = scratch.join("root").display().to_string();
+    let run_out_dir = scratch.join("out").display().to_string();
+    let run_build_dir = scratch.join("build").display().to_string();
     fs::create_dir_all(&run_root_dir).expect("hook root dir");
     seed_default_assets(&run_root_dir);
     seed_reuse_state(&run_root_dir, &run_build_dir, &run_out_dir);
-    let hook_build = write_temp_build(&format!(
-        "build_name = \"default\"\nextends = \"{}\"\n\n[reporting.post_build]\nscript = \"{}\"\n{}",
-        config_path(),
-        script_path.display(),
-        extra_hook_config,
-    ));
+    let hook_build = write_temp_build(
+        &scratch,
+        &format!(
+            "build_name = \"default\"\nextends = \"{}\"\n\n[reporting.post_build]\nscript = \"{}\"\n{}",
+            config_path(),
+            script_path.display(),
+            extra_hook_config,
+        ),
+    );
 
     run_with_args(AppArgs::parse_from(vec![
         "run".to_string(),
@@ -326,8 +344,8 @@ fn run_with_hook(script_path: &Path, extra_hook_config: &str) -> CommandOutcome 
     ]))
 }
 
-fn write_hook_script(prefix: &str, contents: &str, executable: bool) -> PathBuf {
-    let script_path = PathBuf::from(unique_dir(prefix)).with_extension("sh");
+fn write_hook_script(scratch: &TempDir, prefix: &str, contents: &str, executable: bool) -> PathBuf {
+    let script_path = scratch.join(format!("{prefix}.sh"));
     fs::write(&script_path, contents).expect("hook script");
     #[cfg(unix)]
     if executable {

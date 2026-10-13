@@ -2,7 +2,6 @@ pub mod support;
 
 use gaia_config::resolve_config;
 use gaia_spec::{ArtifactExecutionSpec, BuildModeSpec};
-use std::time::{SystemTime, UNIX_EPOCH};
 use support::write_temp_config;
 
 #[test]
@@ -51,8 +50,6 @@ output_path = "out/plain"
         panic!("expected rust artifact");
     };
     assert!(plain.features.is_empty() && !plain.no_default_features && !plain.all_features);
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -88,8 +85,6 @@ output_path = "out/cross-bin"
         spec.artifacts[0].target.as_deref(),
         Some("aarch64-unknown-linux-gnu")
     );
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -128,12 +123,7 @@ profile = "dist"
 output_path = "out/custom-artifact"
 "#;
 
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!("gaia-build-modes-{nonce}.toml"));
-    std::fs::write(&path, config).expect("temp config should be written");
+    let path = write_temp_config(config);
 
     let spec = resolve_config(path.to_str().expect("temp path should be utf-8"));
 
@@ -159,8 +149,6 @@ output_path = "out/custom-artifact"
         custom.build_mode,
         Some(BuildModeSpec::Custom("dist".into()))
     );
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -214,8 +202,6 @@ defconfig = "raspberrypicm5io_defconfig"
             "build/image/buildroot-output/host/aarch64-buildroot-linux-gnu/sysroot".to_string()
         )]
     );
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -316,8 +302,6 @@ rootfs_path = "/tmp/rootfs"
         }
         ArtifactExecutionSpec::Host => panic!("expected docker execution"),
     }
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -395,6 +379,4 @@ output_path = "out/alone"
     assert_eq!(alone.build_group, None);
     assert!(alone.group_packages.is_empty());
     assert_eq!(alone.features, vec!["cli".to_string()]);
-
-    let _ = std::fs::remove_file(path);
 }

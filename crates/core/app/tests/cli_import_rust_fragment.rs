@@ -11,7 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use support::unique_dir;
+use gaia_testkit::TempDir;
 
 const FRAGMENT: &str = r#"
 [[artifacts]]
@@ -79,7 +79,8 @@ fn orion_repo(root: &Path) -> (PathBuf, String) {
 
 #[test]
 fn imported_rust_fragment_with_service_validates_and_plans() {
-    let root = PathBuf::from(unique_dir("gaia-import-rust-fragment"));
+    let scratch = TempDir::new("gaia-import-rust-fragment");
+    let root = scratch.join("root");
     let (repo, rev) = orion_repo(&root);
     let workspace = root.join("image");
     fs::create_dir_all(workspace.join("rootfs")).expect("rootfs");
@@ -193,5 +194,4 @@ rootfs_path = "{workspace}/rootfs"
         }
         other => panic!("expected planned outcome, got {other:?}"),
     }
-    let _ = fs::remove_dir_all(root);
 }

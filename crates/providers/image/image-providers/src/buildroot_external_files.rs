@@ -388,6 +388,7 @@ fn hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
 
     #[test]
     fn host_external_assignment_names_the_host_package() {
@@ -461,23 +462,20 @@ mod tests {
         assert!(package_of_path("board/raze/post-image.sh").is_empty());
     }
 
-    fn tree_with(files: &[(&str, &str)]) -> PathBuf {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time")
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("gaia-external-files-{nonce}"));
+    fn tree_with(files: &[(&str, &str)]) -> (TempDir, PathBuf) {
+        let scratch = TempDir::new("gaia-external-files");
+        let root = scratch.path().to_path_buf();
         for (path, contents) in files {
             let full = root.join(path);
             fs::create_dir_all(full.parent().expect("parent")).expect("dir");
             fs::write(full, contents).expect("file");
         }
-        root
+        (scratch, root)
     }
 
     #[test]
     fn external_files_are_keyed_by_tree_and_skip_git() {
-        let root = tree_with(&[
+        let (_scratch, root) = tree_with(&[
             ("external.desc", "name: RAZE_DEVICE\n"),
             ("external.mk", "HOST_EROFS_UTILS_CONF_OPTS += -x\n"),
             (".git/HEAD", "ref"),
@@ -495,7 +493,6 @@ mod tests {
             files["RAZE_DEVICE:external.mk"].packages,
             BTreeSet::from(["host-erofs-utils".to_string()])
         );
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

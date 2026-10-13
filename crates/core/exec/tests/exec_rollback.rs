@@ -2,6 +2,7 @@ pub mod support;
 
 use gaia_exec::{ExecutionProviders, execute_plan};
 use gaia_plan::{plan_build, plan_build_with_reuse_state};
+use gaia_testkit::TempDir;
 use std::path::Path;
 use support::{
     artifact_failure_spec_with_overrides, failing_spec_with_overrides, provider_catalogs,
@@ -10,10 +11,11 @@ use support::{
 
 #[test]
 fn rollback_completed_policy_unwinds_completed_outputs_from_current_run() {
-    let spec = failing_spec_with_overrides(vec![(
-        "policy.failure.rollback_completed".into(),
-        "true".into(),
-    )]);
+    let scratch = TempDir::new("gaia-exec-test");
+    let spec = failing_spec_with_overrides(
+        &scratch,
+        vec![("policy.failure.rollback_completed".into(), "true".into())],
+    );
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
 
@@ -73,13 +75,17 @@ fn rollback_completed_policy_unwinds_completed_outputs_from_current_run() {
 
 #[test]
 fn preserve_failed_outputs_policy_keeps_failed_operation_outputs() {
-    let spec = failing_spec_with_overrides(vec![
-        (
-            "policy.failure.preserve_failed_outputs".into(),
-            "true".into(),
-        ),
-        ("policy.failure.rollback_completed".into(), "true".into()),
-    ]);
+    let scratch = TempDir::new("gaia-exec-test");
+    let spec = failing_spec_with_overrides(
+        &scratch,
+        vec![
+            (
+                "policy.failure.preserve_failed_outputs".into(),
+                "true".into(),
+            ),
+            ("policy.failure.rollback_completed".into(), "true".into()),
+        ],
+    );
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
 
@@ -130,13 +136,17 @@ fn preserve_failed_outputs_policy_keeps_failed_operation_outputs() {
 
 #[test]
 fn rollback_domains_policy_keeps_sources_but_rolls_back_artifacts() {
-    let spec = artifact_failure_spec_with_overrides(vec![
-        (
-            "policy.failure.rollback_domains".into(),
-            "artifacts,images,installs,stage,checkpoints".into(),
-        ),
-        ("policy.failure.rollback_completed".into(), "true".into()),
-    ]);
+    let scratch = TempDir::new("gaia-exec-test");
+    let spec = artifact_failure_spec_with_overrides(
+        &scratch,
+        vec![
+            (
+                "policy.failure.rollback_domains".into(),
+                "artifacts,images,installs,stage,checkpoints".into(),
+            ),
+            ("policy.failure.rollback_completed".into(), "true".into()),
+        ],
+    );
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
 
@@ -215,7 +225,8 @@ fn rollback_domains_policy_keeps_sources_but_rolls_back_artifacts() {
 
 #[test]
 fn failure_keeps_completed_outputs_and_next_plan_reuses_them() {
-    let spec = artifact_failure_spec_with_overrides(Vec::new());
+    let scratch = TempDir::new("gaia-exec-test");
+    let spec = artifact_failure_spec_with_overrides(&scratch, Vec::new());
     // A real workspace already has its Cargo.lock before the first run. The
     // run's own .gaia state must not change the source root's fingerprint
     // (see gaia_plan reuse tests), so it is not pre-created here.
@@ -296,10 +307,11 @@ fn failure_keeps_completed_outputs_and_next_plan_reuses_them() {
 
 #[test]
 fn rollback_disabled_policy_keeps_current_run_outputs() {
-    let spec = failing_spec_with_overrides(vec![(
-        "policy.failure.rollback_on_error".into(),
-        "false".into(),
-    )]);
+    let scratch = TempDir::new("gaia-exec-test");
+    let spec = failing_spec_with_overrides(
+        &scratch,
+        vec![("policy.failure.rollback_on_error".into(), "false".into())],
+    );
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
 

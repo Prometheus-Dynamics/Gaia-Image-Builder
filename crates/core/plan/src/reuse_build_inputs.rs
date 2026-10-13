@@ -179,14 +179,10 @@ mod tests {
     use gaia_spec::{
         ArtifactOutputSpec, ArtifactSpec, BuildrootImageSpec, ImageSpec, JavaArtifactSpec,
     };
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use gaia_testkit::TempDir;
 
-    fn workspace_dir(label: &str) -> PathBuf {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time")
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("gaia-build-inputs-{label}-{nonce}"));
+    fn workspace_dir(scratch: &TempDir, label: &str) -> PathBuf {
+        let root = scratch.join(label);
         fs::create_dir_all(&root).expect("workspace");
         root
     }
@@ -214,7 +210,8 @@ mod tests {
 
     #[test]
     fn a_build_command_script_change_flips_the_artifact_fingerprint() {
-        let root = workspace_dir("artifact");
+        let scratch = TempDir::new("gaia-plan");
+        let root = workspace_dir(&scratch, "artifact");
         let script = root.join("raze/scripts/build-photonvision-jar.sh");
         write(&script, "#!/bin/sh\necho one\n");
         let mut spec = ResolvedBuildSpec::new("build-command");
@@ -236,12 +233,12 @@ mod tests {
         let before = operation_fingerprint(&spec, &kind);
         write(&script, "#!/bin/sh\necho two\n");
         assert_ne!(before, operation_fingerprint(&spec, &kind));
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn a_sourced_file_of_a_build_command_script_counts() {
-        let root = workspace_dir("sourced");
+        let scratch = TempDir::new("gaia-plan");
+        let root = workspace_dir(&scratch, "sourced");
         write(
             &root.join("scripts/build.sh"),
             ". ./lib/env.sh\necho build\n",
@@ -256,7 +253,6 @@ mod tests {
         let after = build_command_components(&spec, &artifact);
         assert_eq!(before.len(), 1);
         assert_ne!(before, after);
-        let _ = fs::remove_dir_all(root);
     }
 
     fn buildroot_spec(root: &Path, external_tree: Option<&str>, script: &str) -> ResolvedBuildSpec {
@@ -275,7 +271,8 @@ mod tests {
 
     #[test]
     fn a_post_image_script_change_flips_the_image_build_fingerprint() {
-        let root = workspace_dir("post-image");
+        let scratch = TempDir::new("gaia-plan");
+        let root = workspace_dir(&scratch, "post-image");
         let script = root.join("board/raze/post-image.sh");
         write(&script, "#!/bin/sh\necho one\n");
         let spec = buildroot_spec(&root, None, "board/raze/post-image.sh");
@@ -285,12 +282,12 @@ mod tests {
             before,
             operation_fingerprint(&spec, &OperationKind::BuildImage)
         );
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn a_post_image_script_change_does_not_flip_the_prepare_fingerprint() {
-        let root = workspace_dir("post-image-prepare");
+        let scratch = TempDir::new("gaia-plan");
+        let root = workspace_dir(&scratch, "post-image-prepare");
         let script = root.join("board/raze/post-image.sh");
         write(&script, "#!/bin/sh\necho one\n");
         let spec = buildroot_spec(&root, None, "board/raze/post-image.sh");
@@ -306,12 +303,12 @@ mod tests {
             build,
             operation_fingerprint(&spec, &OperationKind::BuildImage)
         );
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn an_external_mk_change_flips_the_image_fingerprints_and_names_its_file() {
-        let root = workspace_dir("external-mk");
+        let scratch = TempDir::new("gaia-plan");
+        let root = workspace_dir(&scratch, "external-mk");
         let external = root.join("ext");
         write(&external.join("external.desc"), "name: RAZE\n");
         let mk = external.join("external.mk");
@@ -341,7 +338,6 @@ mod tests {
             before_build,
             operation_fingerprint(&spec, &OperationKind::BuildImage)
         );
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

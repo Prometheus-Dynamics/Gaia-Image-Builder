@@ -3,6 +3,7 @@
 
 use super::*;
 use gaia_plan::{RuntimeClosure, RuntimeEntry};
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -20,7 +21,9 @@ fn write(path: &Path, bytes: &[u8]) {
 #[cfg(unix)]
 #[test]
 fn copies_runtime_closure_files_and_symlink_chain_into_the_tree() {
-    let root = unique_dir("gaia-busybox-closure-copy");
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-busybox-closure-copy");
+    fs::create_dir_all(&root).expect("test root");
     let sysroot = root.join("target");
     let tree = root.join("tree");
     write(&sysroot.join("lib/ld-test-real.so"), b"loader bytes");
@@ -70,12 +73,13 @@ fn copies_runtime_closure_files_and_symlink_chain_into_the_tree() {
         fs::read_link(tree.join("lib/libc.so.6")).expect("link"),
         PathBuf::from("libc-2.0.so")
     );
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn copy_replaces_a_stale_entry_but_refuses_a_directory() {
-    let root = unique_dir("gaia-busybox-closure-replace");
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-busybox-closure-replace");
+    fs::create_dir_all(&root).expect("test root");
     let sysroot = root.join("target");
     let tree = root.join("tree");
     write(&sysroot.join("lib/libx.so.1"), b"new");
@@ -102,7 +106,6 @@ fn copy_replaces_a_stale_entry_but_refuses_a_directory() {
     };
     let error = copy_busybox_runtime_closure(&tree, &dir_closure).expect_err("directory");
     assert!(error.contains("is a directory"), "{error}");
-    let _ = fs::remove_dir_all(root);
 }
 
 /// The target BusyBox's loader and C library come from the target sysroot:
@@ -111,6 +114,7 @@ fn copy_replaces_a_stale_entry_but_refuses_a_directory() {
 #[cfg(unix)]
 #[test]
 fn target_busybox_resolves_loader_and_libc_from_its_target_sysroot() {
+    let scratch = TempDir::new("gaia-exec-test");
     let busybox = Path::new(TARGET_BUSYBOX);
     if !busybox.is_file() {
         eprintln!("skipped: {TARGET_BUSYBOX} is not present");
@@ -143,7 +147,8 @@ fn target_busybox_resolves_loader_and_libc_from_its_target_sysroot() {
         }
     }
 
-    let tree = unique_dir("gaia-busybox-target-closure");
+    let tree = scratch.join("gaia-busybox-target-closure");
+    fs::create_dir_all(&tree).expect("test root");
     let copied = copy_busybox_runtime_closure(&tree, &closure).expect("copy target closure");
     // Looked up by the names the loader uses, through the copied /lib link.
     let loader = fs::read(tree.join("lib/ld-linux-aarch64.so.1")).expect("loader in the tree");
@@ -156,5 +161,4 @@ fn target_busybox_resolves_loader_and_libc_from_its_target_sysroot() {
             .any(|path| path.starts_with(tree.join("usr/lib"))),
         "{copied:?}"
     );
-    let _ = fs::remove_dir_all(tree);
 }

@@ -3,6 +3,7 @@
 
 use super::*;
 use gaia_spec::{AssemblyFileSpec, AssemblyTreeSpec};
+use gaia_testkit::TempDir;
 use std::fs;
 use std::process::Command;
 
@@ -91,10 +92,12 @@ fn cpio_listing(image: &Path, scratch: &Path) -> String {
 
 #[test]
 fn cpio_zstd_packs_the_tree_as_a_deterministic_zstd_newc_archive() {
+    let scratch = TempDir::new("gaia-exec-test");
     if !tool_runs("zstd") || !tool_runs("cpio") {
         return;
     }
-    let root = unique_dir("gaia-assembly-cpio-zstd");
+    let root = scratch.join("gaia-assembly-cpio-zstd");
+    fs::create_dir_all(&root).expect("test root");
     write_assets(&root);
     let mut spec = test_spec(&root);
     spec.image.assembly = Some(cpio_zstd_assembly(
@@ -133,15 +136,16 @@ fn cpio_zstd_packs_the_tree_as_a_deterministic_zstd_newc_archive() {
             .lines()
             .find(|line| line.starts_with("filesystem.1.sha256="))
     );
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn published_filesystem_image_is_copied_to_the_image_output_dir() {
+    let scratch = TempDir::new("gaia-exec-test");
     if !tool_runs("zstd") || !tool_runs("cpio") {
         return;
     }
-    let root = unique_dir("gaia-assembly-publish-disk");
+    let root = scratch.join("gaia-assembly-publish-disk");
+    fs::create_dir_all(&root).expect("test root");
     write_assets(&root);
     let mut spec = test_spec(&root);
     spec.image.assembly = Some(cpio_zstd_assembly(
@@ -174,15 +178,16 @@ fn published_filesystem_image_is_copied_to_the_image_output_dir() {
         "{:?}",
         summary.messages
     );
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn published_filesystem_image_already_in_the_output_dir_is_not_copied_onto_itself() {
+    let scratch = TempDir::new("gaia-exec-test");
     if !tool_runs("zstd") || !tool_runs("cpio") {
         return;
     }
-    let root = unique_dir("gaia-assembly-publish-in-place");
+    let root = scratch.join("gaia-assembly-publish-in-place");
+    fs::create_dir_all(&root).expect("test root");
     write_assets(&root);
     let mut spec = test_spec(&root);
     spec.image.assembly = Some(cpio_zstd_assembly(
@@ -198,17 +203,20 @@ fn published_filesystem_image_already_in_the_output_dir_is_not_copied_onto_itsel
     let image = root.join("out/images/initramfs.cpio.zst");
     assert!(cpio_listing(&image, &root).contains("etc/config.txt"));
     assert_eq!(summary.disk_images, vec![image]);
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn published_filesystem_image_in_ram_is_published_as_the_same_bytes() {
+    let scratch = TempDir::new("gaia-exec-test");
     if !tool_runs("zstd") || !tool_runs("cpio") {
         return;
     }
-    let disk_root = unique_dir("gaia-assembly-publish-ram-disk");
-    let ram_root = unique_dir("gaia-assembly-publish-ram-ram");
-    let ram_base = unique_dir("gaia-assembly-publish-ram-base");
+    let disk_root = scratch.join("gaia-assembly-publish-ram-disk");
+    fs::create_dir_all(&disk_root).expect("test root");
+    let ram_root = scratch.join("gaia-assembly-publish-ram-ram");
+    fs::create_dir_all(&ram_root).expect("test root");
+    let ram_base = scratch.join("gaia-assembly-publish-ram-base");
+    fs::create_dir_all(&ram_base).expect("test root");
     write_assets(&disk_root);
     write_assets(&ram_root);
     let mut disk_spec = test_spec(&disk_root);
@@ -261,16 +269,15 @@ fn published_filesystem_image_in_ram_is_published_as_the_same_bytes() {
             .lines()
             .find(|line| line.starts_with("filesystem.1.sha256="))
     );
-    for path in [&disk_root, &ram_root, &ram_base] {
-        let _ = fs::remove_dir_all(path);
-    }
 }
 
 const MIB: u64 = 1024 * 1024;
 
 #[test]
 fn vfat_auto_size_is_content_plus_overhead_and_margin_rounded_to_a_mib() {
-    let root = unique_dir("gaia-vfat-auto-size");
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-vfat-auto-size");
+    fs::create_dir_all(&root).expect("test root");
     let empty = root.join("empty");
     fs::create_dir_all(&empty).expect("empty tree");
     // No content: the fixed overhead and the minimum margin, 2 MiB.
@@ -303,15 +310,16 @@ fn vfat_auto_size_is_content_plus_overhead_and_margin_rounded_to_a_mib() {
         // 8 KiB of content (two directories), 1 MiB margin and overhead: 3 MiB.
         assert_eq!(vfat_auto_bytes(&looped).expect("loop"), 3 * MIB);
     }
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn vfat_auto_size_builds_an_image_that_holds_the_tree() {
+    let scratch = TempDir::new("gaia-exec-test");
     if !tool_runs("mformat") || !tool_runs("mcopy") {
         return;
     }
-    let root = unique_dir("gaia-assembly-vfat-auto");
+    let root = scratch.join("gaia-assembly-vfat-auto");
+    fs::create_dir_all(&root).expect("test root");
     write_assets(&root);
     let mut spec = test_spec(&root);
     spec.image.assembly = Some(ImageAssemblySpec {
@@ -363,7 +371,6 @@ fn vfat_auto_size_builds_an_image_that_holds_the_tree() {
     assert!(copied.status.success(), "{copied:?}");
     assert_eq!(copied.stdout, b"initramfs config\n");
     assert!(outcome.state.render().contains("filesystem.1.bytes="));
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]

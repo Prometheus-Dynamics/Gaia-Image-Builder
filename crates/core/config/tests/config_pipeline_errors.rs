@@ -1,17 +1,11 @@
 pub mod support;
 
-use std::time::{SystemTime, UNIX_EPOCH};
-use support::default_config_path;
+use gaia_testkit::TempDir;
+use support::{default_config_path, write_temp_config};
 
 #[test]
 fn rejects_deprecated_tuple_workspace_named_paths_shape() {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!("gaia-bad-workspace-paths-{nonce}.toml"));
-    std::fs::write(
-        &path,
+    let path = write_temp_config(
         r#"
 build_name = "bad-workspace-shape"
 
@@ -25,8 +19,7 @@ named_paths = [["assets", "assets"]]
 kind = "starting-point"
 rootfs_path = "/tmp/rootfs"
 "#,
-    )
-    .expect("temp config should be written");
+    );
 
     let result = gaia_config::try_resolve_config(path.to_str().expect("temp path should be utf-8"));
 
@@ -36,7 +29,6 @@ rootfs_path = "/tmp/rootfs"
         gaia_config::ConfigError::ConfigShape { .. }
     ));
     assert!(error.to_string().contains("workspace.named_paths"));
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -133,15 +125,8 @@ fn rejects_invalid_numeric_override_with_typed_error() {
 
 #[test]
 fn missing_import_names_the_importing_file() {
-    let dir = std::env::temp_dir().join(format!(
-        "gaia-missing-import-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system time")
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&dir).expect("temp dir");
+    let scratch = TempDir::new("gaia-missing-import");
+    let dir = scratch.path();
     let build = dir.join("build.toml");
     std::fs::write(
         &build,
@@ -166,5 +151,4 @@ fn missing_import_names_the_importing_file() {
         other => panic!("expected missing reference error, got {other:?}"),
     }
     assert!(error.to_string().contains("import 'layers/gone.toml' in '"));
-    let _ = std::fs::remove_dir_all(dir);
 }

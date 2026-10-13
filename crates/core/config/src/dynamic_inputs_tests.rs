@@ -1,16 +1,12 @@
 use super::*;
+use gaia_testkit::TempDir;
 use std::time::Instant;
 
 #[cfg(unix)]
-fn executable_script(name: &str, contents: &str) -> PathBuf {
+fn executable_script(scratch: &TempDir, name: &str, contents: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
 
-    let nonce = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!("gaia-dynamic-input-test-{name}-{nonce}"));
-    fs::create_dir_all(&dir).expect("script dir");
+    let dir = scratch.path();
     let script = dir.join(name);
     let temp_script = dir.join(format!("{name}.tmp"));
     fs::write(&temp_script, contents).expect("script");
@@ -27,7 +23,8 @@ fn executable_script(name: &str, contents: &str) -> PathBuf {
 #[cfg(unix)]
 #[test]
 fn git_dynamic_input_honors_timeout() {
-    let fake_git = executable_script("git", "#!/bin/sh\nsleep 10\n");
+    let scratch = TempDir::new("gaia-dynamic-input-test-git");
+    let fake_git = executable_script(&scratch, "git", "#!/bin/sh\nsleep 10\n");
     let config = RawInputChoicesFromConfig {
         kind: RawInputChoicesFromKind::GitTags,
         repo: "https://example.invalid/repo.git".into(),
@@ -46,7 +43,8 @@ fn git_dynamic_input_honors_timeout() {
 #[cfg(unix)]
 #[test]
 fn curl_dynamic_input_honors_timeout() {
-    let fake_curl = executable_script("curl", "#!/bin/sh\nsleep 10\n");
+    let scratch = TempDir::new("gaia-dynamic-input-test-curl");
+    let fake_curl = executable_script(&scratch, "curl", "#!/bin/sh\nsleep 10\n");
     let config = RawInputChoicesFromConfig {
         kind: RawInputChoicesFromKind::Json,
         timeout_seconds: Some(1),
@@ -64,7 +62,9 @@ fn curl_dynamic_input_honors_timeout() {
 #[cfg(unix)]
 #[test]
 fn dynamic_command_error_diagnostics_are_bounded() {
+    let scratch = TempDir::new("gaia-dynamic-input-test-noisy");
     let script = executable_script(
+        &scratch,
         "noisy",
         "#!/bin/sh\nyes prefix | head -c 1200000 >&2\nprintf TAIL >&2\nexit 7\n",
     );
@@ -87,7 +87,8 @@ fn dynamic_command_error_diagnostics_are_bounded() {
 
 #[test]
 fn dynamic_command_cache_identity_includes_command() {
-    let source_dir = temp_dir("command-cache-identity");
+    let scratch = TempDir::new("gaia-dynamic-input-test-command-cache-identity");
+    let source_dir = scratch.join("source");
     let first = RawInputChoicesFromConfig {
         kind: RawInputChoicesFromKind::Command,
         command: vec!["printf".into(), "one\n".into()],
@@ -111,7 +112,8 @@ fn dynamic_command_cache_identity_includes_command() {
 
 #[test]
 fn dynamic_json_cache_identity_includes_url_and_json_path() {
-    let source_dir = temp_dir("json-cache-identity");
+    let scratch = TempDir::new("gaia-dynamic-input-test-json-cache-identity");
+    let source_dir = scratch.join("source");
     let first = RawInputChoicesFromConfig {
         kind: RawInputChoicesFromKind::Json,
         url: Some("https://example.invalid/releases.json".into()),
@@ -143,7 +145,8 @@ fn dynamic_json_cache_identity_includes_url_and_json_path() {
 
 #[test]
 fn dynamic_cache_identity_includes_rendering_templates() {
-    let source_dir = temp_dir("template-cache-identity");
+    let scratch = TempDir::new("gaia-dynamic-input-test-template-cache-identity");
+    let source_dir = scratch.join("source");
     let first = RawInputChoicesFromConfig {
         kind: RawInputChoicesFromKind::GitTags,
         repo: "https://example.invalid/repo.git".into(),
@@ -192,9 +195,10 @@ fn curl_auth_config_rejects_newlines() {
 #[cfg(unix)]
 #[test]
 fn curl_auth_config_is_removed_after_curl_failure() {
-    let marker = temp_dir("curl-auth-cleanup").join("auth-path");
-    fs::create_dir_all(marker.parent().expect("marker parent")).expect("marker dir");
+    let scratch = TempDir::new("gaia-dynamic-input-test-curl-auth-cleanup");
+    let marker = scratch.join("auth-path");
     let fake_curl = executable_script(
+        &scratch,
         "curl",
         &format!(
             r#"#!/bin/sh
@@ -236,9 +240,10 @@ exit 7
 #[cfg(unix)]
 #[test]
 fn curl_auth_config_is_removed_after_curl_timeout() {
-    let marker = temp_dir("curl-auth-timeout-cleanup").join("auth-path");
-    fs::create_dir_all(marker.parent().expect("marker parent")).expect("marker dir");
+    let scratch = TempDir::new("gaia-dynamic-input-test-curl-auth-timeout-cleanup");
+    let marker = scratch.join("auth-path");
     let fake_curl = executable_script(
+        &scratch,
         "curl",
         &format!(
             r#"#!/bin/sh
@@ -280,9 +285,10 @@ sleep 10
 #[cfg(unix)]
 #[test]
 fn missing_curl_auth_token_skips_auth_config() {
-    let marker = temp_dir("curl-auth-missing").join("saw-config");
-    fs::create_dir_all(marker.parent().expect("marker parent")).expect("marker dir");
+    let scratch = TempDir::new("gaia-dynamic-input-test-curl-auth-missing");
+    let marker = scratch.join("saw-config");
     let fake_curl = executable_script(
+        &scratch,
         "curl",
         &format!(
             r#"#!/bin/sh
@@ -313,12 +319,4 @@ printf '{{"ok":true}}'
 
     assert_eq!(body, r#"{"ok":true}"#);
     assert!(!marker.exists(), "auth config should not be passed");
-}
-
-fn temp_dir(name: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_nanos();
-    std::env::temp_dir().join(format!("gaia-dynamic-input-test-{name}-{nonce}"))
 }

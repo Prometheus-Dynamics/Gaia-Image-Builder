@@ -20,11 +20,12 @@ use gaia_spec::{
     ArtifactDefinition, ArtifactOutputSpec, ArtifactProviderKind, ArtifactSpec,
     ArtifactVariantSpec, ResolvedBuildSpec, RustArtifactSpec,
 };
+use gaia_testkit::TempDir;
 use std::collections::BTreeMap;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 /// What the scripted provider does for one artifact id.
 #[derive(Clone)]
@@ -161,6 +162,7 @@ impl ArtifactProvider for ScriptedProvider {
 }
 
 struct Harness {
+    _scratch: TempDir,
     spec: ResolvedBuildSpec,
     plan: ExecutionPlan,
     scripts: BTreeMap<String, Script>,
@@ -171,13 +173,8 @@ impl Harness {
     /// `artifacts` are `(id, dependencies)`; every artifact builds in the
     /// artifacts parallelism domain.
     fn new(prefix: &str, artifacts: &[(&str, &[&str])]) -> Self {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time")
-            .as_nanos();
-        let root = std::env::temp_dir()
-            .join("gaia-tests")
-            .join(format!("{prefix}-{nonce}"));
+        let scratch = TempDir::new(prefix);
+        let root = scratch.join("root");
         std::fs::create_dir_all(&root).expect("root");
         let mut spec = ResolvedBuildSpec::new(prefix);
         spec.workspace.root_dir = root.display().to_string();
@@ -219,6 +216,7 @@ impl Harness {
             operations.push(operation);
         }
         Self {
+            _scratch: scratch,
             plan: ExecutionPlan {
                 build_id: spec.identity.id.clone(),
                 operations,

@@ -2,6 +2,7 @@ pub mod support;
 
 use gaia_exec::{ExecutionProviders, execute_plan};
 use gaia_plan::plan_build;
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -9,7 +10,8 @@ use support::{fixture_spec, provider_catalogs};
 
 #[test]
 fn provider_execution_materializes_real_outputs() {
-    let spec = fixture_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let spec = fixture_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
 

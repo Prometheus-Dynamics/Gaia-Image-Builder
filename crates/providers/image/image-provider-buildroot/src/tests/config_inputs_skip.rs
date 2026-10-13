@@ -28,9 +28,12 @@ fn image(overrides: Vec<(String, String)>) -> ImageSpec {
 
 #[test]
 fn unchanged_config_inputs_skip_the_config_steps_until_an_input_changes() {
-    let buildroot_dir = temp_path("gaia-config-skip-source");
-    let output_dir = temp_path("gaia-config-skip-output");
-    let workspace = temp_path("gaia-config-skip-workspace");
+    let buildroot_dir_scratch = TempDir::new("gaia-config-skip-source");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-config-skip-output");
+    let output_dir = output_dir_scratch.join("output_dir");
+    let workspace_scratch = TempDir::new("gaia-config-skip-workspace");
+    let workspace = workspace_scratch.join("workspace");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     fs::write(buildroot_dir.join("Makefile"), FAKE_BUILDROOT).expect("makefile");
     let mut spec = ResolvedBuildSpec::new("buildroot-config-skip");
@@ -86,15 +89,14 @@ fn unchanged_config_inputs_skip_the_config_steps_until_an_input_changes() {
         ran(&fourth, "defconfig"),
         "edited config was kept:\n{fourth}"
     );
-
-    let _ = fs::remove_dir_all(buildroot_dir);
-    let _ = fs::remove_dir_all(output_dir);
 }
 
 #[test]
 fn a_changed_kconfig_file_of_the_buildroot_tree_runs_the_config_steps() {
-    let buildroot_dir = temp_path("gaia-config-kconfig-source");
-    let output_dir = temp_path("gaia-config-kconfig-output");
+    let buildroot_dir_scratch = TempDir::new("gaia-config-kconfig-source");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-config-kconfig-output");
+    let output_dir = output_dir_scratch.join("output_dir");
     fs::create_dir_all(buildroot_dir.join("package/foo")).expect("package dir");
     fs::write(buildroot_dir.join("Makefile"), FAKE_BUILDROOT).expect("makefile");
     fs::write(
@@ -102,10 +104,9 @@ fn a_changed_kconfig_file_of_the_buildroot_tree_runs_the_config_steps() {
         "config BR2_PACKAGE_FOO\n",
     )
     .expect("kconfig");
+    let workspace_scratch = TempDir::new("gaia-config-kconfig-workspace");
     let mut spec = ResolvedBuildSpec::new("buildroot-config-kconfig");
-    spec.workspace.root_dir = temp_path("gaia-config-kconfig-workspace")
-        .display()
-        .to_string();
+    spec.workspace.root_dir = workspace_scratch.path().display().to_string();
     let execution = test_execution();
     let policy = ImageExecutionPolicy::default();
     let run = || {
@@ -134,8 +135,6 @@ fn a_changed_kconfig_file_of_the_buildroot_tree_runs_the_config_steps() {
     )
     .expect("kconfig edit");
     assert!(ran(&run(), "defconfig"), "changed Kconfig kept the steps");
-    let _ = fs::remove_dir_all(buildroot_dir);
-    let _ = fs::remove_dir_all(output_dir);
 }
 
 #[test]
@@ -143,9 +142,12 @@ fn make_gets_source_date_epoch_from_the_workspace_head_commit() {
     if std::env::var_os("SOURCE_DATE_EPOCH").is_some() {
         return; // the caller's own value wins; nothing to check here
     }
-    let workspace = temp_path("gaia-epoch-workspace");
-    let buildroot_dir = temp_path("gaia-epoch-source");
-    let output_dir = temp_path("gaia-epoch-output");
+    let workspace_scratch = TempDir::new("gaia-epoch-workspace");
+    let workspace = workspace_scratch.join("workspace");
+    let buildroot_dir_scratch = TempDir::new("gaia-epoch-source");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-epoch-output");
+    let output_dir = output_dir_scratch.join("output_dir");
     fs::create_dir_all(&workspace).expect("workspace");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     let git = |args: &[&str]| {
@@ -192,7 +194,4 @@ all: target-finalize\n\t@true\n",
         fs::read_to_string(output_dir.join("epoch")).expect("epoch"),
         "1710000000"
     );
-    let _ = fs::remove_dir_all(workspace);
-    let _ = fs::remove_dir_all(buildroot_dir);
-    let _ = fs::remove_dir_all(output_dir);
 }

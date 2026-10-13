@@ -26,7 +26,8 @@ fn run_command_reports_missing_tool() {
 
 #[test]
 fn run_command_times_out_long_running_processes() {
-    let root = unique_dir("gaia-starting-point-timeout");
+    let scratch = TempDir::new("gaia-starting-point-timeout");
+    let root = scratch.path().to_path_buf();
     let execution = ImageExecutionContext {
         workspace_root: root.clone(),
         docker_image: None,
@@ -58,7 +59,8 @@ fn run_command_times_out_long_running_processes() {
 
 #[test]
 fn command_for_execution_wraps_docker_backend() {
-    let workspace_root = std::env::temp_dir().join("gaia-starting-point-docker");
+    let scratch = TempDir::new("gaia-starting-point-docker");
+    let workspace_root = scratch.path().to_path_buf();
     let rootfs_dir = workspace_root.join("rootfs");
     let archive_path = workspace_root.join("out/rootfs.tar");
     fs::create_dir_all(&rootfs_dir).expect("rootfs dir");
@@ -88,7 +90,8 @@ fn command_for_execution_wraps_docker_backend() {
 
 #[test]
 fn command_for_execution_mounts_parent_dir_for_output_files() {
-    let workspace_root = std::env::temp_dir().join("gaia-starting-point-docker-parent");
+    let scratch = TempDir::new("gaia-starting-point-docker-parent");
+    let workspace_root = scratch.path().to_path_buf();
     let rootfs_dir = workspace_root.join("rootfs");
     let archive_path = workspace_root.join("out/rootfs.tar");
     fs::create_dir_all(&rootfs_dir).expect("rootfs dir");

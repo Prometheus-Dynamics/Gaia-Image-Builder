@@ -5,18 +5,20 @@ use gaia_plan::{
     plan_build_with_reuse_state, spec_fingerprint,
 };
 use gaia_spec::{SourceDefinition, SourceRefreshPolicySpec};
+use gaia_testkit::TempDir;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
-use support::{provider_catalogs, test_spec, test_spec_with_root, unique_dir};
+use support::{provider_catalogs, test_spec, test_spec_with_root};
 
 #[test]
 fn plan_rebuilds_when_path_source_tree_changes() {
-    let root_dir = unique_dir("gaia-path-root");
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch.join("gaia-path-root").display().to_string();
     fs::create_dir_all(&root_dir).expect("root dir");
     fs::write(PathBuf::from(&root_dir).join("tracked.txt"), "one").expect("initial tracked file");
 
-    let spec = test_spec_with_root(root_dir.clone());
+    let spec = test_spec_with_root(&scratch, root_dir.clone());
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
 
@@ -81,13 +83,14 @@ fn plan_rebuilds_when_path_source_tree_changes() {
 
 #[test]
 fn plan_ignores_workspace_derived_dirs_when_hashing_path_sources() {
-    let root = PathBuf::from(unique_dir("gaia-plan-root"));
+    let scratch = TempDir::new("gaia-plan-test");
+    let root = PathBuf::from(scratch.join("gaia-plan-root").display().to_string());
     fs::create_dir_all(&root).expect("root dir");
     fs::write(root.join("tracked.txt"), "v1").expect("tracked file");
     fs::create_dir_all(root.join("out")).expect("workspace out dir");
     fs::write(root.join("out/runtime.log"), "before").expect("workspace out file");
 
-    let spec = test_spec_with_root(root.display().to_string());
+    let spec = test_spec_with_root(&scratch, root.display().to_string());
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
     let source_operation = baseline_plan
@@ -145,8 +148,12 @@ fn plan_ignores_workspace_derived_dirs_when_hashing_path_sources() {
 
 #[test]
 fn plan_rebuilds_source_when_provider_state_changes() {
-    let root_dir = unique_dir("gaia-source-state-drift-root");
-    let spec = test_spec_with_root(root_dir);
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch
+        .join("gaia-source-state-drift-root")
+        .display()
+        .to_string();
+    let spec = test_spec_with_root(&scratch, root_dir);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
 
@@ -210,12 +217,16 @@ fn plan_rebuilds_source_when_provider_state_changes() {
 
 #[test]
 fn plan_rebuilds_artifact_when_declared_path_source_changes() {
-    let root_dir = unique_dir("gaia-artifact-source-root");
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch
+        .join("gaia-artifact-source-root")
+        .display()
+        .to_string();
     fs::create_dir_all(&root_dir).expect("root dir");
     fs::write(PathBuf::from(&root_dir).join("Cargo.toml"), "version = 1\n")
         .expect("initial source file");
 
-    let spec = test_spec_with_root(root_dir.clone());
+    let spec = test_spec_with_root(&scratch, root_dir.clone());
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
 
@@ -261,7 +272,8 @@ fn plan_rebuilds_artifact_when_declared_path_source_changes() {
 
 #[test]
 fn plan_rebuilds_sources_with_always_refresh_policy_even_when_state_matches() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
 
@@ -294,7 +306,8 @@ fn plan_rebuilds_sources_with_always_refresh_policy_even_when_state_matches() {
 
 #[test]
 fn plan_rebuilds_auto_floating_remote_git_sources() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let mut spec = test_spec(&scratch);
     let source = spec
         .sources
         .iter_mut()
@@ -335,7 +348,8 @@ fn plan_rebuilds_auto_floating_remote_git_sources() {
 
 #[test]
 fn plan_rebuilds_stage_file_and_image_when_stage_asset_changes() {
-    let root_dir = unique_dir("gaia-stage-asset-root");
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch.join("gaia-stage-asset-root").display().to_string();
     let root = PathBuf::from(&root_dir);
     let assets = root.join("examples/default-workspace/assets");
     fs::create_dir_all(assets.join("etc")).expect("asset dir");
@@ -347,7 +361,7 @@ fn plan_rebuilds_stage_file_and_image_when_stage_asset_changes() {
     )
     .expect("service asset");
 
-    let spec = test_spec_with_root(root_dir);
+    let spec = test_spec_with_root(&scratch, root_dir);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
 
@@ -409,9 +423,13 @@ fn plan_rebuilds_stage_file_and_image_when_stage_asset_changes() {
 #[test]
 #[cfg(unix)]
 fn plan_rebuilds_stage_service_when_unit_mode_changes() {
+    let scratch = TempDir::new("gaia-plan-test");
     use std::os::unix::fs::PermissionsExt;
 
-    let root_dir = unique_dir("gaia-stage-service-mode-root");
+    let root_dir = scratch
+        .join("gaia-stage-service-mode-root")
+        .display()
+        .to_string();
     let root = PathBuf::from(&root_dir);
     let assets = root.join("examples/default-workspace/assets");
     fs::create_dir_all(assets.join("etc")).expect("asset dir");
@@ -422,7 +440,7 @@ fn plan_rebuilds_stage_service_when_unit_mode_changes() {
     fs::set_permissions(&service_path, fs::Permissions::from_mode(0o644))
         .expect("initial service mode");
 
-    let spec = test_spec_with_root(root_dir);
+    let spec = test_spec_with_root(&scratch, root_dir);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
 

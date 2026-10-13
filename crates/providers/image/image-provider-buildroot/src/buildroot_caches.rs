@@ -259,11 +259,12 @@ fn restored_linux_release(output_dir: &Path, graph: &PackageGraph) -> Option<Str
 #[cfg(test)]
 mod linux_pin_tests {
     use super::*;
+    use gaia_testkit::TempDir;
 
     #[test]
     fn a_restored_kernel_without_its_source_pins_its_release() {
-        let output = std::env::temp_dir().join(format!("gaia-linux-pin-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&output);
+        let output_scratch = TempDir::new("gaia-linux-pin");
+        let output = output_scratch.join("output");
         let build = output.join("build/linux-custom");
         fs::create_dir_all(&build).expect("build");
         fs::write(build.join(".stamp_installed"), "").expect("stamp");
@@ -287,7 +288,6 @@ mod linux_pin_tests {
         fs::write(build.join("Makefile"), "").expect("kernel source");
         pin_restored_linux_version(&output, &graph).expect("unpin");
         assert!(!output.join("local.mk").exists());
-        let _ = fs::remove_dir_all(output);
     }
 }
 

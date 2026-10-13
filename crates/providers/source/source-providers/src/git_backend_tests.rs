@@ -3,17 +3,7 @@
 
 use super::*;
 use gaia_spec::{CleanPolicy, DockerExecutionSpec, GitBackendSpec, SourceSpec, WorkspaceSpec};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-fn temp_path(prefix: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time")
-        .as_nanos();
-    std::env::temp_dir()
-        .join("gaia-tests")
-        .join(format!("{prefix}-{nonce}"))
-}
+use gaia_testkit::TempDir;
 
 /// A build whose execution backend is docker, as in `[policy.execution]`.
 fn docker_spec(build_dir: &Path) -> ResolvedBuildSpec {
@@ -137,8 +127,9 @@ fn host_backend_without_docker_needs_no_selection() {
 
 #[test]
 fn local_repo_materializes_when_the_build_runs_in_docker() {
-    let build_dir = temp_path("gaia-git-backend-local-build");
-    let repo_dir = temp_path("gaia-git-backend-local-repo");
+    let scratch = TempDir::new("gaia-git-backend-local-build");
+    let build_dir = scratch.join("gaia-git-backend-local-build");
+    let repo_dir = scratch.join("gaia-git-backend-local-repo");
     fs::create_dir_all(&repo_dir).expect("repo dir");
     for args in [
         vec!["init", "-b", "main"],
@@ -200,7 +191,8 @@ fn local_repo_materializes_when_the_build_runs_in_docker() {
 
 #[test]
 fn state_file_never_holds_url_credentials() {
-    let build_dir = temp_path("gaia-git-backend-redact-build");
+    let scratch = TempDir::new("gaia-git-backend-redact-build");
+    let build_dir = scratch.join("gaia-git-backend-redact-build");
     let mut spec = docker_spec(&build_dir);
     // Metadata-only materialization: nothing is fetched, but the state is
     // written with the repository.
@@ -233,7 +225,8 @@ fn state_file_never_holds_url_credentials() {
 
 #[test]
 fn failed_host_git_names_the_source_and_suggests_credentials() {
-    let build_dir = temp_path("gaia-git-backend-fail-build");
+    let scratch = TempDir::new("gaia-git-backend-fail-build");
+    let build_dir = scratch.join("gaia-git-backend-fail-build");
     let spec = docker_spec(&build_dir);
     // Connection refused: fails fast without a network round trip.
     let source = SourceSpec::new(

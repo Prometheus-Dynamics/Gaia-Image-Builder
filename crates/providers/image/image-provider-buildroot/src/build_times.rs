@@ -107,17 +107,12 @@ pub(crate) fn timed_phase<E>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
 
     #[test]
     fn package_times_and_finalize_come_from_this_runs_log_lines() {
-        let output = std::env::temp_dir().join(format!(
-            "gaia-build-times-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time")
-                .as_nanos()
-        ));
+        let scratch = TempDir::new("gaia-build-times");
+        let output = scratch.path().to_path_buf();
         fs::create_dir_all(output.join("build")).expect("build dir");
         fs::write(
             output.join("build/build-time.log"),
@@ -140,6 +135,5 @@ mod tests {
                 "step time: buildroot finalize and images 1200000ms",
             ]
         );
-        let _ = fs::remove_dir_all(output);
     }
 }

@@ -1,5 +1,6 @@
 //! A command stopped early must not leave its docker container running.
 use super::*;
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -27,15 +28,8 @@ fn fake_docker(dir: &Path, run_body: &str) -> (PathBuf, PathBuf) {
     (docker, log)
 }
 
-fn temp_dir(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "gaia-docker-cleanup-{name}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time")
-            .as_nanos()
-    ))
+fn temp_dir(scratch: &TempDir, name: &str) -> PathBuf {
+    scratch.join(name)
 }
 
 fn docker_run(docker: &Path, cidfile: &Path) -> Command {
@@ -49,7 +43,8 @@ fn docker_run(docker: &Path, cidfile: &Path) -> Command {
 
 #[test]
 fn timed_out_docker_run_removes_its_container() {
-    let dir = temp_dir("timeout");
+    let scratch = TempDir::new("gaia-process-docker-test");
+    let dir = temp_dir(&scratch, "timeout");
     let (docker, log) = fake_docker(&dir, "exec sleep 30");
     let cidfile = dir.join("container.cid");
 
@@ -71,12 +66,12 @@ fn timed_out_docker_run_removes_its_container() {
         "{calls}"
     );
     assert!(!cidfile.exists(), "container id file should be removed");
-    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
 fn cancelled_docker_run_removes_its_container() {
-    let dir = temp_dir("cancel");
+    let scratch = TempDir::new("gaia-process-docker-test");
+    let dir = temp_dir(&scratch, "cancel");
     let (docker, log) = fake_docker(&dir, "exec sleep 30");
     let cidfile = dir.join("container.cid");
     let started = std::time::Instant::now();
@@ -95,12 +90,12 @@ fn cancelled_docker_run_removes_its_container() {
     assert_eq!(error.kind, ProcessRunErrorKind::Cancelled);
     let calls = fs::read_to_string(&log).expect("docker calls");
     assert!(calls.contains("rm --force fake-container-id"), "{calls}");
-    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
 fn finished_docker_run_only_discards_the_id_file() {
-    let dir = temp_dir("finished");
+    let scratch = TempDir::new("gaia-process-docker-test");
+    let dir = temp_dir(&scratch, "finished");
     let (docker, log) = fake_docker(&dir, "exit 0");
     let cidfile = dir.join("container.cid");
 
@@ -116,13 +111,12 @@ fn finished_docker_run_only_discards_the_id_file() {
     let calls = fs::read_to_string(&log).expect("docker calls");
     assert!(!calls.contains("rm --force"), "{calls}");
     assert!(!cidfile.exists(), "container id file should be removed");
-    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
 fn links_in_mounted_dirs_to_outside_dirs_mount_their_targets() {
-    let root = std::env::temp_dir().join(format!("gaia-docker-links-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
+    let scratch = TempDir::new("gaia-process-docker-test");
+    let root = scratch.join("links");
     let workspace = root.join("workspace");
     let outside = root.join("ram/tree");
     std::fs::create_dir_all(workspace.join("build/image")).expect("workspace");
@@ -152,5 +146,4 @@ fn links_in_mounted_dirs_to_outside_dirs_mount_their_targets() {
         !args.iter().any(|arg| arg.starts_with("/usr/bin:")),
         "{args:?}"
     );
-    let _ = std::fs::remove_dir_all(root);
 }

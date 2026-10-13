@@ -484,6 +484,7 @@ fn ram_low(memory: Option<u64>, space: Option<u64>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
 
     fn policy(work_dir: &str, budget: Option<&str>) -> ImageExecutionPolicy {
         ImageExecutionPolicy {
@@ -496,15 +497,10 @@ mod tests {
         }
     }
 
-    fn temp(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("gaia-ram-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        dir
-    }
-
     #[test]
     fn a_work_dir_tree_is_linked_from_the_build_dir_and_dropped_for_disk() {
-        let root = temp("workdir");
+        let root_scratch = TempDir::new("gaia-ram-workdir");
+        let root = root_scratch.join("root");
         let output = root.join("build/image/buildroot-output");
         fs::create_dir_all(&output).expect("disk tree");
         fs::write(output.join("old"), "x").expect("old file");
@@ -541,12 +537,12 @@ mod tests {
         let disk = place_work_dir(&output, &policy("disk", None)).expect("disk");
         assert_eq!(disk.dir, output);
         assert!(fs::symlink_metadata(&output).is_err() || !output.is_symlink());
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn a_ram_tree_needs_its_budget_and_free_memory() {
-        let root = temp("budget");
+        let root_scratch = TempDir::new("gaia-ram-budget");
+        let root = root_scratch.join("root");
         let output = root.join("build/image/buildroot-output");
         // A previous tree of 500 GiB never fits a 60 GiB budget.
         fs::create_dir_all(root.join("build/image")).expect("dirs");
@@ -563,7 +559,6 @@ mod tests {
             "{:?}",
             work.messages
         );
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -603,7 +598,8 @@ mod tests {
 
     #[test]
     fn an_unchanged_source_is_not_copied_again() {
-        let root = temp("mirror-skip");
+        let root_scratch = TempDir::new("gaia-ram-mirror-skip");
+        let root = root_scratch.join("root");
         let source = materialized_source(&root, "tree-1");
         let work = ram_work(&root);
         let (mirror, notes) = buildroot_source_for(&source, &work, true);
@@ -622,12 +618,12 @@ mod tests {
             fs::read_to_string(mirror.join("Makefile")).expect("kept"),
             "kept by the test\n"
         );
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn a_changed_digest_or_entry_copies_the_source_again() {
-        let root = temp("mirror-changed");
+        let root_scratch = TempDir::new("gaia-ram-mirror-changed");
+        let root = root_scratch.join("root");
         let source = materialized_source(&root, "tree-1");
         let work = ram_work(&root);
         let (mirror, _) = buildroot_source_for(&source, &work, true);
@@ -655,12 +651,12 @@ mod tests {
             "all:\n"
         );
         assert!(mirror.join("extra.txt").is_file());
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn a_missing_mirror_is_copied_in_full() {
-        let root = temp("mirror-missing");
+        let root_scratch = TempDir::new("gaia-ram-mirror-missing");
+        let root = root_scratch.join("root");
         let source = materialized_source(&root, "tree-1");
         let work = ram_work(&root);
         let (mirror, _) = buildroot_source_for(&source, &work, true);
@@ -670,12 +666,12 @@ mod tests {
         assert!(notes.is_empty(), "{notes:?}");
         assert!(mirror.join("Makefile").is_file());
         assert!(mirror.join("package/pkg-utils.mk").is_file());
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn a_source_without_a_trusted_identity_is_copied_every_time() {
-        let root = temp("mirror-untrusted");
+        let root_scratch = TempDir::new("gaia-ram-mirror-untrusted");
+        let root = root_scratch.join("root");
         let source = materialized_source(&root, "tree-1");
         // A path-only record names no content.
         fs::write(
@@ -693,12 +689,12 @@ mod tests {
             "all:\n"
         );
         assert!(!mirror.join(MIRROR_SOURCE_MARKER).exists());
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn a_skipped_mirror_reverts_gaia_patches_when_no_patches_apply() {
-        let root = temp("mirror-patches");
+        let root_scratch = TempDir::new("gaia-ram-mirror-patches");
+        let root = root_scratch.join("root");
         let source = materialized_source(&root, "tree-1");
         let work = ram_work(&root);
         let (mirror, _) = buildroot_source_for(&source, &work, true);
@@ -719,6 +715,5 @@ mod tests {
             fs::read_to_string(mirror.join("Makefile")).expect("reverted"),
             HOST_FINALIZE_UPSTREAM.to_string() + "\n"
         );
-        let _ = fs::remove_dir_all(root);
     }
 }

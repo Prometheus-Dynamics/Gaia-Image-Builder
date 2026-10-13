@@ -1,22 +1,27 @@
 pub mod support;
 
 use gaia_app::{AppArgs, CommandOutcome, run_finish, run_with_args};
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::{Path, PathBuf};
-use support::{config_path, seed_default_assets, seed_reuse_state, unique_dir};
+use support::{config_path, seed_default_assets, seed_reuse_state};
 
 /// Roots of one run: the seeded workspace, its output and build dirs.
 struct Roots {
     root: String,
     out: String,
     build: String,
+    /// Owns the directory that holds the roots and export destinations.
+    scratch: TempDir,
 }
 
 fn fresh_roots(prefix: &str) -> Roots {
+    let scratch = TempDir::new(prefix);
     let roots = Roots {
-        root: unique_dir(&format!("{prefix}-root")),
-        out: unique_dir(&format!("{prefix}-out")),
-        build: unique_dir(&format!("{prefix}-build")),
+        root: scratch.join("root").display().to_string(),
+        out: scratch.join("out").display().to_string(),
+        build: scratch.join("build").display().to_string(),
+        scratch,
     };
     fs::create_dir_all(&roots.root).expect("workspace root");
     seed_default_assets(&roots.root);
@@ -78,7 +83,7 @@ fn sha256_of(path: &Path) -> String {
 #[test]
 fn successful_run_exports_the_primary_image_under_its_versioned_name() {
     let roots = fresh_roots("gaia-export-ok");
-    let export_dir = PathBuf::from(unique_dir("gaia-export-dest"));
+    let export_dir = roots.scratch.join("dest");
     let export_arg = export_dir.display().to_string();
     let (args, outcome) = successful_run(&roots, &["--export", &export_arg]);
 
@@ -129,19 +134,12 @@ fn successful_run_exports_the_primary_image_under_its_versioned_name() {
         "a successful run gets no resume hint: {:?}",
         finish.lines
     );
-    let _ = fs::remove_dir_all(export_dir);
 }
 
 #[test]
 fn failed_run_exports_nothing_and_ends_with_the_resume_hint() {
-    let roots = Roots {
-        root: unique_dir("gaia-export-fail-root"),
-        out: unique_dir("gaia-export-fail-out"),
-        build: unique_dir("gaia-export-fail-build"),
-    };
-    fs::create_dir_all(&roots.root).expect("workspace root");
-    seed_default_assets(&roots.root);
-    let export_dir = PathBuf::from(unique_dir("gaia-export-fail-dest"));
+    let roots = fresh_roots("gaia-export-fail");
+    let export_dir = roots.scratch.join("dest");
     let export_arg = export_dir.display().to_string();
     // The same invocation as the failing run in cli_run_failures, plus export.
     let args = AppArgs::parse_from(vec![
@@ -191,7 +189,7 @@ fn failed_run_exports_nothing_and_ends_with_the_resume_hint() {
 #[test]
 fn a_run_that_ends_with_errors_is_not_exported_even_when_it_built_an_image() {
     let roots = fresh_roots("gaia-export-errors");
-    let export_dir = PathBuf::from(unique_dir("gaia-export-errors-dest"));
+    let export_dir = roots.scratch.join("dest");
     let export_arg = export_dir.display().to_string();
     let (args, mut outcome) = successful_run(&roots, &["--export", &export_arg]);
     assert_eq!(outcome.exit_code(), 0);
@@ -223,7 +221,7 @@ fn a_run_that_ends_with_errors_is_not_exported_even_when_it_built_an_image() {
 #[test]
 fn export_collisions_keep_both_images_and_the_resume_hint_is_absent_on_success() {
     let roots = fresh_roots("gaia-export-collide");
-    let export_dir = PathBuf::from(unique_dir("gaia-export-collide-dest"));
+    let export_dir = roots.scratch.join("dest");
     let export_arg = export_dir.display().to_string();
     let (args, outcome) = successful_run(&roots, &["--export", &export_arg]);
     assert_eq!(outcome.exit_code(), 0, "{outcome:?}");
@@ -245,7 +243,6 @@ fn export_collisions_keep_both_images_and_the_resume_hint_is_absent_on_success()
         b"someone else's image",
         "the existing different file is never overwritten"
     );
-    let _ = fs::remove_dir_all(export_dir);
 }
 
 /// The `--set` words that point a run's export at `dir` at one config level.
@@ -260,7 +257,7 @@ fn as_refs(words: &[String]) -> Vec<&str> {
 #[test]
 fn workspace_export_dir_exports_without_the_export_flag() {
     let roots = fresh_roots("gaia-export-cfg-ws");
-    let dest = PathBuf::from(unique_dir("gaia-export-cfg-ws-dest"));
+    let dest = roots.scratch.join("dest");
     let set = export_set("workspace.export_dir", &dest);
     let (args, outcome) = successful_run(&roots, &as_refs(&set));
 
@@ -276,14 +273,13 @@ fn workspace_export_dir_exports_without_the_export_flag() {
         "{:?}",
         finish.lines
     );
-    let _ = fs::remove_dir_all(dest);
 }
 
 #[test]
 fn image_export_dir_beats_the_workspace_default() {
     let roots = fresh_roots("gaia-export-cfg-img");
-    let workspace_dest = PathBuf::from(unique_dir("gaia-export-cfg-ws-loses"));
-    let image_dest = PathBuf::from(unique_dir("gaia-export-cfg-img-wins"));
+    let workspace_dest = roots.scratch.join("workspace-loses");
+    let image_dest = roots.scratch.join("image-wins");
     let mut set = export_set("workspace.export_dir", &workspace_dest);
     set.extend(export_set("image.output.export_dir", &image_dest));
     let (args, outcome) = successful_run(&roots, &as_refs(&set));
@@ -296,14 +292,13 @@ fn image_export_dir_beats_the_workspace_default() {
         !workspace_dest.exists(),
         "the workspace default is not used when the build sets its own"
     );
-    let _ = fs::remove_dir_all(image_dest);
 }
 
 #[test]
 fn export_flag_beats_the_configured_directory() {
     let roots = fresh_roots("gaia-export-cfg-flag");
-    let flag_dest = PathBuf::from(unique_dir("gaia-export-cfg-flag-wins"));
-    let config_dest = PathBuf::from(unique_dir("gaia-export-cfg-flag-loses"));
+    let flag_dest = roots.scratch.join("flag-wins");
+    let config_dest = roots.scratch.join("flag-loses");
     let flag = flag_dest.display().to_string();
     let set = export_set("image.output.export_dir", &config_dest);
     let mut words = as_refs(&set);
@@ -318,13 +313,12 @@ fn export_flag_beats_the_configured_directory() {
         !config_dest.exists(),
         "the configured directory is not used"
     );
-    let _ = fs::remove_dir_all(flag_dest);
 }
 
 #[test]
 fn no_export_suppresses_a_configured_export_for_one_run() {
     let roots = fresh_roots("gaia-export-cfg-none");
-    let dest = PathBuf::from(unique_dir("gaia-export-cfg-none-dest"));
+    let dest = roots.scratch.join("dest");
     let set = export_set("workspace.export_dir", &dest);
     let mut words = as_refs(&set);
     words.push("--no-export");
@@ -360,19 +354,12 @@ fn relative_configured_export_dir_is_taken_from_the_workspace_root() {
     assert!(!finish.export_failed, "{:?}", finish.lines);
     let dest = PathBuf::from(&roots.root).join("exports/images");
     assert_eq!(file_names(&dest).len(), 1, "{:?}", file_names(&dest));
-    let _ = fs::remove_dir_all(dest);
 }
 
 #[test]
 fn a_failed_run_with_a_configured_export_exports_nothing() {
-    let roots = Roots {
-        root: unique_dir("gaia-export-cfg-fail-root"),
-        out: unique_dir("gaia-export-cfg-fail-out"),
-        build: unique_dir("gaia-export-cfg-fail-build"),
-    };
-    fs::create_dir_all(&roots.root).expect("workspace root");
-    seed_default_assets(&roots.root);
-    let dest = PathBuf::from(unique_dir("gaia-export-cfg-fail-dest"));
+    let roots = fresh_roots("gaia-export-cfg-fail");
+    let dest = roots.scratch.join("dest");
     // The same invocation as the failing run in cli_run_failures, plus a
     // configured export: no `image.allow_fallback`, so the run fails.
     let mut words = vec![

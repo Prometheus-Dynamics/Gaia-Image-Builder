@@ -30,7 +30,6 @@ fn resolves_the_image_rootfs_table() {
     ));
     let spec = gaia_config::resolve_config(path.to_str().expect("temp path should be utf-8"));
     assert_eq!(excluded(&spec), vec!["libcamera", "libpisp"]);
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -47,5 +46,4 @@ fn the_override_sets_the_exclusion_list() {
         },
     );
     assert_eq!(excluded(&spec), vec!["libcamera", "libpisp"]);
-    let _ = std::fs::remove_file(path);
 }

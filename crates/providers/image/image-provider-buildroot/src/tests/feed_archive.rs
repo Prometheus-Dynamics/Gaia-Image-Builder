@@ -2,9 +2,12 @@ use super::*;
 
 #[test]
 fn archive_buildroot_output_promotes_single_primary_image() {
-    let collect_dir = temp_path("gaia-buildroot-collect-dir");
-    let output_dir = temp_path("gaia-buildroot-output-dir");
-    let archive_path = temp_path("gaia-buildroot-primary-archive");
+    let collect_dir_scratch = TempDir::new("gaia-buildroot-collect-dir");
+    let collect_dir = collect_dir_scratch.join("collect_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-output-dir");
+    let output_dir = output_dir_scratch.join("output_dir");
+    let archive_path_scratch = TempDir::new("gaia-buildroot-primary-archive");
+    let archive_path = archive_path_scratch.join("archive_path");
     fs::create_dir_all(&collect_dir).expect("collect dir");
     fs::create_dir_all(&output_dir).expect("output dir");
     fs::write(collect_dir.join("rootfs.squashfs"), "primary image").expect("image");
@@ -49,9 +52,12 @@ fn archive_buildroot_output_promotes_single_primary_image() {
 
 #[test]
 fn collect_expected_images_and_archive_promote_raw_board_image() {
-    let output_dir = temp_path("gaia-buildroot-raw-board-out");
-    let collect_dir = temp_path("gaia-buildroot-raw-board-collect");
-    let archive_path = temp_path("gaia-buildroot-raw-board-archive.img");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-raw-board-out");
+    let output_dir = output_dir_scratch.join("output_dir");
+    let collect_dir_scratch = TempDir::new("gaia-buildroot-raw-board-collect");
+    let collect_dir = collect_dir_scratch.join("collect_dir");
+    let archive_path_scratch = TempDir::new("gaia-buildroot-raw-board-archive.img");
+    let archive_path = archive_path_scratch.join("archive_path");
     fs::create_dir_all(output_dir.join("images")).expect("images dir");
     fs::write(output_dir.join("images/sdcard.img"), "raw board image").expect("raw image");
     let image = ImageSpec {
@@ -102,8 +108,10 @@ fn collect_expected_images_and_archive_promote_raw_board_image() {
 
 #[test]
 fn archive_buildroot_output_compresses_raw_board_image_for_img_xz_output() {
-    let output_dir = temp_path("gaia-buildroot-raw-board-xz-out");
-    let collect_dir = temp_path("gaia-buildroot-raw-board-xz-collect");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-raw-board-xz-out");
+    let output_dir = output_dir_scratch.join("output_dir");
+    let collect_dir_scratch = TempDir::new("gaia-buildroot-raw-board-xz-collect");
+    let collect_dir = collect_dir_scratch.join("collect_dir");
     let archive_path = collect_dir.join("helios.img.xz");
     fs::create_dir_all(output_dir.join("images")).expect("images dir");
     fs::write(output_dir.join("images/rootfs.squashfs"), "rootfs").expect("rootfs image");
@@ -164,8 +172,10 @@ fn archive_buildroot_output_compresses_raw_board_image_for_img_xz_output() {
 
 #[test]
 fn compress_primary_image_timeout_preserves_existing_archive() {
-    let collect_dir = temp_path("gaia-buildroot-raw-board-timeout-collect");
-    let script_dir = temp_path("gaia-buildroot-fake-xz-timeout-bin");
+    let collect_dir_scratch = TempDir::new("gaia-buildroot-raw-board-timeout-collect");
+    let collect_dir = collect_dir_scratch.join("collect_dir");
+    let script_dir_scratch = TempDir::new("gaia-buildroot-fake-xz-timeout-bin");
+    let script_dir = script_dir_scratch.join("script_dir");
     let archive_path = collect_dir.join("helios.img.xz");
     let source_path = collect_dir.join("sdcard.img");
     fs::create_dir_all(&collect_dir).expect("collect dir");
@@ -207,8 +217,10 @@ fn compress_primary_image_timeout_preserves_existing_archive() {
 
 #[test]
 fn compress_primary_image_failure_preserves_existing_archive() {
-    let collect_dir = temp_path("gaia-buildroot-raw-board-failed-collect");
-    let script_dir = temp_path("gaia-buildroot-fake-xz-failed-bin");
+    let collect_dir_scratch = TempDir::new("gaia-buildroot-raw-board-failed-collect");
+    let collect_dir = collect_dir_scratch.join("collect_dir");
+    let script_dir_scratch = TempDir::new("gaia-buildroot-fake-xz-failed-bin");
+    let script_dir = script_dir_scratch.join("script_dir");
     let archive_path = collect_dir.join("helios.img.xz");
     let source_path = collect_dir.join("sdcard.img");
     fs::create_dir_all(&collect_dir).expect("collect dir");
@@ -247,8 +259,10 @@ fn compress_primary_image_failure_preserves_existing_archive() {
 
 #[test]
 fn compress_primary_image_streams_logs_and_uses_policy_threads() {
-    let collect_dir = temp_path("gaia-buildroot-raw-board-log-collect");
-    let script_dir = temp_path("gaia-buildroot-fake-xz-log-bin");
+    let collect_dir_scratch = TempDir::new("gaia-buildroot-raw-board-log-collect");
+    let collect_dir = collect_dir_scratch.join("collect_dir");
+    let script_dir_scratch = TempDir::new("gaia-buildroot-fake-xz-log-bin");
+    let script_dir = script_dir_scratch.join("script_dir");
     let archive_path = collect_dir.join("helios.img.xz");
     let source_path = collect_dir.join("sdcard.img");
     let args_path = script_dir.join("args.txt");
@@ -346,8 +360,10 @@ fn image_feed_has_content_is_true_when_stage_or_install_entries_exist() {
 
 #[test]
 fn archive_buildroot_output_archives_final_raw_image_into_compressed_tar() {
-    let collect_dir = temp_path("gaia-buildroot-collect-multi-dir");
-    let output_dir = temp_path("gaia-buildroot-output-multi-dir");
+    let collect_dir_scratch = TempDir::new("gaia-buildroot-collect-multi-dir");
+    let collect_dir = collect_dir_scratch.join("collect_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-output-multi-dir");
+    let output_dir = output_dir_scratch.join("output_dir");
     let archive_path = collect_dir.join("bundle.tar.xz");
     fs::create_dir_all(&collect_dir).expect("collect dir");
     fs::create_dir_all(&output_dir).expect("output dir");

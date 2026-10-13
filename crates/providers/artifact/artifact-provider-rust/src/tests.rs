@@ -1,22 +1,13 @@
 use super::*;
 use gaia_spec::{ArtifactOutputSpec, ArtifactVariantSpec, RustArtifactSpec};
+use gaia_testkit::TempDir;
 use std::fs;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-fn temp_path(prefix: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time")
-        .as_nanos();
-    std::env::temp_dir()
-        .join("gaia-tests")
-        .join(format!("{prefix}-{nonce}"))
-}
 
 #[test]
 fn rust_provider_fails_for_missing_source_dir_when_nested_build_enabled() {
-    let output_path = temp_path("gaia-rust-provider-output");
-    let missing_source_dir = temp_path("gaia-rust-provider-missing-source");
+    let scratch = TempDir::new("gaia-rust-provider-output");
+    let output_path = scratch.join("gaia-rust-provider-output");
+    let missing_source_dir = scratch.join("gaia-rust-provider-missing-source");
     let artifact = ArtifactSpec::new(
         "gaia-app",
         ArtifactDefinition::Rust(RustArtifactSpec {
@@ -55,7 +46,8 @@ fn rust_provider_fails_for_missing_source_dir_when_nested_build_enabled() {
 
 #[test]
 fn rust_artifact_state_persists_backend_native_fields() {
-    let output_path = temp_path("gaia-rust-provider-state");
+    let scratch = TempDir::new("gaia-rust-provider-state");
+    let output_path = scratch.join("gaia-rust-provider-state");
     fs::write(&output_path, "artifact").expect("output");
     let mut artifact = ArtifactSpec::new(
         "gaia-app",
@@ -104,9 +96,10 @@ fn rust_artifact_state_persists_backend_native_fields() {
 
 #[test]
 fn nested_rust_build_does_not_accept_stale_existing_output() {
-    let output_path = temp_path("gaia-rust-provider-stale-output");
+    let scratch = TempDir::new("gaia-rust-provider-stale-output");
+    let output_path = scratch.join("gaia-rust-provider-stale-output");
     fs::write(&output_path, "stale").expect("output");
-    let missing_source_dir = temp_path("gaia-rust-provider-missing-source-with-output");
+    let missing_source_dir = scratch.join("gaia-rust-provider-missing-source-with-output");
     let artifact = ArtifactSpec::new(
         "gaia-app",
         ArtifactDefinition::Rust(RustArtifactSpec {
@@ -175,8 +168,9 @@ fn nested_contract(artifact: &ArtifactSpec, source_dir: &Path) -> ArtifactExecut
 
 /// A two-member cargo workspace with dependency-free binaries, so the
 /// build is fast and offline. `broken` members fail to compile.
-fn tiny_workspace(prefix: &str, members: &[(&str, bool)]) -> PathBuf {
-    let root = temp_path(prefix);
+fn tiny_workspace(prefix: &str, members: &[(&str, bool)]) -> TempDir {
+    let scratch = TempDir::new(prefix);
+    let root = scratch.path().to_path_buf();
     let names = members
         .iter()
         .map(|(name, _)| format!("\"{name}\""))
@@ -203,7 +197,7 @@ fn tiny_workspace(prefix: &str, members: &[(&str, bool)]) -> PathBuf {
         };
         fs::write(dir.join("src/main.rs"), body).expect("member main");
     }
-    root
+    scratch
 }
 
 fn capture_sink() -> (
@@ -220,7 +214,8 @@ fn capture_sink() -> (
 
 #[test]
 fn batch_key_groups_only_compatible_nested_builds() {
-    let source = temp_path("gaia-rust-batch-key");
+    let scratch = TempDir::new("gaia-rust-batch-key");
+    let source = scratch.join("gaia-rust-batch-key");
     let alpha = rust_artifact("alpha", "alpha", &source.join("out/alpha"));
     let beta = rust_artifact("beta", "beta", &source.join("out/beta"));
     let alpha_contract = nested_contract(&alpha, &source);
@@ -237,7 +232,7 @@ fn batch_key_groups_only_compatible_nested_builds() {
     cross.artifact_target = Some("aarch64-unknown-linux-gnu".into());
     assert_ne!(alpha_key, RustProvider.batch_key(&beta, &cross));
     let mut other_source = beta_contract.clone();
-    other_source.source_dir = Some(temp_path("other").display().to_string());
+    other_source.source_dir = Some(scratch.join("other").display().to_string());
     assert_ne!(alpha_key, RustProvider.batch_key(&beta, &other_source));
     let mut placeholder = beta_contract;
     placeholder.allow_nested_build = false;
@@ -246,7 +241,8 @@ fn batch_key_groups_only_compatible_nested_builds() {
 
 #[test]
 fn cargo_build_command_selects_every_batched_package() {
-    let source = temp_path("gaia-rust-batch-command");
+    let scratch = TempDir::new("gaia-rust-batch-command");
+    let source = scratch.join("gaia-rust-batch-command");
     let alpha = rust_artifact("alpha", "alpha", &source.join("out/alpha"));
     let mut contract = nested_contract(&alpha, &source);
     contract.build_mode = Some(BuildModeSpec::Release);
@@ -267,11 +263,13 @@ fn cargo_build_command_selects_every_batched_package() {
 
 #[test]
 fn batched_cargo_build_matches_individual_outputs_and_state() {
-    let workspace = tiny_workspace("gaia-rust-batch-ok", &[("alpha", false), ("beta", false)]);
+    let workspace_scratch =
+        tiny_workspace("gaia-rust-batch-ok", &[("alpha", false), ("beta", false)]);
+    let workspace = workspace_scratch.path();
     let alpha = rust_artifact("alpha", "alpha", &workspace.join("out/alpha"));
     let beta = rust_artifact("beta", "beta", &workspace.join("out/beta"));
-    let alpha_contract = nested_contract(&alpha, &workspace);
-    let beta_contract = nested_contract(&beta, &workspace);
+    let alpha_contract = nested_contract(&alpha, workspace);
+    let beta_contract = nested_contract(&beta, workspace);
     let (leader_sink, leader_lines) = capture_sink();
     let (member_sink, member_lines) = capture_sink();
 
@@ -327,16 +325,17 @@ fn batched_cargo_build_matches_individual_outputs_and_state() {
             .iter()
             .any(|line| line.contains("cargo build batched"))
     );
-    let _ = fs::remove_dir_all(workspace);
 }
 
 #[test]
 fn failed_batch_falls_back_to_individual_builds() {
-    let workspace = tiny_workspace("gaia-rust-batch-fail", &[("good", false), ("bad", true)]);
+    let workspace_scratch =
+        tiny_workspace("gaia-rust-batch-fail", &[("good", false), ("bad", true)]);
+    let workspace = workspace_scratch.path();
     let good = rust_artifact("good", "good", &workspace.join("out/good"));
     let bad = rust_artifact("bad", "bad", &workspace.join("out/bad"));
-    let good_contract = nested_contract(&good, &workspace);
-    let bad_contract = nested_contract(&bad, &workspace);
+    let good_contract = nested_contract(&good, workspace);
+    let bad_contract = nested_contract(&bad, workspace);
 
     let results = RustProvider.execute_artifact_batch(
         &[
@@ -359,7 +358,6 @@ fn failed_batch_falls_back_to_individual_builds() {
     let error = results[1].as_ref().expect_err("broken package fails");
     assert_eq!(error.kind, ArtifactProviderErrorKind::BackendCommand);
     assert!(error.message.contains("'bad'"), "{}", error.message);
-    let _ = fs::remove_dir_all(workspace);
 }
 
 fn with_features(
@@ -378,7 +376,8 @@ fn with_features(
 
 #[test]
 fn cargo_command_passes_feature_flags_through() {
-    let source = temp_path("gaia-rust-features-command");
+    let scratch = TempDir::new("gaia-rust-features-command");
+    let source = scratch.join("gaia-rust-features-command");
     let artifact = with_features(
         rust_artifact("node", "orion-node", &source.join("out/node")),
         &["metrics", "tls"],
@@ -446,7 +445,8 @@ fn validation_rejects_all_features_with_other_feature_flags() {
 
 #[test]
 fn batching_and_state_respect_feature_flags() {
-    let source = temp_path("gaia-rust-features-batch");
+    let scratch = TempDir::new("gaia-rust-features-batch");
+    let source = scratch.join("gaia-rust-features-batch");
     let plain = rust_artifact("a", "a", &source.join("out/a"));
     let featured = with_features(
         rust_artifact("b", "b", &source.join("out/b")),
@@ -491,9 +491,10 @@ fn batching_and_state_respect_feature_flags() {
 
 #[test]
 fn no_default_features_reaches_cargo() {
+    let scratch = TempDir::new("gaia-rust-no-default-features");
     // The default feature makes the crate fail to compile, so the build
     // only succeeds when --no-default-features is passed through.
-    let root = temp_path("gaia-rust-no-default-features");
+    let root = scratch.join("gaia-rust-no-default-features");
     fs::create_dir_all(root.join("src")).expect("src");
     fs::write(
         root.join("Cargo.toml"),
@@ -523,7 +524,6 @@ fn no_default_features_reaches_cargo() {
         .execute_artifact(&with_defaults, &contract, None, None)
         .expect_err("default features fail to compile");
     assert_eq!(error.kind, ArtifactProviderErrorKind::BackendCommand);
-    let _ = fs::remove_dir_all(root);
 }
 
 mod groups;

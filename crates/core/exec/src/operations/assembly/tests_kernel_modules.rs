@@ -3,6 +3,7 @@
 
 use super::*;
 use gaia_spec::{AssemblyKernelModulesSpec, AssemblyTreeSpec};
+use gaia_testkit::TempDir;
 use std::fs;
 
 fn host_has(tool: &str) -> bool {
@@ -77,7 +78,9 @@ fn run_modules(spec: &ResolvedBuildSpec) -> Result<AssemblyStagingSummary, Assem
 
 #[test]
 fn kernel_modules_copy_the_dependency_closure_and_skip_builtins() {
-    let root = unique_dir("gaia-assembly-kernel-modules");
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-assembly-kernel-modules");
+    fs::create_dir_all(&root).expect("test root");
     fake_kernel_modules(&root, "6.12.0");
     let mut spec = test_spec(&root);
     spec.image.assembly = Some(modules_assembly(
@@ -132,12 +135,13 @@ fn kernel_modules_copy_the_dependency_closure_and_skip_builtins() {
         assert!(index.contains("libcomposite.ko.xz"), "{index}");
         assert!(!index.contains("unused.ko"), "{index}");
     }
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn kernel_modules_name_a_module_that_exists_nowhere() {
-    let root = unique_dir("gaia-assembly-kernel-missing");
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-assembly-kernel-missing");
+    fs::create_dir_all(&root).expect("test root");
     fake_kernel_modules(&root, "6.12.0");
     let mut spec = test_spec(&root);
     spec.image.assembly = Some(modules_assembly(&root, None, &["nope"], None));
@@ -149,12 +153,13 @@ fn kernel_modules_name_a_module_that_exists_nowhere() {
         "{}",
         error.message
     );
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn kernel_modules_pick_the_only_version_or_the_named_one() {
-    let root = unique_dir("gaia-assembly-kernel-versions");
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-assembly-kernel-versions");
+    fs::create_dir_all(&root).expect("test root");
     fake_kernel_modules(&root, "6.12.0");
     fake_kernel_modules(&root, "6.6.1");
     let mut spec = test_spec(&root);
@@ -178,12 +183,13 @@ fn kernel_modules_pick_the_only_version_or_the_named_one() {
         root.join("build/assembly/initramfs/lib/modules/6.6.1/kernel/net/unused.ko")
             .is_file()
     );
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn kernel_modules_refuse_a_depmod_that_does_not_exist() {
-    let root = unique_dir("gaia-assembly-kernel-depmod");
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-assembly-kernel-depmod");
+    fs::create_dir_all(&root).expect("test root");
     fake_kernel_modules(&root, "6.12.0");
     let mut spec = test_spec(&root);
     spec.image.assembly = Some(modules_assembly(
@@ -201,5 +207,4 @@ fn kernel_modules_refuse_a_depmod_that_does_not_exist() {
         "{}",
         error.message
     );
-    let _ = fs::remove_dir_all(root);
 }

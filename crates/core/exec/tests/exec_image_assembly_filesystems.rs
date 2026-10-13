@@ -9,6 +9,7 @@ use gaia_spec::{
     AssemblyBusyboxInitramfsSpec, AssemblyDirSpec, AssemblyFileSpec, AssemblyFilesystemKindSpec,
     AssemblySymlinkSpec, AssemblyTransformKindSpec, AssemblyTransformSpec, ImageAssemblySpec,
 };
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::Path;
 use std::thread;
@@ -20,7 +21,8 @@ use support::{
 
 #[test]
 fn executes_image_assembly_copy_and_gzip_transforms() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = Path::new(&spec.workspace.build_dir);
     let source_dir = build_dir.join("transform-sources");
     let output_dir = build_dir.join("transform-output");
@@ -99,9 +101,10 @@ fn executes_image_assembly_copy_and_gzip_transforms() {
 #[cfg(unix)]
 #[test]
 fn gzip_transform_failure_reports_bounded_stderr_tail_and_tool_path() {
+    let scratch = TempDir::new("gaia-exec-test");
     use std::os::unix::fs::PermissionsExt;
 
-    let mut spec = test_spec();
+    let mut spec = test_spec(&scratch);
     spec.policy.execution.output_retention.stderr_bytes = 4;
     let provider_bin = Path::new(&spec.workspace.build_dir).join("image/buildroot-output/host/bin");
     fs::create_dir_all(&provider_bin).expect("provider bin");
@@ -159,7 +162,8 @@ fn gzip_transform_failure_reports_bounded_stderr_tail_and_tool_path() {
 #[cfg(unix)]
 #[test]
 fn gzip_transform_tool_start_failure_is_typed() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let provider_bin = Path::new(&spec.workspace.build_dir).join("image/buildroot-output/host/bin");
     fs::create_dir_all(&provider_bin).expect("provider bin");
     let fake_gzip = provider_bin.join("gzip");
@@ -209,9 +213,10 @@ fn gzip_transform_tool_start_failure_is_typed() {
 #[cfg(unix)]
 #[test]
 fn gzip_transform_honors_assembly_command_timeout() {
+    let scratch = TempDir::new("gaia-exec-test");
     use std::os::unix::fs::PermissionsExt;
 
-    let mut spec = test_spec();
+    let mut spec = test_spec(&scratch);
     spec.policy.providers.buildroot.timeout_seconds = 1;
     let provider_bin = Path::new(&spec.workspace.build_dir).join("image/buildroot-output/host/bin");
     fs::create_dir_all(&provider_bin).expect("provider bin");
@@ -267,9 +272,10 @@ fn gzip_transform_honors_assembly_command_timeout() {
 #[cfg(unix)]
 #[test]
 fn gzip_transform_succeeds_when_tool_version_probe_hangs() {
+    let scratch = TempDir::new("gaia-exec-test");
     use std::os::unix::fs::PermissionsExt;
 
-    let mut spec = test_spec();
+    let mut spec = test_spec(&scratch);
     spec.policy.providers.buildroot.timeout_seconds = 10;
     let provider_bin = Path::new(&spec.workspace.build_dir).join("image/buildroot-output/host/bin");
     fs::create_dir_all(&provider_bin).expect("provider bin");
@@ -340,9 +346,10 @@ fn gzip_transform_succeeds_when_tool_version_probe_hangs() {
 #[cfg(unix)]
 #[test]
 fn gzip_transform_honors_execution_cancellation() {
+    let scratch = TempDir::new("gaia-exec-test");
     use std::os::unix::fs::PermissionsExt;
 
-    let mut spec = test_spec();
+    let mut spec = test_spec(&scratch);
     spec.policy.providers.buildroot.timeout_seconds = 30;
     let provider_bin = Path::new(&spec.workspace.build_dir).join("image/buildroot-output/host/bin");
     fs::create_dir_all(&provider_bin).expect("provider bin");
@@ -402,9 +409,10 @@ fn gzip_transform_honors_execution_cancellation() {
 #[cfg(unix)]
 #[test]
 fn compile_dts_prefers_provider_host_dtc() {
+    let scratch = TempDir::new("gaia-exec-test");
     use std::os::unix::fs::PermissionsExt;
 
-    let mut spec = test_spec();
+    let mut spec = test_spec(&scratch);
     let collect_dir = Path::new(&spec.workspace.out_dir).join("images");
     spec.image.output.collect_dir = Some(collect_dir.display().to_string());
     let provider_bin = Path::new(&spec.workspace.build_dir).join("image/buildroot-output/host/bin");
@@ -466,7 +474,8 @@ fn compile_dts_prefers_provider_host_dtc() {
 
 #[test]
 fn executes_image_assembly_cpio_filesystems() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = Path::new(&spec.workspace.build_dir);
     let source_dir = build_dir.join("filesystem-sources");
     let output_dir = build_dir.join("filesystem-output");
@@ -558,9 +567,10 @@ fn executes_image_assembly_cpio_filesystems() {
 #[cfg(unix)]
 #[test]
 fn executes_busybox_initramfs_and_packs_cpio_gzip() {
+    let scratch = TempDir::new("gaia-exec-test");
     use std::os::unix::fs::PermissionsExt;
 
-    let mut spec = test_spec();
+    let mut spec = test_spec(&scratch);
     let build_dir = Path::new(&spec.workspace.build_dir);
     let source_dir = build_dir.join("busybox-sources");
     let output_dir = build_dir.join("busybox-output");

@@ -2,7 +2,8 @@ use super::*;
 
 #[test]
 fn package_reconcile_disabled_returns_no_messages() {
-    let root = unique_dir("gaia-starting-point-packages-disabled");
+    let scratch = TempDir::new("gaia-starting-point-packages-disabled");
+    let root = scratch.path().to_path_buf();
     let packages = gaia_spec::StartingPointPackagesSpec::default();
 
     let messages = reconcile_packages(&root, &root, &packages).expect("disabled packages");
@@ -12,7 +13,8 @@ fn package_reconcile_disabled_returns_no_messages() {
 
 #[test]
 fn package_reconcile_plans_apt_commands() {
-    let root = unique_dir("gaia-starting-point-packages");
+    let scratch = TempDir::new("gaia-starting-point-packages");
+    let root = scratch.path().to_path_buf();
     fs::create_dir_all(root.join("etc")).expect("etc");
     fs::create_dir_all(root.join("usr/bin")).expect("usr bin");
     fs::write(root.join("etc/os-release"), "VERSION_ID=\"24.04\"\n").expect("os-release");
@@ -54,7 +56,8 @@ fn package_reconcile_plans_apt_commands() {
 
 #[test]
 fn package_reconcile_execute_true_plans_commands_without_dry_run_notice() {
-    let root = unique_dir("gaia-starting-point-packages-execute");
+    let scratch = TempDir::new("gaia-starting-point-packages-execute");
+    let root = scratch.path().to_path_buf();
     fs::create_dir_all(root.join("etc")).expect("etc");
     fs::create_dir_all(root.join("usr/bin")).expect("usr bin");
     fs::write(root.join("etc/os-release"), "VERSION_ID=\"24.04\"\n").expect("os-release");
@@ -91,7 +94,8 @@ fn package_reconcile_execute_true_plans_commands_without_dry_run_notice() {
 
 #[test]
 fn package_reconcile_quotes_shell_syntax_in_planned_commands() {
-    let root = unique_dir("gaia-starting-point-packages-quote");
+    let scratch = TempDir::new("gaia-starting-point-packages-quote");
+    let root = scratch.path().to_path_buf();
     fs::create_dir_all(root.join("etc")).expect("etc");
     fs::create_dir_all(root.join("usr/bin")).expect("usr bin");
     fs::write(root.join("etc/os-release"), "VERSION_ID=\"24.04\"\n").expect("os-release");
@@ -123,7 +127,8 @@ fn package_reconcile_quotes_shell_syntax_in_planned_commands() {
 
 #[test]
 fn package_reconcile_blocks_major_release_change_without_opt_in() {
-    let root = unique_dir("gaia-starting-point-packages-major");
+    let scratch = TempDir::new("gaia-starting-point-packages-major");
+    let root = scratch.path().to_path_buf();
     fs::create_dir_all(root.join("etc")).expect("etc");
     fs::create_dir_all(root.join("usr/bin")).expect("usr bin");
     fs::write(root.join("etc/os-release"), "VERSION_ID=\"22.04\"\n").expect("os-release");

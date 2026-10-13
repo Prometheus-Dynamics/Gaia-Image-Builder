@@ -1,6 +1,7 @@
 pub mod support;
 
 use gaia_plan::{OperationReuse, plan_build, plan_build_with_reuse_state};
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::PathBuf;
 use support::{fixture_spec, provider_catalogs, reuse_state_for_ids};
@@ -8,8 +9,8 @@ use support::{fixture_spec, provider_catalogs, reuse_state_for_ids};
 const ROOT_SOURCE: &str = "source:workspace-root";
 
 /// Build and out live inside the source root, as they do in a real workspace.
-fn spec_with_state_inside_root() -> gaia_spec::ResolvedBuildSpec {
-    let mut spec = fixture_spec();
+fn spec_with_state_inside_root(scratch: &TempDir) -> gaia_spec::ResolvedBuildSpec {
+    let mut spec = fixture_spec(scratch);
     let root = PathBuf::from(&spec.workspace.root_dir);
     spec.workspace.build_dir = root.join("build").display().to_string();
     spec.workspace.out_dir = root.join("out").display().to_string();
@@ -57,7 +58,8 @@ fn root_source_reuse(
 
 #[test]
 fn workspace_root_source_is_reused_after_run_creates_gaia_state_in_root() {
-    let spec = spec_with_state_inside_root();
+    let scratch = TempDir::new("gaia-exec-test");
+    let spec = spec_with_state_inside_root(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let baseline = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
 
@@ -74,7 +76,8 @@ fn workspace_root_source_is_reused_after_run_creates_gaia_state_in_root() {
 
 #[test]
 fn workspace_root_source_rebuilds_when_a_real_source_file_changes() {
-    let spec = spec_with_state_inside_root();
+    let scratch = TempDir::new("gaia-exec-test");
+    let spec = spec_with_state_inside_root(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let baseline = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
 

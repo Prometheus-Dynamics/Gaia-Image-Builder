@@ -190,15 +190,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
     use std::fs;
-    use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn validate_tar_archive_entries_accepts_safe_archive() {
-        let dir = unique_dir("safe-tar");
+        let scratch = TempDir::new("gaia-process-test");
+        let dir = scratch.join("safe-tar");
         let src = dir.join("src");
         fs::create_dir_all(src.join("dir")).expect("source dir");
         fs::write(src.join("dir/file.txt"), "ok").expect("source file");
@@ -214,13 +212,12 @@ mod tests {
             None,
         )
         .expect("safe archive should validate");
-
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn validate_tar_archive_entries_accepts_safe_archive_with_strip_components() {
-        let dir = unique_dir("safe-strip-tar");
+        let scratch = TempDir::new("gaia-process-test");
+        let dir = scratch.join("safe-strip-tar");
         let src = dir.join("src");
         fs::create_dir_all(src.join("outer/dir")).expect("source dir");
         fs::write(src.join("outer/dir/file.txt"), "ok").expect("source file");
@@ -236,13 +233,12 @@ mod tests {
             None,
         )
         .expect("safe stripped archive should validate");
-
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn validate_tar_archive_entries_rejects_parent_traversal() {
-        let dir = unique_dir("traversal-tar");
+        let scratch = TempDir::new("gaia-process-test");
+        let dir = scratch.join("traversal-tar");
         let src = dir.join("src");
         fs::create_dir_all(&src).expect("source dir");
         fs::write(src.join("file.txt"), "ok").expect("source file");
@@ -269,7 +265,6 @@ mod tests {
         .expect_err("traversal archive should fail");
 
         assert!(error.message.contains("escapes the extraction destination"));
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -295,9 +290,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn validate_tar_archive_entries_rejects_absolute_symlink() {
+        let scratch = TempDir::new("gaia-process-test");
         use std::os::unix::fs::symlink;
 
-        let dir = unique_dir("absolute-symlink-tar");
+        let dir = scratch.join("absolute-symlink-tar");
         let src = dir.join("src");
         fs::create_dir_all(&src).expect("source dir");
         symlink("/tmp", src.join("link")).expect("symlink");
@@ -315,15 +311,15 @@ mod tests {
         .expect_err("absolute symlink archive should fail");
 
         assert!(error.message.contains("absolute target"));
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[cfg(unix)]
     #[test]
     fn validate_tar_archive_entries_rejects_relative_symlink_escape() {
+        let scratch = TempDir::new("gaia-process-test");
         use std::os::unix::fs::symlink;
 
-        let dir = unique_dir("relative-symlink-tar");
+        let dir = scratch.join("relative-symlink-tar");
         let src = dir.join("src");
         fs::create_dir_all(src.join("dir")).expect("source dir");
         symlink("../../escape", src.join("dir/link")).expect("symlink");
@@ -341,13 +337,13 @@ mod tests {
         .expect_err("relative symlink escape should fail");
 
         assert!(error.message.contains("escapes the extraction destination"));
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[cfg(unix)]
     #[test]
     fn validate_tar_archive_entries_rejects_hardlinks() {
-        let dir = unique_dir("hardlink-tar");
+        let scratch = TempDir::new("gaia-process-test");
+        let dir = scratch.join("hardlink-tar");
         let src = dir.join("src");
         fs::create_dir_all(&src).expect("source dir");
         fs::write(src.join("file.txt"), "ok").expect("source file");
@@ -366,7 +362,6 @@ mod tests {
         .expect_err("hardlink archive should fail");
 
         assert!(error.message.contains("hardlink"));
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -387,13 +382,5 @@ mod tests {
             .status()
             .expect("create tar");
         assert!(status.success());
-    }
-
-    fn unique_dir(name: &str) -> PathBuf {
-        let counter = TEST_DIR_COUNTER.fetch_add(1, Ordering::SeqCst);
-        std::env::temp_dir().join("gaia-tests").join(format!(
-            "gaia-process-tar-{name}-{}-{counter}",
-            std::process::id()
-        ))
     }
 }

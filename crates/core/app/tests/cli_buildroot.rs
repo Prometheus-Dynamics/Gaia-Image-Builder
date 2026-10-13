@@ -1,15 +1,19 @@
 pub mod support;
 
 use gaia_app::{AppArgs, CommandOutcome, run_with_args};
+use gaia_testkit::TempDir;
 use std::path::Path;
-use support::{unique_dir, write_temp_build};
+use support::write_temp_build;
 
 #[test]
 fn run_command_refuses_invalid_buildroot_defconfig_path_before_execution() {
     // Root the workspace in a temp dir; "." would resolve to the crate directory.
-    let root_dir = unique_dir("gaia-cli-bad-defconfig-root");
-    let build = write_temp_build(&format!(
-        r#"
+    let scratch = TempDir::new("gaia-cli-bad-defconfig");
+    let root_dir = scratch.join("root").display().to_string();
+    let build = write_temp_build(
+        &scratch,
+        &format!(
+            r#"
 build_name = "bad-buildroot-defconfig"
 
 [workspace]
@@ -26,7 +30,8 @@ name = "rootfs.tar"
 format = "tar"
 required = true
 "#,
-    ));
+        ),
+    );
 
     let run = run_with_args(AppArgs::parse_from(vec!["run".to_string(), build]));
 
@@ -43,9 +48,12 @@ required = true
 #[test]
 fn run_command_fails_when_buildroot_backend_is_missing_and_fallback_is_not_enabled() {
     // Root the workspace in a temp dir; "." would resolve to the crate directory.
-    let root_dir = unique_dir("gaia-cli-missing-backend-root");
-    let build = write_temp_build(&format!(
-        r#"
+    let scratch = TempDir::new("gaia-cli-missing-backend");
+    let root_dir = scratch.join("root").display().to_string();
+    let build = write_temp_build(
+        &scratch,
+        &format!(
+            r#"
 build_name = "missing-buildroot-backend"
 
 [workspace]
@@ -62,7 +70,8 @@ name = "rootfs.tar"
 format = "tar"
 required = true
 "#,
-    ));
+        ),
+    );
 
     let run = run_with_args(AppArgs::parse_from(vec!["run".to_string(), build]));
 
@@ -95,9 +104,12 @@ required = true
 fn run_command_allows_explicit_buildroot_fallback_and_reports_it() {
     // Keep root, out dir and collect dir in temp so the test never writes into
     // the repository tree.
-    let run_out_dir = unique_dir("gaia-cli-fallback-out");
-    let build = write_temp_build(&format!(
-        r#"
+    let scratch = TempDir::new("gaia-cli-fallback");
+    let run_out_dir = scratch.join("out").display().to_string();
+    let build = write_temp_build(
+        &scratch,
+        &format!(
+            r#"
 build_name = "explicit-buildroot-fallback"
 
 [workspace]
@@ -118,7 +130,8 @@ name = "rootfs.tar"
 format = "tar"
 required = true
 "#
-    ));
+        ),
+    );
 
     let run = run_with_args(AppArgs::parse_from(vec!["run".to_string(), build]));
 

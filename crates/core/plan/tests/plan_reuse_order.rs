@@ -2,15 +2,19 @@ pub mod support;
 
 use gaia_config::resolve_config;
 use gaia_plan::{OperationReuse, ReuseState, plan_build, plan_build_with_reuse_state};
+use gaia_testkit::TempDir;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
-use support::{provider_catalogs, reuse_state_for_ids, unique_dir};
+use support::{provider_catalogs, reuse_state_for_ids};
 
 /// An artifact that waits for the image prepare step. Planning pushes the
 /// artifact before `image:prepare`, so the artifact is evaluated first.
-fn split_build_spec() -> gaia_spec::ResolvedBuildSpec {
-    let root_dir = unique_dir("gaia-plan-reuse-order-root");
+fn split_build_spec(scratch: &TempDir) -> gaia_spec::ResolvedBuildSpec {
+    let root_dir = scratch
+        .join("gaia-plan-reuse-order-root")
+        .display()
+        .to_string();
     fs::create_dir_all(&root_dir).expect("root dir");
     let config_path = PathBuf::from(&root_dir).join("build.toml");
     fs::write(
@@ -72,7 +76,8 @@ fn reuse_of<'plan>(plan: &'plan gaia_plan::ExecutionPlan, id: &str) -> &'plan Op
 
 #[test]
 fn dependency_reused_after_dependent_is_evaluated_does_not_cascade() {
-    let spec = split_build_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = split_build_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     materialize_outputs(&spec);
     let baseline = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
@@ -122,7 +127,8 @@ fn dependency_reused_after_dependent_is_evaluated_does_not_cascade() {
 
 #[test]
 fn dependency_that_runs_still_cascades_to_a_planned_after_dependent() {
-    let spec = split_build_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = split_build_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     materialize_outputs(&spec);
     let baseline = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);

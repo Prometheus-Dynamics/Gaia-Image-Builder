@@ -2,6 +2,7 @@
 //! disk, and the fallback. Split from `tests.rs` for its length.
 
 use super::*;
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::Path;
 
@@ -101,9 +102,13 @@ fn write_ram_test_assets(root: &Path) {
 
 #[test]
 fn ram_work_dir_keeps_intermediates_in_ram_and_publishes_the_same_outputs() {
-    let disk_root = unique_dir("gaia-assembly-ram-disk");
-    let ram_root = unique_dir("gaia-assembly-ram-ram");
-    let ram_base = unique_dir("gaia-assembly-ram-base");
+    let scratch = TempDir::new("gaia-exec-test");
+    let disk_root = scratch.join("gaia-assembly-ram-disk");
+    fs::create_dir_all(&disk_root).expect("test root");
+    let ram_root = scratch.join("gaia-assembly-ram-ram");
+    fs::create_dir_all(&ram_root).expect("test root");
+    let ram_base = scratch.join("gaia-assembly-ram-base");
+    fs::create_dir_all(&ram_base).expect("test root");
     write_ram_test_assets(&disk_root);
     write_ram_test_assets(&ram_root);
     let mut disk_spec = test_spec(&disk_root);
@@ -172,16 +177,15 @@ fn ram_work_dir_keeps_intermediates_in_ram_and_publishes_the_same_outputs() {
             .iter()
             .any(|message| message.contains("in RAM"))
     );
-
-    for root in [&disk_root, &ram_root, &ram_base] {
-        let _ = fs::remove_dir_all(root);
-    }
 }
 
 #[test]
 fn ram_work_dir_falls_back_to_disk_when_memory_is_short() {
-    let root = unique_dir("gaia-assembly-ram-short");
-    let ram_base = unique_dir("gaia-assembly-ram-short-base");
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-assembly-ram-short");
+    fs::create_dir_all(&root).expect("test root");
+    let ram_base = scratch.join("gaia-assembly-ram-short-base");
+    fs::create_dir_all(&ram_base).expect("test root");
     write_ram_test_assets(&root);
     let mut spec = test_spec(&root);
     spec.image.assembly = Some(ram_test_assembly("ram"));
@@ -205,8 +209,4 @@ fn ram_work_dir_falls_back_to_disk_when_memory_is_short() {
     assert!(out.join("disk.img").is_file());
     assert!(out.join("boot.cpio").is_file());
     assert!(!ram_base.join("gaia-tester").exists());
-
-    for path in [&root, &ram_base] {
-        let _ = fs::remove_dir_all(path);
-    }
 }

@@ -1,16 +1,6 @@
 use super::*;
 use gaia_spec::{CleanPolicy, GitBackendSpec, SourceSpec, WorkspaceSpec};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-fn temp_path(prefix: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time")
-        .as_nanos();
-    std::env::temp_dir()
-        .join("gaia-tests")
-        .join(format!("{prefix}-{nonce}"))
-}
+use gaia_testkit::TempDir;
 
 fn test_spec(build_dir: &Path) -> ResolvedBuildSpec {
     let mut spec = ResolvedBuildSpec::new("test");
@@ -38,7 +28,8 @@ impl SourceProvider for DummySourceProvider {
 
 #[test]
 fn default_source_execution_fails_instead_of_materializing_placeholder() {
-    let build_dir = temp_path("gaia-source-default-exec");
+    let scratch = TempDir::new("gaia-source-default-exec");
+    let build_dir = scratch.join("gaia-source-default-exec");
     let spec = test_spec(&build_dir);
     let source = SourceSpec::new(
         "dummy-source",
@@ -60,8 +51,9 @@ fn default_source_execution_fails_instead_of_materializing_placeholder() {
 
 #[test]
 fn path_provider_creates_materialized_link_or_manifest() {
-    let build_dir = temp_path("gaia-source-path-build");
-    let source_root = temp_path("gaia-source-path-root");
+    let scratch = TempDir::new("gaia-source-path-build");
+    let build_dir = scratch.join("gaia-source-path-build");
+    let source_root = scratch.join("gaia-source-path-root");
     fs::create_dir_all(&source_root).expect("source root");
     fs::write(source_root.join("hello.txt"), "hi").expect("source file");
 
@@ -96,7 +88,8 @@ fn path_provider_creates_materialized_link_or_manifest() {
 
 #[test]
 fn command_for_execution_mounts_parent_dir_for_output_files() {
-    let workspace_root = temp_path("gaia-source-docker-parent");
+    let scratch = TempDir::new("gaia-source-docker-parent");
+    let workspace_root = scratch.join("gaia-source-docker-parent");
     let archive_path = workspace_root.join("downloads/archive.tar.gz");
     fs::create_dir_all(workspace_root.join("downloads")).expect("downloads dir");
     let execution = SourceExecutionContext {
@@ -133,8 +126,9 @@ fn command_for_execution_mounts_parent_dir_for_output_files() {
 
 #[test]
 fn git_provider_persists_resolved_commit_and_selected_ref() {
-    let build_dir = temp_path("gaia-source-git-build");
-    let repo_dir = temp_path("gaia-source-git-repo");
+    let scratch = TempDir::new("gaia-source-git-build");
+    let build_dir = scratch.join("gaia-source-git-build");
+    let repo_dir = scratch.join("gaia-source-git-repo");
     fs::create_dir_all(&repo_dir).expect("repo dir");
 
     Command::new("git")
@@ -210,8 +204,9 @@ fn git_provider_persists_resolved_commit_and_selected_ref() {
 
 #[test]
 fn download_provider_fetches_local_file_url() {
-    let build_dir = temp_path("gaia-source-download-build");
-    let download_root = temp_path("gaia-source-download-root");
+    let scratch = TempDir::new("gaia-source-download-build");
+    let build_dir = scratch.join("gaia-source-download-build");
+    let download_root = scratch.join("gaia-source-download-root");
     fs::create_dir_all(&download_root).expect("download root");
     let source_file = download_root.join("payload.txt");
     fs::write(&source_file, "payload").expect("payload file");
@@ -249,8 +244,9 @@ fn download_provider_fetches_local_file_url() {
 
 #[test]
 fn path_provider_errors_for_missing_path() {
-    let build_dir = temp_path("gaia-source-missing-path-build");
-    let missing_root = temp_path("gaia-source-missing-path-root");
+    let scratch = TempDir::new("gaia-source-missing-path-build");
+    let build_dir = scratch.join("gaia-source-missing-path-build");
+    let missing_root = scratch.join("gaia-source-missing-path-root");
 
     let spec = test_spec(&build_dir);
     let source = SourceSpec::new(
@@ -272,8 +268,11 @@ fn path_provider_errors_for_missing_path() {
 
 #[test]
 fn archive_provider_errors_for_missing_archive() {
-    let build_dir = temp_path("gaia-source-missing-archive-build");
-    let missing_archive = temp_path("gaia-source-missing-archive-root").join("missing.tar");
+    let scratch = TempDir::new("gaia-source-missing-archive-build");
+    let build_dir = scratch.join("gaia-source-missing-archive-build");
+    let missing_archive = scratch
+        .join("gaia-source-missing-archive-root")
+        .join("missing.tar");
 
     let spec = test_spec(&build_dir);
     let source = SourceSpec::new(
@@ -295,8 +294,9 @@ fn archive_provider_errors_for_missing_archive() {
 
 #[test]
 fn download_provider_detects_sha_mismatch() {
-    let build_dir = temp_path("gaia-source-download-sha-build");
-    let download_root = temp_path("gaia-source-download-sha-root");
+    let scratch = TempDir::new("gaia-source-download-sha-build");
+    let build_dir = scratch.join("gaia-source-download-sha-build");
+    let download_root = scratch.join("gaia-source-download-sha-root");
     fs::create_dir_all(&download_root).expect("download root");
     let source_file = download_root.join("payload.txt");
     fs::write(&source_file, "payload").expect("payload file");
@@ -352,7 +352,8 @@ fn run_command_reports_missing_tool() {
 
 #[test]
 fn command_for_execution_wraps_docker_backend() {
-    let workspace_root = temp_path("gaia-source-docker-workspace");
+    let scratch = TempDir::new("gaia-source-docker-workspace");
+    let workspace_root = scratch.join("gaia-source-docker-workspace");
     fs::create_dir_all(&workspace_root).expect("workspace dir");
     let repo_dir = workspace_root.join("repo");
     let out_dir = workspace_root.join("out");
@@ -456,8 +457,9 @@ fn git_source(repo: String, locked_commit: Option<String>) -> SourceSpec {
 
 #[test]
 fn git_provider_checks_out_locked_commit_instead_of_branch_tip() {
-    let build_dir = temp_path("gaia-source-git-locked-build");
-    let repo_dir = temp_path("gaia-source-git-locked-repo");
+    let scratch = TempDir::new("gaia-source-git-locked-build");
+    let build_dir = scratch.join("gaia-source-git-locked-build");
+    let repo_dir = scratch.join("gaia-source-git-locked-repo");
     init_repo_with_commit(&repo_dir, "one");
     let first = run_git(&repo_dir, &["rev-parse", "HEAD"]);
     let second = commit_file(&repo_dir, "two");
@@ -500,7 +502,8 @@ fn git_provider_checks_out_locked_commit_instead_of_branch_tip() {
 
 #[test]
 fn resolve_git_source_commit_reads_branches_annotated_tags_and_head() {
-    let repo_dir = temp_path("gaia-source-git-resolve-repo");
+    let scratch = TempDir::new("gaia-source-git-resolve-repo");
+    let repo_dir = scratch.join("gaia-source-git-resolve-repo");
     init_repo_with_commit(&repo_dir, "one");
     let tagged = run_git(&repo_dir, &["rev-parse", "HEAD"]);
     run_git(&repo_dir, &["tag", "-a", "v1", "-m", "release v1"]);
@@ -536,9 +539,10 @@ fn resolve_git_source_commit_reads_branches_annotated_tags_and_head() {
 
 #[test]
 fn download_provider_reuses_sha_keyed_cache_without_refetching() {
-    let workspace = temp_path("gaia-source-download-cache-root");
+    let scratch = TempDir::new("gaia-source-download-cache-root");
+    let workspace = scratch.join("gaia-source-download-cache-root");
     let build_dir = workspace.join("build");
-    let download_root = temp_path("gaia-source-download-cache-src");
+    let download_root = scratch.join("gaia-source-download-cache-src");
     fs::create_dir_all(&download_root).expect("download root");
     let source_file = download_root.join("payload.txt");
     fs::write(&source_file, "cached payload").expect("payload file");
@@ -587,9 +591,10 @@ fn download_provider_reuses_sha_keyed_cache_without_refetching() {
 
 #[test]
 fn download_provider_does_not_cache_mismatched_content() {
-    let workspace = temp_path("gaia-source-download-nocache-root");
+    let scratch = TempDir::new("gaia-source-download-nocache-root");
+    let workspace = scratch.join("gaia-source-download-nocache-root");
     fs::create_dir_all(&workspace).expect("workspace");
-    let download_root = temp_path("gaia-source-download-nocache-src");
+    let download_root = scratch.join("gaia-source-download-nocache-src");
     fs::create_dir_all(&download_root).expect("download root");
     let source_file = download_root.join("payload.txt");
     fs::write(&source_file, "payload").expect("payload file");

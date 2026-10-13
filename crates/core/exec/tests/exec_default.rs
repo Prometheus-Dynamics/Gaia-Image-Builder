@@ -2,15 +2,17 @@ pub mod support;
 
 use gaia_exec::{ExecutionEvent, ExecutionProviders, execute_plan};
 use gaia_plan::plan_build;
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::Path;
 use support::{fixture_spec, provider_catalogs, test_spec};
 
 #[test]
 fn executes_default_plan_with_runtime_events() {
+    let scratch = TempDir::new("gaia-exec-test");
     // The fixture workspace swaps the example's `gaia` package for a tiny crate so the
     // Rust artifact is a real (but seconds-long) `cargo build`.
-    assert_default_plan_executes(fixture_spec());
+    assert_default_plan_executes(fixture_spec(&scratch));
 }
 
 /// End-to-end variant that builds the real Gaia workspace as the example's Rust
@@ -20,7 +22,8 @@ fn executes_default_plan_with_runtime_events() {
 #[test]
 #[ignore = "slow: compiles the whole Gaia workspace"]
 fn executes_default_plan_building_real_gaia() {
-    assert_default_plan_executes(test_spec());
+    let scratch = TempDir::new("gaia-exec-test");
+    assert_default_plan_executes(test_spec(&scratch));
 }
 
 fn assert_default_plan_executes(spec: gaia_spec::ResolvedBuildSpec) {

@@ -8,14 +8,18 @@ use gaia_spec::{
     AssemblyDiskPartitionSpec, AssemblyDiskSpec, AssemblyPartitionTableSpec, ImageAssemblySpec,
     ResolvedBuildSpec,
 };
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::{Path, PathBuf};
 use support::{provider_catalogs, test_spec};
 
 /// A spec whose assembly builds one MBR disk, `sdcard.img`, in the collect
 /// dir, with `archive_name` set to `archive_name`.
-fn single_disk_spec(archive_name: Option<&str>) -> (ResolvedBuildSpec, PathBuf, PathBuf) {
-    let mut spec = test_spec();
+fn single_disk_spec(
+    scratch: &TempDir,
+    archive_name: Option<&str>,
+) -> (ResolvedBuildSpec, PathBuf, PathBuf) {
+    let mut spec = test_spec(scratch);
     let build_dir = PathBuf::from(&spec.workspace.build_dir);
     let collect_dir = Path::new(&spec.workspace.out_dir).join("images");
     spec.image.output.collect_dir = Some(collect_dir.display().to_string());
@@ -80,7 +84,8 @@ fn primary_output(outcome: &ExecutionOutcome) -> Option<PathBuf> {
 
 #[test]
 fn uncompressed_img_archive_is_the_assembled_disk() {
-    let (spec, collect_dir, sdcard) = single_disk_spec(Some("published.img"));
+    let scratch = TempDir::new("gaia-exec-test");
+    let (spec, collect_dir, sdcard) = single_disk_spec(&scratch, Some("published.img"));
 
     let outcome = assemble(&spec);
 
@@ -95,7 +100,8 @@ fn uncompressed_img_archive_is_the_assembled_disk() {
 
 #[test]
 fn single_disk_is_the_primary_output_without_an_archive() {
-    let (spec, _, sdcard) = single_disk_spec(None);
+    let scratch = TempDir::new("gaia-exec-test");
+    let (spec, _, sdcard) = single_disk_spec(&scratch, None);
 
     let outcome = assemble(&spec);
 

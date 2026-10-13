@@ -45,15 +45,9 @@ overrides = [["input.pv", "2026"]]
     )
 }
 
-fn resolved_variants(name: &str) -> (std::path::PathBuf, Vec<ResolvedBuildSpec>) {
-    let dir = std::env::temp_dir().join(format!(
-        "gaia-variants-{name}-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time")
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&dir).expect("temp dir");
+fn resolved_variants(name: &str) -> (gaia_testkit::TempDir, Vec<ResolvedBuildSpec>) {
+    let scratch = gaia_testkit::TempDir::new(&format!("gaia-variants-{name}"));
+    let dir = scratch.path().to_path_buf();
     let build = dir.join("pv.toml");
     std::fs::write(&build, variant_build(&dir.join("out"))).expect("build file");
     let specs = gaia_config::resolve_variant_specs(
@@ -61,7 +55,7 @@ fn resolved_variants(name: &str) -> (std::path::PathBuf, Vec<ResolvedBuildSpec>)
         &gaia_config::ResolveOptions::default(),
     )
     .expect("variants resolve");
-    (dir, specs)
+    (scratch, specs)
 }
 
 #[test]
@@ -108,7 +102,7 @@ fn the_source_is_shared_and_the_artifact_built_per_variant() {
 
 #[test]
 fn a_shared_operation_recorded_by_one_variant_is_reused_by_the_next() {
-    let (dir, mut specs) = resolved_variants("handoff");
+    let (scratch, mut specs) = resolved_variants("handoff");
     let context = AppContext::with_defaults();
     let split = classify(&context, &specs).expect("classify");
     for spec in &mut specs {
@@ -130,7 +124,7 @@ fn a_shared_operation_recorded_by_one_variant_is_reused_by_the_next() {
     };
     // The default variant ran first and recorded the shared source.
     save_shared_state(default, &plan, &outcome, &split.shared);
-    assert!(dir.join("out/.gaia/pv.reuse-state").is_file());
+    assert!(scratch.join("out/.gaia/pv.reuse-state").is_file());
 
     let scope = ReuseScope::Variant {
         shared: &split.shared,
@@ -205,14 +199,8 @@ overrides = [{variant_overrides}]
 }
 
 fn classify_build(name: &str, variant_overrides: &str) -> Result<VariantSplit, String> {
-    let dir = std::env::temp_dir().join(format!(
-        "gaia-variants-{name}-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time")
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&dir).expect("temp dir");
+    let scratch = gaia_testkit::TempDir::new(&format!("gaia-variants-{name}"));
+    let dir = scratch.path().to_path_buf();
     let build = dir.join("pv.toml");
     std::fs::write(
         &build,

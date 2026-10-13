@@ -7,13 +7,15 @@ use gaia_spec::{
     AssemblyFilesystemSpec, AssemblyPartitionTableSpec, AssemblyTransformKindSpec,
     AssemblyTransformSpec, AssemblyTreeSpec, ImageAssemblySpec,
 };
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::Path;
 use support::{provider_catalogs, test_spec};
 
 #[test]
 fn executes_image_assembly_file_staging() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = Path::new(&spec.workspace.build_dir);
     let source_dir = build_dir.join("assembly-sources");
     let glob_dir = source_dir.join("firmware");
@@ -135,7 +137,8 @@ fn executes_image_assembly_file_staging() {
 
 #[test]
 fn image_assembly_missing_required_source_fails() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = Path::new(&spec.workspace.build_dir);
     let tree_dir = build_dir.join("assembly/boot");
     spec.image.assembly = Some(ImageAssemblySpec {
@@ -202,9 +205,10 @@ fn image_assembly_missing_required_source_fails() {
 #[cfg(unix)]
 #[test]
 fn image_assembly_cleanup_failure_preserves_original_error() {
+    let scratch = TempDir::new("gaia-exec-test");
     use std::os::unix::fs::PermissionsExt;
 
-    let mut spec = test_spec();
+    let mut spec = test_spec(&scratch);
     let build_dir = Path::new(&spec.workspace.build_dir);
     let protected_parent = build_dir.join("protected-assembly");
     let tree_dir = protected_parent.join("boot");
@@ -250,7 +254,6 @@ fn image_assembly_cleanup_failure_preserves_original_error() {
 
     fs::set_permissions(&protected_parent, fs::Permissions::from_mode(0o755))
         .expect("restore parent");
-    let _ = fs::remove_dir_all(&protected_parent);
 
     assert_eq!(outcome.errors.len(), 1);
     assert_eq!(outcome.errors[0].code, "assembly_execution_failed");
@@ -283,7 +286,8 @@ fn image_assembly_cleanup_failure_preserves_original_error() {
 
 #[test]
 fn image_assembly_transform_failure_cleans_prior_outputs() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = Path::new(&spec.workspace.build_dir);
     let source_dir = build_dir.join("transform-cleanup-sources");
     let output_dir = build_dir.join("transform-cleanup-output");
@@ -339,7 +343,8 @@ fn image_assembly_transform_failure_cleans_prior_outputs() {
 
 #[test]
 fn image_assembly_disk_failure_cleans_generated_filesystem_output() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = Path::new(&spec.workspace.build_dir);
     let source_dir = build_dir.join("disk-cleanup-sources");
     let tree_dir = build_dir.join("disk-cleanup-tree");
@@ -436,7 +441,8 @@ fn image_assembly_disk_failure_cleans_generated_filesystem_output() {
 #[cfg(unix)]
 #[test]
 fn image_assembly_disk_write_failure_cleans_temp_and_final_outputs() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = Path::new(&spec.workspace.build_dir);
     let source_dir = build_dir.join("disk-write-cleanup-sources");
     let output_dir = build_dir.join("disk-write-cleanup-output");
@@ -504,9 +510,10 @@ fn image_assembly_disk_write_failure_cleans_temp_and_final_outputs() {
 #[cfg(unix)]
 #[test]
 fn image_assembly_filesystem_failure_cleans_temp_and_final_outputs() {
+    let scratch = TempDir::new("gaia-exec-test");
     use std::os::unix::fs::PermissionsExt;
 
-    let mut spec = test_spec();
+    let mut spec = test_spec(&scratch);
     let build_dir = Path::new(&spec.workspace.build_dir);
     let source_dir = build_dir.join("filesystem-cleanup-sources");
     let tree_dir = build_dir.join("filesystem-cleanup-tree");
@@ -586,8 +593,9 @@ fn image_assembly_filesystem_failure_cleans_temp_and_final_outputs() {
 /// into that directory.
 #[test]
 fn a_multi_file_glob_needs_a_directory_dest() {
+    let scratch = TempDir::new("gaia-exec-test");
     let run = |dest: &str| {
-        let mut spec = test_spec();
+        let mut spec = test_spec(&scratch);
         let build_dir = Path::new(&spec.workspace.build_dir).to_path_buf();
         let glob_dir = build_dir.join("assembly-sources/overlays");
         fs::create_dir_all(&glob_dir).expect("glob source dir");

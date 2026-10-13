@@ -6,6 +6,7 @@ use gaia_exec::{
 use gaia_plan::{OperationId, plan_build};
 use gaia_report::generate_report;
 use gaia_spec::RollbackDomain;
+use gaia_testkit::TempDir;
 use gaia_validate::validate_spec_with_providers;
 use support::{provider_catalogs, test_spec};
 
@@ -31,7 +32,8 @@ fn execution_error(
 
 #[test]
 fn rebuild_reasons_include_rollback_and_disabled_policy_entries() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-report-test");
+    let mut spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let validation =
         validate_spec_with_providers(&spec, &source_catalog, &artifact_catalog, &image_catalog);
@@ -96,7 +98,8 @@ fn rebuild_reasons_include_rollback_and_disabled_policy_entries() {
 
 #[test]
 fn typed_execution_kinds_flow_into_failure_classes_without_heuristics() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-report-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let validation =
         validate_spec_with_providers(&spec, &source_catalog, &artifact_catalog, &image_catalog);
@@ -159,7 +162,8 @@ fn typed_execution_kinds_flow_into_failure_classes_without_heuristics() {
 
 #[test]
 fn failed_execution_report_preserves_output_tail() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-report-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let validation =
         validate_spec_with_providers(&spec, &source_catalog, &artifact_catalog, &image_catalog);
@@ -186,7 +190,8 @@ fn failed_execution_report_preserves_output_tail() {
 
 #[test]
 fn failed_execution_report_includes_cleanup_status_and_failures() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-report-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let validation =
         validate_spec_with_providers(&spec, &source_catalog, &artifact_catalog, &image_catalog);

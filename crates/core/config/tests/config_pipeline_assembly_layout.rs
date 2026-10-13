@@ -116,7 +116,6 @@ src = "$assembly.work/rootfs.ext4.zst"
 fn resolves_extended_partitions_zstd_and_archives() {
     let path = write_temp_config(CM5_AB_LAYOUT);
     let spec = resolve_config(path.to_str().expect("temp path should be utf-8"));
-    let _ = std::fs::remove_file(path);
     let assembly = spec.image.assembly.as_ref().expect("assembly");
 
     assert!(
@@ -197,7 +196,6 @@ entries = [["IMAGE_SHA256", "v${build.version}:${assembly.sha256:$provider.image
 "#,
     );
     let spec = resolve_config(path.to_str().expect("temp path should be utf-8"));
-    let _ = std::fs::remove_file(path);
     let archive = &spec.image.assembly.as_ref().expect("assembly").archives[0];
 
     assert_eq!(archive.members[0].name, "manifest.env");
@@ -258,7 +256,6 @@ image = "$provider.images/rootfs.ext4"
 "#,
     );
     let spec = resolve_config(path.to_str().expect("temp path should be utf-8"));
-    let _ = std::fs::remove_file(path);
     let assembly = spec.image.assembly.as_ref().expect("assembly");
 
     let emmc = &assembly.disks[0];

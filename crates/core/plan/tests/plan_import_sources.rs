@@ -3,6 +3,7 @@
 use gaia_config::{ResolveOptions, try_resolve_config_with_options};
 use gaia_plan::{OperationKind, operation_fingerprint};
 use gaia_spec::{ResolvedBuildSpec, StageItemId};
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -64,11 +65,8 @@ fn env_set(id: &str) -> OperationKind {
 
 #[test]
 fn fingerprint_of_layer_items_changes_with_the_import_revision() {
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("time")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("gaia-plan-import-src-{nonce}"));
+    let scratch = TempDir::new("gaia-plan-import-src");
+    let root = scratch.join("root");
     let workspace = root.join("workspace");
     let repo = root.join("atlas");
     fs::create_dir_all(&workspace).expect("workspace");
@@ -108,5 +106,4 @@ fn fingerprint_of_layer_items_changes_with_the_import_revision() {
         operation_fingerprint(&after, &env_set("local-env")),
         "local items keep their fingerprint"
     );
-    let _ = fs::remove_dir_all(root);
 }

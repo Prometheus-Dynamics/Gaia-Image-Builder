@@ -1,6 +1,7 @@
 pub mod support;
 
 use gaia_plan::{OperationReuse, ReuseState, plan_build};
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::PathBuf;
 use support::{provider_catalogs, test_spec};
@@ -129,7 +130,8 @@ fn rebuild_of(ids: &[&str], packages: &[&str]) -> gaia_plan::RebuildRequest {
 
 #[test]
 fn rebuild_executes_a_reusable_operation_and_its_dependents_follow() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     materialize_reusable_test_outputs(&spec);
     let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
@@ -157,7 +159,8 @@ fn rebuild_executes_a_reusable_operation_and_its_dependents_follow() {
 
 #[test]
 fn rebuild_without_reuse_state_only_changes_the_reason() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let rebuild = rebuild_of(&["artifact:gaia-app"], &[]);
     let plan = gaia_plan::plan_build_with_rebuilds(
@@ -176,7 +179,8 @@ fn rebuild_without_reuse_state_only_changes_the_reason() {
 
 #[test]
 fn rebuild_domain_and_glob_targets_force_their_operations() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let domain = gaia_plan::RebuildRequest {
         targets: vec![gaia_plan::PlanTarget::Domain(gaia_plan::PlanDomain::Image)],
@@ -212,7 +216,8 @@ fn rebuild_domain_and_glob_targets_force_their_operations() {
 
 #[test]
 fn unknown_rebuild_operations_are_refused_with_close_matches() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
     let typo = rebuild_of(&["artifact:gaia-ap"], &[]);
@@ -227,7 +232,8 @@ fn unknown_rebuild_operations_are_refused_with_close_matches() {
 
 #[test]
 fn rebuild_packages_force_the_image_build_with_their_reason() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let packages = rebuild_of(&[], &["libfoo"]);
     let plan = gaia_plan::plan_build_with_rebuilds(

@@ -2,8 +2,9 @@
 //! repository holding the build file.
 
 use gaia_config::try_resolve_config;
+use gaia_testkit::TempDir;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 fn git(repo: &Path, args: &[&str]) -> String {
@@ -17,17 +18,8 @@ fn git(repo: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "gaia-project-git-{name}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time")
-            .as_nanos()
-    ));
-    fs::create_dir_all(&dir).expect("temp dir");
-    dir
+fn temp_dir(name: &str) -> TempDir {
+    TempDir::new(&format!("gaia-project-git-{name}"))
 }
 
 const BUILD: &str = r#"
@@ -53,16 +45,17 @@ fn image_commit(spec: &gaia_spec::ResolvedBuildSpec) -> String {
 
 #[test]
 fn project_tokens_resolve_to_the_build_file_repository() {
-    let repo = temp_dir("repo");
-    git(&repo, &["init", "-q", "-b", "main"]);
-    git(&repo, &["config", "user.email", "gaia@example.com"]);
-    git(&repo, &["config", "user.name", "Gaia Test"]);
+    let scratch = temp_dir("repo");
+    let repo = scratch.path();
+    git(repo, &["init", "-q", "-b", "main"]);
+    git(repo, &["config", "user.email", "gaia@example.com"]);
+    git(repo, &["config", "user.name", "Gaia Test"]);
     let build = repo.join("build.toml");
     fs::write(&build, BUILD).expect("build");
-    git(&repo, &["add", "."]);
-    git(&repo, &["commit", "-q", "-m", "recipe"]);
-    git(&repo, &["tag", "v1.4.0"]);
-    let head = git(&repo, &["rev-parse", "HEAD"]);
+    git(repo, &["add", "."]);
+    git(repo, &["commit", "-q", "-m", "recipe"]);
+    git(repo, &["tag", "v1.4.0"]);
+    let head = git(repo, &["rev-parse", "HEAD"]);
 
     let spec = try_resolve_config(build.to_str().expect("utf-8")).expect("resolve");
     assert_eq!(image_commit(&spec), head);
@@ -77,20 +70,20 @@ fn project_tokens_resolve_to_the_build_file_repository() {
         "{:?}",
         spec.policy.interpolation.unresolved
     );
-    let _ = fs::remove_dir_all(repo);
 }
 
 #[test]
 fn uncommitted_tracked_changes_mark_the_commit_dirty() {
-    let repo = temp_dir("dirty");
-    git(&repo, &["init", "-q", "-b", "main"]);
-    git(&repo, &["config", "user.email", "gaia@example.com"]);
-    git(&repo, &["config", "user.name", "Gaia Test"]);
+    let scratch = temp_dir("dirty");
+    let repo = scratch.path();
+    git(repo, &["init", "-q", "-b", "main"]);
+    git(repo, &["config", "user.email", "gaia@example.com"]);
+    git(repo, &["config", "user.name", "Gaia Test"]);
     let build = repo.join("build.toml");
     fs::write(&build, BUILD).expect("build");
-    git(&repo, &["add", "."]);
-    git(&repo, &["commit", "-q", "-m", "recipe"]);
-    let head = git(&repo, &["rev-parse", "HEAD"]);
+    git(repo, &["add", "."]);
+    git(repo, &["commit", "-q", "-m", "recipe"]);
+    let head = git(repo, &["rev-parse", "HEAD"]);
     fs::write(&build, format!("{BUILD}\n# local edit\n")).expect("edit");
 
     let spec = try_resolve_config(build.to_str().expect("utf-8")).expect("resolve");
@@ -103,12 +96,12 @@ fn uncommitted_tracked_changes_mark_the_commit_dirty() {
         "{:?}",
         spec.identity.version
     );
-    let _ = fs::remove_dir_all(repo);
 }
 
 #[test]
 fn project_tokens_outside_git_stay_unresolved() {
-    let dir = temp_dir("plain");
+    let scratch = temp_dir("plain");
+    let dir = scratch.path();
     let build = dir.join("build.toml");
     fs::write(&build, BUILD).expect("build");
 
@@ -121,5 +114,4 @@ fn project_tokens_outside_git_stay_unresolved() {
             .iter()
             .any(|unresolved| unresolved.token == "project.commit")
     );
-    let _ = fs::remove_dir_all(dir);
 }

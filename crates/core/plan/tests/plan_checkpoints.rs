@@ -2,13 +2,15 @@ pub mod support;
 
 use gaia_config::resolve_config;
 use gaia_plan::{OperationOptionality, plan_build};
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::PathBuf;
-use support::{provider_catalogs, unique_dir};
+use support::provider_catalogs;
 
 #[test]
 fn checkpoint_can_anchor_to_install_operation() {
-    let root_dir = unique_dir("gaia-plan-root");
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch.join("gaia-plan-root").display().to_string();
     fs::create_dir_all(&root_dir).expect("root dir");
     let config_path = PathBuf::from(&root_dir).join("build.toml");
     fs::write(
@@ -65,7 +67,11 @@ upload_policy = "off"
 
 #[test]
 fn checkpoint_policies_flow_into_operation_optionality() {
-    let root_dir = unique_dir("gaia-plan-optional-root");
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch
+        .join("gaia-plan-optional-root")
+        .display()
+        .to_string();
     fs::create_dir_all(&root_dir).expect("root dir");
     let config_path = PathBuf::from(&root_dir).join("build.toml");
     fs::write(

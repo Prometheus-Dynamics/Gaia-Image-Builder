@@ -1,14 +1,16 @@
 //! `--rebuild-package` against the package cache: the named package is
 //! dircleaned and then left out of the restore, so the make builds it again.
-use super::tests::{built_tree, cache_graph, temp, test_cache, tools_available};
+use super::tests::{built_tree, cache_graph, test_cache, tools_available};
 use super::*;
+use gaia_testkit::TempDir;
 
 #[test]
 fn a_rebuild_package_is_dircleaned_and_not_restored_from_the_cache() {
     if !tools_available() {
         return;
     }
-    let root = temp("rebuild-package");
+    let root_scratch = TempDir::new("rebuild-package");
+    let root = root_scratch.join("root");
     let cache = test_cache(&root, &[]);
     let first = root.join("first");
     built_tree(&first, b"app binary");
@@ -45,5 +47,4 @@ fn a_rebuild_package_is_dircleaned_and_not_restored_from_the_cache() {
         ["base"]
     );
     assert!(!second.join("per-package/app").exists());
-    let _ = fs::remove_dir_all(root);
 }

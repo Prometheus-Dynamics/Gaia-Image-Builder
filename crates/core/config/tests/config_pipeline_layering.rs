@@ -7,6 +7,7 @@ use gaia_spec::{
     RetryBackoffStrategySpec, RollbackDomain, SourceDefinition, SourcePinPolicySpec,
     SourceRefreshPolicySpec, StageContentOriginSpec, WorkspacePathKindSpec,
 };
+use gaia_testkit::TempDir;
 use std::path::PathBuf;
 use support::default_config_path;
 
@@ -365,14 +366,8 @@ fn resolves_layered_default_config() {
 
 #[test]
 fn resolves_string_and_conditional_table_imports() {
-    let root = std::env::temp_dir().join(format!(
-        "gaia-conditional-imports-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time")
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&root).expect("temp config dir");
+    let scratch = TempDir::new("gaia-conditional-imports");
+    let root = scratch.path();
     let base = root.join("base.toml");
     let full = root.join("full.toml");
     let build = root.join("build.toml");
@@ -446,14 +441,8 @@ imports = [
 
 #[test]
 fn conditional_imports_see_selected_input_backed_build_profile() {
-    let root = std::env::temp_dir().join(format!(
-        "gaia-conditional-input-imports-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time")
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&root).expect("temp config dir");
+    let scratch = TempDir::new("gaia-conditional-input-imports");
+    let root = scratch.path();
     let full = root.join("full.toml");
     let build = root.join("build.toml");
     std::fs::write(

@@ -253,8 +253,9 @@ entries = [["SRC", "${source.app-source.path}"]]
         "kind = \"git\"\nrepo = \"file:///nonexistent-repo\"\nrev = \"0123456789abcdef0123456789abcdef01234567\"",
     );
     let scoped = std::collections::BTreeSet::from(["app-source".to_string()]);
+    let config = write_temp_config(&contents);
     let specs = gaia_config::resolve_variant_specs_scoped(
-        path_of(&contents).as_str(),
+        config.to_str().expect("utf-8 temp path"),
         &ResolveOptions::default(),
         &scoped,
     )
@@ -278,13 +279,6 @@ entries = [["SRC", "${source.app-source.path}"]]
         "{}",
         src(&shared[1])
     );
-}
-
-fn path_of(contents: &str) -> String {
-    write_temp_config(contents)
-        .to_str()
-        .expect("utf-8 temp path")
-        .to_string()
 }
 
 #[test]
@@ -322,8 +316,9 @@ output_path = "out/app.jar"
     };
 
     let scoped = std::collections::BTreeSet::from(["app-source".to_string()]);
+    let config = write_temp_config(&contents);
     let specs = gaia_config::resolve_variant_specs_scoped(
-        path_of(&contents).as_str(),
+        config.to_str().expect("utf-8 temp path"),
         &ResolveOptions::default(),
         &scoped,
     )

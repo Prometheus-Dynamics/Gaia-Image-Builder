@@ -1,9 +1,9 @@
 pub mod support;
 
 use gaia_config::resolve_config;
+use gaia_testkit::TempDir;
 use gaia_validate::validate_spec;
 use std::fs;
-use std::time::{SystemTime, UNIX_EPOCH};
 use support::write_temp_config;
 
 #[test]
@@ -14,11 +14,8 @@ fn buildroot_flash_and_erofs_expected_image_names_are_accepted() {
         ("jffs2", "rootfs.jffs2", "BR2_TARGET_ROOTFS_JFFS2=y\n"),
         ("erofs", "rootfs.erofs", "BR2_TARGET_ROOTFS_EROFS=y\n"),
     ] {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("gaia-buildroot-{format_name}-name-{nonce}"));
+        let scratch = TempDir::new("gaia-buildroot-name");
+        let root = scratch.join("root");
         fs::create_dir_all(root.join("assets")).expect("assets dir");
         let defconfig = root.join("assets/test.defconfig");
         fs::write(&defconfig, defconfig_contents).expect("defconfig");
@@ -66,8 +63,6 @@ required = true
                 .any(|diagnostic| diagnostic.code == "buildroot_expected_image_format_not_enabled"),
             "{format_name} defconfig should be accepted"
         );
-
-        let _ = fs::remove_dir_all(root);
     }
 }
 
@@ -79,12 +74,8 @@ fn buildroot_flash_and_erofs_expected_image_name_mismatches_are_errors() {
         ("jffs2", "rootfs.ubi", "BR2_TARGET_ROOTFS_JFFS2=y\n"),
         ("erofs", "rootfs.ubi", "BR2_TARGET_ROOTFS_EROFS=y\n"),
     ] {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos();
-        let root =
-            std::env::temp_dir().join(format!("gaia-buildroot-{format_name}-name-invalid-{nonce}"));
+        let scratch = TempDir::new("gaia-buildroot-name-invalid");
+        let root = scratch.join("root");
         fs::create_dir_all(root.join("assets")).expect("assets dir");
         let defconfig = root.join("assets/test.defconfig");
         fs::write(&defconfig, defconfig_contents).expect("defconfig");
@@ -125,8 +116,6 @@ required = true
                 .any(|diagnostic| diagnostic.code == "buildroot_expected_image_name_mismatch"),
             "{image_name} should be rejected for {format_name}"
         );
-
-        let _ = fs::remove_dir_all(root);
     }
 }
 
@@ -138,12 +127,8 @@ fn buildroot_flash_and_erofs_expected_images_require_defconfig_support() {
         ("jffs2", "rootfs.jffs2"),
         ("erofs", "rootfs.erofs"),
     ] {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos();
-        let root =
-            std::env::temp_dir().join(format!("gaia-buildroot-{format_name}-defconfig-{nonce}"));
+        let scratch = TempDir::new("gaia-buildroot-defconfig");
+        let root = scratch.join("root");
         fs::create_dir_all(root.join("assets")).expect("assets dir");
         let defconfig = root.join("assets/test.defconfig");
         fs::write(&defconfig, "BR2_TARGET_ROOTFS_TAR=y\n").expect("defconfig");
@@ -184,8 +169,6 @@ required = true
                 .any(|diagnostic| diagnostic.code == "buildroot_expected_image_format_not_enabled"),
             "{format_name} should require defconfig support"
         );
-
-        let _ = fs::remove_dir_all(root);
     }
 }
 
@@ -198,11 +181,8 @@ fn buildroot_lower_priority_expected_image_names_are_accepted() {
         ("f2fs", "rootfs.f2fs", "BR2_TARGET_ROOTFS_F2FS=y\n"),
         ("btrfs", "rootfs.btrfs", "BR2_TARGET_ROOTFS_BTRFS=y\n"),
     ] {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("gaia-buildroot-{format_name}-name-{nonce}"));
+        let scratch = TempDir::new("gaia-buildroot-name");
+        let root = scratch.join("root");
         fs::create_dir_all(root.join("assets")).expect("assets dir");
         let defconfig = root.join("assets/test.defconfig");
         fs::write(&defconfig, defconfig_contents).expect("defconfig");
@@ -250,8 +230,6 @@ required = true
                 .any(|diagnostic| diagnostic.code == "buildroot_expected_image_format_not_enabled"),
             "{format_name} defconfig should be accepted"
         );
-
-        let _ = fs::remove_dir_all(root);
     }
 }
 
@@ -264,12 +242,8 @@ fn buildroot_lower_priority_expected_image_name_mismatches_are_errors() {
         ("f2fs", "rootfs.romfs", "BR2_TARGET_ROOTFS_F2FS=y\n"),
         ("btrfs", "rootfs.romfs", "BR2_TARGET_ROOTFS_BTRFS=y\n"),
     ] {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos();
-        let root =
-            std::env::temp_dir().join(format!("gaia-buildroot-{format_name}-name-invalid-{nonce}"));
+        let scratch = TempDir::new("gaia-buildroot-name-invalid");
+        let root = scratch.join("root");
         fs::create_dir_all(root.join("assets")).expect("assets dir");
         let defconfig = root.join("assets/test.defconfig");
         fs::write(&defconfig, defconfig_contents).expect("defconfig");
@@ -310,8 +284,6 @@ required = true
                 .any(|diagnostic| diagnostic.code == "buildroot_expected_image_name_mismatch"),
             "{image_name} should be rejected for {format_name}"
         );
-
-        let _ = fs::remove_dir_all(root);
     }
 }
 
@@ -324,12 +296,8 @@ fn buildroot_lower_priority_expected_images_require_defconfig_support() {
         ("f2fs", "rootfs.f2fs"),
         ("btrfs", "rootfs.btrfs"),
     ] {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos();
-        let root =
-            std::env::temp_dir().join(format!("gaia-buildroot-{format_name}-defconfig-{nonce}"));
+        let scratch = TempDir::new("gaia-buildroot-defconfig");
+        let root = scratch.join("root");
         fs::create_dir_all(root.join("assets")).expect("assets dir");
         let defconfig = root.join("assets/test.defconfig");
         fs::write(&defconfig, "BR2_TARGET_ROOTFS_TAR=y\n").expect("defconfig");
@@ -370,8 +338,6 @@ required = true
                 .any(|diagnostic| diagnostic.code == "buildroot_expected_image_format_not_enabled"),
             "{format_name} should require defconfig support"
         );
-
-        let _ = fs::remove_dir_all(root);
     }
 }
 
@@ -407,11 +373,8 @@ config_fragments = ["assets/fragment.cfg"]
 
 #[test]
 fn missing_buildroot_config_fragment_is_an_error() {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("gaia-buildroot-fragment-validate-{nonce}"));
+    let scratch = TempDir::new("gaia-buildroot-fragment-validate");
+    let root = scratch.join("root");
     fs::create_dir_all(root.join("assets")).expect("assets dir");
     let defconfig = root.join("assets/test.defconfig");
     fs::write(&defconfig, "BR2_TARGET_ROOTFS_TAR=y\n").expect("defconfig");
@@ -447,8 +410,6 @@ config_fragments = ["assets/missing-fragment.cfg"]
             .iter()
             .any(|diagnostic| diagnostic.code == "buildroot_config_fragment_missing")
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]

@@ -259,17 +259,10 @@ fn utc_stamp(unix_seconds: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or(0);
-        let dir =
-            std::env::temp_dir().join(format!("gaia-app-export-{name}-{}-{nonce}", process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("temp dir");
-        dir
+    fn temp_dir(name: &str) -> TempDir {
+        TempDir::new(&format!("gaia-app-export-{name}"))
     }
 
     #[test]
@@ -311,7 +304,8 @@ mod tests {
 
     #[test]
     fn export_copies_under_the_versioned_name_with_the_right_sha256() {
-        let root = temp_dir("copy");
+        let root_scratch = temp_dir("copy");
+        let root = root_scratch.path().to_path_buf();
         let source = root.join("archive.img");
         fs::write(&source, b"gaia image bytes").expect("source");
         let dest = root.join("out");
@@ -346,12 +340,12 @@ mod tests {
             .filter(|entry| entry.file_name().to_string_lossy().starts_with('.'))
             .count();
         assert_eq!(leftovers, 0, "no partial copy is left behind");
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn collisions_never_overwrite_different_content_and_reuse_identical_content() {
-        let root = temp_dir("collide");
+        let root_scratch = temp_dir("collide");
+        let root = root_scratch.path().to_path_buf();
         let dest = root.join("out");
         let first = root.join("first.img");
         fs::write(&first, b"first").expect("first");
@@ -372,12 +366,12 @@ mod tests {
             .expect("third export");
         assert_eq!(c[0].path, a[0].path);
         assert_eq!(fs::read_dir(&dest).expect("dest").count(), 2);
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn primary_images_of_a_directory_are_its_disk_images_only() {
-        let root = temp_dir("dir");
+        let root_scratch = temp_dir("dir");
+        let root = root_scratch.path().to_path_buf();
         fs::write(root.join("b.img.xz"), "x").expect("b");
         fs::write(root.join("a.img"), "x").expect("a");
         fs::write(root.join("notes.txt"), "x").expect("notes");
@@ -389,6 +383,5 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(names, ["a.img", "b.img.xz"]);
         assert!(primary_images(&root.join("missing")).is_err());
-        let _ = fs::remove_dir_all(root);
     }
 }

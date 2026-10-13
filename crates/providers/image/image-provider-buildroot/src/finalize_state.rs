@@ -107,18 +107,13 @@ pub(crate) fn keep_host_finalized_after(output_dir: &Path, at: std::time::System
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
     use std::time::{Duration, SystemTime};
 
     #[test]
     fn the_host_marker_stays_current_across_a_stamp_refresh_only_when_moved() {
-        let root = std::env::temp_dir().join(format!(
-            "gaia-host-finalized-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .expect("time")
-                .as_nanos()
-        ));
+        let root_scratch = TempDir::new("gaia-host-finalized");
+        let root = root_scratch.join("root");
         let stamps = root.join("build/zlib-1.3");
         fs::create_dir_all(&stamps).expect("stamps");
         fs::create_dir_all(root.join("host")).expect("host");
@@ -146,6 +141,5 @@ mod tests {
         // A later install (a rebuilt package) makes it stale again.
         at(&stamp, now + Duration::from_secs(5));
         assert!(!host_finalized_current(&root));
-        let _ = fs::remove_dir_all(root);
     }
 }

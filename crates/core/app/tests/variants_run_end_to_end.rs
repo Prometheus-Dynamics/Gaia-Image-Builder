@@ -3,6 +3,7 @@
 //! source with a shared artifact, and a starting-point image per variant.
 
 use gaia_app::{AppArgs, CommandOutcome, VariantOutcome, run_with_args};
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -14,6 +15,7 @@ const SHARED_CARGO: &str = "[package]\nname = \"shared-tool\"\nversion = \"1.0.0
 struct Scenario {
     root: PathBuf,
     build: PathBuf,
+    _scratch: TempDir,
 }
 
 impl Scenario {
@@ -70,12 +72,8 @@ fn git(dir: &Path, args: &[&str]) -> String {
 /// A scratch root with a git repo of the app at two commits, a shared path
 /// source, a seed rootfs and the build file. `v2` overrides the app rev.
 fn scenario(name: &str) -> Scenario {
-    let nonce = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .expect("time")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("gaia-variants-e2e-{name}-{nonce}"));
-    fs::create_dir_all(&root).expect("scenario root");
+    let scratch = TempDir::new(&format!("gaia-variants-e2e-{name}"));
+    let root = scratch.path().to_path_buf();
 
     let repo = root.join("app-repo");
     fs::create_dir_all(repo.join("src")).expect("repo src");
@@ -189,7 +187,11 @@ overrides = [["input.app_rev", "{rev_two}"], ["image.output.archive_name", "vari
     )
     .expect("build file");
 
-    Scenario { root, build }
+    Scenario {
+        root,
+        build,
+        _scratch: scratch,
+    }
 }
 
 fn run_args(scenario: &Scenario, extra: &[&str]) -> AppArgs {
@@ -447,5 +449,4 @@ fn validate_checks_every_variant() {
         }
         other => panic!("expected a failure, got {other:?}"),
     }
-    let _ = fs::remove_dir_all(&scenario.root);
 }

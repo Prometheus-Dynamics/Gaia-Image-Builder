@@ -1,9 +1,10 @@
 pub mod support;
 
 use gaia_app::{AppArgs, CommandOutcome, run_with_args};
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::PathBuf;
-use support::{unique_dir, write_temp_build};
+use support::write_temp_build;
 
 #[test]
 fn help_and_version_dispatch_without_config_resolution() {
@@ -25,7 +26,8 @@ fn help_and_version_dispatch_without_config_resolution() {
 
 #[test]
 fn invalid_build_path_is_reported_as_failed_command() {
-    let missing = unique_dir("gaia-cli-missing-build");
+    let scratch = TempDir::new("gaia-cli-missing-build");
+    let missing = scratch.join("missing-build.toml").display().to_string();
 
     let outcome = run_with_args(AppArgs::parse_from(["validate", missing.as_str()]));
 
@@ -41,7 +43,9 @@ fn invalid_build_path_is_reported_as_failed_command() {
 
 #[test]
 fn malformed_build_config_is_reported_as_failed_command() {
+    let scratch = TempDir::new("gaia-cli-malformed-build");
     let path = write_temp_build(
+        &scratch,
         r#"
 build_name = "broken"
 [workspace
@@ -59,16 +63,17 @@ root_dir = "."
         }
         other => panic!("expected failed outcome, got {other:?}"),
     }
-
-    let _ = fs::remove_file(path);
 }
 
 #[test]
 fn plan_command_refuses_invalid_config_before_execution() {
-    let out_dir = unique_dir("gaia-cli-invalid-plan-out");
-    let build_dir = unique_dir("gaia-cli-invalid-plan-build");
-    let path = write_temp_build(&format!(
-        r#"
+    let scratch = TempDir::new("gaia-cli-invalid-plan");
+    let out_dir = scratch.join("out").display().to_string();
+    let build_dir = scratch.join("build").display().to_string();
+    let path = write_temp_build(
+        &scratch,
+        &format!(
+            r#"
 build_name = "invalid-plan"
 
 [workspace]
@@ -83,7 +88,8 @@ rootfs_path = "/tmp/rootfs"
 [image.feed]
 install_entries = ["missing-install"]
 "#,
-    ));
+        ),
+    );
 
     let outcome = run_with_args(AppArgs::parse_from(["plan", path.as_str()]));
 
@@ -96,16 +102,17 @@ install_entries = ["missing-install"]
         other => panic!("expected failed outcome, got {other:?}"),
     }
     assert!(!PathBuf::from(&out_dir).join(".gaia/reports").exists());
-
-    let _ = fs::remove_file(path);
 }
 
 #[test]
 fn run_command_refuses_invalid_config_before_execution() {
-    let out_dir = unique_dir("gaia-cli-invalid-run-out");
-    let build_dir = unique_dir("gaia-cli-invalid-run-build");
-    let path = write_temp_build(&format!(
-        r#"
+    let scratch = TempDir::new("gaia-cli-invalid-run");
+    let out_dir = scratch.join("out").display().to_string();
+    let build_dir = scratch.join("build").display().to_string();
+    let path = write_temp_build(
+        &scratch,
+        &format!(
+            r#"
 build_name = "invalid-run"
 
 [workspace]
@@ -120,7 +127,8 @@ rootfs_path = "/tmp/rootfs"
 [image.feed]
 stage_files = ["missing-stage-file"]
 "#,
-    ));
+        ),
+    );
 
     let outcome = run_with_args(AppArgs::parse_from(["run", path.as_str()]));
 
@@ -134,18 +142,18 @@ stage_files = ["missing-stage-file"]
     }
     assert!(!PathBuf::from(&build_dir).exists());
     assert!(PathBuf::from(&out_dir).join(".gaia/reports").exists());
-
-    let _ = fs::remove_file(path);
 }
 
 #[test]
 fn run_command_reports_report_write_failure_without_panicking() {
-    let out_file = unique_dir("gaia-cli-report-out-file");
-    let build_dir = unique_dir("gaia-cli-report-build");
-    fs::create_dir_all(PathBuf::from(&out_file).parent().expect("out parent")).expect("out parent");
+    let scratch = TempDir::new("gaia-cli-report-write-failure");
+    let out_file = scratch.join("out-file").display().to_string();
+    let build_dir = scratch.join("build").display().to_string();
     fs::write(&out_file, "not a directory").expect("out file");
-    let path = write_temp_build(&format!(
-        r#"
+    let path = write_temp_build(
+        &scratch,
+        &format!(
+            r#"
 build_name = "report-write-failure"
 
 [workspace]
@@ -160,7 +168,8 @@ rootfs_path = "/tmp/rootfs"
 [image.feed]
 stage_files = ["missing-stage-file"]
 "#,
-    ));
+        ),
+    );
 
     let outcome = run_with_args(AppArgs::parse_from(["run", path.as_str()]));
 
@@ -172,9 +181,6 @@ stage_files = ["missing-stage-file"]
         }
         other => panic!("expected failed outcome, got {other:?}"),
     }
-
-    let _ = fs::remove_file(path);
-    let _ = fs::remove_file(out_file);
 }
 
 #[test]

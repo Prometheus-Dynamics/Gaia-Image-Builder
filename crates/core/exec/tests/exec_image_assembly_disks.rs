@@ -6,6 +6,7 @@ use gaia_spec::{
     AssemblyDiskPartitionSpec, AssemblyDiskSpec, AssemblyFileSpec, AssemblyFilesystemKindSpec,
     AssemblyFilesystemSpec, AssemblyPartitionTableSpec, AssemblyTreeSpec, ImageAssemblySpec,
 };
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -14,9 +15,10 @@ use support::{provider_catalogs, test_spec};
 #[cfg(unix)]
 #[test]
 fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
+    let scratch = TempDir::new("gaia-exec-test");
     use std::os::unix::fs::PermissionsExt;
 
-    let mut spec = test_spec();
+    let mut spec = test_spec(&scratch);
     let build_dir = Path::new(&spec.workspace.build_dir);
     let output_dir = build_dir.join("filesystem-output");
     let collect_dir = Path::new(&spec.workspace.out_dir).join("images");
@@ -169,18 +171,20 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
 
 #[test]
 fn executes_image_assembly_archives_single_disk_as_raw_xz() {
-    archives_single_disk("published.img.xz", "xz");
+    let scratch = TempDir::new("gaia-exec-test");
+    archives_single_disk(&scratch, "published.img.xz", "xz");
 }
 
 #[test]
 fn executes_image_assembly_archives_single_disk_as_raw_zstd() {
-    archives_single_disk("published.img.zst", "zstd");
+    let scratch = TempDir::new("gaia-exec-test");
+    archives_single_disk(&scratch, "published.img.zst", "zstd");
 }
 
 /// Assembles one disk published as `archive_name`, then checks that
 /// `decompressor -dc` gives back the disk.
-fn archives_single_disk(archive_name: &str, decompressor: &str) {
-    let mut spec = test_spec();
+fn archives_single_disk(scratch: &TempDir, archive_name: &str, decompressor: &str) {
+    let mut spec = test_spec(scratch);
     let build_dir = Path::new(&spec.workspace.build_dir);
     let collect_dir = Path::new(&spec.workspace.out_dir).join("images");
     spec.image.output.collect_dir = Some(collect_dir.display().to_string());
@@ -273,9 +277,10 @@ fn archives_single_disk(archive_name: &str, decompressor: &str) {
 #[cfg(unix)]
 #[test]
 fn vfat_filesystem_honors_mformat_timeout() {
+    let scratch = TempDir::new("gaia-exec-test");
     use std::os::unix::fs::PermissionsExt;
 
-    let mut spec = test_spec();
+    let mut spec = test_spec(&scratch);
     spec.policy.providers.buildroot.timeout_seconds = 1;
     let build_dir = Path::new(&spec.workspace.build_dir);
     let output_dir = build_dir.join("filesystem-timeout-output");
@@ -359,7 +364,8 @@ fn vfat_filesystem_honors_mformat_timeout() {
 
 #[test]
 fn executes_image_assembly_mbr_disk() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = Path::new(&spec.workspace.build_dir);
     let image_dir = build_dir.join("disk-images");
     let output_dir = build_dir.join("disk-output");
@@ -470,7 +476,8 @@ fn executes_image_assembly_mbr_disk() {
 
 #[test]
 fn executes_image_assembly_mbr_disk_with_explicit_lba_layout() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = Path::new(&spec.workspace.build_dir);
     let image_dir = build_dir.join("explicit-disk-images");
     let output_dir = build_dir.join("explicit-disk-output");
@@ -554,7 +561,8 @@ fn executes_image_assembly_mbr_disk_with_explicit_lba_layout() {
 
 #[test]
 fn image_assembly_mbr_rejects_bootable_logical_partition_before_writing_disk() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = Path::new(&spec.workspace.build_dir);
     let image_dir = build_dir.join("disk-images");
     let output = build_dir.join("disk-output/sdcard.img");

@@ -412,6 +412,7 @@ pub(crate) fn write_local_mk_section(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
 
     #[test]
     fn probes_accept_new_enough_tools() {
@@ -476,8 +477,8 @@ mod tests {
 
     #[test]
     fn the_local_mk_block_is_replaced_and_user_lines_kept() {
-        let dir = std::env::temp_dir().join(format!("gaia-host-tools-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
+        let scratch = TempDir::new("gaia-host-tools");
+        let dir = scratch.path().to_path_buf();
         fs::create_dir_all(&dir).expect("dir");
         fs::write(dir.join("local.mk"), "FOO_OVERRIDE_SRCDIR = /src/foo\n").expect("local.mk");
         write_local_mk_block(&dir, &ccache_stub("/usr/bin/ccache")).expect("write");
@@ -495,7 +496,6 @@ mod tests {
             fs::read_to_string(dir.join("local.mk")).expect("read"),
             "FOO_OVERRIDE_SRCDIR = /src/foo\n"
         );
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

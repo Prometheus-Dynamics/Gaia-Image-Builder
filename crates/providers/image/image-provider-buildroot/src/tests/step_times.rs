@@ -2,9 +2,12 @@ use super::*;
 
 #[test]
 fn a_failed_make_still_reports_its_step_times() {
-    let workspace = temp_path("gaia-step-times-workspace");
-    let buildroot_dir = temp_path("gaia-step-times-source");
-    let output_dir = temp_path("gaia-step-times-output");
+    let workspace_scratch = TempDir::new("gaia-step-times-workspace");
+    let workspace = workspace_scratch.join("workspace");
+    let buildroot_dir_scratch = TempDir::new("gaia-step-times-source");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-step-times-output");
+    let output_dir = output_dir_scratch.join("output_dir");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     fs::write(
         buildroot_dir.join("Makefile"),
@@ -47,9 +50,12 @@ fn a_failed_make_still_reports_its_step_times() {
 
 #[test]
 fn prepare_finalizes_the_target_without_making_images() {
-    let workspace = temp_path("gaia-buildroot-prepare-images-workspace");
-    let buildroot_dir = temp_path("gaia-buildroot-prepare-images-source");
-    let output_dir = temp_path("gaia-buildroot-prepare-images-output");
+    let workspace_scratch = TempDir::new("gaia-buildroot-prepare-images-workspace");
+    let workspace = workspace_scratch.join("workspace");
+    let buildroot_dir_scratch = TempDir::new("gaia-buildroot-prepare-images-source");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-prepare-images-output");
+    let output_dir = output_dir_scratch.join("output_dir");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     fs::write(
         buildroot_dir.join("Makefile"),
@@ -92,14 +98,12 @@ fn prepare_finalizes_the_target_without_making_images() {
             "parallel_packages = {parallel_packages}"
         );
     }
-    let _ = fs::remove_dir_all(workspace);
-    let _ = fs::remove_dir_all(buildroot_dir);
-    let _ = fs::remove_dir_all(output_dir);
 }
 
 #[test]
 fn a_build_operations_steps_cover_its_duration() {
-    let workspace = temp_path("gaia-step-cover-workspace");
+    let workspace_scratch = TempDir::new("gaia-step-cover-workspace");
+    let workspace = workspace_scratch.join("workspace");
     let source = workspace.join("build/sources/fake-buildroot");
     fs::create_dir_all(&source).expect("buildroot source");
     // Every target sleeps, so the operation's time is in its steps rather
@@ -196,5 +200,4 @@ fn a_build_operations_steps_cover_its_duration() {
         covered.as_secs_f64() >= 0.9 * elapsed.as_secs_f64(),
         "steps cover {covered:?} of {elapsed:?}: {names:?}"
     );
-    let _ = fs::remove_dir_all(workspace);
 }

@@ -1,12 +1,11 @@
 use super::*;
 
 fn digest_of(config: &str) -> String {
-    let dir = temp_path("buildroot-config-digest");
+    let dir_scratch = TempDir::new("buildroot-config-digest");
+    let dir = dir_scratch.join("dir");
     fs::create_dir_all(&dir).expect("output dir");
     fs::write(dir.join(".config"), config).expect("config");
-    let digest = buildroot_config_digest(&dir).expect("digest");
-    let _ = fs::remove_dir_all(dir);
-    digest
+    buildroot_config_digest(&dir).expect("digest")
 }
 
 const BASE: &str = "#\n# Automatically generated file; DO NOT EDIT.\n# Buildroot 2025.02 Configuration\n#\nBR2_aarch64=y\nBR2_DL_DIR=\"/work/a/dl\"\nBR2_JLEVEL=0\n# BR2_PACKAGE_FFMPEG is not set\n";

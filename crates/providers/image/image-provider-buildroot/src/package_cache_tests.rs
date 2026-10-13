@@ -1,10 +1,12 @@
 use super::*;
+use gaia_testkit::TempDir;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::time::UNIX_EPOCH;
 
 #[test]
 fn stamps_are_recorded_in_build_order() {
-    let dir = temp("stamps");
+    let dir_scratch = TempDir::new("stamps");
+    let dir = dir_scratch.join("dir");
     fs::create_dir_all(&dir).expect("dir");
     let now = std::time::SystemTime::now();
     for (offset, stamp) in [
@@ -30,18 +32,6 @@ fn stamps_are_recorded_in_build_order() {
             ".stamp_installed"
         ]
     );
-    let _ = fs::remove_dir_all(dir);
-}
-
-pub(super) fn temp(label: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "gaia-package-cache-{label}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time")
-            .as_nanos()
-    ))
 }
 
 fn write(path: &Path, contents: &[u8]) {
@@ -163,7 +153,8 @@ fn packages_round_trip_into_another_tree() {
     if !tools_available() {
         return;
     }
-    let root = temp("round-trip");
+    let root_scratch = TempDir::new("round-trip");
+    let root = root_scratch.join("root");
     let cache = test_cache(&root, &[]);
     let first = root.join("first");
     built_tree(&first, b"app binary");
@@ -222,7 +213,6 @@ fn packages_round_trip_into_another_tree() {
 
     // Already built: nothing to restore.
     assert!(cache.restore(&second, &graph, &keys).is_empty());
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -230,7 +220,8 @@ fn packages_with_the_path_in_binaries_restore_only_at_that_path() {
     if !tools_available() {
         return;
     }
-    let root = temp("pinned");
+    let root_scratch = TempDir::new("pinned");
+    let root = root_scratch.join("root");
     let cache = test_cache(&root, &[]);
     let first = root.join("first");
     let mut binary = b"\0ELF ".to_vec();
@@ -255,7 +246,6 @@ fn packages_with_the_path_in_binaries_restore_only_at_that_path() {
         fs::read(first.join("per-package/app/target/usr/bin/app")).expect("app"),
         binary
     );
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -273,18 +263,19 @@ fn output_paths_are_rewritten_everywhere() {
 
 #[test]
 fn caches_larger_than_their_free_space_are_reported() {
-    let dir = temp("space");
+    let dir_scratch = TempDir::new("space");
+    let dir = dir_scratch.join("dir");
     fs::create_dir_all(&dir).expect("dir");
     let warning = cache_space_warning("package cache", &dir, u64::MAX).expect("warning");
     assert!(warning.starts_with(CACHE_SPACE_WARNING_PREFIX), "{warning}");
     assert!(warning.contains("GiB free"), "{warning}");
     assert_eq!(cache_space_warning("package cache", &dir, 1), None);
-    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
 fn stamps_of_unchanged_packages_are_made_newer_than_their_inputs() {
-    let root = temp("refresh");
+    let root_scratch = TempDir::new("refresh");
+    let root = root_scratch.join("root");
     let output = root.join("out");
     let stamps = output.join("build/app-1");
     fs::create_dir_all(&stamps).expect("stamps");
@@ -322,7 +313,6 @@ fn stamps_of_unchanged_packages_are_made_newer_than_their_inputs() {
     let refreshed = modified(".stamp_installed");
     refresh_current_stamps(&output, &graph, &keys);
     assert_eq!(modified(".stamp_installed"), refreshed);
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -330,7 +320,8 @@ fn packages_are_stored_at_their_level_and_restored_from_either() {
     if !tools_available() {
         return;
     }
-    let root = temp("levels");
+    let root_scratch = TempDir::new("levels");
+    let root = root_scratch.join("root");
     let cache = test_cache(&root, &["app"]);
     let first = root.join("first");
     built_tree(&first, b"app binary");
@@ -349,7 +340,6 @@ fn packages_are_stored_at_their_level_and_restored_from_either() {
     let second = root.join("second");
     fs::create_dir_all(&second).expect("second");
     assert_eq!(cache.restore(&second, &graph, &keys), ["app", "base"]);
-    let _ = fs::remove_dir_all(root);
 }
 
 /// Regular files under `output/per-package` and `output/images`, with their
@@ -378,18 +368,15 @@ fn packages_round_trip_across_filesystems() {
         return;
     }
     let trees = shm.join(format!("gaia-package-cache-trees-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&trees);
     if fs::create_dir_all(&trees).is_err() {
         return;
     }
     let Some(home) = std::env::var_os("HOME") else {
-        let _ = fs::remove_dir_all(&trees);
         return;
     };
     let caches = PathBuf::from(home)
         .join(".cache")
         .join(format!("gaia-test-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&caches);
     fs::create_dir_all(&caches).expect("caches");
     let same_filesystem = {
         use std::os::unix::fs::MetadataExt;
@@ -397,8 +384,6 @@ fn packages_round_trip_across_filesystems() {
     };
     if same_filesystem {
         // The test would not exercise a cross-filesystem store and restore.
-        let _ = fs::remove_dir_all(&trees);
-        let _ = fs::remove_dir_all(&caches);
         return;
     }
 
@@ -467,9 +452,6 @@ fn packages_round_trip_across_filesystems() {
 
     // Already built: nothing to restore.
     assert!(cache.restore(&second, &graph, &keys).is_empty());
-
-    let _ = fs::remove_dir_all(&trees);
-    let _ = fs::remove_dir_all(&caches);
 }
 
 /// The link step as it was: one `rsync -a --link-dest` per source.
@@ -595,7 +577,8 @@ fn dependency_links_match_rsync() {
     if !tools_available() {
         return;
     }
-    let root = temp("links");
+    let root_scratch = TempDir::new("links");
+    let root = root_scratch.join("root");
     let a = root.join("a/target");
     let b = root.join("b/target");
     let c = root.join("c/target");
@@ -645,19 +628,18 @@ fn dependency_links_match_rsync() {
     let expected = describe_links(&by_rsync, &sources);
     assert!(expected.contains_key("usr/lib/liba.so"));
     assert_eq!(describe_links(&by_links, &sources), expected);
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn a_directory_that_is_a_file_elsewhere_is_refused() {
-    let root = temp("conflict");
+    let root_scratch = TempDir::new("conflict");
+    let root = root_scratch.join("root");
     let a = root.join("a");
     let b = root.join("b");
     write(&a.join("usr/thing"), b"file");
     write(&b.join("usr/thing/inside"), b"dir");
     let result = TreeListings::default().link(&root.join("out"), &[a, b]);
     assert!(result.is_err());
-    let _ = fs::remove_dir_all(root);
 }
 
 /// Times the link step of a synthetic 100-package build (fan-in through a
@@ -786,5 +768,4 @@ fn dependency_link_benchmark() {
         "link step for {PACKAGES} packages: in-process {links:?} ({links_entries} entries), rsync per dependency {rsync:?} ({rsync_entries} entries)"
     );
     assert_eq!(links_entries, rsync_entries);
-    let _ = fs::remove_dir_all(root);
 }

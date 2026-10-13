@@ -7,7 +7,7 @@ fn an_assembly_is_recorded_under_the_fingerprint_its_inputs_settled_to() {
     // The build rewrites an assembly input during the run, after the plan
     // was made. The saved fingerprint must be the one the input has after
     // the run, or the next preview reruns an assembly nothing changed.
-    let mut spec = test_spec();
+    let (_scratch, mut spec) = test_spec();
     fs::create_dir_all(&spec.workspace.build_dir).expect("build dir");
     let input = PathBuf::from(&spec.workspace.build_dir).join("rootfs.ext4");
     fs::write(&input, "built").expect("input");

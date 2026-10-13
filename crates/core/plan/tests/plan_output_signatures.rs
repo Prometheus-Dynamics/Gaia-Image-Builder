@@ -4,6 +4,7 @@ use gaia_plan::{
     OperationReuse, ReuseState, operation_output_signature, plan_build,
     plan_build_with_reuse_state, spec_fingerprint,
 };
+use gaia_testkit::TempDir;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
@@ -11,7 +12,8 @@ use support::{provider_catalogs, test_spec};
 
 #[test]
 fn plan_rebuilds_when_operation_fingerprint_mismatches_even_if_outputs_exist() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
     let reused_ids = ["artifact:gaia-app"];
@@ -62,7 +64,8 @@ fn plan_rebuilds_when_operation_fingerprint_mismatches_even_if_outputs_exist() {
 
 #[test]
 fn plan_rebuilds_when_materialized_outputs_change_even_if_operation_fingerprint_matches() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
     let reused_ids = ["artifact:gaia-app"];
@@ -117,7 +120,8 @@ fn plan_rebuilds_when_materialized_outputs_change_even_if_operation_fingerprint_
 
 #[test]
 fn plan_rebuilds_when_provider_state_changes_even_if_output_file_matches() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
     if let Some(parent) = PathBuf::from(&spec.artifacts[0].output.path).parent() {

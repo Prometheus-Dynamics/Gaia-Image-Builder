@@ -1,6 +1,7 @@
 pub mod support;
 
 use gaia_plan::{OperationKind, operation_fingerprint};
+use gaia_testkit::TempDir;
 use support::test_spec;
 
 /// Renaming the collected image or its archive (an image flavour with
@@ -8,7 +9,8 @@ use support::test_spec;
 /// fingerprint stays; image:build collects and archives, so its changes.
 #[test]
 fn image_output_naming_changes_only_the_build_fingerprint() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = test_spec(&scratch);
     let mut renamed = spec.clone();
     renamed.image.output.archive_name = Some("other-flavour-1.2.3.tar".into());
     renamed.image.output.collect_dir = Some("/elsewhere/images".into());
@@ -28,7 +30,8 @@ fn image_output_naming_changes_only_the_build_fingerprint() {
 /// other stage files shares the prepared Buildroot base.
 #[test]
 fn image_feed_changes_only_the_build_fingerprint() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = test_spec(&scratch);
     let mut fed = spec.clone();
     fed.image.feed.stage_files.push("extra-file".into());
 

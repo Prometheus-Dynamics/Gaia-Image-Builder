@@ -1,9 +1,9 @@
 pub mod support;
 
 use gaia_config::resolve_config;
+use gaia_testkit::TempDir;
 use gaia_validate::validate_spec;
 use std::fs;
-use std::time::{SystemTime, UNIX_EPOCH};
 use support::write_temp_config;
 
 #[test]
@@ -39,11 +39,8 @@ defconfig = "dummy_defconfig"
 
 #[test]
 fn buildroot_expected_image_format_mismatch_is_an_error() {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("gaia-buildroot-validate-{nonce}"));
+    let scratch = TempDir::new("gaia-buildroot-validate");
+    let root = scratch.join("root");
     fs::create_dir_all(root.join("assets")).expect("assets dir");
     let defconfig = root.join("assets/test.defconfig");
     fs::write(&defconfig, "BR2_TARGET_ROOTFS_TAR=y\n").expect("defconfig");
@@ -83,17 +80,12 @@ required = true
             .iter()
             .any(|diagnostic| diagnostic.code == "buildroot_expected_image_format_not_enabled")
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn buildroot_expected_image_can_be_satisfied_by_assembly_disk_output() {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("gaia-buildroot-assembly-expected-{nonce}"));
+    let scratch = TempDir::new("gaia-buildroot-assembly-expected");
+    let root = scratch.join("root");
     fs::create_dir_all(root.join("assets")).expect("assets dir");
     let defconfig = root.join("assets/test.defconfig");
     fs::write(&defconfig, "BR2_TARGET_ROOTFS_TAR=y\n").expect("defconfig");
@@ -153,17 +145,12 @@ image = "$provider.images/rootfs.tar"
         "assembly-generated sdcard.img should satisfy expected raw image: {:?}",
         report.diagnostics
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn buildroot_expected_image_still_requires_defconfig_when_not_generated_by_assembly() {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("gaia-buildroot-provider-expected-{nonce}"));
+    let scratch = TempDir::new("gaia-buildroot-provider-expected");
+    let root = scratch.join("root");
     fs::create_dir_all(root.join("assets")).expect("assets dir");
     let defconfig = root.join("assets/test.defconfig");
     fs::write(&defconfig, "BR2_TARGET_ROOTFS_TAR=y\n").expect("defconfig");
@@ -211,8 +198,6 @@ path = "$assembly.work/boot"
             .any(|diagnostic| diagnostic.code == "buildroot_expected_image_format_not_enabled"),
         "provider-produced sdcard.img should still require Buildroot raw support"
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]

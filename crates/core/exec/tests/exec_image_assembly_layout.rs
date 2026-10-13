@@ -6,6 +6,7 @@ use gaia_spec::{
     AssemblyDiskPartitionSpec, AssemblyDiskSpec, AssemblyPartitionTableSpec, ImageAssemblySpec,
     ResolvedBuildSpec,
 };
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -88,7 +89,8 @@ fn assembly_state(spec: &ResolvedBuildSpec) -> String {
 
 #[test]
 fn seven_partition_mbr_uses_extended_partition_and_ebr_chain() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = Path::new(&spec.workspace.build_dir).to_path_buf();
     let images = build_dir.join("layout-images");
     fs::create_dir_all(&images).expect("images dir");
@@ -251,7 +253,8 @@ fn assert_sfdisk_layout(image: &Path, expected: &[(u32, u64, u64, &str)]) {
 
 #[test]
 fn partition_size_pads_images_and_empty_partitions_stay_sparse() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = Path::new(&spec.workspace.build_dir).to_path_buf();
     let images = build_dir.join("sized-images");
     fs::create_dir_all(&images).expect("images dir");
@@ -310,7 +313,8 @@ fn partition_size_pads_images_and_empty_partitions_stay_sparse() {
 
 #[test]
 fn partition_image_larger_than_size_fails_before_writing_disk() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = Path::new(&spec.workspace.build_dir).to_path_buf();
     let images = build_dir.join("too-big-images");
     fs::create_dir_all(&images).expect("images dir");

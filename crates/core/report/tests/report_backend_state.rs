@@ -3,6 +3,7 @@ pub mod support;
 use gaia_plan::plan_build;
 use gaia_report::generate_report;
 use gaia_spec::{AssemblyTreeSpec, ImageAssemblySpec};
+use gaia_testkit::TempDir;
 use gaia_validate::validate_spec_with_providers;
 use std::fs;
 use std::path::PathBuf;
@@ -10,7 +11,8 @@ use support::{materialize_reusable_outputs, provider_catalogs, test_spec};
 
 #[test]
 fn report_generation_tolerates_corrupt_backend_state_lines() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-report-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     materialize_reusable_outputs(&spec);
 
@@ -173,7 +175,8 @@ fn report_generation_tolerates_corrupt_backend_state_lines() {
 
 #[test]
 fn report_includes_image_assembly_runtime_state() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-report-test");
+    let mut spec = test_spec(&scratch);
     spec.image.assembly = Some(ImageAssemblySpec {
         trees: vec![AssemblyTreeSpec {
             id: "boot".into(),
@@ -297,7 +300,8 @@ fn report_includes_image_assembly_runtime_state() {
 
 #[test]
 fn report_includes_output_hygiene_warnings_without_failing() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-report-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     materialize_reusable_outputs(&spec);
     let collect_dir = PathBuf::from(spec.image.output.collect_dir.as_ref().expect("collect dir"));
@@ -335,7 +339,8 @@ fn report_includes_output_hygiene_warnings_without_failing() {
 
 #[test]
 fn output_hygiene_uses_custom_threshold_and_transient_names() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-report-test");
+    let mut spec = test_spec(&scratch);
     spec.reporting.output_hygiene.large_file_threshold_bytes = 8;
     spec.reporting.output_hygiene.transient_dir_names = vec!["tmp-work".into()];
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
@@ -380,7 +385,8 @@ fn output_hygiene_uses_custom_threshold_and_transient_names() {
 
 #[test]
 fn output_hygiene_allows_assembly_archive_outputs() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-report-test");
+    let mut spec = test_spec(&scratch);
     spec.reporting.output_hygiene.large_file_threshold_bytes = 8;
     let collect_dir = PathBuf::from(spec.image.output.collect_dir.as_ref().expect("collect dir"));
     spec.image.assembly = Some(ImageAssemblySpec {

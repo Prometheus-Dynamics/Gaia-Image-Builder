@@ -13,5 +13,8 @@ gaia-process.workspace = true
 gaia-spec.workspace = true
 sha2.workspace = true
 
+[dev-dependencies]
+gaia-testkit.workspace = true
+
 [lints]
 workspace = true

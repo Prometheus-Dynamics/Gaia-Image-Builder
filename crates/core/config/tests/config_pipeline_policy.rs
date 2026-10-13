@@ -80,8 +80,6 @@ rootfs_path = "/tmp/rootfs"
         spec.policy.providers.starting_point.timeout_seconds,
         DEFAULT_STARTING_POINT_PROVIDER_TIMEOUT_SECONDS
     );
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -536,8 +534,6 @@ overrides = [
         dev.policy.providers.buildroot.shared_output_dir.as_deref(),
         Some("/var/cache/gaia-shared")
     );
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]

@@ -3,12 +3,13 @@ use gaia_config::{ResolveOptions, resolve_config_with_options};
 use gaia_image_providers::ImageProviderCatalog;
 use gaia_plan::{ExecutionPlan, ReuseState, operation_output_signature, spec_fingerprint};
 use gaia_source_providers::SourceProviderCatalog;
+use gaia_testkit::TempDir;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-static UNIQUE_COUNTER: AtomicU64 = AtomicU64::new(0);
+/// The path `name` under a test scratch directory, as the string specs take.
+pub fn scratch_child(scratch: &TempDir, name: &str) -> String {
+    scratch.join(name).display().to_string()
+}
 
 pub fn default_config_path() -> String {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -25,22 +26,9 @@ pub fn provider_catalogs() -> (
     gaia_default_providers::provider_catalogs()
 }
 
-pub fn unique_dir(prefix: &str) -> String {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time")
-        .as_nanos();
-    let count = UNIQUE_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir()
-        .join("gaia-tests")
-        .join(format!("{prefix}-{nonce}-{count}"))
-        .display()
-        .to_string()
-}
-
-pub fn test_spec() -> gaia_spec::ResolvedBuildSpec {
-    let build_dir = unique_dir("gaia-plan-build");
-    let out_dir = unique_dir("gaia-plan-out");
+pub fn test_spec(scratch: &TempDir) -> gaia_spec::ResolvedBuildSpec {
+    let build_dir = scratch.join("build").display().to_string();
+    let out_dir = scratch.join("out").display().to_string();
     resolve_config_with_options(
         &default_config_path(),
         &ResolveOptions {
@@ -68,9 +56,9 @@ pub fn rebase_workspace_root(spec: &mut gaia_spec::ResolvedBuildSpec, root_dir: 
     spec.workspace.out_dir = new_root.join("out").display().to_string();
 }
 
-pub fn test_spec_with_root(root_dir: String) -> gaia_spec::ResolvedBuildSpec {
-    let build_dir = unique_dir("gaia-plan-build");
-    let out_dir = unique_dir("gaia-plan-out");
+pub fn test_spec_with_root(scratch: &TempDir, root_dir: String) -> gaia_spec::ResolvedBuildSpec {
+    let build_dir = scratch.join("build").display().to_string();
+    let out_dir = scratch.join("out").display().to_string();
     resolve_config_with_options(
         &default_config_path(),
         &ResolveOptions {

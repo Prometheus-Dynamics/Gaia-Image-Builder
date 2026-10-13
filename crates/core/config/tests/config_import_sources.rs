@@ -3,6 +3,7 @@
 
 use gaia_config::{ResolveOptions, try_resolve_config_with_options};
 use gaia_spec::{ResolvedBuildSpec, SourceDefinition};
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -25,6 +26,7 @@ unit_path = "@self/units/raze-camera.service"
 
 struct Fixture {
     root: PathBuf,
+    _scratch: TempDir,
     workspace: PathBuf,
     repo: PathBuf,
     commits: Vec<String>,
@@ -34,11 +36,8 @@ impl Fixture {
     /// A workspace (with `Cargo.toml`) and a git repo laid out like Atlas,
     /// with two commits; the second only touches `README.md`.
     fn new(name: &str) -> Self {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time")
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("gaia-import-src-{name}-{nonce}"));
+        let scratch = TempDir::new(&format!("gaia-import-src-{name}"));
+        let root = scratch.path().to_path_buf();
         let workspace = root.join("workspace");
         let repo = root.join("atlas");
         fs::create_dir_all(workspace.join("configs/builds")).expect("workspace");
@@ -54,6 +53,7 @@ impl Fixture {
         let second = head(&repo);
         Self {
             root: fs::canonicalize(&root).expect("canonical root"),
+            _scratch: scratch,
             workspace: fs::canonicalize(&workspace).expect("canonical workspace"),
             repo,
             commits: vec![first, second],
@@ -99,12 +99,6 @@ impl Fixture {
             },
         )
         .map_err(|error| error.to_string())
-    }
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
     }
 }
 

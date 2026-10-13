@@ -371,16 +371,14 @@ pub enum AppCommand {
 mod tests {
     use super::*;
 
-    fn temp_dir(name: &str) -> std::path::PathBuf {
-        let dir = env::temp_dir().join(format!("gaia-app-cli-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("temp dir");
-        dir
+    fn temp_dir(name: &str) -> gaia_testkit::TempDir {
+        gaia_testkit::TempDir::new(&format!("gaia-app-cli-{name}"))
     }
 
     #[test]
     fn default_build_config_prefers_current_dir_build_toml() {
-        let dir = temp_dir("build-toml");
+        let dir_scratch = temp_dir("build-toml");
+        let dir = dir_scratch.path().to_path_buf();
         fs::write(dir.join("build.toml"), "build_name = \"local\"\n").expect("build toml");
         fs::write(dir.join("other.toml"), "build_name = \"other\"\n").expect("other toml");
 
@@ -388,13 +386,12 @@ mod tests {
             default_build_config_in_dir(&dir),
             dir.join("build.toml").display().to_string()
         );
-
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn default_build_config_uses_current_dir_toml_before_example_default() {
-        let dir = temp_dir("single-toml");
+        let dir_scratch = temp_dir("single-toml");
+        let dir = dir_scratch.path().to_path_buf();
         fs::write(
             dir.join("Cargo.toml"),
             "[package]\nname = \"not-a-build\"\n",
@@ -406,8 +403,6 @@ mod tests {
             default_build_config_in_dir(&dir),
             dir.join("local.toml").display().to_string()
         );
-
-        let _ = fs::remove_dir_all(dir);
     }
 
     fn parse(args: &[&str]) -> AppArgs {

@@ -9,6 +9,7 @@ use gaia_spec::{
     ResolvedBuildSpec, SourceDefinition, SourceId, SourcePinPolicySpec, SourceRef,
     SourceRefreshPolicySpec,
 };
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::{Path, PathBuf};
 use support::{provider_catalogs, reuse_state_for_ids, test_spec};
@@ -19,8 +20,8 @@ const NEW_COMMIT: &str = "e565dcf0ddba11000000000000000000000000b2";
 /// `gaia-app` builds from the pinned `gaia-upstream` git source, so a rev
 /// change on that source reaches an artifact. The source is pinned and not
 /// refreshed on every run, so the commit is the only thing that changes.
-fn upstream_spec(commit: &str) -> ResolvedBuildSpec {
-    let mut spec = test_spec();
+fn upstream_spec(scratch: &TempDir, commit: &str) -> ResolvedBuildSpec {
+    let mut spec = test_spec(scratch);
     set_upstream_commit(&mut spec, commit);
     spec.artifacts[0].source = Some(SourceRef::new("gaia-upstream"));
     spec
@@ -93,8 +94,8 @@ struct Baseline {
     recorded_input: u64,
 }
 
-fn baseline(tree_digest: &str) -> Baseline {
-    let spec = upstream_spec(OLD_COMMIT);
+fn baseline(scratch: &TempDir, tree_digest: &str) -> Baseline {
+    let spec = upstream_spec(scratch, OLD_COMMIT);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     write_upstream_state(&spec, OLD_COMMIT, tree_digest);
     write_artifact_output(&spec);
@@ -126,7 +127,8 @@ fn plan_with(spec: &ResolvedBuildSpec, state: &ReuseState) -> gaia_plan::Executi
 
 #[test]
 fn unchanged_source_and_artifact_are_not_invalidated() {
-    let base = baseline("sha-tree-1");
+    let scratch = TempDir::new("gaia-plan-test");
+    let base = baseline(&scratch, "sha-tree-1");
     let plan = plan_with(&base.spec, &base.state);
 
     assert_eq!(code_or_reuse(&plan, "source:gaia-upstream"), "reused");
@@ -145,7 +147,8 @@ fn code_or_reuse(plan: &gaia_plan::ExecutionPlan, id: &str) -> &'static str {
 
 #[test]
 fn rev_bump_names_the_rev_and_the_source_it_cascades_from() {
-    let base = baseline("sha-tree-1");
+    let scratch = TempDir::new("gaia-plan-test");
+    let base = baseline(&scratch, "sha-tree-1");
     let mut bumped = base.spec.clone();
     set_upstream_commit(&mut bumped, NEW_COMMIT);
     // Not yet re-materialized: the state file still records the old commit.
@@ -180,7 +183,8 @@ fn rev_bump_names_the_rev_and_the_source_it_cascades_from() {
 
 #[test]
 fn rev_bump_with_identical_tree_keeps_dependents_on_their_early_cutoff() {
-    let base = baseline("sha-tree-1");
+    let scratch = TempDir::new("gaia-plan-test");
+    let base = baseline(&scratch, "sha-tree-1");
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let mut bumped = base.spec.clone();
     set_upstream_commit(&mut bumped, NEW_COMMIT);
@@ -204,7 +208,8 @@ fn rev_bump_with_identical_tree_keeps_dependents_on_their_early_cutoff() {
 
 #[test]
 fn rev_bump_with_changed_tree_invalidates_dependents() {
-    let base = baseline("sha-tree-1");
+    let scratch = TempDir::new("gaia-plan-test");
+    let base = baseline(&scratch, "sha-tree-1");
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let mut bumped = base.spec.clone();
     set_upstream_commit(&mut bumped, NEW_COMMIT);
@@ -220,7 +225,8 @@ fn rev_bump_with_changed_tree_invalidates_dependents() {
 
 #[test]
 fn source_content_signature_ignores_the_commit_only_when_a_tree_digest_is_recorded() {
-    let spec = upstream_spec(OLD_COMMIT);
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = upstream_spec(&scratch, OLD_COMMIT);
     let kind = OperationKind::MaterializeSource {
         source_id: SourceId::new("gaia-upstream"),
     };
@@ -257,7 +263,8 @@ fn source_content_signature_ignores_the_commit_only_when_a_tree_digest_is_record
 
 #[test]
 fn invalidation_summary_of_a_fresh_plan_counts_every_executing_operation_as_direct() {
-    let spec = upstream_spec(OLD_COMMIT);
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = upstream_spec(&scratch, OLD_COMMIT);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
     let summary: InvalidationSummary = invalidation_summary(&plan);
@@ -269,7 +276,8 @@ fn invalidation_summary_of_a_fresh_plan_counts_every_executing_operation_as_dire
 
 #[test]
 fn prepare_output_signature_ignores_the_shared_collect_state() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = test_spec(&scratch);
     let build_dir = PathBuf::from(&spec.workspace.build_dir);
     let config = build_dir.join("image/buildroot-output/.config");
     fs::create_dir_all(config.parent().expect("output dir")).expect("output dir");

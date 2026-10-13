@@ -1,20 +1,22 @@
 pub mod support;
 
 use gaia_config::{resolve_config, try_resolve_config};
-use std::path::PathBuf;
+use gaia_testkit::TempDir;
+use std::path::Path;
 #[cfg(unix)]
 use std::time::Instant;
 use support::write_temp_config;
 
 #[test]
 fn resolves_input_choices_from_git_tags() {
-    let repo = unique_git_repo("gaia-config-dynamic-input-tags");
-    git(&repo, &["init"]);
-    git(&repo, &["config", "user.email", "gaia@example.invalid"]);
-    git(&repo, &["config", "user.name", "Gaia Test"]);
-    git(&repo, &["commit", "--allow-empty", "-m", "init"]);
-    git(&repo, &["tag", "v2026.2.1"]);
-    git(&repo, &["tag", "v2026.3.4"]);
+    let scratch = unique_git_repo("gaia-config-dynamic-input-tags");
+    let repo = scratch.path();
+    git(repo, &["init"]);
+    git(repo, &["config", "user.email", "gaia@example.invalid"]);
+    git(repo, &["config", "user.name", "Gaia Test"]);
+    git(repo, &["commit", "--allow-empty", "-m", "init"]);
+    git(repo, &["tag", "v2026.2.1"]);
+    git(repo, &["tag", "v2026.3.4"]);
 
     let config = write_temp_config(&format!(
         r#"
@@ -49,15 +51,16 @@ sort = "version-desc"
 
 #[test]
 fn resolves_dynamic_git_input_filters_source_fallback_and_cache() {
-    let repo = unique_git_repo("gaia-config-dynamic-input-advanced");
-    git(&repo, &["init"]);
-    git(&repo, &["config", "user.email", "gaia@example.invalid"]);
-    git(&repo, &["config", "user.name", "Gaia Test"]);
-    git(&repo, &["commit", "--allow-empty", "-m", "init"]);
-    git(&repo, &["branch", "release/v2026.3.4"]);
-    git(&repo, &["branch", "release/v2026.4.0-rc1"]);
-    git(&repo, &["branch", "release/v2026.4.0"]);
-    git(&repo, &["branch", "scratch/local"]);
+    let scratch = unique_git_repo("gaia-config-dynamic-input-advanced");
+    let repo = scratch.path();
+    git(repo, &["init"]);
+    git(repo, &["config", "user.email", "gaia@example.invalid"]);
+    git(repo, &["config", "user.name", "Gaia Test"]);
+    git(repo, &["commit", "--allow-empty", "-m", "init"]);
+    git(repo, &["branch", "release/v2026.3.4"]);
+    git(repo, &["branch", "release/v2026.4.0-rc1"]);
+    git(repo, &["branch", "release/v2026.4.0"]);
+    git(repo, &["branch", "scratch/local"]);
 
     let config = write_temp_config(&format!(
         r#"
@@ -100,7 +103,7 @@ cache_ttl_seconds = 3600
     assert_eq!(input.default.as_deref(), Some("v2026.4.0"));
     assert_eq!(spec.identity.version.as_deref(), Some("v2026.4.0"));
 
-    git(&repo, &["branch", "release/v2026.5.0"]);
+    git(repo, &["branch", "release/v2026.5.0"]);
     let cached = resolve_config(&config.display().to_string());
     let cached_input = cached
         .inputs
@@ -140,7 +143,8 @@ prefer_stable = true
 
 #[test]
 fn resolves_json_command_template_and_nonfatal_dynamic_inputs() {
-    let root = unique_git_repo("gaia-config-dynamic-input-json-command");
+    let scratch = unique_git_repo("gaia-config-dynamic-input-json-command");
+    let root = scratch.path();
     let json_path = root.join("releases.json");
     std::fs::write(
         &json_path,
@@ -239,7 +243,8 @@ on_error = "warn"
 fn command_dynamic_input_honors_timeout() {
     use std::os::unix::fs::PermissionsExt;
 
-    let root = unique_git_repo("gaia-config-dynamic-input-timeout");
+    let scratch = unique_git_repo("gaia-config-dynamic-input-timeout");
+    let root = scratch.path();
     let script_path = root.join("choices.sh");
     std::fs::write(&script_path, "#!/bin/sh\nsleep 10\n").expect("script");
     let mut permissions = std::fs::metadata(&script_path)
@@ -271,17 +276,11 @@ timeout_seconds = 1
     assert!(message.contains("timed out after 1s"), "{message}");
 }
 
-fn unique_git_repo(prefix: &str) -> PathBuf {
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!("{prefix}-{nonce}"));
-    std::fs::create_dir_all(&path).expect("git repo dir");
-    path
+fn unique_git_repo(prefix: &str) -> TempDir {
+    TempDir::new(prefix)
 }
 
-fn git(repo: &PathBuf, args: &[&str]) {
+fn git(repo: &Path, args: &[&str]) {
     let output = std::process::Command::new("git")
         .args(args)
         .current_dir(repo)

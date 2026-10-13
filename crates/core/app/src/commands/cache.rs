@@ -353,6 +353,7 @@ fn human(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
 
     fn entry(root: &Path, level: &str, package: &str, key: &str, size: u64) {
         let dir = root.join(level).join(package);
@@ -381,8 +382,8 @@ mod tests {
 
     #[test]
     fn single_entries_are_removed_without_touching_the_rest() {
-        let root = std::env::temp_dir().join(format!("gaia-cache-cmd-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
+        let scratch = TempDir::new("gaia-cache-cmd");
+        let root = scratch.join("cache");
         entry(&root, "system", "mesa3d", "aaaa1111", 10);
         entry(&root, "system", "mesa3d", "bbbb2222", 20);
         entry(&root, "system", "linux", "cccc3333", 30);
@@ -441,6 +442,5 @@ mod tests {
         .expect("clear");
         assert!(!root.join("project").exists());
         assert!(root.join("system/linux").is_dir());
-        let _ = fs::remove_dir_all(root);
     }
 }

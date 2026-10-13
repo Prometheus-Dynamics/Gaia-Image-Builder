@@ -175,19 +175,8 @@ fn artifact_state_contents(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
     use std::fs;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn temp_path(prefix: &str) -> PathBuf {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time")
-            .as_nanos();
-        std::env::temp_dir()
-            .join("gaia-tests")
-            .join(format!("{prefix}-{nonce}"))
-    }
 
     #[test]
     fn run_command_reports_missing_tool() {
@@ -228,7 +217,8 @@ mod tests {
 
     #[test]
     fn go_artifact_state_persists_backend_native_fields() {
-        let output_path = temp_path("gaia-go-provider-state");
+        let scratch = TempDir::new("gaia-go-provider-state");
+        let output_path = scratch.join("gaia-go-provider-state");
         fs::write(&output_path, "artifact").expect("output");
         let mut artifact = ArtifactSpec::new(
             "go-artifact",

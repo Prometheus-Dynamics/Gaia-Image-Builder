@@ -3,14 +3,12 @@ use gaia_config::{ResolveOptions, resolve_config_with_options};
 use gaia_image_providers::ImageProviderCatalog;
 use gaia_plan::{ExecutionPlan, ReuseState, operation_output_signature, spec_fingerprint};
 use gaia_source_providers::{SourceProvider, SourceProviderCatalog};
+use gaia_testkit::TempDir;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-static UNIQUE_COUNTER: AtomicU64 = AtomicU64::new(0);
+use std::time::Duration;
 
 pub fn default_config_path() -> String {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -19,22 +17,9 @@ pub fn default_config_path() -> String {
         .to_string()
 }
 
-pub fn unique_dir(prefix: &str) -> String {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time")
-        .as_nanos();
-    let count = UNIQUE_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir()
-        .join("gaia-tests")
-        .join(format!("{prefix}-{nonce}-{count}"))
-        .display()
-        .to_string()
-}
-
-pub fn test_spec() -> gaia_spec::ResolvedBuildSpec {
-    let build_dir = unique_dir("gaia-exec-build");
-    let out_dir = unique_dir("gaia-exec-out");
+pub fn test_spec(scratch: &TempDir) -> gaia_spec::ResolvedBuildSpec {
+    let build_dir = scratch.join("build").display().to_string();
+    let out_dir = scratch.join("out").display().to_string();
     resolve_config_with_options(
         &default_config_path(),
         &ResolveOptions {
@@ -56,9 +41,9 @@ pub fn test_spec() -> gaia_spec::ResolvedBuildSpec {
 /// tiny fixture crate instead of this repository. The default example's Rust artifact
 /// then compiles in seconds (instead of building all of Gaia) and nothing is written
 /// into the repository tree.
-pub fn fixture_spec() -> gaia_spec::ResolvedBuildSpec {
-    let root_dir = unique_dir("gaia-exec-fixture-root");
-    let root = PathBuf::from(&root_dir);
+pub fn fixture_spec(scratch: &TempDir) -> gaia_spec::ResolvedBuildSpec {
+    let root = scratch.join("root");
+    let root_dir = root.display().to_string();
     write_fixture_crate(&root);
     copy_dir_recursive(
         &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -72,11 +57,11 @@ pub fn fixture_spec() -> gaia_spec::ResolvedBuildSpec {
                 ("workspace.root_dir".into(), root_dir),
                 (
                     "workspace.build_dir".into(),
-                    unique_dir("gaia-exec-fixture-build"),
+                    scratch.join("build").display().to_string(),
                 ),
                 (
                     "workspace.out_dir".into(),
-                    unique_dir("gaia-exec-fixture-out"),
+                    scratch.join("out").display().to_string(),
                 ),
                 ("image.allow_fallback".into(), "true".into()),
                 (
@@ -124,16 +109,17 @@ pub fn provider_catalogs() -> (
     gaia_default_providers::provider_catalogs()
 }
 
-pub fn failing_spec() -> gaia_spec::ResolvedBuildSpec {
-    failing_spec_with_overrides(Vec::new())
+pub fn failing_spec(scratch: &TempDir) -> gaia_spec::ResolvedBuildSpec {
+    failing_spec_with_overrides(scratch, Vec::new())
 }
 
 pub fn artifact_failure_spec_with_overrides(
+    scratch: &TempDir,
     mut extra_overrides: Vec<(String, String)>,
 ) -> gaia_spec::ResolvedBuildSpec {
-    let build_dir = unique_dir("gaia-exec-artifact-fail-build");
-    let out_dir = unique_dir("gaia-exec-artifact-fail-out");
-    let root_dir = unique_dir("gaia-exec-artifact-fail-root");
+    let build_dir = scratch.join("build").display().to_string();
+    let out_dir = scratch.join("out").display().to_string();
+    let root_dir = scratch.join("root").display().to_string();
     fs::create_dir_all(PathBuf::from(&root_dir).join("src")).expect("artifact fail root src");
     fs::write(
         PathBuf::from(&root_dir).join("Cargo.toml"),
@@ -185,11 +171,12 @@ pub fn artifact_failure_spec_with_overrides(
 }
 
 pub fn failing_spec_with_overrides(
+    scratch: &TempDir,
     mut extra_overrides: Vec<(String, String)>,
 ) -> gaia_spec::ResolvedBuildSpec {
-    let build_dir = unique_dir("gaia-exec-fail-build");
-    let out_dir = unique_dir("gaia-exec-fail-out");
-    let missing_root = unique_dir("gaia-exec-missing-root");
+    let build_dir = scratch.join("build").display().to_string();
+    let out_dir = scratch.join("out").display().to_string();
+    let missing_root = scratch.join("missing-root").display().to_string();
     let mut explicit_overrides = vec![
         ("workspace.root_dir".into(), missing_root),
         ("workspace.build_dir".into(), build_dir),

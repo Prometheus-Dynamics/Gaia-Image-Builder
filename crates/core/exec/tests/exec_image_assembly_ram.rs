@@ -6,14 +6,15 @@ use gaia_spec::{
     AssemblyDiskPartitionSpec, AssemblyDiskSpec, AssemblyPartitionTableSpec, ImageAssemblySpec,
     ResolvedBuildSpec,
 };
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::Path;
 use support::{assembly_file, assembly_tree, provider_catalogs, test_spec};
 
 /// A disk built from a file in a tree, published to the collect dir. The
 /// tree is an intermediate: in RAM when the work dir says so.
-fn spec_with_work_dir(work_dir: &str) -> ResolvedBuildSpec {
-    let mut spec = test_spec();
+fn spec_with_work_dir(scratch: &TempDir, work_dir: &str) -> ResolvedBuildSpec {
+    let mut spec = test_spec(scratch);
     let build_dir = Path::new(&spec.workspace.build_dir);
     let out_dir = Path::new(&spec.workspace.out_dir);
     spec.image.output.collect_dir = Some(out_dir.join("images").display().to_string());
@@ -77,8 +78,9 @@ fn assemble(spec: &ResolvedBuildSpec) {
 
 #[test]
 fn ram_work_dir_publishes_the_same_disk_as_disk_mode() {
-    let ram = spec_with_work_dir("ram");
-    let disk = spec_with_work_dir("disk");
+    let scratch = TempDir::new("gaia-exec-test");
+    let ram = spec_with_work_dir(&scratch, "ram");
+    let disk = spec_with_work_dir(&scratch, "disk");
     assemble(&ram);
     assemble(&disk);
 

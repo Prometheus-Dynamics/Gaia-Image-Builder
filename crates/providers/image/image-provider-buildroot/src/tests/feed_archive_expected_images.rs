@@ -2,8 +2,10 @@ use super::*;
 
 #[test]
 fn collect_expected_images_reports_missing_required_output() {
-    let output_dir = temp_path("gaia-buildroot-collect-expected-missing");
-    let collect_dir = temp_path("gaia-buildroot-collect-expected-collect");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-collect-expected-missing");
+    let output_dir = output_dir_scratch.join("output_dir");
+    let collect_dir_scratch = TempDir::new("gaia-buildroot-collect-expected-collect");
+    let collect_dir = collect_dir_scratch.join("collect_dir");
     fs::create_dir_all(output_dir.join("images")).expect("images dir");
     fs::create_dir_all(&collect_dir).expect("collect dir");
     let image = ImageSpec {
@@ -37,8 +39,10 @@ fn collect_expected_images_reports_missing_required_output() {
 
 #[test]
 fn collect_expected_images_skips_required_output_generated_by_assembly() {
-    let output_dir = temp_path("gaia-buildroot-collect-assembly-output");
-    let collect_dir = temp_path("gaia-buildroot-collect-assembly-collect");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-collect-assembly-output");
+    let output_dir = output_dir_scratch.join("output_dir");
+    let collect_dir_scratch = TempDir::new("gaia-buildroot-collect-assembly-collect");
+    let collect_dir = collect_dir_scratch.join("collect_dir");
     fs::create_dir_all(output_dir.join("images")).expect("images dir");
     fs::write(output_dir.join("images/rootfs.tar"), "rootfs").expect("provider input");
     fs::create_dir_all(&collect_dir).expect("collect dir");
@@ -88,8 +92,10 @@ fn collect_expected_images_skips_required_output_generated_by_assembly() {
 
 #[test]
 fn collect_expected_images_copies_board_style_raw_image() {
-    let output_dir = temp_path("gaia-buildroot-collect-raw-output");
-    let collect_dir = temp_path("gaia-buildroot-collect-raw-collect");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-collect-raw-output");
+    let output_dir = output_dir_scratch.join("output_dir");
+    let collect_dir_scratch = TempDir::new("gaia-buildroot-collect-raw-collect");
+    let collect_dir = collect_dir_scratch.join("collect_dir");
     fs::create_dir_all(output_dir.join("images")).expect("images dir");
     fs::write(output_dir.join("images/sdcard.img"), "disk-image").expect("sdcard image");
     let image = ImageSpec {
@@ -122,8 +128,10 @@ fn collect_expected_images_copies_board_style_raw_image() {
 
 #[test]
 fn collect_expected_images_copies_raw_board_image_into_collect_dir() {
-    let output_dir = temp_path("gaia-buildroot-collect-raw-output");
-    let collect_dir = temp_path("gaia-buildroot-collect-raw-collect");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-collect-raw-output");
+    let output_dir = output_dir_scratch.join("output_dir");
+    let collect_dir_scratch = TempDir::new("gaia-buildroot-collect-raw-collect");
+    let collect_dir = collect_dir_scratch.join("collect_dir");
     let images_dir = output_dir.join("images");
     fs::create_dir_all(&images_dir).expect("images dir");
     fs::create_dir_all(&collect_dir).expect("collect dir");
@@ -158,8 +166,10 @@ fn collect_expected_images_copies_raw_board_image_into_collect_dir() {
 
 #[test]
 fn collect_expected_images_copies_required_cpio_image() {
-    let output_dir = temp_path("gaia-buildroot-collect-cpio-output");
-    let collect_dir = temp_path("gaia-buildroot-collect-cpio-collect");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-collect-cpio-output");
+    let output_dir = output_dir_scratch.join("output_dir");
+    let collect_dir_scratch = TempDir::new("gaia-buildroot-collect-cpio-collect");
+    let collect_dir = collect_dir_scratch.join("collect_dir");
     fs::create_dir_all(output_dir.join("images")).expect("images dir");
     fs::write(output_dir.join("images/rootfs.cpio.gz"), "cpio-image").expect("cpio image");
     let image = ImageSpec {
@@ -192,8 +202,10 @@ fn collect_expected_images_copies_required_cpio_image() {
 
 #[test]
 fn collect_expected_images_skips_missing_optional_cpio_image() {
-    let output_dir = temp_path("gaia-buildroot-collect-optional-cpio-output");
-    let collect_dir = temp_path("gaia-buildroot-collect-optional-cpio-collect");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-collect-optional-cpio-output");
+    let output_dir = output_dir_scratch.join("output_dir");
+    let collect_dir_scratch = TempDir::new("gaia-buildroot-collect-optional-cpio-collect");
+    let collect_dir = collect_dir_scratch.join("collect_dir");
     fs::create_dir_all(output_dir.join("images")).expect("images dir");
     let image = ImageSpec {
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
@@ -233,8 +245,10 @@ fn collect_expected_images_copies_ext2_and_ext3_images() {
             "ext3-image",
         ),
     ] {
-        let output_dir = temp_path(&format!("gaia-buildroot-collect-{name}-output"));
-        let collect_dir = temp_path(&format!("gaia-buildroot-collect-{name}-collect"));
+        let output_dir_scratch = TempDir::new(&format!("gaia-buildroot-collect-{name}-output"));
+        let output_dir = output_dir_scratch.join("output_dir");
+        let collect_dir_scratch = TempDir::new(&format!("gaia-buildroot-collect-{name}-collect"));
+        let collect_dir = collect_dir_scratch.join("collect_dir");
         fs::create_dir_all(output_dir.join("images")).expect("images dir");
         fs::write(output_dir.join("images").join(name), contents).expect("ext image");
         let image = ImageSpec {
@@ -272,8 +286,12 @@ fn collect_expected_images_skips_missing_optional_ext2_and_ext3_images() {
         (BuildrootExpectedImageFormatSpec::Ext2, "rootfs.ext2"),
         (BuildrootExpectedImageFormatSpec::Ext3, "rootfs.ext3"),
     ] {
-        let output_dir = temp_path(&format!("gaia-buildroot-collect-optional-{name}-output"));
-        let collect_dir = temp_path(&format!("gaia-buildroot-collect-optional-{name}-collect"));
+        let output_dir_scratch =
+            TempDir::new(&format!("gaia-buildroot-collect-optional-{name}-output"));
+        let output_dir = output_dir_scratch.join("output_dir");
+        let collect_dir_scratch =
+            TempDir::new(&format!("gaia-buildroot-collect-optional-{name}-collect"));
+        let collect_dir = collect_dir_scratch.join("collect_dir");
         fs::create_dir_all(output_dir.join("images")).expect("images dir");
         let image = ImageSpec {
             definition: ImageDefinition::Buildroot(BuildrootImageSpec {
@@ -324,8 +342,10 @@ fn collect_expected_images_copies_flash_and_erofs_images() {
             "erofs-image",
         ),
     ] {
-        let output_dir = temp_path(&format!("gaia-buildroot-collect-{name}-output"));
-        let collect_dir = temp_path(&format!("gaia-buildroot-collect-{name}-collect"));
+        let output_dir_scratch = TempDir::new(&format!("gaia-buildroot-collect-{name}-output"));
+        let output_dir = output_dir_scratch.join("output_dir");
+        let collect_dir_scratch = TempDir::new(&format!("gaia-buildroot-collect-{name}-collect"));
+        let collect_dir = collect_dir_scratch.join("collect_dir");
         fs::create_dir_all(output_dir.join("images")).expect("images dir");
         fs::write(output_dir.join("images").join(name), contents).expect("image");
         let image = ImageSpec {
@@ -365,8 +385,12 @@ fn collect_expected_images_skips_missing_optional_flash_and_erofs_images() {
         (BuildrootExpectedImageFormatSpec::Jffs2, "rootfs.jffs2"),
         (BuildrootExpectedImageFormatSpec::Erofs, "rootfs.erofs"),
     ] {
-        let output_dir = temp_path(&format!("gaia-buildroot-collect-optional-{name}-output"));
-        let collect_dir = temp_path(&format!("gaia-buildroot-collect-optional-{name}-collect"));
+        let output_dir_scratch =
+            TempDir::new(&format!("gaia-buildroot-collect-optional-{name}-output"));
+        let output_dir = output_dir_scratch.join("output_dir");
+        let collect_dir_scratch =
+            TempDir::new(&format!("gaia-buildroot-collect-optional-{name}-collect"));
+        let collect_dir = collect_dir_scratch.join("collect_dir");
         fs::create_dir_all(output_dir.join("images")).expect("images dir");
         let image = ImageSpec {
             definition: ImageDefinition::Buildroot(BuildrootImageSpec {
@@ -422,8 +446,10 @@ fn collect_expected_images_copies_lower_priority_images() {
             "btrfs-image",
         ),
     ] {
-        let output_dir = temp_path(&format!("gaia-buildroot-collect-{name}-output"));
-        let collect_dir = temp_path(&format!("gaia-buildroot-collect-{name}-collect"));
+        let output_dir_scratch = TempDir::new(&format!("gaia-buildroot-collect-{name}-output"));
+        let output_dir = output_dir_scratch.join("output_dir");
+        let collect_dir_scratch = TempDir::new(&format!("gaia-buildroot-collect-{name}-collect"));
+        let collect_dir = collect_dir_scratch.join("collect_dir");
         fs::create_dir_all(output_dir.join("images")).expect("images dir");
         fs::write(output_dir.join("images").join(name), contents).expect("image");
         let image = ImageSpec {
@@ -464,8 +490,12 @@ fn collect_expected_images_skips_missing_optional_lower_priority_images() {
         (BuildrootExpectedImageFormatSpec::F2fs, "rootfs.f2fs"),
         (BuildrootExpectedImageFormatSpec::Btrfs, "rootfs.btrfs"),
     ] {
-        let output_dir = temp_path(&format!("gaia-buildroot-collect-optional-{name}-output"));
-        let collect_dir = temp_path(&format!("gaia-buildroot-collect-optional-{name}-collect"));
+        let output_dir_scratch =
+            TempDir::new(&format!("gaia-buildroot-collect-optional-{name}-output"));
+        let output_dir = output_dir_scratch.join("output_dir");
+        let collect_dir_scratch =
+            TempDir::new(&format!("gaia-buildroot-collect-optional-{name}-collect"));
+        let collect_dir = collect_dir_scratch.join("collect_dir");
         fs::create_dir_all(output_dir.join("images")).expect("images dir");
         let image = ImageSpec {
             definition: ImageDefinition::Buildroot(BuildrootImageSpec {

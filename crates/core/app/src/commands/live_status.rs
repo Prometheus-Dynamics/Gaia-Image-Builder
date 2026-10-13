@@ -465,6 +465,7 @@ pub(crate) fn fixture_status() -> LiveStatus {
 mod tests {
     use super::*;
     use gaia_plan::OperationId;
+    use gaia_testkit::TempDir;
 
     fn id(value: &str) -> OperationId {
         OperationId::new(value)
@@ -474,12 +475,8 @@ mod tests {
         read_json(&build_dir.join(STATUS_FILE))
     }
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("gaia-live-status-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("temp dir");
-        dir
+    fn temp_dir(name: &str) -> TempDir {
+        TempDir::new(&format!("gaia-live-status-{name}"))
     }
 
     fn recorder(dir: &Path) -> LiveRecorder {
@@ -513,7 +510,8 @@ mod tests {
 
     #[test]
     fn recorder_writes_on_start_and_throttles_log_updates() {
-        let dir = temp_dir("throttle");
+        let dir_scratch = temp_dir("throttle");
+        let dir = dir_scratch.path().to_path_buf();
         let mut live = recorder(&dir);
         let start = Instant::now();
         live.record(&ExecutionEvent::Started {
@@ -542,12 +540,12 @@ mod tests {
         // No temp file is left behind by the atomic rename.
         assert!(status_path.exists());
         assert!(!dir.join(format!("{STATUS_FILE}.tmp")).exists());
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn lifecycle_events_are_written_at_once() {
-        let dir = temp_dir("urgent");
+        let dir_scratch = temp_dir("urgent");
+        let dir = dir_scratch.path().to_path_buf();
         let mut live = recorder(&dir);
         let start = Instant::now();
         live.flush(start);
@@ -565,12 +563,12 @@ mod tests {
         assert!(status.running.is_empty());
         assert_eq!(status.finished.done, 1);
         assert_eq!(status.ops_done, 1);
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn finish_leaves_last_snapshot_and_removes_live_file() {
-        let dir = temp_dir("finish");
+        let dir_scratch = temp_dir("finish");
+        let dir = dir_scratch.path().to_path_buf();
         let mut live = recorder(&dir);
         live.record(&ExecutionEvent::Started {
             operation_id: id("a"),
@@ -594,12 +592,12 @@ mod tests {
         assert_eq!(last.status.finished.failed, 1);
         assert_eq!(last.status.failed, vec!["a".to_string()]);
         assert_eq!(last.errors, errors);
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn last_snapshot_without_errors_field_still_reads() {
-        let dir = temp_dir("old-last");
+        let dir_scratch = temp_dir("old-last");
+        let dir = dir_scratch.path().to_path_buf();
         let mut value = serde_json::to_value(LastRun {
             outcome: "failed".into(),
             ended_at: 1_200,
@@ -611,12 +609,12 @@ mod tests {
         fs::write(dir.join(LAST_FILE), value.to_string()).expect("write");
         let last = read_last(&dir).expect("old snapshot");
         assert!(last.errors.is_empty());
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn build_progress_is_kept_on_the_running_operation() {
-        let dir = temp_dir("progress");
+        let dir_scratch = temp_dir("progress");
+        let dir = dir_scratch.path().to_path_buf();
         let mut live = recorder(&dir);
         live.record(&ExecutionEvent::Started {
             operation_id: id("image"),
@@ -634,6 +632,5 @@ mod tests {
             (12, 40, Some(300))
         );
         assert_eq!(build.active, vec!["linux", "mesa3d"]);
-        let _ = fs::remove_dir_all(dir);
     }
 }

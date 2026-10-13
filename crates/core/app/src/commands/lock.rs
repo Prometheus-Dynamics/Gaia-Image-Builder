@@ -154,6 +154,7 @@ fn lock_build(
 mod tests {
     use super::*;
     use gaia_spec::{GitSourceSpec, SourcePinPolicySpec, SourceRefreshPolicySpec, SourceSpec};
+    use gaia_testkit::TempDir;
     use std::cell::Cell;
     use std::fs;
 
@@ -182,9 +183,8 @@ mod tests {
 
     #[test]
     fn lock_keeps_existing_entries_and_updates_only_named_sources() {
-        let dir =
-            std::env::temp_dir().join(format!("gaia-app-lock-{}-{}", std::process::id(), line!()));
-        let _ = fs::remove_dir_all(&dir);
+        let scratch = TempDir::new("gaia-app-lock");
+        let dir = scratch.path().to_path_buf();
         fs::create_dir_all(&dir).expect("dir");
         let spec = spec_with_sources(&dir);
         let round = Cell::new(0);
@@ -243,6 +243,5 @@ mod tests {
             .expect("load")
             .expect("present");
         assert_eq!(lock.git.len(), 1);
-        let _ = fs::remove_dir_all(dir);
     }
 }

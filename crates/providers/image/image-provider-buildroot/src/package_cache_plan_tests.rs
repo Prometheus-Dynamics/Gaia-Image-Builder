@@ -1,14 +1,16 @@
 //! The plans `gaia preview` shows are the ones the cache performs: the restore
 //! plan is `restore_except`'s, the eviction list is `evict`'s.
-use super::tests::{built_tree, cache_graph, temp, test_cache, tools_available};
+use super::tests::{built_tree, cache_graph, test_cache, tools_available};
 use super::*;
+use gaia_testkit::TempDir;
 
 #[test]
 fn the_preview_restores_what_restore_except_restores() {
     if !tools_available() {
         return;
     }
-    let root = temp("restore-plan");
+    let root_scratch = TempDir::new("restore-plan");
+    let root = root_scratch.join("root");
     let cache = test_cache(&root, &[]);
     let first = root.join("first");
     built_tree(&first, b"app binary");
@@ -35,7 +37,6 @@ fn the_preview_restores_what_restore_except_restores() {
         let restored = cache.restore_except(&second, &graph, &keys, &excluded);
         assert_eq!(restored, planned, "excluded {excluded:?}");
     }
-    let _ = fs::remove_dir_all(root);
 }
 
 /// Every cache entry directory under the cache's levels.
@@ -62,7 +63,8 @@ fn preview_evictions_are_the_entries_eviction_removes() {
     if !tools_available() {
         return;
     }
-    let root = temp("evictions");
+    let root_scratch = TempDir::new("evictions");
+    let root = root_scratch.join("root");
     let mut cache = test_cache(&root, &[]);
     let first = root.join("first");
     built_tree(&first, b"app binary");
@@ -88,5 +90,4 @@ fn preview_evictions_are_the_entries_eviction_removes() {
     let after = cached_entries(&cache);
     let removed = before.difference(&after).cloned().collect::<BTreeSet<_>>();
     assert_eq!(removed, previewed);
-    let _ = fs::remove_dir_all(root);
 }

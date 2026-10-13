@@ -5,19 +5,8 @@ use gaia_spec::{
     SourceDefinition, SourceRef, SourceSpec, StageContentOriginSpec, StageEnvSetSpec,
     StageFileSpec, StageServiceSpec, StartingPointImageSpec,
 };
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
-fn unique_dir(label: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_nanos();
-    let path = std::env::temp_dir()
-        .join("gaia-tests")
-        .join(format!("{label}-{nonce}"));
-    fs::create_dir_all(&path).expect("unique dir");
-    path
-}
+use gaia_testkit::TempDir;
+use std::time::{Duration, Instant};
 
 mod command;
 mod packages;

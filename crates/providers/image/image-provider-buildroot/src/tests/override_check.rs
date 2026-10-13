@@ -95,7 +95,8 @@ fn requested_n_fails_when_the_symbol_stays_enabled() {
 
 #[test]
 fn error_policy_fails_before_make_and_lists_every_dropped_symbol() {
-    let workspace = temp_path("gaia-override-check-error");
+    let workspace_scratch = TempDir::new("gaia-override-check-error");
+    let workspace = workspace_scratch.join("workspace");
     let buildroot_dir = write_buildroot_source(
         &workspace,
         "build",
@@ -139,7 +140,8 @@ fn error_policy_fails_before_make_and_lists_every_dropped_symbol() {
 
 #[test]
 fn warn_policy_builds_and_reports_warnings_on_the_result() {
-    let workspace = temp_path("gaia-override-check-warn");
+    let workspace_scratch = TempDir::new("gaia-override-check-warn");
+    let workspace = workspace_scratch.join("workspace");
     write_buildroot_source(
         &workspace,
         "build",
@@ -167,7 +169,8 @@ fn warn_policy_builds_and_reports_warnings_on_the_result() {
 
 #[test]
 fn off_policy_and_honored_overrides_produce_no_warnings() {
-    let workspace = temp_path("gaia-override-check-off");
+    let workspace_scratch = TempDir::new("gaia-override-check-off");
+    let workspace = workspace_scratch.join("workspace");
     write_buildroot_source(
         &workspace,
         "build",
@@ -197,7 +200,8 @@ fn off_policy_and_honored_overrides_produce_no_warnings() {
 
 #[test]
 fn shared_output_tree_is_checked_too() {
-    let workspace = temp_path("gaia-override-check-shared");
+    let workspace_scratch = TempDir::new("gaia-override-check-shared");
+    let workspace = workspace_scratch.join("workspace");
     write_buildroot_source(
         &workspace,
         "build",

@@ -18,6 +18,7 @@ serde_json.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+gaia-testkit.workspace = true
 gaia-artifact-providers.workspace = true
 gaia-config.workspace = true
 gaia-default-providers.workspace = true

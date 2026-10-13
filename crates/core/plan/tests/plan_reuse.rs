@@ -8,14 +8,16 @@ use gaia_spec::{
     AssemblyDiskPartitionSpec, AssemblyDiskSpec, AssemblyFileSpec, AssemblyPartitionTableSpec,
     AssemblyTreeSpec, ImageAssemblySpec,
 };
+use gaia_testkit::TempDir;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
-use support::{provider_catalogs, test_spec, test_spec_with_root, unique_dir};
+use support::{provider_catalogs, test_spec, test_spec_with_root};
 
 #[test]
 fn default_plan_reuses_operations_when_state_matches() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     fs::create_dir_all(PathBuf::from(&spec.workspace.build_dir).join("sources/gaia-upstream"))
         .expect("gaia-upstream source dir");
@@ -137,7 +139,8 @@ fn default_plan_reuses_operations_when_state_matches() {
 
 #[test]
 fn plan_rebuilds_when_materialized_outputs_are_missing_even_if_state_matches() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
     let reused_ids = [
@@ -196,7 +199,8 @@ fn plan_rebuilds_when_materialized_outputs_are_missing_even_if_state_matches() {
 
 #[test]
 fn plan_rebuilds_when_runtime_state_files_are_missing_even_if_other_outputs_exist() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     fs::create_dir_all(PathBuf::from(&spec.workspace.build_dir).join("sources/gaia-upstream"))
         .expect("gaia-upstream source dir");
@@ -326,7 +330,8 @@ fn plan_rebuilds_when_runtime_state_files_are_missing_even_if_other_outputs_exis
 
 #[test]
 fn plan_rebuilds_assembly_when_runtime_state_is_missing_even_if_outputs_exist() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = PathBuf::from(&spec.workspace.build_dir);
     let source_dir = build_dir.join("assembly-source");
     let tree_dir = build_dir.join("assembly-tree");
@@ -396,9 +401,13 @@ fn plan_rebuilds_assembly_when_runtime_state_is_missing_even_if_outputs_exist() 
 
 #[test]
 fn plan_rebuilds_assembly_when_direct_partition_image_changes() {
-    let root_dir = unique_dir("gaia-plan-assembly-reuse-partition-root");
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch
+        .join("gaia-plan-assembly-reuse-partition-root")
+        .display()
+        .to_string();
     fs::create_dir_all(&root_dir).expect("root dir");
-    let mut spec = test_spec_with_root(root_dir);
+    let mut spec = test_spec_with_root(&scratch, root_dir);
     let partition_image = gaia_spec::resolve_workspace_path(&spec.workspace, "@assets/rootfs.img")
         .expect("asset path");
     fs::create_dir_all(partition_image.parent().expect("asset parent")).expect("assets dir");
@@ -552,7 +561,8 @@ fn materialize_reusable_test_outputs(spec: &gaia_spec::ResolvedBuildSpec) {
 
 #[test]
 fn stale_spec_fingerprint_still_reuses_unchanged_operation_fingerprints() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let mut spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     materialize_reusable_test_outputs(&spec);
     let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
@@ -656,7 +666,8 @@ fn reuse_of<'plan>(plan: &'plan gaia_plan::ExecutionPlan, id: &str) -> &'plan Op
 
 #[test]
 fn operation_reruns_when_reused_inputs_changed_since_it_last_ran() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     materialize_reusable_test_outputs(&spec);
     let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
@@ -699,7 +710,8 @@ fn operation_reruns_when_reused_inputs_changed_since_it_last_ran() {
 
 #[test]
 fn dependency_rebuild_offers_early_cutoff_with_recorded_input_signature() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     materialize_reusable_test_outputs(&spec);
     let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);

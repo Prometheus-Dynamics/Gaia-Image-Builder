@@ -170,8 +170,6 @@ when = { branch = "main" }
             .collect::<Vec<_>>(),
         vec!["svc-kept"]
     );
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -212,6 +210,4 @@ when = { target = "rpi5" }
 
     assert_eq!(spec.artifacts.len(), 1);
     assert_eq!(spec.artifacts[0].id.as_str(), "selected");
-
-    let _ = std::fs::remove_file(path);
 }

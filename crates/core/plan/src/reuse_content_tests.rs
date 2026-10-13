@@ -1,17 +1,12 @@
 use super::*;
 use gaia_image_providers::{CONTENT_DIGESTS_FILE, record_collect_dir_digests};
+use gaia_testkit::TempDir;
 use std::time::{Duration, SystemTime};
 
 const FAKE_DIGEST: &str = "ab";
 
-fn temp_collect_dir(name: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time")
-        .as_nanos();
-    let dir = std::env::temp_dir()
-        .join("gaia-reuse-content-tests")
-        .join(format!("{name}-{nonce}"));
+fn temp_collect_dir(scratch: &TempDir, name: &str) -> PathBuf {
+    let dir = scratch.join(name);
     fs::create_dir_all(&dir).expect("collect dir");
     dir
 }
@@ -22,7 +17,8 @@ fn fake_digest() -> String {
 
 #[test]
 fn recorded_manifest_signature_equals_hashed_signature() {
-    let dir = temp_collect_dir("equals-hash");
+    let scratch = TempDir::new("gaia-plan");
+    let dir = temp_collect_dir(&scratch, "equals-hash");
     let image = dir.join("disk.img");
     fs::write(&image, b"image bytes").expect("image");
     let hashed = content_state_signature(&image);
@@ -34,7 +30,8 @@ fn recorded_manifest_signature_equals_hashed_signature() {
 
 #[test]
 fn collect_dir_digest_ignores_the_manifest_itself() {
-    let dir = temp_collect_dir("manifest-excluded");
+    let scratch = TempDir::new("gaia-plan");
+    let dir = temp_collect_dir(&scratch, "manifest-excluded");
     fs::write(dir.join("disk.img"), b"image bytes").expect("image");
     fs::write(dir.join("image-provider.txt"), b"provider=x\n").expect("marker");
     let before = collect_dir_digest(&dir);
@@ -47,7 +44,8 @@ fn collect_dir_digest_ignores_the_manifest_itself() {
 
 #[test]
 fn recorded_digest_is_used_without_reading_the_file() {
-    let dir = temp_collect_dir("recorded-wins");
+    let scratch = TempDir::new("gaia-plan");
+    let dir = temp_collect_dir(&scratch, "recorded-wins");
     let image = dir.join("disk.img");
     fs::write(&image, b"image bytes").expect("image");
     record_collect_dir_digests(&dir).expect("record");
@@ -68,7 +66,8 @@ fn recorded_digest_is_used_without_reading_the_file() {
 
 #[test]
 fn changed_mtime_forces_a_rehash() {
-    let dir = temp_collect_dir("mtime-rehash");
+    let scratch = TempDir::new("gaia-plan");
+    let dir = temp_collect_dir(&scratch, "mtime-rehash");
     let image = dir.join("disk.img");
     fs::write(&image, b"image bytes").expect("image");
     record_collect_dir_digests(&dir).expect("record");
@@ -97,7 +96,8 @@ fn changed_mtime_forces_a_rehash() {
 
 #[test]
 fn changed_size_forces_a_rehash() {
-    let dir = temp_collect_dir("size-rehash");
+    let scratch = TempDir::new("gaia-plan");
+    let dir = temp_collect_dir(&scratch, "size-rehash");
     let image = dir.join("disk.img");
     fs::write(&image, b"image bytes").expect("image");
     record_collect_dir_digests(&dir).expect("record");

@@ -96,16 +96,10 @@ pub(crate) fn check_kernel_modules_installed(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
 
-    fn tree(installed: usize) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "gaia-kernel-modules-{installed}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time")
-                .as_nanos()
-        ));
+    fn tree(installed: usize) -> TempDir {
+        let dir = TempDir::new(&format!("gaia-kernel-modules-{installed}"));
         let linux = dir.join("build/linux-6.12.20");
         fs::create_dir_all(&linux).expect("linux build dir");
         fs::create_dir_all(dir.join("build/linux-firmware-2025")).expect("firmware dir");
@@ -124,40 +118,40 @@ mod tests {
 
     #[test]
     fn partial_module_install_fails_by_default() {
-        let dir = tree(1);
-        let error = check_kernel_modules_installed(&dir, BuildrootOverrideCheckSpec::Error)
+        let scratch = tree(1);
+        let dir = scratch.path();
+        let error = check_kernel_modules_installed(dir, BuildrootOverrideCheckSpec::Error)
             .expect_err("partial install must fail");
         assert!(
             error.message.contains("1 of the 3 kernel modules"),
             "{error:?}"
         );
-        let warnings = check_kernel_modules_installed(&dir, BuildrootOverrideCheckSpec::Warn)
+        let warnings = check_kernel_modules_installed(dir, BuildrootOverrideCheckSpec::Warn)
             .expect("warn mode");
         assert_eq!(warnings.len(), 1);
         assert!(
-            check_kernel_modules_installed(&dir, BuildrootOverrideCheckSpec::Off)
+            check_kernel_modules_installed(dir, BuildrootOverrideCheckSpec::Off)
                 .expect("off")
                 .is_empty()
         );
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn complete_install_or_no_modular_kernel_passes() {
-        let dir = tree(3);
+        let scratch = tree(3);
+        let dir = scratch.path();
         assert!(
-            check_kernel_modules_installed(&dir, BuildrootOverrideCheckSpec::Error)
+            check_kernel_modules_installed(dir, BuildrootOverrideCheckSpec::Error)
                 .expect("complete")
                 .is_empty()
         );
-        let _ = fs::remove_dir_all(&dir);
-        let empty = std::env::temp_dir().join(format!("gaia-no-kernel-{}", std::process::id()));
+        let empty_scratch = TempDir::new("gaia-no-kernel");
+        let empty = empty_scratch.path();
         fs::create_dir_all(empty.join("build")).expect("build dir");
         assert!(
-            check_kernel_modules_installed(&empty, BuildrootOverrideCheckSpec::Error)
+            check_kernel_modules_installed(empty, BuildrootOverrideCheckSpec::Error)
                 .expect("no kernel")
                 .is_empty()
         );
-        let _ = fs::remove_dir_all(empty);
     }
 }

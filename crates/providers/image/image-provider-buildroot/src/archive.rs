@@ -501,6 +501,7 @@ fn publish_archive_output(temp: &Path, output: &Path) -> Result<(), ImageProvide
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
 
     fn tool_installed(tool: &str) -> bool {
         Command::new(tool).arg("--version").output().is_ok()
@@ -516,11 +517,8 @@ mod tests {
                 eprintln!("skipping archive step-time test: '{tool}' is not installed");
                 continue;
             }
-            let dir = std::env::temp_dir().join(format!(
-                "gaia-archive-step-time-{tool}-{}",
-                std::process::id()
-            ));
-            fs::create_dir_all(&dir).expect("test dir");
+            let scratch = TempDir::new(&format!("gaia-archive-step-time-{tool}"));
+            let dir = scratch.path().to_path_buf();
             let source = dir.join("helios.img");
             fs::write(&source, "raw image ".repeat(4096)).expect("raw image");
             let archive = dir.join(format!("helios.img.{extension}"));
@@ -555,7 +553,6 @@ mod tests {
                 }),
                 "missing size line in {messages:?}"
             );
-            fs::remove_dir_all(&dir).expect("cleanup");
         }
     }
 

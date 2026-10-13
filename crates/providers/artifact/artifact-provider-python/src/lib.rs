@@ -216,18 +216,8 @@ fn artifact_state_contents(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn temp_path(prefix: &str) -> PathBuf {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time")
-            .as_nanos();
-        std::env::temp_dir()
-            .join("gaia-tests")
-            .join(format!("{prefix}-{nonce}"))
-    }
 
     #[test]
     fn run_command_reports_missing_tool() {
@@ -268,7 +258,8 @@ mod tests {
 
     #[test]
     fn python_artifact_state_persists_backend_native_fields() {
-        let output_path = temp_path("gaia-python-provider-state");
+        let scratch = TempDir::new("gaia-python-provider-state");
+        let output_path = scratch.join("gaia-python-provider-state");
         fs::write(&output_path, "artifact").expect("output");
         let artifact = ArtifactSpec::new(
             "python-artifact",
@@ -327,6 +318,7 @@ mod tests {
 
     #[test]
     fn execute_artifact_rejects_target_override() {
+        let scratch = TempDir::new("gaia-python-provider-src");
         let mut artifact = ArtifactSpec::new(
             "python-targeted",
             ArtifactDefinition::Python(gaia_spec::PythonArtifactSpec {
@@ -340,7 +332,12 @@ mod tests {
         artifact.target = Some("linux/arm64".into());
         let contract = ArtifactExecutionContract::from_spec(
             &artifact,
-            Some(temp_path("gaia-python-provider-src").display().to_string()),
+            Some(
+                scratch
+                    .join("gaia-python-provider-src")
+                    .display()
+                    .to_string(),
+            ),
             false,
             ArtifactExecutionContract::default_command_policy(),
             gaia_spec::OutputRetentionPolicySpec::default(),

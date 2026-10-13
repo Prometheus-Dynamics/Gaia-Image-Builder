@@ -1,16 +1,11 @@
 use super::{COMMAND_SIGNATURE_TIMEOUT_SECONDS, command_signature};
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::PathBuf;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
-fn temp_script(name: &str, contents: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time")
-        .as_nanos();
-    let path = std::env::temp_dir()
-        .join("gaia-tests")
-        .join(format!("{name}-{nonce}.sh"));
+fn temp_script(scratch: &TempDir, name: &str, contents: &str) -> PathBuf {
+    let path = scratch.join(format!("{name}.sh"));
     fs::create_dir_all(path.parent().expect("script parent")).expect("script parent");
     fs::write(&path, contents).expect("script");
     #[cfg(unix)]
@@ -25,7 +20,9 @@ fn temp_script(name: &str, contents: &str) -> PathBuf {
 
 #[test]
 fn command_signature_returns_tool_output() {
+    let scratch = TempDir::new("gaia-plan");
     let script = temp_script(
+        &scratch,
         "gaia-command-signature-version",
         "#!/bin/sh\necho version-1\n",
     );
@@ -40,7 +37,9 @@ fn command_signature_returns_tool_output() {
 
 #[test]
 fn command_signature_times_out_hanging_tools() {
+    let scratch = TempDir::new("gaia-plan");
     let script = temp_script(
+        &scratch,
         "gaia-command-signature-hang",
         "#!/bin/sh\nsleep 30\necho never\n",
     );
@@ -63,11 +62,8 @@ fn command_signature_times_out_hanging_tools() {
 #[test]
 fn content_state_signature_ignores_path_and_mtime() {
     use super::content_state_signature;
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("gaia-content-signature-{nonce}"));
+    let scratch = TempDir::new("gaia-content-signature");
+    let root = scratch.join("root");
     let first_dir = root.join("first");
     let second_dir = root.join("second");
     fs::create_dir_all(&first_dir).expect("first dir");
@@ -105,5 +101,4 @@ fn content_state_signature_ignores_path_and_mtime() {
         content_state_signature(&root.join("absent")),
         "missing:absent"
     );
-    let _ = fs::remove_dir_all(root);
 }

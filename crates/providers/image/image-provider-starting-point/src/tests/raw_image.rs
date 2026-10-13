@@ -26,7 +26,8 @@ fn choose_image_partition_prefers_largest_non_vfat_partition() {
 
 #[test]
 fn starting_point_raw_image_rejects_read_only_overlay_before_root_check() {
-    let root = unique_dir("gaia-starting-point-raw-readonly");
+    let scratch = TempDir::new("gaia-starting-point-raw-readonly");
+    let root = scratch.path().to_path_buf();
     let image_path = root.join("base.img");
     fs::write(&image_path, "img").expect("image file");
 

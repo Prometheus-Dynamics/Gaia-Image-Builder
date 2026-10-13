@@ -2,7 +2,8 @@ use super::*;
 
 #[test]
 fn command_for_execution_wraps_docker_backend() {
-    let workspace_root = temp_path("gaia-buildroot-docker-workspace");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-docker-workspace");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
     let buildroot_dir = workspace_root.join("buildroot");
     let output_dir = workspace_root.join("output");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
@@ -31,8 +32,10 @@ fn command_for_execution_wraps_docker_backend() {
 
 #[test]
 fn execute_image_refuses_implicit_buildroot_fallback() {
-    let workspace_root = temp_path("gaia-buildroot-no-fallback-workspace");
-    let collect_dir = temp_path("gaia-buildroot-no-fallback-collect");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-no-fallback-workspace");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
+    let collect_dir_scratch = TempDir::new("gaia-buildroot-no-fallback-collect");
+    let collect_dir = collect_dir_scratch.join("collect_dir");
     let spec = ResolvedBuildSpec {
         workspace: gaia_spec::WorkspaceSpec {
             root_dir: workspace_root.display().to_string(),
@@ -83,7 +86,8 @@ fn execute_image_refuses_implicit_buildroot_fallback() {
 
 #[test]
 fn prepare_operation_reruns_even_when_expected_buildroot_images_exist() {
-    let workspace_root = temp_path("gaia-buildroot-prepare-reuse-workspace");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-prepare-reuse-workspace");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
     let build_dir = workspace_root.join("build");
     let source_dir = build_dir.join("sources").join("buildroot-source");
     let collect_dir = workspace_root.join("out").join("images");
@@ -152,7 +156,8 @@ fn prepare_operation_reruns_even_when_expected_buildroot_images_exist() {
 
 #[test]
 fn build_operation_applies_config_overrides_when_expected_images_exist() {
-    let workspace_root = temp_path("gaia-buildroot-existing-output-config-workspace");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-existing-output-config-workspace");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
     let build_dir = workspace_root.join("build");
     let source_dir = build_dir.join("sources").join("buildroot-source");
     let collect_dir = workspace_root.join("out").join("images");
@@ -234,7 +239,8 @@ fn build_operation_applies_config_overrides_when_expected_images_exist() {
 
 #[test]
 fn prepare_operation_does_not_reuse_partial_target_tree() {
-    let workspace_root = temp_path("gaia-buildroot-prepare-partial-workspace");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-prepare-partial-workspace");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
     let build_dir = workspace_root.join("build");
     let source_dir = build_dir.join("sources").join("buildroot-source");
     let collect_dir = workspace_root.join("out").join("images");
@@ -292,7 +298,8 @@ fn prepare_operation_does_not_reuse_partial_target_tree() {
 
 #[test]
 fn build_operation_reruns_when_assembly_provider_input_is_missing() {
-    let workspace_root = temp_path("gaia-buildroot-assembly-input-workspace");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-assembly-input-workspace");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
     let build_dir = workspace_root.join("build");
     let source_dir = build_dir.join("sources").join("buildroot-source");
     let collect_dir = workspace_root.join("out").join("images");
@@ -380,7 +387,8 @@ fn build_operation_reruns_when_assembly_provider_input_is_missing() {
 
 #[test]
 fn direct_squashfs_refresh_reuses_prepared_target_without_make() {
-    let workspace_root = temp_path("gaia-buildroot-direct-squashfs-workspace");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-direct-squashfs-workspace");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
     let buildroot_dir = workspace_root.join("buildroot");
     let output_dir = workspace_root.join("out/buildroot-output");
     let source_target_dir = output_dir.join("target");
@@ -450,7 +458,8 @@ fn direct_squashfs_refresh_reuses_prepared_target_without_make() {
 
 #[test]
 fn copy_path_preserves_symlinks_in_rootfs_tree() {
-    let root = temp_path("gaia-buildroot-copy-symlink");
+    let root_scratch = TempDir::new("gaia-buildroot-copy-symlink");
+    let root = root_scratch.join("root");
     let src_dir = root.join("src");
     let dest_dir = root.join("dest");
     fs::create_dir_all(src_dir.join("dev")).expect("src dev dir");
@@ -471,7 +480,8 @@ fn copy_path_preserves_symlinks_in_rootfs_tree() {
 
 #[test]
 fn ensure_fakeroot_chown_paths_exist_creates_missing_directories() {
-    let root = temp_path("gaia-buildroot-fakeroot-paths");
+    let root_scratch = TempDir::new("gaia-buildroot-fakeroot-paths");
+    let root = root_scratch.join("root");
     let staged_target_dir = root.join("target");
     fs::create_dir_all(&staged_target_dir).expect("staged target dir");
     let fakeroot_script = root.join("fakeroot");

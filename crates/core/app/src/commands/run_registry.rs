@@ -388,13 +388,11 @@ pub(crate) fn fixture_registered_run(pid: u32, display_name: &str) -> Registered
 mod tests {
     use super::*;
     use crate::commands::live_status::{FinishedCounts, LiveStatus};
+    use gaia_testkit::TempDir;
     use std::process::Command;
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = env::temp_dir().join(format!("gaia-run-registry-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("temp dir");
-        dir
+    fn temp_dir(name: &str) -> TempDir {
+        TempDir::new(&format!("gaia-run-registry-{name}"))
     }
 
     /// A pid of a process that has exited and been reaped: certainly dead.
@@ -452,7 +450,8 @@ mod tests {
 
     #[test]
     fn registration_is_written_and_removed_on_drop() {
-        let dir = temp_dir("write-remove");
+        let dir_scratch = temp_dir("write-remove");
+        let dir = dir_scratch.path().to_path_buf();
         let run = fixture_registered_run(own_pid(), "Demo build");
         let entry = dir.join(format!("{}.json", run.pid));
         {
@@ -462,13 +461,14 @@ mod tests {
             assert!(!dir.join(format!("{}.json.tmp", run.pid)).exists());
         }
         assert!(!entry.exists(), "dropping the guard removes the entry");
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn ended_run_is_listed_for_a_day_and_its_entry_is_gone() {
-        let dir = temp_dir("ended");
-        let build = temp_dir("ended-build");
+        let dir_scratch = temp_dir("ended");
+        let dir = dir_scratch.path().to_path_buf();
+        let build_scratch = temp_dir("ended-build");
+        let build = build_scratch.path().to_path_buf();
         let mut run = fixture_registered_run(dead_pid(), "Ended build");
         run.build_dir = build.clone();
         let files = RunFiles::in_build_dir(&build);
@@ -492,8 +492,6 @@ mod tests {
         let later = list_runs_in(&dir, 2_000 + ENDED_RETENTION_SECS + 1);
         assert!(later.is_empty());
         assert!(!ended_path_for(&dir, run.pid).exists());
-        let _ = fs::remove_dir_all(dir);
-        let _ = fs::remove_dir_all(build);
     }
 
     fn ended_path_for(dir: &Path, pid: u32) -> PathBuf {
@@ -502,7 +500,8 @@ mod tests {
 
     #[test]
     fn stale_entries_of_dead_or_foreign_processes_are_pruned() {
-        let dir = temp_dir("stale");
+        let dir_scratch = temp_dir("stale");
+        let dir = dir_scratch.path().to_path_buf();
         let dead = fixture_registered_run(dead_pid(), "Dead build");
         let (foreign, mut sleeper) = foreign_pid();
         let foreign = fixture_registered_run(foreign, "Foreign build");
@@ -518,13 +517,14 @@ mod tests {
         assert!(!entry_path(&dir, dead.pid).exists());
         assert!(!entry_path(&dir, foreign.pid).exists());
         assert!(!dir.join("junk.json").exists());
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn a_run_that_died_after_its_final_snapshot_is_listed_as_ended() {
-        let dir = temp_dir("crashed");
-        let build = temp_dir("crashed-build");
+        let dir_scratch = temp_dir("crashed");
+        let dir = dir_scratch.path().to_path_buf();
+        let build_scratch = temp_dir("crashed-build");
+        let build = build_scratch.path().to_path_buf();
         let files = RunFiles::in_build_dir(&build);
         let mut run = fixture_registered_run(dead_pid(), "Crashed build");
         run.pid_file = files.pid;
@@ -537,14 +537,14 @@ mod tests {
         assert_eq!(listed.len(), 1, "{listed:?}");
         assert_eq!(listed[0].ended_at(), 1_500);
         assert!(!entry_path(&dir, run.pid).exists());
-        let _ = fs::remove_dir_all(dir);
-        let _ = fs::remove_dir_all(build);
     }
 
     #[test]
     fn a_live_run_is_listed_with_its_status_and_a_paused_run_keeps_its_entry() {
-        let dir = temp_dir("live");
-        let build = temp_dir("live-build");
+        let dir_scratch = temp_dir("live");
+        let dir = dir_scratch.path().to_path_buf();
+        let build_scratch = temp_dir("live-build");
+        let build = build_scratch.path().to_path_buf();
         let files = RunFiles::in_build_dir(&build);
         let mut run = fixture_registered_run(own_pid(), "Live build");
         run.status_file = files.status.clone();
@@ -562,8 +562,6 @@ mod tests {
         assert!(entry_path(&dir, run.pid).exists());
         drop(registration);
         assert!(!entry_path(&dir, run.pid).exists());
-        let _ = fs::remove_dir_all(dir);
-        let _ = fs::remove_dir_all(build);
     }
 
     #[test]

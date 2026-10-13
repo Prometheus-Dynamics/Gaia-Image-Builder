@@ -321,10 +321,11 @@ mod tests {
     use super::*;
     use gaia_image_providers::PreviewCleanKind;
     use gaia_spec::{BuildrootImageSpec, ImageDefinition, ImageOutputSpec, ImageSpec, SourceId};
+    use gaia_testkit::TempDir;
     use sha2::{Digest, Sha256};
     use std::collections::BTreeMap;
     use std::fs;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     /// Every path under `dir` with its kind and, for files, its SHA-256.
     fn tree_digest(dir: &Path) -> BTreeMap<String, String> {
@@ -359,22 +360,14 @@ mod tests {
         digests
     }
 
-    pub(super) fn scratch_root(name: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or_default();
-        let root = std::env::temp_dir().join(format!(
-            "gaia-app-preview-{name}-{}-{nanos}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&root);
-        root
+    pub(super) fn scratch_root(name: &str) -> TempDir {
+        TempDir::new(&format!("gaia-app-preview-{name}"))
     }
 
     #[test]
     fn preview_leaves_the_real_output_tree_byte_for_byte_unchanged() {
-        let root = scratch_root("unchanged");
+        let scratch = scratch_root("unchanged");
+        let root = scratch.join("root");
         let source = root.join("build/sources/buildroot");
         let output = root.join("build/image/buildroot-output");
         fs::create_dir_all(&source).expect("source");
@@ -474,7 +467,6 @@ mod tests {
             )
         );
         assert!(!report.operations.is_empty());
-        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -550,7 +542,8 @@ mod tests {
 
     #[test]
     fn a_rev_bump_is_previewed_with_the_source_it_invalidates() {
-        let root = scratch_root("rev-bump");
+        let scratch = scratch_root("rev-bump");
+        let root = scratch.join("root");
         let mut spec = gaia_spec::ResolvedBuildSpec::new("app-rev");
         spec.workspace.root_dir = root.display().to_string();
         spec.workspace.build_dir = "build".into();
@@ -614,7 +607,6 @@ mod tests {
             "{}",
             source.reason
         );
-        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

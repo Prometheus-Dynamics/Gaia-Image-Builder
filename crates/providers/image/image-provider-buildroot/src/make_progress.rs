@@ -295,6 +295,7 @@ fn last_package_durations(log: &str) -> BTreeMap<String, f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
 
     #[test]
     fn durations_come_from_the_last_build_of_each_step() {
@@ -313,7 +314,6 @@ mod tests {
 
     /// Makes `output`'s package directories, installed or not, for `snapshot`.
     fn fixture(output: &Path, packages: &[(&str, bool)]) -> Vec<(String, PathBuf)> {
-        let _ = fs::remove_dir_all(output);
         packages
             .iter()
             .map(|(name, installed)| {
@@ -346,7 +346,8 @@ mod tests {
 
     #[test]
     fn unknown_active_kernel_makes_the_estimate_large() {
-        let output = std::env::temp_dir().join(format!("gaia-kernel-{}", std::process::id()));
+        let output_scratch = TempDir::new("gaia-kernel");
+        let output = output_scratch.join("output");
         // zlib was built before, curl finished in this run (60 s last time),
         // linux is building with no record, mesa3d (600 s) and python (200 s)
         // are left. Median of the recorded durations: 130 s for linux.
@@ -392,12 +393,12 @@ mod tests {
         );
         // 130 - 125 = 5 s, floored at 13 s.
         assert_eq!(later.eta, Some(Duration::from_secs(1613)));
-        let _ = fs::remove_dir_all(output);
     }
 
     #[test]
     fn no_estimate_when_most_of_what_is_left_is_a_guess() {
-        let output = std::env::temp_dir().join(format!("gaia-guess-{}", std::process::id()));
+        let output_scratch = TempDir::new("gaia-guess");
+        let output = output_scratch.join("output");
         let packages = fixture(
             &output,
             &[
@@ -442,13 +443,12 @@ mod tests {
         );
         // 120 s left at 120 s for 60 s: twice as slow, so 240 s.
         assert_eq!(known.eta, Some(Duration::from_secs(240)));
-        let _ = fs::remove_dir_all(output);
     }
 
     #[test]
     fn progress_counts_packages_and_estimates_from_the_last_build() {
-        let output = std::env::temp_dir().join(format!("gaia-progress-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&output);
+        let output_scratch = TempDir::new("gaia-progress");
+        let output = output_scratch.join("output");
         let mut packages = Vec::new();
         for (name, stamps) in [
             ("zlib", &[".stamp_built", ".stamp_installed"][..]),
@@ -509,6 +509,5 @@ mod tests {
             fs::read_to_string(output.join(PACKAGE_DURATIONS)).expect("durations"),
             "zlib 12.0\n"
         );
-        let _ = fs::remove_dir_all(output);
     }
 }

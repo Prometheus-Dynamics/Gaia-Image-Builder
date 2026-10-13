@@ -11,6 +11,7 @@ use gaia_spec::{
     AssemblyDiskPartitionSpec, AssemblyDiskSpec, AssemblyDiskTruncateSpec,
     AssemblyEbrPlacementSpec, AssemblyPartitionTableSpec, ImageAssemblySpec, ResolvedBuildSpec,
 };
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -271,7 +272,8 @@ const DEFAULT_LOGICAL: [(u32, u32); 3] = [(10240, 4), (14336, 2048), (18432, 409
 
 #[test]
 fn packed_ebrs_keep_every_logical_partition_when_truncated() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = PathBuf::from(&spec.workspace.build_dir);
     let (boot, rootfs) = write_images(&build_dir);
     let data = build_dir.join("data.img");
@@ -325,7 +327,8 @@ fn packed_ebrs_keep_every_logical_partition_when_truncated() {
 
 #[test]
 fn default_ebrs_keep_every_logical_partition_when_truncated() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = PathBuf::from(&spec.workspace.build_dir);
     let (boot, rootfs) = write_images(&build_dir);
     let data = build_dir.join("data.img");
@@ -350,7 +353,8 @@ fn default_ebrs_keep_every_logical_partition_when_truncated() {
 
 #[test]
 fn untruncated_disk_keeps_full_size_with_packed_ebrs() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = PathBuf::from(&spec.workspace.build_dir);
     let (boot, rootfs) = write_images(&build_dir);
     let data = build_dir.join("data.img");
@@ -374,7 +378,8 @@ fn untruncated_disk_keeps_full_size_with_packed_ebrs() {
 
 #[test]
 fn truncated_disk_archive_has_the_truncated_length() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = PathBuf::from(&spec.workspace.build_dir);
     let (boot, rootfs) = write_images(&build_dir);
     let output = build_dir.join("out").join("sdcard.img");
@@ -432,7 +437,8 @@ fn truncated_disk_archive_has_the_truncated_length() {
 
 #[test]
 fn wiped_partition_counts_its_full_size_when_truncated() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = PathBuf::from(&spec.workspace.build_dir);
     let (boot, _rootfs) = write_images(&build_dir);
     let output = build_dir.join("out").join("sdcard.img");
@@ -465,7 +471,8 @@ fn wiped_partition_counts_its_full_size_when_truncated() {
 
 #[test]
 fn oversized_image_still_errors_when_truncating() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = PathBuf::from(&spec.workspace.build_dir);
     let (boot, _rootfs) = write_images(&build_dir);
     let output = build_dir.join("out").join("sdcard.img");
@@ -501,7 +508,8 @@ fn oversized_image_still_errors_when_truncating() {
 
 #[test]
 fn unmaterialized_partition_with_an_image_is_refused() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = PathBuf::from(&spec.workspace.build_dir);
     let (boot, _rootfs) = write_images(&build_dir);
     let output = build_dir.join("out").join("sdcard.img");
@@ -532,7 +540,8 @@ fn unmaterialized_partition_with_an_image_is_refused() {
 /// image and two unmaterialized logical partitions, 1 MiB aligned.
 #[test]
 fn raze_layout_with_unmaterialized_logical_partitions_assembles() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = PathBuf::from(&spec.workspace.build_dir);
     let (boot, rootfs) = write_images(&build_dir);
     let output = build_dir.join("out").join("sdcard.img");

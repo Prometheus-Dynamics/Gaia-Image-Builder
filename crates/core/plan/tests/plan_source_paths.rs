@@ -6,13 +6,15 @@ pub mod support;
 use gaia_config::resolve_config;
 use gaia_plan::plan_build;
 use gaia_spec::ImageDefinition;
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::PathBuf;
-use support::{provider_catalogs, unique_dir};
+use support::provider_catalogs;
 
 #[test]
 fn image_depends_on_sources_named_by_config_overrides() {
-    let root_dir = unique_dir("gaia-plan-source-paths");
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch.join("gaia-plan-source-paths").display().to_string();
     fs::create_dir_all(PathBuf::from(&root_dir).join("tables")).expect("root dir");
     let config_path = PathBuf::from(&root_dir).join("build.toml");
     fs::write(
@@ -105,5 +107,4 @@ config_overrides = [
             "a source whose directory is only a prefix of another's is not named: {id}"
         );
     }
-    let _ = fs::remove_dir_all(root_dir);
 }

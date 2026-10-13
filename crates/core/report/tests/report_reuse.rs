@@ -3,12 +3,14 @@ pub mod support;
 use gaia_exec::{ExecutionProviders, execute_plan};
 use gaia_plan::{plan_build, plan_build_with_reuse_state};
 use gaia_report::generate_report;
+use gaia_testkit::TempDir;
 use gaia_validate::validate_spec_with_providers;
 use support::{materialize_reusable_outputs, provider_catalogs, reuse_state_for_ids, test_spec};
 
 #[test]
 fn generates_report_bundle_with_reuse_counts() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-report-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let validation =
         validate_spec_with_providers(&spec, &source_catalog, &artifact_catalog, &image_catalog);

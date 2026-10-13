@@ -1,17 +1,14 @@
 pub mod support;
 
 use gaia_config::resolve_config;
+use gaia_testkit::TempDir;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 use support::{write_temp_config, write_temp_config_at};
 
 #[test]
 fn interpolates_builtin_root_tokens() {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_nanos();
-    let project_root = std::env::temp_dir().join(format!("gaia-root-tokens-{nonce}"));
+    let scratch = TempDir::new("gaia-root-tokens");
+    let project_root = scratch.join("project");
     let config_dir = project_root.join("gaia/configs/builds");
     let config_path = config_dir.join("root-token-build.toml");
     std::fs::create_dir_all(&project_root).expect("project root should be created");

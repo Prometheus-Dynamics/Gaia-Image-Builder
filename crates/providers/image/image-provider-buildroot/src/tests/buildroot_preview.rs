@@ -54,11 +54,13 @@ struct Fixture {
     spec: ResolvedBuildSpec,
     buildroot_dir: PathBuf,
     output_dir: PathBuf,
+    _scratch: TempDir,
 }
 
 impl Fixture {
     fn new(name: &str) -> Self {
-        let root = temp_path(name);
+        let root_scratch = TempDir::new(name);
+        let root = root_scratch.join("root");
         let buildroot_dir = root.join("build/sources/buildroot");
         let output_dir = root.join("build/image/buildroot-output");
         fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
@@ -95,6 +97,7 @@ impl Fixture {
             spec,
             buildroot_dir,
             output_dir,
+            _scratch: root_scratch,
         }
     }
 

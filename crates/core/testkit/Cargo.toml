@@ -1,0 +1,13 @@
+[package]
+name = "gaia-testkit"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Test-only helpers shared by Gaia's crates (scratch directories that clean up after themselves)."
+publish = false
+
+[lints]
+workspace = true

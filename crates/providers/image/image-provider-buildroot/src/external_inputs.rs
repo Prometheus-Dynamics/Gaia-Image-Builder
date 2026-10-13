@@ -83,6 +83,7 @@ pub(crate) fn write_external_files_state(
 mod tests {
     use super::*;
     use gaia_image_providers::{ExternalFile, external_package_digests};
+    use gaia_testkit::TempDir;
     use std::collections::BTreeSet;
 
     fn file(digest: &str, packages: &[&str]) -> ExternalFile {
@@ -207,7 +208,8 @@ mod tests {
             ("RAZE:external.mk".to_string(), file("sha256:x", &["linux"])),
             ("RAZE:Config.in".to_string(), file("sha256:c", &[])),
         ]);
-        let dir = std::env::temp_dir().join(format!("gaia-external-state-{}", std::process::id()));
+        let dir_scratch = TempDir::new("gaia-external-state");
+        let dir = dir_scratch.join("dir");
         fs::create_dir_all(&dir).expect("dir");
         let _ = fs::remove_file(dir.join(EXTERNAL_FILES_STATE));
         let baseline = external_changes_since_build(&dir, &current);
@@ -220,12 +222,12 @@ mod tests {
             external_changes_since_build(&dir, &current),
             ExternalChanges::default()
         );
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn a_tree_without_external_files_has_no_baseline_message() {
-        let dir = std::env::temp_dir().join(format!("gaia-external-empty-{}", std::process::id()));
+        let dir_scratch = TempDir::new("gaia-external-empty");
+        let dir = dir_scratch.join("dir");
         fs::create_dir_all(&dir).expect("dir");
         let _ = fs::remove_file(dir.join(EXTERNAL_FILES_STATE));
         assert!(
@@ -233,6 +235,5 @@ mod tests {
                 .reasons
                 .is_empty()
         );
-        let _ = fs::remove_dir_all(dir);
     }
 }

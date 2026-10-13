@@ -5,6 +5,7 @@ use gaia_plan::{
     operation_output_signature, plan_build, plan_build_with_reuse_state, spec_fingerprint,
 };
 use gaia_spec::{AssemblyArchiveSpec, AssemblyPathTemplate, ImageAssemblySpec, ResolvedBuildSpec};
+use gaia_testkit::TempDir;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -63,8 +64,8 @@ struct Fixture {
     assembly_output: PathBuf,
 }
 
-fn fixture() -> Fixture {
-    let mut spec = test_spec();
+fn fixture(scratch: &TempDir) -> Fixture {
+    let mut spec = test_spec(scratch);
     let build_dir = PathBuf::from(&spec.workspace.build_dir);
     let out_dir = PathBuf::from(&spec.workspace.out_dir);
     let collect = PathBuf::from(spec.image.output.collect_dir.clone().expect("collect dir"));
@@ -199,7 +200,8 @@ fn replan(spec: &ResolvedBuildSpec, state: &ReuseState) -> ExecutionPlan {
 
 #[test]
 fn build_image_signature_ignores_rewritten_provider_state_and_mtimes() {
-    let fixture = fixture();
+    let scratch = TempDir::new("gaia-plan-test");
+    let fixture = fixture(&scratch);
     let collect = &fixture.collect;
     let first = build_image_signature(&fixture.spec).expect("build image signature");
 
@@ -215,7 +217,8 @@ fn build_image_signature_ignores_rewritten_provider_state_and_mtimes() {
 
 #[test]
 fn build_image_signature_changes_when_an_image_byte_changes() {
-    let fixture = fixture();
+    let scratch = TempDir::new("gaia-plan-test");
+    let fixture = fixture(&scratch);
     let collect = &fixture.collect;
     let first = build_image_signature(&fixture.spec).expect("build image signature");
 
@@ -230,7 +233,8 @@ fn build_image_signature_changes_when_an_image_byte_changes() {
 
 #[test]
 fn identical_image_rebuild_keeps_assembly_reused() {
-    let fixture = fixture();
+    let scratch = TempDir::new("gaia-plan-test");
+    let fixture = fixture(&scratch);
     let spec = &fixture.spec;
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let baseline = plan_build(spec, &source_catalog, &artifact_catalog, &image_catalog);
@@ -263,7 +267,8 @@ fn identical_image_rebuild_keeps_assembly_reused() {
 
 #[test]
 fn changed_image_byte_reruns_assembly() {
-    let fixture = fixture();
+    let scratch = TempDir::new("gaia-plan-test");
+    let fixture = fixture(&scratch);
     let spec = &fixture.spec;
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let baseline = plan_build(spec, &source_catalog, &artifact_catalog, &image_catalog);
@@ -285,7 +290,8 @@ fn changed_image_byte_reruns_assembly() {
 
 #[test]
 fn assembly_reruns_only_when_its_output_bytes_change() {
-    let fixture = fixture();
+    let scratch = TempDir::new("gaia-plan-test");
+    let fixture = fixture(&scratch);
     let spec = &fixture.spec;
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let baseline = plan_build(spec, &source_catalog, &artifact_catalog, &image_catalog);

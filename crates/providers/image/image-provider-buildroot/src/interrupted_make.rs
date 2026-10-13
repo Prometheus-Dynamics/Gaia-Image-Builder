@@ -159,13 +159,7 @@ pub(crate) fn in_progress(dir: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn temp(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("gaia-interrupted-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        dir
-    }
+    use gaia_testkit::TempDir;
 
     fn package(output: &Path, dir: &str, stamps: &[&str]) {
         let build = output.join("build").join(dir);
@@ -177,7 +171,8 @@ mod tests {
 
     #[test]
     fn a_killed_make_redoes_only_the_packages_in_progress() {
-        let output = temp("killed");
+        let output_scratch = TempDir::new("gaia-interrupted-killed");
+        let output = output_scratch.join("output");
         package(&output, "zlib-1.3", &[".stamp_built", ".stamp_installed"]);
         package(
             &output,
@@ -271,6 +266,5 @@ mod tests {
         assert!(output.join("per-package/zlib/target").is_dir());
         assert!(output.join("build/busybox-1.37").is_dir());
         assert!(!output.join(MAKE_RUNNING).exists());
-        let _ = fs::remove_dir_all(output);
     }
 }

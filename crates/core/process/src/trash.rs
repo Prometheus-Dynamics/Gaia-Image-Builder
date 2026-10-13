@@ -116,12 +116,13 @@ fn trash_name(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
     use std::time::{Duration, Instant};
 
     #[test]
     fn discarded_trees_vanish_at_once_and_are_deleted_in_the_background() {
-        let root = std::env::temp_dir().join(format!("gaia-trash-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
+        let scratch = TempDir::new("gaia-trash-test");
+        let root = scratch.join("root");
         let tree = root.join("output/build");
         fs::create_dir_all(tree.join("pkg/sub")).expect("tree");
         fs::write(tree.join("pkg/sub/file"), b"x").expect("file");
@@ -141,6 +142,5 @@ mod tests {
         discard(&root.join("output/keep")).expect("file");
         assert!(!root.join("output/keep").exists());
         discard(&root.join("output/missing")).expect("missing");
-        let _ = fs::remove_dir_all(root);
     }
 }

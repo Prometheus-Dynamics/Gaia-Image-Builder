@@ -3,12 +3,14 @@ pub mod support;
 use gaia_exec::{ExecutionProviders, execute_plan};
 use gaia_plan::plan_build;
 use gaia_report::{ReportFileKind, generate_report, write_report_bundle};
+use gaia_testkit::TempDir;
 use gaia_validate::validate_spec_with_providers;
 use support::{provider_catalogs, test_spec};
 
 #[test]
 fn generates_report_bundle_for_default_run() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-report-test");
+    let mut spec = test_spec(&scratch);
     if let gaia_spec::ImageDefinition::Buildroot(buildroot) = &mut spec.image.definition {
         buildroot.allow_fallback = true;
     }
@@ -295,7 +297,8 @@ fn generates_report_bundle_for_default_run() {
 
 #[test]
 fn writes_report_bundle_files_with_sizes() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-report-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let validation =
         validate_spec_with_providers(&spec, &source_catalog, &artifact_catalog, &image_catalog);

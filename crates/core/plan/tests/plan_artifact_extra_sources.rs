@@ -12,6 +12,7 @@ use gaia_spec::{
     ResolvedBuildSpec, SourceDefinition, SourceId, SourcePinPolicySpec, SourceRef,
     SourceRefreshPolicySpec,
 };
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::{Path, PathBuf};
 use support::{provider_catalogs, reuse_state_for_ids, test_spec};
@@ -21,8 +22,8 @@ const NEW_COMMIT: &str = "e565dcf0ddba11000000000000000000000000b2";
 
 /// `gaia-app` builds from `gaia-upstream` and also reads `eidos`, a second
 /// git source, through `extra_sources`.
-fn spec_with_extra_source(commit: &str) -> ResolvedBuildSpec {
-    let mut spec = test_spec();
+fn spec_with_extra_source(scratch: &TempDir, commit: &str) -> ResolvedBuildSpec {
+    let mut spec = test_spec(scratch);
     let mut upstream = spec
         .sources
         .iter()
@@ -105,8 +106,8 @@ struct Baseline {
 
 /// Before the bump: both sources and the artifact recorded as done, the
 /// artifact's inputs recorded from the old trees.
-fn baseline(eidos_tree: &str) -> Baseline {
-    let spec = spec_with_extra_source(OLD_COMMIT);
+fn baseline(scratch: &TempDir, eidos_tree: &str) -> Baseline {
+    let spec = spec_with_extra_source(scratch, OLD_COMMIT);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     write_source_state(&spec, "gaia-upstream", OLD_COMMIT, "sha-upstream-tree");
     write_source_state(&spec, "eidos", OLD_COMMIT, eidos_tree);
@@ -141,7 +142,8 @@ fn plan_with(spec: &ResolvedBuildSpec, state: &ReuseState) -> gaia_plan::Executi
 
 #[test]
 fn artifact_depends_on_each_extra_source_once() {
-    let mut spec = spec_with_extra_source(OLD_COMMIT);
+    let scratch = TempDir::new("gaia-plan-test");
+    let mut spec = spec_with_extra_source(&scratch, OLD_COMMIT);
     // Naming the artifact's own source adds no second edge to it.
     spec.artifacts[0].extra_sources = vec![SourceId::new("eidos"), SourceId::new("gaia-upstream")];
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
@@ -154,7 +156,8 @@ fn artifact_depends_on_each_extra_source_once() {
 
 #[test]
 fn components_name_the_extra_sources_only_when_there_are_some() {
-    let spec = spec_with_extra_source(OLD_COMMIT);
+    let scratch = TempDir::new("gaia-plan-test");
+    let spec = spec_with_extra_source(&scratch, OLD_COMMIT);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
     let named = |spec: &ResolvedBuildSpec| {
@@ -172,7 +175,8 @@ fn components_name_the_extra_sources_only_when_there_are_some() {
 
 #[test]
 fn artifact_without_extra_sources_has_no_edge_to_other_sources() {
-    let mut spec = spec_with_extra_source(OLD_COMMIT);
+    let scratch = TempDir::new("gaia-plan-test");
+    let mut spec = spec_with_extra_source(&scratch, OLD_COMMIT);
     spec.artifacts[0].extra_sources.clear();
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
@@ -185,7 +189,8 @@ fn artifact_without_extra_sources_has_no_edge_to_other_sources() {
 
 #[test]
 fn extra_source_rev_bump_reruns_the_source_and_its_artifact() {
-    let base = baseline("sha-eidos-tree");
+    let scratch = TempDir::new("gaia-plan-test");
+    let base = baseline(&scratch, "sha-eidos-tree");
     let mut bumped = base.spec.clone();
     set_commit(&mut bumped, "eidos", NEW_COMMIT);
     // Not yet re-materialized: the state still records the old commit.
@@ -211,7 +216,8 @@ fn extra_source_rev_bump_reruns_the_source_and_its_artifact() {
 
 #[test]
 fn extra_source_rev_bump_with_identical_tree_keeps_the_artifact_on_its_cutoff() {
-    let base = baseline("sha-eidos-tree");
+    let scratch = TempDir::new("gaia-plan-test");
+    let base = baseline(&scratch, "sha-eidos-tree");
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let mut bumped = base.spec.clone();
     set_commit(&mut bumped, "eidos", NEW_COMMIT);
@@ -226,7 +232,8 @@ fn extra_source_rev_bump_with_identical_tree_keeps_the_artifact_on_its_cutoff() 
 
 #[test]
 fn extra_source_content_change_moves_the_artifacts_input_signature() {
-    let base = baseline("sha-eidos-tree");
+    let scratch = TempDir::new("gaia-plan-test");
+    let base = baseline(&scratch, "sha-eidos-tree");
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let mut bumped = base.spec.clone();
     set_commit(&mut bumped, "eidos", NEW_COMMIT);

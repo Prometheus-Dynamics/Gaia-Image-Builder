@@ -38,9 +38,12 @@ fn runs(output_dir: &Path) -> (Vec<String>, Vec<String>) {
 
 #[test]
 fn overrides_and_cache_settings_take_one_olddefconfig_run_with_the_old_merge() {
-    let workspace = temp_path("gaia-config-settings-workspace");
-    let buildroot_dir = temp_path("gaia-config-settings-source");
-    let output_dir = temp_path("gaia-config-settings-output");
+    let workspace_scratch = TempDir::new("gaia-config-settings-workspace");
+    let workspace = workspace_scratch.join("workspace");
+    let buildroot_dir_scratch = TempDir::new("gaia-config-settings-source");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-config-settings-output");
+    let output_dir = output_dir_scratch.join("output_dir");
     fs::create_dir_all(workspace.join("assets")).expect("assets dir");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     fs::write(buildroot_dir.join("Makefile"), FAKE_BUILDROOT).expect("makefile");
@@ -91,22 +94,19 @@ fn overrides_and_cache_settings_take_one_olddefconfig_run_with_the_old_merge() {
         fs::read_to_string(output_dir.join(".config")).expect("config"),
         seen[1]
     );
-
-    let _ = fs::remove_dir_all(workspace);
-    let _ = fs::remove_dir_all(buildroot_dir);
-    let _ = fs::remove_dir_all(output_dir);
 }
 
 #[test]
 fn without_overrides_or_cache_settings_no_olddefconfig_runs() {
-    let buildroot_dir = temp_path("gaia-config-settings-none-source");
-    let output_dir = temp_path("gaia-config-settings-none-output");
+    let buildroot_dir_scratch = TempDir::new("gaia-config-settings-none-source");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-config-settings-none-output");
+    let output_dir = output_dir_scratch.join("output_dir");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     fs::write(buildroot_dir.join("Makefile"), FAKE_BUILDROOT).expect("makefile");
+    let workspace_scratch = TempDir::new("gaia-config-settings-none-workspace");
     let mut spec = ResolvedBuildSpec::new("buildroot-config-settings-none");
-    spec.workspace.root_dir = temp_path("gaia-config-settings-none-workspace")
-        .display()
-        .to_string();
+    spec.workspace.root_dir = workspace_scratch.path().display().to_string();
     let execution = test_execution();
     let policy = ImageExecutionPolicy::default();
     run_buildroot_with(
@@ -124,7 +124,4 @@ fn without_overrides_or_cache_settings_no_olddefconfig_runs() {
     let (seen, calls) = runs(&output_dir);
     assert_eq!(calls, ["defconfig"], "{calls:?}");
     assert!(seen.is_empty(), "{seen:?}");
-
-    let _ = fs::remove_dir_all(buildroot_dir);
-    let _ = fs::remove_dir_all(output_dir);
 }

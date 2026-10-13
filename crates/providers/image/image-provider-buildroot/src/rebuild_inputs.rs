@@ -286,6 +286,7 @@ fn hash_tree(root: &Path, path: &Path, hasher: &mut Sha256) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
 
     const BASE: &str = "#\n# Buildroot 2025.02 Configuration\n#\nBR2_aarch64=y\n\
         BR2_PACKAGE_LIBCAMERA=y\n# BR2_PACKAGE_FFMPEG is not set\n\
@@ -410,14 +411,8 @@ mod tests {
 
     #[test]
     fn override_digests_name_the_changed_packages() {
-        let base = std::env::temp_dir().join(format!(
-            "gaia-override-digests-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time")
-                .as_nanos()
-        ));
+        let base_scratch = TempDir::new("gaia-override-digests");
+        let base = base_scratch.join("base");
         let write = |package: &str, contents: &str| {
             fs::create_dir_all(base.join(package)).expect("dir");
             fs::write(base.join(package).join(format!("{package}.mk")), contents).expect("mk");
@@ -434,7 +429,6 @@ mod tests {
         );
         write_package_override_digests(&base, &after).expect("record");
         assert_eq!(read_package_override_digests(&base), Some(after));
-        let _ = fs::remove_dir_all(base);
     }
 
     #[test]
@@ -455,14 +449,8 @@ mod tests {
 
     #[test]
     fn package_override_digest_ignores_location_and_timestamps() {
-        let base = std::env::temp_dir().join(format!(
-            "gaia-override-digest-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time")
-                .as_nanos()
-        ));
+        let base_scratch = TempDir::new("gaia-override-digest");
+        let base = base_scratch.join("base");
         let write = |root: &Path, contents: &str| {
             fs::create_dir_all(root.join("libcamera")).expect("dir");
             fs::write(root.join("libcamera/libcamera.mk"), contents).expect("mk");
@@ -481,6 +469,5 @@ mod tests {
             package_override_content_digest(std::slice::from_ref(&first)),
             package_override_content_digest(std::slice::from_ref(&second))
         );
-        let _ = fs::remove_dir_all(base);
     }
 }

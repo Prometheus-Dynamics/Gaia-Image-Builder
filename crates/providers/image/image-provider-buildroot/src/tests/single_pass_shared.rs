@@ -108,7 +108,8 @@ fn listing(path: &Path) -> Vec<String> {
 
 #[test]
 fn private_build_packs_feed_in_a_single_make() {
-    let workspace_root = temp_path("gaia-buildroot-single-pass");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-single-pass");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
     write_buildroot_source(&workspace_root, "build", SINGLE_PASS_MAKEFILE);
     let spec = feed_spec(&workspace_root, "single", "build");
     let output_dir = workspace_root.join("build/image/buildroot-output");
@@ -175,7 +176,8 @@ fn private_build_packs_feed_in_a_single_make() {
 
 #[test]
 fn private_build_falls_back_when_post_build_script_does_not_run() {
-    let workspace_root = temp_path("gaia-buildroot-single-pass-fallback");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-single-pass-fallback");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
     write_buildroot_source(&workspace_root, "build", NO_POST_BUILD_MAKEFILE);
     let spec = feed_spec(&workspace_root, "fallback", "build");
     let output_dir = workspace_root.join("build/image/buildroot-output");
@@ -205,7 +207,8 @@ fn private_build_falls_back_when_post_build_script_does_not_run() {
 
 #[test]
 fn feed_post_build_script_quotes_paths_and_restores_modes() {
-    let rootfs = temp_path("gaia-buildroot-feed-script");
+    let rootfs_scratch = TempDir::new("gaia-buildroot-feed-script");
+    let rootfs = rootfs_scratch.join("rootfs");
     fs::create_dir_all(rootfs.join("opt/it's here")).expect("dirs");
     fs::write(rootfs.join("opt/it's here/file"), "x").expect("file");
     let script = feed_post_build_script(
@@ -223,7 +226,8 @@ fn feed_post_build_script_quotes_paths_and_restores_modes() {
 
 #[test]
 fn shared_output_key_ignores_build_identity_but_tracks_buildroot_inputs() {
-    let workspace_root = temp_path("gaia-buildroot-shared-key");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-shared-key");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
     let source_a = write_buildroot_source(&workspace_root, "build-a", SHARED_MAKEFILE);
     let source_b = write_buildroot_source(&workspace_root, "build-b", SHARED_MAKEFILE);
     let spec_a = feed_spec(&workspace_root, "helios-base-os", "build-a");
@@ -255,7 +259,8 @@ fn shared_output_key_ignores_build_identity_but_tracks_buildroot_inputs() {
 
 #[test]
 fn shared_output_builds_once_and_keeps_feeds_private() {
-    let workspace_root = temp_path("gaia-buildroot-shared-build");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-shared-build");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
     for build_dir in ["build-a", "build-b"] {
         let source = write_buildroot_source(&workspace_root, build_dir, SHARED_MAKEFILE);
         write_executable(
@@ -350,7 +355,8 @@ fn shared_output_builds_once_and_keeps_feeds_private() {
 
 #[test]
 fn shared_output_lock_waits_and_honors_cancellation() {
-    let workspace_root = temp_path("gaia-buildroot-shared-lock");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-shared-lock");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
     let source = write_buildroot_source(&workspace_root, "build", SHARED_MAKEFILE);
     let spec = feed_spec(&workspace_root, "locked", "build");
     let shared = shared_buildroot_output(
@@ -390,7 +396,8 @@ fn shared_output_rejects_initramfs() {
 
 #[test]
 fn squashfs_compression_change_does_not_clean_the_output_tree() {
-    let workspace_root = temp_path("gaia-buildroot-squashfs-comp");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-squashfs-comp");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
     let output_dir = workspace_root.join("output");
     fs::create_dir_all(&output_dir).expect("output");
     let xz = "BR2_TARGET_ROOTFS_SQUASHFS=y\nBR2_TARGET_ROOTFS_SQUASHFS4_XZ=y\n";

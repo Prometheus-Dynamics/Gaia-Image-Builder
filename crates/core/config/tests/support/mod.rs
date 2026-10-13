@@ -1,5 +1,6 @@
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use gaia_testkit::TempDir;
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
 
 pub fn default_config_path() -> String {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -8,14 +9,35 @@ pub fn default_config_path() -> String {
         .to_string()
 }
 
-pub fn write_temp_config(contents: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!("gaia-config-pipeline-{nonce}.toml"));
+/// A config file written into its own scratch directory. The directory is removed
+/// when this value is dropped, so keep it alive for as long as the path is used.
+pub struct TempConfig {
+    path: PathBuf,
+    _scratch: TempDir,
+}
+
+impl Deref for TempConfig {
+    type Target = PathBuf;
+
+    fn deref(&self) -> &PathBuf {
+        &self.path
+    }
+}
+
+impl AsRef<Path> for TempConfig {
+    fn as_ref(&self) -> &Path {
+        &self.path
+    }
+}
+
+pub fn write_temp_config(contents: &str) -> TempConfig {
+    let scratch = TempDir::new("gaia-config-pipeline");
+    let path = scratch.join("config.toml");
     std::fs::write(&path, contents).expect("temp config should be written");
-    path
+    TempConfig {
+        path,
+        _scratch: scratch,
+    }
 }
 
 pub fn write_temp_config_at(path: &PathBuf, contents: &str) {

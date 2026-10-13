@@ -4,24 +4,29 @@ use gaia_app::{
     AppArgs, CommandOutcome, backend_overview_lines, run_with_args, runtime_overview_lines,
 };
 use gaia_config::{ResolveOptions, resolve_config_with_options};
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::PathBuf;
-use support::{config_path, seed_default_assets, seed_reuse_state, unique_dir};
+use support::{config_path, seed_default_assets, seed_reuse_state};
 
 #[test]
 fn backend_and_runtime_overview_helpers_expose_runtime_domains() {
+    let overview = TempDir::new("gaia-overview");
     let spec = resolve_config_with_options(
         &config_path(),
         &ResolveOptions {
             explicit_overrides: vec![
                 (
                     "workspace.root_dir".into(),
-                    unique_dir("gaia-overview-root"),
+                    overview.join("root").display().to_string(),
                 ),
-                ("workspace.out_dir".into(), unique_dir("gaia-overview-out")),
+                (
+                    "workspace.out_dir".into(),
+                    overview.join("out").display().to_string(),
+                ),
                 (
                     "workspace.build_dir".into(),
-                    unique_dir("gaia-overview-build"),
+                    overview.join("build").display().to_string(),
                 ),
             ],
             ..ResolveOptions::default()
@@ -46,9 +51,10 @@ fn backend_and_runtime_overview_helpers_expose_runtime_domains() {
             .any(|line| line.contains("runtime checkpoint target: base-image via local"))
     );
 
-    let run_root_dir = unique_dir("gaia-overview-cli-root");
-    let run_out_dir = unique_dir("gaia-overview-cli-out");
-    let run_build_dir = unique_dir("gaia-overview-cli-build");
+    let scratch = TempDir::new("gaia-overview-cli");
+    let run_root_dir = scratch.join("root").display().to_string();
+    let run_out_dir = scratch.join("out").display().to_string();
+    let run_build_dir = scratch.join("build").display().to_string();
     fs::create_dir_all(&run_root_dir).expect("overview root dir");
     fs::create_dir_all(PathBuf::from(&run_root_dir).join("src")).expect("overview root src");
     fs::write(

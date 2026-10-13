@@ -2,6 +2,7 @@
 //! sparse copy. Split from `placement.rs` for its length.
 
 use super::*;
+use gaia_testkit::TempDir;
 
 fn roots_for(root: &Path) -> (ResolvedBuildSpec, AssemblyRoots) {
     let mut spec = ResolvedBuildSpec::new("placement-test");
@@ -43,8 +44,8 @@ fn env(base: &Path, memory: Option<u64>, tmpfs: Option<u64>) -> PlacementEnv {
 
 #[test]
 fn ram_moves_intermediates_and_keeps_published_disks_on_disk() {
-    let root = std::env::temp_dir().join(format!("gaia-placement-moves-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
+    let scratch = TempDir::new("gaia-placement-moves");
+    let root = scratch.join("root");
     let (mut spec, roots) = roots_for(&root);
     let mut assembly = spec.image.assembly.clone().expect("assembly");
     assembly.disks.push(gaia_spec::AssemblyDiskSpec {
@@ -129,8 +130,8 @@ fn ram_moves_intermediates_and_keeps_published_disks_on_disk() {
 
 #[test]
 fn ram_falls_back_to_disk_when_the_intermediates_do_not_fit() {
-    let root = std::env::temp_dir().join(format!("gaia-placement-fit-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
+    let scratch = TempDir::new("gaia-placement-fit");
+    let root = scratch.join("root");
     let (spec, roots) = roots_for(&root);
     let assembly = spec.image.assembly.clone().expect("assembly");
     let base = root.join("ram");
@@ -152,7 +153,8 @@ fn ram_falls_back_to_disk_when_the_intermediates_do_not_fit() {
 
 #[test]
 fn disk_keyword_and_paths_never_go_to_ram() {
-    let root = std::env::temp_dir().join(format!("gaia-placement-disk-{}", std::process::id()));
+    let scratch = TempDir::new("gaia-placement-disk");
+    let root = scratch.join("root");
     let (mut spec, roots) = roots_for(&root);
     let mut assembly = spec.image.assembly.clone().expect("assembly");
     assembly.work_dir = Some("disk".into());
@@ -171,7 +173,8 @@ fn disk_keyword_and_paths_never_go_to_ram() {
 
 #[test]
 fn unset_work_dir_follows_the_buildroot_tree() {
-    let root = std::env::temp_dir().join(format!("gaia-placement-follow-{}", std::process::id()));
+    let scratch = TempDir::new("gaia-placement-follow");
+    let root = scratch.join("root");
     let (mut spec, roots) = roots_for(&root);
     let mut assembly = spec.image.assembly.clone().expect("assembly");
     assembly.work_dir = None;
@@ -235,8 +238,8 @@ fn digest_tokens_have_their_paths_rewritten() {
 
 #[test]
 fn sparse_copy_writes_the_same_bytes() {
-    let root = std::env::temp_dir().join(format!("gaia-placement-sparse-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
+    let scratch = TempDir::new("gaia-placement-sparse");
+    let root = scratch.join("root");
     std::fs::create_dir_all(&root).expect("root");
     let source = root.join("source.img");
     let mut bytes = vec![0u8; 3 * SPARSE_CHUNK + 1234];
@@ -258,7 +261,6 @@ fn sparse_copy_writes_the_same_bytes() {
         std::fs::metadata(&copied).expect("meta").len(),
         SPARSE_CHUNK as u64 + 10
     );
-    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -286,9 +288,8 @@ fn ram_root_is_stable_per_work_dir() {
 
 #[test]
 fn a_raw_disk_under_the_work_dir_is_still_published_to_its_path() {
-    let root =
-        std::env::temp_dir().join(format!("gaia-placement-work-disk-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
+    let scratch = TempDir::new("gaia-placement-work-disk");
+    let root = scratch.join("root");
     let (mut spec, roots) = roots_for(&root);
     let mut assembly = spec.image.assembly.clone().expect("assembly");
     assembly.disks.push(gaia_spec::AssemblyDiskSpec {

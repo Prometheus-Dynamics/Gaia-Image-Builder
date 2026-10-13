@@ -358,46 +358,39 @@ fn reuse_state_path(spec: &ResolvedBuildSpec) -> PathBuf {
 mod tests {
     use super::*;
     use gaia_config::{ResolveOptions, resolve_config_with_options};
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use gaia_testkit::TempDir;
 
     #[path = "state_assembly_tests.rs"]
     mod assembly_tests;
 
-    static UNIQUE_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    fn unique_dir(prefix: &str) -> String {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time")
-            .as_nanos();
-        let count = UNIQUE_COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir()
-            .join("gaia-tests")
-            .join(format!("{prefix}-{nonce}-{count}"))
-            .display()
-            .to_string()
-    }
-
-    fn test_spec() -> ResolvedBuildSpec {
-        resolve_config_with_options(
+    /// The spec's build and out dirs live in the returned guard, which the test must keep.
+    fn test_spec() -> (TempDir, ResolvedBuildSpec) {
+        let scratch = TempDir::new("gaia-state");
+        let spec = resolve_config_with_options(
             &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("../../../examples/default-workspace/configs/default.toml")
                 .display()
                 .to_string(),
             &ResolveOptions {
                 explicit_overrides: vec![
-                    ("workspace.build_dir".into(), unique_dir("gaia-state-build")),
-                    ("workspace.out_dir".into(), unique_dir("gaia-state-out")),
+                    (
+                        "workspace.build_dir".into(),
+                        scratch.join("build").display().to_string(),
+                    ),
+                    (
+                        "workspace.out_dir".into(),
+                        scratch.join("out").display().to_string(),
+                    ),
                 ],
                 ..ResolveOptions::default()
             },
-        )
+        );
+        (scratch, spec)
     }
 
     #[test]
     fn load_reuse_state_ignores_malformed_entries_and_out_lines() {
-        let spec = test_spec();
+        let (_scratch, spec) = test_spec();
         let path = reuse_state_path(&spec);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).expect("reuse state dir");
@@ -452,7 +445,7 @@ mod tests {
 
     #[test]
     fn load_reuse_state_decodes_multiline_output_signatures() {
-        let spec = test_spec();
+        let (_scratch, spec) = test_spec();
         let path = reuse_state_path(&spec);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).expect("reuse state dir");
@@ -492,7 +485,7 @@ mod tests {
         assert_eq!(parsed.get("stage:a;b"), Some(&7));
         assert_eq!(parsed.len(), 2);
 
-        let spec = test_spec();
+        let (_scratch, spec) = test_spec();
         let path = reuse_state_path(&spec);
         fs::create_dir_all(path.parent().expect("parent")).expect("reuse state dir");
         fs::write(&path, "fingerprint=5\nartifact:app\ndur=artifact:app;10\n")
@@ -506,7 +499,7 @@ mod tests {
 
     #[test]
     fn save_records_built_durations_and_keeps_older_ones() {
-        let spec = test_spec();
+        let (_scratch, spec) = test_spec();
         let path = reuse_state_path(&spec);
         fs::create_dir_all(path.parent().expect("parent")).expect("reuse state dir");
         fs::write(
@@ -549,7 +542,7 @@ mod tests {
 
     #[test]
     fn load_reuse_state_returns_none_for_invalid_fingerprint() {
-        let spec = test_spec();
+        let (_scratch, spec) = test_spec();
         let path = reuse_state_path(&spec);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).expect("reuse state dir");
@@ -562,7 +555,7 @@ mod tests {
 
     #[test]
     fn save_carries_over_unattempted_operations_only() {
-        let spec = test_spec();
+        let (_scratch, spec) = test_spec();
         let previous = ReuseState {
             spec_fingerprint: spec_fingerprint(&spec),
             completed_operation_ids: ["image:build".to_string(), "artifact:old".to_string()]
@@ -622,7 +615,7 @@ mod tests {
 
     #[test]
     fn save_keeps_completed_operations_of_a_failed_run_for_reuse() {
-        let spec = test_spec();
+        let (_scratch, spec) = test_spec();
         let kept = gaia_plan::PlannedOperation::new(
             gaia_plan::OperationId::new("artifact:kept"),
             gaia_plan::OperationKind::ResolveBuild,
@@ -658,7 +651,7 @@ mod tests {
 
     #[test]
     fn save_keeps_completed_operations_of_a_cancelled_run_for_reuse() {
-        let spec = test_spec();
+        let (_scratch, spec) = test_spec();
         let plan = ExecutionPlan {
             build_id: spec.identity.id.clone(),
             operations: vec![
@@ -690,7 +683,7 @@ mod tests {
 
     #[test]
     fn save_drops_rolled_back_operations_from_reuse_state() {
-        let spec = test_spec();
+        let (_scratch, spec) = test_spec();
         let plan = ExecutionPlan {
             build_id: spec.identity.id.clone(),
             operations: vec![gaia_plan::PlannedOperation::new(
@@ -713,7 +706,7 @@ mod tests {
 
     #[test]
     fn components_round_trip_through_the_details_sidecar() {
-        let spec = test_spec();
+        let (_scratch, spec) = test_spec();
         let context = crate::AppContext::with_defaults();
         let plan = gaia_plan::plan_build(
             &spec,
@@ -764,7 +757,7 @@ mod tests {
 
     #[test]
     fn a_state_without_details_and_junk_in_the_details_still_load() {
-        let spec = test_spec();
+        let (_scratch, spec) = test_spec();
         let path = reuse_state_path(&spec);
         fs::create_dir_all(path.parent().expect("parent")).expect("reuse state dir");
         fs::write(&path, "fingerprint=7\nimage:build\nop=image:build;9\n").expect("state");

@@ -15,5 +15,8 @@ gaia-image-providers.workspace = true
 gaia-spec.workspace = true
 gaia-source-providers.workspace = true
 
+[dev-dependencies]
+gaia-testkit.workspace = true
+
 [lints]
 workspace = true

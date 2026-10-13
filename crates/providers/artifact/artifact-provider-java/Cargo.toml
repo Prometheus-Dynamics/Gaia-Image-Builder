@@ -13,5 +13,8 @@ gaia-artifact-providers.workspace = true
 gaia-process.workspace = true
 gaia-spec.workspace = true
 
+[dev-dependencies]
+gaia-testkit.workspace = true
+
 [lints]
 workspace = true

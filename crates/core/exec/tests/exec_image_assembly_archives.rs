@@ -6,6 +6,7 @@ use gaia_spec::{
     AssemblyArchiveMemberSpec, AssemblyArchiveSpec, AssemblyTransformKindSpec, ImageAssemblySpec,
     ResolvedBuildSpec,
 };
+use gaia_testkit::TempDir;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -131,7 +132,8 @@ fn file_member(name: &str, src: &Path) -> AssemblyArchiveMemberSpec {
 #[cfg(unix)]
 #[test]
 fn archive_bundles_manifest_and_zstd_members_deterministically() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = PathBuf::from(&spec.workspace.build_dir);
     let collect_dir = PathBuf::from(&spec.workspace.out_dir).join("images");
     spec.image.output.collect_dir = Some(collect_dir.display().to_string());
@@ -287,7 +289,8 @@ fn archive_bundles_manifest_and_zstd_members_deterministically() {
 
 #[test]
 fn archive_with_missing_digest_file_fails_without_publishing() {
-    let mut spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
     let build_dir = PathBuf::from(&spec.workspace.build_dir);
     let bundle = build_dir.join("missing-digest/bundle.tar");
     spec.image.assembly = Some(ImageAssemblySpec {

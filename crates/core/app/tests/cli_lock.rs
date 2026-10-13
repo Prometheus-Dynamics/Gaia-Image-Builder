@@ -4,10 +4,10 @@ use gaia_app::{AppArgs, CommandOutcome, run_with_args};
 use gaia_plan::{OperationKind, operation_fingerprint};
 use gaia_spec::{SourceDefinition, SourceId};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
-use support::unique_dir;
+use gaia_testkit::TempDir;
 
 fn git(repo: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
@@ -51,7 +51,8 @@ fn source_fingerprint(build: &str) -> u64 {
 
 #[test]
 fn lock_pins_git_sources_and_update_moves_them() {
-    let root = PathBuf::from(unique_dir("gaia-cli-lock"));
+    let scratch = TempDir::new("gaia-cli-lock");
+    let root = scratch.join("root");
     let repo = root.join("orion");
     fs::create_dir_all(&repo).expect("repo dir");
     git(&repo, &["init", "-b", "main"]);
@@ -142,7 +143,8 @@ pin = "locked"
 
 #[test]
 fn lock_pins_unpinned_import_sources_so_resolution_works() {
-    let root = PathBuf::from(unique_dir("gaia-cli-lock-import"));
+    let scratch = TempDir::new("gaia-cli-lock-import");
+    let root = scratch.join("root");
     let repo = root.join("atlas");
     fs::create_dir_all(&repo).expect("repo dir");
     git(&repo, &["init", "-b", "main"]);

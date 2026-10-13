@@ -228,17 +228,12 @@ fn expected_images_present(image: &ImageSpec, output_dir: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
 
     #[test]
     fn the_digest_follows_target_contents_package_images_and_image_scripts() {
-        let root = std::env::temp_dir().join(format!(
-            "gaia-rootfs-inputs-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time")
-                .as_nanos()
-        ));
+        let root_scratch = TempDir::new("gaia-rootfs-inputs");
+        let root = root_scratch.join("root");
         let buildroot = root.join("buildroot");
         let output = root.join("output");
         for (path, contents) in [
@@ -286,6 +281,5 @@ mod tests {
         assert_eq!(recorded_rootfs_inputs(&output).as_deref(), Some("abc"));
         record_rootfs_inputs(&output, None).expect("forget");
         assert_eq!(recorded_rootfs_inputs(&output), None);
-        let _ = fs::remove_dir_all(root);
     }
 }

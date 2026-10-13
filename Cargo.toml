@@ -9,6 +9,7 @@ members = [
   "crates/core/plan",
   "crates/core/exec",
   "crates/core/report",
+  "crates/core/testkit",
   "crates/providers/source/source-providers",
   "crates/providers/default-providers",
   "crates/providers/artifact/artifact-providers",
@@ -42,6 +43,7 @@ gaia-validate = { path = "crates/core/validate", version = "2.0.0" }
 gaia-plan = { path = "crates/core/plan", version = "2.0.0" }
 gaia-exec = { path = "crates/core/exec", version = "2.0.0" }
 gaia-report = { path = "crates/core/report", version = "2.0.0" }
+gaia-testkit = { path = "crates/core/testkit", version = "2.0.0" }
 gaia-source-providers = { path = "crates/providers/source/source-providers", version = "2.0.0" }
 gaia-default-providers = { path = "crates/providers/default-providers", version = "2.0.0" }
 gaia-artifact-providers = { path = "crates/providers/artifact/artifact-providers", version = "2.0.0" }

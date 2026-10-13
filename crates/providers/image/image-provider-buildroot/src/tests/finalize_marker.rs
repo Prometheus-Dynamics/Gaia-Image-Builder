@@ -6,7 +6,8 @@ fn ran(calls: &str, step: &str) -> bool {
 
 #[test]
 fn the_finalize_marker_holds_only_for_the_config_it_was_recorded_with() {
-    let output = temp_path("gaia-finalize-marker");
+    let output_scratch = TempDir::new("gaia-finalize-marker");
+    let output = output_scratch.join("output");
     fs::create_dir_all(&output).expect("output");
     assert!(!finalized_for(&output, "d1"));
     record_finalized(&output, "d1");
@@ -14,12 +15,12 @@ fn the_finalize_marker_holds_only_for_the_config_it_was_recorded_with() {
     assert!(!finalized_for(&output, "d2"));
     invalidate_finalized(&output);
     assert!(!finalized_for(&output, "d1"));
-    let _ = fs::remove_dir_all(output);
 }
 
 #[test]
 fn a_tree_builds_nothing_only_when_every_package_with_a_build_dir_is_installed() {
-    let output = temp_path("gaia-finalize-installed");
+    let output_scratch = TempDir::new("gaia-finalize-installed");
+    let output = output_scratch.join("output");
     fs::create_dir_all(output.join("build/foo-1")).expect("build dir");
     let mut graph = PackageGraph::default();
     graph.packages.insert(
@@ -35,15 +36,17 @@ fn a_tree_builds_nothing_only_when_every_package_with_a_build_dir_is_installed()
     assert!(!all_packages_installed(&output, &graph));
     fs::write(output.join("build/foo-1/.stamp_installed"), "").expect("stamp");
     assert!(all_packages_installed(&output, &graph));
-    let _ = fs::remove_dir_all(output);
 }
 
 /// The split build (parallel packages): a make that finalizes, then images.
 #[test]
 fn an_unchanged_built_tree_skips_the_repeated_finalize_of_the_build_operation() {
-    let buildroot_dir = temp_path("gaia-finalize-skip-source");
-    let output_dir = temp_path("gaia-finalize-skip-output");
-    let workspace = temp_path("gaia-finalize-skip-workspace");
+    let buildroot_dir_scratch = TempDir::new("gaia-finalize-skip-source");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-finalize-skip-output");
+    let output_dir = output_dir_scratch.join("output_dir");
+    let workspace_scratch = TempDir::new("gaia-finalize-skip-workspace");
+    let workspace = workspace_scratch.join("workspace");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     fs::write(
         buildroot_dir.join("graph.json"),
@@ -120,7 +123,4 @@ all:\n\t@mkdir -p $(O)/images && touch $(O)/images/rootfs.img && echo images >> 
     // A changed config makes the finalize run again.
     let (_, changed) = run("n");
     assert!(ran(&changed, "finalize"), "{changed}");
-
-    let _ = fs::remove_dir_all(buildroot_dir);
-    let _ = fs::remove_dir_all(output_dir);
 }

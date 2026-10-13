@@ -52,11 +52,12 @@ fn workspace_head_epoch(root: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
 
     #[test]
     fn the_workspace_head_commit_time_is_used_when_the_environment_has_none() {
-        let root = std::env::temp_dir().join(format!("gaia-source-date-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
+        let scratch = TempDir::new("gaia-source-date");
+        let root = scratch.path().to_path_buf();
         fs::create_dir_all(&root).expect("workspace");
         let git = |args: &[&str]| {
             Command::new("git")
@@ -73,20 +74,15 @@ mod tests {
                 .expect("git")
         };
         if !git(&["init", "-q"]).success() {
-            let _ = fs::remove_dir_all(&root);
             return; // no git in this environment
         }
         fs::write(root.join("file"), "x").expect("file");
         assert!(git(&["add", "file"]).success());
         assert!(git(&["commit", "-q", "-m", "one"]).success());
         assert_eq!(workspace_head_epoch(&root).as_deref(), Some("1700000000"));
-        let _ = fs::remove_dir_all(&root);
         // Not a repository (a separate path, so the memoized answer above
         // cannot answer for it): nothing to offer.
-        let plain =
-            std::env::temp_dir().join(format!("gaia-source-date-plain-{}", std::process::id()));
-        let _ = fs::create_dir_all(&plain);
-        assert_eq!(workspace_head_epoch(&plain), None);
-        let _ = fs::remove_dir_all(&plain);
+        let plain_scratch = TempDir::new("gaia-source-date-plain");
+        assert_eq!(workspace_head_epoch(plain_scratch.path()), None);
     }
 }

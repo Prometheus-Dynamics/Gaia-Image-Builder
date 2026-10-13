@@ -5,15 +5,16 @@ use gaia_plan::{
     ExecutionPlan, OperationId, OperationKind, OperationReuse, PlannedOperation,
     operation_input_signature,
 };
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::PathBuf;
-use support::{provider_catalogs, unique_dir};
+use support::provider_catalogs;
 
-fn path_source_spec() -> gaia_spec::ResolvedBuildSpec {
+fn path_source_spec(scratch: &TempDir) -> gaia_spec::ResolvedBuildSpec {
     let mut spec = gaia_spec::ResolvedBuildSpec::new("early-cutoff");
-    spec.workspace.root_dir = unique_dir("gaia-exec-cutoff-root");
-    spec.workspace.build_dir = unique_dir("gaia-exec-cutoff-build");
-    spec.workspace.out_dir = unique_dir("gaia-exec-cutoff-out");
+    spec.workspace.root_dir = scratch.join("gaia-exec-cutoff-root").display().to_string();
+    spec.workspace.build_dir = scratch.join("gaia-exec-cutoff-build").display().to_string();
+    spec.workspace.out_dir = scratch.join("gaia-exec-cutoff-out").display().to_string();
     fs::create_dir_all(&spec.workspace.root_dir).expect("root dir");
     spec.sources = vec![gaia_spec::SourceSpec::new(
         "alpha",
@@ -58,7 +59,8 @@ fn materialized_marker(spec: &gaia_spec::ResolvedBuildSpec) -> PathBuf {
 
 #[test]
 fn unchanged_inputs_cut_off_a_dependency_triggered_rebuild() {
-    let spec = path_source_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let spec = path_source_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let plan = plan_with_cutoff(&spec, |plan, operation| {
         Some(operation_input_signature(&spec, plan, operation))
@@ -87,7 +89,8 @@ fn unchanged_inputs_cut_off_a_dependency_triggered_rebuild() {
 
 #[test]
 fn changed_inputs_still_execute() {
-    let spec = path_source_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let spec = path_source_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let plan = plan_with_cutoff(&spec, |plan, operation| {
         Some(operation_input_signature(&spec, plan, operation).wrapping_add(1))

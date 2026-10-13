@@ -314,6 +314,7 @@ pub(crate) fn assembly_input_signature(spec: &ResolvedBuildSpec) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
 
     #[test]
     fn kernel_modules_and_published_copies_enter_the_fingerprint() {
@@ -321,7 +322,8 @@ mod tests {
             AssemblyFilesystemKindSpec, AssemblyFilesystemSpec, AssemblyKernelModulesSpec,
             AssemblyTreeSpec, ImageAssemblySpec,
         };
-        let root = std::env::temp_dir().join(format!("gaia-reuse-kernel-{}", std::process::id()));
+        let scratch = TempDir::new("gaia-reuse-kernel");
+        let root = scratch.join("root");
         let kernel = root.join("images/modules/6.12.0");
         std::fs::create_dir_all(&kernel).expect("kernel dir");
         std::fs::write(kernel.join("modules.dep"), "kernel/a.ko:\n").expect("modules.dep");
@@ -363,7 +365,6 @@ mod tests {
                 .push("usb_f_mass_storage".into());
         }
         assert_ne!(before, assembly_input_signature(&spec));
-        let _ = std::fs::remove_dir_all(root);
     }
 }
 
@@ -430,19 +431,11 @@ fn file_digest(path: &Path) -> Result<String, String> {
 mod busybox_runtime_tests {
     use super::busybox_runtime_parts;
     use crate::elf::tests::{EM_AARCH64, ElfFixture, build_elf};
+    use gaia_testkit::TempDir;
     use std::fs;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn temp_root(name: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or(0);
-        let dir = std::env::temp_dir().join(format!(
-            "gaia-reuse-busybox-{name}-{}-{nanos}",
-            std::process::id()
-        ));
+    fn temp_root(scratch: &TempDir, name: &str) -> PathBuf {
+        let dir = scratch.join(name);
         fs::create_dir_all(&dir).expect("temp root");
         dir
     }
@@ -450,7 +443,8 @@ mod busybox_runtime_tests {
     #[cfg(unix)]
     #[test]
     fn a_changed_library_in_the_sysroot_changes_the_busybox_inputs() {
-        let root = temp_root("libc");
+        let scratch = TempDir::new("gaia-plan");
+        let root = temp_root(&scratch, "libc");
         let sysroot = root.join("target");
         let busybox = sysroot.join("bin/busybox");
         fs::create_dir_all(busybox.parent().expect("bin")).expect("bin dir");
@@ -500,6 +494,5 @@ mod busybox_runtime_tests {
             missing[0].1.starts_with("busybox-runtime:error:"),
             "{missing:?}"
         );
-        let _ = fs::remove_dir_all(root);
     }
 }

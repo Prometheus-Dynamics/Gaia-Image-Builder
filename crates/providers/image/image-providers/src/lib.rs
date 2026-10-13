@@ -558,17 +558,7 @@ impl ImageProviderCatalog {
 mod tests {
     use super::*;
     use gaia_spec::BuildrootImageSpec;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn temp_path(prefix: &str) -> PathBuf {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time")
-            .as_nanos();
-        std::env::temp_dir()
-            .join("gaia-tests")
-            .join(format!("{prefix}-{nonce}"))
-    }
+    use gaia_testkit::TempDir;
 
     struct DummyImageProvider;
 
@@ -584,10 +574,16 @@ mod tests {
 
     #[test]
     fn default_image_execution_fails_instead_of_materializing_placeholder() {
+        let scratch = TempDir::new("gaia-image-default-exec");
         let spec = ResolvedBuildSpec::new("default-image-exec");
         let image = ImageSpec::new(ImageDefinition::Buildroot(BuildrootImageSpec::default()));
         let output = ImageOutputContract {
-            collect_dir: Some(temp_path("gaia-image-default-exec").display().to_string()),
+            collect_dir: Some(
+                scratch
+                    .join("gaia-image-default-exec")
+                    .display()
+                    .to_string(),
+            ),
             archive_name: Some("image.tar".into()),
             emit_report: false,
         };
@@ -609,7 +605,8 @@ mod tests {
 
     #[test]
     fn materialize_image_output_cleans_temp_archive_when_rename_fails() {
-        let root = temp_path("gaia-image-output-failure");
+        let scratch = TempDir::new("gaia-image-output-failure");
+        let root = scratch.join("gaia-image-output-failure");
         fs::create_dir_all(&root).expect("root dir");
         let archive_path = root.join("existing-dir");
         fs::create_dir_all(&archive_path).expect("existing archive dir");
@@ -636,7 +633,8 @@ mod tests {
 
     #[test]
     fn publish_replace_output_restores_previous_output_when_replacement_fails() {
-        let root = temp_path("gaia-publish-replace-restore");
+        let scratch = TempDir::new("gaia-publish-replace-restore");
+        let root = scratch.join("gaia-publish-replace-restore");
         let output = root.join("output.img");
         let missing_temp = temporary_publish_output_path(&output, "output");
         fs::create_dir_all(&root).expect("root dir");

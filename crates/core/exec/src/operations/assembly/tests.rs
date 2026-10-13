@@ -1,24 +1,13 @@
 use super::*;
 use gaia_spec::expand_simple_glob;
+use gaia_testkit::TempDir;
 
 use gaia_spec::{
     AssemblyFileSpec, AssemblyTreeSpec, ImageAssemblySpec, ImageOutputSpec, WorkspaceNamedPathSpec,
     WorkspacePathKindSpec,
 };
 use std::fs;
-use std::path::{Path, PathBuf};
-#[cfg(unix)]
-use std::time::{SystemTime, UNIX_EPOCH};
-
-fn unique_dir(prefix: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("{prefix}-{nonce}"));
-    fs::create_dir_all(&root).expect("test root");
-    root
-}
+use std::path::Path;
 
 fn test_spec(root: &Path) -> ResolvedBuildSpec {
     let mut spec = ResolvedBuildSpec::new("assembly-helper-test");
@@ -40,7 +29,9 @@ fn test_spec(root: &Path) -> ResolvedBuildSpec {
 
 #[test]
 fn assembly_file_dest_maps_directory_dest_and_rejects_escape() {
-    let root = unique_dir("gaia-assembly-dest");
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-assembly-dest");
+    fs::create_dir_all(&root).expect("test root");
     let tree = root.join("tree");
     let source = root.join("sources/config.txt");
     fs::create_dir_all(source.parent().expect("source parent")).expect("source parent");
@@ -60,13 +51,13 @@ fn assembly_file_dest_maps_directory_dest_and_rejects_escape() {
             .expect_err("wildcard dest should fail")
             .contains("cannot contain '*'")
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn expand_simple_glob_sorts_matches_and_allows_missing_directories() {
-    let root = unique_dir("gaia-assembly-glob");
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-assembly-glob");
+    fs::create_dir_all(&root).expect("test root");
     let spec = test_spec(&root);
     let glob_dir = root.join("glob");
     fs::create_dir_all(&glob_dir).expect("glob dir");
@@ -97,13 +88,13 @@ fn expand_simple_glob_sorts_matches_and_allows_missing_directories() {
     )
     .expect("missing glob dir");
     assert!(missing.is_empty());
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn expand_simple_glob_matches_versioned_parent_directories() {
-    let root = unique_dir("gaia-assembly-nested-glob");
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-assembly-nested-glob");
+    fs::create_dir_all(&root).expect("test root");
     let spec = test_spec(&root);
     let firmware = root.join("build/rpi-firmware-1.2.3/boot/overlays");
     fs::create_dir_all(&firmware).expect("firmware dir");
@@ -125,15 +116,15 @@ fn expand_simple_glob_matches_versioned_parent_directories() {
         .to_string();
     let matches = expand_simple_glob(&spec, &roots, &pattern).expect("nested glob matches");
     assert_eq!(matches, vec![firmware.join("hat_map.dtb")]);
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn file_sha256_hashes_sparse_files_incrementally() {
+    let scratch = TempDir::new("gaia-exec-test");
     use std::io::{Seek, SeekFrom, Write};
 
-    let root = unique_dir("gaia-assembly-sha256");
+    let root = scratch.join("gaia-assembly-sha256");
+    fs::create_dir_all(&root).expect("test root");
     let path = root.join("sparse.bin");
     let mut file = fs::File::create(&path).expect("sparse file");
     file.write_all(b"prefix").expect("prefix");
@@ -159,8 +150,6 @@ fn file_sha256_hashes_sparse_files_incrementally() {
         .collect::<String>();
 
     assert_eq!(file_sha256(&path).expect("sha256"), expected);
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -180,7 +169,9 @@ fn read_tail_bytes_keeps_only_configured_tail() {
 
 #[test]
 fn publish_assembly_output_restores_previous_output_when_replacement_fails() {
-    let root = unique_dir("gaia-assembly-publish-restore");
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-assembly-publish-restore");
+    fs::create_dir_all(&root).expect("test root");
     let output = root.join("output.img");
     let missing_temp = root.join(".output.img.gaia-tmp");
     fs::create_dir_all(&root).expect("root dir");
@@ -201,7 +192,9 @@ fn publish_assembly_output_restores_previous_output_when_replacement_fails() {
 
 #[test]
 fn stage_image_assembly_cleans_tree_and_skips_optional_missing_sources() {
-    let root = unique_dir("gaia-assembly-stage");
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-assembly-stage");
+    fs::create_dir_all(&root).expect("test root");
     let mut spec = test_spec(&root);
     let source = root.join("assets/config.txt");
     fs::create_dir_all(source.parent().expect("source parent")).expect("assets");
@@ -251,13 +244,13 @@ fn stage_image_assembly_cleans_tree_and_skips_optional_missing_sources() {
     let state = summary.state.render();
     assert!(state.contains("staged_file_count=1"));
     assert!(state.contains("skipped_file_count=1"));
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn copy_assembly_file_copies_regular_files_and_applies_mode() {
-    let root = unique_dir("gaia-assembly-copy");
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-assembly-copy");
+    fs::create_dir_all(&root).expect("test root");
     let source = root.join("source");
     let dest = root.join("nested/dest");
     fs::write(&source, "payload").expect("source");
@@ -281,14 +274,14 @@ fn copy_assembly_file_copies_regular_files_and_applies_mode() {
             0o755
         );
     }
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[cfg(unix)]
 #[test]
 fn copy_assembly_file_preserves_symlinks_when_requested() {
-    let root = unique_dir("gaia-assembly-symlink");
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-assembly-symlink");
+    fs::create_dir_all(&root).expect("test root");
     let source_target = root.join("target");
     let source_link = root.join("link");
     let dest = root.join("dest-link");
@@ -309,8 +302,6 @@ fn copy_assembly_file_preserves_symlinks_when_requested() {
         fs::read_link(&dest).expect("dest symlink"),
         Path::new("target")
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -371,7 +362,9 @@ fn assembly_disk_helpers_parse_types_aliases_and_signatures() {
 #[cfg(unix)]
 #[test]
 fn busybox_applet_symlink_points_to_busybox() {
-    let root = unique_dir("gaia-busybox-applet");
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-busybox-applet");
+    fs::create_dir_all(&root).expect("test root");
     let tree = root.join("initramfs");
     fs::create_dir_all(tree.join("bin")).expect("bin dir");
     fs::write(tree.join("bin/busybox"), "busybox").expect("busybox");
@@ -383,12 +376,12 @@ fn busybox_applet_symlink_points_to_busybox() {
         Path::new("busybox")
     );
     assert!(create_busybox_applet_symlink(&tree, "../bad").is_err());
-
-    let _ = fs::remove_dir_all(root);
 }
 #[test]
 fn buildroot_assembly_roots_expose_images_target_host_and_staging() {
-    let root = unique_dir("gaia-buildroot-assembly-roots");
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-buildroot-assembly-roots");
+    fs::create_dir_all(&root).expect("test root");
     let mut spec = test_spec(&root);
     spec.image.output = ImageOutputSpec {
         collect_dir: Some(root.join("publish").display().to_string()),
@@ -430,8 +423,6 @@ fn buildroot_assembly_roots_expose_images_target_host_and_staging() {
         roots.tree_path("roots").expect("tree"),
         root.join("publish/work/tree")
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 fn boot_assembly(
@@ -480,7 +471,9 @@ fn copy_transform(src: &str, dest: &str) -> gaia_spec::AssemblyTransformSpec {
 
 #[test]
 fn transforms_read_this_runs_filesystem_output() {
-    let root = unique_dir("gaia-assembly-order");
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-assembly-order");
+    fs::create_dir_all(&root).expect("test root");
     let mut spec = test_spec(&root);
     let source = root.join("assets/config.txt");
     fs::create_dir_all(source.parent().expect("source parent")).expect("assets");
@@ -513,13 +506,13 @@ fn transforms_read_this_runs_filesystem_output() {
             .unwrap_or_else(|| panic!("no message with '{text}': {:?}", summary.messages))
     };
     assert!(position("built assembly filesystem 'boot'") < position("ran assembly transform"));
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn assembly_steps_reading_each_others_outputs_are_refused() {
-    let root = unique_dir("gaia-assembly-cycle");
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-assembly-cycle");
+    fs::create_dir_all(&root).expect("test root");
     let mut spec = test_spec(&root);
     let source = root.join("assets/config.txt");
     fs::create_dir_all(source.parent().expect("source parent")).expect("assets");
@@ -539,11 +532,11 @@ fn assembly_steps_reading_each_others_outputs_are_refused() {
             .message
             .contains("copy transform to '$assembly.work/b'")
     );
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn assembly_disk_archives_log_a_step_time_and_sizes() {
+    let scratch = TempDir::new("gaia-exec-test");
     for (archive_name, tool, label) in [
         ("helios.img.xz", "xz", "xz"),
         ("helios.img.zst", "zstd", "zstd"),
@@ -552,7 +545,8 @@ fn assembly_disk_archives_log_a_step_time_and_sizes() {
             eprintln!("skipping assembly archive step-time test: '{tool}' is not installed");
             continue;
         }
-        let root = unique_dir("gaia-assembly-archive-step-time");
+        let root = scratch.join("gaia-assembly-archive-step-time");
+        fs::create_dir_all(&root).expect("test root");
         let mut spec = test_spec(&root);
         spec.image.output.archive_name = Some(archive_name.into());
         let images = root.join("out/images");
@@ -580,7 +574,6 @@ fn assembly_disk_archives_log_a_step_time_and_sizes() {
                 && message.contains(" -> ")),
             "missing size line in {messages:?}"
         );
-        let _ = fs::remove_dir_all(root);
     }
 }
 

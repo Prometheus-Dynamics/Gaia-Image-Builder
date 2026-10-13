@@ -8,16 +8,24 @@ use gaia_plan::{
     OperationParallelismDomain, OperationReuse, PlannedOperation,
 };
 use gaia_source_providers::SourceProviderCatalog;
+use gaia_testkit::TempDir;
 use std::fs;
 use std::time::{Duration, Instant};
-use support::{FailThenCancelAwarePathSourceProvider, SleepPathSourceProvider, unique_dir};
+use support::{FailThenCancelAwarePathSourceProvider, SleepPathSourceProvider};
 
 #[test]
 fn parallelizable_source_operations_execute_concurrently() {
+    let scratch = TempDir::new("gaia-exec-test");
     let mut spec = gaia_spec::ResolvedBuildSpec::new("parallel-exec");
-    spec.workspace.root_dir = unique_dir("gaia-exec-parallel-root");
-    spec.workspace.build_dir = unique_dir("gaia-exec-parallel-build");
-    spec.workspace.out_dir = unique_dir("gaia-exec-parallel-out");
+    spec.workspace.root_dir = scratch
+        .join("gaia-exec-parallel-root")
+        .display()
+        .to_string();
+    spec.workspace.build_dir = scratch
+        .join("gaia-exec-parallel-build")
+        .display()
+        .to_string();
+    spec.workspace.out_dir = scratch.join("gaia-exec-parallel-out").display().to_string();
     fs::create_dir_all(&spec.workspace.root_dir).expect("parallel root dir");
     spec.sources = vec![
         gaia_spec::SourceSpec::new(
@@ -100,10 +108,20 @@ fn parallelizable_source_operations_execute_concurrently() {
 
 #[test]
 fn failed_parallel_operation_cancels_running_siblings_before_rollback() {
+    let scratch = TempDir::new("gaia-exec-test");
     let mut spec = gaia_spec::ResolvedBuildSpec::new("parallel-failure-cancels-siblings");
-    spec.workspace.root_dir = unique_dir("gaia-exec-parallel-fail-root");
-    spec.workspace.build_dir = unique_dir("gaia-exec-parallel-fail-build");
-    spec.workspace.out_dir = unique_dir("gaia-exec-parallel-fail-out");
+    spec.workspace.root_dir = scratch
+        .join("gaia-exec-parallel-fail-root")
+        .display()
+        .to_string();
+    spec.workspace.build_dir = scratch
+        .join("gaia-exec-parallel-fail-build")
+        .display()
+        .to_string();
+    spec.workspace.out_dir = scratch
+        .join("gaia-exec-parallel-fail-out")
+        .display()
+        .to_string();
     spec.policy.execution.jobs = 2;
     fs::create_dir_all(&spec.workspace.root_dir).expect("parallel fail root dir");
     spec.sources = vec![

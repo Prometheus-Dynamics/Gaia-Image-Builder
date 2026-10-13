@@ -1,20 +1,16 @@
 use super::*;
+use gaia_testkit::TempDir;
 
 struct Fixture {
     root: PathBuf,
     buildroot: PathBuf,
+    _scratch: TempDir,
 }
 
 impl Fixture {
     fn new(label: &str) -> Self {
-        let root = std::env::temp_dir().join(format!(
-            "gaia-package-keys-{label}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time")
-                .as_nanos()
-        ));
+        let scratch = TempDir::new(&format!("gaia-package-keys-{label}"));
+        let root = scratch.path().to_path_buf();
         let buildroot = root.join("buildroot");
         for (path, contents) in [
             ("Makefile", "ifeq ($(BR2_OPTIMIZE_2),y)\nendif\n"),
@@ -41,7 +37,11 @@ impl Fixture {
             fs::create_dir_all(path.parent().expect("parent")).expect("dir");
             fs::write(path, contents).expect("file");
         }
-        Self { root, buildroot }
+        Self {
+            root,
+            buildroot,
+            _scratch: scratch,
+        }
     }
 
     fn output(&self, name: &str, config: &str) -> PathBuf {
@@ -59,12 +59,6 @@ impl Fixture {
             execution_identity: "host:test",
             external: &BTreeMap::new(),
         })
-    }
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
     }
 }
 

@@ -5,31 +5,41 @@
 use gaia_config::{
     ConfigError, ResolveOptions, resolve_variant_specs, try_resolve_config_with_options,
 };
+use gaia_testkit::TempDir;
 use std::fs;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
-static COUNTER: AtomicU64 = AtomicU64::new(0);
+/// A build tree written to its own scratch directory. Derefs to the tree's
+/// `build.toml`; the directory is removed when this value is dropped.
+struct Tree {
+    build: PathBuf,
+    _scratch: TempDir,
+}
+
+impl Deref for Tree {
+    type Target = PathBuf;
+
+    fn deref(&self) -> &PathBuf {
+        &self.build
+    }
+}
 
 /// Writes a build tree (`files` are relative path and contents) and returns
-/// the path of its `build.toml`. `ROOT` in contents is the tree's root.
-fn write_tree(files: &[(&str, &str)]) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("time")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!(
-        "gaia-source-overrides-{nonce}-{}",
-        COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
+/// it. `ROOT` in contents is the tree's root.
+fn write_tree(files: &[(&str, &str)]) -> Tree {
+    let scratch = TempDir::new("gaia-source-overrides");
+    let root = scratch.path().to_path_buf();
     for (path, contents) in files {
         let full = root.join(path);
         fs::create_dir_all(full.parent().expect("parent")).expect("dir");
         let contents = contents.replace("ROOT", &root.display().to_string());
         fs::write(full, contents).expect("write");
     }
-    root.join("build.toml")
+    Tree {
+        build: root.join("build.toml"),
+        _scratch: scratch,
+    }
 }
 
 /// A build whose `eidos` source is declared only by an import gated on
@@ -66,7 +76,7 @@ kind = "path"
 path = "eidos-original"
 "#;
 
-fn tree(build: &str) -> PathBuf {
+fn tree(build: &str) -> Tree {
     write_tree(&[
         ("build.toml", build),
         ("backend-styx.toml", STYX),

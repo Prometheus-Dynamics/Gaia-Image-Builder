@@ -201,6 +201,7 @@ fn hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use crate::buildroot_external_files::external_trees;
+    use gaia_testkit::TempDir;
 
     fn workspace(root: &Path) -> WorkspaceSpec {
         WorkspaceSpec {
@@ -216,10 +217,8 @@ mod tests {
 
     #[test]
     fn overrides_win_over_fragments_and_defconfig() {
-        let root = std::env::temp_dir().join(format!(
-            "gaia-buildroot-scripts-settings-{}",
-            std::process::id()
-        ));
+        let scratch = TempDir::new("gaia-buildroot-scripts-settings");
+        let root = scratch.path().to_path_buf();
         write(
             &root.join("raze.defconfig"),
             "BR2_ROOTFS_POST_IMAGE_SCRIPT=\"board/a.sh\"\n# BR2_X is not set\n",
@@ -235,15 +234,12 @@ mod tests {
         let settings = resolved_settings(&workspace(&root), &buildroot, &[], None);
         assert_eq!(settings["BR2_ROOTFS_POST_IMAGE_SCRIPT"], "board/b.sh");
         assert!(!settings.contains_key("BR2_X"));
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn a_post_image_script_change_changes_its_component() {
-        let root = std::env::temp_dir().join(format!(
-            "gaia-buildroot-scripts-change-{}",
-            std::process::id()
-        ));
+        let scratch = TempDir::new("gaia-buildroot-scripts-change");
+        let root = scratch.path().to_path_buf();
         let script = root.join("board/raze/post-image.sh");
         write(&script, "#!/bin/sh\necho one\n");
         write(&root.join("board/raze/helper.sh"), "helper\n");
@@ -264,15 +260,12 @@ mod tests {
         // A sibling file beside the script counts too.
         write(&root.join("board/raze/helper.sh"), "helper v2\n");
         assert_ne!(after, post_script_components(&ws, &buildroot, &[], None));
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn external_tree_scripts_are_found_through_br2_external_paths() {
-        let root = std::env::temp_dir().join(format!(
-            "gaia-buildroot-scripts-external-{}",
-            std::process::id()
-        ));
+        let scratch = TempDir::new("gaia-buildroot-scripts-external");
+        let root = scratch.path().to_path_buf();
         write(&root.join("ext/external.desc"), "name: RAZE\n");
         write(&root.join("ext/board/post-fakeroot.sh"), "fakeroot\n");
         let ws = workspace(&root);
@@ -291,6 +284,5 @@ mod tests {
             components[0].0,
             "post-fakeroot script RAZE:board/post-fakeroot.sh"
         );
-        let _ = fs::remove_dir_all(root);
     }
 }

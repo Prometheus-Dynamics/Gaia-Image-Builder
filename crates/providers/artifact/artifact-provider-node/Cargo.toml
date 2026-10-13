@@ -12,5 +12,8 @@ description = "Node artifact provider scaffold for Gaia."
 gaia-artifact-providers.workspace = true
 gaia-spec.workspace = true
 
+[dev-dependencies]
+gaia-testkit.workspace = true
+
 [lints]
 workspace = true

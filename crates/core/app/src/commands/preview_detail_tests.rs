@@ -5,7 +5,6 @@ use super::tests::{record_reuse_state, scratch_root};
 use super::*;
 use crate::commands::load_reuse_state;
 use gaia_spec::{BuildrootImageSpec, ImageDefinition};
-use std::fs;
 use std::path::Path;
 
 fn buildroot_spec(root: &Path, overrides: &[(&str, &str)]) -> gaia_spec::ResolvedBuildSpec {
@@ -40,7 +39,8 @@ fn record_finished_run(spec: &gaia_spec::ResolvedBuildSpec, plan: &gaia_plan::Ex
 
 #[test]
 fn a_changed_override_key_is_previewed_by_name() {
-    let root = scratch_root("override-key");
+    let scratch = scratch_root("override-key");
+    let root = scratch.join("root");
     let context = AppContext::with_defaults();
     let spec = buildroot_spec(
         &root,
@@ -100,12 +100,12 @@ fn a_changed_override_key_is_previewed_by_name() {
     {
         assert_eq!(operation.reason, "reused from state-file", "{operation:?}");
     }
-    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn a_state_recorded_without_details_says_no_detail_recorded() {
-    let root = scratch_root("no-details");
+    let scratch = scratch_root("no-details");
+    let root = scratch.join("root");
     let context = AppContext::with_defaults();
     let spec = buildroot_spec(&root, &[("BR2_TARGET_GENERIC_ISSUE", "one")]);
     let baseline = gaia_plan::plan_build(
@@ -140,12 +140,12 @@ fn a_state_recorded_without_details_says_no_detail_recorded() {
         "{}",
         image.reason
     );
-    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn a_changed_build_env_key_is_previewed_by_name() {
-    let root = scratch_root("build-env");
+    let scratch = scratch_root("build-env");
+    let root = scratch.join("root");
     let context = AppContext::with_defaults();
     let java = |gradle_home: &str| {
         let mut spec = gaia_spec::ResolvedBuildSpec::new("app-env");
@@ -211,14 +211,14 @@ fn a_changed_build_env_key_is_previewed_by_name() {
         "{}",
         artifact.reason
     );
-    let _ = fs::remove_dir_all(&root);
 }
 
 /// What `gaia run` does: the reasons come from the plan explained before the
 /// run saves its state, and the rebuild-reasons report carries them.
 #[test]
 fn a_run_names_the_changed_input_in_its_rebuild_reasons() {
-    let root = scratch_root("run-reasons");
+    let scratch = scratch_root("run-reasons");
+    let root = scratch.join("root");
     let context = AppContext::with_defaults();
     let spec = buildroot_spec(&root, &[("BR2_TARGET_GENERIC_ISSUE", "one")]);
     let baseline = gaia_plan::plan_build(
@@ -261,5 +261,4 @@ fn a_run_names_the_changed_input_in_its_rebuild_reasons() {
         "{}",
         image.message
     );
-    let _ = fs::remove_dir_all(&root);
 }

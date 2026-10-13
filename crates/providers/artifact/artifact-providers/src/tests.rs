@@ -3,21 +3,12 @@ use gaia_spec::{
     ArtifactDefinition, ArtifactExecutionSpec, ArtifactOutputSpec, ArtifactVariantSpec,
     DockerExecutionSpec, GradleHomeSpec,
 };
+use gaia_testkit::TempDir;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-
-static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn temp_path(prefix: &str) -> PathBuf {
-    let nonce = TEST_DIR_COUNTER.fetch_add(1, Ordering::SeqCst);
-    std::env::temp_dir()
-        .join("gaia-tests")
-        .join(format!("{prefix}-{}-{nonce}", std::process::id()))
-}
 
 struct DummyArtifactProvider;
 
@@ -33,6 +24,7 @@ impl ArtifactProvider for DummyArtifactProvider {
 
 #[test]
 fn default_artifact_execution_fails_instead_of_materializing_placeholder() {
+    let scratch = TempDir::new("gaia-artifact-default-exec");
     let artifact = ArtifactSpec::new(
         "dummy-artifact",
         ArtifactDefinition::Rust(gaia_spec::RustArtifactSpec {
@@ -47,7 +39,8 @@ fn default_artifact_execution_fails_instead_of_materializing_placeholder() {
         }),
         None,
         ArtifactOutputSpec {
-            path: temp_path("gaia-artifact-default-exec")
+            path: scratch
+                .join("gaia-artifact-default-exec")
                 .join("dummy.bin")
                 .display()
                 .to_string(),
@@ -65,7 +58,8 @@ fn default_artifact_execution_fails_instead_of_materializing_placeholder() {
 
 #[test]
 fn materialize_artifact_output_cleans_temp_file_when_rename_fails() {
-    let root = temp_path("gaia-artifact-output-failure");
+    let scratch = TempDir::new("gaia-artifact-output-failure");
+    let root = scratch.join("gaia-artifact-output-failure");
     fs::create_dir_all(&root).expect("root dir");
     let output_path = root.join("existing-dir");
     fs::create_dir_all(&output_path).expect("existing output dir");
@@ -109,7 +103,8 @@ fn materialize_artifact_output_cleans_temp_file_when_rename_fails() {
 
 #[test]
 fn copy_artifact_file_to_output_creates_parent_and_finalizes_temp_file() {
-    let root = temp_path("gaia-artifact-copy-output");
+    let scratch = TempDir::new("gaia-artifact-copy-output");
+    let root = scratch.join("gaia-artifact-copy-output");
     fs::create_dir_all(&root).expect("root dir");
     let source = root.join("built.bin");
     let output = root.join("nested").join("artifact.bin");
@@ -135,17 +130,20 @@ fn artifact_package_root_resolves_relative_package_dirs_against_source() {
 
 #[test]
 fn ensure_artifact_output_parent_creates_parent_directories() {
-    let output_path = temp_path("gaia-artifact-parent").join("nested/out.bin");
+    let scratch = TempDir::new("gaia-artifact-parent");
+    let output_path = scratch.join("gaia-artifact-parent").join("nested/out.bin");
 
     ensure_artifact_output_parent(&output_path).expect("output parent");
 
     assert!(output_path.parent().expect("parent").is_dir());
-    let _ = fs::remove_dir_all(output_path.ancestors().nth(1).expect("test root"));
 }
 
 #[test]
 fn materialize_artifact_marker_and_state_writes_both_files() {
-    let output_path = temp_path("gaia-artifact-marker-state").join("artifact.bin");
+    let scratch = TempDir::new("gaia-artifact-marker-state");
+    let output_path = scratch
+        .join("gaia-artifact-marker-state")
+        .join("artifact.bin");
     let contract = ArtifactExecutionContract {
         provider: ArtifactProviderKind::Rust,
         source: None,
@@ -197,7 +195,6 @@ fn materialize_artifact_marker_and_state_writes_both_files() {
         .expect("state"),
         "state"
     );
-    let _ = fs::remove_dir_all(output_path.ancestors().nth(1).expect("test root"));
 }
 
 #[test]
@@ -226,7 +223,8 @@ fn retry_backoff_duration_supports_fixed_and_exponential_strategies() {
 
 #[test]
 fn command_for_execution_wraps_docker_backend() {
-    let workspace_root = temp_path("gaia-docker-workspace");
+    let scratch = TempDir::new("gaia-docker-workspace");
+    let workspace_root = scratch.join("gaia-docker-workspace");
     fs::create_dir_all(&workspace_root).expect("workspace dir");
     let source_dir = workspace_root.join("src");
     fs::create_dir_all(&source_dir).expect("source dir");
@@ -309,7 +307,8 @@ fn command_for_execution_wraps_docker_backend() {
 
 #[test]
 fn run_command_with_retries_reuses_contract_retry_policy() {
-    let root = temp_path("gaia-artifact-retry");
+    let scratch = TempDir::new("gaia-artifact-retry");
+    let root = scratch.join("gaia-artifact-retry");
     fs::create_dir_all(&root).expect("root dir");
     let marker = root.join("attempted");
     let output_path = root.join("out.bin");
@@ -519,11 +518,12 @@ fn docker_tag(contract: &ArtifactExecutionContract) -> String {
 
 #[test]
 fn dockerfile_execution_image_is_built_once_and_tagged_by_content() {
-    let workspace = temp_path("gaia-dockerfile-exec");
+    let scratch = TempDir::new("gaia-dockerfile-exec");
+    let workspace = scratch.join("gaia-dockerfile-exec");
     let docker_dir = workspace.join("docker/rust");
     fs::create_dir_all(&docker_dir).expect("docker dir");
     fs::write(docker_dir.join("Dockerfile"), "FROM rust:1.94\n").expect("dockerfile");
-    let tools = temp_path("gaia-dockerfile-fake-docker");
+    let tools = scratch.join("gaia-dockerfile-fake-docker");
     fs::create_dir_all(&tools).expect("tools dir");
     let fake_docker = tools.join("docker");
     fs::write(&fake_docker, FAKE_DOCKER).expect("fake docker");
@@ -585,7 +585,8 @@ fn dockerfile_execution_image_is_built_once_and_tagged_by_content() {
 
 #[test]
 fn dockerfile_execution_rejects_missing_dockerfile() {
-    let workspace = temp_path("gaia-dockerfile-missing");
+    let scratch = TempDir::new("gaia-dockerfile-missing");
+    let workspace = scratch.join("gaia-dockerfile-missing");
     fs::create_dir_all(&workspace).expect("workspace");
     let mut spec = ResolvedBuildSpec::new("dockerfile-missing");
     spec.workspace.root_dir = workspace.display().to_string();

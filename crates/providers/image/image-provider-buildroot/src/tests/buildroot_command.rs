@@ -3,8 +3,10 @@ use super::*;
 #[test]
 fn run_buildroot_reports_make_failures() {
     let spec = ResolvedBuildSpec::new("buildroot-test");
-    let buildroot_dir = temp_path("gaia-buildroot-test-dir");
-    let output_dir = temp_path("gaia-buildroot-test-out");
+    let buildroot_dir_scratch = TempDir::new("gaia-buildroot-test-dir");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-test-out");
+    let output_dir = output_dir_scratch.join("output_dir");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     fs::write(
             buildroot_dir.join("Makefile"),
@@ -101,7 +103,8 @@ fn make_jobs_are_provider_local_and_not_forced_by_scheduler_jobs() {
 
 #[test]
 fn buildroot_cache_policy_sets_make_environment_and_creates_dirs() {
-    let workspace = temp_path("gaia-buildroot-cache-workspace");
+    let workspace_scratch = TempDir::new("gaia-buildroot-cache-workspace");
+    let workspace = workspace_scratch.join("workspace");
     let mut spec = ResolvedBuildSpec::new("buildroot-cache-test");
     spec.workspace.root_dir = workspace.display().to_string();
     let policy = ImageExecutionPolicy {
@@ -139,7 +142,7 @@ fn buildroot_default_caches_are_shared_by_every_workspace() {
     };
     let envs = |workspace: &str| {
         let mut spec = ResolvedBuildSpec::new("buildroot-shared-cache");
-        spec.workspace.root_dir = temp_path(workspace).display().to_string();
+        spec.workspace.root_dir = std::env::temp_dir().join(workspace).display().to_string();
         let mut command = Command::new("make");
         apply_buildroot_policy_env(&mut command, &spec, &policy).expect("cache env");
         command
@@ -160,7 +163,8 @@ fn buildroot_default_caches_are_shared_by_every_workspace() {
 
 #[test]
 fn ccache_max_size_is_written_to_the_cache_config() {
-    let dir = temp_path("gaia-ccache-max-size");
+    let dir_scratch = TempDir::new("gaia-ccache-max-size");
+    let dir = dir_scratch.join("dir");
     fs::create_dir_all(&dir).expect("dir");
     fs::write(
         dir.join("ccache.conf"),
@@ -197,10 +201,14 @@ fn ccache_hit_rate_counts_this_runs_compilations() {
 
 #[test]
 fn buildroot_parallel_packages_and_ccache_configure_and_report() {
-    let workspace = temp_path("gaia-buildroot-parallel-workspace");
-    let buildroot_dir = temp_path("gaia-buildroot-parallel-source");
-    let output_dir = temp_path("gaia-buildroot-parallel-output");
-    let ccache_dir = temp_path("gaia-buildroot-parallel-ccache");
+    let workspace_scratch = TempDir::new("gaia-buildroot-parallel-workspace");
+    let workspace = workspace_scratch.join("workspace");
+    let buildroot_dir_scratch = TempDir::new("gaia-buildroot-parallel-source");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-parallel-output");
+    let output_dir = output_dir_scratch.join("output_dir");
+    let ccache_dir_scratch = TempDir::new("gaia-buildroot-parallel-ccache");
+    let ccache_dir = ccache_dir_scratch.join("ccache_dir");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     // Like Buildroot: `target-finalize` builds (recording make's flags, a
     // ccache stats log like two compilations, one from the cache, and the
@@ -328,9 +336,12 @@ fn buildroot_kconfig_string_value_rejects_newlines() {
 
 #[test]
 fn buildroot_cache_config_escapes_kconfig_paths() {
-    let workspace = temp_path("gaia-buildroot-cache-escaping-workspace");
-    let buildroot_dir = temp_path("gaia-buildroot-cache-escaping-source");
-    let output_dir = temp_path("gaia-buildroot-cache-escaping-output");
+    let workspace_scratch = TempDir::new("gaia-buildroot-cache-escaping-workspace");
+    let workspace = workspace_scratch.join("workspace");
+    let buildroot_dir_scratch = TempDir::new("gaia-buildroot-cache-escaping-source");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-cache-escaping-output");
+    let output_dir = output_dir_scratch.join("output_dir");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     fs::create_dir_all(&output_dir).expect("output dir");
     fs::write(output_dir.join(".config"), "BR2_TARGET_ROOTFS_TAR=y\n").expect("config");
@@ -362,9 +373,12 @@ fn buildroot_cache_config_escapes_kconfig_paths() {
 
 #[test]
 fn buildroot_package_overrides_are_staged_as_external_tree() {
-    let workspace = temp_path("gaia-buildroot-package-overrides-workspace");
-    let buildroot_dir = temp_path("gaia-buildroot-package-overrides-source");
-    let output_dir = temp_path("gaia-buildroot-package-overrides-output");
+    let workspace_scratch = TempDir::new("gaia-buildroot-package-overrides-workspace");
+    let workspace = workspace_scratch.join("workspace");
+    let buildroot_dir_scratch = TempDir::new("gaia-buildroot-package-overrides-source");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-package-overrides-output");
+    let output_dir = output_dir_scratch.join("output_dir");
     let user_external = workspace.join("user-external");
     let override_pkg = workspace.join("gaia/assets/buildroot/packages/foo");
 
@@ -443,9 +457,12 @@ fn buildroot_package_overrides_are_staged_as_external_tree() {
 
 #[test]
 fn buildroot_package_overrides_replace_existing_source_packages() {
-    let workspace = temp_path("gaia-buildroot-package-replacements-workspace");
-    let buildroot_dir = temp_path("gaia-buildroot-package-replacements-source");
-    let output_dir = temp_path("gaia-buildroot-package-replacements-output");
+    let workspace_scratch = TempDir::new("gaia-buildroot-package-replacements-workspace");
+    let workspace = workspace_scratch.join("workspace");
+    let buildroot_dir_scratch = TempDir::new("gaia-buildroot-package-replacements-source");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-package-replacements-output");
+    let output_dir = output_dir_scratch.join("output_dir");
     let override_pkg = workspace.join("gaia/assets/buildroot/packages/foo");
     let source_pkg = buildroot_dir.join("package/foo");
 
@@ -526,9 +543,12 @@ fn buildroot_package_overrides_replace_existing_source_packages() {
 
 #[test]
 fn buildroot_config_changes_clean_existing_output_before_make() {
-    let workspace = temp_path("gaia-buildroot-config-clean-workspace");
-    let buildroot_dir = temp_path("gaia-buildroot-config-clean-source");
-    let output_dir = temp_path("gaia-buildroot-config-clean-output");
+    let workspace_scratch = TempDir::new("gaia-buildroot-config-clean-workspace");
+    let workspace = workspace_scratch.join("workspace");
+    let buildroot_dir_scratch = TempDir::new("gaia-buildroot-config-clean-source");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-config-clean-output");
+    let output_dir = output_dir_scratch.join("output_dir");
 
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     fs::create_dir_all(output_dir.join("target")).expect("stale target dir");
@@ -583,9 +603,12 @@ fn buildroot_config_changes_clean_existing_output_before_make() {
 
 #[test]
 fn buildroot_retry_after_failed_post_image_does_not_clean() {
-    let workspace = temp_path("gaia-buildroot-post-image-retry-workspace");
-    let buildroot_dir = temp_path("gaia-buildroot-post-image-retry-source");
-    let output_dir = temp_path("gaia-buildroot-post-image-retry-output");
+    let workspace_scratch = TempDir::new("gaia-buildroot-post-image-retry-workspace");
+    let workspace = workspace_scratch.join("workspace");
+    let buildroot_dir_scratch = TempDir::new("gaia-buildroot-post-image-retry-source");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-post-image-retry-output");
+    let output_dir = output_dir_scratch.join("output_dir");
 
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     // `all` builds packages, then fails in "post-image" while the marker
@@ -648,9 +671,12 @@ fn buildroot_retry_after_failed_post_image_does_not_clean() {
 
 #[test]
 fn buildroot_option_change_rebuilds_only_the_package_and_its_dependents() {
-    let workspace = temp_path("gaia-buildroot-targeted-workspace");
-    let buildroot_dir = temp_path("gaia-buildroot-targeted-source");
-    let output_dir = temp_path("gaia-buildroot-targeted-output");
+    let workspace_scratch = TempDir::new("gaia-buildroot-targeted-workspace");
+    let workspace = workspace_scratch.join("workspace");
+    let buildroot_dir_scratch = TempDir::new("gaia-buildroot-targeted-source");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-targeted-output");
+    let output_dir = output_dir_scratch.join("output_dir");
 
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     // bar depends on foo; baz on nothing.
@@ -745,9 +771,14 @@ fn buildroot_option_change_rebuilds_only_the_package_and_its_dependents() {
 
 #[test]
 fn buildroot_package_override_missing_config_in_fails_before_make() {
-    let workspace = temp_path("gaia-buildroot-package-overrides-missing-config-workspace");
-    let buildroot_dir = temp_path("gaia-buildroot-package-overrides-missing-config-source");
-    let output_dir = temp_path("gaia-buildroot-package-overrides-missing-config-output");
+    let workspace_scratch =
+        TempDir::new("gaia-buildroot-package-overrides-missing-config-workspace");
+    let workspace = workspace_scratch.join("workspace");
+    let buildroot_dir_scratch =
+        TempDir::new("gaia-buildroot-package-overrides-missing-config-source");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-package-overrides-missing-config-output");
+    let output_dir = output_dir_scratch.join("output_dir");
     let override_pkg = workspace.join("gaia/assets/buildroot/packages/foo");
 
     fs::create_dir_all(&override_pkg).expect("override package dir");
@@ -792,9 +823,12 @@ fn buildroot_package_override_missing_config_in_fails_before_make() {
 
 #[test]
 fn buildroot_package_override_detects_generated_external_name_conflict() {
-    let workspace = temp_path("gaia-buildroot-package-overrides-conflict-workspace");
-    let buildroot_dir = temp_path("gaia-buildroot-package-overrides-conflict-source");
-    let output_dir = temp_path("gaia-buildroot-package-overrides-conflict-output");
+    let workspace_scratch = TempDir::new("gaia-buildroot-package-overrides-conflict-workspace");
+    let workspace = workspace_scratch.join("workspace");
+    let buildroot_dir_scratch = TempDir::new("gaia-buildroot-package-overrides-conflict-source");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-package-overrides-conflict-output");
+    let output_dir = output_dir_scratch.join("output_dir");
     let user_external = workspace.join("user-external");
     let override_pkg = workspace.join("gaia/assets/buildroot/packages/foo");
 
@@ -848,7 +882,8 @@ fn buildroot_package_override_detects_generated_external_name_conflict() {
 
 #[test]
 fn buildroot_state_digest_ignores_unrelated_build_tree_files() {
-    let output_dir = temp_path("gaia-buildroot-digest-out");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-digest-out");
+    let output_dir = output_dir_scratch.join("output_dir");
     fs::create_dir_all(output_dir.join("images")).expect("images dir");
     fs::write(output_dir.join(".config"), "BR2_TARGET_ROOTFS_TAR=y\n").expect("config");
     fs::write(output_dir.join("images/rootfs.tar"), "rootfs").expect("image");
@@ -875,7 +910,8 @@ fn buildroot_state_digest_ignores_unrelated_build_tree_files() {
 
 #[test]
 fn command_for_execution_mounts_parent_dir_for_output_files() {
-    let workspace_root = temp_path("gaia-buildroot-docker-parent");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-docker-parent");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
     let output_path = workspace_root.join("out/rootfs.tar");
     fs::create_dir_all(workspace_root.join("out")).expect("out dir");
     let execution = ImageExecutionContext {
@@ -936,8 +972,10 @@ fn buildroot_zero_local_jobs_uses_available_parallelism() {
 
 #[test]
 fn refresh_buildroot_images_after_feed_overlay_runs_target_post_image_for_non_tar_outputs() {
-    let buildroot_dir = temp_path("gaia-buildroot-post-image-dir");
-    let output_dir = temp_path("gaia-buildroot-post-image-out");
+    let buildroot_dir_scratch = TempDir::new("gaia-buildroot-post-image-dir");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-post-image-out");
+    let output_dir = output_dir_scratch.join("output_dir");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     fs::write(
             buildroot_dir.join("Makefile"),
@@ -987,8 +1025,10 @@ fn refresh_buildroot_images_after_feed_overlay_runs_target_post_image_for_non_ta
 
 #[test]
 fn refresh_buildroot_images_after_feed_overlay_disables_legacy_before_target_post_image() {
-    let buildroot_dir = temp_path("gaia-buildroot-post-image-legacy-dir");
-    let output_dir = temp_path("gaia-buildroot-post-image-legacy-out");
+    let buildroot_dir_scratch = TempDir::new("gaia-buildroot-post-image-legacy-dir");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-post-image-legacy-out");
+    let output_dir = output_dir_scratch.join("output_dir");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     fs::create_dir_all(&output_dir).expect("output dir");
     fs::write(output_dir.join(".config"), "BR2_LEGACY=y\n").expect("buildroot config");
@@ -1035,7 +1075,8 @@ fn refresh_buildroot_images_after_feed_overlay_disables_legacy_before_target_pos
 
 #[test]
 fn refresh_buildroot_images_after_feed_overlay_absolutizes_external_tree() {
-    let workspace_root = temp_path("gaia-buildroot-post-image-external-workspace");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-post-image-external-workspace");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
     let buildroot_dir = workspace_root.join("buildroot");
     let output_dir = workspace_root.join("out");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
@@ -1087,7 +1128,8 @@ fn refresh_buildroot_images_after_feed_overlay_absolutizes_external_tree() {
 
 #[test]
 fn refresh_buildroot_post_image_direct_runs_configured_script_with_buildroot_env() {
-    let workspace_root = temp_path("gaia-buildroot-direct-post-image-workspace");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-direct-post-image-workspace");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
     let buildroot_dir = workspace_root.join("buildroot");
     let output_dir = workspace_root.join("out/buildroot-output");
     let script_path = workspace_root.join("post-image.sh");
@@ -1133,8 +1175,10 @@ fn refresh_buildroot_post_image_direct_runs_configured_script_with_buildroot_env
 
 #[test]
 fn materialize_defconfig_support_files_copies_sibling_assets_into_output_dir() {
-    let assets_dir = temp_path("gaia-buildroot-defconfig-assets");
-    let output_dir = temp_path("gaia-buildroot-defconfig-out");
+    let assets_dir_scratch = TempDir::new("gaia-buildroot-defconfig-assets");
+    let assets_dir = assets_dir_scratch.join("assets_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-defconfig-out");
+    let output_dir = output_dir_scratch.join("output_dir");
     fs::create_dir_all(&assets_dir).expect("assets dir");
     let defconfig_path = assets_dir.join("custom.defconfig");
     fs::write(&defconfig_path, "BR2_x86_64=y\n").expect("defconfig");
@@ -1158,9 +1202,12 @@ fn materialize_defconfig_support_files_copies_sibling_assets_into_output_dir() {
 
 #[test]
 fn apply_buildroot_config_fragments_merges_fragments_and_runs_olddefconfig() {
-    let workspace_root = temp_path("gaia-buildroot-fragment-workspace");
-    let buildroot_dir = temp_path("gaia-buildroot-fragment-buildroot");
-    let output_dir = temp_path("gaia-buildroot-fragment-output");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-fragment-workspace");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
+    let buildroot_dir_scratch = TempDir::new("gaia-buildroot-fragment-buildroot");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-fragment-output");
+    let output_dir = output_dir_scratch.join("output_dir");
     fs::create_dir_all(workspace_root.join("assets")).expect("assets dir");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     fs::create_dir_all(&output_dir).expect("output dir");
@@ -1225,8 +1272,10 @@ fn apply_buildroot_config_fragments_merges_fragments_and_runs_olddefconfig() {
 
 #[test]
 fn apply_buildroot_config_settings_merges_overrides_and_runs_olddefconfig() {
-    let buildroot_dir = temp_path("gaia-buildroot-override-buildroot");
-    let output_dir = temp_path("gaia-buildroot-override-output");
+    let buildroot_dir_scratch = TempDir::new("gaia-buildroot-override-buildroot");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-override-output");
+    let output_dir = output_dir_scratch.join("output_dir");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     fs::create_dir_all(&output_dir).expect("output dir");
     fs::write(
@@ -1278,7 +1327,8 @@ fn apply_buildroot_config_settings_merges_overrides_and_runs_olddefconfig() {
 
 #[test]
 fn normalize_global_patch_dir_resolves_workspace_relative_entries() {
-    let workspace_root = temp_path("gaia-buildroot-global-patch-workspace");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-global-patch-workspace");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
     let patch_dir = workspace_root.join("gaia/assets/buildroot/patches");
     fs::create_dir_all(&patch_dir).expect("patch dir");
     let mut spec = ResolvedBuildSpec::new("global-patch-dir");
@@ -1297,8 +1347,10 @@ fn normalize_global_patch_dir_resolves_workspace_relative_entries() {
 
 #[test]
 fn refresh_buildroot_images_after_feed_overlay_skips_tar_only_outputs() {
-    let buildroot_dir = temp_path("gaia-buildroot-post-image-skip-dir");
-    let output_dir = temp_path("gaia-buildroot-post-image-skip-out");
+    let buildroot_dir_scratch = TempDir::new("gaia-buildroot-post-image-skip-dir");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-post-image-skip-out");
+    let output_dir = output_dir_scratch.join("output_dir");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     fs::write(
         buildroot_dir.join("Makefile"),
@@ -1341,8 +1393,10 @@ fn refresh_buildroot_images_after_feed_overlay_skips_tar_only_outputs() {
 
 #[test]
 fn refresh_buildroot_images_after_feed_overlay_reports_target_post_image_failure() {
-    let buildroot_dir = temp_path("gaia-buildroot-post-image-fail-dir");
-    let output_dir = temp_path("gaia-buildroot-post-image-fail-out");
+    let buildroot_dir_scratch = TempDir::new("gaia-buildroot-post-image-fail-dir");
+    let buildroot_dir = buildroot_dir_scratch.join("buildroot_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-post-image-fail-out");
+    let output_dir = output_dir_scratch.join("output_dir");
     fs::create_dir_all(&buildroot_dir).expect("buildroot dir");
     fs::write(
         buildroot_dir.join("Makefile"),

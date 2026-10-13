@@ -271,15 +271,9 @@ pub(crate) fn decide_with_probe_cache(
 mod tests {
     use super::*;
     use gaia_spec::HostToolStepSpec;
+    use gaia_testkit::TempDir;
     use std::os::unix::fs::PermissionsExt;
     use std::sync::atomic::{AtomicUsize, Ordering};
-
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = env::temp_dir().join(format!("gaia-probe-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("dir");
-        dir
-    }
 
     fn tool(name: &'static str, enabled: bool, steps: &str) -> ProbeTool {
         ProbeTool {
@@ -308,17 +302,18 @@ mod tests {
 
     #[test]
     fn key_is_stable_while_nothing_changes() {
-        let dir = temp_dir("stable");
+        let dir_scratch = TempDir::new("gaia-probe-stable");
+        let dir = dir_scratch.path().to_path_buf();
         fake_tool(&dir, "ccache", "one");
         let path = dir.display().to_string();
         assert!(key(&tools(true), &path).is_some());
         assert_eq!(key(&tools(true), &path), key(&tools(true), &path));
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn key_changes_when_a_tool_binary_is_replaced() {
-        let dir = temp_dir("replace");
+        let dir_scratch = TempDir::new("gaia-probe-replace");
+        let dir = dir_scratch.path().to_path_buf();
         let path = dir.display().to_string();
         fake_tool(&dir, "ccache", "one");
         let before = key(&tools(true), &path);
@@ -328,12 +323,12 @@ mod tests {
         fs::set_permissions(&replacement, fs::Permissions::from_mode(0o755)).expect("mode");
         fs::rename(&replacement, dir.join("ccache")).expect("replace");
         assert_ne!(before, key(&tools(true), &path));
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn key_changes_when_a_tool_binary_is_touched() {
-        let dir = temp_dir("touch");
+        let dir_scratch = TempDir::new("gaia-probe-touch");
+        let dir = dir_scratch.path().to_path_buf();
         let path = dir.display().to_string();
         let binary = fake_tool(&dir, "ccache", "one");
         let before = key(&tools(true), &path);
@@ -341,13 +336,14 @@ mod tests {
         file.set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1_000_000))
             .expect("touch");
         assert_ne!(before, key(&tools(true), &path));
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn key_changes_when_path_changes_or_a_shadowing_tool_appears() {
-        let first = temp_dir("path-first");
-        let second = temp_dir("path-second");
+        let first_scratch = TempDir::new("gaia-probe-path-first");
+        let first = first_scratch.path().to_path_buf();
+        let second_scratch = TempDir::new("gaia-probe-path-second");
+        let second = second_scratch.path().to_path_buf();
         fake_tool(&second, "ccache", "one");
         let only_second = key(&tools(true), &second.display().to_string());
         let both = format!("{}:{}", first.display(), second.display());
@@ -356,13 +352,12 @@ mod tests {
         // A tool appearing in an earlier PATH entry changes the answer.
         fake_tool(&first, "ccache", "one");
         assert_ne!(shadowed_later, key(&tools(true), &both));
-        let _ = fs::remove_dir_all(first);
-        let _ = fs::remove_dir_all(second);
     }
 
     #[test]
     fn key_changes_when_a_config_symbol_or_policy_changes() {
-        let dir = temp_dir("config").display().to_string();
+        let config_scratch = TempDir::new("gaia-probe-config");
+        let dir = config_scratch.path().display().to_string();
         assert_ne!(key(&tools(true), &dir), key(&tools(false), &dir));
         let build_only = vec![tool("ccache", true, "[Build]")];
         assert_ne!(key(&tools(true), &dir), key(&build_only, &dir));
@@ -370,7 +365,8 @@ mod tests {
 
     #[test]
     fn relative_path_entries_and_docker_without_an_image_have_no_key() {
-        let dir = temp_dir("relative");
+        let dir_scratch = TempDir::new("gaia-probe-relative");
+        let dir = dir_scratch.path().to_path_buf();
         let relative = format!(".:{}", dir.display());
         assert_eq!(key(&tools(true), &relative), None);
         assert_eq!(key(&tools(true), ""), None);
@@ -383,12 +379,12 @@ mod tests {
             ),
             None
         );
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn recorded_answers_are_reused_only_under_their_key() {
-        let dir = temp_dir("roundtrip");
+        let dir_scratch = TempDir::new("gaia-probe-roundtrip");
+        let dir = dir_scratch.path().to_path_buf();
         let mut answers = Answers::new();
         answers.insert(
             ("ccache".into(), "4.0".into()),
@@ -398,12 +394,12 @@ mod tests {
         write_answers(&dir, "key-a", &answers).expect("write");
         assert_eq!(read_answers(&dir, "key-a"), Some(answers));
         assert_eq!(read_answers(&dir, "key-b"), None);
-        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn a_corrupt_cache_is_ignored() {
-        let dir = temp_dir("corrupt");
+        let dir_scratch = TempDir::new("gaia-probe-corrupt");
+        let dir = dir_scratch.path().to_path_buf();
         let mut answers = Answers::new();
         answers.insert(
             ("ccache".into(), "4.0".into()),
@@ -422,7 +418,6 @@ mod tests {
         assert_eq!(read_answers(&dir, "key-a"), None);
         fs::write(&file, "").expect("empty");
         assert_eq!(read_answers(&dir, "key-a"), None);
-        let _ = fs::remove_dir_all(dir);
     }
 
     fn system_ccache_policy() -> gaia_spec::BuildrootHostToolsPolicySpec {
@@ -436,7 +431,8 @@ mod tests {
 
     #[test]
     fn decisions_reuse_the_probe_answers_until_an_input_changes() {
-        let dir = temp_dir("decide");
+        let dir_scratch = TempDir::new("gaia-probe-decide");
+        let dir = dir_scratch.path().to_path_buf();
         let config = "BR2_CCACHE=y\n";
         let policy = system_ccache_policy();
         let probes = AtomicUsize::new(0);
@@ -477,6 +473,5 @@ mod tests {
             .expect("corrupt");
         assert!(!corrupt.reused);
         assert_eq!(corrupt.decision, first.decision);
-        let _ = fs::remove_dir_all(dir);
     }
 }

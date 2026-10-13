@@ -10,9 +10,10 @@ use gaia_spec::{
     AssemblyFilesystemSpec, AssemblyPartitionTableSpec, AssemblyTransformKindSpec,
     AssemblyTransformSpec, AssemblyTreeSpec, ImageAssemblySpec,
 };
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::PathBuf;
-use support::{default_config_path, provider_catalogs, rebase_workspace_root, unique_dir};
+use support::{default_config_path, provider_catalogs, rebase_workspace_root, scratch_child};
 
 #[test]
 fn default_plan_has_valid_operations_and_rebuild_reasons() {
@@ -65,7 +66,8 @@ fn default_plan_has_valid_operations_and_rebuild_reasons() {
 
 #[test]
 fn starting_point_image_depends_on_declared_source() {
-    let root_dir = unique_dir("gaia-plan-starting-point-source-root");
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch_child(&scratch, "gaia-plan-starting-point-source-root");
     fs::create_dir_all(&root_dir).expect("root dir");
     let config_path = PathBuf::from(&root_dir).join("build.toml");
     fs::write(
@@ -114,7 +116,8 @@ source_path = "rootfs"
 
 #[test]
 fn buildroot_image_prepare_can_run_before_artifact_installs() {
-    let root_dir = unique_dir("gaia-plan-buildroot-split-root");
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch_child(&scratch, "gaia-plan-buildroot-split-root");
     fs::create_dir_all(&root_dir).expect("root dir");
     let config_path = PathBuf::from(&root_dir).join("build.toml");
     fs::write(
@@ -206,7 +209,8 @@ defconfig = "qemu_aarch64_virt_defconfig"
 
 #[test]
 fn image_assembly_depends_on_image_build_when_configured() {
-    let root_dir = unique_dir("gaia-plan-image-assembly-root");
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch_child(&scratch, "gaia-plan-image-assembly-root");
     fs::create_dir_all(&root_dir).expect("root dir");
     let config_path = PathBuf::from(&root_dir).join("build.toml");
     fs::write(
@@ -302,6 +306,7 @@ fn image_assembly_is_not_planned_when_omitted() {
 
 #[test]
 fn buildroot_and_starting_point_without_assembly_do_not_plan_assembly() {
+    let scratch = TempDir::new("gaia-plan-test");
     for (name, image_toml) in [
         (
             "buildroot-no-assembly-plan",
@@ -322,7 +327,7 @@ output_mode = "copy-rootfs"
 "#,
         ),
     ] {
-        let root_dir = unique_dir(name);
+        let root_dir = scratch_child(&scratch, name);
         fs::create_dir_all(&root_dir).expect("root dir");
         let config_path = PathBuf::from(&root_dir).join("build.toml");
         fs::write(
@@ -357,7 +362,8 @@ out_dir = "out"
 
 #[test]
 fn image_assembly_fingerprint_tracks_staged_file_inputs() {
-    let root_dir = unique_dir("gaia-plan-image-assembly-fingerprint-root");
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch_child(&scratch, "gaia-plan-image-assembly-fingerprint-root");
     fs::create_dir_all(&root_dir).expect("root dir");
     let source_path = PathBuf::from(&root_dir).join("config.txt");
     fs::write(&source_path, "one").expect("source");
@@ -400,7 +406,8 @@ fn image_assembly_fingerprint_tracks_staged_file_inputs() {
 
 #[test]
 fn image_assembly_fingerprint_tracks_glob_expansion() {
-    let root_dir = unique_dir("gaia-plan-image-assembly-glob-fingerprint-root");
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch_child(&scratch, "gaia-plan-image-assembly-glob-fingerprint-root");
     let source_dir = PathBuf::from(&root_dir).join("firmware");
     fs::create_dir_all(&source_dir).expect("source dir");
     fs::write(source_dir.join("a.dtb"), "one").expect("first dtb");
@@ -443,7 +450,11 @@ fn image_assembly_fingerprint_tracks_glob_expansion() {
 
 #[test]
 fn image_assembly_fingerprint_tracks_transform_inputs() {
-    let root_dir = unique_dir("gaia-plan-image-assembly-transform-fingerprint-root");
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch_child(
+        &scratch,
+        "gaia-plan-image-assembly-transform-fingerprint-root",
+    );
     fs::create_dir_all(&root_dir).expect("root dir");
     let source_path = PathBuf::from(&root_dir).join("kernel");
     fs::write(&source_path, "one").expect("source");
@@ -480,7 +491,11 @@ fn image_assembly_fingerprint_tracks_transform_inputs() {
 
 #[test]
 fn image_assembly_fingerprint_tracks_direct_partition_images() {
-    let root_dir = unique_dir("gaia-plan-image-assembly-partition-fingerprint-root");
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch_child(
+        &scratch,
+        "gaia-plan-image-assembly-partition-fingerprint-root",
+    );
     let mut spec = resolve_config(&default_config_path());
     rebase_workspace_root(&mut spec, &root_dir);
     let partition_image = gaia_spec::resolve_workspace_path(&spec.workspace, "@assets/rootfs.img")
@@ -532,7 +547,11 @@ fn image_assembly_fingerprint_tracks_direct_partition_images() {
 
 #[test]
 fn image_assembly_fingerprint_tracks_provider_root_partition_images() {
-    let root_dir = unique_dir("gaia-plan-image-assembly-provider-partition-fingerprint-root");
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch_child(
+        &scratch,
+        "gaia-plan-image-assembly-provider-partition-fingerprint-root",
+    );
     fs::create_dir_all(&root_dir).expect("root dir");
     let mut spec = resolve_config(&default_config_path());
     rebase_workspace_root(&mut spec, &root_dir);
@@ -586,7 +605,11 @@ fn image_assembly_fingerprint_tracks_provider_root_partition_images() {
 
 #[test]
 fn image_assembly_fingerprint_tracks_missing_partition_image_becoming_present() {
-    let root_dir = unique_dir("gaia-plan-image-assembly-missing-partition-fingerprint-root");
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch_child(
+        &scratch,
+        "gaia-plan-image-assembly-missing-partition-fingerprint-root",
+    );
     let mut spec = resolve_config(&default_config_path());
     rebase_workspace_root(&mut spec, &root_dir);
     let partition_image = gaia_spec::resolve_workspace_path(&spec.workspace, "@assets/rootfs.img")
@@ -637,7 +660,11 @@ fn image_assembly_fingerprint_tracks_missing_partition_image_becoming_present() 
 
 #[test]
 fn image_assembly_fingerprint_does_not_hash_generated_filesystem_partition_outputs() {
-    let root_dir = unique_dir("gaia-plan-image-assembly-generated-partition-fingerprint-root");
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch_child(
+        &scratch,
+        "gaia-plan-image-assembly-generated-partition-fingerprint-root",
+    );
     fs::create_dir_all(&root_dir).expect("root dir");
     let mut spec = resolve_config(&default_config_path());
     rebase_workspace_root(&mut spec, &root_dir);
@@ -704,7 +731,8 @@ fn image_assembly_fingerprint_does_not_hash_generated_filesystem_partition_outpu
 
 #[test]
 fn empty_image_assembly_section_does_not_add_operation() {
-    let root_dir = unique_dir("gaia-plan-empty-image-assembly-root");
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch_child(&scratch, "gaia-plan-empty-image-assembly-root");
     fs::create_dir_all(&root_dir).expect("root dir");
     let config_path = PathBuf::from(&root_dir).join("build.toml");
     fs::write(

@@ -1,17 +1,7 @@
 use super::*;
+use gaia_testkit::TempDir;
 use std::ffi::OsStr;
 use std::fs;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-fn temp_path(prefix: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time")
-        .as_nanos();
-    std::env::temp_dir()
-        .join("gaia-tests")
-        .join(format!("{prefix}-{nonce}"))
-}
 
 #[test]
 fn run_command_reports_missing_tool() {
@@ -51,7 +41,8 @@ fn run_command_reports_missing_tool() {
 
 #[test]
 fn java_artifact_state_persists_backend_native_fields() {
-    let output_path = temp_path("gaia-java-provider-state");
+    let scratch = TempDir::new("gaia-java-provider-state");
+    let output_path = scratch.join("gaia-java-provider-state");
     fs::write(&output_path, "artifact").expect("output");
     let artifact = ArtifactSpec::new(
         "java-artifact",
@@ -68,7 +59,7 @@ fn java_artifact_state_persists_backend_native_fields() {
     );
     let contract = ArtifactExecutionContract::from_spec(
         &artifact,
-        Some(temp_path("gaia-java-provider-src").display().to_string()),
+        Some(scratch.join("gaia-java-provider-src").display().to_string()),
         false,
         ArtifactExecutionContract::default_command_policy(),
         gaia_spec::OutputRetentionPolicySpec::default(),
@@ -91,8 +82,11 @@ fn java_artifact_state_persists_backend_native_fields() {
 
 #[test]
 fn execute_artifact_uses_custom_build_command() {
-    let source_dir = temp_path("gaia-java-provider-custom-src");
-    let output_path = temp_path("gaia-java-provider-custom-out").join("app.jar");
+    let scratch = TempDir::new("gaia-java-provider-custom-src");
+    let source_dir = scratch.join("gaia-java-provider-custom-src");
+    let output_path = scratch
+        .join("gaia-java-provider-custom-out")
+        .join("app.jar");
     fs::create_dir_all(&source_dir).expect("source dir");
     let artifact = ArtifactSpec::new(
         "java-custom-command",
@@ -261,12 +255,13 @@ fn docker_contract(artifact: &ArtifactSpec) -> ArtifactExecutionContract {
 
 #[test]
 fn default_gradle_build_redirects_gradle_home_when_configured() {
+    let scratch = TempDir::new("gaia-java-default-gradle-cache");
     let artifact = default_gradle_artifact(vec![(
         "GRADLE_USER_HOME".into(),
         "/ws/.gaia/docker-home/.gradle".into(),
     )]);
     let contract = docker_contract(&artifact);
-    let cache = temp_path("gaia-java-default-gradle-cache");
+    let cache = scratch.join("gaia-java-default-gradle-cache");
     let mut command = Command::new("gradle");
     command.arg("build").arg("-q");
 
@@ -293,7 +288,8 @@ fn default_gradle_build_redirects_gradle_home_when_configured() {
 
 #[test]
 fn default_build_without_build_env_gets_a_persistent_gradle_home_only_in_user_cache_mode() {
-    let cache = temp_path("gaia-java-default-no-env-cache");
+    let scratch = TempDir::new("gaia-java-default-no-env-cache");
+    let cache = scratch.join("gaia-java-default-no-env-cache");
     let artifact = default_gradle_artifact(Vec::new());
     let contract = docker_contract(&artifact);
 
@@ -347,7 +343,8 @@ fn default_build_without_build_env_gets_a_persistent_gradle_home_only_in_user_ca
 
 #[test]
 fn gradle_wrapper_version_comes_from_properties_file() {
-    let dir = temp_path("gaia-java-wrapper-version");
+    let scratch = TempDir::new("gaia-java-wrapper-version");
+    let dir = scratch.join("gaia-java-wrapper-version");
     fs::create_dir_all(dir.join("gradle/wrapper")).expect("wrapper dir");
     fs::write(
         dir.join("gradle/wrapper/gradle-wrapper.properties"),
@@ -360,7 +357,7 @@ fn gradle_wrapper_version_comes_from_properties_file() {
         "gradle-wrapper distributionUrl=https\\://services.gradle.org/distributions/gradle-9.1.0-bin.zip"
     );
     assert_eq!(
-        gradle_wrapper_version_line(&temp_path("gaia-java-no-wrapper")),
+        gradle_wrapper_version_line(&scratch.join("gaia-java-no-wrapper")),
         "unavailable"
     );
 }
@@ -393,6 +390,7 @@ fn validate_artifact_rejects_target_override() {
 
 #[test]
 fn execute_artifact_rejects_target_override() {
+    let scratch = TempDir::new("gaia-java-provider-src");
     let mut artifact = ArtifactSpec::new(
         "java-targeted",
         ArtifactDefinition::Java(gaia_spec::JavaArtifactSpec {
@@ -409,7 +407,7 @@ fn execute_artifact_rejects_target_override() {
     artifact.target = Some("aarch64-unknown-linux-gnu".into());
     let contract = ArtifactExecutionContract::from_spec(
         &artifact,
-        Some(temp_path("gaia-java-provider-src").display().to_string()),
+        Some(scratch.join("gaia-java-provider-src").display().to_string()),
         false,
         ArtifactExecutionContract::default_command_policy(),
         gaia_spec::OutputRetentionPolicySpec::default(),
@@ -429,7 +427,8 @@ fn execute_artifact_rejects_target_override() {
 
 #[test]
 fn persistent_home_keeps_a_build_s_own_home_and_ignores_host_builds() {
-    let cache = temp_path("gaia-java-home-cache");
+    let scratch = TempDir::new("gaia-java-home-cache");
+    let cache = scratch.join("gaia-java-home-cache");
     let own = vec![("HOME".to_string(), "/opt/builder".to_string())];
     assert_eq!(
         persistent_home(&own, true, true, Some(&cache)),

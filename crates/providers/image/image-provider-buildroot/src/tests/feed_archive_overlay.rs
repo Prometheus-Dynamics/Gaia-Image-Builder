@@ -2,8 +2,10 @@ use super::*;
 
 #[test]
 fn apply_image_feed_to_rootfs_writes_install_file_env_and_service_content() {
-    let workspace_root = temp_path("gaia-buildroot-feed-workspace");
-    let rootfs_dir = temp_path("gaia-buildroot-feed-rootfs");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-feed-workspace");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
+    let rootfs_dir_scratch = TempDir::new("gaia-buildroot-feed-rootfs");
+    let rootfs_dir = rootfs_dir_scratch.join("rootfs_dir");
     let artifact_dir = workspace_root.join("out/artifacts");
     let assets_dir = workspace_root.join("assets");
     fs::create_dir_all(&artifact_dir).expect("artifact dir");
@@ -103,9 +105,12 @@ fn apply_image_feed_to_rootfs_writes_install_file_env_and_service_content() {
 
 #[test]
 fn prunes_removed_stage_file_from_previous_runtime_state() {
-    let workspace_root = temp_path("gaia-buildroot-feed-prune-workspace");
-    let rootfs_dir = temp_path("gaia-buildroot-feed-prune-rootfs");
-    let output_dir = temp_path("gaia-buildroot-feed-prune-output");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-feed-prune-workspace");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
+    let rootfs_dir_scratch = TempDir::new("gaia-buildroot-feed-prune-rootfs");
+    let rootfs_dir = rootfs_dir_scratch.join("rootfs_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-feed-prune-output");
+    let output_dir = output_dir_scratch.join("output_dir");
     let runtime_dir = workspace_root.join("out/.gaia/runtime");
     fs::create_dir_all(rootfs_dir.join("usr/local/bin")).expect("rootfs bin");
     fs::create_dir_all(&runtime_dir).expect("runtime dir");
@@ -129,9 +134,12 @@ fn prunes_removed_stage_file_from_previous_runtime_state() {
 
 #[test]
 fn stale_image_feed_outputs_are_pruned_before_overlay() {
-    let workspace_root = temp_path("gaia-buildroot-feed-prune-workspace");
-    let rootfs_dir = temp_path("gaia-buildroot-feed-prune-rootfs");
-    let output_dir = temp_path("gaia-buildroot-feed-prune-output");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-feed-prune-workspace");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
+    let rootfs_dir_scratch = TempDir::new("gaia-buildroot-feed-prune-rootfs");
+    let rootfs_dir = rootfs_dir_scratch.join("rootfs_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-feed-prune-output");
+    let output_dir = output_dir_scratch.join("output_dir");
     let assets_dir = workspace_root.join("assets");
     fs::create_dir_all(&assets_dir).expect("assets dir");
     fs::create_dir_all(rootfs_dir.join("usr/local/bin")).expect("rootfs bin");
@@ -173,11 +181,16 @@ fn stale_image_feed_outputs_are_pruned_before_overlay() {
 
 #[test]
 fn final_tar_image_contains_install_stage_env_and_service_content() {
-    let workspace_root = temp_path("gaia-buildroot-final-image-workspace");
-    let rootfs_dir = temp_path("gaia-buildroot-final-image-rootfs");
-    let output_dir = temp_path("gaia-buildroot-final-image-output");
-    let collect_dir = temp_path("gaia-buildroot-final-image-collect");
-    let archive_path = temp_path("gaia-buildroot-final-image-primary.tar");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-final-image-workspace");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
+    let rootfs_dir_scratch = TempDir::new("gaia-buildroot-final-image-rootfs");
+    let rootfs_dir = rootfs_dir_scratch.join("rootfs_dir");
+    let output_dir_scratch = TempDir::new("gaia-buildroot-final-image-output");
+    let output_dir = output_dir_scratch.join("output_dir");
+    let collect_dir_scratch = TempDir::new("gaia-buildroot-final-image-collect");
+    let collect_dir = collect_dir_scratch.join("collect_dir");
+    let archive_path_scratch = TempDir::new("gaia-buildroot-final-image-primary.tar");
+    let archive_path = archive_path_scratch.join("archive_path");
     let artifact_dir = workspace_root.join("out/artifacts");
     let assets_dir = workspace_root.join("assets");
     fs::create_dir_all(&artifact_dir).expect("artifact dir");
@@ -318,8 +331,10 @@ fn fake_elf(machine: u16) -> Vec<u8> {
 
 #[test]
 fn apply_image_feed_to_rootfs_rejects_wrong_target_artifact_binary() {
-    let workspace_root = temp_path("gaia-buildroot-feed-target-workspace");
-    let rootfs_dir = temp_path("gaia-buildroot-feed-target-rootfs");
+    let workspace_root_scratch = TempDir::new("gaia-buildroot-feed-target-workspace");
+    let workspace_root = workspace_root_scratch.join("workspace_root");
+    let rootfs_dir_scratch = TempDir::new("gaia-buildroot-feed-target-rootfs");
+    let rootfs_dir = rootfs_dir_scratch.join("rootfs_dir");
     let artifact_dir = workspace_root.join("out/artifacts");
     fs::create_dir_all(&artifact_dir).expect("artifact dir");
 

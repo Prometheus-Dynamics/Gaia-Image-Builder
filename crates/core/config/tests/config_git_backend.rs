@@ -3,20 +3,28 @@
 
 use gaia_config::try_resolve_config;
 use gaia_spec::{GitBackendSpec, SourceDefinition};
+use gaia_testkit::TempDir;
 use std::fs;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
-fn write_build(name: &str, source_extra: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "gaia-git-backend-{name}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time")
-            .as_nanos()
-    ));
-    fs::create_dir_all(&dir).expect("temp dir");
-    let build = dir.join("build.toml");
+/// A build file in its own scratch directory, removed when dropped.
+struct Build {
+    path: PathBuf,
+    _scratch: TempDir,
+}
+
+impl Deref for Build {
+    type Target = PathBuf;
+
+    fn deref(&self) -> &PathBuf {
+        &self.path
+    }
+}
+
+fn write_build(name: &str, source_extra: &str) -> Build {
+    let scratch = TempDir::new(&format!("gaia-git-backend-{name}"));
+    let build = scratch.join("build.toml");
     fs::write(
         &build,
         format!(
@@ -24,7 +32,10 @@ fn write_build(name: &str, source_extra: &str) -> PathBuf {
         ),
     )
     .expect("build file");
-    build
+    Build {
+        path: build,
+        _scratch: scratch,
+    }
 }
 
 fn git_backend_of(build: &Path) -> GitBackendSpec {

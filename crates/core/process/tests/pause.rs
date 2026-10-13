@@ -46,8 +46,8 @@ fn pausing_stops_commands_without_timing_them_out() {
     );
 
     // 2. A paused command does not run: it writes nothing while paused.
-    let marker = std::env::temp_dir().join(format!("gaia-pause-{}", std::process::id()));
-    let _ = std::fs::remove_file(&marker);
+    let scratch = gaia_testkit::TempDir::new("gaia-pause-test");
+    let marker = scratch.join("marker");
     let pauser = pause_later(Duration::from_millis(100), Duration::from_millis(1000));
     let watcher = {
         let marker = marker.clone();
@@ -74,7 +74,6 @@ fn pausing_stops_commands_without_timing_them_out() {
         "the command ran while paused"
     );
     assert!(marker.exists());
-    let _ = std::fs::remove_file(&marker);
 
     // 3. Cancelling a paused command still stops it.
     let cancelled = Arc::new(AtomicBool::new(false));

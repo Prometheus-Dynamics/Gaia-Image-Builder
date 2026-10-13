@@ -9,17 +9,31 @@ use gaia_plan::{
     OperationParallelismDomain, OperationReuse, PlannedOperation,
 };
 use gaia_source_providers::SourceProviderCatalog;
+use gaia_testkit::TempDir;
 use std::fs;
 use std::path::{Path, PathBuf};
-use support::{FailAndLeavePartialSourceProvider, unique_dir};
+use support::FailAndLeavePartialSourceProvider;
 
 /// Two parallel sources: `fail` fails, `slow` is in flight and gets cancelled
 /// by the stop signal while it has written a partial output.
-fn fail_and_slow_spec(name: &str, preserve_failed_outputs: bool) -> gaia_spec::ResolvedBuildSpec {
+fn fail_and_slow_spec(
+    scratch: &TempDir,
+    name: &str,
+    preserve_failed_outputs: bool,
+) -> gaia_spec::ResolvedBuildSpec {
     let mut spec = gaia_spec::ResolvedBuildSpec::new(name);
-    spec.workspace.root_dir = unique_dir(&format!("gaia-exec-{name}-root"));
-    spec.workspace.build_dir = unique_dir(&format!("gaia-exec-{name}-build"));
-    spec.workspace.out_dir = unique_dir(&format!("gaia-exec-{name}-out"));
+    spec.workspace.root_dir = scratch
+        .join(format!("gaia-exec-{name}-root"))
+        .display()
+        .to_string();
+    spec.workspace.build_dir = scratch
+        .join(format!("gaia-exec-{name}-build"))
+        .display()
+        .to_string();
+    spec.workspace.out_dir = scratch
+        .join(format!("gaia-exec-{name}-out"))
+        .display()
+        .to_string();
     spec.policy.execution.jobs = 2;
     spec.policy.failure.preserve_failed_outputs = preserve_failed_outputs;
     fs::create_dir_all(&spec.workspace.root_dir).expect("root dir");
@@ -94,7 +108,8 @@ fn slow_output_dir(spec: &gaia_spec::ResolvedBuildSpec) -> PathBuf {
 
 #[test]
 fn cancelled_sibling_partial_output_is_removed_and_not_recorded_as_completed() {
-    let spec = fail_and_slow_spec("exec-sibling-partial", false);
+    let scratch = TempDir::new("gaia-exec-test");
+    let spec = fail_and_slow_spec(&scratch, "exec-sibling-partial", false);
 
     let outcome = run_fail_and_slow(&spec);
 
@@ -123,7 +138,8 @@ fn cancelled_sibling_partial_output_is_removed_and_not_recorded_as_completed() {
 
 #[test]
 fn cancelled_sibling_partial_output_is_kept_when_failed_outputs_are_preserved() {
-    let spec = fail_and_slow_spec("exec-sibling-preserve", true);
+    let scratch = TempDir::new("gaia-exec-test");
+    let spec = fail_and_slow_spec(&scratch, "exec-sibling-preserve", true);
 
     let outcome = run_fail_and_slow(&spec);
 

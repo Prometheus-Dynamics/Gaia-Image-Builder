@@ -4,22 +4,10 @@ use gaia_spec::{
     BuildrootExpectedImageFormatSpec, BuildrootExpectedImageSpec, BuildrootImageSpec,
     ImageAssemblySpec, ImageDefinition, ImageOutputSpec, ImageSpec,
 };
+use gaia_testkit::TempDir;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
-static TEMP_PATH_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-fn temp_path(prefix: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time")
-        .as_nanos();
-    let counter = TEMP_PATH_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    std::env::temp_dir()
-        .join("gaia-tests")
-        .join(format!("{prefix}-{}-{counter}-{nonce}", std::process::id()))
-}
+use std::time::{Duration, Instant};
 
 /// Writes an executable fake tool without ever holding a write descriptor to
 /// it in this process. Tests run in parallel threads; a child forked by

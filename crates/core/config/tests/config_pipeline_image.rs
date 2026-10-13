@@ -5,7 +5,7 @@ use gaia_spec::{
     AssemblyFilesystemKindSpec, AssemblyTransformKindSpec, BuildrootExpectedImageFormatSpec,
     ImageDefinition,
 };
-use std::time::{SystemTime, UNIX_EPOCH};
+use gaia_testkit::TempDir;
 use support::write_temp_config;
 
 #[test]
@@ -37,8 +37,6 @@ defconfig = "dummy_defconfig"
         ImageDefinition::Buildroot(buildroot) => assert!(buildroot.allow_fallback),
         other => panic!("expected buildroot image, got {other:?}"),
     }
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -152,8 +150,6 @@ applets = ["sh", "mount"]
     assert_eq!(assembly.disks[0].first_lba, Some(1));
     assert_eq!(assembly.disks[0].alignment_lba, Some(1));
     assert_eq!(assembly.busybox_initramfs[0].applets, vec!["sh", "mount"]);
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -199,8 +195,6 @@ output = "$provider.images/boot.vfat"
     assert!(assembly.transforms[0].deterministic);
     assert!(assembly.filesystems[0].deterministic);
     assert!(!assembly.filesystems[1].deterministic);
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -234,8 +228,6 @@ transient_dir_names = [".cache", "tmp-work"]
         spec.reporting.output_hygiene.transient_dir_names,
         vec![".cache".to_string(), "tmp-work".to_string()]
     );
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -277,8 +269,6 @@ out_dir = "out"
             spec.image.assembly.is_none(),
             "{name} should not get an implicit assembly spec"
         );
-
-        let _ = std::fs::remove_file(path);
     }
 }
 
@@ -389,8 +379,6 @@ required = true
         }
         other => panic!("expected buildroot image, got {other:?}"),
     }
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -432,8 +420,6 @@ output_mode = "copy-and-archive"
         }
         definition => panic!("expected starting-point image, got {definition:?}"),
     }
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -517,17 +503,12 @@ archive_name = "base-mutated.img"
         }
         definition => panic!("expected starting-point image, got {definition:?}"),
     }
-
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]
 fn resolves_buildroot_config_fragments() {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("gaia-buildroot-fragments-config-{nonce}"));
+    let scratch = TempDir::new("gaia-buildroot-fragments-config");
+    let root = scratch.join("root");
     std::fs::create_dir_all(root.join("assets")).expect("assets dir");
     std::fs::write(
         root.join("assets/base.defconfig"),
@@ -595,6 +576,4 @@ config_overrides = [["BR2_TARGET_GENERIC_HOSTNAME", "\"gaia-smoke\""]]
         }
         other => panic!("expected buildroot image, got {other:?}"),
     }
-
-    let _ = std::fs::remove_dir_all(root);
 }

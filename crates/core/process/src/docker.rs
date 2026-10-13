@@ -482,10 +482,12 @@ pub fn docker_image_build_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
 
     #[test]
     fn docker_build_context_hash_tracks_dockerfile_and_context_changes() {
-        let dir = unique_dir("docker-context-hash");
+        let scratch = TempDir::new("gaia-process-test");
+        let dir = scratch.join("docker-context-hash");
         let context = dir.join("ctx");
         fs::create_dir_all(context.join("scripts")).expect("context");
         fs::create_dir_all(context.join(".git")).expect("git dir");
@@ -525,13 +527,11 @@ mod tests {
     }
     use std::ffi::OsStr;
     use std::fs;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn docker_run_command_wraps_program_with_mounts_env_and_workdir() {
-        let workspace = unique_dir("docker-run-workspace");
+        let scratch = TempDir::new("gaia-process-test");
+        let workspace = scratch.join("docker-run-workspace");
         let output_file = workspace.join("out/image.tar");
         let current_dir = workspace.join("work");
         fs::create_dir_all(output_file.parent().expect("output parent")).expect("output parent");
@@ -579,13 +579,12 @@ mod tests {
             window[0] == "-v"
                 && window[1] == format!("{}:{}", workspace.display(), workspace.display())
         }));
-
-        let _ = fs::remove_dir_all(workspace);
     }
 
     #[test]
     fn a_value_listing_several_paths_mounts_each_existing_one_and_no_missing_one() {
-        let root = unique_dir("docker-mount-candidates");
+        let scratch = TempDir::new("gaia-process-test");
+        let root = scratch.join("docker-mount-candidates");
         let scripts = root.join("exclude");
         std::fs::create_dir_all(&scripts).expect("scripts dir");
         std::fs::write(scripts.join("exclude.sh"), "#!/bin/sh\n").expect("script");
@@ -601,7 +600,6 @@ mod tests {
             absolute_docker_mount_candidate(&format!("file://{}", scripts.display())),
             Some(scripts.clone())
         );
-        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -613,13 +611,5 @@ mod tests {
             docker_run_command(&command, &spec),
             Err(DockerRunError::EmptyImage)
         ));
-    }
-
-    fn unique_dir(name: &str) -> PathBuf {
-        let counter = TEST_DIR_COUNTER.fetch_add(1, Ordering::SeqCst);
-        std::env::temp_dir().join("gaia-tests").join(format!(
-            "gaia-process-docker-{name}-{}-{counter}",
-            std::process::id()
-        ))
     }
 }

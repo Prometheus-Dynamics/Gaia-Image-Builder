@@ -2,6 +2,7 @@
 
 use super::*;
 use gaia_artifact_providers::ArtifactDockerExecution;
+use gaia_testkit::TempDir;
 
 fn shared_contract(artifact: &ArtifactSpec, source: &Path) -> ArtifactExecutionContract {
     let mut contract = nested_contract(artifact, source);
@@ -54,12 +55,13 @@ fn build_into(
 
 #[test]
 fn per_source_target_dir_stays_the_default() {
-    let source = temp_path("gaia-rust-target-default");
+    let scratch = TempDir::new("gaia-rust-target-default");
+    let source = scratch.join("gaia-rust-target-default");
     let artifact = rust_artifact("a", "a", &source.join("out/a"));
     let contract = nested_contract(&artifact, &source);
 
     let target = cargo_target_for_in(
-        Some(&temp_path("gaia-rust-target-default-cache")),
+        Some(&scratch.join("gaia-rust-target-default-cache")),
         &source.display().to_string(),
         &contract,
     );
@@ -71,7 +73,8 @@ fn per_source_target_dir_stays_the_default() {
 
 #[test]
 fn shared_key_depends_on_toolchain_target_profile_and_backend_only() {
-    let source = temp_path("gaia-rust-target-key");
+    let scratch = TempDir::new("gaia-rust-target-key");
+    let source = scratch.join("gaia-rust-target-key");
     let artifact = rust_artifact("a", "a", &source.join("out/a"));
     let base = nested_contract(&artifact, &source);
     let key = shared_target_key(&base);
@@ -79,7 +82,7 @@ fn shared_key_depends_on_toolchain_target_profile_and_backend_only() {
 
     // The source directory is not part of the key: that is what lets
     // sources share one dir.
-    let elsewhere = nested_contract(&artifact, &temp_path("gaia-rust-target-key-other"));
+    let elsewhere = nested_contract(&artifact, &scratch.join("gaia-rust-target-key-other"));
     assert_eq!(key, shared_target_key(&elsewhere));
 
     let mut release = base.clone();
@@ -106,10 +109,12 @@ fn shared_key_depends_on_toolchain_target_profile_and_backend_only() {
 
 #[test]
 fn shared_target_dir_lives_under_the_user_cache_and_claims_its_packages() {
-    let workspace = tiny_workspace("gaia-rust-target-shared", &[("solo", false)]);
-    let root = temp_path("gaia-rust-target-shared-cache");
+    let scratch = TempDir::new("gaia-rust-target-shared-cache");
+    let workspace_scratch = tiny_workspace("gaia-rust-target-shared", &[("solo", false)]);
+    let workspace = workspace_scratch.path();
+    let root = scratch.join("gaia-rust-target-shared-cache");
     let artifact = rust_artifact("solo", "solo", &workspace.join("out/solo"));
-    let contract = shared_contract(&artifact, &workspace);
+    let contract = shared_contract(&artifact, workspace);
 
     let target = cargo_target_for_in(Some(&root), &workspace.display().to_string(), &contract);
 
@@ -124,15 +129,14 @@ fn shared_target_dir_lives_under_the_user_cache_and_claims_its_packages() {
             .ends_with("/solo"),
         "the claim records the package directory"
     );
-    let _ = fs::remove_dir_all(workspace);
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn shared_target_dir_needs_a_user_cache() {
-    let workspace = tiny_workspace("gaia-rust-target-no-cache", &[("solo", false)]);
+    let workspace_scratch = tiny_workspace("gaia-rust-target-no-cache", &[("solo", false)]);
+    let workspace = workspace_scratch.path();
     let artifact = rust_artifact("solo", "solo", &workspace.join("out/solo"));
-    let contract = shared_contract(&artifact, &workspace);
+    let contract = shared_contract(&artifact, workspace);
 
     let target = cargo_target_for_in(None, &workspace.display().to_string(), &contract);
 
@@ -146,15 +150,16 @@ fn shared_target_dir_needs_a_user_cache() {
         "{:?}",
         target.note
     );
-    let _ = fs::remove_dir_all(workspace);
 }
 
 #[test]
 fn shared_target_dir_is_mounted_into_docker_containers() {
-    let workspace = tiny_workspace("gaia-rust-target-docker", &[("solo", false)]);
-    let root = temp_path("gaia-rust-target-docker-cache");
+    let scratch = TempDir::new("gaia-rust-target-docker-cache");
+    let workspace_scratch = tiny_workspace("gaia-rust-target-docker", &[("solo", false)]);
+    let workspace = workspace_scratch.path();
+    let root = scratch.join("gaia-rust-target-docker-cache");
     let artifact = rust_artifact("solo", "solo", &workspace.join("out/solo"));
-    let mut contract = shared_contract(&artifact, &workspace);
+    let mut contract = shared_contract(&artifact, workspace);
     contract.workspace_root = Some(workspace.display().to_string());
     contract.execution_backend = ArtifactExecutionBackend::Docker(ArtifactDockerExecution {
         image: "gaia-rust:test".into(),
@@ -182,13 +187,12 @@ fn shared_target_dir_is_mounted_into_docker_containers() {
         args.iter().any(|arg| arg.contains(&dir)),
         "the shared target dir is mounted at its own path: {args:?}"
     );
-    let _ = fs::remove_dir_all(workspace);
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn recorded_state_does_not_depend_on_the_target_dir_mode() {
-    let source = temp_path("gaia-rust-target-state");
+    let scratch = TempDir::new("gaia-rust-target-state");
+    let source = scratch.join("gaia-rust-target-state");
     let artifact = rust_artifact("a", "a", &source.join("out/a"));
     let per_source = nested_contract(&artifact, &source);
     let shared = shared_contract(&artifact, &source);
@@ -209,9 +213,12 @@ fn recorded_state_does_not_depend_on_the_target_dir_mode() {
 
 #[test]
 fn distinct_packages_share_one_target_dir_and_each_gets_its_own_output() {
-    let root = temp_path("gaia-rust-target-two-cache");
-    let first = tiny_workspace("gaia-rust-target-two-first", &[("alpha", false)]);
-    let second = tiny_workspace("gaia-rust-target-two-second", &[("beta", false)]);
+    let scratch = TempDir::new("gaia-rust-target-two-cache");
+    let root = scratch.join("gaia-rust-target-two-cache");
+    let first_scratch = tiny_workspace("gaia-rust-target-two-first", &[("alpha", false)]);
+    let first = first_scratch.path();
+    let second_scratch = tiny_workspace("gaia-rust-target-two-second", &[("beta", false)]);
+    let second = second_scratch.path();
     fs::write(
         second.join("beta/src/main.rs"),
         "fn main() { println!(\"beta\"); }\n",
@@ -224,11 +231,11 @@ fn distinct_packages_share_one_target_dir_and_each_gets_its_own_output() {
     .expect("alpha main");
     let alpha_contract = shared_contract(
         &rust_artifact("alpha", "alpha", &first.join("out/alpha")),
-        &first,
+        first,
     );
     let beta_contract = shared_contract(
         &rust_artifact("beta", "beta", &second.join("out/beta")),
-        &second,
+        second,
     );
 
     let alpha_target =
@@ -239,31 +246,31 @@ fn distinct_packages_share_one_target_dir_and_each_gets_its_own_output() {
     assert!(alpha_target.shared && beta_target.shared);
     assert_eq!(alpha_target.dir, beta_target.dir);
     assert_eq!(
-        build_into(&first, "alpha", &alpha_contract, &alpha_target),
+        build_into(first, "alpha", &alpha_contract, &alpha_target),
         "alpha"
     );
     assert_eq!(
-        build_into(&second, "beta", &beta_contract, &beta_target),
+        build_into(second, "beta", &beta_contract, &beta_target),
         "beta"
     );
     // Rebuilding the first source after the second keeps its own output.
     assert_eq!(
-        build_into(&first, "alpha", &alpha_contract, &alpha_target),
+        build_into(first, "alpha", &alpha_contract, &alpha_target),
         "alpha"
     );
-    let _ = fs::remove_dir_all(first);
-    let _ = fs::remove_dir_all(second);
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn same_named_package_from_another_directory_never_reuses_the_first_build() {
+    let scratch = TempDir::new("gaia-rust-target-collide-cache");
     // Both packages are `app` 0.1.0 with identical manifests and older
     // sources than the first build's outputs: cargo would consider the
     // second one fresh and link the first binary, were it not for the claim.
-    let root = temp_path("gaia-rust-target-collide-cache");
-    let first = tiny_workspace("gaia-rust-target-collide-first", &[("app", false)]);
-    let second = tiny_workspace("gaia-rust-target-collide-second", &[("app", false)]);
+    let root = scratch.join("gaia-rust-target-collide-cache");
+    let first_scratch = tiny_workspace("gaia-rust-target-collide-first", &[("app", false)]);
+    let first = first_scratch.path();
+    let second_scratch = tiny_workspace("gaia-rust-target-collide-second", &[("app", false)]);
+    let second = second_scratch.path();
     fs::write(
         first.join("app/src/main.rs"),
         "fn main() { println!(\"first\"); }\n",
@@ -275,17 +282,17 @@ fn same_named_package_from_another_directory_never_reuses_the_first_build() {
     )
     .expect("second main");
     let first_contract =
-        shared_contract(&rust_artifact("app", "app", &first.join("out/app")), &first);
+        shared_contract(&rust_artifact("app", "app", &first.join("out/app")), first);
     let second_contract = shared_contract(
         &rust_artifact("app", "app", &second.join("out/app")),
-        &second,
+        second,
     );
 
     let first_target =
         cargo_target_for_in(Some(&root), &first.display().to_string(), &first_contract);
     assert!(first_target.shared, "{:?}", first_target.note);
     assert_eq!(
-        build_into(&first, "app", &first_contract, &first_target),
+        build_into(first, "app", &first_contract, &first_target),
         "first"
     );
 
@@ -302,10 +309,7 @@ fn same_named_package_from_another_directory_never_reuses_the_first_build() {
         second_target.note
     );
     assert_eq!(
-        build_into(&second, "app", &second_contract, &second_target),
+        build_into(second, "app", &second_contract, &second_target),
         "second"
     );
-    let _ = fs::remove_dir_all(first);
-    let _ = fs::remove_dir_all(second);
-    let _ = fs::remove_dir_all(root);
 }

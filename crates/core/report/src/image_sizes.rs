@@ -101,18 +101,19 @@ pub(crate) fn summary_image_paths(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_testkit::TempDir;
     use std::io::{Seek, SeekFrom, Write};
 
-    fn temp_file(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("gaia-image-sizes-{}-{name}", std::process::id()));
+    fn temp_file(scratch: &TempDir, name: &str) -> PathBuf {
+        let dir = scratch.join(name);
         std::fs::create_dir_all(&dir).expect("temp dir");
         dir.join("disk.img")
     }
 
     #[test]
     fn content_size_counts_written_data_not_holes() {
-        let path = temp_file("holes");
+        let scratch = TempDir::new("gaia-report");
+        let path = temp_file(&scratch, "holes");
         let mut file = std::fs::File::create(&path).expect("create");
         // One 4 KiB written block, then a 1 MiB hole, then a 4 KiB block.
         file.write_all(&[0xab; 4096]).expect("first block");
@@ -131,24 +132,23 @@ mod tests {
             "a sparse hole must not count as content: {record:?}"
         );
         assert!(image_size_note(record).starts_with("disk.img: "));
-        let _ = std::fs::remove_dir_all(path.parent().expect("dir"));
     }
 
     #[test]
     fn content_size_is_never_more_than_the_file_length() {
-        let path = temp_file("short");
+        let scratch = TempDir::new("gaia-report");
+        let path = temp_file(&scratch, "short");
         std::fs::write(&path, [1u8; 100]).expect("write");
         let records = image_size_records(std::slice::from_ref(&path));
         assert!(records[0].content_bytes <= records[0].raw_bytes);
-        let _ = std::fs::remove_dir_all(path.parent().expect("dir"));
     }
 
     #[test]
     fn missing_paths_and_directories_are_skipped() {
-        let missing = temp_file("missing");
+        let scratch = TempDir::new("gaia-report");
+        let missing = temp_file(&scratch, "missing");
         let dir = missing.parent().expect("dir").to_path_buf();
         assert!(image_size_records(&[missing, dir.clone()]).is_empty());
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -165,8 +165,8 @@ mod tests {
 
     #[test]
     fn compressed_archives_get_no_size_record() {
-        let dir =
-            std::env::temp_dir().join(format!("gaia-image-sizes-{}-archive", std::process::id()));
+        let scratch = TempDir::new("gaia-report-test");
+        let dir = scratch.join("archive");
         std::fs::create_dir_all(&dir).expect("temp dir");
         let archive = dir.join("disk.img.zst");
         std::fs::write(&archive, [7u8; 64]).expect("write");
@@ -176,7 +176,6 @@ mod tests {
         assert!(is_compressed_archive(&tar));
         assert!(!is_compressed_archive(&dir.join("sdcard.img")));
         assert!(image_size_records(&[archive, tar]).is_empty());
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

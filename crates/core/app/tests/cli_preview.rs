@@ -1,6 +1,7 @@
 pub mod support;
 
 use gaia_app::{AppArgs, AppCommand, CommandOutcome, run_with_args};
+use gaia_testkit::TempDir;
 use support::starting_point_raw_image_example_build_path;
 
 #[test]
@@ -51,17 +52,18 @@ fn preview_only_flags_are_refused_for_other_commands() {
 
 #[test]
 fn first_preview_has_no_earlier_run_to_invalidate() {
+    let scratch = TempDir::new("cli-preview");
     let outcome = run_with_args(AppArgs {
         command: AppCommand::Preview,
         build: starting_point_raw_image_example_build_path(),
         explicit_overrides: vec![
             (
                 "workspace.build_dir".into(),
-                support::unique_dir("cli-preview-build"),
+                scratch.join("build").display().to_string(),
             ),
             (
                 "workspace.out_dir".into(),
-                support::unique_dir("cli-preview-out"),
+                scratch.join("out").display().to_string(),
             ),
         ],
         ..AppArgs::default()

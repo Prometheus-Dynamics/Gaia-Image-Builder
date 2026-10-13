@@ -2,7 +2,8 @@ use super::*;
 
 #[test]
 fn starting_point_tar_rootfs_accepts_image_feed_overlay() {
-    let root = unique_dir("gaia-starting-point-overlay");
+    let scratch = TempDir::new("gaia-starting-point-overlay");
+    let root = scratch.path().to_path_buf();
     let seed_dir = root.join("seed");
     let seed_rootfs = seed_dir.join("rootfs");
     fs::create_dir_all(seed_rootfs.join("etc")).expect("seed etc");
@@ -148,7 +149,8 @@ fn starting_point_tar_rootfs_accepts_image_feed_overlay() {
 
 #[test]
 fn starting_point_rejects_overlay_on_opaque_file_rootfs() {
-    let root = unique_dir("gaia-starting-point-opaque");
+    let scratch = TempDir::new("gaia-starting-point-opaque");
+    let root = scratch.path().to_path_buf();
     let opaque = root.join("base.bin");
     fs::write(&opaque, "opaque").expect("opaque rootfs");
 

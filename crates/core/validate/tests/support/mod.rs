@@ -1,27 +1,60 @@
 use gaia_image_providers::{ImageOutputContract, ImagePlan, ImageProvider, ImageProviderOperation};
 use gaia_spec::{ImageProviderKind, ImageSpec};
+use gaia_testkit::TempDir;
 use std::fs;
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
 
-pub fn write_temp_config(contents: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!("gaia-unresolved-{nonce}.toml"));
-    fs::write(&path, contents).expect("temp config should be written");
-    path
+/// A scratch directory owned by one test; removed when the value is dropped.
+pub struct Workspace {
+    dir: TempDir,
 }
 
-pub fn create_temp_workspace(prefix: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("{prefix}-{nonce}"));
-    fs::create_dir_all(&root).expect("temp workspace should be created");
-    root
+impl Deref for Workspace {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        self.dir.path()
+    }
+}
+
+impl AsRef<Path> for Workspace {
+    fn as_ref(&self) -> &Path {
+        self.dir.path()
+    }
+}
+
+/// A config file written into its own scratch directory, removed when dropped.
+pub struct ConfigFile {
+    _dir: TempDir,
+    path: PathBuf,
+}
+
+impl Deref for ConfigFile {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl AsRef<Path> for ConfigFile {
+    fn as_ref(&self) -> &Path {
+        &self.path
+    }
+}
+
+pub fn write_temp_config(contents: &str) -> ConfigFile {
+    let dir = TempDir::new("gaia-unresolved");
+    let path = dir.join("config.toml");
+    fs::write(&path, contents).expect("temp config should be written");
+    ConfigFile { _dir: dir, path }
+}
+
+pub fn create_temp_workspace(prefix: &str) -> Workspace {
+    Workspace {
+        dir: TempDir::new(prefix),
+    }
 }
 
 pub struct DuplicatePrepareImageProvider;

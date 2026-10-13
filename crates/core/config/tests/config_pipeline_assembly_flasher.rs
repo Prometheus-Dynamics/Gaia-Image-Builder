@@ -84,7 +84,6 @@ publish = true
 fn flasher_boot_image_resolves_cpio_zstd_kernel_modules_and_publish() {
     let path = write_temp_config(FLASHER);
     let spec = resolve_config(path.to_str().expect("temp path should be utf-8"));
-    let _ = std::fs::remove_file(path);
     let assembly = spec.image.assembly.as_ref().expect("assembly");
 
     assert!(

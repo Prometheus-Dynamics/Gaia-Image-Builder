@@ -199,8 +199,6 @@ origin = "static-asset"
             .iter()
             .any(|diagnostic| diagnostic.code == "stage_file_src_missing")
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -246,8 +244,6 @@ origin = "static-asset"
                 || diagnostic.code == "stage_file_src_placeholder"),
         "directory-backed static stage source should validate"
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -295,8 +291,6 @@ origin = "static-asset"
         "{:?}",
         report.diagnostics
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -337,8 +331,6 @@ unit_path = "assets/demo.service"
             .iter()
             .any(|diagnostic| diagnostic.code == "stage_service_unit_missing")
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -392,8 +384,6 @@ origin = "static-asset"
         busybox_warnings >= 2,
         "expected busybox portability warnings for wget and awk patterns"
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -448,6 +438,4 @@ unit_path = "assets/provision.target"
             .iter()
             .any(|diagnostic| { diagnostic.code == "stage_service_name_unusual" })
     );
-
-    let _ = fs::remove_dir_all(root);
 }

@@ -210,22 +210,14 @@ pub(crate) fn supports_reflinks(dir: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn temp(label: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "gaia-buildroot-patch-{label}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time")
-                .as_nanos()
-        ))
-    }
+    use gaia_testkit::TempDir;
 
     #[test]
     fn only_the_upstream_text_is_patched_and_only_with_reflinks() {
-        let buildroot = temp("source");
-        let output = temp("output");
+        let buildroot_scratch = TempDir::new("gaia-buildroot-patch-source");
+        let buildroot = buildroot_scratch.join("buildroot");
+        let output_scratch = TempDir::new("gaia-buildroot-patch-output");
+        let output = output_scratch.join("output");
         fs::create_dir_all(buildroot.join("package")).expect("package dir");
         let upstream = format!("define per-package-rsync\n{PPD_COPY_UPSTREAM}\nendef\n");
         fs::write(buildroot.join("package/pkg-utils.mk"), &upstream).expect("makefile");
@@ -249,13 +241,12 @@ mod tests {
         fs::write(buildroot.join("package/pkg-utils.mk"), "something else\n").expect("other");
         let message = apply_reflink_finalize(&buildroot, &output).expect("unknown text");
         assert!(message.is_some_and(|message| message.contains("left as is")));
-        let _ = fs::remove_dir_all(buildroot);
-        let _ = fs::remove_dir_all(output);
     }
 
     #[test]
     fn host_finalize_skip_is_applied_once_and_reverts_to_upstream() {
-        let buildroot = temp("host-finalize");
+        let buildroot_scratch = TempDir::new("gaia-buildroot-patch-host-finalize");
+        let buildroot = buildroot_scratch.join("buildroot");
         fs::create_dir_all(&buildroot).expect("buildroot dir");
         let upstream = format!(
             "host-finalize: $(PACKAGES) $(HOST_DIR)\n\t@$(call MESSAGE,\"Finalizing host directory\")\n{HOST_FINALIZE_UPSTREAM}\t$(Q)PARALLEL_JOBS=1 \\\n"
@@ -287,6 +278,5 @@ mod tests {
             fs::read_to_string(buildroot.join("Makefile")).expect("read"),
             "host-finalize: other\n"
         );
-        let _ = fs::remove_dir_all(buildroot);
     }
 }

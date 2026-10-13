@@ -5,11 +5,13 @@ use gaia_exec::{
     execute_plan_with_cancellation,
 };
 use gaia_plan::{plan_build, plan_build_with_reuse_state};
+use gaia_testkit::TempDir;
 use support::{materialize_reusable_outputs, provider_catalogs, reuse_state_for_ids, test_spec};
 
 #[test]
 fn cancelled_run_records_cancellation_and_skips_future_operations() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
     let cancellation = ExecutionCancellation::new();
@@ -46,7 +48,8 @@ fn cancelled_run_records_cancellation_and_skips_future_operations() {
 
 #[test]
 fn executes_reused_plan_and_records_reused_operations() {
-    let spec = test_spec();
+    let scratch = TempDir::new("gaia-exec-test");
+    let spec = test_spec(&scratch);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     materialize_reusable_outputs(&spec);
     let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
