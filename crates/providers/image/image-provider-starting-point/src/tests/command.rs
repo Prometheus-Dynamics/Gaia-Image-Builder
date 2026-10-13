@@ -92,6 +92,9 @@ fn command_for_execution_mounts_parent_dir_for_output_files() {
     let rootfs_dir = workspace_root.join("rootfs");
     let archive_path = workspace_root.join("out/rootfs.tar");
     fs::create_dir_all(&rootfs_dir).expect("rootfs dir");
+    // As the provider does before building the tar command: docker must not
+    // create a missing mount source (it would be root-owned).
+    fs::create_dir_all(workspace_root.join("out")).expect("archive dir");
     let execution = ImageExecutionContext {
         workspace_root: workspace_root.clone(),
         docker_image: Some("docker.io/library/alpine:latest".to_string()),

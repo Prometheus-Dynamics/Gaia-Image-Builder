@@ -30,6 +30,17 @@ newest release, and updates the Rust docker images to 1.99.0.
 - `[[variants]]` accepts `preset`/`presets`; see "Variants" below.
 - `--set sources.<id>.path=DIR` names a source that an input-gated import declares. It is checked against the config the resolution selects after presets, variants and conditional imports, not the base file alone. A variant applies it to the variants that declare the source; it is an error only when no selected variant (or the base, when selected) declares it, and the message lists the declared sources.
 
+### Docker never creates mount sources
+
+- A command argument like `BR2_ROOTFS_POST_BUILD_SCRIPT=/x/exclude.sh
+  board/post-build.sh` was taken as one path, and docker created the
+  missing "directory" `/x/exclude.sh board/...` as root inside the build
+  tree; the next variant's image:build could not remove it ("Permission
+  denied"). Values are split on whitespace, each absolute path is mounted
+  only when it (or its parent) exists, and no missing mount source is ever
+  passed to docker. A stale directory holding files another user owns is
+  moved into `.gaia-trash` instead of failing the build.
+
 ### Build variants
 
 - A build file can declare `[[variants]]`: each is an `id` and `overrides` in the `--set` form. One `gaia run` then builds the base config (variant `default`) and each variant, in order, from one shared base. `gaia run --variant pv2026[,...]` builds a subset; `preview` and `plan` show each variant. See "Variants" in `docs/configuration.md`.

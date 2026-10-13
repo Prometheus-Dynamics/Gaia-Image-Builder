@@ -847,15 +847,36 @@ fn image_feed_managed_paths(
 
 pub(crate) fn remove_path_if_exists(path: &Path) -> Result<(), ImageProviderError> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(path).map_err(|error| {
-            ImageProviderError::new(
+        Ok(metadata) if metadata.is_dir() => match fs::remove_dir_all(path) {
+            Ok(()) => Ok(()),
+            // Something inside is not ours (an older Gaia let docker create a
+            // root-owned directory in it): the directory itself is in a tree
+            // we own, so move it out of the way into the trash instead.
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                gaia_process::discard(path).map_err(|discard_error| {
+                    ImageProviderError::new(
+                        ImageProviderErrorKind::RuntimeState,
+                        format!(
+                            "failed to remove stale image feed directory '{}': {error}; moving it aside failed too: {discard_error} (it holds files another user owns: remove it as that user)",
+                            path.display()
+                        ),
+                    )
+                })?;
+                tracing::warn!(
+                    provider_domain = "image.buildroot",
+                    "moved stale '{}' into the trash: it holds files another user owns ({error})",
+                    path.display()
+                );
+                Ok(())
+            }
+            Err(error) => Err(ImageProviderError::new(
                 ImageProviderErrorKind::RuntimeState,
                 format!(
                     "failed to remove stale image feed directory '{}': {error}",
                     path.display()
                 ),
-            )
-        }),
+            )),
+        },
         Ok(_) => fs::remove_file(path).map_err(|error| {
             ImageProviderError::new(
                 ImageProviderErrorKind::RuntimeState,

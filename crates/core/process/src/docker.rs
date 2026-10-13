@@ -103,7 +103,12 @@ pub fn docker_run_command(
     if spec.map_workspace_user {
         wrapped.args(docker_workspace_user_args(&spec.workspace_root));
     }
-    for mount in normalized_docker_mounts(&spec.mounts, command) {
+    // A missing source would be created by docker as root (see
+    // `docker_mount_candidates`): only existing directories are mounted.
+    for mount in normalized_docker_mounts(&spec.mounts, command)
+        .into_iter()
+        .filter(|mount| mount.is_dir())
+    {
         wrapped
             .arg("-v")
             .arg(format!("{}:{}", mount.display(), mount.display()));
@@ -239,27 +244,44 @@ pub fn discover_docker_mounts(
     mounts.insert(current_dir.to_path_buf());
     for arg in command.get_args() {
         let arg = arg.to_string_lossy();
-        if let Some(path) = absolute_docker_mount_candidate(&arg) {
-            mounts.insert(path);
-        }
+        mounts.extend(docker_mount_candidates(&arg));
     }
     mounts.into_iter().collect()
 }
 
+/// The first directory [`docker_mount_candidates`] finds in `arg`.
 pub fn absolute_docker_mount_candidate(arg: &str) -> Option<PathBuf> {
-    if let Some(path) = arg.strip_prefix("file://")
-        && Path::new(path).is_absolute()
-    {
-        return Some(normalize_docker_mount_path(Path::new(path)));
+    docker_mount_candidates(arg).into_iter().next()
+}
+
+/// The existing directories to mount for the absolute paths in `arg`: a
+/// path itself, `file://<path>`, or `NAME=<value>` whose value may list
+/// several whitespace-separated paths (`BR2_ROOTFS_POST_BUILD_SCRIPT=/a.sh
+/// board/b.sh`). A path that does not exist (nor its parent) is not
+/// mounted: docker would create a missing bind-mount source as root, and a
+/// value read as one path (`/a.sh board`) left a root-owned directory the
+/// build user can no longer remove.
+pub fn docker_mount_candidates(arg: &str) -> Vec<PathBuf> {
+    let value = arg
+        .strip_prefix("file://")
+        .or_else(|| arg.split_once('=').map(|(_, value)| value))
+        .unwrap_or(arg);
+    value
+        .split_whitespace()
+        .map(|part| part.strip_prefix("file://").unwrap_or(part))
+        .filter(|part| Path::new(part).is_absolute())
+        .filter_map(|part| existing_mount_dir(Path::new(part)))
+        .collect()
+}
+
+/// `path` when it is a directory, else its parent when that is one.
+fn existing_mount_dir(path: &Path) -> Option<PathBuf> {
+    if path.is_dir() {
+        return Some(path.to_path_buf());
     }
-    if let Some((_, value)) = arg.split_once('=')
-        && Path::new(value).is_absolute()
-    {
-        return Some(normalize_docker_mount_path(Path::new(value)));
-    }
-    Path::new(arg)
-        .is_absolute()
-        .then(|| normalize_docker_mount_path(Path::new(arg)))
+    path.parent()
+        .filter(|parent| parent.is_dir())
+        .map(Path::to_path_buf)
 }
 
 pub fn normalize_docker_mount_path(path: &Path) -> PathBuf {
@@ -559,6 +581,27 @@ mod tests {
         }));
 
         let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn a_value_listing_several_paths_mounts_each_existing_one_and_no_missing_one() {
+        let root = unique_dir("docker-mount-candidates");
+        let scripts = root.join("exclude");
+        std::fs::create_dir_all(&scripts).expect("scripts dir");
+        std::fs::write(scripts.join("exclude.sh"), "#!/bin/sh\n").expect("script");
+        let arg = format!(
+            "BR2_ROOTFS_POST_BUILD_SCRIPT={} board/raspberrypicm5io/post-build.sh {}",
+            scripts.join("exclude.sh").display(),
+            root.join("missing/dir/post.sh").display()
+        );
+        // The script's directory; never `<script> board/...` (read as one
+        // path, docker created it as root) and never the missing path.
+        assert_eq!(docker_mount_candidates(&arg), vec![scripts.clone()]);
+        assert_eq!(
+            absolute_docker_mount_candidate(&format!("file://{}", scripts.display())),
+            Some(scripts.clone())
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
