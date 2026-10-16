@@ -140,6 +140,16 @@ fn xz_dictionaries(compressed: &Path) -> Vec<u64> {
         .expect("xz -lvv");
     assert!(output.status.success(), "xz -lvv failed");
     let text = String::from_utf8_lossy(&output.stdout);
+    // The kernel did not boot a stream whose block header lacks its sizes.
+    let sizes_in_headers: Vec<&str> = text
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("Sizes in headers:"))
+        .map(str::trim)
+        .collect();
+    assert!(
+        !sizes_in_headers.is_empty() && sizes_in_headers.iter().all(|value| *value == "Yes"),
+        "block headers carry the sizes: {text}"
+    );
     text.split("dict=")
         .skip(1)
         .map(|rest| {

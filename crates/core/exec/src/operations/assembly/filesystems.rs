@@ -103,16 +103,24 @@ pub(super) fn execute_assembly_filesystem(
             // The kernel's XZ decoder reads CRC32 (or no) checks only, and it
             // allocates the whole dictionary up front: an initramfs with the
             // 64 MiB dictionary of `-9` fails to unpack before /init runs.
-            // One thread writes one block, so the output is deterministic.
-            let filter = cpio_xz_filter(
-                filesystem.compression_level,
-                file_len(&temp_cpio).inspect_err(|_| {
-                    let _ = std_fs::remove_file(&temp_cpio);
-                })?,
-            );
+            // The stream must also carry its sizes in the block header, which
+            // xz writes only in threaded mode (`-T1` leaves them out, and that
+            // initramfs did not boot either). One block as large as the cpio
+            // keeps the output the same for any thread count.
+            let input_bytes = file_len(&temp_cpio).inspect_err(|_| {
+                let _ = std_fs::remove_file(&temp_cpio);
+            })?;
+            let filter = cpio_xz_filter(filesystem.compression_level, input_bytes);
+            let block_size = format!("--block-size={}", input_bytes.max(1));
             let mut command = Command::new(&tool.program);
             command
-                .args(["-T1", "--check=crc32", filter.as_str(), "-c"])
+                .args([
+                    "-T2",
+                    block_size.as_str(),
+                    "--check=crc32",
+                    filter.as_str(),
+                    "-c",
+                ])
                 .arg(&temp_cpio);
             let xz_output = run_command_stdout_to_file(
                 spec,
