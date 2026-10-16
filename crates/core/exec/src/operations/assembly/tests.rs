@@ -619,3 +619,27 @@ mod tests_verity;
 
 #[path = "tests_ram.rs"]
 mod ram;
+
+/// Buildroot installs system tools (veritysetup, mkfs.ext4, debugfs) into
+/// host/sbin: the provider's host tools are searched there too, before PATH.
+#[test]
+fn assembly_tools_are_found_in_the_provider_host_sbin() {
+    let scratch = gaia_testkit::TempDir::new("gaia-assembly-host-sbin");
+    let root = scratch.path().to_path_buf();
+    let host = root.join("host");
+    fs::create_dir_all(host.join("sbin")).expect("host sbin");
+    let tool = host.join("sbin/gaia-test-only-veritysetup");
+    fs::write(&tool, "#!/bin/sh\n").expect("tool");
+    let roots = AssemblyRoots {
+        assembly_work: root.join("build/assembly"),
+        assembly_out: root.join("out/images"),
+        provider_images: root.join("out/images"),
+        provider_target: root.join("target"),
+        provider_host: Some(host.clone()),
+        provider_staging: None,
+        trees: std::collections::BTreeMap::new(),
+    };
+    let resolved =
+        resolve_assembly_tool(&roots, "gaia-test-only-veritysetup").expect("found in host/sbin");
+    assert_eq!(resolved.program, tool);
+}

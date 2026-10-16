@@ -111,6 +111,14 @@ newest release, and updates the Rust docker images to 1.99.0.
   passed to docker. A stale directory holding files another user owns is
   moved into `.gaia-trash` instead of failing the build.
 
+### Assembly tools from the provider's host/sbin
+
+- Assembly tools are looked up in the provider's host `bin`, `sbin`,
+  `usr/bin` and `usr/sbin` (then PATH). Buildroot installs veritysetup,
+  mkfs.ext4, debugfs and depmod into `host/sbin`, so a slot build failed
+  with "assembly tool 'veritysetup' was not found" although
+  host-cryptsetup was built.
+
 ### Build variants
 
 - A build file can declare `[[variants]]`: each is an `id` and `overrides` in the `--set` form. One `gaia run` then builds the base config (variant `default`) and each variant, in order, from one shared base. `gaia run --variant pv2026[,...]` builds a subset; `preview` and `plan` show each variant. See "Variants" in `docs/configuration.md`.

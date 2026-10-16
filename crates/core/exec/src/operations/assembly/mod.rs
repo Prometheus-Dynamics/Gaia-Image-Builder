@@ -632,9 +632,13 @@ struct ResolvedTool {
 
 fn resolve_assembly_tool(roots: &AssemblyRoots, name: &str) -> Result<ResolvedTool, String> {
     if let Some(provider_host) = &roots.provider_host {
+        // Buildroot installs system tools (veritysetup, mkfs.ext4, debugfs,
+        // depmod) into host/sbin.
         for relative in [
             PathBuf::from("bin").join(name),
+            PathBuf::from("sbin").join(name),
             PathBuf::from("usr/bin").join(name),
+            PathBuf::from("usr/sbin").join(name),
             PathBuf::from(name),
         ] {
             let candidate = provider_host.join(relative);
