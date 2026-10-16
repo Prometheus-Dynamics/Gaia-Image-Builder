@@ -79,7 +79,7 @@ fn preview_evictions_are_the_entries_eviction_removes() {
     assert_eq!(before.len(), 2);
 
     // Over its size: every entry goes (the target is nine tenths of 1 byte).
-    cache.max_size = 1;
+    cache.max_size = Some(1);
     let previewed = cache
         .preview_evictions()
         .into_iter()

@@ -6,6 +6,12 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Buildroot package cache: default size from free space
+
+- When `[providers.buildroot.package_cache] max_size` is unset, each level's budget is computed at run start as `clamp(free / 2 + current size, 2 GiB, 40 GiB)`, with `free` the free space on the level's filesystem and `current size` what the level already holds. It was a fixed `100G`, which warned on a disk with less than that free. Without a free-space reading the budget is 40 GiB. Cache keys are unchanged.
+- The "may grow to ... but its filesystem has ... free" warning fires only for an explicit `max_size` larger than the free space; the default never warns.
+- Eviction is least recently used first (manifest modification time, which restores and stores refresh) and now also runs at the start of a run, before packages are restored, so a lowered `max_size` takes effect. Each eviction is reported in the run output with its count and size.
+
 ### Assembly: lean trees (strip, include lists, module metadata, cpio-xz)
 
 - `strip = true` on `[[image.assembly.binaries]]` (the program and every library of its closure), on `[[image.assembly.files]]` (each copied ELF) and on a tree (every ELF in it, just before a filesystem or archive packs it). Only the copies in the tree are stripped. Executables and shared libraries get `--strip-unneeded`; kernel modules and relocatable objects get `--strip-debug`; non-ELF files, symlinks and already-stripped files are left alone; hard links stay linked. The tool is `[image.assembly] strip_tool`, else the provider's `<triplet>-strip`, else `llvm-strip`, else `strip` for host-machine ELFs; if none is found the build fails, naming the file. The bytes saved are recorded per tree.

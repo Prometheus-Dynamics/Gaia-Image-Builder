@@ -407,7 +407,9 @@ pub struct BuildrootPackageCachePolicySpec {
     /// `project`.
     pub system_packages: Vec<String>,
     /// Size to keep at each level (for example `100G`); least recently
-    /// used packages are evicted beyond it.
+    /// used packages are evicted beyond it. Unset, each level is kept at
+    /// half its filesystem's free space plus what it holds, between 2 GiB
+    /// and 40 GiB.
     pub max_size: Option<String>,
 }
 

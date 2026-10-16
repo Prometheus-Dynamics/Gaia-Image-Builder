@@ -793,7 +793,7 @@ enabled = true
 # project_dir = ".gaia/cache/buildroot/packages"
 # project_packages = ["photonvision*", "my-app"]  # kept in this project only
 # system_packages = []            # shared even when level = "project"
-max_size = "100G"                 # per level; least recently used packages go first
+# max_size = "100G"               # per level; unset: see "Size budget" below
 ```
 
 Built packages are cached by content, so a wiped output tree or a second
@@ -825,6 +825,21 @@ Packages are stored at `level` (default `system`), except those matching
 frequently changing packages) or `system_packages` (stored at the system
 level when `level = "project"`). Restores look in the project level first,
 then the system level. `dir` is accepted as an alias of `system_dir`.
+
+**Size budget.** Each level is kept at its `max_size` (least recently used
+packages are evicted first, until the level is at nine tenths of it). Unset,
+a level's budget is computed when a run starts, from the free space `F` on
+the filesystem holding that level and the bytes `C` the level already holds:
+
+    budget = clamp(F / 2 + C, 2 GiB, 40 GiB)
+
+so an existing cache is not over budget merely for being there, and a nearly
+full disk gets a small cache. When the free space cannot be read, the budget
+is 40 GiB. Eviction runs at the start of a run (when a lowered `max_size` or
+a large cache is over its budget) and after packages are stored; each
+eviction is reported in the run output with its count and size. A `max_size`
+that is set is only warned about when it is larger than the free space; the
+default never warns.
 
 `gaia cache` manages the cache entry by entry, so one bad package never
 means wiping everything:

@@ -124,7 +124,8 @@ pub(super) fn test_cache(root: &Path, project_packages: &[&str]) -> PackageCache
     PackageCache {
         system: Some(root.join("system")),
         project: root.join("project"),
-        max_size: u64::MAX,
+        max_size: Some(u64::MAX),
+        default_budgets: Vec::new(),
         policy: gaia_spec::BuildrootPackageCachePolicySpec {
             enabled: true,
             project_packages: project_packages

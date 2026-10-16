@@ -20,7 +20,7 @@ impl PackageCache {
         self.levels()
             .into_iter()
             .flat_map(|(_, level)| {
-                eviction_walk(level, self.max_size, |_, _| true)
+                eviction_walk(level, self.budget(level), |_, _| true)
                     .into_iter()
                     .map(|(manifest, size)| CacheEviction {
                         path: manifest.with_extension(""),

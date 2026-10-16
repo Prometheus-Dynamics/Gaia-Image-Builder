@@ -25,7 +25,6 @@ use sha2::Digest;
 use std::os::unix::fs::MetadataExt;
 
 const DEFAULT_PACKAGE_CACHE_DIR: &str = gaia_spec::USER_BUILDROOT_PACKAGE_CACHE_DIR;
-const DEFAULT_PACKAGE_CACHE_MAX_SIZE: &str = "100G";
 
 /// Stamps in the order Buildroot creates them; restored stamps get
 /// increasing modification times in this order.
@@ -58,8 +57,13 @@ pub(crate) struct PackageCache {
     system: Option<PathBuf>,
     /// The project level.
     project: PathBuf,
-    /// Size kept at each level.
-    max_size: u64,
+    /// Size kept at each level when the user set `max_size`; `None` for the
+    /// default, which is resolved per level in `default_budgets`.
+    max_size: Option<u64>,
+    /// The default size of each level, resolved at run start from its
+    /// filesystem's free space and its current size (see
+    /// `default_max_size`). Empty when `max_size` is set.
+    default_budgets: Vec<(PathBuf, u64)>,
     policy: gaia_spec::BuildrootPackageCachePolicySpec,
     /// Where the cache is, when that needs saying.
     pub(crate) note: Option<String>,
@@ -115,34 +119,55 @@ pub(crate) fn package_cache(
     let max_size = settings
         .max_size
         .as_deref()
-        .unwrap_or(DEFAULT_PACKAGE_CACHE_MAX_SIZE)
-        .parse::<gaia_spec::ByteSize>()
-        .map_err(|error| {
-            ImageProviderError::new(
-                ImageProviderErrorKind::PolicyBlocked,
-                format!("providers.buildroot.package_cache.max_size: {error}"),
-            )
-        })?
-        .bytes();
-    Ok(Some(PackageCache {
+        .map(|text| {
+            text.parse::<gaia_spec::ByteSize>()
+                .map(|size| size.bytes())
+                .map_err(|error| {
+                    ImageProviderError::new(
+                        ImageProviderErrorKind::PolicyBlocked,
+                        format!("providers.buildroot.package_cache.max_size: {error}"),
+                    )
+                })
+        })
+        .transpose()?;
+    let mut cache = PackageCache {
         system,
         project,
         max_size,
+        default_budgets: Vec::new(),
         policy: settings.clone(),
         note,
-    }))
+    };
+    if max_size.is_none() {
+        cache.default_budgets = cache
+            .levels()
+            .into_iter()
+            .map(|(_, dir)| {
+                let budget = evict::default_max_size(
+                    filesystem_available_bytes(dir),
+                    evict::eviction_order(dir).0,
+                );
+                (dir.to_path_buf(), budget)
+            })
+            .collect();
+    }
+    Ok(Some(cache))
 }
 
 impl PackageCache {
-    /// A warning when the cache's filesystem cannot hold `max_size` more.
+    /// A warning when a `max_size` the user set is more than the cache's
+    /// filesystem has free. The default never warns.
     pub(crate) fn space_warning(&self) -> Vec<String> {
+        let Some(max_size) = self.max_size else {
+            return Vec::new();
+        };
         self.levels()
             .into_iter()
             .filter_map(|(level, dir)| {
                 cache_space_warning(
                     &format!("package cache ({} level)", level.as_str()),
                     dir,
-                    self.max_size,
+                    max_size,
                 )
             })
             .collect()
@@ -553,9 +578,6 @@ impl PackageCache {
                 Err(reason) => skipped.push(format!("{name}: {reason}")),
             }
         }
-        if !stored.is_empty() {
-            self.evict();
-        }
         (stored, skipped)
     }
 
@@ -711,14 +733,6 @@ impl PackageCache {
                 error.to_string()
             })
     }
-
-    /// Removes the least recently used entries beyond `max_size`, by their
-    /// manifests (size, and last use as the manifest's modification time).
-    fn evict(&self) {
-        for (_, level) in self.levels() {
-            evict::evict_level(level, self.max_size);
-        }
-    }
 }
 
 /// Whether `name` is built in `output_dir`: its install stamp is there.
@@ -744,6 +758,10 @@ mod tests;
 #[cfg(test)]
 #[path = "package_cache_plan_tests.rs"]
 mod plan_tests;
+
+#[cfg(test)]
+#[path = "package_cache_budget_tests.rs"]
+mod budget_tests;
 
 #[cfg(test)]
 #[path = "package_cache_rebuild_tests.rs"]

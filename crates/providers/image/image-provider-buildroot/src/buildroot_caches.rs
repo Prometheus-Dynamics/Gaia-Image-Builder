@@ -35,6 +35,7 @@ impl CachedPackages {
                 .store(output_dir, &self.graph, &self.keys, &self.restored);
         let mut messages = Vec::new();
         if !stored.is_empty() {
+            messages.extend(eviction_message(self.cache.evict()));
             messages.push(format!(
                 "stored {} Buildroot package(s) in the package cache: {}",
                 stored.len(),
@@ -128,6 +129,8 @@ pub(crate) fn restore_cached_packages(
     };
     messages.extend(cache.space_warning());
     messages.extend(cache.note.clone());
+    // Brought under its size before this run adds to the cache.
+    messages.extend(eviction_message(cache.evict()));
     let started = std::time::Instant::now();
     // Host tools taken from the system are part of every key.
     let mut identity = execution_identity(command_context.execution);
@@ -198,6 +201,17 @@ pub(crate) fn restore_cached_packages(
         keys,
         restored,
     }))
+}
+
+/// The run message for package builds evicted from the package cache, if any.
+fn eviction_message((count, bytes): (usize, u64)) -> Option<String> {
+    (count > 0).then(|| {
+        format!(
+            "package cache: evicted {count} least recently used package build(s) ({}) to stay \
+             within its size",
+            crate::ram_tree::gib(bytes)
+        )
+    })
 }
 
 /// ccache's per-compilation statistics for one `make`, which only that
