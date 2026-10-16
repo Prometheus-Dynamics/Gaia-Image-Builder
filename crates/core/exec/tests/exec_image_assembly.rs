@@ -34,11 +34,14 @@ fn executes_image_assembly_file_staging() {
     spec.image.assembly = Some(ImageAssemblySpec {
         work_dir: Some(build_dir.join("assembly").display().to_string().into()),
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "boot".into(),
             path: tree_dir.display().to_string().into(),
         }],
         files: vec![
             AssemblyFileSpec {
+                include: Vec::new(),
+                strip: false,
                 exclude: Vec::new(),
                 tree: "boot".into(),
                 src: Some(source_dir.join("config.txt").display().to_string().into()),
@@ -52,6 +55,8 @@ fn executes_image_assembly_file_staging() {
                 json: None,
             },
             AssemblyFileSpec {
+                include: Vec::new(),
+                strip: false,
                 exclude: Vec::new(),
                 tree: "boot".into(),
                 src: None,
@@ -65,6 +70,8 @@ fn executes_image_assembly_file_staging() {
                 json: None,
             },
             AssemblyFileSpec {
+                include: Vec::new(),
+                strip: false,
                 exclude: Vec::new(),
                 tree: "boot".into(),
                 src: Some(source_dir.join("missing.txt").display().to_string().into()),
@@ -79,6 +86,8 @@ fn executes_image_assembly_file_staging() {
             },
             #[cfg(unix)]
             AssemblyFileSpec {
+                include: Vec::new(),
+                strip: false,
                 exclude: Vec::new(),
                 tree: "boot".into(),
                 src: Some(source_dir.join("config-link").display().to_string().into()),
@@ -160,10 +169,13 @@ fn image_assembly_missing_required_source_fails() {
     spec.image.assembly = Some(ImageAssemblySpec {
         work_dir: Some(build_dir.join("assembly").display().to_string().into()),
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "boot".into(),
             path: "$assembly.work/boot".into(),
         }],
         files: vec![AssemblyFileSpec {
+            include: Vec::new(),
+            strip: false,
             exclude: Vec::new(),
             tree: "boot".into(),
             src: Some(
@@ -240,10 +252,13 @@ fn image_assembly_cleanup_failure_preserves_original_error() {
     spec.image.assembly = Some(ImageAssemblySpec {
         work_dir: Some(protected_parent.display().to_string().into()),
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "boot".into(),
             path: "$assembly.work/boot".into(),
         }],
         files: vec![AssemblyFileSpec {
+            include: Vec::new(),
+            strip: false,
             exclude: Vec::new(),
             tree: "boot".into(),
             src: Some(build_dir.join("missing.txt").display().to_string().into()),
@@ -388,10 +403,13 @@ fn image_assembly_disk_failure_cleans_generated_filesystem_output() {
 
     spec.image.assembly = Some(ImageAssemblySpec {
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "initramfs".into(),
             path: tree_dir.display().to_string().into(),
         }],
         files: vec![AssemblyFileSpec {
+            include: Vec::new(),
+            strip: false,
             exclude: Vec::new(),
             tree: "initramfs".into(),
             src: Some(source_dir.join("init").display().to_string().into()),
@@ -577,10 +595,13 @@ fn image_assembly_filesystem_failure_cleans_temp_and_final_outputs() {
 
     spec.image.assembly = Some(ImageAssemblySpec {
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "boot".into(),
             path: tree_dir.display().to_string().into(),
         }],
         files: vec![AssemblyFileSpec {
+            include: Vec::new(),
+            strip: false,
             exclude: Vec::new(),
             tree: "boot".into(),
             src: Some(source_dir.join("boot.txt").display().to_string().into()),
@@ -655,10 +676,13 @@ fn a_multi_file_glob_needs_a_directory_dest() {
         spec.image.assembly = Some(ImageAssemblySpec {
             work_dir: Some(build_dir.join("assembly").display().to_string().into()),
             trees: vec![AssemblyTreeSpec {
+                strip: false,
                 id: "boot".into(),
                 path: tree_dir.display().to_string().into(),
             }],
             files: vec![AssemblyFileSpec {
+                include: Vec::new(),
+                strip: false,
                 exclude: Vec::new(),
                 tree: "boot".into(),
                 src: None,

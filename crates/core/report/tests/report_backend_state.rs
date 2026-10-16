@@ -179,6 +179,7 @@ fn report_includes_image_assembly_runtime_state() {
     let mut spec = test_spec(&scratch);
     spec.image.assembly = Some(ImageAssemblySpec {
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "boot".into(),
             path: "$assembly.work/boot".into(),
         }],

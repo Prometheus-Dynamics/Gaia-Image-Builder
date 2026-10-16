@@ -31,10 +31,13 @@ fn cpio_zstd_assembly(work_dir: &str, output: &str, publish: bool) -> ImageAssem
     ImageAssemblySpec {
         work_dir: Some(work_dir.into()),
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "initramfs".into(),
             path: "$assembly.work/initramfs".into(),
         }],
         files: vec![AssemblyFileSpec {
+            include: Vec::new(),
+            strip: false,
             exclude: Vec::new(),
             tree: "initramfs".into(),
             src: Some("@assets/config.txt".into()),
@@ -333,10 +336,13 @@ fn vfat_auto_size_builds_an_image_that_holds_the_tree() {
     spec.image.assembly = Some(ImageAssemblySpec {
         work_dir: Some("$assembly.work".into()),
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "boot".into(),
             path: "$assembly.work/boot".into(),
         }],
         files: vec![AssemblyFileSpec {
+            include: Vec::new(),
+            strip: false,
             exclude: Vec::new(),
             tree: "boot".into(),
             src: Some("@assets/config.txt".into()),

@@ -146,6 +146,7 @@ pub(crate) fn compile_image_assembly(
             .map(|tree| AssemblyTreeSpec {
                 id: tree.id.into(),
                 path: tree.path.into(),
+                strip: tree.strip,
             })
             .collect(),
         dirs: raw
@@ -174,6 +175,8 @@ pub(crate) fn compile_image_assembly(
                 src: file.src.map(Into::into),
                 src_glob: file.src_glob.map(Into::into),
                 exclude: file.exclude,
+                include: file.include,
+                strip: file.strip,
                 dest: file.dest,
                 mode: file.mode,
                 optional: file.optional,
@@ -267,6 +270,7 @@ pub(crate) fn compile_image_assembly(
                 dest: binary.dest,
                 sysroot: binary.sysroot.map(Into::into),
                 mode: binary.mode,
+                strip: binary.strip,
             })
             .collect(),
         busybox_initramfs: raw
@@ -289,8 +293,10 @@ pub(crate) fn compile_image_assembly(
                 kernel_version: modules.kernel_version,
                 modules: modules.modules,
                 depmod: modules.depmod.map(Into::into),
+                metadata: modules.metadata,
             })
             .collect(),
+        strip_tool: raw.strip_tool.map(Into::into),
         // Filled in once the sources are known (see source_tokens).
         assembly_sources: Vec::new(),
     };
@@ -320,6 +326,7 @@ fn compile_assembly_filesystem_kind(raw: RawAssemblyFilesystemKind) -> AssemblyF
         RawAssemblyFilesystemKind::Cpio => AssemblyFilesystemKindSpec::Cpio,
         RawAssemblyFilesystemKind::CpioGzip => AssemblyFilesystemKindSpec::CpioGzip,
         RawAssemblyFilesystemKind::CpioZstd => AssemblyFilesystemKindSpec::CpioZstd,
+        RawAssemblyFilesystemKind::CpioXz => AssemblyFilesystemKindSpec::CpioXz,
         RawAssemblyFilesystemKind::Ext4 => AssemblyFilesystemKindSpec::Ext4,
     }
 }
@@ -329,6 +336,7 @@ fn default_assembly_filesystem_deterministic(raw: RawAssemblyFilesystemKind) -> 
         RawAssemblyFilesystemKind::Cpio
         | RawAssemblyFilesystemKind::CpioGzip
         | RawAssemblyFilesystemKind::CpioZstd
+        | RawAssemblyFilesystemKind::CpioXz
         | RawAssemblyFilesystemKind::Ext4 => true,
         RawAssemblyFilesystemKind::Vfat => false,
     }

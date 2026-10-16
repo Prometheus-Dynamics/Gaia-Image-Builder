@@ -13,6 +13,7 @@ mod image_assembly_layout;
 mod image_assembly_options;
 mod image_assembly_order;
 mod image_assembly_outputs;
+mod image_assembly_strip;
 mod inputs;
 mod install_stage;
 mod java_policy;

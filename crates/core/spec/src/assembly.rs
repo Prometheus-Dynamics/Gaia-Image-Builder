@@ -381,6 +381,7 @@ mod tests {
             work_dir: Some("$provider.images/work".into()),
             out_dir: Some("$provider.images".into()),
             trees: vec![AssemblyTreeSpec {
+                strip: false,
                 id: "boot".into(),
                 path: "$assembly.work/boot".into(),
             }],
@@ -435,6 +436,7 @@ mod tests {
         )));
         let assembly = ImageAssemblySpec {
             trees: vec![AssemblyTreeSpec {
+                strip: false,
                 id: "boot".into(),
                 path: "$assembly.tree.boot/nested".into(),
             }],

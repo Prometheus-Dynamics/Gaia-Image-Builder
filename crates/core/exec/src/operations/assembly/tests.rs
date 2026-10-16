@@ -9,7 +9,7 @@ use gaia_spec::{
 use std::fs;
 use std::path::Path;
 
-fn test_spec(root: &Path) -> ResolvedBuildSpec {
+pub(super) fn test_spec(root: &Path) -> ResolvedBuildSpec {
     let mut spec = ResolvedBuildSpec::new("assembly-helper-test");
     spec.workspace.root_dir = root.display().to_string();
     spec.workspace.build_dir = root.join("build").display().to_string();
@@ -207,11 +207,14 @@ fn stage_image_assembly_cleans_tree_and_skips_optional_missing_sources() {
     spec.image.assembly = Some(ImageAssemblySpec {
         work_dir: Some(root.join("build/assembly").display().to_string().into()),
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "boot".into(),
             path: "$assembly.work/boot".into(),
         }],
         files: vec![
             AssemblyFileSpec {
+                include: Vec::new(),
+                strip: false,
                 exclude: Vec::new(),
                 tree: "boot".into(),
                 src: Some("@assets/config.txt".into()),
@@ -225,6 +228,8 @@ fn stage_image_assembly_cleans_tree_and_skips_optional_missing_sources() {
                 json: None,
             },
             AssemblyFileSpec {
+                include: Vec::new(),
+                strip: false,
                 exclude: Vec::new(),
                 tree: "boot".into(),
                 src: Some("@assets/missing.txt".into()),
@@ -264,6 +269,8 @@ fn copy_assembly_file_copies_regular_files_and_applies_mode() {
     let dest = root.join("nested/dest");
     fs::write(&source, "payload").expect("source");
     let file = AssemblyFileSpec {
+        include: Vec::new(),
+        strip: false,
         exclude: Vec::new(),
         tree: "boot".into(),
         src: Some(source.display().to_string().into()),
@@ -301,6 +308,8 @@ fn copy_assembly_file_preserves_symlinks_when_requested() {
     fs::write(&source_target, "payload").expect("target");
     std::os::unix::fs::symlink("target", &source_link).expect("symlink");
     let file = AssemblyFileSpec {
+        include: Vec::new(),
+        strip: false,
         exclude: Vec::new(),
         tree: "boot".into(),
         src: Some(source_link.display().to_string().into()),
@@ -410,6 +419,7 @@ fn buildroot_assembly_roots_expose_images_target_host_and_staging() {
         work_dir: Some("$provider.images/work".into()),
         out_dir: Some("$provider.images".into()),
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "roots".into(),
             path: "$assembly.work/tree".into(),
         }],
@@ -450,10 +460,13 @@ fn boot_assembly(
     ImageAssemblySpec {
         work_dir: Some(root.join("build/assembly").display().to_string().into()),
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "boot".into(),
             path: "$assembly.work/boot".into(),
         }],
         files: vec![AssemblyFileSpec {
+            include: Vec::new(),
+            strip: false,
             exclude: Vec::new(),
             tree: "boot".into(),
             src: Some("@assets/config.txt".into()),
@@ -621,8 +634,14 @@ mod tests_filesystem;
 #[path = "tests_generated.rs"]
 mod tests_generated;
 
+#[path = "tests_cpio_xz.rs"]
+mod tests_cpio_xz;
+#[path = "tests_entries.rs"]
+mod tests_entries;
 #[path = "tests_kernel_modules.rs"]
 mod tests_kernel_modules;
+#[path = "tests_strip.rs"]
+mod tests_strip;
 #[path = "tests_verity.rs"]
 mod tests_verity;
 

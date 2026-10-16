@@ -81,7 +81,26 @@ pub(super) fn execute_kernel_modules(
             )
         })?;
     }
-    for name in MODULE_METADATA {
+    // The listed metadata files must exist in the kernel's module set; the
+    // default set may be partly absent.
+    let listed = modules.metadata.as_deref();
+    let metadata: Vec<&str> = match listed {
+        Some(names) => {
+            for name in names {
+                if !kernel_dir.join(name).is_file() {
+                    return Err(format!(
+                        "kernel module metadata '{name}' for tree '{}' is not in '{}'",
+                        modules.tree,
+                        kernel_dir.display()
+                    )
+                    .into());
+                }
+            }
+            names.iter().map(String::as_str).collect()
+        }
+        None => MODULE_METADATA.to_vec(),
+    };
+    for name in metadata {
         let source = kernel_dir.join(name);
         if source.is_file() {
             std_fs::create_dir_all(&target_dir).map_err(|error| {
@@ -118,6 +137,12 @@ pub(super) fn execute_kernel_modules(
         .into());
     }
 
+    // depmod writes its own indexes into the tree; a listed set keeps only
+    // the listed `modules.*` files.
+    if let Some(names) = listed {
+        prune_modules_metadata(&target_dir, names)?;
+    }
+
     Ok(KernelModulesSummary {
         kernel_version,
         copied: closure.into_iter().collect(),
@@ -125,6 +150,40 @@ pub(super) fn execute_kernel_modules(
         depmod_version: tool_version(&depmod, ["--version"]),
         depmod: depmod.display,
     })
+}
+
+/// Removes the `modules.*` files of `dir` that `keep` does not name. A
+/// missing `dir` has nothing to remove.
+fn prune_modules_metadata(dir: &Path, keep: &[String]) -> Result<(), String> {
+    let entries = match std_fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "failed to read kernel module dir '{}': {error}",
+                dir.display()
+            ));
+        }
+    };
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            format!(
+                "failed to read kernel module dir '{}': {error}",
+                dir.display()
+            )
+        })?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let is_metadata = name.starts_with("modules.");
+        if is_metadata && !keep.contains(&name) && entry.path().is_file() {
+            std_fs::remove_file(entry.path()).map_err(|error| {
+                format!(
+                    "failed to remove kernel module metadata '{}': {error}",
+                    entry.path().display()
+                )
+            })?;
+        }
+    }
+    Ok(())
 }
 
 /// The `<kernel version>` directory to take modules from.

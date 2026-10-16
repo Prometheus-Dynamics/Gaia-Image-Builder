@@ -29,8 +29,13 @@ pub(crate) fn validate_filesystem_outputs(
 ) {
     for filesystem in &assembly.filesystems {
         if let Some(level) = filesystem.compression_level {
-            if filesystem.kind != AssemblyFilesystemKindSpec::CpioZstd {
-                diagnostics.push(error(
+            let range = match filesystem.kind {
+                AssemblyFilesystemKindSpec::CpioZstd => Some((1..=19, "1 and 19")),
+                AssemblyFilesystemKindSpec::CpioXz => Some((0..=9, "0 and 9")),
+                _ => None,
+            };
+            match range {
+                None => diagnostics.push(error(
                     "assembly_filesystem_compression_level_unsupported",
                     format!(
                         "assembly filesystem '{}' kind '{}' does not accept compression_level",
@@ -38,16 +43,18 @@ pub(crate) fn validate_filesystem_outputs(
                         filesystem.kind.as_str()
                     ),
                     Some("image.assembly.filesystems".into()),
-                ));
-            } else if !(1..=19).contains(&level) {
-                diagnostics.push(error(
-                    "assembly_filesystem_compression_level_invalid",
-                    format!(
-                        "assembly filesystem '{}' compression_level {level} must be between 1 and 19",
-                        filesystem.id
-                    ),
-                    Some("image.assembly.filesystems".into()),
-                ));
+                )),
+                Some((levels, text)) if !levels.contains(&level) => {
+                    diagnostics.push(error(
+                        "assembly_filesystem_compression_level_invalid",
+                        format!(
+                            "assembly filesystem '{}' compression_level {level} must be between {text}",
+                            filesystem.id
+                        ),
+                        Some("image.assembly.filesystems".into()),
+                    ));
+                }
+                Some(_) => {}
             }
         }
         if filesystem.publish && filesystem.publish_template().is_none() {
@@ -152,6 +159,21 @@ pub(crate) fn validate_kernel_modules(
                 ),
                 location.clone(),
             ));
+        }
+        for name in modules.metadata.iter().flatten() {
+            let valid = name.strip_prefix("modules.").is_some_and(|rest| {
+                !rest.is_empty() && !rest.contains('/') && !rest.contains('\0')
+            });
+            if !valid {
+                diagnostics.push(error(
+                    "assembly_kernel_modules_metadata_invalid",
+                    format!(
+                        "kernel modules entry {} metadata '{name}' must be a file name starting with 'modules.'",
+                        index + 1
+                    ),
+                    location.clone(),
+                ));
+            }
         }
         if modules.from.trim().is_empty() {
             diagnostics.push(error(

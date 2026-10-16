@@ -10,6 +10,7 @@ use crate::image_assembly_collected::validate_collected_reference;
 /// ustar `name` field length; longer names are rejected rather than split
 /// into the `prefix` field.
 const TAR_NAME_MAX_BYTES: usize = 100;
+const GZIP_LEVELS: std::ops::RangeInclusive<u32> = 1..=9;
 const ZSTD_LEVELS: std::ops::RangeInclusive<u32> = 1..=19;
 const XZ_LEVELS: std::ops::RangeInclusive<u32> = 0..=9;
 
@@ -115,6 +116,7 @@ pub(crate) fn validate_transform_levels(
             continue;
         };
         let (kind, range) = match transform.kind {
+            gaia_spec::AssemblyTransformKindSpec::Gzip => ("gzip", GZIP_LEVELS),
             gaia_spec::AssemblyTransformKindSpec::Zstd => ("zstd", ZSTD_LEVELS),
             gaia_spec::AssemblyTransformKindSpec::Xz => ("xz", XZ_LEVELS),
             _ => {

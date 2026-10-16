@@ -9,8 +9,11 @@ use gaia_spec::{AssemblyStep, ImageAssemblySpec};
 /// What the steps of one assembly run produced, recorded into its state.
 pub(super) struct StepRun<'a> {
     spec: &'a ResolvedBuildSpec,
-    assembly: &'a ImageAssemblySpec,
-    roots: &'a AssemblyRoots,
+    pub(super) assembly: &'a ImageAssemblySpec,
+    pub(super) roots: &'a AssemblyRoots,
+    /// Strips the copies of `strip = true` entries and of packed trees.
+    pub(super) stripper: Stripper<'a>,
+    pub(super) strip: StripTotals,
     operation_id: &'a OperationId,
     cancel_check: Option<gaia_process::ProcessCancelCheck>,
     pub(super) state: KeyValueState,
@@ -110,6 +113,13 @@ impl<'a> StepRun<'a> {
             spec,
             assembly,
             roots,
+            stripper: Stripper::new(
+                spec,
+                roots,
+                assembly.strip_tool.as_ref(),
+                cancel_check.clone(),
+            ),
+            strip: StripTotals::default(),
             operation_id,
             cancel_check,
             state,
@@ -171,6 +181,7 @@ impl<'a> StepRun<'a> {
             AssemblyStep::Filesystem(index) => {
                 let tree = self.assembly.filesystems[index].source_tree.to_string();
                 self.check_runtime_libs_of(&[tree.as_str()]);
+                self.strip_trees_of(&[tree.as_str()])?;
                 self.filesystem(index)
             }
             AssemblyStep::Disk(index) => self.disk(index),
@@ -184,6 +195,7 @@ impl<'a> StepRun<'a> {
                     .collect::<Vec<_>>();
                 let trees = trees.iter().map(String::as_str).collect::<Vec<_>>();
                 self.check_runtime_libs_of(&trees);
+                self.strip_trees_of(&trees)?;
                 self.archive(index)
             }
         }
@@ -258,6 +270,10 @@ impl<'a> StepRun<'a> {
         state.insert("completed_transform_count", self.transform_count);
         state.insert("completed_filesystem_count", self.filesystem_count);
         state.insert("completed_disk_count", self.disk_count);
+        if self.strip.files > 0 {
+            state.insert("stripped_file_count", self.strip.files);
+            state.insert("stripped_saved_bytes", self.strip.saved_bytes);
+        }
         if !self.assembly.archives.is_empty() {
             state.insert("completed_archive_count", self.archive_count);
         }
@@ -366,6 +382,10 @@ impl<'a> StepRun<'a> {
             let dest = assembly_file_dest(tree_path, &source, &file.dest)?;
             tracing::Span::current().record("output_path", dest.display().to_string());
             copy_assembly_file(&source, &dest, file)?;
+            if file.strip {
+                let summary = self.stripper.strip_paths(std::slice::from_ref(&dest))?;
+                self.strip.add(summary);
+            }
             let regular = std_fs::symlink_metadata(&dest).is_ok_and(|metadata| metadata.is_file());
             if regular && !file.allow_missing_libs && gaia_plan::is_dynamic_elf(&dest) {
                 self.pending_lib_checks.push(PendingLibCheck {
@@ -447,7 +467,8 @@ impl<'a> StepRun<'a> {
             output_path = tracing::field::Empty
         );
         let _span_guard = span.enter();
-        let summary = execute_binary(self.spec, self.roots, binary)?;
+        let summary = execute_binary(self.spec, self.roots, binary, &mut self.stripper)?;
+        self.strip.add(summary.stripped);
         tracing::Span::current().record("output_path", summary.dest.display().to_string());
         self.binary_count += 1;
         let prefix = format!("binary.{}", self.binary_count);

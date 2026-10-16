@@ -8,6 +8,7 @@ use crate::diagnostics::error;
 use crate::image_assembly_collected::validate_collected_reference;
 use crate::image_assembly_generated;
 use crate::image_assembly_layout;
+use crate::image_assembly_strip;
 
 pub(crate) fn validate_image_assembly(
     spec: &ResolvedBuildSpec,
@@ -48,6 +49,10 @@ pub(crate) fn validate_image_assembly(
             "image.assembly.trees",
             diagnostics,
         );
+    }
+
+    if let Some(tool) = &assembly.strip_tool {
+        image_assembly_strip::validate_strip_tool(spec, &tree_ids, tool, diagnostics);
     }
 
     for dir in &assembly.dirs {
@@ -104,6 +109,8 @@ pub(crate) fn validate_image_assembly(
             "image.assembly.files",
             diagnostics,
         );
+        image_assembly_strip::validate_include(file, index, diagnostics);
+        image_assembly_strip::validate_strip_file(file, index, diagnostics);
         if file.allow_missing_libs && (file.content.is_some() || file.json.is_some()) {
             diagnostics.push(error(
                 "assembly_allow_missing_libs_not_allowed",
@@ -310,6 +317,7 @@ pub(crate) fn validate_image_assembly(
             gaia_spec::AssemblyFilesystemKindSpec::Cpio
             | gaia_spec::AssemblyFilesystemKindSpec::CpioGzip
             | gaia_spec::AssemblyFilesystemKindSpec::CpioZstd
+            | gaia_spec::AssemblyFilesystemKindSpec::CpioXz
             | gaia_spec::AssemblyFilesystemKindSpec::Ext4
                 if !filesystem.deterministic =>
             {

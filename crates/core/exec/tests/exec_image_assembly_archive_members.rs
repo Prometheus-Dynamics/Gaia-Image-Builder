@@ -84,6 +84,7 @@ fn names(entries: &[Entry]) -> Vec<&str> {
 
 fn tree(id: &str, path: &Path) -> AssemblyTreeSpec {
     AssemblyTreeSpec {
+        strip: false,
         id: id.into(),
         path: path.display().to_string().into(),
     }
@@ -293,6 +294,8 @@ fn file_src_glob_exclude_skips_named_matches() {
     spec.image.assembly = Some(ImageAssemblySpec {
         trees: vec![tree("rootfs", &rootfs)],
         files: vec![AssemblyFileSpec {
+            include: Vec::new(),
+            strip: false,
             tree: "rootfs".into(),
             src: None,
             src_glob: Some(sources.join("*.dtbo").display().to_string().into()),

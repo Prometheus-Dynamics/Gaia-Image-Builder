@@ -61,10 +61,13 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
     spec.image.assembly = Some(ImageAssemblySpec {
         work_dir: Some(build_dir.join("assembly").display().to_string().into()),
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "boot".into(),
             path: "$assembly.work/boot".into(),
         }],
         files: vec![AssemblyFileSpec {
+            include: Vec::new(),
+            strip: false,
             exclude: Vec::new(),
             tree: "boot".into(),
             src_glob: Some(source_dir.join("*.txt").display().to_string().into()),
@@ -319,10 +322,13 @@ fn vfat_filesystem_honors_mformat_timeout() {
                 .into(),
         ),
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "boot".into(),
             path: "$assembly.work/boot".into(),
         }],
         files: vec![AssemblyFileSpec {
+            include: Vec::new(),
+            strip: false,
             exclude: Vec::new(),
             tree: "boot".into(),
             src: Some(source_dir.join("boot.txt").display().to_string().into()),

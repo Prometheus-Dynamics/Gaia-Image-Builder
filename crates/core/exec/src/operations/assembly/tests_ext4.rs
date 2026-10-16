@@ -60,6 +60,8 @@ fn write_rootfs_assets(root: &Path) {
 
 fn rootfs_file(src: &str, dest: &str, mode: Option<&str>) -> AssemblyFileSpec {
     AssemblyFileSpec {
+        include: Vec::new(),
+        strip: false,
         exclude: Vec::new(),
         tree: "rootfs".into(),
         src: Some(src.into()),
@@ -86,6 +88,7 @@ fn ext4_assembly(
     ImageAssemblySpec {
         work_dir: Some("$assembly.work".into()),
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "rootfs".into(),
             path: "$assembly.work/rootfs".into(),
         }],

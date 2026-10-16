@@ -59,6 +59,7 @@ fn merge_image_assembly(
             busybox_initramfs: [base.busybox_initramfs, overlay.busybox_initramfs].concat(),
             binaries: [base.binaries, overlay.binaries].concat(),
             kernel_modules: [base.kernel_modules, overlay.kernel_modules].concat(),
+            strip_tool: overlay.strip_tool.or(base.strip_tool),
         }),
         (None, Some(assembly)) | (Some(assembly), None) => Some(assembly),
         (None, None) => None,

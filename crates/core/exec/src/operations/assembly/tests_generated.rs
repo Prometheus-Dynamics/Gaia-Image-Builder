@@ -49,6 +49,8 @@ fn generated_file(
     json: Option<AssemblyJsonValue>,
 ) -> AssemblyFileSpec {
     AssemblyFileSpec {
+        include: Vec::new(),
+        strip: false,
         exclude: Vec::new(),
         tree: "boot".into(),
         src: None,
@@ -86,6 +88,7 @@ fn generated_assembly(
     ImageAssemblySpec {
         work_dir: Some(work_dir.into()),
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "boot".into(),
             path: "$assembly.work/boot".into(),
         }],
@@ -231,6 +234,7 @@ fn a_token_that_names_a_missing_file_fails_the_assembly() {
     spec.image.assembly = Some(ImageAssemblySpec {
         work_dir: Some("$assembly.work".into()),
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "boot".into(),
             path: "$assembly.work/boot".into(),
         }],
@@ -303,6 +307,7 @@ fn generated_files_in_a_ram_work_dir_are_written_to_ram_and_render_the_same() {
 
 fn tree_spec(id: &str) -> AssemblyTreeSpec {
     AssemblyTreeSpec {
+        strip: false,
         id: id.into(),
         path: gaia_spec::AssemblyPathTemplate::new(format!("$assembly.work/{id}")),
     }

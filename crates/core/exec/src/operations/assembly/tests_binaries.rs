@@ -64,6 +64,7 @@ pub(super) fn binaries_assembly(
     ImageAssemblySpec {
         work_dir: Some("$assembly.work".into()),
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "rootfs".into(),
             path: tree.display().to_string().into(),
         }],
@@ -74,6 +75,7 @@ pub(super) fn binaries_assembly(
 
 pub(super) fn binary(src: &Path, dest: &str) -> AssemblyBinarySpec {
     AssemblyBinarySpec {
+        strip: false,
         tree: "rootfs".into(),
         src: src.display().to_string().into(),
         dest: dest.into(),

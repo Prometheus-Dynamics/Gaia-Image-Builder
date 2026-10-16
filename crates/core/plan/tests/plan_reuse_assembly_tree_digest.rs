@@ -28,15 +28,19 @@ fn spec_with_tree(scratch: &TempDir, name: &str) -> (ResolvedBuildSpec, PathBuf)
         work_dir: Some("$assembly.work".into()),
         trees: vec![
             AssemblyTreeSpec {
+                strip: false,
                 id: "boot".into(),
                 path: "$assembly.work/boot".into(),
             },
             AssemblyTreeSpec {
+                strip: false,
                 id: "payload".into(),
                 path: "$assembly.out/payload".into(),
             },
         ],
         files: vec![AssemblyFileSpec {
+            include: Vec::new(),
+            strip: false,
             exclude: Vec::new(),
             tree: "boot".into(),
             src: None,

@@ -507,15 +507,19 @@ mod tests {
         let assembly = ImageAssemblySpec {
             trees: vec![
                 AssemblyTreeSpec {
+                    strip: false,
                     id: "initramfs".into(),
                     path: "/work/initramfs".into(),
                 },
                 AssemblyTreeSpec {
+                    strip: false,
                     id: "boot".into(),
                     path: "/work/boot".into(),
                 },
             ],
             files: vec![AssemblyFileSpec {
+                include: Vec::new(),
+                strip: false,
                 exclude: Vec::new(),
                 tree: "boot".into(),
                 src: Some("$assembly.out/boot.img".into()),
@@ -529,6 +533,7 @@ mod tests {
                 json: None,
             }],
             kernel_modules: vec![AssemblyKernelModulesSpec {
+                metadata: None,
                 tree: "initramfs".into(),
                 from: "/provider/target/lib/modules".into(),
                 kernel_version: None,
@@ -610,6 +615,8 @@ mod tests {
         let file =
             |tree: &str, dest: &str, content: Option<&str>, json: Option<AssemblyJsonValue>| {
                 AssemblyFileSpec {
+                    include: Vec::new(),
+                    strip: false,
                     exclude: Vec::new(),
                     tree: tree.into(),
                     src: None,
@@ -626,10 +633,12 @@ mod tests {
         let assembly = ImageAssemblySpec {
             trees: vec![
                 AssemblyTreeSpec {
+                    strip: false,
                     id: "boot".into(),
                     path: "/build/boot".into(),
                 },
                 AssemblyTreeSpec {
+                    strip: false,
                     id: "payload".into(),
                     path: "/build/payload".into(),
                 },
@@ -674,11 +683,14 @@ mod tests {
         };
         let assembly = ImageAssemblySpec {
             trees: vec![AssemblyTreeSpec {
+                strip: false,
                 id: "boot".into(),
                 path: "$assembly.work/boot".into(),
             }],
             files: vec![
                 AssemblyFileSpec {
+                    include: Vec::new(),
+                    strip: false,
                     exclude: Vec::new(),
                     tree: "boot".into(),
                     src: None,
@@ -694,6 +706,8 @@ mod tests {
                     allow_missing_libs: false,
                 },
                 AssemblyFileSpec {
+                    include: Vec::new(),
+                    strip: false,
                     exclude: Vec::new(),
                     tree: "boot".into(),
                     src: None,

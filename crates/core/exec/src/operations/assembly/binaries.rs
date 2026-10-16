@@ -12,6 +12,8 @@ pub(super) struct BinarySummary {
     pub(super) sha256: String,
     pub(super) runtime_linkage: RuntimeLinkage,
     pub(super) runtime_libraries: Vec<PathBuf>,
+    /// What stripping the copies removed (zero unless `strip = true`).
+    pub(super) stripped: StripSummary,
 }
 
 /// The mode a listed binary gets when the config does not set one.
@@ -21,6 +23,7 @@ pub(super) fn execute_binary(
     spec: &ResolvedBuildSpec,
     roots: &AssemblyRoots,
     binary: &gaia_spec::AssemblyBinarySpec,
+    stripper: &mut Stripper<'_>,
 ) -> Result<BinarySummary, AssemblyError> {
     let tree = roots.tree_path(&binary.tree)?;
     let src = roots.resolve_path(spec, &binary.src)?;
@@ -74,6 +77,14 @@ pub(super) fn execute_binary(
     } else {
         (RuntimeLinkage::Static, Vec::new())
     };
+    // The copies are stripped before their digests are taken.
+    let stripped = if binary.strip {
+        let mut copies = vec![dest.clone()];
+        copies.extend(runtime_libraries.iter().cloned());
+        stripper.strip_paths(&copies)?
+    } else {
+        StripSummary::default()
+    };
     Ok(BinarySummary {
         bytes: file_len(&dest)?,
         sha256: file_sha256(&dest)?,
@@ -81,5 +92,6 @@ pub(super) fn execute_binary(
         dest,
         runtime_linkage,
         runtime_libraries,
+        stripped,
     })
 }

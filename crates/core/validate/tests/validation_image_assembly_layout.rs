@@ -156,7 +156,13 @@ level = 22
 kind = "gzip"
 src = "$provider.images/Image"
 dest = "$assembly.work/Image.gz"
-level = 9
+level = 10
+
+[[image.assembly.transforms]]
+kind = "copy"
+src = "$provider.images/Image"
+dest = "$assembly.work/Image.copy"
+level = 3
 
 [[image.assembly.disks]]
 id = "emmc"

@@ -94,6 +94,52 @@ pub(super) fn execute_assembly_filesystem(
                 tool_version: tool_version(&tool, ["--version"]),
             })
         }
+        gaia_spec::AssemblyFilesystemKindSpec::CpioXz => {
+            let tool = resolve_assembly_tool(roots, "xz")?;
+            tracing::Span::current().record("tool_path", tool.display.as_str());
+            let temp = temporary_assembly_output_path(&output);
+            let temp_cpio = temp.with_extension("cpio.tmp");
+            write_newc_archive(source_tree, &temp_cpio)?;
+            // The kernel's XZ decoder reads CRC32 (or no) checks only. The
+            // flags are the xz transform's: a fixed block size keeps the
+            // output the same for any thread count.
+            let level = filesystem
+                .compression_level
+                .map(|level| format!("-{level}"));
+            let mut args = vec!["-T0", "--block-size=24MiB", "--check=crc32", "-c"];
+            args.extend(level.as_deref());
+            let mut command = Command::new(&tool.program);
+            command.args(&args).arg(&temp_cpio);
+            let xz_output = run_command_stdout_to_file(
+                spec,
+                &mut command,
+                &temp,
+                process_output_retention(spec),
+                cancel_check,
+            )
+            .inspect_err(|_| {
+                let _ = std_fs::remove_file(&temp);
+            })?;
+            let _ = std_fs::remove_file(&temp_cpio);
+            if !xz_output.status.success() {
+                let _ = std_fs::remove_file(&temp);
+                return Err(format!(
+                    "cpio-xz compressor failed for '{}' using '{}': {}",
+                    source_tree.display(),
+                    tool.display,
+                    xz_output.failure_context(&command)
+                )
+                .into());
+            }
+            publish_assembly_output(&temp, &output)?;
+            Ok(AssemblyFilesystemSummary {
+                bytes: file_len(&output)?,
+                sha256: file_sha256(&output)?,
+                output,
+                tool_path: Some(tool.display.clone()),
+                tool_version: tool_version(&tool, ["--version"]),
+            })
+        }
         gaia_spec::AssemblyFilesystemKindSpec::CpioZstd => {
             let tool = resolve_assembly_tool(roots, "zstd")?;
             tracing::Span::current().record("tool_path", tool.display.as_str());

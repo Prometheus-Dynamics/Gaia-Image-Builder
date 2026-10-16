@@ -285,6 +285,122 @@ fn text(raw: &[u8]) -> Result<String, String> {
         .map_err(|_| "ELF string is not UTF-8".to_string())
 }
 
+/// What stripping an ELF file needs to know: its type, its machine, and
+/// whether it still has a symbol table or debug sections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ElfSections {
+    /// `e_type`: 1 relocatable, 2 executable, 3 shared object.
+    pub object_type: u16,
+    /// `e_machine`: the target architecture.
+    pub machine: u16,
+    /// A `.symtab` section is present.
+    pub has_symtab: bool,
+    /// A `.debug_*` or `.zdebug_*` section is present (not `.debug_gdb_scripts`).
+    pub has_debug: bool,
+}
+
+/// Reads an ELF file's type, machine and symbol and debug sections from its
+/// bytes. Bytes without the ELF magic are `Ok(None)`; a truncated or corrupt
+/// ELF file is an error.
+pub fn elf_sections(bytes: &[u8]) -> Result<Option<ElfSections>, String> {
+    if !bytes.starts_with(ELF_MAGIC) {
+        return Ok(None);
+    }
+    let is_64bit = match bytes.get(4) {
+        Some(1) => false,
+        Some(2) => true,
+        _ => return Err("unknown ELF class".into()),
+    };
+    let little_endian = match bytes.get(5) {
+        Some(1) => true,
+        Some(2) => false,
+        _ => return Err("unknown ELF data encoding".into()),
+    };
+    let layout = Layout {
+        is_64bit,
+        little_endian,
+    };
+    let object_type = layout.half(slice(bytes, 0x10, 2)?)?;
+    let machine = layout.half(slice(bytes, 0x12, 2)?)?;
+    let (shoff, shentsize, shnum, shstrndx) = if is_64bit {
+        (
+            layout.word(slice(bytes, 0x28, 8)?)?,
+            u64::from(layout.half(slice(bytes, 0x3a, 2)?)?),
+            u64::from(layout.half(slice(bytes, 0x3c, 2)?)?),
+            u64::from(layout.half(slice(bytes, 0x3e, 2)?)?),
+        )
+    } else {
+        (
+            layout.word(slice(bytes, 0x20, 4)?)?,
+            u64::from(layout.half(slice(bytes, 0x2e, 2)?)?),
+            u64::from(layout.half(slice(bytes, 0x30, 2)?)?),
+            u64::from(layout.half(slice(bytes, 0x32, 2)?)?),
+        )
+    };
+    let mut sections = ElfSections {
+        object_type,
+        machine,
+        has_symtab: false,
+        has_debug: false,
+    };
+    if shoff == 0 || shnum == 0 {
+        return Ok(Some(sections));
+    }
+    if shstrndx >= shnum {
+        return Err("ELF section name table index is out of range".into());
+    }
+    let header = |index: u64| section_header(bytes, layout, shoff, shentsize, index);
+    let names_header = header(shstrndx)?;
+    let names = slice(bytes, names_header.offset, names_header.size)?;
+    for index in 0..shnum {
+        let name = string_at(names, u64::from(header(index)?.name))?;
+        if name == b".symtab" {
+            sections.has_symtab = true;
+        } else if (name.starts_with(b".debug_") && name != b".debug_gdb_scripts")
+            || name.starts_with(b".zdebug_")
+        {
+            // `.debug_gdb_scripts` is a GDB auto-load hook that the strip
+            // tools leave in place; it is not debug information.
+            sections.has_debug = true;
+        }
+    }
+    Ok(Some(sections))
+}
+
+/// The fields of one section header that the section scan reads.
+struct SectionHeader {
+    name: u32,
+    offset: u64,
+    size: u64,
+}
+
+fn section_header(
+    bytes: &[u8],
+    layout: Layout,
+    shoff: u64,
+    shentsize: u64,
+    index: u64,
+) -> Result<SectionHeader, String> {
+    let start = index
+        .checked_mul(shentsize)
+        .and_then(|relative| shoff.checked_add(relative))
+        .ok_or_else(|| "ELF section header offset out of range".to_string())?;
+    let entry = slice(bytes, start, shentsize)?;
+    let name = layout.word32(slice(entry, 0, 4)?)?;
+    let (offset, size) = if layout.is_64bit {
+        (
+            layout.word(slice(entry, 0x18, 8)?)?,
+            layout.word(slice(entry, 0x20, 8)?)?,
+        )
+    } else {
+        (
+            layout.word(slice(entry, 0x10, 4)?)?,
+            layout.word(slice(entry, 0x14, 4)?)?,
+        )
+    };
+    Ok(SectionHeader { name, offset, size })
+}
+
 #[cfg(any(test, feature = "test-fixtures"))]
 #[path = "elf_tests.rs"]
 pub(crate) mod tests;

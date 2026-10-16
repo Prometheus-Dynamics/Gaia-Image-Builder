@@ -56,10 +56,12 @@ fn modules_assembly(
     ImageAssemblySpec {
         work_dir: Some(root.join("build/assembly").display().to_string().into()),
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "initramfs".into(),
             path: "$assembly.work/initramfs".into(),
         }],
         kernel_modules: vec![AssemblyKernelModulesSpec {
+            metadata: None,
             tree: "initramfs".into(),
             from: "$provider.images/modules".into(),
             kernel_version: kernel_version.map(str::to_string),
@@ -204,6 +206,72 @@ fn kernel_modules_refuse_a_depmod_that_does_not_exist() {
     assert!(error.message.contains("depmod"), "{}", error.message);
     assert!(
         error.message.contains("does not exist"),
+        "{}",
+        error.message
+    );
+}
+
+/// The module spec with a `metadata` list.
+fn metadata_assembly(root: &Path, metadata: &[&str]) -> ImageAssemblySpec {
+    let mut assembly = modules_assembly(root, None, &["usb-f-mass-storage"], None);
+    assembly.kernel_modules[0].metadata =
+        Some(metadata.iter().map(|name| name.to_string()).collect());
+    assembly
+}
+
+#[test]
+fn a_metadata_list_installs_only_the_listed_modules_files() {
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-assembly-kernel-metadata");
+    fs::create_dir_all(&root).expect("test root");
+    fake_kernel_modules(&root, "6.12.0");
+    let kernel = root.join("out/images/modules/6.12.0");
+    fs::write(
+        kernel.join("modules.alias"),
+        "alias usb:* usb_f_mass_storage\n",
+    )
+    .expect("alias");
+    let mut spec = test_spec(&root);
+    spec.image.assembly = Some(metadata_assembly(&root, &["modules.dep", "modules.alias"]));
+
+    run_modules(&spec).expect("kernel modules with a metadata list");
+
+    let target = root.join("build/assembly/initramfs/lib/modules/6.12.0");
+    assert!(target.join("modules.dep").is_file());
+    assert!(target.join("modules.alias").is_file());
+    let mut names: Vec<String> = fs::read_dir(&target)
+        .expect("target")
+        .map(|entry| {
+            entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .filter(|name| name.starts_with("modules."))
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        vec!["modules.alias", "modules.dep"],
+        "only the listed files"
+    );
+    assert!(target.join("kernel/usb/usb_f_mass_storage.ko").is_file());
+}
+
+#[test]
+fn a_listed_metadata_file_the_module_set_lacks_is_an_error() {
+    let scratch = TempDir::new("gaia-exec-test");
+    let root = scratch.join("gaia-assembly-kernel-metadata-missing");
+    fs::create_dir_all(&root).expect("test root");
+    fake_kernel_modules(&root, "6.12.0");
+    let mut spec = test_spec(&root);
+    spec.image.assembly = Some(metadata_assembly(&root, &["modules.symbols"]));
+
+    let error = run_modules(&spec).expect_err("missing listed metadata");
+
+    assert!(
+        error.message.contains("'modules.symbols'"),
         "{}",
         error.message
     );

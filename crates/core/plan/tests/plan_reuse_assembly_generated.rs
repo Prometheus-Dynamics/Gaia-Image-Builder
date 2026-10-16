@@ -28,11 +28,14 @@ fn spec_with_generated(scratch: &TempDir, name: &str) -> (ResolvedBuildSpec, Pat
     let assembly = ImageAssemblySpec {
         work_dir: Some("$assembly.work".into()),
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "boot".into(),
             path: "$assembly.work/boot".into(),
         }],
         files: vec![
             AssemblyFileSpec {
+                include: Vec::new(),
+                strip: false,
                 exclude: Vec::new(),
                 tree: "boot".into(),
                 src: None,
@@ -46,6 +49,8 @@ fn spec_with_generated(scratch: &TempDir, name: &str) -> (ResolvedBuildSpec, Pat
                 allow_missing_libs: false,
             },
             AssemblyFileSpec {
+                include: Vec::new(),
+                strip: false,
                 exclude: Vec::new(),
                 tree: "boot".into(),
                 src: None,
@@ -63,6 +68,7 @@ fn spec_with_generated(scratch: &TempDir, name: &str) -> (ResolvedBuildSpec, Pat
             },
         ],
         binaries: vec![AssemblyBinarySpec {
+            strip: false,
             tree: "boot".into(),
             src: "$assembly.out/tool".into(),
             dest: "usr/bin/tool".into(),

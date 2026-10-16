@@ -18,6 +18,10 @@ pub struct RawImageAssemblyConfig {
     pub busybox_initramfs: Vec<RawAssemblyBusyboxInitramfsConfig>,
     pub binaries: Vec<RawAssemblyBinaryConfig>,
     pub kernel_modules: Vec<RawAssemblyKernelModulesConfig>,
+    /// The `strip` program for `strip = true` entries: a program name
+    /// (looked up like other assembly tools) or a path. Unset searches the
+    /// provider's tools, then the host.
+    pub strip_tool: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -25,6 +29,9 @@ pub struct RawImageAssemblyConfig {
 pub struct RawAssemblyTreeConfig {
     pub id: String,
     pub path: String,
+    /// Strips every ELF file in the tree right before a filesystem or
+    /// archive packs it.
+    pub strip: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -51,6 +58,12 @@ pub struct RawAssemblyFileConfig {
     pub src_glob: Option<String>,
     /// `src_glob` only: file names (simple `*` globs allowed) left out of the match set.
     pub exclude: Vec<String>,
+    /// `src_glob` only: when set, only the matches whose file name one of
+    /// these names (simple `*` globs allowed) matches are copied. An entry
+    /// that matches nothing is an error unless `optional` is set.
+    pub include: Vec<String>,
+    /// Strips each copied ELF file (`src`, or each `src_glob` match).
+    pub strip: bool,
     /// Text written to `dest` instead of copying a source.
     pub content: Option<String>,
     /// A JSON document written to `dest` instead of copying a source.
@@ -71,7 +84,7 @@ pub struct RawAssemblyTransformConfig {
     pub src: Option<String>,
     pub dest: String,
     pub deterministic: Option<bool>,
-    /// Compression level: `zstd` 1-19, `xz` 0-9.
+    /// Compression level: `gzip` 1-9, `zstd` 1-19, `xz` 0-9.
     pub level: Option<u32>,
     /// `verity` only: the hash tree's own file; unset appends it to `dest`.
     pub hash_dest: Option<String>,
@@ -122,7 +135,8 @@ pub struct RawAssemblyFilesystemConfig {
     pub output: String,
     pub size: Option<String>,
     pub deterministic: Option<bool>,
-    /// zstd level for `cpio-zstd`; defaults to 19.
+    /// zstd level for `cpio-zstd` (defaults to 19), or xz level for `cpio-xz`
+    /// (0-9, defaults to xz's own).
     pub compression_level: Option<u32>,
     /// Copy the image to the image output dir under its file name.
     pub publish: bool,
@@ -163,6 +177,7 @@ pub enum RawAssemblyFilesystemKind {
     Cpio,
     CpioGzip,
     CpioZstd,
+    CpioXz,
     Ext4,
 }
 
@@ -352,6 +367,9 @@ pub struct RawAssemblyBinaryConfig {
     pub sysroot: Option<String>,
     /// Octal file mode; `0755` when unset.
     pub mode: Option<String>,
+    /// Strips the copied program and every copied runtime library (the
+    /// copies in the tree only).
+    pub strip: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -362,6 +380,10 @@ pub struct RawAssemblyKernelModulesConfig {
     pub kernel_version: Option<String>,
     pub modules: Vec<String>,
     pub depmod: Option<String>,
+    /// The `modules.*` metadata files to install (`modules.dep`,
+    /// `modules.alias`, ...). Unset keeps the default set; set, only these
+    /// are installed, and the other `modules.*` files depmod wrote are left out.
+    pub metadata: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

@@ -251,3 +251,27 @@ fn rejects_non_elf_and_truncated_input() {
         );
     }
 }
+
+#[test]
+fn elf_sections_reads_type_and_machine_and_skips_non_elf() {
+    let bytes = build_elf(&ElfFixture::dynamic(EM_AARCH64, &["libc.so.6"]));
+    let sections = elf_sections(&bytes)
+        .expect("readable")
+        .expect("an ELF file");
+    assert_eq!(sections.object_type, 3, "ET_DYN");
+    assert_eq!(sections.machine, EM_AARCH64);
+    // The fixture has no section headers, so neither section is present.
+    assert!(!sections.has_symtab && !sections.has_debug);
+    assert_eq!(elf_sections(b"#!/bin/sh\n").expect("not an error"), None);
+}
+
+#[test]
+fn elf_sections_rejects_a_truncated_section_table() {
+    let mut bytes = build_elf(&ElfFixture::dynamic(EM_X86_64, &[]));
+    // e_shoff points past the end of the file, with one section header.
+    let past_end = bytes.len() as u64 + 64;
+    bytes[0x28..0x30].copy_from_slice(&past_end.to_le_bytes());
+    bytes[0x3c..0x3e].copy_from_slice(&1u16.to_le_bytes());
+    bytes[0x3e..0x40].copy_from_slice(&0u16.to_le_bytes());
+    assert!(elf_sections(&bytes).is_err());
+}

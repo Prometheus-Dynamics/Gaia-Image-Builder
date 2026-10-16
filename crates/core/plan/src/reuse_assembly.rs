@@ -223,6 +223,12 @@ pub(crate) fn assembly_input_entries(spec: &ResolvedBuildSpec) -> Vec<(String, S
                 command_signature("zstd", ["--version"]),
             ));
         }
+        if filesystem.kind == gaia_spec::AssemblyFilesystemKindSpec::CpioXz {
+            parts.push((
+                format!("tool xz (cpio-xz {})", filesystem.id),
+                command_signature("xz", ["--version"]),
+            ));
+        }
         if filesystem.kind == gaia_spec::AssemblyFilesystemKindSpec::Ext4 {
             parts.push((
                 format!("tool mkfs.ext4 (ext4 {})", filesystem.id),
@@ -417,10 +423,12 @@ mod tests {
         spec.image.output.collect_dir = Some(root.join("images").display().to_string());
         spec.image.assembly = Some(ImageAssemblySpec {
             trees: vec![AssemblyTreeSpec {
+                strip: false,
                 id: "initramfs".into(),
                 path: "$assembly.work/initramfs".into(),
             }],
             kernel_modules: vec![AssemblyKernelModulesSpec {
+                metadata: None,
                 tree: "initramfs".into(),
                 from: "$provider.images/modules".into(),
                 kernel_version: Some("6.12.0".into()),

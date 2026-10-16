@@ -370,10 +370,13 @@ fn image_assembly_fingerprint_tracks_staged_file_inputs() {
     rebase_workspace_root(&mut spec, &root_dir);
     spec.image.assembly = Some(ImageAssemblySpec {
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "boot".into(),
             path: "$assembly.work/boot".into(),
         }],
         files: vec![AssemblyFileSpec {
+            include: Vec::new(),
+            strip: false,
             exclude: Vec::new(),
             tree: "boot".into(),
             src: Some(source_path.display().to_string().into()),
@@ -418,10 +421,13 @@ fn image_assembly_fingerprint_tracks_glob_expansion() {
     rebase_workspace_root(&mut spec, &root_dir);
     spec.image.assembly = Some(ImageAssemblySpec {
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "boot".into(),
             path: "$assembly.work/boot".into(),
         }],
         files: vec![AssemblyFileSpec {
+            include: Vec::new(),
+            strip: false,
             exclude: Vec::new(),
             tree: "boot".into(),
             src: None,
@@ -640,6 +646,7 @@ fn image_assembly_fingerprint_does_not_hash_generated_filesystem_partition_outpu
     fs::write(&generated_output, "stale-one").expect("stale generated output");
     spec.image.assembly = Some(ImageAssemblySpec {
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "rootfs".into(),
             path: "$assembly.work/rootfs".into(),
         }],

@@ -5,6 +5,7 @@ mod assembly_json;
 mod assembly_order;
 mod assembly_output_spec;
 mod assembly_spec;
+mod assembly_spec_debug;
 mod byte_size;
 mod checkpoints;
 mod clean;

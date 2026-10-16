@@ -12,10 +12,40 @@ pub(super) fn assembly_file_sources(
     let Some(src_glob) = &file.src_glob else {
         return Ok(Vec::new());
     };
-    Ok(gaia_spec::exclude_names(
+    let matches = gaia_spec::exclude_names(
         gaia_spec::expand_simple_glob(spec, roots, src_glob)?,
         &file.exclude,
-    ))
+    );
+    if file.include.is_empty() {
+        return Ok(matches);
+    }
+    // Every include entry names at least one match, unless it is optional.
+    let name_of = |path: &PathBuf| {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string)
+    };
+    for entry in &file.include {
+        let found = matches
+            .iter()
+            .filter_map(name_of)
+            .any(|name| gaia_spec::wildcard_match(entry, &name));
+        if !found && !file.optional {
+            return Err(format!(
+                "assembly file include entry '{entry}' matches no file of '{src_glob}'"
+            ));
+        }
+    }
+    Ok(matches
+        .into_iter()
+        .filter(|path| {
+            name_of(path).is_some_and(|name| {
+                file.include
+                    .iter()
+                    .any(|entry| gaia_spec::wildcard_match(entry, &name))
+            })
+        })
+        .collect())
 }
 
 /// Whether a file entry's `dest` names a directory the sources are copied

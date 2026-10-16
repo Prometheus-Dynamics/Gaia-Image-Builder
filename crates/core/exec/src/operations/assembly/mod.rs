@@ -27,6 +27,8 @@ mod placement;
 mod runtime_closure;
 mod state;
 mod steps;
+mod steps_strip;
+mod strip;
 mod tar;
 mod transforms;
 mod verity;
@@ -43,6 +45,7 @@ use filesystems::*;
 use kernel_modules::*;
 use mbr::*;
 use placement::*;
+use strip::*;
 
 use state::AssemblyExecutionContext;
 pub(crate) use state::{assembly_state_path, image_assembly_cleanup_paths};

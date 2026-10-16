@@ -24,6 +24,8 @@ fn placement_gib() -> u64 {
 /// dir moves or keeps.
 fn ram_test_assembly(work_dir: &str) -> ImageAssemblySpec {
     let file = |src: &str, dest: &str| AssemblyFileSpec {
+        include: Vec::new(),
+        strip: false,
         exclude: Vec::new(),
         tree: "boot".into(),
         src: Some(src.into()),
@@ -51,6 +53,7 @@ fn ram_test_assembly(work_dir: &str) -> ImageAssemblySpec {
     ImageAssemblySpec {
         work_dir: Some(work_dir.into()),
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "boot".into(),
             path: "$assembly.work/boot".into(),
         }],

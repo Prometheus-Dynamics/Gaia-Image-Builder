@@ -64,6 +64,7 @@ fn image_assembly_output_cleanup_paths(
                 filesystem.kind,
                 gaia_spec::AssemblyFilesystemKindSpec::CpioGzip
                     | gaia_spec::AssemblyFilesystemKindSpec::CpioZstd
+                    | gaia_spec::AssemblyFilesystemKindSpec::CpioXz
             ) {
                 paths.push(temp.with_extension("cpio.tmp"));
             }

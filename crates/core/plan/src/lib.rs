@@ -15,6 +15,7 @@ mod runtime_libs;
 mod targets;
 mod tree_digest;
 
+pub use elf::{ElfSections, elf_sections};
 pub use estimate::{PlanEstimate, estimate_plan, format_duration_short};
 pub use graph::{ExecutionPlan, PlanDiagnostic, ReuseState};
 pub use operations::{

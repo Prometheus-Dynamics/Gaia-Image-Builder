@@ -30,7 +30,7 @@ pub(super) fn archive_log_messages(
 }
 
 /// `1.4 GiB`, `142 MiB`, `812 B`.
-fn format_bytes(bytes: u64) -> String {
+pub(super) fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
     let mut unit = 0;

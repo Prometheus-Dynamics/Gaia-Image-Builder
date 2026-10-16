@@ -341,10 +341,13 @@ fn plan_rebuilds_assembly_when_runtime_state_is_missing_even_if_outputs_exist() 
     fs::write(tree_dir.join("config.txt"), "stale").expect("stale assembly output");
     spec.image.assembly = Some(ImageAssemblySpec {
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "boot".into(),
             path: tree_dir.display().to_string().into(),
         }],
         files: vec![AssemblyFileSpec {
+            include: Vec::new(),
+            strip: false,
             exclude: Vec::new(),
             tree: "boot".into(),
             src: Some(source_dir.join("config.txt").display().to_string().into()),

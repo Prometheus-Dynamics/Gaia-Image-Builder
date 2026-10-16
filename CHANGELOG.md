@@ -6,6 +6,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Assembly: lean trees (strip, include lists, module metadata, cpio-xz)
+
+- `strip = true` on `[[image.assembly.binaries]]` (the program and every library of its closure), on `[[image.assembly.files]]` (each copied ELF) and on a tree (every ELF in it, just before a filesystem or archive packs it). Only the copies in the tree are stripped. Executables and shared libraries get `--strip-unneeded`; kernel modules and relocatable objects get `--strip-debug`; non-ELF files, symlinks and already-stripped files are left alone; hard links stay linked. The tool is `[image.assembly] strip_tool`, else the provider's `<triplet>-strip`, else `llvm-strip`, else `strip` for host-machine ELFs; if none is found the build fails, naming the file. The bytes saved are recorded per tree.
+- `include = [...]` on a `src_glob` files entry copies only the matches named there (file names, simple `*` globs). A name that matches nothing is an error unless `optional = true`.
+- `metadata = ["modules.dep", ...]` on a kernel-modules entry installs only the listed `modules.*` files and removes the other indexes depmod writes. Unset keeps today's behaviour.
+- A new filesystem kind `cpio-xz`: xz with `--check=crc32` (the only check the kernel decoder takes besides none), deterministic, with an optional `compression_level` 0-9.
+- The `gzip` transform takes `level` 1-9 and writes no name or mtime (`gzip -n`), so its output is byte-identical across runs.
+- None of the new options changes the fingerprint of a config that does not set it.
+
 ### Assembly: copied dynamic files warn about missing libraries
 
 - A `[[image.assembly.files]]` entry that copies a dynamically linked file (one that names a program interpreter or `DT_NEEDED` libraries) is checked once its tree is complete, before a filesystem or archive packs it. Each interpreter and library the file needs must be in the tree, as `[[image.assembly.binaries]]` would bring them. A missing one is a warning in the run output and the summary, naming the file, the tree and the libraries. It is not an error, since a tree may overlay a full rootfs.

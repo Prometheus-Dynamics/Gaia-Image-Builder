@@ -13,6 +13,7 @@ fn roots_for(root: &Path) -> (ResolvedBuildSpec, AssemblyRoots) {
     spec.image.assembly = Some(ImageAssemblySpec {
         work_dir: Some("ram".into()),
         trees: vec![gaia_spec::AssemblyTreeSpec {
+            strip: false,
             id: "boot".into(),
             path: "$assembly.work/boot".into(),
         }],

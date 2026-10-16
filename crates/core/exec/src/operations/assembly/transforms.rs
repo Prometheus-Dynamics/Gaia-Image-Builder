@@ -63,7 +63,12 @@ pub(super) fn execute_assembly_transform(
             })
         }
         gaia_spec::AssemblyTransformKindSpec::Gzip => {
-            compress_to_dest(spec, roots, "gzip", &["-n", "-c"], src, dest, cancel_check)
+            // `-n` leaves the name and the modification time out of the
+            // header, so the same input and level give the same bytes.
+            let level = transform.level.map(|level| format!("-{level}"));
+            let mut args = vec!["-n", "-c"];
+            args.extend(level.as_deref());
+            compress_to_dest(spec, roots, "gzip", &args, src, dest, cancel_check)
         }
         gaia_spec::AssemblyTransformKindSpec::Zstd => {
             let level = transform.level.map(|level| format!("-{level}"));

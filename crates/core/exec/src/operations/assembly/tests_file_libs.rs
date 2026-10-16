@@ -14,6 +14,8 @@ use std::path::Path;
 
 fn file_entry(src: &Path, dest: &str) -> AssemblyFileSpec {
     AssemblyFileSpec {
+        include: Vec::new(),
+        strip: false,
         tree: "rootfs".into(),
         src: Some(src.display().to_string().into()),
         src_glob: None,
@@ -32,6 +34,7 @@ fn files_assembly(tree: &Path, files: Vec<AssemblyFileSpec>) -> ImageAssemblySpe
     ImageAssemblySpec {
         work_dir: Some("$assembly.work".into()),
         trees: vec![AssemblyTreeSpec {
+            strip: false,
             id: "rootfs".into(),
             path: tree.display().to_string().into(),
         }],

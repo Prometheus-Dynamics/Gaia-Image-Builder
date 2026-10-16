@@ -23,36 +23,12 @@ pub struct ImageAssemblySpec {
     pub busybox_initramfs: Vec<AssemblyBusyboxInitramfsSpec>,
     pub binaries: Vec<AssemblyBinarySpec>,
     pub kernel_modules: Vec<AssemblyKernelModulesSpec>,
+    /// The `strip` program for `strip = true` entries; `None` searches the
+    /// provider's tools, then the host.
+    pub strip_tool: Option<AssemblyPathTemplate>,
     /// Declared sources a `${source.<id>...}` token in this assembly names
     /// (sorted, without duplicates). The assembly depends on each of them.
     pub assembly_sources: Vec<SourceId>,
-}
-
-// Operation fingerprints hash the Debug output of the assembly. This prints
-// the same text as the derived impl did, plus `assembly_sources` only when
-// set, so assemblies without source tokens keep their fingerprints.
-impl std::fmt::Debug for ImageAssemblySpec {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut debug = formatter.debug_struct("ImageAssemblySpec");
-        debug
-            .field("work_dir", &self.work_dir)
-            .field("out_dir", &self.out_dir)
-            .field("trees", &self.trees)
-            .field("dirs", &self.dirs)
-            .field("symlinks", &self.symlinks)
-            .field("files", &self.files)
-            .field("transforms", &self.transforms)
-            .field("filesystems", &self.filesystems)
-            .field("disks", &self.disks)
-            .field("archives", &self.archives)
-            .field("busybox_initramfs", &self.busybox_initramfs)
-            .field("binaries", &self.binaries)
-            .field("kernel_modules", &self.kernel_modules);
-        if !self.assembly_sources.is_empty() {
-            debug.field("assembly_sources", &self.assembly_sources);
-        }
-        debug.finish()
-    }
 }
 
 impl ImageAssemblySpec {
@@ -73,10 +49,13 @@ impl ImageAssemblySpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct AssemblyTreeSpec {
     pub id: AssemblyTreeId,
     pub path: AssemblyPathTemplate,
+    /// Strips every ELF file in the tree right before a filesystem or
+    /// archive packs it.
+    pub strip: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,6 +85,11 @@ pub struct AssemblyFileSpec {
     pub src_glob: Option<AssemblyPathTemplate>,
     /// `src_glob` only: file names (simple `*` globs allowed) left out of the match set.
     pub exclude: Vec<String>,
+    /// `src_glob` only: when non-empty, only the matches whose file name one
+    /// of these names (simple `*` globs allowed) matches are copied.
+    pub include: Vec<String>,
+    /// Strips each copied ELF file; other copied files are left alone.
+    pub strip: bool,
     /// Text written to `dest`, with `${assembly...}` tokens rendered.
     pub content: Option<String>,
     /// A JSON document written to `dest`, with `${assembly...}` tokens rendered.
@@ -119,30 +103,6 @@ pub struct AssemblyFileSpec {
     pub allow_missing_libs: bool,
 }
 
-// Operation fingerprints hash the Debug output of the assembly. This prints
-// the same text as the derived impl did, plus `allow_missing_libs` only when
-// set, so entries that do not set it keep their fingerprints.
-impl std::fmt::Debug for AssemblyFileSpec {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut debug = formatter.debug_struct("AssemblyFileSpec");
-        debug
-            .field("tree", &self.tree)
-            .field("src", &self.src)
-            .field("src_glob", &self.src_glob)
-            .field("exclude", &self.exclude)
-            .field("content", &self.content)
-            .field("json", &self.json)
-            .field("dest", &self.dest)
-            .field("mode", &self.mode)
-            .field("optional", &self.optional)
-            .field("preserve_symlink", &self.preserve_symlink);
-        if self.allow_missing_libs {
-            debug.field("allow_missing_libs", &self.allow_missing_libs);
-        }
-        debug.finish()
-    }
-}
-
 impl AssemblyFileSpec {
     pub fn parsed_mode(&self) -> Result<Option<FileMode>, FileModeParseError> {
         self.mode.as_deref().map(FileMode::from_str).transpose()
@@ -151,7 +111,7 @@ impl AssemblyFileSpec {
 
 /// Modules copied from a kernel's module tree into a tree, with their
 /// dependency closure, and `depmod` run over the result.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct AssemblyKernelModulesSpec {
     pub tree: AssemblyTreeId,
     /// The directory holding the `<kernel version>` directories.
@@ -162,6 +122,8 @@ pub struct AssemblyKernelModulesSpec {
     pub modules: Vec<String>,
     /// The `depmod` to run; `None` takes the provider's, then the host's.
     pub depmod: Option<AssemblyPathTemplate>,
+    /// The `modules.*` files to install; `None` keeps the default set.
+    pub metadata: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -319,7 +281,7 @@ impl std::fmt::Display for MbrPartitionTypeParseError {
 
 /// A binary copied into a tree with its runtime closure: the interpreter and
 /// the libraries it needs, found under `sysroot`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct AssemblyBinarySpec {
     pub tree: AssemblyTreeId,
     /// The binary in the target tree it was built for.
@@ -329,6 +291,8 @@ pub struct AssemblyBinarySpec {
     /// Target root for the runtime libraries; `None` derives it from `src`.
     pub sysroot: Option<AssemblyPathTemplate>,
     pub mode: Option<String>,
+    /// Strips the copied program and every copied runtime library.
+    pub strip: bool,
 }
 
 impl AssemblyBinarySpec {
@@ -737,27 +701,6 @@ mod tests {
             )
             .referenced_tree_ids(),
             vec!["boot", "rootfs"]
-        );
-    }
-}
-
-#[cfg(test)]
-mod debug_tests {
-    use super::*;
-    use crate::SourceId;
-
-    /// Fingerprints hash this text: sources appear only when named.
-    #[test]
-    fn assembly_sources_print_only_when_set() {
-        let mut spec = ImageAssemblySpec::default();
-        let plain = format!("{spec:?}");
-        assert!(!plain.contains("assembly_sources"), "{plain}");
-        assert!(plain.starts_with("ImageAssemblySpec { work_dir: None, out_dir: None, trees: []"));
-        spec.assembly_sources = vec![SourceId::new("app")];
-        let named = format!("{spec:?}");
-        assert!(
-            named.ends_with("assembly_sources: [SourceId(\"app\")] }"),
-            "{named}"
         );
     }
 }

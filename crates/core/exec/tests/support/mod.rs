@@ -291,6 +291,7 @@ pub fn reuse_state_for_ids(
 
 pub fn assembly_tree(id: &str, path: impl ToString) -> gaia_spec::AssemblyTreeSpec {
     gaia_spec::AssemblyTreeSpec {
+        strip: false,
         id: id.into(),
         path: path.to_string().into(),
     }
@@ -298,6 +299,8 @@ pub fn assembly_tree(id: &str, path: impl ToString) -> gaia_spec::AssemblyTreeSp
 
 pub fn assembly_file(tree: &str, src: impl ToString, dest: &str) -> gaia_spec::AssemblyFileSpec {
     gaia_spec::AssemblyFileSpec {
+        include: Vec::new(),
+        strip: false,
         exclude: Vec::new(),
         tree: tree.into(),
         src: Some(src.to_string().into()),

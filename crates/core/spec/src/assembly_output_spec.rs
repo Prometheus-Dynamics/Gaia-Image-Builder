@@ -80,7 +80,8 @@ pub struct AssemblyFilesystemSpec {
     /// Byte size, or `"auto"` for vfat and ext4 (sized from the tree).
     pub size: Option<String>,
     pub deterministic: bool,
-    /// zstd level for `cpio-zstd` (1-19); `None` uses the default.
+    /// zstd level for `cpio-zstd` (1-19) or xz level for `cpio-xz` (0-9);
+    /// `None` uses the default.
     pub compression_level: Option<u32>,
     /// Also copy the image to `$assembly.out/<file name of output>`, the
     /// image output dir, where it is published as an image of the run.
@@ -130,6 +131,9 @@ pub enum AssemblyFilesystemKindSpec {
     Cpio,
     CpioGzip,
     CpioZstd,
+    /// A newc cpio archive compressed with xz and a CRC32 check (the kernel's
+    /// XZ decoder reads that check).
+    CpioXz,
     /// An ext4 image of the tree, built with `mkfs.ext4 -d`.
     Ext4,
 }
@@ -141,6 +145,7 @@ impl AssemblyFilesystemKindSpec {
             Self::Cpio => "cpio",
             Self::CpioGzip => "cpio-gzip",
             Self::CpioZstd => "cpio-zstd",
+            Self::CpioXz => "cpio-xz",
             Self::Ext4 => "ext4",
         }
     }
