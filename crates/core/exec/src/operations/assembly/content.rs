@@ -136,6 +136,16 @@ pub(super) fn write_generated_file(
             ));
         }
     };
+    // Text written to a .json file must be JSON: a TOML literal string
+    // ('...\n') keeps a backslash-n and once shipped an invalid state.json.
+    if file.content.is_some() && file.dest.to_ascii_lowercase().ends_with(".json") {
+        serde_json::from_str::<serde_json::Value>(&text).map_err(|error| {
+            format!(
+                "assembly file for tree '{}' writes '{}', which is not valid JSON after its tokens are filled in ({error}); in TOML a '...' literal string keeps a backslash-n as two characters: use a \"...\" string, a ''' multi-line string, or `json = {{ ... }}`",
+                file.tree, file.dest
+            )
+        })?;
+    }
     let dest = assembly_tree_dest(tree_path, &file.dest)?;
     if let Some(parent) = dest.parent() {
         std_fs::create_dir_all(parent).map_err(|error| {

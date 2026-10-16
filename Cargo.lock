@@ -584,6 +584,7 @@ dependencies = [
  "gaia-source-providers",
  "gaia-spec",
  "gaia-testkit",
+ "serde_json",
  "sha2 0.11.0",
  "tracing",
 ]

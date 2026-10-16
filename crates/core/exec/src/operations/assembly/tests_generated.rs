@@ -422,3 +422,51 @@ fn an_empty_tree_digest_renders_an_empty_object_and_text_cannot_use_one() {
         error.message
     );
 }
+
+/// Text written to a .json file must parse once its tokens are filled in:
+/// a TOML '...' literal string keeps a backslash-n, which once shipped an
+/// invalid state.json. Valid JSON text with tokens is written as is.
+#[test]
+fn text_content_for_a_json_file_must_be_json() {
+    let scratch = TempDir::new("gaia-exec-generated-json-text");
+    let root = scratch.join("gaia-generated-json-text");
+    write_assets(&root);
+    let mut spec = test_spec(&root);
+    let broken = generated_file(
+        "state.json",
+        Some("{\"schema\":1,\"previous\":null}\\n"),
+        None,
+    );
+    spec.image.assembly = Some(generated_assembly(
+        "$assembly.work",
+        vec![broken],
+        Vec::new(),
+    ));
+    let error =
+        stage_image_assembly_with(&spec, &OperationId::image_assembly(), None, disk_env_panic)
+            .expect_err("a literal backslash-n is not JSON");
+    let message = format!("{error:?}");
+    assert!(
+        message.contains("state.json") && message.contains("not valid JSON"),
+        "{message}"
+    );
+
+    let valid = generated_file(
+        "state.json",
+        Some("{\"size\":${assembly.size:$assembly.work/part.bin},\"previous\":null}\n"),
+        None,
+    );
+    spec.image.assembly = Some(generated_assembly(
+        "$assembly.work",
+        vec![valid],
+        Vec::new(),
+    ));
+    let summary =
+        stage_image_assembly_with(&spec, &OperationId::image_assembly(), None, disk_env_panic)
+            .expect("valid JSON text");
+    let dest = PathBuf::from(state_value(&summary, "file.1.dest"));
+    assert_eq!(
+        fs::read_to_string(dest).expect("state.json"),
+        "{\"size\":1000,\"previous\":null}\n"
+    );
+}

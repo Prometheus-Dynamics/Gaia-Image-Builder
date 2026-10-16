@@ -117,6 +117,14 @@ newest release, and updates the Rust docker images to 1.99.0.
   passed to docker. A stale directory holding files another user owns is
   moved into `.gaia-trash` instead of failing the build.
 
+### Generated JSON text is checked
+
+- Generated `content` written to a `.json` destination must parse as JSON
+  once its tokens are filled in. A TOML `'...'` literal string keeps a
+  backslash-n as two characters and once shipped an invalid slot
+  `state.json`; the error now says so and suggests `"..."`, `'''` or
+  `json = { ... }`.
+
 ### Assembly tools from the provider's host/sbin
 
 - Assembly tools are looked up in the provider's host `bin`, `sbin`,
