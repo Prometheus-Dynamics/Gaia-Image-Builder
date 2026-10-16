@@ -6,6 +6,11 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Buildroot compiler cache: default size from free space
+
+- When `[providers.buildroot.ccache] max_size` is unset, the size is computed at run start as `clamp(free / 2 + current size, 2 GiB, 40 GiB)`, the same rule as the package cache, with `free` the free space on the cache directory's filesystem (a missing directory holds nothing yet) and `current size` what it already holds. It was a fixed `50G`. The size is written to the cache's `ccache.conf` at run time and logged; it is not in `.config` or the config fingerprint, so a change in free space rebuilds nothing.
+- The "may grow to ... but its filesystem has ... free" warning fires only for an explicit `max_size` larger than the free space; the default never warns.
+
 ### Buildroot package cache: default size from free space
 
 - When `[providers.buildroot.package_cache] max_size` is unset, each level's budget is computed at run start as `clamp(free / 2 + current size, 2 GiB, 40 GiB)`, with `free` the free space on the level's filesystem and `current size` what the level already holds. It was a fixed `100G`, which warned on a disk with less than that free. Without a free-space reading the budget is 40 GiB. Cache keys are unchanged.

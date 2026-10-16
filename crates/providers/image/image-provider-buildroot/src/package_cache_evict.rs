@@ -80,7 +80,7 @@ const DEFAULT_MAX_SIZE_FLOOR: u64 = 2 * GIB;
 /// cache is not over budget merely for being there), capped at
 /// [`DEFAULT_MAX_SIZE_CAP`] and never below [`DEFAULT_MAX_SIZE_FLOOR`].
 /// Without a free-space reading (`None`) it is the cap.
-pub(super) fn default_max_size(free: Option<u64>, current: u64) -> u64 {
+pub(crate) fn default_max_size(free: Option<u64>, current: u64) -> u64 {
     let Some(free) = free else {
         return DEFAULT_MAX_SIZE_CAP;
     };

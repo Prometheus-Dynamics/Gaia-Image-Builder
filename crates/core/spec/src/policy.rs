@@ -480,7 +480,7 @@ pub struct BuildrootCcachePolicySpec {
     /// Defaults to a cache shared by every workspace of the user.
     pub dir: Option<String>,
     /// ccache `max_size` (for example `50G`), written to the cache's
-    /// `ccache.conf`.
+    /// `ccache.conf`. Unset: computed from the free space at run start.
     pub max_size: Option<String>,
 }
 

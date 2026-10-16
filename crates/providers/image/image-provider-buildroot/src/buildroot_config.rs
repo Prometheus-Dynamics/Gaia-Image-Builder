@@ -360,17 +360,31 @@ pub(crate) fn buildroot_cache_overrides(
     }
     if policy.ccache_enabled {
         let ccache_dir = buildroot_ccache_dir(spec, policy)?;
+        // Run time only: ccache.conf is read by ccache, never by Buildroot's
+        // .config or the config fingerprint, so a size that follows the free
+        // space does not rebuild anything.
+        let max_size = ccache_max_size_for_run(&ccache_dir, policy.ccache_max_size.as_deref());
         if !dry_run {
-            ensure_ccache_max_size(&ccache_dir, policy.ccache_max_size.as_deref())?;
+            ensure_ccache_max_size(&ccache_dir, &max_size)?;
+            tracing::info!(
+                provider_domain = "image.buildroot",
+                "buildroot ccache: max_size {max_size} ({}) for '{}'",
+                if policy.ccache_max_size.is_some() {
+                    "set"
+                } else {
+                    "from free space"
+                },
+                ccache_dir.display()
+            );
         }
-        let max_size = policy
-            .ccache_max_size
-            .as_deref()
-            .unwrap_or(DEFAULT_CCACHE_MAX_SIZE)
-            .trim_end_matches('i')
-            .parse::<gaia_spec::ByteSize>()
-            .map(gaia_spec::ByteSize::bytes);
-        if let Ok(max_size) = max_size {
+        // Only an explicit size can exceed the free space the user meant to
+        // leave; the default is computed from it and never warns.
+        if let Some(explicit) = policy.ccache_max_size.as_deref()
+            && let Ok(max_size) = explicit
+                .trim_end_matches('i')
+                .parse::<gaia_spec::ByteSize>()
+                .map(gaia_spec::ByteSize::bytes)
+        {
             warnings.extend(cache_space_warning("ccache", &ccache_dir, max_size));
         }
         overrides.push(("BR2_CCACHE".to_string(), "y".to_string()));
@@ -391,7 +405,7 @@ pub(crate) fn buildroot_cache_overrides(
 /// Under the user cache root, or the workspace when that is unavailable.
 const DEFAULT_BUILDROOT_DOWNLOAD_DIR: &str = "buildroot/dl";
 const DEFAULT_BUILDROOT_CCACHE_DIR: &str = gaia_spec::USER_BUILDROOT_CCACHE_DIR;
-const DEFAULT_CCACHE_MAX_SIZE: &str = "50G";
+const MIB: u64 = 1024 * 1024;
 
 /// Caches shared by every workspace of the user, so builds of different
 /// projects reuse each other's downloads and compiler cache:
@@ -460,13 +474,36 @@ pub(crate) fn filesystem_available_bytes(dir: &Path) -> Option<u64> {
     Some(available_kib * 1024)
 }
 
+/// ccache's `max_size` for a run, as `ccache.conf` spells it: the explicit
+/// `max_size` as given, else the default for the free space on the cache's
+/// filesystem (see [`ccache_default_max_size`]). An unset cache directory
+/// that does not exist yet has no size of its own, and `buildroot_ccache_dir`
+/// creates it before this is asked.
+pub(crate) fn ccache_max_size_for_run(ccache_dir: &Path, explicit: Option<&str>) -> String {
+    match explicit {
+        Some(max_size) => max_size.trim().to_string(),
+        None => ccache_default_max_size(
+            filesystem_available_bytes(ccache_dir),
+            tree_size(ccache_dir),
+        ),
+    }
+}
+
+/// The default ccache `max_size` for a cache holding `current` bytes on a
+/// filesystem with `free` bytes free: `clamp(free / 2 + current, 2 GiB,
+/// 40 GiB)`, in whole MiB.
+pub(crate) fn ccache_default_max_size(free: Option<u64>, current: u64) -> String {
+    format!("{}M", evict::default_max_size(free, current) / MIB)
+}
+
 /// Sets ccache's `max_size` in the cache's own `ccache.conf`, which every
-/// ccache using the directory reads.
+/// ccache using the directory reads. Replaces a `max_size` line already there,
+/// so a lowered or removed setting takes effect on the next ccache run.
 pub(crate) fn ensure_ccache_max_size(
     ccache_dir: &Path,
-    max_size: Option<&str>,
+    max_size: &str,
 ) -> Result<(), ImageProviderError> {
-    let max_size = max_size.unwrap_or(DEFAULT_CCACHE_MAX_SIZE).trim();
+    let max_size = max_size.trim();
     let digits = max_size.trim_end_matches(|c: char| c.is_ascii_alphabetic());
     let unit = &max_size[digits.len()..];
     if digits.parse::<f64>().is_err()

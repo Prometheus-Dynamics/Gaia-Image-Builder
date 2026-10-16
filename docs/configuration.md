@@ -684,7 +684,7 @@ parallel_packages = true
 [providers.buildroot.ccache]
 enabled = true
 # dir = "/srv/buildroot-ccache"          # default: the user cache below
-max_size = "50G"                         # default 50G
+# max_size = "50G"                       # default: from free space, see below
 ```
 
 Downloads and the compiler cache are shared by every build of every project
@@ -704,6 +704,16 @@ when that cannot be created.
   same toolchain share them. The run summary reports how many of the run's
   compilations came from the cache:
   `buildroot ccache: 8123/9410 compilations from cache (86.3%)`.
+- The compiler cache's `max_size`, unset, is computed when a run starts, from
+  the free space `F` on the cache directory's filesystem and the bytes `C`
+  the cache already holds: `clamp(F / 2 + C, 2 GiB, 40 GiB)`, written to
+  `ccache.conf` in whole MiB and logged. A cache directory that does not exist
+  yet holds nothing. When the free space cannot be read the size is 40 GiB.
+  Only an explicit `max_size` larger than the free space warns; the default
+  never does. The size is written to `ccache.conf` at run time only: it is not
+  in `.config`, so a change in free space rebuilds nothing. ccache reads the
+  limit on each run and trims the cache to it when it cleans up, so a lowered
+  `max_size` takes effect at that cleanup.
 - `parallel_packages = true` builds independent packages concurrently: it
   sets `BR2_PER_PACKAGE_DIRECTORIES=y` and runs the top-level `make` with
   `-j<local_jobs>` and a load limit of the same value (inherited by each

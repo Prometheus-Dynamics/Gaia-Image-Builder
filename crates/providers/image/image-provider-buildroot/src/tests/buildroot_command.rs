@@ -172,19 +172,88 @@ fn ccache_max_size_is_written_to_the_cache_config() {
         "max_size = 5G\nsloppiness = time_macros\n",
     )
     .expect("conf");
-    ensure_ccache_max_size(&dir, None).expect("default size");
+    ensure_ccache_max_size(&dir, "51200M").expect("default size");
     assert_eq!(
         fs::read_to_string(dir.join("ccache.conf")).expect("conf"),
-        "sloppiness = time_macros\nmax_size = 50G\n"
+        "sloppiness = time_macros\nmax_size = 51200M\n"
     );
-    ensure_ccache_max_size(&dir, Some("120G")).expect("size");
+    ensure_ccache_max_size(&dir, "120G").expect("size");
     assert!(
         fs::read_to_string(dir.join("ccache.conf"))
             .expect("conf")
             .ends_with("\nmax_size = 120G\n")
     );
-    assert!(ensure_ccache_max_size(&dir, Some("lots")).is_err());
-    assert!(ensure_ccache_max_size(&dir, Some("50X")).is_err());
+    assert!(ensure_ccache_max_size(&dir, "lots").is_err());
+    assert!(ensure_ccache_max_size(&dir, "50X").is_err());
+}
+
+const GIB: u64 = 1024 * 1024 * 1024;
+
+#[test]
+fn the_default_ccache_size_follows_the_free_space() {
+    // clamp(free / 2 + current, 2 GiB, 40 GiB), in MiB.
+    assert_eq!(ccache_default_max_size(Some(20 * GIB), 4 * GIB), "14336M");
+    assert_eq!(ccache_default_max_size(Some(100 * GIB), 10 * GIB), "40960M");
+    assert_eq!(ccache_default_max_size(Some(100 * GIB), 0), "40960M");
+    assert_eq!(ccache_default_max_size(Some(200 * GIB), 60 * GIB), "40960M");
+    assert_eq!(ccache_default_max_size(Some(0), 0), "2048M");
+    assert_eq!(ccache_default_max_size(None, 0), "40960M");
+    // An explicit size is used as given, whatever the free space.
+    let scratch = TempDir::new("gaia-ccache-explicit");
+    assert_eq!(
+        ccache_max_size_for_run(&scratch.join("ccache"), Some(" 50G ")),
+        "50G"
+    );
+}
+
+#[test]
+fn the_ccache_size_is_run_time_only_and_not_in_the_config() {
+    let spec = ResolvedBuildSpec::new("buildroot-ccache-size");
+    let scratch = TempDir::new("gaia-ccache-config");
+    let overrides = |max_size: Option<&str>| {
+        let policy = ImageExecutionPolicy {
+            ccache_enabled: true,
+            ccache_dir: Some(scratch.join("ccache").display().to_string()),
+            ccache_max_size: max_size.map(str::to_string),
+            ..ImageExecutionPolicy::default()
+        };
+        buildroot_cache_overrides(&spec, &policy, true)
+            .expect("overrides")
+            .0
+    };
+    let default = overrides(None);
+    let explicit = overrides(Some("3G"));
+    // The size is in ccache.conf only: the .config overrides, which the
+    // config digest and the fingerprint are built from, are the same for the
+    // default and for any explicit size.
+    assert_eq!(default, explicit);
+    assert!(
+        default.iter().all(|(key, _)| !key.contains("MAX_SIZE")),
+        "{default:?}"
+    );
+}
+
+#[test]
+fn an_explicit_ccache_size_warns_only_when_it_exceeds_the_free_space() {
+    let spec = ResolvedBuildSpec::new("buildroot-ccache-warn");
+    let scratch = TempDir::new("gaia-ccache-warn");
+    let warn = |max_size: Option<&str>| {
+        let policy = ImageExecutionPolicy {
+            ccache_enabled: true,
+            ccache_dir: Some(scratch.join("ccache").display().to_string()),
+            ccache_max_size: max_size.map(str::to_string),
+            ..ImageExecutionPolicy::default()
+        };
+        buildroot_cache_overrides(&spec, &policy, true)
+            .expect("overrides")
+            .1
+    };
+    assert!(warn(None).is_empty(), "the default never warns");
+    assert!(warn(Some("1K")).is_empty());
+    assert!(
+        !warn(Some("1000000000G")).is_empty(),
+        "an explicit size far beyond the free space warns"
+    );
 }
 
 #[test]
@@ -272,10 +341,15 @@ fn buildroot_parallel_packages_and_ccache_configure_and_report() {
         "BR2_CCACHE_DIR=\"{}\"",
         fs::canonicalize(&ccache_dir).expect("ccache dir").display()
     )));
-    assert_eq!(
-        fs::read_to_string(ccache_dir.join("ccache.conf")).expect("ccache conf"),
-        "max_size = 50G\n"
-    );
+    // The default is computed from the free space at run start, so only its
+    // shape is fixed here: whole MiB within the default's clamp.
+    let conf = fs::read_to_string(ccache_dir.join("ccache.conf")).expect("ccache conf");
+    let size = conf
+        .strip_prefix("max_size = ")
+        .and_then(|rest| rest.strip_suffix("M\n"))
+        .and_then(|mib| mib.parse::<u64>().ok())
+        .unwrap_or_else(|| panic!("unexpected ccache.conf: {conf:?}"));
+    assert!((2048..=40960).contains(&size), "{conf:?}");
     let makeflags = fs::read_to_string(output_dir.join("makeflags")).expect("makeflags");
     assert!(!makeflags.contains("-l"), "{makeflags}");
     assert!(

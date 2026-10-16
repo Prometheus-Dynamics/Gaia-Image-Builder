@@ -749,7 +749,7 @@ pub(crate) fn stamp_built(output_dir: &Path, graph: &PackageGraph, name: &str) -
 }
 
 #[path = "package_cache_evict.rs"]
-mod evict;
+pub(crate) mod evict;
 
 #[cfg(test)]
 #[path = "package_cache_tests.rs"]
