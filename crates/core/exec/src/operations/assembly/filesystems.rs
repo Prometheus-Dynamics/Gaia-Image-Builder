@@ -100,16 +100,20 @@ pub(super) fn execute_assembly_filesystem(
             let temp = temporary_assembly_output_path(&output);
             let temp_cpio = temp.with_extension("cpio.tmp");
             write_newc_archive(source_tree, &temp_cpio)?;
-            // The kernel's XZ decoder reads CRC32 (or no) checks only. The
-            // flags are the xz transform's: a fixed block size keeps the
-            // output the same for any thread count.
-            let level = filesystem
-                .compression_level
-                .map(|level| format!("-{level}"));
-            let mut args = vec!["-T0", "--block-size=24MiB", "--check=crc32", "-c"];
-            args.extend(level.as_deref());
+            // The kernel's XZ decoder reads CRC32 (or no) checks only, and it
+            // allocates the whole dictionary up front: an initramfs with the
+            // 64 MiB dictionary of `-9` fails to unpack before /init runs.
+            // One thread writes one block, so the output is deterministic.
+            let filter = cpio_xz_filter(
+                filesystem.compression_level,
+                file_len(&temp_cpio).inspect_err(|_| {
+                    let _ = std_fs::remove_file(&temp_cpio);
+                })?,
+            );
             let mut command = Command::new(&tool.program);
-            command.args(&args).arg(&temp_cpio);
+            command
+                .args(["-T1", "--check=crc32", filter.as_str(), "-c"])
+                .arg(&temp_cpio);
             let xz_output = run_command_stdout_to_file(
                 spec,
                 &mut command,
@@ -597,4 +601,19 @@ fn pad_newc(file: &mut std_fs::File, written: usize) -> Result<(), String> {
             .map_err(|error| format!("failed to write cpio padding: {error}"))?;
     }
     Ok(())
+}
+
+/// The largest LZMA2 dictionary a `cpio-xz` initramfs gets: the kernel's
+/// decoder allocates the whole dictionary (Documentation/staging/xz.rst).
+pub(super) const CPIO_XZ_MAX_DICT: u64 = 1024 * 1024;
+
+/// The `--lzma2` filter of a `cpio-xz` image: the level's preset (6 when
+/// unset) with its dictionary capped at 1 MiB, or the input size rounded up
+/// to 4 KiB (xz's smallest dictionary) when that is smaller.
+pub(super) fn cpio_xz_filter(level: Option<u32>, input_bytes: u64) -> String {
+    let dict = input_bytes
+        .div_ceil(4096)
+        .saturating_mul(4096)
+        .clamp(4096, CPIO_XZ_MAX_DICT);
+    format!("--lzma2=preset={},dict={dict}", level.unwrap_or(6))
 }
