@@ -29,7 +29,10 @@ pub use reuse::{
 };
 pub use reuse_details::{fingerprint_change_detail, operation_components, recorded_fingerprint};
 pub use reuse_explain::{InvalidationSummary, invalidation_summary};
-pub use runtime_libs::{RuntimeClosure, RuntimeEntry, derive_sysroot, resolve_runtime_closure};
+pub use runtime_libs::{
+    RuntimeClosure, RuntimeEntry, derive_sysroot, is_dynamic_elf, missing_runtime_libraries,
+    resolve_runtime_closure,
+};
 pub use targets::{PlanDomain, PlanTarget};
 pub use tree_digest::{tree_digest_members, tree_digest_signature};
 

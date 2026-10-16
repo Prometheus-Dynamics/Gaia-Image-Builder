@@ -178,6 +178,7 @@ pub(crate) fn compile_image_assembly(
                 mode: file.mode,
                 optional: file.optional,
                 preserve_symlink: file.preserve_symlink,
+                allow_missing_libs: file.allow_missing_libs,
                 content: file.content,
                 json: file.json.map(compile_assembly_json),
             })

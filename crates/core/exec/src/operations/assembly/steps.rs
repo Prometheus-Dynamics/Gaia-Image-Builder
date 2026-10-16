@@ -41,6 +41,19 @@ pub(super) struct StepRun<'a> {
     /// The transform, verity and archive outputs written under the image
     /// output dir (`$assembly.out`): final outputs of the run.
     pub(super) published_outputs: Vec<PathBuf>,
+    /// Copied dynamically linked files whose runtime libraries are checked
+    /// once their tree is complete, before a filesystem or archive packs it.
+    pending_lib_checks: Vec<PendingLibCheck>,
+    /// The runtime-library warnings this run raised, for the run summary.
+    pub(super) warnings: Vec<String>,
+}
+
+/// A copied dynamically linked file, checked against its tree's libraries.
+struct PendingLibCheck {
+    tree: String,
+    tree_path: PathBuf,
+    /// The copied file, under `tree_path`.
+    file: PathBuf,
 }
 
 /// The steps in the order they must run, with every step's resolved paths.
@@ -119,6 +132,8 @@ impl<'a> StepRun<'a> {
             disk_ids: Vec::new(),
             disk_publish: Vec::new(),
             published_outputs: Vec::new(),
+            pending_lib_checks: Vec::new(),
+            warnings: Vec::new(),
         }
     }
 
@@ -153,14 +168,71 @@ impl<'a> StepRun<'a> {
             AssemblyStep::Binary(index) => self.binary(index),
             AssemblyStep::KernelModules(index) => self.kernel_modules(index),
             AssemblyStep::Transform(index) => self.transform(index),
-            AssemblyStep::Filesystem(index) => self.filesystem(index),
+            AssemblyStep::Filesystem(index) => {
+                let tree = self.assembly.filesystems[index].source_tree.to_string();
+                self.check_runtime_libs_of(&[tree.as_str()]);
+                self.filesystem(index)
+            }
             AssemblyStep::Disk(index) => self.disk(index),
-            AssemblyStep::Archive(index) => self.archive(index),
+            AssemblyStep::Archive(index) => {
+                // Each tree member's tree is complete: every step that fills
+                // it ran before this one (the order reads its root).
+                let trees = self.assembly.archives[index]
+                    .members
+                    .iter()
+                    .filter_map(|member| member.tree.as_ref().map(ToString::to_string))
+                    .collect::<Vec<_>>();
+                let trees = trees.iter().map(String::as_str).collect::<Vec<_>>();
+                self.check_runtime_libs_of(&trees);
+                self.archive(index)
+            }
         }
+    }
+
+    /// Checks the copied dynamic files of `trees`, now that the steps that
+    /// fill them have run. Files of other trees wait for their own check.
+    fn check_runtime_libs_of(&mut self, trees: &[&str]) {
+        let (ready, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.pending_lib_checks)
+            .into_iter()
+            .partition(|check| trees.contains(&check.tree.as_str()));
+        self.pending_lib_checks = waiting;
+        for check in ready {
+            self.check_runtime_libs(&check);
+        }
+    }
+
+    /// Warns when a copied dynamic file's libraries are not in its tree. A
+    /// tree may overlay a full rootfs, so this is a warning, not an error.
+    fn check_runtime_libs(&mut self, check: &PendingLibCheck) {
+        let guest = match check.file.strip_prefix(&check.tree_path) {
+            Ok(relative) => format!("/{}", relative.display()),
+            Err(_) => check.file.display().to_string(),
+        };
+        let message = match gaia_plan::missing_runtime_libraries(&check.file, &check.tree_path) {
+            Ok(missing) if missing.is_empty() => return,
+            Ok(missing) => format!(
+                "assembly file '{guest}' in tree '{}' is dynamically linked, but the tree lacks {}: copy it with [[image.assembly.binaries]] to bring its libraries",
+                check.tree,
+                missing.join(", ")
+            ),
+            Err(error) => format!(
+                "could not check the runtime libraries of assembly file '{guest}' in tree '{}': {error}",
+                check.tree
+            ),
+        };
+        let key = self.warnings.len() + 1;
+        self.state
+            .insert(format!("runtime_lib_warning.{key}"), &message);
+        self.messages.push(format!("warning: {message}"));
+        self.warnings.push(message);
     }
 
     /// Records the totals once every step ran.
     pub(super) fn finish(&mut self) {
+        // Trees no filesystem or archive packed are complete now.
+        for check in std::mem::take(&mut self.pending_lib_checks) {
+            self.check_runtime_libs(&check);
+        }
         let state = &mut self.state;
         state.insert("created_dir_count", self.dir_count);
         if self.dir_count > 0 {
@@ -294,6 +366,14 @@ impl<'a> StepRun<'a> {
             let dest = assembly_file_dest(tree_path, &source, &file.dest)?;
             tracing::Span::current().record("output_path", dest.display().to_string());
             copy_assembly_file(&source, &dest, file)?;
+            let regular = std_fs::symlink_metadata(&dest).is_ok_and(|metadata| metadata.is_file());
+            if regular && !file.allow_missing_libs && gaia_plan::is_dynamic_elf(&dest) {
+                self.pending_lib_checks.push(PendingLibCheck {
+                    tree: file.tree.as_str().to_string(),
+                    tree_path: tree_path.to_path_buf(),
+                    file: dest.clone(),
+                });
+            }
             self.staged_count += 1;
             let count = self.staged_count;
             self.state

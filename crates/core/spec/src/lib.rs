@@ -9,6 +9,7 @@ mod byte_size;
 mod checkpoints;
 mod clean;
 mod export;
+mod file_mode;
 mod ids;
 mod image;
 mod inputs;
@@ -60,7 +61,7 @@ pub use assembly_spec::{
     AssemblyDiskSpec, AssemblyDiskTruncateSpec, AssemblyEbrPlacementSpec, AssemblyFileSpec,
     AssemblyKernelModulesSpec, AssemblyPartitionTableSpec, AssemblyPathTemplate,
     AssemblyPathTemplateContext, AssemblyPathTemplateError, AssemblySymlinkSpec, AssemblyTreeSpec,
-    FileMode, FileModeParseError, ImageAssemblySpec, MbrPartitionType, MbrPartitionTypeParseError,
+    ImageAssemblySpec, MbrPartitionType, MbrPartitionTypeParseError,
 };
 pub use byte_size::{ByteSize, ByteSizeParseError};
 pub use checkpoints::{
@@ -69,6 +70,7 @@ pub use checkpoints::{
 };
 pub use clean::{CleanProfileSpec, CleanSpec};
 pub use export::ExportSpec;
+pub use file_mode::{FileMode, FileModeParseError};
 pub use ids::{
     ArtifactId, AssemblyFilesystemId, AssemblyTreeId, BuildId, IdError, InstallId, SourceId,
     StageItemId,

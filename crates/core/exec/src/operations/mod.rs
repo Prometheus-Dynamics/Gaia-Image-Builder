@@ -501,7 +501,7 @@ pub(crate) fn dispatch_operation(
                             reused: false,
                             reuse_details: Vec::new(),
                             messages: Vec::new(),
-                            warnings: Vec::new(),
+                            warnings: summary.warnings,
                             disk_images: summary.disk_images,
                             notes: Vec::new(),
                             state_details: Vec::new(),

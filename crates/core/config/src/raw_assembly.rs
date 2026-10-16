@@ -59,6 +59,9 @@ pub struct RawAssemblyFileConfig {
     pub mode: Option<String>,
     pub optional: bool,
     pub preserve_symlink: bool,
+    /// A copied dynamically linked file whose libraries the tree lacks is
+    /// accepted without the warning (for a tree that overlays a full rootfs).
+    pub allow_missing_libs: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]

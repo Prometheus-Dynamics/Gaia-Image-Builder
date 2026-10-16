@@ -296,3 +296,104 @@ fn library_directory_links_of_the_sysroot_are_kept() {
         ]
     );
 }
+
+#[test]
+fn missing_runtime_libraries_names_the_interpreter_and_each_missing_soname() {
+    let scratch = TempDir::new("gaia-plan");
+    let root = temp_root(&scratch, "missing-gaps");
+    let tree = root.join("tree");
+    let tool = tree.join("usr/sbin/tool");
+    write_file(
+        &tool,
+        &build_elf(&ElfFixture {
+            interpreter: Some("/lib/ld-test.so.1"),
+            ..ElfFixture::dynamic(EM_X86_64, &["libc.so.6", "libgone.so.1"])
+        }),
+    );
+
+    let missing = missing_runtime_libraries(&tool, &tree).expect("lookup");
+
+    assert_eq!(
+        missing,
+        vec![
+            "/lib/ld-test.so.1 (program interpreter)".to_string(),
+            "libc.so.6 (needed by /usr/sbin/tool)".to_string(),
+            "libgone.so.1 (needed by /usr/sbin/tool)".to_string(),
+        ]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn missing_runtime_libraries_is_empty_once_the_tree_holds_the_closure() {
+    let scratch = TempDir::new("gaia-plan");
+    let root = temp_root(&scratch, "present-gaps");
+    let tree = root.join("tree");
+    let tool = tree.join("usr/sbin/tool");
+    write_file(
+        &tool,
+        &build_elf(&ElfFixture {
+            interpreter: Some("/lib/ld-test.so.1"),
+            ..ElfFixture::dynamic(EM_X86_64, &["libc.so.6"])
+        }),
+    );
+    write_file(
+        &tree.join("lib/ld-test-real.so"),
+        &build_elf(&ElfFixture::dynamic(EM_X86_64, &[])),
+    );
+    symlink("ld-test-real.so", &tree.join("lib/ld-test.so.1"));
+    write_file(
+        &tree.join("usr/lib/libc.so.6"),
+        &build_elf(&ElfFixture::dynamic(EM_X86_64, &[])),
+    );
+
+    assert_eq!(
+        missing_runtime_libraries(&tool, &tree).expect("lookup"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn missing_runtime_libraries_of_a_static_file_is_empty() {
+    let scratch = TempDir::new("gaia-plan");
+    let root = temp_root(&scratch, "static-gaps");
+    let file = root.join("static-tool");
+    write_file(&file, &build_elf(&ElfFixture::dynamic(EM_X86_64, &[])));
+
+    assert_eq!(
+        missing_runtime_libraries(&file, &root).expect("lookup"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn is_dynamic_elf_is_true_only_for_a_file_that_needs_a_runtime() {
+    let scratch = TempDir::new("gaia-plan");
+    let root = temp_root(&scratch, "is-dynamic");
+    let dynamic = root.join("dynamic");
+    write_file(
+        &dynamic,
+        &build_elf(&ElfFixture::dynamic(EM_X86_64, &["libc.so.6"])),
+    );
+    let interpreted = root.join("interpreted");
+    write_file(
+        &interpreted,
+        &build_elf(&ElfFixture {
+            interpreter: Some("/lib/ld-test.so.1"),
+            ..ElfFixture::dynamic(EM_X86_64, &[])
+        }),
+    );
+    let fixed = root.join("static");
+    write_file(&fixed, &build_elf(&ElfFixture::dynamic(EM_X86_64, &[])));
+    let text = root.join("notes.txt");
+    write_file(&text, b"not an ELF file\n");
+    let truncated = root.join("truncated");
+    write_file(&truncated, b"\x7fELF\x02\x01");
+
+    assert!(is_dynamic_elf(&dynamic));
+    assert!(is_dynamic_elf(&interpreted));
+    assert!(!is_dynamic_elf(&fixed));
+    assert!(!is_dynamic_elf(&text));
+    assert!(!is_dynamic_elf(&truncated));
+    assert!(!is_dynamic_elf(&root.join("absent")));
+}

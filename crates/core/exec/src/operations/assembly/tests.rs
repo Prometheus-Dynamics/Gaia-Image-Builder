@@ -220,6 +220,7 @@ fn stage_image_assembly_cleans_tree_and_skips_optional_missing_sources() {
                 mode: None,
                 optional: false,
                 preserve_symlink: false,
+                allow_missing_libs: false,
                 content: None,
                 json: None,
             },
@@ -232,6 +233,7 @@ fn stage_image_assembly_cleans_tree_and_skips_optional_missing_sources() {
                 mode: None,
                 optional: true,
                 preserve_symlink: false,
+                allow_missing_libs: false,
                 content: None,
                 json: None,
             },
@@ -270,6 +272,7 @@ fn copy_assembly_file_copies_regular_files_and_applies_mode() {
         mode: Some("0755".into()),
         optional: false,
         preserve_symlink: false,
+        allow_missing_libs: false,
         content: None,
         json: None,
     };
@@ -306,6 +309,7 @@ fn copy_assembly_file_preserves_symlinks_when_requested() {
         mode: None,
         optional: false,
         preserve_symlink: true,
+        allow_missing_libs: false,
         content: None,
         json: None,
     };
@@ -458,6 +462,7 @@ fn boot_assembly(
             mode: None,
             optional: false,
             preserve_symlink: false,
+            allow_missing_libs: false,
             content: None,
             json: None,
         }],
@@ -609,6 +614,8 @@ mod tests_binaries;
 mod tests_busybox;
 #[path = "tests_ext4.rs"]
 mod tests_ext4;
+#[path = "tests_file_libs.rs"]
+mod tests_file_libs;
 #[path = "tests_filesystem.rs"]
 mod tests_filesystem;
 #[path = "tests_generated.rs"]

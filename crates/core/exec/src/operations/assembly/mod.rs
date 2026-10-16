@@ -62,6 +62,9 @@ pub(crate) struct AssemblyStagingSummary {
     /// image output dir, published filesystem images, and the transform,
     /// verity and archive outputs written there.
     pub disk_images: Vec<PathBuf>,
+    /// Problems the run found that do not fail it, such as a copied
+    /// dynamically linked file whose libraries its tree lacks.
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,6 +145,7 @@ pub(crate) fn stage_image_assembly_with(
             cleanup_paths: Vec::new(),
             archive_path: None,
             disk_images: Vec::new(),
+            warnings: Vec::new(),
         });
     };
     let disk_roots = AssemblyRoots::new(spec, assembly)?;
@@ -302,6 +306,7 @@ fn stage_steps(
         disk_ids,
         filesystem_published,
         published_outputs,
+        warnings,
         ..
     } = run;
 
@@ -352,6 +357,7 @@ fn stage_steps(
         cleanup_paths,
         archive_path,
         disk_images,
+        warnings,
     })
 }
 

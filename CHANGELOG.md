@@ -6,6 +6,12 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Assembly: copied dynamic files warn about missing libraries
+
+- A `[[image.assembly.files]]` entry that copies a dynamically linked file (one that names a program interpreter or `DT_NEEDED` libraries) is checked once its tree is complete, before a filesystem or archive packs it. Each interpreter and library the file needs must be in the tree, as `[[image.assembly.binaries]]` would bring them. A missing one is a warning in the run output and the summary, naming the file, the tree and the libraries. It is not an error, since a tree may overlay a full rootfs.
+- `allow_missing_libs = true` on a file entry accepts it without the warning. It is refused on generated `content` and `json` entries. Static and non-ELF files are never checked.
+- A missing program interpreter is reported with the other missing libraries instead of failing the lookup first.
+
 ### Image outputs: the disk of a raw archive, xz transforms, published outputs
 
 - `[image.output] disk = "<id>"` picks the assembly disk a raw disk archive (`archive_name` as `.img`/`.raw`, optionally `.xz` or `.zst`) is built from. It is required when the assembly builds several disks; the error names the option and the disks.

@@ -104,6 +104,15 @@ pub(crate) fn validate_image_assembly(
             "image.assembly.files",
             diagnostics,
         );
+        if file.allow_missing_libs && (file.content.is_some() || file.json.is_some()) {
+            diagnostics.push(error(
+                "assembly_allow_missing_libs_not_allowed",
+                format!(
+                    "files[{index}].allow_missing_libs only applies to a copied file (src or src_glob), not generated content"
+                ),
+                Some("image.assembly.files".into()),
+            ));
+        }
         if file.content.is_some() || file.json.is_some() {
             image_assembly_generated::validate_generated_file(spec, &tree_ids, file, diagnostics);
             continue;

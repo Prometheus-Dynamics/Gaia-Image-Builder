@@ -59,6 +59,7 @@ fn generated_file(
         mode: None,
         optional: false,
         preserve_symlink: false,
+        allow_missing_libs: false,
     }
 }
 

@@ -11,6 +11,7 @@
 use crate::elf::{ElfObject, parse_elf};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Links followed while resolving one name, as the Linux loader allows.
@@ -110,19 +111,7 @@ pub fn resolve_runtime_closure(
         ));
     }
 
-    let mut resolver = Resolver::new(&sysroot, object.architecture())?;
-    let mut queue = VecDeque::new();
-    if let Some(interpreter) = &object.interpreter {
-        resolver.add_interpreter(interpreter, &mut queue)?;
-    }
-    let binary_origin = guest_dir_of(binary, &sysroot);
-    queue.push_back(Requester {
-        label: binary.display().to_string(),
-        origin: binary_origin,
-        needed: object.needed.clone(),
-        search_paths: object.search_paths.clone(),
-    });
-    resolver.run(&mut queue)?;
+    let resolver = lookup(binary, &sysroot, &object)?;
     if !resolver.missing.is_empty() {
         return Err(format!(
             "busybox '{}' needs runtime libraries that are not under sysroot '{}': {}",
@@ -160,6 +149,62 @@ pub fn resolve_runtime_closure(
         interpreter: object.interpreter,
         entries: entries.into_values().collect(),
     })
+}
+
+/// The libraries a dynamically linked file needs that `sysroot` does not
+/// hold, each named with what needs it, sorted. Empty for a static file.
+/// Lookup works as for [`resolve_runtime_closure`], with `sysroot` as the
+/// root, so a file placed in a tree is checked against that tree.
+pub fn missing_runtime_libraries(binary: &Path, sysroot: &Path) -> Result<Vec<String>, String> {
+    let bytes = fs::read(binary)
+        .map_err(|error| format!("failed to read '{}': {error}", binary.display()))?;
+    let object = parse_elf(&bytes)
+        .map_err(|error| format!("'{}' is not an ELF file: {error}", binary.display()))?;
+    if !object.is_dynamic() {
+        return Ok(Vec::new());
+    }
+    let resolver = lookup(binary, sysroot, &object)?;
+    Ok(resolver.missing.into_iter().collect())
+}
+
+/// Whether the file at `path` is a dynamically linked ELF file: it names a
+/// program interpreter or a NEEDED library. A file that is not ELF, cannot be
+/// read, or is static is `false`.
+pub fn is_dynamic_elf(path: &Path) -> bool {
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let mut magic = [0u8; 4];
+    if file.read_exact(&mut magic).is_err() || magic != *b"\x7fELF" {
+        return false;
+    }
+    fs::read(path)
+        .ok()
+        .and_then(|bytes| parse_elf(&bytes).ok())
+        .is_some_and(|object| object.is_dynamic())
+}
+
+/// Looks up the interpreter and every NEEDED name of `object` (the file at
+/// `binary`, under `sysroot`), breadth first. Names that are not found are
+/// left in the resolver's `missing` set.
+fn lookup<'a>(
+    binary: &Path,
+    sysroot: &'a Path,
+    object: &ElfObject,
+) -> Result<Resolver<'a>, String> {
+    let mut resolver = Resolver::new(sysroot, object.architecture())?;
+    let mut queue = VecDeque::new();
+    if let Some(interpreter) = &object.interpreter {
+        resolver.add_interpreter(interpreter, &mut queue)?;
+    }
+    queue.push_back(Requester {
+        label: guest_path_of(binary, sysroot),
+        origin: guest_dir_of(binary, sysroot),
+        needed: object.needed.clone(),
+        search_paths: object.search_paths.clone(),
+    });
+    resolver.run(&mut queue)?;
+    Ok(resolver)
 }
 
 /// An object whose own NEEDED names still have to be looked up.
@@ -218,12 +263,11 @@ impl<'a> Resolver<'a> {
                 "program interpreter '{interpreter}' is not an absolute path"
             ));
         }
-        let walked = walk(self.sysroot, interpreter)?.ok_or_else(|| {
-            format!(
-                "program interpreter '{interpreter}' does not exist under sysroot '{}'",
-                self.sysroot.display()
-            )
-        })?;
+        let Some(walked) = walk(self.sysroot, interpreter)? else {
+            self.missing
+                .insert(format!("{interpreter} (program interpreter)"));
+            return Ok(());
+        };
         if !self.matches_architecture(&walked.real)? {
             return Err(format!(
                 "program interpreter '{interpreter}' under sysroot '{}' is not an ELF object for the busybox architecture",
@@ -589,6 +633,15 @@ fn parent_guest(path: &str) -> Option<String> {
         Some(("", _)) => Some("/".to_string()),
         Some((dir, _)) => Some(dir.to_string()),
         None => None,
+    }
+}
+
+/// The binary's guest path when it sits under the sysroot (`/usr/sbin/tool`),
+/// else its host path, as messages name it.
+fn guest_path_of(binary: &Path, sysroot: &Path) -> String {
+    match binary.strip_prefix(sysroot) {
+        Ok(relative) => format!("/{}", relative.display()),
+        Err(_) => binary.display().to_string(),
     }
 }
 

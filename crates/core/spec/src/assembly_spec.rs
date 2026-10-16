@@ -1,4 +1,5 @@
 use crate::assembly_output_spec::{AssemblyFilesystemSpec, AssemblyTransformSpec};
+use crate::file_mode::{FileMode, FileModeParseError};
 use crate::{
     AssemblyArchiveSpec, AssemblyJsonValue, AssemblyTreeId, ByteSize, ByteSizeParseError,
     ImageProviderKind, SourceId,
@@ -98,7 +99,7 @@ pub struct AssemblySymlinkSpec {
     pub target: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct AssemblyFileSpec {
     pub tree: AssemblyTreeId,
     pub src: Option<AssemblyPathTemplate>,
@@ -113,64 +114,38 @@ pub struct AssemblyFileSpec {
     pub mode: Option<String>,
     pub optional: bool,
     pub preserve_symlink: bool,
+    /// Lets a copied dynamically linked file keep a missing runtime library
+    /// without the warning that names it.
+    pub allow_missing_libs: bool,
+}
+
+// Operation fingerprints hash the Debug output of the assembly. This prints
+// the same text as the derived impl did, plus `allow_missing_libs` only when
+// set, so entries that do not set it keep their fingerprints.
+impl std::fmt::Debug for AssemblyFileSpec {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = formatter.debug_struct("AssemblyFileSpec");
+        debug
+            .field("tree", &self.tree)
+            .field("src", &self.src)
+            .field("src_glob", &self.src_glob)
+            .field("exclude", &self.exclude)
+            .field("content", &self.content)
+            .field("json", &self.json)
+            .field("dest", &self.dest)
+            .field("mode", &self.mode)
+            .field("optional", &self.optional)
+            .field("preserve_symlink", &self.preserve_symlink);
+        if self.allow_missing_libs {
+            debug.field("allow_missing_libs", &self.allow_missing_libs);
+        }
+        debug.finish()
+    }
 }
 
 impl AssemblyFileSpec {
     pub fn parsed_mode(&self) -> Result<Option<FileMode>, FileModeParseError> {
         self.mode.as_deref().map(FileMode::from_str).transpose()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FileMode(u32);
-
-impl FileMode {
-    pub fn bits(self) -> u32 {
-        self.0
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FileModeParseError {
-    Empty,
-    InvalidOctal(String),
-    OutOfRange(u32),
-}
-
-impl std::fmt::Display for FileModeParseError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Empty => formatter.write_str("file mode cannot be empty"),
-            Self::InvalidOctal(value) => {
-                write!(formatter, "file mode '{value}' must be an octal value")
-            }
-            Self::OutOfRange(value) => {
-                write!(formatter, "file mode '{value:o}' must not exceed 07777")
-            }
-        }
-    }
-}
-
-impl FromStr for FileMode {
-    type Err = FileModeParseError;
-
-    fn from_str(raw: &str) -> Result<Self, Self::Err> {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            return Err(FileModeParseError::Empty);
-        }
-        if !trimmed
-            .chars()
-            .all(|character| matches!(character, '0'..='7'))
-        {
-            return Err(FileModeParseError::InvalidOctal(raw.into()));
-        }
-        let parsed = u32::from_str_radix(trimmed, 8)
-            .map_err(|_| FileModeParseError::InvalidOctal(raw.into()))?;
-        if parsed > 0o7777 {
-            return Err(FileModeParseError::OutOfRange(parsed));
-        }
-        Ok(Self(parsed))
     }
 }
 
@@ -616,14 +591,6 @@ fn assembly_template_tokens(raw: &str) -> Vec<&str> {
 mod tests {
     use super::*;
     use crate::ImageProviderKind;
-
-    #[test]
-    fn file_mode_parses_octal_modes_including_zero() {
-        assert_eq!("0000".parse::<FileMode>().expect("0000").bits(), 0o0000);
-        assert_eq!("0644".parse::<FileMode>().expect("0644").bits(), 0o0644);
-        assert!("0888".parse::<FileMode>().is_err());
-        assert!("10000".parse::<FileMode>().is_err());
-    }
 
     #[test]
     fn mbr_partition_type_parses_aliases_and_raw_hex() {

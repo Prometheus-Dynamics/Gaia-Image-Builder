@@ -32,6 +32,7 @@ fn ram_test_assembly(work_dir: &str) -> ImageAssemblySpec {
         mode: None,
         optional: false,
         preserve_symlink: false,
+        allow_missing_libs: false,
         content: None,
         json: None,
     };

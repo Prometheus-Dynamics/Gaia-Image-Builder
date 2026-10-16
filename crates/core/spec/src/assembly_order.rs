@@ -524,6 +524,7 @@ mod tests {
                 mode: None,
                 optional: false,
                 preserve_symlink: false,
+                allow_missing_libs: false,
                 content: None,
                 json: None,
             }],
@@ -619,6 +620,7 @@ mod tests {
                     mode: None,
                     optional: false,
                     preserve_symlink: false,
+                    allow_missing_libs: false,
                 }
             };
         let assembly = ImageAssemblySpec {
@@ -689,6 +691,7 @@ mod tests {
                     mode: None,
                     optional: false,
                     preserve_symlink: false,
+                    allow_missing_libs: false,
                 },
                 AssemblyFileSpec {
                     exclude: Vec::new(),
@@ -706,6 +709,7 @@ mod tests {
                     mode: None,
                     optional: false,
                     preserve_symlink: false,
+                    allow_missing_libs: false,
                 },
             ],
             transforms: vec![AssemblyTransformSpec {

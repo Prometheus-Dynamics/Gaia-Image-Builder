@@ -2071,6 +2071,7 @@ Assembly behavior:
 - Glob staging is deterministic and currently supports simple non-recursive `*` filename patterns.
 - A `dest` of `.` or ending in `/` is a directory the sources are copied into; any other `dest` is the file a single source is copied to. A `src_glob` that matches several files needs a directory `dest` (otherwise every match would land on one file) and fails without one.
 - `optional = true` skips missing sources without failing the build and records the skip in runtime state.
+- A copied file that is dynamically linked (it names a program interpreter or `DT_NEEDED` libraries) is checked against its tree. Once the steps that fill the tree have run, before a filesystem or archive packs it, each interpreter and library the file needs must be in the tree, looked up as [listed binaries](#listed-binaries) look them up. A missing one is a warning, not an error: the run output and the summary name the file and the libraries (`copy it with [[image.assembly.binaries]] to bring its libraries`). A tree may be an overlay on a full rootfs, which is why it is not an error. `allow_missing_libs = true` on the entry accepts the file without the warning. The check reads only ELF headers, never the host, and a static or non-ELF file is never checked. `allow_missing_libs` is refused on `content` and `json` entries.
 - `mode = "0755"` applies Unix file modes on Unix hosts.
 - Transform kinds currently implemented are `copy`, `gzip`, `zstd`, `xz`, `compile-dts`, and `verity` (see [dm-verity and ext4](#dm-verity-and-ext4)).
 - `gzip` uses stable name and timestamp behavior for deterministic output.
@@ -2227,6 +2228,8 @@ json = { schema = 1, state = "trial", size = "${assembly.size:$assembly.work/slo
 - `mode` (optional): octal, `0755` unless set.
 
 Several binaries may share libraries: each library is copied once per binary, the later copy replacing the same file. Reuse fingerprints cover the binary and its closure, like BusyBox's.
+
+A `[[image.assembly.files]]` entry that copies a dynamic binary without its libraries gets a warning naming them (see [Image Assembly](#image-assembly)); `binaries` is the entry that brings them. Libraries a `binaries` entry or another file entry brings into the tree count, whatever the entries' order.
 
 #### dm-verity and ext4
 

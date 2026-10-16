@@ -43,6 +43,7 @@ fn spec_with_generated(scratch: &TempDir, name: &str) -> (ResolvedBuildSpec, Pat
                 mode: None,
                 optional: false,
                 preserve_symlink: false,
+                allow_missing_libs: false,
             },
             AssemblyFileSpec {
                 exclude: Vec::new(),
@@ -58,6 +59,7 @@ fn spec_with_generated(scratch: &TempDir, name: &str) -> (ResolvedBuildSpec, Pat
                 mode: None,
                 optional: false,
                 preserve_symlink: false,
+                allow_missing_libs: false,
             },
         ],
         binaries: vec![AssemblyBinarySpec {

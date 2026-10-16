@@ -13,7 +13,7 @@ use std::path::Path;
 const TARGET_E2FSCK: &str =
     "/dev/shm/gaia-sozo/217f87a2dbce/buildroot-output/target/usr/sbin/e2fsck";
 
-fn write(path: &Path, bytes: &[u8]) {
+pub(super) fn write(path: &Path, bytes: &[u8]) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("parent dir");
     }
@@ -21,7 +21,7 @@ fn write(path: &Path, bytes: &[u8]) {
 }
 
 #[cfg(unix)]
-fn symlink(target: &str, path: &Path) {
+pub(super) fn symlink(target: &str, path: &Path) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("parent dir");
     }
@@ -29,7 +29,7 @@ fn symlink(target: &str, path: &Path) {
 }
 
 /// A target root's loader and C library, as the sysroot of the tools below.
-fn write_target_libraries(root: &Path) {
+pub(super) fn write_target_libraries(root: &Path) {
     let sysroot = root.join("target");
     write(
         &sysroot.join("lib/ld-test-real.so"),
@@ -45,7 +45,7 @@ fn write_target_libraries(root: &Path) {
 
 /// A dynamic `usr/sbin/<tool>` in the target root that needs both libraries.
 /// Returns the tool's path.
-fn write_dynamic_tool(root: &Path, tool: &str) -> PathBuf {
+pub(super) fn write_dynamic_tool(root: &Path, tool: &str) -> PathBuf {
     let path = root.join("target/usr/sbin").join(tool);
     write(
         &path,
@@ -57,7 +57,10 @@ fn write_dynamic_tool(root: &Path, tool: &str) -> PathBuf {
     path
 }
 
-fn binaries_assembly(tree: &Path, binaries: Vec<AssemblyBinarySpec>) -> ImageAssemblySpec {
+pub(super) fn binaries_assembly(
+    tree: &Path,
+    binaries: Vec<AssemblyBinarySpec>,
+) -> ImageAssemblySpec {
     ImageAssemblySpec {
         work_dir: Some("$assembly.work".into()),
         trees: vec![AssemblyTreeSpec {
@@ -69,7 +72,7 @@ fn binaries_assembly(tree: &Path, binaries: Vec<AssemblyBinarySpec>) -> ImageAss
     }
 }
 
-fn binary(src: &Path, dest: &str) -> AssemblyBinarySpec {
+pub(super) fn binary(src: &Path, dest: &str) -> AssemblyBinarySpec {
     AssemblyBinarySpec {
         tree: "rootfs".into(),
         src: src.display().to_string().into(),
@@ -79,11 +82,11 @@ fn binary(src: &Path, dest: &str) -> AssemblyBinarySpec {
     }
 }
 
-fn disk_env_panic() -> PlacementEnv {
+pub(super) fn disk_env_panic() -> PlacementEnv {
     panic!("a disk work dir reads no RAM facts")
 }
 
-fn state_value(summary: &AssemblyStagingSummary, key: &str) -> String {
+pub(super) fn state_value(summary: &AssemblyStagingSummary, key: &str) -> String {
     summary
         .state
         .render()

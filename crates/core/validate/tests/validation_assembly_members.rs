@@ -206,3 +206,31 @@ free = "{free}"
         vec!["assembly_filesystem_free_invalid"]
     );
 }
+
+#[test]
+fn allow_missing_libs_only_applies_to_copied_files() {
+    assert_eq!(
+        codes(
+            r#"
+[[image.assembly.files]]
+tree = "boot"
+content = "hello"
+dest = "a.txt"
+allow_missing_libs = true
+"#
+        ),
+        vec!["assembly_allow_missing_libs_not_allowed"]
+    );
+    assert!(
+        codes(
+            r#"
+[[image.assembly.files]]
+tree = "boot"
+src = "@assets/a.txt"
+dest = "a.txt"
+allow_missing_libs = true
+"#
+        )
+        .is_empty()
+    );
+}

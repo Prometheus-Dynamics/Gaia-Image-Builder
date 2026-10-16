@@ -306,6 +306,7 @@ pub fn assembly_file(tree: &str, src: impl ToString, dest: &str) -> gaia_spec::A
         mode: None,
         optional: false,
         preserve_symlink: false,
+        allow_missing_libs: false,
         content: None,
         json: None,
     }

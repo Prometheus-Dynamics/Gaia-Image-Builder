@@ -53,6 +53,7 @@ fn spec_with_tree(scratch: &TempDir, name: &str) -> (ResolvedBuildSpec, PathBuf)
             mode: None,
             optional: false,
             preserve_symlink: false,
+            allow_missing_libs: false,
         }],
         ..ImageAssemblySpec::default()
     };

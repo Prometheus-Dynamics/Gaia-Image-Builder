@@ -303,6 +303,7 @@ fn file_src_glob_exclude_skips_named_matches() {
             mode: None,
             optional: false,
             preserve_symlink: false,
+            allow_missing_libs: false,
         }],
         ..ImageAssemblySpec::default()
     });
