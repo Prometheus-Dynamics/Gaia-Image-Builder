@@ -17,14 +17,38 @@ use std::process::Command;
 const BLOCK: usize = 4096;
 const HASH_BLOCK: usize = 4096;
 
-fn veritysetup_present() -> bool {
-    Command::new("veritysetup")
+/// A real veritysetup for the exec tests: `GAIA_TEST_VERITYSETUP` (a path,
+/// e.g. a Buildroot `host/sbin/veritysetup`), else one on PATH. The tests
+/// skip only when there is none, so argument mistakes are caught wherever a
+/// binary exists.
+fn real_veritysetup() -> Option<std::path::PathBuf> {
+    let candidate = std::env::var_os("GAIA_TEST_VERITYSETUP")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("PATH").and_then(|path| {
+                std::env::split_paths(&path)
+                    .map(|dir| dir.join("veritysetup"))
+                    .find(|candidate| candidate.is_file())
+            })
+        })?;
+    Command::new(&candidate)
         .arg("--version")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
-        .is_ok()
+        .ok()
+        .filter(|status| status.success())
+        .map(|_| candidate)
+}
+
+/// Puts `veritysetup` where the assembly finds a Buildroot provider's host
+/// tools (`<build>/image/buildroot-output/host/sbin`), as a real build does.
+fn provide_veritysetup(root: &Path, binary: &Path) {
+    let sbin = root.join("build/image/buildroot-output/host/sbin");
+    fs::create_dir_all(&sbin).expect("provider host sbin");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(binary, sbin.join("veritysetup")).expect("veritysetup link");
 }
 
 /// The test spec with command timeouts long enough for the e2fsprogs and
@@ -121,13 +145,14 @@ fn state_value(summary: &AssemblyStagingSummary, key: &str) -> String {
 
 #[test]
 fn verity_tree_is_appended_after_the_padded_data_and_matches_the_reference() {
-    if !veritysetup_present() {
-        eprintln!("skipped: veritysetup is not installed");
+    let Some(veritysetup) = real_veritysetup() else {
+        eprintln!("skipped: no veritysetup (set GAIA_TEST_VERITYSETUP)");
         return;
-    }
+    };
     let scratch = TempDir::new("gaia-exec-verity");
     let root = scratch.join("gaia-assembly-verity");
     data_file(&root);
+    provide_veritysetup(&root, &veritysetup);
     let mut spec = roomy_spec(&root);
     spec.image.assembly = Some(verity_assembly("$assembly.work/data.erofs", None));
     let operation = OperationId::image_assembly();
@@ -166,7 +191,7 @@ fn verity_tree_is_appended_after_the_padded_data_and_matches_the_reference() {
     );
     assert!(bytes.len() > padded, "the tree is appended");
 
-    let check = Command::new("veritysetup")
+    let check = Command::new(&veritysetup)
         .arg("verify")
         .arg(&image)
         .arg(&image)
@@ -185,13 +210,14 @@ fn verity_tree_is_appended_after_the_padded_data_and_matches_the_reference() {
 
 #[test]
 fn verity_tree_in_its_own_file_leaves_the_data_padded_and_alone() {
-    if !veritysetup_present() {
-        eprintln!("skipped: veritysetup is not installed");
+    let Some(veritysetup) = real_veritysetup() else {
+        eprintln!("skipped: no veritysetup (set GAIA_TEST_VERITYSETUP)");
         return;
-    }
+    };
     let scratch = TempDir::new("gaia-exec-verity-separate");
     let root = scratch.join("gaia-assembly-verity-separate");
     data_file(&root);
+    provide_veritysetup(&root, &veritysetup);
     let mut spec = roomy_spec(&root);
     spec.image.assembly = Some(verity_assembly(
         "$assembly.work/data.erofs",
@@ -213,7 +239,7 @@ fn verity_tree_in_its_own_file_leaves_the_data_padded_and_alone() {
         state_value(&summary, "verity.1.root_hash"),
         reference_root_hash(&padded_data, &salt)
     );
-    let check = Command::new("veritysetup")
+    let check = Command::new(&veritysetup)
         .arg("verify")
         .arg(root.join("build/assembly/data.erofs"))
         .arg(&hash)
@@ -225,13 +251,14 @@ fn verity_tree_in_its_own_file_leaves_the_data_padded_and_alone() {
 
 #[test]
 fn archive_entries_read_the_verity_fields_they_name() {
-    if !veritysetup_present() {
-        eprintln!("skipped: veritysetup is not installed");
+    let Some(veritysetup) = real_veritysetup() else {
+        eprintln!("skipped: no veritysetup (set GAIA_TEST_VERITYSETUP)");
         return;
-    }
+    };
     let scratch = TempDir::new("gaia-exec-verity-archive");
     let root = scratch.join("gaia-assembly-verity-archive");
     data_file(&root);
+    provide_veritysetup(&root, &veritysetup);
     let mut spec = roomy_spec(&root);
     let mut assembly = verity_assembly("$assembly.work/data.erofs", None);
     assembly.archives = vec![AssemblyArchiveSpec {

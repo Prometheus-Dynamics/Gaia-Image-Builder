@@ -33,3 +33,7 @@ Add Docker, remote-backend, soak, or hardware-specific suites only when they cov
 
 - File-size linting is warning-only, supports `FILE_SIZE_EXCLUDE_DIRS=path1:path2`, and tracks any current exceptions through `testing/ci/file-size-baseline.txt`
 - The existing GitHub Actions remote checkpoint workflow remains the extended surface for networked backend validation
+
+The dm-verity exec tests run a real `veritysetup`: one on PATH, or the
+path in `GAIA_TEST_VERITYSETUP` (for example a Buildroot build's
+`host/sbin/veritysetup`). Without one they are skipped.

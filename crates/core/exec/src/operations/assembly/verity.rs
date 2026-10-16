@@ -156,8 +156,7 @@ pub(super) fn execute_assembly_verity(
             .arg(format!("--hash-block-size={hash_block_size}"))
             .arg(format!("--salt={salt}"))
             .arg(format!("--uuid={uuid}"))
-            .arg(format!("--hash-offset={hash_offset}"))
-            .arg("--batch-mode");
+            .arg(format!("--hash-offset={hash_offset}"));
         let output = run_command_capture_tail(
             spec,
             &mut command,
