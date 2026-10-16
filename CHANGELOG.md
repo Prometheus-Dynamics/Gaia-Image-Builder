@@ -6,6 +6,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Inputs: tokens in input values
+
+- An input's value (its declared `default`, or a `--set input.<name>=` value) is interpolated like the rest of the build, so `default = "${project.commit_short}"` or `"${build.date}"` resolves instead of being reported as `interpolation_unresolved [input.<name>]`. A build file in a linked git worktree gets that worktree's `HEAD` for `${project.commit}`.
+
 ### Buildroot compiler cache: default size from free space
 
 - When `[providers.buildroot.ccache] max_size` is unset, the size is computed at run start as `clamp(free / 2 + current size, 2 GiB, 40 GiB)`, the same rule as the package cache, with `free` the free space on the cache directory's filesystem (a missing directory holds nothing yet) and `current size` what it already holds. It was a fixed `50G`. The size is written to the cache's `ccache.conf` at run time and logged; it is not in `.config` or the config fingerprint, so a change in free space rebuilds nothing.

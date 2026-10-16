@@ -37,6 +37,19 @@ pub fn interpolate_config(raw: RawBuildConfig, env: &ResolvedEnvironment) -> Raw
             )
         })
         .collect();
+    // Input values (a declared default or a `--set input.x=` value) take the
+    // same tokens as the rest of the build, so a default can be
+    // `${project.commit_short}`.
+    interpolated.selected_inputs = snapshot
+        .selected_inputs
+        .iter()
+        .map(|(key, value)| {
+            (
+                key.clone(),
+                resolver::interpolate_string(value.clone(), &snapshot, env),
+            )
+        })
+        .collect();
     interpolated.product.family = snapshot
         .product
         .family

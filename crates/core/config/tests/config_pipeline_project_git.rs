@@ -115,3 +115,77 @@ fn project_tokens_outside_git_stay_unresolved() {
             .any(|unresolved| unresolved.token == "project.commit")
     );
 }
+
+const INPUT_BUILD: &str = r#"
+build_name = "slots"
+
+[inputs.slot_commit]
+kind = "string"
+default = "${project.commit_short}"
+
+[workspace]
+root_dir = "."
+
+[[stage.env_sets]]
+id = "slot"
+name = "slot"
+entries = [["SLOT_ID", "slot-${input.slot_commit}"]]
+
+[image]
+kind = "starting-point"
+rootfs_path = "/tmp/rootfs"
+"#;
+
+fn selected_input<'a>(spec: &'a gaia_spec::ResolvedBuildSpec, name: &str) -> &'a str {
+    spec.inputs
+        .selected
+        .iter()
+        .find(|(key, _)| key == name)
+        .map(|(_, value)| value.as_str())
+        .expect("selected input")
+}
+
+/// An input default takes project tokens too, also when the build file is
+/// in a linked git worktree.
+#[test]
+fn input_defaults_resolve_project_tokens_in_a_repo_and_its_worktree() {
+    let scratch = temp_dir("inputs");
+    let repo = scratch.path().join("repo");
+    fs::create_dir_all(&repo).expect("repo");
+    git(&repo, &["init", "-q", "-b", "main"]);
+    git(&repo, &["config", "user.email", "gaia@example.com"]);
+    git(&repo, &["config", "user.name", "Gaia Test"]);
+    fs::write(repo.join("build.toml"), INPUT_BUILD).expect("build");
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "recipe"]);
+    let head = git(&repo, &["rev-parse", "HEAD"]);
+    let short = &head[..8];
+
+    let worktree = scratch.path().join("worktree");
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+            worktree.to_str().expect("utf-8"),
+        ],
+    );
+
+    for build in [repo.join("build.toml"), worktree.join("build.toml")] {
+        let spec = try_resolve_config(build.to_str().expect("utf-8")).expect("resolve");
+        assert_eq!(
+            selected_input(&spec, "slot_commit"),
+            short,
+            "{}",
+            build.display()
+        );
+        assert_eq!(spec.stage.env_sets[0].entries[0].1, format!("slot-{short}"));
+        assert!(
+            spec.policy.interpolation.unresolved.is_empty(),
+            "{:?}",
+            spec.policy.interpolation.unresolved
+        );
+    }
+}

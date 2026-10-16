@@ -1799,7 +1799,11 @@ git repository holding the build file. `${project.commit}` is the full `HEAD`
 sha, suffixed `-dirty` when tracked files have uncommitted changes, and
 `${project.describe}` is `git describe --tags --always --dirty`. They resolve
 during normal interpolation, so they work anywhere `${build.version}` does,
-including `version`, `archive_name`, env sets and archive manifest entries.
+including `version`, `archive_name`, env sets, archive manifest entries and
+input values (a declared `default`, or a `--set input.<name>=` value), so
+`default = "${project.commit_short}"` gives an input the build file's own
+commit. A build file in a linked git worktree resolves to that worktree's
+`HEAD`.
 `${project.commit_short}` is the first 8 characters of `${project.commit}`,
 with the `-dirty` suffix kept. Use them to make image versions unique per build:
 
