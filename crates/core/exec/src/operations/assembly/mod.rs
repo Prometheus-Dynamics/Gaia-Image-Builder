@@ -24,9 +24,11 @@ mod filesystems;
 mod kernel_modules;
 mod mbr;
 mod placement;
+mod produced;
 mod runtime_closure;
 mod state;
 mod steps;
+mod steps_order;
 mod steps_strip;
 mod strip;
 mod tar;
@@ -47,9 +49,14 @@ use mbr::*;
 use placement::*;
 use strip::*;
 
+use produced::ProducedRecorder;
 use state::AssemblyExecutionContext;
-pub(crate) use state::{assembly_state_path, image_assembly_cleanup_paths};
-use steps::{StepRun, ordered_assembly_steps, remove_stale_step_outputs};
+pub(crate) use state::{
+    assembly_state_path, image_assembly_cleanup_paths, record_produced_outputs,
+    recorded_produced_outputs,
+};
+use steps::StepRun;
+use steps_order::{ordered_assembly_steps, remove_stale_step_outputs};
 use transforms::*;
 use verity::*;
 
@@ -68,6 +75,8 @@ pub(crate) struct AssemblyStagingSummary {
     /// Problems the run found that do not fail it, such as a copied
     /// dynamically linked file whose libraries its tree lacks.
     pub warnings: Vec<String>,
+    /// The outputs this run wrote, each with its size as it was written.
+    pub produced_outputs: Vec<ProducedOutput>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,6 +158,7 @@ pub(crate) fn stage_image_assembly_with(
             archive_path: None,
             disk_images: Vec::new(),
             warnings: Vec::new(),
+            produced_outputs: Vec::new(),
         });
     };
     let disk_roots = AssemblyRoots::new(spec, assembly)?;
@@ -297,6 +307,7 @@ fn stage_steps(
     if let Some(ram) = view.ram {
         run.disk_publish = ram.disk_publish.clone();
     }
+    run.produced = ProducedRecorder::new(spec, view.disk_assembly, view.disk_roots);
     for step in order {
         run.run(step)?;
     }
@@ -310,8 +321,10 @@ fn stage_steps(
         filesystem_published,
         published_outputs,
         warnings,
+        produced,
         ..
     } = run;
+    record_produced_outputs(&mut state, &produced.outputs);
 
     let mut cleanup_paths = context.cleanup_paths();
     let mut archive_path = None;
@@ -361,6 +374,7 @@ fn stage_steps(
         archive_path,
         disk_images,
         warnings,
+        produced_outputs: produced.outputs,
     })
 }
 

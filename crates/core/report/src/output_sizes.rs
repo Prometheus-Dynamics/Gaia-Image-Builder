@@ -10,6 +10,7 @@
 
 use crate::assembly_outputs::KnownOutput;
 use crate::model::{OutputSizeRecord, RunSummary, SizeChange};
+use gaia_exec::ProducedOutput;
 use gaia_spec::ResolvedBuildSpec;
 use std::collections::BTreeSet;
 use std::fs;
@@ -34,6 +35,9 @@ pub(crate) struct SizeScope<'a> {
     /// Outputs the assembly spec names, with the kind the spec gives them.
     /// They count whenever they exist, reused or not.
     pub(crate) known: &'a [KnownOutput],
+    /// Outputs the run recorded with their sizes as written. They count
+    /// whether or not the file is still there (a RAM work dir's is gone).
+    pub(crate) produced: &'a [ProducedOutput],
     /// The dirs output names are made relative to, the first that holds the
     /// output winning; otherwise the output's file name is its name.
     pub(crate) dirs: &'a [PathBuf],
@@ -101,22 +105,35 @@ fn strip_compression(name: &str) -> &str {
         .unwrap_or(name)
 }
 
-/// The size records of a run, sorted by kind then name. An output that is not
-/// a file is left out. Each entry is compared with the baseline entry at the
-/// same path; a baseline entry that is no longer an output is `removed` when
-/// the run may say so.
+/// The size records of a run, sorted by kind then name. An output the run
+/// recorded uses the size it had when it was written; any other output that
+/// is a file is measured now, and one that is not is left out. Each entry is
+/// compared with the baseline entry at the same path; a baseline entry that
+/// is no longer an output is `removed` when the run may say so.
 pub(crate) fn output_size_records(
     scope: &SizeScope<'_>,
     baseline: &[OutputSizeRecord],
 ) -> Vec<OutputSizeRecord> {
+    let mut seen = BTreeSet::<String>::new();
+    let mut records = Vec::new();
+    for produced in scope.produced {
+        let key = produced.path.display().to_string();
+        if seen.insert(key.clone()) {
+            records.extend(size_record(
+                key,
+                produced.kind.as_str(),
+                produced.name.clone(),
+                produced.bytes,
+                baseline,
+            ));
+        }
+    }
     let mut candidates: Vec<PathBuf> = scope.known.iter().map(|known| known.path.clone()).collect();
     candidates.extend(scope.published.iter().cloned());
     if scope.carry_over {
         candidates.extend(scope.previous_outputs.iter().cloned());
         candidates.extend(baseline.iter().map(|record| PathBuf::from(&record.path)));
     }
-    let mut seen = BTreeSet::<String>::new();
-    let mut records = Vec::new();
     for path in candidates {
         let key = path.display().to_string();
         if seen.contains(&key) {
@@ -126,25 +143,18 @@ pub(crate) fn output_size_records(
             continue;
         };
         seen.insert(key.clone());
-        let previous = baseline
-            .iter()
-            .find(|record| record.path == key && record.change != SizeChange::Removed)
-            .map(|record| record.bytes);
-        let Some(change) = size_change(Some(bytes), previous) else {
-            continue;
-        };
         let kind = scope
             .known
             .iter()
             .find(|known| known.path == path)
             .map_or_else(|| output_kind(&path), |known| known.kind);
-        records.push(OutputSizeRecord {
-            kind: kind.to_string(),
-            name: output_name(&path, scope.dirs),
-            path: key,
+        records.extend(size_record(
+            key,
+            kind,
+            output_name(&path, scope.dirs),
             bytes,
-            change,
-        });
+            baseline,
+        ));
     }
     if scope.removals {
         for previous in baseline
@@ -170,6 +180,28 @@ pub(crate) fn output_size_records(
             .then_with(|| a.path.cmp(&b.path))
     });
     records
+}
+
+/// The record of an output of `bytes` at `path`, compared with the baseline.
+fn size_record(
+    path: String,
+    kind: &str,
+    name: String,
+    bytes: u64,
+    baseline: &[OutputSizeRecord],
+) -> Option<OutputSizeRecord> {
+    let previous = baseline
+        .iter()
+        .find(|record| record.path == path && record.change != SizeChange::Removed)
+        .map(|record| record.bytes);
+    let change = size_change(Some(bytes), previous)?;
+    Some(OutputSizeRecord {
+        kind: kind.to_string(),
+        name,
+        path,
+        bytes,
+        change,
+    })
 }
 
 /// The baseline file of `spec`: the sizes of its last clean run, beside its
@@ -267,6 +299,7 @@ fn file_name(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gaia_exec::ProducedOutputKind;
     use gaia_testkit::TempDir;
 
     #[test]
@@ -357,6 +390,7 @@ mod tests {
                 previous_outputs: &[],
                 known: &[],
                 dirs: &[],
+                produced: &[],
                 carry_over: false,
                 removals: true,
             },
@@ -407,6 +441,7 @@ mod tests {
                 previous_outputs: &[],
                 known: &[],
                 dirs: &[],
+                produced: &[],
                 carry_over: true,
                 removals: true,
             },
@@ -423,6 +458,7 @@ mod tests {
                 previous_outputs: &[],
                 known: &[],
                 dirs: &[],
+                produced: &[],
                 carry_over: false,
                 removals: true,
             },
@@ -445,6 +481,7 @@ mod tests {
                 previous_outputs: &previous,
                 known: &[],
                 dirs: &[],
+                produced: &[],
                 carry_over: true,
                 removals: true,
             },
@@ -460,6 +497,7 @@ mod tests {
                 previous_outputs: &previous,
                 known: &[],
                 dirs: &[],
+                produced: &[],
                 carry_over: false,
                 removals: true,
             },
@@ -479,12 +517,63 @@ mod tests {
                 previous_outputs: &[],
                 known: &[],
                 dirs: &[],
+                produced: &[],
                 carry_over: false,
                 removals: false,
             },
             &baseline,
         );
         assert!(records.is_empty(), "{records:?}");
+    }
+
+    #[test]
+    fn recorded_sizes_win_over_the_file_and_survive_its_removal() {
+        let scratch = TempDir::new("gaia-report-sizes");
+        let dir = scratch.join("out");
+        fs::create_dir_all(&dir).expect("out dir");
+        let stat_path = dir.join("sdcard.img");
+        fs::write(&stat_path, vec![0u8; 50]).expect("stat'd");
+        let gone = dir.join("initramfs.cpio.xz");
+        let produced = [
+            ProducedOutput {
+                kind: ProducedOutputKind::Filesystem,
+                name: "initramfs.cpio.xz".into(),
+                path: gone.clone(),
+                bytes: 4096,
+            },
+            // Recorded at a size the file no longer has: the record wins.
+            ProducedOutput {
+                kind: ProducedOutputKind::Disk,
+                name: "sdcard.img".into(),
+                path: stat_path.clone(),
+                bytes: 60,
+            },
+        ];
+        let records = output_size_records(
+            &SizeScope {
+                published: &[],
+                previous_outputs: &[],
+                known: &[],
+                produced: &produced,
+                dirs: &[],
+                carry_over: false,
+                removals: true,
+            },
+            &[],
+        );
+        assert_eq!(records.len(), 2, "{records:?}");
+        let gone_record = records
+            .iter()
+            .find(|record| record.path == gone.display().to_string())
+            .expect("removed output's record");
+        assert_eq!(gone_record.bytes, 4096);
+        assert_eq!(gone_record.kind, "filesystem");
+        assert_eq!(gone_record.change, SizeChange::New);
+        let disk_record = records
+            .iter()
+            .find(|record| record.path == stat_path.display().to_string())
+            .expect("disk record");
+        assert_eq!(disk_record.bytes, 60);
     }
 
     #[test]

@@ -92,11 +92,23 @@ pub fn render_summary(
     };
     let previous_outputs = read_previous_outputs(&summary_path(spec));
     let assembly = assembly_outputs(spec);
+    // A reused assembly wrote nothing, so the outputs it recorded when it
+    // last ran are this run's.
+    let assembly_reused = plan.operations.iter().any(|operation| {
+        matches!(operation.kind, OperationKind::AssembleImage)
+            && matches!(operation.reuse, OperationReuse::Reuse { .. })
+    });
+    let produced_outputs = if assembly_reused {
+        gaia_exec::recorded_assembly_outputs(spec)
+    } else {
+        outcome.produced_outputs.clone()
+    };
     let sizes = output_size_records(
         &SizeScope {
             published: &published_outputs,
             previous_outputs: &previous_outputs,
             known: &assembly.known,
+            produced: &produced_outputs,
             dirs: &assembly.dirs,
             carry_over: plan.operations.iter().any(|operation| {
                 matches!(

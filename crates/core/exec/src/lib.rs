@@ -26,7 +26,8 @@ use scheduler::{
 
 pub use operations::{
     ExecutionCleanupStatus, ExecutionError, ExecutionErrorKind, ExecutionEvent,
-    OperationExecutionResult, image_execution_policy,
+    OperationExecutionResult, ProducedOutput, ProducedOutputKind, image_execution_policy,
+    recorded_assembly_outputs,
 };
 pub use runtime::{
     CleanupFailure, ExecutionCancellation, ExecutionContext, ExecutionOutcome, OperationTiming,

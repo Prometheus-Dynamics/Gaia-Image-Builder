@@ -97,6 +97,58 @@ pub enum ExecutionCleanupStatus {
     Failed,
 }
 
+/// The kind of an assembly output, as the assembly spec gives it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProducedOutputKind {
+    Archive,
+    Disk,
+    Filesystem,
+    Transform,
+}
+
+impl ProducedOutputKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Archive => "archive",
+            Self::Disk => "disk",
+            Self::Filesystem => "filesystem",
+            Self::Transform => "transform",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "archive" => Some(Self::Archive),
+            "disk" => Some(Self::Disk),
+            "filesystem" => Some(Self::Filesystem),
+            "transform" => Some(Self::Transform),
+            _ => None,
+        }
+    }
+}
+
+/// An image output an assembly step wrote, with its size as it was when the
+/// step wrote it. A filesystem built in a RAM work dir is gone once the
+/// assembly ends, so the run summary takes its size from here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProducedOutput {
+    pub kind: ProducedOutputKind,
+    /// The path relative to the assembly out dir or work dir (the file name
+    /// when neither holds it), as the run summary names outputs.
+    pub name: String,
+    /// The output's path in the spec's view: where it is published, even when
+    /// the step wrote it in RAM.
+    pub path: PathBuf,
+    pub bytes: u64,
+}
+
+/// The image outputs the assembly of `spec` recorded when it last ran, read
+/// from its state file. Empty when it never ran or recorded none. A reused
+/// assembly reports these, since nothing was written this run.
+pub fn recorded_assembly_outputs(spec: &gaia_spec::ResolvedBuildSpec) -> Vec<ProducedOutput> {
+    assembly::recorded_produced_outputs(spec)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationExecutionResult {
     pub operation_id: OperationId,
@@ -105,6 +157,9 @@ pub struct OperationExecutionResult {
     pub cancelled: bool,
     pub reused_source: Option<String>,
     pub image_results: Vec<gaia_image_providers::ImageExecutionResult>,
+    /// The assembly outputs this operation wrote, with their sizes. Kept
+    /// apart from `image_results`, which marks the outputs a run publishes.
+    pub produced_outputs: Vec<ProducedOutput>,
     pub cleanup_domain: Option<RollbackDomain>,
     pub cleanup_paths: Vec<PathBuf>,
 }
@@ -126,6 +181,7 @@ impl OperationExecutionResult {
             cancelled: false,
             reused_source: None,
             image_results: Vec::new(),
+            produced_outputs: Vec::new(),
             cleanup_domain: None,
             cleanup_paths: Vec::new(),
         }
@@ -207,6 +263,7 @@ pub(crate) fn dispatch_operation(
             cancelled: false,
             reused_source: Some(source.clone()),
             image_results: Vec::new(),
+            produced_outputs: Vec::new(),
             cleanup_domain: None,
             cleanup_paths: Vec::new(),
         }
@@ -483,7 +540,8 @@ pub(crate) fn dispatch_operation(
                     "assembled image files".into(),
                     RollbackDomain::Images,
                     [summary.cleanup_paths, vec![assembly_state_path(spec)]].concat(),
-                );
+                )
+                .with_produced_outputs(summary.produced_outputs);
                 // Without an archive the collect dir is not this run's
                 // deliverable, so it stays unset; the disks still report.
                 if summary.archive_path.is_some() || !summary.disk_images.is_empty() {

@@ -10,7 +10,10 @@ use std::sync::{
 };
 use std::time::Duration;
 
-use crate::{ExecutionCleanupStatus, ExecutionError, ExecutionEvent, OperationExecutionResult};
+use crate::{
+    ExecutionCleanupStatus, ExecutionError, ExecutionEvent, OperationExecutionResult,
+    ProducedOutput,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionContext {
@@ -34,6 +37,9 @@ pub struct ExecutionOutcome {
     pub cancelled: bool,
     pub cancelled_operation_id: Option<OperationId>,
     pub image_results: Vec<ImageExecutionResult>,
+    /// The assembly outputs the run wrote, with their sizes as written. A
+    /// reused assembly reports its recorded outputs instead.
+    pub produced_outputs: Vec<ProducedOutput>,
     pub events: Vec<ExecutionEvent>,
     pub errors: Vec<ExecutionError>,
     pub cleanup_failures: Vec<CleanupFailure>,
@@ -175,6 +181,9 @@ impl ExecutionRuntime {
         self.outcome
             .image_results
             .extend(result.image_results.clone());
+        self.outcome
+            .produced_outputs
+            .extend(result.produced_outputs.clone());
         for event in result.events {
             self.emit_event(event);
         }
@@ -323,6 +332,7 @@ impl ExecutionRuntime {
             // Image results are not tied to an operation id here; once any
             // completed output was unwound, the image result may be stale.
             self.outcome.image_results.clear();
+            self.outcome.produced_outputs.clear();
         }
     }
 

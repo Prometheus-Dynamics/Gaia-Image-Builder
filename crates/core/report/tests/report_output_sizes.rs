@@ -56,6 +56,12 @@ fn spec_with_disk(scratch: &TempDir, rootfs_bytes: usize) -> (ResolvedBuildSpec,
 /// Plans and runs the image assembly (or a reused one), then writes the
 /// report bundle the way `gaia run` does.
 fn run(spec: &ResolvedBuildSpec, reused: bool) -> ReportBundle {
+    run_removing(spec, reused, &[])
+}
+
+/// As [`run`], but `removed` files are deleted once the run has ended, as a
+/// RAM work dir's copies are.
+fn run_removing(spec: &ResolvedBuildSpec, reused: bool, removed: &[&Path]) -> ReportBundle {
     let mut operation =
         PlannedOperation::new(OperationId::image_assembly(), OperationKind::AssembleImage);
     if reused {
@@ -80,6 +86,9 @@ fn run(spec: &ResolvedBuildSpec, reused: bool) -> ReportBundle {
             image_catalog: &image_catalog,
         },
     );
+    for path in removed {
+        fs::remove_file(path).expect("removed output");
+    }
     let report = generate_report(spec, &validation, &plan, &outcome);
     write_report_bundle(spec, &report).expect("report bundle written");
     report
@@ -307,4 +316,46 @@ fn filesystems_and_transforms_report_their_spec_kinds_and_growth() {
     for name in ["initramfs.cpio", "kernel8.img"] {
         assert_eq!(size(&reused, name).change, SizeChange::Unchanged, "{name}");
     }
+}
+
+#[test]
+fn outputs_removed_after_the_run_keep_their_recorded_sizes() {
+    let scratch = TempDir::new("gaia-report-sizes");
+    let spec = spec_with_filesystem_and_transform(&scratch, 16 * 1024, 16 * 1024);
+    let first = run(&spec, false);
+    let cpio = PathBuf::from(&size(&first, "initramfs.cpio").path);
+    let kernel = PathBuf::from(&size(&first, "kernel8.img").path);
+
+    // The run's outputs are gone by the time the report is made, as a RAM
+    // work dir's copies are; their sizes were recorded as they were written.
+    let spec = spec_with_filesystem_and_transform(&scratch, 64 * 1024, 64 * 1024);
+    let second = run_removing(&spec, false, &[&cpio, &kernel]);
+    assert!(!cpio.exists() && !kernel.exists());
+    for name in ["initramfs.cpio", "kernel8.img"] {
+        let record = size(&second, name);
+        assert!(record.bytes > 0, "{record:?}");
+        assert!(
+            matches!(record.change, SizeChange::Changed { .. }),
+            "{record:?}"
+        );
+        assert!(record.delta_bytes().unwrap_or_default() > 0, "{record:?}");
+    }
+    let cpio_bytes = size(&second, "initramfs.cpio").bytes;
+
+    // A reused assembly writes nothing: its recorded sizes are reported
+    // unchanged, though the files are still gone.
+    let reused = run_removing(&spec, true, &[]);
+    for name in ["initramfs.cpio", "kernel8.img"] {
+        let record = size(&reused, name);
+        assert_eq!(record.change, SizeChange::Unchanged, "{record:?}");
+        assert_eq!(
+            record.kind,
+            if name == "kernel8.img" {
+                "transform"
+            } else {
+                "filesystem"
+            }
+        );
+    }
+    assert_eq!(size(&reused, "initramfs.cpio").bytes, cpio_bytes);
 }

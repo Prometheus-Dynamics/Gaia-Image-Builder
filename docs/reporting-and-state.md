@@ -114,9 +114,17 @@ image sizes (change since the previous successful run):
 - The baseline is `<build>.sizes.json` beside the reports (`.gaia/reports` under
   the output dir). It is written after each run that finishes cleanly and has
   outputs. A run that builds no image leaves it alone.
-- A reused image operation writes nothing, so its outputs are carried forward
-  from the baseline (or, before one exists, from the previous `summary.json`): they
-  are still on disk and are reported with their change, normally `=`.
+- An assembly output is sized when the step writes it, not when the run ends. A
+  filesystem or transform built in a RAM work dir is removed with that dir, so
+  its recorded size is what the table shows. The recorded outputs also go to the
+  assembly's runtime state file (`image-assembly.state`, keys
+  `produced_output_count` and `produced_output.<n>.kind|name|path|bytes`). Outputs
+  the run did not record are measured from the file, as before.
+- A reused image operation writes nothing, so its outputs are carried forward:
+  an assembly reports the outputs its state file recorded, and the other outputs
+  come from the baseline (or, before one exists, from the previous `summary.json`).
+  They are reported with their change, normally `=`, even when the files are
+  not on disk.
 - The table shows the image size only. The bytes used inside a vfat image are
   not reported: the assembly computes them only when it sizes the image
   automatically, and does not keep them otherwise.

@@ -221,3 +221,65 @@ fn ram_work_dir_falls_back_to_disk_when_memory_is_short() {
     assert!(out.join("boot.cpio").is_file());
     assert!(!ram_base.join("gaia-tester").exists());
 }
+
+#[test]
+fn ram_work_dir_records_each_output_size_as_it_was_written() {
+    let scratch = TempDir::new("gaia-exec-test");
+    let disk_root = scratch.join("gaia-assembly-ram-sizes-disk");
+    fs::create_dir_all(&disk_root).expect("test root");
+    let ram_root = scratch.join("gaia-assembly-ram-sizes-ram");
+    fs::create_dir_all(&ram_root).expect("test root");
+    let ram_base = scratch.join("gaia-assembly-ram-sizes-base");
+    fs::create_dir_all(&ram_base).expect("test root");
+    write_ram_test_assets(&disk_root);
+    write_ram_test_assets(&ram_root);
+    let mut disk_spec = test_spec(&disk_root);
+    disk_spec.image.assembly = Some(ram_test_assembly("disk"));
+    let mut ram_spec = test_spec(&ram_root);
+    ram_spec.image.assembly = Some(ram_test_assembly("ram"));
+    let operation = OperationId::image_assembly();
+    let disk_summary = stage_image_assembly_with(&disk_spec, &operation, None, || {
+        panic!("a disk work dir reads no RAM facts")
+    })
+    .expect("disk assembly");
+    let ram_summary = stage_image_assembly_with(&ram_spec, &operation, None, || {
+        ram_env(&ram_base, 64 * placement_gib())
+    })
+    .expect("ram assembly");
+
+    let ram_out = ram_root.join("out/images");
+    // The filesystem image was built in RAM and is gone now, but its size
+    // was recorded as it was written, at the path the spec publishes it to.
+    assert!(!ram_out.join("boot.cpio").exists());
+    let find = |summary: &AssemblyStagingSummary, kind: ProducedOutputKind, name: &str| {
+        summary
+            .produced_outputs
+            .iter()
+            .find(|output| output.kind == kind && output.name == name)
+            .cloned()
+            .unwrap_or_else(|| panic!("no {name} recorded: {:?}", summary.produced_outputs))
+    };
+    for (kind, name) in [
+        (ProducedOutputKind::Filesystem, "boot.cpio"),
+        (ProducedOutputKind::Transform, "part-copy.bin"),
+        (ProducedOutputKind::Disk, "disk.img"),
+    ] {
+        let ram = find(&ram_summary, kind, name);
+        let disk = find(&disk_summary, kind, name);
+        assert!(ram.bytes > 0, "{ram:?}");
+        assert_eq!(ram.bytes, disk.bytes, "{name}");
+        assert_eq!(
+            ram.bytes,
+            fs::metadata(&disk.path).expect("disk output").len(),
+            "{name}"
+        );
+    }
+    assert_eq!(
+        find(&ram_summary, ProducedOutputKind::Filesystem, "boot.cpio").path,
+        ram_out.join("boot.cpio")
+    );
+    assert_eq!(
+        find(&ram_summary, ProducedOutputKind::Disk, "disk.img").path,
+        ram_out.join("disk.img")
+    );
+}

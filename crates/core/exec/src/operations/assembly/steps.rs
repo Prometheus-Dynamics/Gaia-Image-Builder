@@ -3,6 +3,7 @@
 //! that reads another step's output runs after it
 //! ([`gaia_spec::order_assembly_steps`]).
 
+use super::produced::ProducedRecorder;
 use super::*;
 use gaia_spec::{AssemblyStep, ImageAssemblySpec};
 
@@ -44,6 +45,8 @@ pub(super) struct StepRun<'a> {
     /// The transform, verity and archive outputs written under the image
     /// output dir (`$assembly.out`): final outputs of the run.
     pub(super) published_outputs: Vec<PathBuf>,
+    /// The assembly outputs this run wrote, with their sizes as written.
+    pub(super) produced: ProducedRecorder<'a>,
     /// Copied dynamically linked files whose runtime libraries are checked
     /// once their tree is complete, before a filesystem or archive packs it.
     pending_lib_checks: Vec<PendingLibCheck>,
@@ -57,46 +60,6 @@ struct PendingLibCheck {
     tree_path: PathBuf,
     /// The copied file, under `tree_path`.
     file: PathBuf,
-}
-
-/// The steps in the order they must run, with every step's resolved paths.
-pub(super) fn ordered_assembly_steps(
-    spec: &ResolvedBuildSpec,
-    assembly: &ImageAssemblySpec,
-    roots: &AssemblyRoots,
-) -> Result<(Vec<AssemblyStep>, Vec<gaia_spec::AssemblyStepPaths>), AssemblyError> {
-    let paths = gaia_spec::assembly_step_paths(
-        assembly,
-        &|template| roots.resolve_path(spec, template.as_str()).ok(),
-        &|tree| roots.tree_path(tree).ok().map(Path::to_path_buf),
-    );
-    let order = gaia_spec::order_assembly_steps(&paths)
-        .map_err(|cycle| AssemblyError::runtime(cycle.describe(assembly)))?;
-    Ok((order, paths))
-}
-
-/// Removes what the steps that create their outputs from scratch produced
-/// in an earlier run, so a step reading one of those paths before it is
-/// produced again fails instead of using a stale file.
-pub(super) fn remove_stale_step_outputs(
-    paths: &[gaia_spec::AssemblyStepPaths],
-) -> Result<(), AssemblyError> {
-    for step in paths.iter().filter(|step| step.step.replaces_outputs()) {
-        for output in &step.writes {
-            match std_fs::symlink_metadata(output) {
-                Ok(metadata) if metadata.is_file() || metadata.file_type().is_symlink() => {
-                    std_fs::remove_file(output).map_err(|error| {
-                        format!(
-                            "failed to remove stale assembly output '{}': {error}",
-                            output.display()
-                        )
-                    })?;
-                }
-                _ => {}
-            }
-        }
-    }
-    Ok(())
 }
 
 impl<'a> StepRun<'a> {
@@ -142,6 +105,7 @@ impl<'a> StepRun<'a> {
             disk_ids: Vec::new(),
             disk_publish: Vec::new(),
             published_outputs: Vec::new(),
+            produced: ProducedRecorder::new(spec, assembly, roots),
             pending_lib_checks: Vec::new(),
             warnings: Vec::new(),
         }
@@ -598,6 +562,7 @@ impl<'a> StepRun<'a> {
         }
         tracing::Span::current().record("output_path", summary.dest.display().to_string());
         self.note_published_output(&summary.dest);
+        self.produced.record_transform(index, summary.bytes);
         self.transform_count += 1;
         let key = AssemblyStateKey::new("transform", self.transform_count);
         let state = &mut self.state;
@@ -635,6 +600,7 @@ impl<'a> StepRun<'a> {
             execute_assembly_verity(self.spec, self.roots, transform, self.cancel_check.clone())?;
         tracing::Span::current().record("output_path", output.data.display().to_string());
         self.note_published_output(&output.data);
+        self.produced.record_verity(index, &output);
         self.transform_count += 1;
         let key = AssemblyStateKey::new("transform", self.transform_count);
         let verity_key = AssemblyStateKey::new("verity", self.transform_count);
@@ -685,6 +651,7 @@ impl<'a> StepRun<'a> {
             filesystem,
             self.cancel_check.clone(),
         )?;
+        self.produced.record_filesystem(index, summary.bytes);
         // A published copy goes to the image output dir under the output's
         // file name, as a raw disk does; the bytes are the same.
         let published = match filesystem.publish_template() {
@@ -754,6 +721,7 @@ impl<'a> StepRun<'a> {
         }
         tracing::Span::current().record("output_path", summary.output.display().to_string());
         self.disk_count += 1;
+        self.produced.record_disk(index, summary.bytes);
         self.disk_outputs.push(source);
         self.disk_ids.push(disk.id.clone());
         self.disk_published.push(summary.output.clone());
@@ -785,6 +753,7 @@ impl<'a> StepRun<'a> {
             clock.elapsed(),
         ));
         self.note_published_output(&summary.output);
+        self.produced.record_archive(index, &summary.output);
         self.archive_count += 1;
         record_archive_state(&mut self.state, self.archive_count, archive, &summary);
         self.messages.push(format!(

@@ -320,6 +320,7 @@ pub(crate) fn success_from_messages(
         cancelled: false,
         reused_source: None,
         image_results: Vec::new(),
+        produced_outputs: Vec::new(),
         cleanup_domain: Some(cleanup_domain),
         cleanup_paths,
     }
@@ -341,6 +342,7 @@ pub(crate) fn cancelled_with_cleanup(
         cancelled: true,
         reused_source: None,
         image_results: Vec::new(),
+        produced_outputs: Vec::new(),
         cleanup_domain: Some(cleanup_domain),
         cleanup_paths,
     }
@@ -382,6 +384,7 @@ pub(crate) fn failure_with_kind_and_tail(
         cancelled: false,
         reused_source: None,
         image_results: Vec::new(),
+        produced_outputs: Vec::new(),
         cleanup_domain: None,
         cleanup_paths: Vec::new(),
     }
@@ -509,6 +512,12 @@ impl OperationExecutionResult {
         image_result: gaia_image_providers::ImageExecutionResult,
     ) -> Self {
         self.image_results.push(image_result);
+        self
+    }
+
+    /// Records the outputs an assembly wrote, with their sizes.
+    pub(crate) fn with_produced_outputs(mut self, outputs: Vec<ProducedOutput>) -> Self {
+        self.produced_outputs.extend(outputs);
         self
     }
 }

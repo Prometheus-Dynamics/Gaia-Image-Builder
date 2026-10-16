@@ -27,6 +27,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - The summary has the same list as `sizes` (`kind`, `name`, `path`, `bytes`, `change`). It is in the post-build hook's JSON payload too, and the run dashboard's summary and details panels show it in place of the raw and content sizes.
 - The baseline is `<build>.sizes.json` beside the reports. It is written only by a clean run that has image outputs, so a failed or cancelled run leaves the comparison with the last good run in place. A reused image operation still reports its outputs, carried forward from that baseline (or the previous `summary.json` before one exists).
 - The sizes also cover every filesystem and transform output the assembly spec names (kinds `filesystem` and `transform`, named by path relative to the assembly out dir), read from the spec's own path templates, so a reused assembly still reports them. Kinds come from the spec where it names the output; a kernel `.img` written by a transform is a `transform`, not a `disk`. Bytes used inside a vfat image are not reported.
+- An assembly output's size is recorded as its step writes it, so a filesystem built in a RAM work dir (such as the slot initramfs, `cpio-xz`, or `rootfs.erofs`) is listed with its size instead of being missing once the RAM copies are removed. A reused assembly reports the sizes its state file recorded (`image-assembly.state`), still with their change.
 
 ### Assembly: copied dynamic files warn about missing libraries
 

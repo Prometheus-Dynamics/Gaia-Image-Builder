@@ -4,6 +4,54 @@ pub(crate) fn assembly_state_path(spec: &ResolvedBuildSpec) -> PathBuf {
     runtime_state_dir(spec).join(gaia_spec::IMAGE_ASSEMBLY_STATE_FILE_NAME)
 }
 
+/// Writes each produced output's record into the assembly state, under
+/// `produced_output.<n>.<field>`, so a reused assembly can report them.
+pub(crate) fn record_produced_outputs(state: &mut KeyValueState, outputs: &[ProducedOutput]) {
+    state.insert(PRODUCED_OUTPUT_COUNT_KEY, outputs.len());
+    for (index, output) in outputs.iter().enumerate() {
+        let number = index + 1;
+        state.insert(
+            format!("produced_output.{number}.kind"),
+            output.kind.as_str(),
+        );
+        state.insert(format!("produced_output.{number}.name"), &output.name);
+        state.insert(
+            format!("produced_output.{number}.path"),
+            output.path.display().to_string(),
+        );
+        state.insert(format!("produced_output.{number}.bytes"), output.bytes);
+    }
+}
+
+/// The produced outputs the assembly state of `spec` recorded, or none when
+/// the state is missing or predates them.
+pub(crate) fn recorded_produced_outputs(spec: &ResolvedBuildSpec) -> Vec<ProducedOutput> {
+    std::fs::read_to_string(assembly_state_path(spec))
+        .map(|contents| parse_produced_outputs(&contents))
+        .unwrap_or_default()
+}
+
+fn parse_produced_outputs(contents: &str) -> Vec<ProducedOutput> {
+    let fields = KeyValueState::parse(contents).into_map();
+    let count = fields
+        .get(PRODUCED_OUTPUT_COUNT_KEY)
+        .and_then(|count| count.parse::<usize>().ok())
+        .unwrap_or(0);
+    (1..=count)
+        .filter_map(|number| {
+            let field = |name: &str| fields.get(&format!("produced_output.{number}.{name}"));
+            Some(ProducedOutput {
+                kind: ProducedOutputKind::parse(field("kind")?)?,
+                name: field("name")?.clone(),
+                path: PathBuf::from(field("path")?),
+                bytes: field("bytes")?.parse().ok()?,
+            })
+        })
+        .collect()
+}
+
+const PRODUCED_OUTPUT_COUNT_KEY: &str = "produced_output_count";
+
 pub(crate) fn image_assembly_cleanup_paths(spec: &ResolvedBuildSpec) -> Vec<PathBuf> {
     let mut paths = vec![assembly_state_path(spec)];
     let Some(assembly) = &spec.image.assembly else {
@@ -103,4 +151,38 @@ fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
         }
     }
     deduped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn produced_outputs_round_trip_through_the_state_file() {
+        let outputs = vec![
+            ProducedOutput {
+                kind: ProducedOutputKind::Filesystem,
+                name: "initramfs.cpio.xz".into(),
+                path: PathBuf::from("/out/images/initramfs.cpio.xz"),
+                bytes: 4096,
+            },
+            ProducedOutput {
+                kind: ProducedOutputKind::Disk,
+                name: "sdcard.img".into(),
+                path: PathBuf::from("/out/images/sdcard=a.img"),
+                bytes: 1 << 30,
+            },
+        ];
+        let mut state = KeyValueState::new();
+        record_produced_outputs(&mut state, &outputs);
+        assert_eq!(parse_produced_outputs(&state.render()), outputs);
+    }
+
+    #[test]
+    fn a_state_without_produced_outputs_records_none() {
+        assert!(parse_produced_outputs("kind=image-assembly\n").is_empty());
+        // A record missing a field is skipped rather than half-read.
+        let broken = "produced_output_count=1\nproduced_output.1.kind=disk\n";
+        assert!(parse_produced_outputs(broken).is_empty());
+    }
 }
