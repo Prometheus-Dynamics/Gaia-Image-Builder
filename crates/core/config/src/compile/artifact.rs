@@ -1,9 +1,9 @@
 use super::*;
-use gaia_spec::SourceId;
+use gaia_spec::{CargoGitSourceSpec, SourceDefinition, SourceId, SourceSpec};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub(crate) fn compile_artifact(raw: RawArtifactConfig) -> ArtifactSpec {
-    let extra_sources = compile_extra_sources(&raw.sources, raw.source.as_deref());
+pub(crate) fn compile_artifact(raw: RawArtifactConfig, sources: &[SourceSpec]) -> ArtifactSpec {
+    let mut extra_sources = compile_extra_sources(&raw.sources, raw.source.as_deref());
     let definition = match raw.definition {
         RawArtifactDefinition::Rust {
             package,
@@ -12,20 +12,32 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig) -> ArtifactSpec {
             features,
             no_default_features,
             all_features,
-        } => ArtifactDefinition::Rust(RustArtifactSpec {
-            package,
-            target_name,
-            variant: if emit_directory {
-                ArtifactVariantSpec::Directory
-            } else {
-                ArtifactVariantSpec::File
-            },
-            features,
-            no_default_features,
-            all_features,
-            build_group: raw.build_group,
-            group_packages: Vec::new(),
-        }),
+        } => {
+            let cargo_git_sources =
+                compile_cargo_git_sources(raw.cargo_git_sources.clone(), sources);
+            // The build reads the git sources its cargo git dependencies come
+            // from, so the artifact depends on each of them.
+            extra_sources = merge_extra_sources(
+                extra_sources,
+                cargo_git_sources.iter().map(|source| source.source.clone()),
+                raw.source.as_deref(),
+            );
+            ArtifactDefinition::Rust(RustArtifactSpec {
+                package,
+                target_name,
+                variant: if emit_directory {
+                    ArtifactVariantSpec::Directory
+                } else {
+                    ArtifactVariantSpec::File
+                },
+                features,
+                no_default_features,
+                all_features,
+                build_group: raw.build_group,
+                group_packages: Vec::new(),
+                cargo_git_sources,
+            })
+        }
         RawArtifactDefinition::Java {
             build_target,
             build_args,
@@ -79,6 +91,50 @@ pub(crate) fn compile_extra_sources(sources: &[String], own: Option<&str>) -> Ve
     extra.sort();
     extra.dedup();
     extra
+}
+
+/// Adds `more` to an artifact's extra sources: sorted, without duplicates,
+/// and without its own `own` source.
+fn merge_extra_sources(
+    extra: Vec<SourceId>,
+    more: impl Iterator<Item = SourceId>,
+    own: Option<&str>,
+) -> Vec<SourceId> {
+    let mut merged = extra
+        .into_iter()
+        .chain(more)
+        .filter(|id| Some(id.as_str()) != own)
+        .collect::<Vec<_>>();
+    merged.sort();
+    merged.dedup();
+    merged
+}
+
+/// `cargo_git_sources` as compiled: sorted by URL, each with the repository
+/// of the git source it names. A source that is not a declared git source
+/// keeps an empty repository; validation reports it.
+fn compile_cargo_git_sources(
+    mapping: BTreeMap<String, String>,
+    sources: &[SourceSpec],
+) -> Vec<CargoGitSourceSpec> {
+    mapping
+        .into_iter()
+        .map(|(url, source)| {
+            let repo = sources
+                .iter()
+                .find(|candidate| candidate.id.as_str() == source)
+                .and_then(|candidate| match &candidate.definition {
+                    SourceDefinition::Git(git) => Some(git.repo.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            CargoGitSourceSpec {
+                url,
+                source: SourceId::new(source),
+                repo,
+            }
+        })
+        .collect()
 }
 
 /// Gives every member of a rust build group the same cargo selection: the

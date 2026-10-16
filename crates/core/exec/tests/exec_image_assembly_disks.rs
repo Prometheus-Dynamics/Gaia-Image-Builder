@@ -72,6 +72,8 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
             mode: None,
             optional: false,
             preserve_symlink: false,
+            content: None,
+            json: None,
         }],
         filesystems: vec![AssemblyFilesystemSpec {
             id: "bootfs".into(),
@@ -325,6 +327,8 @@ fn vfat_filesystem_honors_mformat_timeout() {
             mode: None,
             optional: false,
             preserve_symlink: false,
+            content: None,
+            json: None,
         }],
         filesystems: vec![AssemblyFilesystemSpec {
             id: "bootfs".into(),

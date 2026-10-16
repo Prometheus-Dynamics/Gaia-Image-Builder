@@ -42,6 +42,8 @@ fn cpio_zstd_assembly(work_dir: &str, output: &str, publish: bool) -> ImageAssem
             mode: None,
             optional: false,
             preserve_symlink: false,
+            content: None,
+            json: None,
         }],
         filesystems: vec![gaia_spec::AssemblyFilesystemSpec {
             id: "initramfs".into(),
@@ -339,6 +341,8 @@ fn vfat_auto_size_builds_an_image_that_holds_the_tree() {
             mode: None,
             optional: false,
             preserve_symlink: false,
+            content: None,
+            json: None,
         }],
         filesystems: vec![gaia_spec::AssemblyFilesystemSpec {
             id: "boot".into(),

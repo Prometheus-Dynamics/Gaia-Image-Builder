@@ -126,6 +126,7 @@ fn file_member(name: &str, src: &Path) -> AssemblyArchiveMemberSpec {
         name: name.into(),
         src: Some(src.display().to_string().into()),
         entries: None,
+        json: None,
     }
 }
 
@@ -170,6 +171,7 @@ fn archive_bundles_manifest_and_zstd_members_deterministically() {
                 AssemblyArchiveMemberSpec {
                     name: "manifest.env".into(),
                     src: None,
+                    json: None,
                     entries: Some(vec![
                         ("MODEL".into(), "cm5".into()),
                         ("VERSION".into(), "1.2.3".into()),
@@ -300,6 +302,7 @@ fn archive_with_missing_digest_file_fails_without_publishing() {
             members: vec![AssemblyArchiveMemberSpec {
                 name: "manifest.env".into(),
                 src: None,
+                json: None,
                 entries: Some(vec![(
                     "ROOTFS_SHA256".into(),
                     format!(

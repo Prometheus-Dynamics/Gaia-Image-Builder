@@ -22,7 +22,9 @@
 //! as `boot.vfat` is no longer left there in RAM mode.
 
 use super::*;
-use gaia_spec::{AssemblyPathTemplate, AssemblyWorkDirKeyword, ImageAssemblySpec};
+use gaia_spec::{
+    AssemblyJsonValue, AssemblyPathTemplate, AssemblyWorkDirKeyword, ImageAssemblySpec,
+};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap};
 use std::io::Read;
@@ -36,9 +38,11 @@ pub(crate) const RAM_BASE: &str = "/dev/shm";
 const RAM_MARGIN: u64 = 4 * GIB;
 /// Chunk size for copying a raw disk without writing its zeros.
 const SPARSE_CHUNK: usize = MIB as usize;
-/// Prefixes of the references in archive entries, inside `${...}`: a file's
-/// digest, and a field of a verity transform's output.
+/// Prefixes of the references in archive entries, generated files and JSON
+/// values, inside `${...}`: a file's digest, a file's size, and a field of a
+/// verity transform's output.
 const DIGEST_TOKEN_PREFIX: &str = "assembly.sha256:";
+const SIZE_TOKEN_PREFIX: &str = "assembly.size:";
 const VERITY_TOKEN_PREFIX: &str = "assembly.verity:";
 
 /// Where the facts a RAM placement depends on come from. Tests fill it in;
@@ -357,9 +361,25 @@ fn rewrite_assembly(
     for tree in &mut rewritten.trees {
         tree.path = absolute(&tree.path)?;
     }
+    // Generated text and JSON name their tokens' paths; those move with the
+    // rest of the assembly.
+    let rewrite_text = |text: &str| -> Result<String, String> {
+        rewrite_digest_tokens(text, |inner| {
+            absolute(&AssemblyPathTemplate::new(inner.trim()))
+                .map(|template| template.as_str().to_string())
+        })
+    };
     for file in &mut rewritten.files {
         file.src = absolute_opt(&file.src)?;
         file.src_glob = absolute_opt(&file.src_glob)?;
+        file.content = file.content.as_deref().map(rewrite_text).transpose()?;
+        if let Some(json) = &mut file.json {
+            rewrite_json_strings(json, &rewrite_text)?;
+        }
+    }
+    for binary in &mut rewritten.binaries {
+        binary.src = absolute(&binary.src)?;
+        binary.sysroot = absolute_opt(&binary.sysroot)?;
     }
     for modules in &mut rewritten.kernel_modules {
         modules.from = absolute(&modules.from)?;
@@ -389,20 +409,42 @@ fn rewrite_assembly(
             member.src = absolute_opt(&member.src)?;
             if let Some(entries) = &mut member.entries {
                 for (_, value) in entries.iter_mut() {
-                    *value = rewrite_digest_tokens(value, |inner| {
-                        absolute(&AssemblyPathTemplate::new(inner.trim()))
-                            .map(|template| template.as_str().to_string())
-                    })?;
+                    *value = rewrite_text(value)?;
                 }
+            }
+            if let Some(json) = &mut member.json {
+                rewrite_json_strings(json, &rewrite_text)?;
             }
         }
     }
     Ok(rewritten)
 }
 
-/// Rewrites the path inside each `${assembly.sha256:<path>}` and
-/// `${assembly.verity:<path>:<field>}` in `value`; the field and any other
-/// token are kept as they are.
+/// Rewrites every string of a JSON value with `rewrite`.
+fn rewrite_json_strings(
+    value: &mut AssemblyJsonValue,
+    rewrite: &dyn Fn(&str) -> Result<String, String>,
+) -> Result<(), String> {
+    match value {
+        AssemblyJsonValue::String(text) => *text = rewrite(text)?,
+        AssemblyJsonValue::Integer(_) | AssemblyJsonValue::Bool(_) => {}
+        AssemblyJsonValue::Array(items) => {
+            for item in items {
+                rewrite_json_strings(item, rewrite)?;
+            }
+        }
+        AssemblyJsonValue::Object(members) => {
+            for (_, item) in members {
+                rewrite_json_strings(item, rewrite)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Rewrites the path inside each `${assembly.sha256:<path>}`,
+/// `${assembly.size:<path>}` and `${assembly.verity:<path>:<field>}` in
+/// `value`; the field and any other token are kept as they are.
 fn rewrite_digest_tokens(
     value: &str,
     mut rewrite: impl FnMut(&str) -> Result<String, String>,
@@ -420,6 +462,11 @@ fn rewrite_digest_tokens(
         if let Some(path) = token.strip_prefix(DIGEST_TOKEN_PREFIX) {
             out.push_str("${");
             out.push_str(DIGEST_TOKEN_PREFIX);
+            out.push_str(&rewrite(path)?);
+            out.push('}');
+        } else if let Some(path) = token.strip_prefix(SIZE_TOKEN_PREFIX) {
+            out.push_str("${");
+            out.push_str(SIZE_TOKEN_PREFIX);
             out.push_str(&rewrite(path)?);
             out.push('}');
         } else if let Some(body) = token.strip_prefix(VERITY_TOKEN_PREFIX)

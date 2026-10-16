@@ -19,6 +19,7 @@ sha2.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+gaia-plan = { workspace = true, features = ["test-fixtures"] }
 gaia-testkit.workspace = true
 gaia-config.workspace = true
 gaia-default-providers.workspace = true

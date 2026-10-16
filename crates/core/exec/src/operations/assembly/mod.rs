@@ -14,7 +14,9 @@ use super::helpers::{process_output_retention, runtime_state_dir};
 
 mod archive_log;
 mod archives;
+mod binaries;
 mod busybox;
+mod content;
 mod disks;
 mod ext4;
 mod files;
@@ -22,6 +24,7 @@ mod filesystems;
 mod kernel_modules;
 mod mbr;
 mod placement;
+mod runtime_closure;
 mod state;
 mod steps;
 mod tar;
@@ -30,7 +33,9 @@ mod verity;
 
 use archive_log::*;
 use archives::*;
+use binaries::*;
 use busybox::*;
+use content::*;
 use disks::*;
 use ext4::*;
 use files::*;
@@ -38,6 +43,7 @@ use filesystems::*;
 use kernel_modules::*;
 use mbr::*;
 use placement::*;
+
 use state::AssemblyExecutionContext;
 pub(crate) use state::{assembly_state_path, image_assembly_cleanup_paths};
 use steps::{StepRun, ordered_assembly_steps, remove_stale_step_outputs};
@@ -218,6 +224,7 @@ fn stage_steps(
         .with("filesystem_count", assembly.filesystems.len())
         .with("disk_count", assembly.disks.len())
         .with("busybox_initramfs_count", assembly.busybox_initramfs.len())
+        .with("binary_count", assembly.binaries.len())
         .with("kernel_modules_count", assembly.kernel_modules.len())
         .with(
             "work_dir.placement",

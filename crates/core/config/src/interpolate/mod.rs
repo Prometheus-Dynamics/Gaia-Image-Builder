@@ -1,5 +1,6 @@
 mod assembly;
 mod assembly_archives;
+mod build_date;
 mod export;
 mod project_git;
 mod resolver;
@@ -444,6 +445,16 @@ fn interpolate_artifact(
     artifact.build_group = artifact
         .build_group
         .map(|value| resolver::interpolate_string(value, raw, env));
+    artifact.cargo_git_sources = artifact
+        .cargo_git_sources
+        .into_iter()
+        .map(|(url, source)| {
+            (
+                resolver::interpolate_string(url, raw, env),
+                resolver::interpolate_string(source, raw, env),
+            )
+        })
+        .collect();
     artifact.install_name = artifact
         .install_name
         .map(|value| resolver::interpolate_string(value, raw, env));

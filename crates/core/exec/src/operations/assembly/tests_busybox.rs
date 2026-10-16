@@ -1,7 +1,7 @@
 //! BusyBox runtime libraries: the closure copied into a tree. Split from
 //! `tests.rs` for its length.
 
-use super::*;
+use super::runtime_closure::copy_runtime_closure;
 use gaia_plan::{RuntimeClosure, RuntimeEntry};
 use gaia_testkit::TempDir;
 use std::fs;
@@ -52,7 +52,7 @@ fn copies_runtime_closure_files_and_symlink_chain_into_the_tree() {
         ],
     };
 
-    let copied = copy_busybox_runtime_closure(&tree, &closure).expect("copy");
+    let copied = copy_runtime_closure(&tree, &closure).expect("copy");
 
     assert_eq!(
         copied,
@@ -93,7 +93,7 @@ fn copy_replaces_a_stale_entry_but_refuses_a_directory() {
             source: sysroot.join("lib/libx.so.1"),
         }],
     };
-    copy_busybox_runtime_closure(&tree, &file_closure).expect("replace stale file");
+    copy_runtime_closure(&tree, &file_closure).expect("replace stale file");
     assert_eq!(fs::read(tree.join("lib/libx.so.1")).expect("file"), b"new");
 
     fs::create_dir_all(tree.join("lib/dir.so")).expect("dir in the way");
@@ -104,7 +104,7 @@ fn copy_replaces_a_stale_entry_but_refuses_a_directory() {
         }],
         ..file_closure
     };
-    let error = copy_busybox_runtime_closure(&tree, &dir_closure).expect_err("directory");
+    let error = copy_runtime_closure(&tree, &dir_closure).expect_err("directory");
     assert!(error.contains("is a directory"), "{error}");
 }
 
@@ -149,7 +149,7 @@ fn target_busybox_resolves_loader_and_libc_from_its_target_sysroot() {
 
     let tree = scratch.join("gaia-busybox-target-closure");
     fs::create_dir_all(&tree).expect("test root");
-    let copied = copy_busybox_runtime_closure(&tree, &closure).expect("copy target closure");
+    let copied = copy_runtime_closure(&tree, &closure).expect("copy target closure");
     // Looked up by the names the loader uses, through the copied /lib link.
     let loader = fs::read(tree.join("lib/ld-linux-aarch64.so.1")).expect("loader in the tree");
     let libc = fs::read(tree.join("lib/libc.so.6")).expect("libc.so.6 in the tree");

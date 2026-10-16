@@ -141,6 +141,8 @@ entries = [
         vec![
             "assembly_archive_verity_target_unknown",
             "assembly_archive_entry_value_invalid",
+            // `other.erofs` is read, but no step writes it.
+            "assembly_token_path_not_produced",
         ]
     );
 }

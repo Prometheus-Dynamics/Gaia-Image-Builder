@@ -1,0 +1,290 @@
+//! Generated content: text files and JSON documents in trees and archives,
+//! with their `${assembly...}` tokens rendered at assembly time, the steps
+//! they read run first, and RAM placement. Split from `tests.rs`.
+
+use super::*;
+use gaia_spec::{
+    AssemblyArchiveMemberSpec, AssemblyArchiveSpec, AssemblyFileSpec, AssemblyJsonValue,
+    AssemblyTreeSpec,
+};
+use gaia_testkit::TempDir;
+use sha2::{Digest, Sha256};
+use std::fs;
+use std::path::Path;
+
+/// 1000 bytes of a pattern: the size and digest the tokens must render.
+fn part_bytes() -> Vec<u8> {
+    (0..1000).map(|index| (index * 13 % 251) as u8).collect()
+}
+
+fn hex_sha256(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn write_assets(root: &Path) {
+    let assets = root.join("assets");
+    fs::create_dir_all(&assets).expect("assets");
+    fs::write(assets.join("part.bin"), part_bytes()).expect("part");
+}
+
+fn disk_env_panic() -> PlacementEnv {
+    panic!("a disk work dir reads no RAM facts")
+}
+
+fn state_value(summary: &AssemblyStagingSummary, key: &str) -> String {
+    summary
+        .state
+        .render()
+        .lines()
+        .find_map(|line| line.strip_prefix(&format!("{key}=")).map(str::to_string))
+        .unwrap_or_else(|| panic!("state has no {key}"))
+}
+
+fn generated_file(
+    dest: &str,
+    content: Option<&str>,
+    json: Option<AssemblyJsonValue>,
+) -> AssemblyFileSpec {
+    AssemblyFileSpec {
+        tree: "boot".into(),
+        src: None,
+        src_glob: None,
+        content: content.map(str::to_string),
+        json,
+        dest: dest.into(),
+        mode: None,
+        optional: false,
+        preserve_symlink: false,
+    }
+}
+
+fn object(members: Vec<(&str, AssemblyJsonValue)>) -> AssemblyJsonValue {
+    AssemblyJsonValue::Object(
+        members
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect(),
+    )
+}
+
+fn text(value: &str) -> AssemblyJsonValue {
+    AssemblyJsonValue::String(value.to_string())
+}
+
+/// A boot tree, the 1000-byte part copied into the work dir, and the given
+/// tree files and archives.
+fn generated_assembly(
+    work_dir: &str,
+    files: Vec<AssemblyFileSpec>,
+    archives: Vec<AssemblyArchiveSpec>,
+) -> ImageAssemblySpec {
+    ImageAssemblySpec {
+        work_dir: Some(work_dir.into()),
+        trees: vec![AssemblyTreeSpec {
+            id: "boot".into(),
+            path: "$assembly.work/boot".into(),
+        }],
+        // Declared before the part it reads: the step must still run after it.
+        files,
+        transforms: vec![copy_transform(
+            "@assets/part.bin",
+            "$assembly.work/part.bin",
+        )],
+        archives,
+        ..ImageAssemblySpec::default()
+    }
+}
+
+fn manifest_json() -> AssemblyJsonValue {
+    object(vec![
+        ("schema", AssemblyJsonValue::Integer(1)),
+        ("id", text("slot-a")),
+        (
+            "image",
+            object(vec![
+                ("size", text("${assembly.size:$assembly.work/part.bin}")),
+                ("sha256", text("${assembly.sha256:$assembly.work/part.bin}")),
+            ]),
+        ),
+        ("trial", AssemblyJsonValue::Bool(false)),
+        (
+            "boot",
+            object(vec![(
+                "files",
+                object(vec![(
+                    "kernel8.img",
+                    text("${assembly.sha256:$assembly.work/part.bin}"),
+                )]),
+            )]),
+        ),
+    ])
+}
+
+fn expected_manifest(sha: &str) -> String {
+    format!(
+        "{{\n  \"schema\": 1,\n  \"id\": \"slot-a\",\n  \"image\": {{\n    \"size\": 1000,\n    \"sha256\": \"{sha}\"\n  }},\n  \"trial\": false,\n  \"boot\": {{\n    \"files\": {{\n      \"kernel8.img\": \"{sha}\"\n    }}\n  }}\n}}\n"
+    )
+}
+
+#[cfg(unix)]
+#[test]
+fn text_content_renders_tokens_after_the_step_that_produces_them() {
+    use std::os::unix::fs::PermissionsExt;
+    let scratch = TempDir::new("gaia-exec-generated");
+    let root = scratch.join("gaia-generated-text");
+    write_assets(&root);
+    let mut spec = test_spec(&root);
+    let sha = hex_sha256(&part_bytes());
+    let file = generated_file(
+        "cmdline.txt",
+        Some(
+            "root=${assembly.size:$assembly.work/part.bin} digest=${assembly.sha256:$assembly.work/part.bin}\n",
+        ),
+        None,
+    );
+    spec.image.assembly = Some(generated_assembly("$assembly.work", vec![file], Vec::new()));
+
+    let summary =
+        stage_image_assembly_with(&spec, &OperationId::image_assembly(), None, disk_env_panic)
+            .expect("generated text assembly");
+
+    let dest = PathBuf::from(state_value(&summary, "file.1.dest"));
+    assert_eq!(
+        fs::read_to_string(&dest).expect("cmdline"),
+        format!("root=1000 digest={sha}\n")
+    );
+    assert_eq!(
+        fs::metadata(&dest).expect("cmdline").permissions().mode() & 0o7777,
+        0o644,
+        "a generated file defaults to 0644 whatever the umask"
+    );
+    assert_eq!(state_value(&summary, "file.1.generated"), "true");
+}
+
+#[test]
+fn json_documents_render_in_order_with_numbers_in_tree_and_archive() {
+    let scratch = TempDir::new("gaia-exec-generated");
+    let root = scratch.join("gaia-generated-json");
+    write_assets(&root);
+    let sha = hex_sha256(&part_bytes());
+    let mut spec = test_spec(&root);
+    let archive = AssemblyArchiveSpec {
+        id: "bundle".into(),
+        output: "$assembly.out/bundle.tar".into(),
+        members: vec![AssemblyArchiveMemberSpec {
+            name: "manifest.json".into(),
+            src: None,
+            entries: None,
+            json: Some(manifest_json()),
+        }],
+    };
+    spec.image.assembly = Some(generated_assembly(
+        "$assembly.work",
+        vec![generated_file("manifest.json", None, Some(manifest_json()))],
+        vec![archive],
+    ));
+
+    let first =
+        stage_image_assembly_with(&spec, &OperationId::image_assembly(), None, disk_env_panic)
+            .expect("json assembly");
+    let tree_file = fs::read_to_string(state_value(&first, "file.1.dest")).expect("manifest");
+    assert_eq!(tree_file, expected_manifest(&sha));
+
+    let tar = fs::read(state_value(&first, "archives.1.output")).expect("bundle");
+    let tar_text = String::from_utf8_lossy(&tar);
+    assert!(
+        tar_text.contains(&expected_manifest(&sha)),
+        "the archive member holds the same document"
+    );
+
+    // Deterministic: a second run writes the same bytes.
+    let second =
+        stage_image_assembly_with(&spec, &OperationId::image_assembly(), None, disk_env_panic)
+            .expect("second run");
+    assert_eq!(
+        fs::read_to_string(state_value(&second, "file.1.dest")).expect("manifest"),
+        tree_file
+    );
+}
+
+#[test]
+fn a_token_that_names_a_missing_file_fails_the_assembly() {
+    let scratch = TempDir::new("gaia-exec-generated");
+    let root = scratch.join("gaia-generated-missing");
+    write_assets(&root);
+    let mut spec = test_spec(&root);
+    let file = generated_file(
+        "size.txt",
+        Some("${assembly.size:$assembly.work/never-written.bin}"),
+        None,
+    );
+    spec.image.assembly = Some(ImageAssemblySpec {
+        work_dir: Some("$assembly.work".into()),
+        trees: vec![AssemblyTreeSpec {
+            id: "boot".into(),
+            path: "$assembly.work/boot".into(),
+        }],
+        files: vec![file],
+        ..ImageAssemblySpec::default()
+    });
+    let error =
+        stage_image_assembly_with(&spec, &OperationId::image_assembly(), None, disk_env_panic)
+            .expect_err("missing size");
+    assert!(
+        error.message.contains("${assembly.size:") && error.message.contains("does not exist"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn generated_files_in_a_ram_work_dir_are_written_to_ram_and_render_the_same() {
+    let scratch = TempDir::new("gaia-exec-generated");
+    let root = scratch.join("gaia-generated-ram");
+    write_assets(&root);
+    let base = root.join("shm");
+    fs::create_dir_all(&base).expect("ram base");
+    let sha = hex_sha256(&part_bytes());
+    let mut spec = test_spec(&root);
+    // The archive publishes the RAM-built file, so the bytes are checked
+    // after the RAM copies are gone.
+    let archive = AssemblyArchiveSpec {
+        id: "bundle".into(),
+        output: "$assembly.out/bundle.tar".into(),
+        members: vec![AssemblyArchiveMemberSpec {
+            name: "cmdline.txt".into(),
+            src: Some("$assembly.tree.boot/cmdline.txt".into()),
+            entries: None,
+            json: None,
+        }],
+    };
+    spec.image.assembly = Some(generated_assembly(
+        "ram",
+        vec![generated_file(
+            "cmdline.txt",
+            Some("digest=${assembly.sha256:$assembly.work/part.bin}"),
+            None,
+        )],
+        vec![archive],
+    ));
+    let env = || PlacementEnv {
+        ram_base: base.clone(),
+        user: "tester".into(),
+        memory_available: Some(16 * 1024 * 1024 * 1024),
+        tmpfs_available: Some(64 * 1024 * 1024 * 1024),
+    };
+    let summary = stage_image_assembly_with(&spec, &OperationId::image_assembly(), None, env)
+        .expect("ram generated assembly");
+
+    assert_eq!(state_value(&summary, "work_dir.placement"), "ram");
+    let dest = PathBuf::from(state_value(&summary, "file.1.dest"));
+    assert!(dest.starts_with(&base), "{}", dest.display());
+    let tar = fs::read(state_value(&summary, "archives.1.output")).expect("bundle");
+    assert!(
+        String::from_utf8_lossy(&tar).contains(&format!("digest={sha}")),
+        "the RAM-built file is published with its rendered token"
+    );
+}

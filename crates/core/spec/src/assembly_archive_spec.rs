@@ -1,4 +1,4 @@
-use crate::AssemblyPathTemplate;
+use crate::{AssemblyJsonValue, AssemblyPathTemplate};
 
 /// A deterministic ustar archive assembled after disks.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -9,20 +9,25 @@ pub struct AssemblyArchiveSpec {
     pub members: Vec<AssemblyArchiveMemberSpec>,
 }
 
-/// One archive member: either a file (`src`) or a generated `KEY=value`
-/// file (`entries`). Exactly one of the two must be set.
+/// One archive member: a file (`src`), a generated `KEY=value` file
+/// (`entries`), or a generated JSON document (`json`). Exactly one of the
+/// three must be set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssemblyArchiveMemberSpec {
     pub name: String,
     pub src: Option<AssemblyPathTemplate>,
     pub entries: Option<Vec<(String, String)>>,
+    pub json: Option<AssemblyJsonValue>,
 }
 
 impl AssemblyArchiveMemberSpec {
     pub fn source(&self) -> Option<AssemblyArchiveMemberSourceSpec<'_>> {
-        match (&self.src, &self.entries) {
-            (Some(src), None) => Some(AssemblyArchiveMemberSourceSpec::File(src)),
-            (None, Some(entries)) => Some(AssemblyArchiveMemberSourceSpec::Generated(entries)),
+        match (&self.src, &self.entries, &self.json) {
+            (Some(src), None, None) => Some(AssemblyArchiveMemberSourceSpec::File(src)),
+            (None, Some(entries), None) => {
+                Some(AssemblyArchiveMemberSourceSpec::Generated(entries))
+            }
+            (None, None, Some(json)) => Some(AssemblyArchiveMemberSourceSpec::Json(json)),
             _ => None,
         }
     }
@@ -32,6 +37,7 @@ impl AssemblyArchiveMemberSpec {
 pub enum AssemblyArchiveMemberSourceSpec<'a> {
     File(&'a AssemblyPathTemplate),
     Generated(&'a [(String, String)]),
+    Json(&'a AssemblyJsonValue),
 }
 
 /// A `${assembly...}` reference inside a generated archive entry value,
@@ -43,6 +49,8 @@ pub enum AssemblyValueToken {
     /// `${assembly.verity:<path>:<field>}`: one field of a verity transform's
     /// output.
     Verity(AssemblyVerityToken),
+    /// `${assembly.size:<path>}`: the size of a file in bytes.
+    Size(AssemblySizeToken),
 }
 
 impl AssemblyValueToken {
@@ -51,8 +59,25 @@ impl AssemblyValueToken {
         match self {
             Self::Digest(token) => &token.path,
             Self::Verity(token) => &token.path,
+            Self::Size(token) => &token.path,
         }
     }
+
+    /// Whether the token's text is a decimal integer, so a JSON value that is
+    /// exactly this token is written as a number.
+    pub fn is_numeric(&self) -> bool {
+        match self {
+            Self::Digest(_) => false,
+            Self::Verity(token) => token.field.is_numeric(),
+            Self::Size(_) => true,
+        }
+    }
+}
+
+/// An `${assembly.size:<path template>}` reference: the file's size in bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssemblySizeToken {
+    pub path: AssemblyPathTemplate,
 }
 
 /// An `${assembly.sha256:<path template>}` reference.
@@ -88,6 +113,11 @@ pub enum AssemblyVerityField {
 }
 
 impl AssemblyVerityField {
+    /// Whether the field is a decimal integer rather than hex text.
+    pub fn is_numeric(self) -> bool {
+        !matches!(self, Self::RootHash | Self::Salt)
+    }
+
     pub const ALL: [Self; 6] = [
         Self::RootHash,
         Self::Salt,
@@ -115,6 +145,7 @@ impl AssemblyVerityField {
 
 const DIGEST_TOKEN_PREFIX: &str = "assembly.sha256:";
 const VERITY_TOKEN_PREFIX: &str = "assembly.verity:";
+const SIZE_TOKEN_PREFIX: &str = "assembly.size:";
 
 /// Splits a generated entry value into literal text and `${assembly...}`
 /// tokens, replacing each token with `resolve(token)`. Any other `${...}`
@@ -149,6 +180,14 @@ fn parse_value_token(token: &str, value: &str) -> Result<AssemblyValueToken, Str
             path: AssemblyPathTemplate::new(path.trim()),
         }));
     }
+    if let Some(path) = token.strip_prefix(SIZE_TOKEN_PREFIX) {
+        if path.trim().is_empty() {
+            return Err(format!("'${{{token}}}' needs a path in '{value}'"));
+        }
+        return Ok(AssemblyValueToken::Size(AssemblySizeToken {
+            path: AssemblyPathTemplate::new(path.trim()),
+        }));
+    }
     if let Some(body) = token.strip_prefix(VERITY_TOKEN_PREFIX) {
         let Some((path, field)) = body.rsplit_once(':') else {
             return Err(format!(
@@ -175,7 +214,7 @@ fn parse_value_token(token: &str, value: &str) -> Result<AssemblyValueToken, Str
         }));
     }
     Err(format!(
-        "unsupported token '${{{token}}}' in '{value}'; only '${{assembly.sha256:<path>}}' and '${{assembly.verity:<path>:<field>}}' are resolved at assembly time"
+        "unsupported token '${{{token}}}' in '{value}'; only '${{assembly.sha256:<path>}}', '${{assembly.size:<path>}}' and '${{assembly.verity:<path>:<field>}}' are resolved at assembly time"
     ))
 }
 
@@ -212,7 +251,7 @@ mod tests {
                     token.path.as_str(),
                     token.field.as_str()
                 )),
-                AssemblyValueToken::Digest(_) => Err("digest".into()),
+                _ => Err("other".into()),
             },
         )
         .expect("rendered");
@@ -237,6 +276,7 @@ mod tests {
             "${assembly.verity:x}",
             "${assembly.verity:x:uuid}",
             "${assembly.verity::root_hash}",
+            "${assembly.size: }",
         ] {
             assert!(
                 assembly_value_tokens(value, |_| Ok(String::new())).is_err(),
@@ -251,6 +291,7 @@ mod tests {
             name: "m".into(),
             src: Some("x".into()),
             entries: None,
+            json: None,
         };
         assert!(matches!(
             member.source(),
@@ -263,5 +304,13 @@ mod tests {
             member.source(),
             Some(AssemblyArchiveMemberSourceSpec::Generated(_))
         ));
+        member.entries = None;
+        member.json = Some(AssemblyJsonValue::Object(Vec::new()));
+        assert!(matches!(
+            member.source(),
+            Some(AssemblyArchiveMemberSourceSpec::Json(_))
+        ));
+        member.src = Some("x".into());
+        assert_eq!(member.source(), None);
     }
 }

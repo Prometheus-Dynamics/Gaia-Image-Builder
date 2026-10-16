@@ -110,11 +110,13 @@ fn spec_with_archive(scratch: &TempDir, name: &str) -> (ResolvedBuildSpec, PathB
                         "IMAGE_SHA256".into(),
                         "${assembly.sha256:$assembly.out/emmc.img}".into(),
                     )]),
+                    json: None,
                 },
                 AssemblyArchiveMemberSpec {
                     name: "rootfs.ext4".into(),
                     src: Some("@assets/rootfs.ext4".into()),
                     entries: None,
+                    json: None,
                 },
             ],
         }],

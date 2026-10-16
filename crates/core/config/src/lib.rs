@@ -156,6 +156,7 @@ pub(crate) fn resolve_build_checked(
     let interpolated = interpolate_config(with_dynamic_inputs, &env);
     let normalized = normalize_paths(interpolated)?;
     reject_non_rust_build_groups(&normalized)?;
+    reject_non_rust_cargo_git_sources(&normalized)?;
     let mut spec = compile_config(normalized);
     if let Some(id) = &variant.id {
         for source in spec
@@ -664,6 +665,28 @@ fn reject_non_rust_build_groups(raw: &raw::RawBuildConfig) -> Result<(), ConfigE
             .unwrap_or_else(|| "<unknown>".to_string()),
         message: format!(
             "artifact '{}' sets build_group, which is only supported for kind = \"rust\" artifacts",
+            artifact.id
+        ),
+    })
+}
+
+/// `cargo_git_sources` maps cargo git dependencies, so it only applies to
+/// `kind = "rust"` artifacts.
+fn reject_non_rust_cargo_git_sources(raw: &raw::RawBuildConfig) -> Result<(), ConfigError> {
+    let Some(artifact) = raw.artifacts.iter().find(|artifact| {
+        !artifact.cargo_git_sources.is_empty()
+            && !matches!(artifact.definition, raw::RawArtifactDefinition::Rust { .. })
+    }) else {
+        return Ok(());
+    };
+    Err(ConfigError::ConfigShape {
+        path: raw
+            .source_path
+            .as_deref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<unknown>".to_string()),
+        message: format!(
+            "artifact '{}' sets cargo_git_sources, which is only supported for kind = \"rust\" artifacts",
             artifact.id
         ),
     })

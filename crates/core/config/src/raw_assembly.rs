@@ -1,4 +1,6 @@
 use serde::Deserialize;
+use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
+use std::fmt;
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
@@ -14,6 +16,7 @@ pub struct RawImageAssemblyConfig {
     pub disks: Vec<RawAssemblyDiskConfig>,
     pub archives: Vec<RawAssemblyArchiveConfig>,
     pub busybox_initramfs: Vec<RawAssemblyBusyboxInitramfsConfig>,
+    pub binaries: Vec<RawAssemblyBinaryConfig>,
     pub kernel_modules: Vec<RawAssemblyKernelModulesConfig>,
 }
 
@@ -46,6 +49,10 @@ pub struct RawAssemblyFileConfig {
     pub tree: String,
     pub src: Option<String>,
     pub src_glob: Option<String>,
+    /// Text written to `dest` instead of copying a source.
+    pub content: Option<String>,
+    /// A JSON document written to `dest` instead of copying a source.
+    pub json: Option<RawAssemblyJsonValue>,
     pub dest: String,
     pub mode: Option<String>,
     pub optional: bool,
@@ -232,13 +239,98 @@ pub struct RawAssemblyArchiveMemberConfig {
     pub name: String,
     pub src: Option<String>,
     pub entries: Option<Vec<(String, String)>>,
+    pub json: Option<RawAssemblyJsonValue>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct RawAssemblyArchiveGeneratedConfig {
     pub name: String,
-    pub entries: Vec<(String, String)>,
+    /// `KEY = "value"` lines; unset with `json` unset writes an empty file.
+    pub entries: Option<Vec<(String, String)>>,
+    pub json: Option<RawAssemblyJsonValue>,
+}
+
+/// A JSON value as written in a `json = { ... }` table. Objects keep their
+/// keys in the order the file wrote them (the `toml` crate's `preserve_order`
+/// feature). Floats are rejected; a datetime is taken as its text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RawAssemblyJsonValue {
+    String(String),
+    Integer(i64),
+    Bool(bool),
+    Array(Vec<RawAssemblyJsonValue>),
+    Object(Vec<(String, RawAssemblyJsonValue)>),
+}
+
+impl<'de> Deserialize<'de> for RawAssemblyJsonValue {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(JsonValueVisitor)
+    }
+}
+
+struct JsonValueVisitor;
+
+impl<'de> Visitor<'de> for JsonValueVisitor {
+    type Value = RawAssemblyJsonValue;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a string, integer, boolean, array or table")
+    }
+
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        Ok(RawAssemblyJsonValue::String(value.to_string()))
+    }
+
+    fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
+        Ok(RawAssemblyJsonValue::String(value))
+    }
+
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+        Ok(RawAssemblyJsonValue::Integer(value))
+    }
+
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+        i64::try_from(value)
+            .map(RawAssemblyJsonValue::Integer)
+            .map_err(|_| E::custom(format!("integer {value} is too large for a JSON value")))
+    }
+
+    fn visit_bool<E: de::Error>(self, value: bool) -> Result<Self::Value, E> {
+        Ok(RawAssemblyJsonValue::Bool(value))
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let mut items = Vec::new();
+        while let Some(item) = seq.next_element::<RawAssemblyJsonValue>()? {
+            items.push(item);
+        }
+        Ok(RawAssemblyJsonValue::Array(items))
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut members: Vec<(String, RawAssemblyJsonValue)> = Vec::new();
+        while let Some(key) = map.next_key::<String>()? {
+            if members.iter().any(|(existing, _)| *existing == key) {
+                return Err(de::Error::custom(format!("duplicate json key '{key}'")));
+            }
+            let value = map.next_value::<RawAssemblyJsonValue>()?;
+            members.push((key, value));
+        }
+        Ok(RawAssemblyJsonValue::Object(members))
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawAssemblyBinaryConfig {
+    pub tree: String,
+    pub src: String,
+    pub dest: String,
+    /// Root for the runtime libraries; derived from `src` when unset.
+    pub sysroot: Option<String>,
+    /// Octal file mode; `0755` when unset.
+    pub mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

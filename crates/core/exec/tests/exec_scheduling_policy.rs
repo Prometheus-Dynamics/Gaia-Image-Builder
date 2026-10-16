@@ -194,6 +194,7 @@ impl Harness {
                     all_features: false,
                     build_group: None,
                     group_packages: Vec::new(),
+                    cargo_git_sources: Vec::new(),
                 }),
                 None,
                 ArtifactOutputSpec {

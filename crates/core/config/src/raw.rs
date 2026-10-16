@@ -520,6 +520,10 @@ pub struct RawArtifactConfig {
     /// Rust only: artifacts naming the same group build in one cargo run.
     #[serde(default)]
     pub build_group: Option<String>,
+    /// Rust only: cargo git dependencies taken from declared git sources, as
+    /// the repo URL Cargo.lock records → the git source's id.
+    #[serde(default)]
+    pub cargo_git_sources: BTreeMap<String, String>,
     #[serde(default)]
     pub install_name: Option<String>,
     #[serde(default)]

@@ -19,6 +19,7 @@ fn rust_provider_fails_for_missing_source_dir_when_nested_build_enabled() {
             all_features: false,
             build_group: None,
             group_packages: Vec::new(),
+            cargo_git_sources: Vec::new(),
         }),
         None,
         ArtifactOutputSpec {
@@ -60,6 +61,7 @@ fn rust_artifact_state_persists_backend_native_fields() {
             all_features: false,
             build_group: None,
             group_packages: Vec::new(),
+            cargo_git_sources: Vec::new(),
         }),
         None,
         ArtifactOutputSpec {
@@ -111,6 +113,7 @@ fn nested_rust_build_does_not_accept_stale_existing_output() {
             all_features: false,
             build_group: None,
             group_packages: Vec::new(),
+            cargo_git_sources: Vec::new(),
         }),
         None,
         ArtifactOutputSpec {
@@ -148,6 +151,7 @@ fn rust_artifact(id: &str, package: &str, output: &Path) -> ArtifactSpec {
             all_features: false,
             build_group: None,
             group_packages: Vec::new(),
+            cargo_git_sources: Vec::new(),
         }),
         None,
         ArtifactOutputSpec {
@@ -526,5 +530,6 @@ fn no_default_features_reaches_cargo() {
     assert_eq!(error.kind, ArtifactProviderErrorKind::BackendCommand);
 }
 
+mod cargo_git;
 mod groups;
 mod shared_target;

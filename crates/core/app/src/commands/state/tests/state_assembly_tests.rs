@@ -19,6 +19,7 @@ fn an_assembly_is_recorded_under_the_fingerprint_its_inputs_settled_to() {
                 name: "rootfs.ext4".into(),
                 src: Some(input.display().to_string().into()),
                 entries: None,
+                json: None,
             }],
         }],
         ..gaia_spec::ImageAssemblySpec::default()

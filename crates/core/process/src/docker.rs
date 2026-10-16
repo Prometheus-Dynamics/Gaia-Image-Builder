@@ -105,13 +105,19 @@ pub fn docker_run_command(
     }
     // A missing source would be created by docker as root (see
     // `docker_mount_candidates`): only existing directories are mounted.
+    let read_only = read_only_docker_mounts();
     for mount in normalized_docker_mounts(&spec.mounts, command)
         .into_iter()
         .filter(|mount| mount.is_dir())
     {
+        let suffix = if read_only.contains(&mount) {
+            ":ro"
+        } else {
+            ""
+        };
         wrapped
             .arg("-v")
-            .arg(format!("{}:{}", mount.display(), mount.display()));
+            .arg(format!("{0}:{0}{suffix}", mount.display()));
     }
     wrapped.arg("-w").arg(&spec.current_dir);
     for (key, value) in &spec.extra_env {
@@ -305,6 +311,29 @@ pub fn register_docker_mount(dir: &Path) {
         .insert(dir.to_path_buf());
 }
 
+/// Directories mounted read-only into every container this process runs
+/// from now on, for inputs a build must not change (a git mirror it fetches
+/// from).
+static READ_ONLY_MOUNTS: std::sync::Mutex<BTreeSet<PathBuf>> =
+    std::sync::Mutex::new(BTreeSet::new());
+
+/// Mounts `dir` read-only (`:ro`) into every container this process runs
+/// from now on. A directory already mounted through the workspace is mounted
+/// again inside that mount, read-only.
+pub fn register_read_only_docker_mount(dir: &Path) {
+    READ_ONLY_MOUNTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(dir.to_path_buf());
+}
+
+fn read_only_docker_mounts() -> BTreeSet<PathBuf> {
+    READ_ONLY_MOUNTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
+
 /// The spec's mounts, the registered ones, and the targets of links inside
 /// them that paths in the command's arguments and environment go through
 /// (a link in the workspace to a directory outside it would otherwise
@@ -319,6 +348,7 @@ fn normalized_docker_mounts(mounts: &[PathBuf], command: &Command) -> Vec<PathBu
             .iter()
             .cloned(),
     );
+    all.extend(read_only_docker_mounts());
     let named = command
         .get_args()
         .chain(command.get_envs().filter_map(|(_, value)| value))
@@ -600,6 +630,34 @@ mod tests {
             absolute_docker_mount_candidate(&format!("file://{}", scripts.display())),
             Some(scripts.clone())
         );
+    }
+
+    #[test]
+    fn a_read_only_registered_mount_is_mounted_with_ro() {
+        let scratch = TempDir::new("gaia-process-test");
+        let workspace = scratch.join("docker-ro-mount");
+        let mirror = workspace.join(".gaia/cache/git/mirror.git");
+        fs::create_dir_all(&mirror).expect("mirror dir");
+        register_read_only_docker_mount(&mirror);
+
+        let command = Command::new("build-tool");
+        let spec = DockerRunSpec::workspace_mount("image:latest", &workspace, &command);
+        let wrapped = docker_run_command(&command, &spec).expect("docker command");
+        let args = wrapped
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        let read_only = format!("{0}:{0}:ro", mirror.display());
+        assert!(
+            args.windows(2)
+                .any(|window| window[0] == "-v" && window[1] == read_only),
+            "{args:?}"
+        );
+        // The workspace itself stays read-write.
+        assert!(args.windows(2).any(|window| {
+            window[0] == "-v" && window[1] == format!("{0}:{0}", workspace.display())
+        }));
     }
 
     #[test]

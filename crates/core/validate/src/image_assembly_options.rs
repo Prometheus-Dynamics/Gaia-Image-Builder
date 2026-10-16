@@ -193,8 +193,9 @@ pub(crate) fn validate_filesystem_options(
     }
 }
 
-/// Every `${assembly.verity:<path>:<field>}` archive token must name the
-/// `dest` of a verity transform, written the same way.
+/// Every `${assembly.verity:<path>:<field>}` token, in archive entries,
+/// archive JSON and generated files, must name the `dest` of a verity
+/// transform, written the same way.
 pub(crate) fn validate_verity_token_targets(
     assembly: &ImageAssemblySpec,
     diagnostics: &mut Vec<ValidationDiagnostic>,
@@ -205,29 +206,24 @@ pub(crate) fn validate_verity_token_targets(
         .filter(|transform| transform.kind == AssemblyTransformKindSpec::Verity)
         .map(|transform| transform.dest.as_str().trim())
         .collect();
-    for archive in &assembly.archives {
-        for member in &archive.members {
-            for (key, value) in member.entries.iter().flatten() {
-                let _ = assembly_value_tokens(value, |token| {
-                    if let AssemblyValueToken::Verity(verity) = token
-                        && !verity_dests.contains(verity.path.as_str().trim())
-                    {
-                        diagnostics.push(error(
-                            "assembly_archive_verity_target_unknown",
-                            format!(
-                                "assembly archive '{}' member '{}' entry '{key}' reads verity field '{}' of '{}', which no verity transform writes; use the transform's dest exactly as written",
-                                archive.id,
-                                member.name,
-                                verity.field.as_str(),
-                                verity.path
-                            ),
-                            Some("image.assembly.archives.generated.entries".into()),
-                        ));
-                    }
-                    Ok(String::new())
-                });
+    for site in crate::image_assembly_generated::token_sites(assembly) {
+        let _ = assembly_value_tokens(site.text, |token| {
+            if let AssemblyValueToken::Verity(verity) = token
+                && !verity_dests.contains(verity.path.as_str().trim())
+            {
+                diagnostics.push(error(
+                    "assembly_archive_verity_target_unknown",
+                    format!(
+                        "{} reads verity field '{}' of '{}', which no verity transform writes; use the transform's dest exactly as written",
+                        site.label,
+                        verity.field.as_str(),
+                        verity.path
+                    ),
+                    Some(site.location.into()),
+                ));
             }
-        }
+            Ok(String::new())
+        });
     }
 }
 

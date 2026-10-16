@@ -1,12 +1,14 @@
 mod artifacts;
 mod build_groups;
 mod buildroot_policy;
+mod cargo_git_sources;
 mod checkpoints;
 mod core;
 mod diagnostics;
 mod image;
 mod image_assembly;
 mod image_assembly_collected;
+mod image_assembly_generated;
 mod image_assembly_layout;
 mod image_assembly_options;
 mod image_assembly_order;

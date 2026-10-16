@@ -58,6 +58,12 @@ pub(super) fn interpolate_image_assembly(
             file.src_glob = file
                 .src_glob
                 .map(|value| resolver::interpolate_string(value, raw, env));
+            file.content = file
+                .content
+                .map(|value| assembly_archives::interpolate_content(&value, raw, env));
+            file.json = file
+                .json
+                .map(|value| assembly_archives::interpolate_json(value, raw, env));
             file.dest = resolver::interpolate_string(file.dest, raw, env);
             file.mode = file
                 .mode
@@ -159,6 +165,22 @@ pub(super) fn interpolate_image_assembly(
                 .map(|value| resolver::interpolate_string(value, raw, env))
                 .collect();
             initramfs
+        })
+        .collect();
+    assembly.binaries = assembly
+        .binaries
+        .into_iter()
+        .map(|mut binary| {
+            binary.tree = resolver::interpolate_string(binary.tree, raw, env);
+            binary.src = resolver::interpolate_string(binary.src, raw, env);
+            binary.dest = resolver::interpolate_string(binary.dest, raw, env);
+            binary.sysroot = binary
+                .sysroot
+                .map(|value| resolver::interpolate_string(value, raw, env));
+            binary.mode = binary
+                .mode
+                .map(|value| resolver::interpolate_string(value, raw, env));
+            binary
         })
         .collect();
     assembly.kernel_modules = assembly

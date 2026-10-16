@@ -1,6 +1,6 @@
 use crate::env::ResolvedEnvironment;
 use crate::raw::RawBuildConfig;
-use crate::raw_assembly::RawAssemblyArchiveConfig;
+use crate::raw_assembly::{RawAssemblyArchiveConfig, RawAssemblyJsonValue};
 
 use super::resolver;
 
@@ -20,13 +20,66 @@ pub(super) fn interpolate_assembly_archive(
         if let Some(entries) = member.entries.take() {
             member.entries = Some(interpolate_entries(entries, raw, env));
         }
+        member.json = member
+            .json
+            .take()
+            .map(|value| interpolate_json(value, raw, env));
     }
     for generated in &mut archive.generated {
         generated.name =
             resolver::interpolate_string(std::mem::take(&mut generated.name), raw, env);
-        generated.entries = interpolate_entries(std::mem::take(&mut generated.entries), raw, env);
+        generated.entries = generated
+            .entries
+            .take()
+            .map(|entries| interpolate_entries(entries, raw, env));
+        generated.json = generated
+            .json
+            .take()
+            .map(|value| interpolate_json(value, raw, env));
     }
     archive
+}
+
+/// Interpolates file content like an entry value: config tokens resolve,
+/// `${assembly...}` tokens are kept for assembly time.
+pub(super) fn interpolate_content(
+    value: &str,
+    raw: &RawBuildConfig,
+    env: &ResolvedEnvironment,
+) -> String {
+    interpolate_entry_value(value, raw, env)
+}
+
+/// Interpolates every string of a JSON value (keys too), keeping
+/// `${assembly...}` tokens for assembly time.
+pub(super) fn interpolate_json(
+    value: RawAssemblyJsonValue,
+    raw: &RawBuildConfig,
+    env: &ResolvedEnvironment,
+) -> RawAssemblyJsonValue {
+    match value {
+        RawAssemblyJsonValue::String(text) => {
+            RawAssemblyJsonValue::String(interpolate_entry_value(&text, raw, env))
+        }
+        RawAssemblyJsonValue::Integer(_) | RawAssemblyJsonValue::Bool(_) => value,
+        RawAssemblyJsonValue::Array(items) => RawAssemblyJsonValue::Array(
+            items
+                .into_iter()
+                .map(|item| interpolate_json(item, raw, env))
+                .collect(),
+        ),
+        RawAssemblyJsonValue::Object(members) => RawAssemblyJsonValue::Object(
+            members
+                .into_iter()
+                .map(|(key, item)| {
+                    (
+                        resolver::interpolate_string(key, raw, env),
+                        interpolate_json(item, raw, env),
+                    )
+                })
+                .collect(),
+        ),
+    }
 }
 
 fn interpolate_entries(

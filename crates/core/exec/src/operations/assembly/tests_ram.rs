@@ -31,6 +31,8 @@ fn ram_test_assembly(work_dir: &str) -> ImageAssemblySpec {
         mode: None,
         optional: false,
         preserve_symlink: false,
+        content: None,
+        json: None,
     };
     let partition = |name: &str, image: Option<&str>, size: Option<&str>, wipe: bool| {
         gaia_spec::AssemblyDiskPartitionSpec {

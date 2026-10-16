@@ -1,0 +1,139 @@
+//! Generated content: the `${assembly...}` tokens of archive entries, text
+//! files and JSON documents are rendered here, and a tree file generated
+//! from text or JSON is written here.
+
+use super::files::assembly_dest_is_directory;
+use super::*;
+use gaia_spec::{AssemblyJsonValue, AssemblyValueToken};
+
+/// The value of one `${assembly...}` token: a file's sha256, a field of a
+/// verity transform's output, or a file's size in bytes.
+pub(super) fn token_value(
+    spec: &ResolvedBuildSpec,
+    roots: &AssemblyRoots,
+    verity: &VerityOutputs,
+    token: &AssemblyValueToken,
+) -> Result<String, String> {
+    match token {
+        AssemblyValueToken::Digest(token) => {
+            let path = roots.resolve_path(spec, &token.path)?;
+            if !path.is_file() {
+                return Err(format!(
+                    "'${{assembly.sha256:{}}}' file '{}' does not exist",
+                    token.path,
+                    path.display()
+                ));
+            }
+            file_sha256(&path)
+        }
+        AssemblyValueToken::Verity(token) => {
+            let path = roots.resolve_path(spec, &token.path)?;
+            let output = verity.get(&path).ok_or_else(|| {
+                format!(
+                    "'${{assembly.verity:{}:{}}}' names no verity transform output at '{}'",
+                    token.path,
+                    token.field.as_str(),
+                    path.display()
+                )
+            })?;
+            Ok(output.field(token.field))
+        }
+        AssemblyValueToken::Size(token) => {
+            let path = roots.resolve_path(spec, &token.path)?;
+            if !path.is_file() {
+                return Err(format!(
+                    "'${{assembly.size:{}}}' file '{}' does not exist",
+                    token.path,
+                    path.display()
+                ));
+            }
+            Ok(file_len(&path)?.to_string())
+        }
+    }
+}
+
+/// Renders the tokens of a text value.
+pub(super) fn render_text(
+    spec: &ResolvedBuildSpec,
+    roots: &AssemblyRoots,
+    verity: &VerityOutputs,
+    text: &str,
+) -> Result<String, String> {
+    gaia_spec::assembly_value_tokens(text, |token| token_value(spec, roots, verity, token))
+}
+
+/// The text of a JSON document, with its tokens rendered.
+pub(super) fn render_json(
+    spec: &ResolvedBuildSpec,
+    roots: &AssemblyRoots,
+    verity: &VerityOutputs,
+    json: &AssemblyJsonValue,
+) -> Result<String, String> {
+    json.render(&mut |token| token_value(spec, roots, verity, token))
+}
+
+/// A tree file generated from `content` or `json`, as written.
+pub(super) struct GeneratedFile {
+    pub(super) dest: PathBuf,
+    pub(super) bytes: u64,
+    pub(super) sha256: String,
+}
+
+/// The mode a generated file gets when the config does not set one. Fixed,
+/// so the tree does not depend on the host's umask.
+const DEFAULT_GENERATED_MODE: &str = "0644";
+
+/// Writes a file entry's generated content into the tree.
+pub(super) fn write_generated_file(
+    spec: &ResolvedBuildSpec,
+    roots: &AssemblyRoots,
+    verity: &VerityOutputs,
+    tree_path: &Path,
+    file: &gaia_spec::AssemblyFileSpec,
+) -> Result<GeneratedFile, String> {
+    if assembly_dest_is_directory(&file.dest) {
+        return Err(format!(
+            "assembly file for tree '{}' generates content for dest '{}', which names a directory; name the file",
+            file.tree, file.dest
+        ));
+    }
+    let text = match (&file.content, &file.json) {
+        (Some(content), None) => render_text(spec, roots, verity, content)?,
+        (None, Some(json)) => render_json(spec, roots, verity, json)?,
+        _ => {
+            return Err(format!(
+                "assembly file for tree '{}' must set exactly one of src, src_glob, content or json",
+                file.tree
+            ));
+        }
+    };
+    let dest = assembly_tree_dest(tree_path, &file.dest)?;
+    if let Some(parent) = dest.parent() {
+        std_fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "failed to create generated file dir '{}': {error}",
+                parent.display()
+            )
+        })?;
+    }
+    std_fs::write(&dest, text.as_bytes()).map_err(|error| {
+        format!(
+            "failed to write generated file '{}': {error}",
+            dest.display()
+        )
+    })?;
+    let mode = match file.parsed_mode().map_err(|error| error.to_string())? {
+        Some(mode) => Some(mode),
+        None => Some(
+            DEFAULT_GENERATED_MODE
+                .parse()
+                .map_err(|error: gaia_spec::FileModeParseError| error.to_string())?,
+        ),
+    };
+    apply_mode(&dest, mode)?;
+    Ok(GeneratedFile {
+        bytes: file_len(&dest)?,
+        sha256: file_sha256(&dest)?,
+        dest,
+    })
+}

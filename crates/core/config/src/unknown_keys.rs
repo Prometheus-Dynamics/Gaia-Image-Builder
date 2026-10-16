@@ -125,6 +125,11 @@ const ASSEMBLY_CHILDREN: &[Section] = &[
         &[],
     ),
     section(
+        "binaries",
+        struct_fields::<raw_assembly::RawAssemblyBinaryConfig>,
+        &[],
+    ),
+    section(
         "kernel_modules",
         struct_fields::<raw_assembly::RawAssemblyKernelModulesConfig>,
         &[],

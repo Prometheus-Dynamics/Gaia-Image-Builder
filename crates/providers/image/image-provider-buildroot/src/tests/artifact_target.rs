@@ -12,6 +12,7 @@ fn artifact(target: &str) -> gaia_spec::ArtifactSpec {
             all_features: false,
             build_group: None,
             group_packages: Vec::new(),
+            cargo_git_sources: Vec::new(),
         }),
         None,
         gaia_spec::ArtifactOutputSpec {

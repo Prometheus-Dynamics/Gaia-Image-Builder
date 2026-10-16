@@ -250,6 +250,7 @@ fn archive_entries_read_the_verity_fields_they_name() {
                     "${assembly.verity:$assembly.work/data.erofs:hash_offset}".into(),
                 ),
             ]),
+            json: None,
         }],
     }];
     spec.image.assembly = Some(assembly);
@@ -284,6 +285,7 @@ fn archive_entry_naming_no_verity_output_fails_without_running_a_tool() {
                     "ROOT".into(),
                     "${assembly.verity:$assembly.work/nothing.erofs:root_hash}".into(),
                 )]),
+                json: None,
             }],
         }],
         ..ImageAssemblySpec::default()

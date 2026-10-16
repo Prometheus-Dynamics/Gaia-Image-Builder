@@ -11,9 +11,11 @@ description = "Rust artifact provider scaffold for Gaia."
 [dependencies]
 gaia-artifact-providers.workspace = true
 gaia-process.workspace = true
+gaia-source-providers.workspace = true
 gaia-spec.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+toml.workspace = true
 
 [dev-dependencies]
 gaia-testkit.workspace = true

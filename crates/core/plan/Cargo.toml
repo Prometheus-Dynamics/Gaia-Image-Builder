@@ -17,6 +17,10 @@ gaia-spec.workspace = true
 sha2.workspace = true
 tracing.workspace = true
 
+[features]
+# Generated ELF objects for the tests of crates that copy binaries.
+test-fixtures = []
+
 [dev-dependencies]
 gaia-testkit.workspace = true
 gaia-config.workspace = true

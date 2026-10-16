@@ -218,6 +218,8 @@ fn stage_image_assembly_cleans_tree_and_skips_optional_missing_sources() {
                 mode: None,
                 optional: false,
                 preserve_symlink: false,
+                content: None,
+                json: None,
             },
             AssemblyFileSpec {
                 tree: "boot".into(),
@@ -227,6 +229,8 @@ fn stage_image_assembly_cleans_tree_and_skips_optional_missing_sources() {
                 mode: None,
                 optional: true,
                 preserve_symlink: false,
+                content: None,
+                json: None,
             },
         ],
         ..ImageAssemblySpec::default()
@@ -262,6 +266,8 @@ fn copy_assembly_file_copies_regular_files_and_applies_mode() {
         mode: Some("0755".into()),
         optional: false,
         preserve_symlink: false,
+        content: None,
+        json: None,
     };
 
     copy_assembly_file(&source, &dest, &file).expect("copy");
@@ -295,6 +301,8 @@ fn copy_assembly_file_preserves_symlinks_when_requested() {
         mode: None,
         optional: false,
         preserve_symlink: true,
+        content: None,
+        json: None,
     };
 
     copy_assembly_file(&source_link, &dest, &file).expect("copy symlink");
@@ -443,6 +451,8 @@ fn boot_assembly(
             mode: None,
             optional: false,
             preserve_symlink: false,
+            content: None,
+            json: None,
         }],
         transforms,
         filesystems: vec![gaia_spec::AssemblyFilesystemSpec {
@@ -585,12 +595,16 @@ fn assembly_disk_archives_log_a_step_time_and_sizes() {
     }
 }
 
+#[path = "tests_binaries.rs"]
+mod tests_binaries;
 #[path = "tests_busybox.rs"]
 mod tests_busybox;
 #[path = "tests_ext4.rs"]
 mod tests_ext4;
 #[path = "tests_filesystem.rs"]
 mod tests_filesystem;
+#[path = "tests_generated.rs"]
+mod tests_generated;
 
 #[path = "tests_kernel_modules.rs"]
 mod tests_kernel_modules;

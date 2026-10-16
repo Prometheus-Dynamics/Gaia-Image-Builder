@@ -1,6 +1,7 @@
 mod artifact;
 mod assembly;
 mod assembly_archive_spec;
+mod assembly_json;
 mod assembly_order;
 mod assembly_output_spec;
 mod assembly_spec;
@@ -31,8 +32,9 @@ mod workspace;
 pub use artifact::{
     ArtifactDefinition, ArtifactExecutionSpec, ArtifactInstallClassSpec,
     ArtifactInstallIdentitySpec, ArtifactOutputSpec, ArtifactProviderKind, ArtifactRef,
-    ArtifactSpec, ArtifactVariantSpec, BuildModeSpec, DockerArtifactExecutionSpec, GoArtifactSpec,
-    JavaArtifactSpec, NodeArtifactSpec, PythonArtifactSpec, RustArtifactSpec,
+    ArtifactSpec, ArtifactVariantSpec, BuildModeSpec, CargoGitSourceSpec,
+    DockerArtifactExecutionSpec, GoArtifactSpec, JavaArtifactSpec, NodeArtifactSpec,
+    PythonArtifactSpec, RustArtifactSpec, cargo_git_url_key,
 };
 pub use assembly::{
     AssemblyRoots, AssemblyWorkDirKeyword, assembly_work_dir_keyword, expand_simple_glob,
@@ -40,9 +42,10 @@ pub use assembly::{
 };
 pub use assembly_archive_spec::{
     AssemblyArchiveMemberSourceSpec, AssemblyArchiveMemberSpec, AssemblyArchiveSpec,
-    AssemblyDigestToken, AssemblyValueToken, AssemblyVerityField, AssemblyVerityToken,
-    assembly_value_tokens,
+    AssemblyDigestToken, AssemblySizeToken, AssemblyValueToken, AssemblyVerityField,
+    AssemblyVerityToken, assembly_value_tokens,
 };
+pub use assembly_json::{AssemblyJsonValue, json_string};
 pub use assembly_order::{
     AssemblyCycle, AssemblyStep, AssemblyStepPaths, assembly_step_paths,
     assembly_steps_reading_later_outputs, order_assembly_steps,
@@ -52,8 +55,8 @@ pub use assembly_output_spec::{
     AssemblyTransformSpec, VERITY_DEFAULT_BLOCK_SIZE,
 };
 pub use assembly_spec::{
-    AssemblyBusyboxInitramfsSpec, AssemblyDirSpec, AssemblyDiskPartitionSpec, AssemblyDiskSpec,
-    AssemblyDiskTruncateSpec, AssemblyEbrPlacementSpec, AssemblyFileSpec,
+    AssemblyBinarySpec, AssemblyBusyboxInitramfsSpec, AssemblyDirSpec, AssemblyDiskPartitionSpec,
+    AssemblyDiskSpec, AssemblyDiskTruncateSpec, AssemblyEbrPlacementSpec, AssemblyFileSpec,
     AssemblyKernelModulesSpec, AssemblyPartitionTableSpec, AssemblyPathTemplate,
     AssemblyPathTemplateContext, AssemblyPathTemplateError, AssemblySymlinkSpec, AssemblyTreeSpec,
     FileMode, FileModeParseError, ImageAssemblySpec, MbrPartitionType, MbrPartitionTypeParseError,

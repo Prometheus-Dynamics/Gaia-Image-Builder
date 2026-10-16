@@ -4,12 +4,12 @@
 use super::*;
 
 /// Machine numbers used by the fixtures.
-pub(crate) const EM_X86_64: u16 = 62;
-pub(crate) const EM_AARCH64: u16 = 183;
+pub const EM_X86_64: u16 = 62;
+pub const EM_AARCH64: u16 = 183;
 
 /// What a fixture object contains.
 #[derive(Debug, Clone)]
-pub(crate) struct ElfFixture<'a> {
+pub struct ElfFixture<'a> {
     pub is_64bit: bool,
     pub little_endian: bool,
     pub machine: u16,
@@ -19,7 +19,7 @@ pub(crate) struct ElfFixture<'a> {
 }
 
 impl<'a> ElfFixture<'a> {
-    pub(crate) fn dynamic(machine: u16, needed: &'a [&'a str]) -> Self {
+    pub fn dynamic(machine: u16, needed: &'a [&'a str]) -> Self {
         Self {
             is_64bit: true,
             little_endian: true,
@@ -37,7 +37,7 @@ const VADDR_BASE: u64 = 0x40_0000;
 
 /// Builds an ELF object with a PT_LOAD over the whole file, a PT_DYNAMIC, an
 /// optional PT_INTERP, and the dynamic entries the fixture asks for.
-pub(crate) fn build_elf(fixture: &ElfFixture<'_>) -> Vec<u8> {
+pub fn build_elf(fixture: &ElfFixture<'_>) -> Vec<u8> {
     let is_64 = fixture.is_64bit;
     let little = fixture.little_endian;
     let word = if is_64 { 8 } else { 4 };
@@ -214,6 +214,7 @@ fn rpath_is_used_when_there_is_no_runpath() {
 
 /// The file offset of the first dynamic entry with `tag`, in a little-endian
 /// ELF64 fixture built by [`build_elf`].
+#[cfg_attr(not(test), allow(dead_code))]
 fn find_tag(bytes: &[u8], tag: u64) -> Option<usize> {
     let phoff = u64::from_le_bytes(bytes[32..40].try_into().ok()?) as usize;
     let phnum = u16::from_le_bytes(bytes[56..58].try_into().ok()?) as usize;

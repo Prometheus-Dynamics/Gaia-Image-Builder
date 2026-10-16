@@ -1,5 +1,5 @@
+use super::runtime_closure::{RuntimeLinkage, copy_runtime_closure};
 use super::*;
-use gaia_plan::RuntimeEntry;
 
 pub(super) struct BusyboxInitramfsSummary {
     pub(super) src: PathBuf,
@@ -7,25 +7,8 @@ pub(super) struct BusyboxInitramfsSummary {
     pub(super) bytes: u64,
     pub(super) sha256: String,
     pub(super) applets: Vec<String>,
-    pub(super) runtime_linkage: BusyboxRuntimeLinkage,
+    pub(super) runtime_linkage: RuntimeLinkage,
     pub(super) runtime_libraries: Vec<PathBuf>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum BusyboxRuntimeLinkage {
-    NotRequested,
-    Static,
-    Dynamic,
-}
-
-impl BusyboxRuntimeLinkage {
-    pub(super) fn as_str(self) -> &'static str {
-        match self {
-            Self::NotRequested => "not-requested",
-            Self::Static => "static",
-            Self::Dynamic => "dynamic",
-        }
-    }
 }
 
 pub(super) fn execute_busybox_initramfs(
@@ -79,13 +62,13 @@ pub(super) fn execute_busybox_initramfs(
             .transpose()?;
         let closure = gaia_plan::resolve_runtime_closure(&src, sysroot.as_deref())?;
         if closure.dynamic {
-            let copied = copy_busybox_runtime_closure(tree, &closure)?;
-            (BusyboxRuntimeLinkage::Dynamic, copied)
+            let copied = copy_runtime_closure(tree, &closure)?;
+            (RuntimeLinkage::Dynamic, copied)
         } else {
-            (BusyboxRuntimeLinkage::Static, Vec::new())
+            (RuntimeLinkage::Static, Vec::new())
         }
     } else {
-        (BusyboxRuntimeLinkage::NotRequested, Vec::new())
+        (RuntimeLinkage::NotRequested, Vec::new())
     };
 
     Ok(BusyboxInitramfsSummary {
@@ -134,72 +117,4 @@ pub(super) fn create_busybox_applet_symlink(tree: &Path, applet: &str) -> Result
                 )
             })
     }
-}
-
-/// Writes a resolved runtime closure into the tree at its absolute paths:
-/// the interpreter and each library as a copy of the sysroot's file, and each
-/// symlink crossed on the way as a symlink with the sysroot's target text.
-/// Returns the tree paths of the copied files.
-pub(super) fn copy_busybox_runtime_closure(
-    tree: &Path,
-    closure: &gaia_plan::RuntimeClosure,
-) -> Result<Vec<PathBuf>, String> {
-    let mut copied = Vec::new();
-    for entry in &closure.entries {
-        let dest = tree.join(entry.guest().trim_start_matches('/'));
-        if let Some(parent) = dest.parent() {
-            std_fs::create_dir_all(parent).map_err(|error| {
-                format!(
-                    "failed to create busybox runtime dir '{}': {error}",
-                    parent.display()
-                )
-            })?;
-        }
-        if let Ok(metadata) = dest.symlink_metadata() {
-            if metadata.is_dir() {
-                return Err(format!(
-                    "busybox runtime path '{}' is a directory in the tree, but the sysroot needs it as a link or file; do not create that directory in the tree",
-                    dest.display()
-                ));
-            }
-            std_fs::remove_file(&dest).map_err(|error| {
-                format!(
-                    "failed to replace busybox runtime path '{}': {error}",
-                    dest.display()
-                )
-            })?;
-        }
-        match entry {
-            RuntimeEntry::File { source, .. } => {
-                std_fs::copy(source, &dest).map_err(|error| {
-                    format!(
-                        "failed to copy busybox runtime file '{}' to '{}': {error}",
-                        source.display(),
-                        dest.display()
-                    )
-                })?;
-                copied.push(dest);
-            }
-            RuntimeEntry::Symlink { target, .. } => create_runtime_symlink(target, &dest)?,
-        }
-    }
-    Ok(copied)
-}
-
-#[cfg(unix)]
-fn create_runtime_symlink(target: &str, dest: &Path) -> Result<(), String> {
-    std::os::unix::fs::symlink(target, dest).map_err(|error| {
-        format!(
-            "failed to create busybox runtime link '{}' -> '{target}': {error}",
-            dest.display()
-        )
-    })
-}
-
-#[cfg(not(unix))]
-fn create_runtime_symlink(_target: &str, dest: &Path) -> Result<(), String> {
-    Err(format!(
-        "busybox runtime link '{}' needs a Unix host to create symlinks",
-        dest.display()
-    ))
 }

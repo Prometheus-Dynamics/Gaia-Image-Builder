@@ -352,6 +352,8 @@ fn plan_rebuilds_assembly_when_runtime_state_is_missing_even_if_outputs_exist() 
             mode: None,
             optional: false,
             preserve_symlink: false,
+            content: None,
+            json: None,
         }],
         ..ImageAssemblySpec::default()
     });

@@ -6,6 +6,7 @@ use gaia_spec::ResolvedBuildSpec;
 use crate::ValidationDiagnostic;
 use crate::diagnostics::error;
 use crate::image_assembly_collected::validate_collected_reference;
+use crate::image_assembly_generated;
 use crate::image_assembly_layout;
 
 pub(crate) fn validate_image_assembly(
@@ -96,10 +97,15 @@ pub(crate) fn validate_image_assembly(
                 Some("image.assembly.files".into()),
             ));
         }
+        if file.content.is_some() || file.json.is_some() {
+            image_assembly_generated::validate_generated_file(spec, &tree_ids, file, diagnostics);
+            continue;
+        }
         match (file.src.as_ref(), file.src_glob.as_ref()) {
             (Some(_), Some(_)) | (None, None) => diagnostics.push(error(
                 "assembly_file_source_invalid",
-                "assembly file entries must set exactly one of src or src_glob".into(),
+                "assembly file entries must set exactly one of src, src_glob, content or json"
+                    .into(),
                 Some("image.assembly.files".into()),
             )),
             (Some(src), None) => {
@@ -441,6 +447,8 @@ pub(crate) fn validate_image_assembly(
     crate::image_assembly_outputs::validate_filesystem_outputs(spec, assembly, diagnostics);
     crate::image_assembly_outputs::validate_kernel_modules(spec, assembly, &tree_ids, diagnostics);
     image_assembly_layout::validate_archives(spec, assembly, &tree_ids, diagnostics);
+    image_assembly_generated::validate_binaries(spec, &tree_ids, assembly, diagnostics);
+    image_assembly_generated::validate_token_reads(assembly, diagnostics);
     crate::image_assembly_order::validate_assembly_order(assembly, diagnostics);
 
     for initramfs in &assembly.busybox_initramfs {

@@ -1,5 +1,8 @@
 use crate::assembly_output_spec::{AssemblyFilesystemSpec, AssemblyTransformSpec};
-use crate::{AssemblyArchiveSpec, AssemblyTreeId, ByteSize, ByteSizeParseError, ImageProviderKind};
+use crate::{
+    AssemblyArchiveSpec, AssemblyJsonValue, AssemblyTreeId, ByteSize, ByteSizeParseError,
+    ImageProviderKind,
+};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -17,6 +20,7 @@ pub struct ImageAssemblySpec {
     pub disks: Vec<AssemblyDiskSpec>,
     pub archives: Vec<AssemblyArchiveSpec>,
     pub busybox_initramfs: Vec<AssemblyBusyboxInitramfsSpec>,
+    pub binaries: Vec<AssemblyBinarySpec>,
     pub kernel_modules: Vec<AssemblyKernelModulesSpec>,
 }
 
@@ -33,6 +37,7 @@ impl ImageAssemblySpec {
             && self.disks.is_empty()
             && self.archives.is_empty()
             && self.busybox_initramfs.is_empty()
+            && self.binaries.is_empty()
             && self.kernel_modules.is_empty()
     }
 }
@@ -68,6 +73,10 @@ pub struct AssemblyFileSpec {
     pub tree: AssemblyTreeId,
     pub src: Option<AssemblyPathTemplate>,
     pub src_glob: Option<AssemblyPathTemplate>,
+    /// Text written to `dest`, with `${assembly...}` tokens rendered.
+    pub content: Option<String>,
+    /// A JSON document written to `dest`, with `${assembly...}` tokens rendered.
+    pub json: Option<AssemblyJsonValue>,
     pub dest: String,
     pub mode: Option<String>,
     pub optional: bool,
@@ -298,6 +307,26 @@ impl std::fmt::Display for MbrPartitionTypeParseError {
                 write!(formatter, "unknown partition type alias '{value}'")
             }
         }
+    }
+}
+
+/// A binary copied into a tree with its runtime closure: the interpreter and
+/// the libraries it needs, found under `sysroot`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssemblyBinarySpec {
+    pub tree: AssemblyTreeId,
+    /// The binary in the target tree it was built for.
+    pub src: AssemblyPathTemplate,
+    /// Where the binary goes in the tree, as a path in the tree.
+    pub dest: String,
+    /// Target root for the runtime libraries; `None` derives it from `src`.
+    pub sysroot: Option<AssemblyPathTemplate>,
+    pub mode: Option<String>,
+}
+
+impl AssemblyBinarySpec {
+    pub fn parsed_mode(&self) -> Result<Option<FileMode>, FileModeParseError> {
+        self.mode.as_deref().map(FileMode::from_str).transpose()
     }
 }
 

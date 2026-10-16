@@ -1,3 +1,4 @@
+use super::content::{render_json, token_value};
 use super::tar::TarWriter;
 use super::*;
 use gaia_spec::AssemblyArchiveMemberSourceSpec;
@@ -94,8 +95,20 @@ fn write_archive(
                     .map_err(context)?;
                 (None, bytes)
             }
+            Some(AssemblyArchiveMemberSourceSpec::Json(json)) => {
+                let contents = render_json(spec, roots, verity, json).map_err(context)?;
+                let bytes = contents.len() as u64;
+                writer
+                    .append(&member.name, bytes, &mut contents.as_bytes(), |chunk| {
+                        hasher.update(chunk)
+                    })
+                    .map_err(context)?;
+                (None, bytes)
+            }
             None => {
-                return Err(context("must set exactly one of src or entries".into()));
+                return Err(context(
+                    "must set exactly one of src, entries or json".into(),
+                ));
             }
         };
         members.push(AssemblyTarMemberSummary {
@@ -124,8 +137,8 @@ fn write_archive(
 }
 
 /// Renders `KEY=value` lines. `${assembly.sha256:<path>}` becomes the hex
-/// sha256 of that file, and `${assembly.verity:<path>:<field>}` a field of
-/// that verity transform's output. Values are single-quoted unless they
+/// sha256 of that file, `${assembly.verity:<path>:<field>}` a field of
+/// that verity transform's output, and `${assembly.size:<path>}` the size. Values are single-quoted unless they
 /// consist only of shell-safe characters, so the file can be sourced by `sh`.
 pub(super) fn render_env_file(
     spec: &ResolvedBuildSpec,
@@ -135,30 +148,8 @@ pub(super) fn render_env_file(
 ) -> Result<String, String> {
     let mut contents = String::new();
     for (key, value) in entries {
-        let value = gaia_spec::assembly_value_tokens(value, |token| match token {
-            gaia_spec::AssemblyValueToken::Digest(token) => {
-                let path = roots.resolve_path(spec, &token.path)?;
-                if !path.is_file() {
-                    return Err(format!(
-                        "'${{assembly.sha256:{}}}' file '{}' does not exist",
-                        token.path,
-                        path.display()
-                    ));
-                }
-                file_sha256(&path)
-            }
-            gaia_spec::AssemblyValueToken::Verity(token) => {
-                let path = roots.resolve_path(spec, &token.path)?;
-                let output = verity.get(&path).ok_or_else(|| {
-                    format!(
-                        "'${{assembly.verity:{}:{}}}' names no verity transform output at '{}'",
-                        token.path,
-                        token.field.as_str(),
-                        path.display()
-                    )
-                })?;
-                Ok(output.field(token.field))
-            }
+        let value = gaia_spec::assembly_value_tokens(value, |token| {
+            token_value(spec, roots, verity, token)
         })
         .map_err(|error| format!("entry '{key}': {error}"))?;
         contents.push_str(key);

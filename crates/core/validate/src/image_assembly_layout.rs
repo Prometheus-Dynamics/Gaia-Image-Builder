@@ -204,7 +204,7 @@ pub(crate) fn validate_archives(
                 None => diagnostics.push(error(
                     "assembly_archive_member_source_invalid",
                     format!(
-                        "assembly archive '{}' member '{}' must set exactly one of src or entries",
+                        "assembly archive '{}' member '{}' must set exactly one of src, entries or json",
                         archive.id, member.name
                     ),
                     Some("image.assembly.archives.members".into()),
@@ -234,6 +234,21 @@ pub(crate) fn validate_archives(
                         entries,
                         diagnostics,
                     );
+                }
+                Some(AssemblyArchiveMemberSourceSpec::Json(json)) => {
+                    for text in json.strings() {
+                        crate::image_assembly_generated::validate_tokens(
+                            spec,
+                            tree_ids,
+                            text,
+                            "image.assembly.archives.generated.json",
+                            &format!(
+                                "assembly archive '{}' member '{}' json",
+                                archive.id, member.name
+                            ),
+                            diagnostics,
+                        );
+                    }
                 }
             }
         }

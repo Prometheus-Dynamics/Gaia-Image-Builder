@@ -20,6 +20,7 @@ pub(super) struct StepRun<'a> {
     staged_count: usize,
     skipped_count: usize,
     busybox_count: usize,
+    binary_count: usize,
     transform_count: usize,
     filesystem_count: usize,
     disk_count: usize,
@@ -100,6 +101,7 @@ impl<'a> StepRun<'a> {
             staged_count: 0,
             skipped_count: 0,
             busybox_count: 0,
+            binary_count: 0,
             transform_count: 0,
             filesystem_count: 0,
             disk_count: 0,
@@ -133,6 +135,7 @@ impl<'a> StepRun<'a> {
             AssemblyStep::Symlink(index) => self.symlink(index),
             AssemblyStep::File(index) => self.file(index),
             AssemblyStep::BusyboxInitramfs(index) => self.busybox(index),
+            AssemblyStep::Binary(index) => self.binary(index),
             AssemblyStep::KernelModules(index) => self.kernel_modules(index),
             AssemblyStep::Transform(index) => self.transform(index),
             AssemblyStep::Filesystem(index) => self.filesystem(index),
@@ -163,6 +166,7 @@ impl<'a> StepRun<'a> {
             self.staged_count, self.skipped_count
         ));
         state.insert("completed_busybox_initramfs_count", self.busybox_count);
+        state.insert("completed_binary_count", self.binary_count);
         state.insert("completed_kernel_modules_count", self.kernel_modules_count);
         state.insert("completed_transform_count", self.transform_count);
         state.insert("completed_filesystem_count", self.filesystem_count);
@@ -215,6 +219,26 @@ impl<'a> StepRun<'a> {
         );
         let _span_guard = span.enter();
         let tree_path = self.roots.tree_path(&file.tree)?;
+        if file.content.is_some() || file.json.is_some() {
+            let generated =
+                write_generated_file(self.spec, self.roots, &self.verity_outputs, tree_path, file)?;
+            tracing::Span::current().record("output_path", generated.dest.display().to_string());
+            self.staged_count += 1;
+            let count = self.staged_count;
+            self.state.insert(format!("file.{count}.generated"), "true");
+            self.state.insert(
+                format!("file.{count}.dest"),
+                generated.dest.display().to_string(),
+            );
+            self.state
+                .insert(format!("file.{count}.bytes"), generated.bytes);
+            self.state
+                .insert(format!("file.{count}.sha256"), generated.sha256);
+            if let Some(mode) = &file.mode {
+                self.state.insert(format!("file.{count}.mode"), mode);
+            }
+            return Ok(());
+        }
         let sources = assembly_file_sources(self.spec, self.roots, file)?;
         if sources.is_empty() && file.optional {
             self.skipped_count += 1;
@@ -314,6 +338,54 @@ impl<'a> StepRun<'a> {
             "prepared busybox initramfs tree '{}' with {} applet(s)",
             initramfs.tree,
             summary.applets.len()
+        ));
+        Ok(())
+    }
+
+    fn binary(&mut self, index: usize) -> Result<(), AssemblyError> {
+        let binary = &self.assembly.binaries[index];
+        let span = tracing::info_span!(
+            "assembly_binary",
+            operation_id = %self.operation_id.as_str(),
+            tree_id = %binary.tree,
+            dest = %binary.dest,
+            output_path = tracing::field::Empty
+        );
+        let _span_guard = span.enter();
+        let summary = execute_binary(self.spec, self.roots, binary)?;
+        tracing::Span::current().record("output_path", summary.dest.display().to_string());
+        self.binary_count += 1;
+        let prefix = format!("binary.{}", self.binary_count);
+        let state = &mut self.state;
+        state.insert(format!("{prefix}.tree"), binary.tree.as_str());
+        state.insert(format!("{prefix}.src"), summary.src.display().to_string());
+        state.insert(format!("{prefix}.dest"), summary.dest.display().to_string());
+        state.insert(format!("{prefix}.bytes"), summary.bytes);
+        state.insert(format!("{prefix}.sha256"), summary.sha256);
+        state.insert(
+            format!("{prefix}.runtime_linkage"),
+            summary.runtime_linkage.as_str(),
+        );
+        state.insert(
+            format!("{prefix}.runtime_library_count"),
+            summary.runtime_libraries.len(),
+        );
+        for (library_index, library) in summary.runtime_libraries.iter().enumerate() {
+            state.insert(
+                format!("{prefix}.runtime_library.{}", library_index + 1),
+                library.display().to_string(),
+            );
+        }
+        self.messages.push(format!(
+            "installed binary '{}' into tree '{}' ({} runtime librar{})",
+            binary.dest,
+            binary.tree,
+            summary.runtime_libraries.len(),
+            if summary.runtime_libraries.len() == 1 {
+                "y"
+            } else {
+                "ies"
+            }
         ));
         Ok(())
     }

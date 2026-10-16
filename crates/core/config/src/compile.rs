@@ -383,7 +383,11 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
             SourceSpec::new(source.id, definition)
         })
         .collect();
-    spec.artifacts = raw.artifacts.into_iter().map(compile_artifact).collect();
+    spec.artifacts = raw
+        .artifacts
+        .into_iter()
+        .map(|artifact| compile_artifact(artifact, &spec.sources))
+        .collect();
     complete_build_groups(&mut spec.artifacts);
     spec.install.entries = raw
         .install

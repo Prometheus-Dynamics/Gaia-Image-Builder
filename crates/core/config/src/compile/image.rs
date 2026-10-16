@@ -1,6 +1,8 @@
 use super::*;
-use crate::raw_assembly::RawAssemblyArchiveConfig;
-use gaia_spec::{AssemblyArchiveMemberSpec, AssemblyArchiveSpec};
+use crate::raw_assembly::{RawAssemblyArchiveConfig, RawAssemblyJsonValue};
+use gaia_spec::{
+    AssemblyArchiveMemberSpec, AssemblyArchiveSpec, AssemblyBinarySpec, AssemblyJsonValue,
+};
 
 pub(crate) fn compile_image_feed(raw: &RawBuildConfig) -> ImageFeedSpec {
     ImageFeedSpec {
@@ -175,6 +177,8 @@ pub(crate) fn compile_image_assembly(
                 mode: file.mode,
                 optional: file.optional,
                 preserve_symlink: file.preserve_symlink,
+                content: file.content,
+                json: file.json.map(compile_assembly_json),
             })
             .collect(),
         transforms: raw
@@ -251,6 +255,17 @@ pub(crate) fn compile_image_assembly(
             .into_iter()
             .map(compile_assembly_archive)
             .collect(),
+        binaries: raw
+            .binaries
+            .into_iter()
+            .map(|binary| AssemblyBinarySpec {
+                tree: binary.tree.into(),
+                src: binary.src.into(),
+                dest: binary.dest,
+                sysroot: binary.sysroot.map(Into::into),
+                mode: binary.mode,
+            })
+            .collect(),
         busybox_initramfs: raw
             .busybox_initramfs
             .into_iter()
@@ -321,15 +336,20 @@ fn compile_assembly_partition_table(raw: RawAssemblyPartitionTable) -> AssemblyP
 }
 
 /// `generated` members come first, then `members` in their declared order.
+/// A generated member with neither `entries` nor `json` is an empty file.
 fn compile_assembly_archive(raw: RawAssemblyArchiveConfig) -> AssemblyArchiveSpec {
-    let generated = raw
-        .generated
-        .into_iter()
-        .map(|generated| AssemblyArchiveMemberSpec {
+    let generated = raw.generated.into_iter().map(|generated| {
+        let entries = match (&generated.entries, &generated.json) {
+            (None, None) => Some(Vec::new()),
+            _ => generated.entries,
+        };
+        AssemblyArchiveMemberSpec {
             name: generated.name,
             src: None,
-            entries: Some(generated.entries),
-        });
+            entries,
+            json: generated.json.map(compile_assembly_json),
+        }
+    });
     let members = raw
         .members
         .into_iter()
@@ -337,10 +357,29 @@ fn compile_assembly_archive(raw: RawAssemblyArchiveConfig) -> AssemblyArchiveSpe
             name: member.name,
             src: member.src.map(Into::into),
             entries: member.entries,
+            json: member.json.map(compile_assembly_json),
         });
     AssemblyArchiveSpec {
         id: raw.id,
         output: raw.output.into(),
         members: generated.chain(members).collect(),
+    }
+}
+
+/// A `json = { ... }` value as the spec holds it, keys in written order.
+fn compile_assembly_json(raw: RawAssemblyJsonValue) -> AssemblyJsonValue {
+    match raw {
+        RawAssemblyJsonValue::String(text) => AssemblyJsonValue::String(text),
+        RawAssemblyJsonValue::Integer(number) => AssemblyJsonValue::Integer(number),
+        RawAssemblyJsonValue::Bool(flag) => AssemblyJsonValue::Bool(flag),
+        RawAssemblyJsonValue::Array(items) => {
+            AssemblyJsonValue::Array(items.into_iter().map(compile_assembly_json).collect())
+        }
+        RawAssemblyJsonValue::Object(members) => AssemblyJsonValue::Object(
+            members
+                .into_iter()
+                .map(|(key, value)| (key, compile_assembly_json(value)))
+                .collect(),
+        ),
     }
 }

@@ -381,6 +381,8 @@ fn image_assembly_fingerprint_tracks_staged_file_inputs() {
             mode: None,
             optional: false,
             preserve_symlink: false,
+            content: None,
+            json: None,
         }],
         ..ImageAssemblySpec::default()
     });
@@ -425,6 +427,8 @@ fn image_assembly_fingerprint_tracks_glob_expansion() {
             mode: None,
             optional: false,
             preserve_symlink: false,
+            content: None,
+            json: None,
         }],
         ..ImageAssemblySpec::default()
     });

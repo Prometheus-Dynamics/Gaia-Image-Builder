@@ -285,6 +285,6 @@ fn text(raw: &[u8]) -> Result<String, String> {
         .map_err(|_| "ELF string is not UTF-8".to_string())
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-fixtures"))]
 #[path = "elf_tests.rs"]
 pub(crate) mod tests;

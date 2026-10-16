@@ -60,6 +60,39 @@ pub(crate) fn assembly_input_entries(spec: &ResolvedBuildSpec) -> Vec<(String, S
         ));
     }
     for file in &assembly.files {
+        let owner = format!("file {}:{}", file.tree, file.dest);
+        if let Some(content) = &file.content {
+            parts.push((
+                format!("content {owner}"),
+                format!("content:{owner}:sha256={}", text_digest(content)),
+            ));
+            crate::reuse_assembly_archives::token_input_entries(
+                spec,
+                &roots,
+                "file-digest",
+                (&owner, &owner),
+                content,
+                &generated_filesystem_outputs,
+                &mut parts,
+            );
+        }
+        if let Some(json) = &file.json {
+            parts.push((
+                format!("json {owner}"),
+                format!("json:{owner}:sha256={}", text_digest(&format!("{json:?}"))),
+            ));
+            for text in json.strings() {
+                crate::reuse_assembly_archives::token_input_entries(
+                    spec,
+                    &roots,
+                    "file-digest",
+                    (&owner, &owner),
+                    text,
+                    &generated_filesystem_outputs,
+                    &mut parts,
+                );
+            }
+        }
         if let Some(src) = &file.src {
             let resolved = roots
                 .resolve_path(spec, src)
@@ -146,8 +179,29 @@ pub(crate) fn assembly_input_entries(spec: &ResolvedBuildSpec) -> Vec<(String, S
                 .sysroot
                 .as_ref()
                 .and_then(|template| roots.resolve_path(spec, template).ok());
-            parts.extend(busybox_runtime_parts(&resolved, sysroot.as_deref()));
+            parts.extend(runtime_closure_parts(&resolved, sysroot.as_deref()));
         }
+    }
+    for binary in &assembly.binaries {
+        let resolved = roots
+            .resolve_path(spec, &binary.src)
+            .unwrap_or_else(|_| PathBuf::from(binary.src.as_str()));
+        parts.push((
+            format!("binary {} {}", binary.tree, resolved.display()),
+            format!(
+                "binary:{}:{}:{}:{}:{}",
+                binary.tree,
+                binary.dest,
+                resolved.display(),
+                path_state_signature(&resolved),
+                binary.mode.as_deref().unwrap_or("")
+            ),
+        ));
+        let sysroot = binary
+            .sysroot
+            .as_ref()
+            .and_then(|template| roots.resolve_path(spec, template).ok());
+        parts.extend(runtime_closure_parts(&resolved, sysroot.as_deref()));
     }
     for filesystem in &assembly.filesystems {
         if filesystem.kind == gaia_spec::AssemblyFilesystemKindSpec::CpioZstd {
@@ -392,7 +446,7 @@ mod tests {
 /// A changed libc under the sysroot therefore invalidates the assembly. A
 /// closure that cannot be resolved is named by its error, so the fingerprint
 /// never matches a run that could not have been built.
-fn busybox_runtime_parts(binary: &Path, sysroot: Option<&Path>) -> Vec<(String, String)> {
+fn runtime_closure_parts(binary: &Path, sysroot: Option<&Path>) -> Vec<(String, String)> {
     let closure = match crate::resolve_runtime_closure(binary, sysroot) {
         Ok(closure) => closure,
         Err(error) => {
@@ -438,6 +492,13 @@ fn busybox_runtime_parts(binary: &Path, sysroot: Option<&Path>) -> Vec<(String, 
     parts
 }
 
+fn text_digest(text: &str) -> String {
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 fn file_digest(path: &Path) -> Result<String, String> {
     let bytes = fs::read(path).map_err(|error| format!("{}: {error}", path.display()))?;
     Ok(Sha256::digest(bytes)
@@ -448,7 +509,7 @@ fn file_digest(path: &Path) -> Result<String, String> {
 
 #[cfg(test)]
 mod busybox_runtime_tests {
-    use super::busybox_runtime_parts;
+    use super::runtime_closure_parts;
     use crate::elf::tests::{EM_AARCH64, ElfFixture, build_elf};
     use gaia_testkit::TempDir;
     use std::fs;
@@ -481,7 +542,7 @@ mod busybox_runtime_tests {
         let libc = sysroot.join("lib/libc.so.6");
         fs::write(&libc, build_elf(&ElfFixture::dynamic(EM_AARCH64, &[]))).expect("libc");
 
-        let before = busybox_runtime_parts(&busybox, None);
+        let before = runtime_closure_parts(&busybox, None);
         assert!(
             before.iter().all(|(_, part)| !part.contains("error:")),
             "{before:?}"
@@ -502,12 +563,12 @@ mod busybox_runtime_tests {
             }),
         )
         .expect("new libc");
-        let after = busybox_runtime_parts(&busybox, None);
+        let after = runtime_closure_parts(&busybox, None);
         assert_ne!(before, after);
 
         // A missing library makes the inputs an error, which never matches a reuse.
         fs::remove_file(&libc).expect("remove libc");
-        let missing = busybox_runtime_parts(&busybox, None);
+        let missing = runtime_closure_parts(&busybox, None);
         assert_eq!(missing.len(), 1);
         assert!(
             missing[0].1.starts_with("busybox-runtime:error:"),

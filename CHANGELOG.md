@@ -16,6 +16,21 @@ This cycle also moves the toolchain pin and `rust-version` to Rust 1.99.0
 (installing Gaia needs Rust 1.99 or newer), upgrades every dependency to its
 newest release, and updates the Rust docker images to 1.99.0.
 
+### Generated files, JSON documents and listed binaries for image assembly
+
+- New file entry sources `content = "..."` (text) and `json = { ... }` (a JSON document) write a generated file into a tree, in place of `src`/`src_glob`. Archive members and generated members take `json` in place of `entries`/`src`. `json` tables keep their key order, render numbers for numeric tokens, and write pretty-printed output with a trailing newline, byte-identical across runs.
+- Generated text and JSON render `${assembly...}` tokens at assembly time: `${assembly.sha256:...}`, `${assembly.verity:...:<field>}`, and the new `${assembly.size:<path>}` (size in bytes), in archive entries too. A generated file runs after the steps whose outputs it reads, and works in RAM work dirs. A token that reads an assembly path no step writes is a validation error.
+- New `${build.date}`: the build's time as RFC 3339 UTC, from `SOURCE_DATE_EPOCH` or the build file's git `HEAD` commit time.
+- New `[[image.assembly.binaries]]` copies a binary into a tree with its runtime closure (interpreter and libraries from the sysroot), reusing the BusyBox closure copy. A static binary is only copied. Reuse fingerprints cover the binary and its closure.
+- Docs: "Generated content" and "Listed binaries" in `docs/configuration.md`, with a dynamic slot example combining verity, a JSON manifest, a generated cmdline and a binary.
+- The `toml` crate's `preserve_order` feature is enabled for the config crate, so JSON tables keep their written key order.
+
+### Rust artifacts build private cargo git dependencies from git sources
+
+- New artifact key `cargo_git_sources` (rust only) maps a cargo git dependency to a declared `kind = "git"` source: `cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }`. The key is the repository URL as `Cargo.lock` records it. The artifact depends on the source, and the source's id must be declared and of kind git.
+- Before cargo runs, Gaia makes each commit the lock pins for that repository present in the source's mirror under `.gaia/cache/git` (fetching it on the host with your git credentials), keeps it reachable from a branch of the mirror, and runs cargo with `CARGO_NET_GIT_FETCH_WITH_CLI=true` and `url.<mirror>.insteadOf` rewriting. The container gets no credentials: the mirror is mounted read-only. A locked commit the source does not have fails the build with the URL, the commit and the source id.
+- The mapping is part of the artifact's fingerprint only when set, so artifacts without it keep their fingerprints. `Cargo.toml` and `Cargo.lock` are unchanged. Docs: "Private cargo git dependencies" in `docs/configuration.md`.
+
 ### dm-verity transform and ext4 filesystem for image assembly
 
 - New transform kind `verity` builds a dm-verity hash tree over a data image (`src`, such as an EROFS root filesystem) with `veritysetup format`. The tree is appended to the padded data in `dest`, or written to `hash_dest`. Options: `data_block_size` and `hash_block_size` (powers of two, 512 to 4096, default 4096), `salt` (default: the sha256 of `src`), `uuid` (default: derived from `src`). Two runs give byte-identical output and the same root hash.

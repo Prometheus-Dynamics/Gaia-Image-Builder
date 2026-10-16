@@ -7,12 +7,16 @@ use gaia_artifact_providers::{
     materialize_artifact_output, render_artifact_backend_state, run_command_with_retries,
 };
 use gaia_process::register_docker_mount;
-use gaia_spec::{ArtifactDefinition, ArtifactSpec, BuildModeSpec, ResolvedBuildSpec};
+use gaia_spec::{
+    ArtifactDefinition, ArtifactSpec, BuildModeSpec, CargoGitSourceSpec, ResolvedBuildSpec,
+};
 use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod cargo_git;
 
 pub struct RustProvider;
 
@@ -536,12 +540,16 @@ fn prepare_cargo_target(target: &CargoTarget) -> Result<(), ArtifactProviderErro
     Ok(())
 }
 
-/// Cargo feature selection of a rust artifact.
+/// Cargo feature selection of a rust artifact, and the git sources its cargo
+/// git dependencies come from.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct CargoFeatureFlags {
     features: Vec<String>,
     no_default_features: bool,
     all_features: bool,
+    /// `cargo_git_sources`: prepared on the host before cargo runs. Not in
+    /// the state fields: the artifact's fingerprint covers them.
+    git_sources: Vec<CargoGitSourceSpec>,
 }
 
 impl CargoFeatureFlags {
@@ -551,6 +559,7 @@ impl CargoFeatureFlags {
                 features: rust.features.clone(),
                 no_default_features: rust.no_default_features,
                 all_features: rust.all_features,
+                git_sources: rust.cargo_git_sources.clone(),
             },
             _ => Self::default(),
         }
@@ -633,7 +642,10 @@ fn run_cargo_build(
             line: note.clone(),
         });
     }
-    let command = cargo_build_command(source_dir, packages, flags, contract, &target.dir);
+    let git_env =
+        cargo_git::cargo_git_env(&flags.git_sources, contract, source_dir, log_sink.as_ref())?;
+    let mut command = cargo_build_command(source_dir, packages, flags, contract, &target.dir);
+    command.envs(git_env.iter().map(|(key, value)| (key, value)));
     let label = match packages {
         [package] => format!("cargo build for package '{package}'"),
         _ => format!("cargo build for packages '{}'", packages.join("', '")),

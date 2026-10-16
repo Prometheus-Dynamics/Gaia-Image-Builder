@@ -141,6 +141,37 @@ pub struct RustArtifactSpec {
     /// Sorted packages of every member of `build_group` (this one
     /// included); each is passed to cargo as `-p`. Empty outside a group.
     pub group_packages: Vec<String>,
+    /// Cargo git dependencies served from declared git sources, sorted by
+    /// `url`. Empty unless the artifact sets `cargo_git_sources`.
+    pub cargo_git_sources: Vec<CargoGitSourceSpec>,
+}
+
+/// One cargo git dependency the build takes from a declared git source
+/// instead of the network: the repository URL as Cargo.lock records it, and
+/// the git source whose mirror holds the commits the lock pins.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CargoGitSourceSpec {
+    /// The repository URL as written in the workspace's Cargo.lock (or in
+    /// the artifact's `cargo_git_sources` key; URLs match with and without
+    /// `git+`, a trailing `.git` or `/`).
+    pub url: String,
+    /// The declared `kind = "git"` source that supplies the commits.
+    pub source: SourceId,
+    /// That source's repository URL, which keys its mirror.
+    pub repo: String,
+}
+
+/// The form cargo git URLs are compared in: without a `git+` prefix, a
+/// `?query` or `#fragment`, a trailing `/` and a trailing `.git`. Cargo.lock
+/// writes `git+https://host/repo?branch=main#sha`, and the key of
+/// `cargo_git_sources` may be written with or without `.git`.
+pub fn cargo_git_url_key(url: &str) -> String {
+    let url = url.trim();
+    let url = url.strip_prefix("git+").unwrap_or(url);
+    let url = url.split(['?', '#']).next().unwrap_or(url);
+    let url = url.trim_end_matches('/');
+    let url = url.strip_suffix(".git").unwrap_or(url);
+    url.trim_end_matches('/').to_string()
 }
 
 impl RustArtifactSpec {
@@ -173,6 +204,9 @@ impl std::fmt::Debug for RustArtifactSpec {
         }
         if !self.group_packages.is_empty() {
             debug.field("group_packages", &self.group_packages);
+        }
+        if !self.cargo_git_sources.is_empty() {
+            debug.field("cargo_git_sources", &self.cargo_git_sources);
         }
         debug.finish()
     }
@@ -432,6 +466,7 @@ mod tests {
             all_features: false,
             build_group: None,
             group_packages: Vec::new(),
+            cargo_git_sources: Vec::new(),
         }
     }
 
@@ -464,5 +499,40 @@ mod tests {
         ));
         assert_eq!(spec.cargo_packages(), spec.group_packages);
         assert_eq!(rust_spec().cargo_packages(), vec!["engine".to_string()]);
+    }
+
+    #[test]
+    fn cargo_git_url_key_ignores_prefix_query_slash_and_dot_git() {
+        let key = "https://github.com/Prometheus-Dynamics/Eidos";
+        for url in [
+            "https://github.com/Prometheus-Dynamics/Eidos",
+            "https://github.com/Prometheus-Dynamics/Eidos.git",
+            "https://github.com/Prometheus-Dynamics/Eidos/",
+            "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=main#0123",
+            "git+https://github.com/Prometheus-Dynamics/Eidos?rev=abc",
+        ] {
+            assert_eq!(cargo_git_url_key(url), key, "{url}");
+        }
+        assert_ne!(
+            cargo_git_url_key("https://github.com/Prometheus-Dynamics/Eidos-core.git"),
+            key
+        );
+    }
+
+    #[test]
+    fn rust_spec_debug_includes_cargo_git_sources_only_when_set() {
+        let mut spec = rust_spec();
+        let plain = format!("{spec:?}");
+        assert!(!plain.contains("cargo_git_sources"));
+        spec.cargo_git_sources = vec![CargoGitSourceSpec {
+            url: "https://example.com/dep.git".into(),
+            source: SourceId::new("dep"),
+            repo: "https://example.com/dep.git".into(),
+        }];
+        let debug = format!("{spec:?}");
+        assert!(debug.contains(
+            "cargo_git_sources: [CargoGitSourceSpec { url: \"https://example.com/dep.git\""
+        ));
+        assert!(debug.ends_with("}] }"));
     }
 }

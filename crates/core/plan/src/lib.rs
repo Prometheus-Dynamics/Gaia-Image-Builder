@@ -31,6 +31,12 @@ pub use reuse_explain::{InvalidationSummary, invalidation_summary};
 pub use runtime_libs::{RuntimeClosure, RuntimeEntry, derive_sysroot, resolve_runtime_closure};
 pub use targets::{PlanDomain, PlanTarget};
 
+/// ELF objects for tests that copy binaries (`test-fixtures` feature).
+#[cfg(feature = "test-fixtures")]
+pub mod test_fixtures {
+    pub use crate::elf::tests::{EM_AARCH64, EM_X86_64, ElfFixture, build_elf};
+}
+
 use gaia_artifact_providers::{ArtifactProviderCatalog, ArtifactProviderOperation};
 use gaia_image_providers::{ImageProviderCatalog, ImageProviderOperation};
 use gaia_source_providers::{SourceProviderCatalog, SourceProviderOperation};

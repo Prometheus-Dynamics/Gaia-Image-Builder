@@ -1373,6 +1373,9 @@ Artifact kinds:
     `features` or `no_default_features`)
 
   - `build_group` (string; see [Rust build groups](#rust-build-groups))
+  - `cargo_git_sources` (table: repository URL as Cargo.lock records it →
+    the id of a declared `kind = "git"` source; see
+    [Private cargo git dependencies](#private-cargo-git-dependencies))
 
   Feature flags are part of the artifact's identity: changing them rebuilds the
   artifact, and non-default flags are recorded in its backend state. Only
@@ -1480,6 +1483,55 @@ mode = 420
 
 Both artifacts build with `cargo build -p helios-engine -p vision-plugin
 --features helios-engine/plugins,vision-plugin/simd --release`.
+
+#### Private cargo git dependencies
+
+A rust artifact whose workspace depends on a private git repository (`git =
+"https://github.com/org/private.git"` in `Cargo.toml`) needs that repository's
+credentials when cargo fetches it, and a docker container has none. Map the
+dependency to a declared git source instead, and Gaia serves it from that
+source's mirror, prepared on the host with your own git credentials:
+
+```toml
+[[sources]]
+id = "eidos"
+kind = "git"
+repo = "https://github.com/Prometheus-Dynamics/Eidos.git"
+branch = "main"
+
+[[artifacts]]
+id = "vision"
+kind = "rust"
+source = "workspace"
+package = "vision"
+cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
+output_path = "${workspace.out_dir}/artifacts/vision"
+```
+
+- The key is the repository URL as `Cargo.lock` records it. It also matches
+  without `.git`, with a trailing `/`, and with the `git+` prefix or a `?branch=`
+  query that the lock adds. The value is the id of a declared `kind = "git"` source.
+- The artifact depends on each named source, so a change to it rebuilds the
+  artifact. The source's branch or tag does not decide which commits build: the
+  lock does. Cargo.toml and Cargo.lock are not changed.
+- Before cargo runs, on the host: every commit the workspace's `Cargo.lock`
+  pins for the mapped repository must be in the source's mirror under
+  `.gaia/cache/git`. A commit the mirror lacks is fetched; if it still cannot be
+  found the build fails and names the URL, the locked commit and the source.
+  The commit is then kept reachable from `refs/heads/gaia-locked/<commit>` in the
+  mirror, because cargo's git fetch only asks for branches. The mirror's refs are
+  rewritten on every build.
+- Cargo runs with `CARGO_NET_GIT_FETCH_WITH_CLI=true` and git URL rewriting
+  (`url.<mirror>.insteadOf`), so it reads the dependency from the mirror, never
+  from the network. In docker the mirror is mounted read-only at its own path,
+  and the execution image needs `git` (the official rust images have it).
+  Entries already in `GIT_CONFIG_COUNT` are kept.
+- Each mapping must name a `kind = "git"` source. Two keys naming the same
+  repository for different sources, or `cargo_git_sources` on a non-rust
+  artifact, are validation errors.
+- Rewrites match by prefix, so a locked repository whose URL starts with a
+  mapped one (`https://h/a` and `https://h/a-core`) is a build error unless it
+  is mapped too.
 
 Java artifacts run Maven or Gradle automatically when `build_command` is omitted. Use `build_args` to replace the default Maven/Gradle arguments while keeping tool detection, or use `build_command` for a source-local command such as a wrapper script. `build_env` adds environment variables for either mode. `after_image_prepare = true` schedules the artifact after Buildroot prepare, which is useful when the artifact needs the generated Buildroot sysroot before the final image feed is assembled.
 
@@ -1952,7 +2004,7 @@ Assembly roots:
 
 Assembly behavior:
 - Declared `trees` are cleaned and recreated before staging.
-- File entries use exactly one of `src` or `src_glob`.
+- File entries use exactly one of `src`, `src_glob`, `content` or `json`. `content` and `json` write a generated file (see [Generated content](#generated-content)).
 - Glob staging is deterministic and currently supports simple non-recursive `*` filename patterns.
 - A `dest` of `.` or ending in `/` is a directory the sources are copied into; any other `dest` is the file a single source is copied to. A `src_glob` that matches several files needs a directory `dest` (otherwise every match would land on one file) and fails without one.
 - `optional = true` skips missing sources without failing the build and records the skip in runtime state.
@@ -1964,6 +2016,7 @@ Assembly behavior:
 - `busybox_initramfs` copies the configured BusyBox binary to `bin/busybox` and creates the requested applet symlinks in `bin`. With `include_runtime_libs = true` it also copies the dynamic loader and the shared libraries the binary needs, from the target's sysroot (see the next bullet). Each entry takes:
   - `tree`, `busybox`, `applets`, `include_runtime_libs`: as above.
   - `sysroot` (optional): the target root the runtime libraries are read from, as a path template such as `$provider.target`. Unset, it is derived from `busybox`: the directory above its `bin/` or `sbin/`, or two levels up from `usr/bin/` or `usr/sbin/`. A dynamic binary whose sysroot cannot be derived fails the build, asking for `sysroot`.
+- `binaries` copies a binary into a tree together with the runtime it needs (see [Listed binaries](#listed-binaries)).
 - `kernel_modules` copies the named kernel modules, and the modules they depend on, from a kernel's `modules.dep` into a tree under `lib/modules/<kernel version>/` at the same relative paths. It also copies `modules.order`, `modules.builtin` and `modules.builtin.modinfo` when present, then runs `depmod -b <tree> <kernel version>`, so the tree's module index covers exactly the copied set. Each entry takes:
   - `tree`: the tree to fill.
   - `from`: the directory holding the `<kernel version>` directories, such as `$provider.target/lib/modules`.
@@ -2054,13 +2107,48 @@ Assembly results report, per published raw disk image (and the primary image), `
 `[[image.assembly.archives]]` builds a plain POSIX ustar archive after all disks, written by Gaia itself (no external `tar`):
 - `id`: unique archive id.
 - `output`: path template, like other assembly outputs; it can point into the image collect dir (`$provider.images/...`).
-- `members`: ordered list. Each member has a `name` (path inside the archive) and exactly one of `src` (a path template; the file is copied) or `entries` (a generated file).
+- `members`: ordered list. Each member has a `name` (path inside the archive) and exactly one of `src` (a path template; the file is copied), `entries` (a generated `KEY=value` file) or `json` (a generated JSON document, see [Generated content](#generated-content)).
 - `generated`: ordered list of generated members (`name`, `entries`). They are written **before** all `members`; to interleave generated and file members, put `entries` directly on a `members` item instead.
 - `entries`: `[["KEY", "value"], ...]`, rendered as one `KEY=value` line per entry in order. Keys must match `[A-Za-z_][A-Za-z0-9_]*`. Values made only of `A-Z a-z 0-9 _ @ % + = : , . / -` are written as-is; anything else (including an empty value) is wrapped in single quotes with embedded `'` written as `'\''`, so the file can be sourced by `sh`. Values cannot contain newlines.
 - Entry values may contain `${assembly.sha256:<path template>}`, replaced at assembly time by the lowercase hex sha256 of that file (an assembly output such as a transform result, or any other file). The file must exist when the archive is built. Normal config interpolation such as `${build.version}` runs first and may also appear inside the path (`${assembly.sha256:$assembly.out/${build.name}.img}`). Any other `${...}` left in a value is a validation error.
+- Entry values may also contain `${assembly.size:<path template>}`, replaced by the size of that file in bytes.
 - Entry values may also contain `${assembly.verity:<path template>:<field>}`, replaced by a field of a `verity` transform's output. The path must be the transform's `dest` written exactly as in the transform. The fields are `root_hash`, `salt`, `hash_offset`, `data_blocks`, `data_block_size` and `hash_block_size`; see [dm-verity and ext4](#dm-verity-and-ext4). A token that names no verity transform output is a validation error, and an unknown field name is rejected at validation too.
 
 Archive output is deterministic: entries appear in the configured order with mtime 0, uid/gid 0, empty user and group names, and mode `0644`. Member names must be relative paths of at most 100 bytes (the ustar name field; prefix splitting is not used) without `.`/`..` components, and must be unique per archive. The archive is written to a temporary file and published atomically; state records `archives.N.output`, `bytes`, `sha256`, and per-member name, source, size, and sha256. Archive outputs are treated as expected outputs, so a bundle in the collect dir is not reported as a large unexpected file. Reuse fingerprints cover the archive config and the state of every member and digest input file.
+
+#### Generated content
+
+Three ways to write generated text or JSON into a tree or an archive. All three render `${assembly...}` tokens at assembly time and run after the steps whose outputs they read, so a file can name a transform's output that is declared after it.
+
+- **Text files**: `[[image.assembly.files]]` with `content = "..."` (in place of `src`/`src_glob`) writes the text to `dest` in the tree. `mode` applies as for copied files; unset, a generated file is `0644` whatever the host's umask. `dest` must name a file, not a directory. Config interpolation such as `${build.name}` runs first. Any other `${...}` left in the text is an error, so a file that carries its own `${VAR}` (a shell script, say) belongs in `src` rather than `content`.
+- **JSON documents**: `json = { ... }` on a file entry, or on an archive `members` or `generated` item (in place of `entries`/`src`). It is a TOML table whose values are strings, integers, booleans, arrays and tables. Floats are rejected. Keys keep the order the file wrote them, and the output is pretty-printed with two-space indentation and a trailing newline, so two runs write the same bytes.
+- **Tokens** in any string value: `${assembly.sha256:<path>}` (hex digest), `${assembly.size:<path>}` (size in bytes) and `${assembly.verity:<path>:<field>}`. A string that is exactly one numeric token (`size`, or a verity `hash_offset`, `data_blocks`, `data_block_size` or `hash_block_size`) is written as a JSON number; any other token is written as text.
+- `${build.date}` is the build's time as RFC 3339 UTC (`2026-10-15T12:00:00Z`): `SOURCE_DATE_EPOCH` when the environment sets it, else the commit time of the build file's git `HEAD`. Outside both it stays unresolved and the assembly fails rather than write a wall-clock time.
+
+A token that reads a work or out path no step writes is a validation error (`assembly_token_path_not_produced`), since nothing would produce it before the read. The rest of the rules are the archive rules above.
+
+```toml
+[[image.assembly.files]]
+tree = "boot"
+dest = "cmdline.txt"
+content = "console=tty1 atlas.roothash=${assembly.verity:$assembly.work/slot/rootfs.erofs:root_hash} rootwait"
+
+[[image.assembly.files]]
+tree = "boot"
+dest = "state.json"
+json = { schema = 1, state = "trial", size = "${assembly.size:$assembly.work/slot/rootfs.erofs}" }
+```
+
+#### Listed binaries
+
+`[[image.assembly.binaries]]` copies one binary from a target tree into a tree, with the runtime closure a dynamically linked binary needs: its interpreter and its shared libraries, found under a sysroot and copied to the same absolute paths in the tree (symlinks crossed on the way are recreated). A static binary is only copied. Each entry takes:
+- `tree`: the tree to fill.
+- `src`: the binary, a path template such as `$provider.buildroot_output/target/usr/sbin/e2fsck`.
+- `dest`: where it goes in the tree, such as `usr/sbin/e2fsck`. It must be a file path inside the tree.
+- `sysroot` (optional): the target root its libraries are read from. Unset, it is derived from `src`: the directory above its `bin/` or `sbin/` (or `usr/bin/`, `usr/sbin/`).
+- `mode` (optional): octal, `0755` unless set.
+
+Several binaries may share libraries: each library is copied once per binary, the later copy replacing the same file. Reuse fingerprints cover the binary and its closure, like BusyBox's.
 
 #### dm-verity and ext4
 
@@ -2125,6 +2213,43 @@ src = "$assembly.work/rootfs.verity.erofs"
 ```
 
 The bundle's `manifest.env` is the file the updater sources. The root slot is `rootfs.verity.erofs`; the initramfs opens it with the manifest's root hash and hash offset.
+
+##### Example: a dynamic slot with its manifest, cmdline and tools
+
+The same slot, with the root's verity values in a JSON manifest and in the kernel command line, a fragment that names the slot's trial state, and `e2fsck` copied into the initramfs with its libraries:
+
+```toml
+[[image.assembly.trees]]
+id = "initramfs"
+path = "$assembly.work/initramfs"
+
+[[image.assembly.transforms]]
+kind = "verity"
+src = "$provider.images/rootfs.erofs"
+dest = "$assembly.work/slot/rootfs.erofs"
+
+[[image.assembly.files]]
+tree = "initramfs"
+content = "atlas.roothash=${assembly.verity:$assembly.work/slot/rootfs.erofs:root_hash}\n"
+dest = "cmdline.txt"
+
+[[image.assembly.files]]
+tree = "initramfs"
+content = "trial=1\n"
+dest = "default.txt"
+
+[[image.assembly.files]]
+tree = "initramfs"
+dest = "state.json"
+json = { schema = 1, id = "${input.slot_id}", version = "${build.version}", built = "${build.date}", source = "${project.describe}", image = { size = "${assembly.size:$assembly.work/slot/rootfs.erofs}", sha256 = "${assembly.sha256:$assembly.work/slot/rootfs.erofs}" }, verity = { root_hash = "${assembly.verity:$assembly.work/slot/rootfs.erofs:root_hash}", salt = "${assembly.verity:$assembly.work/slot/rootfs.erofs:salt}", hash_offset = "${assembly.verity:$assembly.work/slot/rootfs.erofs:hash_offset}", data_blocks = "${assembly.verity:$assembly.work/slot/rootfs.erofs:data_blocks}" } }
+
+[[image.assembly.binaries]]
+tree = "initramfs"
+src = "$provider.buildroot_output/target/usr/sbin/e2fsck"
+dest = "usr/sbin/e2fsck"
+```
+
+The `state.json` document is written in the order shown, and its `hash_offset` and `data_blocks` are JSON numbers.
 
 ##### Example: ext4 data partition
 

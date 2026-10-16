@@ -2,8 +2,9 @@
 //! writes (the same path, a file inside a directory it fills, or a
 //! directory it writes into) runs after it, whatever their kinds or
 //! declaration order. Steps that do not depend on each other keep the
-//! classic order: dirs, symlinks, files, busybox initramfs, kernel modules,
-//! transforms, filesystems, disks, archives, each in declaration order.
+//! classic order: dirs, symlinks, files, busybox initramfs, binaries, kernel
+//! modules, transforms, filesystems, disks, archives, each in declaration
+//! order.
 
 use std::path::{Path, PathBuf};
 
@@ -16,6 +17,7 @@ pub enum AssemblyStep {
     Symlink(usize),
     File(usize),
     BusyboxInitramfs(usize),
+    Binary(usize),
     KernelModules(usize),
     Transform(usize),
     Filesystem(usize),
@@ -40,6 +42,10 @@ impl AssemblyStep {
                     assembly.busybox_initramfs[index].tree
                 )
             }
+            Self::Binary(index) => format!(
+                "binary '{}' for tree '{}'",
+                assembly.binaries[index].dest, assembly.binaries[index].tree
+            ),
             Self::KernelModules(index) => format!(
                 "kernel modules for tree '{}'",
                 assembly.kernel_modules[index].tree
@@ -109,17 +115,30 @@ pub fn assembly_step_paths(
         );
     }
     for (index, file) in assembly.files.iter().enumerate() {
-        let read = match (&file.src, &file.src_glob) {
-            (Some(src), _) => resolve(src),
+        let mut reads = match (&file.src, &file.src_glob) {
+            (Some(src), _) => vec![resolve(src)],
             // A glob reads what its pattern matches.
-            (None, Some(glob)) => resolve(glob),
-            (None, None) => None,
+            (None, Some(glob)) => vec![resolve(glob)],
+            // Generated content reads the paths its tokens name.
+            (None, None) => {
+                let mut token_reads = Vec::new();
+                if let Some(content) = &file.content {
+                    value_token_reads(content, resolve, &mut token_reads);
+                }
+                if let Some(json) = &file.json {
+                    for text in json.strings() {
+                        value_token_reads(text, resolve, &mut token_reads);
+                    }
+                }
+                token_reads
+            }
         };
         let dest = file.dest.trim_end_matches('/');
         let dest = if dest.is_empty() { "." } else { dest };
+        reads.retain(Option::is_some);
         push(
             AssemblyStep::File(index),
-            vec![read],
+            reads,
             vec![in_tree(file.tree.as_str(), dest)],
         );
     }
@@ -132,6 +151,17 @@ pub fn assembly_step_paths(
             AssemblyStep::BusyboxInitramfs(index),
             reads,
             vec![tree(initramfs.tree.as_str())],
+        );
+    }
+    for (index, binary) in assembly.binaries.iter().enumerate() {
+        let mut reads = vec![resolve(&binary.src)];
+        if let Some(sysroot) = &binary.sysroot {
+            reads.push(resolve(sysroot));
+        }
+        push(
+            AssemblyStep::Binary(index),
+            reads,
+            vec![tree(binary.tree.as_str())],
         );
     }
     for (index, modules) in assembly.kernel_modules.iter().enumerate() {
@@ -180,10 +210,12 @@ pub fn assembly_step_paths(
                 reads.push(resolve(src));
             }
             for (_, value) in member.entries.iter().flatten() {
-                let _ = assembly_value_tokens(value, |token| {
-                    reads.push(resolve(token.path()));
-                    Ok(String::new())
-                });
+                value_token_reads(value, resolve, &mut reads);
+            }
+            if let Some(json) = &member.json {
+                for text in json.strings() {
+                    value_token_reads(text, resolve, &mut reads);
+                }
             }
         }
         push(
@@ -193,6 +225,18 @@ pub fn assembly_step_paths(
         );
     }
     steps
+}
+
+/// The paths a value's `${assembly...}` tokens read, resolved.
+fn value_token_reads(
+    value: &str,
+    resolve: &dyn Fn(&AssemblyPathTemplate) -> Option<PathBuf>,
+    reads: &mut Vec<Option<PathBuf>>,
+) {
+    let _ = assembly_value_tokens(value, |token| {
+        reads.push(resolve(token.path()));
+        Ok(String::new())
+    });
 }
 
 /// Whether a read (a path, or a pattern with `*` components) and a write
@@ -445,6 +489,8 @@ mod tests {
                 mode: None,
                 optional: false,
                 preserve_symlink: false,
+                content: None,
+                json: None,
             }],
             kernel_modules: vec![AssemblyKernelModulesSpec {
                 tree: "initramfs".into(),
@@ -515,6 +561,91 @@ mod tests {
         assert_eq!(
             filesystem.publish_template().expect("published").as_str(),
             "$assembly.out/boot.img"
+        );
+    }
+
+    /// Generated text and JSON read the paths their tokens name, so a file
+    /// declared before the transform that writes its `${assembly.size:...}`
+    /// path still runs after it.
+    #[test]
+    fn generated_content_runs_after_the_steps_whose_outputs_its_tokens_read() {
+        use crate::{
+            AssemblyFileSpec, AssemblyJsonValue, AssemblyTransformKindSpec, AssemblyTransformSpec,
+            AssemblyTreeSpec,
+        };
+        let assembly = ImageAssemblySpec {
+            trees: vec![AssemblyTreeSpec {
+                id: "boot".into(),
+                path: "$assembly.work/boot".into(),
+            }],
+            files: vec![
+                AssemblyFileSpec {
+                    tree: "boot".into(),
+                    src: None,
+                    src_glob: None,
+                    content: Some(
+                        "root=${assembly.verity:$assembly.work/rootfs.erofs:root_hash}".into(),
+                    ),
+                    json: None,
+                    dest: "cmdline.txt".into(),
+                    mode: None,
+                    optional: false,
+                    preserve_symlink: false,
+                },
+                AssemblyFileSpec {
+                    tree: "boot".into(),
+                    src: None,
+                    src_glob: None,
+                    content: None,
+                    json: Some(AssemblyJsonValue::Object(vec![(
+                        "size".into(),
+                        AssemblyJsonValue::String(
+                            "${assembly.size:$assembly.work/rootfs.erofs}".into(),
+                        ),
+                    )])),
+                    dest: "state.json".into(),
+                    mode: None,
+                    optional: false,
+                    preserve_symlink: false,
+                },
+            ],
+            transforms: vec![AssemblyTransformSpec {
+                kind: AssemblyTransformKindSpec::Verity,
+                src: Some("$provider.images/rootfs.erofs".into()),
+                dest: "$assembly.work/rootfs.erofs".into(),
+                deterministic: true,
+                level: None,
+                hash_dest: None,
+                data_block_size: None,
+                hash_block_size: None,
+                salt: None,
+                uuid: None,
+            }],
+            ..ImageAssemblySpec::default()
+        };
+        let paths = assembly_step_paths(
+            &assembly,
+            &|template| Some(PathBuf::from(template.as_str())),
+            &|tree| Some(PathBuf::from(format!("/build/{tree}"))),
+        );
+        let order = order_assembly_steps(&paths).expect("no cycle");
+        let transform = order
+            .iter()
+            .position(|step| *step == AssemblyStep::Transform(0))
+            .expect("transform");
+        assert!(
+            order
+                .iter()
+                .position(|step| *step == AssemblyStep::File(0))
+                .expect("file")
+                > transform
+        );
+        assert!(
+            order
+                .iter()
+                .position(|step| *step == AssemblyStep::File(1))
+                .expect("json")
+                > transform
         );
     }
 }

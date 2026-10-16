@@ -46,6 +46,8 @@ fn executes_image_assembly_file_staging() {
                 mode: Some("0644".into()),
                 optional: false,
                 preserve_symlink: false,
+                content: None,
+                json: None,
             },
             AssemblyFileSpec {
                 tree: "boot".into(),
@@ -55,6 +57,8 @@ fn executes_image_assembly_file_staging() {
                 mode: None,
                 optional: false,
                 preserve_symlink: false,
+                content: None,
+                json: None,
             },
             AssemblyFileSpec {
                 tree: "boot".into(),
@@ -64,6 +68,8 @@ fn executes_image_assembly_file_staging() {
                 mode: None,
                 optional: true,
                 preserve_symlink: false,
+                content: None,
+                json: None,
             },
             #[cfg(unix)]
             AssemblyFileSpec {
@@ -74,6 +80,8 @@ fn executes_image_assembly_file_staging() {
                 mode: None,
                 optional: false,
                 preserve_symlink: true,
+                content: None,
+                json: None,
             },
         ],
         ..ImageAssemblySpec::default()
@@ -161,6 +169,8 @@ fn image_assembly_missing_required_source_fails() {
             mode: None,
             optional: false,
             preserve_symlink: false,
+            content: None,
+            json: None,
         }],
         ..ImageAssemblySpec::default()
     });
@@ -231,6 +241,8 @@ fn image_assembly_cleanup_failure_preserves_original_error() {
             mode: None,
             optional: false,
             preserve_symlink: false,
+            content: None,
+            json: None,
         }],
         ..ImageAssemblySpec::default()
     });
@@ -375,6 +387,8 @@ fn image_assembly_disk_failure_cleans_generated_filesystem_output() {
             mode: None,
             optional: false,
             preserve_symlink: false,
+            content: None,
+            json: None,
         }],
         filesystems: vec![AssemblyFilesystemSpec {
             id: "initramfs".into(),
@@ -559,6 +573,8 @@ fn image_assembly_filesystem_failure_cleans_temp_and_final_outputs() {
             mode: None,
             optional: false,
             preserve_symlink: false,
+            content: None,
+            json: None,
         }],
         filesystems: vec![AssemblyFilesystemSpec {
             id: "bootfs".into(),
@@ -632,6 +648,8 @@ fn a_multi_file_glob_needs_a_directory_dest() {
                 mode: None,
                 optional: false,
                 preserve_symlink: false,
+                content: None,
+                json: None,
             }],
             ..ImageAssemblySpec::default()
         });
