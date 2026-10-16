@@ -335,29 +335,6 @@ pub(crate) fn log_lines(status: &LiveStatus) -> Vec<String> {
         .collect()
 }
 
-#[cfg_attr(not(feature = "tui"), allow(dead_code))]
-/// The picker's note for a build with a live run:
-/// `● running 12m, 83% packages`.
-pub(crate) fn live_badge(run: &LiveRun, now: u64) -> String {
-    let Some(status) = &run.status else {
-        return "● running".into();
-    };
-    let state = if run.paused() { "paused" } else { "running" };
-    let elapsed = short_elapsed(now.saturating_sub(status.started_at));
-    let detail = match status.running.iter().find_map(|op| op.build.as_ref()) {
-        Some(progress) => {
-            let percent = progress
-                .done
-                .saturating_mul(100)
-                .checked_div(progress.total)
-                .unwrap_or(100);
-            format!("{percent}% packages")
-        }
-        None => format!("ops {}/{}", status.ops_done, status.ops_total),
-    };
-    format!("● {state} {elapsed}, {detail}")
-}
-
 /// `45s`, `12m`, `1h05m`.
 pub(crate) fn short_elapsed(seconds: u64) -> String {
     if seconds < 60 {
@@ -470,24 +447,6 @@ mod tests {
             text,
             "gaia run 7 is running; it has not written a status yet"
         );
-    }
-
-    #[test]
-    fn badge_shows_package_percentage_and_elapsed_time() {
-        let run = live_fixture();
-        // 12 minutes after the start, 120 of 145 packages: 82%.
-        assert_eq!(
-            live_badge(&run, 1_000 + 12 * 60),
-            "● running 12m, 82% packages"
-        );
-        let mut no_packages = fixture_status();
-        no_packages.running.clear();
-        let run = LiveRun {
-            pid: 1,
-            status: Some(no_packages),
-            stopped: true,
-        };
-        assert_eq!(live_badge(&run, 1_000 + 90), "● paused 1m, ops 3/10");
     }
 
     #[test]

@@ -35,6 +35,7 @@ fn cpio_zstd_assembly(work_dir: &str, output: &str, publish: bool) -> ImageAssem
             path: "$assembly.work/initramfs".into(),
         }],
         files: vec![AssemblyFileSpec {
+            exclude: Vec::new(),
             tree: "initramfs".into(),
             src: Some("@assets/config.txt".into()),
             src_glob: None,
@@ -46,6 +47,7 @@ fn cpio_zstd_assembly(work_dir: &str, output: &str, publish: bool) -> ImageAssem
             json: None,
         }],
         filesystems: vec![gaia_spec::AssemblyFilesystemSpec {
+            free: None,
             id: "initramfs".into(),
             kind: gaia_spec::AssemblyFilesystemKindSpec::CpioZstd,
             source_tree: "initramfs".into(),
@@ -286,13 +288,13 @@ fn vfat_auto_size_is_content_plus_overhead_and_margin_rounded_to_a_mib() {
     let empty = root.join("empty");
     fs::create_dir_all(&empty).expect("empty tree");
     // No content: the fixed overhead and the minimum margin, 2 MiB.
-    assert_eq!(vfat_auto_bytes(&empty).expect("empty"), 2 * MIB);
+    assert_eq!(vfat_auto_bytes(&empty, 0).expect("empty"), 2 * MIB);
 
     let one_byte = root.join("one");
     fs::create_dir_all(one_byte.join("etc")).expect("tree");
     fs::write(one_byte.join("etc/a"), b"x").expect("file");
     // One cluster of content: 4 KiB + 1 MiB + 1 MiB, rounded up to 3 MiB.
-    assert_eq!(vfat_auto_bytes(&one_byte).expect("one byte"), 3 * MIB);
+    assert_eq!(vfat_auto_bytes(&one_byte, 0).expect("one byte"), 3 * MIB);
 
     let large = root.join("large");
     fs::create_dir_all(&large).expect("large tree");
@@ -300,10 +302,10 @@ fn vfat_auto_size_is_content_plus_overhead_and_margin_rounded_to_a_mib() {
         .and_then(|file| file.set_len(50 * MIB))
         .expect("sparse kernel");
     // 50 MiB content, 5% margin (2.5 MiB), fixed overhead 1 MiB: 53.5 MiB, to 54.
-    let size = vfat_auto_bytes(&large).expect("large");
+    let size = vfat_auto_bytes(&large, 0).expect("large");
     assert_eq!(size, 54 * MIB);
     assert_eq!(size % MIB, 0);
-    assert_eq!(vfat_auto_bytes(&large).expect("again"), size);
+    assert_eq!(vfat_auto_bytes(&large, 0).expect("again"), size);
 
     // A link to a directory is counted, not followed: a link back to the
     // tree does not recurse forever.
@@ -313,7 +315,7 @@ fn vfat_auto_size_is_content_plus_overhead_and_margin_rounded_to_a_mib() {
         fs::create_dir_all(looped.join("dir")).expect("looped tree");
         std::os::unix::fs::symlink(&looped, looped.join("dir/back")).expect("loop link");
         // 8 KiB of content (two directories), 1 MiB margin and overhead: 3 MiB.
-        assert_eq!(vfat_auto_bytes(&looped).expect("loop"), 3 * MIB);
+        assert_eq!(vfat_auto_bytes(&looped, 0).expect("loop"), 3 * MIB);
     }
 }
 
@@ -334,6 +336,7 @@ fn vfat_auto_size_builds_an_image_that_holds_the_tree() {
             path: "$assembly.work/boot".into(),
         }],
         files: vec![AssemblyFileSpec {
+            exclude: Vec::new(),
             tree: "boot".into(),
             src: Some("@assets/config.txt".into()),
             src_glob: None,
@@ -345,6 +348,7 @@ fn vfat_auto_size_builds_an_image_that_holds_the_tree() {
             json: None,
         }],
         filesystems: vec![gaia_spec::AssemblyFilesystemSpec {
+            free: None,
             id: "boot".into(),
             kind: gaia_spec::AssemblyFilesystemKindSpec::Vfat,
             source_tree: "boot".into(),

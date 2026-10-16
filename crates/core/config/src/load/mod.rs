@@ -158,9 +158,24 @@ impl Loader<'_> {
         validate_raw_toml_shape(&canonical_path, &value)?;
         let unknown_keys = crate::unknown_keys::unknown_config_keys(&value);
         let sets_nothing = value.as_table().is_some_and(toml::Table::is_empty);
+        // `kind` may be left to a layer this file extends. Without it the
+        // table parses as an empty buildroot definition, which the merge
+        // treats as "no definition" under any kind the other layers set.
+        // A file with no `[image]` table has no definition to check.
+        let image_kind_given = value.get("image").is_none_or(|image| {
+            image
+                .as_table()
+                .is_none_or(|table| table.contains_key("kind"))
+        });
+        if let Some(image) = value.get_mut("image").and_then(toml::Value::as_table_mut)
+            && !image_kind_given
+        {
+            image.insert("kind".into(), toml::Value::String("buildroot".into()));
+        }
         let mut raw: RawBuildConfig = value
             .try_into()
             .map_err(|error| ConfigError::config_parse(&canonical_path, error))?;
+        raw.image.kind_given = image_kind_given;
         raw.source_path = Some(canonical_path.clone());
         raw.unknown_keys = unknown_keys;
         raw.sets_nothing = sets_nothing;
@@ -195,6 +210,12 @@ impl Loader<'_> {
             raw.extends_config = Some(Box::new(self.load(&extends_path, origin, false)?));
         }
         if entrypoint {
+            if !image_kind_given_in_chain(&raw) {
+                return Err(ConfigError::config_shape(
+                    &canonical_path,
+                    "image.kind is not set in this build file or any layer it extends; set kind = \"buildroot\" or kind = \"starting-point\"",
+                ));
+            }
             let selected = crate::apply_preset_selection(raw.clone(), self.build, self.options);
             self.global_inputs = crate::merge::selected_inputs_for_imports(&selected);
         }
@@ -446,4 +467,13 @@ fn infer_build_name(path: &Path) -> String {
         .and_then(|stem| stem.to_str())
         .unwrap_or("build")
         .to_string()
+}
+
+/// Whether this config or a config it extends sets `image.kind`.
+fn image_kind_given_in_chain(raw: &RawBuildConfig) -> bool {
+    raw.image.kind_given
+        || raw
+            .extends_config
+            .as_deref()
+            .is_some_and(image_kind_given_in_chain)
 }

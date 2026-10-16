@@ -17,6 +17,19 @@ pub(super) fn interpolate_assembly_archive(
             .src
             .take()
             .map(|value| resolver::interpolate_string(value, raw, env));
+        member.tree = member
+            .tree
+            .take()
+            .map(|value| resolver::interpolate_string(value, raw, env));
+        member.src_dir = member
+            .src_dir
+            .take()
+            .map(|value| resolver::interpolate_string(value, raw, env));
+        member.src_glob = member
+            .src_glob
+            .take()
+            .map(|value| resolver::interpolate_string(value, raw, env));
+        member.prefix = resolver::interpolate_string(std::mem::take(&mut member.prefix), raw, env);
         if let Some(entries) = member.entries.take() {
             member.entries = Some(interpolate_entries(entries, raw, env));
         }

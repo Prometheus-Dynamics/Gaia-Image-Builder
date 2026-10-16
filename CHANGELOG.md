@@ -16,6 +16,28 @@ This cycle also moves the toolchain pin and `rust-version` to Rust 1.99.0
 (installing Gaia needs Rust 1.99 or newer), upgrades every dependency to its
 newest release, and updates the Rust docker images to 1.99.0.
 
+### TUI screens: start, setup, details
+
+- The start screen shows the builds on the system as cards (progress, elapsed time and estimate for running ones; outcome, duration and age for recent ones) and each build config with its target, profile and last run.
+- Setup is a form with validation badges beside a plan preview: operations to run and reuse, why they run, recorded time, validation, and a Start button that says why it cannot start. A build that declares `[[variants]]` gets a variant value; the variant is planned and run.
+- A details screen (`d`) with Plan, Validation, Reports, Spec and Events tabs replaces the old side panels.
+- Every screen has the same header and footer; `?` lists the keys of the screen.
+- The run dashboard's chart tabs are always five (Summary last), so the footer's `1-5` is right on every run. The Progress chart draws the last run as dots beside this run's braille line, with a marker for now.
+
+### Assembly archive trees, auto-size headroom and layer kind
+
+- Archive members can take a whole tree: `tree = "<tree id>"` or `src_dir = "<path>"` archives every entry under it (regular files with mode 0644 or 0755, directories and symbolic links) under `prefix`, in sorted order and deterministic bytes. `src_glob` on a member archives each match under `name`. `exclude = [...]` on a `tree` or `src_glob` archive member, and on a file entry's `src_glob`, leaves out matches by file name.
+- `free = "256M"` on a vfat or ext4 filesystem with `size = "auto"` leaves that much room beyond the content estimate.
+- `${source.<id>.commit_short}` and `${project.commit_short}`: the first 8 characters of the commit, with a `-dirty` suffix kept.
+- The image `kind` may be left out of a layer that is extended by a build file which sets it; a build that has an `[image]` table and in which no file sets `kind` fails with an error naming `image.kind`.
+- Path sources inside a git work tree compute their identity from `git ls-files` (tracked, plus untracked and not ignored), so ignored build output is no longer read. Their identity changes once, which can cause one rebuild.
+
+### Run dashboard for the TUI monitor and attached runs
+
+- The TUI's monitor (a run it started) and attached view (a `gaia run` another process started) share one run dashboard: a header bar with the state, variant, elapsed time and ETA; an overall progress gauge weighted by the recorded duration of each operation, with the Buildroot packages of a running make; an operations table with each operation's state, time, expected time, delta and reason; chart tabs (Progress: this run against the last one; Resources: CPU, memory, tmpfs, load and disk; Steps; Packages; and a completion Summary); and an output pane with follow, per-operation filter, search and a height control. `Enter` opens an operation's details, `?` lists the keys, `f`/`s` filter and sort, `p` pauses or resumes, and `c` then `c` cancels.
+- The live status file (`.gaia-run.status.json`) carries what the dashboard needs: every planned operation with its state, timing, expected duration and reason, the variant, the step times and the errors. The new fields are optional on read, so snapshots from older Gaia versions still load, and older readers ignore them.
+- The dashboard lays out for 40x8 and up: the wide layout (charts beside the table) from 110 columns; narrower terminals show the table, and `v` switches to the charts.
+
 ### Generated files, JSON documents and listed binaries for image assembly
 
 - New file entry sources `content = "..."` (text) and `json = { ... }` (a JSON document) write a generated file into a tree, in place of `src`/`src_glob`. Archive members and generated members take `json` in place of `entries`/`src`. `json` tables keep their key order, render numbers for numeric tokens, and write pretty-printed output with a trailing newline, byte-identical across runs.

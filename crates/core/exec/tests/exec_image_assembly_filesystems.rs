@@ -516,6 +516,7 @@ fn executes_image_assembly_cpio_filesystems() {
         work_dir: Some(build_dir.join("assembly").display().to_string().into()),
         trees: vec![assembly_tree("initramfs", "$assembly.work/initramfs")],
         files: vec![AssemblyFileSpec {
+            exclude: Vec::new(),
             mode: Some("0755".into()),
             ..assembly_file("initramfs", source_dir.join("init").display(), "init")
         }],

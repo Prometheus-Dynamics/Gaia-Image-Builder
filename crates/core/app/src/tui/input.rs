@@ -14,8 +14,8 @@ impl<'a> TuiState<'a> {
         match self.screen {
             Screen::Picker => self.handle_picker_key(code),
             Screen::Setup => self.handle_setup_key(code, modifiers),
-            Screen::Monitor => self.handle_monitor_key(code, modifiers),
-            Screen::Attach => self.handle_attach_key(code),
+            Screen::Details => self.handle_details_key(code, modifiers),
+            Screen::Monitor | Screen::Attach => self.handle_dashboard_key(code, modifiers),
         }
     }
 
@@ -27,7 +27,7 @@ impl<'a> TuiState<'a> {
             KeyCode::Char('r') => {
                 self.build_entries =
                     discover_build_entries(&self.build, self.builds_dir.as_deref());
-                self.build_dirs.clear();
+                self.build_meta.clear();
                 self.picker_polled_at = None;
                 self.ensure_build_selection();
                 self.ensure_picker_selection();
@@ -47,20 +47,13 @@ impl<'a> TuiState<'a> {
             KeyCode::Char('b') => self.open_picker(),
             KeyCode::Char('p') => self.refresh(),
             KeyCode::Char('r') | KeyCode::Char('s') => self.start_run(),
-            KeyCode::Char('m') => {
-                if matches!(self.run_state, RunState::Running { .. }) || self.last_run.is_some() {
-                    self.screen = Screen::Monitor;
-                } else {
-                    self.set_status("no build to monitor yet; press s to start one");
-                }
-            }
+            KeyCode::Char('m') => self.open_monitor_if_any(),
+            KeyCode::Char('d') => self.open_details(DetailTab::Plan),
             KeyCode::Enter => self.activate_setup_item(),
             KeyCode::Char('j') | KeyCode::Down => self.move_setup_down(),
             KeyCode::Char('k') | KeyCode::Up => self.move_setup_up(),
-            KeyCode::PageDown => self.detail_scroll = self.detail_scroll.saturating_add(10),
-            KeyCode::PageUp => self.detail_scroll = self.detail_scroll.saturating_sub(10),
-            KeyCode::Left if modifiers.is_empty() => self.prev_setup_detail(),
-            KeyCode::Right if modifiers.is_empty() => self.next_setup_detail(),
+            KeyCode::Left if modifiers.is_empty() => self.change_setup_value(-1),
+            KeyCode::Right if modifiers.is_empty() => self.change_setup_value(1),
             _ => {}
         }
     }
@@ -78,56 +71,6 @@ impl<'a> TuiState<'a> {
             }
             KeyCode::Char(ch) => {
                 self.edit_buffer.push(ch);
-            }
-            _ => {}
-        }
-    }
-
-    pub(crate) fn handle_monitor_key(&mut self, code: KeyCode, modifiers: KeyModifiers) {
-        match code {
-            KeyCode::Esc => {
-                self.screen = Screen::Setup;
-                if matches!(self.run_state, RunState::Running { .. }) {
-                    self.set_status("build still running; press m to return to the monitor");
-                }
-            }
-            KeyCode::Char('c') => self.cancel_run(),
-            KeyCode::Char('f') => {
-                self.follow_running = !self.follow_running;
-                if self.follow_running {
-                    self.select_newest_running_operation();
-                    self.detail_follow_tail = true;
-                }
-                self.set_status(if self.follow_running {
-                    "following the running operation"
-                } else {
-                    "follow off"
-                });
-            }
-            KeyCode::Char('j') | KeyCode::Down => {
-                self.follow_running = false;
-                self.move_operation_down();
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                self.follow_running = false;
-                self.move_operation_up();
-            }
-            KeyCode::Left if modifiers.is_empty() => self.prev_monitor_view(),
-            KeyCode::Right if modifiers.is_empty() => self.next_monitor_view(),
-            KeyCode::PageDown => {
-                self.detail_follow_tail = false;
-                self.detail_scroll = self.detail_scroll.saturating_add(10);
-            }
-            KeyCode::PageUp => {
-                self.detail_follow_tail = false;
-                self.detail_scroll = self.detail_scroll.saturating_sub(10);
-            }
-            KeyCode::Home => {
-                self.detail_follow_tail = false;
-                self.detail_scroll = 0;
-            }
-            KeyCode::End => {
-                self.detail_follow_tail = true;
             }
             _ => {}
         }

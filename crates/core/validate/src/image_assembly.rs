@@ -97,6 +97,13 @@ pub(crate) fn validate_image_assembly(
                 Some("image.assembly.files".into()),
             ));
         }
+        validate_exclude(
+            &file.exclude,
+            file.src_glob.is_some(),
+            &format!("files[{index}].exclude"),
+            "image.assembly.files",
+            diagnostics,
+        );
         if file.content.is_some() || file.json.is_some() {
             image_assembly_generated::validate_generated_file(spec, &tree_ids, file, diagnostics);
             continue;
@@ -242,6 +249,28 @@ pub(crate) fn validate_image_assembly(
                 "image.assembly.filesystems.output",
                 diagnostics,
             );
+        }
+        if let Some(free) = &filesystem.free {
+            if filesystem.size.as_deref() != Some("auto") {
+                diagnostics.push(error(
+                    "assembly_filesystem_free_without_auto",
+                    format!(
+                        "assembly filesystem '{}' sets free, which only applies with size = \"auto\"",
+                        filesystem.id
+                    ),
+                    Some("image.assembly.filesystems".into()),
+                ));
+            }
+            if filesystem.parsed_free().is_err() {
+                diagnostics.push(error(
+                    "assembly_filesystem_free_invalid",
+                    format!(
+                        "assembly filesystem '{}' free '{free}' is not a byte size",
+                        filesystem.id
+                    ),
+                    Some("image.assembly.filesystems".into()),
+                ));
+            }
         }
         if filesystem.size.as_deref() == Some("auto") {
             if !matches!(
@@ -541,6 +570,35 @@ pub(crate) fn assembly_expected_image_names(spec: &ResolvedBuildSpec) -> HashSet
         )
         .filter_map(expected_image_name_from_output)
         .collect()
+}
+
+/// `exclude` lists file names; it is only allowed where the source is a
+/// glob or tree (`allowed`), and each entry must be a bare name.
+pub(crate) fn validate_exclude(
+    exclude: &[String],
+    allowed: bool,
+    label: &str,
+    location: &str,
+    diagnostics: &mut Vec<ValidationDiagnostic>,
+) {
+    if !exclude.is_empty() && !allowed {
+        diagnostics.push(error(
+            "assembly_exclude_not_allowed",
+            format!(
+                "{label} sets exclude, which only applies to src_glob (or tree for archive members)"
+            ),
+            Some(location.into()),
+        ));
+    }
+    for name in exclude {
+        if name.is_empty() || name.contains('/') || name.contains('\0') {
+            diagnostics.push(error(
+                "assembly_exclude_invalid",
+                format!("{label} entry '{name}' must be a file name without '/'"),
+                Some(location.into()),
+            ));
+        }
+    }
 }
 
 fn validate_simple_glob_pattern(pattern: &str, diagnostics: &mut Vec<ValidationDiagnostic>) {

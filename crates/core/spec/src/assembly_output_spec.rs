@@ -86,11 +86,18 @@ pub struct AssemblyFilesystemSpec {
     pub uuid: Option<String>,
     /// `ext4` only: whether to create a journal; `None` is on.
     pub journal: Option<bool>,
+    /// Only with `size = "auto"`: free space to leave beyond the content, a
+    /// byte size; `None` leaves only the automatic margin.
+    pub free: Option<String>,
 }
 
 impl AssemblyFilesystemSpec {
     pub fn parsed_size(&self) -> Result<Option<ByteSize>, ByteSizeParseError> {
         self.size.as_deref().map(ByteSize::from_str).transpose()
+    }
+
+    pub fn parsed_free(&self) -> Result<Option<ByteSize>, ByteSizeParseError> {
+        self.free.as_deref().map(ByteSize::from_str).transpose()
     }
 
     /// Where a published filesystem image is copied: the image output dir

@@ -488,12 +488,11 @@ gaia tui configs/builds/cm5.toml      # open one build directly
 Without an explicit build, the TUI opens the build picker when more than one
 entrypoint is found and goes straight to setup when there is only one.
 
-The picker starts with a **Running builds** section, from anywhere on the
+The picker starts with a **Builds on this system** section, from anywhere on the
 system: every `gaia run` in the registry (see [`status`](#status)), live ones
 first and runs that ended in the last 24 hours dimmed. Selecting one attaches to
 its monitor through the status file the run registered; no build config is
-resolved. Outside a project, `gaia tui` opens the picker with only the running
-builds, and says so when there are none. `j`/`k` move between the running
+resolved. Outside a project, `gaia tui` opens the picker with only those builds. `j`/`k` move between the running
 builds and the build configs of the directory, `Enter` attaches or opens, and
 `r` rescans both.
 
@@ -502,23 +501,52 @@ do not appear to other processes; start them with `gaia run`.
 
 When a build already has a `gaia run` in progress (started from another terminal
 or a script), the TUI attaches to it instead of offering to start one, and the
-picker marks such builds, for example `● running 12m, 83% packages`. The attached
-monitor shows the same summary as `gaia status`, refreshed every second, and the
-recent output (`PgUp`/`PgDn` scroll, `End` follows). `p` pauses the run, `r`
-resumes it, and `c` cancels it (press `c` or `y` again to confirm). `q` leaves
-the monitor and the build keeps running; `b` returns to the picker.
+picker marks such builds with a progress bar and their elapsed time. The attached
+monitor is the run dashboard (see Monitor below), refreshed every second from
+the run's status file. `p` pauses or resumes the run (`r` resumes it), and `c`
+cancels it (press `c` or `y` again to confirm). `q` leaves the monitor and the
+build keeps running; `b` returns to the picker.
+
+Every screen has the same frame: a header line with the screen's name and the
+build or run it is about, the screen's body, and a footer with its key hints.
+`?` lists the keys of the screen you are on. Below 40x8 the TUI only says that
+the terminal is too small.
 
 Screens:
-- **Picker** lists build entrypoints.
-- **Setup** edits inputs (enum inputs cycle with `Left`/`Right`, booleans
-  toggle, others open a text field), branch, and parallel jobs, and shows
-  Overview, Selection, Validation, Plan, Reports, and Spec panels. The Plan
-  panel lists every operation with whether the next run will execute or reuse
-  it, and why.
-- **Monitor** shows progress, every operation with its live status, and
-  Overview, Events, Logs, Reports, and Spec views. The selection follows the
-  newest running operation until you move it by hand (`f` turns following back
-  on). When a run fails, the monitor jumps to the failed operation's logs.
+- **Start** (the picker) lists the builds on the system as cards: the running
+  ones with a progress bar, operations done, elapsed time and an estimate, and
+  the recent ones that ended in the last day with their outcome. Below them, the
+  build configs of the directory show their target and profile and the outcome,
+  duration and age of their last run.
+- **Setup** is a form on the left (branch, target, profile, inputs, variant on
+  builds that declare `[[variants]]`, jobs) with a validation badge on each
+  value, and a plan preview on the right: how many operations run and how many
+  are reused, why they run, the recorded time of what runs (marked `~`), the
+  validation outcome, and the Start button. The Start button says why it cannot
+  start. `Left`/`Right` change a value; `d` opens the details.
+- **Details** has five tabs, `Left`/`Right`, `Tab`, or `1`-`5`: **Plan** (a table
+  of each operation, RUN or REUSE, with its reason and last duration; `f` filters
+  to run or reuse), **Validation** (errors, warnings and plan problems, grouped),
+  **Reports** (the last run's outcome, its slowest operations and image steps as
+  bars, its images and errors), **Spec** (the resolved build in sections) and
+  **Events** (the run's output: `/` searches, `o` shows one operation, `F`
+  follows the newest line). `Esc` returns to setup.
+- **Monitor** is the run dashboard, also shown for an attached run. It has a
+  header (state, variant, elapsed time, ETA), an overall progress gauge weighted
+  by how long each operation took last time, and an operations table: each
+  operation's state, time, expected time, the difference from it, and why it
+  runs. The selection follows the running operation until you move it (`f`
+  filters: all, running, failed, slow; `s` sorts: plan order, duration, delta).
+  `Enter` opens an operation's details: why it runs, its time, its packages and
+  step times, its error, and the end of its output. The five chart tabs
+  (`Left`/`Right`, `Tab`, or `1`-`5`) are Progress (this run's progress against
+  the last run's: a braille line for this run, a dotted line for the last run,
+  and a marker for now), Resources (CPU, memory, tmpfs, load and disk), Steps and
+  Packages (the image build's step times and Buildroot packages), and Summary,
+  which is last and shows the outcome, slowest operations, images and errors
+  once the run is over. The output pane follows the newest line (`F` holds it in
+  place), filters to the selected operation (`l`), searches (`/`), and resizes
+  (`+`/`-`). On a narrow terminal the table and the charts take turns (`v`).
 
 Press `?` on any screen for the key list. `q` or `Ctrl+C` quits; while a
 build is running, the first press asks for confirmation, the second cancels the

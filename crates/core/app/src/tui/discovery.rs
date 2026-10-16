@@ -71,47 +71,6 @@ pub(crate) fn image_provider_label(spec: &ResolvedBuildSpec) -> &'static str {
     }
 }
 
-pub(crate) fn render_event_line(event: &ExecutionEvent) -> Line<'static> {
-    match event {
-        ExecutionEvent::Started { operation_id } => {
-            Line::from(format!("started: {}", operation_id.as_str()))
-        }
-        ExecutionEvent::Succeeded { operation_id } => {
-            Line::from(format!("succeeded: {}", operation_id.as_str()))
-        }
-        ExecutionEvent::Reused { operation_id } => {
-            Line::from(format!("reused: {}", operation_id.as_str()))
-        }
-        ExecutionEvent::Cancelled { operation_id } => {
-            Line::from(format!("cancelled: {}", operation_id.as_str()))
-        }
-        ExecutionEvent::Failed {
-            operation_id,
-            message,
-        } => Line::from(format!(
-            "failed: {}  {}",
-            operation_id.as_str(),
-            sanitize_tui_line(message)
-        )),
-        ExecutionEvent::Skipped {
-            operation_id,
-            reason,
-        } => Line::from(format!(
-            "skipped: {}  {}",
-            operation_id.as_str(),
-            sanitize_tui_line(reason)
-        )),
-        ExecutionEvent::Log {
-            operation_id,
-            message,
-        } => Line::from(format!(
-            "log: {}  {}",
-            operation_id.as_str(),
-            sanitize_tui_line(message)
-        )),
-    }
-}
-
 pub(crate) fn sanitize_tui_lines(text: &str) -> Vec<String> {
     text.split('\n').map(sanitize_tui_line).collect()
 }
@@ -163,13 +122,6 @@ pub(crate) fn format_elapsed(duration: Duration) -> String {
     let minutes = (seconds % 3600) / 60;
     let remaining = seconds % 60;
     format!("{hours:02}:{minutes:02}:{remaining:02}")
-}
-
-pub(crate) fn index_of_monitor_view(view: MonitorView) -> usize {
-    MonitorView::all()
-        .iter()
-        .position(|candidate| *candidate == view)
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

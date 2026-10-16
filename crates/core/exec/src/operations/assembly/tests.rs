@@ -211,6 +211,7 @@ fn stage_image_assembly_cleans_tree_and_skips_optional_missing_sources() {
         }],
         files: vec![
             AssemblyFileSpec {
+                exclude: Vec::new(),
                 tree: "boot".into(),
                 src: Some("@assets/config.txt".into()),
                 src_glob: None,
@@ -222,6 +223,7 @@ fn stage_image_assembly_cleans_tree_and_skips_optional_missing_sources() {
                 json: None,
             },
             AssemblyFileSpec {
+                exclude: Vec::new(),
                 tree: "boot".into(),
                 src: Some("@assets/missing.txt".into()),
                 src_glob: None,
@@ -259,6 +261,7 @@ fn copy_assembly_file_copies_regular_files_and_applies_mode() {
     let dest = root.join("nested/dest");
     fs::write(&source, "payload").expect("source");
     let file = AssemblyFileSpec {
+        exclude: Vec::new(),
         tree: "boot".into(),
         src: Some(source.display().to_string().into()),
         src_glob: None,
@@ -294,6 +297,7 @@ fn copy_assembly_file_preserves_symlinks_when_requested() {
     fs::write(&source_target, "payload").expect("target");
     std::os::unix::fs::symlink("target", &source_link).expect("symlink");
     let file = AssemblyFileSpec {
+        exclude: Vec::new(),
         tree: "boot".into(),
         src: Some(source_link.display().to_string().into()),
         src_glob: None,
@@ -444,6 +448,7 @@ fn boot_assembly(
             path: "$assembly.work/boot".into(),
         }],
         files: vec![AssemblyFileSpec {
+            exclude: Vec::new(),
             tree: "boot".into(),
             src: Some("@assets/config.txt".into()),
             src_glob: None,
@@ -456,6 +461,7 @@ fn boot_assembly(
         }],
         transforms,
         filesystems: vec![gaia_spec::AssemblyFilesystemSpec {
+            free: None,
             id: "boot".into(),
             kind: gaia_spec::AssemblyFilesystemKindSpec::Cpio,
             source_tree: "boot".into(),

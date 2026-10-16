@@ -407,6 +407,8 @@ fn rewrite_assembly(
         archive.output = absolute(&archive.output)?;
         for member in &mut archive.members {
             member.src = absolute_opt(&member.src)?;
+            member.src_dir = absolute_opt(&member.src_dir)?;
+            member.src_glob = absolute_opt(&member.src_glob)?;
             if let Some(entries) = &mut member.entries {
                 for (_, value) in entries.iter_mut() {
                     *value = rewrite_text(value)?;

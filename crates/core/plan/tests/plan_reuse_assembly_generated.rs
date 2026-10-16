@@ -33,6 +33,7 @@ fn spec_with_generated(scratch: &TempDir, name: &str) -> (ResolvedBuildSpec, Pat
         }],
         files: vec![
             AssemblyFileSpec {
+                exclude: Vec::new(),
                 tree: "boot".into(),
                 src: None,
                 src_glob: None,
@@ -44,6 +45,7 @@ fn spec_with_generated(scratch: &TempDir, name: &str) -> (ResolvedBuildSpec, Pat
                 preserve_symlink: false,
             },
             AssemblyFileSpec {
+                exclude: Vec::new(),
                 tree: "boot".into(),
                 src: None,
                 src_glob: None,

@@ -4,6 +4,8 @@ use super::*;
 pub(crate) enum Screen {
     Picker,
     Setup,
+    /// The details of the build: plan, validation, reports, spec and events.
+    Details,
     Monitor,
     /// A `gaia run` another process started: its status and recent output.
     Attach,
@@ -12,39 +14,14 @@ pub(crate) enum Screen {
 /// Which section of the start screen the cursor is in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PickerFocus {
-    /// The running builds, from anywhere on the system.
+    /// The running and recently ended builds, from anywhere on the system.
     Runs,
     /// The build configs of this directory.
     Builds,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DetailView {
-    Overview,
-    Selection,
-    Validation,
-    Plan,
-    Events,
-    Logs,
-    Reports,
-    Spec,
-}
-
-impl DetailView {
-    pub(crate) fn title(self) -> &'static str {
-        match self {
-            Self::Overview => "Overview",
-            Self::Selection => "Selection",
-            Self::Validation => "Validation",
-            Self::Plan => "Plan",
-            Self::Events => "Events",
-            Self::Logs => "Logs",
-            Self::Reports => "Reports",
-            Self::Spec => "Spec",
-        }
-    }
-}
-
+/// The items of the setup form, in order. Form items are edited in place;
+/// the detail items open the details screen on their tab.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SetupItem {
     StartBuild,
@@ -52,11 +29,11 @@ pub(crate) enum SetupItem {
     Target,
     Profile,
     Input(String),
+    /// The variant of a build that declares `[[variants]]`.
+    Variant,
     Jobs,
-    Overview,
-    Selection,
-    Validation,
     Plan,
+    Validation,
     Reports,
     Spec,
     PickBuild,
@@ -71,10 +48,8 @@ impl SetupItem {
             Self::Target,
             Self::Profile,
             Self::Jobs,
-            Self::Overview,
-            Self::Selection,
-            Self::Validation,
             Self::Plan,
+            Self::Validation,
             Self::Reports,
             Self::Spec,
             Self::PickBuild,
@@ -84,49 +59,68 @@ impl SetupItem {
 
     pub(crate) fn title(&self) -> &str {
         match self {
-            Self::StartBuild => "Start Build",
+            Self::StartBuild => "Start build",
             Self::Branch => "Branch",
             Self::Target => "Target",
             Self::Profile => "Profile",
             Self::Input(name) => name.as_str(),
+            Self::Variant => "Variant",
             Self::Jobs => "Jobs",
-            Self::Overview => "Overview",
-            Self::Selection => "Selection",
-            Self::Validation => "Validation",
             Self::Plan => "Plan",
+            Self::Validation => "Validation",
             Self::Reports => "Reports",
             Self::Spec => "Spec",
-            Self::PickBuild => "Pick Build",
+            Self::PickBuild => "Pick build",
             Self::Refresh => "Refresh",
         }
     }
 
-    pub(crate) fn detail_view(&self) -> DetailView {
+    /// The details tab this item opens, for the detail items.
+    pub(crate) fn details_tab(&self) -> Option<DetailTab> {
         match self {
-            Self::StartBuild
-            | Self::Branch
-            | Self::Target
-            | Self::Profile
-            | Self::Input(_)
-            | Self::Jobs
-            | Self::Overview => DetailView::Overview,
-            Self::Selection => DetailView::Selection,
-            Self::Validation => DetailView::Validation,
-            Self::Plan => DetailView::Plan,
-            Self::Reports => DetailView::Reports,
-            Self::Spec => DetailView::Spec,
-            Self::PickBuild | Self::Refresh => DetailView::Overview,
+            Self::Plan => Some(DetailTab::Plan),
+            Self::Validation => Some(DetailTab::Validation),
+            Self::Reports => Some(DetailTab::Reports),
+            Self::Spec => Some(DetailTab::Spec),
+            _ => None,
         }
     }
 }
 
+/// The tabs of the details screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MonitorView {
-    Overview,
-    Events,
-    Logs,
+pub(crate) enum DetailTab {
+    Plan,
+    Validation,
     Reports,
     Spec,
+    Events,
+}
+
+impl DetailTab {
+    pub(crate) const ALL: [DetailTab; 5] = [
+        Self::Plan,
+        Self::Validation,
+        Self::Reports,
+        Self::Spec,
+        Self::Events,
+    ];
+
+    pub(crate) fn title(self) -> &'static str {
+        match self {
+            Self::Plan => "Plan",
+            Self::Validation => "Validation",
+            Self::Reports => "Reports",
+            Self::Spec => "Spec",
+            Self::Events => "Events",
+        }
+    }
+
+    /// Moves to the tab `step` away, wrapping.
+    pub(crate) fn step(self, step: isize) -> Self {
+        let index = Self::ALL.iter().position(|tab| *tab == self).unwrap_or(0) as isize;
+        Self::ALL[(index + step).rem_euclid(Self::ALL.len() as isize) as usize]
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,37 +130,9 @@ pub(crate) enum SetupEditField {
     Jobs,
 }
 
-impl MonitorView {
-    pub(crate) fn all() -> &'static [Self] {
-        &[
-            Self::Overview,
-            Self::Events,
-            Self::Logs,
-            Self::Reports,
-            Self::Spec,
-        ]
-    }
-
-    pub(crate) fn detail_view(self) -> DetailView {
-        match self {
-            Self::Overview => DetailView::Overview,
-            Self::Events => DetailView::Events,
-            Self::Logs => DetailView::Logs,
-            Self::Reports => DetailView::Reports,
-            Self::Spec => DetailView::Spec,
-        }
-    }
-}
-
 pub(crate) struct BuildEntry {
     pub(crate) label: String,
     pub(crate) path: String,
-}
-
-pub(crate) struct OperationItem {
-    pub(crate) label: String,
-    pub(crate) status: &'static str,
-    pub(crate) color: Color,
 }
 
 pub(crate) enum RunThreadMessage {

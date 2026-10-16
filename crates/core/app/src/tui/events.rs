@@ -6,46 +6,20 @@ use super::*;
 /// of thousands of lines; the TUI only needs a readable tail.
 const MAX_LOG_LINES_PER_OPERATION: usize = 5_000;
 
-/// Execution events indexed by operation as they arrive, so rendering never
-/// rescans the full event stream.
+/// The events of the run this TUI started: the lifecycle events, in order,
+/// and each operation's output, kept per operation so the operation popup
+/// can show its tail.
 #[derive(Default)]
 pub(crate) struct EventLog {
     /// Lifecycle events (everything except logs), in arrival order.
     lifecycle: Vec<ExecutionEvent>,
-    statuses: HashMap<String, OperationStatus>,
     logs: HashMap<String, OperationLog>,
-    /// Operations started but not yet finished, oldest first.
-    running: Vec<String>,
-    completed: usize,
 }
 
 #[derive(Default)]
 pub(crate) struct OperationLog {
     pub(crate) lines: VecDeque<String>,
     pub(crate) dropped: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum OperationStatus {
-    Running,
-    Succeeded,
-    Reused,
-    Cancelled,
-    Failed,
-    Skipped,
-}
-
-impl OperationStatus {
-    pub(crate) fn badge(self) -> (&'static str, Color) {
-        match self {
-            Self::Running => ("RUN", Color::LightCyan),
-            Self::Succeeded => ("OK", Color::Green),
-            Self::Reused => ("REUSE", Color::LightBlue),
-            Self::Cancelled => ("CANCEL", Color::LightYellow),
-            Self::Failed => ("FAIL", Color::Red),
-            Self::Skipped => ("SKIP", Color::DarkGray),
-        }
-    }
 }
 
 impl EventLog {
@@ -58,45 +32,24 @@ impl EventLog {
     }
 
     pub(crate) fn push(&mut self, event: ExecutionEvent) {
-        let (operation_id, status) = match &event {
-            ExecutionEvent::Log {
-                operation_id,
-                message,
-            } => {
-                let log = self
-                    .logs
-                    .entry(operation_id.as_str().to_string())
-                    .or_default();
-                for line in sanitize_tui_lines(message) {
-                    if log.lines.len() == MAX_LOG_LINES_PER_OPERATION {
-                        log.lines.pop_front();
-                        log.dropped += 1;
-                    }
-                    log.lines.push_back(line);
+        if let ExecutionEvent::Log {
+            operation_id,
+            message,
+        } = &event
+        {
+            let log = self
+                .logs
+                .entry(operation_id.as_str().to_string())
+                .or_default();
+            for line in sanitize_tui_lines(message) {
+                if log.lines.len() == MAX_LOG_LINES_PER_OPERATION {
+                    log.lines.pop_front();
+                    log.dropped += 1;
                 }
-                return;
+                log.lines.push_back(line);
             }
-            ExecutionEvent::Started { operation_id } => (operation_id, OperationStatus::Running),
-            ExecutionEvent::Succeeded { operation_id } => {
-                (operation_id, OperationStatus::Succeeded)
-            }
-            ExecutionEvent::Reused { operation_id } => (operation_id, OperationStatus::Reused),
-            ExecutionEvent::Cancelled { operation_id } => {
-                (operation_id, OperationStatus::Cancelled)
-            }
-            ExecutionEvent::Failed { operation_id, .. } => (operation_id, OperationStatus::Failed),
-            ExecutionEvent::Skipped { operation_id, .. } => {
-                (operation_id, OperationStatus::Skipped)
-            }
-        };
-        let id = operation_id.as_str().to_string();
-        self.running.retain(|running| running != &id);
-        match status {
-            OperationStatus::Running => self.running.push(id.clone()),
-            OperationStatus::Succeeded | OperationStatus::Reused => self.completed += 1,
-            OperationStatus::Cancelled | OperationStatus::Failed | OperationStatus::Skipped => {}
+            return;
         }
-        self.statuses.insert(id, status);
         self.lifecycle.push(event);
     }
 
@@ -104,29 +57,8 @@ impl EventLog {
         self.lifecycle.is_empty() && self.logs.is_empty()
     }
 
-    pub(crate) fn lifecycle(&self) -> &[ExecutionEvent] {
-        &self.lifecycle
-    }
-
-    pub(crate) fn status(&self, operation_id: &str) -> Option<OperationStatus> {
-        self.statuses.get(operation_id).copied()
-    }
-
     pub(crate) fn log(&self, operation_id: &str) -> Option<&OperationLog> {
         self.logs.get(operation_id)
-    }
-
-    pub(crate) fn running(&self) -> &[String] {
-        &self.running
-    }
-
-    /// The most recently started operation that is still running.
-    pub(crate) fn newest_running(&self) -> Option<&str> {
-        self.running.last().map(String::as_str)
-    }
-
-    pub(crate) fn completed_count(&self) -> usize {
-        self.completed
     }
 
     pub(crate) fn first_failed(&self) -> Option<&str> {
@@ -147,42 +79,24 @@ mod tests {
     }
 
     #[test]
-    fn tracks_status_running_set_and_completion() {
+    fn finds_the_first_failed_operation() {
         let mut log = EventLog::default();
         log.push(ExecutionEvent::Started {
             operation_id: id("a"),
         });
-        log.push(ExecutionEvent::Started {
-            operation_id: id("b"),
-        });
-        assert_eq!(log.running(), ["a".to_string(), "b".to_string()]);
-        assert_eq!(log.newest_running(), Some("b"));
-
         log.push(ExecutionEvent::Succeeded {
             operation_id: id("b"),
         });
+        assert_eq!(log.first_failed(), None);
         log.push(ExecutionEvent::Failed {
             operation_id: id("a"),
             message: "boom".into(),
         });
-        assert!(log.running().is_empty());
-        assert_eq!(log.completed_count(), 1);
-        assert_eq!(log.status("a"), Some(OperationStatus::Failed));
-        assert_eq!(log.status("b"), Some(OperationStatus::Succeeded));
-        assert_eq!(log.first_failed(), Some("a"));
-    }
-
-    #[test]
-    fn skipped_operations_are_not_running_or_completed() {
-        let mut log = EventLog::default();
-        log.push(ExecutionEvent::Skipped {
+        log.push(ExecutionEvent::Failed {
             operation_id: id("c"),
-            reason: "skipped because dependency 'a' failed".into(),
+            message: "later".into(),
         });
-        assert_eq!(log.status("c"), Some(OperationStatus::Skipped));
-        assert_eq!(OperationStatus::Skipped.badge().0, "SKIP");
-        assert!(log.running().is_empty());
-        assert_eq!(log.completed_count(), 0);
+        assert_eq!(log.first_failed(), Some("a"));
     }
 
     #[test]
@@ -198,6 +112,6 @@ mod tests {
         assert_eq!(entry.lines.len(), MAX_LOG_LINES_PER_OPERATION);
         assert_eq!(entry.dropped, 3);
         assert_eq!(entry.lines.front().map(String::as_str), Some("line 3"));
-        assert!(log.lifecycle().is_empty());
+        assert!(!log.is_empty());
     }
 }

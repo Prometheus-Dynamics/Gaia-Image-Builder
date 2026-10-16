@@ -12,7 +12,10 @@ pub(super) fn assembly_file_sources(
     let Some(src_glob) = &file.src_glob else {
         return Ok(Vec::new());
     };
-    gaia_spec::expand_simple_glob(spec, roots, src_glob)
+    Ok(gaia_spec::exclude_names(
+        gaia_spec::expand_simple_glob(spec, roots, src_glob)?,
+        &file.exclude,
+    ))
 }
 
 /// Whether a file entry's `dest` names a directory the sources are copied

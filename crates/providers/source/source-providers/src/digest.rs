@@ -104,8 +104,100 @@ pub fn path_source_fingerprint(
     let root = normalize_existing_path(root);
     let mut hasher = DefaultHasher::new();
     root.display().to_string().hash(&mut hasher);
-    hash_path_source_entry(&root, true, &ignores, &mut hasher);
+    match git_listed_files(&root) {
+        // Inside a git work tree, git already knows which files matter: the
+        // tracked and untracked-but-not-ignored ones. Ignored build output
+        // (target/, node_modules/, ...) is never read.
+        Some(files) => hash_git_listed_files(&root, &files, &ignores, &mut hasher),
+        None => hash_path_source_entry(&root, true, &ignores, &mut hasher),
+    }
     format!("{:016x}", hasher.finish())
+}
+
+/// Relative paths of the files git lists under `root`: tracked files plus
+/// untracked files that are not ignored, sorted. `None` when `root` is not
+/// inside a git work tree or git fails, so the caller walks the tree.
+fn git_listed_files(root: &Path) -> Option<Vec<PathBuf>> {
+    use std::process::Stdio;
+
+    let inside = crate::git_helpers::git_command()
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !inside.status.success() || String::from_utf8_lossy(&inside.stdout).trim() != "true" {
+        return None;
+    }
+    let listed = crate::git_helpers::git_command()
+        .arg("-C")
+        .arg(root)
+        .args([
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !listed.status.success() {
+        return None;
+    }
+    let mut files = listed
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|entry| !entry.is_empty())
+        .map(path_from_git_bytes)
+        .collect::<Vec<_>>();
+    files.sort();
+    files.dedup();
+    Some(files)
+}
+
+fn path_from_git_bytes(bytes: &[u8]) -> PathBuf {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
+    }
+    #[cfg(not(unix))]
+    {
+        PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
+    }
+}
+
+/// Hashes the git-listed files with the same rules as the walk: an entry is
+/// skipped when any of its path components is ignored, and a listed path that
+/// is missing from the work tree (deleted but not staged) is skipped, as the
+/// walk never sees it. A listed directory (a submodule or nested repository)
+/// is hashed as the walk hashes a directory.
+fn hash_git_listed_files(
+    root: &Path,
+    files: &[PathBuf],
+    ignores: &PathSourceIgnores,
+    hasher: &mut DefaultHasher,
+) {
+    for relative in files {
+        if ignores.skips_relative(root, relative) {
+            continue;
+        }
+        let path = root.join(relative);
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        // The relative path is hashed so a rename changes the digest.
+        relative.display().to_string().hash(hasher);
+        if metadata.is_dir() {
+            hash_path_source_entry(&path, true, ignores, hasher);
+        } else {
+            hash_path_source_leaf(&path, &metadata, hasher);
+        }
+    }
 }
 
 struct PathSourceIgnores {
@@ -122,6 +214,19 @@ impl PathSourceIgnores {
             return false;
         };
         self.names.iter().any(|ignored| ignored == name) || is_gaia_owned_name(name)
+    }
+
+    /// Whether `root.join(relative)` is skipped, checking every component so
+    /// an ignored directory prunes everything below it, as the walk does.
+    fn skips_relative(&self, root: &Path, relative: &Path) -> bool {
+        let mut current = root.to_path_buf();
+        for component in relative.components() {
+            current.push(component);
+            if self.skips(&current) {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -159,13 +264,7 @@ fn hash_path_source_entry(
             return;
         }
     };
-    if metadata.file_type().is_symlink() {
-        "symlink".hash(hasher);
-        fs::read_link(path)
-            .map(|target| target.display().to_string())
-            .unwrap_or_default()
-            .hash(hasher);
-    } else if metadata.is_dir() {
+    if metadata.is_dir() {
         "dir".hash(hasher);
         match fs::read_dir(path) {
             Ok(entries) => {
@@ -180,6 +279,20 @@ fn hash_path_source_entry(
             }
             Err(_) => "unreadable".hash(hasher),
         }
+    } else {
+        hash_path_source_leaf(path, &metadata, hasher);
+    }
+}
+
+/// Hashes a non-directory entry: a symlink's target, or a file's length, mode
+/// and contents.
+fn hash_path_source_leaf(path: &Path, metadata: &fs::Metadata, hasher: &mut DefaultHasher) {
+    if metadata.file_type().is_symlink() {
+        "symlink".hash(hasher);
+        fs::read_link(path)
+            .map(|target| target.display().to_string())
+            .unwrap_or_default()
+            .hash(hasher);
     } else if metadata.is_file() {
         "file".hash(hasher);
         metadata.len().hash(hasher);

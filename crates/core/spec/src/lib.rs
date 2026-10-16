@@ -37,8 +37,8 @@ pub use artifact::{
     PythonArtifactSpec, RustArtifactSpec, cargo_git_url_key,
 };
 pub use assembly::{
-    AssemblyRoots, AssemblyWorkDirKeyword, assembly_work_dir_keyword, expand_simple_glob,
-    wildcard_match,
+    AssemblyRoots, AssemblyWorkDirKeyword, assembly_work_dir_keyword, exclude_names,
+    expand_simple_glob, wildcard_match,
 };
 pub use assembly_archive_spec::{
     AssemblyArchiveMemberSourceSpec, AssemblyArchiveMemberSpec, AssemblyArchiveSpec,

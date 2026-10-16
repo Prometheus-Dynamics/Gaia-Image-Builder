@@ -73,6 +73,8 @@ pub struct AssemblyFileSpec {
     pub tree: AssemblyTreeId,
     pub src: Option<AssemblyPathTemplate>,
     pub src_glob: Option<AssemblyPathTemplate>,
+    /// `src_glob` only: file names (simple `*` globs allowed) left out of the match set.
+    pub exclude: Vec<String>,
     /// Text written to `dest`, with `${assembly...}` tokens rendered.
     pub content: Option<String>,
     /// A JSON document written to `dest`, with `${assembly...}` tokens rendered.

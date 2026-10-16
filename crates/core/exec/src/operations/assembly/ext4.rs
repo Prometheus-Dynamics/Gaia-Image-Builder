@@ -35,7 +35,7 @@ const EXT4_UUID_DOMAIN: &[u8] = b"gaia ext4 uuid\n";
 /// rounded up to a block), the inode tables, the fixed overhead and the
 /// journal, plus a margin, rounded up to 1 MiB. It depends only on the
 /// tree's content.
-pub(super) fn ext4_auto_bytes(source_tree: &Path) -> Result<u64, String> {
+pub(super) fn ext4_auto_bytes(source_tree: &Path, free: u64) -> Result<u64, String> {
     let entries = collect_archive_entries(source_tree)?;
     let mut content = EXT4_BLOCK_BYTES;
     for (_, path) in &entries {
@@ -48,7 +48,7 @@ pub(super) fn ext4_auto_bytes(source_tree: &Path) -> Result<u64, String> {
         };
     }
     let inode_table = ext4_inode_count(entries.len()) * EXT4_INODE_BYTES;
-    let margin = (content / 20).max(EXT4_AUTO_MIN_MARGIN_BYTES);
+    let margin = auto_margin(content, EXT4_AUTO_MIN_MARGIN_BYTES, free);
     let base = content + inode_table + EXT4_AUTO_FIXED_OVERHEAD_BYTES + margin;
     let total = base + ext4_journal_bytes(base);
     Ok(total.div_ceil(MIB) * MIB)
@@ -77,7 +77,7 @@ pub(super) fn execute_ext4_filesystem(
     let tool_path = format!("mkfs.ext4={};debugfs={}", mkfs.display, debugfs.display);
     tracing::Span::current().record("tool_path", tool_path.as_str());
     let bytes = if filesystem.size.as_deref() == Some("auto") {
-        ext4_auto_bytes(source_tree)?
+        ext4_auto_bytes(source_tree, auto_free_bytes(filesystem)?)?
     } else {
         filesystem
             .parsed_size()

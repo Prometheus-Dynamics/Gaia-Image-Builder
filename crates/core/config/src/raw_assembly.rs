@@ -49,6 +49,8 @@ pub struct RawAssemblyFileConfig {
     pub tree: String,
     pub src: Option<String>,
     pub src_glob: Option<String>,
+    /// `src_glob` only: file names (simple `*` globs allowed) left out of the match set.
+    pub exclude: Vec<String>,
     /// Text written to `dest` instead of copying a source.
     pub content: Option<String>,
     /// A JSON document written to `dest` instead of copying a source.
@@ -125,6 +127,9 @@ pub struct RawAssemblyFilesystemConfig {
     pub uuid: Option<String>,
     /// `ext4` only: create a journal, the default.
     pub journal: Option<bool>,
+    /// With `size = "auto"` only: free space to leave beyond the content
+    /// estimate (a byte size). The auto margin is used when larger.
+    pub free: Option<String>,
 }
 
 impl Default for RawAssemblyFilesystemConfig {
@@ -141,6 +146,7 @@ impl Default for RawAssemblyFilesystemConfig {
             label: None,
             uuid: None,
             journal: None,
+            free: None,
         }
     }
 }
@@ -240,6 +246,16 @@ pub struct RawAssemblyArchiveMemberConfig {
     pub src: Option<String>,
     pub entries: Option<Vec<(String, String)>>,
     pub json: Option<RawAssemblyJsonValue>,
+    /// Every entry under this assembly tree's root, stored under `prefix`.
+    pub tree: Option<String>,
+    /// Every entry under this directory, stored under `prefix`.
+    pub src_dir: Option<String>,
+    /// Each file the pattern matches, stored under `name` (a prefix ending in `/`).
+    pub src_glob: Option<String>,
+    /// `tree` and `src_dir`: archive path prefix, empty or ending in `/`.
+    pub prefix: String,
+    /// `tree` and `src_glob`: file names (simple `*` globs allowed) left out.
+    pub exclude: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

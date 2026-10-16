@@ -6,8 +6,13 @@
 //! updates, and at once for every operation start and finish. When the run
 //! ends, its final snapshot and outcome go to `.gaia-run.last.json` and the
 //! live file is removed.
+//!
+//! The snapshot carries everything the TUI run dashboard shows: every planned
+//! operation with its state, timing, expected duration and reason, the
+//! Buildroot packages, the step times and the variant. Each field added after
+//! the first version is `#[serde(default)]`, so older files still read and
+//! older readers ignore what they do not know.
 
-use std::collections::VecDeque;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -16,19 +21,18 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use gaia_exec::{ExecutionEvent, ExecutionOutcome};
 use serde::{Deserialize, Serialize};
 
-use super::progress::compact_log_line;
+mod tracker;
+pub(crate) use tracker::{Change, RunTracker, live_variant, plan_operations, run_selection_label};
 
 /// The live snapshot of a run in progress.
 pub(crate) const STATUS_FILE: &str = ".gaia-run.status.json";
 /// The final snapshot of the last run, with its outcome.
 pub(crate) const LAST_FILE: &str = ".gaia-run.last.json";
 
-const LOG_CAPACITY: usize = 200;
-const FAILED_CAPACITY: usize = 20;
 const WRITE_INTERVAL: Duration = Duration::from_secs(1);
 
 /// What a live `gaia run` looked like at its last write.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct LiveStatus {
     pub pid: u32,
     pub build_name: String,
@@ -47,6 +51,18 @@ pub(crate) struct LiveStatus {
     pub failed: Vec<String>,
     /// The most recent output lines, oldest first.
     pub logs: Vec<LogLine>,
+    /// Every planned operation, in plan order, with its state.
+    #[serde(default)]
+    pub operations: Vec<LiveOperation>,
+    /// The variant being built, for a build with variants.
+    #[serde(default)]
+    pub variant: Option<LiveVariant>,
+    /// The errors that failed operations so far, oldest first, capped.
+    #[serde(default)]
+    pub errors: Vec<RunError>,
+    /// What the run builds for: `target · profile`, when the build has them.
+    #[serde(default)]
+    pub selection: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,12 +75,32 @@ pub(crate) struct RunningOperation {
     pub build: Option<BuildProgressStatus>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct BuildProgressStatus {
     pub done: usize,
     pub total: usize,
     pub active: Vec<String>,
     pub eta_secs: Option<u64>,
+    /// When each active package was first seen (unix milliseconds).
+    #[serde(default)]
+    pub active_since: Vec<PackageStart>,
+    /// Packages that left the active list, oldest first, capped.
+    #[serde(default)]
+    pub finished: Vec<PackageTiming>,
+}
+
+/// A package the Buildroot make is building, and when it started.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct PackageStart {
+    pub name: String,
+    pub started_ms: u64,
+}
+
+/// A package the Buildroot make finished, and how long it was active.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct PackageTiming {
+    pub name: String,
+    pub ms: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -86,6 +122,65 @@ impl FinishedCounts {
 pub(crate) struct LogLine {
     pub op: String,
     pub line: String,
+}
+
+/// The state of one planned operation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum OpState {
+    #[default]
+    Pending,
+    Running,
+    Done,
+    Reused,
+    Failed,
+    Cancelled,
+    Skipped,
+    /// A state written by a newer Gaia.
+    #[serde(other)]
+    Unknown,
+}
+
+/// One planned operation of a run, with what the run has done to it so far.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub(crate) struct LiveOperation {
+    pub id: String,
+    /// The part of the id before the colon: `image`, `artifact`, ...
+    pub domain: String,
+    pub state: OpState,
+    /// The plan reuses the operation: it will not execute.
+    pub planned_reuse: bool,
+    /// Why the operation executes, when it does (a rebuild reason code).
+    pub reason_code: Option<String>,
+    pub reason: Option<String>,
+    /// Recorded duration of the last run of this operation, when known.
+    pub expected_ms: Option<u64>,
+    /// Unix milliseconds.
+    pub started_ms: Option<u64>,
+    /// Unix milliseconds.
+    pub ended_ms: Option<u64>,
+    pub last_log: Option<String>,
+    /// Inner progress of a Buildroot `make`, when the operation reports it.
+    pub build: Option<BuildProgressStatus>,
+    /// Step times the operation reported, in order, capped.
+    pub steps: Vec<LiveStep>,
+}
+
+/// A step inside an operation and its wall time.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct LiveStep {
+    pub step: String,
+    pub ms: u64,
+}
+
+/// The variant a run builds, and its place among the declared variants.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct LiveVariant {
+    pub id: String,
+    /// 1-based position among the declared variants.
+    pub index: usize,
+    pub count: usize,
 }
 
 /// The final snapshot of a run and how it ended.
@@ -140,11 +235,16 @@ impl LiveRun {
     }
 }
 
-/// Identifies the run in its status files.
+/// Identifies the run in its status files, and what it will do.
 pub(crate) struct LiveRunInfo {
     pub build_name: String,
     pub display_name: String,
     pub ops_total: usize,
+    /// The planned operations, in plan order (see [`plan_operations`]).
+    pub operations: Vec<LiveOperation>,
+    pub variant: Option<LiveVariant>,
+    /// What the run builds for (see [`run_selection_label`]).
+    pub selection: Option<String>,
 }
 
 /// Writes a run's live status. Feed it every event with [`record`](Self::record)
@@ -152,13 +252,7 @@ pub(crate) struct LiveRunInfo {
 pub(crate) struct LiveRecorder {
     status_path: PathBuf,
     last_path: PathBuf,
-    pid: u32,
-    info: LiveRunInfo,
-    started_at: u64,
-    running: Vec<RunningOperation>,
-    finished: FinishedCounts,
-    failed: Vec<String>,
-    logs: VecDeque<LogLine>,
+    tracker: RunTracker,
     /// Something changed since the last write.
     dirty: bool,
     /// An operation started or finished: write at once, regardless of the
@@ -173,13 +267,7 @@ impl LiveRecorder {
         Self {
             status_path: build_dir.join(STATUS_FILE),
             last_path: build_dir.join(LAST_FILE),
-            pid: std::process::id(),
-            info,
-            started_at: unix_now(),
-            running: Vec::new(),
-            finished: FinishedCounts::default(),
-            failed: Vec::new(),
-            logs: VecDeque::new(),
+            tracker: RunTracker::new(info),
             dirty: true,
             urgent: false,
             last_write: None,
@@ -189,86 +277,15 @@ impl LiveRecorder {
 
     /// Records the state change an execution event causes.
     pub(crate) fn record(&mut self, event: &ExecutionEvent) {
-        match event {
-            ExecutionEvent::Started { operation_id } => {
-                let id = operation_id.as_str();
-                if !self.running.iter().any(|op| op.id == id) {
-                    self.running.push(RunningOperation {
-                        id: id.to_string(),
-                        started_at: unix_now(),
-                        last_log: None,
-                        build: None,
-                    });
-                }
-                self.mark_lifecycle();
-            }
-            ExecutionEvent::Log {
-                operation_id,
-                message,
-            } => {
-                let id = operation_id.as_str();
-                if let Some(progress) = gaia_process::parse_build_progress(message) {
-                    if let Some(op) = self.running.iter_mut().find(|op| op.id == id) {
-                        op.build = Some(BuildProgressStatus {
-                            done: progress.done,
-                            total: progress.total,
-                            active: progress.active,
-                            eta_secs: progress.eta.map(|eta| eta.as_secs()),
-                        });
-                    }
-                } else {
-                    for line in message.lines().map(compact_log_line) {
-                        if line.is_empty() {
-                            continue;
-                        }
-                        if let Some(op) = self.running.iter_mut().find(|op| op.id == id) {
-                            op.last_log = Some(line.clone());
-                        }
-                        if self.logs.len() == LOG_CAPACITY {
-                            self.logs.pop_front();
-                        }
-                        self.logs.push_back(LogLine {
-                            op: id.to_string(),
-                            line,
-                        });
-                    }
-                }
-                self.dirty = true;
-            }
-            ExecutionEvent::Succeeded { operation_id } => {
-                self.finished.done += 1;
-                self.end(operation_id.as_str());
-            }
-            ExecutionEvent::Reused { operation_id } => {
-                self.finished.reused += 1;
-                self.end(operation_id.as_str());
-            }
-            ExecutionEvent::Cancelled { operation_id } => {
-                self.finished.cancelled += 1;
-                self.end(operation_id.as_str());
-            }
-            ExecutionEvent::Failed { operation_id, .. } => {
-                self.finished.failed += 1;
-                if self.failed.len() < FAILED_CAPACITY {
-                    self.failed.push(operation_id.as_str().to_string());
-                }
-                self.end(operation_id.as_str());
-            }
-            ExecutionEvent::Skipped { operation_id, .. } => {
-                self.finished.skipped += 1;
-                self.end(operation_id.as_str());
-            }
+        match self.tracker.record(event, unix_now_ms()) {
+            Change::Lifecycle => self.mark_lifecycle(),
+            Change::Output => self.dirty = true,
         }
     }
 
     fn mark_lifecycle(&mut self) {
         self.dirty = true;
         self.urgent = true;
-    }
-
-    fn end(&mut self, id: &str) {
-        self.running.retain(|op| op.id != id);
-        self.mark_lifecycle();
     }
 
     /// Writes the snapshot when something changed and the interval allows it
@@ -305,20 +322,7 @@ impl LiveRecorder {
     }
 
     fn snapshot(&self, paused: bool) -> LiveStatus {
-        LiveStatus {
-            pid: self.pid,
-            build_name: self.info.build_name.clone(),
-            display_name: self.info.display_name.clone(),
-            started_at: self.started_at,
-            updated_at: unix_now(),
-            paused,
-            ops_total: self.info.ops_total,
-            ops_done: self.finished.total(),
-            running: self.running.clone(),
-            finished: self.finished.clone(),
-            failed: self.failed.clone(),
-            logs: self.logs.iter().cloned().collect(),
-        }
+        self.tracker.snapshot(paused, unix_now_ms())
     }
 }
 
@@ -419,10 +423,22 @@ fn process_stopped(pid: u32) -> bool {
         .is_some_and(|state| matches!(state, "T" | "t"))
 }
 
+/// The part of an operation id before its colon: `image` for `image:buildroot`.
+pub(crate) fn domain_of(id: &str) -> String {
+    id.split_once(':')
+        .map_or(id, |(domain, _)| domain)
+        .to_string()
+}
+
 pub(crate) fn unix_now() -> u64 {
+    unix_now_ms() / 1000
+}
+
+/// Unix time in milliseconds.
+pub(crate) fn unix_now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
+        .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
         .unwrap_or_default()
 }
 
@@ -446,6 +462,7 @@ pub(crate) fn fixture_status() -> LiveStatus {
                 total: 145,
                 active: vec!["linux".into(), "mesa3d".into()],
                 eta_secs: Some(600),
+                ..BuildProgressStatus::default()
             }),
         }],
         finished: FinishedCounts {
@@ -458,6 +475,7 @@ pub(crate) fn fixture_status() -> LiveStatus {
             op: "artifact:cli".into(),
             line: "cargo build finished".into(),
         }],
+        ..LiveStatus::default()
     }
 }
 
@@ -479,15 +497,19 @@ mod tests {
         TempDir::new(&format!("gaia-live-status-{name}"))
     }
 
+    fn info() -> LiveRunInfo {
+        LiveRunInfo {
+            build_name: "demo".into(),
+            display_name: "Demo build".into(),
+            ops_total: 4,
+            operations: Vec::new(),
+            variant: None,
+            selection: None,
+        }
+    }
+
     fn recorder(dir: &Path) -> LiveRecorder {
-        LiveRecorder::new(
-            dir,
-            LiveRunInfo {
-                build_name: "demo".into(),
-                display_name: "Demo build".into(),
-                ops_total: 4,
-            },
-        )
+        LiveRecorder::new(dir, info())
     }
 
     #[test]
@@ -506,6 +528,55 @@ mod tests {
         let json = serde_json::to_string(&last).expect("encode");
         let decoded: LastRun = serde_json::from_str(&json).expect("decode");
         assert_eq!(decoded, last);
+    }
+
+    #[test]
+    fn snapshot_without_the_dashboard_fields_still_reads() {
+        // A snapshot as the first version wrote it: no operations, variant or
+        // errors, and no package timing inside the build progress.
+        let mut value = serde_json::to_value(fixture_status()).expect("encode");
+        let object = value.as_object_mut().expect("object");
+        object.remove("operations");
+        object.remove("variant");
+        object.remove("errors");
+        let build = &mut value["running"][0]["build"];
+        build.as_object_mut().expect("build").remove("active_since");
+        build.as_object_mut().expect("build").remove("finished");
+
+        let status: LiveStatus = serde_json::from_value(value).expect("old snapshot");
+        assert!(status.operations.is_empty());
+        assert!(status.variant.is_none());
+        assert!(status.errors.is_empty());
+        assert_eq!(status.running[0].build.as_ref().map(|b| b.done), Some(120));
+    }
+
+    #[test]
+    fn new_fields_round_trip_and_unknown_states_read() {
+        let mut status = fixture_status();
+        status.variant = Some(LiveVariant {
+            id: "pv2026".into(),
+            index: 2,
+            count: 4,
+        });
+        status.selection = Some("rpi5 · release".into());
+        status.operations = vec![LiveOperation {
+            id: "artifact:cli".into(),
+            domain: "artifact".into(),
+            state: OpState::Done,
+            expected_ms: Some(1_500),
+            started_ms: Some(1_000),
+            ended_ms: Some(2_500),
+            ..LiveOperation::default()
+        }];
+        let json = serde_json::to_string(&status).expect("encode");
+        let decoded: LiveStatus = serde_json::from_str(&json).expect("decode");
+        assert_eq!(decoded, status);
+
+        // A state a newer Gaia writes reads as Unknown rather than failing.
+        let mut value = serde_json::to_value(&status).expect("encode");
+        value["operations"][0]["state"] = serde_json::json!("quantum");
+        let decoded: LiveStatus = serde_json::from_value(value).expect("decode");
+        assert_eq!(decoded.operations[0].state, OpState::Unknown);
     }
 
     #[test]

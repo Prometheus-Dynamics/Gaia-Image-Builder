@@ -48,6 +48,22 @@ pub(super) fn execute_assembly_archive(
     })
 }
 
+/// One entry a tree, directory or glob member expands to.
+enum ArchiveEntry {
+    File {
+        name: String,
+        src: PathBuf,
+        mode: u32,
+    },
+    Dir {
+        name: String,
+    },
+    Symlink {
+        name: String,
+        target: String,
+    },
+}
+
 fn write_archive(
     spec: &ResolvedBuildSpec,
     roots: &AssemblyRoots,
@@ -67,9 +83,66 @@ fn write_archive(
         let context = |error: String| {
             format!(
                 "assembly archive '{}' member '{}': {error}",
-                archive.id, member.name
+                archive.id,
+                member_label(member)
             )
         };
+        let expanded = match member.source() {
+            Some(AssemblyArchiveMemberSourceSpec::Tree(tree)) => {
+                let root = roots
+                    .tree_path(tree.as_str())
+                    .map_err(context)?
+                    .to_path_buf();
+                let mut entries = Vec::new();
+                collect_tree_entries(&root, &member.prefix, &member.exclude, &mut entries)
+                    .map_err(context)?;
+                Some(entries)
+            }
+            Some(AssemblyArchiveMemberSourceSpec::Dir(template)) => {
+                let root = roots.resolve_path(spec, template).map_err(context)?;
+                let mut entries = Vec::new();
+                collect_tree_entries(&root, &member.prefix, &member.exclude, &mut entries)
+                    .map_err(context)?;
+                Some(entries)
+            }
+            Some(AssemblyArchiveMemberSourceSpec::Glob(pattern)) => {
+                let matches = gaia_spec::exclude_names(
+                    gaia_spec::expand_simple_glob(spec, roots, pattern.as_str())
+                        .map_err(context)?,
+                    &member.exclude,
+                );
+                let mut entries = Vec::new();
+                for path in matches {
+                    let metadata = std_fs::metadata(&path).map_err(|error| {
+                        context(format!("failed to read '{}': {error}", path.display()))
+                    })?;
+                    if !metadata.is_file() {
+                        return Err(context(format!(
+                            "'{}' matched by src_glob is not a file",
+                            path.display()
+                        )));
+                    }
+                    let file_name = path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .ok_or_else(|| {
+                            context(format!("'{}' has no UTF-8 file name", path.display()))
+                        })?
+                        .to_string();
+                    entries.push(ArchiveEntry::File {
+                        name: format!("{}{file_name}", member.name),
+                        mode: file_mode(&metadata),
+                        src: path,
+                    });
+                }
+                Some(entries)
+            }
+            _ => None,
+        };
+        if let Some(entries) = expanded {
+            append_entries(&mut writer, &entries, &mut members).map_err(context)?;
+            continue;
+        }
         let mut hasher = Sha256::new();
         let (src, bytes) = match member.source() {
             Some(AssemblyArchiveMemberSourceSpec::File(src)) => {
@@ -105,9 +178,10 @@ fn write_archive(
                     .map_err(context)?;
                 (None, bytes)
             }
+            Some(_) => return Err(context("internal: unexpanded member source".into())),
             None => {
                 return Err(context(
-                    "must set exactly one of src, entries or json".into(),
+                    "must set exactly one of src, entries, json, tree, src_dir or src_glob".into(),
                 ));
             }
         };
@@ -115,11 +189,7 @@ fn write_archive(
             name: member.name.clone(),
             src,
             bytes,
-            sha256: hasher
-                .finalize()
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect(),
+            sha256: hex_digest(hasher),
         });
     }
     writer
@@ -134,6 +204,137 @@ fn write_archive(
             )
         })?;
     Ok(members)
+}
+
+fn hex_digest(hasher: Sha256) -> String {
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// How a member is named in messages: its name, else its source.
+fn member_label(member: &gaia_spec::AssemblyArchiveMemberSpec) -> String {
+    if !member.name.is_empty() {
+        return member.name.clone();
+    }
+    match member.source() {
+        Some(AssemblyArchiveMemberSourceSpec::Tree(tree)) => format!("tree {}", tree.as_str()),
+        Some(AssemblyArchiveMemberSourceSpec::Dir(dir)) => format!("src_dir {}", dir.as_str()),
+        _ => String::new(),
+    }
+}
+
+/// 0755 for an executable file, else 0644.
+fn file_mode(metadata: &std_fs::Metadata) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    if metadata.permissions().mode() & 0o111 != 0 {
+        0o755
+    } else {
+        0o644
+    }
+}
+
+/// Every entry under `root`, in sorted order, directories before their
+/// contents, stored under `prefix`. Symlinks are kept as links and never
+/// followed; `exclude` drops files and links by name.
+fn collect_tree_entries(
+    root: &Path,
+    prefix: &str,
+    exclude: &[String],
+    entries: &mut Vec<ArchiveEntry>,
+) -> Result<(), String> {
+    let read = std_fs::read_dir(root)
+        .map_err(|error| format!("failed to read '{}': {error}", root.display()))?;
+    let mut children = Vec::new();
+    for entry in read {
+        children.push(
+            entry
+                .map_err(|error| format!("failed to read '{}': {error}", root.display()))?
+                .path(),
+        );
+    }
+    children.sort();
+    for child in children {
+        let name = child
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| format!("'{}' has no UTF-8 file name", child.display()))?
+            .to_string();
+        let archive_name = format!("{prefix}{name}");
+        let metadata = std_fs::symlink_metadata(&child)
+            .map_err(|error| format!("failed to read '{}': {error}", child.display()))?;
+        let file_type = metadata.file_type();
+        if file_type.is_dir() {
+            entries.push(ArchiveEntry::Dir {
+                name: format!("{archive_name}/"),
+            });
+            collect_tree_entries(&child, &format!("{archive_name}/"), exclude, entries)?;
+            continue;
+        }
+        if exclude
+            .iter()
+            .any(|pattern| gaia_spec::wildcard_match(pattern, &name))
+        {
+            continue;
+        }
+        if file_type.is_symlink() {
+            let target = std_fs::read_link(&child)
+                .map_err(|error| format!("failed to read '{}': {error}", child.display()))?;
+            let target = target
+                .to_str()
+                .ok_or_else(|| format!("symlink '{}' target is not UTF-8", child.display()))?
+                .to_string();
+            entries.push(ArchiveEntry::Symlink {
+                name: archive_name,
+                target,
+            });
+        } else if file_type.is_file() {
+            entries.push(ArchiveEntry::File {
+                name: archive_name,
+                mode: file_mode(&metadata),
+                src: child,
+            });
+        } else {
+            return Err(format!(
+                "'{}' is not a regular file, directory or symlink",
+                child.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Appends expanded entries; regular files are recorded as members with
+/// their source and digest. Directories and links are not recorded.
+fn append_entries(
+    writer: &mut TarWriter<std::io::BufWriter<std_fs::File>>,
+    entries: &[ArchiveEntry],
+    members: &mut Vec<AssemblyTarMemberSummary>,
+) -> Result<(), String> {
+    for entry in entries {
+        match entry {
+            ArchiveEntry::Dir { name } => writer.append_dir(name)?,
+            ArchiveEntry::Symlink { name, target } => writer.append_symlink(name, target)?,
+            ArchiveEntry::File { name, src, mode } => {
+                let mut reader = std_fs::File::open(src)
+                    .map_err(|error| format!("failed to open '{}': {error}", src.display()))?;
+                let bytes = file_len(src)?;
+                let mut hasher = Sha256::new();
+                writer.append_file(name, *mode, bytes, &mut reader, |chunk| {
+                    hasher.update(chunk)
+                })?;
+                members.push(AssemblyTarMemberSummary {
+                    name: name.clone(),
+                    src: Some(src.clone()),
+                    bytes,
+                    sha256: hex_digest(hasher),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Renders `KEY=value` lines. `${assembly.sha256:<path>}` becomes the hex

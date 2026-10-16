@@ -16,6 +16,11 @@ fn an_assembly_is_recorded_under_the_fingerprint_its_inputs_settled_to() {
             id: "update".into(),
             output: "$assembly.out/update.tar".into(),
             members: vec![gaia_spec::AssemblyArchiveMemberSpec {
+                tree: None,
+                src_dir: None,
+                src_glob: None,
+                prefix: String::new(),
+                exclude: Vec::new(),
                 name: "rootfs.ext4".into(),
                 src: Some(input.display().to_string().into()),
                 entries: None,

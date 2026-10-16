@@ -125,7 +125,7 @@ fn resolve_token(token: &str, raw: &RawBuildConfig, env: &ResolvedEnvironment) -
         "project.root_dir" => project_root_dir(raw, env),
         "build.date" => super::build_date::resolve(&config_root_dir(raw))
             .unwrap_or_else(|| format!("${{{token}}}")),
-        "project.commit" | "project.describe" => {
+        "project.commit" | "project.commit_short" | "project.describe" => {
             super::project_git::resolve(token, &config_root_dir(raw))
                 .unwrap_or_else(|| format!("${{{token}}}"))
         }

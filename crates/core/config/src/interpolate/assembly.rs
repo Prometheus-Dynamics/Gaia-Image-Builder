@@ -101,6 +101,9 @@ pub(super) fn interpolate_image_assembly(
             filesystem.size = filesystem
                 .size
                 .map(|value| resolver::interpolate_string(value, raw, env));
+            filesystem.free = filesystem
+                .free
+                .map(|value| resolver::interpolate_string(value, raw, env));
             filesystem.label = filesystem
                 .label
                 .map(|value| resolver::interpolate_string(value, raw, env));

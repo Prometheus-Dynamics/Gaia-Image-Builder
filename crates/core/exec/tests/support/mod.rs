@@ -298,6 +298,7 @@ pub fn assembly_tree(id: &str, path: impl ToString) -> gaia_spec::AssemblyTreeSp
 
 pub fn assembly_file(tree: &str, src: impl ToString, dest: &str) -> gaia_spec::AssemblyFileSpec {
     gaia_spec::AssemblyFileSpec {
+        exclude: Vec::new(),
         tree: tree.into(),
         src: Some(src.to_string().into()),
         src_glob: None,
@@ -336,6 +337,7 @@ pub fn assembly_filesystem(
     output: impl ToString,
 ) -> gaia_spec::AssemblyFilesystemSpec {
     gaia_spec::AssemblyFilesystemSpec {
+        free: None,
         id: id.into(),
         kind,
         source_tree: source_tree.into(),

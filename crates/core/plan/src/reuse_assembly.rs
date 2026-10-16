@@ -415,6 +415,7 @@ mod tests {
                 depmod: None,
             }],
             filesystems: vec![AssemblyFilesystemSpec {
+                free: None,
                 id: "boot".into(),
                 kind: AssemblyFilesystemKindSpec::CpioZstd,
                 source_tree: "initramfs".into(),
@@ -492,7 +493,7 @@ fn runtime_closure_parts(binary: &Path, sysroot: Option<&Path>) -> Vec<(String, 
     parts
 }
 
-fn text_digest(text: &str) -> String {
+pub(crate) fn text_digest(text: &str) -> String {
     Sha256::digest(text.as_bytes())
         .iter()
         .map(|byte| format!("{byte:02x}"))

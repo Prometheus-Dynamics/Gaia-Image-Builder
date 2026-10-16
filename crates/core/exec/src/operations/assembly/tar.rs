@@ -2,14 +2,34 @@ use std::io::{Read, Write};
 
 /// ustar block size.
 pub(super) const TAR_BLOCK: usize = 512;
-/// Longest name the ustar `name` field holds; the `prefix` field is unused.
+/// Longest name (and symlink target) the ustar `name` field holds; the
+/// `prefix` field is unused.
 pub(super) const TAR_NAME_MAX: usize = 100;
 /// Largest size the 11-digit octal size field can store.
 const TAR_SIZE_MAX: u64 = 0o77777777777;
 const TAR_FILE_MODE: u32 = 0o644;
 
-/// Writes a deterministic POSIX ustar stream: regular files only, mtime 0,
-/// uid/gid 0, empty user/group names and mode 0644.
+/// The entry kinds the writer emits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TarKind {
+    File,
+    Dir,
+    Symlink,
+}
+
+impl TarKind {
+    fn type_flag(self) -> u8 {
+        match self {
+            Self::File => b'0',
+            Self::Dir => b'5',
+            Self::Symlink => b'2',
+        }
+    }
+}
+
+/// Writes a deterministic POSIX ustar stream: mtime 0, uid/gid 0, empty
+/// user/group names. Regular files take the mode given (0644 or 0755 in
+/// practice), directories 0755, symlinks 0777.
 pub(super) struct TarWriter<W: Write> {
     inner: W,
 }
@@ -19,17 +39,29 @@ impl<W: Write> TarWriter<W> {
         Self { inner }
     }
 
-    /// Appends a file entry whose contents come from `reader`, which must
-    /// yield exactly `size` bytes. Each chunk is also passed to `observe`.
+    /// Appends a regular file with mode 0644; see [`TarWriter::append_file`].
     pub(super) fn append(
         &mut self,
         name: &str,
         size: u64,
         reader: &mut impl Read,
+        observe: impl FnMut(&[u8]),
+    ) -> Result<(), String> {
+        self.append_file(name, TAR_FILE_MODE, size, reader, observe)
+    }
+
+    /// Appends a file entry whose contents come from `reader`, which must
+    /// yield exactly `size` bytes. Each chunk is also passed to `observe`.
+    pub(super) fn append_file(
+        &mut self,
+        name: &str,
+        mode: u32,
+        size: u64,
+        reader: &mut impl Read,
         mut observe: impl FnMut(&[u8]),
     ) -> Result<(), String> {
         self.inner
-            .write_all(&ustar_header(name, size)?)
+            .write_all(&ustar_entry_header(name, size, mode, TarKind::File, "")?)
             .map_err(|error| format!("failed to write tar header for '{name}': {error}"))?;
         let mut buffer = vec![0u8; 64 * 1024];
         let mut written = 0u64;
@@ -57,6 +89,26 @@ impl<W: Write> TarWriter<W> {
         self.write_padding(size)
     }
 
+    /// Appends a directory entry; `name` should end in `/`.
+    pub(super) fn append_dir(&mut self, name: &str) -> Result<(), String> {
+        self.inner
+            .write_all(&ustar_entry_header(name, 0, 0o755, TarKind::Dir, "")?)
+            .map_err(|error| format!("failed to write tar header for '{name}': {error}"))
+    }
+
+    /// Appends a symbolic link entry pointing at `target`, stored as is.
+    pub(super) fn append_symlink(&mut self, name: &str, target: &str) -> Result<(), String> {
+        self.inner
+            .write_all(&ustar_entry_header(
+                name,
+                0,
+                0o777,
+                TarKind::Symlink,
+                target,
+            )?)
+            .map_err(|error| format!("failed to write tar header for '{name}': {error}"))
+    }
+
     /// Writes the two zero blocks that end the archive and returns the
     /// underlying writer.
     pub(super) fn finish(mut self) -> Result<W, String> {
@@ -78,10 +130,27 @@ impl<W: Write> TarWriter<W> {
     }
 }
 
+/// A regular file header with mode 0644.
+#[cfg(test)]
 pub(super) fn ustar_header(name: &str, size: u64) -> Result<[u8; TAR_BLOCK], String> {
+    ustar_entry_header(name, size, TAR_FILE_MODE, TarKind::File, "")
+}
+
+fn ustar_entry_header(
+    name: &str,
+    size: u64,
+    mode: u32,
+    kind: TarKind,
+    link: &str,
+) -> Result<[u8; TAR_BLOCK], String> {
     if name.is_empty() || name.len() > TAR_NAME_MAX {
         return Err(format!(
             "tar member name '{name}' must be 1-{TAR_NAME_MAX} bytes (ustar name field)"
+        ));
+    }
+    if link.len() > TAR_NAME_MAX {
+        return Err(format!(
+            "tar symlink '{name}' target '{link}' is longer than the {TAR_NAME_MAX}-byte ustar link field"
         ));
     }
     if size > TAR_SIZE_MAX {
@@ -91,12 +160,13 @@ pub(super) fn ustar_header(name: &str, size: u64) -> Result<[u8; TAR_BLOCK], Str
     }
     let mut header = [0u8; TAR_BLOCK];
     header[..name.len()].copy_from_slice(name.as_bytes());
-    write_octal(&mut header[100..108], TAR_FILE_MODE as u64);
+    write_octal(&mut header[100..108], mode as u64);
     write_octal(&mut header[108..116], 0); // uid
     write_octal(&mut header[116..124], 0); // gid
     write_octal(&mut header[124..136], size);
     write_octal(&mut header[136..148], 0); // mtime
-    header[156] = b'0'; // regular file
+    header[156] = kind.type_flag();
+    header[157..157 + link.len()].copy_from_slice(link.as_bytes());
     header[257..263].copy_from_slice(b"ustar\0");
     header[263..265].copy_from_slice(b"00");
     // uname/gname (265..329), devmajor/devminor and prefix stay zero.
@@ -138,6 +208,33 @@ mod tests {
         let stored = std::str::from_utf8(&header[148..154]).expect("octal");
         assert_eq!(u32::from_str_radix(stored, 8).expect("checksum"), expected);
         assert_eq!(&header[154..156], b"\0 ");
+    }
+
+    #[test]
+    fn dir_symlink_and_mode_headers_carry_their_type() {
+        let mut writer = TarWriter::new(Vec::new());
+        writer.append_dir("boot/").expect("dir");
+        writer
+            .append_symlink("boot/link", "target.dtbo")
+            .expect("symlink");
+        writer
+            .append_file("boot/run.sh", 0o755, 0, &mut &b""[..], |_| {})
+            .expect("exec file");
+        let bytes = writer.finish().expect("finish");
+        assert_eq!(bytes[156], b'5');
+        assert_eq!(&bytes[100..108], b"0000755\0");
+        assert_eq!(&bytes[124..136], b"00000000000\0");
+        assert_eq!(bytes[TAR_BLOCK + 156], b'2');
+        assert_eq!(
+            &bytes[TAR_BLOCK + 157..TAR_BLOCK + 157 + 11],
+            b"target.dtbo"
+        );
+        assert_eq!(bytes[2 * TAR_BLOCK + 156], b'0');
+        assert_eq!(
+            &bytes[2 * TAR_BLOCK + 100..2 * TAR_BLOCK + 108],
+            b"0000755\0"
+        );
+        assert!(ustar_entry_header("l", 0, 0o777, TarKind::Symlink, &"t".repeat(101)).is_err());
     }
 
     #[test]

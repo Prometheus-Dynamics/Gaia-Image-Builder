@@ -57,6 +57,54 @@ pub(crate) fn archive_input_entries(
                         );
                     }
                 }
+                Some(AssemblyArchiveMemberSourceSpec::Tree(tree)) => {
+                    // The tree's root state covers every entry under it.
+                    if let Ok(root) = roots.tree_path(tree.as_str()) {
+                        parts.push(input_part(
+                            "archive-member",
+                            &owner,
+                            &part_owner,
+                            root.to_path_buf(),
+                            generated_outputs,
+                        ));
+                    }
+                }
+                Some(AssemblyArchiveMemberSourceSpec::Dir(dir)) => {
+                    parts.push(input_part(
+                        "archive-member",
+                        &owner,
+                        &part_owner,
+                        resolve(spec, roots, dir),
+                        generated_outputs,
+                    ));
+                }
+                Some(AssemblyArchiveMemberSourceSpec::Glob(pattern)) => {
+                    // The matched files, and the set they form, are the inputs.
+                    let matches = gaia_spec::expand_simple_glob(spec, roots, pattern.as_str())
+                        .map(|paths| gaia_spec::exclude_names(paths, &member.exclude))
+                        .unwrap_or_default();
+                    let names = matches
+                        .iter()
+                        .map(|path| path.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    parts.push((
+                        format!("archive {owner} matches"),
+                        format!(
+                            "archive-glob:{part_owner}:{}",
+                            crate::reuse_assembly::text_digest(&names)
+                        ),
+                    ));
+                    for path in matches {
+                        parts.push(input_part(
+                            "archive-member",
+                            &owner,
+                            &part_owner,
+                            path,
+                            generated_outputs,
+                        ));
+                    }
+                }
                 None => {}
             }
         }

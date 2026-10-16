@@ -15,21 +15,18 @@ use gaia_exec::{
     ExecutionCancellation, ExecutionEvent, ExecutionProviders,
     execute_plan_with_cancellation_and_observer,
 };
-use gaia_plan::{ExecutionPlan, PlannedOperation, plan_build_with_reuse_state};
-use gaia_report::{ReportFileKind, generate_report, write_report_bundle};
+use gaia_plan::{ExecutionPlan, plan_build_with_reuse_state};
+use gaia_report::{generate_report, write_report_bundle};
 use gaia_spec::ResolvedBuildSpec;
 use gaia_validate::{ValidationReport, validate_spec_with_providers};
 use ratatui::Frame;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style, Stylize};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph, Wrap};
 
+use crate::AppContext;
 use crate::commands::{
     CommandOutcome, RunArtifacts, load_operation_durations, load_reuse_state, save_reuse_state,
 };
-use crate::{AppContext, backend_overview_lines, runtime_overview_lines};
 
 /// How the TUI was invoked from the command line.
 pub struct TuiLaunch<'a> {
@@ -129,17 +126,23 @@ fn run_loop(
 }
 
 mod attach;
+mod dashboard;
 mod details;
 mod discovery;
 mod events;
 mod input;
+mod metrics;
 mod model;
-mod plan_view;
+mod picker;
 mod render;
 mod run;
+mod run_view;
 mod setup;
+mod setup_view;
 mod state;
 mod status;
+mod theme;
+mod widgets;
 
 pub(crate) use attach::*;
 pub(crate) use discovery::*;
@@ -147,3 +150,6 @@ pub(crate) use events::*;
 pub(crate) use model::*;
 pub(crate) use render::*;
 pub(crate) use state::*;
+
+#[cfg(test)]
+mod screen_tests;

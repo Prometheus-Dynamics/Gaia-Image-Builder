@@ -345,6 +345,7 @@ fn plan_rebuilds_assembly_when_runtime_state_is_missing_even_if_outputs_exist() 
             path: tree_dir.display().to_string().into(),
         }],
         files: vec![AssemblyFileSpec {
+            exclude: Vec::new(),
             tree: "boot".into(),
             src: Some(source_dir.join("config.txt").display().to_string().into()),
             src_glob: None,

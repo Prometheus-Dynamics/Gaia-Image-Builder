@@ -60,6 +60,7 @@ fn write_rootfs_assets(root: &Path) {
 
 fn rootfs_file(src: &str, dest: &str, mode: Option<&str>) -> AssemblyFileSpec {
     AssemblyFileSpec {
+        exclude: Vec::new(),
         tree: "rootfs".into(),
         src: Some(src.into()),
         src_glob: None,
@@ -102,6 +103,7 @@ fn ext4_assembly(
             target: "etc/motd".into(),
         }],
         filesystems: vec![gaia_spec::AssemblyFilesystemSpec {
+            free: None,
             id: "rootfs".into(),
             kind: AssemblyFilesystemKindSpec::Ext4,
             source_tree: "rootfs".into(),
@@ -296,7 +298,7 @@ fn ext4_auto_bytes_cover_the_content_in_whole_mib() {
     fs::create_dir_all(tree.join("a")).expect("dir");
     fs::write(tree.join("a/big"), vec![1u8; 3 * 1024 * 1024 + 1]).expect("big");
     fs::write(tree.join("small"), "x").expect("small");
-    let bytes = ext4_auto_bytes(&tree).expect("auto bytes");
+    let bytes = ext4_auto_bytes(&tree, 0).expect("auto bytes");
     let content = 3 * 1024 * 1024 + 1 + 4096 + 4096 + 4096 + 4096;
     assert_eq!(bytes % MIB_BYTES, 0);
     assert!(

@@ -65,6 +65,7 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
             path: "$assembly.work/boot".into(),
         }],
         files: vec![AssemblyFileSpec {
+            exclude: Vec::new(),
             tree: "boot".into(),
             src_glob: Some(source_dir.join("*.txt").display().to_string().into()),
             src: None,
@@ -76,6 +77,7 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
             json: None,
         }],
         filesystems: vec![AssemblyFilesystemSpec {
+            free: None,
             id: "bootfs".into(),
             kind: AssemblyFilesystemKindSpec::Vfat,
             source_tree: "boot".into(),
@@ -320,6 +322,7 @@ fn vfat_filesystem_honors_mformat_timeout() {
             path: "$assembly.work/boot".into(),
         }],
         files: vec![AssemblyFileSpec {
+            exclude: Vec::new(),
             tree: "boot".into(),
             src: Some(source_dir.join("boot.txt").display().to_string().into()),
             src_glob: None,
@@ -331,6 +334,7 @@ fn vfat_filesystem_honors_mformat_timeout() {
             json: None,
         }],
         filesystems: vec![AssemblyFilesystemSpec {
+            free: None,
             id: "bootfs".into(),
             kind: AssemblyFilesystemKindSpec::Vfat,
             source_tree: "boot".into(),

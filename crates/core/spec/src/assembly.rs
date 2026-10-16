@@ -179,6 +179,23 @@ pub fn expand_simple_glob(
     Ok(matches)
 }
 
+/// Drops the matches whose file name one of `exclude`'s names (simple `*`
+/// globs) matches.
+pub fn exclude_names(paths: Vec<PathBuf>, exclude: &[String]) -> Vec<PathBuf> {
+    if exclude.is_empty() {
+        return paths;
+    }
+    paths
+        .into_iter()
+        .filter(|path| {
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                return true;
+            };
+            !exclude.iter().any(|pattern| wildcard_match(pattern, name))
+        })
+        .collect()
+}
+
 fn expand_glob_components(
     components: &[Component<'_>],
     index: usize,

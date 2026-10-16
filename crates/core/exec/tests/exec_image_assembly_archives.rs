@@ -123,6 +123,11 @@ fn parse_tar(bytes: &[u8]) -> Vec<TarEntry> {
 
 fn file_member(name: &str, src: &Path) -> AssemblyArchiveMemberSpec {
     AssemblyArchiveMemberSpec {
+        tree: None,
+        src_dir: None,
+        src_glob: None,
+        prefix: String::new(),
+        exclude: Vec::new(),
         name: name.into(),
         src: Some(src.display().to_string().into()),
         entries: None,
@@ -169,6 +174,11 @@ fn archive_bundles_manifest_and_zstd_members_deterministically() {
             output: bundle.display().to_string().into(),
             members: vec![
                 AssemblyArchiveMemberSpec {
+                    tree: None,
+                    src_dir: None,
+                    src_glob: None,
+                    prefix: String::new(),
+                    exclude: Vec::new(),
                     name: "manifest.env".into(),
                     src: None,
                     json: None,
@@ -300,6 +310,11 @@ fn archive_with_missing_digest_file_fails_without_publishing() {
             id: "update".into(),
             output: bundle.display().to_string().into(),
             members: vec![AssemblyArchiveMemberSpec {
+                tree: None,
+                src_dir: None,
+                src_glob: None,
+                prefix: String::new(),
+                exclude: Vec::new(),
                 name: "manifest.env".into(),
                 src: None,
                 json: None,

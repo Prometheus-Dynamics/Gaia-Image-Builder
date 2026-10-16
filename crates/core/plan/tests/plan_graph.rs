@@ -374,6 +374,7 @@ fn image_assembly_fingerprint_tracks_staged_file_inputs() {
             path: "$assembly.work/boot".into(),
         }],
         files: vec![AssemblyFileSpec {
+            exclude: Vec::new(),
             tree: "boot".into(),
             src: Some(source_path.display().to_string().into()),
             src_glob: None,
@@ -420,6 +421,7 @@ fn image_assembly_fingerprint_tracks_glob_expansion() {
             path: "$assembly.work/boot".into(),
         }],
         files: vec![AssemblyFileSpec {
+            exclude: Vec::new(),
             tree: "boot".into(),
             src: None,
             src_glob: Some(source_dir.join("*.dtb").display().to_string().into()),
@@ -640,6 +642,7 @@ fn image_assembly_fingerprint_does_not_hash_generated_filesystem_partition_outpu
             path: "$assembly.work/rootfs".into(),
         }],
         filesystems: vec![AssemblyFilesystemSpec {
+            free: None,
             id: "rootfs".into(),
             kind: AssemblyFilesystemKindSpec::Cpio,
             source_tree: "rootfs".into(),

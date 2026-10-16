@@ -1,21 +1,44 @@
+//! The frame every screen sits in: a header line naming the screen and what it
+//! is about, the screen's body, and the footer with its key hints. Below the
+//! smallest size a notice replaces the screens.
+
 use super::*;
-use crate::commands::live_status::unix_now;
+use crate::tui::dashboard;
+use crate::tui::details;
+use crate::tui::picker;
+use crate::tui::run_view::RunPhase;
+use crate::tui::setup_view;
+use crate::tui::widgets::badge::phase_badge;
+use crate::tui::widgets::chrome;
+use crate::tui::widgets::help::{HelpSection, render_help as draw_help};
+use ratatui::text::Span;
 
 pub(crate) fn render(frame: &mut Frame<'_>, state: &mut TuiState<'_>) {
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(10), Constraint::Length(3)])
-        .split(frame.area());
-
-    match state.screen {
-        Screen::Picker => render_picker(frame, layout[0], state),
-        Screen::Setup => render_setup(frame, layout[0], state),
-        Screen::Monitor => render_monitor(frame, layout[0], state),
-        Screen::Attach => render_attach(frame, layout[0], state),
+    let area = frame.area();
+    if !chrome::fits_screen(area) {
+        chrome::too_small(frame, area);
+        return;
     }
-    render_footer(frame, layout[1], state);
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(3),
+        ])
+        .split(area);
+
+    chrome::screen_header(frame, rows[0], screen_title(state), header_subject(state));
+    match state.screen {
+        Screen::Picker => picker::render(frame, rows[1], state),
+        Screen::Setup => setup_view::render(frame, rows[1], state),
+        Screen::Details => details::render(frame, rows[1], state),
+        Screen::Monitor => render_monitor(frame, rows[1], state),
+        Screen::Attach => render_attach(frame, rows[1], state),
+    }
+    render_footer(frame, rows[2], state);
     if state.show_help {
-        render_help(frame, frame.area(), state);
+        render_help(frame, area, state);
     }
 }
 
@@ -26,322 +49,240 @@ const HELP_GLOBAL: &[(&str, &str)] = &[
 const HELP_PICKER: &[(&str, &str)] = &[
     (
         "j/k Up/Down",
-        "move through running builds and build configs",
+        "move through the builds and the build configs",
     ),
-    ("Enter", "attach to a running build, or open a build config"),
+    ("Enter", "attach to a build, or open a build config"),
     ("r", "rescan build files and running builds"),
 ];
 const HELP_SETUP: &[(&str, &str)] = &[
-    ("j/k Up/Down", "move through setup items"),
-    ("Left/Right", "change value / switch detail view"),
-    ("Enter", "select or edit the item"),
-    ("s / r", "start build"),
-    ("m", "back to the monitor"),
-    ("b", "pick a different build"),
-    ("p", "refresh resolve/validate/plan"),
-    ("PgUp/PgDn", "scroll detail panel"),
-];
-const HELP_ATTACH: &[(&str, &str)] = &[
-    ("p", "pause the build (its commands stop)"),
-    ("r", "resume the build"),
-    ("c", "cancel the build (press c or y to confirm)"),
-    ("b", "pick another build"),
-    ("PgUp/PgDn Home/End", "scroll the recent output"),
-    ("q", "leave the monitor; the build keeps running"),
-];
-const HELP_MONITOR: &[(&str, &str)] = &[
-    ("j/k Up/Down", "select operation (turns follow off)"),
-    ("f", "follow the running operation"),
+    ("j/k Up/Down", "move through the form"),
     (
         "Left/Right",
-        "switch view: Overview Events Logs Reports Spec",
+        "change the value (target, profile, inputs, variant, jobs)",
     ),
-    ("PgUp/PgDn Home", "scroll"),
-    ("End", "jump to the newest output"),
-    ("c", "cancel the build"),
-    ("Esc", "back to setup (the build keeps running)"),
+    (
+        "Enter",
+        "edit the value, or open Plan, Validation, Reports or Spec",
+    ),
+    (
+        "s / r",
+        "start the build (when the plan preview says it can start)",
+    ),
+    ("d", "the details: plan, validation, reports, spec, events"),
+    ("m", "back to the monitor"),
+    ("b", "pick a different build"),
+    ("p", "refresh resolve, validate and plan"),
+];
+const HELP_DETAILS: &[(&str, &str)] = &[
+    ("Left/Right Tab", "switch tab (or 1-5)"),
+    ("Up/Down PgUp/PgDn", "scroll; in Plan, move the cursor"),
+    ("Home/End", "top or bottom of the tab"),
+    ("f", "plan: all, run or reuse only"),
+    ("/", "events: search the output (Enter keeps, Esc clears)"),
+    ("o", "events: the output of one operation, then all"),
+    ("F", "events: follow the newest line, or hold it"),
+    ("s / m / b", "start the build / monitor / pick a build"),
+    ("Esc", "back to setup"),
+];
+/// The run dashboard, shared by the monitor and the attached run.
+const HELP_DASHBOARD: &[(&str, &str)] = &[
+    (
+        "j/k Up/Down",
+        "select an operation (stops following the running one)",
+    ),
+    (
+        "Enter",
+        "details of the operation: why it runs, its time, output",
+    ),
+    (
+        "f / s",
+        "filter (all, running, failed, slow) / sort (plan, duration, delta)",
+    ),
+    (
+        "Left/Right Tab",
+        "switch chart: Progress, Resources, Steps, Packages, Summary",
+    ),
+    ("1-5", "pick a chart by its number"),
+    (
+        "v",
+        "narrow terminals: show the charts instead of the table",
+    ),
+    (
+        "PgUp/PgDn Home/End",
+        "scroll the output (End follows the newest line)",
+    ),
+    ("F", "output: follow the newest line, or hold it in place"),
+    ("l", "output: only the selected operation"),
+    ("/", "search the output (Enter keeps it, Esc clears it)"),
+    ("+ / -", "output pane height"),
+    ("p", "pause or resume the build"),
+    ("c", "cancel the build (c or y to confirm)"),
+];
+const HELP_MONITOR: &[(&str, &str)] = &[("Esc", "back to setup (the build keeps running)")];
+const HELP_ATTACH: &[(&str, &str)] = &[
+    ("b", "pick another build"),
+    ("q", "leave the monitor; the build keeps running"),
 ];
 
 pub(crate) fn render_help(frame: &mut Frame<'_>, area: Rect, state: &TuiState<'_>) {
-    let screen_keys = match state.screen {
-        Screen::Picker => HELP_PICKER,
-        Screen::Setup => HELP_SETUP,
-        Screen::Monitor => HELP_MONITOR,
-        Screen::Attach => HELP_ATTACH,
+    let sections = match state.screen {
+        Screen::Picker => vec![HelpSection {
+            title: "Start screen",
+            keys: HELP_PICKER,
+        }],
+        Screen::Setup => vec![HelpSection {
+            title: "Setup",
+            keys: HELP_SETUP,
+        }],
+        Screen::Details => vec![HelpSection {
+            title: "Details",
+            keys: HELP_DETAILS,
+        }],
+        Screen::Monitor => vec![
+            HelpSection {
+                title: "Run",
+                keys: HELP_DASHBOARD,
+            },
+            HelpSection {
+                title: "Monitor",
+                keys: HELP_MONITOR,
+            },
+        ],
+        Screen::Attach => vec![
+            HelpSection {
+                title: "Run",
+                keys: HELP_DASHBOARD,
+            },
+            HelpSection {
+                title: "Attached build",
+                keys: HELP_ATTACH,
+            },
+        ],
     };
-    let mut lines = Vec::new();
-    for (key, action) in screen_keys.iter().chain(HELP_GLOBAL) {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{key:>16}  "),
-                Style::default().fg(Color::LightYellow),
-            ),
-            Span::raw(*action),
-        ]));
+    let mut all = sections;
+    all.push(HelpSection {
+        title: "Global",
+        keys: HELP_GLOBAL,
+    });
+    draw_help(frame, area, &all);
+}
+
+/// The name of the screen, in the header.
+fn screen_title(state: &TuiState<'_>) -> &'static str {
+    match state.screen {
+        Screen::Picker => "Start",
+        Screen::Setup => "Setup",
+        Screen::Details => "Details",
+        Screen::Monitor => "Monitor",
+        Screen::Attach => "Attached",
     }
-    let width = 64.min(area.width);
-    let height = (lines.len() as u16 + 2).min(area.height);
-    let popup = Rect {
-        x: area.x + (area.width - width) / 2,
-        y: area.y + (area.height - height) / 2,
-        width,
-        height,
-    };
-    frame.render_widget(ratatui::widgets::Clear, popup);
-    frame.render_widget(
-        Paragraph::new(Text::from(lines)).block(
-            Block::default()
-                .title(" Keys (any key closes) ")
-                .borders(Borders::ALL),
+}
+
+/// What the screen is about, after the title: the build or the run, and a
+/// badge while a build runs from this TUI.
+fn header_subject(state: &TuiState<'_>) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let name = match state.screen {
+        Screen::Picker => format!(
+            "{} build config(s), {} running",
+            state.build_entries.len(),
+            state.runs.iter().filter(|run| run.is_live()).count()
         ),
-        popup,
-    );
+        Screen::Attach => state
+            .attach
+            .as_ref()
+            .and_then(|attach| attach.view.as_ref())
+            .map(|view| view.display_name.clone())
+            .unwrap_or_else(|| "no run".to_string()),
+        _ => state
+            .spec
+            .as_ref()
+            .map(|spec| spec.identity.display_name.clone())
+            .unwrap_or_else(|| {
+                std::path::Path::new(&state.build)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "no build".to_string())
+            }),
+    };
+    spans.push(Span::raw(name));
+    if matches!(state.run_state, RunState::Running { .. }) {
+        spans.push(Span::raw("  "));
+        spans.push(phase_badge(RunPhase::Running));
+    }
+    spans
 }
 
 pub(crate) fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &TuiState<'_>) {
     let hint = if state.edit_field.is_some() {
-        "[Type] edit  [Backspace] delete  [Enter] apply  [Esc] cancel"
+        "[Type] edit  [Backspace] delete  [Enter] apply  [Esc] cancel".to_string()
     } else {
         match state.screen {
-            Screen::Picker => "[Enter] open/attach  [j/k] move  [r] rescan  [?] help  [q] quit",
-            Screen::Setup => {
-                "[Enter] select/edit  [Left/Right] value  [s] start  [?] help  [q] quit"
+            Screen::Picker => {
+                "[Enter] open/attach  [j/k] move  [r] rescan  [?] help  [q] quit".into()
             }
+            Screen::Setup => {
+                "[Enter] select/edit  [←→] value  [s] start  [d] details  [m] monitor  [?] help  [q] quit"
+                    .into()
+            }
+            Screen::Details => format!(
+                "{}  [?] help  [q] quit",
+                details::footer_hint(state.details.tab())
+            ),
             Screen::Monitor => {
-                "[Left/Right] view  [f] follow  [c] cancel  [Esc] setup  [?] help  [q] quit"
+                let over = state.monitor_run_view().is_some_and(|view| view.is_over());
+                format!("{}  [Esc] setup", dashboard::footer_hint(over))
             }
             Screen::Attach => {
-                "[p] pause  [r] resume  [c] cancel  [b] builds  [PgUp/PgDn] scroll  [?] help  [q] leave monitor"
+                let over = state
+                    .attach
+                    .as_ref()
+                    .and_then(|attach| attach.view.as_ref())
+                    .is_some_and(|view| view.is_over());
+                format!("{}  [b] builds", dashboard::footer_hint(over))
             }
         }
     };
-    let line = if let Some(notice) = state.footer_notice() {
-        Line::from(vec![
-            Span::raw(hint),
-            Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(notice.to_string(), Style::default().fg(Color::LightYellow)),
-        ])
+    let notice = state.footer_notice();
+    let hint = if state.edit_field.is_none() && matches!(state.screen, Screen::Attach) {
+        hint.replace("[q] quit", "[q] leave monitor")
     } else {
-        Line::from(hint)
+        hint
     };
-    let footer =
-        Paragraph::new(Text::from(vec![line])).block(Block::default().borders(Borders::TOP));
-    frame.render_widget(footer, area);
+    chrome::footer(frame, area, &hint, notice);
 }
 
-/// The start screen: the running gaia builds of the whole system above the
-/// build configs of this directory. Without running builds it is the build
-/// picker alone.
-pub(crate) fn render_picker(frame: &mut Frame<'_>, area: Rect, state: &mut TuiState<'_>) {
-    if state.runs.is_empty() {
-        render_build_picker(frame, area, state);
-        return;
-    }
-    let runs_height = (state.runs.len() as u16 + 2).min((area.height / 2).max(3));
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(runs_height), Constraint::Min(3)])
-        .split(area);
-    render_running_builds(frame, rows[0], state);
-    render_build_picker(frame, rows[1], state);
-}
-
-fn picker_highlight() -> Style {
-    Style::default()
-        .fg(Color::Black)
-        .bg(Color::LightYellow)
-        .add_modifier(Modifier::BOLD)
-}
-
-fn render_running_builds(frame: &mut Frame<'_>, area: Rect, state: &mut TuiState<'_>) {
-    let now = unix_now();
-    let live = state.runs.iter().filter(|run| run.is_live()).count();
-    let items = state
-        .runs
-        .iter()
-        .map(|run| ListItem::new(registered_run_line(run, now)))
-        .collect::<Vec<_>>();
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .title(format!("Running builds ({live} live)"))
-                .borders(Borders::ALL),
-        )
-        .highlight_symbol(">> ")
-        .highlight_style(picker_highlight());
-    if state.picker_focus == PickerFocus::Runs {
-        frame.render_stateful_widget(list, area, &mut state.run_list);
-    } else {
-        frame.render_stateful_widget(list, area, &mut ListState::default());
-    }
-}
-
-fn render_build_picker(frame: &mut Frame<'_>, area: Rect, state: &mut TuiState<'_>) {
-    if state.build_entries.is_empty() {
-        let text = vec![
-            Line::from("No build configs in this directory."),
-            Line::from("Run gaia tui from a project directory, or use --builds-dir <dir>."),
-        ];
-        frame.render_widget(
-            Paragraph::new(Text::from(text))
-                .block(Block::default().title("Build Picker").borders(Borders::ALL)),
-            area,
-        );
-        return;
-    }
-    let items = state
-        .build_entries
-        .iter()
-        .map(|entry| {
-            ListItem::new(picker_line(
-                &entry.label,
-                state.live_marks.get(&entry.path),
-                unix_now(),
-            ))
-        })
-        .collect::<Vec<_>>();
-    let list = List::new(items)
-        .block(Block::default().title("Build Picker").borders(Borders::ALL))
-        .highlight_symbol(">> ")
-        .highlight_style(picker_highlight());
-    if state.picker_focus == PickerFocus::Builds {
-        frame.render_stateful_widget(list, area, &mut state.build_list);
-    } else {
-        frame.render_stateful_widget(list, area, &mut ListState::default());
-    }
-}
-
-pub(crate) fn render_setup(frame: &mut Frame<'_>, area: Rect, state: &mut TuiState<'_>) {
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(34), Constraint::Min(0)])
-        .split(area);
-    render_setup_menu(frame, cols[0], state);
-    render_detail_panel(frame, cols[1], state, &state.setup_panel_title());
-}
-
+/// The monitor of the run this TUI started: the run dashboard.
 pub(crate) fn render_monitor(frame: &mut Frame<'_>, area: Rect, state: &mut TuiState<'_>) {
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(5), Constraint::Min(8)])
-        .split(area);
-    render_monitor_progress(frame, rows[0], state);
-
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(42), Constraint::Min(0)])
-        .split(rows[1]);
-    render_operations_list(frame, cols[0], state);
-    render_detail_panel(frame, cols[1], state, &state.monitor_panel_title());
-}
-
-pub(crate) fn render_setup_menu(frame: &mut Frame<'_>, area: Rect, state: &mut TuiState<'_>) {
-    let items = state
-        .setup_items
-        .iter()
-        .map(|item| ListItem::new(state.setup_item_label(item.clone())))
-        .collect::<Vec<_>>();
-    let list = List::new(items)
-        .block(Block::default().title("Setup").borders(Borders::ALL))
-        .highlight_symbol(">> ")
-        .highlight_style(
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::LightYellow)
-                .add_modifier(Modifier::BOLD),
+    let Some(view) = state.monitor_run_view() else {
+        chrome::empty_state(
+            frame,
+            area,
+            "Monitor",
+            &[
+                "no build has run in this session",
+                "press s in setup to start one",
+            ],
         );
-    frame.render_stateful_widget(list, area, &mut state.setup_list);
-}
-
-pub(crate) fn render_operations_list(frame: &mut Frame<'_>, area: Rect, state: &mut TuiState<'_>) {
-    let items = state
-        .operation_items()
-        .into_iter()
-        .map(|item| {
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("[{}] ", item.status),
-                    Style::default().fg(item.color),
-                ),
-                Span::raw(item.label),
-            ]))
-        })
-        .collect::<Vec<_>>();
-    let block = Block::default().title("Operations").borders(Borders::ALL);
-    let list = List::new(items)
-        .block(block)
-        .highlight_symbol(">> ")
-        .highlight_style(
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::LightYellow)
-                .add_modifier(Modifier::BOLD),
-        );
-    frame.render_stateful_widget(list, area, &mut state.operation_list);
-}
-
-pub(crate) fn render_detail_panel(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    state: &mut TuiState<'_>,
-    title: &str,
-) {
-    let block = match state.screen {
-        Screen::Monitor => Block::default()
-            .title(state.monitor_tabs_title())
-            .borders(Borders::ALL),
-        _ => Block::default().title(title).borders(Borders::ALL),
+        return;
     };
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let lines = state.detail_lines();
-    if state.should_tail_detail() {
-        let visible_lines = inner.height as usize;
-        let scroll = lines.len().saturating_sub(visible_lines);
-        state.detail_scroll = scroll.min(u16::MAX as usize) as u16;
-    }
-
-    let panel = Paragraph::new(Text::from(lines))
-        .wrap(Wrap { trim: false })
-        .scroll((state.detail_scroll, 0));
-    frame.render_widget(
-        panel,
-        Rect {
-            x: inner.x.saturating_add(1),
-            y: inner.y,
-            width: inner.width.saturating_sub(2),
-            height: inner.height,
-        },
-    );
+    let events = &state.events;
+    let tail = |id: &str| {
+        let lines = events
+            .log(id)
+            .map(|log| {
+                let skip = log.lines.len().saturating_sub(POPUP_TAIL);
+                log.lines.iter().skip(skip).cloned().collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if lines.is_empty() {
+            view.op_log_lines(id)
+        } else {
+            lines
+        }
+    };
+    dashboard::render(frame, area, &view, &mut state.dash, &state.metrics, &tail);
 }
 
-pub(crate) fn render_monitor_progress(frame: &mut Frame<'_>, area: Rect, state: &TuiState<'_>) {
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Length(2)])
-        .split(area);
-    let gauge = Gauge::default()
-        .block(
-            Block::default()
-                .title(format!(
-                    "Progress  build={}  status={}  elapsed={}",
-                    state
-                        .spec
-                        .as_ref()
-                        .map(|spec| spec.identity.display_name.clone())
-                        .unwrap_or_else(|| state.build.clone()),
-                    state.run_status_label(),
-                    state.run_elapsed_label(),
-                ))
-                .borders(Borders::ALL),
-        )
-        .gauge_style(Style::default().fg(Color::Green))
-        .percent(state.run_progress_percent())
-        .label(format!("{}%", state.run_progress_percent()));
-    frame.render_widget(gauge, rows[0]);
-
-    let summary = Paragraph::new(Text::from(vec![Line::from(state.monitor_summary_line())]))
-        .block(Block::default().borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM));
-    frame.render_widget(summary, rows[1]);
-}
+/// Output lines the operation popup can take from the monitor's log.
+const POPUP_TAIL: usize = 40;

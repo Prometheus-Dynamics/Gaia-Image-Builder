@@ -1,6 +1,10 @@
 use super::*;
-use crate::commands::live_status::LiveRun;
+use crate::commands::live_status::{LastRun, LiveRun, RunTracker};
 use crate::commands::run_registry::{ListedRun, list_runs};
+use crate::tui::dashboard::{DashboardState, RunEnd};
+use crate::tui::details::DetailsState;
+use crate::tui::metrics::Metrics;
+use ratatui::widgets::ListState;
 const SETUP_REFRESH_DEBOUNCE: Duration = Duration::from_millis(200);
 
 pub(crate) struct TuiState<'a> {
@@ -13,9 +17,6 @@ pub(crate) struct TuiState<'a> {
     pub(crate) build_list: ListState,
     pub(crate) setup_items: Vec<SetupItem>,
     pub(crate) setup_list: ListState,
-    pub(crate) operation_list: ListState,
-    pub(crate) monitor_view: usize,
-    pub(crate) detail_scroll: u16,
     pub(crate) spec: Option<ResolvedBuildSpec>,
     pub(crate) validation: Option<ValidationReport>,
     pub(crate) plan: Option<ExecutionPlan>,
@@ -25,6 +26,16 @@ pub(crate) struct TuiState<'a> {
     pub(crate) last_run: Option<RunArtifacts>,
     pub(crate) last_run_duration: Option<Duration>,
     pub(crate) events: EventLog,
+    /// The state of the run this TUI started, for the monitor.
+    pub(crate) tracker: Option<RunTracker>,
+    /// Set once the run this TUI started is over.
+    pub(crate) run_end: Option<RunEnd>,
+    /// Cancellation of the run was asked for.
+    pub(crate) cancelling: bool,
+    /// The run dashboard's own state: selection, filters, charts, output.
+    pub(crate) dash: DashboardState,
+    /// Machine metrics for the dashboard, sampled while the TUI runs.
+    pub(crate) metrics: Metrics,
     pub(crate) run_state: RunState,
     pub(crate) status: String,
     pub(crate) status_since: Instant,
@@ -33,24 +44,24 @@ pub(crate) struct TuiState<'a> {
     pub(crate) pending_exit_code: Option<(i32, Instant)>,
     pub(crate) quit: QuitState,
     pub(crate) show_help: bool,
-    /// Monitor selection tracks the newest running operation until the user
-    /// picks one by hand.
-    pub(crate) follow_running: bool,
     pub(crate) pending_refresh_at: Option<Instant>,
     pub(crate) refresh_receiver: Option<Receiver<RefreshThreadMessage>>,
     pub(crate) refresh_revision: u64,
-    pub(crate) detail_follow_tail: bool,
     /// The monitor of a run another process started, when attached.
     pub(crate) attach: Option<AttachState>,
     /// Builds of the picker with a live run, by build path.
     pub(crate) live_marks: std::collections::BTreeMap<String, LiveRun>,
-    /// Build dir of each picker entry, resolved once per scan.
-    pub(crate) build_dirs: std::collections::BTreeMap<String, Option<PathBuf>>,
+    /// What each build config says about itself, resolved once per scan.
+    pub(crate) build_meta: std::collections::BTreeMap<String, Option<BuildMeta>>,
+    /// The last recorded run of each build config, by build path.
+    pub(crate) build_last: std::collections::BTreeMap<String, LastRun>,
     pub(crate) picker_polled_at: Option<Instant>,
     /// Every gaia run registered on this system, live and recently ended.
     pub(crate) runs: Vec<ListedRun>,
     pub(crate) run_list: ListState,
     pub(crate) picker_focus: PickerFocus,
+    /// The details screen: its tab and the state of each tab.
+    pub(crate) details: DetailsState,
 }
 
 impl<'a> TuiState<'a> {
@@ -120,9 +131,6 @@ impl<'a> TuiState<'a> {
             build_list,
             setup_items: SetupItem::defaults(),
             setup_list,
-            operation_list: ListState::default(),
-            monitor_view: 0,
-            detail_scroll: 0,
             spec: None,
             validation: None,
             plan: None,
@@ -131,6 +139,11 @@ impl<'a> TuiState<'a> {
             last_run: None,
             last_run_duration: None,
             events: EventLog::default(),
+            tracker: None,
+            run_end: None,
+            cancelling: false,
+            dash: DashboardState::default(),
+            metrics: Metrics::system(),
             run_state: RunState::Idle,
             status: "loading build state".into(),
             status_since: Instant::now(),
@@ -139,18 +152,18 @@ impl<'a> TuiState<'a> {
             pending_exit_code: None,
             quit: QuitState::Idle,
             show_help: false,
-            follow_running: true,
             pending_refresh_at: None,
             refresh_receiver: None,
             refresh_revision: 0,
-            detail_follow_tail: true,
             attach: None,
             live_marks: Default::default(),
-            build_dirs: Default::default(),
+            build_meta: Default::default(),
+            build_last: Default::default(),
             picker_polled_at: None,
             runs,
             run_list,
             picker_focus,
+            details: DetailsState::default(),
         }
     }
 
@@ -214,6 +227,7 @@ impl<'a> TuiState<'a> {
         if let RunState::Running { spinner_tick, .. } = &mut self.run_state {
             *spinner_tick = spinner_tick.wrapping_add(1);
         }
+        self.metrics.sample_if_due(Instant::now());
         self.poll_refresh_completion();
         self.start_pending_refresh();
         self.poll_live();
@@ -307,8 +321,6 @@ impl<'a> TuiState<'a> {
         self.plan = Some(artifacts.plan);
         self.plan_diagnostics = artifacts.plan_diagnostics;
         self.operation_durations = artifacts.operation_durations;
-        self.detail_scroll = 0;
-        self.ensure_operation_selection();
         self.set_status("refreshed resolve/validate/plan state");
     }
 
@@ -322,12 +334,13 @@ impl<'a> TuiState<'a> {
                 _ => items.push(SetupItem::Input(input.name.clone())),
             }
         }
+        if !spec.selection.variants.is_empty() {
+            items.push(SetupItem::Variant);
+        }
         items.extend([
             SetupItem::Jobs,
-            SetupItem::Overview,
-            SetupItem::Selection,
-            SetupItem::Validation,
             SetupItem::Plan,
+            SetupItem::Validation,
             SetupItem::Reports,
             SetupItem::Spec,
             SetupItem::PickBuild,
@@ -386,7 +399,19 @@ fn resolve_refresh_artifacts(
     })
 }
 
-fn resolve_spec_for_refresh(
+/// What a build config says about itself, for the picker: where its build
+/// dir is, and its target and profile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BuildMeta {
+    pub(crate) build_dir: PathBuf,
+    pub(crate) target: Option<String>,
+    pub(crate) profile: Option<String>,
+}
+
+/// Resolves the build the setup shows and runs: the build config with the
+/// current overrides, the git branch when the build has none, and for a build
+/// with `[[variants]]` the selected variant (the first one when none is).
+pub(crate) fn resolve_spec_for_refresh(
     build: &str,
     mut options: ResolveOptions,
 ) -> Result<(ResolveOptions, ResolvedBuildSpec), String> {
@@ -406,7 +431,28 @@ fn resolve_spec_for_refresh(
         spec =
             try_resolve_config_with_options(build, &options).map_err(|error| error.to_string())?;
     }
-
+    if spec.selection.variants.is_empty() {
+        return Ok((options, spec));
+    }
+    let declared = spec
+        .selection
+        .variants
+        .iter()
+        .map(|variant| variant.id.clone())
+        .collect::<Vec<_>>();
+    let chosen = options
+        .selected_variants
+        .first()
+        .filter(|id| declared.contains(id))
+        .cloned()
+        .unwrap_or_else(|| declared[0].clone());
+    options.selected_variants = vec![chosen.clone()];
+    let specs =
+        gaia_config::resolve_variant_specs(build, &options).map_err(|error| error.to_string())?;
+    let spec = specs
+        .into_iter()
+        .find(|spec| spec.selection.variant.as_deref() == Some(chosen.as_str()))
+        .ok_or_else(|| format!("variant '{chosen}' did not resolve"))?;
     Ok((options, spec))
 }
 

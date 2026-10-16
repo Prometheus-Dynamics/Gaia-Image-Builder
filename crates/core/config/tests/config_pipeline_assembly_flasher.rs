@@ -114,6 +114,7 @@ fn flasher_boot_image_resolves_cpio_zstd_kernel_modules_and_publish() {
 #[test]
 fn cpio_zstd_and_publish_default_to_off_when_unset() {
     let spec = AssemblyFilesystemSpec {
+        free: None,
         id: "initramfs".into(),
         kind: AssemblyFilesystemKindSpec::CpioZstd,
         source_tree: "initramfs".into(),

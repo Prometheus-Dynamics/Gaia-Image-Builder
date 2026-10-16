@@ -20,7 +20,10 @@ use std::time::Instant;
 
 use crate::AppContext;
 
-use super::live_status::{LiveRecorder, LiveRunInfo, run_errors, run_outcome_label, unix_now};
+use super::live_status::{
+    LiveRecorder, LiveRunInfo, live_variant, plan_operations, run_errors, run_outcome_label,
+    run_selection_label, unix_now,
+};
 use super::progress::{ConsoleProgress, console_progress_disabled};
 use super::rebuild::check_rebuild_request;
 use super::reuse_reasons::{explain_rebuild_reasons, recorded_for_explanation};
@@ -279,6 +282,9 @@ fn execute_plan_with_console_progress(
             build_name: spec.build_name().to_string(),
             display_name: spec.display_name().to_string(),
             ops_total: operation_count,
+            operations: plan_operations(&plan.operations, &super::load_operation_durations(spec)),
+            variant: live_variant(spec),
+            selection: run_selection_label(spec),
         },
     );
     let print = !console_progress_disabled();

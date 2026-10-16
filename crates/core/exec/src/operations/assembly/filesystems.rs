@@ -149,7 +149,7 @@ pub(super) fn execute_assembly_filesystem(
             let tool_path = format!("mformat={};mcopy={}", mformat.display, mcopy.display);
             tracing::Span::current().record("tool_path", tool_path.as_str());
             let bytes = if filesystem.size.as_deref() == Some("auto") {
-                vfat_auto_bytes(source_tree)?
+                vfat_auto_bytes(source_tree, auto_free_bytes(filesystem)?)?
             } else {
                 filesystem
                     .parsed_size()
@@ -208,14 +208,30 @@ pub(super) fn vfat_sectors_per_cluster(bytes: u64) -> Option<u32> {
         .then_some(1)
 }
 
+/// The margin `size = "auto"` leaves: 5% of the content or the minimum,
+/// whichever is more, and at least the filesystem's `free`.
+pub(super) fn auto_margin(content: u64, min: u64, free: u64) -> u64 {
+    (content / 20).max(min).max(free)
+}
+
+/// The `free` of a filesystem with `size = "auto"`, in bytes (0 when unset).
+pub(super) fn auto_free_bytes(
+    filesystem: &gaia_spec::AssemblyFilesystemSpec,
+) -> Result<u64, String> {
+    Ok(filesystem
+        .parsed_free()
+        .map_err(|error| format!("assembly filesystem '{}' free: {error}", filesystem.id))?
+        .map_or(0, |free| free.bytes()))
+}
+
 /// The image size for `size = "auto"`: the content (each file rounded up to
 /// a cluster, each directory costing one) plus the fixed FAT overhead plus a
 /// margin, rounded up to 1 MiB. It depends only on the tree's content, so the
 /// same tree gives the same size. A tree that overruns the estimate fails
 /// when `mcopy` runs out of space, rather than silently truncating.
-pub(super) fn vfat_auto_bytes(source_tree: &Path) -> Result<u64, String> {
+pub(super) fn vfat_auto_bytes(source_tree: &Path, free: u64) -> Result<u64, String> {
     let content = vfat_content_bytes(source_tree)?;
-    let margin = (content / 20).max(VFAT_AUTO_MIN_MARGIN_BYTES);
+    let margin = auto_margin(content, VFAT_AUTO_MIN_MARGIN_BYTES, free);
     let total = content + VFAT_AUTO_FIXED_OVERHEAD_BYTES + margin;
     Ok(total.div_ceil(MIB) * MIB)
 }

@@ -14,6 +14,12 @@ Config files can use:
 - table imports with `when` for conditional fragments, for example
   `{ path = "full.toml", when = { profile = "full" } }`
 
+The image `kind` (`kind = "buildroot"` or `kind = "starting-point"`) may be set
+by the build file or by any layer it extends. A layer that only adds
+`[image.assembly]` or `[image.rootfs]` tables can leave `kind` out; it merges
+under the kind the build file sets. A build that has an `[image]` table and in
+which no file sets `kind` fails with an error that names `image.kind`.
+
 Merging rules:
 - later imports override earlier ones
 - vectors of typed objects merge by id/key where supported
@@ -1244,6 +1250,14 @@ still run in docker; only git runs on the host.
 - The `git_backend` setting does not change source fingerprints: a build
   upgraded to this version keeps its materialized sources.
 
+**Path source identity.** A path source inside a git work tree is identified by
+the files git lists for it: tracked files and untracked files that are not
+ignored, with `identity_ignore` and the built-in ignores applied on top. Ignored
+build output such as `target/` or `node_modules/` is never read, so validating a
+build on a large checkout stays fast. Outside a git work tree the whole directory
+is walked as before. The identity of a git-backed path source changed once with
+this rule, so its first build after the change may rebuild.
+
 ### Git Source Lockfile
 
 `gaia lock <build.toml>` writes `<build>.gaia.lock` next to the build
@@ -1732,13 +1746,17 @@ A git source that follows a branch or tag without a lock has no exact commit
 before it is fetched, so its token is reported as unresolved: pin it with
 `rev` or `gaia lock`.
 
+`${source.<id>.commit_short}` is the first 8 characters of that commit; a
+`-dirty` suffix is kept, so a short token still shows an uncommitted tree.
+
 Project identity: `${project.commit}` and `${project.describe}` describe the
 git repository holding the build file. `${project.commit}` is the full `HEAD`
 sha, suffixed `-dirty` when tracked files have uncommitted changes, and
 `${project.describe}` is `git describe --tags --always --dirty`. They resolve
 during normal interpolation, so they work anywhere `${build.version}` does,
 including `version`, `archive_name`, env sets and archive manifest entries.
-Use them to make image versions unique per build:
+`${project.commit_short}` is the first 8 characters of `${project.commit}`,
+with the `-dirty` suffix kept. Use them to make image versions unique per build:
 
 ```toml
 version = "${input.app_version}+${project.describe}"
@@ -2005,6 +2023,7 @@ Assembly roots:
 Assembly behavior:
 - Declared `trees` are cleaned and recreated before staging.
 - File entries use exactly one of `src`, `src_glob`, `content` or `json`. `content` and `json` write a generated file (see [Generated content](#generated-content)).
+- `exclude = ["dwc2.dtbo", "i2c*.dtbo"]` on a `src_glob` entry leaves out matches by file name (simple `*` globs allowed). Use it to copy a stock set except the names a later entry provides, so the result does not depend on copy order. It is refused on other entries.
 - Glob staging is deterministic and currently supports simple non-recursive `*` filename patterns.
 - A `dest` of `.` or ending in `/` is a directory the sources are copied into; any other `dest` is the file a single source is copied to. A `src_glob` that matches several files needs a directory `dest` (otherwise every match would land on one file) and fails without one.
 - `optional = true` skips missing sources without failing the build and records the skip in runtime state.
@@ -2032,6 +2051,7 @@ Assembly behavior:
 - `cpio` kinds write a newc archive with uid and gid 0, entries in sorted order and zero timestamps, so the same tree packs to the same bytes. `cpio-zstd` compresses that archive with `zstd -q -c --no-progress -T0 -<compression_level>`, resolving `zstd` like the zstd transform; `compression_level` (1-19) is only accepted on `cpio-zstd` and defaults to 19.
 - `publish = true` on a filesystem also copies its image to the image output dir (`$assembly.out`, the collect dir by default) under the output's file name, and the published image is reported like a raw disk: in the run summary, its image sizes, and the content digests. The name must not collide with another output or published copy. In a RAM work dir the image is built in RAM and copied to the image output dir when built.
 - `vfat` uses `mtools` (`mformat` and `mcopy`), resolving provider host tools first, then host `PATH`; `size` accepts byte values or binary `K`, `M`, `G`, and `T` suffixes, or `size = "auto"`. Without `size` the image is 32M.
+- `free = "256M"` (only with `size = "auto"`) leaves that much free space beyond the content estimate: the margin becomes the larger of the automatic margin and `free`, and the result is still rounded up to a whole MiB. Use it when files will be added to the image later.
 - `size = "auto"` (vfat and ext4) sizes the image from its source tree; the vfat rule is: each file is counted rounded up to 4 KiB, each directory as 4 KiB, plus 1 MiB for the FAT tables and root directory, plus a margin of 5% (at least 1 MiB), rounded up to a whole MiB. The size depends only on the tree's content, so the same tree always gets the same size. The 4 KiB per entry is an estimate of the cluster size mtools picks: a tree that overruns it fails while copying, rather than being truncated.
 - Raw MBR disk assembly writes 1 MiB-aligned partitions sequentially (see [Disk partitions](#disk-partitions)).
 - MBR partition `type` accepts raw `0xNN` values; `type_alias` currently supports `fat32-lba` and `linux`.
@@ -2107,7 +2127,11 @@ Assembly results report, per published raw disk image (and the primary image), `
 `[[image.assembly.archives]]` builds a plain POSIX ustar archive after all disks, written by Gaia itself (no external `tar`):
 - `id`: unique archive id.
 - `output`: path template, like other assembly outputs; it can point into the image collect dir (`$provider.images/...`).
-- `members`: ordered list. Each member has a `name` (path inside the archive) and exactly one of `src` (a path template; the file is copied), `entries` (a generated `KEY=value` file) or `json` (a generated JSON document, see [Generated content](#generated-content)).
+- `members`: ordered list. Each member has exactly one source: `src` (a path template; the file is copied, stored as `name`), `entries` (a generated `KEY=value` file, stored as `name`), `json` (a generated JSON document, see [Generated content](#generated-content)), `tree` or `src_dir` (every entry under an assembly tree or a directory), or `src_glob` (each file the pattern matches).
+- `tree = "<tree id>"` and `src_dir = "<path template>"` archive every entry under that root, stored under `prefix` (empty, or a relative path ending in `/`). `name` may be left empty for these. Entries are walked in sorted order, a directory before its contents: regular files keep mode 0644, or 0755 when executable; directories are 0755; symbolic links are stored as links and not followed. Only regular files appear in the archive's state. A `tree` member reads its tree's root, so it runs after the steps that fill the tree, and its fingerprint covers the tree's content.
+- `src_glob = "<pattern>"` archives each file the pattern matches under `name`, a directory prefix ending in `/`, followed by the file's own name.
+- `exclude = [...]` on a `tree` or `src_glob` member leaves out files (not directories) by name, simple `*` globs allowed.
+- Archive paths follow the ustar rule: a name, or a link target, longer than 100 bytes fails the build with an error naming it (the `prefix` field is not used to split names).
 - `generated`: ordered list of generated members (`name`, `entries`). They are written **before** all `members`; to interleave generated and file members, put `entries` directly on a `members` item instead.
 - `entries`: `[["KEY", "value"], ...]`, rendered as one `KEY=value` line per entry in order. Keys must match `[A-Za-z_][A-Za-z0-9_]*`. Values made only of `A-Z a-z 0-9 _ @ % + = : , . / -` are written as-is; anything else (including an empty value) is wrapped in single quotes with embedded `'` written as `'\''`, so the file can be sourced by `sh`. Values cannot contain newlines.
 - Entry values may contain `${assembly.sha256:<path template>}`, replaced at assembly time by the lowercase hex sha256 of that file (an assembly output such as a transform result, or any other file). The file must exist when the archive is built. Normal config interpolation such as `${build.version}` runs first and may also appear inside the path (`${assembly.sha256:$assembly.out/${build.name}.img}`). Any other `${...}` left in a value is a validation error.

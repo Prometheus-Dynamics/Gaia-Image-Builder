@@ -17,6 +17,7 @@ fn roots_for(root: &Path) -> (ResolvedBuildSpec, AssemblyRoots) {
             path: "$assembly.work/boot".into(),
         }],
         filesystems: vec![gaia_spec::AssemblyFilesystemSpec {
+            free: None,
             id: "bootfs".into(),
             kind: gaia_spec::AssemblyFilesystemKindSpec::Vfat,
             source_tree: "boot".into(),

@@ -677,6 +677,11 @@ pub struct RawImageConfig {
     pub feed: RawImageFeedConfig,
     pub output: RawImageOutputConfig,
     pub assembly: Option<RawImageAssemblyConfig>,
+    /// Whether this file or a layer it merges says `kind`. Set by the loader:
+    /// a layer that omits `kind` parses as an empty buildroot definition,
+    /// which merges under the kind a build file sets.
+    #[serde(skip)]
+    pub kind_given: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]

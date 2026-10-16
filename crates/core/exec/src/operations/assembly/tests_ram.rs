@@ -24,6 +24,7 @@ fn placement_gib() -> u64 {
 /// dir moves or keeps.
 fn ram_test_assembly(work_dir: &str) -> ImageAssemblySpec {
     let file = |src: &str, dest: &str| AssemblyFileSpec {
+        exclude: Vec::new(),
         tree: "boot".into(),
         src: Some(src.into()),
         src_glob: None,
@@ -61,6 +62,7 @@ fn ram_test_assembly(work_dir: &str) -> ImageAssemblySpec {
             "$assembly.work/part-copy.bin",
         )],
         filesystems: vec![gaia_spec::AssemblyFilesystemSpec {
+            free: None,
             id: "boot".into(),
             kind: gaia_spec::AssemblyFilesystemKindSpec::Cpio,
             source_tree: "boot".into(),

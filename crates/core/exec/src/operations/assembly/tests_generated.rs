@@ -49,6 +49,7 @@ fn generated_file(
     json: Option<AssemblyJsonValue>,
 ) -> AssemblyFileSpec {
     AssemblyFileSpec {
+        exclude: Vec::new(),
         tree: "boot".into(),
         src: None,
         src_glob: None,
@@ -175,6 +176,11 @@ fn json_documents_render_in_order_with_numbers_in_tree_and_archive() {
         id: "bundle".into(),
         output: "$assembly.out/bundle.tar".into(),
         members: vec![AssemblyArchiveMemberSpec {
+            tree: None,
+            src_dir: None,
+            src_glob: None,
+            prefix: String::new(),
+            exclude: Vec::new(),
             name: "manifest.json".into(),
             src: None,
             entries: None,
@@ -255,6 +261,11 @@ fn generated_files_in_a_ram_work_dir_are_written_to_ram_and_render_the_same() {
         id: "bundle".into(),
         output: "$assembly.out/bundle.tar".into(),
         members: vec![AssemblyArchiveMemberSpec {
+            tree: None,
+            src_dir: None,
+            src_glob: None,
+            prefix: String::new(),
+            exclude: Vec::new(),
             name: "cmdline.txt".into(),
             src: Some("$assembly.tree.boot/cmdline.txt".into()),
             entries: None,

@@ -39,6 +39,7 @@ fn executes_image_assembly_file_staging() {
         }],
         files: vec![
             AssemblyFileSpec {
+                exclude: Vec::new(),
                 tree: "boot".into(),
                 src: Some(source_dir.join("config.txt").display().to_string().into()),
                 src_glob: None,
@@ -50,6 +51,7 @@ fn executes_image_assembly_file_staging() {
                 json: None,
             },
             AssemblyFileSpec {
+                exclude: Vec::new(),
                 tree: "boot".into(),
                 src: None,
                 src_glob: Some(glob_dir.join("*.dtb").display().to_string().into()),
@@ -61,6 +63,7 @@ fn executes_image_assembly_file_staging() {
                 json: None,
             },
             AssemblyFileSpec {
+                exclude: Vec::new(),
                 tree: "boot".into(),
                 src: Some(source_dir.join("missing.txt").display().to_string().into()),
                 src_glob: None,
@@ -73,6 +76,7 @@ fn executes_image_assembly_file_staging() {
             },
             #[cfg(unix)]
             AssemblyFileSpec {
+                exclude: Vec::new(),
                 tree: "boot".into(),
                 src: Some(source_dir.join("config-link").display().to_string().into()),
                 src_glob: None,
@@ -156,6 +160,7 @@ fn image_assembly_missing_required_source_fails() {
             path: "$assembly.work/boot".into(),
         }],
         files: vec![AssemblyFileSpec {
+            exclude: Vec::new(),
             tree: "boot".into(),
             src: Some(
                 build_dir
@@ -234,6 +239,7 @@ fn image_assembly_cleanup_failure_preserves_original_error() {
             path: "$assembly.work/boot".into(),
         }],
         files: vec![AssemblyFileSpec {
+            exclude: Vec::new(),
             tree: "boot".into(),
             src: Some(build_dir.join("missing.txt").display().to_string().into()),
             src_glob: None,
@@ -380,6 +386,7 @@ fn image_assembly_disk_failure_cleans_generated_filesystem_output() {
             path: tree_dir.display().to_string().into(),
         }],
         files: vec![AssemblyFileSpec {
+            exclude: Vec::new(),
             tree: "initramfs".into(),
             src: Some(source_dir.join("init").display().to_string().into()),
             src_glob: None,
@@ -391,6 +398,7 @@ fn image_assembly_disk_failure_cleans_generated_filesystem_output() {
             json: None,
         }],
         filesystems: vec![AssemblyFilesystemSpec {
+            free: None,
             id: "initramfs".into(),
             kind: AssemblyFilesystemKindSpec::Cpio,
             source_tree: "initramfs".into(),
@@ -566,6 +574,7 @@ fn image_assembly_filesystem_failure_cleans_temp_and_final_outputs() {
             path: tree_dir.display().to_string().into(),
         }],
         files: vec![AssemblyFileSpec {
+            exclude: Vec::new(),
             tree: "boot".into(),
             src: Some(source_dir.join("boot.txt").display().to_string().into()),
             src_glob: None,
@@ -577,6 +586,7 @@ fn image_assembly_filesystem_failure_cleans_temp_and_final_outputs() {
             json: None,
         }],
         filesystems: vec![AssemblyFilesystemSpec {
+            free: None,
             id: "bootfs".into(),
             kind: AssemblyFilesystemKindSpec::Vfat,
             source_tree: "boot".into(),
@@ -641,6 +651,7 @@ fn a_multi_file_glob_needs_a_directory_dest() {
                 path: tree_dir.display().to_string().into(),
             }],
             files: vec![AssemblyFileSpec {
+                exclude: Vec::new(),
                 tree: "boot".into(),
                 src: None,
                 src_glob: Some(glob_dir.join("*.dtbo").display().to_string().into()),

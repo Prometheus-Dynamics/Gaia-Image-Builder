@@ -1,4 +1,5 @@
-//! `${project.commit}` and `${project.describe}`: the git identity of the
+//! `${project.commit}`, `${project.commit_short}` (its first 8 characters)
+//! and `${project.describe}`: the git identity of the
 //! repository holding the build file, so image versions can be unique per
 //! build (`version = "1.4.0+${project.describe}"`).
 
@@ -6,6 +7,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
+
+use crate::source_tokens::short_commit;
 
 #[derive(Clone, Default)]
 struct ProjectGit {
@@ -54,6 +57,7 @@ fn project_git(dir: &Path) -> ProjectGit {
 pub(super) fn resolve(token: &str, build_file_dir: &str) -> Option<String> {
     let field = match token {
         "project.commit" => |git: ProjectGit| git.commit,
+        "project.commit_short" => |git: ProjectGit| git.commit.map(|commit| short_commit(&commit)),
         "project.describe" => |git: ProjectGit| git.describe,
         _ => return None,
     };

@@ -173,6 +173,7 @@ pub(crate) fn compile_image_assembly(
                 tree: file.tree.into(),
                 src: file.src.map(Into::into),
                 src_glob: file.src_glob.map(Into::into),
+                exclude: file.exclude,
                 dest: file.dest,
                 mode: file.mode,
                 optional: file.optional,
@@ -206,6 +207,7 @@ pub(crate) fn compile_image_assembly(
                 source_tree: filesystem.source_tree.into(),
                 output: filesystem.output.into(),
                 size: filesystem.size,
+                free: filesystem.free,
                 deterministic: filesystem
                     .deterministic
                     .unwrap_or_else(|| default_assembly_filesystem_deterministic(filesystem.kind)),
@@ -344,6 +346,11 @@ fn compile_assembly_archive(raw: RawAssemblyArchiveConfig) -> AssemblyArchiveSpe
             _ => generated.entries,
         };
         AssemblyArchiveMemberSpec {
+            tree: None,
+            src_dir: None,
+            src_glob: None,
+            prefix: String::new(),
+            exclude: Vec::new(),
             name: generated.name,
             src: None,
             entries,
@@ -358,6 +365,11 @@ fn compile_assembly_archive(raw: RawAssemblyArchiveConfig) -> AssemblyArchiveSpe
             src: member.src.map(Into::into),
             entries: member.entries,
             json: member.json.map(compile_assembly_json),
+            tree: member.tree.map(Into::into),
+            src_dir: member.src_dir.map(Into::into),
+            src_glob: member.src_glob.map(Into::into),
+            prefix: member.prefix,
+            exclude: member.exclude,
         });
     AssemblyArchiveSpec {
         id: raw.id,

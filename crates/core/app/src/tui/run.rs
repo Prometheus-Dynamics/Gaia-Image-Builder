@@ -1,5 +1,9 @@
 use super::*;
-use crate::commands::live_status::live_run;
+use crate::commands::live_status::{
+    LiveRunInfo, RunTracker, live_run, live_variant, plan_operations, run_outcome_label,
+    run_selection_label, unix_now_ms,
+};
+use crate::tui::dashboard::{DashboardState, RunEnd};
 
 impl<'a> TuiState<'a> {
     pub(crate) fn poll_run_completion(&mut self) {
@@ -13,12 +17,13 @@ impl<'a> TuiState<'a> {
         };
         let run_duration = started_at.elapsed();
         let mut finished = None;
-        let mut received_events = false;
         loop {
             match receiver.try_recv() {
                 Ok(RunThreadMessage::Event(event)) => {
+                    if let Some(tracker) = self.tracker.as_mut() {
+                        tracker.record(&event, unix_now_ms());
+                    }
                     self.events.push(event);
-                    received_events = true;
                 }
                 Ok(RunThreadMessage::Finished(result)) => {
                     finished = Some(*result);
@@ -33,14 +38,15 @@ impl<'a> TuiState<'a> {
         }
 
         let Some(message) = finished else {
-            if received_events && self.follow_running {
-                self.select_newest_running_operation();
-            }
             return;
         };
 
         match message {
             Ok(run) => {
+                self.run_end = Some(RunEnd {
+                    outcome: run_outcome_label(&run.outcome).to_string(),
+                    ended_ms: unix_now_ms(),
+                });
                 let cancelled = run.outcome.cancelled;
                 let error_count = run.outcome.errors.len();
                 // The run thread forwards every event before `Finished`, so
@@ -67,7 +73,6 @@ impl<'a> TuiState<'a> {
                         "run failed with {error_count} error(s); showing logs for the failed operation"
                     ));
                 } else {
-                    self.monitor_view = index_of_monitor_view(MonitorView::Reports);
                     let report_count = self
                         .last_run
                         .as_ref()
@@ -80,17 +85,22 @@ impl<'a> TuiState<'a> {
                 }
             }
             Err(message) => {
+                self.run_end = Some(RunEnd {
+                    outcome: "failed".into(),
+                    ended_ms: unix_now_ms(),
+                });
                 self.set_status(format!("run failed: {message}"));
             }
         }
         self.run_state = RunState::Idle;
-        self.detail_scroll = 0;
+        self.cancelling = false;
         if self.quit == QuitState::CancelThenExit {
             self.pending_exit_code = Some((self.exit_code().max(130), Instant::now()));
         }
         self.quit = QuitState::Idle;
     }
 
+    /// Selects the first failed operation, so the dashboard opens on it.
     fn focus_first_failure(&mut self) {
         let failed = self.events.first_failed().map(str::to_string).or_else(|| {
             self.last_run.as_ref().and_then(|run| {
@@ -100,35 +110,11 @@ impl<'a> TuiState<'a> {
                     .map(|error| error.operation_id.as_str().to_string())
             })
         });
-        if let Some(index) = failed.and_then(|id| self.index_of_operation(&id)) {
-            self.operation_list.select(Some(index));
+        if let Some(id) = failed {
+            self.dash.selected = Some(id);
         }
-        self.follow_running = false;
-        self.monitor_view = index_of_monitor_view(MonitorView::Logs);
-        self.detail_follow_tail = true;
-    }
-
-    pub(crate) fn select_newest_running_operation(&mut self) {
-        let index = self
-            .events
-            .newest_running()
-            .and_then(|id| self.index_of_operation(id));
-        if let Some(index) = index
-            && self.operation_list.selected() != Some(index)
-        {
-            self.operation_list.select(Some(index));
-            if self.detail_follow_tail {
-                self.detail_scroll = 0;
-            }
-        }
-    }
-
-    pub(crate) fn index_of_operation(&self, operation_id: &str) -> Option<usize> {
-        self.plan
-            .as_ref()?
-            .operations
-            .iter()
-            .position(|operation| operation.id.as_str() == operation_id)
+        self.dash.follow = false;
+        self.dash.log_follow = true;
     }
 
     pub(crate) fn start_run(&mut self) {
@@ -191,7 +177,23 @@ impl<'a> TuiState<'a> {
         self.last_run_duration = None;
         self.pending_exit_code = None;
         self.quit = QuitState::Idle;
-        self.follow_running = true;
+        self.dash = DashboardState::default();
+        self.run_end = None;
+        self.cancelling = false;
+        self.tracker = self
+            .spec
+            .as_ref()
+            .zip(self.plan.as_ref())
+            .map(|(spec, plan)| {
+                RunTracker::new(LiveRunInfo {
+                    build_name: spec.build_name().to_string(),
+                    display_name: spec.display_name().to_string(),
+                    ops_total: plan.operations.len(),
+                    operations: plan_operations(&plan.operations, &self.operation_durations),
+                    variant: live_variant(spec),
+                    selection: run_selection_label(spec),
+                })
+            });
         thread::spawn(move || {
             let context = AppContext::with_defaults();
             let result =
@@ -205,8 +207,6 @@ impl<'a> TuiState<'a> {
             started_at: Instant::now(),
             spinner_tick: 0,
         };
-        self.monitor_view = index_of_monitor_view(MonitorView::Logs);
-        self.detail_follow_tail = true;
         self.screen = Screen::Monitor;
         self.set_status("run started");
     }
@@ -215,6 +215,7 @@ impl<'a> TuiState<'a> {
         match &self.run_state {
             RunState::Running { cancellation, .. } => {
                 cancellation.cancel();
+                self.cancelling = true;
                 self.set_status("cancellation requested");
             }
             RunState::Idle => {
@@ -230,7 +231,8 @@ pub(crate) fn collect_run_artifacts(
     cancellation: &ExecutionCancellation,
     event_sender: &mpsc::Sender<RunThreadMessage>,
 ) -> io::Result<RunArtifacts> {
-    let spec = try_resolve_config_with_options(build, options).map_err(io::Error::other)?;
+    let (_, spec) =
+        super::state::resolve_spec_for_refresh(build, options.clone()).map_err(io::Error::other)?;
     let validation = validate_spec_with_providers(
         &spec,
         &context.source_catalog,

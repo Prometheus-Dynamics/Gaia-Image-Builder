@@ -13,6 +13,9 @@
 //! before it is fetched; its token stays unresolved and validation reports it
 //! (pin it with `rev` or `gaia lock`).
 //!
+//! `${source.<id>.commit_short}`: the first 8 characters of that commit (a
+//! `-dirty` suffix, if any, is kept).
+//!
 //! `${source.<id>.path}`: the directory holding the source's files, so a
 //! Buildroot setting can name a file inside a source (for example
 //! `BR2_ROOTFS_USERS_TABLES`). See [`gaia_spec::source_checkout_dir`]: an
@@ -41,7 +44,13 @@ use gaia_spec::{
 
 const PREFIX: &str = "source.";
 const COMMIT_SUFFIX: &str = ".commit";
+const COMMIT_SHORT_SUFFIX: &str = ".commit_short";
 const PATH_SUFFIX: &str = ".path";
+
+/// The first 8 characters of a commit, keeping a `-dirty` suffix.
+pub(crate) fn short_commit(commit: &str) -> String {
+    commit.chars().take(8).collect()
+}
 
 /// Substitutes `${source.<id>.commit}` and `${source.<id>.path}`, and drops
 /// the tokens it resolved from the unresolved list.
@@ -91,6 +100,7 @@ pub(crate) fn substitute_source_tokens(spec: &mut ResolvedBuildSpec) {
 fn source_token_id(token: &str) -> Option<&str> {
     let rest = token.strip_prefix(PREFIX)?;
     rest.strip_suffix(COMMIT_SUFFIX)
+        .or_else(|| rest.strip_suffix(COMMIT_SHORT_SUFFIX))
         .or_else(|| rest.strip_suffix(PATH_SUFFIX))
 }
 
@@ -155,6 +165,10 @@ fn is_source_token(token: &str) -> bool {
 fn source_token_values(spec: &ResolvedBuildSpec) -> BTreeMap<String, String> {
     let mut values = BTreeMap::new();
     for (id, commit) in source_commits(spec) {
+        values.insert(
+            format!("{PREFIX}{id}{COMMIT_SHORT_SUFFIX}"),
+            short_commit(&commit),
+        );
         values.insert(format!("{PREFIX}{id}{COMMIT_SUFFIX}"), commit);
     }
     for import in &spec.selection.import_sources {
@@ -308,5 +322,23 @@ mod tests {
         assert!(is_full_sha(&"0123456789abcdef".repeat(2).repeat(2)[..40]));
         assert!(!is_full_sha("main"));
         assert!(!is_full_sha("abc123"));
+    }
+
+    #[test]
+    fn commit_short_is_eight_characters_and_keeps_the_dirty_marker() {
+        assert_eq!(short_commit(&"0123456789abcdef".repeat(2)), "01234567");
+        assert_eq!(short_commit("0123456789abcdef-dirty"), "01234567");
+        assert_eq!(source_token_id("source.atlas.commit_short"), Some("atlas"));
+        assert_eq!(source_token_id("source.atlas.commit"), Some("atlas"));
+        let values = BTreeMap::from([(
+            "source.atlas.commit_short".to_string(),
+            "01234567".to_string(),
+        )]);
+        let mut referenced = BTreeSet::new();
+        assert_eq!(
+            substitute("rev=${source.atlas.commit_short}", &values, &mut referenced),
+            "rev=01234567"
+        );
+        assert!(referenced.contains(&SourceId::new("atlas")));
     }
 }

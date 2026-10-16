@@ -621,3 +621,94 @@ fn download_provider_does_not_cache_mismatched_content() {
     assert!(!cached.exists());
     assert!(download_cache_path(&workspace, "deadbeef").is_none());
 }
+
+/// Fingerprint of a path source with no identity ignores and an out dir
+/// outside the source root.
+fn path_source_identity(scratch: &TempDir, root: &Path) -> String {
+    let spec = test_spec(&scratch.join("build"));
+    path_source_fingerprint(&spec.workspace, root, &[])
+}
+
+/// A git repo with a tracked source file, an ignored `target/` directory, and
+/// a `.gitignore` that also ignores `*.log` files.
+fn init_identity_repo(repo: &Path) {
+    fs::create_dir_all(repo.join("src")).expect("src dir");
+    fs::write(repo.join(".gitignore"), "target/\n*.log\n").expect("gitignore");
+    fs::write(repo.join("src/main.rs"), "fn main() {}\n").expect("tracked file");
+    run_git(repo, &["init", "-b", "main"]);
+    run_git(repo, &["config", "user.email", "gaia@example.com"]);
+    run_git(repo, &["config", "user.name", "Gaia Test"]);
+    run_git(repo, &["add", "."]);
+    run_git(repo, &["commit", "-m", "initial"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn path_source_identity_in_git_repo_skips_ignored_build_output_unread() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let scratch = TempDir::new("gaia-source-identity-ignored");
+    let repo = scratch.join("repo");
+    init_identity_repo(&repo);
+
+    // Root can read mode 000 files, so the unreadable-file check only means
+    // something for a non-root user.
+    let target = repo.join("target/debug");
+    fs::create_dir_all(&target).expect("target dir");
+    for index in 0..200 {
+        fs::write(target.join(format!("artifact-{index}.o")), "obj").expect("object");
+    }
+    let locked = target.join("locked.bin");
+    fs::write(&locked, "secret").expect("locked file");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).expect("chmod 000");
+    if fs::File::open(&locked).is_ok() {
+        eprintln!("skipping: running with privileges that read mode 000 files");
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).expect("chmod back");
+        return;
+    }
+
+    let with_target = path_source_identity(&scratch, &repo);
+    // Identity must not depend on ignored build output at all, so removing
+    // it yields the same fingerprint, and the unreadable file was never read.
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).expect("chmod back");
+    fs::remove_dir_all(repo.join("target")).expect("remove target");
+    assert_eq!(with_target, path_source_identity(&scratch, &repo));
+}
+
+#[test]
+fn path_source_identity_in_git_repo_tracks_tracked_file_content() {
+    let scratch = TempDir::new("gaia-source-identity-content");
+    let repo = scratch.join("repo");
+    init_identity_repo(&repo);
+    let before = path_source_identity(&scratch, &repo);
+
+    fs::write(repo.join("src/main.rs"), "fn main() {1}\n").expect("edit tracked file");
+
+    assert_ne!(before, path_source_identity(&scratch, &repo));
+}
+
+#[test]
+fn path_source_identity_in_git_repo_tracks_new_untracked_files() {
+    let scratch = TempDir::new("gaia-source-identity-untracked");
+    let repo = scratch.join("repo");
+    init_identity_repo(&repo);
+    let before = path_source_identity(&scratch, &repo);
+
+    fs::write(repo.join("notes.txt"), "not ignored").expect("untracked file");
+
+    assert_ne!(before, path_source_identity(&scratch, &repo));
+}
+
+#[test]
+fn path_source_identity_in_git_repo_ignores_gitignored_files_outside_ignored_dirs() {
+    let scratch = TempDir::new("gaia-source-identity-gitignored");
+    let repo = scratch.join("repo");
+    init_identity_repo(&repo);
+    let before = path_source_identity(&scratch, &repo);
+
+    fs::write(repo.join("debug.log"), "ignored by *.log").expect("ignored file");
+    fs::create_dir_all(repo.join("src/nested")).expect("nested dir");
+    fs::write(repo.join("src/nested/out.log"), "ignored too").expect("nested ignored file");
+
+    assert_eq!(before, path_source_identity(&scratch, &repo));
+}

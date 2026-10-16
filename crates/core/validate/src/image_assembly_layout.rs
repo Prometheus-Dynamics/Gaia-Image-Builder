@@ -4,7 +4,7 @@ use gaia_spec::{AssemblyArchiveMemberSourceSpec, ImageAssemblySpec, ResolvedBuil
 
 use crate::ValidationDiagnostic;
 use crate::diagnostics::error;
-use crate::image_assembly::validate_assembly_path_template;
+use crate::image_assembly::{validate_assembly_path_template, validate_exclude};
 use crate::image_assembly_collected::validate_collected_reference;
 
 /// ustar `name` field length; longer names are rejected rather than split
@@ -181,7 +181,50 @@ pub(crate) fn validate_archives(
         }
         let mut names = HashSet::new();
         for member in &archive.members {
-            if let Some(problem) = tar_member_name_problem(&member.name) {
+            let member_label = member_label(member);
+            validate_exclude(
+                &member.exclude,
+                matches!(
+                    member.source(),
+                    Some(AssemblyArchiveMemberSourceSpec::Tree(_))
+                        | Some(AssemblyArchiveMemberSourceSpec::Glob(_))
+                ),
+                &format!(
+                    "assembly archive '{}' member '{member_label}' exclude",
+                    archive.id
+                ),
+                "image.assembly.archives.members",
+                diagnostics,
+            );
+            let prefix_allowed = matches!(
+                member.source(),
+                Some(AssemblyArchiveMemberSourceSpec::Tree(_))
+                    | Some(AssemblyArchiveMemberSourceSpec::Dir(_))
+            );
+            if !member.prefix.is_empty() {
+                if !prefix_allowed {
+                    diagnostics.push(error(
+                        "assembly_archive_member_prefix_invalid",
+                        format!(
+                            "assembly archive '{}' member '{member_label}' sets prefix, which only applies to tree or src_dir members",
+                            archive.id
+                        ),
+                        Some("image.assembly.archives.members".into()),
+                    ));
+                } else if !member.prefix.ends_with('/')
+                    || tar_member_name_problem(member.prefix.trim_end_matches('/')).is_some()
+                {
+                    diagnostics.push(error(
+                        "assembly_archive_member_prefix_invalid",
+                        format!(
+                            "assembly archive '{}' member '{member_label}' prefix '{}' must be a relative directory path ending in '/'",
+                            archive.id, member.prefix
+                        ),
+                        Some("image.assembly.archives.members".into()),
+                    ));
+                }
+            }
+            if let Some(problem) = member_name_problem(member) {
                 diagnostics.push(error(
                     "assembly_archive_member_name_invalid",
                     format!(
@@ -190,7 +233,7 @@ pub(crate) fn validate_archives(
                     ),
                     Some("image.assembly.archives.members".into()),
                 ));
-            } else if !names.insert(member.name.as_str()) {
+            } else if !member.name.is_empty() && !names.insert(member.name.as_str()) {
                 diagnostics.push(error(
                     "assembly_archive_member_duplicate",
                     format!(
@@ -204,11 +247,56 @@ pub(crate) fn validate_archives(
                 None => diagnostics.push(error(
                     "assembly_archive_member_source_invalid",
                     format!(
-                        "assembly archive '{}' member '{}' must set exactly one of src, entries or json",
-                        archive.id, member.name
+                        "assembly archive '{}' member '{member_label}' must set exactly one of src, entries, json, tree, src_dir or src_glob",
+                        archive.id
                     ),
                     Some("image.assembly.archives.members".into()),
                 )),
+                Some(AssemblyArchiveMemberSourceSpec::Tree(tree)) => {
+                    if !tree_ids.contains(tree) {
+                        diagnostics.push(error(
+                            "assembly_archive_member_tree_unknown",
+                            format!(
+                                "assembly archive '{}' member '{member_label}' names tree '{}', which is not defined",
+                                archive.id,
+                                tree.as_str()
+                            ),
+                            Some("image.assembly.archives.members.tree".into()),
+                        ));
+                    }
+                }
+                Some(AssemblyArchiveMemberSourceSpec::Dir(dir)) => {
+                    validate_assembly_path_template(
+                        spec,
+                        tree_ids,
+                        dir,
+                        "image.assembly.archives.members.src_dir",
+                        diagnostics,
+                    );
+                    validate_collected_reference(
+                        spec,
+                        dir,
+                        &format!("archives[{}].members[{member_label}].src_dir", archive.id),
+                        "image.assembly.archives.members",
+                        diagnostics,
+                    );
+                }
+                Some(AssemblyArchiveMemberSourceSpec::Glob(pattern)) => {
+                    validate_assembly_path_template(
+                        spec,
+                        tree_ids,
+                        pattern,
+                        "image.assembly.archives.members.src_glob",
+                        diagnostics,
+                    );
+                    validate_collected_reference(
+                        spec,
+                        pattern,
+                        &format!("archives[{}].members[{member_label}].src_glob", archive.id),
+                        "image.assembly.archives.members",
+                        diagnostics,
+                    );
+                }
                 Some(AssemblyArchiveMemberSourceSpec::File(src)) => {
                     validate_assembly_path_template(
                         spec,
@@ -302,6 +390,40 @@ fn validate_generated_entries(
                 location(),
             ));
         }
+    }
+}
+
+/// How a member is named in messages: its name, else its source.
+fn member_label(member: &gaia_spec::AssemblyArchiveMemberSpec) -> String {
+    if !member.name.is_empty() {
+        return member.name.clone();
+    }
+    match member.source() {
+        Some(AssemblyArchiveMemberSourceSpec::Tree(tree)) => format!("tree {}", tree.as_str()),
+        Some(AssemblyArchiveMemberSourceSpec::Dir(dir)) => format!("src_dir {}", dir.as_str()),
+        _ => String::new(),
+    }
+}
+
+/// `name` is the archived path, except for tree and directory members (where
+/// it may be left empty and `prefix` is used) and globs (where it is a
+/// directory prefix ending in `/`).
+fn member_name_problem(member: &gaia_spec::AssemblyArchiveMemberSpec) -> Option<&'static str> {
+    match member.source() {
+        Some(AssemblyArchiveMemberSourceSpec::Tree(_))
+        | Some(AssemblyArchiveMemberSourceSpec::Dir(_))
+            if member.name.is_empty() =>
+        {
+            None
+        }
+        Some(AssemblyArchiveMemberSourceSpec::Glob(_)) => {
+            if !member.name.ends_with('/') {
+                Some("must be a directory prefix ending in '/' for src_glob members")
+            } else {
+                tar_member_name_problem(member.name.trim_end_matches('/'))
+            }
+        }
+        _ => tar_member_name_problem(&member.name),
     }
 }
 

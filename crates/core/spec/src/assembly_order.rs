@@ -209,6 +209,17 @@ pub fn assembly_step_paths(
             if let Some(src) = &member.src {
                 reads.push(resolve(src));
             }
+            // A tree or directory member reads its root, so it waits for
+            // every step that fills it; a glob reads what it matches.
+            if let Some(tree_id) = &member.tree {
+                reads.push(tree(tree_id.as_str()));
+            }
+            if let Some(src_dir) = &member.src_dir {
+                reads.push(resolve(src_dir));
+            }
+            if let Some(src_glob) = &member.src_glob {
+                reads.push(resolve(src_glob));
+            }
             for (_, value) in member.entries.iter().flatten() {
                 value_token_reads(value, resolve, &mut reads);
             }
@@ -482,6 +493,7 @@ mod tests {
                 },
             ],
             files: vec![AssemblyFileSpec {
+                exclude: Vec::new(),
                 tree: "boot".into(),
                 src: Some("$assembly.out/boot.img".into()),
                 src_glob: None,
@@ -500,6 +512,7 @@ mod tests {
                 depmod: None,
             }],
             filesystems: vec![AssemblyFilesystemSpec {
+                free: None,
                 id: "boot".into(),
                 kind: AssemblyFilesystemKindSpec::CpioZstd,
                 source_tree: "initramfs".into(),
@@ -544,6 +557,7 @@ mod tests {
     fn published_filesystem_images_go_to_the_output_dir_under_their_file_name() {
         use crate::{AssemblyFilesystemKindSpec, AssemblyFilesystemSpec};
         let mut filesystem = AssemblyFilesystemSpec {
+            free: None,
             id: "boot".into(),
             kind: AssemblyFilesystemKindSpec::Vfat,
             source_tree: "boot".into(),
@@ -580,6 +594,7 @@ mod tests {
             }],
             files: vec![
                 AssemblyFileSpec {
+                    exclude: Vec::new(),
                     tree: "boot".into(),
                     src: None,
                     src_glob: None,
@@ -593,6 +608,7 @@ mod tests {
                     preserve_symlink: false,
                 },
                 AssemblyFileSpec {
+                    exclude: Vec::new(),
                     tree: "boot".into(),
                     src: None,
                     src_glob: None,

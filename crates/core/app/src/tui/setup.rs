@@ -10,10 +10,15 @@ impl<'a> TuiState<'a> {
             SetupItem::Target => self.cycle_target(1),
             SetupItem::Profile => self.cycle_profile(1),
             SetupItem::Input(name) => self.activate_input(&name, 1),
+            SetupItem::Variant => self.cycle_variant(1),
             SetupItem::Jobs => self.begin_edit(SetupEditField::Jobs, self.current_jobs_value()),
             SetupItem::PickBuild => self.open_picker(),
             SetupItem::Refresh => self.refresh(),
-            _ => {}
+            item => {
+                if let Some(tab) = item.details_tab() {
+                    self.open_details(tab);
+                }
+            }
         }
     }
 
@@ -24,97 +29,28 @@ impl<'a> TuiState<'a> {
             .unwrap_or(SetupItem::StartBuild)
     }
 
-    pub(crate) fn selected_monitor_view(&self) -> MonitorView {
-        MonitorView::all()[self.monitor_view]
-    }
-
-    pub(crate) fn next_setup_detail(&mut self) {
+    /// Left and Right on a form item change its value, one step either way.
+    pub(crate) fn change_setup_value(&mut self, direction: i32) {
         match self.selected_setup_item() {
-            SetupItem::Branch => self.cycle_branch_mode(1),
-            SetupItem::Target => self.cycle_target(1),
-            SetupItem::Profile => self.cycle_profile(1),
-            SetupItem::Input(name) => self.activate_input(&name, 1),
-            SetupItem::Jobs => self.cycle_jobs(1),
-            SetupItem::Overview => self
-                .setup_list
-                .select(Some(self.index_of_setup_item(&SetupItem::Selection))),
-            SetupItem::Selection => self
-                .setup_list
-                .select(Some(self.index_of_setup_item(&SetupItem::Validation))),
-            SetupItem::Validation => self
-                .setup_list
-                .select(Some(self.index_of_setup_item(&SetupItem::Plan))),
-            SetupItem::Plan => self
-                .setup_list
-                .select(Some(self.index_of_setup_item(&SetupItem::Reports))),
-            SetupItem::Reports => self
-                .setup_list
-                .select(Some(self.index_of_setup_item(&SetupItem::Spec))),
-            SetupItem::Spec => self
-                .setup_list
-                .select(Some(self.index_of_setup_item(&SetupItem::Overview))),
+            SetupItem::Branch => self.cycle_branch_mode(direction),
+            SetupItem::Target => self.cycle_target(direction),
+            SetupItem::Profile => self.cycle_profile(direction),
+            SetupItem::Input(name) => self.activate_input(&name, direction),
+            SetupItem::Variant => self.cycle_variant(direction),
+            SetupItem::Jobs => self.cycle_jobs(direction),
             _ => {}
         }
-        self.detail_scroll = 0;
-    }
-
-    pub(crate) fn prev_setup_detail(&mut self) {
-        match self.selected_setup_item() {
-            SetupItem::Branch => self.cycle_branch_mode(-1),
-            SetupItem::Target => self.cycle_target(-1),
-            SetupItem::Profile => self.cycle_profile(-1),
-            SetupItem::Input(name) => self.activate_input(&name, -1),
-            SetupItem::Jobs => self.cycle_jobs(-1),
-            SetupItem::Overview => self
-                .setup_list
-                .select(Some(self.index_of_setup_item(&SetupItem::Spec))),
-            SetupItem::Selection => self
-                .setup_list
-                .select(Some(self.index_of_setup_item(&SetupItem::Overview))),
-            SetupItem::Validation => self
-                .setup_list
-                .select(Some(self.index_of_setup_item(&SetupItem::Selection))),
-            SetupItem::Plan => self
-                .setup_list
-                .select(Some(self.index_of_setup_item(&SetupItem::Validation))),
-            SetupItem::Reports => self
-                .setup_list
-                .select(Some(self.index_of_setup_item(&SetupItem::Plan))),
-            SetupItem::Spec => self
-                .setup_list
-                .select(Some(self.index_of_setup_item(&SetupItem::Reports))),
-            _ => {}
-        }
-        self.detail_scroll = 0;
-    }
-
-    pub(crate) fn next_monitor_view(&mut self) {
-        self.monitor_view = (self.monitor_view + 1) % MonitorView::all().len();
-        self.detail_scroll = 0;
-        self.detail_follow_tail = true;
-    }
-
-    pub(crate) fn prev_monitor_view(&mut self) {
-        self.monitor_view = if self.monitor_view == 0 {
-            MonitorView::all().len() - 1
-        } else {
-            self.monitor_view - 1
-        };
-        self.detail_scroll = 0;
-        self.detail_follow_tail = true;
     }
 
     pub(crate) fn move_setup_down(&mut self) {
         let total = self.setup_items.len();
         let current = self.setup_list.selected().unwrap_or(0);
         self.setup_list.select(Some((current + 1).min(total - 1)));
-        self.detail_scroll = 0;
     }
 
     pub(crate) fn move_setup_up(&mut self) {
         let current = self.setup_list.selected().unwrap_or(0);
         self.setup_list.select(Some(current.saturating_sub(1)));
-        self.detail_scroll = 0;
     }
 
     pub(crate) fn begin_edit(&mut self, field: SetupEditField, current: String) {
@@ -304,6 +240,49 @@ impl<'a> TuiState<'a> {
         }
     }
 
+    /// The variant the build is planned and run for: the selected one, else
+    /// the spec's own.
+    pub(crate) fn current_variant_value(&self) -> String {
+        self.options
+            .selected_variants
+            .first()
+            .cloned()
+            .or_else(|| {
+                self.spec
+                    .as_ref()
+                    .and_then(|spec| spec.selection.variant.clone())
+            })
+            .unwrap_or_default()
+    }
+
+    /// Steps through the variants the build declares.
+    pub(crate) fn cycle_variant(&mut self, direction: i32) {
+        let choices = self
+            .spec
+            .as_ref()
+            .map(|spec| {
+                spec.selection
+                    .variants
+                    .iter()
+                    .map(|variant| variant.id.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if choices.is_empty() {
+            self.set_status("this build declares no variants");
+            return;
+        }
+        let current = self.current_variant_value();
+        let current_index = choices
+            .iter()
+            .position(|choice| choice == &current)
+            .unwrap_or(0);
+        let len = choices.len() as i32;
+        let next = (current_index as i32 + direction).rem_euclid(len) as usize;
+        self.options.selected_variants = vec![choices[next].clone()];
+        self.request_refresh(format!("variant set to {}", choices[next]));
+    }
+
     pub(crate) fn cycle_profile(&mut self, direction: i32) {
         let Some(choices) = self.input_choices("profile") else {
             self.set_status("profile input is not declared");
@@ -440,6 +419,7 @@ impl<'a> TuiState<'a> {
             SetupItem::Profile => format!("Profile: {}", self.current_profile_value()),
             SetupItem::Input(name) => format!("{name}: {}", self.current_input_value(&name)),
             SetupItem::Jobs => format!("Jobs: {}", self.current_jobs_label()),
+            SetupItem::Variant => format!("Variant: {}", self.current_variant_value()),
             _ => item.title().to_string(),
         }
     }
@@ -449,25 +429,6 @@ impl<'a> TuiState<'a> {
             .iter()
             .position(|candidate| candidate == item)
             .unwrap_or(0)
-    }
-
-    pub(crate) fn move_operation_down(&mut self) {
-        let total = self.operation_total();
-        if total == 0 {
-            return;
-        }
-        let current = self.operation_list.selected().unwrap_or(0);
-        self.operation_list
-            .select(Some((current + 1).min(total - 1)));
-        self.detail_scroll = 0;
-        self.detail_follow_tail = true;
-    }
-
-    pub(crate) fn move_operation_up(&mut self) {
-        let current = self.operation_list.selected().unwrap_or(0);
-        self.operation_list.select(Some(current.saturating_sub(1)));
-        self.detail_scroll = 0;
-        self.detail_follow_tail = true;
     }
 
     pub(crate) fn select_next_build(&mut self) {

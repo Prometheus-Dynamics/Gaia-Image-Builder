@@ -238,6 +238,11 @@ fn archive_entries_read_the_verity_fields_they_name() {
         id: "bundle".into(),
         output: "$assembly.work/bundle.tar".into(),
         members: vec![AssemblyArchiveMemberSpec {
+            tree: None,
+            src_dir: None,
+            src_glob: None,
+            prefix: String::new(),
+            exclude: Vec::new(),
             name: "verity.env".into(),
             src: None,
             entries: Some(vec![
@@ -279,6 +284,11 @@ fn archive_entry_naming_no_verity_output_fails_without_running_a_tool() {
             id: "bundle".into(),
             output: "$assembly.work/bundle.tar".into(),
             members: vec![AssemblyArchiveMemberSpec {
+                tree: None,
+                src_dir: None,
+                src_glob: None,
+                prefix: String::new(),
+                exclude: Vec::new(),
                 name: "verity.env".into(),
                 src: None,
                 entries: Some(vec![(

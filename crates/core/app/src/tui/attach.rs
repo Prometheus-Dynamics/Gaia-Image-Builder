@@ -1,16 +1,18 @@
 //! Attaching to a `gaia run` that another process started: when a build has a
-//! live run, the TUI shows its monitor (the `gaia status` summary, refreshed
-//! each second, and the recent output) instead of offering to start one. The
-//! picker marks the builds that are running. Pause, resume and cancel go to
-//! the run's pid; quitting the monitor never stops the build.
+//! live run, the TUI shows its run dashboard (built from the run's live status
+//! file, read each second) instead of offering to start one. The picker marks
+//! the builds that are running. Pause, resume and cancel go to the run's pid;
+//! quitting the monitor never stops the build.
 
 use super::*;
 use crate::AppCommand;
 use crate::commands::live_status::{
-    LastRun, LiveRun, RunFiles, live_run, live_run_at, read_last_at, unix_now,
+    LiveRun, RunFiles, live_run, live_run_at, read_last, read_last_at, unix_now_ms,
 };
-use crate::commands::run_registry::{ListedRun, RegisteredRun, list_runs};
-use crate::commands::status::{last_run_lines, live_badge, live_lines, log_lines, run_summary};
+use crate::commands::run_registry::{RegisteredRun, list_runs};
+use crate::tui::dashboard;
+use crate::tui::run_view::{RunSource, RunView};
+use crate::tui::widgets::chrome;
 
 /// How often the attached monitor re-reads the run's files.
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -22,15 +24,9 @@ pub(crate) struct AttachState {
     pub(crate) files: RunFiles,
     /// The live run, `None` once it has ended.
     pub(crate) run: Option<LiveRun>,
-    /// How the run ended, once it is no longer live.
-    pub(crate) ended: Option<LastRun>,
-    pub(crate) summary: Vec<String>,
-    pub(crate) logs: Vec<String>,
-    pub(crate) log_scroll: u16,
-    pub(crate) follow_tail: bool,
-    /// `c` was pressed: the next `c` or `y` cancels the build.
-    pub(crate) cancel_armed: bool,
-    polled_at: Instant,
+    /// The run as the dashboard shows it; `None` when there is no run to show.
+    pub(crate) view: Option<RunView>,
+    pub(crate) polled_at: Instant,
 }
 
 impl AttachState {
@@ -38,12 +34,7 @@ impl AttachState {
         let mut attach = Self {
             files,
             run: None,
-            ended: None,
-            summary: Vec::new(),
-            logs: Vec::new(),
-            log_scroll: 0,
-            follow_tail: true,
-            cancel_armed: false,
+            view: None,
             polled_at: Instant::now(),
         };
         attach.poll();
@@ -51,59 +42,21 @@ impl AttachState {
     }
 
     fn poll(&mut self) {
-        let now = unix_now();
+        let now = unix_now_ms();
         self.run = live_run_at(&self.files);
-        self.ended = match self.run {
+        let ended = match self.run {
             Some(_) => None,
             None => read_last_at(&self.files.last),
         };
-        self.summary = match (&self.run, &self.ended) {
-            (Some(run), _) => live_lines(run, now),
-            (None, Some(last)) => {
-                let mut lines = vec!["no run is live".to_string()];
-                lines.extend(last_run_lines(last, now));
-                lines
-            }
-            (None, None) => vec!["no run is live and no final snapshot was found".to_string()],
+        self.view = match (&self.run, ended) {
+            (Some(run), _) => Some(match &run.status {
+                Some(status) => RunView::live(status, RunSource::Attached, run.paused(), now),
+                None => RunView::starting(Some(run.pid), RunSource::Attached, now),
+            }),
+            (None, Some(last)) => Some(RunView::from_last(&last, RunSource::Attached, now)),
+            (None, None) => None,
         };
-        let status = self
-            .run
-            .as_ref()
-            .and_then(|run| run.status.as_ref())
-            .or(self.ended.as_ref().map(|last| &last.status));
-        self.logs = status.map(log_lines).unwrap_or_default();
         self.polled_at = Instant::now();
-    }
-
-    fn scroll_up(&mut self, step: u16) {
-        self.follow_tail = false;
-        self.log_scroll = self.log_scroll.saturating_sub(step);
-    }
-
-    fn scroll_down(&mut self, step: u16) {
-        self.log_scroll = self.log_scroll.saturating_add(step);
-    }
-}
-
-/// A row of the running builds: the run on one line, dimmed once it ended.
-pub(crate) fn registered_run_line(run: &ListedRun, now: u64) -> Line<'static> {
-    let style = if run.is_live() {
-        Style::default().fg(Color::LightGreen)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    Line::from(Span::styled(run_summary(run, now), style))
-}
-
-/// A picker row: the build's label, then its badge when a run is live.
-pub(crate) fn picker_line(label: &str, run: Option<&LiveRun>, now: u64) -> Line<'static> {
-    match run {
-        None => Line::from(label.to_string()),
-        Some(run) => Line::from(vec![
-            Span::raw(label.to_string()),
-            Span::raw("  "),
-            Span::styled(live_badge(run, now), Style::default().fg(Color::LightGreen)),
-        ]),
     }
 }
 
@@ -129,6 +82,7 @@ impl<'a> TuiState<'a> {
 
     fn attach_to(&mut self, files: RunFiles) {
         self.attach = Some(AttachState::load(files));
+        self.dash = Default::default();
         self.screen = Screen::Attach;
         self.set_status("attached to a gaia run; q leaves the monitor, the build keeps running");
     }
@@ -158,31 +112,44 @@ impl<'a> TuiState<'a> {
                     self.refresh_picker_marks();
                 }
             }
-            Screen::Setup | Screen::Monitor => {}
+            Screen::Setup | Screen::Monitor | Screen::Details => {}
         }
     }
 
-    /// Re-reads the registered runs and which build of the picker runs.
+    /// Re-reads the registered runs, and for each build config its live run
+    /// (if any) and its last recorded run.
     fn refresh_picker_marks(&mut self) {
         self.runs = list_runs();
         self.ensure_picker_selection();
         let options = self.options.clone();
         let mut marks = std::collections::BTreeMap::new();
+        let mut last = std::collections::BTreeMap::new();
         for entry in &self.build_entries {
-            let build_dir = self
-                .build_dirs
+            let meta = self
+                .build_meta
                 .entry(entry.path.clone())
                 .or_insert_with(|| {
                     try_resolve_config_with_options(&entry.path, &options)
                         .ok()
-                        .map(|spec| PathBuf::from(spec.workspace.build_dir))
+                        .map(|spec| BuildMeta {
+                            build_dir: PathBuf::from(&spec.workspace.build_dir),
+                            target: spec.metadata.target.clone(),
+                            profile: spec.metadata.profile.clone(),
+                        })
                 })
                 .clone();
-            if let Some(run) = build_dir.and_then(|dir| live_run(&dir)) {
+            let Some(meta) = meta else {
+                continue;
+            };
+            if let Some(run) = live_run(&meta.build_dir) {
                 marks.insert(entry.path.clone(), run);
+            }
+            if let Some(ended) = read_last(&meta.build_dir) {
+                last.insert(entry.path.clone(), ended);
             }
         }
         self.live_marks = marks;
+        self.build_last = last;
         self.picker_polled_at = Some(Instant::now());
     }
 
@@ -193,68 +160,8 @@ impl<'a> TuiState<'a> {
             .map(|run| run.pid)
     }
 
-    pub(crate) fn handle_attach_key(&mut self, code: KeyCode) {
-        let armed = self
-            .attach
-            .as_ref()
-            .is_some_and(|attach| attach.cancel_armed);
-        if let Some(attach) = self.attach.as_mut() {
-            attach.cancel_armed = false;
-        }
-        if armed {
-            if matches!(code, KeyCode::Char('c' | 'y')) {
-                self.signal_attached(AppCommand::Cancel, "cancelling the build");
-            } else {
-                self.set_status("cancel not confirmed; the build keeps running");
-            }
-            return;
-        }
-        match code {
-            KeyCode::Char('p') => self.signal_attached(AppCommand::Pause, "pausing the build"),
-            KeyCode::Char('r') => self.signal_attached(AppCommand::Resume, "resuming the build"),
-            KeyCode::Char('c') => {
-                if self.attached_pid().is_none() {
-                    self.set_status("no live run to cancel");
-                } else {
-                    if let Some(attach) = self.attach.as_mut() {
-                        attach.cancel_armed = true;
-                    }
-                    self.set_status(
-                        "press c or y again to cancel the build; any other key keeps it running",
-                    );
-                }
-            }
-            KeyCode::Char('b') => self.open_picker(),
-            KeyCode::Up | KeyCode::Char('k') => self.scroll_attached(true, 1),
-            KeyCode::Down | KeyCode::Char('j') => self.scroll_attached(false, 1),
-            KeyCode::PageUp => self.scroll_attached(true, 10),
-            KeyCode::PageDown => self.scroll_attached(false, 10),
-            KeyCode::Home => {
-                if let Some(attach) = self.attach.as_mut() {
-                    attach.follow_tail = false;
-                    attach.log_scroll = 0;
-                }
-            }
-            KeyCode::End => {
-                if let Some(attach) = self.attach.as_mut() {
-                    attach.follow_tail = true;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn scroll_attached(&mut self, up: bool, step: u16) {
-        if let Some(attach) = self.attach.as_mut() {
-            if up {
-                attach.scroll_up(step);
-            } else {
-                attach.scroll_down(step);
-            }
-        }
-    }
-
-    fn signal_attached(&mut self, command: AppCommand, action: &str) {
+    /// Sends a command to the attached run's process.
+    pub(crate) fn signal_attached(&mut self, command: AppCommand, action: &str) {
         let Some(pid) = self.attached_pid() else {
             self.set_status("no live run to signal; the build has ended");
             return;
@@ -277,70 +184,33 @@ impl<'a> TuiState<'a> {
 }
 
 pub(crate) fn render_attach(frame: &mut Frame<'_>, area: Rect, state: &mut TuiState<'_>) {
-    let Some(attach) = state.attach.as_mut() else {
+    let TuiState {
+        attach,
+        dash,
+        metrics,
+        ..
+    } = state;
+    let Some(view) = attach.as_ref().and_then(|attach| attach.view.as_ref()) else {
+        chrome::empty_state(
+            frame,
+            area,
+            "Attached",
+            &[
+                "no run is live and no final snapshot was found",
+                "press b to pick a build",
+            ],
+        );
         return;
     };
-    let summary_height = (attach.summary.len() as u16 + 2).clamp(3, (area.height / 2).max(3));
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(summary_height), Constraint::Min(4)])
-        .split(area);
-
-    let title = match (&attach.run, &attach.ended) {
-        (Some(run), _) if run.paused() => "Attached: PAUSED",
-        (Some(_), _) => "Attached: live run",
-        (None, Some(_)) => "Attached: run ended",
-        (None, None) => "Attached: no run",
-    };
-    let summary = attach
-        .summary
-        .iter()
-        .map(|line| Line::from(line.clone()))
-        .collect::<Vec<_>>();
-    frame.render_widget(
-        Paragraph::new(Text::from(summary))
-            .wrap(Wrap { trim: false })
-            .block(Block::default().title(title).borders(Borders::ALL)),
-        rows[0],
-    );
-
-    let block = Block::default()
-        .title(format!(
-            "Recent output ({} lines)  PgUp/PgDn scroll  End follows",
-            attach.logs.len()
-        ))
-        .borders(Borders::ALL);
-    let inner = block.inner(rows[1]);
-    frame.render_widget(block, rows[1]);
-    let visible = inner.height as usize;
-    let max_scroll = attach.logs.len().saturating_sub(visible);
-    let max_scroll = max_scroll.min(u16::MAX as usize) as u16;
-    if attach.follow_tail || attach.log_scroll >= max_scroll {
-        attach.follow_tail = true;
-        attach.log_scroll = max_scroll;
-    }
-    let logs = attach
-        .logs
-        .iter()
-        .map(|line| Line::from(line.clone()))
-        .collect::<Vec<_>>();
-    frame.render_widget(
-        Paragraph::new(Text::from(logs)).scroll((attach.log_scroll, 0)),
-        Rect {
-            x: inner.x.saturating_add(1),
-            y: inner.y,
-            width: inner.width.saturating_sub(2),
-            height: inner.height,
-        },
-    );
+    let tail = |id: &str| view.op_log_lines(id);
+    dashboard::render(frame, area, view, dash, metrics, &tail);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::live_status::LastRun;
     use crate::commands::live_status::fixture_status;
-    use crate::commands::run_registry::fixture_registered_run;
-    use gaia_testkit::TempDir;
     use ratatui::backend::TestBackend;
 
     fn live_fixture(stopped: bool) -> LiveRun {
@@ -352,16 +222,14 @@ mod tests {
     }
 
     fn attach_fixture(run: LiveRun) -> AttachState {
-        let status = run.status.clone().expect("fixture status");
+        let view = match &run.status {
+            Some(status) => RunView::live(status, RunSource::Attached, run.paused(), 1_100_000),
+            None => RunView::starting(Some(run.pid), RunSource::Attached, 1_100_000),
+        };
         AttachState {
             files: RunFiles::in_build_dir(&PathBuf::new()),
-            summary: live_lines(&run, 1_100),
-            logs: log_lines(&status),
             run: Some(run),
-            ended: None,
-            log_scroll: 0,
-            follow_tail: true,
-            cancel_armed: false,
+            view: Some(view),
             polled_at: Instant::now(),
         }
     }
@@ -378,205 +246,89 @@ mod tests {
             .join("\n")
     }
 
-    fn line_text(line: &Line<'_>) -> String {
-        line.spans
-            .iter()
-            .map(|span| span.content.as_ref())
-            .collect()
-    }
-
-    #[test]
-    fn picker_marks_running_builds_with_elapsed_time_and_progress() {
-        let running = line_text(&picker_line(
-            "cm5.toml",
-            Some(&live_fixture(false)),
-            1_000 + 12 * 60,
-        ));
-        assert_eq!(running, "cm5.toml  ● running 12m, 82% packages");
-        assert_eq!(line_text(&picker_line("pi.toml", None, 0)), "pi.toml");
-    }
-
-    #[test]
-    fn attached_monitor_renders_status_and_recent_output() {
-        let context = AppContext::with_defaults();
-        let mut state = TuiState::new(
-            &context,
-            TuiLaunch {
-                build: "missing-build.toml",
-                build_explicit: true,
-                builds_dir: None,
-            },
-            &ResolveOptions::default(),
-        );
-        state.screen = Screen::Attach;
-        state.attach = Some(attach_fixture(live_fixture(true)));
-
-        let mut terminal =
-            ratatui::Terminal::new(TestBackend::new(110, 26)).expect("test terminal");
-        terminal
-            .draw(|frame| render(frame, &mut state))
-            .expect("draw");
-        let text = buffer_text(terminal.backend().buffer());
-        assert!(text.contains("Attached: PAUSED"), "{text}");
-        assert!(text.contains("ops: 3/10"), "{text}");
-        assert!(text.contains("packages: ["), "{text}");
-        assert!(text.contains("image:buildroot"), "{text}");
-        assert!(
-            text.contains("artifact:cli  cargo build finished"),
-            "{text}"
-        );
-        assert!(text.contains("[p] pause"), "{text}");
-    }
-
-    #[test]
-    fn cancel_needs_a_second_confirming_key() {
-        let context = AppContext::with_defaults();
-        let mut state = TuiState::new(
-            &context,
-            TuiLaunch {
-                build: "missing-build.toml",
-                build_explicit: true,
-                builds_dir: None,
-            },
-            &ResolveOptions::default(),
-        );
-        state.screen = Screen::Attach;
-        state.attach = Some(attach_fixture(live_fixture(false)));
-
-        state.handle_attach_key(KeyCode::Char('c'));
-        assert!(state.attach.as_ref().is_some_and(|a| a.cancel_armed));
-        // Any other key disarms it without signalling the run.
-        state.handle_attach_key(KeyCode::Char('x'));
-        assert!(state.attach.as_ref().is_some_and(|a| !a.cancel_armed));
-        assert_eq!(
-            state.footer_notice(),
-            Some("cancel not confirmed; the build keeps running")
-        );
-    }
-
-    fn listed_live(name: &str, pid: u32) -> ListedRun {
-        let mut status = fixture_status();
-        status.pid = pid;
-        ListedRun {
-            run: fixture_registered_run(pid, name),
-            live: Some(LiveRun {
-                pid,
-                status: Some(status),
-                stopped: false,
-            }),
-            ended: None,
-        }
-    }
-
-    fn listed_ended(name: &str, pid: u32) -> ListedRun {
-        let mut status = fixture_status();
-        status.pid = pid;
-        status.running.clear();
-        ListedRun {
-            run: fixture_registered_run(pid, name),
-            live: None,
-            ended: Some(LastRun {
-                outcome: "completed".into(),
-                ended_at: 1_500,
-                status,
-                errors: Vec::new(),
-            }),
-        }
-    }
-
-    /// A picker over an empty directory: no build configs of its own.
-    fn picker_without_project(runs: Vec<ListedRun>) -> (TempDir, TuiState<'static>) {
+    fn attached_state(run: LiveRun) -> TuiState<'static> {
         let context: &'static AppContext = Box::leak(Box::new(AppContext::with_defaults()));
-        let scratch = TempDir::new("gaia-tui-empty");
-        let empty = scratch.path();
         let mut state = TuiState::new(
             context,
             TuiLaunch {
                 build: "missing-build.toml",
-                build_explicit: false,
-                builds_dir: empty.to_str(),
+                build_explicit: true,
+                builds_dir: None,
             },
             &ResolveOptions::default(),
         );
-        state.screen = Screen::Picker;
-        state.runs = runs;
-        state.ensure_picker_selection();
-        (scratch, state)
+        state.screen = Screen::Attach;
+        state.attach = Some(attach_fixture(run));
+        state
     }
 
     #[test]
-    fn start_screen_shows_running_builds_without_a_project() {
-        let (_scratch, mut state) = picker_without_project(vec![
-            listed_live("Cm5 image", 4242),
-            listed_ended("Pi zero", 99),
-        ]);
-        assert_eq!(state.picker_focus, PickerFocus::Runs);
-
+    fn attached_monitor_renders_the_run_dashboard() {
+        let mut state = attached_state(live_fixture(true));
         let mut terminal =
-            ratatui::Terminal::new(TestBackend::new(110, 20)).expect("test terminal");
+            ratatui::Terminal::new(TestBackend::new(120, 32)).expect("test terminal");
         terminal
             .draw(|frame| render(frame, &mut state))
             .expect("draw");
         let text = buffer_text(terminal.backend().buffer());
-        assert!(text.contains("Running builds (1 live)"), "{text}");
-        assert!(text.contains(">> Cm5 image  pid 4242"), "{text}");
-        assert!(
-            text.contains("Pi zero  pid 99  ended (completed)"),
-            "{text}"
-        );
-        assert!(
-            text.contains("No build configs in this directory."),
-            "{text}"
-        );
-        assert!(text.contains("[Enter] open/attach"), "{text}");
+        assert!(text.contains("PAUSED"), "{text}");
+        assert!(text.contains("Demo build"), "{text}");
+        assert!(text.contains("ops 3/10"), "{text}");
+        assert!(text.contains("image:buildroot"), "{text}");
+        assert!(text.contains("artifact:cli"), "{text}");
+        assert!(text.contains("cargo build finished"), "{text}");
+        assert!(text.contains("[p] pause/resume"), "{text}");
     }
 
     #[test]
-    fn start_screen_without_runs_or_projects_still_opens() {
-        let (_scratch, mut state) = picker_without_project(Vec::new());
+    fn attached_monitor_says_when_no_run_is_left() {
+        let mut state = attached_state(live_fixture(false));
+        state.attach = Some(AttachState {
+            files: RunFiles::in_build_dir(&PathBuf::new()),
+            run: None,
+            view: None,
+            polled_at: Instant::now(),
+        });
         let mut terminal =
-            ratatui::Terminal::new(TestBackend::new(110, 16)).expect("test terminal");
+            ratatui::Terminal::new(TestBackend::new(100, 20)).expect("test terminal");
         terminal
             .draw(|frame| render(frame, &mut state))
             .expect("draw");
         let text = buffer_text(terminal.backend().buffer());
-        assert!(text.contains("Build Picker"), "{text}");
-        assert!(
-            text.contains("No build configs in this directory."),
-            "{text}"
-        );
+        assert!(text.contains("no run is live"), "{text}");
     }
 
     #[test]
-    fn cursor_moves_through_running_builds_then_build_configs() {
-        let (_scratch, mut state) =
-            picker_without_project(vec![listed_live("One", 4242), listed_live("Two", 4343)]);
-        // A build config of this directory, below the running builds.
-        state.build_entries = vec![BuildEntry {
-            label: "cm5.toml".into(),
-            path: "cm5.toml".into(),
-        }];
-        state.ensure_build_selection();
-
-        state.handle_key(KeyCode::Down, KeyModifiers::empty());
-        assert_eq!(state.run_list.selected(), Some(1));
-        state.handle_key(KeyCode::Down, KeyModifiers::empty());
-        assert_eq!(state.picker_focus, PickerFocus::Builds);
-        assert_eq!(state.build_list.selected(), Some(0));
-        state.handle_key(KeyCode::Up, KeyModifiers::empty());
-        assert_eq!(state.picker_focus, PickerFocus::Runs);
-        assert_eq!(state.run_list.selected(), Some(1));
+    fn an_ended_run_shows_its_outcome_as_a_view() {
+        let mut status = fixture_status();
+        status.running.clear();
+        let last = LastRun {
+            outcome: "failed".into(),
+            ended_at: 1_200,
+            status,
+            errors: vec![crate::commands::live_status::RunError {
+                operation_id: "artifact:kernel".into(),
+                code: "backend_command_failed".into(),
+                message: "make failed".into(),
+            }],
+        };
+        let view = RunView::from_last(&last, RunSource::Attached, 1_300_000);
+        assert_eq!(view.phase, crate::tui::run_view::RunPhase::Failed);
+        assert_eq!(view.errors.len(), 1);
     }
 
     #[test]
-    fn enter_on_a_running_build_attaches_through_its_registry_entry() {
-        let (_scratch, mut state) = picker_without_project(vec![listed_live("Cm5 image", 4242)]);
-        state.handle_key(KeyCode::Enter, KeyModifiers::empty());
-        assert_eq!(state.screen, Screen::Attach);
-        let attach = state.attach.as_ref().expect("attached");
+    fn cancel_needs_a_second_confirming_key() {
+        let mut state = attached_state(live_fixture(false));
+
+        state.handle_dashboard_key(KeyCode::Char('c'), KeyModifiers::empty());
+        assert!(state.dash.cancel_armed);
+        // Any other key disarms it without signalling the run.
+        state.handle_dashboard_key(KeyCode::Char('x'), KeyModifiers::empty());
+        assert!(!state.dash.cancel_armed);
         assert_eq!(
-            attach.files,
-            RunFiles::in_build_dir(&PathBuf::from("/builds/demo/build"))
+            state.footer_notice(),
+            Some("cancel not confirmed; the build keeps running")
         );
     }
 }

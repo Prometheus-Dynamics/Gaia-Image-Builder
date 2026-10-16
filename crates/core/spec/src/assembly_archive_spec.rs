@@ -1,4 +1,4 @@
-use crate::{AssemblyJsonValue, AssemblyPathTemplate};
+use crate::{AssemblyJsonValue, AssemblyPathTemplate, AssemblyTreeId};
 
 /// A deterministic ustar archive assembled after disks.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -9,27 +9,68 @@ pub struct AssemblyArchiveSpec {
     pub members: Vec<AssemblyArchiveMemberSpec>,
 }
 
-/// One archive member: a file (`src`), a generated `KEY=value` file
-/// (`entries`), or a generated JSON document (`json`). Exactly one of the
-/// three must be set.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One archive member. Exactly one source must be set:
+///
+/// - `src`: a file, stored as `name`.
+/// - `entries`: a generated `KEY=value` file, stored as `name`.
+/// - `json`: a generated JSON document, stored as `name`.
+/// - `tree`: every entry under an assembly tree's root, stored under `prefix`.
+/// - `src_dir`: every entry under a directory, stored under `prefix`.
+/// - `src_glob`: each file the pattern matches, stored as `name` (a directory
+///   prefix ending in `/`) followed by the file's own name.
+///
+/// `prefix` only applies to `tree` and `src_dir`. For those, `name` may be
+/// empty; then the member is labelled by its source.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AssemblyArchiveMemberSpec {
     pub name: String,
     pub src: Option<AssemblyPathTemplate>,
     pub entries: Option<Vec<(String, String)>>,
     pub json: Option<AssemblyJsonValue>,
+    pub tree: Option<AssemblyTreeId>,
+    pub src_dir: Option<AssemblyPathTemplate>,
+    pub src_glob: Option<AssemblyPathTemplate>,
+    /// Archive path prefix for `tree` and `src_dir`: empty or ends in `/`.
+    pub prefix: String,
+    /// `tree` and `src_glob` only: file names (simple `*` globs allowed)
+    /// left out of the set. Directories are never excluded.
+    pub exclude: Vec<String>,
 }
 
 impl AssemblyArchiveMemberSpec {
     pub fn source(&self) -> Option<AssemblyArchiveMemberSourceSpec<'_>> {
-        match (&self.src, &self.entries, &self.json) {
-            (Some(src), None, None) => Some(AssemblyArchiveMemberSourceSpec::File(src)),
-            (None, Some(entries), None) => {
-                Some(AssemblyArchiveMemberSourceSpec::Generated(entries))
-            }
-            (None, None, Some(json)) => Some(AssemblyArchiveMemberSourceSpec::Json(json)),
-            _ => None,
+        let set = [
+            self.src.is_some(),
+            self.entries.is_some(),
+            self.json.is_some(),
+            self.tree.is_some(),
+            self.src_dir.is_some(),
+            self.src_glob.is_some(),
+        ]
+        .iter()
+        .filter(|set| **set)
+        .count();
+        if set != 1 {
+            return None;
         }
+        if let Some(src) = &self.src {
+            return Some(AssemblyArchiveMemberSourceSpec::File(src));
+        }
+        if let Some(entries) = &self.entries {
+            return Some(AssemblyArchiveMemberSourceSpec::Generated(entries));
+        }
+        if let Some(json) = &self.json {
+            return Some(AssemblyArchiveMemberSourceSpec::Json(json));
+        }
+        if let Some(tree) = &self.tree {
+            return Some(AssemblyArchiveMemberSourceSpec::Tree(tree));
+        }
+        if let Some(src_dir) = &self.src_dir {
+            return Some(AssemblyArchiveMemberSourceSpec::Dir(src_dir));
+        }
+        self.src_glob
+            .as_ref()
+            .map(AssemblyArchiveMemberSourceSpec::Glob)
     }
 }
 
@@ -38,6 +79,9 @@ pub enum AssemblyArchiveMemberSourceSpec<'a> {
     File(&'a AssemblyPathTemplate),
     Generated(&'a [(String, String)]),
     Json(&'a AssemblyJsonValue),
+    Tree(&'a AssemblyTreeId),
+    Dir(&'a AssemblyPathTemplate),
+    Glob(&'a AssemblyPathTemplate),
 }
 
 /// A `${assembly...}` reference inside a generated archive entry value,
@@ -288,10 +332,14 @@ mod tests {
     #[test]
     fn archive_member_source_requires_exactly_one_kind() {
         let mut member = AssemblyArchiveMemberSpec {
+            tree: None,
+            src_dir: None,
+            src_glob: None,
+            prefix: String::new(),
+            exclude: Vec::new(),
             name: "m".into(),
             src: Some("x".into()),
-            entries: None,
-            json: None,
+            ..Default::default()
         };
         assert!(matches!(
             member.source(),
@@ -311,6 +359,28 @@ mod tests {
             Some(AssemblyArchiveMemberSourceSpec::Json(_))
         ));
         member.src = Some("x".into());
+        assert_eq!(member.source(), None);
+        member.src = None;
+        member.json = None;
+        member.tree = Some(AssemblyTreeId::new("boot"));
+        assert!(matches!(
+            member.source(),
+            Some(AssemblyArchiveMemberSourceSpec::Tree(_))
+        ));
+        member.src_dir = Some("x".into());
+        assert_eq!(member.source(), None);
+        member.tree = None;
+        assert!(matches!(
+            member.source(),
+            Some(AssemblyArchiveMemberSourceSpec::Dir(_))
+        ));
+        member.src_dir = None;
+        member.src_glob = Some("x/*".into());
+        assert!(matches!(
+            member.source(),
+            Some(AssemblyArchiveMemberSourceSpec::Glob(_))
+        ));
+        member.src_glob = None;
         assert_eq!(member.source(), None);
     }
 }

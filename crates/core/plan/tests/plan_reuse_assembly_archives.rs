@@ -104,6 +104,11 @@ fn spec_with_archive(scratch: &TempDir, name: &str) -> (ResolvedBuildSpec, PathB
             output: "$assembly.out/update.tar".into(),
             members: vec![
                 AssemblyArchiveMemberSpec {
+                    tree: None,
+                    src_dir: None,
+                    src_glob: None,
+                    prefix: String::new(),
+                    exclude: Vec::new(),
                     name: "manifest.env".into(),
                     src: None,
                     entries: Some(vec![(
@@ -113,6 +118,11 @@ fn spec_with_archive(scratch: &TempDir, name: &str) -> (ResolvedBuildSpec, PathB
                     json: None,
                 },
                 AssemblyArchiveMemberSpec {
+                    tree: None,
+                    src_dir: None,
+                    src_glob: None,
+                    prefix: String::new(),
+                    exclude: Vec::new(),
                     name: "rootfs.ext4".into(),
                     src: Some("@assets/rootfs.ext4".into()),
                     entries: None,
