@@ -276,3 +276,25 @@ fn selection_names_declared_variants_only() {
         "{error}"
     );
 }
+
+/// An assembly naming a source (a slot id with `${source.<id>.path}` or
+/// `.commit_short`) depends on it, but runs per variant: the source may
+/// differ between variants; only image:prepare's sources are the base.
+#[test]
+fn a_source_only_the_assembly_reads_may_differ_between_variants() {
+    let scratch = gaia_testkit::TempDir::new("gaia-variants-assembly-source");
+    let dir = scratch.path().to_path_buf();
+    let build = dir.join("pv.toml");
+    let contents = format!(
+        "{}\n[[image.assembly.trees]]\nid = \"slot\"\npath = \"$assembly.work/slot\"\n\n[[image.assembly.files]]\ntree = \"slot\"\ncontent = \"${{source.app-source.path}}\\n\"\ndest = \"id.txt\"\n",
+        base_source_build(&dir.join("out"), r#"["sources.app-source.path", "app2"]"#)
+    );
+    std::fs::write(&build, contents).expect("build file");
+    let specs = gaia_config::resolve_variant_specs(
+        build.to_str().expect("utf-8 path"),
+        &gaia_config::ResolveOptions::default(),
+    )
+    .expect("variants resolve");
+    let split = classify(&AppContext::with_defaults(), &specs).expect("classifies");
+    assert!(split.variant_sources.contains("app-source"), "{split:?}");
+}

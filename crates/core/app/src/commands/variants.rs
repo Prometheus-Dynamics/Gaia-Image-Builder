@@ -178,8 +178,11 @@ fn classify(context: &AppContext, specs: &[ResolvedBuildSpec]) -> Result<Variant
         }
     }
 
-    // Sources the shared Buildroot base reads: a direct dependency of an
-    // image operation, or the image's own source. These cannot differ.
+    // Sources the shared Buildroot base reads: a direct dependency of
+    // image:prepare (always planned with variants), or the image's own
+    // source. These cannot differ. image:build and image:assembly run per
+    // variant, so sources only they read (an assembly naming
+    // `${source.<id>.commit_short}`) may differ like any artifact's.
     let mut base_sources = BTreeSet::new();
     for spec in specs {
         match &spec.image.definition {
@@ -197,10 +200,7 @@ fn classify(context: &AppContext, specs: &[ResolvedBuildSpec]) -> Result<Variant
         }
     }
     for (id, kind) in &kinds {
-        if !matches!(
-            kind,
-            OperationKind::PrepareImage | OperationKind::BuildImage | OperationKind::AssembleImage
-        ) {
+        if !matches!(kind, OperationKind::PrepareImage) {
             continue;
         }
         for map in &per_variant {
