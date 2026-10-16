@@ -105,22 +105,18 @@ pub(super) fn execute_assembly_filesystem(
             // 64 MiB dictionary of `-9` fails to unpack before /init runs.
             // The stream must also carry its sizes in the block header, which
             // xz writes only in threaded mode (`-T1` leaves them out, and that
-            // initramfs did not boot either). One block as large as the cpio
-            // keeps the output the same for any thread count.
+            // initramfs did not boot either). xz's own threaded block size
+            // (3 x the dictionary) is kept: with `--block-size` set to the cpio
+            // size xz wrote a 16-byte block header the slot kernel did not
+            // boot, where plain `-T2` writes the 20-byte header that boots.
+            // A fixed thread count keeps the output the same on every host.
             let input_bytes = file_len(&temp_cpio).inspect_err(|_| {
                 let _ = std_fs::remove_file(&temp_cpio);
             })?;
             let filter = cpio_xz_filter(filesystem.compression_level, input_bytes);
-            let block_size = format!("--block-size={}", input_bytes.max(1));
             let mut command = Command::new(&tool.program);
             command
-                .args([
-                    "-T2",
-                    block_size.as_str(),
-                    "--check=crc32",
-                    filter.as_str(),
-                    "-c",
-                ])
+                .args(["-T2", "--check=crc32", filter.as_str(), "-c"])
                 .arg(&temp_cpio);
             let xz_output = run_command_stdout_to_file(
                 spec,

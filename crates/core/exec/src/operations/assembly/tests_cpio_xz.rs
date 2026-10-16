@@ -202,6 +202,11 @@ fn cpio_xz_caps_the_dictionary_at_one_mib_whatever_the_level() {
         stage_image_assembly_with(&spec, &OperationId::image_assembly(), None, disk_env_panic)
             .expect("filesystem assembly");
     let output = state_value(&summary, "filesystem.1.output");
+    // The block header right after the 12-byte stream header: plain `-T2`
+    // writes the padded 20-byte header ((0x04 + 1) * 4) that booted, where
+    // `--block-size=<cpio size>` wrote a 16-byte one that did not.
+    let bytes = fs::read(&output).expect("cpio-xz output");
+    assert_eq!(bytes[12], 0x04, "a 20-byte block header");
     let dicts = xz_dictionaries(Path::new(&output));
     assert!(!dicts.is_empty(), "xz -lvv names the dictionary");
     assert!(
