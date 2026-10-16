@@ -454,6 +454,9 @@ fn boot_assembly(
             deterministic: true,
             compression_level: None,
             publish: false,
+            label: None,
+            uuid: None,
+            journal: None,
         }],
         ..ImageAssemblySpec::default()
     }
@@ -466,6 +469,11 @@ fn copy_transform(src: &str, dest: &str) -> gaia_spec::AssemblyTransformSpec {
         dest: dest.into(),
         deterministic: true,
         level: None,
+        hash_dest: None,
+        data_block_size: None,
+        hash_block_size: None,
+        salt: None,
+        uuid: None,
     }
 }
 
@@ -579,11 +587,15 @@ fn assembly_disk_archives_log_a_step_time_and_sizes() {
 
 #[path = "tests_busybox.rs"]
 mod tests_busybox;
+#[path = "tests_ext4.rs"]
+mod tests_ext4;
 #[path = "tests_filesystem.rs"]
 mod tests_filesystem;
 
 #[path = "tests_kernel_modules.rs"]
 mod tests_kernel_modules;
+#[path = "tests_verity.rs"]
+mod tests_verity;
 
 #[path = "tests_ram.rs"]
 mod ram;

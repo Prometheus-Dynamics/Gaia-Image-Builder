@@ -25,6 +25,9 @@ fn roots_for(root: &Path) -> (ResolvedBuildSpec, AssemblyRoots) {
             deterministic: true,
             compression_level: None,
             publish: false,
+            label: None,
+            uuid: None,
+            journal: None,
         }],
         ..ImageAssemblySpec::default()
     });

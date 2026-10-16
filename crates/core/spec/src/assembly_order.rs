@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::{AssemblyPathTemplate, ImageAssemblySpec, assembly_digest_tokens};
+use crate::{AssemblyPathTemplate, ImageAssemblySpec, assembly_value_tokens};
 
 /// One assembly step, by kind and index within its kind's list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -142,10 +142,14 @@ pub fn assembly_step_paths(
         );
     }
     for (index, transform) in assembly.transforms.iter().enumerate() {
+        let mut writes = vec![resolve(&transform.dest)];
+        if let Some(hash_dest) = &transform.hash_dest {
+            writes.push(resolve(hash_dest));
+        }
         push(
             AssemblyStep::Transform(index),
             vec![transform.src.as_ref().and_then(resolve)],
-            vec![resolve(&transform.dest)],
+            writes,
         );
     }
     for (index, filesystem) in assembly.filesystems.iter().enumerate() {
@@ -176,8 +180,8 @@ pub fn assembly_step_paths(
                 reads.push(resolve(src));
             }
             for (_, value) in member.entries.iter().flatten() {
-                let _ = assembly_digest_tokens(value, |token| {
-                    reads.push(resolve(&token.path));
+                let _ = assembly_value_tokens(value, |token| {
+                    reads.push(resolve(token.path()));
                     Ok(String::new())
                 });
             }
@@ -458,6 +462,9 @@ mod tests {
                 deterministic: true,
                 compression_level: None,
                 publish: true,
+                label: None,
+                uuid: None,
+                journal: None,
             }],
             ..ImageAssemblySpec::default()
         };
@@ -499,6 +506,9 @@ mod tests {
             deterministic: false,
             compression_level: None,
             publish: false,
+            label: None,
+            uuid: None,
+            journal: None,
         };
         assert_eq!(filesystem.publish_template(), None);
         filesystem.publish = true;

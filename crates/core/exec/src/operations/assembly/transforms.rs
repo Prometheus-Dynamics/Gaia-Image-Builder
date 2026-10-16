@@ -71,6 +71,11 @@ pub(super) fn execute_assembly_transform(
             args.extend(level.as_deref());
             compress_to_dest(spec, roots, "zstd", &args, src, dest, cancel_check)
         }
+        gaia_spec::AssemblyTransformKindSpec::Verity => Err(format!(
+            "assembly transform 'verity' for '{}' runs as a verity step, not a copy",
+            dest.display()
+        )
+        .into()),
         gaia_spec::AssemblyTransformKindSpec::CompileDts => {
             let tool = resolve_assembly_tool(roots, "dtc")?;
             tracing::Span::current().record("tool_path", tool.display.as_str());

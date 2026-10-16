@@ -16,6 +16,15 @@ This cycle also moves the toolchain pin and `rust-version` to Rust 1.99.0
 (installing Gaia needs Rust 1.99 or newer), upgrades every dependency to its
 newest release, and updates the Rust docker images to 1.99.0.
 
+### dm-verity transform and ext4 filesystem for image assembly
+
+- New transform kind `verity` builds a dm-verity hash tree over a data image (`src`, such as an EROFS root filesystem) with `veritysetup format`. The tree is appended to the padded data in `dest`, or written to `hash_dest`. Options: `data_block_size` and `hash_block_size` (powers of two, 512 to 4096, default 4096), `salt` (default: the sha256 of `src`), `uuid` (default: derived from `src`). Two runs give byte-identical output and the same root hash.
+- A verity transform's layout is recorded in the assembly state under `verity.<n>.*`: root hash, salt, UUID, hash offset, data blocks and block sizes.
+- Archive entries read those values with `${assembly.verity:<dest>:<field>}` (`root_hash`, `salt`, `hash_offset`, `data_blocks`, `data_block_size`, `hash_block_size`). The path is the transform's `dest` as written; other names and fields are validation errors.
+- New filesystem kind `ext4` packs a tree into an ext4 image with `mkfs.ext4 -d`. Options: `size` (required, a byte size or `"auto"`), `label` (at most 16 bytes), `uuid`, `journal` (default on). Every entry is root:root with timestamps of 0, and two runs over the same tree are byte-identical. `publish` and RAM work dirs apply as for the other filesystems.
+- Validation covers the new options (rejected on the kinds that do not take them) and the verity tokens. Docs: "dm-verity and ext4" in `docs/configuration.md`, with a dynamic slot bundle example and an ext4 data partition example.
+- Both tools are host tools resolved like the other assembly tools (provider host tools first, then `PATH`): `veritysetup` for `verity`, `mkfs.ext4` and `debugfs` for `ext4`. The build fails with a clear error when one is missing.
+
 ### Artifacts rebuild when a source they read changes
 
 - An artifact whose Java build fields name another source through `${source.<id>.path}` or `${source.<id>.commit}` (for example `build_env = [["EIDOS_PATH", "${source.eidos.path}"]]`) now depends on that source. Before, a changed source re-materialized but the artifact was reused, shipping a stale jar.

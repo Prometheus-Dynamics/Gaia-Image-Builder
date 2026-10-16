@@ -127,6 +127,11 @@ fn gzip_transform_failure_reports_bounded_stderr_tail_and_tool_path() {
             dest: output_dir.join("kernel.img").display().to_string().into(),
             deterministic: true,
             level: None,
+            hash_dest: None,
+            data_block_size: None,
+            hash_block_size: None,
+            salt: None,
+            uuid: None,
         }],
         ..ImageAssemblySpec::default()
     });
@@ -180,6 +185,11 @@ fn gzip_transform_tool_start_failure_is_typed() {
             dest: output_dir.join("kernel.img").display().to_string().into(),
             deterministic: true,
             level: None,
+            hash_dest: None,
+            data_block_size: None,
+            hash_block_size: None,
+            salt: None,
+            uuid: None,
         }],
         ..ImageAssemblySpec::default()
     });
@@ -239,6 +249,11 @@ fn gzip_transform_honors_assembly_command_timeout() {
             dest: output_dir.join("kernel.img").display().to_string().into(),
             deterministic: true,
             level: None,
+            hash_dest: None,
+            data_block_size: None,
+            hash_block_size: None,
+            salt: None,
+            uuid: None,
         }],
         ..ImageAssemblySpec::default()
     });
@@ -303,6 +318,11 @@ fn gzip_transform_succeeds_when_tool_version_probe_hangs() {
             dest: dest.display().to_string().into(),
             deterministic: true,
             level: None,
+            hash_dest: None,
+            data_block_size: None,
+            hash_block_size: None,
+            salt: None,
+            uuid: None,
         }],
         ..ImageAssemblySpec::default()
     });
@@ -372,6 +392,11 @@ fn gzip_transform_honors_execution_cancellation() {
             dest: output_dir.join("kernel.img").display().to_string().into(),
             deterministic: true,
             level: None,
+            hash_dest: None,
+            data_block_size: None,
+            hash_block_size: None,
+            salt: None,
+            uuid: None,
         }],
         ..ImageAssemblySpec::default()
     });
@@ -440,6 +465,11 @@ fn compile_dts_prefers_provider_host_dtc() {
             dest: dest.display().to_string().into(),
             deterministic: true,
             level: None,
+            hash_dest: None,
+            data_block_size: None,
+            hash_block_size: None,
+            salt: None,
+            uuid: None,
         }],
         ..ImageAssemblySpec::default()
     });

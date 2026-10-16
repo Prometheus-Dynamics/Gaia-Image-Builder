@@ -318,6 +318,11 @@ pub fn assembly_transform(
         dest: dest.to_string().into(),
         deterministic: true,
         level: None,
+        hash_dest: None,
+        data_block_size: None,
+        hash_block_size: None,
+        salt: None,
+        uuid: None,
     }
 }
 
@@ -336,6 +341,9 @@ pub fn assembly_filesystem(
         deterministic: kind != gaia_spec::AssemblyFilesystemKindSpec::Vfat,
         compression_level: None,
         publish: false,
+        label: None,
+        uuid: None,
+        journal: None,
     }
 }
 

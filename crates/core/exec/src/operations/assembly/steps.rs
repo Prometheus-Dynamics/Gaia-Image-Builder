@@ -25,6 +25,8 @@ pub(super) struct StepRun<'a> {
     disk_count: usize,
     archive_count: usize,
     kernel_modules_count: usize,
+    /// The verity transforms' outputs, for archive entries that name them.
+    verity_outputs: VerityOutputs,
     /// Where each published filesystem image is published, in build order.
     pub(super) filesystem_published: Vec<PathBuf>,
     /// Where each built disk's bytes are (RAM in a RAM run).
@@ -103,6 +105,7 @@ impl<'a> StepRun<'a> {
             disk_count: 0,
             archive_count: 0,
             kernel_modules_count: 0,
+            verity_outputs: VerityOutputs::new(),
             filesystem_published: Vec::new(),
             disk_outputs: Vec::new(),
             disk_published: Vec::new(),
@@ -370,6 +373,9 @@ impl<'a> StepRun<'a> {
 
     fn transform(&mut self, index: usize) -> Result<(), AssemblyError> {
         let transform = &self.assembly.transforms[index];
+        if transform.kind == gaia_spec::AssemblyTransformKindSpec::Verity {
+            return self.verity(index);
+        }
         let span = tracing::info_span!(
             "assembly_transform",
             operation_id = %self.operation_id.as_str(),
@@ -421,6 +427,50 @@ impl<'a> StepRun<'a> {
             transform.kind.as_str(),
             summary.dest.display()
         ));
+        Ok(())
+    }
+
+    fn verity(&mut self, index: usize) -> Result<(), AssemblyError> {
+        let transform = &self.assembly.transforms[index];
+        let span = tracing::info_span!(
+            "assembly_verity",
+            operation_id = %self.operation_id.as_str(),
+            dest = %transform.dest,
+            output_path = tracing::field::Empty,
+            tool_path = tracing::field::Empty
+        );
+        let _span_guard = span.enter();
+        let output =
+            execute_assembly_verity(self.spec, self.roots, transform, self.cancel_check.clone())?;
+        tracing::Span::current().record("output_path", output.data.display().to_string());
+        self.transform_count += 1;
+        let key = AssemblyStateKey::new("transform", self.transform_count);
+        let verity_key = AssemblyStateKey::new("verity", self.transform_count);
+        let state = &mut self.state;
+        state.insert(key.field("kind"), transform.kind.as_str());
+        state.insert(key.field("src"), output.src.display().to_string());
+        state.insert(key.field("dest"), output.data.display().to_string());
+        state.insert(key.field("deterministic"), transform.deterministic);
+        state.insert(key.field("bytes"), output.bytes);
+        state.insert(key.field("sha256"), &output.sha256);
+        state.insert(key.field("tool"), &output.tool_path);
+        if let Some(tool_version) = &output.tool_version {
+            state.insert(key.field("tool_version"), tool_version);
+        }
+        state.insert(verity_key.field("hash"), output.hash.display().to_string());
+        state.insert(verity_key.field("root_hash"), &output.root_hash);
+        state.insert(verity_key.field("salt"), &output.salt);
+        state.insert(verity_key.field("uuid"), &output.uuid);
+        state.insert(verity_key.field("hash_offset"), output.hash_offset);
+        state.insert(verity_key.field("data_blocks"), output.data_blocks);
+        state.insert(verity_key.field("data_block_size"), output.data_block_size);
+        state.insert(verity_key.field("hash_block_size"), output.hash_block_size);
+        self.messages.push(format!(
+            "built assembly verity tree for '{}' (root hash {})",
+            output.data.display(),
+            output.root_hash
+        ));
+        self.verity_outputs.insert(output.data.clone(), output);
         Ok(())
     }
 
@@ -532,7 +582,8 @@ impl<'a> StepRun<'a> {
         );
         let _span_guard = span.enter();
         let clock = gaia_process::ActiveClock::start();
-        let summary = execute_assembly_archive(self.spec, self.roots, archive)?;
+        let summary =
+            execute_assembly_archive(self.spec, self.roots, archive, &self.verity_outputs)?;
         let member_bytes = summary.members.iter().map(|member| member.bytes).sum();
         self.messages.extend(archive_log_messages(
             &summary.output,

@@ -52,6 +52,9 @@ fn cpio_zstd_assembly(work_dir: &str, output: &str, publish: bool) -> ImageAssem
             deterministic: true,
             compression_level: Some(3),
             publish,
+            label: None,
+            uuid: None,
+            journal: None,
         }],
         ..ImageAssemblySpec::default()
     }
@@ -346,6 +349,9 @@ fn vfat_auto_size_builds_an_image_that_holds_the_tree() {
             deterministic: false,
             compression_level: None,
             publish: false,
+            label: None,
+            uuid: None,
+            journal: None,
         }],
         ..ImageAssemblySpec::default()
     });

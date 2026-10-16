@@ -12,7 +12,7 @@ const VFAT_AUTO_FIXED_OVERHEAD_BYTES: u64 = 1024 * 1024;
 /// The least free space `size = "auto"` leaves, or 5% of the content when
 /// that is more.
 const VFAT_AUTO_MIN_MARGIN_BYTES: u64 = 1024 * 1024;
-const MIB: u64 = 1024 * 1024;
+pub(super) const MIB: u64 = 1024 * 1024;
 
 pub(super) struct AssemblyFilesystemSummary {
     pub(super) output: PathBuf,
@@ -139,6 +139,9 @@ pub(super) fn execute_assembly_filesystem(
                 tool_path: Some(tool.display.clone()),
                 tool_version: tool_version(&tool, ["--version"]),
             })
+        }
+        gaia_spec::AssemblyFilesystemKindSpec::Ext4 => {
+            execute_ext4_filesystem(spec, roots, filesystem, source_tree, &output, cancel_check)
         }
         gaia_spec::AssemblyFilesystemKindSpec::Vfat => {
             let mformat = resolve_assembly_tool(roots, "mformat")?;
@@ -366,7 +369,9 @@ fn write_newc_archive(source_tree: &Path, output: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn collect_archive_entries(source_tree: &Path) -> Result<Vec<(String, PathBuf)>, String> {
+pub(super) fn collect_archive_entries(
+    source_tree: &Path,
+) -> Result<Vec<(String, PathBuf)>, String> {
     let mut entries = Vec::new();
     collect_archive_entries_inner(source_tree, source_tree, &mut entries)?;
     Ok(entries)

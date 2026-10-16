@@ -238,11 +238,15 @@ pub(crate) fn validate_image_assembly(
             );
         }
         if filesystem.size.as_deref() == Some("auto") {
-            if filesystem.kind != gaia_spec::AssemblyFilesystemKindSpec::Vfat {
+            if !matches!(
+                filesystem.kind,
+                gaia_spec::AssemblyFilesystemKindSpec::Vfat
+                    | gaia_spec::AssemblyFilesystemKindSpec::Ext4
+            ) {
                 diagnostics.push(error(
                     "assembly_filesystem_size_auto_unsupported",
                     format!(
-                        "assembly filesystem '{}' uses size = \"auto\", which is only supported for kind 'vfat'",
+                        "assembly filesystem '{}' uses size = \"auto\", which is only supported for kinds 'vfat' and 'ext4'",
                         filesystem.id
                     ),
                     Some("image.assembly.filesystems".into()),
@@ -262,6 +266,7 @@ pub(crate) fn validate_image_assembly(
             gaia_spec::AssemblyFilesystemKindSpec::Cpio
             | gaia_spec::AssemblyFilesystemKindSpec::CpioGzip
             | gaia_spec::AssemblyFilesystemKindSpec::CpioZstd
+            | gaia_spec::AssemblyFilesystemKindSpec::Ext4
                 if !filesystem.deterministic =>
             {
                 diagnostics.push(error(
@@ -425,6 +430,14 @@ pub(crate) fn validate_image_assembly(
     }
 
     image_assembly_layout::validate_transform_levels(assembly, diagnostics);
+    crate::image_assembly_options::validate_transform_options(
+        spec,
+        assembly,
+        &tree_ids,
+        diagnostics,
+    );
+    crate::image_assembly_options::validate_filesystem_options(assembly, diagnostics);
+    crate::image_assembly_options::validate_verity_token_targets(assembly, diagnostics);
     crate::image_assembly_outputs::validate_filesystem_outputs(spec, assembly, diagnostics);
     crate::image_assembly_outputs::validate_kernel_modules(spec, assembly, &tree_ids, diagnostics);
     image_assembly_layout::validate_archives(spec, assembly, &tree_ids, diagnostics);

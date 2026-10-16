@@ -1957,7 +1957,7 @@ Assembly behavior:
 - A `dest` of `.` or ending in `/` is a directory the sources are copied into; any other `dest` is the file a single source is copied to. A `src_glob` that matches several files needs a directory `dest` (otherwise every match would land on one file) and fails without one.
 - `optional = true` skips missing sources without failing the build and records the skip in runtime state.
 - `mode = "0755"` applies Unix file modes on Unix hosts.
-- Transform kinds currently implemented are `copy`, `gzip`, `zstd`, and `compile-dts`.
+- Transform kinds currently implemented are `copy`, `gzip`, `zstd`, `compile-dts`, and `verity` (see [dm-verity and ext4](#dm-verity-and-ext4)).
 - `gzip` uses stable name and timestamp behavior for deterministic output.
 - `zstd` runs `zstd -q -c --no-progress -T0 [-<level>] <src>`, resolving `zstd` from provider host tools first, then host `PATH`; the tool path and version are recorded in assembly state. The optional `level` (1-19) is only accepted on `zstd` transforms and defaults to zstd's own default.
 - `compile-dts` resolves `dtc` from provider host tools first, then host `PATH`.
@@ -1975,11 +1975,11 @@ Assembly behavior:
 - Runtime libraries are found from the binary's ELF headers, never from the host: the program interpreter, the `DT_NEEDED` names and the `DT_RUNPATH` (or `DT_RPATH`) entries are read from the file, and each name is looked up under the sysroot. The search order is the binary's RUNPATH/RPATH entries (`$ORIGIN` is expanded; an entry with another `$` token, or a relative path, is skipped), then `lib`, `lib64`, `usr/lib`, `usr/lib64`, the `<triplet>` directories present under `lib` and `usr/lib`, and the directories of `etc/ld.so.conf` and its `include` files. A library is used only when its class, byte order and machine match the binary, so a host library is never taken for a target one.
 - Symlinks inside the sysroot are followed (an absolute link target means the sysroot's root). The tree gets each file the loader reaches as a real copy at its absolute path, and each symlink crossed on the way as a symlink with the same target text, so a soname such as `libc.so.6` resolves in the tree as it does on the target. The interpreter is placed at its exact path. A static binary copies nothing. A NEEDED name that is not found under the sysroot fails the build, and the error lists every missing name. The tree must not create a directory that the sysroot links (for example `lib` when the sysroot has `/lib -> usr/lib`), since the link cannot replace it.
 - For a cross-compiled BusyBox taken from a Buildroot target tree, set `sysroot = "$provider.target"` (or leave it unset when the binary sits at `$provider.target/bin/busybox`). The reuse fingerprint covers the sysroot, the interpreter, every symlink and the digest of every library file, so a changed libc rebuilds the assembly.
-- Filesystem kinds currently implemented are `vfat`, `cpio`, `cpio-gzip`, and `cpio-zstd`.
+- Filesystem kinds currently implemented are `vfat`, `cpio`, `cpio-gzip`, `cpio-zstd`, and `ext4` (see [dm-verity and ext4](#dm-verity-and-ext4)).
 - `cpio` kinds write a newc archive with uid and gid 0, entries in sorted order and zero timestamps, so the same tree packs to the same bytes. `cpio-zstd` compresses that archive with `zstd -q -c --no-progress -T0 -<compression_level>`, resolving `zstd` like the zstd transform; `compression_level` (1-19) is only accepted on `cpio-zstd` and defaults to 19.
 - `publish = true` on a filesystem also copies its image to the image output dir (`$assembly.out`, the collect dir by default) under the output's file name, and the published image is reported like a raw disk: in the run summary, its image sizes, and the content digests. The name must not collide with another output or published copy. In a RAM work dir the image is built in RAM and copied to the image output dir when built.
 - `vfat` uses `mtools` (`mformat` and `mcopy`), resolving provider host tools first, then host `PATH`; `size` accepts byte values or binary `K`, `M`, `G`, and `T` suffixes, or `size = "auto"`. Without `size` the image is 32M.
-- `size = "auto"` (vfat only) sizes the image from its source tree: each file is counted rounded up to 4 KiB, each directory as 4 KiB, plus 1 MiB for the FAT tables and root directory, plus a margin of 5% (at least 1 MiB), rounded up to a whole MiB. The size depends only on the tree's content, so the same tree always gets the same size. The 4 KiB per entry is an estimate of the cluster size mtools picks: a tree that overruns it fails while copying, rather than being truncated.
+- `size = "auto"` (vfat and ext4) sizes the image from its source tree; the vfat rule is: each file is counted rounded up to 4 KiB, each directory as 4 KiB, plus 1 MiB for the FAT tables and root directory, plus a margin of 5% (at least 1 MiB), rounded up to a whole MiB. The size depends only on the tree's content, so the same tree always gets the same size. The 4 KiB per entry is an estimate of the cluster size mtools picks: a tree that overruns it fails while copying, rather than being truncated.
 - Raw MBR disk assembly writes 1 MiB-aligned partitions sequentially (see [Disk partitions](#disk-partitions)).
 - MBR partition `type` accepts raw `0xNN` values; `type_alias` currently supports `fat32-lba` and `linux`.
 - Assembly runtime state is included in provenance and manifest reports with staged file, transform, filesystem, disk, and archive output sizes and digests.
@@ -2058,8 +2058,92 @@ Assembly results report, per published raw disk image (and the primary image), `
 - `generated`: ordered list of generated members (`name`, `entries`). They are written **before** all `members`; to interleave generated and file members, put `entries` directly on a `members` item instead.
 - `entries`: `[["KEY", "value"], ...]`, rendered as one `KEY=value` line per entry in order. Keys must match `[A-Za-z_][A-Za-z0-9_]*`. Values made only of `A-Z a-z 0-9 _ @ % + = : , . / -` are written as-is; anything else (including an empty value) is wrapped in single quotes with embedded `'` written as `'\''`, so the file can be sourced by `sh`. Values cannot contain newlines.
 - Entry values may contain `${assembly.sha256:<path template>}`, replaced at assembly time by the lowercase hex sha256 of that file (an assembly output such as a transform result, or any other file). The file must exist when the archive is built. Normal config interpolation such as `${build.version}` runs first and may also appear inside the path (`${assembly.sha256:$assembly.out/${build.name}.img}`). Any other `${...}` left in a value is a validation error.
+- Entry values may also contain `${assembly.verity:<path template>:<field>}`, replaced by a field of a `verity` transform's output. The path must be the transform's `dest` written exactly as in the transform. The fields are `root_hash`, `salt`, `hash_offset`, `data_blocks`, `data_block_size` and `hash_block_size`; see [dm-verity and ext4](#dm-verity-and-ext4). A token that names no verity transform output is a validation error, and an unknown field name is rejected at validation too.
 
 Archive output is deterministic: entries appear in the configured order with mtime 0, uid/gid 0, empty user and group names, and mode `0644`. Member names must be relative paths of at most 100 bytes (the ustar name field; prefix splitting is not used) without `.`/`..` components, and must be unique per archive. The archive is written to a temporary file and published atomically; state records `archives.N.output`, `bytes`, `sha256`, and per-member name, source, size, and sha256. Archive outputs are treated as expected outputs, so a bundle in the collect dir is not reported as a large unexpected file. Reuse fingerprints cover the archive config and the state of every member and digest input file.
+
+#### dm-verity and ext4
+
+Two kinds for images that a device mounts read-only or from a data partition.
+
+**`verity`** (a transform) builds a dm-verity hash tree over `src`, a data image such as an EROFS root filesystem, with `veritysetup format`. `veritysetup` resolves from provider host tools first (`bin/`, `usr/bin/`, or the host dir), then host `PATH`; a missing tool fails the build with a clear error. Options, all for `kind = "verity"` only (other kinds reject them):
+- `dest`: the output data image. The data is copied and zero-padded to whole `data_block_size` blocks. Unless `hash_dest` is set the hash tree is appended after the padded data, so `dest` is one file that holds the data and its tree.
+- `hash_dest` (optional): write the hash tree to its own file instead; `dest` then holds the padded data alone.
+- `data_block_size`, `hash_block_size`: powers of two from 512 to 4096, default 4096.
+- `salt` (optional): hex, 1 to 256 bytes. Unset, the salt is the sha256 of `src`, so the same data always gets the same tree.
+- `uuid` (optional): the superblock UUID. Unset, it is derived from the sha256 of `src`.
+
+The tree uses sha256 and the default superblock. The layout is recorded for the consumer in the assembly state under `verity.<n>.*`, and archive entries reach it with `${assembly.verity:<dest>:<field>}`:
+
+| Field | Meaning |
+| --- | --- |
+| `root_hash` | the root hash, lower-case hex |
+| `salt` | the salt, lower-case hex |
+| `hash_offset` | byte offset of the verity superblock in the hash device: the first hash-block boundary after the padded data when appended, `0` for a separate file |
+| `data_blocks` | data blocks the tree covers |
+| `data_block_size`, `hash_block_size` | the block sizes in bytes |
+
+To open the tree, the hash device is `dest` when appended or `hash_dest` otherwise, and the root hash and hash offset are the recorded values: `veritysetup open <dest> <name> <hash device> <root_hash> --hash-offset=<hash_offset>`. The superblock records the block sizes, salt and UUID. Two runs over the same `src` give byte-identical output and the same root hash. The reproducibility rests on the salt and UUID being derived from the data, not on a random salt.
+
+**`ext4`** (a filesystem) packs `source_tree` into an ext4 image with `mkfs.ext4 -d`, resolved like `veritysetup` (`mkfs.ext4` and `debugfs` from provider host tools, then `PATH`). Options, for `kind = "ext4"` only:
+- `size` (required): a byte size with a binary suffix, or `"auto"`. The size must be a multiple of 4 KiB. Auto sizing counts each file and directory in whole 4 KiB blocks, the inode tables (two inodes per entry plus 64, 256 bytes each), 8 MiB of fixed overhead and the journal, plus a margin of 5% (at least 4 MiB), rounded up to a whole MiB.
+- `label` (optional): at most 16 bytes, no `/`.
+- `uuid` (optional): a UUID. Unset, it is derived from the filesystem `id`.
+- `journal` (optional): `false` for no journal; the default is a journal of 1/64 of the image, between 4 and 128 MiB.
+
+`mke2fs` copies the builder's owners and times into the image, so Gaia then sets every entry to root:root with timestamps of 0 (the epoch). File modes are kept. The fixed UUID, hash seed and time make two runs over the same tree byte-identical. Entry names containing `"`, `\` or a control character are rejected, because `debugfs` cannot set them. `publish = true` and the RAM work dir work as for the other filesystems, and `deterministic` must stay `true`.
+
+##### Example: dynamic slot bundle
+
+A read-only root slot: the EROFS root filesystem from the image provider (Buildroot's EROFS rootfs option, for example), a verity tree appended to it, and a bundle that carries the root's digest and the verity values the initramfs needs to open the tree:
+
+```toml
+[[image.assembly.transforms]]
+kind = "verity"
+src = "$provider.images/rootfs.erofs"
+dest = "$assembly.work/rootfs.verity.erofs"
+
+[[image.assembly.archives]]
+id = "slot"
+output = "$provider.images/slot.pdupdate"
+
+[[image.assembly.archives.generated]]
+name = "manifest.env"
+entries = [
+  ["ROOTFS_SHA256", "${assembly.sha256:$provider.images/rootfs.erofs}"],
+  ["VERITY_ROOT_HASH", "${assembly.verity:$assembly.work/rootfs.verity.erofs:root_hash}"],
+  ["VERITY_SALT", "${assembly.verity:$assembly.work/rootfs.verity.erofs:salt}"],
+  ["VERITY_HASH_OFFSET", "${assembly.verity:$assembly.work/rootfs.verity.erofs:hash_offset}"],
+  ["VERITY_DATA_BLOCKS", "${assembly.verity:$assembly.work/rootfs.verity.erofs:data_blocks}"],
+  ["VERITY_DATA_BLOCK_SIZE", "${assembly.verity:$assembly.work/rootfs.verity.erofs:data_block_size}"],
+  ["VERITY_HASH_BLOCK_SIZE", "${assembly.verity:$assembly.work/rootfs.verity.erofs:hash_block_size}"],
+]
+
+[[image.assembly.archives.members]]
+name = "rootfs.erofs"
+src = "$assembly.work/rootfs.verity.erofs"
+```
+
+The bundle's `manifest.env` is the file the updater sources. The root slot is `rootfs.verity.erofs`; the initramfs opens it with the manifest's root hash and hash offset.
+
+##### Example: ext4 data partition
+
+A data partition built from a tree of its own, sized from the tree and labelled, as the last partition of a disk:
+
+```toml
+[[image.assembly.filesystems]]
+id = "data"
+kind = "ext4"
+source_tree = "data"
+output = "$provider.images/data.ext4"
+size = "auto"
+label = "data"
+
+[[image.assembly.disks.partitions]]
+name = "data"
+type_alias = "linux"
+image = "$provider.images/data.ext4"
+```
 
 #### Example: CM5 eMMC A/B layout with an update bundle
 

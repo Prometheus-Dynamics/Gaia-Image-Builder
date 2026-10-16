@@ -82,6 +82,9 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
             deterministic: false,
             compression_level: None,
             publish: false,
+            label: None,
+            uuid: None,
+            journal: None,
         }],
         disks: vec![AssemblyDiskSpec {
             id: "sdcard".into(),
@@ -332,6 +335,9 @@ fn vfat_filesystem_honors_mformat_timeout() {
             deterministic: false,
             compression_level: None,
             publish: false,
+            label: None,
+            uuid: None,
+            journal: None,
         }],
         ..ImageAssemblySpec::default()
     });

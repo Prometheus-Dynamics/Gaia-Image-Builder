@@ -16,6 +16,7 @@ mod archive_log;
 mod archives;
 mod busybox;
 mod disks;
+mod ext4;
 mod files;
 mod filesystems;
 mod kernel_modules;
@@ -25,11 +26,13 @@ mod state;
 mod steps;
 mod tar;
 mod transforms;
+mod verity;
 
 use archive_log::*;
 use archives::*;
 use busybox::*;
 use disks::*;
+use ext4::*;
 use files::*;
 use filesystems::*;
 use kernel_modules::*;
@@ -39,6 +42,7 @@ use state::AssemblyExecutionContext;
 pub(crate) use state::{assembly_state_path, image_assembly_cleanup_paths};
 use steps::{StepRun, ordered_assembly_steps, remove_stale_step_outputs};
 use transforms::*;
+use verity::*;
 
 const TOOL_VERSION_TIMEOUT_SECONDS: u64 = 2;
 

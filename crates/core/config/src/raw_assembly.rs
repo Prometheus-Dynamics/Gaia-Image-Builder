@@ -60,6 +60,16 @@ pub struct RawAssemblyTransformConfig {
     pub dest: String,
     pub deterministic: Option<bool>,
     pub level: Option<u32>,
+    /// `verity` only: the hash tree's own file; unset appends it to `dest`.
+    pub hash_dest: Option<String>,
+    /// `verity` only: data block size in bytes, default 4096.
+    pub data_block_size: Option<u32>,
+    /// `verity` only: hash block size in bytes, default 4096.
+    pub hash_block_size: Option<u32>,
+    /// `verity` only: hex salt; unset derives it from the data image.
+    pub salt: Option<String>,
+    /// `verity` only: superblock UUID; unset derives it from the data image.
+    pub uuid: Option<String>,
 }
 
 impl Default for RawAssemblyTransformConfig {
@@ -70,6 +80,11 @@ impl Default for RawAssemblyTransformConfig {
             dest: String::new(),
             deterministic: None,
             level: None,
+            hash_dest: None,
+            data_block_size: None,
+            hash_block_size: None,
+            salt: None,
+            uuid: None,
         }
     }
 }
@@ -81,6 +96,7 @@ pub enum RawAssemblyTransformKind {
     Gzip,
     Zstd,
     Copy,
+    Verity,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -96,6 +112,12 @@ pub struct RawAssemblyFilesystemConfig {
     pub compression_level: Option<u32>,
     /// Copy the image to the image output dir under its file name.
     pub publish: bool,
+    /// `ext4` only: the volume label, at most 16 bytes.
+    pub label: Option<String>,
+    /// `ext4` only: the filesystem UUID; unset derives it from the id.
+    pub uuid: Option<String>,
+    /// `ext4` only: create a journal, the default.
+    pub journal: Option<bool>,
 }
 
 impl Default for RawAssemblyFilesystemConfig {
@@ -109,6 +131,9 @@ impl Default for RawAssemblyFilesystemConfig {
             deterministic: None,
             compression_level: None,
             publish: false,
+            label: None,
+            uuid: None,
+            journal: None,
         }
     }
 }
@@ -120,6 +145,7 @@ pub enum RawAssemblyFilesystemKind {
     Cpio,
     CpioGzip,
     CpioZstd,
+    Ext4,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]

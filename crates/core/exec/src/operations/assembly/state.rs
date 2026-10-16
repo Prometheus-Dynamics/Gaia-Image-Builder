@@ -48,10 +48,13 @@ fn image_assembly_output_cleanup_paths(
         }
     }
     for transform in &assembly.transforms {
-        if let Ok(path) = roots.resolve_path(spec, &transform.dest) {
-            paths.push(temporary_assembly_output_path(&path));
-            paths.push(temporary_assembly_backup_path(&path));
-            paths.push(path);
+        let outputs = std::iter::once(&transform.dest).chain(transform.hash_dest.as_ref());
+        for output in outputs {
+            if let Ok(path) = roots.resolve_path(spec, output) {
+                paths.push(temporary_assembly_output_path(&path));
+                paths.push(temporary_assembly_backup_path(&path));
+                paths.push(path);
+            }
         }
     }
     for filesystem in &assembly.filesystems {

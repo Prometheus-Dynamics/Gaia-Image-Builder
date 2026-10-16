@@ -118,6 +118,12 @@ pub(crate) fn assembly_input_entries(spec: &ResolvedBuildSpec) -> Vec<(String, S
             gaia_spec::AssemblyTransformKindSpec::Zstd => {
                 parts.push(("tool zstd".into(), command_signature("zstd", ["--version"])));
             }
+            gaia_spec::AssemblyTransformKindSpec::Verity => {
+                parts.push((
+                    "tool veritysetup".into(),
+                    command_signature("veritysetup", ["--version"]),
+                ));
+            }
             _ => {}
         }
     }
@@ -148,6 +154,16 @@ pub(crate) fn assembly_input_entries(spec: &ResolvedBuildSpec) -> Vec<(String, S
             parts.push((
                 format!("tool zstd (cpio-zstd {})", filesystem.id),
                 command_signature("zstd", ["--version"]),
+            ));
+        }
+        if filesystem.kind == gaia_spec::AssemblyFilesystemKindSpec::Ext4 {
+            parts.push((
+                format!("tool mkfs.ext4 (ext4 {})", filesystem.id),
+                command_signature("mkfs.ext4", ["-V"]),
+            ));
+            parts.push((
+                format!("tool debugfs (ext4 {})", filesystem.id),
+                command_signature("debugfs", ["-V"]),
             ));
         }
     }
@@ -353,6 +369,9 @@ mod tests {
                 deterministic: true,
                 compression_level: None,
                 publish: true,
+                label: None,
+                uuid: None,
+                journal: None,
             }],
             ..ImageAssemblySpec::default()
         });

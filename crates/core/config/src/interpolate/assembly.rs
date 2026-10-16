@@ -73,6 +73,15 @@ pub(super) fn interpolate_image_assembly(
                 .src
                 .map(|value| resolver::interpolate_string(value, raw, env));
             transform.dest = resolver::interpolate_string(transform.dest, raw, env);
+            transform.hash_dest = transform
+                .hash_dest
+                .map(|value| resolver::interpolate_string(value, raw, env));
+            transform.salt = transform
+                .salt
+                .map(|value| resolver::interpolate_string(value, raw, env));
+            transform.uuid = transform
+                .uuid
+                .map(|value| resolver::interpolate_string(value, raw, env));
             transform
         })
         .collect();
@@ -85,6 +94,12 @@ pub(super) fn interpolate_image_assembly(
             filesystem.output = resolver::interpolate_string(filesystem.output, raw, env);
             filesystem.size = filesystem
                 .size
+                .map(|value| resolver::interpolate_string(value, raw, env));
+            filesystem.label = filesystem
+                .label
+                .map(|value| resolver::interpolate_string(value, raw, env));
+            filesystem.uuid = filesystem
+                .uuid
                 .map(|value| resolver::interpolate_string(value, raw, env));
             filesystem
         })

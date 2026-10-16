@@ -268,11 +268,11 @@ fn validate_generated_entries(
                 location(),
             ));
         }
-        let rendered = gaia_spec::assembly_digest_tokens(value, |token| {
+        let rendered = gaia_spec::assembly_value_tokens(value, |token| {
             validate_assembly_path_template(
                 spec,
                 tree_ids,
-                &token.path,
+                token.path(),
                 "image.assembly.archives.generated.entries",
                 diagnostics,
             );

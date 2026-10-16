@@ -36,8 +36,10 @@ pub(crate) const RAM_BASE: &str = "/dev/shm";
 const RAM_MARGIN: u64 = 4 * GIB;
 /// Chunk size for copying a raw disk without writing its zeros.
 const SPARSE_CHUNK: usize = MIB as usize;
-/// Prefix of the digest references in archive entries, inside `${...}`.
-const DIGEST_TOKEN_OPEN: &str = "${assembly.sha256:";
+/// Prefixes of the references in archive entries, inside `${...}`: a file's
+/// digest, and a field of a verity transform's output.
+const DIGEST_TOKEN_PREFIX: &str = "assembly.sha256:";
+const VERITY_TOKEN_PREFIX: &str = "assembly.verity:";
 
 /// Where the facts a RAM placement depends on come from. Tests fill it in;
 /// a run reads it from the system, and only when RAM is asked for.
@@ -366,6 +368,7 @@ fn rewrite_assembly(
     for transform in &mut rewritten.transforms {
         transform.src = absolute_opt(&transform.src)?;
         transform.dest = absolute(&transform.dest)?;
+        transform.hash_dest = absolute_opt(&transform.hash_dest)?;
     }
     for filesystem in &mut rewritten.filesystems {
         filesystem.output = absolute(&filesystem.output)?;
@@ -397,23 +400,42 @@ fn rewrite_assembly(
     Ok(rewritten)
 }
 
-/// Rewrites the path inside each `${assembly.sha256:<path>}` in `value`.
+/// Rewrites the path inside each `${assembly.sha256:<path>}` and
+/// `${assembly.verity:<path>:<field>}` in `value`; the field and any other
+/// token are kept as they are.
 fn rewrite_digest_tokens(
     value: &str,
     mut rewrite: impl FnMut(&str) -> Result<String, String>,
 ) -> Result<String, String> {
     let mut out = String::new();
     let mut rest = value;
-    while let Some(start) = rest.find(DIGEST_TOKEN_OPEN) {
+    while let Some(start) = rest.find("${") {
         out.push_str(&rest[..start]);
-        let after = &rest[start + DIGEST_TOKEN_OPEN.len()..];
+        let after = &rest[start + 2..];
         let Some(end) = after.find('}') else {
             out.push_str(&rest[start..]);
             return Ok(out);
         };
-        out.push_str(DIGEST_TOKEN_OPEN);
-        out.push_str(&rewrite(&after[..end])?);
-        out.push('}');
+        let token = &after[..end];
+        if let Some(path) = token.strip_prefix(DIGEST_TOKEN_PREFIX) {
+            out.push_str("${");
+            out.push_str(DIGEST_TOKEN_PREFIX);
+            out.push_str(&rewrite(path)?);
+            out.push('}');
+        } else if let Some(body) = token.strip_prefix(VERITY_TOKEN_PREFIX)
+            && let Some((path, field)) = body.rsplit_once(':')
+        {
+            out.push_str("${");
+            out.push_str(VERITY_TOKEN_PREFIX);
+            out.push_str(&rewrite(path)?);
+            out.push(':');
+            out.push_str(field);
+            out.push('}');
+        } else {
+            out.push_str("${");
+            out.push_str(token);
+            out.push('}');
+        }
         rest = &after[end + 1..];
     }
     out.push_str(rest);

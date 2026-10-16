@@ -1,7 +1,5 @@
-use crate::{
-    AssemblyArchiveSpec, AssemblyFilesystemId, AssemblyTreeId, ByteSize, ByteSizeParseError,
-    ImageProviderKind,
-};
+use crate::assembly_output_spec::{AssemblyFilesystemSpec, AssemblyTransformSpec};
+use crate::{AssemblyArchiveSpec, AssemblyTreeId, ByteSize, ByteSizeParseError, ImageProviderKind};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -132,89 +130,6 @@ impl FromStr for FileMode {
             return Err(FileModeParseError::OutOfRange(parsed));
         }
         Ok(Self(parsed))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AssemblyTransformSpec {
-    pub kind: AssemblyTransformKindSpec,
-    pub src: Option<AssemblyPathTemplate>,
-    pub dest: AssemblyPathTemplate,
-    pub deterministic: bool,
-    /// Compression level for `zstd` (1-19); `None` uses the tool default.
-    pub level: Option<u32>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AssemblyTransformKindSpec {
-    CompileDts,
-    Gzip,
-    Zstd,
-    Copy,
-}
-
-impl AssemblyTransformKindSpec {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::CompileDts => "compile-dts",
-            Self::Gzip => "gzip",
-            Self::Zstd => "zstd",
-            Self::Copy => "copy",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AssemblyFilesystemSpec {
-    pub id: AssemblyFilesystemId,
-    pub kind: AssemblyFilesystemKindSpec,
-    pub source_tree: AssemblyTreeId,
-    pub output: AssemblyPathTemplate,
-    /// Byte size, or `"auto"` for vfat (sized from the tree).
-    pub size: Option<String>,
-    pub deterministic: bool,
-    /// zstd level for `cpio-zstd` (1-19); `None` uses the default.
-    pub compression_level: Option<u32>,
-    /// Also copy the image to `$assembly.out/<file name of output>`, the
-    /// image output dir, where it is published as an image of the run.
-    pub publish: bool,
-}
-
-impl AssemblyFilesystemSpec {
-    pub fn parsed_size(&self) -> Result<Option<ByteSize>, ByteSizeParseError> {
-        self.size.as_deref().map(ByteSize::from_str).transpose()
-    }
-
-    /// Where a published filesystem image is copied: the image output dir
-    /// (`$assembly.out`) under the output's file name. `None` when the
-    /// filesystem is not published or the output has no file name.
-    pub fn publish_template(&self) -> Option<AssemblyPathTemplate> {
-        if !self.publish {
-            return None;
-        }
-        let name = std::path::Path::new(self.output.as_str())
-            .file_name()?
-            .to_str()?;
-        Some(AssemblyPathTemplate::new(format!("$assembly.out/{name}")))
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AssemblyFilesystemKindSpec {
-    Vfat,
-    Cpio,
-    CpioGzip,
-    CpioZstd,
-}
-
-impl AssemblyFilesystemKindSpec {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Vfat => "vfat",
-            Self::Cpio => "cpio",
-            Self::CpioGzip => "cpio-gzip",
-            Self::CpioZstd => "cpio-zstd",
-        }
     }
 }
 

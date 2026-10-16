@@ -302,6 +302,11 @@ fn image_assembly_transform_failure_cleans_prior_outputs() {
                 dest: output_dir.join("license.txt").display().to_string().into(),
                 deterministic: true,
                 level: None,
+                hash_dest: None,
+                data_block_size: None,
+                hash_block_size: None,
+                salt: None,
+                uuid: None,
             },
             AssemblyTransformSpec {
                 kind: AssemblyTransformKindSpec::Copy,
@@ -309,6 +314,11 @@ fn image_assembly_transform_failure_cleans_prior_outputs() {
                 dest: output_dir.join("missing.txt").display().to_string().into(),
                 deterministic: true,
                 level: None,
+                hash_dest: None,
+                data_block_size: None,
+                hash_block_size: None,
+                salt: None,
+                uuid: None,
             },
         ],
         ..ImageAssemblySpec::default()
@@ -379,6 +389,9 @@ fn image_assembly_disk_failure_cleans_generated_filesystem_output() {
             deterministic: true,
             compression_level: None,
             publish: false,
+            label: None,
+            uuid: None,
+            journal: None,
         }],
         disks: vec![AssemblyDiskSpec {
             id: "sdcard".into(),
@@ -556,6 +569,9 @@ fn image_assembly_filesystem_failure_cleans_temp_and_final_outputs() {
             deterministic: false,
             compression_level: None,
             publish: false,
+            label: None,
+            uuid: None,
+            journal: None,
         }],
         ..ImageAssemblySpec::default()
     });

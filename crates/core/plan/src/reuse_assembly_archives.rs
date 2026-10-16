@@ -29,12 +29,12 @@ pub(crate) fn archive_input_entries(
                 }
                 Some(AssemblyArchiveMemberSourceSpec::Generated(entries)) => {
                     for (_, value) in entries {
-                        let _ = gaia_spec::assembly_digest_tokens(value, |token| {
+                        let _ = gaia_spec::assembly_value_tokens(value, |token| {
                             parts.push(input_part(
                                 "archive-digest",
                                 &archive.id,
                                 &member.name,
-                                resolve(spec, roots, &token.path),
+                                resolve(spec, roots, token.path()),
                                 generated_outputs,
                             ));
                             Ok(String::new())

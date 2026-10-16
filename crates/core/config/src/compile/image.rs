@@ -186,6 +186,11 @@ pub(crate) fn compile_image_assembly(
                 dest: transform.dest.into(),
                 deterministic: transform.deterministic.unwrap_or(true),
                 level: transform.level,
+                hash_dest: transform.hash_dest.map(Into::into),
+                data_block_size: transform.data_block_size,
+                hash_block_size: transform.hash_block_size,
+                salt: transform.salt,
+                uuid: transform.uuid,
             })
             .collect(),
         filesystems: raw
@@ -202,6 +207,9 @@ pub(crate) fn compile_image_assembly(
                     .unwrap_or_else(|| default_assembly_filesystem_deterministic(filesystem.kind)),
                 compression_level: filesystem.compression_level,
                 publish: filesystem.publish,
+                label: filesystem.label,
+                uuid: filesystem.uuid,
+                journal: filesystem.journal,
             })
             .collect(),
         disks: raw
@@ -281,6 +289,7 @@ fn compile_assembly_transform_kind(raw: RawAssemblyTransformKind) -> AssemblyTra
         RawAssemblyTransformKind::Gzip => AssemblyTransformKindSpec::Gzip,
         RawAssemblyTransformKind::Zstd => AssemblyTransformKindSpec::Zstd,
         RawAssemblyTransformKind::Copy => AssemblyTransformKindSpec::Copy,
+        RawAssemblyTransformKind::Verity => AssemblyTransformKindSpec::Verity,
     }
 }
 
@@ -290,6 +299,7 @@ fn compile_assembly_filesystem_kind(raw: RawAssemblyFilesystemKind) -> AssemblyF
         RawAssemblyFilesystemKind::Cpio => AssemblyFilesystemKindSpec::Cpio,
         RawAssemblyFilesystemKind::CpioGzip => AssemblyFilesystemKindSpec::CpioGzip,
         RawAssemblyFilesystemKind::CpioZstd => AssemblyFilesystemKindSpec::CpioZstd,
+        RawAssemblyFilesystemKind::Ext4 => AssemblyFilesystemKindSpec::Ext4,
     }
 }
 
@@ -297,7 +307,8 @@ fn default_assembly_filesystem_deterministic(raw: RawAssemblyFilesystemKind) -> 
     match raw {
         RawAssemblyFilesystemKind::Cpio
         | RawAssemblyFilesystemKind::CpioGzip
-        | RawAssemblyFilesystemKind::CpioZstd => true,
+        | RawAssemblyFilesystemKind::CpioZstd
+        | RawAssemblyFilesystemKind::Ext4 => true,
         RawAssemblyFilesystemKind::Vfat => false,
     }
 }
