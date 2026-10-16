@@ -15,6 +15,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - The `gzip` transform takes `level` 1-9 and writes no name or mtime (`gzip -n`), so its output is byte-identical across runs.
 - None of the new options changes the fingerprint of a config that does not set it.
 
+### Run summary: image output sizes and their change
+
+- Every `gaia run` prints an `image sizes` table with the file size of each image output it published (archives, disks including `.img.xz`, filesystem images such as `rootfs.erofs` and `initramfs.cpio.zst`, and transform outputs such as a verity hash or a kernel image), sorted by kind then name. Each row shows the change since the previous successful run of the same build and variant: `new`, `=`, `(+1.3 MiB)`, `(-12.0 KiB)` or `removed (was ...)`. It replaces the `image output:` and `primary image size:` lines; `primary image output:` and its `sha256` line stay.
+- The summary has the same list as `sizes` (`kind`, `name`, `path`, `bytes`, `change`). It is in the post-build hook's JSON payload too, and the run dashboard's summary and details panels show it in place of the raw and content sizes.
+- The baseline is `<build>.sizes.json` beside the reports. It is written only by a clean run that has image outputs, so a failed or cancelled run leaves the comparison with the last good run in place. A reused image operation still reports its outputs, carried forward from that baseline (or the previous `summary.json` before one exists).
+- The sizes also cover every filesystem and transform output the assembly spec names (kinds `filesystem` and `transform`, named by path relative to the assembly out dir), read from the spec's own path templates, so a reused assembly still reports them. Kinds come from the spec where it names the output; a kernel `.img` written by a transform is a `transform`, not a `disk`. Bytes used inside a vfat image are not reported.
+
 ### Assembly: copied dynamic files warn about missing libraries
 
 - A `[[image.assembly.files]]` entry that copies a dynamically linked file (one that names a program interpreter or `DT_NEEDED` libraries) is checked once its tree is complete, before a filesystem or archive packs it. Each interpreter and library the file needs must be in the tree, as `[[image.assembly.binaries]]` would bring them. A missing one is a warning in the run output and the summary, naming the file, the tree and the libraries. It is not an error, since a tree may overlay a full rootfs.

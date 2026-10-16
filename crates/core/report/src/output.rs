@@ -2,15 +2,27 @@ use gaia_spec::ResolvedBuildSpec;
 use serde::Serialize;
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::model::{ReportBundle, ReportFileKind, ReportOutputBundle, ReportOutputFile};
+use crate::output_sizes::write_baseline;
+
+/// The directory the run's reports are written to: `.gaia/reports` under the
+/// output dir.
+pub(crate) fn report_dir(spec: &ResolvedBuildSpec) -> PathBuf {
+    spec.workspace.out_path().join(".gaia").join("reports")
+}
+
+/// The file name stem of the run's reports: the build name and variant.
+pub(crate) fn report_file_stem(spec: &ResolvedBuildSpec) -> String {
+    spec.report_name().replace(['/', '\\', ' '], "-")
+}
 
 pub fn write_report_bundle(
     spec: &ResolvedBuildSpec,
     report: &ReportBundle,
 ) -> io::Result<ReportOutputBundle> {
-    let report_dir = spec.workspace.out_path().join(".gaia").join("reports");
+    let report_dir = report_dir(spec);
     tracing::debug!(
         build = %spec.build_name(),
         report_dir = %report_dir.display(),
@@ -18,7 +30,7 @@ pub fn write_report_bundle(
     );
     fs::create_dir_all(&report_dir)?;
 
-    let build_name = spec.report_name().replace(['/', '\\', ' '], "-");
+    let build_name = report_file_stem(spec);
     let files = vec![
         write_json_file(
             &report_dir,
@@ -52,6 +64,13 @@ pub fn write_report_bundle(
         )?,
     ];
 
+    if let Err(error) = write_baseline(spec, &report.summary) {
+        tracing::warn!(
+            build = %spec.build_name(),
+            error = %error,
+            "failed to write the image size baseline"
+        );
+    }
     tracing::debug!(
         build = %spec.build_name(),
         file_count = files.len(),

@@ -558,7 +558,8 @@ pub(crate) fn validate_verdict_line(validation: &gaia_validate::ValidationReport
     )
 }
 
-fn format_bytes(bytes: u64) -> String {
+/// A byte count in binary units: `812 B`, `3.4 MiB`, `1.2 GiB`.
+pub(crate) fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
     let mut unit = 0;

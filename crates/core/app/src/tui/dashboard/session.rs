@@ -6,7 +6,7 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use super::DashAction;
 use crate::AppCommand;
 use crate::commands::live_status::unix_now_ms;
-use crate::tui::run_view::{ImageSize, RunOutcome, RunPhase, RunSource, RunView};
+use crate::tui::run_view::{RunOutcome, RunPhase, RunSource, RunView};
 use crate::tui::{QuitState, RunState, Screen, TuiState};
 
 /// How a run this TUI started ended: its outcome word and when.
@@ -50,17 +50,7 @@ impl<'a> TuiState<'a> {
             return RunOutcome::default();
         };
         RunOutcome {
-            image_sizes: run
-                .report
-                .summary
-                .image_sizes
-                .iter()
-                .map(|size| ImageSize {
-                    path: size.path.clone(),
-                    raw_bytes: size.raw_bytes,
-                    content_bytes: size.content_bytes,
-                })
-                .collect(),
+            sizes: run.report.summary.sizes.clone(),
             out_dir: Some(run.spec.workspace.out_dir.clone()),
             report_files: run.report_outputs.files.len(),
         }

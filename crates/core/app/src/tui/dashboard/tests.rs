@@ -168,10 +168,12 @@ fn a_completed_run_opens_on_the_summary() {
     view.ops = live_view().ops;
     view.outcome.out_dir = Some("/out/demo".into());
     view.outcome.report_files = 5;
-    view.outcome.image_sizes = vec![crate::tui::run_view::ImageSize {
+    view.outcome.sizes = vec![gaia_report::OutputSizeRecord {
+        kind: "disk".into(),
+        name: "image.img".into(),
         path: "/out/demo/image.img".into(),
-        raw_bytes: 3 * 1024 * 1024 * 1024,
-        content_bytes: 900 * 1024 * 1024,
+        bytes: 3 * 1024 * 1024 * 1024,
+        change: gaia_report::SizeChange::New,
     }];
     let mut ui = DashboardState::default();
     let text = draw(&view, &mut ui, 160, 45);
@@ -182,7 +184,8 @@ fn a_completed_run_opens_on_the_summary() {
     );
     assert!(text.contains("Build completed in"), "{text}");
     assert!(text.contains("slowest operations"), "{text}");
-    assert!(text.contains("raw 3.0 GiB"), "{text}");
+    assert!(text.contains("image.img"), "{text}");
+    assert!(text.contains("3.0 GiB  new"), "{text}");
     assert!(text.contains("reports: 5 file(s)"), "{text}");
     assert!(text.contains("Finished"), "{text}");
 }

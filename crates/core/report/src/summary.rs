@@ -1,13 +1,18 @@
 use gaia_exec::{ExecutionError, ExecutionOutcome};
-use gaia_plan::{ExecutionPlan, OperationReuse};
+use gaia_plan::{ExecutionPlan, OperationKind, OperationReuse};
 use gaia_spec::ResolvedBuildSpec;
 use gaia_validate::ValidationReport;
 use std::collections::BTreeMap;
 
+use crate::assembly_outputs::assembly_outputs;
 use crate::image_sizes::{image_size_note, image_size_records, summary_image_paths};
 use crate::model::{
     CleanupStatus, ExecutionFailureReport, FailureClass, FailureClassCount, OperationTimingRecord,
     RunSummary, SummaryErrorRecord,
+};
+use crate::output_sizes::{
+    SizeScope, baseline_path, output_size_records, read_baseline, read_previous_outputs,
+    summary_path,
 };
 use crate::state::{output_hygiene_warnings, rollback_domains};
 
@@ -78,6 +83,33 @@ pub fn render_summary(
         .flat_map(|result| result.notes.clone())
         .collect();
     image_notes.extend(image_sizes.iter().map(image_size_note));
+    let error_count = validation.errors.len() + outcome.errors.len();
+    let image_op = |operation: &gaia_plan::PlannedOperation| {
+        matches!(
+            operation.kind,
+            OperationKind::PrepareImage | OperationKind::BuildImage | OperationKind::AssembleImage
+        )
+    };
+    let previous_outputs = read_previous_outputs(&summary_path(spec));
+    let assembly = assembly_outputs(spec);
+    let sizes = output_size_records(
+        &SizeScope {
+            published: &published_outputs,
+            previous_outputs: &previous_outputs,
+            known: &assembly.known,
+            dirs: &assembly.dirs,
+            carry_over: plan.operations.iter().any(|operation| {
+                matches!(
+                    operation.kind,
+                    OperationKind::BuildImage | OperationKind::AssembleImage
+                ) && matches!(operation.reuse, OperationReuse::Reuse { .. })
+            }),
+            removals: !outcome.cancelled
+                && error_count == 0
+                && plan.operations.iter().any(image_op),
+        },
+        &read_baseline(&baseline_path(spec)),
+    );
     RunSummary {
         build_name: spec.identity.display_name.clone(),
         build_version: spec.identity.version.clone(),
@@ -143,6 +175,8 @@ pub fn render_summary(
             })
             .collect(),
         image_sizes,
+        cancelled: outcome.cancelled,
+        sizes,
     }
 }
 

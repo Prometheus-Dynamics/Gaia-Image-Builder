@@ -55,18 +55,11 @@ impl RunPhase {
     }
 }
 
-/// An image the run published, with its sizes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ImageSize {
-    pub path: String,
-    pub raw_bytes: u64,
-    pub content_bytes: u64,
-}
-
 /// What only a run in this process knows once it has finished: its report.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct RunOutcome {
-    pub image_sizes: Vec<ImageSize>,
+    /// The image output sizes and their change since the previous run.
+    pub sizes: Vec<gaia_report::OutputSizeRecord>,
     pub out_dir: Option<String>,
     pub report_files: usize,
 }

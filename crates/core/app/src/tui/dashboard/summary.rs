@@ -66,16 +66,14 @@ pub(super) fn render(frame: &mut Frame<'_>, area: Rect, view: &RunView) {
         }
     }
 
-    if !view.outcome.image_sizes.is_empty() {
+    if !view.outcome.sizes.is_empty() {
         lines.push(Line::from(""));
-        lines.push(Line::styled("images", theme::accent()));
-        for image in &view.outcome.image_sizes {
-            lines.push(Line::from(format!(
-                "  {}  raw {}  content {}",
-                image.path,
-                format::bytes(image.raw_bytes),
-                format::bytes(image.content_bytes)
-            )));
+        lines.push(Line::styled(
+            "image sizes (change since the previous successful run)",
+            theme::accent(),
+        ));
+        for line in crate::output_images::output_size_lines(&view.outcome.sizes) {
+            lines.push(Line::from(line));
         }
     }
     if let Some(out_dir) = &view.outcome.out_dir {

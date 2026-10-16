@@ -1,8 +1,10 @@
+mod assembly_outputs;
 mod image_sizes;
 mod manifest;
 mod masking;
 mod model;
 mod output;
+mod output_sizes;
 mod provenance;
 mod rebuild;
 mod selection;

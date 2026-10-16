@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -67,6 +67,58 @@ pub struct RunSummary {
     /// Raw and content sizes of the primary image and each raw disk image the
     /// run published. Empty for a reused image.
     pub image_sizes: Vec<ImageSizeRecord>,
+    /// Whether the run was cancelled before it finished.
+    pub cancelled: bool,
+    /// The file size of every image output the run published (the primary
+    /// output, disks, filesystems, transform outputs and archives), or that a
+    /// reused image operation still has on disk, compared with the previous
+    /// successful run of the same build and variant. Sorted by kind then name;
+    /// an output that is gone since that run is listed as `removed`.
+    pub sizes: Vec<OutputSizeRecord>,
+}
+
+/// The size of one image output file. `kind` is inferred from the file name
+/// (see `output_sizes`), not from the assembly step that wrote it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutputSizeRecord {
+    /// `archive`, `disk`, `filesystem` or `output`.
+    pub kind: String,
+    /// The file name.
+    pub name: String,
+    pub path: String,
+    /// File length. For a removed output, its length in the previous run.
+    pub bytes: u64,
+    /// The change from the previous successful run.
+    pub change: SizeChange,
+}
+
+/// How an output's size compares with the previous successful run of the same
+/// build and variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum SizeChange {
+    /// Not in the previous successful run.
+    New,
+    /// The same size as in the previous successful run.
+    Unchanged,
+    /// A different size; `previous_bytes` is the earlier one.
+    Changed { previous_bytes: u64 },
+    /// In the previous successful run but gone now.
+    Removed,
+}
+
+impl OutputSizeRecord {
+    /// The change in bytes from the previous run, when there was one that
+    /// still exists.
+    pub fn delta_bytes(&self) -> Option<i64> {
+        match self.change {
+            SizeChange::Unchanged => Some(0),
+            SizeChange::Changed { previous_bytes } => {
+                Some(self.bytes as i64 - previous_bytes as i64)
+            }
+            SizeChange::New | SizeChange::Removed => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

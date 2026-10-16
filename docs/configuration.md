@@ -1712,7 +1712,7 @@ archive_name = "${build.name}-${build.version}.img.xz"
 disk = "sdcard"
 ```
 
-The run reports every image it publishes (`image output:` lines and the
+The run reports every image it publishes (the `image sizes` table and the
 summary's `published_outputs`): the primary, the other disks written under the
 image output dir, published filesystem images, and archives and transform
 outputs written there. `gaia run --export` (see
@@ -2173,7 +2173,7 @@ Layout:
 - `ebr_placement = "default"` (the default) puts each EBR right before its logical partition, so a logical partition with no data at the end of the disk pulls its EBR, and so the file, a little further out. Nothing is cut off: the file always covers every EBR.
 - `ebr_placement = "packed"`: the EBR chain of the extended partition is written in consecutive sectors at its start (EBR n at the extended start plus n sectors). Logical data starts after the chain, so with `truncate` the file ends after the last logical data and every logical partition is still described at its full size. Each EBR's first entry describes its logical partition relative to that EBR; its second entry links the next EBR, relative to the extended start. The planner errors if the chain leaves no room for the first logical partition. Only affects layouts with more than four partitions; use it with `truncate` when logical partitions are unmaterialized at the end of the disk.
 
-Assembly results report, per published raw disk image (and the primary image), `raw_bytes` (file length) and `content_bytes` (bytes the filesystem allocates, from `st_blocks`, so holes are excluded). The run summary has them in `image_sizes` and adds a note such as `sdcard.img: 1.36 GB raw, 412.00 MB written`.
+Assembly results report, per published raw disk image (and the primary image), `raw_bytes` (file length) and `content_bytes` (bytes the filesystem allocates, from `st_blocks`, so holes are excluded). The run summary has them in `image_sizes` and adds a note such as `sdcard.img: 1.36 GB raw, 412.00 MB written`. Every published output's file size, and its change since the previous run, is in the summary's `sizes` list (see [Image sizes](reporting-and-state.md#image-sizes)).
 
 #### Archives
 

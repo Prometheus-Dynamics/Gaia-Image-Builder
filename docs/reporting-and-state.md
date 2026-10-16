@@ -13,6 +13,9 @@ Gaia emits both human-facing CLI output and machine-readable reports.
 
 The base filename uses canonical `build_name`, not display name.
 
+`<build>.sizes.json` sits beside them but is not a report: it is the image size
+baseline the next run compares with (see [Image sizes](#image-sizes)).
+
 ## Report Types
 
 ### Summary
@@ -25,6 +28,7 @@ Includes:
 - checkpoint built/reused counts
 - failure policy
 - failure-class counts
+- image output sizes and their change since the previous run (`sizes`)
 
 ### Selection
 
@@ -76,6 +80,48 @@ Includes structured records for:
 Includes both:
 - planned execute/reuse reasons
 - rollback/failure-policy outcomes
+
+## Image Sizes
+
+Every run prints a table of the image outputs it published, and the summary
+carries the same data as `sizes`:
+
+```text
+image sizes (change since the previous successful run):
+  archive     sdcard.img.xz       412.3 MiB  (+1.3 MiB)
+  disk        sdcard.img            1.4 GiB  =
+  filesystem  initramfs.cpio.zst    4.1 MiB  (-12.0 KiB)
+  filesystem  rootfs.erofs        182.4 MiB  new
+  output      old-kernel.img              -  removed (was 9.0 MiB)
+```
+
+- Each entry has `kind`, `name`, `path`, `bytes` (the file length) and `change`.
+  The outputs the assembly spec names are listed whether or not the run published
+  them, with the kind the spec gives: `archive`, `disk`, `filesystem` (each
+  `[[image.assembly.filesystems]]` output) or `transform` (each
+  `[[image.assembly.transforms]]` `dest` and `hash_dest`, verity included). Any
+  other published output is kinded from its file name: `archive` for a tar or
+  zip (compressed or not), `disk` for an `.img`, `.raw` or `.iso`, `filesystem`
+  for an erofs, ext, squashfs, vfat or cpio image, and `output` for anything else.
+- `name` is the output's path relative to the assembly out dir (or the work dir),
+  such as `initramfs.cpio` or `boot/kernel8.img`, or its file name when neither
+  holds it.
+- The change is taken against the previous successful run of the same build and
+  variant: `new` when the output was not there, `=` when unchanged, `(+x)` or
+  `(-x)` for a grown or shrunk file, and `removed` for an output of that run that
+  is gone now. Failed and cancelled runs do not replace that baseline; they still
+  list the sizes they produced, compared with it.
+- The baseline is `<build>.sizes.json` beside the reports (`.gaia/reports` under
+  the output dir). It is written after each run that finishes cleanly and has
+  outputs. A run that builds no image leaves it alone.
+- A reused image operation writes nothing, so its outputs are carried forward
+  from the baseline (or, before one exists, from the previous `summary.json`): they
+  are still on disk and are reported with their change, normally `=`.
+- The table shows the image size only. The bytes used inside a vfat image are
+  not reported: the assembly computes them only when it sizes the image
+  automatically, and does not keep them otherwise.
+- `gaia run` with a `post_build` hook passes the same list as `sizes` in its
+  JSON payload.
 
 ## Secret Masking
 

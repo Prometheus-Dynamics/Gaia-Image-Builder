@@ -117,24 +117,28 @@ pub(crate) fn render(
         }
     }
 
-    if !view.outcome.image_sizes.is_empty() {
+    if !view.outcome.sizes.is_empty() {
         lines.push(Line::from(""));
         lines.push(heading("Images"));
         let max = view
             .outcome
-            .image_sizes
+            .sizes
             .iter()
-            .map(|image| image.raw_bytes)
+            .map(|size| size.bytes)
             .max()
             .unwrap_or(0);
-        for image in &view.outcome.image_sizes {
+        for size in &view.outcome.sizes {
+            let shown = if size.change == gaia_report::SizeChange::Removed {
+                "-".to_string()
+            } else {
+                format::bytes(size.bytes)
+            };
             lines.push(Line::from(vec![
-                Span::raw(format!("  {:<28} ", format::truncate(&image.path, 28))),
-                Span::styled(bar(bar_width, share(image.raw_bytes, max)), theme::ok()),
+                Span::raw(format!("  {:<28} ", format::truncate(&size.name, 28))),
+                Span::styled(bar(bar_width, share(size.bytes, max)), theme::ok()),
                 Span::raw(format!(
-                    " raw {} content {}",
-                    format::bytes(image.raw_bytes),
-                    format::bytes(image.content_bytes)
+                    " {shown} {}",
+                    crate::output_images::size_change_text(size)
                 )),
             ]));
         }

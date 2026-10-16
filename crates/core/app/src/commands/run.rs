@@ -361,6 +361,8 @@ struct PostBuildPayload {
     primary_output: Option<PostBuildPrimaryOutput>,
     report_dir: Option<String>,
     report_files: Vec<PostBuildReportFile>,
+    /// Size of each image output and its change since the previous run.
+    sizes: Vec<gaia_report::OutputSizeRecord>,
     summary: PostBuildSummary,
 }
 
@@ -546,6 +548,7 @@ fn build_post_build_payload(
                 bytes: file.bytes,
             })
             .collect(),
+        sizes: report.summary.sizes.clone(),
         summary: PostBuildSummary {
             operation_count: report.summary.operation_count,
             completed_operations: report.summary.completed_operations,
