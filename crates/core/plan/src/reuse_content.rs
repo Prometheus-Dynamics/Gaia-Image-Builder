@@ -14,7 +14,8 @@
 //! Trust is (size, mtime_ns): a same-size edit that restores the mtime is not
 //! seen, the same limit the manifest itself documents.
 
-use crate::reuse::{content_state_signature, resolve_workspace_path};
+use crate::reuse::{content_state_signature, provider_state_signature, resolve_workspace_path};
+use crate::tree_digest::tree_digest_signature;
 use gaia_image_providers::{collect_content_files, recorded_sha256};
 use gaia_spec::{AssemblyPathTemplate, AssemblyRoots, ResolvedBuildSpec};
 use sha2::{Digest, Sha256};
@@ -184,6 +185,71 @@ fn cached_content_signature(manifest: &Path, path: &Path) -> String {
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// Content of a rendered stage item: its runtime state, its entry as the spec
+/// has it, and the bytes of its source when it has one. Never a path or a
+/// timestamp, so identical content keeps the same signature.
+pub(crate) fn rendered_stage_content(
+    spec: &ResolvedBuildSpec,
+    state_path: &Path,
+    entry: String,
+    source: Option<&str>,
+) -> String {
+    let mut parts = vec![provider_state_signature(state_path), entry];
+    if let Some(raw) = source {
+        parts.push(config_path_content(spec, raw));
+    }
+    parts.join("|")
+}
+
+/// The fingerprint part of a config path (`@assets/...`, or relative to the
+/// workspace): where it resolves and what it holds. The resolution is the
+/// executor's (`gaia_spec::resolve_workspace_path`): an unresolvable path is
+/// recorded as such instead of hashing a guessed location.
+pub(crate) fn config_path_fingerprint(spec: &ResolvedBuildSpec, raw: &str) -> String {
+    match gaia_spec::resolve_workspace_path(&spec.workspace, raw) {
+        Ok(path) => format!("{}|{}", path.display(), config_path_content(spec, raw)),
+        Err(error) => format!("unresolved:{error}"),
+    }
+}
+
+/// The content of a config path, as [`config_path_fingerprint`] resolves it,
+/// without the location.
+pub(crate) fn config_path_content(spec: &ResolvedBuildSpec, raw: &str) -> String {
+    match gaia_spec::resolve_workspace_path(&spec.workspace, raw) {
+        // The mode is delivered with the bytes (a unit made executable is a
+        // change), so it is part of the content.
+        Ok(path) => format!(
+            "{}|{}",
+            mode_signature(&path),
+            content_path_signature(&path)
+        ),
+        Err(error) => format!("unresolved:{error}"),
+    }
+}
+
+/// The permission bits of `path`, in octal.
+#[cfg(unix)]
+fn mode_signature(path: &Path) -> String {
+    use std::os::unix::fs::PermissionsExt;
+    fs::metadata(path)
+        .map(|metadata| format!("mode:{:o}", metadata.permissions().mode() & 0o7777))
+        .unwrap_or_else(|_| "mode:missing".into())
+}
+
+#[cfg(not(unix))]
+fn mode_signature(_path: &Path) -> String {
+    "mode:none".into()
+}
+
+/// SHA-256 of a file's bytes, or the digest of a directory tree's files.
+pub(crate) fn content_path_signature(path: &Path) -> String {
+    if path.is_dir() {
+        tree_digest_signature(path)
+    } else {
+        content_state_signature(path)
+    }
 }
 
 #[cfg(test)]

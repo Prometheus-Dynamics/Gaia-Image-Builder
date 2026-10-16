@@ -8,7 +8,10 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::{AssemblyPathTemplate, ImageAssemblySpec, assembly_value_tokens};
+use crate::{
+    AssemblyPathTemplate, AssemblyValueToken, ImageAssemblySpec, assembly_json_string_tokens,
+    assembly_value_tokens,
+};
 
 /// One assembly step, by kind and index within its kind's list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -127,7 +130,7 @@ pub fn assembly_step_paths(
                 }
                 if let Some(json) = &file.json {
                     for text in json.strings() {
-                        value_token_reads(text, resolve, &mut token_reads);
+                        json_token_reads(text, resolve, tree, &mut token_reads);
                     }
                 }
                 token_reads
@@ -225,7 +228,7 @@ pub fn assembly_step_paths(
             }
             if let Some(json) = &member.json {
                 for text in json.strings() {
-                    value_token_reads(text, resolve, &mut reads);
+                    json_token_reads(text, resolve, tree, &mut reads);
                 }
             }
         }
@@ -238,7 +241,7 @@ pub fn assembly_step_paths(
     steps
 }
 
-/// The paths a value's `${assembly...}` tokens read, resolved.
+/// The paths a text value's `${assembly...}` tokens read, resolved.
 fn value_token_reads(
     value: &str,
     resolve: &dyn Fn(&AssemblyPathTemplate) -> Option<PathBuf>,
@@ -246,6 +249,26 @@ fn value_token_reads(
 ) {
     let _ = assembly_value_tokens(value, |token| {
         reads.push(resolve(token.path()));
+        Ok(String::new())
+    });
+}
+
+/// The paths a JSON string's tokens read. A tree digest reads the tree's
+/// root when it names a tree id, so it waits for every step that fills it.
+fn json_token_reads(
+    value: &str,
+    resolve: &dyn Fn(&AssemblyPathTemplate) -> Option<PathBuf>,
+    tree: &dyn Fn(&str) -> Option<PathBuf>,
+    reads: &mut Vec<Option<PathBuf>>,
+) {
+    let _ = assembly_json_string_tokens(value, |token| {
+        let read = match token {
+            AssemblyValueToken::TreeDigest(digest) => {
+                tree(digest.path.as_str().trim()).or_else(|| resolve(&digest.path))
+            }
+            other => resolve(other.path()),
+        };
+        reads.push(read);
         Ok(String::new())
     });
 }
@@ -575,6 +598,66 @@ mod tests {
         assert_eq!(
             filesystem.publish_template().expect("published").as_str(),
             "$assembly.out/boot.img"
+        );
+    }
+
+    /// A JSON tree digest reads its tree: the file waits for every step that
+    /// fills the tree, however it is declared.
+    #[test]
+    fn a_tree_digest_runs_after_the_steps_that_fill_its_tree() {
+        use crate::{AssemblyFileSpec, AssemblyJsonValue, AssemblyTreeSpec};
+        let file =
+            |tree: &str, dest: &str, content: Option<&str>, json: Option<AssemblyJsonValue>| {
+                AssemblyFileSpec {
+                    exclude: Vec::new(),
+                    tree: tree.into(),
+                    src: None,
+                    src_glob: None,
+                    content: content.map(str::to_string),
+                    json,
+                    dest: dest.into(),
+                    mode: None,
+                    optional: false,
+                    preserve_symlink: false,
+                }
+            };
+        let assembly = ImageAssemblySpec {
+            trees: vec![
+                AssemblyTreeSpec {
+                    id: "boot".into(),
+                    path: "/build/boot".into(),
+                },
+                AssemblyTreeSpec {
+                    id: "payload".into(),
+                    path: "/build/payload".into(),
+                },
+            ],
+            files: vec![
+                file(
+                    "boot",
+                    "slot.json",
+                    None,
+                    Some(AssemblyJsonValue::Object(vec![(
+                        "files".into(),
+                        AssemblyJsonValue::String("${assembly.sha256_tree:payload}".into()),
+                    )])),
+                ),
+                file("payload", "a.txt", Some("alpha"), None),
+            ],
+            ..ImageAssemblySpec::default()
+        };
+        let paths = assembly_step_paths(
+            &assembly,
+            &|template| Some(PathBuf::from(template.as_str())),
+            &|id| match id {
+                "boot" => Some(PathBuf::from("/build/boot")),
+                "payload" => Some(PathBuf::from("/build/payload")),
+                _ => None,
+            },
+        );
+        assert_eq!(
+            order_assembly_steps(&paths),
+            Ok(vec![AssemblyStep::File(1), AssemblyStep::File(0)])
         );
     }
 

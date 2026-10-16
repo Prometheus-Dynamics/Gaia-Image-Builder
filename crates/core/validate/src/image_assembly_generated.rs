@@ -7,8 +7,9 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use gaia_spec::{
-    AssemblyTreeId, AssemblyValueToken, ImageAssemblySpec, ResolvedBuildSpec, assembly_step_paths,
-    assembly_value_tokens,
+    AssemblyTreeDigestToken, AssemblyTreeId, AssemblyValueToken, ImageAssemblySpec,
+    ResolvedBuildSpec, assembly_json_string_tokens, assembly_step_paths, assembly_value_tokens,
+    whole_tree_digest_token,
 };
 
 use crate::ValidationDiagnostic;
@@ -22,6 +23,8 @@ pub(crate) struct TokenSite<'a> {
     pub(crate) text: &'a str,
     /// The config location the site comes from.
     pub(crate) location: &'static str,
+    /// A JSON string: a whole `${assembly.sha256_tree:...}` is allowed.
+    pub(crate) json: bool,
 }
 
 /// Every generated string that carries `${assembly...}` tokens: file content
@@ -35,6 +38,7 @@ pub(crate) fn token_sites(assembly: &ImageAssemblySpec) -> Vec<TokenSite<'_>> {
                 label: format!("{label} content"),
                 text: content,
                 location: "image.assembly.files.content",
+                json: false,
             });
         }
         if let Some(json) = &file.json {
@@ -43,6 +47,7 @@ pub(crate) fn token_sites(assembly: &ImageAssemblySpec) -> Vec<TokenSite<'_>> {
                     label: format!("{label} json"),
                     text,
                     location: "image.assembly.files.json",
+                    json: true,
                 });
             }
         }
@@ -55,6 +60,7 @@ pub(crate) fn token_sites(assembly: &ImageAssemblySpec) -> Vec<TokenSite<'_>> {
                     label: format!("{label} entry '{key}'"),
                     text: value,
                     location: "image.assembly.archives.generated.entries",
+                    json: false,
                 });
             }
             if let Some(json) = &member.json {
@@ -63,6 +69,7 @@ pub(crate) fn token_sites(assembly: &ImageAssemblySpec) -> Vec<TokenSite<'_>> {
                         label: format!("{label} json"),
                         text,
                         location: "image.assembly.archives.generated.json",
+                        json: true,
                     });
                 }
             }
@@ -131,7 +138,19 @@ pub(crate) fn validate_generated_file(
     }
     if let Some(json) = &file.json {
         for text in json.strings() {
-            validate_tokens(
+            if whole_tree_digest_token(text)
+                .is_some_and(|digest| digests_own_tree(spec, file, digest.path.as_str()))
+            {
+                diagnostics.push(error(
+                    "assembly_tree_digest_self",
+                    format!(
+                        "assembly file '{}:{}' digests its own tree '{}'; a file cannot be part of the digest it is in",
+                        file.tree, file.dest, file.tree
+                    ),
+                    Some("image.assembly.files.json".into()),
+                ));
+            }
+            validate_json_tokens(
                 spec,
                 tree_ids,
                 text,
@@ -164,6 +183,85 @@ pub(crate) fn validate_tokens(
             Some(location.into()),
         ));
     }
+}
+
+/// Whether a tree digest names the tree the file is written into: its id, or
+/// the path template that tree is declared with.
+fn digests_own_tree(
+    spec: &ResolvedBuildSpec,
+    file: &gaia_spec::AssemblyFileSpec,
+    named: &str,
+) -> bool {
+    let named = named.trim();
+    named == file.tree.as_str()
+        || spec.image.assembly.as_ref().is_some_and(|assembly| {
+            assembly
+                .trees
+                .iter()
+                .any(|tree| tree.id == file.tree && tree.path.as_str() == named)
+        })
+}
+
+/// Checks the tokens of a JSON string. A whole `${assembly.sha256_tree:...}`
+/// names a tree id of the assembly or a path template; any other tree digest
+/// is an error, as is one that is not the whole value.
+pub(crate) fn validate_json_tokens(
+    spec: &ResolvedBuildSpec,
+    tree_ids: &HashSet<AssemblyTreeId>,
+    text: &str,
+    location: &str,
+    label: &str,
+    diagnostics: &mut Vec<ValidationDiagnostic>,
+) {
+    let rendered = assembly_json_string_tokens(text, |token| {
+        match token {
+            AssemblyValueToken::TreeDigest(digest) => {
+                validate_tree_digest(spec, tree_ids, digest, location, diagnostics);
+            }
+            other => {
+                validate_assembly_path_template(
+                    spec,
+                    tree_ids,
+                    other.path(),
+                    location,
+                    diagnostics,
+                );
+            }
+        }
+        Ok(String::new())
+    });
+    if let Err(message) = rendered {
+        diagnostics.push(error(
+            "assembly_generated_token_invalid",
+            format!("{label}: {message}"),
+            Some(location.into()),
+        ));
+    }
+}
+
+/// A tree digest names a tree id of the assembly, or a path template.
+fn validate_tree_digest(
+    spec: &ResolvedBuildSpec,
+    tree_ids: &HashSet<AssemblyTreeId>,
+    digest: &AssemblyTreeDigestToken,
+    location: &str,
+    diagnostics: &mut Vec<ValidationDiagnostic>,
+) {
+    let text = digest.path.as_str().trim();
+    if tree_ids.contains(&AssemblyTreeId::new(text)) {
+        return;
+    }
+    if !text.contains('$') && !text.contains('/') {
+        diagnostics.push(error(
+            "assembly_tree_digest_unknown_tree",
+            format!(
+                "'${{assembly.sha256_tree:{text}}}' names neither a tree of image.assembly nor a path"
+            ),
+            Some(location.into()),
+        ));
+        return;
+    }
+    validate_assembly_path_template(spec, tree_ids, &digest.path, location, diagnostics);
 }
 
 /// Every listed binary: a known tree, a source and a destination in it, and
@@ -257,10 +355,17 @@ pub(crate) fn validate_token_reads(
         .flat_map(|step| step.writes.iter().cloned())
         .collect();
     for site in token_sites(assembly) {
-        let _ = assembly_value_tokens(site.text, |token| {
-            check_read(token, &site, &writes, diagnostics);
-            Ok(String::new())
-        });
+        let _ = if site.json {
+            assembly_json_string_tokens(site.text, |token| {
+                check_read(token, &site, &writes, diagnostics);
+                Ok(String::new())
+            })
+        } else {
+            assembly_value_tokens(site.text, |token| {
+                check_read(token, &site, &writes, diagnostics);
+                Ok(String::new())
+            })
+        };
     }
 }
 
@@ -277,6 +382,13 @@ fn check_read(
     }
     let read = PathBuf::from(text);
     if writes.iter().any(|write| read.starts_with(write)) {
+        return;
+    }
+    // A tree digest reads a directory the steps fill: a write inside it is a
+    // produced path too.
+    if matches!(token, AssemblyValueToken::TreeDigest(_))
+        && writes.iter().any(|write| write.starts_with(&read))
+    {
         return;
     }
     diagnostics.push(error(

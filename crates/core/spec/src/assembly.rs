@@ -121,6 +121,16 @@ impl AssemblyRoots {
             .ok_or_else(|| format!("assembly tree '{id}' is not defined"))
     }
 
+    /// The directory a `${assembly.sha256_tree:...}` names: a tree id, else
+    /// a path template (as [`Self::resolve_path`] reads it).
+    pub fn tree_or_path(&self, spec: &ResolvedBuildSpec, raw: &str) -> Result<PathBuf, String> {
+        let raw = raw.trim();
+        match self.trees.get(raw) {
+            Some(path) => Ok(path.clone()),
+            None => self.resolve_path(spec, raw),
+        }
+    }
+
     pub fn resolve_path(
         &self,
         spec: &ResolvedBuildSpec,

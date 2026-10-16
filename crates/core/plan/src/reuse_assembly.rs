@@ -17,6 +17,19 @@ pub(crate) fn assembly_input_entries(spec: &ResolvedBuildSpec) -> Vec<(String, S
         return vec![("assembly".into(), "assembly:root_resolution_failed".into())];
     };
     let mut parts = Vec::new();
+    // A declared source the assembly's tokens name: its content, as its own
+    // fingerprint sees it, so a changed file in it changes this fingerprint.
+    for id in &assembly.assembly_sources {
+        if let Some(source) = spec.sources.iter().find(|source| source.id == *id) {
+            parts.push((
+                format!("source {id}"),
+                format!(
+                    "source-content:{id}:{}",
+                    crate::reuse::source_backend_signature(spec, source)
+                ),
+            ));
+        }
+    }
     let mut generated_filesystem_outputs = assembly
         .filesystems
         .iter()
@@ -82,7 +95,7 @@ pub(crate) fn assembly_input_entries(spec: &ResolvedBuildSpec) -> Vec<(String, S
                 format!("json:{owner}:sha256={}", text_digest(&format!("{json:?}"))),
             ));
             for text in json.strings() {
-                crate::reuse_assembly_archives::token_input_entries(
+                crate::reuse_assembly_archives::json_token_input_entries(
                     spec,
                     &roots,
                     "file-digest",

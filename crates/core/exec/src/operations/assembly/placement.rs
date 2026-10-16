@@ -44,6 +44,9 @@ const SPARSE_CHUNK: usize = MIB as usize;
 const DIGEST_TOKEN_PREFIX: &str = "assembly.sha256:";
 const SIZE_TOKEN_PREFIX: &str = "assembly.size:";
 const VERITY_TOKEN_PREFIX: &str = "assembly.verity:";
+/// A tree digest names a tree id (kept, as the RAM copy keeps the id) or a
+/// path, which moves like any other path.
+const TREE_DIGEST_TOKEN_PREFIX: &str = "assembly.sha256_tree:";
 
 /// Where the facts a RAM placement depends on come from. Tests fill it in;
 /// a run reads it from the system, and only when RAM is asked for.
@@ -364,10 +367,21 @@ fn rewrite_assembly(
     // Generated text and JSON name their tokens' paths; those move with the
     // rest of the assembly.
     let rewrite_text = |text: &str| -> Result<String, String> {
-        rewrite_digest_tokens(text, |inner| {
-            absolute(&AssemblyPathTemplate::new(inner.trim()))
-                .map(|template| template.as_str().to_string())
-        })
+        rewrite_digest_tokens(
+            text,
+            |inner| {
+                absolute(&AssemblyPathTemplate::new(inner.trim()))
+                    .map(|template| template.as_str().to_string())
+            },
+            |inner| {
+                if disk_roots.trees.contains_key(inner.trim()) {
+                    Ok(inner.trim().to_string())
+                } else {
+                    absolute(&AssemblyPathTemplate::new(inner.trim()))
+                        .map(|template| template.as_str().to_string())
+                }
+            },
+        )
     };
     for file in &mut rewritten.files {
         file.src = absolute_opt(&file.src)?;
@@ -445,11 +459,13 @@ fn rewrite_json_strings(
 }
 
 /// Rewrites the path inside each `${assembly.sha256:<path>}`,
-/// `${assembly.size:<path>}` and `${assembly.verity:<path>:<field>}` in
-/// `value`; the field and any other token are kept as they are.
+/// `${assembly.sha256_tree:<tree or path>}`, `${assembly.size:<path>}` and
+/// `${assembly.verity:<path>:<field>}` in `value`; the field and any other
+/// token are kept as they are. A tree digest's path goes to `rewrite_tree`.
 fn rewrite_digest_tokens(
     value: &str,
     mut rewrite: impl FnMut(&str) -> Result<String, String>,
+    mut rewrite_tree: impl FnMut(&str) -> Result<String, String>,
 ) -> Result<String, String> {
     let mut out = String::new();
     let mut rest = value;
@@ -465,6 +481,11 @@ fn rewrite_digest_tokens(
             out.push_str("${");
             out.push_str(DIGEST_TOKEN_PREFIX);
             out.push_str(&rewrite(path)?);
+            out.push('}');
+        } else if let Some(path) = token.strip_prefix(TREE_DIGEST_TOKEN_PREFIX) {
+            out.push_str("${");
+            out.push_str(TREE_DIGEST_TOKEN_PREFIX);
+            out.push_str(&rewrite_tree(path)?);
             out.push('}');
         } else if let Some(path) = token.strip_prefix(SIZE_TOKEN_PREFIX) {
             out.push_str("${");

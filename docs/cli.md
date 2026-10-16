@@ -94,6 +94,18 @@ its dependents follow the normal rules: they execute as `dependency_rebuilt`,
 and content-based reuse still skips any whose rebuilt inputs turn out
 unchanged. An unknown id is an error that suggests the close matches.
 
+`--rebuild image:prepare` on a build with no prepare step (a plan without
+`image:prepare`, such as a build with no variants and no artifact after
+`image:prepare`) is accepted and means `--rebuild image:build`: that build does
+its whole Buildroot make in `image:build`. Use `--rebuild image:build` directly
+there; it is enough on its own to force the make.
+
+Staged files and services are reused by the content they deliver: a unit file
+referenced through `@assets/...` is hashed by its bytes, not its timestamp, so
+editing it reruns its stage operation and the image build, and a rebuilt
+artifact with new bytes reruns the install and the image build instead of
+being cut off as unchanged.
+
 `--rebuild-package <package>[,...]` is for Buildroot images. The named packages
 are uninstalled and their build directories removed before `make`, they are
 not restored from the package cache in that run, and the cache entry is stored

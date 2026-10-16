@@ -16,6 +16,23 @@ This cycle also moves the toolchain pin and `rust-version` to Rust 1.99.0
 (installing Gaia needs Rust 1.99 or newer), upgrades every dependency to its
 newest release, and updates the Rust docker images to 1.99.0.
 
+### Reuse follows the content of the image feed
+
+- A staged unit or file is fingerprinted by the bytes it resolves to (through
+  `@assets/...` as the executor resolves it), not its mtime, and its stage
+  operation's content signature includes those bytes. Editing a unit file now
+  reruns its stage operation and `image:build`.
+- An install's content signature includes the bytes of the artifact it
+  delivers, so a rebuilt artifact with new bytes reruns `image:build` instead of
+  being cut off by the early cutoff.
+- `--rebuild image:prepare` on a build without a prepare step means
+  `--rebuild image:build` (see docs/cli.md).
+
+### Source tokens in the assembly, tree digest maps
+
+- `${source.<id>.commit}`, `${source.<id>.commit_short}` and `${source.<id>.path}` resolve in every string of `[image.assembly]`: tree ids and paths, file `src`, `dest` and `content`, `json` values, archive members and outputs, disk and filesystem outputs, and the rest. A slot id can carry a source's commit. An unknown source id, or one with no commit yet, is still reported as an unresolved token. The assembly depends on each declared source it names, so a changed file inside a path source reruns it.
+- `${assembly.sha256_tree:<tree id or path template>}`, as a whole JSON value, renders as an object mapping each regular file under the tree to its sha256, sorted by path. It is read after the steps that fill the tree, and its fingerprint covers the tree's content, so a rewrite with the same bytes keeps the assembly reused. In text, or with a file naming its own tree, it is a validation error.
+
 ### TUI screens: start, setup, details
 
 - The start screen shows the builds on the system as cards (progress, elapsed time and estimate for running ones; outcome, duration and age for recent ones) and each build config with its target, profile and last run.

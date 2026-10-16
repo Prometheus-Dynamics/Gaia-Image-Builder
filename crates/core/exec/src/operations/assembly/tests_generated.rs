@@ -299,3 +299,126 @@ fn generated_files_in_a_ram_work_dir_are_written_to_ram_and_render_the_same() {
         "the RAM-built file is published with its rendered token"
     );
 }
+
+fn tree_spec(id: &str) -> AssemblyTreeSpec {
+    AssemblyTreeSpec {
+        id: id.into(),
+        path: gaia_spec::AssemblyPathTemplate::new(format!("$assembly.work/{id}")),
+    }
+}
+
+/// A file in `tree` with generated text content.
+fn tree_text(tree: &str, dest: &str, content: &str) -> AssemblyFileSpec {
+    let mut file = generated_file(dest, Some(content), None);
+    file.tree = tree.into();
+    file
+}
+
+/// `slot.json` in the boot tree, holding the digest map of `payload`.
+fn slot_digest_json(payload: &str) -> AssemblyFileSpec {
+    generated_file(
+        "slot.json",
+        None,
+        Some(object(vec![(
+            "boot",
+            object(vec![(
+                "files",
+                text(&format!("${{assembly.sha256_tree:{payload}}}")),
+            )]),
+        )])),
+    )
+}
+
+#[test]
+fn a_tree_digest_map_lists_the_tree_after_its_fillers_write_it() {
+    let scratch = TempDir::new("gaia-exec-generated");
+    let root = scratch.join("gaia-generated-tree-digest");
+    write_assets(&root);
+    let mut spec = test_spec(&root);
+    // The JSON is declared first; it must still run after both payload files.
+    spec.image.assembly = Some(ImageAssemblySpec {
+        work_dir: Some("$assembly.work".into()),
+        trees: vec![tree_spec("boot"), tree_spec("payload")],
+        files: vec![
+            slot_digest_json("payload"),
+            tree_text("payload", "a.txt", "alpha\n"),
+            tree_text("payload", "nested/b.txt", "beta\n"),
+        ],
+        ..ImageAssemblySpec::default()
+    });
+
+    let summary =
+        stage_image_assembly_with(&spec, &OperationId::image_assembly(), None, disk_env_panic)
+            .expect("tree digest assembly");
+
+    // File steps run in dependency order: the two payload files, then the JSON.
+    let dest = PathBuf::from(state_value(&summary, "file.3.dest"));
+    assert!(dest.ends_with("slot.json"), "{}", dest.display());
+    assert_eq!(
+        fs::read_to_string(&dest).expect("slot.json"),
+        format!(
+            "{{\n  \"boot\": {{\n    \"files\": {{\n      \"a.txt\": \"{}\",\n      \"nested/b.txt\": \"{}\"\n    }}\n  }}\n}}\n",
+            hex_sha256(b"alpha\n"),
+            hex_sha256(b"beta\n")
+        )
+    );
+}
+
+#[test]
+fn an_empty_tree_digest_renders_an_empty_object_and_text_cannot_use_one() {
+    let scratch = TempDir::new("gaia-exec-generated");
+    let root = scratch.join("gaia-generated-tree-digest-empty");
+    write_assets(&root);
+    let mut spec = test_spec(&root);
+    spec.image.assembly = Some(ImageAssemblySpec {
+        work_dir: Some("$assembly.work".into()),
+        trees: vec![tree_spec("boot"), tree_spec("empty")],
+        dirs: vec![gaia_spec::AssemblyDirSpec {
+            tree: "empty".into(),
+            path: ".".into(),
+            mode: None,
+        }],
+        files: vec![generated_file(
+            "slot.json",
+            None,
+            Some(object(vec![(
+                "none",
+                text("${assembly.sha256_tree:empty}"),
+            )])),
+        )],
+        ..ImageAssemblySpec::default()
+    });
+    let summary =
+        stage_image_assembly_with(&spec, &OperationId::image_assembly(), None, disk_env_panic)
+            .expect("empty tree digest");
+    let dest = PathBuf::from(state_value(&summary, "file.1.dest"));
+    assert_eq!(
+        fs::read_to_string(&dest).expect("slot.json"),
+        "{\n  \"none\": {}\n}\n"
+    );
+
+    // In text the token is an error, whatever the tree holds.
+    let mut text_spec = test_spec(&root);
+    text_spec.image.assembly = Some(ImageAssemblySpec {
+        work_dir: Some("$assembly.work".into()),
+        trees: vec![tree_spec("boot"), tree_spec("empty")],
+        files: vec![generated_file(
+            "cmdline.txt",
+            Some("slots=${assembly.sha256_tree:empty}"),
+            None,
+        )],
+        ..ImageAssemblySpec::default()
+    });
+    let error = stage_image_assembly_with(
+        &text_spec,
+        &OperationId::image_assembly(),
+        None,
+        disk_env_panic,
+    )
+    .expect_err("tree digest in text");
+    assert!(
+        error.message.contains("whole JSON value"),
+        "{}",
+        error.message
+    );
+}

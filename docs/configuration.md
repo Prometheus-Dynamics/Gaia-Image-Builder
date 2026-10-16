@@ -1789,6 +1789,30 @@ config_overrides = [
 ]
 ```
 
+Inside `[image.assembly]` every string takes both source tokens: tree ids
+and tree or file paths, file `src`, `dest` and `content`, `json` values (keys
+are not substituted), archive outputs and members, disk and filesystem
+outputs, and the rest. A token there resolves at config time like the others,
+so a slot id can carry the commit:
+
+```toml
+[[image.assembly.trees]]
+id = "slot-${source.app.commit_short}"
+path = "$assembly.work/slot-${source.app.commit_short}"
+
+[[image.assembly.files]]
+tree = "slot-${source.app.commit_short}"
+json = { rev = "${source.app.commit}" }
+dest = "slot.json"
+```
+
+A `${source.<id>...}` token that stays unresolved there (an unknown source id,
+or a git source with no commit yet) is reported by validation, like any other
+unresolved token. Each declared source the assembly names is a dependency of
+its `image:assembly` step: a changed file inside a path source (or a new
+commit of a git source) reruns the assembly, and an unchanged source keeps it
+reused.
+
 When an override value names a source's directory, the image operations
 depend on that source, so it is materialized first. `BR2_ROOTFS_USERS_TABLES`,
 `BR2_ROOTFS_DEVICE_TABLE` and `BR2_ROOTFS_STATIC_DEVICE_TABLE` are applied
@@ -2147,6 +2171,14 @@ Three ways to write generated text or JSON into a tree or an archive. All three 
 - **Text files**: `[[image.assembly.files]]` with `content = "..."` (in place of `src`/`src_glob`) writes the text to `dest` in the tree. `mode` applies as for copied files; unset, a generated file is `0644` whatever the host's umask. `dest` must name a file, not a directory. Config interpolation such as `${build.name}` runs first. Any other `${...}` left in the text is an error, so a file that carries its own `${VAR}` (a shell script, say) belongs in `src` rather than `content`.
 - **JSON documents**: `json = { ... }` on a file entry, or on an archive `members` or `generated` item (in place of `entries`/`src`). It is a TOML table whose values are strings, integers, booleans, arrays and tables. Floats are rejected. Keys keep the order the file wrote them, and the output is pretty-printed with two-space indentation and a trailing newline, so two runs write the same bytes.
 - **Tokens** in any string value: `${assembly.sha256:<path>}` (hex digest), `${assembly.size:<path>}` (size in bytes) and `${assembly.verity:<path>:<field>}`. A string that is exactly one numeric token (`size`, or a verity `hash_offset`, `data_blocks`, `data_block_size` or `hash_block_size`) is written as a JSON number; any other token is written as text.
+- **Tree digest map**: a JSON string that is exactly `${assembly.sha256_tree:<tree id or path template>}` is replaced by an object mapping each regular file's path under that tree (relative to its root, `/` separators, sorted by path) to its lowercase hex sha256. Symbolic links and directories are not listed. An empty tree gives `{}`. It is a whole JSON value only: in `content`, an entry or inside a longer string it is a validation error. The tree is read after the steps that fill it, so a file declared before its tree's files still digests all of them, and the map is a function of the bytes, so rewriting a file with the same bytes keeps the assembly reused. A file cannot digest the tree it is written into (`assembly_tree_digest_self`). For example, a boot tree's `slot.json` naming the payload:
+
+  ```toml
+  [[image.assembly.files]]
+  tree = "boot"
+  json = { boot = { files = "${assembly.sha256_tree:slots-payload}" } }
+  dest = "slot.json"
+  ```
 - `${build.date}` is the build's time as RFC 3339 UTC (`2026-10-15T12:00:00Z`): `SOURCE_DATE_EPOCH` when the environment sets it, else the commit time of the build file's git `HEAD`. Outside both it stays unresolved and the assembly fails rather than write a wall-clock time.
 
 A token that reads a work or out path no step writes is a validation error (`assembly_token_path_not_produced`), since nothing would produce it before the read. The rest of the rules are the archive rules above.

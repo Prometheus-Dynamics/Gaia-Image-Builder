@@ -1,3 +1,4 @@
+mod assembly_source_tokens;
 mod compile;
 mod dynamic_inputs;
 mod env;

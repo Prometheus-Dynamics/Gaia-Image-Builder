@@ -1,3 +1,6 @@
+use crate::reuse::content::{
+    config_path_fingerprint, content_path_signature, rendered_stage_content,
+};
 use crate::reuse_explain::{
     describe_rebuilding, fingerprint_change_message, rebuilding_dependencies,
     source_tree_content_signature,
@@ -357,7 +360,7 @@ pub fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
         OperationKind::RenderStageFile { item_id } => {
             if let Some(item) = spec.stage.files.iter().find(|item| item.id == *item_id) {
                 format!("{item:?}").hash(&mut hasher);
-                path_state_signature(&resolve_workspace_path(spec, &item.src)).hash(&mut hasher);
+                config_path_fingerprint(spec, &item.src).hash(&mut hasher);
             }
         }
         OperationKind::RenderStageEnvSet { item_id } => {
@@ -371,8 +374,7 @@ pub fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
         OperationKind::RenderStageService { item_id } => {
             if let Some(item) = spec.stage.services.iter().find(|item| item.id == *item_id) {
                 format!("{item:?}").hash(&mut hasher);
-                path_state_signature(&resolve_workspace_path(spec, &item.unit_path))
-                    .hash(&mut hasher);
+                config_path_fingerprint(spec, &item.unit_path).hash(&mut hasher);
             }
         }
         OperationKind::PrepareImage | OperationKind::BuildImage => {
@@ -789,8 +791,23 @@ pub fn operation_content_signature(
                     &artifact.output.path,
                 )))
             }),
-        OperationKind::InstallArtifact { install_id, .. } => Some(provider_state_signature(
-            &install_state_path(spec, install_id),
+        // What an install delivers is the artifact's bytes, not the install
+        // record: a rebuilt artifact with new bytes must change this, or the
+        // image built from the feed would be cut off as unchanged.
+        OperationKind::InstallArtifact {
+            install_id,
+            artifact,
+        } => Some(format!(
+            "{}|{}",
+            provider_state_signature(&install_state_path(spec, install_id)),
+            spec.artifacts
+                .iter()
+                .find(|candidate| candidate.id == artifact.id)
+                .map(|candidate| content_path_signature(&artifact_output_path(
+                    spec,
+                    &candidate.output.path
+                )))
+                .unwrap_or_else(|| "artifact-missing".into())
         )),
         // Prepare's signature is its Buildroot .config; build's is the
         // collected image content. Both are already content-based.
@@ -803,11 +820,37 @@ pub fn operation_content_signature(
             source_tree_content_signature(spec, source_id.as_str())
                 .or_else(|| operation_output_signature(spec, kind))
         }
-        OperationKind::RenderStageFile { .. }
-        | OperationKind::RenderStageEnvSet { .. }
-        | OperationKind::RenderStageService { .. }
-        | OperationKind::AssembleImage
-        | OperationKind::CaptureCheckpoint { .. } => operation_output_signature(spec, kind),
+        // A rendered stage item delivers its entry and its source's bytes.
+        OperationKind::RenderStageFile { item_id } => {
+            let item = spec.stage.files.iter().find(|item| item.id == *item_id);
+            Some(rendered_stage_content(
+                spec,
+                &stage_state_path(spec, "file", item_id),
+                item.map(|item| format!("{item:?}")).unwrap_or_default(),
+                item.map(|item| item.src.as_str()),
+            ))
+        }
+        OperationKind::RenderStageEnvSet { item_id } => {
+            let item = spec.stage.env_sets.iter().find(|item| item.id == *item_id);
+            Some(rendered_stage_content(
+                spec,
+                &stage_state_path(spec, "env", item_id),
+                item.map(|item| format!("{item:?}")).unwrap_or_default(),
+                None,
+            ))
+        }
+        OperationKind::RenderStageService { item_id } => {
+            let item = spec.stage.services.iter().find(|item| item.id == *item_id);
+            Some(rendered_stage_content(
+                spec,
+                &stage_state_path(spec, "service", item_id),
+                item.map(|item| format!("{item:?}")).unwrap_or_default(),
+                item.map(|item| item.unit_path.as_str()),
+            ))
+        }
+        OperationKind::AssembleImage | OperationKind::CaptureCheckpoint { .. } => {
+            operation_output_signature(spec, kind)
+        }
     }
 }
 
@@ -962,7 +1005,7 @@ pub(crate) fn content_state_signature(path: &Path) -> String {
     format!("sha256:{digest}")
 }
 
-fn provider_state_signature(path: &Path) -> String {
+pub(crate) fn provider_state_signature(path: &Path) -> String {
     fs::read_to_string(path)
         .map(|contents| {
             format!(

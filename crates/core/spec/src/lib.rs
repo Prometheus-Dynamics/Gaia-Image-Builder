@@ -42,10 +42,11 @@ pub use assembly::{
 };
 pub use assembly_archive_spec::{
     AssemblyArchiveMemberSourceSpec, AssemblyArchiveMemberSpec, AssemblyArchiveSpec,
-    AssemblyDigestToken, AssemblySizeToken, AssemblyValueToken, AssemblyVerityField,
-    AssemblyVerityToken, assembly_value_tokens,
+    AssemblyDigestToken, AssemblySizeToken, AssemblyTreeDigestToken, AssemblyValueToken,
+    AssemblyVerityField, AssemblyVerityToken, assembly_json_string_tokens, assembly_value_tokens,
+    whole_tree_digest_token,
 };
-pub use assembly_json::{AssemblyJsonValue, json_string};
+pub use assembly_json::{AssemblyJsonValue, TreeDigestResolver, json_string};
 pub use assembly_order::{
     AssemblyCycle, AssemblyStep, AssemblyStepPaths, assembly_step_paths,
     assembly_steps_reading_later_outputs, order_assembly_steps,

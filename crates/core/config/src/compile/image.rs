@@ -290,6 +290,8 @@ pub(crate) fn compile_image_assembly(
                 depmod: modules.depmod.map(Into::into),
             })
             .collect(),
+        // Filled in once the sources are known (see source_tokens).
+        assembly_sources: Vec::new(),
     };
     Some(assembly)
 }

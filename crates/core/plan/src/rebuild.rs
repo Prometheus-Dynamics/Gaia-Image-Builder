@@ -65,6 +65,20 @@ impl RebuildRequest {
         }
     }
 
+    /// The request with names that stand for another operation of `plan`
+    /// replaced by it (see [`image_prepare_alias`]).
+    pub fn resolve_aliases(&self, plan: &ExecutionPlan) -> RebuildRequest {
+        let mut resolved = self.clone();
+        for target in &mut resolved.targets {
+            if let PlanTarget::Operation(pattern) = target
+                && let Some(alias) = image_prepare_alias(pattern, plan)
+            {
+                *pattern = alias.to_string();
+            }
+        }
+        resolved
+    }
+
     /// Errors when an operation target names nothing in `plan` (the full
     /// plan, before `--only` narrows it), listing the close ids.
     pub fn check(&self, plan: &ExecutionPlan) -> Result<(), String> {
@@ -72,6 +86,9 @@ impl RebuildRequest {
             let PlanTarget::Operation(pattern) = target else {
                 continue;
             };
+            if image_prepare_alias(pattern, plan).is_some() {
+                continue;
+            }
             let ids = plan
                 .operations
                 .iter()
@@ -91,6 +108,21 @@ impl RebuildRequest {
         }
         Ok(())
     }
+}
+
+/// `image:build` for the name `image:prepare` when `plan` has no prepare
+/// step: a build without one does its whole Buildroot make in `image:build`,
+/// so forcing the name forces that make. `None` for any other name.
+pub fn image_prepare_alias(pattern: &str, plan: &ExecutionPlan) -> Option<&'static str> {
+    let prepare_planned = plan
+        .operations
+        .iter()
+        .any(|operation| matches!(operation.kind, OperationKind::PrepareImage));
+    let build_planned = plan
+        .operations
+        .iter()
+        .any(|operation| matches!(operation.kind, OperationKind::BuildImage));
+    (pattern == "image:prepare" && !prepare_planned && build_planned).then_some("image:build")
 }
 
 /// `" (did you mean 'a', 'b'?)"` for the closest ids, or nothing.
@@ -133,6 +165,83 @@ fn edit_distance(a: &str, b: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{OperationId, PlannedOperation};
+
+    fn plan_with(kinds: &[(&str, OperationKind)]) -> ExecutionPlan {
+        ExecutionPlan {
+            build_id: gaia_spec::ResolvedBuildSpec::new("rebuild-alias")
+                .identity
+                .id
+                .clone(),
+            operations: kinds
+                .iter()
+                .map(|(id, kind)| PlannedOperation::new(OperationId::new(*id), kind.clone()))
+                .collect(),
+        }
+    }
+
+    fn prepare_request() -> RebuildRequest {
+        RebuildRequest {
+            targets: vec![PlanTarget::Operation("image:prepare".into())],
+            packages: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn image_prepare_forces_the_image_build_when_no_prepare_step_is_planned() {
+        let plan = plan_with(&[
+            ("image:build", OperationKind::BuildImage),
+            ("image:assembly", OperationKind::AssembleImage),
+        ]);
+        let request = prepare_request();
+        request.check(&plan).expect("the name is accepted");
+        let resolved = request.resolve_aliases(&plan);
+        assert!(
+            resolved
+                .reason("image:build", &OperationKind::BuildImage)
+                .is_some_and(|reason| reason.contains("--rebuild names it"))
+        );
+        assert!(
+            resolved
+                .reason("image:assembly", &OperationKind::AssembleImage)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn image_prepare_keeps_its_meaning_when_a_prepare_step_is_planned() {
+        let plan = plan_with(&[
+            ("image:prepare", OperationKind::PrepareImage),
+            ("image:build", OperationKind::BuildImage),
+        ]);
+        assert_eq!(image_prepare_alias("image:prepare", &plan), None);
+        let resolved = prepare_request().resolve_aliases(&plan);
+        assert!(
+            resolved
+                .reason("image:build", &OperationKind::BuildImage)
+                .is_none()
+        );
+        assert!(
+            resolved
+                .reason("image:prepare", &OperationKind::PrepareImage)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn image_prepare_is_still_unknown_without_any_image_step() {
+        let plan = plan_with(&[(
+            "artifact:app",
+            OperationKind::BuildArtifact {
+                artifact_id: "app".into(),
+            },
+        )]);
+        let error = prepare_request().check(&plan).expect_err("unknown");
+        assert!(
+            error.contains("unknown operation 'image:prepare'"),
+            "{error}"
+        );
+    }
 
     #[test]
     fn close_matches_suggest_the_nearest_ids() {

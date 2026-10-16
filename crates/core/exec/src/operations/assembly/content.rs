@@ -4,10 +4,11 @@
 
 use super::files::assembly_dest_is_directory;
 use super::*;
-use gaia_spec::{AssemblyJsonValue, AssemblyValueToken};
+use gaia_spec::{AssemblyJsonValue, AssemblyPathTemplate, AssemblyValueToken};
 
 /// The value of one `${assembly...}` token: a file's sha256, a field of a
-/// verity transform's output, or a file's size in bytes.
+/// verity transform's output, or a file's size in bytes. A tree digest is
+/// a JSON object, so it is rendered by [`tree_digest_members`] instead.
 pub(super) fn token_value(
     spec: &ResolvedBuildSpec,
     roots: &AssemblyRoots,
@@ -49,7 +50,31 @@ pub(super) fn token_value(
             }
             Ok(file_len(&path)?.to_string())
         }
+        AssemblyValueToken::TreeDigest(token) => Err(format!(
+            "'${{assembly.sha256_tree:{}}}' is a whole JSON value; it cannot be rendered as text",
+            token.path
+        )),
     }
+}
+
+/// The per-file digest map of a tree (a tree id, or a path template): each
+/// regular file under it, by its path with `/` separators, with its sha256
+/// hex, sorted by path. Symlinks and directories are not listed; a symlink
+/// is not followed.
+pub(super) fn tree_digest_members(
+    spec: &ResolvedBuildSpec,
+    roots: &AssemblyRoots,
+    template: &AssemblyPathTemplate,
+) -> Result<Vec<(String, String)>, String> {
+    let root = roots.tree_or_path(spec, template.as_str())?;
+    if !root.is_dir() {
+        return Err(format!(
+            "'${{assembly.sha256_tree:{}}}' names '{}', which is not a directory",
+            template,
+            root.display()
+        ));
+    }
+    gaia_plan::tree_digest_members(&root)
 }
 
 /// Renders the tokens of a text value.
@@ -62,14 +87,18 @@ pub(super) fn render_text(
     gaia_spec::assembly_value_tokens(text, |token| token_value(spec, roots, verity, token))
 }
 
-/// The text of a JSON document, with its tokens rendered.
+/// The text of a JSON document, with its tokens rendered. A tree digest is
+/// read after the steps that fill its tree (see `assembly_step_paths`).
 pub(super) fn render_json(
     spec: &ResolvedBuildSpec,
     roots: &AssemblyRoots,
     verity: &VerityOutputs,
     json: &AssemblyJsonValue,
 ) -> Result<String, String> {
-    json.render(&mut |token| token_value(spec, roots, verity, token))
+    json.render_with_trees(
+        &mut |token| token_value(spec, roots, verity, token),
+        &mut |template| tree_digest_members(spec, roots, template),
+    )
 }
 
 /// A tree file generated from `content` or `json`, as written.

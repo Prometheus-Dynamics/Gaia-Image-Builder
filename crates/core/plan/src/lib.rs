@@ -13,6 +13,7 @@ mod reuse_imports;
 mod reuse_toolchain;
 mod runtime_libs;
 mod targets;
+mod tree_digest;
 
 pub use estimate::{PlanEstimate, estimate_plan, format_duration_short};
 pub use graph::{ExecutionPlan, PlanDiagnostic, ReuseState};
@@ -30,6 +31,7 @@ pub use reuse_details::{fingerprint_change_detail, operation_components, recorde
 pub use reuse_explain::{InvalidationSummary, invalidation_summary};
 pub use runtime_libs::{RuntimeClosure, RuntimeEntry, derive_sysroot, resolve_runtime_closure};
 pub use targets::{PlanDomain, PlanTarget};
+pub use tree_digest::{tree_digest_members, tree_digest_signature};
 
 /// ELF objects for tests that copy binaries (`test-fixtures` feature).
 #[cfg(feature = "test-fixtures")]
@@ -415,7 +417,7 @@ pub fn plan_build_with_rebuilds(
         .as_ref()
         .is_some_and(|assembly| !assembly.is_empty());
     if has_image_assembly {
-        operations.push(
+        let mut assembly =
             PlannedOperation::new(OperationId::image_assembly(), OperationKind::AssembleImage)
                 .with_dependency(OperationId::image())
                 .with_parallelism(OperationParallelism::parallelizable(
@@ -426,8 +428,18 @@ pub fn plan_build_with_rebuilds(
                 .with_reuse(OperationReuse::execute(
                     "image_assembly_required",
                     "image assembly will execute after provider image output is available",
-                )),
-        );
+                ));
+        // Declared sources its `${source.<id>...}` tokens name: a change to
+        // one reruns the assembly, as it does for an artifact.
+        for source in spec
+            .image
+            .assembly
+            .iter()
+            .flat_map(|assembly| &assembly.assembly_sources)
+        {
+            assembly = assembly.with_dependency(OperationId::source(source));
+        }
+        operations.push(assembly);
     }
 
     for checkpoint in &spec.checkpoints.points {
@@ -488,7 +500,8 @@ pub fn plan_build_with_rebuilds(
         build_id: spec.identity.id.clone(),
         operations,
     };
-    let plan = apply_reuse_state(plan, spec, reuse_state, rebuild);
+    let rebuild = rebuild.resolve_aliases(&plan);
+    let plan = apply_reuse_state(plan, spec, reuse_state, &rebuild);
     tracing::debug!(
         operations = plan.operations.len(),
         diagnostics = plan.validate().len(),

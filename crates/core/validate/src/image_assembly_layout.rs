@@ -325,7 +325,7 @@ pub(crate) fn validate_archives(
                 }
                 Some(AssemblyArchiveMemberSourceSpec::Json(json)) => {
                     for text in json.strings() {
-                        crate::image_assembly_generated::validate_tokens(
+                        crate::image_assembly_generated::validate_json_tokens(
                             spec,
                             tree_ids,
                             text,

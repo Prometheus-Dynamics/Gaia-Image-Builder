@@ -8,9 +8,10 @@
 //! so the keys that changed can be named. The parts only explain a decision:
 //! reuse is still decided by the fingerprint.
 
+use crate::reuse::content::config_path_fingerprint;
 use crate::reuse::{
     artifact_docker_build_signature, image_backend_signature, operation_content_signature,
-    path_state_signature, resolve_workspace_path, source_backend_signature,
+    source_backend_signature,
 };
 use crate::reuse_assembly::assembly_input_entries;
 use crate::reuse_imports::import_source_signature;
@@ -63,10 +64,7 @@ pub fn operation_components(
         OperationKind::RenderStageFile { item_id } => {
             if let Some(item) = spec.stage.files.iter().find(|item| item.id == *item_id) {
                 parts.raw("stage entry", format!("{item:?}"));
-                parts.raw(
-                    "source file",
-                    path_state_signature(&resolve_workspace_path(spec, &item.src)),
-                );
+                parts.raw("source file", config_path_fingerprint(spec, &item.src));
             }
         }
         OperationKind::RenderStageEnvSet { item_id } => {
@@ -77,10 +75,7 @@ pub fn operation_components(
         OperationKind::RenderStageService { item_id } => {
             if let Some(item) = spec.stage.services.iter().find(|item| item.id == *item_id) {
                 parts.raw("stage entry", format!("{item:?}"));
-                parts.raw(
-                    "unit file",
-                    path_state_signature(&resolve_workspace_path(spec, &item.unit_path)),
-                );
+                parts.raw("unit file", config_path_fingerprint(spec, &item.unit_path));
             }
         }
         OperationKind::PrepareImage | OperationKind::BuildImage => image_parts(

@@ -1,5 +1,7 @@
 use crate::reuse::path_state_signature;
-use gaia_spec::{AssemblyArchiveMemberSourceSpec, AssemblyRoots, ResolvedBuildSpec};
+use gaia_spec::{
+    AssemblyArchiveMemberSourceSpec, AssemblyRoots, AssemblyValueToken, ResolvedBuildSpec,
+};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -46,7 +48,7 @@ pub(crate) fn archive_input_entries(
                 }
                 Some(AssemblyArchiveMemberSourceSpec::Json(json)) => {
                     for text in json.strings() {
-                        token_input_entries(
+                        json_token_input_entries(
                             spec,
                             roots,
                             "archive-digest",
@@ -112,9 +114,9 @@ pub(crate) fn archive_input_entries(
     parts
 }
 
-/// Fingerprint entries for the files a value's `${assembly...}` tokens read,
-/// named after `owner` (for example `archive a/m` or `file tree:dest`) and
-/// tagged with `kind`.
+/// Fingerprint entries for the files a text value's `${assembly...}` tokens
+/// read, named after `owner` (for example `archive a/m` or `file tree:dest`)
+/// and tagged with `kind`.
 pub(crate) fn token_input_entries(
     spec: &ResolvedBuildSpec,
     roots: &AssemblyRoots,
@@ -133,6 +135,45 @@ pub(crate) fn token_input_entries(
             resolve(spec, roots, token.path()),
             generated_outputs,
         ));
+        Ok(String::new())
+    });
+}
+
+/// `token_input_entries` for a JSON string. A tree digest is covered by its
+/// tree's content signature, so the owner rebuilds when a file in the tree
+/// changes, whatever the tree's mtimes.
+pub(crate) fn json_token_input_entries(
+    spec: &ResolvedBuildSpec,
+    roots: &AssemblyRoots,
+    kind: &str,
+    (owner, part_owner): (&str, &str),
+    value: &str,
+    generated_outputs: &BTreeSet<PathBuf>,
+    parts: &mut Vec<(String, String)>,
+) {
+    let _ = gaia_spec::assembly_json_string_tokens(value, |token| {
+        match token {
+            AssemblyValueToken::TreeDigest(digest) => {
+                let root = roots
+                    .tree_or_path(spec, digest.path.as_str())
+                    .unwrap_or_else(|_| PathBuf::from(digest.path.as_str()));
+                parts.push((
+                    format!("{owner} {}", root.display()),
+                    format!(
+                        "{kind}-tree:{part_owner}:{}:{}",
+                        root.display(),
+                        crate::tree_digest::tree_digest_signature(&root)
+                    ),
+                ));
+            }
+            other => parts.push(input_part(
+                kind,
+                owner,
+                part_owner,
+                resolve(spec, roots, other.path()),
+                generated_outputs,
+            )),
+        }
         Ok(String::new())
     });
 }

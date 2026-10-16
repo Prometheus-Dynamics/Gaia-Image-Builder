@@ -220,3 +220,101 @@ dest = "../escape"
         vec!["assembly_binary_dest_invalid"]
     );
 }
+
+#[test]
+fn a_tree_digest_is_a_whole_json_value_of_a_known_tree_or_a_path() {
+    let json_tree = assembly(
+        r#"
+[[image.assembly.trees]]
+id = "payload"
+path = "$assembly.work/payload"
+
+[[image.assembly.files]]
+tree = "rootfs"
+json = { files = "${assembly.sha256_tree:payload}" }
+dest = "manifest.json"
+"#,
+    );
+    assert_eq!(assembly_codes(&json_tree), Vec::<&str>::new());
+
+    let json_path = assembly(
+        r#"
+[[image.assembly.files]]
+tree = "rootfs"
+json = { files = "${assembly.sha256_tree:$assembly.work/rootfs}" }
+dest = "manifest.json"
+"#,
+    );
+    assert!(
+        assembly_codes(&json_path).contains(&"assembly_tree_digest_self"),
+        "a path into the file's own tree is the same self-reference: {:?}",
+        assembly_codes(&json_path)
+    );
+
+    // A directory the steps fill, named by its path, is a produced read.
+    let filled = assembly(
+        r#"
+[[image.assembly.trees]]
+id = "payload"
+path = "$assembly.work/payload"
+
+[[image.assembly.files]]
+tree = "payload"
+content = "x"
+dest = "a.txt"
+
+[[image.assembly.files]]
+tree = "rootfs"
+json = { files = "${assembly.sha256_tree:$assembly.work/payload}" }
+dest = "manifest.json"
+"#,
+    );
+    assert_eq!(assembly_codes(&filled), Vec::<&str>::new());
+}
+
+#[test]
+fn a_tree_digest_in_text_or_naming_no_tree_is_rejected() {
+    let in_text = assembly(
+        r#"
+[[image.assembly.files]]
+tree = "rootfs"
+content = "slots=${assembly.sha256_tree:rootfs}"
+dest = "cmdline.txt"
+"#,
+    );
+    assert_eq!(
+        assembly_codes(&in_text),
+        vec!["assembly_generated_token_invalid"]
+    );
+
+    let unknown = assembly(
+        r#"
+[[image.assembly.files]]
+tree = "rootfs"
+json = { files = "${assembly.sha256_tree:slots-payload}" }
+dest = "manifest.json"
+"#,
+    );
+    assert_eq!(
+        assembly_codes(&unknown),
+        vec!["assembly_tree_digest_unknown_tree"]
+    );
+}
+
+#[test]
+fn a_file_cannot_digest_the_tree_it_is_written_into() {
+    let contents = assembly(
+        r#"
+[[image.assembly.files]]
+tree = "rootfs"
+json = { files = "${assembly.sha256_tree:rootfs}" }
+dest = "manifest.json"
+"#,
+    );
+    // The file is in the tree it digests: one error, and no unknown-tree error.
+    assert!(
+        assembly_codes(&contents).contains(&"assembly_tree_digest_self"),
+        "{:?}",
+        assembly_codes(&contents)
+    );
+}

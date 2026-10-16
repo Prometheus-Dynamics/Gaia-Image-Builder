@@ -1,13 +1,13 @@
 use crate::assembly_output_spec::{AssemblyFilesystemSpec, AssemblyTransformSpec};
 use crate::{
     AssemblyArchiveSpec, AssemblyJsonValue, AssemblyTreeId, ByteSize, ByteSizeParseError,
-    ImageProviderKind,
+    ImageProviderKind, SourceId,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct ImageAssemblySpec {
     pub work_dir: Option<AssemblyPathTemplate>,
     pub out_dir: Option<AssemblyPathTemplate>,
@@ -22,6 +22,36 @@ pub struct ImageAssemblySpec {
     pub busybox_initramfs: Vec<AssemblyBusyboxInitramfsSpec>,
     pub binaries: Vec<AssemblyBinarySpec>,
     pub kernel_modules: Vec<AssemblyKernelModulesSpec>,
+    /// Declared sources a `${source.<id>...}` token in this assembly names
+    /// (sorted, without duplicates). The assembly depends on each of them.
+    pub assembly_sources: Vec<SourceId>,
+}
+
+// Operation fingerprints hash the Debug output of the assembly. This prints
+// the same text as the derived impl did, plus `assembly_sources` only when
+// set, so assemblies without source tokens keep their fingerprints.
+impl std::fmt::Debug for ImageAssemblySpec {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = formatter.debug_struct("ImageAssemblySpec");
+        debug
+            .field("work_dir", &self.work_dir)
+            .field("out_dir", &self.out_dir)
+            .field("trees", &self.trees)
+            .field("dirs", &self.dirs)
+            .field("symlinks", &self.symlinks)
+            .field("files", &self.files)
+            .field("transforms", &self.transforms)
+            .field("filesystems", &self.filesystems)
+            .field("disks", &self.disks)
+            .field("archives", &self.archives)
+            .field("busybox_initramfs", &self.busybox_initramfs)
+            .field("binaries", &self.binaries)
+            .field("kernel_modules", &self.kernel_modules);
+        if !self.assembly_sources.is_empty() {
+            debug.field("assembly_sources", &self.assembly_sources);
+        }
+        debug.finish()
+    }
 }
 
 impl ImageAssemblySpec {
@@ -740,6 +770,27 @@ mod tests {
             )
             .referenced_tree_ids(),
             vec!["boot", "rootfs"]
+        );
+    }
+}
+
+#[cfg(test)]
+mod debug_tests {
+    use super::*;
+    use crate::SourceId;
+
+    /// Fingerprints hash this text: sources appear only when named.
+    #[test]
+    fn assembly_sources_print_only_when_set() {
+        let mut spec = ImageAssemblySpec::default();
+        let plain = format!("{spec:?}");
+        assert!(!plain.contains("assembly_sources"), "{plain}");
+        assert!(plain.starts_with("ImageAssemblySpec { work_dir: None, out_dir: None, trees: []"));
+        spec.assembly_sources = vec![SourceId::new("app")];
+        let named = format!("{spec:?}");
+        assert!(
+            named.ends_with("assembly_sources: [SourceId(\"app\")] }"),
+            "{named}"
         );
     }
 }

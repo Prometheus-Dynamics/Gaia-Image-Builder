@@ -24,8 +24,13 @@
 //! makes the image depend on a source whose directory an override names.
 //!
 //! Both tokens are substituted in stage env set values, build labels,
-//! Buildroot `config_overrides` values and Java artifacts' build target,
-//! arguments, command and environment. With build variants, a source a
+//! Buildroot `config_overrides` values, every string of `[image.assembly]`
+//! (paths, tree ids, entries, JSON values, outputs: see
+//! [`crate::assembly_source_tokens`]) and Java artifacts' build target,
+//! arguments, command and environment. A `${source.<id>...}` token left in
+//! the assembly after substitution (an unknown source, or one with no
+//! commit yet) is recorded as unresolved, so validation reports it. With
+//! build variants, a source a
 //! variant checks out for itself resolves to that variant's checkout
 //! (`<build_dir>/sources/variants/<variant>/<id>`); a source every variant
 //! shares resolves to the shared one.
@@ -38,8 +43,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+use crate::assembly_source_tokens::visit_assembly_strings;
 use gaia_spec::{
     ArtifactDefinition, ImageDefinition, ResolvedBuildSpec, SourceDefinition, SourceId,
+    UnresolvedInterpolationSpec,
 };
 
 const PREFIX: &str = "source.";
@@ -56,20 +63,70 @@ pub(crate) fn short_commit(commit: &str) -> String {
 /// the tokens it resolved from the unresolved list.
 pub(crate) fn substitute_source_tokens(spec: &mut ResolvedBuildSpec) {
     let values = source_token_values(spec);
-    if values.is_empty() {
-        return;
+    if !values.is_empty() {
+        substitute_outside_assembly(spec, &values);
     }
+    let declared = spec
+        .sources
+        .iter()
+        .map(|source| source.id.clone())
+        .collect::<BTreeSet<SourceId>>();
+    if let Some(assembly) = spec.image.assembly.as_mut() {
+        let mut leftovers = Vec::new();
+        let mut referenced = BTreeSet::new();
+        visit_assembly_strings(assembly, &mut |location, text| {
+            *text = substitute(text, &values, &mut referenced);
+            leftovers.extend(unresolved_source_tokens(text).into_iter().map(|token| {
+                UnresolvedInterpolationSpec {
+                    location: location.to_string(),
+                    token,
+                }
+            }));
+        });
+        // The declared sources the assembly names: it depends on each one
+        // (an unknown id stays an unresolved token instead).
+        assembly.assembly_sources = referenced
+            .into_iter()
+            .filter(|id| declared.contains(id))
+            .collect();
+        spec.policy.interpolation.unresolved.extend(leftovers);
+    }
+    spec.policy
+        .interpolation
+        .unresolved
+        .retain(|unresolved| !values.contains_key(&unresolved.token));
+}
+
+/// The `${source...}` tokens a string still holds, without `${}`.
+fn unresolved_source_tokens(text: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("${") {
+        let remainder = &rest[start + 2..];
+        let Some(end) = remainder.find('}') else {
+            break;
+        };
+        let token = &remainder[..end];
+        if token.starts_with(PREFIX) {
+            found.push(token.to_string());
+        }
+        rest = &remainder[end + 1..];
+    }
+    found
+}
+
+fn substitute_outside_assembly(spec: &mut ResolvedBuildSpec, values: &BTreeMap<String, String>) {
     for env_set in &mut spec.stage.env_sets {
         for (_, value) in &mut env_set.entries {
-            *value = substitute(value, &values, &mut BTreeSet::new());
+            *value = substitute(value, values, &mut BTreeSet::new());
         }
     }
     for (_, value) in &mut spec.metadata.labels {
-        *value = substitute(value, &values, &mut BTreeSet::new());
+        *value = substitute(value, values, &mut BTreeSet::new());
     }
     if let ImageDefinition::Buildroot(buildroot) = &mut spec.image.definition {
         for (_, value) in &mut buildroot.config_overrides {
-            *value = substitute(value, &values, &mut BTreeSet::new());
+            *value = substitute(value, values, &mut BTreeSet::new());
         }
     }
     let declared = spec
@@ -80,20 +137,16 @@ pub(crate) fn substitute_source_tokens(spec: &mut ResolvedBuildSpec) {
     for artifact in &mut spec.artifacts {
         let mut referenced = BTreeSet::new();
         if let ArtifactDefinition::Java(java) = &mut artifact.definition {
-            java.build_target = substitute(&java.build_target, &values, &mut referenced);
+            java.build_target = substitute(&java.build_target, values, &mut referenced);
             for value in java.build_args.iter_mut().chain(&mut java.build_command) {
-                *value = substitute(value, &values, &mut referenced);
+                *value = substitute(value, values, &mut referenced);
             }
             for (_, value) in &mut java.build_env {
-                *value = substitute(value, &values, &mut referenced);
+                *value = substitute(value, values, &mut referenced);
             }
         }
         add_extra_sources(artifact, referenced, &declared);
     }
-    spec.policy
-        .interpolation
-        .unresolved
-        .retain(|unresolved| !values.contains_key(&unresolved.token));
 }
 
 /// The source id of a `source.<id>.commit` or `source.<id>.path` token.

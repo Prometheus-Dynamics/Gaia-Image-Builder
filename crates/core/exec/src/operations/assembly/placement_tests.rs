@@ -228,14 +228,26 @@ fn digest_tokens_have_their_paths_rewritten() {
     let rewritten = rewrite_digest_tokens(
         "a=${assembly.sha256:$assembly.out/boot.vfat}/b=${assembly.sha256: x.img }",
         |inner| Ok(format!("<{}>", inner.trim())),
+        |inner| Ok(format!("[{}]", inner.trim())),
     )
     .expect("rewrite");
     assert_eq!(
         rewritten,
         "a=${assembly.sha256:<$assembly.out/boot.vfat>}/b=${assembly.sha256:<x.img>}"
     );
+    // A tree digest's path goes to the tree closure, and keeps its token.
     assert_eq!(
-        rewrite_digest_tokens("plain", |_| Ok(String::new())).expect("plain"),
+        rewrite_digest_tokens(
+            "${assembly.sha256_tree: slots-payload }",
+            |_| Ok(String::new()),
+            |inner| Ok(format!("[{}]", inner.trim())),
+        )
+        .expect("tree"),
+        "${assembly.sha256_tree:[slots-payload]}"
+    );
+    assert_eq!(
+        rewrite_digest_tokens("plain", |_| Ok(String::new()), |_| Ok(String::new()))
+            .expect("plain"),
         "plain"
     );
 }

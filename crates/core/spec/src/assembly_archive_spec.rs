@@ -95,6 +95,10 @@ pub enum AssemblyValueToken {
     Verity(AssemblyVerityToken),
     /// `${assembly.size:<path>}`: the size of a file in bytes.
     Size(AssemblySizeToken),
+    /// `${assembly.sha256_tree:<tree id or path>}`: a JSON object mapping each
+    /// regular file's path under the tree to its sha256. Only a whole JSON
+    /// value may be one; in text it is an error.
+    TreeDigest(AssemblyTreeDigestToken),
 }
 
 impl AssemblyValueToken {
@@ -104,6 +108,7 @@ impl AssemblyValueToken {
             Self::Digest(token) => &token.path,
             Self::Verity(token) => &token.path,
             Self::Size(token) => &token.path,
+            Self::TreeDigest(token) => &token.path,
         }
     }
 
@@ -111,7 +116,7 @@ impl AssemblyValueToken {
     /// exactly this token is written as a number.
     pub fn is_numeric(&self) -> bool {
         match self {
-            Self::Digest(_) => false,
+            Self::Digest(_) | Self::TreeDigest(_) => false,
             Self::Verity(token) => token.field.is_numeric(),
             Self::Size(_) => true,
         }
@@ -128,6 +133,30 @@ pub struct AssemblySizeToken {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssemblyDigestToken {
     pub path: AssemblyPathTemplate,
+}
+
+/// An `${assembly.sha256_tree:<tree id or path template>}` reference: the
+/// per-file digest map of a tree or directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssemblyTreeDigestToken {
+    pub path: AssemblyPathTemplate,
+}
+
+/// The tree digest token, when `text` is exactly one
+/// `${assembly.sha256_tree:<path>}` with a non-empty path. Only a JSON value
+/// may be one (see [`AssemblyValueToken::TreeDigest`]).
+pub fn whole_tree_digest_token(text: &str) -> Option<AssemblyTreeDigestToken> {
+    let body = text
+        .strip_prefix("${")?
+        .strip_suffix('}')?
+        .strip_prefix(TREE_DIGEST_TOKEN_PREFIX)?;
+    if body.contains("${") || body.contains('}') {
+        return None;
+    }
+    let path = body.trim();
+    (!path.is_empty()).then(|| AssemblyTreeDigestToken {
+        path: AssemblyPathTemplate::new(path),
+    })
 }
 
 /// An `${assembly.verity:<path template>:<field>}` reference: the `dest` of
@@ -190,6 +219,7 @@ impl AssemblyVerityField {
 const DIGEST_TOKEN_PREFIX: &str = "assembly.sha256:";
 const VERITY_TOKEN_PREFIX: &str = "assembly.verity:";
 const SIZE_TOKEN_PREFIX: &str = "assembly.size:";
+const TREE_DIGEST_TOKEN_PREFIX: &str = "assembly.sha256_tree:";
 
 /// Splits a generated entry value into literal text and `${assembly...}`
 /// tokens, replacing each token with `resolve(token)`. Any other `${...}`
@@ -208,11 +238,30 @@ pub fn assembly_value_tokens(
             return Err(format!("unterminated '${{' in '{value}'"));
         };
         let token = parse_value_token(&remainder[..end], value)?;
+        if matches!(token, AssemblyValueToken::TreeDigest(_)) {
+            return Err(format!(
+                "'${{{}}}' is a whole JSON value (a file or archive json table); it cannot be part of text in '{value}'",
+                &remainder[..end]
+            ));
+        }
         output.push_str(&resolve(&token)?);
         rest = &remainder[end + 1..];
     }
     output.push_str(rest);
     Ok(output)
+}
+
+/// The tokens of a JSON string, for readers that do not render: a whole
+/// tree digest token is one token; any other string reads as
+/// [`assembly_value_tokens`] does.
+pub fn assembly_json_string_tokens(
+    value: &str,
+    mut resolve: impl FnMut(&AssemblyValueToken) -> Result<String, String>,
+) -> Result<String, String> {
+    match whole_tree_digest_token(value) {
+        Some(token) => resolve(&AssemblyValueToken::TreeDigest(token)).map(|_| String::new()),
+        None => assembly_value_tokens(value, resolve),
+    }
 }
 
 fn parse_value_token(token: &str, value: &str) -> Result<AssemblyValueToken, String> {
@@ -229,6 +278,16 @@ fn parse_value_token(token: &str, value: &str) -> Result<AssemblyValueToken, Str
             return Err(format!("'${{{token}}}' needs a path in '{value}'"));
         }
         return Ok(AssemblyValueToken::Size(AssemblySizeToken {
+            path: AssemblyPathTemplate::new(path.trim()),
+        }));
+    }
+    if let Some(path) = token.strip_prefix(TREE_DIGEST_TOKEN_PREFIX) {
+        if path.trim().is_empty() {
+            return Err(format!(
+                "'${{{token}}}' needs a tree id or path in '{value}'"
+            ));
+        }
+        return Ok(AssemblyValueToken::TreeDigest(AssemblyTreeDigestToken {
             path: AssemblyPathTemplate::new(path.trim()),
         }));
     }
@@ -258,7 +317,7 @@ fn parse_value_token(token: &str, value: &str) -> Result<AssemblyValueToken, Str
         }));
     }
     Err(format!(
-        "unsupported token '${{{token}}}' in '{value}'; only '${{assembly.sha256:<path>}}', '${{assembly.size:<path>}}' and '${{assembly.verity:<path>:<field>}}' are resolved at assembly time"
+        "unsupported token '${{{token}}}' in '{value}'; only '${{assembly.sha256:<path>}}', '${{assembly.sha256_tree:<tree or path>}}', '${{assembly.size:<path>}}' and '${{assembly.verity:<path>:<field>}}' are resolved at assembly time"
     ))
 }
 
@@ -308,6 +367,29 @@ mod tests {
             Some(AssemblyVerityField::DataBlocks)
         );
         assert_eq!(AssemblyVerityField::parse("uuid"), None);
+    }
+
+    #[test]
+    fn tree_digest_tokens_are_read_only_as_whole_json_values() {
+        assert!(
+            assembly_value_tokens("${assembly.sha256_tree:payload}", |_| Ok(String::new()))
+                .is_err()
+        );
+        assert!(assembly_value_tokens("${assembly.sha256_tree:}", |_| Ok(String::new())).is_err());
+        assert!(
+            assembly_json_string_tokens("x${assembly.sha256_tree:payload}", |_| Ok(String::new()))
+                .is_err()
+        );
+        let mut seen = Vec::new();
+        assembly_json_string_tokens("${assembly.sha256_tree:payload}", |token| {
+            seen.push(token.clone());
+            Ok(String::new())
+        })
+        .expect("whole value");
+        assert!(matches!(
+            seen.as_slice(),
+            [AssemblyValueToken::TreeDigest(token)] if token.path.as_str() == "payload"
+        ));
     }
 
     #[test]
