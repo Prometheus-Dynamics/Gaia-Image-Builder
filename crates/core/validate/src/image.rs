@@ -424,8 +424,56 @@ pub(crate) fn validate_image_contract(
         ));
     }
 
+    validate_output_disk(spec, diagnostics);
     validate_raw_archive_source(spec, diagnostics);
     validate_image_assembly(spec, diagnostics);
+}
+
+/// `image.output.disk` names the assembly disk the raw disk archive is built
+/// from: it must be an assembly disk, and it means something only when the
+/// archive is a raw disk image.
+fn validate_output_disk(spec: &ResolvedBuildSpec, diagnostics: &mut Vec<ValidationDiagnostic>) {
+    let Some(disk) = spec.image.output.disk.as_deref() else {
+        return;
+    };
+    let location = Some("image.output.disk".to_string());
+    let disks = spec
+        .image
+        .assembly
+        .as_ref()
+        .map_or(&[][..], |assembly| assembly.disks.as_slice());
+    if !disks.iter().any(|candidate| candidate.id == disk) {
+        let known = disks
+            .iter()
+            .map(|candidate| format!("'{}'", candidate.id))
+            .collect::<Vec<_>>();
+        let known = if known.is_empty() {
+            "the assembly has no disks".to_string()
+        } else {
+            format!("the assembly disks are {}", known.join(", "))
+        };
+        diagnostics.push(error(
+            "image_output_disk_unknown",
+            format!("image.output.disk '{disk}' is not an assembly disk; {known}"),
+            location,
+        ));
+        return;
+    }
+    let raw_disk_archive = spec
+        .image
+        .output
+        .archive_name
+        .as_deref()
+        .and_then(gaia_spec::raw_disk_archive);
+    if raw_disk_archive.is_none() {
+        diagnostics.push(error(
+            "image_output_disk_without_disk_archive",
+            format!(
+                "image.output.disk '{disk}' selects the disk that image.output.archive_name builds, so archive_name must name a raw disk image (.img or .raw, optionally .xz or .zst)"
+            ),
+            location,
+        ));
+    }
 }
 
 /// An `.img`/`.raw` archive name promises a flashable disk. Without an

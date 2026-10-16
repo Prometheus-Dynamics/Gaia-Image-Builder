@@ -58,7 +58,9 @@ pub(crate) struct AssemblyStagingSummary {
     pub messages: Vec<String>,
     pub cleanup_paths: Vec<PathBuf>,
     pub archive_path: Option<PathBuf>,
-    /// The raw disk images and published filesystem images of this run.
+    /// The files this run publishes as images: the disks written under the
+    /// image output dir, published filesystem images, and the transform,
+    /// verity and archive outputs written there.
     pub disk_images: Vec<PathBuf>,
 }
 
@@ -214,6 +216,7 @@ fn stage_steps(
     tracing::Span::current().record("disk_count", assembly.disks.len());
 
     let context = AssemblyExecutionContext::new(spec, view.disk_assembly, view.disk_roots);
+    let view_out_dir = view.roots.assembly_out.clone();
     let mut state = KeyValueState::new()
         .with("kind", gaia_spec::IMAGE_ASSEMBLY_STATE_KIND)
         .with("tree_count", assembly.trees.len())
@@ -296,14 +299,21 @@ fn stage_steps(
         mut messages,
         disk_outputs,
         disk_published,
+        disk_ids,
         filesystem_published,
+        published_outputs,
         ..
     } = run;
 
     let mut cleanup_paths = context.cleanup_paths();
     let mut archive_path = None;
+    let built_disks = disk_ids
+        .iter()
+        .cloned()
+        .zip(disk_outputs.iter().cloned())
+        .collect::<Vec<_>>();
     if let Some(summary) =
-        archive_assembly_disk_output(spec, &disk_outputs, cancel_check.clone(), &mut messages)?
+        archive_assembly_disk_output(spec, &built_disks, cancel_check.clone(), &mut messages)?
     {
         state.insert("archive.path", summary.output.display().to_string());
         state.insert("archive.source", summary.source.display().to_string());
@@ -330,15 +340,18 @@ fn stage_steps(
         );
     }
 
+    let disk_images = disk_published
+        .into_iter()
+        .filter(|path| path.starts_with(&view_out_dir))
+        .chain(filesystem_published)
+        .chain(published_outputs)
+        .collect();
     Ok(AssemblyStagingSummary {
         state,
         messages,
         cleanup_paths,
         archive_path,
-        disk_images: disk_published
-            .into_iter()
-            .chain(filesystem_published)
-            .collect(),
+        disk_images,
     })
 }
 
@@ -350,9 +363,47 @@ struct AssemblyArchiveSummary {
     sha256: String,
 }
 
+/// The disk a raw disk archive is built from: `image.output.disk` when set,
+/// else the only disk the assembly built.
+fn archive_source_disk<'a>(
+    spec: &ResolvedBuildSpec,
+    archive_path: &Path,
+    built_disks: &'a [(String, PathBuf)],
+) -> Result<&'a PathBuf, AssemblyError> {
+    if let Some(id) = spec.image.output.disk.as_deref() {
+        return built_disks
+            .iter()
+            .find(|(disk_id, _)| disk_id == id)
+            .map(|(_, source)| source)
+            .ok_or_else(|| {
+                AssemblyError::runtime(format!(
+                    "image.output.disk '{id}' is not a disk this assembly built; the assembly built {}",
+                    describe_disk_ids(built_disks)
+                ))
+            });
+    }
+    match built_disks {
+        [(_, source)] => Ok(source),
+        _ => Err(AssemblyError::runtime(format!(
+            "image.output.archive_name '{}' requests a raw disk image, but assembly produced {} disk outputs ({}); set image.output.disk to the assembly disk it is built from, or use a tar archive",
+            archive_path.display(),
+            built_disks.len(),
+            describe_disk_ids(built_disks)
+        ))),
+    }
+}
+
+fn describe_disk_ids(built_disks: &[(String, PathBuf)]) -> String {
+    built_disks
+        .iter()
+        .map(|(id, _)| format!("'{id}'"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn archive_assembly_disk_output(
     spec: &ResolvedBuildSpec,
-    disk_outputs: &[PathBuf],
+    built_disks: &[(String, PathBuf)],
     cancel_check: Option<gaia_process::ProcessCancelCheck>,
     messages: &mut Vec<String>,
 ) -> Result<Option<AssemblyArchiveSummary>, AssemblyError> {
@@ -366,17 +417,10 @@ fn archive_assembly_disk_output(
     else {
         return Ok(None);
     };
-    if disk_outputs.is_empty() {
+    if built_disks.is_empty() {
         return Ok(None);
     }
-    if disk_outputs.len() != 1 {
-        return Err(AssemblyError::runtime(format!(
-            "image.output.archive_name '{}' requests a raw disk image, but assembly produced {} disk outputs; configure a single assembly disk or use a tar archive",
-            archive_path.display(),
-            disk_outputs.len()
-        )));
-    }
-    let source = &disk_outputs[0];
+    let source = archive_source_disk(spec, &archive_path, built_disks)?;
     let temp_archive = temporary_assembly_output_path(&archive_path);
     let Some((compressor, args)) = kind.compressor(0) else {
         // An uncompressed `.img`/`.raw` archive is the assembled disk itself.

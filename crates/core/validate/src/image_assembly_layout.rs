@@ -11,6 +11,7 @@ use crate::image_assembly_collected::validate_collected_reference;
 /// into the `prefix` field.
 const TAR_NAME_MAX_BYTES: usize = 100;
 const ZSTD_LEVELS: std::ops::RangeInclusive<u32> = 1..=19;
+const XZ_LEVELS: std::ops::RangeInclusive<u32> = 0..=9;
 
 pub(crate) fn validate_disk_layout(
     disk: &gaia_spec::AssemblyDiskSpec,
@@ -113,19 +114,29 @@ pub(crate) fn validate_transform_levels(
         let Some(level) = transform.level else {
             continue;
         };
-        if transform.kind != gaia_spec::AssemblyTransformKindSpec::Zstd {
-            diagnostics.push(error(
-                "assembly_transform_level_unsupported",
-                format!(
-                    "assembly transform kind '{}' does not accept level",
-                    transform.kind.as_str()
-                ),
-                Some("image.assembly.transforms".into()),
-            ));
-        } else if !ZSTD_LEVELS.contains(&level) {
+        let (kind, range) = match transform.kind {
+            gaia_spec::AssemblyTransformKindSpec::Zstd => ("zstd", ZSTD_LEVELS),
+            gaia_spec::AssemblyTransformKindSpec::Xz => ("xz", XZ_LEVELS),
+            _ => {
+                diagnostics.push(error(
+                    "assembly_transform_level_unsupported",
+                    format!(
+                        "assembly transform kind '{}' does not accept level",
+                        transform.kind.as_str()
+                    ),
+                    Some("image.assembly.transforms".into()),
+                ));
+                continue;
+            }
+        };
+        if !range.contains(&level) {
             diagnostics.push(error(
                 "assembly_transform_level_invalid",
-                format!("assembly zstd transform level {level} must be between 1 and 19"),
+                format!(
+                    "assembly {kind} transform level {level} must be between {} and {}",
+                    range.start(),
+                    range.end()
+                ),
                 Some("image.assembly.transforms".into()),
             ));
         }

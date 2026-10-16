@@ -281,6 +281,10 @@ impl std::fmt::Display for StartingPointOutputModeSpec {
 pub struct ImageOutputSpec {
     pub collect_dir: Option<String>,
     pub archive_name: Option<String>,
+    /// The assembly disk (`[[image.assembly.disks]]` id) the raw disk archive
+    /// `archive_name` is built from. Required when the assembly builds more
+    /// than one disk.
+    pub disk: Option<String>,
     pub emit_report: bool,
 }
 

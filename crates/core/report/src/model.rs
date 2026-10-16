@@ -21,6 +21,9 @@ pub struct RunSummary {
     pub build_target: Option<String>,
     pub build_profile: Option<String>,
     pub primary_image_output: Option<String>,
+    /// Every image the run published, the primary output first, then the
+    /// other disks, filesystem images, archives and transform outputs.
+    pub published_outputs: Vec<String>,
     pub operation_count: usize,
     pub warning_count: usize,
     pub error_count: usize,

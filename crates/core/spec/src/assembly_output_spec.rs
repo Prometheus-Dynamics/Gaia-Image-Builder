@@ -15,7 +15,8 @@ pub struct AssemblyTransformSpec {
     pub src: Option<AssemblyPathTemplate>,
     pub dest: AssemblyPathTemplate,
     pub deterministic: bool,
-    /// Compression level for `zstd` (1-19); `None` uses the tool default.
+    /// Compression level: `zstd` 1-19, `xz` 0-9 (its preset); `None` uses
+    /// the tool default.
     pub level: Option<u32>,
     /// `verity` only: the hash tree's own file. `None` appends the tree to
     /// `dest`, after the data.
@@ -48,6 +49,9 @@ pub enum AssemblyTransformKindSpec {
     CompileDts,
     Gzip,
     Zstd,
+    /// xz, multithreaded and with a fixed block size, so the output is the
+    /// same for any thread count.
+    Xz,
     Copy,
     /// A dm-verity hash tree over a data image (`src`), written to `dest`
     /// with the tree appended or to `hash_dest`.
@@ -60,6 +64,7 @@ impl AssemblyTransformKindSpec {
             Self::CompileDts => "compile-dts",
             Self::Gzip => "gzip",
             Self::Zstd => "zstd",
+            Self::Xz => "xz",
             Self::Copy => "copy",
             Self::Verity => "verity",
         }

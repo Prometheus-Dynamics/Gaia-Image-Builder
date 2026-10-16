@@ -64,13 +64,14 @@ pub fn render_summary(
             image_warnings.push(warning.clone());
         }
     }
-    let image_sizes = image_size_records(&summary_image_paths(
+    let published_outputs = summary_image_paths(
         primary_image_output.as_deref(),
         outcome
             .image_results
             .iter()
             .flat_map(|result| result.disk_images.clone()),
-    ));
+    );
+    let image_sizes = image_size_records(&published_outputs);
     let mut image_notes: Vec<String> = outcome
         .image_results
         .iter()
@@ -85,6 +86,10 @@ pub fn render_summary(
         build_target: spec.metadata.target.clone(),
         build_profile: spec.metadata.profile.clone(),
         primary_image_output,
+        published_outputs: published_outputs
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect(),
         operation_count: plan.operations.len(),
         warning_count: validation.warnings.len()
             + output_hygiene_warnings(spec).len()

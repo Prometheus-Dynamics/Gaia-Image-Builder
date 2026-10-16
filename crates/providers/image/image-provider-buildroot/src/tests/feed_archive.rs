@@ -22,6 +22,7 @@ fn archive_buildroot_output_promotes_single_primary_image() {
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: None,
             archive_name: None,
             emit_report: true,
@@ -71,6 +72,7 @@ fn collect_expected_images_and_archive_promote_raw_board_image() {
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: None,
             archive_name: None,
             emit_report: true,
@@ -134,6 +136,7 @@ fn archive_buildroot_output_compresses_raw_board_image_for_img_xz_output() {
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: None,
             archive_name: None,
             emit_report: true,
@@ -327,6 +330,7 @@ fn image_feed_has_content_is_false_for_bare_image() {
         definition: ImageDefinition::Buildroot(BuildrootImageSpec::default()),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: None,
             archive_name: None,
             emit_report: true,
@@ -348,6 +352,7 @@ fn image_feed_has_content_is_true_when_stage_or_install_entries_exist() {
             stage_services: vec![],
         },
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: None,
             archive_name: None,
             emit_report: true,
@@ -388,6 +393,7 @@ fn archive_buildroot_output_archives_final_raw_image_into_compressed_tar() {
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: None,
             archive_name: None,
             emit_report: true,

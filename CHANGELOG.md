@@ -6,6 +6,12 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Image outputs: the disk of a raw archive, xz transforms, published outputs
+
+- `[image.output] disk = "<id>"` picks the assembly disk a raw disk archive (`archive_name` as `.img`/`.raw`, optionally `.xz` or `.zst`) is built from. It is required when the assembly builds several disks; the error names the option and the disks.
+- A new assembly transform `kind = "xz"` compresses a file with `xz -T0 --block-size=24MiB -c`, with an optional `level` 0-9.
+- The outputs a run writes under the image output dir are published: transform, verity and archive outputs there, and disks written there. They are listed in the run summary (`published_outputs`, `image output:` lines) and `gaia run --export` (or `export_dir`) copies them next to the primary. An uncompressed raw disk other than the primary is listed but not copied.
+
 Changes on `main` since 2.0.0. The workspace version stays `2.0.0` until the
 next release; builds from `main` (some of which briefly reported 2.1.0 to
 2.5.0) are identified by commit. Build files should not require unreleased

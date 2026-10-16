@@ -68,6 +68,7 @@ pub struct RawAssemblyTransformConfig {
     pub src: Option<String>,
     pub dest: String,
     pub deterministic: Option<bool>,
+    /// Compression level: `zstd` 1-19, `xz` 0-9.
     pub level: Option<u32>,
     /// `verity` only: the hash tree's own file; unset appends it to `dest`.
     pub hash_dest: Option<String>,
@@ -104,6 +105,7 @@ pub enum RawAssemblyTransformKind {
     CompileDts,
     Gzip,
     Zstd,
+    Xz,
     Copy,
     Verity,
 }

@@ -2,6 +2,7 @@ mod cli;
 mod commands;
 mod export;
 mod output;
+mod output_images;
 mod output_variants;
 mod run_finish;
 #[cfg(feature = "tui")]

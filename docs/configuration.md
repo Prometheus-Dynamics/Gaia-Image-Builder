@@ -1701,6 +1701,26 @@ for any core count. A common split is zstd for development images and xz
 for releases, for example
 `archive_name = "${build.name}-${build.version}.img.${input.compression}"`.
 
+When the assembly builds more than one disk, a raw disk archive needs
+`disk = "<assembly disk id>"` in `[image.output]` to say which disk it holds
+(the id must be an `[[image.assembly.disks]]` entry, and the archive name must
+be a raw disk image). Without it the run fails and names the disks:
+
+```toml
+[image.output]
+archive_name = "${build.name}-${build.version}.img.xz"
+disk = "sdcard"
+```
+
+The run reports every image it publishes (`image output:` lines and the
+summary's `published_outputs`): the primary, the other disks written under the
+image output dir, published filesystem images, and archives and transform
+outputs written there. `gaia run --export` (see
+[Exporting the image](cli.md#exporting-the-image)) copies the primary and those
+outputs, except uncompressed raw disks other than the primary, which the
+primary archive already holds; compress such a disk with an `xz` transform to
+export it.
+
 Buildroot fields:
 - `defconfig`
 - `external_tree`: one or more `BR2_EXTERNAL` trees, `:`-separated as
@@ -2052,9 +2072,11 @@ Assembly behavior:
 - A `dest` of `.` or ending in `/` is a directory the sources are copied into; any other `dest` is the file a single source is copied to. A `src_glob` that matches several files needs a directory `dest` (otherwise every match would land on one file) and fails without one.
 - `optional = true` skips missing sources without failing the build and records the skip in runtime state.
 - `mode = "0755"` applies Unix file modes on Unix hosts.
-- Transform kinds currently implemented are `copy`, `gzip`, `zstd`, `compile-dts`, and `verity` (see [dm-verity and ext4](#dm-verity-and-ext4)).
+- Transform kinds currently implemented are `copy`, `gzip`, `zstd`, `xz`, `compile-dts`, and `verity` (see [dm-verity and ext4](#dm-verity-and-ext4)).
 - `gzip` uses stable name and timestamp behavior for deterministic output.
 - `zstd` runs `zstd -q -c --no-progress -T0 [-<level>] <src>`, resolving `zstd` from provider host tools first, then host `PATH`; the tool path and version are recorded in assembly state. The optional `level` (1-19) is only accepted on `zstd` transforms and defaults to zstd's own default.
+- `xz` runs `xz -T0 --block-size=24MiB -c [-<level>] <src>`, resolved like `zstd`. Its fixed block size makes the output the same for any core count. The optional `level` (0-9, xz's preset) is only accepted on `xz` and `zstd` transforms. Use it to compress another disk into the output dir, for example `kind = "xz"`, `src = "$assembly.work/slots/<id>.img"`, `dest = "$assembly.out/<id>.img.xz"`.
+- A transform, verity, archive or disk output written under `$assembly.out` is a published output of the run: it is listed in the summary and copied by `--export` (see `image.output.disk` above for raw disks).
 - `compile-dts` resolves `dtc` from provider host tools first, then host `PATH`.
 - `busybox_initramfs` copies the configured BusyBox binary to `bin/busybox` and creates the requested applet symlinks in `bin`. With `include_runtime_libs = true` it also copies the dynamic loader and the shared libraries the binary needs, from the target's sysroot (see the next bullet). Each entry takes:
   - `tree`, `busybox`, `applets`, `include_runtime_libs`: as above.

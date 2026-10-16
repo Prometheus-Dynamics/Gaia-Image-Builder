@@ -502,6 +502,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
         output: ImageOutputSpec {
             collect_dir: raw.image.output.collect_dir,
             archive_name: raw.image.output.archive_name,
+            disk: raw.image.output.disk,
             emit_report: raw.image.output.emit_report,
         },
         assembly: compile_image_assembly(raw.image.assembly),

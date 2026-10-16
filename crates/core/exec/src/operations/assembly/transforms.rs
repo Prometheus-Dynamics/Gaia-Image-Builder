@@ -71,6 +71,14 @@ pub(super) fn execute_assembly_transform(
             args.extend(level.as_deref());
             compress_to_dest(spec, roots, "zstd", &args, src, dest, cancel_check)
         }
+        gaia_spec::AssemblyTransformKindSpec::Xz => {
+            // The block size is fixed, so the output does not depend on the
+            // thread count (the same flags as the raw disk archives).
+            let level = transform.level.map(|level| format!("-{level}"));
+            let mut args = vec!["-T0", "--block-size=24MiB", "-c"];
+            args.extend(level.as_deref());
+            compress_to_dest(spec, roots, "xz", &args, src, dest, cancel_check)
+        }
         gaia_spec::AssemblyTransformKindSpec::Verity => Err(format!(
             "assembly transform 'verity' for '{}' runs as a verity step, not a copy",
             dest.display()

@@ -21,6 +21,7 @@ fn run_buildroot_reports_make_failures() {
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: None,
             archive_name: None,
             emit_report: true,
@@ -993,6 +994,7 @@ fn refresh_buildroot_images_after_feed_overlay_runs_target_post_image_for_non_ta
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: None,
             archive_name: None,
             emit_report: true,
@@ -1049,6 +1051,7 @@ fn refresh_buildroot_images_after_feed_overlay_disables_legacy_before_target_pos
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: None,
             archive_name: None,
             emit_report: true,
@@ -1100,6 +1103,7 @@ fn refresh_buildroot_images_after_feed_overlay_absolutizes_external_tree() {
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: None,
             archive_name: None,
             emit_report: true,
@@ -1368,6 +1372,7 @@ fn refresh_buildroot_images_after_feed_overlay_skips_tar_only_outputs() {
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: None,
             archive_name: None,
             emit_report: true,
@@ -1414,6 +1419,7 @@ fn refresh_buildroot_images_after_feed_overlay_reports_target_post_image_failure
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: None,
             archive_name: None,
             emit_report: true,

@@ -19,6 +19,7 @@ fn collect_expected_images_reports_missing_required_output() {
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: None,
             archive_name: None,
             emit_report: true,
@@ -109,6 +110,7 @@ fn collect_expected_images_copies_board_style_raw_image() {
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: None,
             archive_name: None,
             emit_report: true,
@@ -147,6 +149,7 @@ fn collect_expected_images_copies_raw_board_image_into_collect_dir() {
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: None,
             archive_name: None,
             emit_report: true,
@@ -183,6 +186,7 @@ fn collect_expected_images_copies_required_cpio_image() {
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: None,
             archive_name: None,
             emit_report: true,
@@ -218,6 +222,7 @@ fn collect_expected_images_skips_missing_optional_cpio_image() {
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: None,
             archive_name: None,
             emit_report: true,
@@ -262,6 +267,7 @@ fn collect_expected_images_copies_ext2_and_ext3_images() {
             }),
             feed: gaia_spec::ImageFeedSpec::default(),
             output: ImageOutputSpec {
+                disk: None,
                 collect_dir: None,
                 archive_name: None,
                 emit_report: true,
@@ -304,6 +310,7 @@ fn collect_expected_images_skips_missing_optional_ext2_and_ext3_images() {
             }),
             feed: gaia_spec::ImageFeedSpec::default(),
             output: ImageOutputSpec {
+                disk: None,
                 collect_dir: None,
                 archive_name: None,
                 emit_report: true,
@@ -359,6 +366,7 @@ fn collect_expected_images_copies_flash_and_erofs_images() {
             }),
             feed: gaia_spec::ImageFeedSpec::default(),
             output: ImageOutputSpec {
+                disk: None,
                 collect_dir: None,
                 archive_name: None,
                 emit_report: true,
@@ -403,6 +411,7 @@ fn collect_expected_images_skips_missing_optional_flash_and_erofs_images() {
             }),
             feed: gaia_spec::ImageFeedSpec::default(),
             output: ImageOutputSpec {
+                disk: None,
                 collect_dir: None,
                 archive_name: None,
                 emit_report: true,
@@ -463,6 +472,7 @@ fn collect_expected_images_copies_lower_priority_images() {
             }),
             feed: gaia_spec::ImageFeedSpec::default(),
             output: ImageOutputSpec {
+                disk: None,
                 collect_dir: None,
                 archive_name: None,
                 emit_report: true,
@@ -508,6 +518,7 @@ fn collect_expected_images_skips_missing_optional_lower_priority_images() {
             }),
             feed: gaia_spec::ImageFeedSpec::default(),
             output: ImageOutputSpec {
+                disk: None,
                 collect_dir: None,
                 archive_name: None,
                 emit_report: true,

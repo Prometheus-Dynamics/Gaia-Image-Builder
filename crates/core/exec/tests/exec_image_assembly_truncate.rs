@@ -317,12 +317,14 @@ fn packed_ebrs_keep_every_logical_partition_when_truncated() {
         assert_eq!(parts, expected, "sfdisk --dump");
     }
 
+    // The disk is written outside the image output dir, so it is not one of
+    // the run's published outputs.
     let published = outcome
         .image_results
         .iter()
         .flat_map(|result| result.disk_images.clone())
         .collect::<Vec<_>>();
-    assert_eq!(published, vec![output]);
+    assert!(published.is_empty(), "{published:?}");
 }
 
 #[test]

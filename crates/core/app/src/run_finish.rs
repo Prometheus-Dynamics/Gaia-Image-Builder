@@ -2,11 +2,11 @@
 //! image (`--export`), and on a failed or cancelled run the `resume:` hint
 //! that repeats the invocation.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use gaia_report::ReportBundle;
 
-use crate::export::{ExportedFile, export_images, primary_images, run_stamp};
+use crate::export::{ExportedFile, export_copies, export_images, primary_images, run_stamp};
 use crate::{AppArgs, AppCommand, CommandOutcome};
 
 /// What to print after a `gaia run` outcome.
@@ -98,7 +98,8 @@ fn export_lines(report: &ReportBundle, export_dir: &str) -> (Vec<String>, bool) 
         Ok(sources) => sources,
         Err(error) => return (vec![format!("export failed: {error}")], true),
     };
-    if sources.is_empty() {
+    let others = other_outputs(&report.summary.published_outputs, &sources);
+    if sources.is_empty() && others.is_empty() {
         return (
             vec![format!(
                 "export: nothing to export, no disk image in '{primary}'"
@@ -106,17 +107,53 @@ fn export_lines(report: &ReportBundle, export_dir: &str) -> (Vec<String>, bool) 
             false,
         );
     }
-    let exported = export_images(
-        &sources,
-        Path::new(export_dir),
-        &report.summary.build_name.replace(['/', '\\', ' '], "-"),
-        report.summary.build_version.as_deref(),
-        &run_stamp(),
-    );
-    match exported {
-        Ok(files) => (files.iter().map(exported_line).collect(), false),
-        Err(error) => (vec![format!("export failed: {error}")], true),
+    let mut lines = Vec::new();
+    let mut failed = false;
+    if !sources.is_empty() {
+        let exported = export_images(
+            &sources,
+            Path::new(export_dir),
+            &report.summary.build_name.replace(['/', '\\', ' '], "-"),
+            report.summary.build_version.as_deref(),
+            &run_stamp(),
+        );
+        match exported {
+            Ok(files) => lines.extend(files.iter().map(exported_line)),
+            Err(error) => {
+                lines.push(format!("export failed: {error}"));
+                failed = true;
+            }
+        }
     }
+    if !others.is_empty() && !failed {
+        match export_copies(&others, Path::new(export_dir)) {
+            Ok(files) => lines.extend(files.iter().map(exported_line)),
+            Err(error) => {
+                lines.push(format!("export failed: {error}"));
+                failed = true;
+            }
+        }
+    }
+    (lines, failed)
+}
+
+/// The run's other published outputs, copied next to the primary. An
+/// uncompressed raw disk is left out: the primary archive holds it already,
+/// and it is the largest file of the run.
+fn other_outputs(published: &[String], primary_sources: &[PathBuf]) -> Vec<PathBuf> {
+    published
+        .iter()
+        .map(PathBuf::from)
+        .filter(|path| !primary_sources.contains(path))
+        .filter(|path| {
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default();
+            gaia_spec::raw_disk_archive(name) != Some(gaia_spec::RawDiskArchive::Plain)
+        })
+        .filter(|path| path.is_file())
+        .collect()
 }
 
 fn exported_line(file: &ExportedFile) -> String {
@@ -292,5 +329,34 @@ mod tests {
         assert!(masked);
         assert_eq!(shell_quote("plain-1.2"), "plain-1.2");
         assert_eq!(shell_quote(""), "''");
+    }
+
+    #[test]
+    fn other_outputs_are_the_published_files_but_not_the_primary_or_raw_disks() {
+        let scratch = gaia_testkit::TempDir::new("gaia-run-finish-outputs");
+        let out = scratch.join("out");
+        std::fs::create_dir_all(&out).expect("out dir");
+        let primary = out.join("helios.img.xz");
+        let raw = out.join("sdcard.img");
+        let slot_xz = out.join("slots-sdcard.img.xz");
+        let slot_tar = out.join("slots.slot.tar");
+        for path in [&primary, &raw, &slot_xz, &slot_tar] {
+            std::fs::write(path, b"x").expect("output");
+        }
+        let published = [
+            &primary,
+            &raw,
+            &slot_xz,
+            &slot_tar,
+            &out.join("gone.img.xz"),
+            &out,
+        ]
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>();
+
+        let others = other_outputs(&published, std::slice::from_ref(&primary));
+
+        assert_eq!(others, vec![slot_xz, slot_tar]);
     }
 }

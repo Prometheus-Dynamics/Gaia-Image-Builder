@@ -51,6 +51,7 @@ fn starting_point_tar_rootfs_accepts_image_feed_overlay() {
             stage_services: vec!["runtime-service".into()],
         },
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: Some(root.join("out/images").display().to_string()),
             archive_name: Some("overlay.tar".into()),
             emit_report: true,
@@ -176,6 +177,7 @@ fn starting_point_rejects_overlay_on_opaque_file_rootfs() {
             stage_services: Vec::new(),
         },
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: Some(root.join("out/images").display().to_string()),
             archive_name: Some("opaque.tar".into()),
             emit_report: true,

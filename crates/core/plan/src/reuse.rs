@@ -419,6 +419,8 @@ pub fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
         }
         OperationKind::AssembleImage => {
             format!("{:?}", spec.image.assembly).hash(&mut hasher);
+            // The disk the archive is built from is an input of this step.
+            spec.image.output.disk.hash(&mut hasher);
             operation_output_signature(spec, &OperationKind::BuildImage).hash(&mut hasher);
             crate::reuse_assembly::assembly_input_signature(spec).hash(&mut hasher);
         }

@@ -124,19 +124,37 @@ pub(crate) fn export_images(
     let dir = fs::canonicalize(dir)?;
     let mut exported = Vec::new();
     for source in sources {
-        let source_name = source
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("'{}' has no usable file name", source.display()),
-                )
-            })?;
+        let source_name = source_file_name(source)?;
         let name = export_file_name(source_name, build, version, run_stamp);
         exported.push(place_unique(source, &dir, &name)?);
     }
     Ok(exported)
+}
+
+/// Copies each source into `dir` under its own file name: the other outputs
+/// of a run, whose names the build already chose. Collisions are handled as
+/// in [`export_images`].
+pub(crate) fn export_copies(sources: &[PathBuf], dir: &Path) -> io::Result<Vec<ExportedFile>> {
+    fs::create_dir_all(dir)?;
+    let dir = fs::canonicalize(dir)?;
+    let mut exported = Vec::new();
+    for source in sources {
+        let name = source_file_name(source)?;
+        exported.push(place_unique(source, &dir, name)?);
+    }
+    Ok(exported)
+}
+
+fn source_file_name(source: &Path) -> io::Result<&str> {
+    source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("'{}' has no usable file name", source.display()),
+            )
+        })
 }
 
 /// Copies `source` into `dir` as `name`, or as the first free `-N` variant.
@@ -383,5 +401,29 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(names, ["a.img", "b.img.xz"]);
         assert!(primary_images(&root.join("missing")).is_err());
+    }
+
+    #[test]
+    fn export_copies_keep_each_name_and_never_overwrite_different_content() {
+        let scratch = gaia_testkit::TempDir::new("gaia-export-copies");
+        let src = scratch.join("src");
+        let dir = scratch.join("exports");
+        fs::create_dir_all(&src).expect("src dir");
+        let slot = src.join("photonvision-2027.0.0-alpha-2-libcamera-02b14375.slot.tar");
+        let other = src.join("slots-sdcard.img.xz");
+        fs::write(&slot, b"bundle").expect("bundle");
+        fs::write(&other, b"disk").expect("disk");
+
+        let exported = export_copies(&[slot.clone(), other.clone()], &dir).expect("copies");
+
+        assert_eq!(exported[0].path.file_name(), slot.file_name());
+        assert_eq!(exported[1].path.file_name(), other.file_name());
+        assert_eq!(exported[1].bytes, 4);
+        // A name taken by different content gets a suffix; the same content is reused.
+        fs::write(&other, b"changed").expect("changed");
+        let again = export_copies(std::slice::from_ref(&other), &dir).expect("again");
+        assert_eq!(again[0].path.file_name().unwrap(), "slots-sdcard-1.img.xz");
+        let reused = export_copies(std::slice::from_ref(&slot), &dir).expect("reused");
+        assert_eq!(reused[0].path, exported[0].path);
     }
 }

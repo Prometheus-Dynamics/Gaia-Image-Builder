@@ -34,8 +34,13 @@ pub(super) struct StepRun<'a> {
     pub(super) disk_outputs: Vec<PathBuf>,
     /// Where each built disk is published, in the same order.
     pub(super) disk_published: Vec<PathBuf>,
+    /// The id of each built disk, in the same order as `disk_outputs`.
+    pub(super) disk_ids: Vec<String>,
     /// Per disk: the on-disk path it is copied to when built in RAM.
     pub(super) disk_publish: Vec<PathBuf>,
+    /// The transform, verity and archive outputs written under the image
+    /// output dir (`$assembly.out`): final outputs of the run.
+    pub(super) published_outputs: Vec<PathBuf>,
 }
 
 /// The steps in the order they must run, with every step's resolved paths.
@@ -111,7 +116,17 @@ impl<'a> StepRun<'a> {
             filesystem_published: Vec::new(),
             disk_outputs: Vec::new(),
             disk_published: Vec::new(),
+            disk_ids: Vec::new(),
             disk_publish: Vec::new(),
+            published_outputs: Vec::new(),
+        }
+    }
+
+    /// Records `path` as a final output when the run writes it under the
+    /// image output dir.
+    fn note_published_output(&mut self, path: &Path) {
+        if path.starts_with(&self.roots.assembly_out) {
+            self.published_outputs.push(path.to_path_buf());
         }
     }
 
@@ -466,7 +481,9 @@ impl<'a> StepRun<'a> {
         )?;
         if matches!(
             transform.kind,
-            gaia_spec::AssemblyTransformKindSpec::Gzip | gaia_spec::AssemblyTransformKindSpec::Zstd
+            gaia_spec::AssemblyTransformKindSpec::Gzip
+                | gaia_spec::AssemblyTransformKindSpec::Zstd
+                | gaia_spec::AssemblyTransformKindSpec::Xz
         ) {
             let input_bytes = std_fs::metadata(&summary.src)
                 .ok()
@@ -479,6 +496,7 @@ impl<'a> StepRun<'a> {
             ));
         }
         tracing::Span::current().record("output_path", summary.dest.display().to_string());
+        self.note_published_output(&summary.dest);
         self.transform_count += 1;
         let key = AssemblyStateKey::new("transform", self.transform_count);
         let state = &mut self.state;
@@ -515,6 +533,7 @@ impl<'a> StepRun<'a> {
         let output =
             execute_assembly_verity(self.spec, self.roots, transform, self.cancel_check.clone())?;
         tracing::Span::current().record("output_path", output.data.display().to_string());
+        self.note_published_output(&output.data);
         self.transform_count += 1;
         let key = AssemblyStateKey::new("transform", self.transform_count);
         let verity_key = AssemblyStateKey::new("verity", self.transform_count);
@@ -635,6 +654,7 @@ impl<'a> StepRun<'a> {
         tracing::Span::current().record("output_path", summary.output.display().to_string());
         self.disk_count += 1;
         self.disk_outputs.push(source);
+        self.disk_ids.push(disk.id.clone());
         self.disk_published.push(summary.output.clone());
         record_disk_state(&mut self.state, self.disk_count, disk, &summary);
         self.messages.push(format!(
@@ -663,6 +683,7 @@ impl<'a> StepRun<'a> {
             Some(member_bytes),
             clock.elapsed(),
         ));
+        self.note_published_output(&summary.output);
         self.archive_count += 1;
         record_archive_state(&mut self.state, self.archive_count, archive, &summary);
         self.messages.push(format!(

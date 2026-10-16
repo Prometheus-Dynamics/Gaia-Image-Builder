@@ -1,11 +1,10 @@
 //! Human-readable command output: outcome printing and overview lines.
 
+use crate::output_images::print_image_outputs;
 use crate::output_variants::print_variants;
 use crate::{CommandOutcome, commands};
 use gaia_report::{mask_pairs, mask_value};
 use gaia_spec::ResolvedBuildSpec;
-use std::fs;
-use std::path::Path;
 use std::time::Duration;
 
 /// `gaia plan` estimate lines: total work and the critical path, from the
@@ -406,16 +405,7 @@ pub(crate) fn print_outcome(outcome: &CommandOutcome) {
             if let Some(profile) = &report.summary.build_profile {
                 println!("build profile: {profile}");
             }
-            if let Some(primary_image_output) = &report.summary.primary_image_output {
-                println!("primary image output: {primary_image_output}");
-                if let Ok(bytes) = fs::metadata(primary_image_output).map(|metadata| metadata.len())
-                {
-                    println!("primary image size: {} bytes", bytes);
-                }
-                if let Ok(sha256) = sha256_file(Path::new(primary_image_output)) {
-                    println!("primary image sha256: {sha256}");
-                }
-            }
+            print_image_outputs(&report.summary);
             println!("run time: {}", format_elapsed(*run_duration));
             if !report.provenance.selected_inputs.is_empty() {
                 println!(
@@ -593,10 +583,6 @@ fn format_elapsed(duration: Duration) -> String {
     } else {
         format!("{minutes:02}:{secs:02}")
     }
-}
-
-fn sha256_file(path: &Path) -> std::io::Result<String> {
-    crate::export::sha256_file(path)
 }
 
 pub fn backend_overview_lines(spec: &ResolvedBuildSpec) -> Vec<String> {

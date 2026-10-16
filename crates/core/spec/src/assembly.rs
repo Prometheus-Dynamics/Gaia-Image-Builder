@@ -364,6 +364,7 @@ mod tests {
         };
         spec.image = kind;
         spec.image.output = ImageOutputSpec {
+            disk: None,
             collect_dir: Some("/workspace/out/images".into()),
             archive_name: None,
             emit_report: true,

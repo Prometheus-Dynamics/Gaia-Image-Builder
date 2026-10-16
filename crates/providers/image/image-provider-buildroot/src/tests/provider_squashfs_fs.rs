@@ -58,6 +58,7 @@ fn execute_image_refuses_implicit_buildroot_fallback() {
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: Some(collect_dir.display().to_string()),
             archive_name: Some("primary.tar".into()),
             emit_report: true,
@@ -124,6 +125,7 @@ fn prepare_operation_reruns_even_when_expected_buildroot_images_exist() {
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: Some(collect_dir.display().to_string()),
             archive_name: None,
             emit_report: false,
@@ -202,6 +204,7 @@ fn build_operation_applies_config_overrides_when_expected_images_exist() {
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: Some(collect_dir.display().to_string()),
             archive_name: None,
             emit_report: false,
@@ -269,6 +272,7 @@ fn prepare_operation_does_not_reuse_partial_target_tree() {
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: Some(collect_dir.display().to_string()),
             archive_name: None,
             emit_report: false,
@@ -332,6 +336,7 @@ fn build_operation_reruns_when_assembly_provider_input_is_missing() {
         ..BuildrootImageSpec::default()
     }));
     image.output = ImageOutputSpec {
+        disk: None,
         collect_dir: Some(collect_dir.display().to_string()),
         archive_name: None,
         emit_report: false,

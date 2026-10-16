@@ -52,6 +52,7 @@ fn starting_point_raw_image_rejects_read_only_overlay_before_root_check() {
             stage_services: Vec::new(),
         },
         output: ImageOutputSpec {
+            disk: None,
             collect_dir: Some(root.join("out/images").display().to_string()),
             archive_name: Some("base-mutated.img".into()),
             emit_report: true,

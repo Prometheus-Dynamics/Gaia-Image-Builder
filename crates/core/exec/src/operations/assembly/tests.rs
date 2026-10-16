@@ -20,6 +20,7 @@ fn test_spec(root: &Path) -> ResolvedBuildSpec {
         kind: WorkspacePathKindSpec::Host,
     }];
     spec.image.output = ImageOutputSpec {
+        disk: None,
         collect_dir: Some(root.join("out/images").display().to_string()),
         archive_name: None,
         emit_report: true,
@@ -396,6 +397,7 @@ fn buildroot_assembly_roots_expose_images_target_host_and_staging() {
     fs::create_dir_all(&root).expect("test root");
     let mut spec = test_spec(&root);
     spec.image.output = ImageOutputSpec {
+        disk: None,
         collect_dir: Some(root.join("publish").display().to_string()),
         archive_name: None,
         emit_report: true,
@@ -579,10 +581,10 @@ fn assembly_disk_archives_log_a_step_time_and_sizes() {
         fs::write(&source, "raw disk ".repeat(4096)).expect("disk");
 
         let mut messages = Vec::new();
-        let summary =
-            archive_assembly_disk_output(&spec, std::slice::from_ref(&source), None, &mut messages)
-                .expect("archive should succeed")
-                .expect("archive summary");
+        let built = [("sdcard".to_string(), source.clone())];
+        let summary = archive_assembly_disk_output(&spec, &built, None, &mut messages)
+            .expect("archive should succeed")
+            .expect("archive summary");
         assert_eq!(summary.output, images.join(archive_name));
 
         let step = format!("archive {archive_name} ({label})");

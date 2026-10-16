@@ -307,6 +307,7 @@ fn compile_assembly_transform_kind(raw: RawAssemblyTransformKind) -> AssemblyTra
         RawAssemblyTransformKind::CompileDts => AssemblyTransformKindSpec::CompileDts,
         RawAssemblyTransformKind::Gzip => AssemblyTransformKindSpec::Gzip,
         RawAssemblyTransformKind::Zstd => AssemblyTransformKindSpec::Zstd,
+        RawAssemblyTransformKind::Xz => AssemblyTransformKindSpec::Xz,
         RawAssemblyTransformKind::Copy => AssemblyTransformKindSpec::Copy,
         RawAssemblyTransformKind::Verity => AssemblyTransformKindSpec::Verity,
     }

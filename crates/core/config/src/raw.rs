@@ -848,6 +848,8 @@ pub enum RawStartingPointOutputMode {
 pub struct RawImageOutputConfig {
     pub collect_dir: Option<String>,
     pub archive_name: Option<String>,
+    /// The assembly disk the raw disk archive is built from (see the spec).
+    pub disk: Option<String>,
     /// Where `gaia run` copies the primary image after a successful run.
     pub export_dir: Option<String>,
     pub emit_report: bool,
