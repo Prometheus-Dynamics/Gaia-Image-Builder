@@ -1076,6 +1076,18 @@ Set the old choice to `n` explicitly so Kconfig does not keep it. Switching
 compression does not clean the Buildroot output tree; only the root filesystem
 image is regenerated.
 
+#### EROFS lzma
+
+With `BR2_TARGET_ROOTFS_EROFS_LZMA=y` Buildroot also runs `lzma -9` over
+`rootfs.erofs` (its generic image compression is keyed on the same symbol),
+writing a second image larger than the first and costing about 35 s per build.
+Gaia rewrites that choice to the `custom` one with `lzma,<level>` (the level
+from the config, default 6) before `olddefconfig`, so `mkfs.erofs` gets the
+same `-zlzma,<level>` argument and the extra file is not written. The settings
+step reports `erofs: lzma via custom compression ...`. Other filesystems are
+not changed: ext2, cpio, tar and ubifs keep Buildroot's generic compression on
+purpose.
+
 Retry strategies:
 - `fixed`
 - `exponential`

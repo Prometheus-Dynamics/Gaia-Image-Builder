@@ -6,6 +6,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Buildroot EROFS: lzma without the extra image
+
+- With `BR2_TARGET_ROOTFS_EROFS_LZMA=y`, Buildroot's generic image compression (keyed on the same symbol) also ran `lzma -9` over `rootfs.erofs`, writing a second image larger than the first and costing about 35 s per build. The settings step now rewrites that choice to `custom` with `BR2_TARGET_ROOTFS_EROFS_COMPRESSION_ALGORITHMS="lzma,<level>"`, which gives `mkfs.erofs` the same `-zlzma,<level>` argument, and reports it. Other filesystems are unchanged.
+
 ### Reuse: floating git refs resolved at plan time
 
 - A git source that tracks a floating branch or `HEAD` (`refresh = "auto"`, `pin = "floating"`) was re-materialized on every run, and so were the artifacts built from it (about 3 minutes each for HeliOS), even when the remote's branch had not moved. Planning now resolves the ref with `git ls-remote` (once per ref per plan, in parallel, 30 second limit) and compares it with the commit the last materialization recorded. An unchanged ref keeps the source and its dependents, and the plan reports `reused from floating ref 'main' still at <short commit>`. A moved ref materializes the source and rebuilds its dependents as before. An unresolvable ref (offline, unreachable, missing branch) still materializes, with the reason in the plan.

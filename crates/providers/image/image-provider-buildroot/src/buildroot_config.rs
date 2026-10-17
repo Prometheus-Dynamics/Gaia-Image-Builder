@@ -65,10 +65,15 @@ pub(crate) fn apply_buildroot_config_settings(
         )
     })?;
     let normalized_overrides = normalize_buildroot_config_overrides(spec, overrides);
-    let merged = merge_buildroot_config_assignments(
+    let mut merged = merge_buildroot_config_assignments(
         &merge_buildroot_config_assignments(&original, &normalized_overrides),
         &cache_overrides,
     );
+    let mut notes = Vec::new();
+    if let Some(custom) = erofs_lzma_as_custom_compression(&merged) {
+        merged = custom;
+        notes.push(EROFS_LZMA_NOTE.to_string());
+    }
     if overrides.is_empty() && merged == original {
         return Ok(warnings);
     }
@@ -105,8 +110,61 @@ pub(crate) fn apply_buildroot_config_settings(
                 .to_string(),
         );
     }
+    messages.extend(notes);
     messages.extend(warnings);
     Ok(messages)
+}
+
+/// The note the settings step reports when [`erofs_lzma_as_custom_compression`]
+/// rewrote the config.
+pub(crate) const EROFS_LZMA_NOTE: &str = "erofs: lzma via custom compression to avoid Buildroot's \
+     extra rootfs.erofs.lzma (~35 s)";
+
+/// Rewrites EROFS's `lzma` choice to the `custom` choice with `lzma,<level>`.
+///
+/// Buildroot keys its generic image compression (`fs/common.mk`) on
+/// `BR2_TARGET_ROOTFS_<FS>_LZMA`, and for EROFS that symbol is also the
+/// in-filesystem compressor. So the `lzma` choice makes Buildroot run
+/// `lzma -9` over `rootfs.erofs` as well, writing a second image larger than
+/// the first. The `custom` choice passes the same `-zlzma,<level>` to
+/// `mkfs.erofs` (`fs/erofs/erofs.mk` builds the same argument from either),
+/// with no generic compression. Returns `None` unless the config has EROFS
+/// and its `lzma` choice.
+pub(crate) fn erofs_lzma_as_custom_compression(config: &str) -> Option<String> {
+    let has = |line: &str| config.lines().any(|candidate| candidate == line);
+    if !has("BR2_TARGET_ROOTFS_EROFS=y") || !has("BR2_TARGET_ROOTFS_EROFS_LZMA=y") {
+        return None;
+    }
+    // Kconfig's default level when the config does not name one.
+    let level = config
+        .lines()
+        .rev()
+        .find_map(|line| line.strip_prefix("BR2_TARGET_ROOTFS_EROFS_LZMA_LEVEL="))
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.chars().all(|c| c.is_ascii_digit()))
+        .unwrap_or("6");
+    let mut rewritten = String::with_capacity(config.len() + 96);
+    for line in config.lines() {
+        if line == "BR2_TARGET_ROOTFS_EROFS_LZMA=y" {
+            rewritten.push_str("# BR2_TARGET_ROOTFS_EROFS_LZMA is not set\n");
+        } else {
+            rewritten.push_str(line);
+            rewritten.push('\n');
+        }
+    }
+    Some(merge_buildroot_config_assignments(
+        &rewritten,
+        &[
+            (
+                "BR2_TARGET_ROOTFS_EROFS_CUSTOM_COMPRESSION".to_string(),
+                "y".to_string(),
+            ),
+            (
+                "BR2_TARGET_ROOTFS_EROFS_COMPRESSION_ALGORITHMS".to_string(),
+                format!("\"lzma,{level}\""),
+            ),
+        ],
+    ))
 }
 
 pub(crate) fn merge_buildroot_config_assignments(
