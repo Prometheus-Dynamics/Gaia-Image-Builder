@@ -9,6 +9,7 @@ mod reuse_assembly_archives;
 mod reuse_build_inputs;
 mod reuse_details;
 mod reuse_explain;
+mod reuse_floating;
 mod reuse_imports;
 mod reuse_toolchain;
 mod runtime_libs;
@@ -98,6 +99,8 @@ pub fn plan_build_with_rebuilds(
         reuse_state = reuse_state.is_some(),
     );
     let _guard = span.enter();
+    // Resolves floating git refs once for the whole plan, in parallel.
+    let _floating_refs = reuse_floating::FloatingRefScope::begin(spec);
     let resolve = PlannedOperation::new(OperationId::resolve(), OperationKind::ResolveBuild)
         .with_parallelism(OperationParallelism::exclusive(
             OperationParallelismDomain::Global,

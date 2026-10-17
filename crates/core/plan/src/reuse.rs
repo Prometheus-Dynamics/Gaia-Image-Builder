@@ -5,6 +5,7 @@ use crate::reuse_explain::{
     describe_rebuilding, fingerprint_change_message, rebuilding_dependencies,
     source_tree_content_signature,
 };
+use crate::reuse_floating::FloatingCheck;
 use crate::{
     ExecutionPlan, OperationId, OperationKind, OperationOptionality, OperationReuse,
     PlannedOperation, REBUILD_REQUESTED, RebuildRequest, ReuseState,
@@ -194,8 +195,14 @@ pub(crate) fn apply_reuse_state(
             }
             decisions.insert(operation_id, false);
         } else {
+            let source = match &operation.kind {
+                OperationKind::MaterializeSource { source_id } => {
+                    floating_reuse_note(spec, source_id.as_str())
+                }
+                _ => None,
+            };
             operation.reuse = OperationReuse::Reuse {
-                source: "state-file".into(),
+                source: source.unwrap_or_else(|| "state-file".into()),
             };
             decisions.insert(operation_id, true);
         }
@@ -247,6 +254,18 @@ fn evaluation_order(operations: &[PlannedOperation]) -> Vec<usize> {
     order
 }
 
+/// Why a git source reused by a floating ref that did not move is reused.
+fn floating_reuse_note(spec: &ResolvedBuildSpec, source_id: &str) -> Option<String> {
+    let source = spec
+        .sources
+        .iter()
+        .find(|source| source.id.as_str() == source_id)?;
+    let SourceDefinition::Git(git) = &source.definition else {
+        return None;
+    };
+    crate::reuse_floating::reuse_note(spec, source_id, git)
+}
+
 fn source_refresh_rebuild_reason(
     spec: &ResolvedBuildSpec,
     kind: &OperationKind,
@@ -278,6 +297,43 @@ fn source_refresh_rebuild_reason(
                 source.id.as_str()
             ),
         ));
+    }
+    // A floating git ref is compared with the commit last materialized. An
+    // unchanged ref keeps the checkout; a moved or unresolvable one
+    // materializes, and an unresolvable one says why.
+    if let SourceDefinition::Git(git) = &source.definition
+        && refresh_policy == SourceRefreshPolicySpec::Auto
+        && pin_policy == SourcePinPolicySpec::Floating
+    {
+        match crate::reuse_floating::check(spec, source.id.as_str(), git) {
+            FloatingCheck::NotApplicable => {}
+            FloatingCheck::Unchanged { .. } => return None,
+            FloatingCheck::Moved { label, from, to } => {
+                let message = match from {
+                    Some(from) => format!(
+                        "source '{}' will materialize because {label} moved from {} to {}",
+                        source.id.as_str(),
+                        crate::reuse_floating::short(&from),
+                        crate::reuse_floating::short(&to),
+                    ),
+                    None => format!(
+                        "source '{}' will materialize because {label} is at {} and no commit is recorded for it",
+                        source.id.as_str(),
+                        crate::reuse_floating::short(&to),
+                    ),
+                };
+                return Some(("remote_floating_source", message));
+            }
+            FloatingCheck::Unresolved { label, error } => {
+                return Some((
+                    "remote_floating_source",
+                    format!(
+                        "source '{}' will materialize because {label} could not be resolved ({error})",
+                        source.id.as_str(),
+                    ),
+                ));
+            }
+        }
     }
     if refresh_policy == SourceRefreshPolicySpec::Auto
         && remote_git
@@ -450,7 +506,7 @@ pub(crate) fn source_backend_signature(
         SourceDefinition::Git(git) => format!(
             "{}|{}",
             command_signature("git", ["--version"]),
-            git_source_state_signature(git)
+            git_source_state_signature(spec, git)
         ),
         SourceDefinition::Archive(archive) => format!(
             "{}|{}",
@@ -633,11 +689,18 @@ pub(crate) fn resolve_workspace_path(spec: &ResolvedBuildSpec, value: &str) -> P
     })
 }
 
-fn git_source_state_signature(git: &gaia_spec::GitSourceSpec) -> String {
+fn git_source_state_signature(spec: &ResolvedBuildSpec, git: &gaia_spec::GitSourceSpec) -> String {
     if let Some(locked_commit) = &git.locked_commit {
         // The checkout is fully determined by the locked commit; new commits
         // in a local repository do not change it.
         return format!("locked-git:{locked_commit}");
+    }
+    // A floating ref is identified by the commit it resolves to now, so a
+    // moved branch changes the fingerprint and rebuilds what consumed it.
+    if crate::reuse_floating::applies(spec, git)
+        && let Ok(commit) = crate::reuse_floating::resolved_commit(git)
+    {
+        return format!("floating-git:{commit}");
     }
     if let Some(local_repo) = local_repo_path(&git.repo) {
         let mut command = Command::new("git");
@@ -658,7 +721,7 @@ fn git_source_state_signature(git: &gaia_spec::GitSourceSpec) -> String {
     "remote-git".into()
 }
 
-fn local_repo_path(repo: &str) -> Option<PathBuf> {
+pub(crate) fn local_repo_path(repo: &str) -> Option<PathBuf> {
     let file_repo = repo.strip_prefix("file://").map(PathBuf::from);
     let direct = PathBuf::from(repo);
     file_repo.or_else(|| direct.exists().then_some(direct))

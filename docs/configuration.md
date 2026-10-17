@@ -1248,6 +1248,28 @@ Policies:
 each machine keeps whatever commit it fetched first. To pin git sources to
 the same commit everywhere, use a lockfile.
 
+A git source with `refresh = "auto"`, `pin = "floating"` and a `branch` (or no
+ref, for `HEAD`) is checked at plan time instead of being re-materialized on
+every run. Gaia runs `git ls-remote` for the ref, once per ref per plan (refs
+are resolved in parallel and each call is limited to 30 seconds), and compares
+the commit with the one its last materialization recorded:
+
+- The ref still points at that commit: the source is reused, and so is what
+  was built from it. The plan reports it as `reused from floating ref 'main'
+  still at <short commit>`.
+- The ref moved: the source materializes and its dependents rebuild. The new
+  commit is part of the source fingerprint, so a moved ref also invalidates
+  reuse on its own.
+- The ref cannot be resolved (offline, unreachable, or the branch is missing):
+  the source materializes, and the plan says why.
+
+The check needs `[providers.git] allow_remote_resolution = true` for a remote
+repository; a local repository is checked either way. A source is not checked
+when it names a `tag` or `rev`, pins with `pin = "locked"` or a lockfile, uses
+`git_backend = "execution"` with docker, or refreshes with `refresh = "always"`
+(which always materializes). A build upgraded to this version materializes each
+such source once, because its fingerprint now includes the commit.
+
 #### Git source credentials
 
 Git sources run their git commands (mirror clone and fetch, `ls-remote`,

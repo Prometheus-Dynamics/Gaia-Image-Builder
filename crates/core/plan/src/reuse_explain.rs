@@ -154,7 +154,7 @@ pub(crate) fn source_tree_content_signature(
         .map(|digest| format!("tree:{digest}"))
 }
 
-fn source_state(
+pub(crate) fn source_state(
     spec: &ResolvedBuildSpec,
     source_id: &str,
 ) -> Option<std::collections::BTreeMap<String, String>> {

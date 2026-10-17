@@ -6,6 +6,11 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Reuse: floating git refs resolved at plan time
+
+- A git source that tracks a floating branch or `HEAD` (`refresh = "auto"`, `pin = "floating"`) was re-materialized on every run, and so were the artifacts built from it (about 3 minutes each for HeliOS), even when the remote's branch had not moved. Planning now resolves the ref with `git ls-remote` (once per ref per plan, in parallel, 30 second limit) and compares it with the commit the last materialization recorded. An unchanged ref keeps the source and its dependents, and the plan reports `reused from floating ref 'main' still at <short commit>`. A moved ref materializes the source and rebuilds its dependents as before. An unresolvable ref (offline, unreachable, missing branch) still materializes, with the reason in the plan.
+- The resolved commit is part of a floating source's fingerprint. A build upgraded to this version materializes each such source once.
+
 ### Inputs: tokens in input values
 
 - An input's value (its declared `default`, or a `--set input.<name>=` value) is interpolated like the rest of the build, so `default = "${project.commit_short}"` or `"${build.date}"` resolves instead of being reported as `interpolation_unresolved [input.<name>]`. A build file in a linked git worktree gets that worktree's `HEAD` for `${project.commit}`.

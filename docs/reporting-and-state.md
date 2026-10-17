@@ -174,6 +174,10 @@ Reuse is invalidated when:
 - output signatures change
 - outputs disappear
 - a dependency's content differs from what the operation last consumed
+- a git source's floating branch or `HEAD` moved to another commit since the
+  last materialization. Gaia resolves the ref at plan time (see
+  [Sources](configuration.md#sources)), so a branch that did not move keeps its
+  source and everything built from it
 
 State is saved after every run, including failed, cancelled, and `--only`
 runs. Operations that finished are recorded; entries for operations the run
