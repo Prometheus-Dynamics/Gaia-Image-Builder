@@ -11,6 +11,10 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - A git source that tracks a floating branch or `HEAD` (`refresh = "auto"`, `pin = "floating"`) was re-materialized on every run, and so were the artifacts built from it (about 3 minutes each for HeliOS), even when the remote's branch had not moved. Planning now resolves the ref with `git ls-remote` (once per ref per plan, in parallel, 30 second limit) and compares it with the commit the last materialization recorded. An unchanged ref keeps the source and its dependents, and the plan reports `reused from floating ref 'main' still at <short commit>`. A moved ref materializes the source and rebuilds its dependents as before. An unresolvable ref (offline, unreachable, missing branch) still materializes, with the reason in the plan.
 - The resolved commit is part of a floating source's fingerprint. A build upgraded to this version materializes each such source once.
 
+### Content digests: no fsync per write
+
+- Writing the `.gaia-content-digests` manifest no longer calls `fsync`. Every assembly output published (a `compile-dts` `.dtbo`, a transform's output, the files of an assembly step) rewrote the manifest and waited for the device to flush everything written so far, which took 0.1 to 0.5 s on a loaded disk and could take seconds on a busy one, while `dtc` itself ran in milliseconds. The manifest is still written to a temporary file and renamed into place, so a crash leaves the old or the new manifest, and a lost entry only costs one re-hash.
+
 ### Inputs: tokens in input values
 
 - An input's value (its declared `default`, or a `--set input.<name>=` value) is interpolated like the rest of the build, so `default = "${project.commit_short}"` or `"${build.date}"` resolves instead of being reported as `interpolation_unresolved [input.<name>]`. A build file in a linked git worktree gets that worktree's `HEAD` for `${project.commit}`.

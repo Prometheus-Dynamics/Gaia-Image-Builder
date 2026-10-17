@@ -231,10 +231,13 @@ fn write_entries(base: &Path, entries: &[Entry]) -> io::Result<()> {
             entry.relative, entry.size, entry.mtime_ns, entry.digest
         ));
     }
+    // No fsync: the manifest is a cache, and an fsync waits for the device to
+    // flush everything written so far (seconds on a busy disk) for each
+    // assembly output published. The rename is still atomic, so a crash leaves
+    // the old or the new manifest; a lost entry only costs one re-hash.
     let written = (|| -> io::Result<()> {
         let mut file = fs::File::create(&temp)?;
-        file.write_all(text.as_bytes())?;
-        file.sync_all()
+        file.write_all(text.as_bytes())
     })();
     if let Err(error) = written {
         let _ = fs::remove_file(&temp);

@@ -35,6 +35,31 @@ fn command_description_captures_program_args_and_cwd() {
     assert_eq!(description.cwd.as_deref(), Some("/tmp"));
 }
 
+/// Every assembly transform and tool probe goes through this runner, so a
+/// fast command must not pay a fixed delay (a poll interval, a flush, a sleep)
+/// on top of its own run time.
+#[cfg(unix)]
+#[test]
+fn run_command_returns_promptly_for_fast_command() {
+    for _ in 0..3 {
+        let started = Instant::now();
+        let result = run_command_with_timeout(
+            &mut Command::new("true"),
+            Duration::from_secs(10),
+            "fast-test",
+            None,
+            None,
+        )
+        .expect("true runs");
+        let elapsed = started.elapsed();
+        assert!(result.output.status.success());
+        assert!(
+            elapsed < Duration::from_millis(200),
+            "a fast command took {elapsed:?} through the process runner"
+        );
+    }
+}
+
 #[test]
 fn run_command_reports_cancellation() {
     let cancelled = Arc::new(AtomicBool::new(false));
