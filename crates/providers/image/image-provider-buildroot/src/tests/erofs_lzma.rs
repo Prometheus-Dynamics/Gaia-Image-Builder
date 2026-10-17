@@ -142,3 +142,62 @@ fn settings_step_leaves_other_configs_alone() {
         original
     );
 }
+
+/// The override check must not report Gaia's own rewrite: a requested
+/// `EROFS_LZMA=y` with its level is honored by the custom choice with the
+/// same `lzma,<level>`, and still fails when the level differs.
+#[test]
+fn override_check_accepts_the_rewrite_of_a_requested_erofs_lzma() {
+    let requested_config = "\
+BR2_TARGET_ROOTFS_EROFS=y
+BR2_TARGET_ROOTFS_EROFS_LZMA=y
+BR2_TARGET_ROOTFS_EROFS_LZMA_LEVEL=6
+";
+    // What olddefconfig leaves after the rewrite: the level symbol depends on
+    // the lzma choice, so it disappears.
+    let final_config = "\
+BR2_TARGET_ROOTFS_EROFS=y
+# BR2_TARGET_ROOTFS_EROFS_LZMA is not set
+BR2_TARGET_ROOTFS_EROFS_CUSTOM_COMPRESSION=y
+BR2_TARGET_ROOTFS_EROFS_COMPRESSION_ALGORITHMS=\"lzma,6\"
+";
+    assert!(erofs_lzma_as_custom_compression(requested_config).is_some());
+    let requested = vec![
+        ("BR2_TARGET_ROOTFS_EROFS_LZMA".to_string(), "y".to_string()),
+        (
+            "BR2_TARGET_ROOTFS_EROFS_LZMA_LEVEL".to_string(),
+            "6".to_string(),
+        ),
+    ];
+    let mismatches = find_override_mismatches(final_config, &requested);
+    assert_eq!(
+        mismatches.len(),
+        2,
+        "the raw comparison sees both as dropped"
+    );
+    assert!(
+        mismatches
+            .iter()
+            .all(|mismatch| honored_by_erofs_lzma_rewrite(final_config, mismatch)),
+        "{mismatches:?}"
+    );
+
+    // A different level is a real mismatch.
+    let other_level = vec![(
+        "BR2_TARGET_ROOTFS_EROFS_LZMA_LEVEL".to_string(),
+        "9".to_string(),
+    )];
+    let mismatches = find_override_mismatches(final_config, &other_level);
+    assert_eq!(mismatches.len(), 1);
+    assert!(!honored_by_erofs_lzma_rewrite(final_config, &mismatches[0]));
+
+    // Without the custom choice (Kconfig dropped EROFS lzma for real), it
+    // stays a mismatch.
+    let dropped = "BR2_TARGET_ROOTFS_EROFS=y\n# BR2_TARGET_ROOTFS_EROFS_LZMA is not set\n";
+    let mismatches = find_override_mismatches(dropped, &requested);
+    assert!(
+        mismatches
+            .iter()
+            .all(|mismatch| !honored_by_erofs_lzma_rewrite(dropped, mismatch))
+    );
+}

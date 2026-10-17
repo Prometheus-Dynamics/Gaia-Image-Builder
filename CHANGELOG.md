@@ -8,7 +8,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Buildroot EROFS: lzma without the extra image
 
-- With `BR2_TARGET_ROOTFS_EROFS_LZMA=y`, Buildroot's generic image compression (keyed on the same symbol) also ran `lzma -9` over `rootfs.erofs`, writing a second image larger than the first and costing about 35 s per build. The settings step now rewrites that choice to `custom` with `BR2_TARGET_ROOTFS_EROFS_COMPRESSION_ALGORITHMS="lzma,<level>"`, which gives `mkfs.erofs` the same `-zlzma,<level>` argument, and reports it. Other filesystems are unchanged.
+- With `BR2_TARGET_ROOTFS_EROFS_LZMA=y`, Buildroot's generic image compression (keyed on the same symbol) also ran `lzma -9` over `rootfs.erofs`, writing a second image larger than the first and costing about 35 s per build. The settings step now rewrites that choice to `custom` with `BR2_TARGET_ROOTFS_EROFS_COMPRESSION_ALGORITHMS="lzma,<level>"`, which gives `mkfs.erofs` the same `-zlzma,<level>` argument, and reports it. Other filesystems are unchanged. The `config_overrides` check accepts that rewrite: a requested `BR2_TARGET_ROOTFS_EROFS_LZMA=y` and its `_LZMA_LEVEL` count as honored when the final `.config` has the custom choice with the same `lzma,<level>` (517a311 reported them as dropped and failed the build).
 
 ### Reuse: floating git refs resolved at plan time
 

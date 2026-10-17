@@ -64,7 +64,10 @@ pub(crate) fn check_buildroot_config_overrides(
         return Ok(Vec::new());
     };
     let requested = normalize_buildroot_config_overrides(spec, overrides);
-    let mismatches = find_override_mismatches(&config, &requested);
+    let mismatches = find_override_mismatches(&config, &requested)
+        .into_iter()
+        .filter(|mismatch| !honored_by_erofs_lzma_rewrite(&config, mismatch))
+        .collect::<Vec<_>>();
     if mismatches.is_empty() {
         return Ok(vec![format!(
             "verified {} buildroot config_overrides entr{} against the final .config",
@@ -227,5 +230,33 @@ fn parse_kconfig_number(value: &str) -> Option<i128> {
     {
         Some(hex) => i128::from_str_radix(hex, 16).ok(),
         None => value.parse().ok(),
+    }
+}
+
+/// Whether a mismatch is Gaia's own EROFS rewrite
+/// ([`erofs_lzma_as_custom_compression`]): a requested `EROFS_LZMA=y` (and its
+/// `EROFS_LZMA_LEVEL`) becomes the `custom` choice with `"lzma,<level>"`, which
+/// passes the same `-zlzma,<level>` to `mkfs.erofs`. Honored when the final
+/// `.config` has that custom choice with the requested (or default 6) level.
+pub(crate) fn honored_by_erofs_lzma_rewrite(config: &str, mismatch: &OverrideMismatch) -> bool {
+    let has = |line: &str| config.lines().any(|candidate| candidate == line);
+    if !has("BR2_TARGET_ROOTFS_EROFS=y") || !has("BR2_TARGET_ROOTFS_EROFS_CUSTOM_COMPRESSION=y") {
+        return false;
+    }
+    let Some(algorithms) = config
+        .lines()
+        .rev()
+        .find_map(|line| line.strip_prefix("BR2_TARGET_ROOTFS_EROFS_COMPRESSION_ALGORITHMS="))
+    else {
+        return false;
+    };
+    let algorithms = algorithms.trim().trim_matches('"');
+    let requested = mismatch.requested.trim().trim_matches('"');
+    match mismatch.key.as_str() {
+        "BR2_TARGET_ROOTFS_EROFS_LZMA" => {
+            requested == "y" && algorithms.split(',').next() == Some("lzma")
+        }
+        "BR2_TARGET_ROOTFS_EROFS_LZMA_LEVEL" => algorithms == format!("lzma,{requested}"),
+        _ => false,
     }
 }
