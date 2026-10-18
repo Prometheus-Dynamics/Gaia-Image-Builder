@@ -1,11 +1,11 @@
 use crate::{ArtifactRef, InstallId};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct InstallSpec {
     pub entries: Vec<InstallEntrySpec>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct InstallEntrySpec {
     pub id: InstallId,
     pub artifact: ArtifactRef,

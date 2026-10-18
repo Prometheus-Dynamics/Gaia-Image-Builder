@@ -9,7 +9,7 @@ use std::path::{Component, Path, PathBuf};
 /// The keywords `[image.assembly] work_dir` accepts in place of a path:
 /// `ram` keeps the assembly's intermediates in RAM when the build allows it,
 /// `disk` keeps them in the build dir (the default).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum AssemblyWorkDirKeyword {
     Ram,
     Disk,
@@ -33,7 +33,7 @@ pub fn assembly_work_dir_keyword(raw: &str) -> Option<AssemblyWorkDirKeyword> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyRoots {
     pub assembly_work: PathBuf,
     pub assembly_out: PathBuf,

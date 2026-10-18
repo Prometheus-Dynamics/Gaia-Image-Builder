@@ -1,10 +1,10 @@
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct InputSpec {
     pub declared: Vec<InputOptionSpec>,
     pub selected: Vec<(String, String)>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct InputOptionSpec {
     pub name: String,
     pub description: Option<String>,
@@ -14,7 +14,7 @@ pub struct InputOptionSpec {
     pub choices: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub enum InputKindSpec {
     #[default]
     String,

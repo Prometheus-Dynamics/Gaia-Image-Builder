@@ -33,12 +33,11 @@ pub fn record_content_digests_known(
 ) -> std::io::Result<()> {
     content_digests::record_content_entries(base, items)
 }
+use gaia_spec::Fingerprint;
 pub use preview::{
     ImagePreview, PreviewCleanKind, PreviewDeletion, PreviewDeletionKind, PreviewSection,
 };
-use std::collections::hash_map::DefaultHasher;
 use std::fs;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -407,35 +406,37 @@ pub fn path_bytes(path: &Path) -> u64 {
 }
 
 pub fn dir_digest(path: &Path) -> String {
-    let mut hasher = DefaultHasher::new();
-    hash_dir(path, &mut hasher);
-    format!("{:016x}", hasher.finish())
+    let mut fingerprint = Fingerprint::new("image-dir");
+    hash_dir(path, &mut fingerprint);
+    fingerprint.finish().short_hex()
 }
 
-fn hash_dir(path: &Path, hasher: &mut DefaultHasher) {
-    path.display().to_string().hash(hasher);
+fn hash_dir(path: &Path, hasher: &mut Fingerprint) {
+    hasher.str(&path.display().to_string());
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(_) => {
-            "missing".hash(hasher);
+            hasher.str("missing");
             return;
         }
     };
-    metadata.is_dir().hash(hasher);
-    metadata.is_file().hash(hasher);
-    metadata.len().hash(hasher);
+    hasher
+        .bool(metadata.is_dir())
+        .bool(metadata.is_file())
+        .u64(metadata.len());
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode().hash(hasher);
+        hasher.u64(u64::from(metadata.permissions().mode()));
     }
-    metadata
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default()
-        .hash(hasher);
+    hasher.u128(
+        metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default(),
+    );
     if metadata.is_dir() {
         let mut entries = match fs::read_dir(path) {
             Ok(entries) => entries

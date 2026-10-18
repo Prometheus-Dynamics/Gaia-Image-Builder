@@ -1,4 +1,5 @@
 use super::*;
+use gaia_spec::fingerprint::Fingerprint;
 
 /// Compares an already computed digest against the expected one.
 pub(crate) fn check_sha256(
@@ -62,9 +63,9 @@ pub(crate) const DEFAULT_PATH_SOURCE_IGNORES: &[&str] = &[
 ];
 
 pub(crate) fn tree_digest(path: &Path, ignored_names: &[&str]) -> String {
-    let mut hasher = DefaultHasher::new();
-    hash_tree(path, ignored_names, &mut hasher);
-    format!("{:016x}", hasher.finish())
+    let mut fingerprint = Fingerprint::new("source-tree");
+    hash_tree(path, ignored_names, &mut fingerprint);
+    fingerprint.finish().short_hex()
 }
 
 /// Fingerprint of a path source's tree, shared by the planner (reuse) and the
@@ -102,16 +103,16 @@ pub fn path_source_fingerprint(
         owned,
     };
     let root = normalize_existing_path(root);
-    let mut hasher = DefaultHasher::new();
-    root.display().to_string().hash(&mut hasher);
+    let mut fingerprint = Fingerprint::new("path-source");
+    fingerprint.str(&root.display().to_string());
     match git_listed_files(&root) {
         // Inside a git work tree, git already knows which files matter: the
         // tracked and untracked-but-not-ignored ones. Ignored build output
         // (target/, node_modules/, ...) is never read.
-        Some(files) => hash_git_listed_files(&root, &files, &ignores, &mut hasher),
-        None => hash_path_source_entry(&root, true, &ignores, &mut hasher),
+        Some(files) => hash_git_listed_files(&root, &files, &ignores, &mut fingerprint),
+        None => hash_path_source_entry(&root, true, &ignores, &mut fingerprint),
     }
-    format!("{:016x}", hasher.finish())
+    fingerprint.finish().short_hex()
 }
 
 /// Relative paths of the files git lists under `root`: tracked files plus
@@ -180,7 +181,7 @@ fn hash_git_listed_files(
     root: &Path,
     files: &[PathBuf],
     ignores: &PathSourceIgnores,
-    hasher: &mut DefaultHasher,
+    hasher: &mut Fingerprint,
 ) {
     for relative in files {
         if ignores.skips_relative(root, relative) {
@@ -191,7 +192,7 @@ fn hash_git_listed_files(
             continue;
         };
         // The relative path is hashed so a rename changes the digest.
-        relative.display().to_string().hash(hasher);
+        hasher.str(&relative.display().to_string());
         if metadata.is_dir() {
             hash_path_source_entry(&path, true, ignores, hasher);
         } else {
@@ -241,16 +242,17 @@ fn hash_path_source_entry(
     path: &Path,
     is_root: bool,
     ignores: &PathSourceIgnores,
-    hasher: &mut DefaultHasher,
+    hasher: &mut Fingerprint,
 ) {
     if !is_root {
         if ignores.skips(path) {
             return;
         }
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_default()
-            .hash(hasher);
+        hasher.str(
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default(),
+        );
     }
     // The root may be a symlink to the tree, so it is followed; entries are not.
     let metadata = match if is_root {
@@ -260,12 +262,12 @@ fn hash_path_source_entry(
     } {
         Ok(metadata) => metadata,
         Err(_) => {
-            "missing".hash(hasher);
+            hasher.str("missing");
             return;
         }
     };
     if metadata.is_dir() {
-        "dir".hash(hasher);
+        hasher.str("dir");
         match fs::read_dir(path) {
             Ok(entries) => {
                 let mut entries = entries
@@ -277,7 +279,9 @@ fn hash_path_source_entry(
                     hash_path_source_entry(&entry, false, ignores, hasher);
                 }
             }
-            Err(_) => "unreadable".hash(hasher),
+            Err(_) => {
+                hasher.str("unreadable");
+            }
         }
     } else {
         hash_path_source_leaf(path, &metadata, hasher);
@@ -286,44 +290,25 @@ fn hash_path_source_entry(
 
 /// Hashes a non-directory entry: a symlink's target, or a file's length, mode
 /// and contents.
-fn hash_path_source_leaf(path: &Path, metadata: &fs::Metadata, hasher: &mut DefaultHasher) {
+fn hash_path_source_leaf(path: &Path, metadata: &fs::Metadata, hasher: &mut Fingerprint) {
     if metadata.file_type().is_symlink() {
-        "symlink".hash(hasher);
-        fs::read_link(path)
-            .map(|target| target.display().to_string())
-            .unwrap_or_default()
-            .hash(hasher);
+        hasher.str("symlink");
+        hasher.str(
+            &fs::read_link(path)
+                .map(|target| target.display().to_string())
+                .unwrap_or_default(),
+        );
     } else if metadata.is_file() {
-        "file".hash(hasher);
-        metadata.len().hash(hasher);
+        hasher.str("file");
+        hasher.u64(metadata.len());
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            metadata.permissions().mode().hash(hasher);
+            hasher.u64(u64::from(metadata.permissions().mode()));
         }
-        hash_file_contents(path, hasher);
+        hasher.str(&sha256_or_placeholder(path));
     } else {
-        "other".hash(hasher);
-    }
-}
-
-fn hash_file_contents(path: &Path, hasher: &mut DefaultHasher) {
-    use std::io::Read;
-
-    let Ok(mut file) = fs::File::open(path) else {
-        "unreadable".hash(hasher);
-        return;
-    };
-    let mut buffer = vec![0u8; 64 * 1024];
-    loop {
-        match file.read(&mut buffer) {
-            Ok(0) => break,
-            Ok(read) => hasher.write(&buffer[..read]),
-            Err(_) => {
-                "unreadable".hash(hasher);
-                return;
-            }
-        }
+        hasher.str("other");
     }
 }
 
@@ -350,7 +335,7 @@ fn normalize_existing_path(path: &Path) -> PathBuf {
     }
 }
 
-pub(crate) fn hash_tree(path: &Path, ignored_names: &[&str], hasher: &mut DefaultHasher) {
+pub(crate) fn hash_tree(path: &Path, ignored_names: &[&str], hasher: &mut Fingerprint) {
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -358,18 +343,19 @@ pub(crate) fn hash_tree(path: &Path, ignored_names: &[&str], hasher: &mut Defaul
     if ignored_names.iter().any(|ignored| ignored == &file_name) {
         return;
     }
-    path.display().to_string().hash(hasher);
+    hasher.str(&path.display().to_string());
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(_) => {
-            "missing".hash(hasher);
+            hasher.str("missing");
             return;
         }
     };
-    metadata.is_dir().hash(hasher);
-    metadata.is_file().hash(hasher);
-    metadata.file_type().is_symlink().hash(hasher);
-    metadata.len().hash(hasher);
+    hasher
+        .bool(metadata.is_dir())
+        .bool(metadata.is_file())
+        .bool(metadata.file_type().is_symlink())
+        .u64(metadata.len());
     if metadata.is_dir() {
         let mut entries = match fs::read_dir(path) {
             Ok(entries) => entries
@@ -383,6 +369,6 @@ pub(crate) fn hash_tree(path: &Path, ignored_names: &[&str], hasher: &mut Defaul
             hash_tree(&entry, ignored_names, hasher);
         }
     } else if metadata.is_file() {
-        sha256_or_placeholder(path).hash(hasher);
+        hasher.str(&sha256_or_placeholder(path));
     }
 }

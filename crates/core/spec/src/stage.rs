@@ -1,14 +1,14 @@
 use crate::StageItemId;
 use std::path::Path;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct StageSpec {
     pub files: Vec<StageFileSpec>,
     pub env_sets: Vec<StageEnvSetSpec>,
     pub services: Vec<StageServiceSpec>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct StageFileSpec {
     pub id: StageItemId,
     pub src: String,
@@ -71,7 +71,7 @@ impl StageFileSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct StageEnvSetSpec {
     pub id: StageItemId,
     pub name: String,
@@ -93,7 +93,7 @@ impl StageEnvSetSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct StageServiceSpec {
     pub id: StageItemId,
     pub name: String,
@@ -118,7 +118,7 @@ impl StageServiceSpec {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum StageContentOriginSpec {
     StaticAsset,
     Generated,

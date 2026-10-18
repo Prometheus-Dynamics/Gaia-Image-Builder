@@ -23,6 +23,7 @@ fn plan_rebuilds_when_operation_fingerprint_mismatches_even_if_outputs_exist() {
     fs::write(&spec.artifacts[0].output.path, "artifact").expect("artifact output");
     let state = ReuseState {
         spec_fingerprint: spec_fingerprint(&spec),
+        fingerprint_scheme: gaia_spec::FINGERPRINT_SCHEME,
         completed_operation_ids: reused_ids
             .into_iter()
             .map(str::to_string)
@@ -85,6 +86,7 @@ fn plan_rebuilds_when_materialized_outputs_change_even_if_operation_fingerprint_
 
     let state = ReuseState {
         spec_fingerprint: spec_fingerprint(&spec),
+        fingerprint_scheme: gaia_spec::FINGERPRINT_SCHEME,
         completed_operation_ids: reused_ids
             .into_iter()
             .map(str::to_string)
@@ -154,6 +156,7 @@ fn plan_rebuilds_when_provider_state_changes_even_if_output_file_matches() {
 
     let state = ReuseState {
         spec_fingerprint: spec_fingerprint(&spec),
+        fingerprint_scheme: gaia_spec::FINGERPRINT_SCHEME,
         completed_operation_ids: ["artifact:gaia-app"]
             .into_iter()
             .map(str::to_string)

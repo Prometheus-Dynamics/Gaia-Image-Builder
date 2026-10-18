@@ -1,6 +1,4 @@
-use crate::reuse::content::{
-    config_path_fingerprint, content_path_signature, rendered_stage_content,
-};
+use crate::reuse::content::{content_path_signature, rendered_stage_content};
 use crate::reuse_explain::{
     describe_rebuilding, fingerprint_change_message, rebuilding_dependencies,
     source_tree_content_signature,
@@ -10,6 +8,7 @@ use crate::{
     ExecutionPlan, OperationId, OperationKind, OperationOptionality, OperationReuse,
     PlannedOperation, REBUILD_REQUESTED, RebuildRequest, ReuseState,
 };
+use gaia_spec::fingerprint::{FINGERPRINT_SCHEME, Fingerprint, canonical_json};
 use gaia_spec::{
     CheckpointAnchorRef, ImageDefinition, ResolvedBuildSpec, SourceDefinition, SourcePinPolicySpec,
     SourceRefreshPolicySpec,
@@ -19,7 +18,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -30,10 +28,15 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 // JVM or rustup proxy on a busy machine can take several seconds to start.
 pub(crate) const COMMAND_SIGNATURE_TIMEOUT_SECONDS: u64 = 10;
 
+/// Reason code of an operation whose reuse state predates the current
+/// fingerprint scheme.
+pub const FINGERPRINT_SCHEME_CHANGED: &str = "fingerprint_scheme_changed";
+
+/// Fingerprint of the whole spec, recorded in the reuse state's first line.
 pub fn spec_fingerprint(spec: &ResolvedBuildSpec) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    format!("{spec:?}").hash(&mut hasher);
-    hasher.finish()
+    let mut fingerprint = Fingerprint::new("spec");
+    fingerprint.value("spec", spec);
+    fingerprint.finish().as_u64()
 }
 
 pub(crate) fn apply_reuse_state(
@@ -46,6 +49,8 @@ pub(crate) fn apply_reuse_state(
         rebuild.mark(&mut plan);
         return plan;
     };
+    // Fingerprints of another scheme say nothing about this one's inputs.
+    let scheme_current = reuse_state.fingerprint_scheme == FINGERPRINT_SCHEME;
     let mut decisions = HashMap::<String, bool>::new();
     // Reason code of each operation that executes, for naming a cascade's cause.
     let mut executing_codes = HashMap::<String, &'static str>::new();
@@ -66,11 +71,12 @@ pub(crate) fn apply_reuse_state(
                 OperationKind::ResolveBuild => true,
                 OperationKind::EmitReport => true,
                 _ => {
-                    let fingerprint_mismatch = reuse_state
-                        .operation_fingerprints
-                        .get(&operation_id)
-                        .copied()
-                        != Some(operation.fingerprint);
+                    let fingerprint_mismatch = !scheme_current
+                        || reuse_state
+                            .operation_fingerprints
+                            .get(&operation_id)
+                            .copied()
+                            != Some(operation.fingerprint);
                     let source_refresh_reason =
                         source_refresh_rebuild_reason(spec, &operation.kind);
                     let outputs_missing = !operation_outputs_present(spec, &operation.kind);
@@ -120,6 +126,14 @@ pub(crate) fn apply_reuse_state(
                 source_refresh_rebuild_reason(spec, &operation.kind)
             {
                 operation.reuse = OperationReuse::execute(code, message);
+            } else if !scheme_current {
+                operation.reuse = OperationReuse::execute(
+                    FINGERPRINT_SCHEME_CHANGED,
+                    format!(
+                        "operation '{}' will execute because its reuse state was recorded by an older Gaia fingerprint scheme (a one-time rebuild after upgrading)",
+                        operation.id.as_str()
+                    ),
+                );
             } else if reuse_state
                 .operation_fingerprints
                 .get(&operation_id)
@@ -369,148 +383,6 @@ pub(crate) fn artifact_rebuild_message(artifact: &gaia_spec::ArtifactSpec) -> St
         "artifact '{}' will build because no reuse state exists yet",
         artifact.id.as_str()
     )
-}
-
-pub fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKind) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    match kind {
-        OperationKind::ResolveBuild => {
-            spec.identity.build_name.hash(&mut hasher);
-            spec.identity.display_name.hash(&mut hasher);
-            spec.identity.version.hash(&mut hasher);
-        }
-        OperationKind::MaterializeSource { source_id } => {
-            if let Some(source) = spec.sources.iter().find(|source| source.id == *source_id) {
-                format!("{source:?}").hash(&mut hasher);
-                source_backend_signature(spec, source).hash(&mut hasher);
-            }
-        }
-        OperationKind::BuildArtifact { artifact_id } => {
-            if let Some(artifact) = spec
-                .artifacts
-                .iter()
-                .find(|artifact| artifact.id == *artifact_id)
-            {
-                format!("{artifact:?}").hash(&mut hasher);
-                crate::reuse_toolchain::artifact_backend_signature(spec, artifact)
-                    .hash(&mut hasher);
-                // Only hashed when present so image-only artifacts keep
-                // their existing fingerprints.
-                if let Some(image) = artifact_docker_build_signature(spec, artifact) {
-                    image.hash(&mut hasher);
-                }
-                // The contents of build command scripts (see reuse_build_inputs).
-                let scripts = crate::reuse_build_inputs::build_command_components(spec, artifact);
-                if !scripts.is_empty() {
-                    format!("{scripts:?}").hash(&mut hasher);
-                }
-            }
-        }
-        OperationKind::InstallArtifact { install_id, .. } => {
-            spec.install
-                .entries
-                .iter()
-                .find(|install| install.id == *install_id)
-                .map(|install| format!("{install:?}"))
-                .hash(&mut hasher);
-        }
-        OperationKind::RenderStageFile { item_id } => {
-            if let Some(item) = spec.stage.files.iter().find(|item| item.id == *item_id) {
-                format!("{item:?}").hash(&mut hasher);
-                config_path_fingerprint(spec, &item.src).hash(&mut hasher);
-            }
-        }
-        OperationKind::RenderStageEnvSet { item_id } => {
-            spec.stage
-                .env_sets
-                .iter()
-                .find(|item| item.id == *item_id)
-                .map(|item| format!("{item:?}"))
-                .hash(&mut hasher);
-        }
-        OperationKind::RenderStageService { item_id } => {
-            if let Some(item) = spec.stage.services.iter().find(|item| item.id == *item_id) {
-                format!("{item:?}").hash(&mut hasher);
-                config_path_fingerprint(spec, &item.unit_path).hash(&mut hasher);
-            }
-        }
-        OperationKind::PrepareImage | OperationKind::BuildImage => {
-            // Disk assembly is fingerprinted by its own operation; a partition
-            // layout change must not re-run the Buildroot build.
-            let mut image = spec.image.clone();
-            image.assembly = None;
-            // Where and under what name images are collected and archived is
-            // image:build's business: the prepare step neither collects nor
-            // archives, so a renamed image must not re-run it.
-            if matches!(kind, OperationKind::PrepareImage) {
-                image.output = Default::default();
-                // The image feed (installs, stage files, services) is applied
-                // by image:build's post-build step; prepare runs no feed.
-                image.feed = Default::default();
-                // Leaving packages out of the rootfs is applied to the image's
-                // target by image:build only; prepare finalizes without it.
-                if let ImageDefinition::Buildroot(buildroot) = &mut image.definition {
-                    buildroot.rootfs_exclude_packages.clear();
-                }
-            }
-            format!("{image:?}").hash(&mut hasher);
-            image_backend_signature(spec, &spec.image).hash(&mut hasher);
-            // Post scripts and BR2_EXTERNAL files by content (see
-            // reuse_build_inputs); only hashed when there are some.
-            let content = crate::reuse_build_inputs::buildroot_image_components(
-                spec,
-                matches!(kind, OperationKind::BuildImage),
-            );
-            if !content.is_empty() {
-                format!("{content:?}").hash(&mut hasher);
-            }
-            // Only hashed when enabled so existing fingerprints stay valid.
-            let buildroot_policy = &spec.policy.providers.buildroot;
-            if buildroot_policy.shared_output {
-                (
-                    "buildroot-shared-output",
-                    &buildroot_policy.shared_output_dir,
-                )
-                    .hash(&mut hasher);
-            }
-        }
-        OperationKind::AssembleImage => {
-            format!("{:?}", spec.image.assembly).hash(&mut hasher);
-            // The disk the archive is built from is an input of this step.
-            spec.image.output.disk.hash(&mut hasher);
-            // Hashes the collected image, which the plan's image:build operation
-            // also reads: computed once per plan.
-            // Stored encoded (the memo holds strings), then hashed as the
-            // `Option<String>` it decodes to, so the fingerprint is unchanged.
-            let encoded = plan_memo(
-                "build-image-output".into(),
-                || match operation_output_signature(spec, &OperationKind::BuildImage) {
-                    Some(signature) => format!("some\u{1f}{signature}"),
-                    None => "none".into(),
-                },
-            );
-            encoded
-                .strip_prefix("some\u{1f}")
-                .map(str::to_string)
-                .hash(&mut hasher);
-            crate::reuse_assembly::assembly_input_signature(spec).hash(&mut hasher);
-        }
-        OperationKind::CaptureCheckpoint { checkpoint_id } => {
-            spec.checkpoints
-                .points
-                .iter()
-                .find(|checkpoint| checkpoint.id == *checkpoint_id)
-                .map(|checkpoint| format!("{checkpoint:?}"))
-                .hash(&mut hasher);
-        }
-        OperationKind::EmitReport => {
-            format!("{:?}", spec.reporting).hash(&mut hasher);
-        }
-    }
-    if let Some(imports) = crate::reuse_imports::import_source_signature(spec, kind) {
-        imports.hash(&mut hasher);
-    }
-    hasher.finish()
 }
 
 pub(crate) fn source_backend_signature(
@@ -817,42 +689,35 @@ pub(crate) fn plan_memo(key: String, compute: impl FnOnce() -> String) -> String
 
 pub(crate) fn path_state_signature(path: &Path) -> String {
     plan_memo(format!("path-state\u{1f}{}", path.display()), || {
-        let mut hasher = DefaultHasher::new();
-        hash_path_state(path, &mut hasher, &[]);
-        format!("{:016x}", hasher.finish())
+        let mut fingerprint = Fingerprint::new("path-state");
+        hash_path_state(path, &mut fingerprint);
+        fingerprint.finish().short_hex()
     })
 }
 
-fn hash_path_state(path: &Path, hasher: &mut DefaultHasher, ignored_names: &[String]) {
-    if path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| ignored_names.iter().any(|ignored| ignored == name))
-    {
-        return;
-    }
-    path.display().to_string().hash(hasher);
+fn hash_path_state(path: &Path, fingerprint: &mut Fingerprint) {
+    fingerprint.str(&path.display().to_string());
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(_) => {
-            "missing".hash(hasher);
+            fingerprint.str("missing");
             return;
         }
     };
-    metadata.len().hash(hasher);
-    metadata.is_dir().hash(hasher);
-    metadata.is_file().hash(hasher);
-    metadata.file_type().is_symlink().hash(hasher);
+    fingerprint
+        .u64(metadata.len())
+        .bool(metadata.is_dir())
+        .bool(metadata.is_file())
+        .bool(metadata.file_type().is_symlink());
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode().hash(hasher);
+        fingerprint.u64(u64::from(metadata.permissions().mode()));
     }
     if let Ok(modified) = metadata.modified()
         && let Ok(duration) = modified.duration_since(UNIX_EPOCH)
     {
-        duration.as_secs().hash(hasher);
-        duration.subsec_nanos().hash(hasher);
+        fingerprint.u128(duration.as_nanos());
     }
     if metadata.is_dir() {
         let mut entries = match fs::read_dir(path) {
@@ -864,7 +729,7 @@ fn hash_path_state(path: &Path, hasher: &mut DefaultHasher, ignored_names: &[Str
         };
         entries.sort();
         for entry in entries {
-            hash_path_state(&entry, hasher, ignored_names);
+            hash_path_state(&entry, fingerprint);
         }
     }
 }
@@ -981,7 +846,7 @@ pub fn operation_content_signature(
             Some(rendered_stage_content(
                 spec,
                 &stage_state_path(spec, "file", item_id),
-                item.map(|item| format!("{item:?}")).unwrap_or_default(),
+                item.map(canonical_json).unwrap_or_default(),
                 item.map(|item| item.src.as_str()),
             ))
         }
@@ -990,7 +855,7 @@ pub fn operation_content_signature(
             Some(rendered_stage_content(
                 spec,
                 &stage_state_path(spec, "env", item_id),
-                item.map(|item| format!("{item:?}")).unwrap_or_default(),
+                item.map(canonical_json).unwrap_or_default(),
                 None,
             ))
         }
@@ -999,7 +864,7 @@ pub fn operation_content_signature(
             Some(rendered_stage_content(
                 spec,
                 &stage_state_path(spec, "service", item_id),
-                item.map(|item| format!("{item:?}")).unwrap_or_default(),
+                item.map(canonical_json).unwrap_or_default(),
                 item.map(|item| item.unit_path.as_str()),
             ))
         }
@@ -1038,12 +903,13 @@ fn input_signature_from(
         .collect::<Vec<_>>();
     dependencies.sort_by(|left, right| left.as_str().cmp(right.as_str()));
     dependencies.dedup();
-    let mut hasher = DefaultHasher::new();
+    let mut fingerprint = Fingerprint::new("operation-inputs");
     for dependency in dependencies {
-        dependency.as_str().hash(&mut hasher);
-        content_of(dependency).hash(&mut hasher);
+        fingerprint
+            .str(dependency.as_str())
+            .optional_str(content_of(dependency).as_deref());
     }
-    hasher.finish()
+    fingerprint.finish().as_u64()
 }
 
 /// Output and input signatures of one plan's operations, each computed at

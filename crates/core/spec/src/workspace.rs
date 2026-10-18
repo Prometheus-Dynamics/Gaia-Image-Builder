@@ -1,6 +1,6 @@
 use std::path::{Component, Path, PathBuf};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct WorkspaceSpec {
     pub root_dir: String,
     pub build_dir: String,
@@ -39,14 +39,14 @@ impl WorkspaceSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct WorkspaceNamedPathSpec {
     pub alias: String,
     pub path: String,
     pub kind: WorkspacePathKindSpec,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum CleanPolicy {
     None,
     Build,
@@ -54,14 +54,14 @@ pub enum CleanPolicy {
     All,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub enum WorkspacePathKindSpec {
     #[default]
     Host,
     Logical,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum WorkspacePathError {
     EmptyPath,
     EmptyAlias { raw: String },

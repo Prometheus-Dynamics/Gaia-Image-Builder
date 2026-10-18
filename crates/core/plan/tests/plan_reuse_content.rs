@@ -152,6 +152,7 @@ fn full_state(spec: &ResolvedBuildSpec, baseline: &ExecutionPlan) -> ReuseState 
         .filter(|operation| REUSABLE_IDS.contains(&operation.id.as_str()));
     ReuseState {
         spec_fingerprint: spec_fingerprint(spec),
+        fingerprint_scheme: gaia_spec::FINGERPRINT_SCHEME,
         completed_operation_ids: recorded
             .clone()
             .map(|operation| operation.id.as_str().to_string())

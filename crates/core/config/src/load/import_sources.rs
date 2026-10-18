@@ -11,9 +11,9 @@
 //!   and is never fetched again once present.
 //! - `--set sources.<id>.path=<dir>` reads the files from `<dir>` instead.
 
+use gaia_spec::Fingerprint;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
@@ -54,7 +54,7 @@ struct Resolved {
     identity: String,
     path_override: bool,
     contributes: BTreeSet<String>,
-    config_digest: DefaultHasher,
+    config_digest: Fingerprint,
 }
 
 impl ImportSources {
@@ -352,7 +352,7 @@ impl ImportSources {
         let Some(resolved) = self.resolved.get_mut(id) else {
             return;
         };
-        contents.hash(&mut resolved.config_digest);
+        resolved.config_digest.str(contents);
         let ids = |table: Option<&toml::Value>| {
             table
                 .and_then(toml::Value::as_array)
@@ -397,9 +397,9 @@ impl ImportSources {
                 root: resolved.root.display().to_string(),
                 identity: if resolved.path_override {
                     format!(
-                        "{}#{:016x}",
+                        "{}#{}",
                         resolved.identity,
-                        resolved.config_digest.finish()
+                        resolved.config_digest.finish().short_hex()
                     )
                 } else {
                     resolved.identity
@@ -417,7 +417,7 @@ impl Resolved {
             identity,
             path_override,
             contributes: BTreeSet::new(),
-            config_digest: DefaultHasher::new(),
+            config_digest: Fingerprint::new("import-config"),
         }
     }
 }

@@ -523,7 +523,11 @@ mod tests {
                 .map(|byte| format!("{byte:02x}"))
                 .collect::<String>()
         };
-        let mut body = format!("fingerprint={}\n", gaia_plan::spec_fingerprint(spec));
+        let mut body = format!(
+            "fingerprint={}\nscheme={}\n",
+            gaia_plan::spec_fingerprint(spec),
+            gaia_spec::FINGERPRINT_SCHEME
+        );
         for operation in &plan.operations {
             let id = operation.id.as_str();
             body.push_str(&format!("{id}\nop={id};{}\n", operation.fingerprint));

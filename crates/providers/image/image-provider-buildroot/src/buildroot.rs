@@ -1,8 +1,7 @@
 use super::*;
 use crate::requested_rebuilds::{requested_package_rebuilds, with_requested_rebuilds};
+use gaia_spec::Fingerprint;
 use sha2::{Digest, Sha256};
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 
 pub(crate) fn resolve_buildroot_dir(
     spec: &ResolvedBuildSpec,
@@ -733,23 +732,21 @@ pub(crate) fn buildroot_state_digest_with(
     output_dir: &Path,
     collected: &BTreeMap<String, String>,
 ) -> String {
-    let mut hasher = DefaultHasher::new();
-    output_dir
-        .join(".config")
-        .display()
-        .to_string()
-        .hash(&mut hasher);
-    file_state_for_digest(&output_dir.join(".config"), None).hash(&mut hasher);
-    image_feed_signature_path(output_dir)
-        .display()
-        .to_string()
-        .hash(&mut hasher);
-    file_state_for_digest(&image_feed_signature_path(output_dir), None).hash(&mut hasher);
+    let mut fingerprint = Fingerprint::new("buildroot-state");
+    let config = output_dir.join(".config");
+    fingerprint
+        .str(&config.display().to_string())
+        .str(&file_state_for_digest(&config, None));
+    let feed_signature = image_feed_signature_path(output_dir);
+    fingerprint
+        .str(&feed_signature.display().to_string())
+        .str(&file_state_for_digest(&feed_signature, None));
     if let ImageDefinition::Buildroot(buildroot) = &image.definition {
         for expected in &buildroot.expected_images {
-            expected.name.hash(&mut hasher);
-            expected.format.as_str().hash(&mut hasher);
-            expected.required.hash(&mut hasher);
+            fingerprint
+                .str(&expected.name)
+                .str(expected.format.as_str())
+                .bool(expected.required);
             let images_path = output_dir.join("images").join(&expected.name);
             let root_path = output_dir.join(&expected.name);
             // Collection copies the first of these that exists.
@@ -765,11 +762,11 @@ pub(crate) fn buildroot_state_digest_with(
                     .get(&expected.name)
                     .filter(|_| copied == Some(path))
                     .map(String::as_str);
-                file_state_for_digest(path, known).hash(&mut hasher);
+                fingerprint.str(&file_state_for_digest(path, known));
             }
         }
     }
-    format!("{:016x}", hasher.finish())
+    fingerprint.finish().short_hex()
 }
 
 fn file_state_for_digest(path: &Path, known_digest: Option<&str>) -> String {

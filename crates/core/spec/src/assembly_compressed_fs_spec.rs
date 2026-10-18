@@ -5,7 +5,7 @@ use std::ops::RangeInclusive;
 
 /// Options of a `squashfs` or `erofs` image. Every field is `None` or
 /// `false` for the other kinds.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyCompressedFsSpec {
     /// The compressor by name (see [`SquashfsCompression`] and
     /// [`ErofsCompression`]); `None` uses the kind's default.
@@ -31,7 +31,7 @@ pub const SQUASHFS_BLOCK_SIZES: RangeInclusive<u32> = 4096..=1024 * 1024;
 /// range (the kernel mounts only those up to its page size).
 pub const EROFS_BLOCK_SIZES: RangeInclusive<u32> = 512..=64 * 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum SquashfsCompression {
     /// The default: every squashfs kernel reads it.
     Gzip,
@@ -73,7 +73,7 @@ impl SquashfsCompression {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum ErofsCompression {
     /// Uncompressed.
     None,

@@ -3,7 +3,7 @@
 //! refuse targets Gaia cannot check before any build runs.
 
 /// Architectures Gaia can verify installed binaries against.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum TargetArch {
     X86_64,
     Arm,

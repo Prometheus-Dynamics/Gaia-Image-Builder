@@ -14,6 +14,8 @@ gaia-image-providers.workspace = true
 gaia-process.workspace = true
 gaia-source-providers.workspace = true
 gaia-spec.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 tracing.workspace = true
 

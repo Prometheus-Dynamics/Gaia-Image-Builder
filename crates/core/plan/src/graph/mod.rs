@@ -20,6 +20,10 @@ pub struct PlanDiagnostic {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReuseState {
     pub spec_fingerprint: u64,
+    /// The `gaia_spec::FINGERPRINT_SCHEME` the fingerprints and input
+    /// signatures were recorded under; `0` for state written before schemes
+    /// were recorded. Values of another scheme are never compared.
+    pub fingerprint_scheme: u32,
     pub completed_operation_ids: BTreeSet<String>,
     pub operation_fingerprints: BTreeMap<String, u64>,
     pub operation_output_signatures: BTreeMap<String, String>,

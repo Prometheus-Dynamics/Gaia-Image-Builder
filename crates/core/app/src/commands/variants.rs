@@ -346,7 +346,18 @@ pub(crate) fn scoped_reuse_state(
     if own.is_none() && shared_state.is_none() {
         return None;
     }
+    // Entries of two fingerprint schemes cannot share one scheme: a mix
+    // re-evaluates everything once (scheme 0 matches no current scheme).
+    let fingerprint_scheme = match (
+        own.as_ref().map(|state| state.fingerprint_scheme),
+        shared_state.as_ref().map(|state| state.fingerprint_scheme),
+    ) {
+        (Some(own), Some(shared)) if own != shared => 0,
+        (Some(scheme), _) | (None, Some(scheme)) => scheme,
+        (None, None) => 0,
+    };
     let mut merged = own.unwrap_or_default();
+    merged.fingerprint_scheme = fingerprint_scheme;
     let shared_state = shared_state.unwrap_or_default();
     for id in shared {
         merged.completed_operation_ids.remove(id);

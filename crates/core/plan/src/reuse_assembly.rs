@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 /// The image assembly's external inputs as `(name, part)` pairs. The name
 /// says which input a part is (`src <path>`, `partition <disk>/<name>`, ...),
 /// so a changed input can be named; the parts, joined in order, are the
-/// fingerprint's input signature (see [`assembly_input_signature`]).
+/// assembly fingerprint's `assembly inputs` (see `reuse_inputs`).
 pub(crate) fn assembly_input_entries(spec: &ResolvedBuildSpec) -> Vec<(String, String)> {
     let Some(assembly) = &spec.image.assembly else {
         return vec![("assembly".into(), "assembly:none".into())];
@@ -92,7 +92,10 @@ pub(crate) fn assembly_input_entries(spec: &ResolvedBuildSpec) -> Vec<(String, S
         if let Some(json) = &file.json {
             parts.push((
                 format!("json {owner}"),
-                format!("json:{owner}:sha256={}", text_digest(&format!("{json:?}"))),
+                format!(
+                    "json:{owner}:sha256={}",
+                    text_digest(&gaia_spec::canonical_json(json))
+                ),
             ));
             for text in json.strings() {
                 crate::reuse_assembly_archives::json_token_input_entries(
@@ -404,18 +407,18 @@ fn single_subdir(dir: &std::path::Path) -> Option<PathBuf> {
 }
 
 /// The fingerprint's input signature: every entry's part, in order.
-pub(crate) fn assembly_input_signature(spec: &ResolvedBuildSpec) -> String {
-    assembly_input_entries(spec)
-        .into_iter()
-        .map(|(_, part)| part)
-        .collect::<Vec<_>>()
-        .join("|")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use gaia_testkit::TempDir;
+
+    fn assembly_input_signature(spec: &ResolvedBuildSpec) -> String {
+        assembly_input_entries(spec)
+            .into_iter()
+            .map(|(_, part)| part)
+            .collect::<Vec<_>>()
+            .join("|")
+    }
 
     #[test]
     fn kernel_modules_and_published_copies_enter_the_fingerprint() {

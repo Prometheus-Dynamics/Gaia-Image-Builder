@@ -30,7 +30,7 @@ pub const DEFAULT_OUTPUT_RETENTION_POLICY: OutputRetentionPolicySpec = OutputRet
     failure_tail_lines: DEFAULT_OUTPUT_RETENTION_FAILURE_TAIL_LINES,
 };
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct BuildPolicySpec {
     pub preset: PresetSelectionSpec,
     pub interpolation: InterpolationSpec,
@@ -40,19 +40,19 @@ pub struct BuildPolicySpec {
     pub providers: ProviderExecutionPolicySpec,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct ExecutionPolicySpec {
     pub jobs: u32,
     pub docker: Option<DockerExecutionSpec>,
     pub output_retention: OutputRetentionPolicySpec,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct DockerExecutionSpec {
     pub image: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct OutputRetentionPolicySpec {
     pub stdout_bytes: usize,
     pub stderr_bytes: usize,
@@ -67,26 +67,26 @@ impl Default for OutputRetentionPolicySpec {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct PresetSelectionSpec {
     pub selected: Option<String>,
     pub applied: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct InterpolationSpec {
     pub allow_unresolved: bool,
     pub values: Vec<(String, String)>,
     pub unresolved: Vec<UnresolvedInterpolationSpec>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct UnresolvedInterpolationSpec {
     pub location: String,
     pub token: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct ProviderExecutionPolicySpec {
     pub rust: RustProviderPolicySpec,
     pub git: GitProviderPolicySpec,
@@ -133,7 +133,7 @@ impl ProviderExecutionPolicySpec {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct ResolvedCommandPolicySpec {
     pub retry_attempts: u32,
     pub retry_backoff_ms: u64,
@@ -144,7 +144,7 @@ pub struct ResolvedCommandPolicySpec {
     pub ccache: BuildrootCcachePolicySpec,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub enum RetryBackoffStrategySpec {
     #[default]
     Fixed,
@@ -166,7 +166,7 @@ impl std::fmt::Display for RetryBackoffStrategySpec {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct RustProviderPolicySpec {
     pub allow_nested_build: bool,
     /// Build nested cargo artifacts that share a workspace, target triple,
@@ -200,7 +200,7 @@ impl From<&RustProviderPolicySpec> for ResolvedCommandPolicySpec {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct GitProviderPolicySpec {
     pub allow_remote_resolution: bool,
     pub retry_attempts: u32,
@@ -223,7 +223,7 @@ impl From<&GitProviderPolicySpec> for ResolvedCommandPolicySpec {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct CommandProviderPolicySpec {
     pub retry_attempts: u32,
     pub retry_backoff_ms: u64,
@@ -266,7 +266,7 @@ pub struct CommandProviderPolicySpec {
 
 /// Where Gradle's user home (dependency and wrapper caches) lives for
 /// Docker-built Java artifacts.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub enum GradleHomeSpec {
     /// `<workspace>/.gaia/docker-home/.gradle`, per workspace (default).
     #[default]
@@ -295,7 +295,7 @@ impl GradleHomeSpec {
 }
 
 /// Where the Buildroot output tree is built.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct BuildrootWorkDirPolicySpec {
     /// "disk" (the build dir, default), "ram" (tmpfs), or a directory.
     pub work_dir: String,
@@ -321,7 +321,7 @@ pub const KNOWN_HOST_TOOLS: &[&str] = &["ccache", "pkgconf"];
 /// Where Buildroot's host tools come from: the build environment's own
 /// ("system"), Buildroot's build ("build"), or an error ("fail"), tried in
 /// order, per tool.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct BuildrootHostToolsPolicySpec {
     /// Policy for tools not listed in `tools`, e.g. ["build"].
     pub default: Vec<HostToolStepSpec>,
@@ -353,7 +353,7 @@ impl BuildrootHostToolsPolicySpec {
 }
 
 /// One step of a host tool policy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 pub enum HostToolStepSpec {
     System,
     Build,
@@ -390,7 +390,7 @@ impl HostToolStepSpec {
 
 /// `[providers.buildroot.package_cache]`: a cache of built Buildroot
 /// packages shared by every build of the user.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct BuildrootPackageCachePolicySpec {
     pub enabled: bool,
     /// Where packages are stored unless listed in `project_packages` or
@@ -432,7 +432,7 @@ impl BuildrootPackageCachePolicySpec {
 }
 
 /// The two package cache levels.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub enum PackageCacheLevelSpec {
     /// Shared by every project of the user.
     #[default]
@@ -453,7 +453,7 @@ impl PackageCacheLevelSpec {
 /// `[providers.buildroot] override_check`: how Gaia reacts when the final
 /// Buildroot `.config` does not contain a requested `config_overrides` entry
 /// (usually an unmet `depends on`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum BuildrootOverrideCheckSpec {
     /// Fail the image operation before the long `make`.
     #[default]
@@ -474,7 +474,7 @@ impl BuildrootOverrideCheckSpec {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct BuildrootCcachePolicySpec {
     pub enabled: bool,
     /// Defaults to a cache shared by every workspace of the user.
@@ -498,7 +498,7 @@ impl From<&CommandProviderPolicySpec> for ResolvedCommandPolicySpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct FailureHandlingPolicySpec {
     pub rollback_on_error: bool,
     pub preserve_failed_outputs: bool,
@@ -525,7 +525,7 @@ impl Default for FailureHandlingPolicySpec {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 pub enum RollbackDomain {
     Sources,
     Artifacts,
@@ -565,18 +565,18 @@ impl std::fmt::Display for RollbackDomain {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct PrecedencePolicySpec {
     pub layers: Vec<PrecedenceLayerSpec>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct PrecedenceLayerSpec {
     pub source: PrecedenceSource,
     pub applies_to: Vec<PrecedenceTarget>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum PrecedenceSource {
     ConfigDefaults,
     SelectedPreset,
@@ -587,7 +587,7 @@ pub enum PrecedenceSource {
     CliSetOverrides,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum PrecedenceTarget {
     PresetSelection,
     Environment,

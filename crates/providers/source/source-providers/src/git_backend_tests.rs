@@ -272,19 +272,16 @@ fn failed_host_git_names_the_source_and_suggests_credentials() {
 
 #[test]
 fn git_backend_leaves_the_operation_fingerprint_input_unchanged() {
-    // Operation fingerprints hash the Debug output of the source spec, so the
-    // backend must not appear there: existing builds keep their fingerprints.
-    let host = format!(
-        "{:?}",
-        git_spec("https://example.invalid/org/repo.git", GitBackendSpec::Host)
-    );
-    let execution = format!(
-        "{:?}",
-        git_spec(
-            "https://example.invalid/org/repo.git",
-            GitBackendSpec::Execution
-        )
-    );
+    // Operation fingerprints encode the serialized source spec, so the
+    // backend must not appear there: where git runs never changes the checkout.
+    let host = gaia_spec::canonical_json(&git_spec(
+        "https://example.invalid/org/repo.git",
+        GitBackendSpec::Host,
+    ));
+    let execution = gaia_spec::canonical_json(&git_spec(
+        "https://example.invalid/org/repo.git",
+        GitBackendSpec::Execution,
+    ));
     assert_eq!(host, execution);
     assert!(!host.contains("git_backend"), "{host}");
 }

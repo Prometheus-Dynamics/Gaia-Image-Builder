@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct ReportingSpec {
     pub outputs: ReportingOutputsSpec,
     pub masking: SecretMaskingSpec,
@@ -10,7 +10,7 @@ pub const DEFAULT_LARGE_UNEXPECTED_OUTPUT_BYTES: u64 = 100 * 1024 * 1024;
 pub const DEFAULT_TRANSIENT_DIR_NAMES: &[&str] =
     &[".cache", "build", "buildroot-output", "sources", "target"];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct OutputHygieneSpec {
     pub large_file_threshold_bytes: u64,
     pub transient_dir_names: Vec<String>,
@@ -28,7 +28,7 @@ impl Default for OutputHygieneSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ReportingOutputsSpec {
     pub summary: bool,
     pub provenance: bool,
@@ -45,7 +45,7 @@ impl Default for ReportingOutputsSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SecretMaskingSpec {
     pub enabled: bool,
     pub replacement: String,
@@ -71,7 +71,7 @@ impl Default for SecretMaskingSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct PostBuildHookSpec {
     pub script: String,
     pub timeout_seconds: u64,

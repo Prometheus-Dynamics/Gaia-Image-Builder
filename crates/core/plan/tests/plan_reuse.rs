@@ -97,6 +97,7 @@ fn default_plan_reuses_operations_when_state_matches() {
     ];
     let state = ReuseState {
         spec_fingerprint: spec_fingerprint(&spec),
+        fingerprint_scheme: gaia_spec::FINGERPRINT_SCHEME,
         completed_operation_ids: reused_ids
             .into_iter()
             .map(str::to_string)
@@ -151,6 +152,7 @@ fn plan_rebuilds_when_materialized_outputs_are_missing_even_if_state_matches() {
     ];
     let state = ReuseState {
         spec_fingerprint: spec_fingerprint(&spec),
+        fingerprint_scheme: gaia_spec::FINGERPRINT_SCHEME,
         completed_operation_ids: reused_ids
             .into_iter()
             .map(str::to_string)
@@ -276,6 +278,7 @@ fn plan_rebuilds_when_runtime_state_files_are_missing_even_if_other_outputs_exis
     ];
     let state = ReuseState {
         spec_fingerprint: spec_fingerprint(&spec),
+        fingerprint_scheme: gaia_spec::FINGERPRINT_SCHEME,
         completed_operation_ids: reused_ids
             .into_iter()
             .map(str::to_string)
@@ -367,6 +370,7 @@ fn plan_rebuilds_assembly_when_runtime_state_is_missing_even_if_outputs_exist() 
     let reused_ids = ["image:assembly"];
     let state = ReuseState {
         spec_fingerprint: spec_fingerprint(&spec),
+        fingerprint_scheme: gaia_spec::FINGERPRINT_SCHEME,
         completed_operation_ids: reused_ids
             .into_iter()
             .map(str::to_string)
@@ -457,6 +461,7 @@ fn plan_rebuilds_assembly_when_direct_partition_image_changes() {
     let reused_ids = ["image:assembly"];
     let state = ReuseState {
         spec_fingerprint: spec_fingerprint(&spec),
+        fingerprint_scheme: gaia_spec::FINGERPRINT_SCHEME,
         completed_operation_ids: reused_ids
             .into_iter()
             .map(str::to_string)
@@ -592,6 +597,7 @@ fn stale_spec_fingerprint_still_reuses_unchanged_operation_fingerprints() {
         .push(("release-note".into(), "docs-only".into()));
     let state = ReuseState {
         spec_fingerprint: old_spec_fingerprint,
+        fingerprint_scheme: gaia_spec::FINGERPRINT_SCHEME,
         completed_operation_ids: reused_ids
             .into_iter()
             .map(str::to_string)

@@ -90,6 +90,7 @@ fn reuse_state_for(spec: &ResolvedBuildSpec) -> ReuseState {
     let plan = plan_build(spec, &source_catalog, &artifact_catalog, &image_catalog);
     ReuseState {
         spec_fingerprint: spec_fingerprint(spec),
+        fingerprint_scheme: gaia_spec::FINGERPRINT_SCHEME,
         completed_operation_ids: plan
             .operations
             .iter()

@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-#[derive(Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct ImageAssemblySpec {
     pub work_dir: Option<AssemblyPathTemplate>,
     pub out_dir: Option<AssemblyPathTemplate>,
@@ -25,9 +25,11 @@ pub struct ImageAssemblySpec {
     pub kernel_modules: Vec<AssemblyKernelModulesSpec>,
     /// The `strip` program for `strip = true` entries; `None` searches the
     /// provider's tools, then the host.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub strip_tool: Option<AssemblyPathTemplate>,
     /// Declared sources a `${source.<id>...}` token in this assembly names
     /// (sorted, without duplicates). The assembly depends on each of them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub assembly_sources: Vec<SourceId>,
 }
 
@@ -49,16 +51,17 @@ impl ImageAssemblySpec {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyTreeSpec {
     pub id: AssemblyTreeId,
     pub path: AssemblyPathTemplate,
     /// Strips every ELF file in the tree right before a filesystem or
     /// archive packs it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub strip: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyDirSpec {
     pub tree: AssemblyTreeId,
     pub path: String,
@@ -71,14 +74,14 @@ impl AssemblyDirSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblySymlinkSpec {
     pub tree: AssemblyTreeId,
     pub path: String,
     pub target: String,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyFileSpec {
     pub tree: AssemblyTreeId,
     pub src: Option<AssemblyPathTemplate>,
@@ -87,8 +90,10 @@ pub struct AssemblyFileSpec {
     pub exclude: Vec<String>,
     /// `src_glob` only: when non-empty, only the matches whose file name one
     /// of these names (simple `*` globs allowed) matches are copied.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub include: Vec<String>,
     /// Strips each copied ELF file; other copied files are left alone.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub strip: bool,
     /// Text written to `dest`, with `${assembly...}` tokens rendered.
     pub content: Option<String>,
@@ -100,6 +105,7 @@ pub struct AssemblyFileSpec {
     pub preserve_symlink: bool,
     /// Lets a copied dynamically linked file keep a missing runtime library
     /// without the warning that names it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub allow_missing_libs: bool,
 }
 
@@ -111,7 +117,7 @@ impl AssemblyFileSpec {
 
 /// Modules copied from a kernel's module tree into a tree, with their
 /// dependency closure, and `depmod` run over the result.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyKernelModulesSpec {
     pub tree: AssemblyTreeId,
     /// The directory holding the `<kernel version>` directories.
@@ -123,11 +129,11 @@ pub struct AssemblyKernelModulesSpec {
     /// The `depmod` to run; `None` takes the provider's, then the host's.
     pub depmod: Option<AssemblyPathTemplate>,
     /// The `modules.*` files to install; `None` keeps the default set.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Vec<String>>,
 }
 
-// Debug is in assembly_spec_debug: fingerprints hash it.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyDiskSpec {
     pub id: String,
     pub output: AssemblyPathTemplate,
@@ -145,11 +151,12 @@ pub struct AssemblyDiskSpec {
     /// chain in the first sectors of the extended partition.
     pub ebr_placement: AssemblyEbrPlacementSpec,
     /// GPT only: the disk GUID.
+    #[serde(skip_serializing_if = "crate::fingerprint::is_default")]
     pub gpt: crate::AssemblyGptDiskSpec,
     pub partitions: Vec<AssemblyDiskPartitionSpec>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum AssemblyEbrPlacementSpec {
     Default,
     Packed,
@@ -164,7 +171,7 @@ impl AssemblyEbrPlacementSpec {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum AssemblyDiskTruncateSpec {
     LastData,
 }
@@ -177,7 +184,7 @@ impl AssemblyDiskTruncateSpec {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum AssemblyPartitionTableSpec {
     Mbr,
     Gpt,
@@ -192,8 +199,7 @@ impl AssemblyPartitionTableSpec {
     }
 }
 
-// Debug is in assembly_spec_debug: fingerprints hash it.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyDiskPartitionSpec {
     pub name: String,
     pub kind: Option<String>,
@@ -211,6 +217,7 @@ pub struct AssemblyDiskPartitionSpec {
     /// nothing written: no image and no wipe. Requires `size`.
     pub materialize: bool,
     /// GPT only: the partition GUID. The GPT partition name is `name`.
+    #[serde(skip_serializing_if = "crate::fingerprint::is_default")]
     pub gpt: crate::AssemblyGptPartitionSpec,
 }
 
@@ -230,7 +237,7 @@ impl AssemblyDiskPartitionSpec {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum MbrPartitionType {
     Fat32Lba,
     Linux,
@@ -266,7 +273,7 @@ impl MbrPartitionType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum MbrPartitionTypeParseError {
     InvalidRaw(String),
     UnknownAlias(String),
@@ -287,7 +294,7 @@ impl std::fmt::Display for MbrPartitionTypeParseError {
 
 /// A binary copied into a tree with its runtime closure: the interpreter and
 /// the libraries it needs, found under `sysroot`.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyBinarySpec {
     pub tree: AssemblyTreeId,
     /// The binary in the target tree it was built for.
@@ -298,6 +305,7 @@ pub struct AssemblyBinarySpec {
     pub sysroot: Option<AssemblyPathTemplate>,
     pub mode: Option<String>,
     /// Strips the copied program and every copied runtime library.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub strip: bool,
 }
 
@@ -307,7 +315,7 @@ impl AssemblyBinarySpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyBusyboxInitramfsSpec {
     pub tree: AssemblyTreeId,
     pub busybox: AssemblyPathTemplate,
@@ -317,7 +325,7 @@ pub struct AssemblyBusyboxInitramfsSpec {
     pub applets: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct AssemblyPathTemplate(String);
 
 impl AssemblyPathTemplate {
@@ -394,7 +402,7 @@ impl AssemblyPathTemplate {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct AssemblyPathTemplateContext<'a> {
     pub provider_kind: ImageProviderKind,
     pub provider_images: &'a Path,
@@ -490,7 +498,7 @@ impl From<&str> for AssemblyPathTemplate {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum AssemblyPathTemplateError {
     EmptyTreeReference,
     UnknownTree(String),

@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 pub struct ByteSize(u64);
 
 impl ByteSize {
@@ -13,7 +13,7 @@ impl ByteSize {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum ByteSizeParseError {
     Empty,
     InvalidNumber(String),

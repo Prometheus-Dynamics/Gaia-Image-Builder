@@ -7,12 +7,12 @@ mod assembly_json;
 mod assembly_order;
 mod assembly_output_spec;
 mod assembly_spec;
-mod assembly_spec_debug;
 mod byte_size;
 mod checkpoints;
 mod clean;
 mod export;
 mod file_mode;
+pub mod fingerprint;
 mod ids;
 mod image;
 mod inputs;
@@ -82,6 +82,9 @@ pub use checkpoints::{
 pub use clean::{CleanProfileSpec, CleanSpec};
 pub use export::ExportSpec;
 pub use file_mode::{FileMode, FileModeParseError};
+pub use fingerprint::{
+    FINGERPRINT_SCHEME, Fingerprint, FingerprintDigest, canonical_json, sha256_hex,
+};
 pub use ids::{
     ArtifactId, AssemblyFilesystemId, AssemblyTreeId, BuildId, IdError, InstallId, SourceId,
     StageItemId,
@@ -151,7 +154,7 @@ pub use workspace::{
     default_image_collect_dir, resolve_workspace_path,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ResolvedBuildSpec {
     pub identity: BuildIdentity,
     pub selection: SelectionSpec,
@@ -171,7 +174,7 @@ pub struct ResolvedBuildSpec {
     pub reporting: ReportingSpec,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct BuildIdentity {
     pub id: BuildId,
     pub build_name: String,

@@ -1,7 +1,7 @@
 use crate::{AssemblyJsonValue, AssemblyPathTemplate, AssemblyTreeId};
 
 /// A deterministic ustar archive assembled after disks.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyArchiveSpec {
     pub id: String,
     pub output: AssemblyPathTemplate,
@@ -21,7 +21,7 @@ pub struct AssemblyArchiveSpec {
 ///
 /// `prefix` only applies to `tree` and `src_dir`. For those, `name` may be
 /// empty; then the member is labelled by its source.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyArchiveMemberSpec {
     pub name: String,
     pub src: Option<AssemblyPathTemplate>,
@@ -74,7 +74,7 @@ impl AssemblyArchiveMemberSpec {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum AssemblyArchiveMemberSourceSpec<'a> {
     File(&'a AssemblyPathTemplate),
     Generated(&'a [(String, String)]),
@@ -86,7 +86,7 @@ pub enum AssemblyArchiveMemberSourceSpec<'a> {
 
 /// A `${assembly...}` reference inside a generated archive entry value,
 /// resolved at assembly time.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum AssemblyValueToken {
     /// `${assembly.sha256:<path>}`: the hex sha256 of a file.
     Digest(AssemblyDigestToken),
@@ -124,20 +124,20 @@ impl AssemblyValueToken {
 }
 
 /// An `${assembly.size:<path template>}` reference: the file's size in bytes.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblySizeToken {
     pub path: AssemblyPathTemplate,
 }
 
 /// An `${assembly.sha256:<path template>}` reference.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyDigestToken {
     pub path: AssemblyPathTemplate,
 }
 
 /// An `${assembly.sha256_tree:<tree id or path template>}` reference: the
 /// per-file digest map of a tree or directory.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyTreeDigestToken {
     pub path: AssemblyPathTemplate,
 }
@@ -161,7 +161,7 @@ pub fn whole_tree_digest_token(text: &str) -> Option<AssemblyTreeDigestToken> {
 
 /// An `${assembly.verity:<path template>:<field>}` reference: the `dest` of
 /// a verity transform, and what to read from its output.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyVerityToken {
     pub path: AssemblyPathTemplate,
     pub field: AssemblyVerityField,
@@ -169,7 +169,7 @@ pub struct AssemblyVerityToken {
 
 /// The fields of a verity output an archive entry can name. A consumer
 /// needs all of them to open the tree (`veritysetup open`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum AssemblyVerityField {
     /// The root hash, lower-case hex.
     RootHash,

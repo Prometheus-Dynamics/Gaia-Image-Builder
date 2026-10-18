@@ -14,7 +14,7 @@ use crate::{
 };
 
 /// One assembly step, by kind and index within its kind's list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 pub enum AssemblyStep {
     Dir(usize),
     Symlink(usize),
@@ -78,7 +78,7 @@ impl AssemblyStep {
 }
 
 /// What a step reads and writes.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyStepPaths {
     pub step: AssemblyStep,
     pub reads: Vec<PathBuf>,
@@ -301,7 +301,7 @@ fn depends_on(later: &AssemblyStepPaths, earlier: &AssemblyStepPaths) -> bool {
 }
 
 /// A dependency cycle between assembly steps.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyCycle {
     pub steps: Vec<AssemblyStep>,
 }

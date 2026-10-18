@@ -407,6 +407,54 @@ fn selecting_one_variant_runs_its_own_operations_and_reuses_shared_ones() {
     }
 }
 
+/// Reuse state recorded before fingerprint schemes (no `scheme=` line) is
+/// read without an error and re-evaluated once: the next run executes the
+/// work again, and the run after it reuses it with the config unchanged.
+#[test]
+fn reuse_state_of_an_older_fingerprint_scheme_rebuilds_once_then_reuses() {
+    let scenario = scenario("scheme");
+    let first = run_variants(&scenario, &["--variant", "v2"]);
+    assert_all_ran(&first);
+    let state_dir = scenario.out_dir().join(".gaia");
+    let mut rewritten = 0;
+    for entry in fs::read_dir(&state_dir).expect("state dir") {
+        let path = entry.expect("state entry").path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("reuse-state") {
+            continue;
+        }
+        let state = fs::read_to_string(&path).expect("reuse state");
+        assert!(
+            state.lines().any(|line| line.starts_with("scheme=")),
+            "{state}"
+        );
+        let legacy = state
+            .lines()
+            .filter(|line| !line.starts_with("scheme="))
+            .map(|line| format!("{line}\n"))
+            .collect::<String>();
+        fs::write(&path, legacy).expect("legacy reuse state");
+        rewritten += 1;
+    }
+    assert!(
+        rewritten >= 1,
+        "no reuse state under {}",
+        state_dir.display()
+    );
+
+    let upgraded = run_variants(&scenario, &["--variant", "v2"]);
+    assert_all_ran(&upgraded);
+    let (_, reused) = ran_summary(&upgraded[0]);
+    assert_eq!(reused, 0, "an older scheme's state is never reused");
+
+    let next = run_variants(&scenario, &["--variant", "v2"]);
+    assert_all_ran(&next);
+    let (_, reused) = ran_summary(&next[0]);
+    assert!(
+        reused >= 2,
+        "the unchanged config is reused, reused {reused}"
+    );
+}
+
 /// `gaia validate` checks every variant as `run` resolves it: a variant
 /// publishing to the default variant's archive is reported, with the
 /// variant named, and `--variant` must name a declared variant.

@@ -27,7 +27,7 @@ use gaia_artifact_providers::{
     ArtifactExecutionBackend, ArtifactExecutionContract, ArtifactProviderError,
     ArtifactProviderErrorKind, ProcessLogLine, ProcessLogSink, ProcessLogStream,
 };
-use gaia_source_providers::{GIT_MIRROR_CACHE_DIR, remote_git_mirror_dir_name};
+use gaia_source_providers::{GIT_MIRROR_CACHE_DIR, remote_git_mirror_dir};
 use gaia_spec::{CargoGitSourceSpec, cargo_git_url_key, redact_url_userinfo};
 
 /// Branch namespace in a mirror that keeps each locked commit reachable.
@@ -387,7 +387,7 @@ pub(crate) fn cargo_git_env(
                 ),
             ));
         }
-        let mirror = cache_dir.join(remote_git_mirror_dir_name(&mapping.repo));
+        let mirror = remote_git_mirror_dir(&cache_dir, &mapping.repo);
         ensure_mirror(&mapping.repo, &mirror, timeout, log_sink)?;
         gaia_process::register_read_only_docker_mount(&mirror);
         for (url, commits) in by_url {

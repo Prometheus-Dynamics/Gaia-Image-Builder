@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct IdError {
     message: &'static str,
 }
@@ -21,7 +21,7 @@ impl std::error::Error for IdError {}
 
 macro_rules! id_type {
     ($name:ident) => {
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
         pub struct $name(String);
 
         impl $name {

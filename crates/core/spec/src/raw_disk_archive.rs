@@ -4,7 +4,7 @@
 //! times faster, for development images; xz is smaller, for releases.
 
 /// How a raw disk archive is written.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum RawDiskArchive {
     Plain,
     Xz,

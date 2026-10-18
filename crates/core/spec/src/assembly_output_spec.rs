@@ -10,7 +10,7 @@ use std::str::FromStr;
 /// The dm-verity data and hash block size when the spec sets none.
 pub const VERITY_DEFAULT_BLOCK_SIZE: u32 = 4096;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyTransformSpec {
     pub kind: AssemblyTransformKindSpec,
     pub src: Option<AssemblyPathTemplate>,
@@ -45,7 +45,7 @@ impl AssemblyTransformSpec {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum AssemblyTransformKindSpec {
     CompileDts,
     Gzip,
@@ -72,8 +72,7 @@ impl AssemblyTransformKindSpec {
     }
 }
 
-// Debug is in assembly_spec_debug: fingerprints hash it.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyFilesystemSpec {
     pub id: AssemblyFilesystemId,
     pub kind: AssemblyFilesystemKindSpec,
@@ -99,11 +98,13 @@ pub struct AssemblyFilesystemSpec {
     pub free: Option<String>,
     /// `squashfs` and `erofs` only: compression, block size and the erofs
     /// layout options.
+    #[serde(skip_serializing_if = "crate::fingerprint::is_default")]
     pub compressed: AssemblyCompressedFsSpec,
     /// `vfat` only: the FAT type to format, 12, 16 or 32; the run fails if
     /// `mformat` cannot make that type at the image's size. `None` keeps the
     /// default: FAT16 from 3 MiB up to 16 MiB, where `mformat` would pick
     /// FAT12, and `mformat`'s own choice otherwise.
+    #[serde(skip_serializing_if = "crate::fingerprint::is_default")]
     pub fat_size: Option<u32>,
 }
 
@@ -138,7 +139,7 @@ impl AssemblyFilesystemSpec {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum AssemblyFilesystemKindSpec {
     Vfat,
     Cpio,

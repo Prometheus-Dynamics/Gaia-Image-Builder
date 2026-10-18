@@ -1,7 +1,7 @@
 use crate::SourceId;
 use std::path::Path;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SourceSpec {
     pub id: SourceId,
     pub definition: SourceDefinition,
@@ -26,7 +26,7 @@ impl SourceSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum SourceDefinition {
     Git(GitSourceSpec),
     Path(PathSourceSpec),
@@ -45,7 +45,7 @@ impl SourceDefinition {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct GitSourceSpec {
     pub repo: String,
     pub branch: Option<String>,
@@ -58,15 +58,17 @@ pub struct GitSourceSpec {
     /// Commit recorded for this source in the build's lockfile. When set,
     /// materialization checks out exactly this commit instead of the
     /// configured branch/tag tip.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub locked_commit: Option<String>,
-    /// Where the git commands for this source run. Not part of the Debug
-    /// output: operation fingerprints hash that, and where git runs does not
-    /// change the checkout it produces.
+    /// Where the git commands for this source run. Not serialized, so not
+    /// part of operation fingerprints: where git runs does not change the
+    /// checkout it produces.
+    #[serde(skip)]
     pub git_backend: GitBackendSpec,
 }
 
 /// Where a git source's git commands (clone, fetch, ls-remote, checkout) run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
 pub enum GitBackendSpec {
     /// On the host, with the user's environment: git config, credential
     /// helpers, ssh agent and `GIT_*` variables.
@@ -101,29 +103,7 @@ impl GitSourceSpec {
     }
 }
 
-// Operation fingerprints hash the Debug output of specs. `locked_commit` is
-// only printed when set, so builds without a lockfile keep the fingerprints
-// they had before lockfiles existed.
-impl std::fmt::Debug for GitSourceSpec {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut debug = formatter.debug_struct("GitSourceSpec");
-        debug
-            .field("repo", &self.repo)
-            .field("branch", &self.branch)
-            .field("tag", &self.tag)
-            .field("rev", &self.rev)
-            .field("subdir", &self.subdir)
-            .field("update", &self.update)
-            .field("refresh_policy", &self.refresh_policy)
-            .field("pin_policy", &self.pin_policy);
-        if let Some(locked_commit) = &self.locked_commit {
-            debug.field("locked_commit", locked_commit);
-        }
-        debug.finish()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct PathSourceSpec {
     pub path: String,
     pub identity_ignore: Vec<String>,
@@ -143,7 +123,7 @@ impl AsRef<Path> for PathSourceSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ArchiveSourceSpec {
     pub path: String,
     pub strip_components: u32,
@@ -163,7 +143,7 @@ impl AsRef<Path> for ArchiveSourceSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct DownloadSourceSpec {
     pub url: String,
     pub sha256: Option<String>,
@@ -172,7 +152,7 @@ pub struct DownloadSourceSpec {
     pub pin_policy: SourcePinPolicySpec,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum SourceRefreshPolicySpec {
     Auto,
     Always,
@@ -195,7 +175,7 @@ impl std::fmt::Display for SourceRefreshPolicySpec {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum SourcePinPolicySpec {
     Floating,
     Locked,
@@ -216,7 +196,7 @@ impl std::fmt::Display for SourcePinPolicySpec {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum SourceProviderKind {
     Git,
     Path,
@@ -255,7 +235,7 @@ impl std::str::FromStr for SourceProviderKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct SourceRef {
     pub id: SourceId,
 }

@@ -1,11 +1,11 @@
 use crate::{IdError, InstallId, StageItemId};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct CheckpointSpec {
     pub points: Vec<CheckpointPointSpec>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct CheckpointPointSpec {
     pub id: CheckpointId,
     pub backend: Option<CheckpointBackendRef>,
@@ -14,7 +14,7 @@ pub struct CheckpointPointSpec {
     pub anchor: CheckpointAnchorRef,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct CheckpointId(String);
 
 impl CheckpointId {
@@ -78,12 +78,12 @@ impl std::str::FromStr for CheckpointId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct CheckpointBackendRef {
     pub backend: String,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub enum CheckpointPolicy {
     #[default]
     Off,
@@ -91,7 +91,7 @@ pub enum CheckpointPolicy {
     Always,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub enum CheckpointAnchorRef {
     #[default]
     Image,

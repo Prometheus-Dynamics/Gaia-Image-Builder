@@ -197,7 +197,7 @@ fn ensure_remote_git_cache(
             cache_dir.display()
         ))
     })?;
-    let mirror_dir = cache_dir.join(remote_git_mirror_dir_name(&git.repo));
+    let mirror_dir = remote_git_mirror_dir(&cache_dir, &git.repo);
     if mirror_dir.join("HEAD").is_file() {
         // Refresh so the mirror keeps supplying objects for new commits; a
         // failed refresh only makes the clone fetch more itself.
@@ -239,14 +239,52 @@ fn ensure_remote_git_cache(
 
 /// One mirror per repository, shared by every branch, tag and revision.
 pub fn remote_git_cache_key(repo: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    repo.hash(&mut hasher);
-    format!("repo-{:016x}", hasher.finish())
+    let mut fingerprint = gaia_spec::Fingerprint::new("git-mirror");
+    fingerprint.str(repo);
+    format!("repo-{}", fingerprint.finish().short_hex())
 }
 
 /// Directory name of a repository's mirror under `.gaia/cache/git`.
 pub fn remote_git_mirror_dir_name(repo: &str) -> String {
     format!("{}.git", remote_git_cache_key(repo))
+}
+
+/// The name mirrors had before stable fingerprints: `std`'s `DefaultHasher`
+/// over the URL. Only computed to migrate such a mirror (see
+/// [`remote_git_mirror_dir`]); a Rust release that changes that hasher only
+/// makes the migration miss, and the mirror is cloned again.
+fn legacy_remote_git_mirror_dir_name(repo: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    repo.hash(&mut hasher);
+    format!("repo-{:016x}.git", hasher.finish())
+}
+
+/// The mirror directory of `repo` under `cache_dir`. A mirror still under its
+/// legacy name is renamed to the current one first, so mirrors made by an
+/// older Gaia keep serving their objects instead of being cloned again.
+pub fn remote_git_mirror_dir(cache_dir: &Path, repo: &str) -> PathBuf {
+    let mirror = cache_dir.join(remote_git_mirror_dir_name(repo));
+    if !mirror.exists() {
+        let legacy = cache_dir.join(legacy_remote_git_mirror_dir_name(repo));
+        if legacy != mirror
+            && legacy.join("HEAD").is_file()
+            && let Err(error) = fs::rename(&legacy, &mirror)
+        {
+            // Another process may have renamed it first; otherwise the
+            // mirror is cloned again under the current name.
+            if !mirror.exists() {
+                tracing::warn!(
+                    legacy = %legacy.display(),
+                    mirror = %mirror.display(),
+                    %error,
+                    "could not rename a git mirror to its current name"
+                );
+            }
+        }
+    }
+    mirror
 }
 
 /// Workspace-relative directory holding the shared git mirrors.

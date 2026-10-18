@@ -4,7 +4,7 @@ pub const RUNTIME_STATE_DIR_NAME: &str = ".gaia/runtime";
 pub const IMAGE_ASSEMBLY_STATE_FILE_NAME: &str = "image-assembly.state";
 pub const IMAGE_ASSEMBLY_STATE_KIND: &str = "image-assembly";
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct KeyValueState {
     fields: Vec<(String, String)>,
 }

@@ -1,7 +1,7 @@
 use crate::{ArtifactId, SourceId, SourceRef};
 use std::path::Path;
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ArtifactSpec {
     pub id: ArtifactId,
     pub definition: ArtifactDefinition,
@@ -9,6 +9,7 @@ pub struct ArtifactSpec {
     /// Sources other than `source` the artifact reads: named by `sources`
     /// in its config, or by a `${source.<id>.*}` token in its build fields.
     /// Sorted and without duplicates; the artifact depends on each source.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub extra_sources: Vec<SourceId>,
     pub execution: Option<ArtifactExecutionSpec>,
     pub target: Option<String>,
@@ -17,30 +18,6 @@ pub struct ArtifactSpec {
     pub after_image_prepare: bool,
     pub output: ArtifactOutputSpec,
     pub install_identity: Option<ArtifactInstallIdentitySpec>,
-}
-
-// Operation fingerprints hash the Debug output of specs. `extra_sources` is
-// only printed when set, so artifacts without extra sources keep the
-// fingerprints they had before the field existed.
-impl std::fmt::Debug for ArtifactSpec {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut debug = formatter.debug_struct("ArtifactSpec");
-        debug
-            .field("id", &self.id)
-            .field("definition", &self.definition)
-            .field("source", &self.source)
-            .field("execution", &self.execution)
-            .field("target", &self.target)
-            .field("build_mode", &self.build_mode)
-            .field("dependencies", &self.dependencies)
-            .field("after_image_prepare", &self.after_image_prepare)
-            .field("output", &self.output)
-            .field("install_identity", &self.install_identity);
-        if !self.extra_sources.is_empty() {
-            debug.field("extra_sources", &self.extra_sources);
-        }
-        debug.finish()
-    }
 }
 
 impl ArtifactSpec {
@@ -70,39 +47,24 @@ impl ArtifactSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum ArtifactExecutionSpec {
     Host,
     Docker(DockerArtifactExecutionSpec),
 }
 
-#[derive(Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct DockerArtifactExecutionSpec {
     pub image: Option<String>,
     /// Dockerfile Gaia builds the execution image from (workspace path).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub dockerfile: Option<String>,
     /// Build context for `dockerfile`; defaults to the Dockerfile's directory.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
 }
 
-// Operation fingerprints hash the Debug output of specs. The Dockerfile
-// fields are only printed when set, so image-only artifacts keep the
-// fingerprints they had before Dockerfile support existed.
-impl std::fmt::Debug for DockerArtifactExecutionSpec {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut debug = formatter.debug_struct("DockerArtifactExecutionSpec");
-        debug.field("image", &self.image);
-        if let Some(dockerfile) = &self.dockerfile {
-            debug.field("dockerfile", dockerfile);
-        }
-        if let Some(context) = &self.context {
-            debug.field("context", context);
-        }
-        debug.finish()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum ArtifactDefinition {
     Rust(RustArtifactSpec),
     Java(JavaArtifactSpec),
@@ -123,7 +85,7 @@ impl ArtifactDefinition {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct RustArtifactSpec {
     pub package: String,
     pub target_name: Option<String>,
@@ -137,19 +99,22 @@ pub struct RustArtifactSpec {
     pub all_features: bool,
     /// Rust artifacts sharing a build group are always built by one cargo
     /// invocation, so cargo resolves features once for all of them.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub build_group: Option<String>,
     /// Sorted packages of every member of `build_group` (this one
     /// included); each is passed to cargo as `-p`. Empty outside a group.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub group_packages: Vec<String>,
     /// Cargo git dependencies served from declared git sources, sorted by
     /// `url`. Empty unless the artifact sets `cargo_git_sources`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub cargo_git_sources: Vec<CargoGitSourceSpec>,
 }
 
 /// One cargo git dependency the build takes from a declared git source
 /// instead of the network: the repository URL as Cargo.lock records it, and
 /// the git source whose mirror holds the commits the lock pins.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct CargoGitSourceSpec {
     /// The repository URL as written in the workspace's Cargo.lock (or in
     /// the artifact's `cargo_git_sources` key; URLs match with and without
@@ -186,33 +151,7 @@ impl RustArtifactSpec {
     }
 }
 
-// Operation fingerprints hash the Debug output of specs. The build group
-// fields are only printed when set, so artifacts outside a group keep the
-// fingerprints they had before build groups existed.
-impl std::fmt::Debug for RustArtifactSpec {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut debug = formatter.debug_struct("RustArtifactSpec");
-        debug
-            .field("package", &self.package)
-            .field("target_name", &self.target_name)
-            .field("variant", &self.variant)
-            .field("features", &self.features)
-            .field("no_default_features", &self.no_default_features)
-            .field("all_features", &self.all_features);
-        if let Some(build_group) = &self.build_group {
-            debug.field("build_group", build_group);
-        }
-        if !self.group_packages.is_empty() {
-            debug.field("group_packages", &self.group_packages);
-        }
-        if !self.cargo_git_sources.is_empty() {
-            debug.field("cargo_git_sources", &self.cargo_git_sources);
-        }
-        debug.finish()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct JavaArtifactSpec {
     pub build_target: String,
     pub build_args: Vec<String>,
@@ -220,28 +159,28 @@ pub struct JavaArtifactSpec {
     pub build_env: Vec<(String, String)>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct NodeArtifactSpec {
     pub package_dir: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct PythonArtifactSpec {
     pub package_dir: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct GoArtifactSpec {
     pub package: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum ArtifactVariantSpec {
     File,
     Directory,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum BuildModeSpec {
     Debug,
     Release,
@@ -276,7 +215,7 @@ impl std::str::FromStr for BuildModeSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ArtifactOutputSpec {
     pub path: String,
 }
@@ -293,14 +232,14 @@ impl AsRef<Path> for ArtifactOutputSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ArtifactInstallIdentitySpec {
     pub install_name: String,
     pub install_class: ArtifactInstallClassSpec,
     pub destination_hint: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum ArtifactInstallClassSpec {
     Binary,
     Library,
@@ -329,7 +268,7 @@ impl std::fmt::Display for ArtifactInstallClassSpec {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum ArtifactProviderKind {
     Rust,
     Java,
@@ -371,7 +310,7 @@ impl std::str::FromStr for ArtifactProviderKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct ArtifactRef {
     pub id: ArtifactId,
 }
@@ -423,8 +362,9 @@ mod tests {
         assert!("unknown".parse::<ArtifactProviderKind>().is_err());
     }
 
+    /// Fingerprints encode `extra_sources` only when set.
     #[test]
-    fn artifact_spec_debug_prints_extra_sources_only_when_set() {
+    fn artifact_spec_serializes_extra_sources_only_when_set() {
         let mut spec = ArtifactSpec::new(
             "app",
             ArtifactDefinition::Go(GoArtifactSpec {
@@ -435,27 +375,9 @@ mod tests {
                 path: "out/app".into(),
             },
         );
-        // What `#[derive(Debug)]` printed before `extra_sources` existed.
-        let derived = format!(
-            "ArtifactSpec {{ id: {:?}, definition: {:?}, source: {:?}, execution: {:?}, target: {:?}, build_mode: {:?}, dependencies: {:?}, after_image_prepare: {:?}, output: {:?}, install_identity: {:?} }}",
-            spec.id,
-            spec.definition,
-            spec.source,
-            spec.execution,
-            spec.target,
-            spec.build_mode,
-            spec.dependencies,
-            spec.after_image_prepare,
-            spec.output,
-            spec.install_identity
-        );
-        assert_eq!(format!("{spec:?}"), derived);
-
+        assert!(!crate::canonical_json(&spec).contains("extra_sources"));
         spec.extra_sources = vec![SourceId::new("corelib")];
-        let debug = format!("{spec:?}");
-        assert!(
-            debug.ends_with("install_identity: None, extra_sources: [SourceId(\"corelib\")] }")
-        );
+        assert!(crate::canonical_json(&spec).contains(r#""extra_sources":["corelib"]"#));
     }
 
     fn rust_spec() -> RustArtifactSpec {
@@ -472,33 +394,20 @@ mod tests {
         }
     }
 
+    /// Fingerprints encode the build group fields only when set.
     #[test]
-    fn rust_spec_debug_matches_the_derived_format_outside_a_group() {
-        let spec = rust_spec();
-        // What `#[derive(Debug)]` printed before build groups existed.
-        let derived = format!(
-            "RustArtifactSpec {{ package: {:?}, target_name: {:?}, variant: {:?}, features: {:?}, no_default_features: {:?}, all_features: {:?} }}",
-            spec.package,
-            spec.target_name,
-            spec.variant,
-            spec.features,
-            spec.no_default_features,
-            spec.all_features
-        );
-        assert_eq!(format!("{spec:?}"), derived);
-        let pretty = format!("{spec:#?}");
-        assert!(!pretty.contains("build_group") && !pretty.contains("group_packages"));
-    }
-
-    #[test]
-    fn rust_spec_debug_includes_group_fields_when_set() {
+    fn rust_spec_serializes_group_fields_only_when_set() {
         let mut spec = rust_spec();
+        let plain = crate::canonical_json(&spec);
+        assert!(!plain.contains("build_group") && !plain.contains("group_packages"));
         spec.build_group = Some("engine".into());
         spec.group_packages = vec!["engine".into(), "plugin".into()];
-        let debug = format!("{spec:?}");
-        assert!(debug.ends_with(
-            "all_features: false, build_group: \"engine\", group_packages: [\"engine\", \"plugin\"] }"
-        ));
+        let grouped = crate::canonical_json(&spec);
+        assert!(
+            grouped.contains(r#""build_group":"engine""#)
+                && grouped.contains(r#""group_packages":["engine","plugin"]"#),
+            "{grouped}"
+        );
         assert_eq!(spec.cargo_packages(), spec.group_packages);
         assert_eq!(rust_spec().cargo_packages(), vec!["engine".to_string()]);
     }
@@ -522,19 +431,17 @@ mod tests {
     }
 
     #[test]
-    fn rust_spec_debug_includes_cargo_git_sources_only_when_set() {
+    fn rust_spec_serializes_cargo_git_sources_only_when_set() {
         let mut spec = rust_spec();
-        let plain = format!("{spec:?}");
-        assert!(!plain.contains("cargo_git_sources"));
+        assert!(!crate::canonical_json(&spec).contains("cargo_git_sources"));
         spec.cargo_git_sources = vec![CargoGitSourceSpec {
             url: "https://example.com/dep.git".into(),
             source: SourceId::new("dep"),
             repo: "https://example.com/dep.git".into(),
         }];
-        let debug = format!("{spec:?}");
-        assert!(debug.contains(
-            "cargo_git_sources: [CargoGitSourceSpec { url: \"https://example.com/dep.git\""
-        ));
-        assert!(debug.ends_with("}] }"));
+        assert!(
+            crate::canonical_json(&spec)
+                .contains(r#""cargo_git_sources":[{"repo":"https://example.com/dep.git""#)
+        );
     }
 }

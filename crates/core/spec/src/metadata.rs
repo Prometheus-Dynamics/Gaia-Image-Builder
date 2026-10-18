@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct BuildMetadataSpec {
     pub version: Option<String>,
     pub description: Option<String>,
@@ -19,14 +19,14 @@ pub struct BuildMetadataSpec {
 
 /// Ids a build declares it must end up with (`[expect]`); validation fails
 /// when one is missing.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct ExpectedItemsSpec {
     pub artifacts: Vec<String>,
     pub installs: Vec<String>,
     pub sources: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct ProductIdentitySpec {
     pub family: Option<String>,
     pub name: Option<String>,

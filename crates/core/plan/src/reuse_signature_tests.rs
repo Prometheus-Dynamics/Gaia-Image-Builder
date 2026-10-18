@@ -113,6 +113,7 @@ fn recorded_state(spec: &ResolvedBuildSpec, baseline: &ExecutionPlan) -> ReuseSt
         .collect::<Vec<_>>();
     ReuseState {
         spec_fingerprint: spec_fingerprint(spec),
+        fingerprint_scheme: gaia_spec::FINGERPRINT_SCHEME,
         completed_operation_ids: operations
             .iter()
             .map(|operation| operation.id.as_str().to_string())

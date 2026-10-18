@@ -1,6 +1,6 @@
 /// Where a successful `gaia run` copies its primary image (`--export`
 /// without the flag). Both directories are absolute once config resolves.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct ExportSpec {
     /// `image.output.export_dir`, the build's own setting.
     pub image_dir: Option<String>,

@@ -9,7 +9,7 @@
 pub const DEFAULT_VARIANT_ID: &str = "default";
 
 /// A declared variant, as written in `[[variants]]`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct VariantSpec {
     pub id: String,
     pub description: Option<String>,

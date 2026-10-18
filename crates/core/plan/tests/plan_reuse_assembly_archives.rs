@@ -21,6 +21,7 @@ fn reuse_state_for_assembly(spec: &ResolvedBuildSpec) -> ReuseState {
     let reused_ids = ["image:assembly"];
     ReuseState {
         spec_fingerprint: spec_fingerprint(spec),
+        fingerprint_scheme: gaia_spec::FINGERPRINT_SCHEME,
         completed_operation_ids: reused_ids
             .into_iter()
             .map(str::to_string)
@@ -177,6 +178,7 @@ fn state_recorded_after_run(
         .expect("assembly operation");
     ReuseState {
         spec_fingerprint: spec_fingerprint(spec),
+        fingerprint_scheme: gaia_spec::FINGERPRINT_SCHEME,
         completed_operation_ids: ["image:assembly".to_string()].into_iter().collect(),
         operation_fingerprints: [("image:assembly".to_string(), fingerprint_of(operation))]
             .into_iter()

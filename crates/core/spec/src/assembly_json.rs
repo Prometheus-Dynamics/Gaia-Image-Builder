@@ -22,7 +22,7 @@ pub type TreeDigestResolver<'a> =
     dyn FnMut(&AssemblyPathTemplate) -> Result<Vec<(String, String)>, String> + 'a;
 
 /// One JSON value of a generated document.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum AssemblyJsonValue {
     String(String),
     Integer(i64),

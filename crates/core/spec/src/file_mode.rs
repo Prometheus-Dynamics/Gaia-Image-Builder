@@ -2,7 +2,7 @@
 
 use std::str::FromStr;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct FileMode(u32);
 
 impl FileMode {
@@ -11,7 +11,7 @@ impl FileMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum FileModeParseError {
     Empty,
     InvalidOctal(String),

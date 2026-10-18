@@ -263,22 +263,33 @@ fn cache_clean_paths(
 /// fetches and no cargo git dependency of this build maps to. Includes the
 /// mirrors of the old one-per-ref layout.
 fn unused_mirror_paths(spec: &ResolvedBuildSpec, cache_root: &Path) -> Vec<PathBuf> {
-    let mut used = BTreeSet::new();
+    let mirrors = cache_root.join(gaia_source_providers::GIT_MIRROR_CACHE_DIR);
+    let mut repos = Vec::new();
     for source in &spec.sources {
         if let SourceDefinition::Git(git) = &source.definition {
-            used.insert(gaia_source_providers::remote_git_mirror_dir_name(&git.repo));
+            repos.push(git.repo.as_str());
         }
     }
     for artifact in &spec.artifacts {
         if let ArtifactDefinition::Rust(rust) = &artifact.definition {
-            for mapping in &rust.cargo_git_sources {
-                used.insert(gaia_source_providers::remote_git_mirror_dir_name(
-                    &mapping.repo,
-                ));
-            }
+            repos.extend(
+                rust.cargo_git_sources
+                    .iter()
+                    .map(|mapping| mapping.repo.as_str()),
+            );
         }
     }
-    let mirrors = cache_root.join(gaia_source_providers::GIT_MIRROR_CACHE_DIR);
+    // Resolving a used mirror renames one still under its legacy name, so it
+    // is kept rather than cleaned as unused.
+    let used = repos
+        .into_iter()
+        .filter_map(|repo| {
+            gaia_source_providers::remote_git_mirror_dir(&mirrors, repo)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+        })
+        .collect::<BTreeSet<_>>();
     sorted_children(&mirrors)
         .into_iter()
         .filter(|path| !path_name(path).is_some_and(|name| used.contains(name)))

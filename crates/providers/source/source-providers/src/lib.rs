@@ -12,11 +12,9 @@ use gaia_spec::{
 };
 #[cfg(test)]
 use gaia_spec::{DownloadSourceSpec, PathSourceSpec};
-use std::collections::hash_map::DefaultHasher;
 #[cfg(test)]
 use std::ffi::OsStr;
 use std::fs;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::OnceLock;
@@ -166,7 +164,7 @@ pub(crate) use digest::*;
 pub use download::{DOWNLOAD_CACHE_DIR, download_cache_path};
 pub(crate) use git_helpers::*;
 pub use git_helpers::{
-    GIT_MIRROR_CACHE_DIR, remote_git_cache_key, remote_git_mirror_dir_name,
+    GIT_MIRROR_CACHE_DIR, remote_git_cache_key, remote_git_mirror_dir, remote_git_mirror_dir_name,
     resolve_git_source_commit,
 };
 pub use git_import::{IMPORT_SOURCE_CACHE_DIR, ensure_git_revision_checkout};

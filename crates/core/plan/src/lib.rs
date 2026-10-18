@@ -11,6 +11,7 @@ mod reuse_details;
 mod reuse_explain;
 mod reuse_floating;
 mod reuse_imports;
+mod reuse_inputs;
 mod reuse_toolchain;
 mod runtime_libs;
 mod targets;
@@ -26,11 +27,12 @@ pub use operations::{
 };
 pub use rebuild::{REBUILD_REQUESTED, RebuildRequest};
 pub use reuse::{
-    operation_content_signature, operation_fingerprint, operation_input_signature,
+    FINGERPRINT_SCHEME_CHANGED, operation_content_signature, operation_input_signature,
     operation_output_signature, spec_fingerprint,
 };
 pub use reuse_details::{fingerprint_change_detail, operation_components, recorded_fingerprint};
 pub use reuse_explain::{InvalidationSummary, invalidation_summary};
+pub use reuse_inputs::operation_fingerprint;
 pub use runtime_libs::{
     RuntimeClosure, RuntimeEntry, derive_sysroot, is_dynamic_elf, missing_runtime_libraries,
     resolve_runtime_closure,

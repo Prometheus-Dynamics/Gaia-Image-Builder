@@ -117,6 +117,7 @@ pub fn reuse_state_for_ids(
 ) -> ReuseState {
     ReuseState {
         spec_fingerprint: spec_fingerprint(spec),
+        fingerprint_scheme: gaia_spec::FINGERPRINT_SCHEME,
         completed_operation_ids: reused_ids
             .iter()
             .copied()

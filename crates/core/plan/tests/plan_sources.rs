@@ -42,6 +42,7 @@ fn plan_rebuilds_when_path_source_tree_changes() {
     let reused_ids = ["source:gaia-upstream", "source:workspace-root"];
     let state = ReuseState {
         spec_fingerprint: spec_fingerprint(&spec),
+        fingerprint_scheme: gaia_spec::FINGERPRINT_SCHEME,
         completed_operation_ids: reused_ids
             .into_iter()
             .map(str::to_string)
@@ -112,6 +113,7 @@ fn plan_ignores_workspace_derived_dirs_when_hashing_path_sources() {
 
     let state = ReuseState {
         spec_fingerprint: spec_fingerprint(&spec),
+        fingerprint_scheme: gaia_spec::FINGERPRINT_SCHEME,
         completed_operation_ids: ["source:workspace-root"]
             .into_iter()
             .map(str::to_string)
@@ -182,6 +184,7 @@ fn plan_rebuilds_source_when_provider_state_changes() {
 
     let state = ReuseState {
         spec_fingerprint: spec_fingerprint(&spec),
+        fingerprint_scheme: gaia_spec::FINGERPRINT_SCHEME,
         completed_operation_ids: ["source:workspace-root"]
             .into_iter()
             .map(str::to_string)

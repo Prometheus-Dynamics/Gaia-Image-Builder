@@ -1,7 +1,7 @@
 use crate::{ImageAssemblySpec, InstallId, SourceId, StageItemId};
 use std::path::Path;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ImageSpec {
     pub definition: ImageDefinition,
     pub feed: ImageFeedSpec,
@@ -24,7 +24,7 @@ impl ImageSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum ImageDefinition {
     Buildroot(BuildrootImageSpec),
     StartingPoint(StartingPointImageSpec),
@@ -39,7 +39,7 @@ impl ImageDefinition {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct ImageFeedSpec {
     pub install_entries: Vec<InstallId>,
     pub stage_files: Vec<StageItemId>,
@@ -47,7 +47,7 @@ pub struct ImageFeedSpec {
     pub stage_services: Vec<StageItemId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct BuildrootImageSpec {
     pub source: Option<SourceId>,
     pub defconfig: Option<String>,
@@ -90,14 +90,14 @@ impl Default for BuildrootImageSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct BuildrootExpectedImageSpec {
     pub name: String,
     pub format: BuildrootExpectedImageFormatSpec,
     pub required: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum BuildrootExpectedImageFormatSpec {
     Tar,
     Cpio,
@@ -154,7 +154,7 @@ impl std::fmt::Display for BuildrootExpectedImageFormatSpec {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum BuildrootExternalTreeModeSpec {
     Auto,
     Required,
@@ -177,7 +177,7 @@ impl std::fmt::Display for BuildrootExternalTreeModeSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct StartingPointImageSpec {
     pub source: Option<SourceId>,
     pub source_path: Option<String>,
@@ -214,7 +214,7 @@ impl Default for StartingPointImageSpec {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct StartingPointPackagesSpec {
     pub enabled: bool,
     pub execute: bool,
@@ -229,7 +229,7 @@ pub struct StartingPointPackagesSpec {
     pub os_release_path: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum StartingPointRootfsValidationModeSpec {
     RequireExists,
     RequireDirectory,
@@ -254,7 +254,7 @@ impl std::fmt::Display for StartingPointRootfsValidationModeSpec {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum StartingPointOutputModeSpec {
     CopyRootfs,
     ArchiveOnly,
@@ -277,7 +277,7 @@ impl std::fmt::Display for StartingPointOutputModeSpec {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct ImageOutputSpec {
     pub collect_dir: Option<String>,
     pub archive_name: Option<String>,
@@ -294,7 +294,7 @@ impl ImageOutputSpec {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum ImageProviderKind {
     Buildroot,
     StartingPoint,

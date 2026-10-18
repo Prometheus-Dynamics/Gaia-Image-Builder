@@ -95,9 +95,7 @@ fn ensure_import_mirror(
     rev: &str,
     timeout: Duration,
 ) -> Result<PathBuf, String> {
-    let mirror = workspace_root
-        .join(GIT_MIRROR_CACHE_DIR)
-        .join(remote_git_mirror_dir_name(repo));
+    let mirror = remote_git_mirror_dir(&workspace_root.join(GIT_MIRROR_CACHE_DIR), repo);
     if mirror.join("HEAD").is_file() {
         let mut has_rev = git_command();
         has_rev

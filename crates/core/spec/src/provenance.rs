@@ -1,9 +1,9 @@
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct ProvenanceSpec {
     pub identity: ProvenanceIdentitySpec,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct ProvenanceIdentitySpec {
     pub project: Option<String>,
     pub vendor: Option<String>,

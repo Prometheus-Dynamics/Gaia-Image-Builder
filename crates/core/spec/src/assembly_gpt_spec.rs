@@ -4,14 +4,14 @@
 use crate::AssemblyDiskPartitionSpec;
 
 /// GPT options of a disk. Unset for MBR disks.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyGptDiskSpec {
     /// The disk GUID; `None` derives it from the disk id.
     pub disk_guid: Option<String>,
 }
 
 /// GPT options of a partition. Unset for MBR disks.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyGptPartitionSpec {
     /// The unique partition GUID (the `PARTUUID`); `None` derives it from
     /// the disk GUID and the partition name.
@@ -19,10 +19,10 @@ pub struct AssemblyGptPartitionSpec {
 }
 
 /// A GUID as written, `8-4-4-4-12` hex digits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct GptGuid([u8; 16]);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct GptGuidParseError(pub String);
 
 impl std::fmt::Display for GptGuidParseError {
@@ -144,7 +144,7 @@ impl GptPartitionType {
 }
 
 /// Why a GPT partition type is not usable.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum GptPartitionTypeError {
     InvalidRaw(String),
     UnknownAlias(String),

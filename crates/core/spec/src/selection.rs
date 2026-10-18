@@ -1,4 +1,4 @@
-#[derive(Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct SelectionSpec {
     pub requested_build: Option<String>,
     pub selected_build_file: Option<String>,
@@ -9,46 +9,19 @@ pub struct SelectionSpec {
     pub explicit_overrides: Vec<(String, String)>,
     pub precedence_order: Vec<String>,
     /// Git sources whose files were imported into the config at resolve time.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub import_sources: Vec<ImportSourceSpec>,
     /// The variant this spec builds (`None` when the build declares none).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub variant: Option<String>,
     /// Every variant the build declares, in file order (empty when none).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub variants: Vec<crate::VariantSpec>,
-}
-
-// Fingerprints hash the Debug output of the spec. `import_sources` is only
-// printed when non-empty so builds without source imports keep the
-// fingerprints they had before source imports existed.
-impl std::fmt::Debug for SelectionSpec {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut debug = formatter.debug_struct("SelectionSpec");
-        debug
-            .field("requested_build", &self.requested_build)
-            .field("selected_build_file", &self.selected_build_file)
-            .field("selected_preset", &self.selected_preset)
-            .field("selected_inputs", &self.selected_inputs)
-            .field("env_files", &self.env_files)
-            .field("env_overrides", &self.env_overrides)
-            .field("explicit_overrides", &self.explicit_overrides)
-            .field("precedence_order", &self.precedence_order);
-        if !self.import_sources.is_empty() {
-            debug.field("import_sources", &self.import_sources);
-        }
-        // Variant fields are printed only when set, so builds without
-        // variants keep the fingerprints they had before variants existed.
-        if let Some(variant) = &self.variant {
-            debug.field("variant", variant);
-        }
-        if !self.variants.is_empty() {
-            debug.field("variants", &self.variants);
-        }
-        debug.finish()
-    }
 }
 
 /// A source whose checkout supplied config files through
 /// `imports = [{ source = "<id>", path = "..." }]`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct ImportSourceSpec {
     /// Source id, as declared in `[[sources]]`.
     pub id: String,

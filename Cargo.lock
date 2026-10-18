@@ -637,6 +637,8 @@ dependencies = [
  "gaia-source-providers",
  "gaia-spec",
  "gaia-testkit",
+ "serde",
+ "serde_json",
  "sha2 0.11.0",
  "tracing",
 ]
@@ -684,6 +686,11 @@ dependencies = [
 [[package]]
 name = "gaia-spec"
 version = "2.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+]
 
 [[package]]
 name = "gaia-testkit"
