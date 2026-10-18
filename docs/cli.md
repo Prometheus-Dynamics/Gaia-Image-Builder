@@ -60,7 +60,10 @@ Semantics:
 - `--env`
   Add one or more runtime env overrides.
 - `--set`
-  Apply explicit top-level override values.
+  Apply explicit top-level override values. The key must name a setting gaia
+  knows, or `input.<name>` for an input the build declares. Any other key
+  fails the command, with a `did you mean` hint for the closest known key,
+  rather than being ignored. Presets are held to the same rule.
 - `--variant <id>[,<id>]`
   For `run`, `preview` and `plan` on a build that declares `[[variants]]`:
   build only the named variants (`default` is the base config). Without it,

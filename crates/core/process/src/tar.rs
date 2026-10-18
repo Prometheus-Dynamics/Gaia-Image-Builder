@@ -1,14 +1,23 @@
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use crate::{ProcessCancelCheck, ProcessLogSink, output_text, run_command_with_timeout};
+use crate::{
+    ProcessCancelCheck, ProcessLogSink, ProcessOutputRetention, output_text,
+    run_command_stdout_to_file_with_timeout_and_retention,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TarArchiveValidationError {
     pub message: String,
 }
 
+/// Validates every entry of the archive. The listing is streamed to a file
+/// and read back line by line, so no entry is skipped however large the
+/// archive is: the process runner keeps only the last few stdout lines.
 pub fn validate_tar_archive_entries(
     archive_path: &Path,
     strip_components: usize,
@@ -17,24 +26,74 @@ pub fn validate_tar_archive_entries(
     sink: Option<ProcessLogSink>,
     cancel_check: Option<ProcessCancelCheck>,
 ) -> Result<(), TarArchiveValidationError> {
+    let listing = ListingFile::beside(archive_path);
     let mut command = Command::new("tar");
     command
         .arg("-tvf")
         .arg(archive_path)
         .arg("--quoting-style=c");
-    let result = run_command_with_timeout(&mut command, timeout, label, sink, cancel_check)
-        .map_err(|error| TarArchiveValidationError {
-            message: error.message,
-        })?;
+    let result = run_command_stdout_to_file_with_timeout_and_retention(
+        &mut command,
+        &listing.path,
+        timeout,
+        label,
+        ProcessOutputRetention::default(),
+        sink,
+        cancel_check,
+    )
+    .map_err(|error| TarArchiveValidationError {
+        message: error.message,
+    })?;
     if !result.output.status.success() {
         return Err(TarArchiveValidationError {
             message: format!("{label} failed: {}", output_text(&result.output)),
         });
     }
-    for line in result.stdout_lines {
+    let file = File::open(&listing.path).map_err(|error| TarArchiveValidationError {
+        message: format!(
+            "failed to read {label} listing '{}': {error}",
+            listing.path.display()
+        ),
+    })?;
+    for line in BufReader::new(file).lines() {
+        let line = line.map_err(|error| TarArchiveValidationError {
+            message: format!("failed to read {label} listing: {error}"),
+        })?;
         validate_tar_listing_line(&line, strip_components)?;
     }
     Ok(())
+}
+
+/// A scratch file for a tar listing, removed when dropped. It sits beside the
+/// archive rather than in the temp dir, which may be RAM-backed; when the
+/// archive's directory is not writable it falls back to the temp dir.
+struct ListingFile {
+    path: PathBuf,
+}
+
+impl ListingFile {
+    fn beside(archive_path: &Path) -> Self {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let name = archive_path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let file_name = format!(".{name}.listing-{}-{unique}", std::process::id());
+        let beside = archive_path.with_file_name(&file_name);
+        let path = if fs::File::create(&beside).is_ok() {
+            beside
+        } else {
+            std::env::temp_dir().join(file_name)
+        };
+        Self { path }
+    }
+}
+
+impl Drop for ListingFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 fn validate_tar_listing_line(
@@ -370,6 +429,57 @@ mod tests {
             .expect_err("fifo archive entries should fail");
 
         assert!(error.message.contains("unsupported type"));
+    }
+
+    /// The bad entry is first, so it is outside the last lines the process
+    /// runner retains. Every entry must still be checked.
+    #[test]
+    fn validate_tar_archive_entries_rejects_bad_entry_before_many_benign_entries() {
+        let scratch = TempDir::new("gaia-process-test");
+        let dir = scratch.join("early-bad-tar");
+        let src = dir.join("src");
+        fs::create_dir_all(src.join("benign")).expect("source dir");
+        fs::write(src.join("bad.txt"), "bad").expect("bad source");
+        for index in 0..1_500 {
+            fs::write(src.join(format!("benign/file-{index:04}.txt")), "ok").expect("benign");
+        }
+        let archive = dir.join("early-bad.tar");
+        let status = Command::new("tar")
+            .arg("-cf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(&src)
+            .arg("--transform=s#^bad.txt$#../escape.txt#")
+            .arg("bad.txt")
+            .status()
+            .expect("create bad tar");
+        assert!(status.success());
+        let status = Command::new("tar")
+            .arg("-rf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(&src)
+            .arg("benign")
+            .status()
+            .expect("append benign entries");
+        assert!(status.success());
+
+        let error = validate_tar_archive_entries(
+            &archive,
+            0,
+            Duration::from_secs(60),
+            "early bad entry tar validation",
+            None,
+            None,
+        )
+        .expect_err("a bad entry before 1,500 benign ones must still be rejected");
+
+        assert!(error.message.contains("escapes the extraction destination"));
+        let leftover = fs::read_dir(&dir)
+            .expect("list dir")
+            .filter_map(Result::ok)
+            .any(|entry| entry.file_name().to_string_lossy().contains(".listing-"));
+        assert!(!leftover, "the listing scratch file must be removed");
     }
 
     fn create_tar(archive: &Path, source_dir: &Path, entries: &[&str]) {

@@ -1,9 +1,11 @@
 use crate::{ConfigError, ResolveOptions, raw};
 
 mod keys;
+mod suggest;
 
 pub(crate) use keys::source_path_override_id;
 use keys::{KnownOverrideKey, OverrideKey};
+use suggest::did_you_mean;
 
 /// Applies the `--set` overrides. Returns the overrides that name a source
 /// the merged config does not declare (`sources.<id>.path`), unapplied: the
@@ -112,9 +114,13 @@ fn apply_override(
     match OverrideKey::parse(key) {
         OverrideKey::Known(known) => apply_known_override(raw, known, key, value)?,
         OverrideKey::Input(name) => {
-            if raw.inputs.contains_key(name) {
-                upsert_pair(&mut raw.selected_inputs, name, value);
+            if !raw.inputs.contains_key(name) {
+                return Err(invalid_override_key(
+                    key,
+                    format!("the build declares no input '{name}'"),
+                ));
             }
+            upsert_pair(&mut raw.selected_inputs, name, value);
         }
         OverrideKey::Env(env_key) => {
             raw.env.insert(env_key.to_string(), value.to_string());
@@ -163,9 +169,21 @@ fn apply_override(
                 pin: None,
             };
         }
-        OverrideKey::Unknown => {}
+        OverrideKey::Unknown => {
+            return Err(invalid_override_key(
+                key,
+                format!("it names no setting{}", did_you_mean(key)),
+            ));
+        }
     }
     Ok(true)
+}
+
+fn invalid_override_key(key: &str, message: String) -> ConfigError {
+    ConfigError::InvalidOverrideKey {
+        key: key.to_string(),
+        message,
+    }
 }
 
 fn apply_known_override(

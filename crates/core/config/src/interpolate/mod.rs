@@ -6,6 +6,7 @@ mod project_git;
 mod resolver;
 mod scanner;
 
+use crate::ConfigError;
 use crate::env::ResolvedEnvironment;
 use crate::raw::{
     RawArtifactConfig, RawArtifactDefinition, RawBuildConfig, RawCheckpointConfig,
@@ -13,7 +14,17 @@ use crate::raw::{
 };
 use assembly::interpolate_image_assembly;
 
-pub fn interpolate_config(raw: RawBuildConfig, env: &ResolvedEnvironment) -> RawBuildConfig {
+/// Interpolates every string field. Fails with the cycle when a `${...}`
+/// reference leads back to a token it is already resolving.
+pub fn interpolate_config(
+    raw: RawBuildConfig,
+    env: &ResolvedEnvironment,
+) -> Result<RawBuildConfig, ConfigError> {
+    resolver::checked(|| interpolate_fields(raw, env))
+        .map_err(|cycle| ConfigError::InterpolationCycle { cycle })
+}
+
+fn interpolate_fields(raw: RawBuildConfig, env: &ResolvedEnvironment) -> RawBuildConfig {
     let snapshot = raw;
     let mut interpolated = snapshot.clone();
 

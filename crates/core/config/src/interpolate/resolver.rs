@@ -1,7 +1,29 @@
 use crate::env::ResolvedEnvironment;
 use crate::raw::RawBuildConfig;
+use std::cell::RefCell;
 use std::env;
 use std::path::{Path, PathBuf};
+
+thread_local! {
+    /// Tokens whose values are being resolved, outermost first. A token that
+    /// is already here would resolve forever.
+    static RESOLVING: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// The first cycle met during the current `checked` pass.
+    static CYCLE: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+}
+
+/// Runs one interpolation pass over a config and returns the first
+/// interpolation cycle it met, if any. The string functions cannot fail, so a
+/// cycle is recorded while they run and reported here.
+pub(crate) fn checked<T>(pass: impl FnOnce() -> T) -> Result<T, Vec<String>> {
+    RESOLVING.with(|stack| stack.borrow_mut().clear());
+    CYCLE.with(|slot| *slot.borrow_mut() = None);
+    let value = pass();
+    match CYCLE.with(|slot| slot.borrow_mut().take()) {
+        Some(cycle) => Err(cycle),
+        None => Ok(value),
+    }
+}
 
 pub(crate) fn interpolate_string(
     value: String,
@@ -19,12 +41,41 @@ pub(crate) fn interpolate_string(
             return output;
         };
         let token = &remainder[..end];
-        output.push_str(&resolve_token(token, raw, env));
+        output.push_str(&resolve_guarded(token, raw, env));
         rest = &remainder[end + 1..];
     }
 
     output.push_str(rest);
     output
+}
+
+/// Resolves a token unless it is already being resolved, in which case the
+/// cycle is recorded (first one wins) and the reference expands to nothing.
+fn resolve_guarded(token: &str, raw: &RawBuildConfig, env: &ResolvedEnvironment) -> String {
+    let cycle = RESOLVING.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        if let Some(start) = stack.iter().position(|open| open == token) {
+            let mut cycle = stack[start..].to_vec();
+            cycle.push(token.to_string());
+            return Some(cycle);
+        }
+        stack.push(token.to_string());
+        None
+    });
+    if let Some(cycle) = cycle {
+        CYCLE.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            if slot.is_none() {
+                *slot = Some(cycle);
+            }
+        });
+        return String::new();
+    }
+    let value = resolve_token(token, raw, env);
+    RESOLVING.with(|stack| {
+        stack.borrow_mut().pop();
+    });
+    value
 }
 
 fn resolve_token(token: &str, raw: &RawBuildConfig, env: &ResolvedEnvironment) -> String {

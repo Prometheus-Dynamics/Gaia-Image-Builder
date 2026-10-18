@@ -462,7 +462,7 @@ separated). Without `--variant` every variant is built.
 Rules:
 - Ids use `[a-z0-9][a-z0-9-]*`, are unique, and `default` is reserved.
 - An override key must be one Gaia knows, or `input.<name>` for an input the
-  build declares. Unlike `--set`, a misspelled key is an error.
+  build declares. As with `--set`, a misspelled key is an error.
 - Override order, last wins: the base file and the selected preset (or the
   variant's `preset`/`presets`), the variant's overrides, then the command
   line's `--set`. A `--set` therefore applies to every variant and beats
@@ -530,6 +530,11 @@ Supported interpolation targets include:
 If unresolved tokens remain:
 - warning when `allow_unresolved = true`
 - error when `allow_unresolved = false`
+
+A reference that leads back to a token it is already resolving is an error
+that names the cycle. For example, `build_name = "x-${build.display_name}"`
+with `display_name = "${build.name}"` fails with
+`interpolation cycle: build.display_name -> build.name -> build.display_name`.
 
 ## Failure Policy
 
@@ -2026,6 +2031,14 @@ rootfs_path = "${workspace.build_dir}/seed-rootfs"
 rootfs_validation_mode = "require-directory"
 output_mode = "copy-and-archive"
 ```
+
+The rootfs is copied into the build tree as it is. Symlinks are copied as
+links and never followed, so an absolute link into the host (such as
+`etc/resolv.conf -> /run/systemd/resolve/stub-resolv.conf`) stays a link and
+no host file is copied in. File and directory modes are kept, and hardlinks
+inside the tree stay hardlinks. Device nodes and fifos are recreated only
+when gaia runs as root; otherwise the build fails and names the file.
+Ownership is not carried over.
 
 Starting-point fields:
 - `rootfs_path`

@@ -154,7 +154,7 @@ pub(crate) fn resolve_build_checked(
         env_files = options.env_files.len(),
         "resolved config environment"
     );
-    let interpolated = interpolate_config(with_dynamic_inputs, &env);
+    let interpolated = interpolate_config(with_dynamic_inputs, &env)?;
     let normalized = normalize_paths(interpolated)?;
     reject_non_rust_build_groups(&normalized)?;
     reject_non_rust_cargo_git_sources(&normalized)?;
@@ -299,6 +299,18 @@ pub enum ConfigError {
         value: String,
         expected: &'static str,
     },
+    /// A `--set` (or preset) key that names no setting, or an `input.<name>`
+    /// for an input the build does not declare. Such a key would otherwise
+    /// be silently ignored.
+    InvalidOverrideKey {
+        key: String,
+        message: String,
+    },
+    /// `${...}` references that lead back to a token being resolved, such as
+    /// `build.name -> build.display_name -> build.name`.
+    InterpolationCycle {
+        cycle: Vec<String>,
+    },
     /// `sources.<id>.path` names a source that no config the build selects
     /// declares. `scope` names what was searched, such as "the selected
     /// config" or "any selected variant".
@@ -442,6 +454,12 @@ impl fmt::Display for ConfigError {
                 formatter,
                 "invalid override value for '{key}': '{value}' (expected {expected})"
             ),
+            Self::InvalidOverrideKey { key, message } => {
+                write!(formatter, "invalid override key '{key}': {message}")
+            }
+            Self::InterpolationCycle { cycle } => {
+                write!(formatter, "interpolation cycle: {}", cycle.join(" -> "))
+            }
             Self::UndeclaredSourceOverride {
                 key,
                 source_id,

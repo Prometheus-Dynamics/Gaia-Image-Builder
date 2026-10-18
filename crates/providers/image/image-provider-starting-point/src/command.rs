@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashMap;
 
 pub(crate) fn stderr_or_stdout(output: &Output) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -346,7 +347,19 @@ pub(crate) fn command_for_execution(
     })
 }
 
+/// Copies a rootfs tree into `dest`, as it is. Symlinks are recreated with
+/// their targets and never followed, so a link into the host cannot pull host
+/// files into the image. Modes are kept, hardlinks inside the tree stay
+/// hardlinks, and device nodes and fifos are recreated when running as root.
 pub(crate) fn copy_dir(src: &Path, dest: &Path) -> Result<(), ImageProviderError> {
+    copy_tree(src, dest, &mut HashMap::new())
+}
+
+/// Files already copied, by (device, inode), so later hardlinks to them can
+/// be recreated instead of copied again.
+type CopiedFiles = HashMap<(u64, u64), PathBuf>;
+
+fn copy_tree(src: &Path, dest: &Path, copied: &mut CopiedFiles) -> Result<(), ImageProviderError> {
     fs::create_dir_all(dest).map_err(|error| {
         ImageProviderError::backend_command(format!(
             "failed to create starting-point rootfs dir '{}': {error}",
@@ -367,17 +380,215 @@ pub(crate) fn copy_dir(src: &Path, dest: &Path) -> Result<(), ImageProviderError
         })?;
         let path = entry.path();
         let target = dest.join(entry.file_name());
-        if path.is_dir() {
-            copy_dir(&path, &target)?;
+        let meta = fs::symlink_metadata(&path).map_err(|error| {
+            ImageProviderError::backend_command(format!(
+                "failed to inspect starting-point rootfs entry '{}': {error}",
+                path.display()
+            ))
+        })?;
+        let file_type = meta.file_type();
+        if file_type.is_symlink() {
+            copy_symlink(&path, &target)?;
+        } else if file_type.is_dir() {
+            copy_tree(&path, &target, copied)?;
+            set_copied_mode(&target, &meta)?;
+        } else if file_type.is_file() {
+            copy_file(&path, &target, &meta, copied)?;
         } else {
-            fs::copy(&path, &target).map_err(|error| {
-                ImageProviderError::backend_command(format!(
-                    "failed to copy starting-point rootfs file '{}' to '{}': {error}",
-                    path.display(),
-                    target.display()
-                ))
-            })?;
+            copy_special_file(&path, &target, &meta)?;
         }
     }
     Ok(())
+}
+
+fn copy_symlink(path: &Path, target: &Path) -> Result<(), ImageProviderError> {
+    let link = fs::read_link(path).map_err(|error| {
+        ImageProviderError::backend_command(format!(
+            "failed to read starting-point rootfs symlink '{}': {error}",
+            path.display()
+        ))
+    })?;
+    std::os::unix::fs::symlink(&link, target).map_err(|error| {
+        ImageProviderError::backend_command(format!(
+            "failed to create starting-point rootfs symlink '{}' -> '{}': {error}",
+            target.display(),
+            link.display()
+        ))
+    })
+}
+
+fn copy_file(
+    path: &Path,
+    target: &Path,
+    meta: &fs::Metadata,
+    copied: &mut CopiedFiles,
+) -> Result<(), ImageProviderError> {
+    use std::os::unix::fs::MetadataExt;
+
+    let identity = (meta.dev(), meta.ino());
+    let first = if meta.nlink() > 1 {
+        copied.get(&identity).cloned()
+    } else {
+        None
+    };
+    if let Some(first) = first {
+        return fs::hard_link(&first, target).map_err(|error| {
+            ImageProviderError::backend_command(format!(
+                "failed to recreate starting-point rootfs hardlink '{}' -> '{}': {error}",
+                target.display(),
+                first.display()
+            ))
+        });
+    }
+    // `fs::copy` keeps the source's permission bits.
+    fs::copy(path, target).map_err(|error| {
+        ImageProviderError::backend_command(format!(
+            "failed to copy starting-point rootfs file '{}' to '{}': {error}",
+            path.display(),
+            target.display()
+        ))
+    })?;
+    if meta.nlink() > 1 {
+        copied.insert(identity, target.to_path_buf());
+    }
+    Ok(())
+}
+
+fn copy_special_file(
+    path: &Path,
+    target: &Path,
+    meta: &fs::Metadata,
+) -> Result<(), ImageProviderError> {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::MetadataExt;
+
+    // SAFETY: `geteuid` only reads the process's credentials.
+    if unsafe { libc::geteuid() } != 0 {
+        return Err(ImageProviderError::backend_command(format!(
+            "cannot copy starting-point rootfs special file '{}' (device, fifo or socket) \
+             without root; run gaia as root or remove it from the rootfs",
+            path.display()
+        )));
+    }
+    let c_target = std::ffi::CString::new(target.as_os_str().as_bytes()).map_err(|error| {
+        ImageProviderError::backend_command(format!(
+            "invalid starting-point rootfs path '{}': {error}",
+            target.display()
+        ))
+    })?;
+    // SAFETY: `c_target` is a valid NUL-terminated path that outlives the call.
+    if unsafe {
+        libc::mknod(
+            c_target.as_ptr(),
+            meta.mode() as libc::mode_t,
+            meta.rdev() as libc::dev_t,
+        )
+    } != 0
+    {
+        return Err(ImageProviderError::backend_command(format!(
+            "failed to recreate starting-point rootfs special file '{}': {}",
+            target.display(),
+            std::io::Error::last_os_error()
+        )));
+    }
+    // `mknod` applies the umask, so the mode is set again.
+    set_copied_mode(target, meta)
+}
+
+/// Gives a copied directory or special file the source's permission bits.
+fn set_copied_mode(target: &Path, meta: &fs::Metadata) -> Result<(), ImageProviderError> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    fs::set_permissions(target, fs::Permissions::from_mode(meta.mode() & 0o7777)).map_err(|error| {
+        ImageProviderError::backend_command(format!(
+            "failed to set mode on starting-point rootfs entry '{}': {error}",
+            target.display()
+        ))
+    })
+}
+
+#[cfg(test)]
+mod copy_tests {
+    use super::*;
+    use gaia_testkit::TempDir;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
+
+    /// A host file outside the rootfs that an absolute symlink points at.
+    /// Copying must never read it.
+    #[test]
+    fn copy_dir_keeps_absolute_symlinks_as_links_and_never_copies_host_content() {
+        let scratch = TempDir::new("gaia-starting-point-copy");
+        let host = scratch.join("host");
+        fs::create_dir_all(&host).expect("host dir");
+        let host_file = host.join("stub-resolv.conf");
+        fs::write(&host_file, "nameserver 10.0.0.1\n").expect("host file");
+        let rootfs = scratch.join("rootfs");
+        fs::create_dir_all(rootfs.join("etc")).expect("etc");
+        symlink(&host_file, rootfs.join("etc/resolv.conf")).expect("absolute symlink");
+        let dest = scratch.join("out");
+
+        copy_dir(&rootfs, &dest).expect("copy should succeed");
+
+        let copied = dest.join("etc/resolv.conf");
+        assert!(
+            fs::symlink_metadata(&copied)
+                .expect("copied link")
+                .file_type()
+                .is_symlink(),
+            "the link itself must be copied"
+        );
+        assert_eq!(fs::read_link(&copied).expect("link target"), host_file);
+    }
+
+    #[test]
+    fn copy_dir_preserves_relative_symlinks() {
+        let scratch = TempDir::new("gaia-starting-point-copy");
+        let rootfs = scratch.join("rootfs");
+        fs::create_dir_all(rootfs.join("usr/lib")).expect("usr/lib");
+        symlink("usr/lib", rootfs.join("lib")).expect("relative symlink");
+        let dest = scratch.join("out");
+
+        copy_dir(&rootfs, &dest).expect("copy should succeed");
+
+        assert_eq!(
+            fs::read_link(dest.join("lib")).expect("link"),
+            PathBuf::from("usr/lib")
+        );
+    }
+
+    #[test]
+    fn copy_dir_keeps_file_and_directory_modes() {
+        let scratch = TempDir::new("gaia-starting-point-copy");
+        let rootfs = scratch.join("rootfs");
+        fs::create_dir_all(rootfs.join("secure")).expect("secure dir");
+        fs::write(rootfs.join("secure/key"), "k").expect("file");
+        fs::set_permissions(rootfs.join("secure/key"), fs::Permissions::from_mode(0o640))
+            .expect("file mode");
+        fs::set_permissions(rootfs.join("secure"), fs::Permissions::from_mode(0o750))
+            .expect("dir mode");
+        let dest = scratch.join("out");
+
+        copy_dir(&rootfs, &dest).expect("copy should succeed");
+
+        let file_mode = fs::metadata(dest.join("secure/key")).expect("file").mode();
+        let dir_mode = fs::metadata(dest.join("secure")).expect("dir").mode();
+        assert_eq!(file_mode & 0o7777, 0o640);
+        assert_eq!(dir_mode & 0o7777, 0o750);
+    }
+
+    #[test]
+    fn copy_dir_keeps_hardlinks_inside_the_tree() {
+        let scratch = TempDir::new("gaia-starting-point-copy");
+        let rootfs = scratch.join("rootfs");
+        fs::create_dir_all(&rootfs).expect("rootfs");
+        fs::write(rootfs.join("a"), "shared").expect("file");
+        fs::hard_link(rootfs.join("a"), rootfs.join("b")).expect("hardlink");
+        let dest = scratch.join("out");
+
+        copy_dir(&rootfs, &dest).expect("copy should succeed");
+
+        let a = fs::metadata(dest.join("a")).expect("a");
+        let b = fs::metadata(dest.join("b")).expect("b");
+        assert_eq!((a.dev(), a.ino()), (b.dev(), b.ino()));
+    }
 }

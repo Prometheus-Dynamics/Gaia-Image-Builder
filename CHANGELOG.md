@@ -100,6 +100,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - The disk GUID (`disk_guid`) and partition GUIDs (`guid`) can be set; unset they are derived from the disk id and partition names, so the same config gives byte-identical disks and stable `PARTUUID`s. MBR-only options (`signature`, `signature_text`, `ebr_placement = "packed"`, `truncate`) are rejected on GPT disks, and GPT options on MBR disks.
 - Fingerprints of existing filesystems and disks are unchanged: the new options are part of them only when set.
 
+### Fixes: tar path checks, interpolation cycles, override keys, rootfs symlinks
+
+- Tar archives are checked entry by entry. The validation read only the last 1,000 lines of the listing, so in a larger archive an earlier `..`, absolute, or hardlink entry was never checked. The listing is now streamed to a scratch file beside the archive and every line is validated.
+- An interpolation cycle (`build_name = "x-${build.display_name}"` with `display_name = "${build.name}"`, or a `${interpolation.values.x}` that refers to itself) overflowed the stack and aborted gaia. It is now a config error naming the cycle: `interpolation cycle: build.display_name -> build.name -> build.display_name`.
+- A `--set` key, or a preset override, that names no setting was silently ignored (`--set image.rootfs_pth=/x`). It is now an error with a `did you mean` hint. `--set input.<name>` for an input the build does not declare is also an error; it was ignored.
+- The starting-point rootfs copy followed symlinks, so an absolute link in the rootfs (for example `etc/resolv.conf` to the host's `stub-resolv.conf`) copied host files into the image, and modes were lost. The copy now recreates symlinks without following them, keeps file and directory modes and in-tree hardlinks, and recreates device nodes and fifos only as root (otherwise it fails naming the file). Ownership is still not carried over.
+
 ### Buildroot EROFS: lzma without the extra image
 
 - With `BR2_TARGET_ROOTFS_EROFS_LZMA=y`, Buildroot's generic image compression (keyed on the same symbol) also ran `lzma -9` over `rootfs.erofs`, writing a second image larger than the first and costing about 35 s per build. The settings step now rewrites that choice to `custom` with `BR2_TARGET_ROOTFS_EROFS_COMPRESSION_ALGORITHMS="lzma,<level>"`, which gives `mkfs.erofs` the same `-zlzma,<level>` argument, and reports it. Other filesystems are unchanged. The `config_overrides` check accepts that rewrite: a requested `BR2_TARGET_ROOTFS_EROFS_LZMA=y` and its `_LZMA_LEVEL` count as honored when the final `.config` has the custom choice with the same `lzma,<level>` (517a311 reported them as dropped and failed the build).
