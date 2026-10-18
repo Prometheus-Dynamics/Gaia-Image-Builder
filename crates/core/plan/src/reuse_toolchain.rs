@@ -232,6 +232,7 @@ mod tests {
         );
         spec.policy.execution.docker = Some(DockerExecutionSpec {
             image: "gaia/build:1".into(),
+            reuse_container: false,
         });
         assert_eq!(
             artifact_toolchain(&spec, &java_artifact(None)),

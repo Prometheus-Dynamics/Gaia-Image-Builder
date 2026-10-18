@@ -677,6 +677,7 @@ mod tests {
             feed: gaia_spec::ImageFeedSpec::default(),
             output: gaia_spec::ImageOutputSpec::default(),
             assembly: None,
+            signing: None,
         };
         let preview = DummyImageProvider.preview_image(
             &spec,

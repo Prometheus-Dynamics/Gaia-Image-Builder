@@ -18,6 +18,7 @@ fn a_failed_make_still_reports_its_step_times() {
     let mut spec = ResolvedBuildSpec::new("step-times");
     spec.workspace.root_dir = workspace.display().to_string();
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             defconfig: Some("test_defconfig".into()),
             ..BuildrootImageSpec::default()
@@ -67,6 +68,7 @@ fn prepare_finalizes_the_target_without_making_images() {
     let mut spec = ResolvedBuildSpec::new("buildroot-prepare-images");
     spec.workspace.root_dir = workspace.display().to_string();
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             defconfig: Some("test_defconfig".into()),
             ..BuildrootImageSpec::default()
@@ -119,6 +121,7 @@ fn a_build_operations_steps_cover_its_duration() {
     spec.workspace.root_dir = workspace.display().to_string();
     spec.workspace.build_dir = "build".into();
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             defconfig: Some("test_defconfig".into()),
             source: Some(SourceId::new("fake-buildroot")),

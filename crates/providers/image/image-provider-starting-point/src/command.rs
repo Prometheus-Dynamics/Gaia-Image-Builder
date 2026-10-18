@@ -265,6 +265,12 @@ pub(crate) fn execution_context(spec: &ResolvedBuildSpec) -> ImageExecutionConte
             .docker
             .as_ref()
             .map(|docker| docker.image.clone()),
+        docker_reuse_container: spec
+            .policy
+            .execution
+            .docker
+            .as_ref()
+            .is_some_and(|docker| docker.reuse_container),
     }
 }
 
@@ -283,7 +289,12 @@ pub(crate) fn command_for_execution(
     }
     let spec =
         DockerRunSpec::discovered_mounts(image.clone(), execution.workspace_root.clone(), command);
-    docker_run_command(command, &spec).map_err(|error| {
+    let wrapped = if execution.docker_reuse_container {
+        docker_reused_exec_command(command, &spec)
+    } else {
+        docker_run_command(command, &spec)
+    };
+    wrapped.map_err(|error| {
         ImageProviderError::new(ImageProviderErrorKind::PolicyBlocked, error.to_string())
     })
 }

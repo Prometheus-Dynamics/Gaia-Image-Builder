@@ -24,11 +24,47 @@ fn is_buildroot_package_name(name: &str) -> bool {
         })
 }
 
+/// `[image.signing]`: the kind names a tool, and the key and outputs are set.
+/// Whether the tool and key exist is checked when the outputs are signed.
+fn validate_image_signing(
+    signing: &gaia_spec::ImageSigningSpec,
+    diagnostics: &mut Vec<ValidationDiagnostic>,
+) {
+    let location = Some("image.signing".to_string());
+    if gaia_spec::ImageSigningKind::parse(&signing.kind).is_none() {
+        diagnostics.push(error(
+            "image_signing_kind_invalid",
+            format!(
+                "image.signing kind '{}' is not minisign, gpg or cosign-blob",
+                signing.kind
+            ),
+            location.clone(),
+        ));
+    }
+    if signing.key.trim().is_empty() {
+        diagnostics.push(error(
+            "image_signing_key_missing",
+            "image.signing key is empty: set a key path, or env:VAR naming a variable".into(),
+            location.clone(),
+        ));
+    }
+    if signing.outputs.is_empty() {
+        diagnostics.push(error(
+            "image_signing_outputs_missing",
+            "image.signing outputs lists no file pattern, such as \"*.img.xz\"".into(),
+            location,
+        ));
+    }
+}
+
 pub(crate) fn validate_image_contract(
     spec: &ResolvedBuildSpec,
     diagnostics: &mut Vec<ValidationDiagnostic>,
 ) {
     let assembly_expected_image_names = assembly_expected_image_names(spec);
+    if let Some(signing) = &spec.image.signing {
+        validate_image_signing(signing, diagnostics);
+    }
     match &spec.image.definition {
         ImageDefinition::Buildroot(buildroot) => {
             for (index, name) in buildroot.rootfs_exclude_packages.iter().enumerate() {

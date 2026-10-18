@@ -67,6 +67,8 @@ impl DockerRunSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DockerRunError {
     EmptyImage,
+    /// A reused container could not be started; the message is docker's.
+    ContainerStart(String),
 }
 
 impl std::fmt::Display for DockerRunError {
@@ -75,6 +77,10 @@ impl std::fmt::Display for DockerRunError {
             DockerRunError::EmptyImage => {
                 formatter.write_str("docker execution requires a non-empty image")
             }
+            DockerRunError::ContainerStart(message) => write!(
+                formatter,
+                "docker execution container failed to start: {message}"
+            ),
         }
     }
 }
@@ -327,7 +333,7 @@ pub fn register_read_only_docker_mount(dir: &Path) {
         .insert(dir.to_path_buf());
 }
 
-fn read_only_docker_mounts() -> BTreeSet<PathBuf> {
+pub(crate) fn read_only_docker_mounts() -> BTreeSet<PathBuf> {
     READ_ONLY_MOUNTS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -339,7 +345,7 @@ fn read_only_docker_mounts() -> BTreeSet<PathBuf> {
 /// (a link in the workspace to a directory outside it would otherwise
 /// dangle in the container). Links outside the mounts (`/bin` -> `/usr/bin`)
 /// are never followed.
-fn normalized_docker_mounts(mounts: &[PathBuf], command: &Command) -> Vec<PathBuf> {
+pub(crate) fn normalized_docker_mounts(mounts: &[PathBuf], command: &Command) -> Vec<PathBuf> {
     let mut all = mounts.iter().cloned().collect::<BTreeSet<_>>();
     all.extend(
         EXTRA_MOUNTS
@@ -380,7 +386,7 @@ fn normalized_docker_mounts(mounts: &[PathBuf], command: &Command) -> Vec<PathBu
     all.into_iter().collect()
 }
 
-fn docker_workspace_user_args(workspace_root: &Path) -> Vec<String> {
+pub(crate) fn docker_workspace_user_args(workspace_root: &Path) -> Vec<String> {
     #[cfg(unix)]
     {
         if let Ok(metadata) = std::fs::metadata(workspace_root) {
@@ -391,73 +397,6 @@ fn docker_workspace_user_args(workspace_root: &Path) -> Vec<String> {
         }
     }
     Vec::new()
-}
-
-/// Directory names skipped when hashing a Docker build context: VCS
-/// metadata and build output that never belong in an execution image.
-const DOCKER_CONTEXT_IGNORES: &[&str] = &[".git", ".gaia", "target", "node_modules"];
-
-/// SHA-256 over a Dockerfile and every file in its build context (relative
-/// path, type, executable bit, contents and symlink targets), in sorted
-/// order. Stable across machines, so it can name a locally built image.
-pub fn docker_build_context_hash(dockerfile: &Path, context: &Path) -> std::io::Result<String> {
-    use sha2::{Digest, Sha256};
-
-    let mut hasher = Sha256::new();
-    hasher.update(b"dockerfile\0");
-    hasher.update(std::fs::read(dockerfile)?);
-    if !context.is_dir() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!(
-                "docker build context '{}' is not a directory",
-                context.display()
-            ),
-        ));
-    }
-    let mut stack = vec![context.to_path_buf()];
-    let mut files = Vec::new();
-    while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir)? {
-            let path = entry?.path();
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("");
-            if DOCKER_CONTEXT_IGNORES.contains(&name) {
-                continue;
-            }
-            let metadata = std::fs::symlink_metadata(&path)?;
-            if metadata.is_dir() {
-                stack.push(path);
-            } else {
-                files.push((path, metadata));
-            }
-        }
-    }
-    files.sort_by(|left, right| left.0.cmp(&right.0));
-    for (path, metadata) in files {
-        let relative = path.strip_prefix(context).unwrap_or(&path);
-        hasher.update(b"\0entry\0");
-        hasher.update(relative.to_string_lossy().as_bytes());
-        if metadata.file_type().is_symlink() {
-            hasher.update(b"\0symlink\0");
-            hasher.update(std::fs::read_link(&path)?.to_string_lossy().as_bytes());
-            continue;
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let executable = metadata.permissions().mode() & 0o111 != 0;
-            hasher.update(if executable { b"\0x\0" } else { b"\0f\0" });
-        }
-        hasher.update(std::fs::read(&path)?);
-    }
-    Ok(hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
 }
 
 /// Tag for a Gaia-built execution image: `gaia-local/<name>:<hash prefix>`.
@@ -512,6 +451,7 @@ pub fn docker_image_build_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::docker_context::docker_build_context_hash;
     use gaia_testkit::TempDir;
 
     #[test]

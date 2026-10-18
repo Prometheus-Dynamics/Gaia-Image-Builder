@@ -9,6 +9,7 @@
 use gaia_image_providers::{
     external_tree_files, external_trees, post_script_components, sha256_hex,
 };
+use gaia_process::hex;
 use gaia_spec::{ArtifactDefinition, ArtifactSpec, ImageDefinition, ResolvedBuildSpec};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -166,10 +167,6 @@ pub(crate) fn buildroot_image_components(
 
 fn file_digest(path: &Path) -> String {
     sha256_hex(path).unwrap_or_else(|error| format!("unreadable:{error}"))
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 #[cfg(test)]

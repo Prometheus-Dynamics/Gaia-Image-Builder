@@ -643,9 +643,27 @@ Each value defaults to the shown release default when omitted or set to `0`. The
 
 `jobs` controls Gaia's operation scheduler. It limits how many independent Gaia operations may run at once; it is not forwarded to backend build tools as-is.
 
-When several CPU-heavy operations (artifact builds, Buildroot prepare/build) run at the same time, Gaia splits the available cores evenly between them and caps each spawned tool with `CARGO_BUILD_JOBS`, `MAKEFLAGS=-jN` and `CMAKE_BUILD_PARALLEL_LEVEL` (and Buildroot's `make -j` when `providers.buildroot.local_jobs = 0`). A heavy operation that runs alone keeps its tools' defaults. Variables you already set in the environment are never overridden, and an explicit `local_jobs` wins.
+Ready operations that can run in parallel start first, in plan order, while an exclusive operation waits. An exclusive operation starts once nothing else runs, and nothing starts beside it. So that it cannot wait forever, once eight starts have passed a waiting operation, Gaia starts nothing new until that operation can run. An operation never runs beside one that holds the same resource (the same destination, output or package directory).
+
+When several CPU-heavy operations (artifact builds, Buildroot prepare/build) run at the same time, Gaia caps each spawned tool with `CARGO_BUILD_JOBS`, `MAKEFLAGS=-jN` and `CMAKE_BUILD_PARALLEL_LEVEL` (and Buildroot's `make -j` when `providers.buildroot.local_jobs = 0`). Each one is sized when it starts, from the cores the running heavy operations do not hold: the free cores are split between it and the heavy operations that can start beside it. A tool reads its job count once, so a running operation keeps its budget; the cores a finished operation held go to the operations that start after it. A heavy operation that runs alone keeps its tools' defaults. Variables you already set in the environment are never overridden, and an explicit `local_jobs` wins.
+
 
 `failure_tail_lines` also bounds streamed build output: every line goes to the live progress/TUI sink as it arrives, but only the newest `failure_tail_lines` lines are retained, and only failed operations report them. Successful operations do not re-emit their build log.
+
+### Docker Containers
+
+With `[execution.docker] enabled = true`, each command runs in the docker image. By default every command is one `docker run --rm --init`.
+
+```toml
+[providers.docker]
+reuse_container = true   # default false
+```
+
+With `reuse_container = true`, a run starts one long-lived container per image, mount set and user (`docker run -d --init ... sleep infinity`) and runs its commands with `docker exec`, with the same working directory, user and environment. The container is removed when the run ends, when the run is cancelled, and when it unwinds from a panic. The image must contain `sleep`.
+
+Measured on this host (`debian:sid`, 20 runs of `true`): 3.6 s per command with `docker run`, 41 ms with `docker exec`. A cancelled command's processes are not killed inside the container when the `docker exec` client stops; they end when the container is removed at the end of the run. If Gaia is killed outright, remove the containers by hand (`docker rm -f`).
+
+Build-context hashes (`dockerfile` artifacts) read each file in chunks and skip re-reading a context whose files have the same sizes, modification times and modes as at the last hash in the same process.
 
 ## Provider Execution Policy
 
@@ -2217,6 +2235,23 @@ The image feed declares which install/stage domains are part of the final image 
 - `stage_services`
 
 If omitted, the current compiler auto-feeds all entries in the corresponding domain.
+
+### Signing
+
+`[image.signing]` writes a signature next to each published image output. It runs after a successful run, over the outputs the run published (reused images too), so a signature always matches its file.
+
+```toml
+[image.signing]
+kind = "gpg"                           # "minisign" | "gpg" | "cosign-blob"
+key = "env:GAIA_SIGNING_KEY"           # a key path, or env:VAR naming a variable that holds it
+outputs = ["*.img.xz", "*.slot.tar"]   # globs over the published output file names
+```
+
+- `minisign`: writes `<file>.minisig` with `minisign -S -s <key>`. The key must not need a password.
+- `gpg`: writes `<file>.asc`, an armored detached signature, with `gpg --detach-sign --local-user <key>`. For gpg the key is a key id or user id, not a path.
+- `cosign-blob`: writes `<file>.sig` with `cosign sign-blob --key <key>`.
+
+A verity root hash file (a published output named `*.roothash`) is signed whether or not `outputs` names it. The signature files join the published outputs in the report. Gaia uses the tool from `PATH` and holds no key material; it never prints the key. The validator rejects an unknown kind, an empty key or an empty `outputs` before the build. A missing tool or key fails the run at the signing step, and the message names the variable or the tool, never the key.
 
 ### Image Assembly
 

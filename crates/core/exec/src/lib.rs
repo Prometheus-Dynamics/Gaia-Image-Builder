@@ -3,6 +3,7 @@ mod operations;
 mod process;
 mod runtime;
 mod scheduler;
+mod signing;
 
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
@@ -20,8 +21,8 @@ use gaia_source_providers::SourceProviderCatalog;
 use gaia_spec::ResolvedBuildSpec;
 use runtime::ExecutionRuntime;
 use scheduler::{
-    ScheduleReadyContext, ScheduleReadyState, ScheduledResult, next_pending_operation_id,
-    resolve_parallel_jobs, schedule_ready_operations,
+    OperationResources, RunningLedger, ScheduleReadyContext, ScheduleReadyState, ScheduledResult,
+    next_pending_operation_id, resolve_parallel_jobs, schedule_ready_operations,
 };
 
 pub use operations::{
@@ -96,6 +97,8 @@ pub fn execute_plan_with_rebuilds(
         keep_going = spec.policy.failure.keep_going,
     );
     let _guard = span.enter();
+    // Containers that `[providers.docker] reuse_container` starts live until the run ends.
+    let _reused_containers = gaia_process::ReusedContainersGuard;
     let context = ExecutionContext::new(spec);
     let mut runtime = ExecutionRuntime::new(context, event_sender);
     let build_name = runtime.context().build_name.clone();
@@ -124,9 +127,8 @@ pub fn execute_plan_with_rebuilds(
     let mut completed = vec![false; operation_count];
     let mut succeeded = vec![false; operation_count];
     let mut running = vec![false; operation_count];
-    let mut running_count = 0usize;
+    let mut ledger = RunningLedger::default();
     let mut running_units = 0usize;
-    let mut running_heavy_units = 0usize;
     type FailedCleanup = (
         OperationId,
         Option<gaia_spec::RollbackDomain>,
@@ -146,10 +148,12 @@ pub fn execute_plan_with_rebuilds(
         })
     };
 
+    let resources = OperationResources::new(spec, plan);
     let schedule_context = ScheduleReadyContext {
         spec,
         plan,
         providers: &providers,
+        resources: &resources,
         build_name: build_name.as_str(),
         event_sender: observer.clone(),
         cancel_check: cancel_check.clone(),
@@ -174,9 +178,8 @@ pub fn execute_plan_with_rebuilds(
                         remaining_dependencies: &remaining_dependencies,
                         completed: &completed,
                         running: &mut running,
-                        running_count: &mut running_count,
+                        ledger: &mut ledger,
                         running_units: &mut running_units,
-                        running_heavy_units: &mut running_heavy_units,
                     },
                 );
                 if scheduled_any {
@@ -184,7 +187,7 @@ pub fn execute_plan_with_rebuilds(
                 }
             }
 
-            if running_count == 0 {
+            if ledger.running() == 0 {
                 for (failed_operation_id, failed_cleanup_domain, failed_cleanup_paths) in
                     kept_going_failures.drain(..)
                 {
@@ -270,7 +273,7 @@ pub fn execute_plan_with_rebuilds(
                 paused,
                 started,
                 unit_finished,
-                heavy,
+                held_cores,
             }) = result_rx.recv()
             else {
                 break;
@@ -278,12 +281,10 @@ pub fn execute_plan_with_rebuilds(
             let result = result.into_cancelled_if_stopped();
             running[index] = false;
             completed[index] = true;
-            running_count = running_count.saturating_sub(1);
+            ledger.finish(&resources, index);
             if unit_finished {
                 running_units = running_units.saturating_sub(1);
-                if heavy {
-                    running_heavy_units = running_heavy_units.saturating_sub(1);
-                }
+                ledger.release_cores(held_cores);
             }
 
             if result.cancelled {
@@ -368,7 +369,11 @@ pub fn execute_plan_with_rebuilds(
         }
     });
 
-    runtime.finish()
+    let mut outcome = runtime.finish();
+    if !outcome.cancelled && outcome.errors.is_empty() {
+        signing::sign_outcome(spec, plan, &mut outcome);
+    }
+    outcome
 }
 
 /// Emits `Skipped` for every operation that never ran because something it

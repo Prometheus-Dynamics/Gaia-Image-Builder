@@ -5,6 +5,7 @@ fn run_command_reports_missing_tool() {
     let execution = ImageExecutionContext {
         workspace_root: std::env::temp_dir(),
         docker_image: None,
+        docker_reuse_container: false,
     };
     let error = run_command(
         Command::new("gaia-missing-starting-point-tool"),
@@ -31,6 +32,7 @@ fn run_command_times_out_long_running_processes() {
     let execution = ImageExecutionContext {
         workspace_root: root.clone(),
         docker_image: None,
+        docker_reuse_container: false,
     };
     let policy = ImageExecutionPolicy {
         timeout_seconds: 1,
@@ -67,6 +69,7 @@ fn command_for_execution_wraps_docker_backend() {
     let execution = ImageExecutionContext {
         workspace_root: workspace_root.clone(),
         docker_image: Some("docker.io/library/alpine:latest".to_string()),
+        docker_reuse_container: false,
     };
     let mut command = Command::new("tar");
     command
@@ -101,6 +104,7 @@ fn command_for_execution_mounts_parent_dir_for_output_files() {
     let execution = ImageExecutionContext {
         workspace_root: workspace_root.clone(),
         docker_image: Some("docker.io/library/alpine:latest".to_string()),
+        docker_reuse_container: false,
     };
     let mut command = Command::new("tar");
     command

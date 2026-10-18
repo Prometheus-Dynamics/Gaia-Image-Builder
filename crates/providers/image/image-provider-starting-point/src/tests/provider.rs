@@ -34,6 +34,7 @@ fn starting_point_tar_rootfs_accepts_image_feed_overlay() {
     spec.workspace.root_dir = root.display().to_string();
     spec.workspace.build_dir = "build".into();
     spec.image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::StartingPoint(StartingPointImageSpec {
             source: Some("base-rootfs".into()),
             source_path: Some("seed-rootfs.tar".into()),
@@ -160,6 +161,7 @@ fn starting_point_rejects_overlay_on_opaque_file_rootfs() {
     spec.workspace.root_dir = root.display().to_string();
     spec.workspace.build_dir = "build".into();
     spec.image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::StartingPoint(StartingPointImageSpec {
             source: None,
             source_path: None,

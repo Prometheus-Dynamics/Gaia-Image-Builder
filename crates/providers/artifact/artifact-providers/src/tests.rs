@@ -370,6 +370,7 @@ fn artifact_execution_backend_prefers_explicit_setting_over_global_default() {
         .to_string();
     spec.policy.execution.docker = Some(DockerExecutionSpec {
         image: "docker.io/library/rust:1.90".to_string(),
+        reuse_container: false,
     });
 
     let inherited = ArtifactSpec::new(
@@ -426,6 +427,7 @@ fn artifact_contract_rejects_empty_inherited_docker_image() {
     let mut spec = gaia_spec::ResolvedBuildSpec::new("artifact-contract");
     spec.policy.execution.docker = Some(DockerExecutionSpec {
         image: String::new(),
+        reuse_container: false,
     });
     let artifact = ArtifactSpec::new(
         "inherited",

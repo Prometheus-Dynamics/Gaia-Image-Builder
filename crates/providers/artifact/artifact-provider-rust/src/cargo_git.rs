@@ -27,6 +27,7 @@ use gaia_artifact_providers::{
     ArtifactExecutionBackend, ArtifactExecutionContract, ArtifactProviderError,
     ArtifactProviderErrorKind, ProcessLogLine, ProcessLogSink, ProcessLogStream,
 };
+use gaia_process::git_command;
 use gaia_source_providers::{GIT_MIRROR_CACHE_DIR, remote_git_mirror_dir};
 use gaia_spec::{CargoGitSourceSpec, cargo_git_url_key, redact_url_userinfo};
 
@@ -127,18 +128,6 @@ fn check_rewrite_prefixes(
         }
     }
     Ok(())
-}
-
-/// A git command for the host, with the same environment as the git source
-/// provider's: no prompts, so a missing credential fails fast.
-fn git_command() -> Command {
-    let mut command = Command::new("git");
-    command
-        .arg("-c")
-        .arg("safe.directory=*")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GCM_INTERACTIVE", "never");
-    command
 }
 
 fn provider_error(kind: ArtifactProviderErrorKind, message: String) -> ArtifactProviderError {

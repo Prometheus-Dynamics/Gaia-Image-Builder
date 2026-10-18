@@ -3,6 +3,7 @@ use gaia_spec::{DEFAULT_COMMAND_RETRY_ATTEMPTS, DEFAULT_COMMAND_RETRY_BACKOFF_MS
 
 pub(crate) fn compile_docker_execution(
     execution: &crate::raw::RawExecutionPolicyConfig,
+    reuse_container: bool,
 ) -> Option<DockerExecutionSpec> {
     execution.docker.enabled.then(|| DockerExecutionSpec {
         image: execution
@@ -10,6 +11,7 @@ pub(crate) fn compile_docker_execution(
             .image
             .clone()
             .unwrap_or_else(|| "docker.io/library/debian:stable-slim".to_string()),
+        reuse_container,
     })
 }
 

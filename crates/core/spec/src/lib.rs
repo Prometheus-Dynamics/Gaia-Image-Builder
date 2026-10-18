@@ -93,8 +93,8 @@ pub use ids::{
 pub use image::{
     BuildrootExpectedImageFormatSpec, BuildrootExpectedImageSpec, BuildrootExternalTreeModeSpec,
     BuildrootImageSpec, ImageDefinition, ImageFeedSpec, ImageOutputSpec, ImageProviderKind,
-    ImageSpec, StartingPointImageSpec, StartingPointOutputModeSpec, StartingPointPackagesSpec,
-    StartingPointRootfsValidationModeSpec,
+    ImageSigningKind, ImageSigningSpec, ImageSpec, StartingPointImageSpec,
+    StartingPointOutputModeSpec, StartingPointPackagesSpec, StartingPointRootfsValidationModeSpec,
 };
 pub use inputs::{InputKindSpec, InputOptionSpec, InputSpec};
 pub use install::{InstallEntrySpec, InstallSpec};

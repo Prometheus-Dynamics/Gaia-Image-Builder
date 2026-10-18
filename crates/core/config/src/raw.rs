@@ -249,6 +249,15 @@ pub struct RawDockerExecutionConfig {
     pub image: Option<String>,
 }
 
+/// `[providers.docker]`: how docker execution runs commands.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawDockerProviderPolicyConfig {
+    /// Run every command of a gaia run in one long-lived container per image,
+    /// mount set and user (`docker exec`), instead of one `docker run` each.
+    pub reuse_container: bool,
+}
+
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct RawOutputRetentionPolicyConfig {
@@ -285,6 +294,7 @@ pub enum RawRollbackDomain {
 pub struct RawProviderPoliciesConfig {
     pub rust: RawRustProviderPolicyConfig,
     pub git: RawGitProviderPolicyConfig,
+    pub docker: RawDockerProviderPolicyConfig,
     pub archive: RawCommandProviderPolicyConfig,
     pub download: RawCommandProviderPolicyConfig,
     pub go: RawCommandProviderPolicyConfig,
@@ -693,6 +703,7 @@ pub struct RawImageConfig {
     pub definition: RawImageDefinition,
     pub feed: RawImageFeedConfig,
     pub output: RawImageOutputConfig,
+    pub signing: Option<RawImageSigningConfig>,
     pub assembly: Option<RawImageAssemblyConfig>,
     /// Whether this file or a layer it merges says `kind`. Set by the loader:
     /// a layer that omits `kind` parses as an empty buildroot definition,
@@ -862,6 +873,18 @@ pub enum RawStartingPointOutputMode {
     CopyRootfs,
     ArchiveOnly,
     CopyAndArchive,
+}
+
+/// `[image.signing]`: a signature for each published output that matches `outputs`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawImageSigningConfig {
+    /// `minisign`, `gpg` or `cosign-blob`.
+    pub kind: String,
+    /// A key path, or `env:VAR`.
+    pub key: String,
+    /// Glob patterns over the published output file names, such as `*.img.xz`.
+    pub outputs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

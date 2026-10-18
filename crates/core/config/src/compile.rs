@@ -162,7 +162,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
         },
         execution: ExecutionPolicySpec {
             jobs: raw.execution.jobs,
-            docker: compile_docker_execution(&raw.execution),
+            docker: compile_docker_execution(&raw.execution, raw.providers.docker.reuse_container),
             output_retention: compile_output_retention(&raw.execution.output_retention),
         },
         failure: FailureHandlingPolicySpec {
@@ -509,6 +509,14 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
             disk: raw.image.output.disk,
             emit_report: raw.image.output.emit_report,
         },
+        signing: raw
+            .image
+            .signing
+            .map(|signing| gaia_spec::ImageSigningSpec {
+                kind: signing.kind,
+                key: signing.key,
+                outputs: signing.outputs,
+            }),
         assembly: compile_image_assembly(raw.image.assembly),
     };
     spec.checkpoints.points = raw

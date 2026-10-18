@@ -32,6 +32,7 @@ pub(super) fn merge_image(base: RawImageConfig, overlay: RawImageConfig) -> RawI
             emit_report: base.output.emit_report || overlay.output.emit_report,
         },
         assembly: merge_image_assembly(base.assembly, overlay.assembly),
+        signing: overlay.signing.or(base.signing),
         kind_given: base.kind_given || overlay.kind_given,
     }
 }

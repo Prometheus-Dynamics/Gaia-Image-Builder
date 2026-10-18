@@ -242,7 +242,7 @@ fn artifact_fields(kind: Option<&str>) -> Option<Vec<&'static str>> {
 /// `[image]`: the keys every image takes, then the keys of its kind. Without
 /// a `kind` (a layer that leaves it to the layer it extends) every kind's
 /// keys are accepted.
-const IMAGE_COMMON_KEYS: &[&str] = &["kind", "feed", "output", "assembly"];
+const IMAGE_COMMON_KEYS: &[&str] = &["kind", "feed", "output", "signing", "assembly"];
 const BUILDROOT_IMAGE_KEYS: &[&str] = &[
     "source",
     "defconfig",
@@ -293,6 +293,7 @@ const ARTIFACT_CHILDREN: &[Section] = &[section(
 
 const IMAGE_CHILDREN: &[Section] = &[
     section("output", struct_fields::<raw::RawImageOutputConfig>, &[]),
+    section("signing", struct_fields::<raw::RawImageSigningConfig>, &[]),
     section("feed", struct_fields::<raw::RawImageFeedConfig>, &[]),
     section(
         "assembly",
@@ -356,6 +357,11 @@ const SECTIONS: &[Section] = &[
                 &[],
             ),
             section("git", struct_fields::<raw::RawGitProviderPolicyConfig>, &[]),
+            section(
+                "docker",
+                struct_fields::<raw::RawDockerProviderPolicyConfig>,
+                &[],
+            ),
             section(
                 "archive",
                 struct_fields::<raw::RawCommandProviderPolicyConfig>,

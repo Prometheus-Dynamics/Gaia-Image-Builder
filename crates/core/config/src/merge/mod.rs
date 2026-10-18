@@ -468,6 +468,9 @@ fn merge_provider_policies(
             retry_backoff_strategy: overlay.git.retry_backoff_strategy,
             timeout_seconds: base.git.timeout_seconds.max(overlay.git.timeout_seconds),
         },
+        docker: crate::raw::RawDockerProviderPolicyConfig {
+            reuse_container: base.docker.reuse_container || overlay.docker.reuse_container,
+        },
         archive: merge_command_policy(base.archive, overlay.archive),
         download: merge_command_policy(base.download, overlay.download),
         go: merge_command_policy(base.go, overlay.go),

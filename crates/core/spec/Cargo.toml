@@ -11,6 +11,7 @@ description = "Canonical typed build specification for Gaia."
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+gaia-process.workspace = true
 sha2.workspace = true
 
 [lints]

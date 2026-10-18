@@ -72,10 +72,264 @@ fn node_artifact(id: &str, source: &str, package_dir: &str, output: &str) -> Art
     )
 }
 
+/// The operation the scheduler picks while operation `running` runs, with
+/// nothing else started.
+fn pick_beside(spec: &ResolvedBuildSpec, plan: &ExecutionPlan, running: usize) -> Option<usize> {
+    let resources = OperationResources::new(spec, plan);
+    let count = plan.operations.len();
+    let mut running_flags = vec![false; count];
+    running_flags[running] = true;
+    let mut ledger = RunningLedger::default();
+    ledger.start(&resources, running);
+    next_schedulable_operation(
+        plan,
+        &resources,
+        &vec![0; count],
+        &vec![false; count],
+        &running_flags,
+        &mut ledger,
+    )
+}
+
 fn assert_second_operation_blocked(spec: &ResolvedBuildSpec, plan: &ExecutionPlan) {
+    assert_eq!(pick_beside(spec, plan, 0), None);
+}
+
+/// What a simulated run did: the operations started together in each wave
+/// (a wave ends when an operation finishes), and the order of all starts.
+struct SimulatedRun {
+    waves: Vec<Vec<usize>>,
+    started: Vec<usize>,
+}
+
+/// Runs `plan` to the end with the scheduler's picking rules. Operations
+/// finish in the order they started. Every start is checked against the
+/// running operations: an exclusive operation never runs beside another, and
+/// no two running operations hold the same resource key.
+fn simulate(spec: &ResolvedBuildSpec, plan: &ExecutionPlan) -> SimulatedRun {
+    let resources = OperationResources::new(spec, plan);
+    let count = plan.operations.len();
+    let mut remaining = vec![0usize; count];
+    for (index, operation) in plan.operations.iter().enumerate() {
+        remaining[index] = operation.depends_on.len();
+    }
+    let mut completed = vec![false; count];
+    let mut running = vec![false; count];
+    let mut ledger = RunningLedger::default();
+    let mut in_flight: Vec<usize> = Vec::new();
+    let mut run = SimulatedRun {
+        waves: Vec::new(),
+        started: Vec::new(),
+    };
+    let mut wave = Vec::new();
+    loop {
+        while let Some(index) = next_schedulable_operation(
+            plan,
+            &resources,
+            &remaining,
+            &completed,
+            &running,
+            &mut ledger,
+        ) {
+            if resources.is_exclusive(index) {
+                assert!(
+                    in_flight.is_empty(),
+                    "exclusive operation {index} started beside {in_flight:?}"
+                );
+            }
+            for other in &in_flight {
+                assert!(
+                    !resources.is_exclusive(*other),
+                    "operation {index} started beside exclusive operation {other}"
+                );
+                assert!(
+                    !resources
+                        .keys(index)
+                        .iter()
+                        .any(|key| resources.keys(*other).contains(key)),
+                    "operations {index} and {other} hold the same resource"
+                );
+            }
+            running[index] = true;
+            ledger.start(&resources, index);
+            in_flight.push(index);
+            wave.push(index);
+            run.started.push(index);
+        }
+        if in_flight.is_empty() {
+            break;
+        }
+        if !wave.is_empty() {
+            run.waves.push(std::mem::take(&mut wave));
+        }
+        let done = in_flight.remove(0);
+        running[done] = false;
+        completed[done] = true;
+        ledger.finish(&resources, done);
+        let done_id = plan.operations[done].id.clone();
+        for (index, operation) in plan.operations.iter().enumerate() {
+            if operation.depends_on.contains(&done_id) {
+                remaining[index] -= 1;
+            }
+        }
+    }
+    assert!(
+        completed.iter().all(|done| *done),
+        "scheduler stalled with operations not started: {:?}",
+        completed
+            .iter()
+            .enumerate()
+            .filter(|(_, done)| !**done)
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>()
+    );
+    run
+}
+
+fn stage_spec(files: &[(&str, &str)]) -> ResolvedBuildSpec {
+    let mut spec = ResolvedBuildSpec::new("parallel-resource-test");
+    spec.stage.files = files
+        .iter()
+        .map(|(id, dest)| StageFileSpec {
+            id: StageItemId::new(*id),
+            src: (*id).into(),
+            dest: (*dest).into(),
+            mode: None,
+            origin: StageContentOriginSpec::StaticAsset,
+        })
+        .collect();
+    spec
+}
+
+fn stage_operation(spec: &ResolvedBuildSpec, index: usize) -> PlannedOperation {
+    let item = spec.stage.files[index].id.clone();
+    parallel_runtime_operation(
+        OperationId::stage_file(&item),
+        OperationKind::RenderStageFile { item_id: item },
+    )
+}
+
+#[test]
+fn idle_scheduler_overlaps_parallel_work_before_an_exclusive_operation() {
+    // The exclusive operation comes first in the plan. The old picker started
+    // it alone when nothing ran, so the two parallel operations waited for it.
+    let spec = stage_spec(&[
+        ("exclusive", "/etc/exclusive"),
+        ("a", "/etc/a"),
+        ("b", "/etc/b"),
+    ]);
+    let exclusive_id = OperationId::stage_file(&spec.stage.files[0].id);
+    let plan = ExecutionPlan {
+        build_id: spec.identity.id.clone(),
+        operations: vec![
+            PlannedOperation::new(
+                exclusive_id,
+                OperationKind::RenderStageFile {
+                    item_id: spec.stage.files[0].id.clone(),
+                },
+            )
+            .with_reuse(OperationReuse::execute("test", "test operation")),
+            stage_operation(&spec, 1),
+            stage_operation(&spec, 2),
+        ],
+    };
+
+    let run = simulate(&spec, &plan);
+
+    assert_eq!(run.waves[0], vec![1, 2], "parallel work starts together");
     assert_eq!(
-        next_schedulable_operation(spec, plan, &[0, 0], &[false, false], &[true, false]),
-        None
+        run.waves.last(),
+        Some(&vec![0]),
+        "exclusive runs alone last"
+    );
+}
+
+#[test]
+fn conflicting_and_exclusive_operations_never_overlap() {
+    // Two pairs of stage files share a destination, one operation depends on
+    // another, and an exclusive operation sits in the middle of the plan.
+    let spec = stage_spec(&[
+        ("x1", "/etc/x"),
+        ("x2", "/etc/x"),
+        ("y1", "/etc/y"),
+        ("y2", "/etc/y"),
+        ("z", "/etc/z"),
+        ("w", "/etc/w"),
+    ]);
+    let mut operations: Vec<PlannedOperation> =
+        (0..6).map(|index| stage_operation(&spec, index)).collect();
+    operations[3] = PlannedOperation::new(
+        OperationId::stage_file(&spec.stage.files[3].id),
+        OperationKind::RenderStageFile {
+            item_id: spec.stage.files[3].id.clone(),
+        },
+    )
+    .with_reuse(OperationReuse::execute("test", "test operation"));
+    operations[5].depends_on = vec![OperationId::stage_file(&spec.stage.files[0].id)];
+    let plan = ExecutionPlan {
+        build_id: spec.identity.id.clone(),
+        operations,
+    };
+
+    let run = simulate(&spec, &plan);
+
+    assert_eq!(run.started.len(), 6);
+    assert!(
+        run.waves.iter().any(|wave| wave.len() >= 2),
+        "some work overlapped: {:?}",
+        run.waves
+    );
+}
+
+#[test]
+fn exclusive_operation_is_not_starved_by_a_stream_of_parallel_work() {
+    // One exclusive operation is ready at the start. The parallel operations
+    // form a chain, so exactly one of them is ready at a time, and a picker
+    // without the bypass limit would run all of them first.
+    const CHAIN: usize = 12;
+    let files: Vec<(String, String)> =
+        std::iter::once(("exclusive".to_string(), "/etc/exclusive".to_string()))
+            .chain(
+                (0..CHAIN).map(|index| (format!("chain-{index}"), format!("/etc/chain-{index}"))),
+            )
+            .collect();
+    let refs: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(id, dest)| (id.as_str(), dest.as_str()))
+        .collect();
+    let spec = stage_spec(&refs);
+    let mut operations = vec![
+        PlannedOperation::new(
+            OperationId::stage_file(&spec.stage.files[0].id),
+            OperationKind::RenderStageFile {
+                item_id: spec.stage.files[0].id.clone(),
+            },
+        )
+        .with_reuse(OperationReuse::execute("test", "test operation")),
+    ];
+    for index in 1..=CHAIN {
+        let mut operation = stage_operation(&spec, index);
+        if index > 1 {
+            operation.depends_on = vec![OperationId::stage_file(&spec.stage.files[index - 1].id)];
+        }
+        operations.push(operation);
+    }
+    let plan = ExecutionPlan {
+        build_id: spec.identity.id.clone(),
+        operations,
+    };
+
+    let run = simulate(&spec, &plan);
+
+    let exclusive_at = run
+        .started
+        .iter()
+        .position(|index| *index == 0)
+        .expect("exclusive operation started");
+    assert!(
+        exclusive_at <= 8,
+        "exclusive operation started at position {exclusive_at} of {}",
+        run.started.len()
     );
 }
 
@@ -156,10 +410,7 @@ fn scheduler_allows_parallel_stage_files_with_different_destinations() {
         ],
     };
 
-    assert_eq!(
-        next_schedulable_operation(&spec, &plan, &[0, 0], &[false, false], &[true, false]),
-        Some(1)
-    );
+    assert_eq!(pick_beside(&spec, &plan, 0), Some(1));
 }
 
 #[test]
@@ -249,10 +500,7 @@ fn scheduler_allows_parallel_artifacts_with_different_build_inputs() {
         ],
     };
 
-    assert_eq!(
-        next_schedulable_operation(&spec, &plan, &[0, 0], &[false, false], &[true, false]),
-        Some(1)
-    );
+    assert_eq!(pick_beside(&spec, &plan, 0), Some(1));
 }
 
 #[test]

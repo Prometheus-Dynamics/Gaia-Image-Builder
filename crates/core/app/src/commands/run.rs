@@ -10,7 +10,6 @@ use gaia_report::{generate_report, write_report_bundle};
 use gaia_spec::ResolvedBuildSpec;
 use gaia_validate::validate_spec_with_providers;
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -592,28 +591,8 @@ fn primary_output_payload(path: &Path) -> io::Result<PostBuildPrimaryOutput> {
     Ok(PostBuildPrimaryOutput {
         path: path.display().to_string(),
         bytes: fs::metadata(path)?.len(),
-        sha256: sha256_file(path)?,
+        sha256: gaia_process::sha256_file(path)?,
     })
-}
-
-fn sha256_file(path: &Path) -> io::Result<String> {
-    use std::io::Read;
-
-    let mut file = fs::File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 8192];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    Ok(hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
 }
 
 fn resolve_hook_script_path(spec: &gaia_spec::ResolvedBuildSpec, script: &str) -> PathBuf {

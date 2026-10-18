@@ -328,7 +328,9 @@ fn new_buildroot_image_and_provider_keys_are_known() {
             "build_name = \"demo\"\n\
              [providers.buildroot]\nerofs_workers = \"auto\"\nmake_timeout_seconds = 0\nmake_retry_attempts = 1\n\
              [providers.rust]\nsccache = true\nstrip = true\n\
-             [image]\nkind = \"buildroot\"\nlegal_info = true\n"
+             [providers.docker]\nreuse_container = true\n\
+             [image]\nkind = \"buildroot\"\nlegal_info = true\n\
+             [image.signing]\nkind = \"gpg\"\nkey = \"env:KEY\"\noutputs = [\"*.img.xz\"]\n"
         )
         .is_empty(),
         "{:?}",
@@ -336,7 +338,9 @@ fn new_buildroot_image_and_provider_keys_are_known() {
             "build_name = \"demo\"\n\
              [providers.buildroot]\nerofs_workers = \"auto\"\nmake_timeout_seconds = 0\nmake_retry_attempts = 1\n\
              [providers.rust]\nsccache = true\nstrip = true\n\
-             [image]\nkind = \"buildroot\"\nlegal_info = true\n"
+             [providers.docker]\nreuse_container = true\n\
+             [image]\nkind = \"buildroot\"\nlegal_info = true\n\
+             [image.signing]\nkind = \"gpg\"\nkey = \"env:KEY\"\noutputs = [\"*.img.xz\"]\n"
         )
     );
 }

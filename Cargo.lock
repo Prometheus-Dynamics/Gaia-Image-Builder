@@ -690,6 +690,7 @@ dependencies = [
 name = "gaia-spec"
 version = "2.0.0"
 dependencies = [
+ "gaia-process",
  "serde",
  "serde_json",
  "sha2 0.11.0",

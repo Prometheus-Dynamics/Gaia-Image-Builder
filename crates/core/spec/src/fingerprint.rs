@@ -12,6 +12,7 @@
 //! state records the scheme it was written under, so a bump re-evaluates every
 //! operation once instead of comparing values of different schemes.
 
+use gaia_process::hex;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -124,11 +125,7 @@ pub(crate) fn is_default<T: Default + PartialEq>(value: &T) -> bool {
 
 /// SHA-256 hex of `text`.
 pub fn sha256_hex(text: &str) -> String {
-    hex(&Sha256::digest(text.as_bytes()))
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    gaia_process::sha256_hex_bytes(text.as_bytes())
 }
 
 /// `value` as JSON with every object's keys sorted and no whitespace, so

@@ -13,9 +13,8 @@
 //! (temporary file, then rename) and is skipped by every collect-dir walk, so
 //! writing it never changes a collect dir's digest.
 
-use sha2::{Digest, Sha256};
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -26,8 +25,6 @@ pub const CONTENT_DIGESTS_FILE: &str = ".gaia-content-digests";
 pub const COLLECT_STATE_FILE: &str = ".gaia-image-state.txt";
 /// Suffix of temporary files written before a rename into place.
 pub const TEMP_FILE_SUFFIX: &str = ".gaia.tmp";
-
-const HASH_BUFFER_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Entry {
@@ -78,21 +75,7 @@ pub fn hex_lower(bytes: &[u8]) -> String {
 
 /// Lowercase hex sha256 of a file's contents.
 pub fn sha256_hex(path: &Path) -> io::Result<String> {
-    let mut file = fs::File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0_u8; HASH_BUFFER_BYTES];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    Ok(hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
+    gaia_process::sha256_file(path)
 }
 
 /// The digest recorded for `path` under manifest directory `base`, when the

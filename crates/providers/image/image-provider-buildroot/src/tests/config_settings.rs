@@ -11,6 +11,7 @@ all: target-finalize\n\t@true\n";
 
 fn image(overrides: Vec<(String, String)>, fragments: Vec<String>) -> ImageSpec {
     ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             defconfig: Some("test_defconfig".into()),
             config_fragments: fragments,

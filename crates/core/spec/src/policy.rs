@@ -50,6 +50,10 @@ pub struct ExecutionPolicySpec {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct DockerExecutionSpec {
     pub image: String,
+    /// One container per image, mounts and user for the run, with each command
+    /// run by `docker exec` (`[providers.docker] reuse_container`).
+    #[serde(skip_serializing_if = "crate::fingerprint::is_default")]
+    pub reuse_container: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]

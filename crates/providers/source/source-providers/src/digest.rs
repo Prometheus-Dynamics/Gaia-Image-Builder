@@ -25,27 +25,10 @@ pub(crate) fn check_sha256(
 /// Tree digests hash every file, so spawning a process per file was the
 /// dominant cost on large source trees.
 pub(crate) fn sha256_or_placeholder(path: &Path) -> String {
-    use sha2::{Digest, Sha256};
-    use std::io::Read;
-
-    let mut file = match fs::File::open(path) {
-        Ok(file) => file,
-        Err(error) => return format!("sha256-error:{}:{error}", path.display()),
-    };
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0u8; 64 * 1024];
-    loop {
-        match file.read(&mut buffer) {
-            Ok(0) => break,
-            Ok(read) => hasher.update(&buffer[..read]),
-            Err(error) => return format!("sha256-error:{}:{error}", path.display()),
-        }
+    match gaia_process::sha256_file(path) {
+        Ok(digest) => digest,
+        Err(error) => format!("sha256-error:{}:{error}", path.display()),
     }
-    hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 /// Directories that never define a path source's identity: VCS metadata,

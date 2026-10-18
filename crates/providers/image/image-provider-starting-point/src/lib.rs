@@ -6,7 +6,8 @@ use gaia_image_providers::{
     file_sha256_or_placeholder, materialize_image_output,
 };
 use gaia_process::{
-    DockerRunSpec, ProcessRunErrorKind, docker_run_command, label_process_log_sink,
+    DockerRunSpec, ProcessRunErrorKind, docker_reused_exec_command,
+    docker_run_command, label_process_log_sink,
     run_command_with_timeout, run_command_with_timeout_and_retention,
 };
 use gaia_spec::{
@@ -29,6 +30,7 @@ pub struct StartingPointImageProvider;
 struct ImageExecutionContext {
     workspace_root: PathBuf,
     docker_image: Option<String>,
+    docker_reuse_container: bool,
 }
 
 impl ImageProvider for StartingPointImageProvider {

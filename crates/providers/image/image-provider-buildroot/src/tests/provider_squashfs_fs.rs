@@ -47,6 +47,7 @@ fn execute_image_refuses_implicit_buildroot_fallback() {
         ..ResolvedBuildSpec::new("no-fallback")
     };
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             allow_fallback: false,
             expected_images: vec![BuildrootExpectedImageSpec {
@@ -116,6 +117,7 @@ fn prepare_operation_reruns_even_when_expected_buildroot_images_exist() {
     spec.workspace.out_dir = "out".into();
 
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             source: Some(SourceId::new("buildroot-source")),
             defconfig: Some("evk_defconfig".into()),
@@ -191,6 +193,7 @@ fn build_operation_applies_config_overrides_when_expected_images_exist() {
     spec.workspace.out_dir = "out".into();
 
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             source: Some(SourceId::new("buildroot-source")),
             defconfig: Some("evk_defconfig".into()),
@@ -271,6 +274,7 @@ fn prepare_operation_does_not_reuse_partial_target_tree() {
     spec.workspace.out_dir = "out".into();
 
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             source: Some(SourceId::new("buildroot-source")),
             defconfig: Some("evk_defconfig".into()),

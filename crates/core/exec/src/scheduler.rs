@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 use std::thread;
@@ -18,6 +18,12 @@ use crate::operations::{
     dispatch_operation,
 };
 use crate::runtime::ExecutionRuntime;
+
+/// Waiting operations (exclusive ones, and parallel ones blocked by a running
+/// resource) that other starts may pass before the scheduler starts nothing
+/// new until a waiting operation can run. Without this limit a steady supply
+/// of parallel work would hold an exclusive operation back indefinitely.
+const WAITING_OPERATION_BYPASS_LIMIT: usize = 8;
 
 /// Early cutoff: an operation scheduled only because a dependency rebuilt is
 /// reused when those dependencies produced the same content it consumed last
@@ -44,10 +50,120 @@ fn early_cutoff<'plan>(
     Cow::Owned(reused)
 }
 
+/// The parallel resource keys and the exclusivity of every operation of a
+/// plan, computed once per run. Resolving a key canonicalizes paths, which is
+/// too costly to repeat for every running operation on every pick.
+pub(crate) struct OperationResources {
+    per_operation: Vec<OperationClaims>,
+}
+
+struct OperationClaims {
+    keys: Vec<ParallelResourceKey>,
+    exclusive: bool,
+}
+
+impl OperationResources {
+    pub(crate) fn new(spec: &ResolvedBuildSpec, plan: &ExecutionPlan) -> Self {
+        Self {
+            per_operation: plan
+                .operations
+                .iter()
+                .map(|operation| OperationClaims {
+                    keys: operation_parallel_resource_keys(spec, operation),
+                    exclusive: !supports_parallel_runtime(
+                        operation.parallelism.mode.clone(),
+                        &operation.parallelism.domain,
+                    ),
+                })
+                .collect(),
+        }
+    }
+
+    fn keys(&self, index: usize) -> &[ParallelResourceKey] {
+        &self.per_operation[index].keys
+    }
+
+    fn is_exclusive(&self, index: usize) -> bool {
+        self.per_operation[index].exclusive
+    }
+}
+
+/// What the running operations hold. It changes when an operation starts and
+/// when it finishes, so a pick tests conflicts against the held keys instead
+/// of recomputing every running operation's keys.
+#[derive(Default)]
+pub(crate) struct RunningLedger {
+    /// How many running operations hold each resource key.
+    holders: HashMap<ParallelResourceKey, usize>,
+    running: usize,
+    exclusive: usize,
+    /// Starts that passed a waiting operation since the last one started.
+    bypassed: usize,
+    /// Cores given to the running heavy units (every core when a unit was
+    /// left to its tools' default).
+    held_cores: usize,
+}
+
+impl RunningLedger {
+    pub(crate) fn running(&self) -> usize {
+        self.running
+    }
+
+    pub(crate) fn held_cores(&self) -> usize {
+        self.held_cores
+    }
+
+    fn holds(&self, key: &ParallelResourceKey) -> bool {
+        self.holders.contains_key(key)
+    }
+
+    fn conflicts(&self, keys: &[ParallelResourceKey]) -> bool {
+        keys.iter().any(|key| self.holds(key))
+    }
+
+    pub(crate) fn start(&mut self, resources: &OperationResources, index: usize) {
+        for key in resources.keys(index) {
+            *self.holders.entry(key.clone()).or_insert(0) += 1;
+        }
+        self.running += 1;
+        if resources.is_exclusive(index) {
+            self.exclusive += 1;
+        }
+    }
+
+    pub(crate) fn finish(&mut self, resources: &OperationResources, index: usize) {
+        for key in resources.keys(index) {
+            let last = match self.holders.get_mut(key) {
+                Some(count) => {
+                    *count = count.saturating_sub(1);
+                    *count == 0
+                }
+                None => false,
+            };
+            if last {
+                self.holders.remove(key);
+            }
+        }
+        self.running = self.running.saturating_sub(1);
+        if resources.is_exclusive(index) {
+            self.exclusive = self.exclusive.saturating_sub(1);
+        }
+    }
+
+    pub(crate) fn hold_cores(&mut self, cores: usize) {
+        self.held_cores += cores;
+    }
+
+    pub(crate) fn release_cores(&mut self, cores: usize) {
+        self.held_cores = self.held_cores.saturating_sub(cores);
+    }
+}
+
 pub(crate) struct ScheduleReadyContext<'env> {
     pub(crate) spec: &'env ResolvedBuildSpec,
     pub(crate) plan: &'env ExecutionPlan,
     pub(crate) providers: &'env ExecutionProviders<'env>,
+    pub(crate) resources: &'env OperationResources,
     pub(crate) build_name: &'env str,
     pub(crate) event_sender: Option<Sender<ExecutionEvent>>,
     pub(crate) cancel_check: ProcessCancelCheck,
@@ -62,11 +178,10 @@ pub(crate) struct ScheduleReadyState<'a> {
     /// they are never scheduled again.
     pub(crate) completed: &'a [bool],
     pub(crate) running: &'a mut [bool],
-    pub(crate) running_count: &'a mut usize,
+    pub(crate) ledger: &'a mut RunningLedger,
     /// Scheduled units still running. A unit is one operation or one batch
     /// of artifact builds; each occupies one job slot.
     pub(crate) running_units: &'a mut usize,
-    pub(crate) running_heavy_units: &'a mut usize,
 }
 
 /// One operation result sent back to the executor loop.
@@ -81,7 +196,8 @@ pub(crate) struct ScheduledResult {
     pub(crate) started: std::time::Instant,
     /// Set on the last result of a unit: its job slot is free again.
     pub(crate) unit_finished: bool,
-    pub(crate) heavy: bool,
+    /// Cores the unit held while it ran (zero unless it is CPU-heavy).
+    pub(crate) held_cores: usize,
 }
 
 pub(crate) fn schedule_ready_operations<'scope, 'env>(
@@ -95,22 +211,27 @@ pub(crate) fn schedule_ready_operations<'scope, 'env>(
     let spec = context.spec;
     let plan = context.plan;
     let providers = context.providers;
+    let resources = context.resources;
     let max_parallel_jobs = context.max_parallel_jobs;
     let ScheduleReadyState {
         remaining_dependencies,
         completed,
         running,
-        running_count,
+        ledger,
         running_units,
-        running_heavy_units,
     } = state;
     loop {
         if *running_units >= max_parallel_jobs {
             break;
         }
-        let Some(index) =
-            next_schedulable_operation(spec, plan, remaining_dependencies, completed, running)
-        else {
+        let Some(index) = next_schedulable_operation(
+            plan,
+            resources,
+            remaining_dependencies,
+            completed,
+            running,
+            ledger,
+        ) else {
             break;
         };
         let leader = early_cutoff(spec, plan, &plan.operations[index]).into_owned();
@@ -121,6 +242,7 @@ pub(crate) fn schedule_ready_operations<'scope, 'env>(
             remaining_dependencies,
             completed,
             running,
+            ledger,
         );
         let parallel =
             supports_parallel_runtime(leader.parallelism.mode.clone(), &leader.parallelism.domain);
@@ -137,12 +259,17 @@ pub(crate) fn schedule_ready_operations<'scope, 'env>(
                     remaining_dependencies,
                     completed,
                     running,
+                    ledger,
                     running_units: *running_units,
-                    running_heavy_units: *running_heavy_units,
                 },
             )
         } else {
             None
+        };
+        let held_cores = if heavy {
+            job_budget.unwrap_or_else(units::available_cores)
+        } else {
+            0
         };
         for (index, operation) in &unit {
             runtime.emit_event(ExecutionEvent::Started {
@@ -153,19 +280,17 @@ pub(crate) fn schedule_ready_operations<'scope, 'env>(
                 operation_kind = ?operation.kind,
                 parallelism_mode = ?operation.parallelism.mode,
                 parallelism_domain = ?operation.parallelism.domain,
-                running_operations = *running_count,
+                running_operations = ledger.running(),
                 max_parallel_jobs,
                 batch_size = unit.len(),
                 job_budget = ?job_budget,
                 "operation started"
             );
             running[*index] = true;
-            *running_count += 1;
+            ledger.start(resources, *index);
         }
         *running_units += 1;
-        if heavy {
-            *running_heavy_units += 1;
-        }
+        ledger.hold_cores(held_cores);
         let tx = result_tx.clone();
         let dispatch_context = DispatchContext {
             build_name: context.build_name.to_string(),
@@ -208,7 +333,7 @@ pub(crate) fn schedule_ready_operations<'scope, 'env>(
                     paused,
                     started: started.started_at(),
                     unit_finished: position == last,
-                    heavy,
+                    held_cores,
                 });
             }
         });
@@ -233,76 +358,61 @@ pub(crate) fn resolve_parallel_jobs(spec: &ResolvedBuildSpec) -> usize {
     }
 }
 
+/// The next operation to start, or `None` when nothing can start now.
+///
+/// Rules, in order:
+/// - Nothing starts beside a running exclusive operation.
+/// - A ready parallel operation whose resources no running operation holds
+///   starts first, in plan order, even while an exclusive operation waits.
+/// - A waiting operation starts only when nothing is running. After
+///   [`WAITING_OPERATION_BYPASS_LIMIT`] starts have passed a waiting operation,
+///   nothing new starts until it can run.
 fn next_schedulable_operation(
-    spec: &ResolvedBuildSpec,
     plan: &ExecutionPlan,
+    resources: &OperationResources,
     remaining_dependencies: &[usize],
     completed: &[bool],
     running: &[bool],
+    ledger: &mut RunningLedger,
 ) -> Option<usize> {
-    let mut ready_parallel = Vec::new();
-    let mut ready_exclusive = Vec::new();
-    let mut any_running = false;
-    let mut exclusive_running = false;
-    let running_parallel_resources = running
-        .iter()
-        .enumerate()
-        .filter(|(_, is_running)| **is_running)
-        .flat_map(|(index, _)| operation_parallel_resource_keys(spec, &plan.operations[index]))
-        .collect::<HashSet<_>>();
-
-    for (index, operation) in plan.operations.iter().enumerate() {
-        if running[index] {
-            any_running = true;
-            if operation.parallelism.mode == OperationParallelismMode::Exclusive {
-                exclusive_running = true;
-            }
-            continue;
-        }
-        if completed[index] || remaining_dependencies[index] != 0 {
-            continue;
-        }
-        match operation.parallelism.mode {
-            OperationParallelismMode::Parallelizable
-                if supports_parallel_runtime(
-                    operation.parallelism.mode.clone(),
-                    &operation.parallelism.domain,
-                ) =>
-            {
-                let resource_keys = operation_parallel_resource_keys(spec, operation);
-                if resource_keys
-                    .iter()
-                    .all(|resource| !running_parallel_resources.contains(resource))
-                {
-                    ready_parallel.push(index)
-                } else {
-                    tracing::debug!(
-                        operation_id = %operation.id.as_str(),
-                        operation_kind = ?operation.kind,
-                        resources = ?resource_keys
-                            .iter()
-                            .filter(|resource| running_parallel_resources.contains(resource))
-                            .collect::<Vec<_>>(),
-                        "operation waiting for parallel resource"
-                    );
-                    ready_exclusive.push(index)
-                }
-            }
-            OperationParallelismMode::Exclusive => ready_exclusive.push(index),
-            OperationParallelismMode::Parallelizable => ready_exclusive.push(index),
-        }
-    }
-
-    if exclusive_running {
+    if ledger.exclusive > 0 {
         return None;
     }
-    if any_running {
-        return ready_parallel.into_iter().next();
+    let mut startable = None;
+    let mut waiting = None;
+    for index in 0..plan.operations.len() {
+        if running[index] || completed[index] || remaining_dependencies[index] != 0 {
+            continue;
+        }
+        if !resources.is_exclusive(index) && !ledger.conflicts(resources.keys(index)) {
+            startable.get_or_insert(index);
+        } else {
+            waiting.get_or_insert(index);
+        }
+        if startable.is_some() && waiting.is_some() {
+            break;
+        }
     }
-    if let Some(index) = ready_exclusive.into_iter().next() {
+    let Some(waiting_index) = waiting else {
+        ledger.bypassed = 0;
+        return startable;
+    };
+    if ledger.bypassed >= WAITING_OPERATION_BYPASS_LIMIT {
+        if ledger.running == 0 {
+            ledger.bypassed = 0;
+            return Some(waiting_index);
+        }
+        return None;
+    }
+    if let Some(index) = startable {
+        ledger.bypassed += 1;
         return Some(index);
     }
-    ready_parallel.into_iter().next()
+    if ledger.running == 0 {
+        ledger.bypassed = 0;
+        return Some(waiting_index);
+    }
+    None
 }
 
 fn supports_parallel_runtime(

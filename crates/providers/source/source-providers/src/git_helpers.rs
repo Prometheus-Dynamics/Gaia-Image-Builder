@@ -1,4 +1,5 @@
 use super::*;
+pub(crate) use gaia_process::git_command;
 
 pub(crate) fn is_local_git_repo(repo: &str) -> bool {
     repo.starts_with("file://") || Path::new(repo).exists()
@@ -656,17 +657,6 @@ pub(crate) fn git_head_commit(repo_dir: &Path) -> Option<String> {
         .status
         .success()
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
-pub(crate) fn git_command() -> Command {
-    let mut command = Command::new("git");
-    command.arg("-c").arg("safe.directory=*");
-    // Git runs unattended: a missing credential fails fast instead of
-    // prompting on the terminal and hanging the build.
-    command
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GCM_INTERACTIVE", "never");
-    command
 }
 
 /// Whether `git` runs on the host. Probed once per process.

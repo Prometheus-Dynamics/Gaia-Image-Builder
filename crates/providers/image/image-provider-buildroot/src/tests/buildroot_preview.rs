@@ -103,6 +103,7 @@ impl Fixture {
 
     fn image(&self, option: Option<&str>) -> ImageSpec {
         ImageSpec {
+            signing: None,
             definition: ImageDefinition::Buildroot(BuildrootImageSpec {
                 source: Some(SourceId::new("buildroot")),
                 defconfig: Some("test_defconfig".into()),

@@ -17,6 +17,7 @@ fn docker_spec(build_dir: &Path) -> ResolvedBuildSpec {
     };
     spec.policy.execution.docker = Some(DockerExecutionSpec {
         image: "docker.io/library/alpine:latest".into(),
+        reuse_container: false,
     });
     spec.policy.providers.git.allow_remote_resolution = true;
     spec.policy.providers.git.retry_attempts = 1;

@@ -7,7 +7,10 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use gaia_process::hex;
 use sha2::{Digest, Sha256};
+
+pub(crate) use gaia_process::sha256_file;
 
 /// One exported image: where it landed, its digest and its size.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -224,24 +227,6 @@ fn copy_hashed(source: &Path, target: &Path) -> io::Result<(String, u64)> {
     }
     output.sync_all()?;
     Ok((hex(&hasher.finalize()), bytes))
-}
-
-pub(crate) fn sha256_file(path: &Path) -> io::Result<String> {
-    let mut file = fs::File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 8192];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    Ok(hex(&hasher.finalize()))
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// The current time as a compact UTC stamp, such as `20261009T142530Z`.

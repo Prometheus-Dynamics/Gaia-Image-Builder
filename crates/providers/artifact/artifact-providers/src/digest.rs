@@ -64,22 +64,10 @@ pub fn render_artifact_backend_state(state: ArtifactBackendState<'_>) -> String 
 }
 
 pub fn file_sha256_or_placeholder(path: &Path) -> String {
-    let output = Command::new("sha256sum").arg(path).output().ok();
-    let Some(output) = output else {
-        return format!("sha256-unavailable:{}", path.display());
-    };
-    if !output.status.success() {
-        return format!(
-            "sha256-error:{}:{}",
-            path.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
+    match gaia_process::sha256_file(path) {
+        Ok(digest) => digest,
+        Err(error) => format!("sha256-error:{}:{error}", path.display()),
     }
-    String::from_utf8_lossy(&output.stdout)
-        .split_whitespace()
-        .next()
-        .unwrap_or_default()
-        .to_string()
 }
 
 pub fn path_bytes(path: &Path) -> u64 {

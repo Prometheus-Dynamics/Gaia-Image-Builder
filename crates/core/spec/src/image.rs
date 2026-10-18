@@ -7,6 +7,56 @@ pub struct ImageSpec {
     pub feed: ImageFeedSpec,
     pub output: ImageOutputSpec,
     pub assembly: Option<ImageAssemblySpec>,
+    /// `[image.signing]`: signatures written next to the published outputs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signing: Option<ImageSigningSpec>,
+}
+
+/// `[image.signing]`. `kind` is as written; [`ImageSigningKind::parse`] reads it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ImageSigningSpec {
+    pub kind: String,
+    /// A path to the key, or `env:VAR` to read the path (or, for gpg, the key id) from `VAR`.
+    pub key: String,
+    /// Glob patterns over the published output file names.
+    pub outputs: Vec<String>,
+}
+
+/// The signing tools `[image.signing] kind` names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageSigningKind {
+    Minisign,
+    Gpg,
+    CosignBlob,
+}
+
+impl ImageSigningKind {
+    pub fn parse(kind: &str) -> Option<Self> {
+        match kind {
+            "minisign" => Some(Self::Minisign),
+            "gpg" => Some(Self::Gpg),
+            "cosign-blob" => Some(Self::CosignBlob),
+            _ => None,
+        }
+    }
+
+    /// The program the kind runs.
+    pub fn program(self) -> &'static str {
+        match self {
+            Self::Minisign => "minisign",
+            Self::Gpg => "gpg",
+            Self::CosignBlob => "cosign",
+        }
+    }
+
+    /// The suffix of a signature file written next to its output.
+    pub fn signature_suffix(self) -> &'static str {
+        match self {
+            Self::Minisign => ".minisig",
+            Self::Gpg => ".asc",
+            Self::CosignBlob => ".sig",
+        }
+    }
 }
 
 impl ImageSpec {
@@ -16,6 +66,7 @@ impl ImageSpec {
             feed: ImageFeedSpec::default(),
             output: ImageOutputSpec::default(),
             assembly: None,
+            signing: None,
         }
     }
 

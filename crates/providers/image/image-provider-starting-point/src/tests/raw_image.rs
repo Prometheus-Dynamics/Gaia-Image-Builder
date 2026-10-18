@@ -35,6 +35,7 @@ fn starting_point_raw_image_rejects_read_only_overlay_before_root_check() {
     spec.workspace.root_dir = root.display().to_string();
     spec.workspace.build_dir = "build".into();
     spec.image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::StartingPoint(StartingPointImageSpec {
             source: None,
             source_path: None,

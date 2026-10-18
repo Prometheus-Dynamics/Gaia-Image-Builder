@@ -15,6 +15,19 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - **Variant output collisions compare paths.** Two variants that write the same file (`collect_dir/archive_name`, an assembly output, or the same export file name in one export dir) are reported, whatever else differs between them. Assembly outputs are compared as the config names them.
 - **`gaia plan` names what changed.** A fingerprint change is explained from the inputs the last run recorded (`config_overrides changed (BR2_FOO)`), as `run` and `preview` already did. A shared operation of a variant run reads its recorded inputs from the shared store, so its explanation is named too.
 
+### Scheduler, docker and image signing
+
+- **The scheduler starts parallel work first.** When nothing runs, ready parallel operations start before a waiting exclusive one, which starts alone once nothing else runs (it used to start first, so the parallel work waited for it). Once eight starts have passed a waiting operation, nothing new starts until it can run, so an exclusive operation cannot be starved. Resource keys of a plan are computed once per run, and a running-resource ledger replaces the per-pick recomputation. Job budgets for CPU-heavy operations are sized from the cores the running ones do not hold, when each one starts; a running tool keeps its budget. No output bytes change.
+- **Docker: streamed, cached context hashes.** `docker_build_context_hash` reads files in chunks and reuses the hash of an unchanged context in the same process. The hash is the same as before, so existing `gaia-local/` image tags stay valid.
+- **`[providers.docker] reuse_container = true`** (default off) runs a run's commands in one long-lived container per image, mount set and user, with `docker exec`, and removes the container at the end of the run, on cancel and on panic. Measured on this host: 3.6 s per command with `docker run --rm`, 41 ms with `docker exec` (20 runs of `true`).
+- **`[image.signing]`** signs the published outputs after a successful run: `kind = "minisign" | "gpg" | "cosign-blob"`, `key` (a path, or `env:VAR`), `outputs` (globs over the output file names). Each signature is written next to its output (`.minisig`, `.asc`, `.sig`) and listed with the published outputs; a `*.roothash` file is signed too. The tool must be on `PATH`. The validator rejects a bad kind, an empty key or no outputs.
+- **Artifact output digests are computed in-process.** The rust/go/java/node/python `output_sha256` values come from the same SHA-256 as before, but without a `sha256sum` process. A file that cannot be read gets the `sha256-error:` placeholder (it used to be the `sha256sum` message, or `sha256-unavailable` when the program was missing).
+
+### Test hygiene and shared helpers
+
+- The buildroot cross-filesystem package-cache test removes its `/dev/shm/gaia-package-cache-trees-<pid>` and `$HOME/.cache/gaia-test-<pid>` directories when it ends, including on failure.
+- `gaia-process` now holds the shared `hex`, `sha256_file`, `sha256_hex_bytes` and `git_command`; the plan, spec, app, source, artifact and image-providers crates use them in place of their own copies. Error texts are unchanged except for the artifact digest noted above.
+
 ### Assembly: output changes (rebuild the affected images)
 
 These change image bytes, approved for this release. Reuse does not notice a tool or code change, so an image built before this release with an unchanged spec is reused as it is: remove the affected images to get the new bytes.

@@ -358,6 +358,18 @@ fn tree_contents(output: &Path) -> BTreeMap<String, Vec<u8>> {
     files
 }
 
+/// Removes the directories a cross-filesystem test created, when the test ends
+/// (including by a failed assertion).
+struct RemoveOnDrop(Vec<PathBuf>);
+
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        for path in &self.0 {
+            let _ = fs::remove_dir_all(path);
+        }
+    }
+}
+
 #[test]
 fn packages_round_trip_across_filesystems() {
     if !tools_available() {
@@ -373,11 +385,13 @@ fn packages_round_trip_across_filesystems() {
         return;
     }
     let Some(home) = std::env::var_os("HOME") else {
+        let _ = fs::remove_dir_all(&trees);
         return;
     };
     let caches = PathBuf::from(home)
         .join(".cache")
         .join(format!("gaia-test-{}", std::process::id()));
+    let _cleanup = RemoveOnDrop(vec![trees.clone(), caches.clone()]);
     fs::create_dir_all(&caches).expect("caches");
     let same_filesystem = {
         use std::os::unix::fs::MetadataExt;

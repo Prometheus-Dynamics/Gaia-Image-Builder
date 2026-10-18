@@ -17,6 +17,7 @@
 use crate::reuse::{content_state_signature, provider_state_signature, resolve_workspace_path};
 use crate::tree_digest::tree_digest_signature;
 use gaia_image_providers::{collect_content_files, recorded_sha256};
+use gaia_process::hex;
 use gaia_spec::{AssemblyPathTemplate, AssemblyRoots, ResolvedBuildSpec};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -181,10 +182,6 @@ fn cached_content_signature(manifest: &Path, path: &Path) -> String {
         map.insert(key, digest.clone());
     }
     digest
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// Content of a rendered stage item: its runtime state, its entry as the spec

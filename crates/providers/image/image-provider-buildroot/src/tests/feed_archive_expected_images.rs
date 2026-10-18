@@ -9,6 +9,7 @@ fn collect_expected_images_reports_missing_required_output() {
     fs::create_dir_all(output_dir.join("images")).expect("images dir");
     fs::create_dir_all(&collect_dir).expect("collect dir");
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             expected_images: vec![BuildrootExpectedImageSpec {
                 name: "rootfs.tar".into(),
@@ -102,6 +103,7 @@ fn collect_expected_images_copies_board_style_raw_image() {
     fs::create_dir_all(output_dir.join("images")).expect("images dir");
     fs::write(output_dir.join("images/sdcard.img"), "disk-image").expect("sdcard image");
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             expected_images: vec![BuildrootExpectedImageSpec {
                 name: "sdcard.img".into(),
@@ -141,6 +143,7 @@ fn collect_expected_images_copies_raw_board_image_into_collect_dir() {
     fs::create_dir_all(&collect_dir).expect("collect dir");
     fs::write(images_dir.join("sdcard.img"), "raw-image").expect("raw image");
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             expected_images: vec![BuildrootExpectedImageSpec {
                 name: "sdcard.img".into(),
@@ -178,6 +181,7 @@ fn collect_expected_images_copies_required_cpio_image() {
     fs::create_dir_all(output_dir.join("images")).expect("images dir");
     fs::write(output_dir.join("images/rootfs.cpio.gz"), "cpio-image").expect("cpio image");
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             expected_images: vec![BuildrootExpectedImageSpec {
                 name: "rootfs.cpio.gz".into(),
@@ -214,6 +218,7 @@ fn collect_expected_images_skips_missing_optional_cpio_image() {
     let collect_dir = collect_dir_scratch.join("collect_dir");
     fs::create_dir_all(output_dir.join("images")).expect("images dir");
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             expected_images: vec![BuildrootExpectedImageSpec {
                 name: "rootfs.cpio".into(),
@@ -259,6 +264,7 @@ fn collect_expected_images_copies_ext2_and_ext3_images() {
         fs::create_dir_all(output_dir.join("images")).expect("images dir");
         fs::write(output_dir.join("images").join(name), contents).expect("ext image");
         let image = ImageSpec {
+            signing: None,
             definition: ImageDefinition::Buildroot(BuildrootImageSpec {
                 expected_images: vec![BuildrootExpectedImageSpec {
                     name: name.into(),
@@ -302,6 +308,7 @@ fn collect_expected_images_skips_missing_optional_ext2_and_ext3_images() {
         let collect_dir = collect_dir_scratch.join("collect_dir");
         fs::create_dir_all(output_dir.join("images")).expect("images dir");
         let image = ImageSpec {
+            signing: None,
             definition: ImageDefinition::Buildroot(BuildrootImageSpec {
                 expected_images: vec![BuildrootExpectedImageSpec {
                     name: name.into(),
@@ -358,6 +365,7 @@ fn collect_expected_images_copies_flash_and_erofs_images() {
         fs::create_dir_all(output_dir.join("images")).expect("images dir");
         fs::write(output_dir.join("images").join(name), contents).expect("image");
         let image = ImageSpec {
+            signing: None,
             definition: ImageDefinition::Buildroot(BuildrootImageSpec {
                 expected_images: vec![BuildrootExpectedImageSpec {
                     name: name.into(),
@@ -403,6 +411,7 @@ fn collect_expected_images_skips_missing_optional_flash_and_erofs_images() {
         let collect_dir = collect_dir_scratch.join("collect_dir");
         fs::create_dir_all(output_dir.join("images")).expect("images dir");
         let image = ImageSpec {
+            signing: None,
             definition: ImageDefinition::Buildroot(BuildrootImageSpec {
                 expected_images: vec![BuildrootExpectedImageSpec {
                     name: name.into(),
@@ -464,6 +473,7 @@ fn collect_expected_images_copies_lower_priority_images() {
         fs::create_dir_all(output_dir.join("images")).expect("images dir");
         fs::write(output_dir.join("images").join(name), contents).expect("image");
         let image = ImageSpec {
+            signing: None,
             definition: ImageDefinition::Buildroot(BuildrootImageSpec {
                 expected_images: vec![BuildrootExpectedImageSpec {
                     name: name.into(),
@@ -510,6 +520,7 @@ fn collect_expected_images_skips_missing_optional_lower_priority_images() {
         let collect_dir = collect_dir_scratch.join("collect_dir");
         fs::create_dir_all(output_dir.join("images")).expect("images dir");
         let image = ImageSpec {
+            signing: None,
             definition: ImageDefinition::Buildroot(BuildrootImageSpec {
                 expected_images: vec![BuildrootExpectedImageSpec {
                     name: name.into(),

@@ -14,6 +14,7 @@ fn run_buildroot_reports_make_failures() {
         )
         .expect("makefile");
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             defconfig: Some("bad_defconfig".into()),
             external_tree: None,
@@ -297,6 +298,7 @@ fn buildroot_parallel_packages_and_ccache_configure_and_report() {
     let mut spec = ResolvedBuildSpec::new("buildroot-parallel");
     spec.workspace.root_dir = workspace.display().to_string();
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             defconfig: Some("test_defconfig".into()),
             ..BuildrootImageSpec::default()
@@ -471,6 +473,7 @@ fn buildroot_package_overrides_are_staged_as_external_tree() {
     let mut spec = ResolvedBuildSpec::new("buildroot-package-overrides");
     spec.workspace.root_dir = workspace.display().to_string();
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             defconfig: Some("test_defconfig".into()),
             external_tree: Some(user_external.display().to_string()),
@@ -560,6 +563,7 @@ fn buildroot_package_overrides_replace_existing_source_packages() {
     let mut spec = ResolvedBuildSpec::new("buildroot-package-replacements");
     spec.workspace.root_dir = workspace.display().to_string();
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             defconfig: Some("test_defconfig".into()),
             external_tree: None,
@@ -639,6 +643,7 @@ fn buildroot_config_changes_clean_existing_output_before_make() {
     let mut spec = ResolvedBuildSpec::new("buildroot-config-clean");
     spec.workspace.root_dir = workspace.display().to_string();
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             defconfig: Some("test_defconfig".into()),
             config_overrides: vec![("BR2_PACKAGE_FOO".into(), "y".into())],
@@ -698,6 +703,7 @@ fn buildroot_retry_after_failed_post_image_does_not_clean() {
     let mut spec = ResolvedBuildSpec::new("buildroot-post-image-retry");
     spec.workspace.root_dir = workspace.display().to_string();
     let image_with = |value: &str| ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             defconfig: Some("test_defconfig".into()),
             config_overrides: vec![("BR2_PACKAGE_FOO".into(), value.into())],
@@ -787,6 +793,7 @@ fn buildroot_option_change_rebuilds_only_the_package_and_its_dependents() {
     let mut spec = ResolvedBuildSpec::new("buildroot-targeted");
     spec.workspace.root_dir = workspace.display().to_string();
     let image_with = |value: &str| ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             defconfig: Some("test_defconfig".into()),
             config_overrides: vec![("BR2_PACKAGE_FOO_OPTION".into(), value.into())],
@@ -869,6 +876,7 @@ fn buildroot_package_override_missing_config_in_fails_before_make() {
     let mut spec = ResolvedBuildSpec::new("buildroot-package-overrides-missing-config");
     spec.workspace.root_dir = workspace.display().to_string();
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             defconfig: Some("test_defconfig".into()),
             ..BuildrootImageSpec::default()
@@ -927,6 +935,7 @@ fn buildroot_package_override_detects_generated_external_name_conflict() {
     let mut spec = ResolvedBuildSpec::new("buildroot-package-overrides-conflict");
     spec.workspace.root_dir = workspace.display().to_string();
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             defconfig: Some("test_defconfig".into()),
             external_tree: Some(user_external.display().to_string()),
@@ -964,6 +973,7 @@ fn buildroot_state_digest_ignores_unrelated_build_tree_files() {
     fs::write(output_dir.join(".config"), "BR2_TARGET_ROOTFS_TAR=y\n").expect("config");
     fs::write(output_dir.join("images/rootfs.tar"), "rootfs").expect("image");
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             expected_images: vec![BuildrootExpectedImageSpec {
                 name: "rootfs.tar".into(),
@@ -1059,6 +1069,7 @@ fn refresh_buildroot_images_after_feed_overlay_runs_target_post_image_for_non_ta
         )
         .expect("makefile");
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             expected_images: vec![BuildrootExpectedImageSpec {
                 name: "rootfs.squashfs".into(),
@@ -1115,6 +1126,7 @@ fn refresh_buildroot_images_after_feed_overlay_disables_legacy_before_target_pos
     )
     .expect("makefile");
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             config_overrides: vec![("BR2_LEGACY".into(), "n".into())],
             expected_images: vec![BuildrootExpectedImageSpec {
@@ -1167,6 +1179,7 @@ fn refresh_buildroot_images_after_feed_overlay_absolutizes_external_tree() {
     let mut spec = ResolvedBuildSpec::new("buildroot-post-image-external-test");
     spec.workspace.root_dir = workspace_root.display().to_string();
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             external_tree: Some("external".into()),
             expected_images: vec![BuildrootExpectedImageSpec {
@@ -1540,6 +1553,7 @@ fn refresh_buildroot_images_after_feed_overlay_skips_tar_only_outputs() {
     )
     .expect("makefile");
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             expected_images: vec![BuildrootExpectedImageSpec {
                 name: "rootfs.tar".into(),
@@ -1587,6 +1601,7 @@ fn refresh_buildroot_images_after_feed_overlay_reports_target_post_image_failure
     )
     .expect("makefile");
     let image = ImageSpec {
+        signing: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             expected_images: vec![BuildrootExpectedImageSpec {
                 name: "rootfs.squashfs".into(),

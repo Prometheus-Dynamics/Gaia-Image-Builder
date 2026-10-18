@@ -8,6 +8,7 @@ fn buildroot_spec(workers: ErofsWorkersSpec) -> ResolvedBuildSpec {
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec::default(),
         assembly: None,
+        signing: None,
     };
     spec.policy.providers.buildroot.erofs_workers = workers;
     spec
