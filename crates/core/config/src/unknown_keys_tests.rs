@@ -326,6 +326,7 @@ fn new_buildroot_image_and_provider_keys_are_known() {
     assert!(
         unknown(
             "build_name = \"demo\"\n\
+             [execution]\noffline = true\n\
              [providers.buildroot]\nerofs_workers = \"auto\"\nmake_timeout_seconds = 0\nmake_retry_attempts = 1\n\
              [providers.rust]\nsccache = true\nstrip = true\n\
              [providers.docker]\nreuse_container = true\n\
@@ -336,6 +337,7 @@ fn new_buildroot_image_and_provider_keys_are_known() {
         "{:?}",
         unknown(
             "build_name = \"demo\"\n\
+             [execution]\noffline = true\n\
              [providers.buildroot]\nerofs_workers = \"auto\"\nmake_timeout_seconds = 0\nmake_retry_attempts = 1\n\
              [providers.rust]\nsccache = true\nstrip = true\n\
              [providers.docker]\nreuse_container = true\n\
