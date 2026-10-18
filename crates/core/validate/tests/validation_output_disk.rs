@@ -12,7 +12,7 @@ use support::write_temp_config;
 fn recipe(output: &str, transform: &str) -> String {
     format!(
         r#"
-build_name = "helios"
+build_name = "acme"
 version = "1.2.3"
 
 [workspace]
@@ -81,7 +81,7 @@ level = 9
 #[test]
 fn output_disk_naming_an_assembly_disk_with_a_disk_archive_validates() {
     let contents = recipe(
-        r#"archive_name = "helios.img.xz"
+        r#"archive_name = "acme.img.xz"
 disk = "sdcard""#,
         XZ,
     );
@@ -91,7 +91,7 @@ disk = "sdcard""#,
 #[test]
 fn output_disk_must_name_an_assembly_disk() {
     let contents = recipe(
-        r#"archive_name = "helios.img.xz"
+        r#"archive_name = "acme.img.xz"
 disk = "emmc""#,
         XZ,
     );
@@ -104,7 +104,7 @@ disk = "emmc""#,
 #[test]
 fn output_disk_needs_a_raw_disk_archive_name() {
     let contents = recipe(
-        r#"archive_name = "helios.tar.xz"
+        r#"archive_name = "acme.tar.xz"
 disk = "sdcard""#,
         XZ,
     );
@@ -116,10 +116,10 @@ disk = "sdcard""#,
 
 #[test]
 fn xz_levels_are_zero_to_nine() {
-    let ok = recipe(r#"archive_name = "helios.img.xz""#, XZ);
+    let ok = recipe(r#"archive_name = "acme.img.xz""#, XZ);
     assert_eq!(output_disk_codes(&ok), Vec::<&str>::new());
     let too_high = recipe(
-        r#"archive_name = "helios.img.xz""#,
+        r#"archive_name = "acme.img.xz""#,
         &XZ.replace("level = 9", "level = 10"),
     );
     assert_eq!(
@@ -131,7 +131,7 @@ fn xz_levels_are_zero_to_nine() {
 #[test]
 fn output_disk_and_xz_transform_resolve_from_the_config() {
     let contents = recipe(
-        r#"archive_name = "helios.img.xz"
+        r#"archive_name = "acme.img.xz"
 disk = "sdcard""#,
         XZ,
     );

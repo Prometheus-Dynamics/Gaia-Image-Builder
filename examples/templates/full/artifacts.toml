@@ -35,16 +35,16 @@ pin = "locked"
 
 # Rust binary.
 [[artifacts]]
-id = "helios-api"
+id = "acme-api"
 kind = "rust"
-package = "helios-api"
-target_name = "helios-api"
+package = "acme-api"
+target_name = "acme-api"
 source = "workspace-root"
 profile = "${build.profile}"
-install_name = "helios-api"
+install_name = "acme-api"
 install_class = "binary"
-install_dest_hint = "/usr/bin/helios-api"
-output_path = "${workspace.out_dir}/artifacts/helios-api"
+install_dest_hint = "/usr/bin/acme-api"
+output_path = "${workspace.out_dir}/artifacts/acme-api"
 
 # Rust shared object / library-ish output.
 [[artifacts]]
@@ -61,14 +61,14 @@ output_path = "${workspace.out_dir}/artifacts/cv-plugin.so"
 
 # Java output points at the expected built jar path inside the source tree.
 [[artifacts]]
-id = "orion-node"
+id = "worker-node"
 kind = "java"
-build_target = "build/libs/orion-node.jar"
+build_target = "build/libs/worker-node.jar"
 source = "workspace-root"
-install_name = "orion-node"
+install_name = "worker-node"
 install_class = "archive"
-install_dest_hint = "/usr/lib/example/orion-node.jar"
-output_path = "${workspace.out_dir}/artifacts/orion-node.jar"
+install_dest_hint = "/usr/lib/example/worker-node.jar"
+output_path = "${workspace.out_dir}/artifacts/worker-node.jar"
 
 # Node output packages a package directory with `npm pack`.
 [[artifacts]]
@@ -94,19 +94,19 @@ output_path = "${workspace.out_dir}/artifacts/python-sdk.whl"
 
 # Go output builds a binary from a Go package path.
 [[artifacts]]
-id = "heliosctl"
+id = "acmectl"
 kind = "go"
-package = "./cmd/heliosctl"
+package = "./cmd/acmectl"
 source = "workspace-root"
-install_name = "heliosctl"
+install_name = "acmectl"
 install_class = "binary"
-install_dest_hint = "/usr/bin/heliosctl"
-output_path = "${workspace.out_dir}/artifacts/heliosctl"
+install_dest_hint = "/usr/bin/acmectl"
+output_path = "${workspace.out_dir}/artifacts/acmectl"
 
 [[install]]
-id = "install-helios-api"
-artifact = "helios-api"
-dest = "/usr/bin/helios-api"
+id = "install-acme-api"
+artifact = "acme-api"
+dest = "/usr/bin/acme-api"
 replace = true
 mode = 493
 owner = "root"
@@ -122,9 +122,9 @@ owner = "root"
 group = "root"
 
 [[install]]
-id = "install-orion-node"
-artifact = "orion-node"
-dest = "/usr/lib/example/orion-node.jar"
+id = "install-worker-node"
+artifact = "worker-node"
+dest = "/usr/lib/example/worker-node.jar"
 replace = true
 mode = 420
 owner = "root"
@@ -149,9 +149,9 @@ owner = "root"
 group = "root"
 
 [[install]]
-id = "install-heliosctl"
-artifact = "heliosctl"
-dest = "/usr/bin/heliosctl"
+id = "install-acmectl"
+artifact = "acmectl"
+dest = "/usr/bin/acmectl"
 replace = true
 mode = 493
 owner = "root"

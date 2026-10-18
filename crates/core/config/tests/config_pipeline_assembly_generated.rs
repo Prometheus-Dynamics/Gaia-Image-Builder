@@ -9,7 +9,7 @@ use gaia_spec::{AssemblyArchiveMemberSourceSpec, AssemblyJsonValue};
 use support::write_temp_config;
 
 const BASE: &str = r#"
-build_name = "helios"
+build_name = "acme"
 version = "1.2.3"
 
 [workspace]
@@ -106,13 +106,13 @@ json = {{ "${{build.name}}" = "${{build.name}}", size = "${{assembly.size:$assem
     let assembly = spec.image.assembly.expect("assembly");
     assert_eq!(
         assembly.files[0].content.as_deref(),
-        Some("name=helios root=${assembly.size:$assembly.work/rootfs.erofs}")
+        Some("name=acme root=${assembly.size:$assembly.work/rootfs.erofs}")
     );
     let json = assembly.files[1].json.clone().expect("json");
     assert_eq!(
         json,
         AssemblyJsonValue::Object(vec![
-            ("helios".into(), AssemblyJsonValue::String("helios".into())),
+            ("acme".into(), AssemblyJsonValue::String("acme".into())),
             (
                 "size".into(),
                 AssemblyJsonValue::String("${assembly.size:$assembly.work/rootfs.erofs}".into()),
@@ -157,7 +157,7 @@ json = {{ id = "${{build.name}}" }}
         archive.members[2].json,
         Some(AssemblyJsonValue::Object(vec![(
             "id".into(),
-            AssemblyJsonValue::String("helios".into())
+            AssemblyJsonValue::String("acme".into())
         )]))
     );
 }

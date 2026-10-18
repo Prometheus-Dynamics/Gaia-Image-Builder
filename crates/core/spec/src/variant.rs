@@ -46,10 +46,10 @@ mod tests {
 
     #[test]
     fn variant_ids_are_lowercase_words_with_dashes() {
-        for valid in ["pv2026", "a", "0", "pv-2026", "x-1-y"] {
+        for valid in ["rel2026", "a", "0", "rel-2026", "x-1-y"] {
             assert!(is_valid_variant_id(valid), "{valid} should be valid");
         }
-        for invalid in ["", "-a", "PV", "pv_2026", "pv 2026", "pv/2026", "é"] {
+        for invalid in ["", "-a", "REL", "rel_2026", "rel 2026", "rel/2026", "é"] {
             assert!(!is_valid_variant_id(invalid), "{invalid} should be invalid");
         }
     }
@@ -58,8 +58,8 @@ mod tests {
     fn variant_scoped_names_only_change_when_a_variant_is_set() {
         assert_eq!(runtime_state_dir_name(None), ".gaia/runtime");
         assert_eq!(
-            runtime_state_dir_name(Some("pv2026")),
-            ".gaia/runtime@pv2026"
+            runtime_state_dir_name(Some("rel2026")),
+            ".gaia/runtime@rel2026"
         );
         assert_eq!(variant_name_suffix(None), "");
         assert_eq!(variant_name_suffix(Some("default")), "@default");

@@ -285,8 +285,8 @@ mod tests {
 
     fn trees() -> Vec<ExternalTree> {
         vec![ExternalTree {
-            name: "RAZE".to_string(),
-            dir: PathBuf::from("/nonexistent-workspace/raze"),
+            name: "MYBOARD".to_string(),
+            dir: PathBuf::from("/nonexistent-workspace/myboard"),
         }]
     }
 
@@ -306,8 +306,8 @@ mod tests {
     #[test]
     fn a_global_patch_dir_subdirectory_names_its_package() {
         let classification = classify(
-            &["RAZE:patchset/linux/0001-fix.patch"],
-            "BR2_GLOBAL_PATCH_DIR=\"$(BR2_EXTERNAL_RAZE_PATH)/patchset\"\n",
+            &["MYBOARD:patchset/linux/0001-fix.patch"],
+            "BR2_GLOBAL_PATCH_DIR=\"$(BR2_EXTERNAL_MYBOARD_PATH)/patchset\"\n",
         );
         assert_eq!(
             classification.packages,
@@ -323,8 +323,8 @@ mod tests {
         // The top directory is the external tree's own directory here, so the
         // relative entry lies in the tree.
         let classification = classify_in(
-            Path::new("/nonexistent-workspace/raze"),
-            &["RAZE:patchset/zlib/0001-fix.patch"],
+            Path::new("/nonexistent-workspace/myboard"),
+            &["MYBOARD:patchset/zlib/0001-fix.patch"],
             "BR2_GLOBAL_PATCH_DIR=\"patchset\"\n",
         );
         assert_eq!(
@@ -336,8 +336,8 @@ mod tests {
     #[test]
     fn a_global_patch_subdirectory_that_is_no_package_reassembles_the_target() {
         let classification = classify(
-            &["RAZE:patchset/not-a-package/0001-fix.patch"],
-            "BR2_GLOBAL_PATCH_DIR=\"$(BR2_EXTERNAL_RAZE_PATH)/patchset\"\n",
+            &["MYBOARD:patchset/not-a-package/0001-fix.patch"],
+            "BR2_GLOBAL_PATCH_DIR=\"$(BR2_EXTERNAL_MYBOARD_PATH)/patchset\"\n",
         );
         assert!(classification.packages.is_empty());
         assert_eq!(classification.finalize.len(), 1, "{classification:?}");
@@ -346,8 +346,8 @@ mod tests {
     #[test]
     fn a_kernel_patch_directory_rebuilds_linux() {
         let classification = classify(
-            &["RAZE:linux/patches/0001-misc-ws2812-pio-rp1-clear_on_probe-parameter.patch"],
-            "BR2_LINUX_KERNEL_PATCH=\"$(BR2_EXTERNAL_RAZE_PATH)/linux/patches\"\n",
+            &["MYBOARD:linux/patches/0001-misc-ws2812-pio-rp1-clear_on_probe-parameter.patch"],
+            "BR2_LINUX_KERNEL_PATCH=\"$(BR2_EXTERNAL_MYBOARD_PATH)/linux/patches\"\n",
         );
         assert_eq!(
             classification.packages,
@@ -359,8 +359,8 @@ mod tests {
     #[test]
     fn a_kernel_fragment_in_the_board_rebuilds_linux() {
         let classification = classify(
-            &["RAZE:board/raze/linux.fragment"],
-            "BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES=\"$(BR2_EXTERNAL_RAZE_PATH)/board/raze/linux.fragment\"\n",
+            &["MYBOARD:board/myboard/linux.fragment"],
+            "BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES=\"$(BR2_EXTERNAL_MYBOARD_PATH)/board/myboard/linux.fragment\"\n",
         );
         assert_eq!(
             classification.packages,
@@ -374,8 +374,8 @@ mod tests {
     #[test]
     fn a_file_a_package_setting_names_rebuilds_that_package() {
         let classification = classify(
-            &["RAZE:board/raze/zlib.conf"],
-            "BR2_PACKAGE_ZLIB_CONFIG_FILE=\"/nonexistent-workspace/raze/board/raze/zlib.conf\"\n",
+            &["MYBOARD:board/myboard/zlib.conf"],
+            "BR2_PACKAGE_ZLIB_CONFIG_FILE=\"/nonexistent-workspace/myboard/board/myboard/zlib.conf\"\n",
         );
         assert_eq!(
             classification.packages,
@@ -386,8 +386,8 @@ mod tests {
     #[test]
     fn an_overlay_file_reassembles_the_target_and_rebuilds_nothing() {
         let classification = classify(
-            &["RAZE:board/raze/overlay/etc/motd"],
-            "BR2_ROOTFS_OVERLAY=\"$(BR2_EXTERNAL_RAZE_PATH)/board/raze/overlay\"\n",
+            &["MYBOARD:board/myboard/overlay/etc/motd"],
+            "BR2_ROOTFS_OVERLAY=\"$(BR2_EXTERNAL_MYBOARD_PATH)/board/myboard/overlay\"\n",
         );
         assert!(classification.packages.is_empty());
         assert!(classification.unmapped.is_empty());
@@ -398,8 +398,8 @@ mod tests {
     #[test]
     fn a_skeleton_file_rebuilds_the_skeleton_package() {
         let classification = classify(
-            &["RAZE:board/raze/skeleton/etc/fstab"],
-            "BR2_ROOTFS_SKELETON_CUSTOM_PATH=\"$(BR2_EXTERNAL_RAZE_PATH)/board/raze/skeleton\"\n",
+            &["MYBOARD:board/myboard/skeleton/etc/fstab"],
+            "BR2_ROOTFS_SKELETON_CUSTOM_PATH=\"$(BR2_EXTERNAL_MYBOARD_PATH)/board/myboard/skeleton\"\n",
         );
         assert_eq!(
             classification.packages,
@@ -411,8 +411,8 @@ mod tests {
     #[test]
     fn a_post_build_script_sibling_reassembles_the_target() {
         let classification = classify(
-            &["RAZE:board/raze/hostname.txt"],
-            "BR2_ROOTFS_POST_BUILD_SCRIPT=\"$(BR2_EXTERNAL_RAZE_PATH)/board/raze/post-build.sh\"\n",
+            &["MYBOARD:board/myboard/hostname.txt"],
+            "BR2_ROOTFS_POST_BUILD_SCRIPT=\"$(BR2_EXTERNAL_MYBOARD_PATH)/board/myboard/post-build.sh\"\n",
         );
         assert!(classification.packages.is_empty());
         assert_eq!(classification.finalize.len(), 1, "{classification:?}");
@@ -421,11 +421,11 @@ mod tests {
     #[test]
     fn a_kconfig_or_documentation_file_cleans_nothing() {
         for key in [
-            "RAZE:Config.in",
-            "RAZE:external.desc",
-            "RAZE:configs/raze_defconfig",
-            "RAZE:docs/notes.txt",
-            "RAZE:README.md",
+            "MYBOARD:Config.in",
+            "MYBOARD:external.desc",
+            "MYBOARD:configs/myboard_defconfig",
+            "MYBOARD:docs/notes.txt",
+            "MYBOARD:README.md",
         ] {
             let classification = classify(&[key], "");
             assert!(
@@ -444,8 +444,8 @@ mod tests {
     #[test]
     fn a_post_image_script_sibling_cleans_nothing() {
         let classification = classify(
-            &["RAZE:board/raze/layout.txt"],
-            "BR2_ROOTFS_POST_IMAGE_SCRIPT=\"$(BR2_EXTERNAL_RAZE_PATH)/board/raze/post-image.sh\"\n",
+            &["MYBOARD:board/myboard/layout.txt"],
+            "BR2_ROOTFS_POST_IMAGE_SCRIPT=\"$(BR2_EXTERNAL_MYBOARD_PATH)/board/myboard/post-image.sh\"\n",
         );
         assert!(classification.finalize.is_empty());
         assert!(classification.unmapped.is_empty());
@@ -454,20 +454,20 @@ mod tests {
 
     #[test]
     fn a_changed_mk_file_is_a_full_clean() {
-        let classification = classify(&["RAZE:board/raze/hooks.mk"], "");
-        assert_eq!(classification.unmapped, ["RAZE:board/raze/hooks.mk"]);
+        let classification = classify(&["MYBOARD:board/myboard/hooks.mk"], "");
+        assert_eq!(classification.unmapped, ["MYBOARD:board/myboard/hooks.mk"]);
         assert!(classification.finalize.is_empty());
     }
 
     #[test]
     fn any_other_changed_file_reassembles_the_target() {
-        let classification = classify(&["RAZE:board/raze/hook.sh"], "");
+        let classification = classify(&["MYBOARD:board/myboard/hook.sh"], "");
         assert!(classification.packages.is_empty());
         assert!(classification.unmapped.is_empty());
         assert_eq!(
             classification.finalize,
             [
-                "buildroot external file RAZE:board/raze/hook.sh changed and maps to no package; reassembling target"
+                "buildroot external file MYBOARD:board/myboard/hook.sh changed and maps to no package; reassembling target"
             ]
         );
     }

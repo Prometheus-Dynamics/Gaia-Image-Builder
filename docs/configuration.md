@@ -36,13 +36,13 @@ for example shared device support kept next to the hardware it supports:
 # in a local config file (the build entrypoint or a layer it imports by path)
 imports = [
   "../layers/base-os.toml",
-  { source = "atlas", path = "devices/raze/gaia/device.toml", when = { target = "cm5" } },
+  { source = "bsp", path = "devices/myboard/gaia/device.toml", when = { target = "evk" } },
 ]
 
 [[sources]]
-id = "atlas"
+id = "bsp"
 kind = "git"
-repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager"
+repo = "https://example.com/org/bsp"
 rev = "<full commit sha>"   # or an entry in the build's lockfile
 ```
 
@@ -80,10 +80,10 @@ rev = "<full commit sha>"   # or an entry in the build's lockfile
 
 Path tokens, rewritten when each file is loaded, at the start of a string value
 or of any entry of a `:`-separated list such as
-`external_tree = "@source:atlas/devices/raze/gaia/buildroot-external:raze/assets/buildroot"`:
+`external_tree = "@source:bsp/devices/myboard/gaia/buildroot-external:myboard/assets/buildroot"`:
 - `@self` / `@self/<rest>`: absolute directory of the file containing the
   value. This is the same for local files and source-imported files, so a
-  layer written with `@self/overlays/raze.dtbo` works from a checkout and from a
+  layer written with `@self/overlays/myboard.dtbo` works from a checkout and from a
   vendored copy imported by plain path.
 - `@source:<id>` / `@source:<id>/<rest>`: the checkout directory of import
   source `<id>`, for consumers referencing files in the source.
@@ -130,19 +130,19 @@ Inputs are the values the build selects: the declared defaults, then the
 selected preset's `input` overrides (the variant's `preset`/`presets` for a
 variant), then `--set`, then a variant's overrides. Import `when` conditions
 see the entrypoint's selection, also from files they import, so
-`{ path = "styx.toml", when = { input = { backend = "styx" } } }` follows
-`--set input.backend=styx`, a preset, or the variant that sets it. The presets
+`{ path = "sensor.toml", when = { input = { backend = "sensor" } } }` follows
+`--set input.backend=sensor`, a preset, or the variant that sets it. The presets
 that set those inputs must be defined in the entrypoint file.
 
 ```toml
 imports = [
-  { path = "raze/photonvision-styx.toml", when = { input = { backend = "styx" } } },
+  { path = "myboard/myapp-sensor.toml", when = { input = { backend = "sensor" } } },
 ]
 
 [[artifacts]]
-id = "styx-helper"
+id = "sensor-helper"
 # ...
-when = { input = { backend = "styx" } }
+when = { input = { backend = "sensor" } }
 ```
 
 Each variant resolves its own imports, so two variants with different
@@ -154,16 +154,16 @@ Supported top-level fields:
 
 ```toml
 gaia_version = ">=2.0.0"
-build_name = "helios-cm5"
-display_name = "HeliOS CM5"
+build_name = "acme-evk"
+display_name = "AcmeOS EVK"
 version = "v2026.2.0"
-description = "Release image for Raspberry Pi CM5."
+description = "Release image for the EVK board."
 branch = "main"
-target = "cm5"
+target = "evk"
 profile = "release"
 labels = [
-  ["stack", "helios"],
-  ["board", "cm5"],
+  ["stack", "acme"],
+  ["board", "evk"],
 ]
 ```
 
@@ -201,8 +201,8 @@ comments) is reported as a `config_layer_empty` warning.
 
 ```toml
 [expect]
-artifacts = ["helios-api", "helios-engine"]
-installs = ["install-helios-api"]
+artifacts = ["acme-api", "acme-engine"]
+installs = ["install-acme-api"]
 sources = ["vision-plugin"]
 ```
 
@@ -226,9 +226,9 @@ maps (`inputs`, `presets`, `env`) are not checked.
 
 ```toml
 [product]
-family = "helios"
+family = "acme"
 name = "vision-system"
-sku = "helios-cm5-release"
+sku = "acme-evk-release"
 ```
 
 ## Inputs
@@ -239,7 +239,7 @@ Inputs are declared at the top level, then selected through defaults, presets, o
 [inputs.target]
 description = "Hardware target identifier"
 kind = "string"
-default = "cm5"
+default = "evk"
 
 [inputs.profile]
 description = "Profile selector"
@@ -343,7 +343,7 @@ default_from = "latest-stable"
 
 [inputs.release_ref.choices_from]
 kind = "github-releases"
-repo = "PhotonVision/photonvision"
+repo = "example-org/my-app"
 include_prereleases = false
 include_drafts = false
 sort = "published-desc"
@@ -425,16 +425,16 @@ One build file can make several images from one shared base. A variant is
 a set of overrides, in the same `key = value` form as `--set`:
 
 ```toml
-[inputs.pv]
+[inputs.rel]
 kind = "enum"
 default = "2027"
 choices = ["2026", "2027"]
 
 [[variants]]
-id = "pv2026"
-description = "PhotonVision 2026"
+id = "rel2026"
+description = "my-app 2026"
 overrides = [
-  ["input.pv", "2026"],
+  ["input.rel", "2026"],
 ]
 ```
 
@@ -443,19 +443,19 @@ presets replace the command line's `--preset` for that variant; its own
 `overrides` then apply on top:
 
 ```toml
-[presets.pv2026]
+[presets.rel2026]
 overrides = [
-  ["input.pv", "2026"],
-  ["input.raze_photonvision_rev", "d11961bd119e2c22101fa9cfe7a7b01f8436aabc"],
+  ["input.rel", "2026"],
+  ["input.myapp_rev", "0123456789abcdef0123456789abcdef01234567"],
 ]
 
 [[variants]]
-id = "pv2026"
-preset = "pv2026"            # or presets = ["a", "b"], applied in order
+id = "rel2026"
+preset = "rel2026"            # or presets = ["a", "b"], applied in order
 ```
 
 Running the file builds the base config as variant `default` and then each
-declared variant, in order. `gaia run --variant pv2026` builds only that one
+declared variant, in order. `gaia run --variant rel2026` builds only that one
 (`--variant default` names the base; several ids may be given, comma
 separated). Without `--variant` every variant is built.
 
@@ -801,7 +801,7 @@ enabled = true
 # level = "system"                # default level for packages: "system" | "project"
 # system_dir = "/srv/buildroot-packages"   # default: see below
 # project_dir = ".gaia/cache/buildroot/packages"
-# project_packages = ["photonvision*", "my-app"]  # kept in this project only
+# project_packages = ["myapp-*", "my-tool"]  # kept in this project only
 # system_packages = []            # shared even when level = "project"
 # max_size = "100G"               # per level; unset: see "Size budget" below
 ```
@@ -946,7 +946,7 @@ was last built from, and rebuilds as little as keeps it correct:
   - Nothing at all: no package is rebuilt.
 
   Each decision is logged with its reason, for example
-  `BR2_RAZE_LEMNOS_USERS_TABLE unset -> "/x/lemnos-users.table": only read
+  `BR2_MYBOARD_DEVMGR_USERS_TABLE unset -> "/x/devmgr-users.table": only read
   when finalizing the target, no package rebuilt`.
 - Toolchain, architecture, libc, init system and other system-wide settings
   still clean the whole output tree (`make clean`), as does any change when
@@ -954,7 +954,7 @@ was last built from, and rebuilds as little as keeps it correct:
   runs only when something changed).
 
 Both the clean and the rebuild log what caused them, for example
-`buildroot rebuild of 3 package(s): libcamera, libcamera-apps, photonvision`
+`buildroot rebuild of 3 package(s): libcamera, libcamera-apps, myapp`
 followed by `libcamera changed: BR2_PACKAGE_LIBCAMERA_PIPELINE_RPI_PISP unset
 -> y`.
 
@@ -990,7 +990,7 @@ at `<shared_output_dir>/<key>`. The key is a digest of:
 - `ccache.enabled`, `parallel_packages` (when on) and the Docker image.
 
 The build name, build directory and image feed are not part of the key, so
-`helios-base-os-cm5` and `helios-full-cm5` share one tree when only their
+`acme-base-os-evk` and `acme-full-evk` share one tree when only their
 feeds differ. Changes inside external trees or package override directories
 are handled in place, like a private tree.
 
@@ -1065,9 +1065,9 @@ overrides = [
 ```
 
 ```sh
-gaia run configs/builds/helios.toml --preset dev
+gaia run configs/builds/acme.toml --preset dev
 # or, for one run:
-gaia run configs/builds/helios.toml \
+gaia run configs/builds/acme.toml \
   --set image.buildroot.config_overrides.BR2_TARGET_ROOTFS_SQUASHFS4_XZ=n \
   --set image.buildroot.config_overrides.BR2_TARGET_ROOTFS_SQUASHFS4_ZSTD=y
 ```
@@ -1129,7 +1129,7 @@ instead.
 ```toml
 [provenance.identity]
 project = "gaia-image-builder"
-vendor = "Prometheus Dynamics"
+vendor = "Example Vendor"
 channel = "release"
 labels = [
   ["branch", "${build.branch}"],
@@ -1324,16 +1324,16 @@ this rule, so its first build after the change may rebuild.
 ### Git Source Lockfile
 
 `gaia lock <build.toml>` writes `<build>.gaia.lock` next to the build
-entrypoint (for example `configs/builds/cm5.toml` →
-`configs/builds/cm5.gaia.lock`). Commit it alongside the build config.
+entrypoint (for example `configs/builds/evk.toml` →
+`configs/builds/evk.gaia.lock`). Commit it alongside the build config.
 
 ```toml
 # Generated by `gaia lock`. Commit this file to pin git sources.
 version = 1
 
 [[git]]
-source = "orion"
-repo = "https://github.com/example/orion.git"
+source = "worker"
+repo = "https://github.com/example/worker.git"
 ref = "branch:main"
 commit = "3f2c9e0d4b1a7c8e6f5d4c3b2a1908f7e6d5c4b3"
 ```
@@ -1373,23 +1373,23 @@ with `gaia clean <build> --all-caches`.
 
 ```toml
 [[artifacts]]
-id = "helios-api"
+id = "acme-api"
 kind = "rust"
-package = "helios-api"
+package = "acme-api"
 source = "workspace-root"
 profile = "${build.profile}"
-dependencies = ["helios-common"]
-install_name = "helios-api"
+dependencies = ["acme-common"]
+install_name = "acme-api"
 install_class = "binary"
-install_dest_hint = "/usr/bin/helios-api"
-output_path = "${workspace.out_dir}/artifacts/helios-api"
+install_dest_hint = "/usr/bin/acme-api"
+output_path = "${workspace.out_dir}/artifacts/acme-api"
 
 [[artifacts]]
-id = "orion-node"
+id = "worker-node"
 kind = "java"
-build_target = "build/libs/orion-node.jar"
+build_target = "build/libs/worker-node.jar"
 source = "workspace-root"
-output_path = "${workspace.out_dir}/artifacts/orion-node.jar"
+output_path = "${workspace.out_dir}/artifacts/worker-node.jar"
 
 [[artifacts]]
 id = "camera-jni"
@@ -1419,11 +1419,11 @@ source = "workspace-root"
 output_path = "${workspace.out_dir}/artifacts/sdk.whl"
 
 [[artifacts]]
-id = "heliosctl"
+id = "acmectl"
 kind = "go"
-package = "./cmd/heliosctl"
+package = "./cmd/acmectl"
 source = "workspace-root"
-output_path = "${workspace.out_dir}/artifacts/heliosctl"
+output_path = "${workspace.out_dir}/artifacts/acmectl"
 ```
 
 Artifact common fields:
@@ -1460,12 +1460,12 @@ Artifact kinds:
 
   ```toml
   [[artifacts]]
-  id = "orion-node"
+  id = "worker-node"
   kind = "rust"
-  package = "orion-node"
+  package = "worker-node"
   no_default_features = true
   features = ["metrics"]
-  output_path = "out/orion-node"
+  output_path = "out/worker-node"
   ```
 
   Gaia collects `target/<triple>/<profile>/<target_name>` from the cargo
@@ -1485,7 +1485,7 @@ Artifact kinds:
 - `go`
   - `package`
 
-`sources = ["eidos"]` names sources the artifact reads besides its own
+`sources = ["corelib"]` names sources the artifact reads besides its own
 `source`. The artifact depends on each of them, so when one re-materializes
 with changed content the artifact rebuilds, and the rebuild reason names the
 source. A `${source.<id>.path}` or `${source.<id>.commit}` token in a Java
@@ -1520,46 +1520,46 @@ package that defines it.
 
 ```toml
 [[artifacts]]
-id = "helios-engine"
+id = "acme-engine"
 kind = "rust"
-source = "helios"
-package = "helios-engine"
+source = "acme"
+package = "acme-engine"
 profile = "release"
-features = ["helios-engine/plugins"]
-build_group = "helios"
-install_name = "helios-engine"
-install_dest_hint = "/usr/bin/helios-engine"
-output_path = "${workspace.out_dir}/artifacts/helios-engine"
+features = ["acme-engine/plugins"]
+build_group = "acme"
+install_name = "acme-engine"
+install_dest_hint = "/usr/bin/acme-engine"
+output_path = "${workspace.out_dir}/artifacts/acme-engine"
 
 [[artifacts]]
 id = "vision-plugin"
 kind = "rust"
-source = "helios"
+source = "acme"
 package = "vision-plugin"          # [lib] crate-type = ["cdylib"]
 target_name = "libvision_plugin.so"
 profile = "release"
 features = ["vision-plugin/simd"]
-build_group = "helios"
+build_group = "acme"
 install_name = "libvision_plugin.so"
 install_class = "library"
-install_dest_hint = "/usr/lib/helios/plugins/libvision_plugin.so"
+install_dest_hint = "/usr/lib/acme/plugins/libvision_plugin.so"
 output_path = "${workspace.out_dir}/artifacts/libvision_plugin.so"
 
 [[install]]
-id = "install-helios-engine"
-artifact = "helios-engine"
-dest = "/usr/bin/helios-engine"
+id = "install-acme-engine"
+artifact = "acme-engine"
+dest = "/usr/bin/acme-engine"
 mode = 493
 
 [[install]]
 id = "install-vision-plugin"
 artifact = "vision-plugin"
-dest = "/usr/lib/helios/plugins/libvision_plugin.so"
+dest = "/usr/lib/acme/plugins/libvision_plugin.so"
 mode = 420
 ```
 
-Both artifacts build with `cargo build -p helios-engine -p vision-plugin
---features helios-engine/plugins,vision-plugin/simd --release`.
+Both artifacts build with `cargo build -p acme-engine -p vision-plugin
+--features acme-engine/plugins,vision-plugin/simd --release`.
 
 #### Private cargo git dependencies
 
@@ -1571,9 +1571,9 @@ source's mirror, prepared on the host with your own git credentials:
 
 ```toml
 [[sources]]
-id = "eidos"
+id = "corelib"
 kind = "git"
-repo = "https://github.com/Prometheus-Dynamics/Eidos.git"
+repo = "https://example.com/org/Corelib.git"
 branch = "main"
 
 [[artifacts]]
@@ -1581,7 +1581,7 @@ id = "vision"
 kind = "rust"
 source = "workspace"
 package = "vision"
-cargo_git_sources = { "https://github.com/Prometheus-Dynamics/Eidos.git" = "eidos" }
+cargo_git_sources = { "https://example.com/org/Corelib.git" = "corelib" }
 output_path = "${workspace.out_dir}/artifacts/vision"
 ```
 
@@ -1619,18 +1619,18 @@ Artifacts run on the host unless `[execution.docker]` or the artifact's own
 
 ```toml
 [[artifacts]]
-id = "helios-engine"
+id = "acme-engine"
 kind = "rust"
-package = "helios-engine"
+package = "acme-engine"
 source = "workspace-root"
-output_path = "${workspace.out_dir}/artifacts/helios-engine"
+output_path = "${workspace.out_dir}/artifacts/acme-engine"
 
 [artifacts.execution]
 backend = "docker"          # or "host"
 
 [artifacts.execution.docker]
 # Either reference an existing image ...
-image = "helios-cross-rust194"
+image = "acme-cross-rust194"
 # ... or let Gaia build it from a Dockerfile (paths are workspace paths,
 # `@alias/...` works).
 dockerfile = "docker/cross-rust/Dockerfile"
@@ -1681,9 +1681,9 @@ Install classes:
 
 ```toml
 [[install]]
-id = "install-helios-api"
-artifact = "helios-api"
-dest = "/usr/bin/helios-api"
+id = "install-acme-api"
+artifact = "acme-api"
+dest = "/usr/bin/acme-api"
 replace = true
 mode = 493
 owner = "root"
@@ -1704,13 +1704,13 @@ id = "runtime-env"
 name = "runtime"
 entries = [
   ["GAIA_MODE", "release"],
-  ["HELIOS_TARGET", "${build.target}"],
+  ["ACME_TARGET", "${build.target}"],
 ]
 
 [[stage.services]]
-id = "helios-api"
-name = "helios-api.service"
-unit_path = "@assets/systemd/helios-api.service"
+id = "acme-api"
+name = "acme-api.service"
+unit_path = "@assets/systemd/acme-api.service"
 ```
 
 Stage file origins:
@@ -1730,10 +1730,10 @@ external_tree = "@assets/buildroot"
 external_tree_mode = "required"
 
 [image.feed]
-install_entries = ["install-helios-api"]
+install_entries = ["install-acme-api"]
 stage_files = ["motd"]
 stage_env_sets = ["runtime-env"]
-stage_services = ["helios-api"]
+stage_services = ["acme-api"]
 
 [[image.expected_images]]
 name = "sdcard.img"
@@ -1796,7 +1796,7 @@ export it.
 Buildroot fields:
 - `defconfig`
 - `external_tree`: one or more `BR2_EXTERNAL` trees, `:`-separated as
-  Buildroot expects (`"@source:atlas/devices/raze/gaia/buildroot-external:raze/assets/buildroot"`).
+  Buildroot expects (`"@source:bsp/devices/myboard/gaia/buildroot-external:myboard/assets/buildroot"`).
   Each entry is resolved on its own: `@self`, `@source:<id>` and `@alias`
   tokens may start any entry, and plain relative entries resolve against the
   workspace root. Every tree needs its own `external.desc` with a unique
@@ -1835,8 +1835,8 @@ changes). Use it to record versions in the image, for example:
 id = "image-version"
 name = "image-version"
 entries = [
-  ["DEVICE_PACKAGE_COMMIT", "${source.atlas.commit}"],
-  ["ORION_COMMIT", "${source.orion.commit}"],
+  ["DEVICE_PACKAGE_COMMIT", "${source.bsp.commit}"],
+  ["WORKER_COMMIT", "${source.worker.commit}"],
 ]
 ```
 
@@ -1879,7 +1879,7 @@ materializes them; with build variants, `<build_dir>/sources/variants/<variant>/
 for a source a variant checks out for itself). Like the commit token it works
 in stage env set values and build labels; both tokens also work in Java
 artifacts' `build_target`, `build_args`, `build_command` and `build_env`
-(for example `build_env = [["EIDOS_PATH", "${source.eidos.path}"]]`) and in
+(for example `build_env = [["CORELIB_PATH", "${source.corelib.path}"]]`) and in
 Buildroot `config_overrides` values, so a setting can name a file inside a
 source:
 
@@ -1887,7 +1887,7 @@ source:
 [image]
 kind = "buildroot"
 config_overrides = [
-  ["BR2_ROOTFS_USERS_TABLES", "\"${source.orion.path}/packaging/buildroot/orion-users.table\""],
+  ["BR2_ROOTFS_USERS_TABLES", "\"${source.worker.path}/packaging/buildroot/worker-users.table\""],
 ]
 ```
 
@@ -1957,7 +1957,7 @@ Buildroot run notes:
   since the last configuration; config steps skipped`.
 - `target-finalize` is reused. Each `make` that reaches it copies every
   package's per-package tree into `target/` and patches the ELF files of
-  `host/` (about 40 s on a PhotonVision tree, with nothing to build). After a
+  `host/` (about 40 s on a large application tree, with nothing to build). After a
   prepare (or build) finalize, the build operation skips it when every
   package is installed, the config is unchanged and nothing has been built
   since; the images step then runs as before. The marker
@@ -2183,7 +2183,7 @@ Assembly behavior:
 - For a cross-compiled BusyBox taken from a Buildroot target tree, set `sysroot = "$provider.target"` (or leave it unset when the binary sits at `$provider.target/bin/busybox`). The reuse fingerprint covers the sysroot, the interpreter, every symlink and the digest of every library file, so a changed libc rebuilds the assembly.
 - Filesystem kinds currently implemented are `vfat`, `cpio`, `cpio-gzip`, `cpio-zstd`, `cpio-xz`, `ext4` (see [dm-verity and ext4](#dm-verity-and-ext4)), `squashfs` and `erofs` (see [squashfs and EROFS](#squashfs-and-erofs)).
 - `cpio` kinds write a newc archive with uid and gid 0, entries in sorted order and zero timestamps, so the same tree packs to the same bytes. `cpio-zstd` compresses that archive with `zstd -q -c --no-progress -T0 -<compression_level>`, resolving `zstd` like the zstd transform; `compression_level` (1-19) is only accepted on `cpio-zstd` and defaults to 19.
-- `cpio-xz` compresses the same newc archive with `xz -T2 --check=crc32 --lzma2=preset=<compression_level>,dict=<size> -c`. The CRC32 check is the one the kernel's XZ initramfs decoder reads. That decoder allocates the whole LZMA2 dictionary, so the dictionary is capped at 1 MiB (or the cpio's size rounded up to 4 KiB, when smaller) whatever the level: the 64 MiB dictionary of `-9` gives an initramfs the kernel cannot unpack. `compression_level` (0-9) is accepted on `cpio-xz` (default 6) and `cpio-zstd` (1-19, default 19 there). Threaded mode writes the block sizes into the block header, which the kernel also needed (a `-T1` stream, without them, did not boot), and xz's own threaded block size is kept: with `--block-size` set to the cpio size xz wrote a shorter block header that did not boot either. The fixed thread count keeps the output the same on every host and run. Of the encodings tried on a Raspberry Pi (Raze) kernel, only this one booted, with a padded 20-byte block header; a 64 MiB dictionary, a `-T1` stream without sizes, and a 16-byte header from `--block-size` each died before /init. For a small, safe initramfs on that board, `cpio-zstd` is the tested choice; boot-test a `cpio-xz` image (and any one over 3 MiB, which xz splits into several blocks) before relying on it.
+- `cpio-xz` compresses the same newc archive with `xz -T2 --check=crc32 --lzma2=preset=<compression_level>,dict=<size> -c`. The CRC32 check is the one the kernel's XZ initramfs decoder reads. That decoder allocates the whole LZMA2 dictionary, so the dictionary is capped at 1 MiB (or the cpio's size rounded up to 4 KiB, when smaller) whatever the level: the 64 MiB dictionary of `-9` gives an initramfs the kernel cannot unpack. `compression_level` (0-9) is accepted on `cpio-xz` (default 6) and `cpio-zstd` (1-19, default 19 there). Threaded mode writes the block sizes into the block header, which the kernel also needed (a `-T1` stream, without them, did not boot), and xz's own threaded block size is kept: with `--block-size` set to the cpio size xz wrote a shorter block header that did not boot either. The fixed thread count keeps the output the same on every host and run. Of the encodings tried on a Raspberry Pi kernel, only this one booted, with a padded 20-byte block header; a 64 MiB dictionary, a `-T1` stream without sizes, and a 16-byte header from `--block-size` each died before /init. For a small, safe initramfs on that board, `cpio-zstd` is the tested choice; boot-test a `cpio-xz` image (and any one over 3 MiB, which xz splits into several blocks) before relying on it.
 - `publish = true` on a filesystem also copies its image to the image output dir (`$assembly.out`, the collect dir by default) under the output's file name, and the published image is reported like a raw disk: in the run summary, its image sizes, and the content digests. The name must not collide with another output or published copy. In a RAM work dir the image is built in RAM and copied to the image output dir when built.
 - `vfat` uses `mtools` (`mformat` and `mcopy`), resolving provider host tools first, then host `PATH`; `size` accepts byte values or binary `K`, `M`, `G`, and `T` suffixes, or `size = "auto"`. Without `size` the image is 32M.
 - `fat_size` (vfat only, optional): the FAT type, `12`, `16` or `32`. Without it a vfat image from 3 MiB up to 16 MiB is formatted FAT16 (one sector per cluster) rather than the FAT12 `mformat` picks at those sizes, because some boot firmwares (e.g. Raspberry Pi's) do not boot from FAT12; other sizes keep `mformat`'s choice (FAT12 below 3 MiB, FAT16 from 16 MiB). `fat_size = 12` keeps `mformat`'s choice at every size, `16` is the default rule, and `32` formats FAT32. With `fat_size` set, the build fails when the image size cannot hold that type: FAT12 needs less than 16 MiB, FAT16 at least 3 MiB.
@@ -2215,7 +2215,7 @@ not left in the collect dir; use `"disk"` to keep it there, or set `publish = tr
 on the filesystem to copy it to the image output dir.
 
 When `work_dir` is unset it follows `[providers.buildroot] work_dir`: RAM when
-that is `"ram"`, disk otherwise. A path, such as the PhotonVision project's
+that is `"ram"`, disk otherwise. A path, such as
 `${workspace.build_dir}/assembly`, keeps the intermediates on disk even when
 the Buildroot tree is in RAM; set `work_dir = "ram"` to move them.
 
@@ -2331,7 +2331,7 @@ A token that reads a work or out path no step writes is a validation error (`ass
 [[image.assembly.files]]
 tree = "boot"
 dest = "cmdline.txt"
-content = "console=tty1 atlas.roothash=${assembly.verity:$assembly.work/slot/rootfs.erofs:root_hash} rootwait"
+content = "console=tty1 roothash=${assembly.verity:$assembly.work/slot/rootfs.erofs:root_hash} rootwait"
 
 [[image.assembly.files]]
 tree = "boot"
@@ -2421,7 +2421,7 @@ dest = "$assembly.work/rootfs.verity.erofs"
 
 [[image.assembly.archives]]
 id = "slot"
-output = "$provider.images/slot.pdupdate"
+output = "$provider.images/slot.update"
 
 [[image.assembly.archives.generated]]
 name = "manifest.env"
@@ -2458,7 +2458,7 @@ dest = "$assembly.work/slot/rootfs.erofs"
 
 [[image.assembly.files]]
 tree = "initramfs"
-content = "atlas.roothash=${assembly.verity:$assembly.work/slot/rootfs.erofs:root_hash}\n"
+content = "roothash=${assembly.verity:$assembly.work/slot/rootfs.erofs:root_hash}\n"
 dest = "cmdline.txt"
 
 [[image.assembly.files]]
@@ -2498,9 +2498,9 @@ type_alias = "linux"
 image = "$provider.images/data.ext4"
 ```
 
-#### Example: CM5 eMMC A/B layout with an update bundle
+#### Example: Raspberry Pi CM5 eMMC A/B layout with an update bundle
 
-A Compute Module 5 eMMC image with a small autoboot partition, A/B boot and root slots, a data partition, and a `.pdupdate` bundle containing a manifest and zstd-compressed slot images:
+A board example for the Raspberry Pi Compute Module 5: an eMMC image with a small autoboot partition, A/B boot and root slots, a data partition, and a `.update` bundle containing a manifest and zstd-compressed slot images:
 
 | Partition | Content |
 | --- | --- |
@@ -2511,7 +2511,7 @@ A Compute Module 5 eMMC image with a small autoboot partition, A/B boot and root
 | p7 | `/data` ext4 from a small image |
 
 ```toml
-build_name = "helios"
+build_name = "my-os"
 version = "1.2.3"
 
 [image.assembly]
@@ -2587,14 +2587,14 @@ image = "$provider.images/data.ext4"
 
 [[image.assembly.archives]]
 id = "update"
-output = "$provider.images/${build.name}-${build.version}.pdupdate"
+output = "$provider.images/${build.name}-${build.version}.update"
 
 [[image.assembly.archives.members]]
 name = "manifest.env"
 entries = [
   ["MODEL", "cm5"],
   ["VERSION", "${build.version}"],
-  ["OS", "HeliOS"],
+  ["OS", "my-os"],
   ["BOOT_SHA256", "${assembly.sha256:$assembly.work/boot.vfat.zst}"],
   ["ROOTFS_SHA256", "${assembly.sha256:$assembly.work/rootfs.ext4.zst}"],
 ]
@@ -2608,7 +2608,7 @@ name = "rootfs.ext4.zst"
 src = "$assembly.work/rootfs.ext4.zst"
 ```
 
-The bundle `helios-1.2.3.pdupdate` is a tar of `manifest.env` (`MODEL`, `VERSION`, `OS`, `BOOT_SHA256`, `ROOTFS_SHA256`) followed by `boot.vfat.zst` and `rootfs.ext4.zst`, where each digest is the sha256 of the compressed member in the bundle.
+The bundle `my-os-1.2.3.update` is a tar of `manifest.env` (`MODEL`, `VERSION`, `OS`, `BOOT_SHA256`, `ROOTFS_SHA256`) followed by `boot.vfat.zst` and `rootfs.ext4.zst`, where each digest is the sha256 of the compressed member in the bundle.
 
 
 Provider hooks and assembly:
@@ -2739,7 +2739,7 @@ upload_policy = "off"
 [[checkpoints]]
 id = "after-api-stage"
 backend = "local"
-anchor = "stage-service:helios-api"
+anchor = "stage-service:acme-api"
 use_policy = "always"
 upload_policy = "off"
 ```

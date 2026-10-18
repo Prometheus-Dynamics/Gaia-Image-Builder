@@ -267,7 +267,7 @@ mod tests {
             "--env",
             "GAIA_MODE=ci",
             "--set",
-            "image.defconfig=raze_defconfig",
+            "image.defconfig=myboard_defconfig",
             "--set",
             "build.version=9.9.9",
             "--only",
@@ -277,7 +277,7 @@ mod tests {
         assert_eq!(
             command,
             "gaia run builds/heli.toml --preset ci --env-file env/ci.env --env GAIA_MODE=ci \
-             --set image.defconfig=raze_defconfig --set build.version=9.9.9 --only image,install"
+             --set image.defconfig=myboard_defconfig --set build.version=9.9.9 --only image,install"
         );
         assert!(!masked);
     }
@@ -336,7 +336,7 @@ mod tests {
         let scratch = gaia_testkit::TempDir::new("gaia-run-finish-outputs");
         let out = scratch.join("out");
         std::fs::create_dir_all(&out).expect("out dir");
-        let primary = out.join("helios.img.xz");
+        let primary = out.join("acme.img.xz");
         let raw = out.join("sdcard.img");
         let slot_xz = out.join("slots-sdcard.img.xz");
         let slot_tar = out.join("slots.slot.tar");

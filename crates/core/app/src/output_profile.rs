@@ -111,7 +111,7 @@ pub(crate) fn slowest_step_lines(
 }
 
 /// After a run: the chain of operations that decided its length, e.g.
-/// `critical path 9m40s: source:eidos 5s → artifact:api 3m18s → image:assembly 58s`.
+/// `critical path 9m40s: source:corelib 5s → artifact:api 3m18s → image:assembly 58s`.
 /// Long paths keep their first and last operations.
 pub(crate) fn critical_path_line(path: &gaia_report::CriticalPathRecord) -> String {
     const SHOWN: usize = 4;

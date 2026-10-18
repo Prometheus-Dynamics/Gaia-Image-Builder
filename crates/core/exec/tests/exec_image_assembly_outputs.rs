@@ -97,7 +97,7 @@ fn two_disk_spec(scratch: &TempDir, output_disk: Option<&str>) -> ResolvedBuildS
     let work_slots = build_dir.join("assembly/slots");
     fs::create_dir_all(&work_slots).expect("slots work dir");
     spec.image.output.collect_dir = Some(out_images.display().to_string());
-    spec.image.output.archive_name = Some("helios.img.xz".into());
+    spec.image.output.archive_name = Some("acme.img.xz".into());
     spec.image.output.disk = output_disk.map(str::to_string);
 
     let sdcard = raw_disk(
@@ -159,7 +159,7 @@ fn archive_takes_its_disk_from_image_output_disk() {
     let out_images = PathBuf::from(&spec.workspace.out_dir).join("images");
     let sdcard = fs::read(out_images.join("sdcard.img")).expect("sdcard.img");
     assert_eq!(
-        decompress_xz(&out_images.join("helios.img.xz")),
+        decompress_xz(&out_images.join("acme.img.xz")),
         sdcard,
         "the main archive holds the sdcard disk, not the slot disk"
     );
@@ -169,7 +169,7 @@ fn archive_takes_its_disk_from_image_output_disk() {
         .iter()
         .find_map(|result| result.archive_path.clone())
         .expect("primary archive");
-    assert_eq!(primary, out_images.join("helios.img.xz"));
+    assert_eq!(primary, out_images.join("acme.img.xz"));
     let published = outcome
         .image_results
         .iter()

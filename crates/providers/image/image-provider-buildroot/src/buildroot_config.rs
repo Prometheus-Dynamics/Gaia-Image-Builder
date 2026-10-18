@@ -24,8 +24,8 @@ pub(crate) struct BuildrootSettingsRequest<'a> {
 /// runs, so a default that depended on a cache setting would be frozen at its
 /// value without the setting. The Buildroot Kconfig tree has none (the cache
 /// symbols appear only in their own definitions and in the `if BR2_CCACHE`
-/// block that holds the settings Gaia writes itself), and the PhotonVision
-/// tree's `.config` came out byte-identical. An external tree whose Kconfig
+/// block that holds the settings Gaia writes itself), and a large
+/// application tree's `.config` came out byte-identical. An external tree whose Kconfig
 /// reads these symbols in a default would need the two runs back.
 pub(crate) fn apply_buildroot_config_settings(
     request: BuildrootSettingsRequest<'_>,

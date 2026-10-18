@@ -112,7 +112,7 @@ fn archive_buildroot_output_compresses_raw_board_image_for_img_xz_output() {
     let output_dir = output_dir_scratch.join("output_dir");
     let collect_dir_scratch = TempDir::new("gaia-buildroot-raw-board-xz-collect");
     let collect_dir = collect_dir_scratch.join("collect_dir");
-    let archive_path = collect_dir.join("helios.img.xz");
+    let archive_path = collect_dir.join("acme.img.xz");
     fs::create_dir_all(output_dir.join("images")).expect("images dir");
     fs::write(output_dir.join("images/rootfs.squashfs"), "rootfs").expect("rootfs image");
     fs::write(output_dir.join("images/sdcard.img"), "raw image").expect("raw image");
@@ -176,7 +176,7 @@ fn compress_primary_image_timeout_preserves_existing_archive() {
     let collect_dir = collect_dir_scratch.join("collect_dir");
     let script_dir_scratch = TempDir::new("gaia-buildroot-fake-xz-timeout-bin");
     let script_dir = script_dir_scratch.join("script_dir");
-    let archive_path = collect_dir.join("helios.img.xz");
+    let archive_path = collect_dir.join("acme.img.xz");
     let source_path = collect_dir.join("sdcard.img");
     fs::create_dir_all(&collect_dir).expect("collect dir");
     fs::write(&source_path, "raw image").expect("raw image");
@@ -221,7 +221,7 @@ fn compress_primary_image_failure_preserves_existing_archive() {
     let collect_dir = collect_dir_scratch.join("collect_dir");
     let script_dir_scratch = TempDir::new("gaia-buildroot-fake-xz-failed-bin");
     let script_dir = script_dir_scratch.join("script_dir");
-    let archive_path = collect_dir.join("helios.img.xz");
+    let archive_path = collect_dir.join("acme.img.xz");
     let source_path = collect_dir.join("sdcard.img");
     fs::create_dir_all(&collect_dir).expect("collect dir");
     fs::write(&source_path, "raw image").expect("raw image");
@@ -263,7 +263,7 @@ fn compress_primary_image_streams_logs_and_uses_policy_threads() {
     let collect_dir = collect_dir_scratch.join("collect_dir");
     let script_dir_scratch = TempDir::new("gaia-buildroot-fake-xz-log-bin");
     let script_dir = script_dir_scratch.join("script_dir");
-    let archive_path = collect_dir.join("helios.img.xz");
+    let archive_path = collect_dir.join("acme.img.xz");
     let source_path = collect_dir.join("sdcard.img");
     let args_path = script_dir.join("args.txt");
     fs::create_dir_all(&collect_dir).expect("collect dir");

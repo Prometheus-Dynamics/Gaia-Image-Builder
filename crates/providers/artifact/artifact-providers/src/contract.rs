@@ -365,7 +365,7 @@ impl ArtifactDockerExecution {
     }
 }
 
-/// `registry.example/helios-cross-rust194:latest` -> `helios-cross-rust194`.
+/// `registry.example/acme-cross-rust194:latest` -> `acme-cross-rust194`.
 fn image_repository_name(image: &str) -> &str {
     let without_digest = image.split('@').next().unwrap_or(image);
     let last = without_digest.rsplit('/').next().unwrap_or(without_digest);

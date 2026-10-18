@@ -22,7 +22,7 @@ rootfs_path = "/tmp/rootfs"
 [[artifacts]]
 id = "node"
 kind = "rust"
-package = "orion-node"
+package = "worker-node"
 features = ["tls", "metrics-${build.name}"]
 no_default_features = true
 output_path = "out/node"
@@ -30,7 +30,7 @@ output_path = "out/node"
 [[artifacts]]
 id = "plain"
 kind = "rust"
-package = "orion-cli"
+package = "worker-cli"
 output_path = "out/plain"
 "#,
     );
@@ -57,7 +57,7 @@ fn resolves_artifact_target_field() {
     let path = write_temp_config(
         r#"
 build_name = "artifact-target"
-target = "cm5"
+target = "evk"
 profile = "release"
 
 [workspace]
@@ -179,7 +179,7 @@ output_path = "out/jni-linuxarm64.jar"
 [image]
 kind = "buildroot"
 source = "buildroot"
-defconfig = "raspberrypicm5io_defconfig"
+defconfig = "evk_defconfig"
 "#,
     );
 
@@ -322,9 +322,9 @@ rootfs_path = "/tmp/rootfs"
 [[artifacts]]
 id = "engine"
 kind = "rust"
-package = "helios-engine"
+package = "acme-engine"
 features = ["tls", "plugins"]
-build_group = "helios"
+build_group = "acme"
 output_path = "out/engine"
 
 [[artifacts]]
@@ -333,13 +333,13 @@ kind = "rust"
 package = "vision-plugin"
 target_name = "libvision_plugin.so"
 features = ["simd", "tls"]
-build_group = "helios"
+build_group = "acme"
 output_path = "out/libvision_plugin.so"
 
 [[artifacts]]
 id = "alone"
 kind = "rust"
-package = "helios-cli"
+package = "acme-cli"
 features = ["cli"]
 output_path = "out/alone"
 "#,
@@ -358,10 +358,10 @@ output_path = "out/alone"
         }
     };
 
-    let packages = vec!["helios-engine".to_string(), "vision-plugin".to_string()];
+    let packages = vec!["acme-engine".to_string(), "vision-plugin".to_string()];
     let features = vec!["plugins".to_string(), "simd".to_string(), "tls".to_string()];
     for (id, package, target_name) in [
-        ("engine", "helios-engine", None),
+        ("engine", "acme-engine", None),
         (
             "vision-plugin",
             "vision-plugin",
@@ -369,7 +369,7 @@ output_path = "out/alone"
         ),
     ] {
         let member = rust(id);
-        assert_eq!(member.build_group.as_deref(), Some("helios"));
+        assert_eq!(member.build_group.as_deref(), Some("acme"));
         assert_eq!(member.group_packages, packages);
         assert_eq!(member.features, features);
         assert_eq!(member.package, package);

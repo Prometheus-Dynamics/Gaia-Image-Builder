@@ -46,7 +46,7 @@ fn spec_with_entry(scratch: &TempDir, entry: &str) -> (ResolvedBuildSpec, PathBu
         &config,
         format!(
             r#"
-build_name = "raze-slot"
+build_name = "myboard-slot"
 version = "1.0.0"
 
 [workspace]

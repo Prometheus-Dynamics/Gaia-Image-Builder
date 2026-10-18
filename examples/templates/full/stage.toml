@@ -25,27 +25,27 @@ id = "runtime-env"
 name = "runtime"
 entries = [
   ["GAIA_MODE", "${env:GAIA_MODE}"],
-  ["HELIOS_TARGET", "${build.target}"],
+  ["ACME_TARGET", "${build.target}"],
   ["EXAMPLE_CHANNEL", "${provenance.identity.channel}"],
 ]
 
 [[stage.env_sets]]
 id = "api-env"
-name = "helios-api"
+name = "acme-api"
 entries = [
-  ["ENV_FILE", "/etc/default/helios-api"],
+  ["ENV_FILE", "/etc/default/acme-api"],
   ["API_BIND", "0.0.0.0:5800"],
 ]
 
 [[stage.services]]
-id = "helios-api"
-name = "helios-api.service"
-unit_path = "@assets/systemd/helios-api.service"
+id = "acme-api"
+name = "acme-api.service"
+unit_path = "@assets/systemd/acme-api.service"
 
 [[stage.services]]
-id = "helios-engine"
-name = "helios-engine.service"
-unit_path = "@assets/systemd/helios-engine.service"
+id = "acme-engine"
+name = "acme-engine.service"
+unit_path = "@assets/systemd/acme-engine.service"
 
 [[checkpoints]]
 id = "base-image"
@@ -57,6 +57,6 @@ upload_policy = "off"
 [[checkpoints]]
 id = "after-api-stage"
 backend = "local"
-anchor = "stage-service:helios-api"
+anchor = "stage-service:acme-api"
 use_policy = "always"
 upload_policy = "off"

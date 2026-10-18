@@ -1,5 +1,5 @@
-//! A project publishes an importable Gaia fragment (like Orion's
-//! `packaging/gaia/orion-node.toml`): a Rust artifact built from the project
+//! A project publishes an importable Gaia fragment (like Worker's
+//! `packaging/gaia/worker-node.toml`): a Rust artifact built from the project
 //! itself for aarch64, its install, and a systemd unit shipped next to the
 //! fragment. Image recipes import it from a pinned git source; it must
 //! validate and plan alongside their own layers.
@@ -15,30 +15,30 @@ use gaia_testkit::TempDir;
 
 const FRAGMENT: &str = r#"
 [[artifacts]]
-id = "orion-node"
+id = "worker-node"
 kind = "rust"
-package = "orion-node"
-source = "orion"
+package = "worker-node"
+source = "worker"
 target = "aarch64-unknown-linux-gnu"
 no_default_features = true
 features = ["single-node"]
-install_name = "orion-node"
+install_name = "worker-node"
 install_class = "binary"
-install_dest_hint = "/usr/bin/orion-node"
-output_path = "${workspace.out_dir}/artifacts/orion-node"
+install_dest_hint = "/usr/bin/worker-node"
+output_path = "${workspace.out_dir}/artifacts/worker-node"
 
 [[install]]
-id = "install-orion-node"
-artifact = "orion-node"
-dest = "/usr/bin/orion-node"
+id = "install-worker-node"
+artifact = "worker-node"
+dest = "/usr/bin/worker-node"
 replace = true
 mode = 493
 owner = "root"
 
 [[stage.services]]
-id = "orion-node"
-name = "orion-node.service"
-unit_path = "@self/orion-node.service"
+id = "worker-node"
+name = "worker-node.service"
+unit_path = "@self/worker-node.service"
 "#;
 
 fn git(repo: &Path, args: &[&str]) -> String {
@@ -56,15 +56,15 @@ fn git(repo: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-/// An Orion-like repository holding the fragment and its unit file.
-fn orion_repo(root: &Path) -> (PathBuf, String) {
-    let repo = root.join("orion");
+/// An Worker-like repository holding the fragment and its unit file.
+fn worker_repo(root: &Path) -> (PathBuf, String) {
+    let repo = root.join("worker");
     let packaging = repo.join("packaging/gaia");
     fs::create_dir_all(&packaging).expect("packaging dir");
-    fs::write(packaging.join("orion-node.toml"), FRAGMENT).expect("fragment");
+    fs::write(packaging.join("worker-node.toml"), FRAGMENT).expect("fragment");
     fs::write(
-        packaging.join("orion-node.service"),
-        "[Service]\nExecStart=/usr/bin/orion-node\n",
+        packaging.join("worker-node.service"),
+        "[Service]\nExecStart=/usr/bin/worker-node\n",
     )
     .expect("unit");
     fs::write(repo.join("Cargo.toml"), "[workspace]\nmembers = []\n").expect("cargo");
@@ -81,7 +81,7 @@ fn orion_repo(root: &Path) -> (PathBuf, String) {
 fn imported_rust_fragment_with_service_validates_and_plans() {
     let scratch = TempDir::new("gaia-import-rust-fragment");
     let root = scratch.join("root");
-    let (repo, rev) = orion_repo(&root);
+    let (repo, rev) = worker_repo(&root);
     let workspace = root.join("image");
     fs::create_dir_all(workspace.join("rootfs")).expect("rootfs");
     fs::write(workspace.join("Cargo.toml"), "[workspace]\n").expect("workspace marker");
@@ -90,8 +90,8 @@ fn imported_rust_fragment_with_service_validates_and_plans() {
         &build,
         format!(
             r#"
-build_name = "raze-image"
-imports = [{{ source = "orion", path = "packaging/gaia/orion-node.toml" }}]
+build_name = "myboard-image"
+imports = [{{ source = "worker", path = "packaging/gaia/worker-node.toml" }}]
 
 [workspace]
 root_dir = "{workspace}"
@@ -99,7 +99,7 @@ build_dir = "build"
 out_dir = "out"
 
 [[sources]]
-id = "orion"
+id = "worker"
 kind = "git"
 repo = "file://{repo}"
 rev = "{rev}"
@@ -107,7 +107,7 @@ rev = "{rev}"
 [[stage.env_sets]]
 id = "image-version"
 name = "image-version"
-entries = [["ORION_COMMIT", "${{source.orion.commit}}"]]
+entries = [["WORKER_COMMIT", "${{source.worker.commit}}"]]
 
 [image]
 kind = "starting-point"
@@ -130,7 +130,7 @@ rootfs_path = "{workspace}/rootfs"
     let artifact = spec
         .artifacts
         .iter()
-        .find(|artifact| artifact.id.as_str() == "orion-node")
+        .find(|artifact| artifact.id.as_str() == "worker-node")
         .expect("imported artifact");
     match &artifact.definition {
         ArtifactDefinition::Rust(rust) => {
@@ -147,7 +147,7 @@ rootfs_path = "{workspace}/rootfs"
         .stage
         .services
         .iter()
-        .find(|service| service.id.as_str() == "orion-node")
+        .find(|service| service.id.as_str() == "worker-node")
         .expect("imported service");
     assert!(
         Path::new(&service.unit_path).is_file(),
@@ -159,7 +159,7 @@ rootfs_path = "{workspace}/rootfs"
             .env_sets
             .iter()
             .flat_map(|env_set| &env_set.entries)
-            .any(|(key, value)| key == "ORION_COMMIT" && *value == rev)
+            .any(|(key, value)| key == "WORKER_COMMIT" && *value == rev)
     );
 
     match run_with_args(AppArgs::parse_from(["plan", build.as_str()])) {
@@ -173,23 +173,23 @@ rootfs_path = "{workspace}/rootfs"
                 .map(|operation| operation.id.as_str())
                 .collect::<Vec<_>>();
             for expected in [
-                "source:orion",
-                "artifact:orion-node",
-                "install:install-orion-node",
-                "stage:service:orion-node",
+                "source:worker",
+                "artifact:worker-node",
+                "install:install-worker-node",
+                "stage:service:worker-node",
             ] {
                 assert!(ids.contains(&expected), "missing {expected} in {ids:?}");
             }
             let artifact = plan
                 .operations
                 .iter()
-                .find(|operation| operation.id.as_str() == "artifact:orion-node")
+                .find(|operation| operation.id.as_str() == "artifact:worker-node")
                 .expect("artifact op");
             assert!(
                 artifact
                     .depends_on
                     .iter()
-                    .any(|dependency| dependency.as_str() == "source:orion")
+                    .any(|dependency| dependency.as_str() == "source:worker")
             );
         }
         other => panic!("expected planned outcome, got {other:?}"),

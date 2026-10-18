@@ -283,16 +283,16 @@ kind = "buildroot"
 defconfig = "dummy_defconfig"
 
 [[artifacts]]
-id = "lemnosd"
+id = "devmgrd"
 kind = "rust"
-package = "lemnosd"
+package = "devmgrd"
 target = "{target}"
-output_path = "out/lemnosd"
+output_path = "out/devmgrd"
 
 [[install]]
-id = "install-lemnosd"
-artifact = "lemnosd"
-dest = "/usr/bin/lemnosd"
+id = "install-devmgrd"
+artifact = "devmgrd"
+dest = "/usr/bin/devmgrd"
 "#
     ));
     let spec = resolve_config(path.to_str().expect("temp path utf-8"));
@@ -336,7 +336,7 @@ out_dir = "out"
 [[artifacts]]
 id = "node"
 kind = "rust"
-package = "orion-node"
+package = "worker-node"
 sources = ["missing"]
 output_path = "out/node"
 

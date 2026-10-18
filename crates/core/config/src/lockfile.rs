@@ -135,8 +135,8 @@ fn toml_string(value: &str) -> String {
     toml::Value::String(value.to_string()).to_string()
 }
 
-/// Lockfile path for a build entrypoint: `configs/builds/cm5.toml` locks into
-/// `configs/builds/cm5.gaia.lock`.
+/// Lockfile path for a build entrypoint: `configs/builds/evk.toml` locks into
+/// `configs/builds/evk.gaia.lock`.
 pub fn lockfile_path_for_build_file(build_file: &Path) -> PathBuf {
     let stem = build_file
         .file_stem()
@@ -173,7 +173,7 @@ mod tests {
 
     fn git(branch: &str) -> GitSourceSpec {
         GitSourceSpec {
-            repo: "https://example.invalid/orion.git".into(),
+            repo: "https://example.invalid/worker.git".into(),
             branch: Some(branch.into()),
             tag: None,
             rev: None,
@@ -210,14 +210,14 @@ mod tests {
     fn status_distinguishes_locked_stale_and_unlocked() {
         let lock = GitLockfile {
             version: LOCKFILE_VERSION,
-            git: vec![GitLockEntry::new("orion", &git("main"), "c".repeat(40))],
+            git: vec![GitLockEntry::new("worker", &git("main"), "c".repeat(40))],
         };
         assert!(matches!(
-            lock.status("orion", &git("main")),
+            lock.status("worker", &git("main")),
             GitLockStatus::Locked(_)
         ));
         assert!(matches!(
-            lock.status("orion", &git("release")),
+            lock.status("worker", &git("release")),
             GitLockStatus::Stale(_)
         ));
         assert_eq!(lock.status("other", &git("main")), GitLockStatus::Unlocked);
@@ -226,8 +226,8 @@ mod tests {
     #[test]
     fn lockfile_path_sits_next_to_build_entrypoint() {
         assert_eq!(
-            lockfile_path_for_build_file(Path::new("/w/configs/builds/cm5.toml")),
-            PathBuf::from("/w/configs/builds/cm5.gaia.lock")
+            lockfile_path_for_build_file(Path::new("/w/configs/builds/evk.toml")),
+            PathBuf::from("/w/configs/builds/evk.gaia.lock")
         );
     }
 
@@ -239,9 +239,9 @@ mod tests {
     #[test]
     fn lockfile_never_stores_url_credentials() {
         let mut secret = git("main");
-        secret.repo = "https://ghp_secret_token@example.invalid/orion.git".into();
-        let entry = GitLockEntry::new("orion", &secret, "c".repeat(40));
-        assert_eq!(entry.repo, "https://***@example.invalid/orion.git");
+        secret.repo = "https://ghp_secret_token@example.invalid/worker.git".into();
+        let entry = GitLockEntry::new("worker", &secret, "c".repeat(40));
+        assert_eq!(entry.repo, "https://***@example.invalid/worker.git");
         let rendered = GitLockfile {
             version: LOCKFILE_VERSION,
             git: vec![entry.clone()],
@@ -251,7 +251,7 @@ mod tests {
         // The configured URL still matches the entry written for it.
         assert!(entry.matches(&secret));
         let mut other = secret.clone();
-        other.repo = "https://example.invalid/orion.git".into();
+        other.repo = "https://example.invalid/worker.git".into();
         assert!(!entry.matches(&other));
     }
 }

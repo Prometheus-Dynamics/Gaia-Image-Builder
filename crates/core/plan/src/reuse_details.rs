@@ -478,13 +478,13 @@ mod tests {
         let recorded = parts(&[("defconfig", "a")]);
         let current = parts(&[
             ("defconfig", "a"),
-            ("build command script raze/build.sh", "s"),
+            ("build command script myboard/build.sh", "s"),
             ("external file tree/x", "f"),
         ]);
         assert_eq!(
             fingerprint_change_detail("image", &recorded, &current).as_deref(),
             Some(
-                "operation 'image' will execute because build command script raze/build.sh has no earlier record (first run with this Gaia); external file tree/x has no earlier record (first run with this Gaia)"
+                "operation 'image' will execute because build command script myboard/build.sh has no earlier record (first run with this Gaia); external file tree/x has no earlier record (first run with this Gaia)"
             )
         );
     }

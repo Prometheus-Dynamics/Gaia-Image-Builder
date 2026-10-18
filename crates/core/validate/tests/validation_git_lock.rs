@@ -7,8 +7,8 @@ use std::fs;
 
 use support::create_temp_workspace;
 
-fn write_build(root: &std::path::Path, orion_branch: &str) -> std::path::PathBuf {
-    let build = root.join("cm5.toml");
+fn write_build(root: &std::path::Path, worker_branch: &str) -> std::path::PathBuf {
+    let build = root.join("evk.toml");
     fs::write(
         &build,
         format!(
@@ -21,16 +21,16 @@ build_dir = "{root}/build"
 out_dir = "{root}/out"
 
 [[sources]]
-id = "orion"
+id = "worker"
 kind = "git"
-repo = "https://example.invalid/orion.git"
-branch = "{orion_branch}"
+repo = "https://example.invalid/worker.git"
+branch = "{worker_branch}"
 pin = "locked"
 
 [[sources]]
-id = "orion-tools"
+id = "worker-tools"
 kind = "git"
-repo = "https://example.invalid/orion"
+repo = "https://example.invalid/worker"
 tag = "v1"
 "#,
             root = root.display()
@@ -42,7 +42,7 @@ tag = "v1"
 
 fn lock_contents(branch: &str) -> String {
     format!(
-        "version = 1\n\n[[git]]\nsource = \"orion\"\nrepo = \"https://example.invalid/orion.git\"\nref = \"branch:{branch}\"\ncommit = \"{}\"\n",
+        "version = 1\n\n[[git]]\nsource = \"worker\"\nrepo = \"https://example.invalid/worker.git\"\nref = \"branch:{branch}\"\ncommit = \"{}\"\n",
         "a".repeat(40)
     )
 }
@@ -51,7 +51,7 @@ fn lock_contents(branch: &str) -> String {
 fn matching_lock_entry_pins_source_without_warnings() {
     let root = create_temp_workspace("gaia-validate-git-lock");
     let build = write_build(&root, "main");
-    fs::write(root.join("cm5.gaia.lock"), lock_contents("main")).expect("lockfile");
+    fs::write(root.join("evk.gaia.lock"), lock_contents("main")).expect("lockfile");
 
     let spec = try_resolve_config(&build.display().to_string()).expect("resolve");
     let SourceDefinition::Git(git) = &spec.sources[0].definition else {
@@ -79,7 +79,7 @@ fn matching_lock_entry_pins_source_without_warnings() {
 fn stale_lock_entry_is_ignored_and_warned() {
     let root = create_temp_workspace("gaia-validate-git-lock-stale");
     let build = write_build(&root, "release");
-    fs::write(root.join("cm5.gaia.lock"), lock_contents("main")).expect("lockfile");
+    fs::write(root.join("evk.gaia.lock"), lock_contents("main")).expect("lockfile");
 
     let spec = try_resolve_config(&build.display().to_string()).expect("resolve");
     let SourceDefinition::Git(git) = &spec.sources[0].definition else {
@@ -105,7 +105,7 @@ fn stale_lock_entry_is_ignored_and_warned() {
 fn unreadable_lockfile_is_a_validation_error() {
     let root = create_temp_workspace("gaia-validate-git-lock-invalid");
     let build = write_build(&root, "main");
-    fs::write(root.join("cm5.gaia.lock"), "version = [").expect("lockfile");
+    fs::write(root.join("evk.gaia.lock"), "version = [").expect("lockfile");
 
     let spec = try_resolve_config(&build.display().to_string()).expect("resolve");
     let report = validate_spec(&spec);

@@ -2,9 +2,9 @@ use super::*;
 
 fn artifact(target: &str) -> gaia_spec::ArtifactSpec {
     let mut artifact = gaia_spec::ArtifactSpec::new(
-        "lemnosd",
+        "devmgrd",
         gaia_spec::ArtifactDefinition::Rust(gaia_spec::RustArtifactSpec {
-            package: "lemnosd".into(),
+            package: "devmgrd".into(),
             target_name: None,
             variant: gaia_spec::ArtifactVariantSpec::File,
             features: Vec::new(),
@@ -16,7 +16,7 @@ fn artifact(target: &str) -> gaia_spec::ArtifactSpec {
         }),
         None,
         gaia_spec::ArtifactOutputSpec {
-            path: "lemnosd".into(),
+            path: "devmgrd".into(),
         },
     );
     artifact.target = Some(target.to_string());
@@ -38,7 +38,7 @@ fn static_musl_and_other_libc_targets_are_verified_by_architecture() {
     let dir_scratch = TempDir::new("gaia-artifact-target");
     let dir = dir_scratch.join("dir");
     fs::create_dir_all(&dir).expect("dir");
-    let aarch64 = dir.join("lemnosd");
+    let aarch64 = dir.join("devmgrd");
     elf(&aarch64, 0xB7);
     for target in [
         "aarch64-unknown-linux-musl",

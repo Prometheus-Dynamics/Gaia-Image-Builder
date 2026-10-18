@@ -176,7 +176,7 @@ mod tests {
 
     fn java_artifact(execution: Option<ArtifactExecutionSpec>) -> ArtifactSpec {
         let mut artifact = ArtifactSpec::new(
-            "photonvision",
+            "myapp",
             ArtifactDefinition::Java(JavaArtifactSpec {
                 build_target: "jar".into(),
                 build_args: Vec::new(),
@@ -185,7 +185,7 @@ mod tests {
             }),
             None,
             ArtifactOutputSpec {
-                path: "out/photonvision.jar".into(),
+                path: "out/myapp.jar".into(),
             },
         );
         artifact.execution = execution;

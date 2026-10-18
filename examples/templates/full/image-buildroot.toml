@@ -4,7 +4,7 @@
 kind = "buildroot"
 
 # Optional Buildroot defconfig.
-defconfig = "raspberrypi_defconfig"
+defconfig = "qemu_aarch64_virt_defconfig"
 
 # Optional Buildroot external tree path.
 external_tree = "@assets/buildroot"
@@ -14,10 +14,10 @@ external_tree_mode = "required"
 
 [image.feed]
 # Explicitly list which install/stage domains contribute to the image.
-install_entries = ["install-helios-api", "install-heliosctl"]
+install_entries = ["install-acme-api", "install-acmectl"]
 stage_files = ["hostname", "motd", "generated-build-info"]
 stage_env_sets = ["runtime-env", "api-env"]
-stage_services = ["helios-api", "helios-engine"]
+stage_services = ["acme-api", "acme-engine"]
 
 [[image.expected_images]]
 name = "sdcard.img"

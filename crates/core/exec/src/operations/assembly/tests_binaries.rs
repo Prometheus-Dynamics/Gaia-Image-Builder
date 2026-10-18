@@ -11,7 +11,7 @@ use std::path::Path;
 /// A binary built for the target, in the read-only target tree of a Buildroot
 /// build. The test that reads it is skipped when it is absent.
 const TARGET_E2FSCK: &str =
-    "/dev/shm/gaia-sozo/217f87a2dbce/buildroot-output/target/usr/sbin/e2fsck";
+    "/dev/shm/gaia-user/217f87a2dbce/buildroot-output/target/usr/sbin/e2fsck";
 
 pub(super) fn write(path: &Path, bytes: &[u8]) {
     if let Some(parent) = path.parent() {

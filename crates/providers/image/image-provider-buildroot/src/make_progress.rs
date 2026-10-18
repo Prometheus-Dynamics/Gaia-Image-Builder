@@ -454,7 +454,7 @@ mod tests {
             ("zlib", &[".stamp_built", ".stamp_installed"][..]),
             ("linux", &[".stamp_built", ".stamp_installed"][..]),
             ("mesa3d", &[".stamp_configured"][..]),
-            ("photonvision", &[][..]),
+            ("myapp", &[][..]),
         ] {
             let dir = output.join("build").join(name);
             fs::create_dir_all(&dir).expect("dir");
@@ -467,10 +467,10 @@ mod tests {
             ("zlib".to_string(), 10.0),
             ("linux".to_string(), 600.0),
             ("mesa3d".to_string(), 300.0),
-            ("photonvision".to_string(), 300.0),
+            ("myapp".to_string(), 300.0),
         ]);
         // zlib was built before; linux took 600 s last time and 300 s now:
-        // twice as fast. photonvision (300 s, not started) counts 150 s now;
+        // twice as fast. myapp (300 s, not started) counts 150 s now;
         // mesa3d (300 s, started 100 s ago) has 200 s left.
         let done_before = BTreeSet::from(["zlib".to_string()]);
         let active =

@@ -383,7 +383,7 @@ fn cargo_command_passes_feature_flags_through() {
     let scratch = TempDir::new("gaia-rust-features-command");
     let source = scratch.join("gaia-rust-features-command");
     let artifact = with_features(
-        rust_artifact("node", "orion-node", &source.join("out/node")),
+        rust_artifact("node", "worker-node", &source.join("out/node")),
         &["metrics", "tls"],
         true,
         false,
@@ -391,7 +391,7 @@ fn cargo_command_passes_feature_flags_through() {
     let contract = nested_contract(&artifact, &source);
     let args = cargo_build_command(
         &source.display().to_string(),
-        &["orion-node".to_string()],
+        &["worker-node".to_string()],
         &CargoFeatureFlags::of(&artifact),
         &contract,
         &source.join(".gaia/cargo-target"),
@@ -404,7 +404,7 @@ fn cargo_command_passes_feature_flags_through() {
         [
             "build",
             "-p",
-            "orion-node",
+            "worker-node",
             "--no-default-features",
             "--features",
             "metrics,tls"
@@ -414,7 +414,7 @@ fn cargo_command_passes_feature_flags_through() {
     let all = with_features(artifact, &[], false, true);
     let args = cargo_build_command(
         &source.display().to_string(),
-        &["orion-node".to_string()],
+        &["worker-node".to_string()],
         &CargoFeatureFlags::of(&all),
         &contract,
         &source.join(".gaia/cargo-target"),
@@ -428,7 +428,7 @@ fn cargo_command_passes_feature_flags_through() {
 
 #[test]
 fn validation_rejects_all_features_with_other_feature_flags() {
-    let base = rust_artifact("node", "orion-node", Path::new("/tmp/out/node"));
+    let base = rust_artifact("node", "worker-node", Path::new("/tmp/out/node"));
     for artifact in [
         with_features(base.clone(), &["tls"], false, true),
         with_features(base.clone(), &[], true, true),

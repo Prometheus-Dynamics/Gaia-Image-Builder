@@ -213,7 +213,7 @@ mod tests {
         spec.artifacts.push(gaia_spec::ArtifactSpec::new(
             "node",
             gaia_spec::ArtifactDefinition::Rust(gaia_spec::RustArtifactSpec {
-                package: "orion-node".into(),
+                package: "worker-node".into(),
                 target_name: None,
                 variant: gaia_spec::ArtifactVariantSpec::File,
                 features: Vec::new(),

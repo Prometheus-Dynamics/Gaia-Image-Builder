@@ -38,7 +38,7 @@ fn mismatches_cover_dropped_changed_and_equivalent_values() {
     let config = "\
 BR2_PACKAGE_MESA3D=y
 # BR2_PACKAGE_XORG7 is not set
-BR2_TARGET_GENERIC_HOSTNAME=\"photon\"
+BR2_TARGET_GENERIC_HOSTNAME=\"myapp\"
 BR2_KERNEL_HEADERS_VERSION=\"6.6\"
 BR2_CCACHE_DIR=\"/cache\"
 BR2_TOOLCHAIN_EXTERNAL_GCC_ARCH_OFFSET=0x1F
@@ -47,7 +47,7 @@ BR2_JLEVEL=8
     let requested = [
         ("BR2_PACKAGE_OPENJDK", "y"),
         ("BR2_PACKAGE_XORG7", "y"),
-        ("BR2_TARGET_GENERIC_HOSTNAME", "photon"),
+        ("BR2_TARGET_GENERIC_HOSTNAME", "myapp"),
         ("BR2_KERNEL_HEADERS_VERSION", "\"6.1\""),
         ("BR2_PACKAGE_MESA3D", "n"),
         ("BR2_PACKAGE_MESA3D", "y"),
@@ -238,7 +238,8 @@ fn override_check_warnings_are_deduplicated() {
 #[test]
 fn substituted_source_paths_compare_against_the_final_config() {
     let spec = ResolvedBuildSpec::new("source-paths");
-    let table = "/work/.gaia/cache/import-sources/orion-abc/packaging/buildroot/orion-users.table";
+    let table =
+        "/work/.gaia/cache/import-sources/worker-abc/packaging/buildroot/worker-users.table";
     let config = format!(
         "BR2_ROOTFS_USERS_TABLES=\"{table}\"\nBR2_ROOTFS_DEVICE_TABLE=\"system/device_table.txt {table}\"\n"
     );
@@ -258,7 +259,7 @@ fn substituted_source_paths_compare_against_the_final_config() {
 
     assert!(find_override_mismatches(&config, &requested).is_empty());
 
-    let stale = config.replace("orion-abc", "orion-old");
+    let stale = config.replace("worker-abc", "worker-old");
     let mismatches = find_override_mismatches(&stale, &requested);
     assert_eq!(mismatches.len(), 2, "{mismatches:?}");
 }

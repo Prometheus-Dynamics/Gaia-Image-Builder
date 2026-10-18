@@ -393,7 +393,7 @@ fn output_hygiene_allows_assembly_archive_outputs() {
     spec.image.assembly = Some(ImageAssemblySpec {
         archives: vec![gaia_spec::AssemblyArchiveSpec {
             id: "update".into(),
-            output: "$provider.images/helios-1.2.3.pdupdate".into(),
+            output: "$provider.images/acme-1.2.3.update".into(),
             members: Vec::new(),
         }],
         ..ImageAssemblySpec::default()
@@ -401,7 +401,7 @@ fn output_hygiene_allows_assembly_archive_outputs() {
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     materialize_reusable_outputs(&spec);
     fs::create_dir_all(&collect_dir).expect("collect dir");
-    fs::write(collect_dir.join("helios-1.2.3.pdupdate"), b"0123456789").expect("bundle");
+    fs::write(collect_dir.join("acme-1.2.3.update"), b"0123456789").expect("bundle");
     fs::write(collect_dir.join("stray.bin"), b"0123456789").expect("stray file");
 
     let validation =
@@ -422,7 +422,7 @@ fn output_hygiene_allows_assembly_archive_outputs() {
         "{large_files:?}"
     );
     assert!(
-        large_files.iter().all(|path| !path.ends_with(".pdupdate")),
+        large_files.iter().all(|path| !path.ends_with(".update")),
         "{large_files:?}"
     );
 }

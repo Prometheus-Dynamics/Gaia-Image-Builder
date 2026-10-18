@@ -451,9 +451,11 @@ mod tests {
         );
         assert_eq!(format!("{spec:?}"), derived);
 
-        spec.extra_sources = vec![SourceId::new("eidos")];
+        spec.extra_sources = vec![SourceId::new("corelib")];
         let debug = format!("{spec:?}");
-        assert!(debug.ends_with("install_identity: None, extra_sources: [SourceId(\"eidos\")] }"));
+        assert!(
+            debug.ends_with("install_identity: None, extra_sources: [SourceId(\"corelib\")] }")
+        );
     }
 
     fn rust_spec() -> RustArtifactSpec {
@@ -503,18 +505,18 @@ mod tests {
 
     #[test]
     fn cargo_git_url_key_ignores_prefix_query_slash_and_dot_git() {
-        let key = "https://github.com/Prometheus-Dynamics/Eidos";
+        let key = "https://example.com/org/Corelib";
         for url in [
-            "https://github.com/Prometheus-Dynamics/Eidos",
-            "https://github.com/Prometheus-Dynamics/Eidos.git",
-            "https://github.com/Prometheus-Dynamics/Eidos/",
-            "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=main#0123",
-            "git+https://github.com/Prometheus-Dynamics/Eidos?rev=abc",
+            "https://example.com/org/Corelib",
+            "https://example.com/org/Corelib.git",
+            "https://example.com/org/Corelib/",
+            "git+https://example.com/org/Corelib.git?branch=main#0123",
+            "git+https://example.com/org/Corelib?rev=abc",
         ] {
             assert_eq!(cargo_git_url_key(url), key, "{url}");
         }
         assert_ne!(
-            cargo_git_url_key("https://github.com/Prometheus-Dynamics/Eidos-core.git"),
+            cargo_git_url_key("https://example.com/org/Corelib-core.git"),
             key
         );
     }

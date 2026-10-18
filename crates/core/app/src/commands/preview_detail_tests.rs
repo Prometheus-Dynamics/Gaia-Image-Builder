@@ -157,9 +157,9 @@ fn a_changed_build_env_key_is_previewed_by_name() {
             ..BuildrootImageSpec::default()
         });
         spec.artifacts.push(gaia_spec::ArtifactSpec::new(
-            "lemnosd",
+            "devmgrd",
             gaia_spec::ArtifactDefinition::Java(gaia_spec::JavaArtifactSpec {
-                build_target: "lemnosd".into(),
+                build_target: "devmgrd".into(),
                 build_args: Vec::new(),
                 build_command: vec!["gradle".into(), "build".into()],
                 build_env: vec![
@@ -169,7 +169,7 @@ fn a_changed_build_env_key_is_previewed_by_name() {
             }),
             None,
             gaia_spec::ArtifactOutputSpec {
-                path: "out/lemnosd.jar".into(),
+                path: "out/devmgrd.jar".into(),
             },
         ));
         spec
@@ -196,7 +196,7 @@ fn a_changed_build_env_key_is_previewed_by_name() {
     let artifact = report
         .operations
         .iter()
-        .find(|operation| operation.id == "artifact:lemnosd")
+        .find(|operation| operation.id == "artifact:devmgrd")
         .expect("artifact operation");
     assert!(artifact.executes);
     assert!(

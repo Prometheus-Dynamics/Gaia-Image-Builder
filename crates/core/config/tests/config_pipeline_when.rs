@@ -8,7 +8,7 @@ fn when_filters_artifacts_installs_stage_and_feed_by_build_context() {
     let path = write_temp_config(
         r#"
 build_name = "when-filter"
-target = "cm5"
+target = "evk"
 profile = "dev"
 branch = "dev-branch"
 
@@ -32,7 +32,7 @@ id = "kept-artifact"
 kind = "rust"
 package = "gaia"
 output_path = "out/kept"
-when = { all = [ { target = "cm5" }, { profile = "dev" }, { branch = "dev-branch" }, { image_kind = "buildroot" } ] }
+when = { all = [ { target = "evk" }, { profile = "dev" }, { branch = "dev-branch" }, { image_kind = "buildroot" } ] }
 
 [[artifacts]]
 id = "dropped-artifact"
@@ -70,7 +70,7 @@ when = { image_kind = "starting-point" }
 id = "env-kept"
 name = "kept"
 entries = [["A", "1"]]
-when = { target = "cm5" }
+when = { target = "evk" }
 
 [[stage.env_sets]]
 id = "env-dropped"
@@ -177,7 +177,7 @@ fn when_supports_interpolated_conditions() {
     let path = write_temp_config(
         r#"
 build_name = "when-interpolated"
-target = "cm5"
+target = "evk"
 profile = "release"
 branch = "feature-a"
 

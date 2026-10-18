@@ -36,7 +36,7 @@ fn resolve_at(workspace: &Path, repo: &Path, rev: &str) -> ResolvedBuildSpec {
         &build,
         format!(
             r#"build_name = "imports"
-imports = [{{ source = "atlas", path = "layer.toml" }}]
+imports = [{{ source = "bsp", path = "layer.toml" }}]
 
 [[stage.env_sets]]
 id = "local-env"
@@ -44,7 +44,7 @@ name = "local"
 entries = [["LOCAL", "1"]]
 
 [[sources]]
-id = "atlas"
+id = "bsp"
 kind = "git"
 repo = "file://{}"
 rev = "{rev}"
@@ -68,13 +68,13 @@ fn fingerprint_of_layer_items_changes_with_the_import_revision() {
     let scratch = TempDir::new("gaia-plan-import-src");
     let root = scratch.join("root");
     let workspace = root.join("workspace");
-    let repo = root.join("atlas");
+    let repo = root.join("bsp");
     fs::create_dir_all(&workspace).expect("workspace");
     fs::create_dir_all(&repo).expect("repo");
     fs::write(workspace.join("Cargo.toml"), "[workspace]\n").expect("cargo");
     fs::write(
         repo.join("layer.toml"),
-        "[[stage.env_sets]]\nid = \"raze-env\"\nname = \"raze\"\nentries = [[\"RAZE\", \"1\"]]\n",
+        "[[stage.env_sets]]\nid = \"myboard-env\"\nname = \"myboard\"\nentries = [[\"MYBOARD\", \"1\"]]\n",
     )
     .expect("layer");
     fs::write(repo.join("README.md"), "one\n").expect("readme");
@@ -93,13 +93,13 @@ fn fingerprint_of_layer_items_changes_with_the_import_revision() {
 
     assert_eq!(before.stage.env_sets, after.stage.env_sets);
     assert_ne!(
-        operation_fingerprint(&before, &env_set("raze-env")),
-        operation_fingerprint(&after, &env_set("raze-env")),
+        operation_fingerprint(&before, &env_set("myboard-env")),
+        operation_fingerprint(&after, &env_set("myboard-env")),
         "a layer item rebuilds when the import moves to another revision"
     );
     assert_eq!(
-        operation_fingerprint(&before, &env_set("raze-env")),
-        operation_fingerprint(&again, &env_set("raze-env")),
+        operation_fingerprint(&before, &env_set("myboard-env")),
+        operation_fingerprint(&again, &env_set("myboard-env")),
     );
     assert_eq!(
         operation_fingerprint(&before, &env_set("local-env")),

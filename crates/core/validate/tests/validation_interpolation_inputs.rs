@@ -116,7 +116,7 @@ build_name = "invalid-inputs"
 [inputs.target]
 kind = "enum"
 required = true
-choices = ["cm5", "rpi5"]
+choices = ["evk", "rpi5"]
 
 [inputs.jobs]
 kind = "integer"

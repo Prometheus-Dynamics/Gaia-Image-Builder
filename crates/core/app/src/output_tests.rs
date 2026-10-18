@@ -124,14 +124,14 @@ fn critical_path_line_is_compact_and_keeps_the_ends_of_long_paths() {
     let path = gaia_report::CriticalPathRecord {
         duration_ms: 580_000,
         operations: vec![
-            entry("source:eidos", 5_000),
-            entry("artifact:helios-api", 198_000),
+            entry("source:corelib", 5_000),
+            entry("artifact:acme-api", 198_000),
             entry("image:assembly", 58_000),
         ],
     };
     assert_eq!(
         critical_path_line(&path),
-        "critical path 9m40s: source:eidos 5s → artifact:helios-api 3m18s → image:assembly 58s"
+        "critical path 9m40s: source:corelib 5s → artifact:acme-api 3m18s → image:assembly 58s"
     );
     let long = gaia_report::CriticalPathRecord {
         duration_ms: 10_000,

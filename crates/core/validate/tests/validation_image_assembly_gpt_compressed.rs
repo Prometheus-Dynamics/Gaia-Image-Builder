@@ -9,7 +9,7 @@ use support::write_temp_config;
 fn assembly_codes(sections: &str) -> Vec<&'static str> {
     let path = write_temp_config(&format!(
         r#"
-build_name = "helios"
+build_name = "acme"
 
 [workspace]
 root_dir = "."

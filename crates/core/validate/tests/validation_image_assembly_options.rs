@@ -9,7 +9,7 @@ use support::write_temp_config;
 fn assembly(sections: &str) -> String {
     format!(
         r#"
-build_name = "helios"
+build_name = "acme"
 version = "1.2.3"
 
 [workspace]

@@ -509,14 +509,14 @@ mod tests {
 
     #[test]
     fn listing_has_one_numbered_line_per_run() {
-        let runs = vec![live_listed("Cm5 image", 4242), ended_listed("Pi zero", 99)];
+        let runs = vec![live_listed("Evk image", 4242), ended_listed("Pi zero", 99)];
         // Started at 1000, now 1560: 560 seconds in; the ended run ended at 1500.
         let text = listing_text(&runs, 1_560);
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 2, "{text}");
         assert_eq!(
             lines[0],
-            " 1  Cm5 image  pid 4242  elapsed 9m  running  ops 3/10  packages 120/145 eta 10m00s  current image:buildroot"
+            " 1  Evk image  pid 4242  elapsed 9m  running  ops 3/10  packages 120/145 eta 10m00s  current image:buildroot"
         );
         assert_eq!(
             lines[1],

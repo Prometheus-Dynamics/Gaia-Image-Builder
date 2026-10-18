@@ -4,10 +4,10 @@ use super::*;
 fn variant_build(out_dir: &std::path::Path) -> String {
     format!(
         r#"
-build_name = "pv"
+build_name = "rel"
 version = "1.0.0"
 
-[inputs.pv]
+[inputs.rel]
 kind = "string"
 default = "2027"
 
@@ -24,7 +24,7 @@ path = "app"
 [[artifacts]]
 id = "jar"
 kind = "rust"
-package = "app-${{input.pv}}"
+package = "app-${{input.rel}}"
 source = "app-source"
 profile = "release"
 target = "x86_64-unknown-linux-musl"
@@ -37,8 +37,8 @@ kind = "starting-point"
 rootfs_path = "seed/base.img"
 
 [[variants]]
-id = "pv2026"
-overrides = [["input.pv", "2026"]]
+id = "rel2026"
+overrides = [["input.rel", "2026"]]
 "#,
         root = out_dir.join("root").display(),
         out = out_dir.display(),
@@ -48,7 +48,7 @@ overrides = [["input.pv", "2026"]]
 fn resolved_variants(name: &str) -> (gaia_testkit::TempDir, Vec<ResolvedBuildSpec>) {
     let scratch = gaia_testkit::TempDir::new(&format!("gaia-variants-{name}"));
     let dir = scratch.path().to_path_buf();
-    let build = dir.join("pv.toml");
+    let build = dir.join("rel.toml");
     std::fs::write(&build, variant_build(&dir.join("out"))).expect("build file");
     let specs = gaia_config::resolve_variant_specs(
         build.to_str().expect("utf-8 path"),
@@ -91,7 +91,7 @@ fn the_source_is_shared_and_the_artifact_built_per_variant() {
         specs[1].artifacts[0]
             .output
             .path
-            .contains("variants/pv2026")
+            .contains("variants/rel2026")
     );
     assert_ne!(
         specs[0].image.output.collect_dir,
@@ -124,12 +124,12 @@ fn a_shared_operation_recorded_by_one_variant_is_reused_by_the_next() {
     };
     // The default variant ran first and recorded the shared source.
     save_shared_state(default, &plan, &outcome, &split.shared);
-    assert!(scratch.join("out/.gaia/pv.reuse-state").is_file());
+    assert!(scratch.join("out/.gaia/rel.reuse-state").is_file());
 
     let scope = ReuseScope::Variant {
         shared: &split.shared,
     };
-    let state = scoped_reuse_state(&specs[1], scope).expect("shared state for pv2026");
+    let state = scoped_reuse_state(&specs[1], scope).expect("shared state for rel2026");
     assert!(state.completed_operation_ids.contains(source.as_str()));
     assert_eq!(
         state.operation_fingerprints.get(source.as_str()),
@@ -155,7 +155,7 @@ fn default_fingerprint(plan: &ExecutionPlan, id: &OperationId) -> Option<u64> {
 fn base_source_build(out_dir: &std::path::Path, variant_overrides: &str) -> String {
     format!(
         r#"
-build_name = "pv"
+build_name = "rel"
 version = "1.0.0"
 
 [workspace]
@@ -201,7 +201,7 @@ overrides = [{variant_overrides}]
 fn classify_build(name: &str, variant_overrides: &str) -> Result<VariantSplit, String> {
     let scratch = gaia_testkit::TempDir::new(&format!("gaia-variants-{name}"));
     let dir = scratch.path().to_path_buf();
-    let build = dir.join("pv.toml");
+    let build = dir.join("rel.toml");
     std::fs::write(
         &build,
         base_source_build(&dir.join("out"), variant_overrides),
@@ -246,8 +246,8 @@ fn a_source_only_an_artifact_reads_may_differ_between_variants() {
 #[test]
 fn variant_outputs_move_into_the_variant_directory() {
     assert_eq!(
-        variant_output_path("/b/artifacts/jar.jar", "pv2026"),
-        "/b/artifacts/variants/pv2026/jar.jar"
+        variant_output_path("/b/artifacts/jar.jar", "rel2026"),
+        "/b/artifacts/variants/rel2026/jar.jar"
     );
     assert_eq!(
         variant_output_path("out/x.bin", "default"),
@@ -257,22 +257,22 @@ fn variant_outputs_move_into_the_variant_directory() {
 
 #[test]
 fn selection_names_declared_variants_only() {
-    let specs = ["default", "pv2026", "pv2027"]
+    let specs = ["default", "rel2026", "rel2027"]
         .iter()
         .map(|id| {
-            let mut spec = ResolvedBuildSpec::new("pv");
+            let mut spec = ResolvedBuildSpec::new("rel");
             spec.selection.variant = Some((*id).to_string());
             spec
         })
         .collect::<Vec<_>>();
     assert_eq!(selected_variants(&specs, &[]).unwrap(), [0, 1, 2]);
     assert_eq!(
-        selected_variants(&specs, &["pv2027".to_string()]).unwrap(),
+        selected_variants(&specs, &["rel2027".to_string()]).unwrap(),
         [2]
     );
-    let error = selected_variants(&specs, &["pv2030".to_string()]).unwrap_err();
+    let error = selected_variants(&specs, &["rel2030".to_string()]).unwrap_err();
     assert!(
-        error.contains("declares: default, pv2026, pv2027"),
+        error.contains("declares: default, rel2026, rel2027"),
         "{error}"
     );
 }
@@ -284,7 +284,7 @@ fn selection_names_declared_variants_only() {
 fn a_source_only_the_assembly_reads_may_differ_between_variants() {
     let scratch = gaia_testkit::TempDir::new("gaia-variants-assembly-source");
     let dir = scratch.path().to_path_buf();
-    let build = dir.join("pv.toml");
+    let build = dir.join("rel.toml");
     let contents = format!(
         "{}\n[[image.assembly.trees]]\nid = \"slot\"\npath = \"$assembly.work/slot\"\n\n[[image.assembly.files]]\ntree = \"slot\"\ncontent = \"${{source.app-source.path}}\\n\"\ndest = \"id.txt\"\n",
         base_source_build(&dir.join("out"), r#"["sources.app-source.path", "app2"]"#)

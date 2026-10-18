@@ -8,7 +8,7 @@ use crate::{ExecutionPlan, OperationKind};
 pub enum PlanTarget {
     /// Every operation in a build domain.
     Domain(PlanDomain),
-    /// One operation by id, such as `artifact:helios-engine`.
+    /// One operation by id, such as `artifact:acme-engine`.
     Operation(String),
 }
 

@@ -56,8 +56,8 @@ Old:
 ```toml
 [program.install]
 [[program.install.items]]
-artifact = "helios-api"
-dest = "/usr/bin/helios-api"
+artifact = "acme-api"
+dest = "/usr/bin/acme-api"
 mode = 493
 ```
 
@@ -65,19 +65,19 @@ New:
 
 ```toml
 [[artifacts]]
-id = "helios-api"
+id = "acme-api"
 kind = "rust"
-package = "helios-api"
+package = "acme-api"
 source = "workspace-root"
-output_path = "${workspace.out_dir}/artifacts/helios-api"
-install_name = "helios-api"
+output_path = "${workspace.out_dir}/artifacts/acme-api"
+install_name = "acme-api"
 install_class = "binary"
-install_dest_hint = "/usr/bin/helios-api"
+install_dest_hint = "/usr/bin/acme-api"
 
 [[install]]
-id = "install-helios-api"
-artifact = "helios-api"
-dest = "/usr/bin/helios-api"
+id = "install-acme-api"
+artifact = "acme-api"
+dest = "/usr/bin/acme-api"
 replace = true
 mode = 493
 owner = "root"

@@ -10,10 +10,10 @@ fn build_with_variants(variants: &str) -> String {
     let root = std::env::temp_dir().join("gaia-config-variants-root");
     format!(
         r#"
-build_name = "pv"
+build_name = "rel"
 version = "1.0.0"
 
-[inputs.pv]
+[inputs.rel]
 kind = "string"
 default = "2027"
 
@@ -30,7 +30,7 @@ path = "app"
 [[artifacts]]
 id = "jar"
 kind = "rust"
-package = "app-${{input.pv}}"
+package = "app-${{input.rel}}"
 source = "app-source"
 profile = "release"
 target = "x86_64-unknown-linux-musl"
@@ -77,13 +77,13 @@ fn each_declared_variant_gets_its_overrides_and_the_base_stays_default() {
     let contents = build_with_variants(
         r#"
 [[variants]]
-id = "pv2026"
-description = "PhotonVision 2026"
-overrides = [["input.pv", "2026"]]
+id = "rel2026"
+description = "MyApp 2026"
+overrides = [["input.rel", "2026"]]
 
 [[variants]]
-id = "pv2025"
-overrides = [["input.pv", "2025"]]
+id = "rel2025"
+overrides = [["input.rel", "2025"]]
 "#,
     );
     let specs = resolve(&contents, &ResolveOptions::default()).expect("resolves");
@@ -91,7 +91,7 @@ overrides = [["input.pv", "2025"]]
         .iter()
         .map(|spec| spec.selection.variant.clone().expect("variant set"))
         .collect::<Vec<_>>();
-    assert_eq!(ids, ["default", "pv2026", "pv2025"]);
+    assert_eq!(ids, ["default", "rel2026", "rel2025"]);
     assert_eq!(package(&specs[0]), "app-2027");
     assert_eq!(package(&specs[1]), "app-2026");
     assert_eq!(package(&specs[2]), "app-2025");
@@ -103,12 +103,12 @@ fn cli_overrides_win_over_variant_overrides() {
     let contents = build_with_variants(
         r#"
 [[variants]]
-id = "pv2026"
-overrides = [["input.pv", "2026"]]
+id = "rel2026"
+overrides = [["input.rel", "2026"]]
 "#,
     );
     let options = ResolveOptions {
-        explicit_overrides: vec![("input.pv".into(), "2030".into())],
+        explicit_overrides: vec![("input.rel".into(), "2030".into())],
         ..ResolveOptions::default()
     };
     let specs = resolve(&contents, &options).expect("resolves");
@@ -121,7 +121,7 @@ fn invalid_variant_declarations_are_rejected() {
     let cases = [
         (
             r#"[[variants]]
-id = "PV2026"
+id = "REL2026"
 "#,
             "lowercase letters",
         ),
@@ -173,24 +173,24 @@ overrides = [["bogus.key", "1"]]
 fn a_variant_preset_applies_before_the_variant_overrides() {
     let contents = build_with_variants(
         r#"
-[presets.pv2026]
-overrides = [["input.pv", "2026"]]
+[presets.rel2026]
+overrides = [["input.rel", "2026"]]
 
-[presets.pv2029]
-overrides = [["input.pv", "2029"]]
+[presets.rel2029]
+overrides = [["input.rel", "2029"]]
 
 [[variants]]
 id = "by-preset"
-preset = "pv2026"
+preset = "rel2026"
 
 [[variants]]
 id = "preset-then-override"
-preset = "pv2026"
-overrides = [["input.pv", "2028"]]
+preset = "rel2026"
+overrides = [["input.rel", "2028"]]
 
 [[variants]]
 id = "preset-list"
-presets = ["pv2026", "pv2029"]
+presets = ["rel2026", "rel2029"]
 "#,
     );
     let specs = resolve(&contents, &ResolveOptions::default()).expect("resolves");
@@ -211,7 +211,7 @@ presets = ["pv2026", "pv2029"]
         .iter()
         .find(|variant| variant.id == "preset-list")
         .expect("declared variant");
-    assert_eq!(listed.presets, ["pv2026", "pv2029"]);
+    assert_eq!(listed.presets, ["rel2026", "rel2029"]);
 }
 
 #[test]
@@ -219,7 +219,7 @@ fn a_variant_naming_an_undefined_preset_is_rejected() {
     let contents = build_with_variants(
         r#"
 [[variants]]
-id = "pv2026"
+id = "rel2026"
 preset = "missing"
 "#,
     );
@@ -239,8 +239,8 @@ fn a_variant_scoped_source_token_names_the_variants_own_checkout() {
     let contents = build_with_variants(
         r#"
 [[variants]]
-id = "pv2026"
-overrides = [["input.pv", "2026"]]
+id = "rel2026"
+overrides = [["input.rel", "2026"]]
 
 [[stage.env_sets]]
 id = "paths"
@@ -267,7 +267,7 @@ entries = [["SRC", "${source.app-source.path}"]]
         src(&specs[0])
     );
     assert!(
-        src(&specs[1]).ends_with("build/sources/variants/pv2026/app-source"),
+        src(&specs[1]).ends_with("build/sources/variants/rel2026/app-source"),
         "{}",
         src(&specs[1])
     );
@@ -286,16 +286,16 @@ fn a_java_artifacts_build_env_names_the_variants_checkout() {
     let contents = build_with_variants(
         r#"
 [[variants]]
-id = "pv2026"
-overrides = [["input.pv", "2026"]]
+id = "rel2026"
+overrides = [["input.rel", "2026"]]
 
 [[artifacts]]
-id = "styx-jar"
+id = "sensor-jar"
 kind = "java"
 source = "app-source"
 build_target = "build/libs/app.jar"
-build_command = ["./build.sh", "--eidos", "${source.app-source.path}"]
-build_env = [["EIDOS_PATH", "${source.app-source.path}"], ["EIDOS_REV", "${source.app-source.commit}"]]
+build_command = ["./build.sh", "--corelib", "${source.app-source.path}"]
+build_env = [["CORELIB_PATH", "${source.app-source.path}"], ["CORELIB_REV", "${source.app-source.commit}"]]
 output_path = "out/app.jar"
 "#,
     )
@@ -307,8 +307,8 @@ output_path = "out/app.jar"
         let artifact = spec
             .artifacts
             .iter()
-            .find(|artifact| artifact.id.as_str() == "styx-jar")
-            .expect("styx-jar");
+            .find(|artifact| artifact.id.as_str() == "sensor-jar")
+            .expect("sensor-jar");
         match &artifact.definition {
             gaia_spec::ArtifactDefinition::Java(java) => java.clone(),
             other => panic!("not java: {other:?}"),
@@ -323,15 +323,15 @@ output_path = "out/app.jar"
         &scoped,
     )
     .expect("resolves");
-    let pv2026 = java(&specs[1]);
-    let eidos = &pv2026.build_env[0].1;
+    let rel2026 = java(&specs[1]);
+    let corelib = &rel2026.build_env[0].1;
     assert!(
-        eidos.ends_with("build/sources/variants/pv2026/app-source"),
-        "{eidos}"
+        corelib.ends_with("build/sources/variants/rel2026/app-source"),
+        "{corelib}"
     );
-    assert_eq!(pv2026.build_command[2], *eidos);
+    assert_eq!(rel2026.build_command[2], *corelib);
     assert_eq!(
-        pv2026.build_env[1].1,
+        rel2026.build_env[1].1,
         "0123456789abcdef0123456789abcdef01234567"
     );
 

@@ -550,8 +550,8 @@ mod tests {
     #[test]
     fn docker_local_image_tag_sanitizes_names() {
         assert_eq!(
-            docker_local_image_tag("Helios Cross/Rust", &"ab".repeat(32)),
-            "gaia-local/helios-cross-rust:abababababababab"
+            docker_local_image_tag("Acme Cross/Rust", &"ab".repeat(32)),
+            "gaia-local/acme-cross-rust:abababababababab"
         );
         assert_eq!(docker_local_image_tag("!!", "123"), "gaia-local/image:123");
     }
@@ -619,7 +619,7 @@ mod tests {
         std::fs::create_dir_all(&scripts).expect("scripts dir");
         std::fs::write(scripts.join("exclude.sh"), "#!/bin/sh\n").expect("script");
         let arg = format!(
-            "BR2_ROOTFS_POST_BUILD_SCRIPT={} board/raspberrypicm5io/post-build.sh {}",
+            "BR2_ROOTFS_POST_BUILD_SCRIPT={} board/evk/post-build.sh {}",
             scripts.join("exclude.sh").display(),
             root.join("missing/dir/post.sh").display()
         );

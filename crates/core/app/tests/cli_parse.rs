@@ -103,10 +103,10 @@ fn flags_are_never_taken_as_the_build_path() {
 
 #[test]
 fn build_path_may_follow_flags() {
-    let args = AppArgs::parse_from(["plan", "--preset", "ci", "configs/builds/cm5.toml"]);
+    let args = AppArgs::parse_from(["plan", "--preset", "ci", "configs/builds/evk.toml"]);
 
     assert_eq!(args.command, AppCommand::Plan);
-    assert_eq!(args.build, "configs/builds/cm5.toml");
+    assert_eq!(args.build, "configs/builds/evk.toml");
     assert!(args.build_explicit);
     assert_eq!(args.preset.as_deref(), Some("ci"));
 }
@@ -136,27 +136,27 @@ fn reports_unknown_flags_missing_values_and_extra_arguments() {
 
 #[test]
 fn parses_lock_update_with_optional_source_ids() {
-    let all = AppArgs::parse_from(["lock", "cm5.toml", "--update"]);
+    let all = AppArgs::parse_from(["lock", "evk.toml", "--update"]);
     assert_eq!(all.command, AppCommand::Lock);
-    assert_eq!(all.build, "cm5.toml");
+    assert_eq!(all.build, "evk.toml");
     assert!(all.lock.update);
     assert!(all.lock.sources.is_empty());
     assert!(all.usage_errors.is_empty());
 
-    let named = AppArgs::parse_from(["lock", "cm5.toml", "--update", "orion,tools"]);
-    assert_eq!(named.lock.sources, vec!["orion", "tools"]);
+    let named = AppArgs::parse_from(["lock", "evk.toml", "--update", "worker,tools"]);
+    assert_eq!(named.lock.sources, vec!["worker", "tools"]);
     assert!(named.usage_errors.is_empty());
 
     // Before the build path, the value after --update stays the build.
-    let flag_first = AppArgs::parse_from(["lock", "--update", "cm5.toml"]);
-    assert_eq!(flag_first.build, "cm5.toml");
+    let flag_first = AppArgs::parse_from(["lock", "--update", "evk.toml"]);
+    assert_eq!(flag_first.build, "evk.toml");
     assert!(flag_first.lock.sources.is_empty());
 
-    let equals = AppArgs::parse_from(["lock", "--update=orion", "cm5.toml"]);
-    assert_eq!(equals.lock.sources, vec!["orion"]);
-    assert_eq!(equals.build, "cm5.toml");
+    let equals = AppArgs::parse_from(["lock", "--update=worker", "evk.toml"]);
+    assert_eq!(equals.lock.sources, vec!["worker"]);
+    assert_eq!(equals.build, "evk.toml");
 
-    let followed_by_flag = AppArgs::parse_from(["lock", "cm5.toml", "--update", "--preset", "ci"]);
+    let followed_by_flag = AppArgs::parse_from(["lock", "evk.toml", "--update", "--preset", "ci"]);
     assert!(followed_by_flag.lock.sources.is_empty());
     assert_eq!(followed_by_flag.preset.as_deref(), Some("ci"));
 }
@@ -165,7 +165,7 @@ fn parses_lock_update_with_optional_source_ids() {
 fn parses_clean_cache_flags() {
     let args = AppArgs::parse_from([
         "clean",
-        "cm5.toml",
+        "evk.toml",
         "--target",
         "caches",
         "--all-caches",
@@ -187,7 +187,7 @@ fn help_flag_after_command_shows_help() {
 fn parses_cache_flags() {
     let args = AppArgs::parse_from([
         "cache",
-        "cm5.toml",
+        "evk.toml",
         "--level",
         "project",
         "--package",
@@ -197,7 +197,7 @@ fn parses_cache_flags() {
         "--dry-run",
     ]);
     assert_eq!(args.command, AppCommand::Cache);
-    assert_eq!(args.build, "cm5.toml");
+    assert_eq!(args.build, "evk.toml");
     assert_eq!(args.cache.level.as_deref(), Some("project"));
     assert_eq!(args.cache.packages, vec!["mesa*"]);
     assert_eq!(args.cache.remove, vec!["mesa3d", "linux@ab12"]);
@@ -214,7 +214,7 @@ fn run_selectors_are_optional_for_status_and_control_commands() {
         assert!(follow.follow && !follow.build_explicit);
     }
     // A number, a name or a config path is the named run.
-    for selector in ["2", "Cm5 image", "configs/builds/cm5.toml"] {
+    for selector in ["2", "Evk image", "configs/builds/evk.toml"] {
         let args = AppArgs::parse_from(["status", selector, "--follow"]);
         assert!(args.build_explicit);
         assert_eq!(args.build, selector);

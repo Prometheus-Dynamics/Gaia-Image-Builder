@@ -100,24 +100,24 @@ mod tests {
         let mut spec = ResolvedBuildSpec::new("dirs");
         spec.workspace.root_dir = "/work".into();
         spec.workspace.build_dir = "build".into();
-        let orion = git_source("orion");
+        let worker = git_source("worker");
         assert_eq!(
-            source_checkout_dir(&spec, &orion),
-            PathBuf::from("/work/build/sources/orion")
+            source_checkout_dir(&spec, &worker),
+            PathBuf::from("/work/build/sources/worker")
         );
         spec.selection.import_sources.push(ImportSourceSpec {
-            id: "orion".into(),
-            root: "/work/.gaia/cache/import-sources/orion-abc".into(),
+            id: "worker".into(),
+            root: "/work/.gaia/cache/import-sources/worker-abc".into(),
             identity: "git:repo@abc".into(),
             contributes: Vec::new(),
         });
         assert_eq!(
-            source_checkout_dir(&spec, &orion),
-            PathBuf::from("/work/.gaia/cache/import-sources/orion-abc")
+            source_checkout_dir(&spec, &worker),
+            PathBuf::from("/work/.gaia/cache/import-sources/worker-abc")
         );
         assert_eq!(
-            source_materialized_dir(&spec.workspace, &orion),
-            PathBuf::from("/work/build/sources/orion")
+            source_materialized_dir(&spec.workspace, &worker),
+            PathBuf::from("/work/build/sources/worker")
         );
     }
 

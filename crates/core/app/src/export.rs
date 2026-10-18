@@ -285,9 +285,9 @@ mod tests {
 
     #[test]
     fn versioned_names_are_kept_and_unversioned_ones_get_a_suffix() {
-        let name = "photonvision-full-raze-dev-v2027.0.0-alpha-2-94-gc9548d91.img.xz";
+        let name = "myapp-full-myboard-dev-v2027.0.0-alpha-2-94-gc9548d91.img.xz";
         assert_eq!(
-            export_file_name(name, "photonvision", Some("2027.0.0"), "stamp"),
+            export_file_name(name, "myapp", Some("2027.0.0"), "stamp"),
             name
         );
         assert_eq!(
@@ -409,7 +409,7 @@ mod tests {
         let src = scratch.join("src");
         let dir = scratch.join("exports");
         fs::create_dir_all(&src).expect("src dir");
-        let slot = src.join("photonvision-2027.0.0-alpha-2-libcamera-02b14375.slot.tar");
+        let slot = src.join("myapp-2027.0.0-alpha-2-libcamera-02b14375.slot.tar");
         let other = src.join("slots-sdcard.img.xz");
         fs::write(&slot, b"bundle").expect("bundle");
         fs::write(&other, b"disk").expect("disk");

@@ -554,7 +554,7 @@ mod tests {
     fn new_fields_round_trip_and_unknown_states_read() {
         let mut status = fixture_status();
         status.variant = Some(LiveVariant {
-            id: "pv2026".into(),
+            id: "rel2026".into(),
             index: 2,
             count: 4,
         });

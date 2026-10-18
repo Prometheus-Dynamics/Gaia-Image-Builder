@@ -303,34 +303,34 @@ mod tests {
     #[test]
     fn substitutes_known_source_tokens_only() {
         let values = BTreeMap::from([
-            ("source.atlas.commit".to_string(), "a".repeat(40)),
-            ("source.atlas.path".to_string(), "/work/atlas".to_string()),
+            ("source.bsp.commit".to_string(), "a".repeat(40)),
+            ("source.bsp.path".to_string(), "/work/bsp".to_string()),
             ("x".to_string(), "not a source token".to_string()),
         ]);
         let mut referenced = BTreeSet::new();
         assert_eq!(
             substitute(
-                "device_package.commit=${source.atlas.commit} other=${source.orion.commit} v=${x}",
+                "device_package.commit=${source.bsp.commit} other=${source.worker.commit} v=${x}",
                 &values,
                 &mut referenced
             ),
             format!(
-                "device_package.commit={} other=${{source.orion.commit}} v=${{x}}",
+                "device_package.commit={} other=${{source.worker.commit}} v=${{x}}",
                 "a".repeat(40)
             )
         );
         assert_eq!(
             substitute(
-                "\"${source.atlas.path}/users.table ${source.orion.path}/x\"",
+                "\"${source.bsp.path}/users.table ${source.worker.path}/x\"",
                 &values,
                 &mut referenced
             ),
-            "\"/work/atlas/users.table ${source.orion.path}/x\""
+            "\"/work/bsp/users.table ${source.worker.path}/x\""
         );
         // Named by a source token, resolved or not; `${x}` is not a source.
         assert_eq!(
             referenced,
-            BTreeSet::from([SourceId::new("atlas"), SourceId::new("orion")])
+            BTreeSet::from([SourceId::new("bsp"), SourceId::new("worker")])
         );
     }
 
@@ -347,26 +347,26 @@ mod tests {
                 build_command: Vec::new(),
                 build_env: Vec::new(),
             }),
-            Some(SourceRef::new("atlas")),
+            Some(SourceRef::new("bsp")),
             ArtifactOutputSpec {
                 path: "app.jar".into(),
             },
         );
         artifact.extra_sources = vec![SourceId::new("zeta")];
         let declared = BTreeSet::from([
-            SourceId::new("atlas"),
-            SourceId::new("eidos"),
+            SourceId::new("bsp"),
+            SourceId::new("corelib"),
             SourceId::new("zeta"),
         ]);
         let referenced = BTreeSet::from([
-            SourceId::new("atlas"),
-            SourceId::new("eidos"),
-            SourceId::new("orion"),
+            SourceId::new("bsp"),
+            SourceId::new("corelib"),
+            SourceId::new("worker"),
         ]);
         add_extra_sources(&mut artifact, referenced, &declared);
         assert_eq!(
             artifact.extra_sources,
-            vec![SourceId::new("eidos"), SourceId::new("zeta")]
+            vec![SourceId::new("corelib"), SourceId::new("zeta")]
         );
     }
 
@@ -381,17 +381,17 @@ mod tests {
     fn commit_short_is_eight_characters_and_keeps_the_dirty_marker() {
         assert_eq!(short_commit(&"0123456789abcdef".repeat(2)), "01234567");
         assert_eq!(short_commit("0123456789abcdef-dirty"), "01234567");
-        assert_eq!(source_token_id("source.atlas.commit_short"), Some("atlas"));
-        assert_eq!(source_token_id("source.atlas.commit"), Some("atlas"));
+        assert_eq!(source_token_id("source.bsp.commit_short"), Some("bsp"));
+        assert_eq!(source_token_id("source.bsp.commit"), Some("bsp"));
         let values = BTreeMap::from([(
-            "source.atlas.commit_short".to_string(),
+            "source.bsp.commit_short".to_string(),
             "01234567".to_string(),
         )]);
         let mut referenced = BTreeSet::new();
         assert_eq!(
-            substitute("rev=${source.atlas.commit_short}", &values, &mut referenced),
+            substitute("rev=${source.bsp.commit_short}", &values, &mut referenced),
             "rev=01234567"
         );
-        assert!(referenced.contains(&SourceId::new("atlas")));
+        assert!(referenced.contains(&SourceId::new("bsp")));
     }
 }

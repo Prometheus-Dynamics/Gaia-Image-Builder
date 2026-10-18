@@ -52,12 +52,12 @@ fn clean_caches_prunes_orphaned_mirrors_and_leftovers_with_sizes() {
     let root_dir = scratch.join("root").display().to_string();
     let root = PathBuf::from(&root_dir);
     let build_dir = root.join("build");
-    let repo = "https://example.invalid/orion.git";
+    let repo = "https://example.invalid/worker.git";
     let git_cache = root.join(".gaia/cache/git");
     let used_mirror = git_cache.join(gaia_source_providers::remote_git_mirror_dir_name(repo));
     let orphan_mirror = git_cache.join("repo-0000000000000000.git");
-    let old_layout_mirror = git_cache.join("orion-main-1234.git");
-    let preserved = build_dir.join("sources/.orion.gaia-preserved");
+    let old_layout_mirror = git_cache.join("worker-main-1234.git");
+    let preserved = build_dir.join("sources/.worker.gaia-preserved");
     let refresh =
         build_dir.join("image/buildroot-output/build/buildroot-fs/squashfs/target.refresh");
     let downloads = root.join(".gaia/cache/downloads/sha256");
@@ -87,7 +87,7 @@ build_dir = "{build}"
 out_dir = "{root_dir}/out"
 
 [[sources]]
-id = "orion"
+id = "worker"
 kind = "git"
 repo = "{repo}"
 branch = "main"

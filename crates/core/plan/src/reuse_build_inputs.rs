@@ -194,7 +194,7 @@ mod tests {
 
     fn java_artifact(build_command: &[&str]) -> ArtifactSpec {
         ArtifactSpec::new(
-            "photonvision-jar",
+            "myapp-jar",
             ArtifactDefinition::Java(JavaArtifactSpec {
                 build_target: "jar".into(),
                 build_args: Vec::new(),
@@ -203,7 +203,7 @@ mod tests {
             }),
             None,
             ArtifactOutputSpec {
-                path: "out/photonvision.jar".into(),
+                path: "out/myapp.jar".into(),
             },
         )
     }
@@ -212,11 +212,11 @@ mod tests {
     fn a_build_command_script_change_flips_the_artifact_fingerprint() {
         let scratch = TempDir::new("gaia-plan");
         let root = workspace_dir(&scratch, "artifact");
-        let script = root.join("raze/scripts/build-photonvision-jar.sh");
+        let script = root.join("myboard/scripts/build-myapp-jar.sh");
         write(&script, "#!/bin/sh\necho one\n");
         let mut spec = ResolvedBuildSpec::new("build-command");
         spec.workspace.root_dir = root.display().to_string();
-        let artifact = java_artifact(&["raze/scripts/build-photonvision-jar.sh"]);
+        let artifact = java_artifact(&["myboard/scripts/build-myapp-jar.sh"]);
         let kind = OperationKind::BuildArtifact {
             artifact_id: artifact.id.clone(),
         };
@@ -228,7 +228,7 @@ mod tests {
                 .iter()
                 .map(|(name, _)| name.as_str())
                 .collect::<Vec<_>>(),
-            ["build command script raze/scripts/build-photonvision-jar.sh"]
+            ["build command script myboard/scripts/build-myapp-jar.sh"]
         );
         let before = operation_fingerprint(&spec, &kind);
         write(&script, "#!/bin/sh\necho two\n");
@@ -273,9 +273,9 @@ mod tests {
     fn a_post_image_script_change_flips_the_image_build_fingerprint() {
         let scratch = TempDir::new("gaia-plan");
         let root = workspace_dir(&scratch, "post-image");
-        let script = root.join("board/raze/post-image.sh");
+        let script = root.join("board/myboard/post-image.sh");
         write(&script, "#!/bin/sh\necho one\n");
-        let spec = buildroot_spec(&root, None, "board/raze/post-image.sh");
+        let spec = buildroot_spec(&root, None, "board/myboard/post-image.sh");
         let before = operation_fingerprint(&spec, &OperationKind::BuildImage);
         write(&script, "#!/bin/sh\necho two\n");
         assert_ne!(
@@ -288,9 +288,9 @@ mod tests {
     fn a_post_image_script_change_does_not_flip_the_prepare_fingerprint() {
         let scratch = TempDir::new("gaia-plan");
         let root = workspace_dir(&scratch, "post-image-prepare");
-        let script = root.join("board/raze/post-image.sh");
+        let script = root.join("board/myboard/post-image.sh");
         write(&script, "#!/bin/sh\necho one\n");
-        let spec = buildroot_spec(&root, None, "board/raze/post-image.sh");
+        let spec = buildroot_spec(&root, None, "board/myboard/post-image.sh");
         let prepare = operation_fingerprint(&spec, &OperationKind::PrepareImage);
         let build = operation_fingerprint(&spec, &OperationKind::BuildImage);
         write(&script, "#!/bin/sh\necho two\n");
@@ -310,7 +310,7 @@ mod tests {
         let scratch = TempDir::new("gaia-plan");
         let root = workspace_dir(&scratch, "external-mk");
         let external = root.join("ext");
-        write(&external.join("external.desc"), "name: RAZE\n");
+        write(&external.join("external.desc"), "name: MYBOARD\n");
         let mk = external.join("external.mk");
         write(
             &mk,
@@ -323,7 +323,7 @@ mod tests {
         assert!(
             components
                 .iter()
-                .any(|(name, _)| name == "external file RAZE:external.mk"),
+                .any(|(name, _)| name == "external file MYBOARD:external.mk"),
             "{components:?}"
         );
         write(

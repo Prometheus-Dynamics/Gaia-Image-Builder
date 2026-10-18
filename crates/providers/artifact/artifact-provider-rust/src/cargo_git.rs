@@ -426,19 +426,19 @@ name = "app"
 version = "0.1.0"
 
 [[package]]
-name = "eidos"
+name = "corelib"
 version = "0.3.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=main#1111111111111111111111111111111111111111"
+source = "git+https://example.com/org/Corelib.git?branch=main#1111111111111111111111111111111111111111"
 
 [[package]]
-name = "eidos-extra"
+name = "corelib-extra"
 version = "0.1.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?rev=abc#2222222222222222222222222222222222222222"
+source = "git+https://example.com/org/Corelib.git?rev=abc#2222222222222222222222222222222222222222"
 
 [[package]]
-name = "eidos-old"
+name = "corelib-old"
 version = "0.1.0"
-source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=main#1111111111111111111111111111111111111111"
+source = "git+https://example.com/org/Corelib.git?branch=main#1111111111111111111111111111111111111111"
 
 [[package]]
 name = "other"
@@ -455,8 +455,8 @@ checksum = "abc"
     fn mapping(url: &str) -> CargoGitSourceSpec {
         CargoGitSourceSpec {
             url: url.into(),
-            source: gaia_spec::SourceId::new("eidos"),
-            repo: "https://github.com/Prometheus-Dynamics/Eidos.git".into(),
+            source: gaia_spec::SourceId::new("corelib"),
+            repo: "https://example.com/org/Corelib.git".into(),
         }
     }
 
@@ -471,8 +471,8 @@ checksum = "abc"
             shown,
             [
                 "https://example.com/Other.git 3333",
-                "https://github.com/Prometheus-Dynamics/Eidos.git 1111",
-                "https://github.com/Prometheus-Dynamics/Eidos.git 2222",
+                "https://example.com/org/Corelib.git 1111",
+                "https://example.com/org/Corelib.git 2222",
             ]
         );
     }
@@ -480,27 +480,21 @@ checksum = "abc"
     #[test]
     fn mapping_matches_lock_urls_with_and_without_dot_git_and_slash() {
         for key in [
-            "https://github.com/Prometheus-Dynamics/Eidos.git",
-            "https://github.com/Prometheus-Dynamics/Eidos",
-            "https://github.com/Prometheus-Dynamics/Eidos/",
+            "https://example.com/org/Corelib.git",
+            "https://example.com/org/Corelib",
+            "https://example.com/org/Corelib/",
         ] {
             let pins = locked_git_pins(LOCK).expect("lock parses");
             let by_url = pins_for(&pins, &mapping(key));
             assert_eq!(
                 by_url.keys().map(String::as_str).collect::<Vec<_>>(),
-                ["https://github.com/Prometheus-Dynamics/Eidos.git"],
+                ["https://example.com/org/Corelib.git"],
                 "{key}"
             );
             assert_eq!(by_url.values().next().map(BTreeSet::len), Some(2));
         }
         let pins = locked_git_pins(LOCK).expect("lock parses");
-        assert!(
-            pins_for(
-                &pins,
-                &mapping("https://github.com/Prometheus-Dynamics/Other")
-            )
-            .is_empty()
-        );
+        assert!(pins_for(&pins, &mapping("https://example.com/org/Other")).is_empty());
     }
 
     #[test]

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 /// A BusyBox built for the target, in the read-only target tree of a
 /// Buildroot build. The test that reads it is skipped when it is absent.
-const TARGET_BUSYBOX: &str = "/dev/shm/gaia-sozo/217f87a2dbce/buildroot-output/target/bin/busybox";
+const TARGET_BUSYBOX: &str = "/dev/shm/gaia-user/217f87a2dbce/buildroot-output/target/bin/busybox";
 
 fn write(path: &Path, bytes: &[u8]) {
     if let Some(parent) = path.parent() {

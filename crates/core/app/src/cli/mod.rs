@@ -481,7 +481,7 @@ mod tests {
             "run",
             "build.toml",
             "--rebuild",
-            "artifact:photonvision-jar,image",
+            "artifact:myapp-jar,image",
             "--rebuild",
             "artifact:*",
             "--rebuild-package",
@@ -490,10 +490,7 @@ mod tests {
             "baz",
         ]);
         assert!(args.usage_errors.is_empty(), "{:?}", args.usage_errors);
-        assert_eq!(
-            args.rebuild,
-            ["artifact:photonvision-jar", "image", "artifact:*"]
-        );
+        assert_eq!(args.rebuild, ["artifact:myapp-jar", "image", "artifact:*"]);
         assert_eq!(args.rebuild_packages, ["libfoo", "bar", "baz"]);
         let missing = parse(&["plan", "build.toml", "--rebuild"]);
         assert_eq!(missing.usage_errors, ["--rebuild requires a value"]);

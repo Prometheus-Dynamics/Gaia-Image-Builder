@@ -588,8 +588,8 @@ fn assembly_steps_reading_each_others_outputs_are_refused() {
 fn assembly_disk_archives_log_a_step_time_and_sizes() {
     let scratch = TempDir::new("gaia-exec-test");
     for (archive_name, tool, label) in [
-        ("helios.img.xz", "xz", "xz"),
-        ("helios.img.zst", "zstd", "zstd"),
+        ("acme.img.xz", "xz", "xz"),
+        ("acme.img.zst", "zstd", "zstd"),
     ] {
         if Command::new(tool).arg("--version").output().is_err() {
             eprintln!("skipping assembly archive step-time test: '{tool}' is not installed");

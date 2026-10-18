@@ -388,14 +388,14 @@ fn excluding_a_kernel_module_reruns_depmod_for_its_kernel() {
     put(
         root,
         "build/packages-file-list.txt",
-        b"styx-ov9282,./lib/modules/7.2.9-v8-16k/updates/ov9282.ko\n\
+        b"sensor-ov9282,./lib/modules/7.2.9-v8-16k/updates/ov9282.ko\n\
           linux,./lib/modules/7.2.9-v8-16k/kernel/drivers/media/i2c/ov9282.ko\n\
           libpisp,./usr/lib/libpisp.so.1\n",
     );
     put(
         root,
         "target/lib/modules/7.2.9-v8-16k/updates/ov9282.ko",
-        b"styx",
+        b"sensor",
     );
     put(
         root,
@@ -419,7 +419,7 @@ fn excluding_a_kernel_module_reruns_depmod_for_its_kernel() {
     fs::set_permissions(host.join("sbin/depmod"), fs::Permissions::from_mode(0o755))
         .expect("executable depmod");
 
-    let staged = stage(root, &["styx-ov9282"]);
+    let staged = stage(root, &["sensor-ov9282"]);
     let status = Command::new("sh")
         .arg(&staged.script)
         .arg(root.join("target"))

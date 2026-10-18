@@ -55,20 +55,20 @@ fn plan(
     })
 }
 
-/// Settings a test makefile set reads: `BR2_RAZE_USERS_TABLE` only when
-/// finalizing, `BR2_RAZE_TUNE` by `kmod`'s `.mk`, anything else
+/// Settings a test makefile set reads: `BR2_MYBOARD_USERS_TABLE` only when
+/// finalizing, `BR2_MYBOARD_TUNE` by `kmod`'s `.mk`, anything else
 /// unknown to the infrastructure.
 fn test_symbol_use(key: &str) -> SymbolUse {
     match key {
-        "BR2_RAZE_USERS_TABLE" => SymbolUse {
+        "BR2_MYBOARD_USERS_TABLE" => SymbolUse {
             finalize: true,
             ..SymbolUse::default()
         },
-        "BR2_RAZE_TUNE" => SymbolUse {
+        "BR2_MYBOARD_TUNE" => SymbolUse {
             packages: BTreeSet::from(["kmod".to_string()]),
             ..SymbolUse::default()
         },
-        "BR2_RAZE_UNUSED" => SymbolUse::default(),
+        "BR2_MYBOARD_UNUSED" => SymbolUse::default(),
         _ => SymbolUse {
             global: Some("read by Buildroot's package/Makefile.in".to_string()),
             ..SymbolUse::default()
@@ -81,7 +81,7 @@ fn settings_no_package_reads_rebuild_nothing() {
     let current = graph(BASE);
     let result = plan(
         &[change(
-            "BR2_RAZE_USERS_TABLE",
+            "BR2_MYBOARD_USERS_TABLE",
             None,
             Some("\"/x/users.table\""),
         )],
@@ -103,7 +103,7 @@ fn settings_no_package_reads_rebuild_nothing() {
         other => panic!("expected no rebuild, got {other:?}"),
     }
     let result = plan(
-        &[change("BR2_RAZE_UNUSED", None, Some("y"))],
+        &[change("BR2_MYBOARD_UNUSED", None, Some("y"))],
         &[],
         Some(&current),
         &current,
@@ -119,14 +119,14 @@ fn settings_no_package_reads_rebuild_nothing() {
         "{result:?}"
     );
     let result = plan(
-        &[change("BR2_RAZE_TUNE", None, Some("y"))],
+        &[change("BR2_MYBOARD_TUNE", None, Some("y"))],
         &[],
         Some(&current),
         &current,
     );
     assert_eq!(rebuilds(result), ["kmod"]);
     let result = plan(
-        &[change("BR2_RAZE_GLOBAL", None, Some("y"))],
+        &[change("BR2_MYBOARD_GLOBAL", None, Some("y"))],
         &[],
         Some(&current),
         &current,
@@ -147,7 +147,7 @@ const BASE: &[(&str, &[&str])] = &[
     ("libcamera", &["toolchain"]),
     ("gstreamer1", &["toolchain"]),
     ("libcamera-apps", &["libcamera"]),
-    ("photonvision", &["libcamera-apps", "gstreamer1"]),
+    ("myapp", &["libcamera-apps", "gstreamer1"]),
     ("kmod", &["toolchain"]),
     ("mesa3d", &["toolchain"]),
 ];
@@ -201,13 +201,13 @@ fn changed_options_rebuild_the_package_and_its_dependents() {
     };
     assert_eq!(
         rebuild.rebuild.into_iter().collect::<Vec<_>>(),
-        ["libcamera", "libcamera-apps", "photonvision"]
+        ["libcamera", "libcamera-apps", "myapp"]
     );
     assert_eq!(
         rebuild.reasons,
         [
             "libcamera changed: BR2_PACKAGE_LIBCAMERA_PIPELINE_RPI_PISP unset -> y",
-            "dependent packages: libcamera-apps, photonvision",
+            "dependent packages: libcamera-apps, myapp",
         ]
     );
 }
@@ -221,7 +221,7 @@ fn override_content_changes_rebuild_only_the_overridden_package() {
     );
     assert_eq!(
         rebuilds(plan(&[], &["libcamera"], None, &current)),
-        ["libcamera", "libcamera-apps", "photonvision"]
+        ["libcamera", "libcamera-apps", "myapp"]
     );
 }
 
@@ -234,7 +234,7 @@ fn version_changes_rebuild_the_package_and_its_dependents() {
     }
     assert_eq!(
         rebuilds(plan(&[], &[], Some(&before), &after)),
-        ["gstreamer1", "photonvision"]
+        ["gstreamer1", "myapp"]
     );
 }
 
@@ -247,7 +247,7 @@ fn removed_packages_are_uninstalled_and_their_dependents_rebuilt() {
             ("host-xz", &[]),
             ("libcamera", &["toolchain"]),
             ("gstreamer1", &["toolchain"]),
-            ("photonvision", &["gstreamer1"]),
+            ("myapp", &["gstreamer1"]),
             ("kmod", &["toolchain"]),
             ("mesa3d", &["toolchain"]),
         ][..],
@@ -260,10 +260,7 @@ fn removed_packages_are_uninstalled_and_their_dependents_rebuilt() {
         rebuild.removed.into_iter().collect::<Vec<_>>(),
         ["libcamera-apps"]
     );
-    assert_eq!(
-        rebuild.rebuild.into_iter().collect::<Vec<_>>(),
-        ["photonvision"]
-    );
+    assert_eq!(rebuild.rebuild.into_iter().collect::<Vec<_>>(), ["myapp"]);
     // Without the previous graph, what the removed package built is
     // unknown.
     assert!(matches!(

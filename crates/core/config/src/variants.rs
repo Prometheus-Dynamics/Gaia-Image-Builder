@@ -238,27 +238,27 @@ mod tests {
 
     #[test]
     fn variants_with_different_image_names_do_not_collide() {
-        let mut first = ResolvedBuildSpec::new("pv");
+        let mut first = ResolvedBuildSpec::new("rel");
         first.image.output.collect_dir = Some("/out/images".into());
-        first.identity.display_name = "PhotonVision 2026".into();
-        first.selection.variant = Some("pv2026".into());
+        first.identity.display_name = "MyApp 2026".into();
+        first.selection.variant = Some("rel2026".into());
         let mut second = first.clone();
-        second.identity.display_name = "PhotonVision 2027".into();
-        second.selection.variant = Some("pv2027".into());
+        second.identity.display_name = "MyApp 2027".into();
+        second.selection.variant = Some("rel2027".into());
         assert!(variant_output_collisions(&[first, second]).is_empty());
     }
 
     #[test]
     fn variants_publishing_the_same_file_are_reported() {
-        let mut first = ResolvedBuildSpec::new("pv");
+        let mut first = ResolvedBuildSpec::new("rel");
         first.image.output.collect_dir = Some("/out/images".into());
-        first.selection.variant = Some("pv2026".into());
+        first.selection.variant = Some("rel2026".into());
         let mut second = first.clone();
-        second.selection.variant = Some("pv2027".into());
+        second.selection.variant = Some("rel2027".into());
         let messages = variant_output_collisions(&[first, second]);
         assert_eq!(messages.len(), 1, "{messages:?}");
         assert!(
-            messages[0].contains("'pv2026' and 'pv2027'"),
+            messages[0].contains("'rel2026' and 'rel2027'"),
             "{messages:?}"
         );
     }

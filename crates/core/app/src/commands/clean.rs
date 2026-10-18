@@ -415,9 +415,9 @@ mod tests {
             fs::write(claim_dir(key).join(name), owner.display().to_string()).expect("claim");
         };
         // Every owner is gone: stale.
-        claim("gone", "orion-0.1.0", &scratch.join("removed-source"));
+        claim("gone", "worker-0.1.0", &scratch.join("removed-source"));
         // One owner still exists: kept.
-        claim("live", "orion-0.1.0", &scratch.join("removed-source"));
+        claim("live", "worker-0.1.0", &scratch.join("removed-source"));
         claim("live", "vega-0.1.0", &live_source);
         // No claims at all (a build may be filling it): kept.
         fs::create_dir_all(targets.join("unclaimed")).expect("unclaimed");

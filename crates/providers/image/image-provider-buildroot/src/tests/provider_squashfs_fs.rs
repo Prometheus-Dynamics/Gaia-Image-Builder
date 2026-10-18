@@ -115,7 +115,7 @@ fn prepare_operation_reruns_even_when_expected_buildroot_images_exist() {
     let image = ImageSpec {
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             source: Some(SourceId::new("buildroot-source")),
-            defconfig: Some("raspberrypicm5io_defconfig".into()),
+            defconfig: Some("evk_defconfig".into()),
             expected_images: vec![BuildrootExpectedImageSpec {
                 name: "rootfs.tar".into(),
                 format: BuildrootExpectedImageFormatSpec::Tar,
@@ -190,7 +190,7 @@ fn build_operation_applies_config_overrides_when_expected_images_exist() {
     let image = ImageSpec {
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             source: Some(SourceId::new("buildroot-source")),
-            defconfig: Some("raspberrypicm5io_defconfig".into()),
+            defconfig: Some("evk_defconfig".into()),
             config_overrides: vec![
                 ("BR2_PACKAGE_BUSYBOX".into(), "y".into()),
                 ("BR2_ROOTFS_POST_IMAGE_SCRIPT".into(), "\"\"".into()),
@@ -267,7 +267,7 @@ fn prepare_operation_does_not_reuse_partial_target_tree() {
     let image = ImageSpec {
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             source: Some(SourceId::new("buildroot-source")),
-            defconfig: Some("raspberrypicm5io_defconfig".into()),
+            defconfig: Some("evk_defconfig".into()),
             ..BuildrootImageSpec::default()
         }),
         feed: gaia_spec::ImageFeedSpec::default(),
@@ -327,7 +327,7 @@ fn build_operation_reruns_when_assembly_provider_input_is_missing() {
 
     let mut image = ImageSpec::new(ImageDefinition::Buildroot(BuildrootImageSpec {
         source: Some(SourceId::new("buildroot-source")),
-        defconfig: Some("raspberrypicm5io_defconfig".into()),
+        defconfig: Some("evk_defconfig".into()),
         expected_images: vec![BuildrootExpectedImageSpec {
             name: "sdcard.img".into(),
             format: BuildrootExpectedImageFormatSpec::Raw,

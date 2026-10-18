@@ -133,11 +133,11 @@ mod tests {
     fn a_changed_external_mk_rebuilds_the_package_it_assigns() {
         // external.mk sets HOST_EROFS_UTILS_CONF_OPTS: the host package.
         let previous = BTreeMap::from([(
-            "RAZE:external.mk".to_string(),
+            "MYBOARD:external.mk".to_string(),
             file("sha256:one", &["host-erofs-utils"]),
         )]);
         let current = BTreeMap::from([(
-            "RAZE:external.mk".to_string(),
+            "MYBOARD:external.mk".to_string(),
             file("sha256:two", &["host-erofs-utils"]),
         )]);
         let changes = external_changes(&previous, &current);
@@ -167,7 +167,7 @@ mod tests {
     #[test]
     fn an_unmapped_external_change_is_a_full_clean() {
         let changes = TreeChanges {
-            external_unmapped: vec!["RAZE:Config.in".to_string()],
+            external_unmapped: vec!["MYBOARD:Config.in".to_string()],
             ..TreeChanges::default()
         };
         let CleanPlan::Full(reasons) = decide(&changes, &graph(&["zlib"])) else {
@@ -175,7 +175,7 @@ mod tests {
         };
         assert_eq!(
             reasons,
-            ["buildroot external file RAZE:Config.in changed and maps to no package"]
+            ["buildroot external file MYBOARD:Config.in changed and maps to no package"]
         );
     }
 
@@ -193,7 +193,7 @@ mod tests {
         };
         let before = key(&BTreeMap::new());
         let after = key(&external_package_digests(&BTreeMap::from([(
-            "RAZE:external.mk".to_string(),
+            "MYBOARD:external.mk".to_string(),
             file("sha256:two", &["host-erofs-utils"]),
         )])));
         assert_ne!(before["host-erofs-utils"], after["host-erofs-utils"]);
@@ -205,8 +205,11 @@ mod tests {
         // The real case: a `linux` fragment or a `.mk` assigning a kernel
         // package must not rebuild it just because no record exists yet.
         let current = BTreeMap::from([
-            ("RAZE:external.mk".to_string(), file("sha256:x", &["linux"])),
-            ("RAZE:Config.in".to_string(), file("sha256:c", &[])),
+            (
+                "MYBOARD:external.mk".to_string(),
+                file("sha256:x", &["linux"]),
+            ),
+            ("MYBOARD:Config.in".to_string(), file("sha256:c", &[])),
         ]);
         let dir_scratch = TempDir::new("gaia-external-state");
         let dir = dir_scratch.join("dir");

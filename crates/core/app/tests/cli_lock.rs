@@ -44,7 +44,7 @@ fn source_fingerprint(build: &str) -> u64 {
     operation_fingerprint(
         &spec,
         &OperationKind::MaterializeSource {
-            source_id: SourceId::new("orion"),
+            source_id: SourceId::new("worker"),
         },
     )
 }
@@ -53,7 +53,7 @@ fn source_fingerprint(build: &str) -> u64 {
 fn lock_pins_git_sources_and_update_moves_them() {
     let scratch = TempDir::new("gaia-cli-lock");
     let root = scratch.join("root");
-    let repo = root.join("orion");
+    let repo = root.join("worker");
     fs::create_dir_all(&repo).expect("repo dir");
     git(&repo, &["init", "-b", "main"]);
     git(&repo, &["config", "user.email", "gaia@example.com"]);
@@ -62,7 +62,7 @@ fn lock_pins_git_sources_and_update_moves_them() {
 
     let configs = root.join("configs/builds");
     fs::create_dir_all(&configs).expect("configs dir");
-    let build_path = configs.join("cm5.toml");
+    let build_path = configs.join("evk.toml");
     fs::write(
         &build_path,
         format!(
@@ -75,7 +75,7 @@ build_dir = "{root}/build"
 out_dir = "{root}/out"
 
 [[sources]]
-id = "orion"
+id = "worker"
 kind = "git"
 repo = "file://{repo}"
 branch = "main"
@@ -98,13 +98,13 @@ pin = "locked"
     let outcome = run_with_args(AppArgs::parse_from(["lock", &build]));
     match &outcome {
         CommandOutcome::Locked { report, .. } => {
-            assert_eq!(report.lockfile, configs.join("cm5.gaia.lock"));
+            assert_eq!(report.lockfile, configs.join("evk.gaia.lock"));
             assert_eq!(report.entries.len(), 1);
             assert_eq!(report.entries[0].commit, first);
         }
         other => panic!("expected locked outcome, got {other:?}"),
     }
-    let lockfile = fs::read_to_string(configs.join("cm5.gaia.lock")).expect("lockfile");
+    let lockfile = fs::read_to_string(configs.join("evk.gaia.lock")).expect("lockfile");
     assert!(lockfile.contains("ref = \"branch:main\""));
     assert_eq!(locked_commit(&build).as_deref(), Some(first.as_str()));
     let first_fingerprint = source_fingerprint(&build);
@@ -120,7 +120,7 @@ pin = "locked"
     assert_eq!(locked_commit(&build).as_deref(), Some(first.as_str()));
     assert_eq!(source_fingerprint(&build), first_fingerprint);
 
-    let outcome = run_with_args(AppArgs::parse_from(["lock", &build, "--update", "orion"]));
+    let outcome = run_with_args(AppArgs::parse_from(["lock", &build, "--update", "worker"]));
     assert!(
         matches!(outcome, CommandOutcome::Locked { .. }),
         "{outcome:?}"
@@ -145,27 +145,27 @@ pin = "locked"
 fn lock_pins_unpinned_import_sources_so_resolution_works() {
     let scratch = TempDir::new("gaia-cli-lock-import");
     let root = scratch.join("root");
-    let repo = root.join("atlas");
+    let repo = root.join("bsp");
     fs::create_dir_all(&repo).expect("repo dir");
     git(&repo, &["init", "-b", "main"]);
     git(&repo, &["config", "user.email", "gaia@example.com"]);
     git(&repo, &["config", "user.name", "Gaia Test"]);
     fs::write(
         repo.join("layer.toml"),
-        "[[stage.env_sets]]\nid = \"raze-env\"\nname = \"raze\"\nentries = [[\"RAZE\", \"1\"]]\n",
+        "[[stage.env_sets]]\nid = \"myboard-env\"\nname = \"myboard\"\nentries = [[\"MYBOARD\", \"1\"]]\n",
     )
     .expect("layer");
     let first = commit(&repo, "one");
 
     let configs = root.join("configs/builds");
     fs::create_dir_all(&configs).expect("configs dir");
-    let build_path = configs.join("cm5.toml");
+    let build_path = configs.join("evk.toml");
     fs::write(
         &build_path,
         format!(
             r#"
 build_name = "lock-import"
-imports = [{{ source = "atlas", path = "layer.toml" }}]
+imports = [{{ source = "bsp", path = "layer.toml" }}]
 
 [workspace]
 root_dir = "{root}"
@@ -173,7 +173,7 @@ build_dir = "{root}/build"
 out_dir = "{root}/out"
 
 [[sources]]
-id = "atlas"
+id = "bsp"
 kind = "git"
 repo = "file://{repo}"
 "#,
@@ -203,6 +203,6 @@ repo = "file://{repo}"
         spec.stage
             .env_sets
             .iter()
-            .any(|env_set| env_set.id.as_str() == "raze-env")
+            .any(|env_set| env_set.id.as_str() == "myboard-env")
     );
 }

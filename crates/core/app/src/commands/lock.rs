@@ -160,8 +160,8 @@ mod tests {
 
     fn spec_with_sources(dir: &std::path::Path) -> ResolvedBuildSpec {
         let mut spec = ResolvedBuildSpec::new("lock-test");
-        spec.selection.selected_build_file = Some(dir.join("cm5.toml").display().to_string());
-        for (id, branch) in [("orion", "main"), ("tools", "dev")] {
+        spec.selection.selected_build_file = Some(dir.join("evk.toml").display().to_string());
+        for (id, branch) in [("worker", "main"), ("tools", "dev")] {
             spec.sources.push(SourceSpec::new(
                 id,
                 SourceDefinition::Git(GitSourceSpec {
@@ -199,7 +199,7 @@ mod tests {
                 .iter()
                 .all(|entry| entry.change == LockChange::Added)
         );
-        assert_eq!(report.lockfile, dir.join("cm5.gaia.lock"));
+        assert_eq!(report.lockfile, dir.join("evk.gaia.lock"));
 
         round.set(1);
         let report = lock_build(&spec, &LockArgs::default(), resolver).expect("relock");
@@ -224,7 +224,7 @@ mod tests {
                 .unwrap()
                 .clone()
         };
-        assert_eq!(by_id("orion").commit, "main-0");
+        assert_eq!(by_id("worker").commit, "main-0");
         assert_eq!(by_id("tools").commit, "dev-1");
         assert!(matches!(by_id("tools").change, LockChange::Updated { .. }));
 
@@ -236,10 +236,12 @@ mod tests {
 
         // Removing a source drops its entry.
         let mut fewer = spec.clone();
-        fewer.sources.retain(|source| source.id.as_str() == "orion");
+        fewer
+            .sources
+            .retain(|source| source.id.as_str() == "worker");
         let report = lock_build(&fewer, &LockArgs::default(), resolver).expect("prune");
         assert_eq!(report.removed, vec!["tools".to_string()]);
-        let lock = GitLockfile::load(&dir.join("cm5.gaia.lock"))
+        let lock = GitLockfile::load(&dir.join("evk.gaia.lock"))
             .expect("load")
             .expect("present");
         assert_eq!(lock.git.len(), 1);

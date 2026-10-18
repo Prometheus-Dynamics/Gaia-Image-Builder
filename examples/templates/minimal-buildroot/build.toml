@@ -2,7 +2,7 @@
 
 build_name = "my-buildroot-image"
 version = "2.0.0"
-target = "cm5"
+target = "generic-aarch64"
 profile = "release"
 
 [workspace]
@@ -48,7 +48,7 @@ origin = "static-asset"
 
 [image]
 kind = "buildroot"
-defconfig = "raspberrypi_defconfig"
+defconfig = "qemu_aarch64_virt_defconfig"
 external_tree_mode = "auto"
 
 [image.feed]

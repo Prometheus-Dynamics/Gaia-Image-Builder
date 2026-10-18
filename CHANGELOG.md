@@ -6,6 +6,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Project-neutral defaults and examples
+
+- vfat filesystems take `fat_size = 12 | 16 | 32`. Unset keeps the current rule (an image from 3 MiB up to 16 MiB is FAT16, because some boot firmwares, e.g. Raspberry Pi's, do not boot FAT12; other sizes keep `mformat`'s choice), so existing configs build the same images and keep their fingerprints. `12` keeps `mformat`'s choice, `32` formats FAT32, and a set `fat_size` fails the run when `mformat` could not make that type at the image's size.
+- With no build config named and no `build.toml` or other `*.toml` in the current directory, commands that need a build fail with "no build config found; pass a path or run in a directory with build.toml or another *.toml build config" instead of falling back to `examples/default-workspace/configs/default.toml`. `status`, `pause`, `resume`, `cancel` and `tui` work without one as before.
+- `examples/default-workspace` and the templates are board-neutral (`qemu_aarch64_virt_defconfig`, target `generic-aarch64`, no vendor name). `examples/buildroot-raspberrypi4-go` stays as the labelled Raspberry Pi example.
+- Docs, doc comments, tests and fixtures use neutral example names instead of downstream project names (and a `.update` bundle instead of `.pdupdate`); the unused `docker/aarch64` vision-stack image is removed.
+
 ### Buildroot images: a script edit rebuilds the images
 
 - The inputs digest that decides whether the filesystem images and the post-image step rerun read the image settings' paths raw. A post-image script named as `$(BR2_EXTERNAL_<NAME>_PATH)/board/post-image.sh` never resolved, so its content (and its genimage config) stayed out of the digest, and editing it could keep the old images. The settings now expand `$(BR2_EXTERNAL_*_PATH)`, `$(TOPDIR)`, `$(BASE_DIR)` and `$(BR2_CONFIG)` the way Buildroot does before the file is read.

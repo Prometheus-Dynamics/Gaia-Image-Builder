@@ -457,7 +457,7 @@ mod tests {
     #[test]
     fn globs_read_only_what_they_match() {
         let dtbs = Path::new("$provider.images/*.dtb");
-        assert!(overlaps(dtbs, Path::new("$provider.images/cm5.dtb")));
+        assert!(overlaps(dtbs, Path::new("$provider.images/evk.dtb")));
         assert!(!overlaps(dtbs, Path::new("$provider.images/boot.vfat")));
         // The writer fills the directory the glob scans.
         assert!(overlaps(dtbs, Path::new("$provider.images")));

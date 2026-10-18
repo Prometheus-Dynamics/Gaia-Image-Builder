@@ -10,7 +10,7 @@ use support::write_temp_config;
 fn codes(assembly_entry: &str) -> Vec<&'static str> {
     let contents = format!(
         r#"
-build_name = "raze-slot"
+build_name = "myboard-slot"
 version = "1.0.0"
 
 [workspace]

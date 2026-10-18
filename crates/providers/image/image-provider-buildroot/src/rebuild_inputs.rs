@@ -313,12 +313,12 @@ mod tests {
             )
         };
         assert_eq!(
-            rebuild_settings(&with_tables("orion-rev1")),
-            rebuild_settings(&with_tables("orion-rev2"))
+            rebuild_settings(&with_tables("worker-rev1")),
+            rebuild_settings(&with_tables("worker-rev2"))
         );
         assert_eq!(
             rebuild_settings(BASE),
-            rebuild_settings(&with_tables("orion-rev1"))
+            rebuild_settings(&with_tables("worker-rev1"))
         );
         for key in [
             "BR2_ROOTFS_USERS_TABLES",
@@ -373,19 +373,19 @@ mod tests {
     fn import_source_rev_bumps_do_not_require_a_clean() {
         let with_external = |checkout: &str| {
             format!(
-                "BR2_EXTERNAL_RAZE_DEVICE_PATH=\"/work/.gaia/cache/import-sources/{checkout}/devices/raze/external\"\n\
+                "BR2_EXTERNAL_MYBOARD_DEVICE_PATH=\"/work/.gaia/cache/import-sources/{checkout}/devices/myboard/external\"\n\
                  BR2_GLOBAL_PATCH_DIR=\"board/patches /work/.gaia/cache/import-sources/{checkout}/patches\"\n{BASE}"
             )
         };
         assert!(
             changed_rebuild_settings(
-                &with_external("atlas-c881c60fb03e977c42948a4dd898d032f55d3d92"),
-                &with_external("atlas-fd52491d21bd8a4a6c783df8ff066cf7624bec06"),
+                &with_external("bsp-c881c60fb03e977c42948a4dd898d032f55d3d92"),
+                &with_external("bsp-fd52491d21bd8a4a6c783df8ff066cf7624bec06"),
             )
             .is_empty()
         );
-        let moved = with_external("atlas-c881c60").replace("/patches\"", "/patches-v2\"");
-        let changes = changed_rebuild_settings(&with_external("atlas-c881c60"), &moved);
+        let moved = with_external("bsp-c881c60").replace("/patches\"", "/patches-v2\"");
+        let changes = changed_rebuild_settings(&with_external("bsp-c881c60"), &moved);
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].key, "BR2_GLOBAL_PATCH_DIR");
     }
@@ -395,15 +395,15 @@ mod tests {
         let with_tree = |describe: &str, names: &str| {
             format!(
                 "BR2_EXTERNAL_NAMES=\"{names}\"\n\
-                 BR2_EXTERNAL_RAZE_DEVICE_PATH=\"/work/atlas/{describe}\"\n\
-                 BR2_EXTERNAL_RAZE_DEVICE_VERSION=\"{describe}\"\n\
+                 BR2_EXTERNAL_MYBOARD_DEVICE_PATH=\"/work/bsp/{describe}\"\n\
+                 BR2_EXTERNAL_MYBOARD_DEVICE_VERSION=\"{describe}\"\n\
                  BR2_EXTERNAL_GAIA_GENERATED_VERSION=\"v2024.0.10-{describe}\"\n{BASE}"
             )
         };
         assert!(
             changed_rebuild_settings(
-                &with_tree("-g5baf83e", "RAZE_DEVICE"),
-                &with_tree("-g696d3ad", "RAZE_DEVICE GAIA_GENERATED"),
+                &with_tree("-g5baf83e", "MYBOARD_DEVICE"),
+                &with_tree("-g696d3ad", "MYBOARD_DEVICE GAIA_GENERATED"),
             )
             .is_empty()
         );
@@ -437,13 +437,13 @@ mod tests {
             |script: &str| format!("{BASE}BR2_ROOTFS_POST_IMAGE_SCRIPT=\"{script}\"\n");
         assert!(
             changed_rebuild_settings(
-                &with_script("/work/raze/post-image.sh"),
-                &with_script("/work/raze/post-image-v2.sh /work/sign.sh"),
+                &with_script("/work/myboard/post-image.sh"),
+                &with_script("/work/myboard/post-image-v2.sh /work/sign.sh"),
             )
             .is_empty()
         );
         assert!(
-            changed_rebuild_settings(BASE, &with_script("/work/raze/post-image.sh")).is_empty()
+            changed_rebuild_settings(BASE, &with_script("/work/myboard/post-image.sh")).is_empty()
         );
     }
 
@@ -455,8 +455,8 @@ mod tests {
             fs::create_dir_all(root.join("libcamera")).expect("dir");
             fs::write(root.join("libcamera/libcamera.mk"), contents).expect("mk");
         };
-        let first = base.join("atlas-rev1/packages");
-        let second = base.join("atlas-rev2/packages");
+        let first = base.join("bsp-rev1/packages");
+        let second = base.join("bsp-rev2/packages");
         write(&first, "LIBCAMERA_VERSION = 1\n");
         std::thread::sleep(std::time::Duration::from_millis(20));
         write(&second, "LIBCAMERA_VERSION = 1\n");

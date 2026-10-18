@@ -355,12 +355,12 @@ mod tests {
 
     #[test]
     fn running_builds_show_progress_and_their_estimate() {
-        let card = run_lines(&live("Cm5 image", 4242), 1_000_000 + 12 * 60_000, 80);
+        let card = run_lines(&live("Evk image", 4242), 1_000_000 + 12 * 60_000, 80);
         let text: String = card
             .iter()
             .flat_map(|line| line.spans.iter().map(|span| span.content.to_string()))
             .collect();
-        assert!(text.contains("Cm5 image"), "{text}");
+        assert!(text.contains("Evk image"), "{text}");
         assert!(text.contains("pid 4242"), "{text}");
         assert!(text.contains("ops 3/10"), "{text}");
         assert!(text.contains("elapsed 12m"), "{text}");
@@ -369,14 +369,14 @@ mod tests {
     #[test]
     fn start_screen_shows_running_and_recent_builds_without_a_project() {
         let (_scratch, mut state) =
-            picker_without_project(vec![live("Cm5 image", 4242), ended("Pi zero", 99)]);
+            picker_without_project(vec![live("Evk image", 4242), ended("Pi zero", 99)]);
         assert_eq!(state.picker_focus, PickerFocus::Runs);
 
         let text = draw(&mut state, 110, 24);
         assert!(text.contains("Builds on this system (1 running)"), "{text}");
         assert!(text.contains("Running now"), "{text}");
         assert!(text.contains("Recent (ended in the last day)"), "{text}");
-        assert!(text.contains("Cm5 image"), "{text}");
+        assert!(text.contains("Evk image"), "{text}");
         assert!(text.contains("pid 99"), "{text}");
         assert!(text.contains("ops 3/10"), "{text}");
         assert!(
@@ -403,8 +403,8 @@ mod tests {
             picker_without_project(vec![live("One", 4242), live("Two", 4343)]);
         // A build config of this directory, below the running builds.
         state.build_entries = vec![BuildEntry {
-            label: "cm5.toml".into(),
-            path: "cm5.toml".into(),
+            label: "evk.toml".into(),
+            path: "evk.toml".into(),
         }];
         state.ensure_build_selection();
 
@@ -422,30 +422,30 @@ mod tests {
     fn build_configs_show_target_profile_and_last_outcome() {
         let (_scratch, mut state) = picker_without_project(Vec::new());
         state.build_entries = vec![BuildEntry {
-            label: "cm5.toml".into(),
-            path: "cm5.toml".into(),
+            label: "evk.toml".into(),
+            path: "evk.toml".into(),
         }];
         state.build_meta.insert(
-            "cm5.toml".into(),
+            "evk.toml".into(),
             Some(crate::tui::state::BuildMeta {
                 build_dir: PathBuf::from("/nonexistent"),
-                target: Some("cm5".into()),
+                target: Some("evk".into()),
                 profile: Some("release".into()),
             }),
         );
-        let mut last = ended("cm5", 7).ended.expect("ended");
+        let mut last = ended("evk", 7).ended.expect("ended");
         last.ended_at = 1_100;
-        state.build_last.insert("cm5.toml".into(), last);
+        state.build_last.insert("evk.toml".into(), last);
         let text = draw(&mut state, 110, 16);
-        assert!(text.contains("cm5.toml"), "{text}");
-        assert!(text.contains("target cm5 · profile release"), "{text}");
+        assert!(text.contains("evk.toml"), "{text}");
+        assert!(text.contains("target evk · profile release"), "{text}");
         assert!(text.contains("last run"), "{text}");
         assert!(text.contains("DONE"), "{text}");
     }
 
     #[test]
     fn enter_on_a_running_build_attaches_through_its_registry_entry() {
-        let (_scratch, mut state) = picker_without_project(vec![live("Cm5 image", 4242)]);
+        let (_scratch, mut state) = picker_without_project(vec![live("Evk image", 4242)]);
         state.handle_key(KeyCode::Enter, KeyModifiers::empty());
         assert_eq!(state.screen, Screen::Attach);
         let attach = state.attach.as_ref().expect("attached");

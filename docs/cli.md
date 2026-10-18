@@ -36,7 +36,7 @@ cargo run -p gaia -- tui <build.toml>
 ```
 
 For projects with layered configs, put concrete entrypoints in
-`configs/builds/*.toml`. Short build names such as `base-os-cm5` resolve through
+`configs/builds/*.toml`. Short build names such as `base-os-evk` resolve through
 that directory, and the TUI build picker lists those concrete entrypoints instead
 of every imported layer. Running `gaia tui` without a build opens that picker
 when project build entrypoints are available.
@@ -72,14 +72,14 @@ Semantics:
 plus everything it depends on. Targets are comma-separated or repeated, and are
 either a domain (`sources`, `artifacts`, `install`, `stage`, `image`,
 `checkpoints`) or an operation id as printed by `gaia plan` (for example
-`artifact:helios-engine`).
+`artifact:acme-engine`).
 
 ```bash
 # build only the artifacts (and the sources they need)
-gaia run configs/builds/cm5.toml --only artifacts
+gaia run configs/builds/evk.toml --only artifacts
 
 # preview what a single artifact rebuild would execute
-gaia plan configs/builds/cm5.toml --only artifact:helios-engine
+gaia plan configs/builds/evk.toml --only artifact:acme-engine
 ```
 
 A partial run keeps the reuse state of operations it did not execute, so an
@@ -116,10 +116,10 @@ packages are cleaned, not the packages that depend on them.
 
 ```bash
 # rebuild the jar and everything that consumes it
-gaia run configs/builds/cm5.toml --rebuild artifact:photonvision-jar
+gaia run configs/builds/evk.toml --rebuild artifact:myapp-jar
 
 # rebuild one Buildroot package from source, showing what that would clean
-gaia preview configs/builds/cm5.toml --rebuild-package libcamera
+gaia preview configs/builds/evk.toml --rebuild-package libcamera
 ```
 
 `gaia resume` does not repeat either flag: a resumed run should not redo the
@@ -206,7 +206,7 @@ The last line is the verdict, for example:
 
 ```text
 preview: no clean, 3 packages rebuilt (mesa3d, openjdk, qt6base), 412 deleted paths
-preview: FULL CLEAN of /run/media/.../image/buildroot-output (reason: effective config changed (no snapshot of the previously built config))
+preview: FULL CLEAN of /path/to/build/image/buildroot-output (reason: effective config changed (no snapshot of the previously built config))
 ```
 
 Options:
@@ -291,22 +291,22 @@ When no clean profile, target, or explicit path is provided, Gaia removes
 `workspace.build_dir` and `workspace.out_dir`.
 
 ```bash
-gaia clean configs/builds/cm5.toml --target caches --dry-run
-gaia clean configs/builds/cm5.toml --all-caches
+gaia clean configs/builds/evk.toml --target caches --dry-run
+gaia clean configs/builds/evk.toml --all-caches
 ```
 
 ### `lock`
 
 Resolves the commit each git source's `branch`, `tag` (or `HEAD`) points at
 and writes it to the build's lockfile, `<build>.gaia.lock` next to the build
-entrypoint (`configs/builds/cm5.toml` locks into
-`configs/builds/cm5.gaia.lock`). Commit the lockfile. See
+entrypoint (`configs/builds/evk.toml` locks into
+`configs/builds/evk.gaia.lock`). Commit the lockfile. See
 [Git Source Lockfile](configuration.md#git-source-lockfile).
 
 ```bash
-gaia lock configs/builds/cm5.toml                    # add missing entries, keep existing ones
-gaia lock configs/builds/cm5.toml --update           # re-resolve every git source
-gaia lock configs/builds/cm5.toml --update orion     # re-resolve one source (comma-separate several)
+gaia lock configs/builds/evk.toml                    # add missing entries, keep existing ones
+gaia lock configs/builds/evk.toml --update           # re-resolve every git source
+gaia lock configs/builds/evk.toml --update worker    # re-resolve one source (comma-separate several)
 ```
 
 - Without `--update`, entries that still match the source's repo and ref are
@@ -371,7 +371,7 @@ output as a collect directory, the disk images inside it. Each copy gets a
 versioned name:
 
 - a name that already carries a version number (such as `v2027.0.0` or `9.9.9`) is kept, so
-  `photonvision-full-raze-dev-v2027.0.0-alpha-2-94-gc9548d91.img.xz` stays as it is;
+  `myapp-full-myboard-dev-v2027.0.0-alpha-2-94-gc9548d91.img.xz` stays as it is;
 - otherwise the name becomes `<build-name>-<version>.<ext>`, or
   `<build-name>-<UTC run time>.<ext>` when the build has no version.
 
@@ -380,7 +380,7 @@ An existing file with different content is never overwritten: the copy takes
 Each exported file prints one line:
 
 ```text
-exported: /home/me/images/photonvision-full-raze-dev-v2027.0.0-alpha-2-94-gc9548d91.img.xz  sha256 <hex>  412345678 bytes
+exported: /home/me/images/myapp-full-myboard-dev-v2027.0.0-alpha-2-94-gc9548d91.img.xz  sha256 <hex>  412345678 bytes
 ```
 
 A failed or cancelled run exports nothing and says so with
@@ -409,7 +409,7 @@ After a run, the summary prints the run's actual critical path, from the
 recorded start and finish time of each operation and the plan's dependencies:
 
 ```text
-critical path 9m40s: source:eidos 5s → artifact:helios-api 3m18s → image:prepare 21s → image:build 4m12s → image:assembly 58s
+critical path 9m40s: source:corelib 5s → artifact:acme-api 3m18s → image:prepare 21s → image:build 4m12s → image:assembly 58s
 ```
 
 It is the chain ending at the operation that finished last; each step back
@@ -445,8 +445,8 @@ operations never interleave:
 
 ```text
 run: 42 operation(s); CI output, one log group per operation
-source:eidos: reused
-::group::artifact:helios-api: done in 3m18s
+source:corelib: reused
+::group::artifact:acme-api: done in 3m18s
 ...the operation's output...
 ::endgroup::
 ::group::image:build: failed: make exited with status 2 in 4m12s
@@ -521,7 +521,7 @@ path:
 ```bash
 gaia pause              # the only live run
 gaia pause 2            # run 2 of `gaia status`
-gaia cancel cm5         # by build name
+gaia cancel evk         # by build name
 ```
 
 The run is found through the registry (see [`status`](#status)); a build config
@@ -552,8 +552,8 @@ with its outcome:
 ```bash
 gaia status                   # every run: live, and ended in the last 24 hours
 gaia status 2                 # run 2 of that list
-gaia status cm5               # by build name or id
-gaia status configs/builds/cm5.toml --follow  # a build config, refreshed every second
+gaia status evk               # by build name or id
+gaia status configs/builds/evk.toml --follow  # a build config, refreshed every second
 ```
 
 A number, a build name or id, or a build config path selects one run and shows
@@ -595,7 +595,7 @@ This command is available in default `gaia` builds. If the binary is built with
 ```bash
 gaia tui                              # pick from configs/builds/*.toml
 gaia tui --builds-dir path/to/builds  # pick from another directory
-gaia tui configs/builds/cm5.toml      # open one build directly
+gaia tui configs/builds/evk.toml      # open one build directly
 ```
 
 Without an explicit build, the TUI opens the build picker when more than one

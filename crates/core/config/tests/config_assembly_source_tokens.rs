@@ -13,7 +13,7 @@ const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 fn config(assembly: &str) -> String {
     format!(
         r#"
-build_name = "raze-slot"
+build_name = "myboard-slot"
 version = "1.0.0"
 
 [workspace]

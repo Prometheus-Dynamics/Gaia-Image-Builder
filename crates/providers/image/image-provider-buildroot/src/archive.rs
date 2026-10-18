@@ -577,9 +577,9 @@ mod tests {
             }
             let scratch = TempDir::new(&format!("gaia-archive-step-time-{tool}"));
             let dir = scratch.path().to_path_buf();
-            let source = dir.join("helios.img");
+            let source = dir.join("acme.img");
             fs::write(&source, "raw image ".repeat(4096)).expect("raw image");
-            let archive = dir.join(format!("helios.img.{extension}"));
+            let archive = dir.join(format!("acme.img.{extension}"));
             let execution = ImageExecutionContext {
                 workspace_root: dir.clone(),
                 docker_image: None,
@@ -597,7 +597,7 @@ mod tests {
             )
             .expect("compression should succeed");
 
-            let step = format!("archive helios.img.{extension} ({tool})");
+            let step = format!("archive acme.img.{extension} ({tool})");
             assert!(
                 messages.iter().any(|message| {
                     gaia_process::parse_step_time(message).is_some_and(|(name, _)| name == step)
@@ -606,7 +606,7 @@ mod tests {
             );
             assert!(
                 messages.iter().any(|message| {
-                    message.starts_with(&format!("archived helios.img.{extension}: "))
+                    message.starts_with(&format!("archived acme.img.{extension}: "))
                         && message.contains(" -> ")
                 }),
                 "missing size line in {messages:?}"

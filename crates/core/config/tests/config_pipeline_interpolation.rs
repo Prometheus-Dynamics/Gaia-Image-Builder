@@ -91,7 +91,7 @@ fn reporting_post_build_hook_compiles_and_interpolates() {
     let path = write_temp_config(
         r#"
 build_name = "hooked"
-target = "cm5"
+target = "evk"
 
 [workspace]
 root_dir = "."
@@ -114,5 +114,5 @@ rootfs_path = "/tmp/rootfs"
 
     let spec = resolve_config(&path.display().to_string());
     let hook = spec.reporting.post_build.expect("post-build hook");
-    assert_eq!(hook.script, "scripts/cm5/post-build.sh");
+    assert_eq!(hook.script, "scripts/evk/post-build.sh");
 }

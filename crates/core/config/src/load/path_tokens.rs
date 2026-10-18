@@ -126,8 +126,8 @@ mod tests {
 
     fn rewrite(contents: &str) -> toml::Value {
         let mut value: toml::Value = toml::from_str(contents).expect("toml");
-        rewrite_path_tokens(&mut value, Path::new("/layers/raze"), &mut |id| {
-            Ok((id == "atlas").then(|| PathBuf::from("/cache/atlas-abc")))
+        rewrite_path_tokens(&mut value, Path::new("/layers/myboard"), &mut |id| {
+            Ok((id == "bsp").then(|| PathBuf::from("/cache/bsp-abc")))
         })
         .expect("rewrite");
         value
@@ -139,22 +139,22 @@ mod tests {
             r#"
 a = "@self/overlay"
 b = "@self"
-c = "@source:atlas/devices/raze"
+c = "@source:bsp/devices/myboard"
 d = "@source:other/x"
 e = "prefix @self/x"
 f = "@selfish"
 nested = { list = ["@self/units/a.service"] }
 "#,
         );
-        assert_eq!(value["a"].as_str(), Some("/layers/raze/overlay"));
-        assert_eq!(value["b"].as_str(), Some("/layers/raze"));
-        assert_eq!(value["c"].as_str(), Some("/cache/atlas-abc/devices/raze"));
+        assert_eq!(value["a"].as_str(), Some("/layers/myboard/overlay"));
+        assert_eq!(value["b"].as_str(), Some("/layers/myboard"));
+        assert_eq!(value["c"].as_str(), Some("/cache/bsp-abc/devices/myboard"));
         assert_eq!(value["d"].as_str(), Some("@source:other/x"));
         assert_eq!(value["e"].as_str(), Some("prefix @self/x"));
         assert_eq!(value["f"].as_str(), Some("@selfish"));
         assert_eq!(
             value["nested"]["list"][0].as_str(),
-            Some("/layers/raze/units/a.service")
+            Some("/layers/myboard/units/a.service")
         );
     }
 
@@ -162,19 +162,19 @@ nested = { list = ["@self/units/a.service"] }
     fn rewrites_tokens_in_every_entry_of_a_colon_separated_list() {
         let value = rewrite(
             r#"
-first = "@source:atlas/devices/raze/gaia/buildroot-external:raze/assets/buildroot"
-later = "raze/assets/buildroot:@source:atlas/ext:@self/ext"
+first = "@source:bsp/devices/myboard/gaia/buildroot-external:myboard/assets/buildroot"
+later = "myboard/assets/buildroot:@source:bsp/ext:@self/ext"
 url = "https://example.com:8080/x"
 untouched = "@source:other/a:b"
 "#,
         );
         assert_eq!(
             value["first"].as_str(),
-            Some("/cache/atlas-abc/devices/raze/gaia/buildroot-external:raze/assets/buildroot")
+            Some("/cache/bsp-abc/devices/myboard/gaia/buildroot-external:myboard/assets/buildroot")
         );
         assert_eq!(
             value["later"].as_str(),
-            Some("raze/assets/buildroot:/cache/atlas-abc/ext:/layers/raze/ext")
+            Some("myboard/assets/buildroot:/cache/bsp-abc/ext:/layers/myboard/ext")
         );
         assert_eq!(value["url"].as_str(), Some("https://example.com:8080/x"));
         assert_eq!(value["untouched"].as_str(), Some("@source:other/a:b"));

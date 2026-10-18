@@ -432,7 +432,7 @@ mod tests {
     use super::*;
 
     const EXTERNAL_MK: &str = r#"
-LINUX_HASH_FILES += $(BR2_EXTERNAL_RAZE_DEVICE_PATH)/linux/linux.hash
+LINUX_HASH_FILES += $(BR2_EXTERNAL_MYBOARD_DEVICE_PATH)/linux/linux.hash
 
 ifeq ($(BR2_PACKAGE_OPENJDK),y)
 OPENJDK_CONF_OPTS += \
@@ -440,27 +440,27 @@ OPENJDK_CONF_OPTS += \
 	STRIP=$(TARGET_STRIP)
 endif
 
-RAZE_KERNEL_OVERLAYS = dwc2 i2c1-pi5
+MYBOARD_KERNEL_OVERLAYS = dwc2 i2c1-pi5
 
 ifeq ($(BR2_LINUX_KERNEL_EXT_OV9782),y)
-define RAZE_BUILD_KERNEL_OVERLAYS
-	$(LINUX_MAKE_ENV) $(BR2_MAKE) -C $(LINUX_DIR) $(RAZE_KERNEL_OVERLAYS)
+define MYBOARD_BUILD_KERNEL_OVERLAYS
+	$(LINUX_MAKE_ENV) $(BR2_MAKE) -C $(LINUX_DIR) $(MYBOARD_KERNEL_OVERLAYS)
 endef
-LINUX_POST_BUILD_HOOKS += RAZE_BUILD_KERNEL_OVERLAYS
+LINUX_POST_BUILD_HOOKS += MYBOARD_BUILD_KERNEL_OVERLAYS
 endif
 
-# Lemnos's users table.
-RAZE_LEMNOS_USERS_TABLE = $(call qstrip,$(BR2_RAZE_LEMNOS_USERS_TABLE))
-ifneq ($(RAZE_LEMNOS_USERS_TABLE),)
-PACKAGES_USERS += $(file <$(RAZE_LEMNOS_USERS_TABLE))$(sep)
+# Devmgr's users table.
+MYBOARD_DEVMGR_USERS_TABLE = $(call qstrip,$(BR2_MYBOARD_DEVMGR_USERS_TABLE))
+ifneq ($(MYBOARD_DEVMGR_USERS_TABLE),)
+PACKAGES_USERS += $(file <$(MYBOARD_DEVMGR_USERS_TABLE))$(sep)
 endif
 
-ifeq ($(BR2_RAZE_FAST_CFLAGS),y)
+ifeq ($(BR2_MYBOARD_FAST_CFLAGS),y)
 TARGET_CFLAGS += -O3
 endif
 
-ifeq ($(BR2_RAZE_EXTRA),y)
-include $(BR2_EXTERNAL_RAZE_DEVICE_PATH)/extra.mk
+ifeq ($(BR2_MYBOARD_EXTRA),y)
+include $(BR2_EXTERNAL_MYBOARD_DEVICE_PATH)/extra.mk
 endif
 "#;
 
@@ -490,14 +490,14 @@ endif
             ("openjdk", "OPENJDK_VERSION = 21\n"),
             (
                 "rpi-firmware",
-                "ifeq ($(BR2_RAZE_FIRMWARE_TRIM),y)\nRPI_FIRMWARE_X = 1\nendif\n",
+                "ifeq ($(BR2_MYBOARD_FIRMWARE_TRIM),y)\nRPI_FIRMWARE_X = 1\nendif\n",
             ),
         ])
     }
 
     #[test]
     fn a_setting_feeding_only_the_users_table_rebuilds_nothing() {
-        let found = sample().symbol_use("BR2_RAZE_LEMNOS_USERS_TABLE");
+        let found = sample().symbol_use("BR2_MYBOARD_DEVMGR_USERS_TABLE");
         assert_eq!(
             found,
             SymbolUse {
@@ -513,15 +513,15 @@ endif
         let found = sample().symbol_use("BR2_LINUX_KERNEL_EXT_OV9782");
         assert_eq!(found.global, None);
         assert_eq!(found.packages, BTreeSet::from(["linux".to_string()]));
-        let found = sample().symbol_use("BR2_RAZE_FIRMWARE_TRIM");
+        let found = sample().symbol_use("BR2_MYBOARD_FIRMWARE_TRIM");
         assert_eq!(found.packages, BTreeSet::from(["rpi-firmware".to_string()]));
     }
 
     #[test]
     fn global_variables_includes_infrastructure_and_architecture_clean_everything() {
         let index = sample();
-        assert!(index.symbol_use("BR2_RAZE_FAST_CFLAGS").global.is_some());
-        assert!(index.symbol_use("BR2_RAZE_EXTRA").global.is_some());
+        assert!(index.symbol_use("BR2_MYBOARD_FAST_CFLAGS").global.is_some());
+        assert!(index.symbol_use("BR2_MYBOARD_EXTRA").global.is_some());
         assert!(index.symbol_use("BR2_SHARED_LIBS").global.is_some());
         assert!(index.symbol_use("BR2_cortex_a76").global.is_some());
     }
@@ -536,6 +536,6 @@ endif
                 ..SymbolUse::default()
             }
         );
-        assert_eq!(index.symbol_use("BR2_RAZE_UNUSED"), SymbolUse::default());
+        assert_eq!(index.symbol_use("BR2_MYBOARD_UNUSED"), SymbolUse::default());
     }
 }

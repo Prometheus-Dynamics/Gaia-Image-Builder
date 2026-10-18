@@ -463,13 +463,13 @@ mod tests {
         entry(&root, "system", "mesa3d", "aaaa1111", 10);
         entry(&root, "system", "mesa3d", "bbbb2222", 20);
         entry(&root, "system", "linux", "cccc3333", 30);
-        entry(&root, "project", "photonvision", "dddd4444", 40);
+        entry(&root, "project", "myapp", "dddd4444", 40);
         let spec = spec(&root);
 
         let report = run_cache_command(&spec, &args()).expect("list");
         assert_eq!(report.json["action"], "list");
         assert_eq!(report.json["entries"].as_array().map(Vec::len), Some(4));
-        assert_eq!(report.json["entries"][0]["package"], "photonvision");
+        assert_eq!(report.json["entries"][0]["package"], "myapp");
         assert_eq!(report.json["levels"][0]["level"], "project");
         let listing = report.lines.join("\n");
         assert!(listing.contains("system level: 3 entries"), "{listing}");
@@ -479,7 +479,7 @@ mod tests {
                 .lines()
                 .next()
                 .expect("first")
-                .contains("photonvision@dddd4444")
+                .contains("myapp@dddd4444")
         );
 
         // A dry run removes nothing.

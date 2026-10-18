@@ -473,7 +473,7 @@ exit 2
 
 fn dockerfile_artifact() -> ArtifactSpec {
     let mut artifact = ArtifactSpec::new(
-        "helios-engine",
+        "acme-engine",
         ArtifactDefinition::Rust(gaia_spec::RustArtifactSpec {
             package: "demo".to_string(),
             target_name: None,
@@ -487,12 +487,12 @@ fn dockerfile_artifact() -> ArtifactSpec {
         }),
         None,
         ArtifactOutputSpec {
-            path: "out/helios-engine".to_string(),
+            path: "out/acme-engine".to_string(),
         },
     );
     artifact.execution = Some(ArtifactExecutionSpec::Docker(
         gaia_spec::DockerArtifactExecutionSpec {
-            image: Some("registry.example/helios-cross-rust194:latest".into()),
+            image: Some("registry.example/acme-cross-rust194:latest".into()),
             dockerfile: Some("docker/rust/Dockerfile".into()),
             context: None,
         },
@@ -542,7 +542,7 @@ fn dockerfile_execution_image_is_built_once_and_tagged_by_content() {
     let mut contract = dockerfile_contract(&spec).expect("contract");
     let tag = docker_tag(&contract);
     assert!(
-        tag.starts_with("gaia-local/helios-cross-rust194:"),
+        tag.starts_with("gaia-local/acme-cross-rust194:"),
         "unexpected tag {tag}"
     );
 

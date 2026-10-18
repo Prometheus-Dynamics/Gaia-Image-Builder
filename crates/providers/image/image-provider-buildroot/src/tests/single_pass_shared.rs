@@ -230,8 +230,8 @@ fn shared_output_key_ignores_build_identity_but_tracks_buildroot_inputs() {
     let workspace_root = workspace_root_scratch.join("workspace_root");
     let source_a = write_buildroot_source(&workspace_root, "build-a", SHARED_MAKEFILE);
     let source_b = write_buildroot_source(&workspace_root, "build-b", SHARED_MAKEFILE);
-    let spec_a = feed_spec(&workspace_root, "helios-base-os", "build-a");
-    let spec_b = feed_spec(&workspace_root, "helios-full", "build-b");
+    let spec_a = feed_spec(&workspace_root, "acme-base-os", "build-a");
+    let spec_b = feed_spec(&workspace_root, "acme-full", "build-b");
     let policy = ImageExecutionPolicy::default();
     let execution = test_execution();
     let image = squashfs_image("buildroot-source", &["a-only"]);
@@ -268,8 +268,8 @@ fn shared_output_builds_once_and_keeps_feeds_private() {
             "#!/bin/sh\nset -e\n[ \"$1\" = \"$BINARIES_DIR\" ]\nprintf '%s' \"$TARGET_DIR\" > \"$BINARIES_DIR/post-image-target\"\n",
         );
     }
-    let spec_a = feed_spec(&workspace_root, "helios-base-os", "build-a");
-    let spec_b = feed_spec(&workspace_root, "helios-full", "build-b");
+    let spec_a = feed_spec(&workspace_root, "acme-base-os", "build-a");
+    let spec_b = feed_spec(&workspace_root, "acme-full", "build-b");
     let policy = ImageExecutionPolicy {
         shared_output: true,
         ..ImageExecutionPolicy::default()
@@ -340,7 +340,7 @@ fn shared_output_builds_once_and_keeps_feeds_private() {
     assert!(!output_b.join(".gaia-pack").exists());
     assert!(
         workspace_root
-            .join("out-helios-full/images/rootfs.squashfs")
+            .join("out-acme-full/images/rootfs.squashfs")
             .is_file()
     );
 

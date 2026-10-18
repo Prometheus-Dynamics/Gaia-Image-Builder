@@ -43,7 +43,7 @@ fn write_tree(files: &[(&str, &str)]) -> Tree {
 
 const BUILD: &str = r#"
 imports = [
-  { path = "backend-styx.toml", when = { input = { backend = "styx" } } },
+  { path = "backend-sensor.toml", when = { input = { backend = "sensor" } } },
 ]
 
 build_name = "backend"
@@ -51,7 +51,7 @@ version = "1.0.0"
 
 [inputs.backend]
 kind = "string"
-default = "styx"
+default = "sensor"
 
 [workspace]
 root_dir = "ROOT"
@@ -63,17 +63,17 @@ kind = "starting-point"
 rootfs_path = "seed"
 "#;
 
-const STYX: &str = r#"
+const SENSOR: &str = r#"
 [[stage.env_sets]]
-id = "styx-env"
-name = "styx"
-entries = [["BACKEND", "styx"]]
+id = "sensor-env"
+name = "sensor"
+entries = [["BACKEND", "sensor"]]
 "#;
 
 fn tree(build: &str) -> Tree {
     write_tree(&[
         ("build.toml", build),
-        ("backend-styx.toml", STYX),
+        ("backend-sensor.toml", SENSOR),
         ("seed/placeholder", "x"),
     ])
 }
@@ -98,7 +98,10 @@ fn with_input(name: &str, value: &str) -> ResolveOptions {
 #[test]
 fn an_import_follows_the_input_default_and_the_set_value() {
     let path = tree(BUILD);
-    assert_eq!(env_set_ids(&path, &ResolveOptions::default()), ["styx-env"]);
+    assert_eq!(
+        env_set_ids(&path, &ResolveOptions::default()),
+        ["sensor-env"]
+    );
     assert!(env_set_ids(&path, &with_input("backend", "other")).is_empty());
 }
 
@@ -114,16 +117,16 @@ fn an_import_follows_an_input_set_by_a_preset() {
     // A `--set` beats the preset, as for every other override.
     let beaten = ResolveOptions {
         preset: Some("other".into()),
-        explicit_overrides: vec![("input.backend".into(), "styx".into())],
+        explicit_overrides: vec![("input.backend".into(), "sensor".into())],
         ..ResolveOptions::default()
     };
-    assert_eq!(env_set_ids(&path, &beaten), ["styx-env"]);
+    assert_eq!(env_set_ids(&path, &beaten), ["sensor-env"]);
 }
 
 #[test]
 fn each_variant_imports_with_its_own_inputs() {
     let build = format!(
-        "{BUILD}\n[[variants]]\nid = \"other\"\noverrides = [[\"input.backend\", \"other\"]]\n\n[[variants]]\nid = \"styx-preset\"\npreset = \"styx\"\n\n[presets.styx]\noverrides = [[\"input.backend\", \"styx\"]]\n"
+        "{BUILD}\n[[variants]]\nid = \"other\"\noverrides = [[\"input.backend\", \"other\"]]\n\n[[variants]]\nid = \"sensor-preset\"\npreset = \"sensor\"\n\n[presets.sensor]\noverrides = [[\"input.backend\", \"sensor\"]]\n"
     );
     let path = tree(&build);
     let specs = resolve_variant_specs(path.to_str().expect("utf-8"), &ResolveOptions::default())
@@ -137,11 +140,11 @@ fn each_variant_imports_with_its_own_inputs() {
             .collect::<Vec<_>>()
     };
     assert_eq!(specs[0].selection.variant.as_deref(), Some("default"));
-    assert_eq!(ids(0), ["styx-env"]);
+    assert_eq!(ids(0), ["sensor-env"]);
     assert_eq!(specs[1].selection.variant.as_deref(), Some("other"));
-    assert!(ids(1).is_empty(), "variant 'other' must not import styx");
-    assert_eq!(specs[2].selection.variant.as_deref(), Some("styx-preset"));
-    assert_eq!(ids(2), ["styx-env"]);
+    assert!(ids(1).is_empty(), "variant 'other' must not import sensor");
+    assert_eq!(specs[2].selection.variant.as_deref(), Some("sensor-preset"));
+    assert_eq!(ids(2), ["sensor-env"]);
 }
 
 #[test]
@@ -150,7 +153,10 @@ fn a_stage_item_can_be_keyed_on_an_input() {
         "{BUILD}\n[[stage.env_sets]]\nid = \"other-env\"\nname = \"other\"\nentries = [[\"BACKEND\", \"other\"]]\nwhen = {{ input = {{ backend = \"other\" }} }}\n"
     );
     let path = tree(&build);
-    assert_eq!(env_set_ids(&path, &ResolveOptions::default()), ["styx-env"]);
+    assert_eq!(
+        env_set_ids(&path, &ResolveOptions::default()),
+        ["sensor-env"]
+    );
     assert_eq!(
         env_set_ids(&path, &with_input("backend", "other")),
         ["other-env"]
@@ -160,7 +166,7 @@ fn a_stage_item_can_be_keyed_on_an_input() {
 #[test]
 fn an_undeclared_input_name_in_a_when_is_rejected() {
     let build = format!(
-        "{BUILD}\n[[stage.env_sets]]\nid = \"typo-env\"\nname = \"typo\"\nentries = []\nwhen = {{ input = {{ backnd = \"styx\" }} }}\n"
+        "{BUILD}\n[[stage.env_sets]]\nid = \"typo-env\"\nname = \"typo\"\nentries = []\nwhen = {{ input = {{ backnd = \"sensor\" }} }}\n"
     );
     let path = tree(&build);
     let error =
@@ -176,15 +182,18 @@ fn an_undeclared_input_name_in_a_when_is_rejected() {
 fn a_boolean_input_value_compares_as_its_string_form() {
     let build = BUILD
         .replace(
-            "default = \"styx\"",
-            "default = \"styx\"\n[inputs.flag]\nkind = \"boolean\"\ndefault = \"true\"",
+            "default = \"sensor\"",
+            "default = \"sensor\"\n[inputs.flag]\nkind = \"boolean\"\ndefault = \"true\"",
         )
         .replace(
-            "{ path = \"backend-styx.toml\", when = { input = { backend = \"styx\" } } },",
-            "{ path = \"backend-styx.toml\", when = { input = { flag = true } } },",
+            "{ path = \"backend-sensor.toml\", when = { input = { backend = \"sensor\" } } },",
+            "{ path = \"backend-sensor.toml\", when = { input = { flag = true } } },",
         );
     let path = tree(&build);
-    assert_eq!(env_set_ids(&path, &ResolveOptions::default()), ["styx-env"]);
+    assert_eq!(
+        env_set_ids(&path, &ResolveOptions::default()),
+        ["sensor-env"]
+    );
     let off = ResolveOptions {
         explicit_overrides: vec![("input.flag".into(), "false".into())],
         ..ResolveOptions::default()

@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use support::{provider_catalogs, reuse_state_for_ids, test_spec};
 
-const SOURCE: &str = "source:eidos";
+const SOURCE: &str = "source:corelib";
 const ARTIFACT: &str = "artifact:gaia-app";
 
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -44,7 +44,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-/// A bare repository `eidos-remote.git` with one commit on `main`, and the
+/// A bare repository `corelib-remote.git` with one commit on `main`, and the
 /// working clone that makes further commits.
 fn init_remote(scratch: &TempDir) -> (PathBuf, PathBuf) {
     // These tests move a branch and plan again in the same process, so each
@@ -52,8 +52,8 @@ fn init_remote(scratch: &TempDir) -> (PathBuf, PathBuf) {
     // SAFETY: set before any plan in this test binary reads it; every value
     // this binary sets is the same.
     unsafe { std::env::set_var("GAIA_FLOATING_REF_TTL_SECONDS", "0") };
-    let remote = scratch.join("eidos-remote.git");
-    let work = scratch.join("eidos-work");
+    let remote = scratch.join("corelib-remote.git");
+    let work = scratch.join("corelib-work");
     fs::create_dir_all(&remote).expect("remote dir");
     git(&remote, &["init", "--bare", "-b", "main"]);
     fs::create_dir_all(&work).expect("work dir");
@@ -71,19 +71,19 @@ fn push_commit(remote: &Path, work: &Path, contents: &str) -> String {
     git(work, &["rev-parse", "HEAD"])
 }
 
-/// The default test build, with `eidos` as the floating remote git source
+/// The default test build, with `corelib` as the floating remote git source
 /// that `gaia-app` builds from.
 fn floating_spec(scratch: &TempDir, remote: &Path) -> ResolvedBuildSpec {
     let mut spec = test_spec(scratch);
     spec.policy.providers.git.allow_remote_resolution = true;
-    let mut eidos = spec
+    let mut corelib = spec
         .sources
         .iter()
         .find(|source| source.id.as_str() == "gaia-upstream")
         .cloned()
         .expect("gaia-upstream source");
-    eidos.id = SourceId::new("eidos");
-    let SourceDefinition::Git(git) = &mut eidos.definition else {
+    corelib.id = SourceId::new("corelib");
+    let SourceDefinition::Git(git) = &mut corelib.definition else {
         panic!("gaia-upstream is a git source");
     };
     git.repo = format!("file://{}", remote.display());
@@ -93,25 +93,25 @@ fn floating_spec(scratch: &TempDir, remote: &Path) -> ResolvedBuildSpec {
     git.locked_commit = None;
     git.refresh_policy = SourceRefreshPolicySpec::Auto;
     git.pin_policy = SourcePinPolicySpec::Floating;
-    spec.sources.push(eidos);
-    spec.artifacts[0].source = Some(SourceRef::new("eidos"));
+    spec.sources.push(corelib);
+    spec.artifacts[0].source = Some(SourceRef::new("corelib"));
     spec
 }
 
-/// What a materialization of `eidos` at `commit` leaves on disk.
+/// What a materialization of `corelib` at `commit` leaves on disk.
 fn record_materialization(spec: &ResolvedBuildSpec, commit: &str) {
-    let dir = PathBuf::from(&spec.workspace.build_dir).join("sources/eidos");
-    fs::create_dir_all(&dir).expect("eidos source dir");
-    fs::write(dir.join("source.txt"), "ok").expect("eidos marker");
+    let dir = PathBuf::from(&spec.workspace.build_dir).join("sources/corelib");
+    fs::create_dir_all(&dir).expect("corelib source dir");
+    fs::write(dir.join("source.txt"), "ok").expect("corelib marker");
     fs::write(
         dir.join(".gaia-source-state.txt"),
         format!(
-            "provider=source.git\nsource=eidos\nselected_ref_type=branch\n\
+            "provider=source.git\nsource=corelib\nselected_ref_type=branch\n\
              selected_ref_value=main\nresolved_mode=remote-clone\n\
              resolved_commit_sha={commit}\n"
         ),
     )
-    .expect("eidos state");
+    .expect("corelib state");
 }
 
 fn write_artifact_output(spec: &ResolvedBuildSpec) {
@@ -234,7 +234,7 @@ fn unresolvable_floating_ref_materializes_with_a_note() {
     write_artifact_output(&spec);
     let state = reuse_state_for_ids(&spec, &baseline, &[SOURCE, ARTIFACT]);
 
-    fs::rename(&remote, scratch.join("eidos-remote-away.git")).expect("remote moved away");
+    fs::rename(&remote, scratch.join("corelib-remote-away.git")).expect("remote moved away");
     let plan = plan(&spec, Some(&state));
 
     let (code, message) = execute_code(op(&plan, SOURCE)).expect("source executes");

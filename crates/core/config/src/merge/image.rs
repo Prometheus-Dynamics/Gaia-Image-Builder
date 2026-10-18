@@ -268,7 +268,7 @@ mod tests {
             },
             RawImageDefinition::Buildroot {
                 source: None,
-                defconfig: Some("raspberrypicm5io_defconfig".into()),
+                defconfig: Some("evk_defconfig".into()),
                 defconfig_path: None,
                 allow_fallback: false,
                 config_fragments: vec!["target.fragment".into()],
@@ -288,7 +288,7 @@ mod tests {
                 expected_images,
                 ..
             } => {
-                assert_eq!(defconfig.as_deref(), Some("raspberrypicm5io_defconfig"));
+                assert_eq!(defconfig.as_deref(), Some("evk_defconfig"));
                 assert_eq!(
                     config_fragments,
                     vec![

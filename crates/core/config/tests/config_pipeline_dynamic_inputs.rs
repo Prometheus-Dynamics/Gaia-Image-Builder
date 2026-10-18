@@ -68,7 +68,7 @@ build_name = "dynamic-inputs-advanced"
 version = "${{input.release_branch}}"
 
 [[sources]]
-id = "photonvision"
+id = "myapp"
 kind = "git"
 repo = "{}"
 branch = "${{input.release_branch}}"
@@ -80,7 +80,7 @@ default_from = "latest-stable"
 
 [inputs.release_branch.choices_from]
 kind = "git-branches"
-source = "photonvision"
+source = "myapp"
 include = ["release/v2026*"]
 exclude = ["*-rc*"]
 strip_prefix = "release/"

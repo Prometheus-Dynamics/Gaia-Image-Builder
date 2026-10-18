@@ -493,7 +493,7 @@ out_dir = "out"
 
 [image]
 kind = "buildroot"
-defconfig = "raspberrypicm5io_defconfig"
+defconfig = "evk_defconfig"
 config_overrides = [["BR2_TARGET_ROOTFS_SQUASHFS4_XZ", "y"], ["BR2_PACKAGE_FOO", "y"]]
 
 [presets.dev]

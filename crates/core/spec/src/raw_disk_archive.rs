@@ -61,14 +61,20 @@ mod tests {
 
     #[test]
     fn raw_disk_archive_names_select_the_compression() {
-        assert_eq!(raw_disk_archive("raze.img"), Some(RawDiskArchive::Plain));
-        assert_eq!(raw_disk_archive("raze.RAW"), Some(RawDiskArchive::Plain));
+        assert_eq!(raw_disk_archive("myboard.img"), Some(RawDiskArchive::Plain));
+        assert_eq!(raw_disk_archive("myboard.RAW"), Some(RawDiskArchive::Plain));
         assert_eq!(
-            raw_disk_archive("raze-1.2.img.xz"),
+            raw_disk_archive("myboard-1.2.img.xz"),
             Some(RawDiskArchive::Xz)
         );
-        assert_eq!(raw_disk_archive("raze.img.zst"), Some(RawDiskArchive::Zstd));
-        assert_eq!(raw_disk_archive("raze.raw.zst"), Some(RawDiskArchive::Zstd));
+        assert_eq!(
+            raw_disk_archive("myboard.img.zst"),
+            Some(RawDiskArchive::Zstd)
+        );
+        assert_eq!(
+            raw_disk_archive("myboard.raw.zst"),
+            Some(RawDiskArchive::Zstd)
+        );
         assert_eq!(raw_disk_archive("rootfs.tar"), None);
         assert_eq!(raw_disk_archive("rootfs.tar.zst"), None);
         assert_eq!(raw_disk_archive("notes.xz"), None);

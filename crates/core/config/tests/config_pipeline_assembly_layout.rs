@@ -4,9 +4,9 @@ use gaia_config::resolve_config;
 use gaia_spec::AssemblyTransformKindSpec;
 use support::write_temp_config;
 
-/// The CM5 A/B layout from docs/configuration.md.
-const CM5_AB_LAYOUT: &str = r#"
-build_name = "helios"
+/// The EVK A/B layout from docs/configuration.md.
+const EVK_AB_LAYOUT: &str = r#"
+build_name = "acme"
 version = "1.2.3"
 
 [workspace]
@@ -91,14 +91,14 @@ image = "$provider.images/data.ext4"
 
 [[image.assembly.archives]]
 id = "update"
-output = "$provider.images/${build.name}-${build.version}.pdupdate"
+output = "$provider.images/${build.name}-${build.version}.update"
 
 [[image.assembly.archives.members]]
 name = "manifest.env"
 entries = [
-  ["MODEL", "cm5"],
+  ["MODEL", "evk"],
   ["VERSION", "${build.version}"],
-  ["OS", "HeliOS"],
+  ["OS", "AcmeOS"],
   ["BOOT_SHA256", "${assembly.sha256:$assembly.work/boot.vfat.zst}"],
   ["ROOTFS_SHA256", "${assembly.sha256:$assembly.work/rootfs.ext4.zst}"],
 ]
@@ -114,7 +114,7 @@ src = "$assembly.work/rootfs.ext4.zst"
 
 #[test]
 fn resolves_extended_partitions_zstd_and_archives() {
-    let path = write_temp_config(CM5_AB_LAYOUT);
+    let path = write_temp_config(EVK_AB_LAYOUT);
     let spec = resolve_config(path.to_str().expect("temp path should be utf-8"));
     let assembly = spec.image.assembly.as_ref().expect("assembly");
 
@@ -145,7 +145,7 @@ fn resolves_extended_partitions_zstd_and_archives() {
     let archive = &assembly.archives[0];
     assert_eq!(
         archive.output.as_str(),
-        "$provider.images/helios-1.2.3.pdupdate"
+        "$provider.images/acme-1.2.3.update"
     );
     assert_eq!(
         archive

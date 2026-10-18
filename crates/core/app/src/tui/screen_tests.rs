@@ -285,7 +285,7 @@ fn dump_phase2_renders() {
     let mut status = fixture_status();
     status.pid = 4242;
     picker.runs = vec![ListedRun {
-        run: fixture_registered_run(4242, "Cm5 image"),
+        run: fixture_registered_run(4242, "Evk image"),
         live: Some(LiveRun {
             pid: 4242,
             status: Some(status),

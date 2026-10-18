@@ -540,10 +540,10 @@ fn unmaterialized_partition_with_an_image_is_refused() {
     assert!(message.contains("not materialized"), "{message}");
 }
 
-/// The PhotonVision Raze layout: three primaries, then rootfs-a with an
+/// A board layout: three primaries, then rootfs-a with an
 /// image and two unmaterialized logical partitions, 1 MiB aligned.
 #[test]
-fn raze_layout_with_unmaterialized_logical_partitions_assembles() {
+fn myboard_layout_with_unmaterialized_logical_partitions_assembles() {
     let scratch = TempDir::new("gaia-exec-test");
     let mut spec = test_spec(&scratch);
     let build_dir = PathBuf::from(&spec.workspace.build_dir);
@@ -610,7 +610,7 @@ fn raze_layout_with_unmaterialized_logical_partitions_assembles() {
             ),
         ],
     );
-    disk.signature = Some("0x5056525a".into());
+    disk.signature = Some("0x12345678".into());
     disk.signature_text = None;
     disk.first_lba = Some(2048);
     disk.alignment_lba = Some(2048);

@@ -33,14 +33,14 @@ kind = "path"
 path = "."
 
 [[sources]]
-id = "orion"
+id = "worker"
 kind = "git"
-repo = "https://example.invalid/orion.git"
+repo = "https://example.invalid/worker.git"
 
 [[sources]]
-id = "orion-extra"
+id = "worker-extra"
 kind = "git"
-repo = "https://example.invalid/orion-extra.git"
+repo = "https://example.invalid/worker-extra.git"
 
 [[sources]]
 id = "tables"
@@ -59,7 +59,7 @@ kind = "buildroot"
 source = "buildroot-source"
 defconfig = "qemu_aarch64_virt_defconfig"
 config_overrides = [
-  ["BR2_ROOTFS_USERS_TABLES", "\"${source.orion-extra.path}/packaging/users.table\""],
+  ["BR2_ROOTFS_USERS_TABLES", "\"${source.worker-extra.path}/packaging/users.table\""],
   ["BR2_ROOTFS_DEVICE_TABLE", "\"system/device_table.txt ${source.tables.path}/device.table\""],
 ]
 "#
@@ -81,7 +81,7 @@ config_overrides = [
         users_table.as_deref().unwrap_or_default(),
         format!(
             "\"{}/packaging/users.table\"",
-            build_dir.join("sources/orion-extra").display()
+            build_dir.join("sources/worker-extra").display()
         )
         .as_str()
     );
@@ -100,10 +100,10 @@ config_overrides = [
                 .iter()
                 .any(|dependency| dependency.as_str() == source)
         };
-        assert!(depends_on("source:orion-extra"), "{id}");
+        assert!(depends_on("source:worker-extra"), "{id}");
         assert!(depends_on("source:tables"), "{id}");
         assert!(
-            !depends_on("source:orion"),
+            !depends_on("source:worker"),
             "a source whose directory is only a prefix of another's is not named: {id}"
         );
     }

@@ -159,7 +159,7 @@ fn archive_bundles_manifest_and_zstd_members_deterministically() {
         rootfs_zst.display(),
     );
     rootfs_transform.level = Some(19);
-    let bundle = collect_dir.join("helios-1.2.3.pdupdate");
+    let bundle = collect_dir.join("acme-1.2.3.update");
     spec.image.assembly = Some(ImageAssemblySpec {
         transforms: vec![
             assembly_transform(
@@ -183,9 +183,9 @@ fn archive_bundles_manifest_and_zstd_members_deterministically() {
                     src: None,
                     json: None,
                     entries: Some(vec![
-                        ("MODEL".into(), "cm5".into()),
+                        ("MODEL".into(), "evk".into()),
                         ("VERSION".into(), "1.2.3".into()),
-                        ("OS".into(), "Helios OS 'stable'".into()),
+                        ("OS".into(), "Acme OS 'stable'".into()),
                         (
                             "BOOT_SHA256".into(),
                             format!("${{assembly.sha256:{}}}", boot_zst.display()),
@@ -226,7 +226,7 @@ fn archive_bundles_manifest_and_zstd_members_deterministically() {
     assert_eq!(
         manifest,
         format!(
-            "MODEL=cm5\nVERSION=1.2.3\nOS='Helios OS '\\''stable'\\'''\nBOOT_SHA256={}\nROOTFS_SHA256={}\n",
+            "MODEL=evk\nVERSION=1.2.3\nOS='Acme OS '\\''stable'\\'''\nBOOT_SHA256={}\nROOTFS_SHA256={}\n",
             sha256_hex(boot_member),
             sha256_hex(rootfs_member)
         )

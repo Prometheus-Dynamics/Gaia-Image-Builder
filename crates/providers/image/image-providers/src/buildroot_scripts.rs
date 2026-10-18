@@ -220,11 +220,11 @@ mod tests {
         let scratch = TempDir::new("gaia-buildroot-scripts-settings");
         let root = scratch.path().to_path_buf();
         write(
-            &root.join("raze.defconfig"),
+            &root.join("myboard.defconfig"),
             "BR2_ROOTFS_POST_IMAGE_SCRIPT=\"board/a.sh\"\n# BR2_X is not set\n",
         );
         let buildroot = BuildrootImageSpec {
-            defconfig_path: Some("raze.defconfig".into()),
+            defconfig_path: Some("myboard.defconfig".into()),
             config_overrides: vec![(
                 "BR2_ROOTFS_POST_IMAGE_SCRIPT".into(),
                 "\"board/b.sh\"".into(),
@@ -240,13 +240,13 @@ mod tests {
     fn a_post_image_script_change_changes_its_component() {
         let scratch = TempDir::new("gaia-buildroot-scripts-change");
         let root = scratch.path().to_path_buf();
-        let script = root.join("board/raze/post-image.sh");
+        let script = root.join("board/myboard/post-image.sh");
         write(&script, "#!/bin/sh\necho one\n");
-        write(&root.join("board/raze/helper.sh"), "helper\n");
+        write(&root.join("board/myboard/helper.sh"), "helper\n");
         let buildroot = BuildrootImageSpec {
             config_overrides: vec![(
                 "BR2_ROOTFS_POST_IMAGE_SCRIPT".into(),
-                "\"board/raze/post-image.sh\"".into(),
+                "\"board/myboard/post-image.sh\"".into(),
             )],
             ..BuildrootImageSpec::default()
         };
@@ -258,7 +258,7 @@ mod tests {
         let after = post_script_components(&ws, &buildroot, &[], None);
         assert_ne!(before, after);
         // A sibling file beside the script counts too.
-        write(&root.join("board/raze/helper.sh"), "helper v2\n");
+        write(&root.join("board/myboard/helper.sh"), "helper v2\n");
         assert_ne!(after, post_script_components(&ws, &buildroot, &[], None));
     }
 
@@ -266,14 +266,14 @@ mod tests {
     fn external_tree_scripts_are_found_through_br2_external_paths() {
         let scratch = TempDir::new("gaia-buildroot-scripts-external");
         let root = scratch.path().to_path_buf();
-        write(&root.join("ext/external.desc"), "name: RAZE\n");
+        write(&root.join("ext/external.desc"), "name: MYBOARD\n");
         write(&root.join("ext/board/post-fakeroot.sh"), "fakeroot\n");
         let ws = workspace(&root);
         let buildroot = BuildrootImageSpec {
             external_tree: Some("ext".into()),
             config_overrides: vec![(
                 "BR2_ROOTFS_POST_FAKEROOT_SCRIPT".into(),
-                "\"$(BR2_EXTERNAL_RAZE_PATH)/board/post-fakeroot.sh\"".into(),
+                "\"$(BR2_EXTERNAL_MYBOARD_PATH)/board/post-fakeroot.sh\"".into(),
             )],
             ..BuildrootImageSpec::default()
         };
@@ -282,7 +282,7 @@ mod tests {
         assert_eq!(components.len(), 1);
         assert_eq!(
             components[0].0,
-            "post-fakeroot script RAZE:board/post-fakeroot.sh"
+            "post-fakeroot script MYBOARD:board/post-fakeroot.sh"
         );
     }
 }

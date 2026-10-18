@@ -157,7 +157,7 @@ fn expected_items_missing_from_the_build_fail_validation() {
     let (_dir, build) = build_with_layer(
         "expect-layer",
         "[[sources]]\nid = \"backend\"\nkind = \"path\"\npath = \".\"\n",
-        "[expect]\nsources = [\"backend\", \"vision-plugin\"]\nartifacts = [\"helios-api\"]\n",
+        "[expect]\nsources = [\"backend\", \"vision-plugin\"]\nartifacts = [\"acme-api\"]\n",
     );
     let spec = try_resolve_config(build.to_str().expect("utf-8 path")).expect("config resolves");
     let report = validate_spec(&spec);
@@ -171,7 +171,7 @@ fn expected_items_missing_from_the_build_fail_validation() {
     assert!(
         missing
             .iter()
-            .any(|message| message.contains("artifact 'helios-api'"))
+            .any(|message| message.contains("artifact 'acme-api'"))
     );
     assert!(
         missing

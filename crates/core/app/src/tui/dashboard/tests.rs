@@ -45,7 +45,7 @@ fn draw(view: &RunView, ui: &mut DashboardState, width: u16, height: u16) -> Str
 fn live_view() -> RunView {
     let mut view = fixture_view(NOW_MS);
     view.variant = Some(LiveVariant {
-        id: "pv2026".into(),
+        id: "rel2026".into(),
         index: 2,
         count: 4,
     });
@@ -79,7 +79,7 @@ fn live_run_uses_the_wide_layout_with_charts_beside_the_table() {
     assert!(text.contains("1 Progress"), "{text}");
     assert!(text.contains("2 Resources"), "{text}");
     assert!(text.contains("30/60"), "{text}");
-    assert!(text.contains("variant pv2026 2/4"), "{text}");
+    assert!(text.contains("variant rel2026 2/4"), "{text}");
     assert!(text.contains("make ETA"), "{text}");
     assert!(text.contains("Why"), "{text}");
 }

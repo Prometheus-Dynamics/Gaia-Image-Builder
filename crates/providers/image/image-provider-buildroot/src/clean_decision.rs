@@ -351,7 +351,7 @@ mod tests {
     #[test]
     fn a_full_clean_dominates_finalize_level_external_changes() {
         let mut changed = changes(Vec::new(), &[]);
-        changed.external_unmapped = vec!["RAZE:board/raze/hooks.mk".to_string()];
+        changed.external_unmapped = vec!["MYBOARD:board/myboard/hooks.mk".to_string()];
         changed.external_finalize = vec!["overlay file changed".to_string()];
         assert!(matches!(
             decide(true, &changed, None, None),
@@ -379,7 +379,7 @@ mod tests {
     fn an_external_change_that_cleans_nothing_is_nothing() {
         let mut changed = changes(Vec::new(), &[]);
         changed.external_reasons =
-            vec!["buildroot external file RAZE:Config.in changed".to_string()];
+            vec!["buildroot external file MYBOARD:Config.in changed".to_string()];
         assert!(!changed.something_changed());
         assert_eq!(decide(true, &changed, None, None), CleanPlan::Nothing);
     }
@@ -421,7 +421,7 @@ mod tests {
             removed: BTreeSet::from(["old".to_string()]),
             reasons: vec![
                 "BR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE a -> b".to_string(),
-                "external file RAZE:board/linux.fragment changed".to_string(),
+                "external file MYBOARD:board/linux.fragment changed".to_string(),
             ],
             refresh_target: false,
         };
@@ -429,7 +429,7 @@ mod tests {
             clean_summary_note(&CleanPlan::Packages(rebuild.clone())),
             Some(
                 "buildroot clean: rebuild linux, linux-headers, uninstall old \
-                 (BR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE a -> b; external file RAZE:board/linux.fragment changed)"
+                 (BR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE a -> b; external file MYBOARD:board/linux.fragment changed)"
                     .to_string()
             )
         );

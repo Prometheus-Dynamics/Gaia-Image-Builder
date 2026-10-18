@@ -245,9 +245,9 @@ mod tests {
 
     #[test]
     fn close_matches_suggest_the_nearest_ids() {
-        let ids = ["artifact:photonvision-jar", "image:build", "image:prepare"];
-        let hint = close_matches_hint("artifact:photonvison-jar", &ids);
-        assert_eq!(hint, " (did you mean 'artifact:photonvision-jar'?)");
+        let ids = ["artifact:myapp-jar", "image:build", "image:prepare"];
+        let hint = close_matches_hint("artifact:myapp-jar", &ids);
+        assert_eq!(hint, " (did you mean 'artifact:myapp-jar'?)");
         assert_eq!(close_matches_hint("zzzzzzzzzzzz", &ids), "");
     }
 

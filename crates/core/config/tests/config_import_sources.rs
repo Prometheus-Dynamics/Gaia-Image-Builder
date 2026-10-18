@@ -12,16 +12,16 @@ const DEVICE_LAYER: &str = r#"
 imports = ["units.toml"]
 
 [[stage.files]]
-id = "raze-overlay"
-src = "@self/overlays/raze.dtbo"
-dest = "/boot/overlays/raze.dtbo"
+id = "myboard-overlay"
+src = "@self/overlays/myboard.dtbo"
+dest = "/boot/overlays/myboard.dtbo"
 "#;
 
 const UNITS_LAYER: &str = r#"
 [[stage.services]]
-id = "raze-camera"
-name = "raze-camera.service"
-unit_path = "@self/units/raze-camera.service"
+id = "myboard-camera"
+name = "myboard-camera.service"
+unit_path = "@self/units/myboard-camera.service"
 "#;
 
 struct Fixture {
@@ -33,16 +33,16 @@ struct Fixture {
 }
 
 impl Fixture {
-    /// A workspace (with `Cargo.toml`) and a git repo laid out like Atlas,
+    /// A workspace (with `Cargo.toml`) and a git repo laid out like Bsp,
     /// with two commits; the second only touches `README.md`.
     fn new(name: &str) -> Self {
         let scratch = TempDir::new(&format!("gaia-import-src-{name}"));
         let root = scratch.path().to_path_buf();
         let workspace = root.join("workspace");
-        let repo = root.join("atlas");
+        let repo = root.join("bsp");
         fs::create_dir_all(workspace.join("configs/builds")).expect("workspace");
         fs::write(workspace.join("Cargo.toml"), "[workspace]\n").expect("cargo");
-        write_device_tree(&repo.join("devices/raze/gaia"));
+        write_device_tree(&repo.join("devices/myboard/gaia"));
         fs::write(repo.join("README.md"), "one\n").expect("readme");
         git(&repo, &["init", "--quiet"]);
         git(&repo, &["add", "."]);
@@ -65,16 +65,16 @@ impl Fixture {
     }
 
     fn build_file(&self) -> PathBuf {
-        self.workspace.join("configs/builds/cm5.toml")
+        self.workspace.join("configs/builds/evk.toml")
     }
 
-    /// Writes the entrypoint: `imports` + `rest` + the atlas source.
+    /// Writes the entrypoint: `imports` + `rest` + the bsp source.
     fn write_build(&self, imports: &str, source_extra: &str, rest: &str) {
         fs::write(
             self.build_file(),
             format!(
-                "build_name = \"cm5\"\ntarget = \"cm5\"\nimports = [{imports}]\n{rest}\n\
-                 [[sources]]\nid = \"atlas\"\nkind = \"git\"\nrepo = \"{}\"\n{source_extra}\n",
+                "build_name = \"evk\"\ntarget = \"evk\"\nimports = [{imports}]\n{rest}\n\
+                 [[sources]]\nid = \"bsp\"\nkind = \"git\"\nrepo = \"{}\"\n{source_extra}\n",
                 self.repo_url()
             ),
         )
@@ -84,7 +84,7 @@ impl Fixture {
     fn checkout(&self, rev: &str) -> PathBuf {
         self.workspace
             .join(".gaia/cache/import-sources")
-            .join(format!("atlas-{rev}"))
+            .join(format!("bsp-{rev}"))
     }
 
     fn resolve(&self, overrides: &[(&str, &str)]) -> Result<ResolvedBuildSpec, String> {
@@ -107,8 +107,8 @@ fn write_device_tree(dir: &Path) {
     fs::create_dir_all(dir.join("units")).expect("units");
     fs::write(dir.join("device.toml"), DEVICE_LAYER).expect("device");
     fs::write(dir.join("units.toml"), UNITS_LAYER).expect("units layer");
-    fs::write(dir.join("overlays/raze.dtbo"), "dtbo").expect("dtbo");
-    fs::write(dir.join("units/raze-camera.service"), "[Unit]\n").expect("unit");
+    fs::write(dir.join("overlays/myboard.dtbo"), "dtbo").expect("dtbo");
+    fs::write(dir.join("units/myboard-camera.service"), "[Unit]\n").expect("unit");
 }
 
 fn git(repo: &Path, args: &[&str]) {
@@ -158,34 +158,34 @@ fn service_unit(spec: &ResolvedBuildSpec, id: &str) -> Option<String> {
         .map(|service| service.unit_path.clone())
 }
 
-const ATLAS_IMPORT: &str = r#"{ source = "atlas", path = "devices/raze/gaia/device.toml" }"#;
+const BSP_IMPORT: &str = r#"{ source = "bsp", path = "devices/myboard/gaia/device.toml" }"#;
 
 #[test]
 fn imports_from_a_git_source_at_rev_with_nested_import_and_tokens() {
     let fixture = Fixture::new("rev");
     let rev = fixture.commits[0].clone();
     fixture.write_build(
-        ATLAS_IMPORT,
+        BSP_IMPORT,
         &format!("rev = \"{rev}\""),
         r#"
 [[stage.files]]
 id = "consumer-ref"
-src = "@source:atlas/devices/raze/gaia/overlays/raze.dtbo"
-dest = "/opt/raze.dtbo"
+src = "@source:bsp/devices/myboard/gaia/overlays/myboard.dtbo"
+dest = "/opt/myboard.dtbo"
 "#,
     );
     let spec = fixture.resolve(&[]).expect("resolve");
-    let layer_dir = fixture.checkout(&rev).join("devices/raze/gaia");
+    let layer_dir = fixture.checkout(&rev).join("devices/myboard/gaia");
     assert_eq!(
-        stage_file_src(&spec, "raze-overlay").as_deref(),
-        Some(layer_dir.join("overlays/raze.dtbo").to_str().unwrap()),
+        stage_file_src(&spec, "myboard-overlay").as_deref(),
+        Some(layer_dir.join("overlays/myboard.dtbo").to_str().unwrap()),
         "@self resolves to the directory of the imported file"
     );
     assert_eq!(
-        service_unit(&spec, "raze-camera").as_deref(),
+        service_unit(&spec, "myboard-camera").as_deref(),
         Some(
             layer_dir
-                .join("units/raze-camera.service")
+                .join("units/myboard-camera.service")
                 .to_str()
                 .unwrap()
         ),
@@ -193,24 +193,24 @@ dest = "/opt/raze.dtbo"
     );
     assert_eq!(
         stage_file_src(&spec, "consumer-ref").as_deref(),
-        Some(layer_dir.join("overlays/raze.dtbo").to_str().unwrap()),
+        Some(layer_dir.join("overlays/myboard.dtbo").to_str().unwrap()),
         "@source:<id> resolves to the checkout"
     );
     let import = &spec.selection.import_sources[0];
-    assert_eq!(import.id, "atlas");
+    assert_eq!(import.id, "bsp");
     assert_eq!(import.identity, format!("git:{}@{rev}", fixture.repo_url()));
-    assert!(import.contributes_to("stage-file:raze-overlay"));
-    assert!(import.contributes_to("stage-service:raze-camera"));
+    assert!(import.contributes_to("stage-file:myboard-overlay"));
+    assert!(import.contributes_to("stage-service:myboard-camera"));
     assert!(!import.contributes_to("stage-file:consumer-ref"));
 
     // The checkout is reused: resolving again works without the repo.
-    fs::rename(&fixture.repo, fixture.root.join("atlas-moved")).expect("move repo");
+    fs::rename(&fixture.repo, fixture.root.join("bsp-moved")).expect("move repo");
     let again = fixture
         .resolve(&[])
         .expect("resolve from existing checkout");
     assert_eq!(
-        stage_file_src(&again, "raze-overlay"),
-        stage_file_src(&spec, "raze-overlay")
+        stage_file_src(&again, "myboard-overlay"),
+        stage_file_src(&spec, "myboard-overlay")
     );
 }
 
@@ -219,12 +219,12 @@ fn when_conditions_filter_source_imports_before_fetching() {
     let fixture = Fixture::new("when");
     let rev = fixture.commits[0].clone();
     fixture.write_build(
-        r#"{ source = "atlas", path = "devices/raze/gaia/device.toml", when = { target = "rpi5" } }"#,
+        r#"{ source = "bsp", path = "devices/myboard/gaia/device.toml", when = { target = "rpi5" } }"#,
         &format!("rev = \"{rev}\""),
         "",
     );
     let spec = fixture.resolve(&[]).expect("resolve");
-    assert!(stage_file_src(&spec, "raze-overlay").is_none());
+    assert!(stage_file_src(&spec, "myboard-overlay").is_none());
     assert!(spec.selection.import_sources.is_empty());
     assert!(
         !fixture.checkout(&rev).exists(),
@@ -234,27 +234,32 @@ fn when_conditions_filter_source_imports_before_fetching() {
     let spec = fixture
         .resolve(&[("build.target", "rpi5")])
         .expect("resolve rpi5");
-    assert!(stage_file_src(&spec, "raze-overlay").is_some());
+    assert!(stage_file_src(&spec, "myboard-overlay").is_some());
 }
 
 #[test]
 fn vendored_copy_resolves_self_like_the_checkout() {
     let fixture = Fixture::new("vendored");
-    let vendored = fixture.workspace.join("vendor/atlas/devices/raze/gaia");
+    let vendored = fixture.workspace.join("vendor/bsp/devices/myboard/gaia");
     write_device_tree(&vendored);
     fixture.write_build(
-        r#""../../vendor/atlas/devices/raze/gaia/device.toml""#,
+        r#""../../vendor/bsp/devices/myboard/gaia/device.toml""#,
         "",
         "",
     );
     let spec = fixture.resolve(&[]).expect("resolve");
     assert_eq!(
-        stage_file_src(&spec, "raze-overlay").as_deref(),
-        Some(vendored.join("overlays/raze.dtbo").to_str().unwrap())
+        stage_file_src(&spec, "myboard-overlay").as_deref(),
+        Some(vendored.join("overlays/myboard.dtbo").to_str().unwrap())
     );
     assert_eq!(
-        service_unit(&spec, "raze-camera").as_deref(),
-        Some(vendored.join("units/raze-camera.service").to_str().unwrap())
+        service_unit(&spec, "myboard-camera").as_deref(),
+        Some(
+            vendored
+                .join("units/myboard-camera.service")
+                .to_str()
+                .unwrap()
+        )
     );
     assert!(spec.selection.import_sources.is_empty());
 }
@@ -271,31 +276,31 @@ fn rejects_imports_that_escape_the_checkout() {
     git(&fixture.repo, &["commit", "--quiet", "-m", "escape"]);
     let rev = head(&fixture.repo);
     fixture.write_build(
-        r#"{ source = "atlas", path = "escape.toml" }"#,
+        r#"{ source = "bsp", path = "escape.toml" }"#,
         &format!("rev = \"{rev}\""),
         "",
     );
     let error = fixture.resolve(&[]).expect_err("nested escape");
     assert!(error.contains("outside the checkout"), "{error}");
-    assert!(error.contains("'atlas'"), "{error}");
+    assert!(error.contains("'bsp'"), "{error}");
     assert!(error.contains("escape.toml"), "{error}");
 
     fixture.write_build(
-        r#"{ source = "atlas", path = "../atlas-other/device.toml" }"#,
+        r#"{ source = "bsp", path = "../bsp-other/device.toml" }"#,
         &format!("rev = \"{rev}\""),
         "",
     );
     let error = fixture.resolve(&[]).expect_err("direct escape");
     assert!(error.contains("outside the checkout"), "{error}");
-    assert!(error.contains("cm5.toml"), "{error}");
+    assert!(error.contains("evk.toml"), "{error}");
 }
 
 #[test]
 fn unpinned_import_source_names_the_import_and_suggests_rev_or_lock() {
     let fixture = Fixture::new("unpinned");
-    fixture.write_build(ATLAS_IMPORT, "", "");
+    fixture.write_build(BSP_IMPORT, "", "");
     let error = fixture.resolve(&[]).expect_err("unpinned");
-    assert!(error.contains("import source 'atlas'"), "{error}");
+    assert!(error.contains("import source 'bsp'"), "{error}");
     assert!(
         error.contains(fixture.build_file().to_str().unwrap()),
         "{error}"
@@ -320,28 +325,28 @@ fn undeclared_import_source_is_an_error() {
 fn lockfile_supplies_the_revision() {
     let fixture = Fixture::new("lock");
     let locked = fixture.commits[0].clone();
-    fixture.write_build(ATLAS_IMPORT, "", "");
+    fixture.write_build(BSP_IMPORT, "", "");
     fs::write(
-        fixture.workspace.join("configs/builds/cm5.gaia.lock"),
+        fixture.workspace.join("configs/builds/evk.gaia.lock"),
         format!(
-            "version = 1\n\n[[git]]\nsource = \"atlas\"\nrepo = \"{}\"\nref = \"head:HEAD\"\ncommit = \"{locked}\"\n",
+            "version = 1\n\n[[git]]\nsource = \"bsp\"\nrepo = \"{}\"\nref = \"head:HEAD\"\ncommit = \"{locked}\"\n",
             fixture.repo_url()
         ),
     )
     .expect("lockfile");
     let spec = fixture.resolve(&[]).expect("resolve");
     assert!(
-        stage_file_src(&spec, "raze-overlay")
+        stage_file_src(&spec, "myboard-overlay")
             .unwrap()
             .starts_with(fixture.checkout(&locked).to_str().unwrap())
     );
-    let atlas = spec
+    let bsp = spec
         .sources
         .iter()
-        .find(|source| source.id.as_str() == "atlas")
-        .expect("atlas source");
-    let SourceDefinition::Git(git) = &atlas.definition else {
-        panic!("atlas stays a git source");
+        .find(|source| source.id.as_str() == "bsp")
+        .expect("bsp source");
+    let SourceDefinition::Git(git) = &bsp.definition else {
+        panic!("bsp stays a git source");
     };
     assert_eq!(git.locked_commit.as_deref(), Some(locked.as_str()));
 }
@@ -349,30 +354,30 @@ fn lockfile_supplies_the_revision() {
 #[test]
 fn local_path_override_reads_the_directory_and_materializes_as_path() {
     let fixture = Fixture::new("override");
-    let dev = fixture.workspace.join("atlas-dev");
-    write_device_tree(&dev.join("devices/raze/gaia"));
+    let dev = fixture.workspace.join("bsp-dev");
+    write_device_tree(&dev.join("devices/myboard/gaia"));
     // No rev: the override needs no pin.
-    fixture.write_build(ATLAS_IMPORT, "", "");
+    fixture.write_build(BSP_IMPORT, "", "");
     let spec = fixture
-        .resolve(&[("sources.atlas.path", "atlas-dev")])
+        .resolve(&[("sources.bsp.path", "bsp-dev")])
         .expect("resolve with override");
     assert_eq!(
-        stage_file_src(&spec, "raze-overlay").as_deref(),
+        stage_file_src(&spec, "myboard-overlay").as_deref(),
         Some(
-            dev.join("devices/raze/gaia/overlays/raze.dtbo")
+            dev.join("devices/myboard/gaia/overlays/myboard.dtbo")
                 .to_str()
                 .unwrap()
         )
     );
-    let atlas = spec
+    let bsp = spec
         .sources
         .iter()
-        .find(|source| source.id.as_str() == "atlas")
-        .expect("atlas source");
+        .find(|source| source.id.as_str() == "bsp")
+        .expect("bsp source");
     assert!(
-        matches!(&atlas.definition, SourceDefinition::Path(path) if path.path == "atlas-dev"),
+        matches!(&bsp.definition, SourceDefinition::Path(path) if path.path == "bsp-dev"),
         "{:?}",
-        atlas.definition
+        bsp.definition
     );
     let identity = &spec.selection.import_sources[0].identity;
     assert!(
@@ -388,12 +393,12 @@ fn local_path_override_reads_the_directory_and_materializes_as_path() {
 
     // Editing a layer file changes the override's identity.
     fs::write(
-        dev.join("devices/raze/gaia/units.toml"),
+        dev.join("devices/myboard/gaia/units.toml"),
         format!("{UNITS_LAYER}\n# edited\n"),
     )
     .expect("edit");
     let edited = fixture
-        .resolve(&[("sources.atlas.path", "atlas-dev")])
+        .resolve(&[("sources.bsp.path", "bsp-dev")])
         .expect("resolve edited");
     assert_ne!(&edited.selection.import_sources[0].identity, identity);
 }
@@ -410,7 +415,7 @@ fn source_imported_files_cannot_declare_import_sources() {
     git(&fixture.repo, &["commit", "--quiet", "-m", "chain"]);
     let rev = head(&fixture.repo);
     fixture.write_build(
-        r#"{ source = "atlas", path = "chain.toml" }"#,
+        r#"{ source = "bsp", path = "chain.toml" }"#,
         &format!("rev = \"{rev}\""),
         "",
     );
@@ -427,51 +432,51 @@ fn non_selected_local_layers_neither_fetch_nor_plan_their_import_source() {
     let fixture = Fixture::new("local-when");
     fs::create_dir_all(fixture.workspace.join("configs/layers")).expect("layers dir");
     fs::write(
-        fixture.workspace.join("configs/layers/raze.toml"),
+        fixture.workspace.join("configs/layers/myboard.toml"),
         r#"
 [[stage.files]]
-id = "raze-overlay"
-src = "@source:atlas/devices/raze/gaia/overlays/raze.dtbo:raze/assets/extra"
-dest = "/boot/overlays/raze.dtbo"
+id = "myboard-overlay"
+src = "@source:bsp/devices/myboard/gaia/overlays/myboard.dtbo:myboard/assets/extra"
+dest = "/boot/overlays/myboard.dtbo"
 "#,
     )
-    .expect("raze layer");
-    let imports = r#""../layers/raze.toml""#;
-    let raze_only = format!("{{ path = {imports}, when = {{ target = \"raze\" }} }}");
+    .expect("myboard layer");
+    let imports = r#""../layers/myboard.toml""#;
+    let myboard_only = format!("{{ path = {imports}, when = {{ target = \"myboard\" }} }}");
 
-    // An unreachable rev, like an unpushed commit: non-raze targets must not care.
+    // An unreachable rev, like an unpushed commit: non-myboard targets must not care.
     fixture.write_build(
-        &raze_only,
+        &myboard_only,
         "rev = \"0000000000000000000000000000000000000000\"",
         "",
     );
-    let spec = fixture.resolve(&[]).expect("non-raze target resolves");
-    assert!(stage_file_src(&spec, "raze-overlay").is_none());
+    let spec = fixture.resolve(&[]).expect("non-myboard target resolves");
+    assert!(stage_file_src(&spec, "myboard-overlay").is_none());
     assert!(spec.selection.import_sources.is_empty());
     assert!(
         spec.sources
             .iter()
-            .all(|source| source.id.as_str() != "atlas"),
+            .all(|source| source.id.as_str() != "bsp"),
         "an import-only source of a non-selected layer must not be planned"
     );
 
     let rev = fixture.commits[0].clone();
-    fixture.write_build(&raze_only, &format!("rev = \"{rev}\""), "");
+    fixture.write_build(&myboard_only, &format!("rev = \"{rev}\""), "");
     let spec = fixture
-        .resolve(&[("build.target", "raze")])
-        .expect("raze target resolves");
-    let src = stage_file_src(&spec, "raze-overlay").expect("raze overlay staged");
+        .resolve(&[("build.target", "myboard")])
+        .expect("myboard target resolves");
+    let src = stage_file_src(&spec, "myboard-overlay").expect("myboard overlay staged");
     assert_eq!(
         src,
         format!(
-            "{}/devices/raze/gaia/overlays/raze.dtbo:raze/assets/extra",
+            "{}/devices/myboard/gaia/overlays/myboard.dtbo:myboard/assets/extra",
             fixture.checkout(&rev).display()
         )
     );
     assert!(
         spec.sources
             .iter()
-            .any(|source| source.id.as_str() == "atlas")
+            .any(|source| source.id.as_str() == "bsp")
     );
 }
 
@@ -482,14 +487,14 @@ fn source_commit_tokens_resolve_to_the_imported_commit() {
     let fixture = Fixture::new("commit-token");
     let rev = fixture.commits[1].clone();
     fixture.write_build(
-        r#"{ source = "atlas", path = "devices/raze/gaia/device.toml" }"#,
+        r#"{ source = "bsp", path = "devices/myboard/gaia/device.toml" }"#,
         &format!("rev = \"{rev}\""),
         r#"
 [[stage.env_sets]]
 id = "image-version"
 name = "image-version"
 entries = [
-  ["DEVICE_PACKAGE_COMMIT", "${source.atlas.commit}"],
+  ["DEVICE_PACKAGE_COMMIT", "${source.bsp.commit}"],
   ["UNKNOWN", "${source.nope.commit}"],
 ]
 "#,
@@ -513,10 +518,7 @@ entries = [
         .iter()
         .map(|unresolved| unresolved.token.as_str())
         .collect::<Vec<_>>();
-    assert!(
-        !unresolved.contains(&"source.atlas.commit"),
-        "{unresolved:?}"
-    );
+    assert!(!unresolved.contains(&"source.bsp.commit"), "{unresolved:?}");
     assert!(unresolved.contains(&"source.nope.commit"), "{unresolved:?}");
 }
 
@@ -529,25 +531,25 @@ fn source_path_tokens_resolve_for_each_source_kind() {
     let rev = fixture.commits[1].clone();
     fs::create_dir_all(fixture.workspace.join("vendor/tables")).expect("path source");
     fixture.write_build(
-        r#"{ source = "atlas", path = "devices/raze/gaia/device.toml" }"#,
+        r#"{ source = "bsp", path = "devices/myboard/gaia/device.toml" }"#,
         &format!(
             "rev = \"{rev}\"\n\n[[sources]]\nid = \"local\"\nkind = \"path\"\npath = \"vendor/tables\"\n\n\
-             [[sources]]\nid = \"orion\"\nkind = \"git\"\nrepo = \"https://example.invalid/orion.git\"\n"
+             [[sources]]\nid = \"worker\"\nkind = \"git\"\nrepo = \"https://example.invalid/worker.git\"\n"
         ),
         r#"
 [image]
 kind = "buildroot"
 defconfig = "qemu_aarch64_virt_defconfig"
 config_overrides = [
-  ["BR2_ROOTFS_USERS_TABLES", "\"${source.atlas.path}/users.table\""],
-  ["BR2_ROOTFS_DEVICE_TABLE", "\"${source.local.path}/device.table ${source.orion.path}/dev.table\""],
+  ["BR2_ROOTFS_USERS_TABLES", "\"${source.bsp.path}/users.table\""],
+  ["BR2_ROOTFS_DEVICE_TABLE", "\"${source.local.path}/device.table ${source.worker.path}/dev.table\""],
   ["BR2_UNKNOWN", "${source.nope.path}"],
 ]
 
 [[stage.env_sets]]
 id = "paths"
 name = "paths"
-entries = [["ATLAS", "${source.atlas.path}"]]
+entries = [["BSP", "${source.bsp.path}"]]
 "#,
     );
 
@@ -561,8 +563,8 @@ entries = [["ATLAS", "${source.atlas.path}"]]
         .join("vendor/tables")
         .display()
         .to_string();
-    let orion = Path::new(&spec.workspace.build_dir)
-        .join("sources/orion")
+    let worker = Path::new(&spec.workspace.build_dir)
+        .join("sources/worker")
         .display()
         .to_string();
     let overrides = buildroot
@@ -576,7 +578,7 @@ entries = [["ATLAS", "${source.atlas.path}"]]
     );
     assert_eq!(
         overrides["BR2_ROOTFS_DEVICE_TABLE"],
-        format!("\"{local}/device.table {orion}/dev.table\"")
+        format!("\"{local}/device.table {worker}/dev.table\"")
     );
     assert_eq!(overrides["BR2_UNKNOWN"], "${source.nope.path}");
     let env_set = spec
@@ -585,7 +587,7 @@ entries = [["ATLAS", "${source.atlas.path}"]]
         .iter()
         .find(|env_set| env_set.id.as_str() == "paths")
         .expect("env set");
-    assert_eq!(env_set.entries, vec![("ATLAS".to_string(), checkout)]);
+    assert_eq!(env_set.entries, vec![("BSP".to_string(), checkout)]);
     let unresolved = spec
         .policy
         .interpolation

@@ -396,7 +396,7 @@ mod tests {
             "HOST_EROFS_UTILS_CONF_OPTS += --enable-multithreading\n\
              LIBCAMERA_DEPENDENCIES = host-meson\n\
              # FOO_VERSION = 1\n\
-             PD_IMAGE_SLOTS_SITE := $(BR2_EXTERNAL_RAZE_PATH)/x\n\
+             PD_IMAGE_SLOTS_SITE := $(BR2_EXTERNAL_MYBOARD_PATH)/x\n\
              FOO_POST_INSTALL_HOOKS += bar\n\
              FOO_INSTALL_TARGET_CMDS = true\n\
              FOO_SITE_METHOD = git\n",
@@ -415,7 +415,7 @@ mod tests {
     #[test]
     fn patches_name_their_package_at_any_depth() {
         assert_eq!(
-            package_of_path("board/raze/patches/linux/0001-fix.patch"),
+            package_of_path("board/myboard/patches/linux/0001-fix.patch"),
             BTreeSet::from(["linux".to_string()])
         );
         assert_eq!(
@@ -423,12 +423,12 @@ mod tests {
             BTreeSet::from(["host-erofs-utils".to_string()])
         );
         // A `patches` directory with no file below a package names none.
-        assert!(package_of_path("board/raze/patches/linux").is_empty());
+        assert!(package_of_path("board/myboard/patches/linux").is_empty());
     }
 
     #[test]
     fn linux_extensions_and_top_level_package_patches_name_their_package() {
-        // The raze tree's kernel patch: a linux post-patch hook in external.mk
+        // The myboard tree's kernel patch: a linux post-patch hook in external.mk
         // applies linux/patches/*.patch, and no BR2_ setting names it.
         assert_eq!(
             package_of_path(
@@ -441,7 +441,7 @@ mod tests {
             BTreeSet::from(["linux".to_string()])
         );
         assert_eq!(
-            package_of_path("linux/raze.config"),
+            package_of_path("linux/myboard.config"),
             BTreeSet::from(["linux".to_string()])
         );
         assert_eq!(
@@ -449,7 +449,7 @@ mod tests {
             BTreeSet::from(["libcamera".to_string()])
         );
         // A patch directory below a board names no package.
-        assert!(package_of_path("board/raze/patches/0001-fix.patch").is_empty());
+        assert!(package_of_path("board/myboard/patches/0001-fix.patch").is_empty());
     }
 
     #[test]
@@ -459,7 +459,7 @@ mod tests {
             BTreeSet::from(["host-erofs-utils".to_string()])
         );
         assert!(package_of_path("Config.in").is_empty());
-        assert!(package_of_path("board/raze/post-image.sh").is_empty());
+        assert!(package_of_path("board/myboard/post-image.sh").is_empty());
     }
 
     fn tree_with(files: &[(&str, &str)]) -> (TempDir, PathBuf) {
@@ -476,21 +476,21 @@ mod tests {
     #[test]
     fn external_files_are_keyed_by_tree_and_skip_git() {
         let (_scratch, root) = tree_with(&[
-            ("external.desc", "name: RAZE_DEVICE\n"),
+            ("external.desc", "name: MYBOARD_DEVICE\n"),
             ("external.mk", "HOST_EROFS_UTILS_CONF_OPTS += -x\n"),
             (".git/HEAD", "ref"),
         ]);
         let trees = vec![ExternalTree {
-            name: "RAZE_DEVICE".into(),
+            name: "MYBOARD_DEVICE".into(),
             dir: root.clone(),
         }];
         let files = external_tree_files(&trees);
         assert_eq!(
             files.keys().cloned().collect::<Vec<_>>(),
-            ["RAZE_DEVICE:external.desc", "RAZE_DEVICE:external.mk"]
+            ["MYBOARD_DEVICE:external.desc", "MYBOARD_DEVICE:external.mk"]
         );
         assert_eq!(
-            files["RAZE_DEVICE:external.mk"].packages,
+            files["MYBOARD_DEVICE:external.mk"].packages,
             BTreeSet::from(["host-erofs-utils".to_string()])
         );
     }
@@ -499,28 +499,28 @@ mod tests {
     fn a_changed_external_mk_names_its_packages_and_unmapped_files_are_reported() {
         let mut before = BTreeMap::new();
         before.insert(
-            "RAZE:external.mk".to_string(),
+            "MYBOARD:external.mk".to_string(),
             ExternalFile {
                 digest: "sha256:old".into(),
                 packages: BTreeSet::from(["host-erofs-utils".to_string()]),
             },
         );
         before.insert(
-            "RAZE:Config.in".to_string(),
+            "MYBOARD:Config.in".to_string(),
             ExternalFile {
                 digest: "sha256:c".into(),
                 packages: BTreeSet::new(),
             },
         );
         let mut after = before.clone();
-        after.get_mut("RAZE:external.mk").expect("mk").digest = "sha256:new".into();
-        after.get_mut("RAZE:Config.in").expect("cfg").digest = "sha256:c2".into();
+        after.get_mut("MYBOARD:external.mk").expect("mk").digest = "sha256:new".into();
+        after.get_mut("MYBOARD:Config.in").expect("cfg").digest = "sha256:c2".into();
         let changes = external_changes(&before, &after);
         assert_eq!(
             changes.packages,
             BTreeSet::from(["host-erofs-utils".to_string()])
         );
-        assert_eq!(changes.unmapped, ["RAZE:Config.in"]);
+        assert_eq!(changes.unmapped, ["MYBOARD:Config.in"]);
         assert_eq!(changes.reasons.len(), 1);
         assert!(external_changes(&before, &before).packages.is_empty());
     }
@@ -529,7 +529,7 @@ mod tests {
     fn external_state_round_trips_and_keys_packages() {
         let mut files = BTreeMap::new();
         files.insert(
-            "RAZE:external.mk".to_string(),
+            "MYBOARD:external.mk".to_string(),
             ExternalFile {
                 digest: "sha256:a".into(),
                 packages: BTreeSet::from(["host-erofs-utils".to_string()]),
@@ -541,7 +541,7 @@ mod tests {
             digests.keys().cloned().collect::<Vec<_>>(),
             ["host-erofs-utils"]
         );
-        files.get_mut("RAZE:external.mk").expect("mk").digest = "sha256:b".into();
+        files.get_mut("MYBOARD:external.mk").expect("mk").digest = "sha256:b".into();
         assert_ne!(digests, external_package_digests(&files));
     }
 }

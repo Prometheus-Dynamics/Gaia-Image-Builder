@@ -27,7 +27,7 @@ sku = "example-template"
 [inputs.target]
 description = "Hardware target identifier"
 kind = "string"
-default = "cm5"
+default = "generic-aarch64"
 
 [inputs.profile]
 description = "Build profile"

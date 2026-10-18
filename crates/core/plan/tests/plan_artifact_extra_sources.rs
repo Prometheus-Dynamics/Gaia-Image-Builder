@@ -20,7 +20,7 @@ use support::{provider_catalogs, reuse_state_for_ids, test_spec};
 const OLD_COMMIT: &str = "3175ad9c0ffee00000000000000000000000001a";
 const NEW_COMMIT: &str = "e565dcf0ddba11000000000000000000000000b2";
 
-/// `gaia-app` builds from `gaia-upstream` and also reads `eidos`, a second
+/// `gaia-app` builds from `gaia-upstream` and also reads `corelib`, a second
 /// git source, through `extra_sources`.
 fn spec_with_extra_source(scratch: &TempDir, commit: &str) -> ResolvedBuildSpec {
     let mut spec = test_spec(scratch);
@@ -30,12 +30,12 @@ fn spec_with_extra_source(scratch: &TempDir, commit: &str) -> ResolvedBuildSpec 
         .find(|source| source.id.as_str() == "gaia-upstream")
         .cloned()
         .expect("gaia-upstream source");
-    upstream.id = SourceId::new("eidos");
+    upstream.id = SourceId::new("corelib");
     spec.sources.push(upstream);
     set_commit(&mut spec, "gaia-upstream", commit);
-    set_commit(&mut spec, "eidos", commit);
+    set_commit(&mut spec, "corelib", commit);
     spec.artifacts[0].source = Some(SourceRef::new("gaia-upstream"));
-    spec.artifacts[0].extra_sources = vec![SourceId::new("eidos")];
+    spec.artifacts[0].extra_sources = vec![SourceId::new("corelib")];
     spec
 }
 
@@ -106,17 +106,21 @@ struct Baseline {
 
 /// Before the bump: both sources and the artifact recorded as done, the
 /// artifact's inputs recorded from the old trees.
-fn baseline(scratch: &TempDir, eidos_tree: &str) -> Baseline {
+fn baseline(scratch: &TempDir, corelib_tree: &str) -> Baseline {
     let spec = spec_with_extra_source(scratch, OLD_COMMIT);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     write_source_state(&spec, "gaia-upstream", OLD_COMMIT, "sha-upstream-tree");
-    write_source_state(&spec, "eidos", OLD_COMMIT, eidos_tree);
+    write_source_state(&spec, "corelib", OLD_COMMIT, corelib_tree);
     write_artifact_output(&spec);
     let plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
     let mut state = reuse_state_for_ids(
         &spec,
         &plan,
-        &["source:gaia-upstream", "source:eidos", "artifact:gaia-app"],
+        &[
+            "source:gaia-upstream",
+            "source:corelib",
+            "artifact:gaia-app",
+        ],
     );
     let recorded_input = operation_input_signature(&spec, &plan, op(&plan, "artifact:gaia-app"));
     state
@@ -145,12 +149,13 @@ fn artifact_depends_on_each_extra_source_once() {
     let scratch = TempDir::new("gaia-plan-test");
     let mut spec = spec_with_extra_source(&scratch, OLD_COMMIT);
     // Naming the artifact's own source adds no second edge to it.
-    spec.artifacts[0].extra_sources = vec![SourceId::new("eidos"), SourceId::new("gaia-upstream")];
+    spec.artifacts[0].extra_sources =
+        vec![SourceId::new("corelib"), SourceId::new("gaia-upstream")];
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
     let depends_on = &op(&plan, "artifact:gaia-app").depends_on;
     let count = |id: &str| depends_on.iter().filter(|dep| dep.as_str() == id).count();
-    assert_eq!(count("source:eidos"), 1);
+    assert_eq!(count("source:corelib"), 1);
     assert_eq!(count("source:gaia-upstream"), 1);
 }
 
@@ -183,27 +188,27 @@ fn artifact_without_extra_sources_has_no_edge_to_other_sources() {
     assert!(
         !op(&plan, "artifact:gaia-app")
             .depends_on
-            .contains(&OperationId::source(&SourceId::new("eidos")))
+            .contains(&OperationId::source(&SourceId::new("corelib")))
     );
 }
 
 #[test]
 fn extra_source_rev_bump_reruns_the_source_and_its_artifact() {
     let scratch = TempDir::new("gaia-plan-test");
-    let base = baseline(&scratch, "sha-eidos-tree");
+    let base = baseline(&scratch, "sha-corelib-tree");
     let mut bumped = base.spec.clone();
-    set_commit(&mut bumped, "eidos", NEW_COMMIT);
+    set_commit(&mut bumped, "corelib", NEW_COMMIT);
     // Not yet re-materialized: the state still records the old commit.
     let plan = plan_with(&bumped, &base.state);
 
     assert_eq!(
-        code(&plan, "source:eidos"),
+        code(&plan, "source:corelib"),
         "operation_fingerprint_mismatch"
     );
     assert_eq!(code(&plan, "artifact:gaia-app"), "dependency_rebuilt");
     assert_eq!(
         message(&plan, "artifact:gaia-app"),
-        "operation 'artifact:gaia-app' will execute because source:eidos runs \
+        "operation 'artifact:gaia-app' will execute because source:corelib runs \
          (operation_fingerprint_mismatch); reused instead if the rebuilt inputs turn out unchanged"
     );
     assert_eq!(
@@ -217,31 +222,31 @@ fn extra_source_rev_bump_reruns_the_source_and_its_artifact() {
 #[test]
 fn extra_source_rev_bump_with_identical_tree_keeps_the_artifact_on_its_cutoff() {
     let scratch = TempDir::new("gaia-plan-test");
-    let base = baseline(&scratch, "sha-eidos-tree");
+    let base = baseline(&scratch, "sha-corelib-tree");
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let mut bumped = base.spec.clone();
-    set_commit(&mut bumped, "eidos", NEW_COMMIT);
-    write_source_state(&bumped, "eidos", NEW_COMMIT, "sha-eidos-tree");
+    set_commit(&mut bumped, "corelib", NEW_COMMIT);
+    write_source_state(&bumped, "corelib", NEW_COMMIT, "sha-corelib-tree");
     let plan = plan_build(&bumped, &source_catalog, &artifact_catalog, &image_catalog);
     assert_eq!(
         operation_input_signature(&bumped, &plan, op(&plan, "artifact:gaia-app")),
         base.recorded_input,
-        "the artifact reads eidos' files, which hash the same"
+        "the artifact reads corelib' files, which hash the same"
     );
 }
 
 #[test]
 fn extra_source_content_change_moves_the_artifacts_input_signature() {
     let scratch = TempDir::new("gaia-plan-test");
-    let base = baseline(&scratch, "sha-eidos-tree");
+    let base = baseline(&scratch, "sha-corelib-tree");
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let mut bumped = base.spec.clone();
-    set_commit(&mut bumped, "eidos", NEW_COMMIT);
-    write_source_state(&bumped, "eidos", NEW_COMMIT, "sha-eidos-tree-2");
+    set_commit(&mut bumped, "corelib", NEW_COMMIT);
+    write_source_state(&bumped, "corelib", NEW_COMMIT, "sha-corelib-tree-2");
     let plan = plan_build(&bumped, &source_catalog, &artifact_catalog, &image_catalog);
     assert_ne!(
         operation_input_signature(&bumped, &plan, op(&plan, "artifact:gaia-app")),
         base.recorded_input,
-        "a changed eidos tree is a changed input of the artifact"
+        "a changed corelib tree is a changed input of the artifact"
     );
 }
