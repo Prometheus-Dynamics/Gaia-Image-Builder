@@ -248,6 +248,24 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
             ),
         };
     }
+    let needs_build = !matches!(
+        args.command,
+        AppCommand::Help
+            | AppCommand::Version
+            | AppCommand::Tui
+            | AppCommand::Pause
+            | AppCommand::Resume
+            | AppCommand::Cancel
+            | AppCommand::Status
+    );
+    if needs_build && args.build.is_empty() {
+        return CommandOutcome::Failed {
+            message: format!(
+                "{}\nrun 'gaia --help' for usage",
+                crate::cli::NO_BUILD_CONFIG_ERROR
+            ),
+        };
+    }
     // The build named on the command line; `None` when the command runs
     // without one (status, pause, resume and cancel then use the registry).
     let explicit_build = args.build_explicit.then_some(args.build.as_str());
@@ -428,7 +446,9 @@ fn help_text() -> String {
         "work dirs; --unused-mirrors also prunes git mirrors this build does not use,",
         "and --all-caches removes every git mirror and the shared download and tool caches.",
         "",
-        "Default build config: examples/default-workspace/configs/default.toml",
+        "Without [build-config], gaia uses build.toml in the current directory, else",
+        "its first other *.toml file by name (not Cargo.toml or rust-toolchain.toml).",
+        "With neither, commands that need a build fail; see examples/ for configs.",
     ]
     .join("\n")
 }

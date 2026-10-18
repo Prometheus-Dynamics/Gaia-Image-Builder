@@ -1,10 +1,14 @@
 use std::{env, fs, path::Path};
 
-pub const EXAMPLE_DEFAULT_BUILD_CONFIG: &str = "examples/default-workspace/configs/default.toml";
+/// The error for a command that needs a build config when none was named
+/// and the current directory has none.
+pub const NO_BUILD_CONFIG_ERROR: &str = "no build config found; pass a path or run in a directory with build.toml or another *.toml build config";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppArgs {
     pub command: AppCommand,
+    /// The build config path; empty when none was named and the current
+    /// directory has none.
     pub build: String,
     /// True when the build config came from the command line rather than a default.
     pub build_explicit: bool,
@@ -327,6 +331,7 @@ fn default_build_config() -> String {
     default_build_config_in_dir(Path::new("."))
 }
 
+/// `build.toml` in `dir`, else its first other `*.toml` by name, else empty.
 fn default_build_config_in_dir(dir: &Path) -> String {
     let build_toml = dir.join("build.toml");
     if build_toml.is_file() {
@@ -339,7 +344,7 @@ fn default_build_config_in_dir(dir: &Path) -> String {
         .into_iter()
         .next()
         .map(|path| path.display().to_string())
-        .unwrap_or_else(|| EXAMPLE_DEFAULT_BUILD_CONFIG.into())
+        .unwrap_or_default()
 }
 
 pub(crate) fn current_dir_build_toml_files(dir: &Path) -> Vec<std::path::PathBuf> {
@@ -405,7 +410,7 @@ mod tests {
     }
 
     #[test]
-    fn default_build_config_uses_current_dir_toml_before_example_default() {
+    fn default_build_config_uses_current_dir_toml_when_no_build_toml() {
         let dir_scratch = temp_dir("single-toml");
         let dir = dir_scratch.path().to_path_buf();
         fs::write(
@@ -419,6 +424,16 @@ mod tests {
             default_build_config_in_dir(&dir),
             dir.join("local.toml").display().to_string()
         );
+    }
+
+    #[test]
+    fn default_build_config_is_empty_without_a_toml() {
+        let dir_scratch = temp_dir("no-toml");
+        let dir = dir_scratch.path().to_path_buf();
+        fs::write(dir.join("Cargo.toml"), "[package]\nname = \"x\"\n").expect("cargo toml");
+        fs::write(dir.join("notes.txt"), "not a build\n").expect("notes");
+
+        assert_eq!(default_build_config_in_dir(&dir), "");
     }
 
     fn parse(args: &[&str]) -> AppArgs {

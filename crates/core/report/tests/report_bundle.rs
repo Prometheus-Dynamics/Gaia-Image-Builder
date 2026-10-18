@@ -155,7 +155,7 @@ fn generates_report_bundle_for_default_run() {
     );
     assert_eq!(
         report.provenance.identity_vendor.as_deref(),
-        Some("Prometheus Dynamics")
+        Some("Example Vendor")
     );
     assert_eq!(
         report.provenance.identity_channel.as_deref(),
@@ -290,7 +290,7 @@ fn generates_report_bundle_for_default_run() {
     assert!(report.manifest.image_outputs.iter().any(|record| {
         record.provider_id == "image.buildroot"
             && record.backend_state.contains_key("archive_sha256")
-            && record.backend_state.get("build_target") == Some(&"cm5".to_string())
+            && record.backend_state.get("build_target") == Some(&"generic-aarch64".to_string())
     }));
     assert_eq!(report.rebuild_reasons.len(), 12);
 }

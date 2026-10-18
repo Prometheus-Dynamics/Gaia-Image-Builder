@@ -19,7 +19,7 @@ fn resolves_layered_default_config() {
     assert_eq!(spec.identity.build_name, "default");
     assert_eq!(spec.identity.version.as_deref(), Some("2.0.0"));
     assert_eq!(spec.metadata.branch.as_deref(), Some("main"));
-    assert_eq!(spec.metadata.target.as_deref(), Some("cm5"));
+    assert_eq!(spec.metadata.target.as_deref(), Some("generic-aarch64"));
     assert_eq!(spec.metadata.profile.as_deref(), Some("dev"));
     assert!(
         spec.selection
@@ -57,7 +57,7 @@ fn resolves_layered_default_config() {
         spec.metadata
             .labels
             .iter()
-            .any(|(key, value)| key == "target" && value == "cm5")
+            .any(|(key, value)| key == "target" && value == "generic-aarch64")
     );
     assert_eq!(spec.metadata.product.family.as_deref(), Some("gaia"));
     assert_eq!(spec.metadata.product.name.as_deref(), Some("image-builder"));
@@ -71,14 +71,14 @@ fn resolves_layered_default_config() {
         spec.selection.selected_inputs,
         vec![
             ("profile".to_string(), "dev".to_string()),
-            ("target".to_string(), "cm5".to_string()),
+            ("target".to_string(), "generic-aarch64".to_string()),
         ]
     );
     assert_eq!(spec.inputs.declared.len(), 2);
     assert!(spec.inputs.declared.iter().any(|input| {
         input.name == "target"
             && input.kind == InputKindSpec::String
-            && input.default.as_deref() == Some("cm5")
+            && input.default.as_deref() == Some("generic-aarch64")
     }));
     assert!(spec.inputs.declared.iter().any(|input| {
         input.name == "profile"
@@ -176,7 +176,7 @@ fn resolves_layered_default_config() {
     );
     assert_eq!(
         spec.provenance.identity.vendor.as_deref(),
-        Some("Prometheus Dynamics")
+        Some("Example Vendor")
     );
     assert_eq!(spec.provenance.identity.channel.as_deref(), Some("rewrite"));
     assert!(
@@ -281,7 +281,7 @@ fn resolves_layered_default_config() {
         ImageDefinition::Buildroot(buildroot) => {
             assert_eq!(
                 buildroot.defconfig.as_deref(),
-                Some("raspberrypi_defconfig")
+                Some("qemu_aarch64_virt_defconfig")
             );
             assert_eq!(
                 buildroot.external_tree_mode,

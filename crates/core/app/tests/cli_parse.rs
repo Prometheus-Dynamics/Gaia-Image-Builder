@@ -224,3 +224,21 @@ fn run_selectors_are_optional_for_status_and_control_commands() {
     assert_eq!(cancel.command, AppCommand::Cancel);
     assert_eq!((cancel.build_explicit, cancel.build.as_str()), (true, "1"));
 }
+
+#[test]
+fn commands_that_need_a_build_fail_clearly_without_one() {
+    for command in [AppCommand::Run, AppCommand::Validate, AppCommand::Lock] {
+        let outcome = gaia_app::run_with_args(AppArgs {
+            command,
+            build: String::new(),
+            ..AppArgs::default()
+        });
+        let gaia_app::CommandOutcome::Failed { message } = outcome else {
+            panic!("{command:?} without a build should fail: {outcome:?}");
+        };
+        assert!(
+            message.starts_with("no build config found; pass a path or run in a directory"),
+            "{message}"
+        );
+    }
+}

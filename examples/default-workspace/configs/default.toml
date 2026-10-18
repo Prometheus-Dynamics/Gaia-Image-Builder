@@ -4,7 +4,7 @@ imports = ["artifacts.toml", "stage.toml"]
 
 [image]
 kind = "buildroot"
-defconfig = "raspberrypi_defconfig"
+defconfig = "qemu_aarch64_virt_defconfig"
 external_tree_mode = "auto"
 
 [image.feed]
