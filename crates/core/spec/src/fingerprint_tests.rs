@@ -224,8 +224,12 @@ fn compressed_and_gpt_options_are_encoded_only_when_set() {
         journal: None,
         free: None,
         compressed: Default::default(),
+        fat_size: None,
     };
     assert!(!canonical_json(&filesystem).contains("compressed"));
+    assert!(!canonical_json(&filesystem).contains("fat_size"));
     filesystem.compressed.compression = Some("zstd".into());
     assert!(canonical_json(&filesystem).contains(r#""compression":"zstd""#));
+    filesystem.fat_size = Some(16);
+    assert!(canonical_json(&filesystem).contains(r#""fat_size":16"#));
 }
