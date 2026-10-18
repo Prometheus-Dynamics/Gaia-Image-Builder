@@ -1,6 +1,8 @@
 //! Tests of the variant classification, scoping and selection.
 
 use super::*;
+use gaia_plan::plan_build_with_rebuilds;
+
 fn variant_build(out_dir: &std::path::Path) -> String {
     format!(
         r#"

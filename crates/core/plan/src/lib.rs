@@ -101,6 +101,20 @@ pub fn plan_build_with_rebuilds(
         reuse_state = reuse_state.is_some(),
     );
     let _guard = span.enter();
+    let plan = plan_build_operations(spec, source_catalog, artifact_catalog, image_catalog);
+    decide_reuse(plan, spec, reuse_state, rebuild)
+}
+
+/// The operations a build plans, before reuse state decides which of them
+/// run. Their shape depends on the spec alone, not on the reuse state or the
+/// rebuild request, so one plan can be decided against several states with
+/// [`decide_reuse`].
+pub fn plan_build_operations(
+    spec: &ResolvedBuildSpec,
+    source_catalog: &SourceProviderCatalog,
+    artifact_catalog: &ArtifactProviderCatalog,
+    image_catalog: &ImageProviderCatalog,
+) -> ExecutionPlan {
     // Resolves floating git refs once for the whole plan, in parallel.
     let _floating_refs = reuse_floating::FloatingRefScope::begin(spec);
     // Tree and repository lookups made while this plan is built are memoized.
@@ -507,10 +521,23 @@ pub fn plan_build_with_rebuilds(
     }
     operations.push(report);
 
-    let plan = ExecutionPlan {
+    ExecutionPlan {
         build_id: spec.identity.id.clone(),
         operations,
-    };
+    }
+}
+
+/// Decides, for each operation of a plan from [`plan_build_operations`],
+/// whether it reuses its recorded result or executes, against `reuse_state`.
+/// `rebuild` names the operations that execute regardless.
+pub fn decide_reuse(
+    plan: ExecutionPlan,
+    spec: &ResolvedBuildSpec,
+    reuse_state: Option<&ReuseState>,
+    rebuild: &RebuildRequest,
+) -> ExecutionPlan {
+    let _floating_refs = reuse_floating::FloatingRefScope::begin(spec);
+    let _memo = reuse::PlanMemoScope::begin();
     let rebuild = rebuild.resolve_aliases(&plan);
     let plan = apply_reuse_state(plan, spec, reuse_state, &rebuild);
     tracing::debug!(

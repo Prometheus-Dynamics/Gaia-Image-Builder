@@ -1,8 +1,10 @@
-use gaia_config::{ResolveOptions, resolve_variant_specs};
+use gaia_config::{ResolveOptions, VariantBuild};
 use gaia_exec::{
     ExecutionCancellation, ExecutionEvent, ExecutionProviders, execute_plan_with_rebuilds,
 };
-use gaia_plan::{PlanTarget, RebuildRequest, plan_build_with_rebuilds};
+use gaia_plan::{
+    ExecutionPlan, PlanTarget, RebuildRequest, decide_reuse, plan_build_with_rebuilds,
+};
 use gaia_process::ProcessRunErrorKind;
 use gaia_report::{generate_report, write_report_bundle};
 use gaia_spec::ResolvedBuildSpec;
@@ -45,7 +47,15 @@ pub fn run_build_command(
     rebuild: &RebuildRequest,
     variants: &[String],
 ) -> CommandOutcome {
-    let mut specs = match resolve_variant_specs(build, options) {
+    let loaded = match VariantBuild::load(build, options) {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            return CommandOutcome::Failed {
+                message: error.to_string(),
+            };
+        }
+    };
+    let mut specs = match loaded.resolve() {
         Ok(specs) => specs,
         Err(error) => {
             return CommandOutcome::Failed {
@@ -56,7 +66,7 @@ pub fn run_build_command(
     if specs[0].selection.variant.is_some() {
         return super::variants::run_variants(
             context,
-            super::variants::VariantSource { build, options },
+            super::variants::VariantSource { build: &loaded },
             specs,
             variants,
             targets,
@@ -78,7 +88,31 @@ pub fn run_build_command(
         targets,
         rebuild,
         ReuseScope::Build,
+        None,
     ))
+}
+
+/// The plan of a resolved spec against its reuse state. A `structure`
+/// planned earlier for the same spec (see `gaia_plan::plan_build_operations`)
+/// is decided rather than planned again.
+pub(super) fn plan_with_reuse(
+    context: &AppContext,
+    spec: &ResolvedBuildSpec,
+    reuse_state: Option<&gaia_plan::ReuseState>,
+    rebuild: &RebuildRequest,
+    structure: Option<ExecutionPlan>,
+) -> ExecutionPlan {
+    match structure {
+        Some(structure) => decide_reuse(structure, spec, reuse_state, rebuild),
+        None => plan_build_with_rebuilds(
+            spec,
+            &context.source_catalog,
+            &context.artifact_catalog,
+            &context.image_catalog,
+            reuse_state,
+            rebuild,
+        ),
+    }
 }
 
 /// The outcome of a run: its report, or why it did not run.
@@ -129,6 +163,7 @@ pub(super) fn collect_run_artifacts_for_spec(
     targets: &[PlanTarget],
     rebuild: &RebuildRequest,
     scope: ReuseScope<'_>,
+    structure: Option<ExecutionPlan>,
 ) -> Result<RunArtifacts, String> {
     let span = tracing::info_span!("run_build", build);
     let _guard = span.enter();
@@ -153,15 +188,8 @@ pub(super) fn collect_run_artifacts_for_spec(
     let reuse_state = scoped_reuse_state(&spec, scope);
     // Read before this run saves its state, which overwrites the details the
     // rebuild reasons are explained from.
-    let recorded = recorded_for_explanation(&spec, reuse_state.as_ref());
-    let mut plan = plan_build_with_rebuilds(
-        &spec,
-        &context.source_catalog,
-        &context.artifact_catalog,
-        &context.image_catalog,
-        reuse_state.as_ref(),
-        rebuild,
-    );
+    let recorded = recorded_for_explanation(&spec, reuse_state.as_ref(), scope);
+    let mut plan = plan_with_reuse(context, &spec, reuse_state.as_ref(), rebuild, structure);
     check_rebuild_request(&spec, &plan, rebuild)?;
     explain_rebuild_reasons(&spec, &mut plan, reuse_state.as_ref(), &recorded);
     let plan = if targets.is_empty() {

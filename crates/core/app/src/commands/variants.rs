@@ -30,11 +30,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use gaia_config::{ResolveOptions, resolve_variant_specs, variant_output_collisions};
+use gaia_config::{VariantBuild, variant_output_collisions};
 use gaia_exec::ExecutionOutcome;
 use gaia_plan::{
     ExecutionPlan, OperationId, OperationKind, PlanTarget, RebuildRequest, ReuseState,
-    plan_build_with_rebuilds,
+    plan_build_operations,
 };
 use gaia_spec::{DEFAULT_VARIANT_ID, ResolvedBuildSpec};
 use gaia_validate::validate_spec_with_providers;
@@ -54,11 +54,10 @@ pub(crate) enum ReuseScope<'a> {
     Variant { shared: &'a BTreeSet<String> },
 }
 
-/// The build file a variant build is resolved from, and the options.
+/// The build a variant command acts on, loaded once for all its variants.
 #[derive(Clone, Copy)]
 pub(crate) struct VariantSource<'a> {
-    pub(crate) build: &'a str,
-    pub(crate) options: &'a ResolveOptions,
+    pub(crate) build: &'a VariantBuild,
 }
 
 /// The planned variants, with which operations each one shares.
@@ -81,13 +80,14 @@ pub(crate) fn variant_id(spec: &ResolvedBuildSpec) -> &str {
 }
 
 /// Validates, classifies and scopes every declared variant. Errors are
-/// reported before anything runs. `build` and `options` resolve the specs
-/// again once it is known which sources each variant checks out itself.
+/// reported before anything runs. The variant build resolves the specs again
+/// once it is known which sources each variant checks out itself, from the
+/// same load.
 pub(crate) fn prepare_variants(
     context: &AppContext,
     source: VariantSource<'_>,
     mut specs: Vec<ResolvedBuildSpec>,
-) -> Result<(Vec<ResolvedBuildSpec>, VariantSplit), String> {
+) -> Result<PreparedVariants, String> {
     // Every declared variant must be valid, whatever `--variant` selects:
     // which operations are shared is decided across all of them.
     let mut errors = Vec::new();
@@ -113,14 +113,13 @@ pub(crate) fn prepare_variants(
             errors.join("\n")
         ));
     }
-    let split = classify(context, &specs)?;
+    let (split, plans) = classify_planned(context, &specs)?;
+    let classified = specs.clone();
     if !split.variant_sources.is_empty() {
-        specs = gaia_config::resolve_variant_specs_scoped(
-            source.build,
-            source.options,
-            &split.variant_sources,
-        )
-        .map_err(|error| error.to_string())?;
+        specs = source
+            .build
+            .resolve_scoped(&split.variant_sources)
+            .map_err(|error| error.to_string())?;
     }
     for spec in specs.iter_mut() {
         scope_variant(spec, &split.shared);
@@ -129,21 +128,51 @@ pub(crate) fn prepare_variants(
     if !collisions.is_empty() {
         return Err(collisions.join("\n"));
     }
-    Ok((specs, split))
+    // A plan made for the classified spec serves the final one where the two
+    // are equal, and is planned again where scoping changed the spec.
+    let structures = plans
+        .into_iter()
+        .zip(classified.iter().zip(&specs))
+        .map(|(plan, (before, after))| (before == after).then_some(plan))
+        .collect();
+    Ok(PreparedVariants {
+        specs,
+        split,
+        structures,
+    })
+}
+
+/// The validated, classified and scoped variants of a build.
+pub(crate) struct PreparedVariants {
+    pub(crate) specs: Vec<ResolvedBuildSpec>,
+    pub(crate) split: VariantSplit,
+    /// Per spec: its plan of the structure (see
+    /// `gaia_plan::plan_build_operations`), where that plan is still the one
+    /// the spec would make, so a run or plan decides reuse on it.
+    pub(crate) structures: Vec<Option<ExecutionPlan>>,
 }
 
 /// Plans every variant without reuse state and splits its operations.
+#[cfg(test)]
 fn classify(context: &AppContext, specs: &[ResolvedBuildSpec]) -> Result<VariantSplit, String> {
+    classify_planned(context, specs).map(|(split, _)| split)
+}
+
+/// [`classify`], which also returns each spec's plan of the structure, so
+/// the variants can be decided against their reuse state without planning
+/// them again.
+fn classify_planned(
+    context: &AppContext,
+    specs: &[ResolvedBuildSpec],
+) -> Result<(VariantSplit, Vec<ExecutionPlan>), String> {
     let plans = specs
         .iter()
         .map(|spec| {
-            plan_build_with_rebuilds(
+            plan_build_operations(
                 spec,
                 &context.source_catalog,
                 &context.artifact_catalog,
                 &context.image_catalog,
-                None,
-                &RebuildRequest::default(),
             )
         })
         .collect::<Vec<ExecutionPlan>>();
@@ -289,7 +318,7 @@ fn classify(context: &AppContext, specs: &[ResolvedBuildSpec]) -> Result<Variant
         }
     }
 
-    Ok(VariantSplit {
+    let split = VariantSplit {
         shared,
         variant_sources,
         operation_counts: specs
@@ -297,7 +326,8 @@ fn classify(context: &AppContext, specs: &[ResolvedBuildSpec]) -> Result<Variant
             .zip(&plans)
             .map(|(spec, plan)| (variant_id(spec).to_string(), plan.operations.len()))
             .collect(),
-    })
+    };
+    Ok((split, plans))
 }
 
 /// Points a variant's own outputs at its own paths. Shared outputs keep
@@ -384,7 +414,7 @@ pub(crate) fn scoped_reuse_state(
 
 /// The spec whose state file is the shared store: the same build, without
 /// a variant.
-fn shared_store_spec(spec: &ResolvedBuildSpec) -> ResolvedBuildSpec {
+pub(crate) fn shared_store_spec(spec: &ResolvedBuildSpec) -> ResolvedBuildSpec {
     let mut shared = spec.clone();
     shared.selection.variant = None;
     shared
@@ -477,7 +507,11 @@ pub(crate) fn run_variants(
         Ok(indices) => indices,
         Err(message) => return CommandOutcome::Failed { message },
     };
-    let (specs, split) = match prepare_variants(context, source, specs) {
+    let PreparedVariants {
+        specs,
+        split,
+        mut structures,
+    } = match prepare_variants(context, source, specs) {
         Ok(prepared) => prepared,
         Err(message) => return CommandOutcome::Failed { message },
     };
@@ -489,13 +523,14 @@ pub(crate) fn run_variants(
         eprintln!("variant {id} ({}/{total})", position + 1);
         let outcome = run_outcome(collect_run_artifacts_for_spec(
             context,
-            source.build,
+            source.build.build(),
             spec,
             targets,
             rebuild,
             ReuseScope::Variant {
                 shared: &split.shared,
             },
+            structures[index].take(),
         ));
         let stop = outcome.exit_code() != 0;
         outcomes.push(VariantOutcome { id, outcome });
@@ -520,7 +555,7 @@ pub(crate) fn preview_variants(
     fail_on_clean: bool,
     json: bool,
 ) -> CommandOutcome {
-    let specs = match resolve_variant_specs(source.build, source.options) {
+    let specs = match source.build.resolve() {
         Ok(specs) => specs,
         Err(error) => {
             return CommandOutcome::Failed {
@@ -532,7 +567,7 @@ pub(crate) fn preview_variants(
         Ok(indices) => indices,
         Err(message) => return CommandOutcome::Failed { message },
     };
-    let (specs, split) = match prepare_variants(context, source, specs) {
+    let PreparedVariants { specs, split, .. } = match prepare_variants(context, source, specs) {
         Ok(prepared) => prepared,
         Err(message) => return CommandOutcome::Failed { message },
     };
@@ -577,7 +612,11 @@ pub(crate) fn plan_variants(
         Ok(indices) => indices,
         Err(message) => return CommandOutcome::Failed { message },
     };
-    let (specs, split) = match prepare_variants(context, source, specs) {
+    let PreparedVariants {
+        specs,
+        split,
+        structures,
+    } = match prepare_variants(context, source, specs) {
         Ok(prepared) => prepared,
         Err(message) => return CommandOutcome::Failed { message },
     };
@@ -594,6 +633,7 @@ pub(crate) fn plan_variants(
                 ReuseScope::Variant {
                     shared: &split.shared,
                 },
+                structures[index].clone(),
             );
             VariantOutcome { id, outcome }
         })

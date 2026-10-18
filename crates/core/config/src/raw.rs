@@ -71,9 +71,9 @@ pub struct RawBuildConfig {
     pub imported_configs: Vec<RawImportedConfig>,
     #[serde(skip)]
     pub unresolved_tokens: Vec<RawUnresolvedInterpolation>,
-    /// Dotted paths of keys in this file that Gaia does not know.
+    /// Keys in this file that Gaia does not know.
     #[serde(skip)]
-    pub unknown_keys: Vec<String>,
+    pub(crate) unknown_keys: Vec<crate::unknown_keys::UnknownKey>,
     /// The file sets nothing at all (only comments).
     #[serde(skip)]
     pub sets_nothing: bool,

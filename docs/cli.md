@@ -19,6 +19,7 @@ gaia resume [run]
 gaia cancel [run]
 gaia status [run]
 gaia tui [build.toml]
+gaia config schema
 ```
 
 If no command is provided, Gaia treats the first positional argument as a build path and defaults to `run`.
@@ -512,6 +513,19 @@ links once (also across caches, for the total), symlinks counted as links and
 never followed. A cache inside another listed one is left out of the total.
 Without a build config that resolves (and none named), it reports the
 user-wide caches and the current directory's workspace caches.
+
+### `config schema`
+
+`gaia config schema` prints the JSON Schema of a build file to standard
+output, without reading any build config. It is written from the keys the
+validation checks (see [Unknown keys](configuration.md)), so an editor
+completes and flags the same keys `gaia validate` does. Save it and point
+taplo or VS Code's Even Better TOML at it; the configuration reference shows
+both settings:
+
+```bash
+gaia config schema > gaia-build.schema.json
+```
 
 ### `pause`, `resume`, `cancel`
 

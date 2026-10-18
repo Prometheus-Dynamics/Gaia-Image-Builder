@@ -16,6 +16,7 @@ semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml = { workspace = true, features = ["preserve_order"] }
+toml_parser.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

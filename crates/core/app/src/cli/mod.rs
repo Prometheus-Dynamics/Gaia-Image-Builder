@@ -119,6 +119,7 @@ impl AppArgs {
             Some("preview") => Some(AppCommand::Preview),
             Some("clean") => Some(AppCommand::Clean),
             Some("cache") => Some(AppCommand::Cache),
+            Some("config") => Some(AppCommand::ConfigSchema),
             Some("pause") => Some(AppCommand::Pause),
             Some("resume") => Some(AppCommand::Resume),
             Some("cancel") => Some(AppCommand::Cancel),
@@ -136,6 +137,10 @@ impl AppArgs {
         }
         if parsed.command == AppCommand::Cache && args.next_if_eq("stats").is_some() {
             parsed.cache.stats = true;
+        }
+        // `gaia config schema` is the only action `config` takes.
+        if parsed.command == AppCommand::ConfigSchema {
+            let _ = args.next_if_eq("schema");
         }
 
         while let Some(arg) = args.next() {
@@ -376,6 +381,8 @@ pub enum AppCommand {
     Plan,
     Clean,
     Cache,
+    /// `gaia config schema`: the JSON Schema of the build config.
+    ConfigSchema,
     /// Signal the running `gaia run` of a build.
     Pause,
     Resume,
@@ -460,6 +467,13 @@ mod tests {
             [("image.defconfig".to_string(), "x".to_string())]
         );
         assert!(args.usage_errors.is_empty(), "{:?}", args.usage_errors);
+    }
+
+    #[test]
+    fn config_schema_needs_no_build_config() {
+        let schema = parse(&["config", "schema"]);
+        assert_eq!(schema.command, AppCommand::ConfigSchema);
+        assert!(schema.usage_errors.is_empty(), "{:?}", schema.usage_errors);
     }
 
     #[test]

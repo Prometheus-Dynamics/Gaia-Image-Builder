@@ -213,14 +213,56 @@ longer matching) cannot silently drop it from the image. Lists from all
 layers are combined.
 
 Unknown keys fail validation (`config_unknown_key` errors, for example
-`unknown key 'build_command' in '<file>': this gaia does not know it`), so a
-typo, or a file written for a newer Gaia, never builds with the setting
-silently missing.
+`unknown key 'build_command' in 'build.toml:1:1': this gaia does not know it`),
+so a typo, or a file written for a newer Gaia, never builds with the setting
+silently missing. The message names the file, line and column of the key, and
+a close match among the keys that table takes (`did you mean 'branch'?`).
 The check covers top-level keys and the `workspace`, `product`,
 `interpolation`, `clean`, `execution`, `failure`, `providers.*`,
-`provenance`, `reporting`, `stage`, `install` and `checkpoints` tables. Tables
-whose fields depend on a `kind` (`sources`, `artifacts`, `image`) and free-form
-maps (`inputs`, `presets`, `env`) are not checked.
+`provenance`, `reporting`, `stage`, `install` and `checkpoints` tables.
+`[[sources]]`, `[[artifacts]]` and `[image]` are checked by their `kind`: a
+source takes the keys of its `kind` (`git`, `path`, `archive`, `download`), an
+artifact those of its `kind` (`rust`, `java`, `node`, `python`, `go`), and the
+image those of its `kind` (`buildroot`, `starting-point`), including the
+`[image.rootfs]`, `[[image.expected_images]]` and `[image.packages]` tables.
+A table with no `kind` (a layer that leaves it to the layer it extends) takes
+the keys of every kind. Free-form maps (`inputs`, `presets`, `env`) are not
+checked.
+
+A parse error, or a value of the wrong type, is reported at the line and
+column where it is: `failed to parse build config 'build.toml:4:12': ...`.
+
+### Editor Support: JSON Schema
+
+`gaia config schema` prints a JSON Schema of the build file, written from the
+same key lists the check above uses, so an editor reports the same unknown
+keys and completes the keys of each kind:
+
+```sh
+gaia config schema > gaia-build.schema.json
+```
+
+With taplo, point a rule at the file in `.taplo.toml`:
+
+```toml
+[[rule]]
+include = ["**/build.toml", "configs/**/*.toml"]
+[rule.schema]
+path = "gaia-build.schema.json"
+```
+
+With VS Code's Even Better TOML, associate the file in `settings.json`:
+
+```json
+{
+  "evenBetterToml.schema.associations": {
+    "build\\.toml$": "./gaia-build.schema.json"
+  }
+}
+```
+
+The schema checks key names and the `kind` values. It does not check value
+types, and it describes no keys in words: the reference is this document.
 
 ## Product Metadata
 
@@ -493,10 +535,13 @@ Limits:
   the shared operations rebuild in each variant, instead of being reused.
   Keep identity the same across variants when the shared work should be
   reused.
-- Variants that would publish the same image file (same collect dir, export
-  dir, image name and version, or assembly output) are an error. Give each a
-  different `input` that changes the image name or version, or its own
-  `image.output.archive_name`.
+- Variants that would write the same output file are an error. The paths
+  compared are `collect_dir/archive_name` of the raw disk image, the `output`
+  of each assembly disk, archive and filesystem, and `export_dir/<file name>`
+  when exports go to a configured directory. An image with no `archive_name`
+  is named from its display name and version. The error names the path and
+  the variants. Give each variant its own `input` that changes the image name
+  or version, or its own `image.output.archive_name`.
 - Variants run one after another in one process. A failing variant stops the
   run; the variants before it keep their outputs.
 

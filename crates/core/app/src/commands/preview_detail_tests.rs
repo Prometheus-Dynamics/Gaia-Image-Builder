@@ -231,7 +231,7 @@ fn a_run_names_the_changed_input_in_its_rebuild_reasons() {
 
     let changed = buildroot_spec(&root, &[("BR2_TARGET_GENERIC_ISSUE", "two")]);
     let reuse_state = load_reuse_state(&changed);
-    let recorded = recorded_for_explanation(&changed, reuse_state.as_ref());
+    let recorded = recorded_for_explanation(&changed, reuse_state.as_ref(), ReuseScope::Build);
     let mut plan = gaia_plan::plan_build_with_rebuilds(
         &changed,
         &context.source_catalog,
@@ -260,5 +260,104 @@ fn a_run_names_the_changed_input_in_its_rebuild_reasons() {
         !image.message.contains("no detail recorded"),
         "{}",
         image.message
+    );
+}
+
+/// `gaia plan` names the changed input the way `run` and `preview` do.
+#[test]
+fn a_changed_override_key_is_planned_by_name() {
+    let scratch = scratch_root("plan-override-key");
+    let root = scratch.join("root");
+    let context = AppContext::with_defaults();
+    let spec = buildroot_spec(
+        &root,
+        &[
+            ("BR2_TARGET_GENERIC_HOSTNAME", "alpha"),
+            ("BR2_TARGET_GENERIC_ISSUE", "one"),
+        ],
+    );
+    let baseline = gaia_plan::plan_build(
+        &spec,
+        &context.source_catalog,
+        &context.artifact_catalog,
+        &context.image_catalog,
+    );
+    record_finished_run(&spec, &baseline);
+
+    let changed = buildroot_spec(
+        &root,
+        &[
+            ("BR2_TARGET_GENERIC_HOSTNAME", "alpha"),
+            ("BR2_TARGET_GENERIC_ISSUE", "two"),
+        ],
+    );
+    let outcome = crate::commands::plan::plan_resolved(
+        &context,
+        changed,
+        &[],
+        &RebuildRequest::default(),
+        crate::commands::variants::ReuseScope::Build,
+        None,
+    );
+    let CommandOutcome::Planned { plan, .. } = outcome else {
+        panic!("the plan of a valid build succeeds");
+    };
+    let image = plan
+        .operations
+        .iter()
+        .find(|operation| operation.id.as_str() == "image:build")
+        .expect("image operation");
+    let gaia_plan::OperationReuse::Execute(reason) = &image.reuse else {
+        panic!("a changed override executes the image build");
+    };
+    assert!(
+        reason
+            .message
+            .contains("config_overrides changed (BR2_TARGET_GENERIC_ISSUE)"),
+        "{}",
+        reason.message
+    );
+    assert!(
+        !reason.message.contains("no detail recorded"),
+        "{}",
+        reason.message
+    );
+}
+
+/// A variant's shared operations were recorded by the shared store, so their
+/// inputs are read from there; its own operations from its own sidecar.
+#[test]
+fn a_variant_reads_the_recorded_inputs_of_its_shared_operations() {
+    use crate::commands::variants::ReuseScope;
+    let scratch = scratch_root("variant-shared-components");
+    let root = scratch.join("root");
+    let context = AppContext::with_defaults();
+    let mut spec = buildroot_spec(&root, &[("BR2_TARGET_GENERIC_ISSUE", "one")]);
+    spec.selection.variant = Some("v2".into());
+    let shared_spec = crate::commands::variants::shared_store_spec(&spec);
+    let baseline = gaia_plan::plan_build(
+        &shared_spec,
+        &context.source_catalog,
+        &context.artifact_catalog,
+        &context.image_catalog,
+    );
+    record_finished_run(&shared_spec, &baseline);
+    let state = gaia_plan::ReuseState::default();
+
+    let shared = std::collections::BTreeSet::from(["image:build".to_string()]);
+    let recorded =
+        recorded_for_explanation(&spec, Some(&state), ReuseScope::Variant { shared: &shared });
+    assert!(
+        recorded.contains_key("image:build"),
+        "the shared store's record of a shared operation is read: {:?}",
+        recorded.keys().collect::<Vec<_>>()
+    );
+
+    let own = std::collections::BTreeSet::new();
+    let recorded =
+        recorded_for_explanation(&spec, Some(&state), ReuseScope::Variant { shared: &own });
+    assert!(
+        !recorded.contains_key("image:build"),
+        "an operation that is not shared is read from the variant's own sidecar"
     );
 }

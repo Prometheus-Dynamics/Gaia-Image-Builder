@@ -1,34 +1,68 @@
 //! Keys a build file sets that this Gaia does not know.
 //!
 //! The raw config structs accept and silently drop unknown keys (so files
-//! written for a newer Gaia still load). Validation reports them as
-//! warnings instead. Known keys are taken from the serde field lists of the
-//! raw structs themselves, so the check never drifts from the parser.
-//! Sections whose struct flattens another (sources, artifacts, the image's
-//! own `kind`-specific keys) or holds free-form maps (inputs, presets, env)
-//! are not checked; the image's plain nested tables (`output`, `feed`,
-//! `assembly` and its entries) are.
+//! written for a newer Gaia still load). Validation reports them instead.
+//! Known keys are taken from the serde field lists of the raw structs
+//! themselves, so the check never drifts from the parser. The tables whose
+//! struct is an internally tagged enum (`[[sources]]` by `kind`,
+//! `[[artifacts]]` by `kind`, and the image's `kind`-specific keys) are
+//! listed by kind here, next to the struct they mirror; a test checks that
+//! every kind's keys still parse. Free-form maps (inputs, presets, env) are
+//! not checked.
 use std::path::Path;
 
 use serde::de::{self, DeserializeOwned, Deserializer, Visitor};
 
+use crate::locate::KeyLocations;
+use crate::overrides::did_you_mean_among;
 use crate::raw::{self, RawBuildConfig};
 use crate::raw_assembly;
 
 type FieldsFn = fn() -> Option<&'static [&'static str]>;
 
+/// The keys of a table whose own keys depend on its `kind`: the keys every
+/// kind takes and the keys of the named kind. `None` when the kind is not one
+/// this Gaia knows (or, for a table without a kind, when it has no kind
+/// rule), so no key is reported.
+type KindFieldsFn = fn(Option<&str>) -> Option<Vec<&'static str>>;
+
+/// How the keys of a table are known.
+#[derive(Clone, Copy)]
+pub(crate) enum Known {
+    /// A plain struct with these field names.
+    Fixed(FieldsFn),
+    /// A table whose keys depend on its `kind`.
+    ByKind(KindFieldsFn),
+}
+
 /// A table (or array of tables) and the struct it deserializes into.
-struct Section {
+pub(crate) struct Section {
     key: &'static str,
-    fields: FieldsFn,
+    known: Known,
     children: &'static [Section],
 }
 
 const fn section(key: &'static str, fields: FieldsFn, children: &'static [Section]) -> Section {
     Section {
         key,
-        fields,
+        known: Known::Fixed(fields),
         children,
+    }
+}
+
+const fn by_kind(key: &'static str, kinds: KindFieldsFn, children: &'static [Section]) -> Section {
+    Section {
+        key,
+        known: Known::ByKind(kinds),
+        children,
+    }
+}
+
+/// The keys one table may set, given the table itself (for its `kind`).
+fn fields_of(known: Known, table: &toml::Table) -> Option<Vec<&'static str>> {
+    match known {
+        Known::Fixed(fields) => fields().map(<[&str]>::to_vec),
+        Known::ByKind(kinds) => kinds(table.get("kind").and_then(toml::Value::as_str)),
     }
 }
 
@@ -55,12 +89,6 @@ fn host_tools_fields() -> Option<&'static [&'static str]> {
             .all(|tool| FIELDS.contains(tool))
     );
     Some(FIELDS)
-}
-
-/// For a table whose own keys depend on `kind` (flattened), so only its
-/// plain nested tables are checked.
-fn unchecked() -> Option<&'static [&'static str]> {
-    None
 }
 
 const ASSEMBLY_CHILDREN: &[Section] = &[
@@ -141,20 +169,156 @@ const ASSEMBLY_CHILDREN: &[Section] = &[
     ),
 ];
 
-const SECTIONS: &[Section] = &[
+/// `[[sources]]`: the keys every source takes, then the keys of its `kind`.
+const SOURCE_COMMON_KEYS: &[&str] = &["id", "kind"];
+const GIT_SOURCE_KEYS: &[&str] = &[
+    "repo",
+    "branch",
+    "tag",
+    "rev",
+    "subdir",
+    "update",
+    "refresh",
+    "pin",
+    "git_backend",
+];
+const PATH_SOURCE_KEYS: &[&str] = &["path", "identity_ignore", "refresh", "pin"];
+const ARCHIVE_SOURCE_KEYS: &[&str] = &["path", "strip_components", "refresh", "pin"];
+const DOWNLOAD_SOURCE_KEYS: &[&str] = &["url", "sha256", "output_path", "refresh", "pin"];
+
+fn source_fields(kind: Option<&str>) -> Option<Vec<&'static str>> {
+    let own = match kind? {
+        "git" => GIT_SOURCE_KEYS,
+        "path" => PATH_SOURCE_KEYS,
+        "archive" => ARCHIVE_SOURCE_KEYS,
+        "download" => DOWNLOAD_SOURCE_KEYS,
+        _ => return None,
+    };
+    Some(SOURCE_COMMON_KEYS.iter().chain(own).copied().collect())
+}
+
+/// `[[artifacts]]`: the keys every artifact takes, then the keys of its kind.
+const ARTIFACT_COMMON_KEYS: &[&str] = &[
+    "id",
+    "kind",
+    "when",
+    "source",
+    "sources",
+    "execution",
+    "target",
+    "profile",
+    "dependencies",
+    "after_image_prepare",
+    "build_group",
+    "cargo_git_sources",
+    "install_name",
+    "install_class",
+    "install_dest_hint",
+    "output_path",
+];
+const RUST_ARTIFACT_KEYS: &[&str] = &[
+    "package",
+    "target_name",
+    "emit_directory",
+    "features",
+    "no_default_features",
+    "all_features",
+];
+const JAVA_ARTIFACT_KEYS: &[&str] = &["build_target", "build_args", "build_command", "build_env"];
+const PACKAGE_DIR_ARTIFACT_KEYS: &[&str] = &["package_dir"];
+const GO_ARTIFACT_KEYS: &[&str] = &["package"];
+
+fn artifact_fields(kind: Option<&str>) -> Option<Vec<&'static str>> {
+    let own = match kind? {
+        "rust" => RUST_ARTIFACT_KEYS,
+        "java" => JAVA_ARTIFACT_KEYS,
+        "node" | "python" => PACKAGE_DIR_ARTIFACT_KEYS,
+        "go" => GO_ARTIFACT_KEYS,
+        _ => return None,
+    };
+    Some(ARTIFACT_COMMON_KEYS.iter().chain(own).copied().collect())
+}
+
+/// `[image]`: the keys every image takes, then the keys of its kind. Without
+/// a `kind` (a layer that leaves it to the layer it extends) every kind's
+/// keys are accepted.
+const IMAGE_COMMON_KEYS: &[&str] = &["kind", "feed", "output", "assembly"];
+const BUILDROOT_IMAGE_KEYS: &[&str] = &[
+    "source",
+    "defconfig",
+    "defconfig_path",
+    "allow_fallback",
+    "config_fragments",
+    "config_overrides",
+    "external_tree",
+    "external_tree_mode",
+    "expected_images",
+    "rootfs",
+];
+const STARTING_POINT_IMAGE_KEYS: &[&str] = &[
+    "source",
+    "source_path",
+    "rootfs_path",
+    "image_partition",
+    "image_read_only",
+    "packages",
+    "rootfs_validation_mode",
+    "output_mode",
+];
+
+fn image_fields(kind: Option<&str>) -> Option<Vec<&'static str>> {
+    let own: Vec<&'static str> = match kind {
+        Some("buildroot") => BUILDROOT_IMAGE_KEYS.to_vec(),
+        Some("starting-point") => STARTING_POINT_IMAGE_KEYS.to_vec(),
+        Some(_) => return None,
+        None => BUILDROOT_IMAGE_KEYS
+            .iter()
+            .chain(STARTING_POINT_IMAGE_KEYS)
+            .copied()
+            .collect(),
+    };
+    Some(IMAGE_COMMON_KEYS.iter().chain(&own).copied().collect())
+}
+
+const ARTIFACT_CHILDREN: &[Section] = &[section(
+    "execution",
+    struct_fields::<raw::RawArtifactExecutionConfig>,
+    &[section(
+        "docker",
+        struct_fields::<raw::RawArtifactDockerExecutionConfig>,
+        &[],
+    )],
+)];
+
+const IMAGE_CHILDREN: &[Section] = &[
+    section("output", struct_fields::<raw::RawImageOutputConfig>, &[]),
+    section("feed", struct_fields::<raw::RawImageFeedConfig>, &[]),
     section(
-        "image",
-        unchecked,
-        &[
-            section("output", struct_fields::<raw::RawImageOutputConfig>, &[]),
-            section("feed", struct_fields::<raw::RawImageFeedConfig>, &[]),
-            section(
-                "assembly",
-                struct_fields::<raw_assembly::RawImageAssemblyConfig>,
-                ASSEMBLY_CHILDREN,
-            ),
-        ],
+        "assembly",
+        struct_fields::<raw_assembly::RawImageAssemblyConfig>,
+        ASSEMBLY_CHILDREN,
     ),
+    section(
+        "rootfs",
+        struct_fields::<raw::RawBuildrootRootfsConfig>,
+        &[],
+    ),
+    section(
+        "expected_images",
+        struct_fields::<raw::RawBuildrootExpectedImageConfig>,
+        &[],
+    ),
+    section(
+        "packages",
+        struct_fields::<raw::RawStartingPointPackagesConfig>,
+        &[],
+    ),
+];
+
+const SECTIONS: &[Section] = &[
+    by_kind("image", image_fields, IMAGE_CHILDREN),
+    by_kind("sources", source_fields, &[]),
+    by_kind("artifacts", artifact_fields, ARTIFACT_CHILDREN),
     section("workspace", struct_fields::<raw::RawWorkspaceConfig>, &[]),
     section("expect", struct_fields::<raw::RawExpectConfig>, &[]),
     section("product", struct_fields::<raw::RawProductConfig>, &[]),
@@ -280,18 +444,40 @@ const SECTIONS: &[Section] = &[
     ),
 ];
 
-/// Dotted paths of the unknown keys in one parsed build file.
-pub(crate) fn unknown_config_keys(value: &toml::Value) -> Vec<String> {
+/// A key a build file sets that this Gaia does not know.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct UnknownKey {
+    /// Dotted path in the file, such as `providers.java.gradle_hme` or
+    /// `stage.files[0].owner`.
+    pub(crate) path: String,
+    /// `" (did you mean 'x'?)"` for the closest key the table takes, or
+    /// nothing.
+    pub(crate) suggestion: String,
+    /// `line:col` of the key in its file, when the file's text shows it.
+    pub(crate) location: Option<String>,
+}
+
+/// The unknown keys of one parsed build file, sorted by path.
+pub(crate) fn unknown_config_keys(value: &toml::Value) -> Vec<UnknownKey> {
     let mut unknown = Vec::new();
-    check_table(
-        value,
-        "",
-        struct_fields::<RawBuildConfig>(),
-        SECTIONS,
-        &mut unknown,
-    );
-    unknown.sort();
+    let root = |_: &toml::Table| struct_fields::<RawBuildConfig>().map(<[&str]>::to_vec);
+    check_table(value, "", &root, SECTIONS, &mut unknown);
+    unknown.sort_by(|left, right| left.path.cmp(&right.path));
     unknown
+}
+
+/// Attaches each unknown key's `line:col` from the file's own text, where the
+/// text shows the key.
+pub(crate) fn locate_unknown_keys(keys: &mut [UnknownKey], path: &Path, text: &str) {
+    if keys.is_empty() {
+        return;
+    }
+    let locations = KeyLocations::scan(text);
+    for key in keys {
+        key.location = locations
+            .offset(&key.path)
+            .map(|offset| crate::locate::at_offset(path, text, offset));
+    }
 }
 
 /// Warnings for loaded files (the entrypoint, its `extends` chain and its
@@ -339,9 +525,11 @@ fn collect_into(raw: &RawBuildConfig, warnings: &mut Vec<String>) {
         .map(|path| path.to_string())
         .unwrap_or_else(|| "<build config>".into());
     for key in &raw.unknown_keys {
+        let place = key.location.clone().unwrap_or_else(|| path.clone());
         let warning = format!(
-            "unknown key '{key}' in '{path}': this gaia does not know it \
-             (a typo, or a setting that needs a newer gaia)"
+            "unknown key '{}' in '{place}'{}: this gaia does not know it \
+             (a typo, or a setting that needs a newer gaia)",
+            key.path, key.suggestion
         );
         if !warnings.contains(&warning) {
             warnings.push(warning);
@@ -355,12 +543,14 @@ fn collect_into(raw: &RawBuildConfig, warnings: &mut Vec<String>) {
     }
 }
 
+/// Checks the keys of `value` (a table, or an array of tables) against the
+/// keys `known` gives for each table, then checks the nested sections.
 fn check_table(
     value: &toml::Value,
     prefix: &str,
-    known: Option<&'static [&'static str]>,
+    known: &dyn Fn(&toml::Table) -> Option<Vec<&'static str>>,
     children: &'static [Section],
-    unknown: &mut Vec<String>,
+    unknown: &mut Vec<UnknownKey>,
 ) {
     let tables: Vec<(String, &toml::Table)> = match value {
         toml::Value::Table(table) => vec![(prefix.to_string(), table)],
@@ -375,6 +565,7 @@ fn check_table(
         _ => return,
     };
     for (path, table) in tables {
+        let fields = known(table);
         for (key, child) in table {
             let child_path = if path.is_empty() {
                 key.clone()
@@ -383,17 +574,22 @@ fn check_table(
             };
             // Without a field list (flattened or custom types) only the
             // listed nested tables are checked.
-            if let Some(known) = known
-                && !known.contains(&key.as_str())
+            if let Some(fields) = &fields
+                && !fields.contains(&key.as_str())
             {
-                unknown.push(child_path);
+                unknown.push(UnknownKey {
+                    path: child_path,
+                    suggestion: did_you_mean_among(key, fields),
+                    location: None,
+                });
                 continue;
             }
             if let Some(section) = children.iter().find(|section| section.key == key) {
+                let section_known = section.known;
                 check_table(
                     child,
                     &child_path,
-                    (section.fields)(),
+                    &move |table| fields_of(section_known, table),
                     section.children,
                     unknown,
                 );
@@ -454,124 +650,62 @@ impl<'de> Deserializer<'de> for FieldNames {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// The layout the JSON schema is written from (see `schema`).
+pub(crate) mod layout {
+    use super::{Known, RawBuildConfig, SECTIONS, Section, struct_fields};
 
-    fn unknown(text: &str) -> Vec<String> {
-        unknown_config_keys(&toml::from_str(text).expect("toml"))
+    /// The keys of the build file's top level.
+    pub(crate) fn root_fields() -> Vec<&'static str> {
+        struct_fields::<RawBuildConfig>()
+            .map(<[&str]>::to_vec)
+            .unwrap_or_default()
     }
 
-    #[test]
-    fn known_keys_are_accepted() {
-        assert!(
-            unknown(
-                "gaia_version = \">=2.1.0\"\nbuild_name = \"demo\"\n\
-                 [workspace]\nroot_dir = \".\"\n\
-                 [providers.buildroot]\noverride_check = \"warn\"\n\
-                 [providers.buildroot.ccache]\nenabled = true\n\
-                 [[stage.files]]\nid = \"a\"\nsrc = \"a\"\ndest = \"/a\"\n\
-                 [[sources]]\nid = \"s\"\nkind = \"path\"\npath = \".\"\nwhatever = 1\n"
-            )
-            .is_empty()
-        );
+    /// A top-level section: its key, how its keys are known, and its nested
+    /// sections.
+    pub(crate) struct Node {
+        pub(crate) key: &'static str,
+        pub(crate) known: Known,
+        pub(crate) children: &'static [Section],
     }
 
-    #[test]
-    fn java_gradle_home_is_a_known_key() {
-        assert!(unknown("[providers.java]\ngradle_home = \"user-cache\"\n").is_empty());
-        assert_eq!(
-            unknown("[providers.java]\ngradle_hme = \"user-cache\"\n"),
-            vec!["providers.java.gradle_hme"]
-        );
+    /// The sections the unknown-key check looks into.
+    pub(crate) fn top_sections() -> Vec<Node> {
+        SECTIONS
+            .iter()
+            .map(|section| Node {
+                key: section.key,
+                known: section.known,
+                children: section.children,
+            })
+            .collect()
     }
 
-    #[test]
-    fn unknown_host_tools_are_reported() {
-        assert_eq!(
-            unknown(
-                "[providers.buildroot.host_tools]\ndefault = \"build\"\n\
-                 ccache = \"system,build\"\ncache = \"system\"\n"
-            ),
-            vec!["providers.buildroot.host_tools.cache"]
-        );
+    /// A nested section, for the schema: its key, how its keys are known and
+    /// its own nested sections.
+    pub(crate) fn nested(section: &Section) -> (&'static str, Known, &'static [Section]) {
+        (section.key, section.known, section.children)
     }
 
-    #[test]
-    fn unknown_top_level_and_section_keys_are_reported() {
-        assert_eq!(
-            unknown(
-                "build_command = \"make\"\n\
-                 [providers.buildroot]\nshared_outptu = true\n\
-                 [providers.buildroot.ccache]\nsize = 1\n\
-                 [[stage.files]]\nid = \"a\"\nsrc = \"a\"\ndest = \"/a\"\nowner = \"root\"\n\
-                 [future_section]\nkey = 1\n"
-            ),
-            vec![
-                "build_command",
-                "future_section",
-                "providers.buildroot.ccache.size",
-                "providers.buildroot.shared_outptu",
-                "stage.files[0].owner",
-            ]
-        );
+    /// The keys a table of a section takes when its `kind` is `kind` (`None`
+    /// for a table that names none).
+    pub(crate) fn keys_for_kind(known: Known, kind: Option<&str>) -> Option<Vec<&'static str>> {
+        match known {
+            Known::Fixed(fields) => fields().map(<[&str]>::to_vec),
+            Known::ByKind(kinds) => kinds(kind),
+        }
     }
 
-    #[test]
-    fn export_dir_keys_are_known() {
-        assert_eq!(
-            unknown(
-                "[workspace]\nexport_dir = \"exports\"\n\
-                 [image.output]\nexport_dir = \"~/images\"\n"
-            ),
-            Vec::<String>::new()
-        );
-    }
-
-    #[test]
-    fn nested_image_tables_are_checked_but_kind_keys_are_not() {
-        assert_eq!(
-            unknown(
-                "[image]\nkind = \"buildroot\"\ndefconfig = \"x\"\n\
-                 [image.output]\narchive_name = \"a.img\"\narchive_format = \"img.xz\"\n\
-                 [image.assembly]\nwork_dir = \"w\"\n\
-                 [[image.assembly.disks]]\nid = \"sd\"\noutput = \"sd.img\"\nsector_size = 512\n\
-                 [[image.assembly.disks.partitions]]\nname = \"boot\"\nimage = \"b\"\nlabel = \"x\"\n"
-            ),
-            vec![
-                "image.assembly.disks[0].partitions[0].label",
-                "image.assembly.disks[0].sector_size",
-                "image.output.archive_format",
-            ]
-        );
-    }
-
-    #[test]
-    fn assembly_archive_tables_are_checked() {
-        assert_eq!(
-            unknown(
-                "[[image.assembly.archives]]\nid = \"b\"\noutput = \"b.tar\"\nformat = \"tar\"\n\
-                 [[image.assembly.archives.members]]\nname = \"a\"\nsrc = \"a\"\nmode = \"0644\"\n\
-                 [[image.assembly.archives.members]]\nname = \"m\"\nentries = [[\"K\", \"v\"]]\n\
-                 [[image.assembly.archives.generated]]\nname = \"g\"\nentries = []\nquote = true\n\
-                 [[image.assembly.disks]]\nid = \"sd\"\noutput = \"sd.img\"\n\
-                 [[image.assembly.disks.partitions]]\nname = \"p\"\nsize = \"2G\"\nwipe = true\n\
-                 [[image.assembly.transforms]]\nkind = \"zstd\"\ndest = \"x.zst\"\nlevel = 19\n"
-            ),
-            vec![
-                "image.assembly.archives[0].format",
-                "image.assembly.archives[0].generated[0].quote",
-                "image.assembly.archives[0].members[0].mode",
-            ]
-        );
-    }
-
-    #[test]
-    fn flattened_and_custom_types_are_not_checked() {
-        assert!(struct_fields::<raw::RawSourceConfig>().is_none());
-        assert!(struct_fields::<raw::RawImageConfig>().is_none());
-        assert!(struct_fields::<RawBuildConfig>().is_some_and(|fields| {
-            fields.contains(&"gaia_version") && !fields.contains(&"unknown_keys")
-        }));
+    /// The kinds a kinded section names.
+    pub(crate) fn kinds_of(key: &str) -> &'static [&'static str] {
+        match key {
+            "sources" => &["git", "path", "archive", "download"],
+            "artifacts" => &["rust", "java", "node", "python", "go"],
+            "image" => &["buildroot", "starting-point"],
+            _ => &[],
+        }
     }
 }
+#[cfg(test)]
+#[path = "unknown_keys_tests.rs"]
+mod tests;

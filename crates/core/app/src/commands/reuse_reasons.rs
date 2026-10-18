@@ -10,6 +10,7 @@ use gaia_spec::ResolvedBuildSpec;
 use std::collections::BTreeMap;
 
 use super::state::{RecordedComponents, load_operation_components};
+use super::variants::{ReuseScope, shared_store_spec};
 
 /// Message of a fingerprint change with no recorded input detail (state
 /// written before per-input records existed, or records that do not match).
@@ -18,15 +19,26 @@ const NO_DETAIL: &str = "fingerprint changed (no detail recorded)";
 /// The inputs recorded by the last run, read from the details sidecar. Must be
 /// read before a run saves its own state, which overwrites the sidecar. Empty
 /// when there is no reuse state, since then nothing can be explained.
+///
+/// A variant's shared operations were recorded by the shared store (see
+/// `variants::scoped_reuse_state`), so their inputs come from its sidecar.
 pub fn recorded_for_explanation(
     spec: &ResolvedBuildSpec,
     reuse_state: Option<&ReuseState>,
+    scope: ReuseScope<'_>,
 ) -> BTreeMap<String, RecordedComponents> {
-    if reuse_state.is_some() {
-        load_operation_components(spec)
-    } else {
-        BTreeMap::new()
+    if reuse_state.is_none() {
+        return BTreeMap::new();
     }
+    let mut recorded = load_operation_components(spec);
+    if let ReuseScope::Variant { shared } = scope {
+        for (id, record) in load_operation_components(&shared_store_spec(spec)) {
+            if shared.contains(&id) {
+                recorded.insert(id, record);
+            }
+        }
+    }
+    recorded
 }
 
 /// Replaces the generic "fingerprint changed (no detail recorded)" reason of

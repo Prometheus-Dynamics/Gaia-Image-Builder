@@ -5,6 +5,7 @@ mod env;
 mod gaia_version;
 mod interpolate;
 mod load;
+mod locate;
 pub mod lockfile;
 mod merge;
 mod overrides;
@@ -12,14 +13,16 @@ mod raw;
 mod raw_assembly;
 mod raw_variant;
 mod raw_when;
+mod schema;
 mod source_tokens;
 mod unknown_keys;
 mod variants;
 
 pub use compile::compile_config;
 pub use gaia_version::GAIA_VERSION;
+pub use schema::config_schema_json;
 pub use variants::{
-    resolve_variant_specs, resolve_variant_specs_scoped, variant_output_collisions,
+    VariantBuild, resolve_variant_specs, resolve_variant_specs_scoped, variant_output_collisions,
 };
 
 use dynamic_inputs::resolve_dynamic_inputs;
@@ -29,7 +32,7 @@ use load::{discover_build_root, load_build_config};
 use merge::merge_config;
 use overrides::{apply_cli_overrides, apply_selected_presets, collect_selected_inputs};
 
-use gaia_spec::ResolvedBuildSpec;
+use gaia_spec::{ImportSourceSpec, ResolvedBuildSpec};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -119,6 +122,30 @@ pub(crate) fn resolve_build_checked(
         explicit_overrides = options.explicit_overrides.len(),
     );
     let _guard = span.enter();
+    let merged = load_merged(build, options)?;
+    resolve_merged(&merged, build, options, variant)
+}
+
+/// A build file loaded, merged and checked under one set of options: the
+/// part of a resolution that does not depend on a variant's own overrides
+/// (see `variants::VariantBuild`).
+#[derive(Debug)]
+pub(crate) struct MergedBuild {
+    /// The merged config, before the selected preset and `--set` overrides.
+    raw: raw::RawBuildConfig,
+    import_sources: Vec<ImportSourceSpec>,
+    unused_import_sources: Vec<String>,
+    unknown_key_warnings: Vec<String>,
+    empty_layer_warnings: Vec<String>,
+}
+
+/// Loads and merges the build under `options`, and checks its declared
+/// variants. Everything here reads the files and the keys the loader reads
+/// from the options (see `variants::loader_reads_override`).
+pub(crate) fn load_merged(
+    build: &str,
+    options: &ResolveOptions,
+) -> Result<MergedBuild, ConfigError> {
     tracing::debug!(build, preset = ?options.preset, "resolving build config");
     let load::LoadedBuildConfig {
         raw,
@@ -143,7 +170,24 @@ pub(crate) fn resolve_build_checked(
     let selected = apply_preset_selection(raw, build, options);
     let merged = merge_config(selected);
     variants::validate_declared(&merged)?;
-    let selected = apply_preset_selection(merged, build, options);
+    Ok(MergedBuild {
+        raw: merged,
+        import_sources,
+        unused_import_sources,
+        unknown_key_warnings,
+        empty_layer_warnings,
+    })
+}
+
+/// Resolves a merged build under `options` and `variant`: the selected
+/// preset, the variant's presets, and the `--set` overrides, then compiles.
+pub(crate) fn resolve_merged(
+    loaded: &MergedBuild,
+    build: &str,
+    options: &ResolveOptions,
+    variant: &VariantResolution,
+) -> Result<ResolvedBuild, ConfigError> {
+    let selected = apply_preset_selection(loaded.raw.clone(), build, options);
     let preset_applied = apply_selected_presets(selected, &options.variant_presets)?;
     let (overridden, undeclared_sources) = apply_cli_overrides(preset_applied, options)?;
     let declared_sources = overrides::declared_source_ids(&overridden);
@@ -168,10 +212,10 @@ pub(crate) fn resolve_build_checked(
             source.variant_scope = Some(id.clone());
         }
     }
-    spec.metadata.config_warnings = unknown_key_warnings;
-    spec.metadata.empty_layers = empty_layer_warnings;
-    spec.selection.import_sources = import_sources;
-    drop_unused_import_sources(&mut spec, &unused_import_sources);
+    spec.metadata.config_warnings = loaded.unknown_key_warnings.clone();
+    spec.metadata.empty_layers = loaded.empty_layer_warnings.clone();
+    spec.selection.import_sources = loaded.import_sources.clone();
+    drop_unused_import_sources(&mut spec, &loaded.unused_import_sources);
     apply_lockfile(&mut spec);
     source_tokens::substitute_source_tokens(&mut spec);
     tracing::debug!(
@@ -357,10 +401,18 @@ impl ConfigError {
         }
     }
 
-    pub(crate) fn config_parse(path: &Path, error: impl fmt::Display) -> Self {
+    /// A parse or type error of a build file's `text`, located at toml's span
+    /// as `path:line:col`. Without a span the error names the file only.
+    pub(crate) fn config_parse_at(path: &Path, text: &str, error: &toml::de::Error) -> Self {
+        let span = error.span();
+        let message = if span.is_some() {
+            error.message().to_string()
+        } else {
+            error.to_string()
+        };
         Self::ConfigParse {
-            path: path.display().to_string(),
-            message: error.to_string(),
+            path: locate::toml_error_location(path, text, span),
+            message,
         }
     }
 

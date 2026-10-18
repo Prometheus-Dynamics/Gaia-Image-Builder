@@ -1,4 +1,4 @@
-use gaia_config::{ResolveOptions, resolve_variant_specs};
+use gaia_config::{ResolveOptions, VariantBuild};
 use gaia_spec::ResolvedBuildSpec;
 use gaia_validate::{
     DiagnosticSeverity, ValidationDiagnostic, ValidationReport, validate_spec_with_providers,
@@ -18,7 +18,15 @@ pub fn validate_build_command(
     options: &ResolveOptions,
     variants: &[String],
 ) -> CommandOutcome {
-    let specs = match resolve_variant_specs(build, options) {
+    let loaded = match VariantBuild::load(build, options) {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            return CommandOutcome::Failed {
+                message: format!("{error}\nvalidate: FAILED (the build config did not resolve)"),
+            };
+        }
+    };
+    let specs = match loaded.resolve() {
         Ok(specs) => specs,
         Err(error) => {
             return CommandOutcome::Failed {
@@ -55,7 +63,7 @@ pub fn validate_build_command(
     // operations are shared, sources the base needs that a variant changes,
     // and colliding outputs once paths are scoped.
     if validation.errors.is_empty()
-        && let Err(message) = prepare_variants(context, VariantSource { build, options }, specs)
+        && let Err(message) = prepare_variants(context, VariantSource { build: &loaded }, specs)
     {
         // Printed from the diagnostics, like every other error.
         validation.diagnostics.push(ValidationDiagnostic {

@@ -1,11 +1,12 @@
-use gaia_config::{ResolveOptions, resolve_variant_specs};
-use gaia_plan::{PlanTarget, RebuildRequest, plan_build_with_rebuilds};
+use gaia_config::{ResolveOptions, VariantBuild};
+use gaia_plan::{ExecutionPlan, PlanTarget, RebuildRequest};
 use gaia_spec::ResolvedBuildSpec;
 use gaia_validate::validate_spec_with_providers;
 
 use crate::AppContext;
 
 use super::rebuild::check_rebuild_request;
+use super::reuse_reasons::{explain_rebuild_reasons, recorded_for_explanation};
 use super::variants::{ReuseScope, plan_variants, scoped_reuse_state};
 use super::{CommandOutcome, load_operation_durations};
 
@@ -17,7 +18,15 @@ pub fn plan_build_command(
     rebuild: &RebuildRequest,
     variants: &[String],
 ) -> CommandOutcome {
-    let mut specs = match resolve_variant_specs(build, options) {
+    let loaded = match VariantBuild::load(build, options) {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            return CommandOutcome::Failed {
+                message: error.to_string(),
+            };
+        }
+    };
+    let mut specs = match loaded.resolve() {
         Ok(specs) => specs,
         Err(error) => {
             return CommandOutcome::Failed {
@@ -28,7 +37,7 @@ pub fn plan_build_command(
     if specs[0].selection.variant.is_some() {
         return plan_variants(
             context,
-            super::variants::VariantSource { build, options },
+            super::variants::VariantSource { build: &loaded },
             specs,
             variants,
             targets,
@@ -43,7 +52,7 @@ pub fn plan_build_command(
         };
     }
     let spec = specs.remove(0);
-    plan_resolved(context, spec, targets, rebuild, ReuseScope::Build)
+    plan_resolved(context, spec, targets, rebuild, ReuseScope::Build, None)
 }
 
 /// The plan of one resolved spec (a build, or one variant of one), with the
@@ -54,6 +63,7 @@ pub(crate) fn plan_resolved(
     targets: &[PlanTarget],
     rebuild: &RebuildRequest,
     scope: ReuseScope<'_>,
+    structure: Option<ExecutionPlan>,
 ) -> CommandOutcome {
     let validation = validate_spec_with_providers(
         &spec,
@@ -72,14 +82,12 @@ pub(crate) fn plan_resolved(
     }
 
     let reuse_state = scoped_reuse_state(&spec, scope);
-    let plan = plan_build_with_rebuilds(
-        &spec,
-        &context.source_catalog,
-        &context.artifact_catalog,
-        &context.image_catalog,
-        reuse_state.as_ref(),
-        rebuild,
-    );
+    // Named like `run` and `preview` name them: what changed since the
+    // recorded state, from the components that state recorded.
+    let recorded = recorded_for_explanation(&spec, reuse_state.as_ref(), scope);
+    let mut plan =
+        super::run::plan_with_reuse(context, &spec, reuse_state.as_ref(), rebuild, structure);
+    explain_rebuild_reasons(&spec, &mut plan, reuse_state.as_ref(), &recorded);
     if let Err(message) = check_rebuild_request(&spec, &plan, rebuild) {
         return CommandOutcome::Failed { message };
     }

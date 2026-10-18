@@ -3,7 +3,7 @@
 //! previewed by its provider, without changing anything.
 
 use crate::AppContext;
-use gaia_config::{ResolveOptions, resolve_variant_specs};
+use gaia_config::{ResolveOptions, VariantBuild};
 use gaia_image_providers::{ImagePreview, ImageProviderOperation};
 use gaia_plan::{
     InvalidationSummary, OperationKind, OperationReuse, PlanTarget, RebuildRequest,
@@ -125,7 +125,15 @@ pub fn preview_build_command(
     json: bool,
     variants: &[String],
 ) -> CommandOutcome {
-    let mut specs = match resolve_variant_specs(build, options) {
+    let loaded = match VariantBuild::load(build, options) {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            return CommandOutcome::Failed {
+                message: error.to_string(),
+            };
+        }
+    };
+    let mut specs = match loaded.resolve() {
         Ok(specs) => specs,
         Err(error) => {
             return CommandOutcome::Failed {
@@ -136,7 +144,7 @@ pub fn preview_build_command(
     if specs[0].selection.variant.is_some() {
         return super::variants::preview_variants(
             context,
-            super::variants::VariantSource { build, options },
+            super::variants::VariantSource { build: &loaded },
             variants,
             targets,
             rebuild,
@@ -213,7 +221,7 @@ pub(crate) fn preview_resolved_scoped(
         rebuild,
     );
     check_rebuild_request(spec, &full_plan, rebuild)?;
-    let recorded = recorded_for_explanation(spec, reuse_state.as_ref());
+    let recorded = recorded_for_explanation(spec, reuse_state.as_ref(), scope);
     explain_rebuild_reasons(spec, &mut full_plan, reuse_state.as_ref(), &recorded);
     let plan = if targets.is_empty() {
         full_plan.clone()

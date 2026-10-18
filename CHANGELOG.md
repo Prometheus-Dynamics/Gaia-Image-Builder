@@ -6,6 +6,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Config: locations, kind-checked keys, JSON Schema, fewer loads
+
+- **Config errors name their place.** A parse error or a value of the wrong type reports `file:line:col` (from toml's span). An unknown key reports the line and column of the key, with a did-you-mean among the keys its table takes.
+- **`[[sources]]`, `[[artifacts]]` and `[image]` are checked by kind.** A typo in a source, an artifact or an image key (including `[image.rootfs]`, `[[image.expected_images]]` and `[image.packages]`) is reported with the keys that kind takes; a key of another kind is reported. Keys of every kind that Gaia knows stay valid, and the examples and the TOML blocks of the docs name no unknown key (a test checks this).
+- **`gaia config schema`** prints a JSON Schema of the build file, written from the same key lists, for taplo and VS Code's Even Better TOML (see `docs/configuration.md`). It checks key names and `kind` values; value types are not checked.
+- **One load per build.** A build with `[[variants]]` loads and merges its file once. A variant whose overrides and presets do not change what the loader reads (no `input.*`, no `build.target/profile/branch`, no source path or `workspace.root_dir`, no preset) takes that merged config; any other variant loads its own. Each variant's plan from `validate`/`run`/`plan` is reused for its run when the spec is unchanged, instead of planned twice. Measured on `examples/buildroot-rust-minimal` with three variants added (four specs), a debug build: `gaia plan` made 4 config loads and 8 plans, now 1 and 4; its median time went from 60 ms to 47 ms. `gaia validate` went from 48 ms to 45 ms (it was already one plan per variant). The resulting specs are unchanged: a test compares them with a load per variant.
+- **Variant output collisions compare paths.** Two variants that write the same file (`collect_dir/archive_name`, an assembly output, or the same export file name in one export dir) are reported, whatever else differs between them. Assembly outputs are compared as the config names them.
+- **`gaia plan` names what changed.** A fingerprint change is explained from the inputs the last run recorded (`config_overrides changed (BR2_FOO)`), as `run` and `preview` already did. A shared operation of a variant run reads its recorded inputs from the shared store, so its explanation is named too.
+
 ### Assembly: output changes (rebuild the affected images)
 
 These change image bytes, approved for this release. Reuse does not notice a tool or code change, so an image built before this release with an unchanged spec is reused as it is: remove the affected images to get the new bytes.

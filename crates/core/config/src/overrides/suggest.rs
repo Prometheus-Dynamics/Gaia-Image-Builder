@@ -123,9 +123,16 @@ const LITERAL_KEYS: &[&str] = &[
 /// Keys are compared in full and by their last segment, so a misspelled
 /// leaf such as `image.rootfs_pth` still finds `image.starting-point.rootfs_path`.
 pub(super) fn did_you_mean(wanted: &str) -> String {
+    did_you_mean_among(wanted, LITERAL_KEYS)
+}
+
+/// [`did_you_mean`] over `candidates` instead of the override keys: the
+/// closest of them to the leaf of `wanted` (a key of a TOML table, say,
+/// against the keys that table takes).
+pub(crate) fn did_you_mean_among(wanted: &str, candidates: &[&str]) -> String {
     let leaf = last_segment(wanted);
     let limit = (leaf.chars().count() / 3).max(2);
-    let mut scored = LITERAL_KEYS
+    let mut scored = candidates
         .iter()
         .filter_map(|id| {
             let distance = edit_distance(wanted, id).min(edit_distance(leaf, last_segment(id)));

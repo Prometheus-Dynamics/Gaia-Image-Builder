@@ -6,6 +6,7 @@ mod suggest;
 pub(crate) use keys::source_path_override_id;
 use keys::{KnownOverrideKey, OverrideKey};
 use suggest::did_you_mean;
+pub(crate) use suggest::did_you_mean_among;
 
 /// Applies the `--set` overrides. Returns the overrides that name a source
 /// the merged config does not declare (`sources.<id>.path`), unapplied: the

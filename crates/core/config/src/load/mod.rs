@@ -141,8 +141,8 @@ impl ConfigFiles {
                 "the file is empty; a config file must set something (was it truncated?)",
             ));
         }
-        let value: toml::Value =
-            toml::from_str(&contents).map_err(|error| ConfigError::config_parse(path, error))?;
+        let value: toml::Value = toml::from_str(&contents)
+            .map_err(|error| ConfigError::config_parse_at(path, &contents, &error))?;
         let parsed = Rc::new(ParsedConfigFile { contents, value });
         self.parsed
             .borrow_mut()
@@ -195,7 +195,8 @@ impl Loader<'_> {
             self.sources.record_file(id, &value, contents);
         }
         validate_raw_toml_shape(&canonical_path, &value)?;
-        let unknown_keys = crate::unknown_keys::unknown_config_keys(&value);
+        let mut unknown_keys = crate::unknown_keys::unknown_config_keys(&value);
+        crate::unknown_keys::locate_unknown_keys(&mut unknown_keys, &canonical_path, contents);
         let sets_nothing = value.as_table().is_some_and(toml::Table::is_empty);
         // `kind` may be left to a layer this file extends. Without it the
         // table parses as an empty buildroot definition, which the merge
@@ -211,9 +212,10 @@ impl Loader<'_> {
         {
             image.insert("kind".into(), toml::Value::String("buildroot".into()));
         }
-        let mut raw: RawBuildConfig = value
-            .try_into()
-            .map_err(|error| ConfigError::config_parse(&canonical_path, error))?;
+        let mut raw: RawBuildConfig = match value.try_into() {
+            Ok(raw) => raw,
+            Err(error) => return Err(value_error(&canonical_path, contents, &error)),
+        };
         raw.image.kind_given = image_kind_given;
         raw.source_path = Some(canonical_path.clone());
         raw.unknown_keys = unknown_keys;
@@ -438,6 +440,17 @@ fn absolutize_from(base: &Path, value: &str) -> PathBuf {
         path
     } else {
         base.join(path)
+    }
+}
+
+/// The error for a file whose values do not fit the build config. The values
+/// were rewritten (path tokens, the implied kind) before they were read, so
+/// the position comes from the file's own text, where that text fails the
+/// same way, and the rewritten values' error stands otherwise.
+fn value_error(path: &Path, text: &str, error: &toml::de::Error) -> ConfigError {
+    match toml::from_str::<RawBuildConfig>(text) {
+        Err(located) => ConfigError::config_parse_at(path, text, &located),
+        Ok(_) => ConfigError::config_parse_at(path, text, error),
     }
 }
 
