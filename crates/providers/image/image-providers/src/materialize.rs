@@ -111,35 +111,29 @@ fn write_image_output(
             })
             .map_err(ImageProviderError::backend_command)?;
     }
-    if let Some(archive_path) = &result.archive_path {
-        if archive_path.is_file() {
-            return Ok(());
-        }
-        if let Some(parent) = archive_path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|error| {
-                    format!(
-                        "failed to create archive dir '{}': {error}",
-                        parent.display()
-                    )
-                })
-                .map_err(ImageProviderError::backend_command)?;
-        }
-        let temp_archive = archive_path.with_extension("gaia.tmp");
-        fs::write(
-            &temp_archive,
-            format!("provider={}\narchive=true\n", result.provider_id),
-        )
-        .map_err(|error| {
-            format!(
-                "failed to write image temp archive '{}': {error}",
-                temp_archive.display()
-            )
-        })
-        .map_err(ImageProviderError::backend_command)?;
-        finalize_temp_image_output(&temp_archive, archive_path, "image archive")?;
+    // No archive is written here. A raw disk archive the typed assembly
+    // builds later is written by that step; until then its path stays absent
+    // (no placeholder file, no digest). A placeholder an earlier build left
+    // is removed, so nothing reads it as an archive.
+    if let Some(archive_path) = &result.archive_path
+        && is_archive_placeholder(archive_path)
+    {
+        let _ = fs::remove_file(archive_path);
     }
     Ok(())
+}
+
+/// Whether a file is the `provider=…\narchive=true` text an earlier build
+/// wrote in place of an archive.
+fn is_archive_placeholder(path: &Path) -> bool {
+    fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.len() < 256)
+        && fs::read_to_string(path).is_ok_and(|text| {
+            let mut lines = text.lines();
+            lines
+                .next()
+                .is_some_and(|line| line.starts_with("provider="))
+                && lines.eq(["archive=true"])
+        })
 }
 
 pub fn finalize_temp_image_output(
@@ -176,7 +170,9 @@ fn render_image_state(result: &ImageExecutionResult, archive_digest: Option<&str
     if let Some(collect_dir) = &result.collect_dir {
         state.insert("collect_digest", dir_digest(collect_dir));
     }
-    if let Some(archive_path) = &result.archive_path {
+    // An archive that is not there (deferred to typed assembly) has no digest
+    // or size to record.
+    if let Some(archive_path) = result.archive_path.as_ref().filter(|path| path.is_file()) {
         let digest = archive_digest
             .map(str::to_string)
             .unwrap_or_else(|| file_sha256_or_placeholder(archive_path));

@@ -321,16 +321,6 @@ pub(crate) fn apply_buildroot_config_fragments(
     )
 }
 
-pub(crate) fn materialize_defconfig_support_files(
-    defconfig_path: &Path,
-    output_dir: &Path,
-) -> Result<(), ImageProviderError> {
-    let Some(defconfig_dir) = defconfig_path.parent() else {
-        return Ok(());
-    };
-    copy_dir_contents(defconfig_dir, output_dir, Some(defconfig_path))
-}
-
 pub(crate) fn copy_dir_contents(
     src_dir: &Path,
     dest_dir: &Path,

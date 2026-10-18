@@ -522,6 +522,7 @@ pub(crate) fn run_buildroot_with(
             image,
             buildroot_dir,
             output_dir,
+            &external_trees_of(spec),
             &command_context,
         )?);
     }

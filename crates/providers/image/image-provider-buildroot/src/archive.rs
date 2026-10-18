@@ -3,7 +3,6 @@ use super::*;
 pub(crate) struct BuildrootArchiveRequest<'a> {
     pub(crate) image: &'a ImageSpec,
     pub(crate) collect_dir: &'a Path,
-    pub(crate) output_dir: &'a Path,
     pub(crate) matched_expected_images: &'a [String],
     pub(crate) archive_path: &'a Path,
     pub(crate) reuse_details: &'a mut Vec<String>,
@@ -16,7 +15,6 @@ pub(crate) fn archive_buildroot_output(
     let BuildrootArchiveRequest {
         image,
         collect_dir,
-        output_dir,
         matched_expected_images,
         archive_path,
         reuse_details,
@@ -45,7 +43,23 @@ pub(crate) fn archive_buildroot_output(
         let source_path = collect_dir.join(&entries[0]);
         if source_path.is_file() {
             if let Some(kind) = compressed_raw_archive(archive_path) {
-                return compress_primary_image(
+                let (compressor, args) = kind
+                    .compressor(command_context.policy.local_jobs)
+                    .ok_or_else(|| {
+                        ImageProviderError::backend_command(
+                            "an uncompressed disk archive is not compressed",
+                        )
+                    })?;
+                let signature = raw_archive_signature(collect_dir, &entries[0], compressor, &args);
+                if raw_archive_signature_is_current(archive_path, &signature) {
+                    reuse_details.push("image-archive".to_string());
+                    return Ok(vec![format!(
+                        "reused compressed image archive '{}' for an unchanged image: {}",
+                        archive_path.display(),
+                        entries[0]
+                    )]);
+                }
+                let messages = compress_primary_image(
                     kind,
                     &source_path,
                     archive_path,
@@ -53,46 +67,90 @@ pub(crate) fn archive_buildroot_output(
                     command_context.policy,
                     command_context.log_sink,
                     command_context.cancel_check,
-                );
-            }
-            if let Some(parent) = archive_path.parent() {
-                fs::create_dir_all(parent).map_err(|error| {
-                    ImageProviderError::backend_command(format!(
-                        "failed to create archive dir '{}': {error}",
-                        parent.display()
-                    ))
-                })?;
+                )?;
+                write_raw_archive_signature(archive_path, &signature)?;
+                return Ok(messages);
             }
             let clock = gaia_process::ActiveClock::start();
-            fs::copy(&source_path, archive_path).map_err(|error| {
-                ImageProviderError::new(
-                    ImageProviderErrorKind::RuntimeState,
-                    format!(
-                        "failed to copy primary buildroot image '{}' to '{}': {error}",
-                        source_path.display(),
-                        archive_path.display()
-                    ),
-                )
-            })?;
+            let copied =
+                copy_collected_file(&source_path, archive_path, collect_dir).map_err(|error| {
+                    ImageProviderError::new(
+                        ImageProviderErrorKind::RuntimeState,
+                        format!(
+                            "failed to copy primary buildroot image '{}' to '{}': {error}",
+                            source_path.display(),
+                            archive_path.display()
+                        ),
+                    )
+                })?;
             return Ok(vec![
                 format!(
-                    "copied primary buildroot image '{}' to '{}'",
+                    "copied primary buildroot image '{}' to '{}' ({})",
                     source_path.display(),
-                    archive_path.display()
+                    archive_path.display(),
+                    copied.placement.describe()
                 ),
                 gaia_process::step_time_message("copy primary image", clock.elapsed()),
             ]);
         }
     }
-    archive_directory(
-        output_dir,
-        archive_path,
-        "buildroot archive",
-        command_context.execution,
-        command_context.policy,
-        command_context.log_sink,
-        command_context.cancel_check,
+    let found = if entries.is_empty() {
+        "none".to_string()
+    } else {
+        entries.join(", ")
+    };
+    let archive_name = archive_path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| archive_path.display().to_string());
+    Err(ImageProviderError::new(
+        ImageProviderErrorKind::RuntimeState,
+        format!(
+            "buildroot archive '{archive_name}' is not a .tar or .txz archive, and it does not \
+             name a single expected image the build produced (expected images found: {found}). \
+             Gaia does not tar the whole Buildroot output to fill it: host and build trees can \
+             be tens of GB. To fix: name the archive '<name>.tar' or '<name>.txz' to archive \
+             the expected images, or name one raw disk image as the archive and make the build \
+             produce it as an expected image."
+        ),
+    ))
+}
+
+/// The signature of a compressed raw archive: its compressor and arguments,
+/// and the digest of the image it compresses (the content manifest's, which
+/// trusts size and mtime).
+fn raw_archive_signature(
+    collect_dir: &Path,
+    entry: &str,
+    compressor: &str,
+    args: &[String],
+) -> String {
+    format!(
+        "gaia-raw-archive-v1\ncompressor={compressor}\nargs={}\ninput={}\n",
+        args.join(" "),
+        archive_entry_digest(collect_dir, &collect_dir.join(entry))
     )
+}
+
+fn raw_archive_signature_is_current(archive_path: &Path, signature: &str) -> bool {
+    archive_path.is_file()
+        && fs::read_to_string(archive_signature_path(archive_path))
+            .is_ok_and(|current| current == signature)
+}
+
+fn write_raw_archive_signature(
+    archive_path: &Path,
+    signature: &str,
+) -> Result<(), ImageProviderError> {
+    fs::write(archive_signature_path(archive_path), signature).map_err(|error| {
+        ImageProviderError::new(
+            ImageProviderErrorKind::RuntimeState,
+            format!(
+                "failed to write image archive state for '{}': {error}",
+                archive_path.display()
+            ),
+        )
+    })
 }
 
 #[derive(Clone, Copy)]

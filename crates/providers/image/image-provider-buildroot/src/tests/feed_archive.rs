@@ -37,7 +37,6 @@ fn archive_buildroot_output_promotes_single_primary_image() {
     archive_buildroot_output(BuildrootArchiveRequest {
         image: &image,
         collect_dir: &collect_dir,
-        output_dir: &output_dir,
         matched_expected_images: &matched,
         archive_path: &archive_path,
         reuse_details: &mut reuse_details,
@@ -94,7 +93,6 @@ fn collect_expected_images_and_archive_promote_raw_board_image() {
     archive_buildroot_output(BuildrootArchiveRequest {
         image: &image,
         collect_dir: &collect_dir,
-        output_dir: &output_dir,
         matched_expected_images: &matched,
         archive_path: &archive_path,
         reuse_details: &mut reuse_details,
@@ -156,7 +154,6 @@ fn archive_buildroot_output_compresses_raw_board_image_for_img_xz_output() {
     archive_buildroot_output(BuildrootArchiveRequest {
         image: &image,
         collect_dir: &collect_dir,
-        output_dir: &output_dir,
         matched_expected_images: &matched,
         archive_path: &archive_path,
         reuse_details: &mut reuse_details,
@@ -408,7 +405,6 @@ fn archive_buildroot_output_archives_final_raw_image_into_compressed_tar() {
     archive_buildroot_output(BuildrootArchiveRequest {
         image: &image,
         collect_dir: &collect_dir,
-        output_dir: &output_dir,
         matched_expected_images: &matched,
         archive_path: &archive_path,
         reuse_details: &mut reuse_details,
@@ -434,7 +430,6 @@ fn archive_buildroot_output_archives_final_raw_image_into_compressed_tar() {
     let messages = archive_buildroot_output(BuildrootArchiveRequest {
         image: &image,
         collect_dir: &collect_dir,
-        output_dir: &output_dir,
         matched_expected_images: &matched,
         archive_path: &archive_path,
         reuse_details: &mut reuse_details,

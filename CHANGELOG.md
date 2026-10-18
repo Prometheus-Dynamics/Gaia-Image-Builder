@@ -6,6 +6,24 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Buildroot images: a script edit rebuilds the images
+
+- The inputs digest that decides whether the filesystem images and the post-image step rerun read the image settings' paths raw. A post-image script named as `$(BR2_EXTERNAL_<NAME>_PATH)/board/post-image.sh` never resolved, so its content (and its genimage config) stayed out of the digest, and editing it could keep the old images. The settings now expand `$(BR2_EXTERNAL_*_PATH)`, `$(TOPDIR)`, `$(BASE_DIR)` and `$(BR2_CONFIG)` the way Buildroot does before the file is read.
+
+### Buildroot defconfig: support files, not the whole directory
+
+- A defconfig's support files were copied as its whole parent directory on every run. A defconfig at a project root therefore copied the workspace, output dir included, and could overwrite Buildroot's `Makefile`, `target` or `build`. Now only the files the defconfig and its config fragments name by a relative path are copied (`-c genimage.cfg`, `overlays/config.txt`), a named directory is copied whole, nothing is copied into or over the output dir, and a copy whose size and mtime already match is kept.
+
+### Buildroot archives: no stub file, no full-output tar
+
+- A Buildroot archive name that is neither `.tar` nor `.txz` and does not match one expected image no longer tars the whole Buildroot output (tens of GB). It is an error that names the archive, the expected images found, and how to fix the name.
+- A raw disk archive that typed assembly builds later was given a placeholder text file (`provider=…\narchive=true`) with a recorded `archive_sha256`. The path now stays absent and records no digest or size; a placeholder from an earlier build is removed.
+- A compressed raw archive (`.img.xz`, `.img.zst`) is skipped when the image and the compressor and its arguments are unchanged, as tar archives already were, with the same state file.
+
+### Buildroot collected images: reflinks and sparse copies
+
+- Collected expected images and assembly inputs were byte-copied on every build, which lost sparseness and copied multi-GB files each time. A collected file is now reflinked (`FICLONE`) where the filesystem supports it, else copied with zero runs left as holes. Its mtime follows the source, and a copy whose size and mtime already match is not written again. Hard links are not used, because later image steps rewrite the Buildroot images in place.
+
 ### Buildroot EROFS: lzma without the extra image
 
 - With `BR2_TARGET_ROOTFS_EROFS_LZMA=y`, Buildroot's generic image compression (keyed on the same symbol) also ran `lzma -9` over `rootfs.erofs`, writing a second image larger than the first and costing about 35 s per build. The settings step now rewrites that choice to `custom` with `BR2_TARGET_ROOTFS_EROFS_COMPRESSION_ALGORITHMS="lzma,<level>"`, which gives `mkfs.erofs` the same `-zlzma,<level>` argument, and reports it. Other filesystems are unchanged. The `config_overrides` check accepts that rewrite: a requested `BR2_TARGET_ROOTFS_EROFS_LZMA=y` and its `_LZMA_LEVEL` count as honored when the final `.config` has the custom choice with the same `lzma,<level>` (517a311 reported them as dropped and failed the build).

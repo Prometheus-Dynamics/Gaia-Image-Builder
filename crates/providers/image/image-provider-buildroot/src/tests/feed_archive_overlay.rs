@@ -275,7 +275,6 @@ fn final_tar_image_contains_install_stage_env_and_service_content() {
     archive_buildroot_output(BuildrootArchiveRequest {
         image: &image,
         collect_dir: &collect_dir,
-        output_dir: &output_dir,
         matched_expected_images: &matched,
         archive_path: &archive_path,
         reuse_details: &mut reuse_details,

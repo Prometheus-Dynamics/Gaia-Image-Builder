@@ -52,6 +52,7 @@ fn test_command_context<'a>(
     }
 }
 
+mod archive_outputs;
 mod artifact_target;
 mod buildroot_command;
 mod buildroot_preview;

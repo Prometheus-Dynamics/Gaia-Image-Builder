@@ -604,7 +604,7 @@ mod tests {
     }
 
     #[test]
-    fn materialize_image_output_cleans_temp_archive_when_rename_fails() {
+    fn materialize_image_output_leaves_a_directory_at_the_archive_path_alone() {
         let scratch = TempDir::new("gaia-image-output-failure");
         let root = scratch.join("gaia-image-output-failure");
         fs::create_dir_all(&root).expect("root dir");
@@ -624,10 +624,11 @@ mod tests {
             state_details: Vec::new(),
         };
 
-        let error = materialize_image_output(&result)
-            .expect_err("rename into existing directory should fail");
+        // No archive is written by materialize: the directory is not touched,
+        // and no temp file is left next to it.
+        materialize_image_output(&result).expect("materialize");
 
-        assert!(error.message.contains("failed to move image archive"));
+        assert!(archive_path.is_dir());
         assert!(!archive_path.with_extension("gaia.tmp").exists());
     }
 

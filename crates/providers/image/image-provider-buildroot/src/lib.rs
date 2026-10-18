@@ -224,7 +224,6 @@ impl ImageProvider for BuildrootImageProvider {
                     archive_buildroot_output(BuildrootArchiveRequest {
                         image,
                         collect_dir: &collect_dir,
-                        output_dir: &tree_dir,
                         matched_expected_images: &matched_expected_images,
                         archive_path,
                         reuse_details: &mut reuse_details,
@@ -637,6 +636,8 @@ fn should_archive_buildroot_output(image: &ImageSpec, archive_path: &Path) -> bo
         && raw_disk_name)
 }
 
+use defconfig_support::materialize_defconfig_support_files;
+
 mod archive;
 mod build_times;
 mod buildroot;
@@ -649,6 +650,7 @@ mod clean_plan;
 mod command;
 mod config_inputs;
 mod configure;
+mod defconfig_support;
 mod external_classify;
 mod external_inputs;
 mod feed;

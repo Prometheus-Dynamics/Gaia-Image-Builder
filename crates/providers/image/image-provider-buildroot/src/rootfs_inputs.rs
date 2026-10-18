@@ -15,6 +15,7 @@
 //! built (their build directories carry their versions).
 
 use super::*;
+use gaia_image_providers::{ExternalTree, expand_external_paths};
 use sha2::{Digest, Sha256};
 
 const ROOTFS_INPUTS_STATE: &str = ".gaia-rootfs-inputs";
@@ -29,8 +30,14 @@ const IMAGE_FILE_SETTINGS: &[&str] = &[
     "BR2_ROOTFS_STATIC_DEVICE_TABLE",
 ];
 
-/// The digest of everything the filesystem image step reads.
-pub(crate) fn rootfs_inputs_digest(buildroot_dir: &Path, output_dir: &Path) -> String {
+/// The digest of everything the filesystem image step reads. `trees` are the
+/// build's `BR2_EXTERNAL` trees, which the settings name through
+/// `$(BR2_EXTERNAL_<NAME>_PATH)`.
+pub(crate) fn rootfs_inputs_digest(
+    buildroot_dir: &Path,
+    output_dir: &Path,
+    trees: &[ExternalTree],
+) -> String {
     let mut hasher = Sha256::new();
     hash_target_tree(&output_dir.join("target"), &mut hasher);
     // The packages left out of target/ (image.rootfs.exclude_packages): the
@@ -73,19 +80,17 @@ pub(crate) fn rootfs_inputs_digest(buildroot_dir: &Path, output_dir: &Path) -> S
         if !IMAGE_FILE_SETTINGS.contains(&key) {
             continue;
         }
-        for token in value.trim_matches('"').split_whitespace() {
-            let path = Path::new(token);
-            let resolved = if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                buildroot_dir.join(path)
+        let expanded =
+            expand_setting_value(value.trim_matches('"'), buildroot_dir, output_dir, trees);
+        for token in expanded.split_whitespace() {
+            let Some(resolved) = resolve_setting_file(token, buildroot_dir, trees) else {
+                continue;
             };
-            if resolved.is_file() {
-                hasher.update(b"file\0");
-                hasher.update(path_content_digest(&resolved));
-                if let Some(parent) = resolved.parent() {
-                    hasher.update(path_content_digest(parent));
-                }
+            hasher.update(b"file\0");
+            hasher.update(resolved.display().to_string().as_bytes());
+            hasher.update(path_content_digest(&resolved));
+            if let Some(parent) = resolved.parent() {
+                hasher.update(path_content_digest(parent));
             }
         }
     }
@@ -104,6 +109,46 @@ pub(crate) fn rootfs_inputs_digest(buildroot_dir: &Path, output_dir: &Path) -> S
     host_packages.sort();
     hasher.update(host_packages.join("\0").as_bytes());
     hex(&hasher.finalize())
+}
+
+/// Expands the variables an image setting may use, as Buildroot does when it
+/// runs the script: the external trees (`$(BR2_EXTERNAL_<NAME>_PATH)`), the
+/// Buildroot tree (`$(TOPDIR)`), the output dir (`$(BASE_DIR)`) and the
+/// `.config` (`$(BR2_CONFIG)`).
+fn expand_setting_value(
+    value: &str,
+    buildroot_dir: &Path,
+    output_dir: &Path,
+    trees: &[ExternalTree],
+) -> String {
+    expand_external_paths(value, trees)
+        .replace("$(TOPDIR)", &buildroot_dir.display().to_string())
+        .replace("$(BASE_DIR)", &output_dir.display().to_string())
+        .replace(
+            "$(BR2_CONFIG)",
+            &output_dir.join(".config").display().to_string(),
+        )
+}
+
+/// The file a setting token names: an absolute path as it is, a relative one
+/// from the Buildroot tree, then from the external trees. A token that still
+/// holds a `$(...)` variable, or names no file, is `None`.
+fn resolve_setting_file(
+    token: &str,
+    buildroot_dir: &Path,
+    trees: &[ExternalTree],
+) -> Option<PathBuf> {
+    if token.contains('$') {
+        return None;
+    }
+    let path = Path::new(token);
+    if path.is_absolute() {
+        return path.is_file().then(|| path.to_path_buf());
+    }
+    std::iter::once(buildroot_dir)
+        .chain(trees.iter().map(|tree| tree.dir.as_path()))
+        .map(|base| base.join(path))
+        .find(|candidate| candidate.is_file())
 }
 
 /// Every entry of the target tree, in sorted order: path, type, mode,
@@ -177,10 +222,11 @@ pub(crate) fn run_images_if_inputs_changed(
     image: &ImageSpec,
     buildroot_dir: &Path,
     output_dir: &Path,
+    trees: &[ExternalTree],
     command_context: &ImageCommandContext<'_>,
 ) -> Result<Vec<String>, ImageProviderError> {
     let started = std::time::Instant::now();
-    let digest = rootfs_inputs_digest(buildroot_dir, output_dir);
+    let digest = rootfs_inputs_digest(buildroot_dir, output_dir, trees);
     let mut messages = vec![gaia_process::step_time_message(
         "rootfs image inputs digest",
         started.elapsed(),
@@ -256,7 +302,7 @@ mod tests {
             "BR2_TARGET_ROOTFS_EROFS=y\nBR2_ROOTFS_POST_IMAGE_SCRIPT=\"board/post-image.sh\"\n",
         )
         .expect("config");
-        let digest = || rootfs_inputs_digest(&buildroot, &output);
+        let digest = || rootfs_inputs_digest(&buildroot, &output, &[]);
         let first = digest();
         assert_eq!(first, digest());
 
@@ -281,5 +327,54 @@ mod tests {
         assert_eq!(recorded_rootfs_inputs(&output).as_deref(), Some("abc"));
         record_rootfs_inputs(&output, None).expect("forget");
         assert_eq!(recorded_rootfs_inputs(&output), None);
+    }
+
+    #[test]
+    fn the_digest_follows_image_scripts_named_through_buildroot_variables() {
+        let root_scratch = TempDir::new("gaia-rootfs-inputs-variables");
+        let root = root_scratch.join("root");
+        let buildroot = root.join("buildroot");
+        let output = root.join("output");
+        let external = root.join("board-tree");
+        for (path, contents) in [
+            (output.join("target/usr/bin/app"), "app"),
+            (output.join("images/rootfs.erofs"), "generated"),
+            (external.join("board/post-image.sh"), "genimage v1"),
+            (output.join("board/genimage.cfg"), "image sdcard.img {}"),
+            (buildroot.join("fs/erofs/erofs.mk"), "mk"),
+        ] {
+            fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+            fs::write(path, contents).expect("file");
+        }
+        // The script lives in an external tree; the arguments name a file
+        // through `$(BASE_DIR)`, which Buildroot expands before running it.
+        fs::write(
+            output.join(".config"),
+            "BR2_TARGET_ROOTFS_EROFS=y\n\
+             BR2_ROOTFS_POST_IMAGE_SCRIPT=\"$(BR2_EXTERNAL_BOARD_PATH)/board/post-image.sh\"\n\
+             BR2_ROOTFS_POST_SCRIPT_ARGS=\"-c $(BASE_DIR)/board/genimage.cfg\"\n",
+        )
+        .expect("config");
+        let trees = vec![ExternalTree {
+            name: "board".to_string(),
+            dir: external.clone(),
+        }];
+        let digest = || rootfs_inputs_digest(&buildroot, &output, &trees);
+        let first = digest();
+
+        fs::write(external.join("board/post-image.sh"), "genimage v2").expect("edit script");
+        let after_script = digest();
+        assert_ne!(first, after_script, "an edited external post-image script");
+
+        fs::write(
+            output.join("board/genimage.cfg"),
+            "image sdcard.img { size = 8G }",
+        )
+        .expect("edit cfg");
+        assert_ne!(
+            after_script,
+            digest(),
+            "an edited $(BASE_DIR) script argument"
+        );
     }
 }

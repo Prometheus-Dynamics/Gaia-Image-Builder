@@ -1259,12 +1259,16 @@ fn materialize_defconfig_support_files_copies_sibling_assets_into_output_dir() {
     let output_dir = output_dir_scratch.join("output_dir");
     fs::create_dir_all(&assets_dir).expect("assets dir");
     let defconfig_path = assets_dir.join("custom.defconfig");
-    fs::write(&defconfig_path, "BR2_x86_64=y\n").expect("defconfig");
+    fs::write(
+        &defconfig_path,
+        "BR2_x86_64=y\nBR2_ROOTFS_POST_SCRIPT_ARGS=\"-c genimage.cfg\"\nBR2_PACKAGE_X=\"overlays/config.txt\"\n",
+    )
+    .expect("defconfig");
     fs::write(assets_dir.join("genimage.cfg"), "image test {}\n").expect("genimage");
     fs::create_dir_all(assets_dir.join("overlays")).expect("overlay dir");
     fs::write(assets_dir.join("overlays/config.txt"), "dtoverlay=test\n").expect("overlay");
 
-    materialize_defconfig_support_files(&defconfig_path, &output_dir)
+    materialize_defconfig_support_files(&defconfig_path, &output_dir, &[])
         .expect("support files should copy");
 
     assert!(!output_dir.join("custom.defconfig").exists());
@@ -1275,6 +1279,105 @@ fn materialize_defconfig_support_files_copies_sibling_assets_into_output_dir() {
     assert_eq!(
         fs::read_to_string(output_dir.join("overlays/config.txt")).expect("copied overlay"),
         "dtoverlay=test\n"
+    );
+}
+
+#[test]
+fn materialize_defconfig_support_files_at_a_project_root_copies_only_referenced_files() {
+    let scratch = TempDir::new("gaia-buildroot-defconfig-root");
+    let root = scratch.join("workspace");
+    let output_dir = root.join("output");
+    fs::create_dir_all(root.join("src/deep")).expect("source dir");
+    fs::create_dir_all(output_dir.join("target")).expect("target dir");
+    fs::write(
+        root.join("custom.defconfig"),
+        "BR2_x86_64=y\nBR2_ROOTFS_POST_SCRIPT_ARGS=\"-c genimage.cfg\"\nBR2_HOSTNAME=\"target\"\n",
+    )
+    .expect("defconfig");
+    fs::write(root.join("genimage.cfg"), "image test {}\n").expect("genimage");
+    fs::write(root.join("src/deep/big.txt"), "not referenced").expect("source file");
+    fs::write(root.join("Makefile"), "project makefile\n").expect("project makefile");
+    // Buildroot's own entries in the output dir, which must survive.
+    fs::write(output_dir.join("Makefile"), "buildroot make\n").expect("buildroot makefile");
+    fs::write(output_dir.join("target/keep.txt"), "keep\n").expect("target file");
+    // A settings file named like a Buildroot entry must not replace it.
+    fs::write(root.join("target"), "a file named target\n").expect("clashing file");
+
+    materialize_defconfig_support_files(&root.join("custom.defconfig"), &output_dir, &[])
+        .expect("support files should copy");
+
+    assert_eq!(
+        fs::read_to_string(output_dir.join("genimage.cfg")).expect("referenced file"),
+        "image test {}\n"
+    );
+    assert!(!output_dir.join("src").exists(), "unreferenced tree copied");
+    assert!(!output_dir.join("custom.defconfig").exists());
+    assert_eq!(
+        fs::read_to_string(output_dir.join("Makefile")).expect("buildroot makefile"),
+        "buildroot make\n"
+    );
+    assert_eq!(
+        fs::read_to_string(output_dir.join("target/keep.txt")).expect("target file"),
+        "keep\n"
+    );
+    assert!(
+        output_dir.join("target").is_dir(),
+        "target replaced by a file"
+    );
+    let mut names = fs::read_dir(&output_dir)
+        .expect("output dir")
+        .map(|entry| {
+            entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect::<Vec<_>>();
+    names.sort();
+    assert_eq!(names, ["Makefile", "genimage.cfg", "target"]);
+}
+
+#[test]
+fn materialize_defconfig_support_files_reads_fragment_references_and_skips_unchanged_copies() {
+    let scratch = TempDir::new("gaia-buildroot-defconfig-fragment");
+    let assets = scratch.join("assets");
+    let output_dir = scratch.join("output");
+    fs::create_dir_all(&assets).expect("assets dir");
+    let defconfig = assets.join("custom.defconfig");
+    fs::write(&defconfig, "BR2_x86_64=y\n").expect("defconfig");
+    let fragment = assets.join("extra.cfg");
+    fs::write(
+        &fragment,
+        "BR2_ROOTFS_POST_SCRIPT_ARGS=\"-c genimage.cfg\"\n",
+    )
+    .expect("fragment");
+    fs::write(assets.join("genimage.cfg"), "image test {}\n").expect("genimage");
+
+    materialize_defconfig_support_files(&defconfig, &output_dir, std::slice::from_ref(&fragment))
+        .expect("support files should copy");
+    assert_eq!(
+        fs::read_to_string(output_dir.join("genimage.cfg")).expect("copied genimage"),
+        "image test {}\n"
+    );
+
+    // Same size and mtime as the source: the copy is kept, not rewritten.
+    let copy = output_dir.join("genimage.cfg");
+    let modified = fs::metadata(assets.join("genimage.cfg"))
+        .expect("source metadata")
+        .modified()
+        .expect("mtime");
+    fs::write(&copy, "IMAGE TEST {}\n").expect("same-size edit");
+    fs::File::options()
+        .write(true)
+        .open(&copy)
+        .and_then(|file| file.set_modified(modified))
+        .expect("restore mtime");
+    materialize_defconfig_support_files(&defconfig, &output_dir, std::slice::from_ref(&fragment))
+        .expect("second copy");
+    assert_eq!(
+        fs::read_to_string(&copy).expect("kept copy"),
+        "IMAGE TEST {}\n"
     );
 }
 

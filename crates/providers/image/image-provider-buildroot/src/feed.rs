@@ -55,16 +55,18 @@ pub(crate) fn collect_expected_images_hashed(
                     )
                 })?;
                 let dest = collect_dir.join(&expected.name);
-                let digest = copy_with_sha256(&found_path, &dest).map_err(|error| {
-                    ImageProviderError::new(
-                        ImageProviderErrorKind::RuntimeState,
-                        format!(
-                            "failed to copy expected buildroot image '{}' to '{}': {error}",
-                            found_path.display(),
-                            dest.display()
-                        ),
-                    )
-                })?;
+                let digest = copy_collected_file(&found_path, &dest, collect_dir)
+                    .map_err(|error| {
+                        ImageProviderError::new(
+                            ImageProviderErrorKind::RuntimeState,
+                            format!(
+                                "failed to copy expected buildroot image '{}' to '{}': {error}",
+                                found_path.display(),
+                                dest.display()
+                            ),
+                        )
+                    })?
+                    .digest;
                 record_copied_digest(collect_dir, &dest, &digest);
                 digests.insert(expected.name.clone(), digest);
                 collected.insert(PathBuf::from(&expected.name));
@@ -108,16 +110,18 @@ pub(crate) fn collect_expected_images_hashed(
                 )
             })?;
         }
-        let digest = copy_with_sha256(&found_path, &dest).map_err(|error| {
-            ImageProviderError::new(
-                ImageProviderErrorKind::RuntimeState,
-                format!(
-                    "failed to copy buildroot assembly input '{}' to '{}': {error}",
-                    found_path.display(),
-                    dest.display()
-                ),
-            )
-        })?;
+        let digest = copy_collected_file(&found_path, &dest, collect_dir)
+            .map_err(|error| {
+                ImageProviderError::new(
+                    ImageProviderErrorKind::RuntimeState,
+                    format!(
+                        "failed to copy buildroot assembly input '{}' to '{}': {error}",
+                        found_path.display(),
+                        dest.display()
+                    ),
+                )
+            })?
+            .digest;
         record_copied_digest(collect_dir, &dest, &digest);
     }
     Ok(CollectedImages { matched, digests })

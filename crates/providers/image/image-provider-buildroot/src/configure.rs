@@ -83,7 +83,15 @@ pub(crate) fn configure_tree(
         .transpose()?;
     let defconfig_args = match (&resolved_defconfig, defconfig) {
         (Some(resolved_defconfig_path), _) => {
-            materialize_defconfig_support_files(resolved_defconfig_path, output_dir)?;
+            let fragment_paths = config_fragments
+                .iter()
+                .map(|fragment| resolve_workspace_path(spec, fragment))
+                .collect::<Result<Vec<_>, _>>()?;
+            materialize_defconfig_support_files(
+                resolved_defconfig_path,
+                output_dir,
+                &fragment_paths,
+            )?;
             Some(vec![
                 "defconfig".to_string(),
                 format!("BR2_DEFCONFIG={}", resolved_defconfig_path.display()),

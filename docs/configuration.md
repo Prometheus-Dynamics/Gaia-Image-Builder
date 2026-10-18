@@ -1760,6 +1760,15 @@ for any core count. A common split is zstd for development images and xz
 for releases, for example
 `archive_name = "${build.name}-${build.version}.img.${input.compression}"`.
 
+A compressed raw archive is skipped when its image and compressor settings are
+unchanged since the last build (the image's digest, from the content manifest,
+and the compressor and its arguments). A Buildroot build's archive name must
+end in `.tar` or `.txz` to hold the expected images, or name one raw disk
+image the build produces. Any other name is an error that names the expected
+images found: Gaia does not tar the whole Buildroot output to fill it. A raw
+disk archive that typed assembly builds is written by that step, so the path
+stays absent until then.
+
 When the assembly builds more than one disk, a raw disk archive needs
 `disk = "<assembly disk id>"` in `[image.output]` to say which disk it holds
 (the id must be an `[[image.assembly.disks]]` entry, and the archive name must
@@ -1793,6 +1802,12 @@ Buildroot fields:
   that adds a tree must list the full combination.
 - `external_tree_mode = "auto" | "required" | "disabled"`
 - `expected_images[]`
+- A defconfig's support files: a file that the defconfig or a config fragment
+  names by a relative path (`-c genimage.cfg`, `overlays/config.txt`) is copied
+  into the output dir, where Buildroot resolves it. Nothing else beside the
+  defconfig is copied, so a defconfig at a project root does not copy the
+  project. A name that is a Buildroot output entry (`Makefile`, `target`,
+  `build`, `host`, `images`, ...) is never copied over it.
 
 Buildroot checks:
 - `[providers.buildroot] override_check = "error" | "warn" | "off"` (default
