@@ -6,9 +6,8 @@ use gaia_image_providers::{
     file_sha256_or_placeholder, materialize_image_output,
 };
 use gaia_process::{
-    DockerRunSpec, ProcessRunErrorKind, docker_reused_exec_command,
-    docker_run_command, label_process_log_sink,
-    run_command_with_timeout, run_command_with_timeout_and_retention,
+    DockerRunSpec, ProcessRunErrorKind, docker_reused_exec_command, docker_run_command,
+    label_process_log_sink, run_command_with_timeout, run_command_with_timeout_and_retention,
 };
 use gaia_spec::{
     ImageDefinition, ImageSpec, ResolvedBuildSpec, SourceId, StartingPointOutputModeSpec,
