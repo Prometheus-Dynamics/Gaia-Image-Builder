@@ -365,8 +365,35 @@ fn stale_ram_work_dirs_are_swept_and_live_or_recent_ones_kept() {
     );
     // A stray file is never a work dir.
     std::fs::write(user_dir.join("stray"), "x").expect("stray");
+    // Old dirs with no assembly marker are never removed: one is the
+    // Buildroot provider's warm RAM tree, which shares this directory.
+    let buildroot_tree = user_dir.join("ca5bb1fdc719").join("buildroot-output");
+    std::fs::create_dir_all(&buildroot_tree).expect("buildroot tree");
+    std::fs::create_dir_all(user_dir.join("unmarked")).expect("unmarked");
+    for old in [user_dir.join("ca5bb1fdc719"), user_dir.join("unmarked")] {
+        let status = std::process::Command::new("touch")
+            .args(["-d", "3 days ago"])
+            .arg(&old)
+            .status()
+            .expect("touch");
+        assert!(status.success());
+    }
+    // Even with a dead marker, a dir holding a Buildroot tree is kept.
+    marker(
+        &user_dir.join("marked-buildroot"),
+        format!("pid=4294967294\nstarted={long_ago}\nbuild_dir=/nonexistent/build\n"),
+    );
+    std::fs::create_dir_all(user_dir.join("marked-buildroot").join("buildroot-output"))
+        .expect("marked buildroot tree");
 
     sweep_stale_ram_dirs(&user_dir, &keep);
+
+    assert!(
+        buildroot_tree.exists(),
+        "a Buildroot RAM tree is never swept"
+    );
+    assert!(user_dir.join("unmarked").exists());
+    assert!(user_dir.join("marked-buildroot").exists());
 
     assert!(!user_dir.join("dead").exists());
     assert!(!user_dir.join("dead-with-build").exists());

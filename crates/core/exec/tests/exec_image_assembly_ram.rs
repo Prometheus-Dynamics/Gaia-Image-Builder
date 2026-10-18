@@ -57,7 +57,20 @@ fn spec_with_work_dir(scratch: &TempDir, work_dir: &str) -> ResolvedBuildSpec {
     spec
 }
 
+/// Points RAM work dirs at a scratch base, so these tests never touch the
+/// real /dev/shm/gaia-<user>, which holds other builds' RAM trees.
+fn scratch_ram_base() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let base = std::env::temp_dir().join("gaia-test-ram-base");
+        fs::create_dir_all(&base).expect("scratch RAM base");
+        // SAFETY: set once, before any assembly of this test binary reads it.
+        unsafe { std::env::set_var("GAIA_RAM_BASE", base) };
+    });
+}
+
 fn assemble(spec: &ResolvedBuildSpec) {
+    scratch_ram_base();
     let plan = gaia_plan::ExecutionPlan {
         build_id: spec.identity.id.clone(),
         operations: vec![PlannedOperation::new(

@@ -120,10 +120,13 @@ fn read_ram_owner(hash_dir: &Path) -> Option<RamOwner> {
     Some(owner)
 }
 
-/// Removes the `<hash>` dirs under `user_dir` that a dead run left behind:
-/// older than [`RAM_STALE_AFTER`], and either with no marker, with a pid that
-/// is gone, or with a build dir that no longer exists. `keep` (this run's
-/// `<hash>` dir) is never touched, and neither is any link.
+/// Removes the `<hash>` dirs under `user_dir` that a dead assembly run left
+/// behind: dirs with an assembly owner marker, older than
+/// [`RAM_STALE_AFTER`], whose pid is gone or whose build dir no longer exists.
+/// A dir without a marker is never removed: the same per-user dir holds the
+/// Buildroot provider's RAM trees (`<hash>/buildroot-output`), which carry no
+/// assembly marker and are a build's warm state. `keep` (this run's `<hash>`
+/// dir) is never touched, and neither is any link.
 pub(super) fn sweep_stale_ram_dirs(user_dir: &Path, keep: &Path) {
     let Ok(entries) = std_fs::read_dir(user_dir) else {
         return;
@@ -140,7 +143,14 @@ pub(super) fn sweep_stale_ram_dirs(user_dir: &Path, keep: &Path) {
         if !metadata.is_dir() {
             continue;
         }
-        let owner = read_ram_owner(&dir);
+        // Only a dir an assembly run marked as its own can be stale.
+        let Some(owner) = read_ram_owner(&dir) else {
+            continue;
+        };
+        if dir.join("buildroot-output").exists() {
+            continue;
+        }
+        let owner = Some(owner);
         let started = owner
             .as_ref()
             .and_then(|owner| owner.started)

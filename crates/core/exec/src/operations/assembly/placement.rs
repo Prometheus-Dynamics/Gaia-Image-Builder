@@ -63,7 +63,7 @@ pub(crate) struct PlacementEnv {
 
 impl PlacementEnv {
     pub(crate) fn system() -> Self {
-        let ram_base = PathBuf::from(RAM_BASE);
+        let ram_base = ram_base();
         Self {
             user: current_user(),
             memory_available: mem_available(),
@@ -71,6 +71,20 @@ impl PlacementEnv {
             ram_base,
         }
     }
+}
+
+/// The tmpfs RAM work dirs live under: [`RAM_BASE`], or `GAIA_RAM_BASE` when
+/// set (tests point it at a scratch dir, so they never touch the real
+/// per-user dir that holds other builds' RAM trees). Unit tests of this crate
+/// always use a scratch base.
+fn ram_base() -> PathBuf {
+    if let Some(base) = std::env::var_os("GAIA_RAM_BASE").filter(|base| !base.is_empty()) {
+        return PathBuf::from(base);
+    }
+    if cfg!(test) {
+        return std::env::temp_dir().join("gaia-test-ram-base");
+    }
+    PathBuf::from(RAM_BASE)
 }
 
 /// The decision for one assembly run.
