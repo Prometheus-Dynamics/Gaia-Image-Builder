@@ -248,6 +248,7 @@ const BUILDROOT_IMAGE_KEYS: &[&str] = &[
     "defconfig",
     "defconfig_path",
     "allow_fallback",
+    "legal_info",
     "config_fragments",
     "config_overrides",
     "external_tree",

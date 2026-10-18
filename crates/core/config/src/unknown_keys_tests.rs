@@ -309,3 +309,63 @@ fn examples_and_docs_name_no_unknown_key() {
     assert!(checked > 0, "the docs have TOML blocks to check");
     assert!(problems.is_empty(), "{problems:#?}");
 }
+
+#[test]
+fn new_buildroot_image_and_provider_keys_are_known() {
+    assert!(
+        unknown(
+            "build_name = \"demo\"\n\
+             [providers.buildroot]\nerofs_workers = \"auto\"\nmake_timeout_seconds = 0\nmake_retry_attempts = 1\n\
+             [providers.rust]\nsccache = true\nstrip = true\n\
+             [image]\nkind = \"buildroot\"\nlegal_info = true\n"
+        )
+        .is_empty(),
+        "{:?}",
+        unknown(
+            "build_name = \"demo\"\n\
+             [providers.buildroot]\nerofs_workers = \"auto\"\nmake_timeout_seconds = 0\nmake_retry_attempts = 1\n\
+             [providers.rust]\nsccache = true\nstrip = true\n\
+             [image]\nkind = \"buildroot\"\nlegal_info = true\n"
+        )
+    );
+}
+
+/// Scans every `.toml` under the directories in `GAIA_UNKNOWN_KEYS_SCAN`
+/// (colon-separated) for unknown keys. Run by hand against downstream
+/// recipes: `GAIA_UNKNOWN_KEYS_SCAN=dir1:dir2 cargo test -p gaia-config
+/// --lib scan_unknown_keys -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn scan_unknown_keys_in_directories() {
+    let Ok(dirs) = std::env::var("GAIA_UNKNOWN_KEYS_SCAN") else {
+        return;
+    };
+    let mut problems = Vec::new();
+    let mut files = 0;
+    let mut stack: Vec<std::path::PathBuf> = dirs.split(':').map(Into::into).collect();
+    while let Some(path) = stack.pop() {
+        if path.is_dir() {
+            let Ok(entries) = std::fs::read_dir(&path) else { continue };
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                if name == "build" || name == "output" || name == ".gaia" || name == "target" {
+                    continue;
+                }
+                stack.push(entry.path());
+            }
+        } else if path.extension().is_some_and(|ext| ext == "toml")
+            && !path.ends_with("Cargo.toml")
+        {
+            let Ok(text) = std::fs::read_to_string(&path) else { continue };
+            let Ok(value) = toml::from_str::<toml::Value>(&text) else { continue };
+            files += 1;
+            for key in unknown_config_keys(&value) {
+                problems.push(format!("{}: {} ({})", path.display(), key.path, key.suggestion));
+            }
+        }
+    }
+    println!("scanned {files} toml files");
+    for problem in &problems {
+        println!("UNKNOWN {problem}");
+    }
+}
