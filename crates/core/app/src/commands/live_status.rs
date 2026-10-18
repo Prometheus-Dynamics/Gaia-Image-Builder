@@ -21,7 +21,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use gaia_exec::{ExecutionEvent, ExecutionOutcome};
 use serde::{Deserialize, Serialize};
 
+mod cache;
 mod tracker;
+pub(crate) use cache::SnapshotCache;
 pub(crate) use tracker::{Change, RunTracker, live_variant, plan_operations, run_selection_label};
 
 /// The live snapshot of a run in progress.
@@ -481,6 +483,7 @@ pub(crate) fn fixture_status() -> LiveStatus {
 
 #[cfg(test)]
 mod tests {
+    use super::cache::FileCache;
     use super::*;
     use gaia_plan::OperationId;
     use gaia_testkit::TempDir;
@@ -510,6 +513,22 @@ mod tests {
 
     fn recorder(dir: &Path) -> LiveRecorder {
         LiveRecorder::new(dir, info())
+    }
+
+    #[test]
+    fn file_cache_reads_a_changed_file_again() {
+        let dir = temp_dir("file-cache");
+        let path = dir.path().join("values.json");
+        let mut cache = FileCache::<u32>::default();
+        assert_eq!(cache.read(&path), None);
+        fs::write(&path, "1").expect("write");
+        assert_eq!(cache.read(&path), Some(1));
+        // Same content, same stamp: the cached value is kept.
+        assert_eq!(cache.read(&path), Some(1));
+        fs::write(&path, "1000").expect("rewrite");
+        assert_eq!(cache.read(&path), Some(1000));
+        fs::remove_file(&path).expect("remove");
+        assert_eq!(cache.read(&path), None);
     }
 
     #[test]

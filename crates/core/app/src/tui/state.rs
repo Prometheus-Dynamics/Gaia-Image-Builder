@@ -1,9 +1,10 @@
 use super::*;
-use crate::commands::live_status::{LastRun, LiveRun, RunTracker};
+use crate::commands::live_status::{LastRun, LiveRun, RunTracker, SnapshotCache};
 use crate::commands::run_registry::{ListedRun, list_runs};
 use crate::tui::dashboard::{DashboardState, RunEnd};
 use crate::tui::details::DetailsState;
 use crate::tui::metrics::Metrics;
+use crate::tui::redraw::Redraw;
 use ratatui::widgets::ListState;
 const SETUP_REFRESH_DEBOUNCE: Duration = Duration::from_millis(200);
 
@@ -62,6 +63,11 @@ pub(crate) struct TuiState<'a> {
     pub(crate) picker_focus: PickerFocus,
     /// The details screen: its tab and the state of each tab.
     pub(crate) details: DetailsState,
+    /// When a frame is due; see [`Redraw`].
+    pub(crate) redraw: Redraw,
+    /// The picker's reads of the build dirs' status files, re-read only when
+    /// a file changed.
+    pub(crate) snapshots: SnapshotCache,
 }
 
 impl<'a> TuiState<'a> {
@@ -164,12 +170,15 @@ impl<'a> TuiState<'a> {
             run_list,
             picker_focus,
             details: DetailsState::default(),
+            redraw: Redraw::default(),
+            snapshots: SnapshotCache::default(),
         }
     }
 
     pub(crate) fn set_status(&mut self, status: impl Into<String>) {
         self.status = status.into();
         self.status_since = Instant::now();
+        self.redraw.mark();
     }
 
     pub(crate) fn footer_notice(&self) -> Option<&str> {
@@ -223,11 +232,53 @@ impl<'a> TuiState<'a> {
         self.set_status(status);
     }
 
+    /// Whether something on screen animates: a run in this TUI, an attached
+    /// live run, or a status notice that is about to expire.
+    pub(crate) fn is_animating(&self) -> bool {
+        matches!(self.run_state, RunState::Running { .. })
+            || (self.screen == Screen::Attach
+                && self
+                    .attach
+                    .as_ref()
+                    .is_some_and(|attach| attach.run.is_some()))
+            || self.footer_notice().is_some()
+    }
+
+    /// Whether a frame is due now. See [`Redraw`].
+    pub(crate) fn redraw_due(&self, now: Instant) -> bool {
+        self.redraw.due(now, self.is_animating())
+    }
+
+    /// Records that a frame was drawn at `now`.
+    pub(crate) fn redraw_drew(&mut self, now: Instant) {
+        let animating = self.is_animating();
+        self.redraw.drew(now, animating);
+    }
+
+    /// Asks for a frame: an input event, a resize, or a change of state.
+    pub(crate) fn request_redraw(&mut self) {
+        self.redraw.mark();
+    }
+
+    /// How long the event loop may wait for input: the next animation frame,
+    /// at most the 100 ms poll that keeps the background work moving.
+    pub(crate) fn poll_timeout(&self, now: Instant) -> Duration {
+        let base = Duration::from_millis(100);
+        match self.redraw.wait(now, self.is_animating()) {
+            Some(wait) => wait.min(base),
+            None => base,
+        }
+    }
+
     pub(crate) fn tick(&mut self) {
         if let RunState::Running { spinner_tick, .. } = &mut self.run_state {
             *spinner_tick = spinner_tick.wrapping_add(1);
         }
-        self.metrics.sample_if_due(Instant::now());
+        if self.metrics.sample_if_due(Instant::now())
+            && matches!(self.screen, Screen::Monitor | Screen::Attach)
+        {
+            self.redraw.mark();
+        }
         self.poll_refresh_completion();
         self.start_pending_refresh();
         self.poll_live();

@@ -5,7 +5,7 @@ use gaia_plan::plan_build;
 use gaia_report::{ReportFileKind, generate_report, write_report_bundle};
 use gaia_testkit::TempDir;
 use gaia_validate::validate_spec_with_providers;
-use support::{provider_catalogs, test_spec};
+use support::{materialize_reusable_outputs, provider_catalogs, test_spec};
 
 #[test]
 fn generates_report_bundle_for_default_run() {
@@ -14,6 +14,8 @@ fn generates_report_bundle_for_default_run() {
     if let gaia_spec::ImageDefinition::Buildroot(buildroot) = &mut spec.image.definition {
         buildroot.allow_fallback = true;
     }
+    // The rust artifact needs its output (nested cargo builds are off).
+    materialize_reusable_outputs(&spec);
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
     let validation =
         validate_spec_with_providers(&spec, &source_catalog, &artifact_catalog, &image_catalog);

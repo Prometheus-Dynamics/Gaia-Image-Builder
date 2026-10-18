@@ -2,9 +2,8 @@ use gaia_artifact_providers::{
     ArtifactBackendState, ArtifactBatchItem, ArtifactExecutionBackend, ArtifactExecutionContract,
     ArtifactPlan, ArtifactProvider, ArtifactProviderError, ArtifactProviderErrorKind,
     ArtifactProviderOperation, ArtifactProviderValidationIssue, ProcessCancelCheck, ProcessLogLine,
-    ProcessLogSink, ProcessLogStream, artifact_output_path, command_version_line,
-    copy_artifact_file_to_output, materialize_artifact_marker_and_state,
-    materialize_artifact_output, render_artifact_backend_state, run_command_with_retries,
+    ProcessLogSink, ProcessLogStream, artifact_output_path, copy_artifact_file_to_output,
+    materialize_artifact_marker_and_state, render_artifact_backend_state, run_command_with_retries,
 };
 use gaia_process::register_docker_mount;
 use gaia_spec::{
@@ -16,7 +15,13 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod cargo_errors;
 mod cargo_git;
+mod tools;
+
+use cargo_errors::cargo_failing_packages;
+
+use tools::{host_toolchain_identity, sccache_env, strip_collected_output, toolchain_version};
 
 pub struct RustProvider;
 
@@ -107,21 +112,16 @@ impl ArtifactProvider for RustProvider {
         } else if output_path.is_file() {
             ("existing-output", Vec::new())
         } else {
-            materialize_artifact_output(
-                contract,
-                &format!(
-                    "provider={}\nartifact={}\npackage={package}\ntarget={target_name}\nmode=placeholder\n",
-                    self.id(),
-                    artifact.id.as_str()
+            // A placeholder file would be shipped as the binary. Without a
+            // nested build there is nothing to collect, so say so.
+            return Err(ArtifactProviderError::new(
+                ArtifactProviderErrorKind::PolicyBlocked,
+                format!(
+                    "rust artifact '{}' has no output at '{}' and nested cargo builds are off; set [providers.rust] allow_nested_build = true to build it, or provide the output file",
+                    artifact.id.as_str(),
+                    contract.output.path
                 ),
-            )?;
-            (
-                "placeholder",
-                vec![format!(
-                    "placeholder artifact output materialized for '{}'",
-                    artifact.id.as_str()
-                )],
-            )
+            ));
         };
         self.finish_artifact(
             artifact,
@@ -261,16 +261,56 @@ impl ArtifactProvider for RustProvider {
                 items.iter().map(|_| Err(error.clone())).collect()
             }
             Err(error) => {
+                // Cargo names the packages that failed to compile. Those
+                // artifacts fail with cargo's error; the others are built on
+                // their own, so each failure is attributed to its artifact.
+                let failing = cargo_failing_packages(&error.message);
+                let failed = items
+                    .iter()
+                    .zip(&resolved)
+                    .map(|(item, (package, _))| {
+                        cargo_packages(item.artifact, package)
+                            .iter()
+                            .any(|member| failing.contains(member))
+                    })
+                    .collect::<Vec<_>>();
+                if !failed.iter().any(|failed| *failed) {
+                    if let Some(sink) = &leader.log_sink {
+                        sink(ProcessLogLine {
+                            stream: ProcessLogStream::Stderr,
+                            line: format!(
+                                "batched cargo build failed ({}); building each artifact on its own",
+                                error.message.lines().next().unwrap_or_default()
+                            ),
+                        });
+                    }
+                    return build_individually(cancel_check);
+                }
                 if let Some(sink) = &leader.log_sink {
                     sink(ProcessLogLine {
                         stream: ProcessLogStream::Stderr,
                         line: format!(
-                            "batched cargo build failed ({}); building each artifact on its own",
+                            "batched cargo build failed ({}); the other artifacts are built on their own",
                             error.message.lines().next().unwrap_or_default()
                         ),
                     });
                 }
-                build_individually(cancel_check)
+                items
+                    .iter()
+                    .zip(failed)
+                    .map(|(item, failed)| {
+                        if failed {
+                            Err(error.clone())
+                        } else {
+                            self.execute_artifact(
+                                item.artifact,
+                                item.contract,
+                                item.log_sink.clone(),
+                                cancel_check.clone(),
+                            )
+                        }
+                    })
+                    .collect()
             }
         }
     }
@@ -447,16 +487,6 @@ fn shared_target_key(contract: &ArtifactExecutionContract) -> String {
         .take(12)
         .map(|byte| format!("{byte:02x}"))
         .collect()
-}
-
-fn host_toolchain_identity() -> String {
-    let rustc = Command::new("rustc")
-        .arg("-vV")
-        .output()
-        .ok()
-        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
-        .unwrap_or_else(|| "rustc unavailable".into());
-    format!("{rustc}{}", command_version_line("cargo", &["--version"]))
 }
 
 /// Claims the local packages of `source_dir` (workspace and path packages;
@@ -644,8 +674,10 @@ fn run_cargo_build(
     }
     let git_env =
         cargo_git::cargo_git_env(&flags.git_sources, contract, source_dir, log_sink.as_ref())?;
+    let sccache = sccache_env(contract, log_sink.as_ref());
     let mut command = cargo_build_command(source_dir, packages, flags, contract, &target.dir);
     command.envs(git_env.iter().map(|(key, value)| (key, value)));
+    command.envs(sccache.iter().map(|(key, value)| (key, value)));
     let label = match packages {
         [package] => format!("cargo build for package '{package}'"),
         _ => format!("cargo build for packages '{}'", packages.join("', '")),
@@ -680,6 +712,9 @@ fn collect_cargo_output(
     let output_canonical = output_path.canonicalize().ok();
     if built_canonical != output_canonical {
         copy_artifact_file_to_output(&built_path, &output_path, "built rust artifact")?;
+        if contract.rust_strip {
+            strip_collected_output(&output_path, contract)?;
+        }
     }
     Ok(())
 }
@@ -726,10 +761,13 @@ fn artifact_state_contents(
         ("compiler_tool".to_string(), "rustc".to_string()),
         (
             "compiler_tool_version".to_string(),
-            command_version_line("rustc", &["--version"]),
+            toolchain_version(contract, "rustc", &["--version"]),
         ),
     ];
     extra_fields.extend(flags.state_fields());
+    if contract.rust_strip {
+        extra_fields.push(("strip".to_string(), "true".to_string()));
+    }
     render_artifact_backend_state(ArtifactBackendState {
         contract,
         provider_id,
@@ -738,7 +776,7 @@ fn artifact_state_contents(
         resolved_identifier: &format!("{package}:{target_name}"),
         output_class: "binary",
         build_tool: "cargo",
-        build_tool_version: &command_version_line("cargo", &["--version"]),
+        build_tool_version: &toolchain_version(contract, "cargo", &["--version"]),
         extra_fields: &extra_fields,
     })
 }

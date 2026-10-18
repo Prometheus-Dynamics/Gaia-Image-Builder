@@ -301,6 +301,8 @@ pub struct RawRustProviderPolicyConfig {
     pub allow_nested_build: bool,
     pub batch_builds: Option<bool>,
     pub shared_target_dir: Option<bool>,
+    pub sccache: Option<bool>,
+    pub strip: Option<bool>,
     pub retry_attempts: u32,
     pub retry_backoff_ms: u64,
     pub retry_backoff_strategy: RawRetryBackoffStrategy,

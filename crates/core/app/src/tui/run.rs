@@ -20,6 +20,7 @@ impl<'a> TuiState<'a> {
         loop {
             match receiver.try_recv() {
                 Ok(RunThreadMessage::Event(event)) => {
+                    self.redraw.mark();
                     if let Some(tracker) = self.tracker.as_mut() {
                         tracker.record(&event, unix_now_ms());
                     }

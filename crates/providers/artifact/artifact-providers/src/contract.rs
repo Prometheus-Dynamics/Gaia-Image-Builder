@@ -44,6 +44,13 @@ pub struct ArtifactExecutionContract {
     /// the shared per-toolchain target dir under the user cache instead of
     /// each source's own `.gaia/cargo-target`. Never part of recorded state.
     pub rust_shared_target_dir: bool,
+    /// Rust only: `[providers.rust] sccache`. Cargo compiles through sccache
+    /// (`RUSTC_WRAPPER`) when it is available. Not part of recorded state:
+    /// the outputs do not depend on it.
+    pub rust_sccache: bool,
+    /// Rust only: `[providers.rust] strip`. The collected output is stripped;
+    /// cargo's own file is not touched. Part of recorded state.
+    pub rust_strip: bool,
 }
 
 impl ArtifactExecutionContract {
@@ -104,6 +111,8 @@ impl ArtifactExecutionContract {
             job_budget: None,
             gradle_home: GradleHomeSpec::default(),
             rust_shared_target_dir: false,
+            rust_sccache: false,
+            rust_strip: false,
         }
     }
 
@@ -124,6 +133,8 @@ impl ArtifactExecutionContract {
     fn apply_build_context(&mut self, spec: &ResolvedBuildSpec) {
         self.gradle_home = spec.policy.providers.java.gradle_home;
         self.rust_shared_target_dir = spec.policy.providers.rust.shared_target_dir;
+        self.rust_sccache = spec.policy.providers.rust.sccache;
+        self.rust_strip = spec.policy.providers.rust.strip;
         let workspace_root = resolve_workspace_root(spec);
         self.workspace_root = Some(workspace_root.clone());
         if Path::new(&self.output.path).is_relative() {

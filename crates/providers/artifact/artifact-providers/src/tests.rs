@@ -81,6 +81,8 @@ fn materialize_artifact_output_cleans_temp_file_when_rename_fails() {
         job_budget: None,
         gradle_home: GradleHomeSpec::default(),
         rust_shared_target_dir: false,
+        rust_sccache: false,
+        rust_strip: false,
         retry_attempts: 1,
         retry_backoff_ms: 0,
         retry_backoff_strategy: RetryBackoffStrategySpec::Fixed,
@@ -161,6 +163,8 @@ fn materialize_artifact_marker_and_state_writes_both_files() {
         job_budget: None,
         gradle_home: GradleHomeSpec::default(),
         rust_shared_target_dir: false,
+        rust_sccache: false,
+        rust_strip: false,
         retry_attempts: 1,
         retry_backoff_ms: 0,
         retry_backoff_strategy: RetryBackoffStrategySpec::Fixed,
@@ -248,6 +252,8 @@ fn command_for_execution_wraps_docker_backend() {
         job_budget: None,
         gradle_home: GradleHomeSpec::default(),
         rust_shared_target_dir: false,
+        rust_sccache: false,
+        rust_strip: false,
         retry_attempts: 1,
         retry_backoff_ms: 0,
         retry_backoff_strategy: RetryBackoffStrategySpec::Fixed,
@@ -329,6 +335,8 @@ fn run_command_with_retries_reuses_contract_retry_policy() {
         job_budget: None,
         gradle_home: GradleHomeSpec::default(),
         rust_shared_target_dir: false,
+        rust_sccache: false,
+        rust_strip: false,
         retry_attempts: 2,
         retry_backoff_ms: 0,
         retry_backoff_strategy: RetryBackoffStrategySpec::Fixed,
@@ -344,7 +352,7 @@ fn run_command_with_retries_reuses_contract_retry_policy() {
     let mut command = Command::new("/bin/sh");
     command
         .arg("-c")
-        .arg("if [ ! -f attempted ]; then touch attempted; exit 7; fi")
+        .arg("if [ ! -f attempted ]; then touch attempted; echo 'failed to download dep' >&2; exit 7; fi")
         .current_dir(&root);
 
     run_command_with_retries(&command, &contract, "retry smoke", None, None)

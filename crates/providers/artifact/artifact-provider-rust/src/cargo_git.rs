@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gaia_artifact_providers::{
@@ -33,9 +33,20 @@ use gaia_spec::{CargoGitSourceSpec, cargo_git_url_key, redact_url_userinfo};
 /// Branch namespace in a mirror that keeps each locked commit reachable.
 const LOCKED_BRANCH_PREFIX: &str = "refs/heads/gaia-locked/";
 
-/// Serializes mirror preparation: artifacts built in parallel may share one
-/// mirror, and clone, fetch and ref updates must not interleave.
-static MIRROR_LOCK: Mutex<()> = Mutex::new(());
+/// One lock per mirror, by mirror path. Artifacts built in parallel may share
+/// a mirror, and its clone, fetch and ref updates must not interleave; other
+/// mirrors are not held up by it.
+static MIRROR_LOCKS: Mutex<BTreeMap<PathBuf, Arc<Mutex<()>>>> = Mutex::new(BTreeMap::new());
+
+/// The lock of `mirror`, created on first use.
+fn mirror_lock(mirror: &Path) -> Arc<Mutex<()>> {
+    MIRROR_LOCKS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .entry(mirror.to_path_buf())
+        .or_default()
+        .clone()
+}
 
 /// One `git+<url>?...#<commit>` entry of a Cargo.lock.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -180,6 +191,27 @@ fn commit_present(mirror: &Path, commit: &str) -> bool {
         .is_ok_and(|status| status.success())
 }
 
+/// The commit the locked branch for `commit` points at, when it exists.
+fn locked_ref_commit(mirror: &Path, commit: &str) -> Option<String> {
+    let output = git_command()
+        .arg("-C")
+        .arg(mirror)
+        .args([
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{LOCKED_BRANCH_PREFIX}{commit}"),
+        ])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 /// A full object name, as the lock records it (40 hex, or 64 for sha256).
 fn is_full_commit(commit: &str) -> bool {
     matches!(commit.len(), 40 | 64) && commit.bytes().all(|byte| byte.is_ascii_hexdigit())
@@ -225,6 +257,11 @@ fn pin_commit(
                 )),
             ));
         }
+    }
+    // Every build pins every commit again. A branch that already names the
+    // commit needs no write, which would take the mirror's ref lock.
+    if locked_ref_commit(mirror, commit).is_some_and(|at| at.eq_ignore_ascii_case(commit)) {
+        return Ok(());
     }
     let mut update = git_command();
     update.arg("-C").arg(mirror).args([
@@ -330,9 +367,6 @@ pub(crate) fn cargo_git_env(
     if sources.is_empty() {
         return Ok(Vec::new());
     }
-    let _guard = MIRROR_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let workspace_root = contract
         .workspace_root
         .as_deref()
@@ -388,6 +422,8 @@ pub(crate) fn cargo_git_env(
             ));
         }
         let mirror = remote_git_mirror_dir(&cache_dir, &mapping.repo);
+        let lock = mirror_lock(&mirror);
+        let _held = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         ensure_mirror(&mapping.repo, &mirror, timeout, log_sink)?;
         gaia_process::register_read_only_docker_mount(&mirror);
         for (url, commits) in by_url {
@@ -565,6 +601,86 @@ checksum = "abc"
             Some("https://h/a.git")
         );
         assert!(get(&appended, "GIT_CONFIG_VALUE_0").is_none());
+    }
+
+    fn git_in(dir: &Path, args: &[&str]) -> String {
+        let output = git_command()
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .expect("git runs");
+        assert!(output.status.success(), "git {args:?} failed");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    #[test]
+    fn each_mirror_has_its_own_lock() {
+        let a = Path::new("/gaia-test/mirror-a.git");
+        let b = Path::new("/gaia-test/mirror-b.git");
+        assert!(Arc::ptr_eq(&mirror_lock(a), &mirror_lock(a)));
+        assert!(!Arc::ptr_eq(&mirror_lock(a), &mirror_lock(b)));
+        let held = mirror_lock(a);
+        let _guard = held.lock().expect("mirror a is free");
+        // A build preparing mirror a does not hold up mirror b.
+        assert!(mirror_lock(b).try_lock().is_ok());
+        assert!(mirror_lock(a).try_lock().is_err());
+    }
+
+    #[test]
+    fn pinning_a_locked_commit_is_repeatable_and_leaves_a_readable_branch() {
+        let git_available = git_command()
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+        if !git_available {
+            eprintln!("skipped: git is not on PATH");
+            return;
+        }
+        let scratch = gaia_testkit::TempDir::new("gaia-cargo-git-pin");
+        let work = scratch.join("work");
+        fs::create_dir_all(&work).expect("work dir");
+        git_in(&work, &["init", "--quiet"]);
+        git_in(
+            &work,
+            &[
+                "-c",
+                "user.name=gaia",
+                "-c",
+                "user.email=gaia@example.invalid",
+                "commit",
+                "--quiet",
+                "--allow-empty",
+                "-m",
+                "pinned",
+            ],
+        );
+        let commit = git_in(&work, &["rev-parse", "HEAD"]);
+        let mirror = scratch.join("mirror.git");
+        let output = git_command()
+            .arg("clone")
+            .arg("--quiet")
+            .arg("--mirror")
+            .arg(&work)
+            .arg(&mirror)
+            .output()
+            .expect("clone runs");
+        assert!(output.status.success(), "clone failed");
+
+        let mapping = CargoGitSourceSpec {
+            url: "https://example.invalid/dep.git".into(),
+            source: gaia_spec::SourceId::new("dep"),
+            repo: "https://example.invalid/dep.git".into(),
+        };
+        let timeout = Duration::from_secs(30);
+        assert_eq!(locked_ref_commit(&mirror, &commit), None);
+        pin_commit(&mirror, &mapping, &mapping.url, &commit, timeout, None).expect("first pin");
+        assert_eq!(locked_ref_commit(&mirror, &commit), Some(commit.clone()));
+        // A second pin finds the branch in place and writes nothing new.
+        pin_commit(&mirror, &mapping, &mapping.url, &commit, timeout, None).expect("second pin");
+        assert_eq!(locked_ref_commit(&mirror, &commit), Some(commit));
     }
 
     #[test]

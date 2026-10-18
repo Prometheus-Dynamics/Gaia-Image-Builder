@@ -110,6 +110,37 @@ pub fn apply_job_budget(command: &mut Command, jobs: usize) {
     }
 }
 
+/// Stderr text that marks a failure as network trouble, which another attempt
+/// can fix.
+const TRANSIENT_FAILURE_MARKERS: [&str; 12] = [
+    "failed to download",
+    "spurious network error",
+    "failed to fetch",
+    "network failure",
+    "connection reset",
+    "connection refused",
+    "connection timed out",
+    "timed out",
+    "could not resolve host",
+    "temporary failure in name resolution",
+    "failed to connect",
+    "too many requests",
+];
+
+/// Whether a failed command looks transient, so another attempt may succeed:
+/// it was killed by a signal, or its stderr reports network trouble. Anything
+/// else, a compile error above all, is deterministic: the same inputs fail the
+/// same way, so it is not retried.
+pub fn failure_is_transient(killed_by_signal: bool, stderr: &str) -> bool {
+    if killed_by_signal {
+        return true;
+    }
+    let lower = stderr.to_ascii_lowercase();
+    TRANSIENT_FAILURE_MARKERS
+        .iter()
+        .any(|marker| lower.contains(marker))
+}
+
 pub fn run_command_with_retries(
     command: &Command,
     contract: &ArtifactExecutionContract,
@@ -155,10 +186,27 @@ pub fn run_command_with_retries(
             );
             return Ok(());
         }
+        let stderr = String::from_utf8_lossy(&output.output.stderr);
         last_error = format!(
             "{label} failed on attempt {attempt}/{attempts}: {}",
-            String::from_utf8_lossy(&output.output.stderr).trim()
+            stderr.trim()
         );
+        if !failure_is_transient(output.output.status.code().is_none(), &stderr) {
+            tracing::warn!(
+                command_label = label,
+                provider_domain = "artifact",
+                provider = %contract.provider.as_str(),
+                output = %contract.output.path.as_str(),
+                attempt,
+                attempts,
+                backend = execution_backend(contract),
+                "artifact provider command failed deterministically; not retried"
+            );
+            return Err(ArtifactProviderError::new(
+                ArtifactProviderErrorKind::BackendCommand,
+                last_error,
+            ));
+        }
         if attempt < attempts {
             let retry_backoff = crate::retry_backoff_duration(
                 contract.retry_backoff_strategy,
@@ -382,4 +430,135 @@ fn docker_command(
     docker_run_command(command, &spec).map_err(|error| {
         ArtifactProviderError::new(ArtifactProviderErrorKind::PolicyBlocked, error.to_string())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gaia_spec::{
+        ArtifactDefinition, ArtifactOutputSpec, ArtifactSpec, ArtifactVariantSpec,
+        OutputRetentionPolicySpec, RustArtifactSpec,
+    };
+    use gaia_testkit::TempDir;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn contract(attempts: u32) -> ArtifactExecutionContract {
+        let artifact = ArtifactSpec::new(
+            "retry-artifact",
+            ArtifactDefinition::Rust(RustArtifactSpec {
+                package: "retry".into(),
+                target_name: None,
+                variant: ArtifactVariantSpec::File,
+                features: Vec::new(),
+                no_default_features: false,
+                all_features: false,
+                build_group: None,
+                group_packages: Vec::new(),
+                cargo_git_sources: Vec::new(),
+            }),
+            None,
+            ArtifactOutputSpec {
+                path: "retry-artifact.bin".into(),
+            },
+        );
+        let mut policy = ArtifactExecutionContract::default_command_policy();
+        policy.retry_attempts = attempts;
+        ArtifactExecutionContract::from_spec(
+            &artifact,
+            None,
+            false,
+            policy,
+            OutputRetentionPolicySpec::default(),
+        )
+    }
+
+    /// A fake tool that appends one line to `calls` per run, then runs `body`.
+    fn fake_tool(dir: &Path, body: &str) -> Command {
+        let script = dir.join("fake-cargo");
+        let calls = dir.join("calls");
+        fs::write(
+            &script,
+            format!("#!/bin/sh\necho call >> '{}'\n{body}\n", calls.display()),
+        )
+        .expect("write fake tool");
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).expect("chmod");
+        Command::new(&script)
+    }
+
+    fn calls(dir: &Path) -> usize {
+        fs::read_to_string(dir.join("calls"))
+            .map(|text| text.lines().count())
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn a_compile_error_is_not_retried() {
+        let scratch = TempDir::new("gaia-retry-compile-error");
+        let command = fake_tool(
+            scratch.path(),
+            "echo 'error[E0425]: cannot find value `x`' >&2\necho 'error: could not compile `retry` (lib) due to 1 previous error' >&2\nexit 101",
+        );
+        let error = run_command_with_retries(&command, &contract(3), "cargo build", None, None)
+            .expect_err("a compile error fails");
+        assert_eq!(error.kind, ArtifactProviderErrorKind::BackendCommand);
+        assert!(
+            error.message.contains("could not compile"),
+            "{}",
+            error.message
+        );
+        assert_eq!(calls(scratch.path()), 1, "one attempt, not retry_attempts");
+    }
+
+    #[test]
+    fn a_network_failure_is_retried() {
+        let scratch = TempDir::new("gaia-retry-network");
+        let command = fake_tool(
+            scratch.path(),
+            "echo 'error: failed to download `serde v1.0.0`' >&2\necho 'spurious network error' >&2\nexit 101",
+        );
+        let error = run_command_with_retries(&command, &contract(3), "cargo build", None, None)
+            .expect_err("the network keeps failing");
+        assert_eq!(error.kind, ArtifactProviderErrorKind::BackendCommand);
+        assert_eq!(calls(scratch.path()), 3);
+    }
+
+    #[test]
+    fn a_process_killed_by_a_signal_is_retried() {
+        let scratch = TempDir::new("gaia-retry-signal");
+        let command = fake_tool(scratch.path(), "kill -9 $$");
+        run_command_with_retries(&command, &contract(2), "cargo build", None, None)
+            .expect_err("the process keeps dying");
+        assert_eq!(calls(scratch.path()), 2);
+    }
+
+    #[test]
+    fn a_success_after_a_transient_failure_is_accepted() {
+        let scratch = TempDir::new("gaia-retry-recovers");
+        // Fails with a network error on the first call, succeeds on the second.
+        let body = format!(
+            "if [ \"$(wc -l < '{0}')\" -lt 2 ]; then echo 'failed to download `x`' >&2; exit 101; fi\nexit 0",
+            scratch.path().join("calls").display()
+        );
+        let command = fake_tool(scratch.path(), &body);
+        run_command_with_retries(&command, &contract(3), "cargo build", None, None)
+            .expect("second attempt succeeds");
+        assert_eq!(calls(scratch.path()), 2);
+    }
+
+    #[test]
+    fn transient_markers_and_signals_decide() {
+        assert!(failure_is_transient(true, ""));
+        assert!(failure_is_transient(
+            false,
+            "warning: spurious network error"
+        ));
+        assert!(!failure_is_transient(
+            false,
+            "error[E0308]: mismatched types"
+        ));
+        assert!(!failure_is_transient(
+            false,
+            "error: could not compile `app`"
+        ));
+    }
 }

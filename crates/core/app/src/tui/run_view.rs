@@ -515,11 +515,11 @@ impl RunView {
     }
 
     /// Output lines of one operation, oldest first, from the recent output.
-    pub(crate) fn op_log_lines(&self, op_id: &str) -> Vec<String> {
+    pub(crate) fn op_log_lines(&self, op_id: &str) -> Vec<&str> {
         self.logs
             .iter()
             .filter(|log| log.op == op_id)
-            .map(|log| log.line.clone())
+            .map(|log| log.line.as_str())
             .collect()
     }
 }

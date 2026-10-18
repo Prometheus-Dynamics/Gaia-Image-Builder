@@ -607,23 +607,46 @@ When several CPU-heavy operations (artifact builds, Buildroot prepare/build) run
 Provider policy lives under `[providers.*]`.
 
 Rust, Git and Java have extra specialized fields:
-- Rust: `allow_nested_build`, `batch_builds`, `shared_target_dir`
+- Rust: `allow_nested_build`, `batch_builds`, `shared_target_dir`, `sccache`, `strip`
 - Git: `allow_remote_resolution`
 - Java: `gradle_home` (see [Java and Gradle](#java-and-gradle))
+
+`allow_nested_build` (default `false`) is what lets Gaia run cargo for a rust
+artifact. Without it a rust artifact is built only when its output file already
+exists (that file is used as it is); otherwise the build fails with an error
+that names the artifact and the output. Gaia never writes a placeholder file in
+its place, because one would be shipped as the binary.
 
 `batch_builds` (default `false`) builds nested cargo artifacts that share a
 source workspace, target triple, profile, feature flags and execution backend
 with a single `cargo build -p a -p b ...` (one container start and one
 dependency resolution) and then copies each output. Per-artifact outputs,
-marker and state files are the same as for individual builds. If the combined
-build fails, each artifact is rebuilt on its own so the failure is attributed
-to the right artifact. Note that cargo unifies dependency features across all
+marker and state files are the same as for individual builds. When cargo names
+the packages that failed to compile (the "could not compile" lines name them), those
+artifacts fail with cargo's error and the others are built on their own. When
+the batch fails without naming a package (for example a network failure), each
+artifact is rebuilt on its own. Note that cargo unifies dependency features across all
 packages selected in one invocation, so a batched binary can differ from the
 same package built alone when packages enable different features of a shared
 dependency. It is therefore opt-in; enable it when your packages agree on
 shared dependency features. Artifacts that must agree on features should use
 a [Rust build group](#rust-build-groups) instead: groups always build together,
 with or without `batch_builds`.
+
+`sccache` (default `false`) compiles nested cargo artifacts through sccache:
+`RUSTC_WRAPPER=sccache` is set when `sccache --version` runs where cargo runs,
+that is on the host, or inside the docker image. On the host the cache lives
+under the user cache root (`<user cache>/sccache`, unless `SCCACHE_DIR` is set);
+docker builds keep it in the workspace cache. Without sccache the build runs
+without it and the log says so. The compiler wrapper does not change the
+outputs, so recorded state does not depend on it.
+
+`strip` (default `false`) strips every collected Rust output. The copy in the
+output path is stripped with the target's strip tool: `<triple>-strip` for a
+cross target, `strip` for the host, and `llvm-strip` as the fallback for both.
+Cargo's own files in the target dir are not touched. A host without any of
+these tools fails the artifact. The setting is part of the recorded state, so
+changing it rebuilds the artifact.
 
 `shared_target_dir` (default `false`) builds the nested cargo artifacts of
 every source into one cargo target directory per toolchain, target triple,
@@ -656,6 +679,12 @@ Every provider supports:
 - `retry_backoff_strategy`
 - `timeout_seconds`
 
+`retry_attempts` applies only to failures that look transient: a command killed
+by a signal, or stderr that reports a network failure (`failed to download`,
+`spurious network error`, `failed to fetch`, `connection reset`, ...). A
+deterministic failure, such as a cargo compile error (`error[E...]`, `could not
+compile`), fails at once: the same inputs fail the same way.
+
 Command providers may also expose provider-local worker counts. Buildroot uses `local_jobs` for `make -j`; leave it at `0` to let Buildroot choose its own default or set it explicitly to avoid nested oversubscription.
 
 Example:
@@ -665,6 +694,8 @@ Example:
 allow_nested_build = false
 batch_builds = true  # opt-in; see above
 shared_target_dir = true  # opt-in; see above
+sccache = true  # opt-in; see above
+strip = true  # opt-in; see above
 retry_attempts = 2
 retry_backoff_ms = 500
 retry_backoff_strategy = "exponential"

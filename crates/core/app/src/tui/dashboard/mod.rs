@@ -34,6 +34,10 @@ use crate::tui::widgets::chrome;
 
 /// From this width the charts sit beside the operations table.
 pub(crate) const WIDE_WIDTH: u16 = 110;
+
+/// The output lines of an operation, borrowed from what the caller keeps: the
+/// run's own log, or the dashboard view's recent output.
+pub(crate) type OpTail<'a> = dyn Fn(&str) -> Vec<&'a str> + 'a;
 /// From this height the progress block has room for its frame.
 const TALL_HEIGHT: u16 = 24;
 /// From this height the output pane is shown.
@@ -181,7 +185,7 @@ pub(crate) fn render(
     view: &RunView,
     ui: &mut DashboardState,
     metrics: &Metrics,
-    tail: &dyn Fn(&str) -> Vec<String>,
+    tail: &OpTail<'_>,
 ) {
     if !chrome::fits(area) {
         chrome::too_small(frame, area);

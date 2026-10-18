@@ -450,6 +450,8 @@ fn merge_provider_policies(
                 .rust
                 .shared_target_dir
                 .or(base.rust.shared_target_dir),
+            sccache: overlay.rust.sccache.or(base.rust.sccache),
+            strip: overlay.rust.strip.or(base.rust.strip),
             retry_attempts: base.rust.retry_attempts.max(overlay.rust.retry_attempts),
             retry_backoff_ms: base
                 .rust

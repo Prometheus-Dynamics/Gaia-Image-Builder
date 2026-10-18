@@ -14,7 +14,7 @@ use crate::tui::run_view::{RunPhase, RunSource, RunView};
 /// The view's clock: a minute into the fixture run.
 const NOW_MS: u64 = 1_060_000;
 
-fn no_tail(_: &str) -> Vec<String> {
+fn no_tail<'a>(_: &str) -> Vec<&'a str> {
     Vec::new()
 }
 

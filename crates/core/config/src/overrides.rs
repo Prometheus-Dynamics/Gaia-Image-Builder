@@ -399,6 +399,12 @@ fn apply_known_override(
         KnownOverrideKey::PolicyProvidersRustSharedTargetDir => {
             raw.providers.rust.shared_target_dir = Some(parse_bool_override(key, value)?)
         }
+        KnownOverrideKey::PolicyProvidersRustSccache => {
+            raw.providers.rust.sccache = Some(parse_bool_override(key, value)?)
+        }
+        KnownOverrideKey::PolicyProvidersRustStrip => {
+            raw.providers.rust.strip = Some(parse_bool_override(key, value)?)
+        }
         KnownOverrideKey::PolicyProvidersRustRetryAttempts => {
             raw.providers.rust.retry_attempts = parse_u32_override(key, value)?
         }

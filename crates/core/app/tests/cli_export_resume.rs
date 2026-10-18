@@ -37,6 +37,8 @@ fn run_words(roots: &Roots, extra: &[&str]) -> Vec<String> {
         "--set".to_string(),
         "image.allow_fallback=true".to_string(),
         "--set".to_string(),
+        "policy.providers.rust.allow_nested_build=false".to_string(),
+        "--set".to_string(),
         format!("workspace.root_dir={}", roots.root),
         "--set".to_string(),
         format!("workspace.out_dir={}", roots.out),

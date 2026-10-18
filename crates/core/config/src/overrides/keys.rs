@@ -55,6 +55,8 @@ pub(super) enum KnownOverrideKey {
     PolicyProvidersRustAllowNestedBuild,
     PolicyProvidersRustBatchBuilds,
     PolicyProvidersRustSharedTargetDir,
+    PolicyProvidersRustSccache,
+    PolicyProvidersRustStrip,
     PolicyProvidersRustRetryAttempts,
     PolicyProvidersRustTimeoutSeconds,
     PolicyProvidersGitAllowRemoteResolution,
@@ -236,6 +238,12 @@ impl<'a> OverrideKey<'a> {
             }
             "policy.providers.rust.shared_target_dir" => {
                 Self::Known(KnownOverrideKey::PolicyProvidersRustSharedTargetDir)
+            }
+            "policy.providers.rust.sccache" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersRustSccache)
+            }
+            "policy.providers.rust.strip" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersRustStrip)
             }
             "policy.providers.rust.retry_attempts" => {
                 Self::Known(KnownOverrideKey::PolicyProvidersRustRetryAttempts)

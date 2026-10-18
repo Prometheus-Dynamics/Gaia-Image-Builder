@@ -530,6 +530,119 @@ fn no_default_features_reaches_cargo() {
     assert_eq!(error.kind, ArtifactProviderErrorKind::BackendCommand);
 }
 
+#[test]
+fn missing_output_without_nested_builds_is_an_error_not_a_placeholder() {
+    let scratch = TempDir::new("gaia-rust-no-placeholder");
+    let output = scratch.join("gaia-rust-no-placeholder/app.bin");
+    let artifact = rust_artifact("app", "app", &output);
+    let contract = ArtifactExecutionContract::from_spec(
+        &artifact,
+        None,
+        false,
+        ArtifactExecutionContract::default_command_policy(),
+        gaia_spec::OutputRetentionPolicySpec::default(),
+    );
+
+    let error = RustProvider
+        .execute_artifact(&artifact, &contract, None, None)
+        .expect_err("nothing builds the output and no placeholder is written");
+
+    assert_eq!(error.kind, ArtifactProviderErrorKind::PolicyBlocked);
+    assert!(
+        error.message.contains("allow_nested_build"),
+        "{}",
+        error.message
+    );
+    assert!(!output.exists(), "a placeholder was written");
+}
+
+#[test]
+fn an_existing_output_is_used_without_nested_builds() {
+    let scratch = TempDir::new("gaia-rust-existing-output");
+    let output = scratch.join("gaia-rust-existing-output/app.bin");
+    fs::create_dir_all(output.parent().expect("parent")).expect("dir");
+    fs::write(&output, "prebuilt").expect("prebuilt output");
+    let artifact = rust_artifact("app", "app", &output);
+    let contract = ArtifactExecutionContract::from_spec(
+        &artifact,
+        None,
+        false,
+        ArtifactExecutionContract::default_command_policy(),
+        gaia_spec::OutputRetentionPolicySpec::default(),
+    );
+
+    RustProvider
+        .execute_artifact(&artifact, &contract, None, None)
+        .expect("the prebuilt output is accepted");
+    assert_eq!(fs::read_to_string(&output).expect("output"), "prebuilt");
+}
+
+#[test]
+fn docker_builds_record_the_image_not_the_host_toolchain() {
+    let artifact = rust_artifact("app", "app", Path::new("app.bin"));
+    let mut contract = nested_contract(&artifact, Path::new("."));
+    contract.execution_backend =
+        ArtifactExecutionBackend::Docker(gaia_artifact_providers::ArtifactDockerExecution {
+            image: "builder:latest".into(),
+            build: None,
+        });
+    assert_eq!(
+        toolchain_version(&contract, "rustc", &["--version"]),
+        "docker:builder:latest"
+    );
+    if let ArtifactExecutionBackend::Docker(docker) = &mut contract.execution_backend {
+        docker.build = Some(gaia_artifact_providers::ArtifactDockerImageBuild {
+            content_hash: None,
+            dockerfile: "Dockerfile".into(),
+            context: None,
+            name: "builder".into(),
+            image_id: Some("sha256:abc".into()),
+            hash_error: None,
+        });
+    }
+    assert_eq!(
+        toolchain_version(&contract, "cargo", &["--version"]),
+        "docker:sha256:abc"
+    );
+    // The host's versions are probed once and then reused.
+    let host = ArtifactExecutionContract {
+        execution_backend: ArtifactExecutionBackend::Host,
+        ..contract.clone()
+    };
+    let first = toolchain_version(&host, "rustc", &["--version"]);
+    assert_eq!(first, toolchain_version(&host, "rustc", &["--version"]));
+}
+
+#[test]
+fn sccache_is_off_unless_asked_for() {
+    let artifact = rust_artifact("app", "app", Path::new("app.bin"));
+    let contract = nested_contract(&artifact, Path::new("."));
+    assert!(!contract.rust_sccache);
+    assert!(sccache_env(&contract, None).is_empty());
+}
+
+#[test]
+fn strip_rewrites_the_collected_copy_with_the_host_strip_tool() {
+    let scratch = TempDir::new("gaia-rust-strip");
+    let dir = scratch.join("gaia-rust-strip");
+    fs::create_dir_all(&dir).expect("dir");
+    let copy = dir.join("collected");
+    fs::copy("/bin/sh", &copy).expect("an ELF to strip");
+    let before = fs::metadata(&copy).expect("copy").len();
+    let artifact = rust_artifact("app", "app", &copy);
+    let mut contract = nested_contract(&artifact, Path::new("."));
+    contract.rust_strip = true;
+
+    match strip_collected_output(&copy, &contract) {
+        Ok(()) => assert!(fs::metadata(&copy).expect("copy").len() <= before),
+        // A host without any strip tool says so, and the copy is left alone.
+        Err(error) => {
+            assert_eq!(error.kind, ArtifactProviderErrorKind::PolicyBlocked);
+            assert_eq!(fs::metadata(&copy).expect("copy").len(), before);
+        }
+    }
+}
+
 mod cargo_git;
 mod groups;
 mod shared_target;

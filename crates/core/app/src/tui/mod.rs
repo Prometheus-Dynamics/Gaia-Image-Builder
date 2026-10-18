@@ -94,20 +94,31 @@ fn run_loop(
         if let Some(code) = state.should_exit() {
             return Ok(code);
         }
-        terminal.draw(|frame| render(frame, state))?;
+        // Draw only when the screen changed or an animation is due; the loop
+        // still wakes every 100 ms to poll the run, the picker and the attach.
+        let now = Instant::now();
+        if state.redraw_due(now) {
+            terminal.draw(|frame| render(frame, state))?;
+            state.redraw_drew(Instant::now());
+        }
 
-        if !event::poll(Duration::from_millis(100))? {
+        if !event::poll(state.poll_timeout(Instant::now()))? {
             state.tick();
             continue;
         }
 
-        let Event::Key(key) = event::read()? else {
+        let event = event::read()?;
+        if matches!(event, Event::Resize(..)) {
+            state.request_redraw();
+        }
+        let Event::Key(key) = event else {
             state.tick();
             continue;
         };
         if key.kind != KeyEventKind::Press {
             continue;
         }
+        state.request_redraw();
 
         let is_quit = match key.code {
             KeyCode::Char('c') => key.modifiers.contains(KeyModifiers::CONTROL),
@@ -134,6 +145,7 @@ mod input;
 mod metrics;
 mod model;
 mod picker;
+mod redraw;
 mod render;
 mod run;
 mod run_view;

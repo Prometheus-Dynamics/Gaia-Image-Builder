@@ -12,6 +12,23 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - A remote source's checkout shares its mirror's objects (`git clone --shared`) instead of copying the history, so a locked or `rev` checkout no longer copies every object. A checkout that lost its mirror is cloned again on its next run.
 - A locked commit, or a `rev` that is a full commit id, already in the mirror is checked out without a fetch. A branch or tag is resolved from the mirror after its fetch, so the separate `ls-remote` round trip is gone; a failed fetch fails the source instead of building from stale refs.
 
+### TUI: idle screens stop redrawing; bounded run logs
+
+- The TUI redraws only when something changed: a key or a resize, a message from the run, a refreshed build or picker state, or a status notice. While something on screen animates (a run in this TUI or an attached live run) it redraws at 4 Hz, and the frame after the animation stops shows its final state. An idle picker went from about 2.9% CPU to about 0.4% in a 10 s pty measurement (debug build), and from 2.5 kB to 0.25 kB of terminal output.
+- The monitor's view is built once per frame instead of once for the footer and once for the body.
+- Operation output borrows the run's log lines when the popup draws them; it is no longer copied on every frame.
+- The picker re-reads a build dir's status and last-run files only when their modification time or size changed, and redraws only when the picker's view changed.
+- The run's log text is capped at 64 MiB across all operations (5,000 lines per operation still applies). Past the cap the oldest lines of finished operations go first, then those of the largest operation. Lifecycle events are capped at the most recent 10,000; the first failed operation is still reported.
+
+### Rust artifacts: no placeholder outputs; safer retries and batch failures
+
+- A rust artifact whose output does not exist, with `[providers.rust] allow_nested_build = false` (the default), used to be written as a text file (`mode=placeholder`) and reported as built. It now fails with an error that names the artifact and the output and says to enable `allow_nested_build` or provide the file. An existing output is still used as it is. `examples/templates/full` names placeholder packages (`acme-api`, `cv-plugin`) and a placeholder git source, so it still needs them replaced before it builds.
+- `retry_attempts` retries only failures that look transient (a signal kill, or stderr that reports a network failure). A cargo compile error fails at once instead of being retried and then rebuilt for each artifact of its batch. When a failed batch names the packages that failed to compile, only those artifacts fail; the others are built on their own.
+- New opt-in `[providers.rust] sccache = true` compiles through sccache (`RUSTC_WRAPPER`) when sccache is available on the host or in the docker image.
+- New opt-in `[providers.rust] strip = true` strips each collected Rust output with `<triple>-strip`, `strip` or `llvm-strip`. Cargo's own files are not touched. It is part of the recorded state.
+- Cargo git mirrors are locked per mirror instead of through one lock for all of them, and a locked commit's branch is written only when it does not already name that commit.
+- Recorded toolchain versions for docker builds name the image (`docker:<image id>`) instead of the host's rustc and cargo. Host versions are probed once per process instead of once per artifact.
+
 ### Project-neutral defaults and examples
 
 - vfat filesystems take `fat_size = 12 | 16 | 32`. Unset keeps the current rule (an image from 3 MiB up to 16 MiB is FAT16, because some boot firmwares, e.g. Raspberry Pi's, do not boot FAT12; other sizes keep `mformat`'s choice), so existing configs build the same images and keep their fingerprints. `12` keeps `mformat`'s choice, `32` formats FAT32, and a set `fat_size` fails the run when `mformat` could not make that type at the image's size.

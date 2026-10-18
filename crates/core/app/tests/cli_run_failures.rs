@@ -20,6 +20,10 @@ fn run_command_surfaces_execution_failures_from_backend_errors() {
         config_path(),
         "--preset".to_string(),
         "ci".to_string(),
+        // The point of this test is a cargo failure from the backend, so the
+        // rust artifact runs cargo (it fails: there is no Cargo.toml here).
+        "--set".to_string(),
+        "policy.providers.rust.allow_nested_build=true".to_string(),
         "--set".to_string(),
         format!("workspace.root_dir={missing_root_dir}"),
         "--set".to_string(),

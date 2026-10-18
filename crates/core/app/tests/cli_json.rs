@@ -69,6 +69,8 @@ impl Workspace {
             "--set",
             "image.allow_fallback=true",
             "--set",
+            "policy.providers.rust.allow_nested_build=false",
+            "--set",
             &format!("workspace.root_dir={}", self.root),
             "--set",
             &format!("workspace.out_dir={}", self.out),

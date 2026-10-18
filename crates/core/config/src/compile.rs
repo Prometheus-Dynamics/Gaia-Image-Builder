@@ -177,6 +177,8 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                 allow_nested_build: raw.providers.rust.allow_nested_build,
                 batch_builds: raw.providers.rust.batch_builds.unwrap_or(false),
                 shared_target_dir: raw.providers.rust.shared_target_dir.unwrap_or(false),
+                sccache: raw.providers.rust.sccache.unwrap_or(false),
+                strip: raw.providers.rust.strip.unwrap_or(false),
                 retry_attempts: compile_provider_retry_attempts(raw.providers.rust.retry_attempts),
                 retry_backoff_ms: compile_provider_retry_backoff_ms(
                     raw.providers.rust.retry_backoff_ms,

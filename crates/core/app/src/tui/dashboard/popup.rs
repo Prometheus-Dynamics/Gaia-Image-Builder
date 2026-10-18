@@ -6,6 +6,7 @@ use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 
+use super::OpTail;
 use crate::commands::live_status::LiveOperation;
 use crate::tui::run_view::RunView;
 use crate::tui::theme;
@@ -22,7 +23,7 @@ pub(super) fn render(
     area: Rect,
     view: &RunView,
     op: &LiveOperation,
-    tail: &dyn Fn(&str) -> Vec<String>,
+    tail: &OpTail<'_>,
 ) {
     let popup = chrome::centred(area, 84, 88, (50, 14));
     let inner = chrome::popup_frame(frame, popup, &op.id);
@@ -38,11 +39,7 @@ pub(super) fn render(
     );
 }
 
-fn content(
-    view: &RunView,
-    op: &LiveOperation,
-    tail: &dyn Fn(&str) -> Vec<String>,
-) -> Vec<Line<'static>> {
+fn content(view: &RunView, op: &LiveOperation, tail: &OpTail<'_>) -> Vec<Line<'static>> {
     let (icon, label, style) = op_badge(op);
     let mut lines = vec![Line::from(vec![
         Span::styled(format!("{icon} {label}"), style),
@@ -122,7 +119,7 @@ fn content(
     }
 
     lines.push(Line::from(""));
-    let mut output = tail(&op.id);
+    let mut output: Vec<&str> = tail(&op.id);
     if output.is_empty() {
         output = view.op_log_lines(&op.id);
     }

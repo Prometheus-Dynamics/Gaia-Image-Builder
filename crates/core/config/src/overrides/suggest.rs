@@ -67,6 +67,8 @@ const LITERAL_KEYS: &[&str] = &[
     "policy.providers.rust.allow_nested_build",
     "policy.providers.rust.batch_builds",
     "policy.providers.rust.shared_target_dir",
+    "policy.providers.rust.sccache",
+    "policy.providers.rust.strip",
     "policy.providers.rust.retry_attempts",
     "policy.providers.rust.timeout_seconds",
     "policy.providers.git.allow_remote_resolution",

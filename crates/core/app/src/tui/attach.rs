@@ -7,7 +7,7 @@
 use super::*;
 use crate::AppCommand;
 use crate::commands::live_status::{
-    LiveRun, RunFiles, live_run, live_run_at, read_last, read_last_at, unix_now_ms,
+    LiveRun, RunFiles, live_run, live_run_at, read_last_at, unix_now_ms,
 };
 use crate::commands::run_registry::{RegisteredRun, list_runs};
 use crate::tui::dashboard;
@@ -101,15 +101,20 @@ impl<'a> TuiState<'a> {
                 if let Some(attach) = self.attach.as_mut()
                     && attach.polled_at.elapsed() >= POLL_INTERVAL
                 {
+                    let was_live = attach.run.is_some();
                     attach.poll();
+                    if was_live != attach.run.is_some() {
+                        self.redraw.mark();
+                    }
                 }
             }
             Screen::Picker => {
                 if self
                     .picker_polled_at
                     .is_none_or(|at| at.elapsed() >= PICKER_POLL_INTERVAL)
+                    && self.refresh_picker_marks()
                 {
-                    self.refresh_picker_marks();
+                    self.redraw.mark();
                 }
             }
             Screen::Setup | Screen::Monitor | Screen::Details => {}
@@ -118,8 +123,11 @@ impl<'a> TuiState<'a> {
 
     /// Re-reads the registered runs, and for each build config its live run
     /// (if any) and its last recorded run.
-    fn refresh_picker_marks(&mut self) {
-        self.runs = list_runs();
+    /// Returns whether the picker's view of the runs changed.
+    fn refresh_picker_marks(&mut self) -> bool {
+        let runs = list_runs();
+        let runs_changed = runs != self.runs;
+        self.runs = runs;
         self.ensure_picker_selection();
         let options = self.options.clone();
         let mut marks = std::collections::BTreeMap::new();
@@ -141,16 +149,18 @@ impl<'a> TuiState<'a> {
             let Some(meta) = meta else {
                 continue;
             };
-            if let Some(run) = live_run(&meta.build_dir) {
+            if let Some(run) = self.snapshots.live_run(&meta.build_dir) {
                 marks.insert(entry.path.clone(), run);
             }
-            if let Some(ended) = read_last(&meta.build_dir) {
+            if let Some(ended) = self.snapshots.read_last(&meta.build_dir) {
                 last.insert(entry.path.clone(), ended);
             }
         }
+        self.picker_polled_at = Some(Instant::now());
+        let changed = runs_changed || marks != self.live_marks || last != self.build_last;
         self.live_marks = marks;
         self.build_last = last;
-        self.picker_polled_at = Some(Instant::now());
+        changed
     }
 
     fn attached_pid(&self) -> Option<u32> {

@@ -6,7 +6,7 @@ use super::*;
 use crate::tui::dashboard;
 use crate::tui::details;
 use crate::tui::picker;
-use crate::tui::run_view::RunPhase;
+use crate::tui::run_view::{RunPhase, RunView};
 use crate::tui::setup_view;
 use crate::tui::widgets::badge::phase_badge;
 use crate::tui::widgets::chrome;
@@ -29,14 +29,18 @@ pub(crate) fn render(frame: &mut Frame<'_>, state: &mut TuiState<'_>) {
         .split(area);
 
     chrome::screen_header(frame, rows[0], screen_title(state), header_subject(state));
+    // The monitor's view is built once per frame, for the footer and the body.
+    let monitor = (state.screen == Screen::Monitor)
+        .then(|| state.monitor_run_view())
+        .flatten();
     match state.screen {
         Screen::Picker => picker::render(frame, rows[1], state),
         Screen::Setup => setup_view::render(frame, rows[1], state),
         Screen::Details => details::render(frame, rows[1], state),
-        Screen::Monitor => render_monitor(frame, rows[1], state),
+        Screen::Monitor => render_monitor(frame, rows[1], state, monitor.as_ref()),
         Screen::Attach => render_attach(frame, rows[1], state),
     }
-    render_footer(frame, rows[2], state);
+    render_footer(frame, rows[2], state, monitor.as_ref());
     if state.show_help {
         render_help(frame, area, state);
     }
@@ -213,7 +217,12 @@ fn header_subject(state: &TuiState<'_>) -> Vec<Span<'static>> {
     spans
 }
 
-pub(crate) fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &TuiState<'_>) {
+pub(crate) fn render_footer(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &TuiState<'_>,
+    monitor: Option<&RunView>,
+) {
     let hint = if state.edit_field.is_some() {
         "[Type] edit  [Backspace] delete  [Enter] apply  [Esc] cancel".to_string()
     } else {
@@ -230,7 +239,7 @@ pub(crate) fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &TuiState<
                 details::footer_hint(state.details.tab())
             ),
             Screen::Monitor => {
-                let over = state.monitor_run_view().is_some_and(|view| view.is_over());
+                let over = monitor.is_some_and(|view| view.is_over());
                 format!("{}  [Esc] setup", dashboard::footer_hint(over))
             }
             Screen::Attach => {
@@ -253,8 +262,13 @@ pub(crate) fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &TuiState<
 }
 
 /// The monitor of the run this TUI started: the run dashboard.
-pub(crate) fn render_monitor(frame: &mut Frame<'_>, area: Rect, state: &mut TuiState<'_>) {
-    let Some(view) = state.monitor_run_view() else {
+pub(crate) fn render_monitor(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &mut TuiState<'_>,
+    view: Option<&RunView>,
+) {
+    let Some(view) = view else {
         chrome::empty_state(
             frame,
             area,
@@ -266,13 +280,19 @@ pub(crate) fn render_monitor(frame: &mut Frame<'_>, area: Rect, state: &mut TuiS
         );
         return;
     };
-    let events = &state.events;
-    let tail = |id: &str| {
-        let lines = events
+    let tail = op_tail(&state.events, view);
+    dashboard::render(frame, area, view, &mut state.dash, &state.metrics, &tail);
+}
+
+/// The output lines of an operation for the popup: the run's own log when it
+/// has one, else the dashboard view's recent output.
+fn op_tail<'a>(events: &'a EventLog, view: &'a RunView) -> impl Fn(&str) -> Vec<&'a str> + 'a {
+    move |id| {
+        let lines: Vec<&'a str> = events
             .log(id)
             .map(|log| {
                 let skip = log.lines.len().saturating_sub(POPUP_TAIL);
-                log.lines.iter().skip(skip).cloned().collect::<Vec<_>>()
+                log.lines.iter().skip(skip).map(String::as_str).collect()
             })
             .unwrap_or_default();
         if lines.is_empty() {
@@ -280,8 +300,7 @@ pub(crate) fn render_monitor(frame: &mut Frame<'_>, area: Rect, state: &mut TuiS
         } else {
             lines
         }
-    };
-    dashboard::render(frame, area, &view, &mut state.dash, &state.metrics, &tail);
+    }
 }
 
 /// Output lines the operation popup can take from the monitor's log.

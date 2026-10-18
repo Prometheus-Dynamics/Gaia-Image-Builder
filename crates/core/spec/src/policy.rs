@@ -180,6 +180,13 @@ pub struct RustProviderPolicySpec {
     /// directory keeps that source's own target dir (cargo would otherwise
     /// reuse the other package's outputs).
     pub shared_target_dir: bool,
+    /// Compile cargo through sccache (`RUSTC_WRAPPER=sccache`) when sccache is
+    /// available: on the host, or inside the docker image. Opt-in.
+    pub sccache: bool,
+    /// Strip the collected Rust artifact outputs with the target's strip tool
+    /// (`<triple>-strip`, else `llvm-strip`, else `strip` for the host). Opt-in;
+    /// cargo's own files are not touched.
+    pub strip: bool,
     pub retry_attempts: u32,
     pub retry_backoff_ms: u64,
     pub retry_backoff_strategy: RetryBackoffStrategySpec,
