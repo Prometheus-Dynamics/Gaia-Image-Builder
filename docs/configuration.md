@@ -1318,6 +1318,33 @@ still run in docker; only git runs on the host.
 - The `git_backend` setting does not change source fingerprints: a build
   upgraded to this version keeps its materialized sources.
 
+**Git checkouts.** A materialized git source is updated in place on each run
+instead of being deleted and cloned again. Its `.gaia` state (such as
+`.gaia/cargo-target`) is kept, and the checkout is made to match its commit
+exactly: tracked files are reset, and untracked and ignored files are removed
+(`git clean -ffdx`), so the tree is the one a fresh clone gives. A checkout
+already at its commit with nothing changed is left alone. A checkout that
+cannot be updated (another origin, a damaged `.git`, a commit that will not
+check out) is cloned again.
+
+- A remote repository's checkout is cloned from its mirror in
+  `.gaia/cache/git` and shares the mirror's objects instead of copying them.
+  Keep the mirror while checkouts use it: `gaia clean --unused-mirrors` removes
+  a mirror that no source maps to, and a checkout that lost its objects is
+  cloned again on its next run.
+- The mirror is fetched only when the source needs it. A locked commit, or a
+  `rev` that is a full commit id, already in the mirror needs no fetch and no
+  network. A branch or tag is fetched and resolved from the mirror after that
+  fetch, so no separate `ls-remote` runs; if the fetch fails, the source fails
+  rather than building from stale refs. The plan-time check of a floating ref
+  is unchanged.
+- A clean checkout's `materialized_tree_digest` is its git tree id
+  (`git-tree:<id>`). The tree names every file's content and mode, and a
+  submodule's commit, so no file is read to compute it. A checkout with local
+  changes is hashed file by file as before. The digest is only compared for
+  equality, so the tree id is a stable identity. Upgrading changes the form of
+  the recorded digest, so the dependents of each git source rebuild once.
+
 **Path source identity.** A path source inside a git work tree is identified by
 the files git lists for it: tracked files and untracked files that are not
 ignored, with `identity_ignore` and the built-in ignores applied on top. Ignored

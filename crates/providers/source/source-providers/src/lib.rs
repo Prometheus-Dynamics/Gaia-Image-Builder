@@ -151,6 +151,8 @@ mod download;
 mod git;
 #[cfg(test)]
 mod git_backend_tests;
+#[cfg(test)]
+mod git_checkout_tests;
 mod git_helpers;
 mod git_import;
 mod path;

@@ -68,6 +68,44 @@ pub(crate) fn tree_digest(path: &Path, ignored_names: &[&str]) -> String {
     fingerprint.finish().short_hex()
 }
 
+/// Content identity of a materialized git checkout, recorded as
+/// `materialized_tree_digest`. A clean checkout is identified by its tree id
+/// (`git-tree:<id>`): the tree names every file's content and mode, and a
+/// submodule's commit, so no file has to be read. A checkout with local
+/// changes, or one git cannot read, is hashed file by file as before.
+pub(crate) fn checkout_content_digest(dir: &Path) -> String {
+    match clean_checkout_tree(dir) {
+        Some(tree) => format!("git-tree:{tree}"),
+        None => tree_digest(
+            dir,
+            &[".git", ".gaia", "source.txt", ".gaia-source-state.txt"],
+        ),
+    }
+}
+
+/// The tree id of `dir`'s HEAD when the checkout has no changes other than
+/// Gaia's own markers.
+fn clean_checkout_tree(dir: &Path) -> Option<String> {
+    let tree = git_command()
+        .arg("-C")
+        .arg(dir)
+        .args(["rev-parse", "--verify", "--quiet", "HEAD^{tree}"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|tree| !tree.is_empty())?;
+    let status = git_status_porcelain(dir)?;
+    status
+        .lines()
+        .all(|line| {
+            line.strip_prefix("?? ")
+                .is_some_and(is_checkout_marker_path)
+        })
+        .then_some(tree)
+}
+
 /// Fingerprint of a path source's tree, shared by the planner (reuse) and the
 /// provider (materialized state) so both agree on what counts as a change.
 ///

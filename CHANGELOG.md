@@ -6,6 +6,12 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Git sources: faster materialization
+
+- **Upgrading rebuilds the dependents of each git source once.** A git source's recorded `materialized_tree_digest` is now a git tree id (`git-tree:<id>`) for a clean checkout, not a hash of every file, so the state the dependents read changes form.- A git source's checkout is updated in place on each run instead of being deleted and cloned again. The checkout is made to match its commit: tracked files reset, untracked and ignored files removed, `.gaia` state kept, and any failure (another origin, a damaged `.git`, a commit that will not check out) falls back to a fresh clone. Measured on a 727-file local repository, an unchanged source went from about 0.30 s to 0.02 to 0.09 s and a locked source from 0.28 s to 0.02 s; a new commit went from 0.30 s to 0.06 s.
+- A remote source's checkout shares its mirror's objects (`git clone --shared`) instead of copying the history, so a locked or `rev` checkout no longer copies every object. A checkout that lost its mirror is cloned again on its next run.
+- A locked commit, or a `rev` that is a full commit id, already in the mirror is checked out without a fetch. A branch or tag is resolved from the mirror after its fetch, so the separate `ls-remote` round trip is gone; a failed fetch fails the source instead of building from stale refs.
+
 ### Project-neutral defaults and examples
 
 - vfat filesystems take `fat_size = 12 | 16 | 32`. Unset keeps the current rule (an image from 3 MiB up to 16 MiB is FAT16, because some boot firmwares, e.g. Raspberry Pi's, do not boot FAT12; other sizes keep `mformat`'s choice), so existing configs build the same images and keep their fingerprints. `12` keeps `mformat`'s choice, `32` formats FAT32, and a set `fat_size` fails the run when `mformat` could not make that type at the image's size.
