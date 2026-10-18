@@ -47,6 +47,11 @@ fn git(dir: &Path, args: &[&str]) -> String {
 /// A bare repository `eidos-remote.git` with one commit on `main`, and the
 /// working clone that makes further commits.
 fn init_remote(scratch: &TempDir) -> (PathBuf, PathBuf) {
+    // These tests move a branch and plan again in the same process, so each
+    // plan must resolve the ref (a resolution is reused for 60s otherwise).
+    // SAFETY: set before any plan in this test binary reads it; every value
+    // this binary sets is the same.
+    unsafe { std::env::set_var("GAIA_FLOATING_REF_TTL_SECONDS", "0") };
     let remote = scratch.join("eidos-remote.git");
     let work = scratch.join("eidos-work");
     fs::create_dir_all(&remote).expect("remote dir");

@@ -7,8 +7,12 @@
 //! token stays unresolved, so an assembly that uses it fails loudly instead
 //! of writing a wall-clock time.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
+
+use super::project_git::repo_stamp;
 
 /// The RFC 3339 UTC time for the build, when one is known.
 pub(super) fn resolve(build_file_dir: &str) -> Option<String> {
@@ -21,10 +25,37 @@ pub(super) fn resolve(build_file_dir: &str) -> Option<String> {
     Some(rfc3339_utc(seconds))
 }
 
+/// The commit time of HEAD, memoized per directory like `project.commit`: a
+/// `${build.date}` per occurrence would otherwise run `git log` each time. An
+/// entry is kept while the repository's stamp (its HEAD, branch and index) is
+/// unchanged, so a new commit is seen at once.
 fn head_commit_time(build_file_dir: &str) -> Option<String> {
     if build_file_dir.is_empty() {
         return None;
     }
+    /// Per directory: the repository stamp the time was read at, and the time.
+    type HeadTimeMemo = Mutex<HashMap<String, (String, Option<String>)>>;
+    static CACHE: OnceLock<HeadTimeMemo> = OnceLock::new();
+    let Some(stamp) = repo_stamp(Path::new(build_file_dir)) else {
+        return run_head_commit_time(build_file_dir);
+    };
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(known) = cache.lock().ok().and_then(|cache| {
+        cache
+            .get(build_file_dir)
+            .filter(|(known_stamp, _)| *known_stamp == stamp)
+            .map(|(_, time)| time.clone())
+    }) {
+        return known;
+    }
+    let time = run_head_commit_time(build_file_dir);
+    if let Ok(mut cache) = cache.lock() {
+        cache.insert(build_file_dir.to_string(), (stamp, time.clone()));
+    }
+    time
+}
+
+fn run_head_commit_time(build_file_dir: &str) -> Option<String> {
     Command::new("git")
         .arg("-C")
         .arg(Path::new(build_file_dir))
@@ -73,7 +104,7 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 
 #[cfg(test)]
 mod tests {
-    use super::rfc3339_utc;
+    use super::{head_commit_time, rfc3339_utc};
 
     #[test]
     fn epochs_render_as_rfc3339_utc() {
@@ -83,5 +114,47 @@ mod tests {
         assert_eq!(rfc3339_utc(1_709_164_800), "2024-02-29T00:00:00Z");
         assert_eq!(rfc3339_utc(1_704_067_199), "2023-12-31T23:59:59Z");
         assert_eq!(rfc3339_utc(-1), "1969-12-31T23:59:59Z");
+    }
+
+    #[test]
+    fn build_date_follows_new_head_commits() {
+        let scratch = gaia_testkit::TempDir::new("gaia-config-build-date");
+        let repo = scratch.join("repo");
+        std::fs::create_dir_all(&repo).expect("repo dir");
+        let dir = repo.display().to_string();
+        let git = |args: &[&str], date: &str| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args([
+                    "-c",
+                    "user.name=Gaia Test",
+                    "-c",
+                    "user.email=gaia-test@example.invalid",
+                    "-c",
+                    "commit.gpgsign=false",
+                ])
+                .args(args)
+                .env("GIT_AUTHOR_DATE", date)
+                .env("GIT_COMMITTER_DATE", date)
+                .output()
+                .expect("git runs");
+            assert!(output.status.success(), "git {args:?}");
+        };
+        git(&["init", "-b", "main"], "@1000000000 +0000");
+        git(
+            &["commit", "--allow-empty", "-m", "one"],
+            "@1000000000 +0000",
+        );
+        assert_eq!(head_commit_time(&dir).as_deref(), Some("1000000000"));
+        git(
+            &["commit", "--allow-empty", "-m", "two"],
+            "@2000000000 +0000",
+        );
+        assert_eq!(
+            head_commit_time(&dir).as_deref(),
+            Some("2000000000"),
+            "a new HEAD commit is seen at once"
+        );
     }
 }

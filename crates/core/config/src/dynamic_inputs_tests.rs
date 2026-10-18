@@ -1,3 +1,4 @@
+use super::dynamic_inputs_memo::memoized_fetch;
 use super::*;
 use gaia_testkit::TempDir;
 use std::time::Instant;
@@ -319,4 +320,37 @@ printf '{{"ok":true}}'
 
     assert_eq!(body, r#"{"ok":true}"#);
     assert!(!marker.exists(), "auth config should not be passed");
+}
+
+#[test]
+fn auto_choices_are_fetched_once_within_the_memo_window() {
+    let calls = std::cell::Cell::new(0);
+    let fetch = || {
+        calls.set(calls.get() + 1);
+        Ok(vec!["v1.0.0".to_string()])
+    };
+    let key = "memo-test:auto-choices".to_string();
+    assert_eq!(
+        memoized_fetch(key.clone(), fetch),
+        Ok(vec!["v1.0.0".to_string()])
+    );
+    assert_eq!(memoized_fetch(key, fetch), Ok(vec!["v1.0.0".to_string()]));
+    assert_eq!(
+        calls.get(),
+        1,
+        "the second resolution reused the first fetch"
+    );
+}
+
+#[test]
+fn failed_choice_fetches_are_retried_by_the_next_resolution() {
+    let calls = std::cell::Cell::new(0);
+    let fetch = || {
+        calls.set(calls.get() + 1);
+        Err("offline".to_string())
+    };
+    let key = "memo-test:failed-choices".to_string();
+    assert!(memoized_fetch(key.clone(), fetch).is_err());
+    assert!(memoized_fetch(key, fetch).is_err());
+    assert_eq!(calls.get(), 2);
 }

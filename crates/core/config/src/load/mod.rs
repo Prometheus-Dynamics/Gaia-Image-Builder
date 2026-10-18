@@ -1,10 +1,12 @@
 mod import_sources;
 mod path_tokens;
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use gaia_spec::ImportSourceSpec;
 
@@ -37,7 +39,10 @@ pub(crate) fn load_build_config(
     tracing::debug!(path = %build_path.display(), "loading build config");
     let entrypoint = fs::canonicalize(&build_path)
         .map_err(|error| ConfigError::config_path(&build_path, error))?;
-    let workspace_root = import_workspace_root(&entrypoint, options)?;
+    // Each file is read and parsed once for this resolution, however many of
+    // the passes below look at it.
+    let files = ConfigFiles::default();
+    let workspace_root = import_workspace_root(&entrypoint, options, &files)?;
     let path_overrides = options
         .explicit_overrides
         .iter()
@@ -61,13 +66,14 @@ pub(crate) fn load_build_config(
     {
         sources.override_timeout(seconds);
     }
-    declare_local_sources(&entrypoint, &mut sources, &mut BTreeSet::new());
+    declare_local_sources(&entrypoint, &mut sources, &mut BTreeSet::new(), &files);
     let mut loader = Loader {
         stack: Vec::new(),
         sources,
         build,
         options,
         global_inputs: BTreeMap::new(),
+        files: &files,
     };
     let config = loader.load(&entrypoint, None, true)?;
     tracing::debug!(
@@ -101,6 +107,48 @@ struct Loader<'a> {
     /// The input values the entrypoint selects, which every file's `when`
     /// conditions see (set while the entrypoint's imports are read).
     global_inputs: BTreeMap<String, String>,
+    files: &'a ConfigFiles,
+}
+
+/// The config files read during one resolution, by canonical path, as their
+/// text and their parsed TOML. Only successful reads are kept, so a file that
+/// fails is reported by the pass that reads it, as before.
+#[derive(Default)]
+struct ConfigFiles {
+    parsed: RefCell<BTreeMap<PathBuf, Rc<ParsedConfigFile>>>,
+}
+
+struct ParsedConfigFile {
+    contents: String,
+    value: toml::Value,
+}
+
+impl ConfigFiles {
+    /// The file at the canonical `path`, read and parsed on first use. Errors
+    /// are the ones the loader reports for an unreadable, empty or invalid file.
+    fn read(&self, path: &Path) -> Result<Rc<ParsedConfigFile>, ConfigError> {
+        let known = self.parsed.borrow().get(path).cloned();
+        if let Some(known) = known {
+            return Ok(known);
+        }
+        let contents =
+            fs::read_to_string(path).map_err(|error| ConfigError::config_read(path, error))?;
+        // An empty build file is never intended: most likely a write that
+        // never finished, which would silently drop what the file provides.
+        if contents.trim().is_empty() {
+            return Err(ConfigError::config_shape(
+                path,
+                "the file is empty; a config file must set something (was it truncated?)",
+            ));
+        }
+        let value: toml::Value =
+            toml::from_str(&contents).map_err(|error| ConfigError::config_parse(path, error))?;
+        let parsed = Rc::new(ParsedConfigFile { contents, value });
+        self.parsed
+            .borrow_mut()
+            .insert(path.to_path_buf(), parsed.clone());
+        Ok(parsed)
+    }
 }
 
 impl Loader<'_> {
@@ -131,18 +179,9 @@ impl Loader<'_> {
             import_source = origin,
             "reading config file"
         );
-        let contents = fs::read_to_string(&canonical_path)
-            .map_err(|error| ConfigError::config_read(&canonical_path, error))?;
-        // An empty build file is never intended: most likely a write that
-        // never finished, which would silently drop what the file provides.
-        if contents.trim().is_empty() {
-            return Err(ConfigError::config_shape(
-                &canonical_path,
-                "the file is empty; a config file must set something (was it truncated?)",
-            ));
-        }
-        let mut value: toml::Value = toml::from_str(&contents)
-            .map_err(|error| ConfigError::config_parse(&canonical_path, error))?;
+        let file = self.files.read(&canonical_path)?;
+        let contents = &file.contents;
+        let mut value = file.value.clone();
         crate::gaia_version::check_required_gaia_version(&canonical_path, &value)?;
         let config_dir = canonical_path
             .parent()
@@ -153,7 +192,7 @@ impl Loader<'_> {
             sources.root(id, &canonical_path).map(Some)
         })?;
         if let Some(id) = origin {
-            self.sources.record_file(id, &value, &contents);
+            self.sources.record_file(id, &value, contents);
         }
         validate_raw_toml_shape(&canonical_path, &value)?;
         let unknown_keys = crate::unknown_keys::unknown_config_keys(&value);
@@ -285,19 +324,22 @@ impl Loader<'_> {
 /// Registers the git sources declared by local config files: the
 /// entrypoint, its `extends` chain and files imported by plain path.
 /// Best effort: unreadable files are reported by the real load.
-fn declare_local_sources(path: &Path, sources: &mut ImportSources, seen: &mut BTreeSet<PathBuf>) {
+fn declare_local_sources(
+    path: &Path,
+    sources: &mut ImportSources,
+    seen: &mut BTreeSet<PathBuf>,
+    files: &ConfigFiles,
+) {
     let Ok(canonical) = fs::canonicalize(path) else {
         return;
     };
     if !seen.insert(canonical.clone()) {
         return;
     }
-    let Some(mut value) = fs::read_to_string(&canonical)
-        .ok()
-        .and_then(|contents| toml::from_str::<toml::Value>(&contents).ok())
-    else {
+    let Ok(file) = files.read(&canonical) else {
         return;
     };
+    let mut value = file.value.clone();
     let config_dir = canonical
         .parent()
         .unwrap_or_else(|| Path::new("."))
@@ -347,6 +389,7 @@ fn declare_local_sources(path: &Path, sources: &mut ImportSources, seen: &mut BT
             &resolve_relative_config_path(&config_dir, &path),
             sources,
             seen,
+            files,
         );
     }
 }
@@ -357,6 +400,7 @@ fn declare_local_sources(path: &Path, sources: &mut ImportSources, seen: &mut BT
 fn import_workspace_root(
     entrypoint: &Path,
     options: &ResolveOptions,
+    files: &ConfigFiles,
 ) -> Result<PathBuf, ConfigError> {
     let build_root = match entrypoint
         .ancestors()
@@ -373,16 +417,13 @@ fn import_workspace_root(
         .find(|(key, _)| key == "workspace.root_dir")
         .map(|(_, value)| value.clone())
         .or_else(|| {
-            fs::read_to_string(entrypoint)
-                .ok()
-                .and_then(|contents| toml::from_str::<toml::Value>(&contents).ok())
-                .and_then(|value| {
-                    value
-                        .get("workspace")?
-                        .get("root_dir")?
-                        .as_str()
-                        .map(ToString::to_string)
-                })
+            files.read(entrypoint).ok().and_then(|file| {
+                file.value
+                    .get("workspace")?
+                    .get("root_dir")?
+                    .as_str()
+                    .map(ToString::to_string)
+            })
         })
         .filter(|root_dir| !root_dir.trim().is_empty());
     Ok(match root_dir {
@@ -476,4 +517,38 @@ fn image_kind_given_in_chain(raw: &RawBuildConfig) -> bool {
             .extends_config
             .as_deref()
             .is_some_and(image_kind_given_in_chain)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gaia_testkit::TempDir;
+
+    #[test]
+    fn a_config_file_is_read_once_per_resolution() {
+        let scratch = TempDir::new("gaia-config-files");
+        let path = scratch.join("build.toml");
+        fs::write(&path, "build_name = \"demo\"\n").expect("config");
+        let canonical = fs::canonicalize(&path).expect("canonical");
+        let files = ConfigFiles::default();
+        let first = files.read(&canonical).expect("first read");
+        // A second read would fail now: the cache answers instead.
+        fs::remove_file(&canonical).expect("remove");
+        let second = files.read(&canonical).expect("cached read");
+        assert!(Rc::ptr_eq(&first, &second));
+        assert_eq!(second.contents, "build_name = \"demo\"\n");
+    }
+
+    #[test]
+    fn unreadable_and_empty_files_are_not_cached() {
+        let scratch = TempDir::new("gaia-config-files-errors");
+        let path = scratch.join("build.toml");
+        fs::write(&path, "  \n").expect("empty config");
+        let canonical = fs::canonicalize(&path).expect("canonical");
+        let files = ConfigFiles::default();
+        assert!(files.read(&canonical).is_err(), "an empty file is an error");
+        fs::write(&canonical, "build_name = \"fixed\"\n").expect("fixed config");
+        let fixed = files.read(&canonical).expect("the fixed file reads");
+        assert_eq!(fixed.contents, "build_name = \"fixed\"\n");
+    }
 }

@@ -245,6 +245,8 @@ fn mode_signature(_path: &Path) -> String {
 
 /// SHA-256 of a file's bytes, or the digest of a directory tree's files.
 pub(crate) fn content_path_signature(path: &Path) -> String {
+    #[cfg(test)]
+    crate::reuse::CONTENT_HASHES.with(|count| count.set(count.get() + 1));
     if path.is_dir() {
         tree_digest_signature(path)
     } else {

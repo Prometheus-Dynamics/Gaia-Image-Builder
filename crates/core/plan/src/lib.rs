@@ -101,6 +101,8 @@ pub fn plan_build_with_rebuilds(
     let _guard = span.enter();
     // Resolves floating git refs once for the whole plan, in parallel.
     let _floating_refs = reuse_floating::FloatingRefScope::begin(spec);
+    // Tree and repository lookups made while this plan is built are memoized.
+    let _memo = reuse::PlanMemoScope::begin();
     let resolve = PlannedOperation::new(OperationId::resolve(), OperationKind::ResolveBuild)
         .with_parallelism(OperationParallelism::exclusive(
             OperationParallelismDomain::Global,

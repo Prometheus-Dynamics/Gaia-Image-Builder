@@ -10,7 +10,7 @@ use std::ffi::OsStr;
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gaia_spec::{ArtifactDefinition, ArtifactExecutionSpec, ArtifactSpec, ResolvedBuildSpec};
 
@@ -98,20 +98,22 @@ fn host_tool_signature(artifact: &ArtifactSpec) -> String {
     }
 }
 
-/// Image id of a docker execution image, probed once per process.
+/// Image id of a docker execution image, probed at most once per
+/// [`crate::reuse::PROBE_CACHE_TTL`]: a rebuilt image changes the id, and a
+/// long-running TUI must see that.
 fn docker_image_signature(image: &str) -> String {
-    static CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, String)>>> = OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
     if let Some(signature) = cache
         .lock()
         .ok()
-        .and_then(|cache| cache.get(image).cloned())
+        .and_then(|cache| crate::reuse::fresh(cache.get(image)))
     {
         return signature;
     }
     let signature = docker_image_signature_with(OsStr::new("docker"), image);
     if let Ok(mut cache) = cache.lock() {
-        cache.insert(image.to_string(), signature.clone());
+        cache.insert(image.to_string(), (Instant::now(), signature.clone()));
     }
     signature
 }

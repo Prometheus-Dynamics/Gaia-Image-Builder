@@ -16,12 +16,15 @@ use crate::raw::{
 mod dynamic_inputs_glob;
 #[path = "dynamic_inputs_identity.rs"]
 mod dynamic_inputs_identity;
+#[path = "dynamic_inputs_memo.rs"]
+mod dynamic_inputs_memo;
 #[cfg(test)]
 #[path = "dynamic_inputs_tests.rs"]
 mod dynamic_inputs_tests;
 
 use dynamic_inputs_glob::glob_matches;
 use dynamic_inputs_identity::dynamic_choices_identity_key;
+use dynamic_inputs_memo::fetch_choices_memoized;
 
 const DYNAMIC_INPUT_TIMEOUT_SECONDS: u64 = 30;
 
@@ -110,7 +113,7 @@ fn resolve_choices_from(
         RawInputChoicesRefresh::Always => {}
     }
 
-    match fetch_choices(config, &repo) {
+    match fetch_choices_memoized(config, &repo, source_dir) {
         Ok(choices) => {
             let choices = normalize_choices(config, choices);
             if !choices.is_empty() || config.allow_empty {

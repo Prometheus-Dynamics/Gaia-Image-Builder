@@ -49,6 +49,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - `run_command_with_timeout_and_retention` and `run_command_stdout_to_file_with_timeout_and_retention` share one run loop (timeouts, cancellation, pauses, output retention). The file variant now also logs the completion debug line the piped variant logs. Behaviour is otherwise unchanged.
 
+### Planning: each signature and lookup once per plan
+
+- Planning a build with a large Buildroot tree or many installs was slow: every stage item hashes every install's artifact (it depends on all of them), and each reuse decision recomputed output signatures. On a synthetic build with 40 installs, 60 stage files and a 20k-file Buildroot tree, `gaia plan` with a recorded reuse state took about 11 s; it now takes about 0.25 s. The decisions are identical (same operations reused, same reasons).
+- Within one plan, output and input signatures are computed once per operation, and a plan memoizes the Buildroot tree state and each local repository's HEAD. Outside a plan nothing is memoized, so a later plan always reads the tree afresh. Fingerprint values are unchanged.
+- Each config file is read and parsed once per resolution, not three times.
+- `refresh = "auto"` choices (git tags or branches, GitHub releases, JSON) are fetched once per minute within the process, so variants and validate-then-plan share one fetch. The on-disk cache TTL is unchanged. A choice added within that minute appears after it.
+- Floating git refs resolved for a plan are reused for 60 seconds in the same process instead of being cleared when the plan ends. `GAIA_FLOATING_REF_TTL_SECONDS` changes the window (`0` resolves every plan, as before). A branch that moves within the window is seen once it expires.
+- Long-running processes (the TUI) no longer keep stale values: `${project.commit}`, `${project.describe}` and `${build.date}` follow new commits and branch moves at once (the `-dirty` suffix can lag by up to 10 seconds), and the tool-version and docker image signatures are re-probed after 60 seconds.
+
 ### Buildroot EROFS: lzma without the extra image
 
 - With `BR2_TARGET_ROOTFS_EROFS_LZMA=y`, Buildroot's generic image compression (keyed on the same symbol) also ran `lzma -9` over `rootfs.erofs`, writing a second image larger than the first and costing about 35 s per build. The settings step now rewrites that choice to `custom` with `BR2_TARGET_ROOTFS_EROFS_COMPRESSION_ALGORITHMS="lzma,<level>"`, which gives `mkfs.erofs` the same `-zlzma,<level>` argument, and reports it. Other filesystems are unchanged. The `config_overrides` check accepts that rewrite: a requested `BR2_TARGET_ROOTFS_EROFS_LZMA=y` and its `_LZMA_LEVEL` count as honored when the final `.config` has the custom choice with the same `lzma,<level>` (517a311 reported them as dropped and failed the build).

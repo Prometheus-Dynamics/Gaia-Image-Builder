@@ -15,6 +15,7 @@ use gaia_spec::{
     SourceRefreshPolicySpec,
 };
 use sha2::{Digest, Sha256};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -23,7 +24,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 // Generous because a timeout changes the fingerprint and forces a rebuild; a
 // JVM or rustup proxy on a busy machine can take several seconds to start.
@@ -50,6 +51,8 @@ pub(crate) fn apply_reuse_state(
     let mut executing_codes = HashMap::<String, &'static str>::new();
     // Dependency kinds, for computing input signatures while `plan` is mutated.
     let snapshot = plan.clone();
+    // Output and input signatures of this plan's operations, each computed once.
+    let signatures = PlanSignatures::new(spec, &snapshot);
     // Decisions are read per dependency, so every dependency must be decided
     // before its dependents. Operations are pushed in planning order, which
     // does not always put a dependency first (an artifact after an image
@@ -75,7 +78,7 @@ pub(crate) fn apply_reuse_state(
                         .operation_output_signatures
                         .get(&operation_id)
                         .map(String::as_str)
-                        != operation_output_signature(spec, &operation.kind).as_deref();
+                        != signatures.output_signature(index).as_deref();
                     let dependency_rebuilding = operation.depends_on.iter().any(|dependency| {
                         if dependency.as_str() == OperationId::resolve().as_str() {
                             return false;
@@ -97,9 +100,7 @@ pub(crate) fn apply_reuse_state(
                         reuse_state
                             .operation_input_signatures
                             .get(&operation_id)
-                            .is_some_and(|recorded| {
-                                *recorded != operation_input_signature(spec, &snapshot, operation)
-                            })
+                            .is_some_and(|recorded| *recorded != signatures.input_signature(index))
                     }
                 }
             };
@@ -141,7 +142,7 @@ pub(crate) fn apply_reuse_state(
                 .operation_output_signatures
                 .get(&operation_id)
                 .map(String::as_str)
-                != operation_output_signature(spec, &operation.kind).as_deref()
+                != signatures.output_signature(index).as_deref()
             {
                 operation.reuse = OperationReuse::execute(
                     "operation_output_changed",
@@ -477,7 +478,21 @@ pub fn operation_fingerprint(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
             format!("{:?}", spec.image.assembly).hash(&mut hasher);
             // The disk the archive is built from is an input of this step.
             spec.image.output.disk.hash(&mut hasher);
-            operation_output_signature(spec, &OperationKind::BuildImage).hash(&mut hasher);
+            // Hashes the collected image, which the plan's image:build operation
+            // also reads: computed once per plan.
+            // Stored encoded (the memo holds strings), then hashed as the
+            // `Option<String>` it decodes to, so the fingerprint is unchanged.
+            let encoded = plan_memo(
+                "build-image-output".into(),
+                || match operation_output_signature(spec, &OperationKind::BuildImage) {
+                    Some(signature) => format!("some\u{1f}{signature}"),
+                    None => "none".into(),
+                },
+            );
+            encoded
+                .strip_prefix("some\u{1f}")
+                .map(str::to_string)
+                .hash(&mut hasher);
             crate::reuse_assembly::assembly_input_signature(spec).hash(&mut hasher);
         }
         OperationKind::CaptureCheckpoint { checkpoint_id } => {
@@ -597,23 +612,37 @@ pub(crate) fn image_backend_signature(
     }
 }
 
-/// Tool version signature, probed once per process: planning fingerprints
-/// every artifact, and each probe would otherwise spawn the tool again.
+/// How long a probed tool or image signature is reused within a process. Long
+/// enough that planning probes each tool once (a planning pass, or the
+/// variants of one run), short enough that a long-running TUI sees an upgraded
+/// tool or a rebuilt image within a minute.
+pub(crate) const PROBE_CACHE_TTL: Duration = Duration::from_secs(60);
+
+/// Tool version signature, probed at most once per [`PROBE_CACHE_TTL`]:
+/// planning fingerprints every artifact, and each probe would otherwise spawn
+/// the tool again.
 pub(crate) fn command_signature<const N: usize>(program: &str, args: [&str; N]) -> String {
-    static CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, String)>>> = OnceLock::new();
     let key = std::iter::once(program)
         .chain(args)
         .collect::<Vec<_>>()
         .join("\u{1f}");
     let cache = CACHE.get_or_init(Default::default);
-    if let Some(signature) = cache.lock().ok().and_then(|cache| cache.get(&key).cloned()) {
+    if let Some(signature) = cache.lock().ok().and_then(|cache| fresh(cache.get(&key))) {
         return signature;
     }
     let signature = probe_command_signature(program, args);
     if let Ok(mut cache) = cache.lock() {
-        cache.insert(key, signature.clone());
+        cache.insert(key, (Instant::now(), signature.clone()));
     }
     signature
+}
+
+/// The cached value when it was stored within [`PROBE_CACHE_TTL`].
+pub(crate) fn fresh(entry: Option<&(Instant, String)>) -> Option<String> {
+    entry
+        .filter(|(stored, _)| stored.elapsed() < PROBE_CACHE_TTL)
+        .map(|(_, value)| value.clone())
 }
 
 fn probe_command_signature<const N: usize>(program: &str, args: [&str; N]) -> String {
@@ -703,20 +732,23 @@ fn git_source_state_signature(spec: &ResolvedBuildSpec, git: &gaia_spec::GitSour
         return format!("floating-git:{commit}");
     }
     if let Some(local_repo) = local_repo_path(&git.repo) {
-        let mut command = Command::new("git");
-        command
-            .arg("-C")
-            .arg(&local_repo)
-            .arg("rev-parse")
-            .arg("HEAD");
-        return match command.output() {
-            Ok(output) if output.status.success() => format!(
-                "local-git:{}",
-                String::from_utf8_lossy(&output.stdout).trim()
-            ),
-            Ok(output) => format!("local-git:exit-{}", output.status),
-            Err(error) => format!("local-git:unavailable:{error}"),
-        };
+        // Once per plan: several sources can share a repository.
+        return plan_memo(format!("git-head\u{1f}{}", local_repo.display()), || {
+            let mut command = Command::new("git");
+            command
+                .arg("-C")
+                .arg(&local_repo)
+                .arg("rev-parse")
+                .arg("HEAD");
+            match command.output() {
+                Ok(output) if output.status.success() => format!(
+                    "local-git:{}",
+                    String::from_utf8_lossy(&output.stdout).trim()
+                ),
+                Ok(output) => format!("local-git:exit-{}", output.status),
+                Err(error) => format!("local-git:unavailable:{error}"),
+            }
+        });
     }
     "remote-git".into()
 }
@@ -727,10 +759,68 @@ pub(crate) fn local_repo_path(repo: &str) -> Option<PathBuf> {
     file_repo.or_else(|| direct.exists().then_some(direct))
 }
 
+thread_local! {
+    /// Lookups made for the plan being built on this thread, or `None` outside
+    /// a plan (see [`PlanMemoScope`]).
+    static PLAN_MEMO: RefCell<Option<HashMap<String, String>>> = const { RefCell::new(None) };
+}
+
+/// Memoizes expensive lookups for the duration of one plan. Planning asks for
+/// the same tree state (the Buildroot tree, a repository's HEAD) once per
+/// operation that reads it, and the answer cannot change while the plan is
+/// built. Outside a plan nothing is memoized, so a later plan always reads the
+/// tree afresh. A scope begun inside another one changes nothing.
+pub(crate) struct PlanMemoScope {
+    owner: bool,
+}
+
+impl PlanMemoScope {
+    pub(crate) fn begin() -> Self {
+        PLAN_MEMO.with(|memo| {
+            let mut memo = memo.borrow_mut();
+            if memo.is_some() {
+                return Self { owner: false };
+            }
+            *memo = Some(HashMap::new());
+            Self { owner: true }
+        })
+    }
+}
+
+impl Drop for PlanMemoScope {
+    fn drop(&mut self) {
+        if self.owner {
+            PLAN_MEMO.with(|memo| *memo.borrow_mut() = None);
+        }
+    }
+}
+
+/// `compute`, memoized under `key` within the current plan. Without a plan
+/// in progress it is just `compute()`.
+pub(crate) fn plan_memo(key: String, compute: impl FnOnce() -> String) -> String {
+    let hit = PLAN_MEMO.with(|memo| {
+        memo.borrow()
+            .as_ref()
+            .and_then(|memo| memo.get(&key).cloned())
+    });
+    if let Some(value) = hit {
+        return value;
+    }
+    let value = compute();
+    PLAN_MEMO.with(|memo| {
+        if let Some(memo) = memo.borrow_mut().as_mut() {
+            memo.insert(key, value.clone());
+        }
+    });
+    value
+}
+
 pub(crate) fn path_state_signature(path: &Path) -> String {
-    let mut hasher = DefaultHasher::new();
-    hash_path_state(path, &mut hasher, &[]);
-    format!("{:016x}", hasher.finish())
+    plan_memo(format!("path-state\u{1f}{}", path.display()), || {
+        let mut hasher = DefaultHasher::new();
+        hash_path_state(path, &mut hasher, &[]);
+        format!("{:016x}", hasher.finish())
+    })
 }
 
 fn hash_path_state(path: &Path, hasher: &mut DefaultHasher, ignored_names: &[String]) {
@@ -926,6 +1016,21 @@ pub fn operation_input_signature(
     plan: &ExecutionPlan,
     operation: &PlannedOperation,
 ) -> u64 {
+    input_signature_from(operation, |dependency| {
+        plan.operations
+            .iter()
+            .find(|candidate| candidate.id == *dependency)
+            .and_then(|candidate| operation_content_signature(spec, &candidate.kind))
+    })
+}
+
+/// The input signature of `operation`, given the content signature of each
+/// dependency. Shared by [`operation_input_signature`] and the per-plan cache,
+/// so both produce the same value.
+fn input_signature_from(
+    operation: &PlannedOperation,
+    mut content_of: impl FnMut(&OperationId) -> Option<String>,
+) -> u64 {
     let mut dependencies = operation
         .depends_on
         .iter()
@@ -936,13 +1041,77 @@ pub fn operation_input_signature(
     let mut hasher = DefaultHasher::new();
     for dependency in dependencies {
         dependency.as_str().hash(&mut hasher);
-        plan.operations
-            .iter()
-            .find(|candidate| candidate.id == *dependency)
-            .and_then(|candidate| operation_content_signature(spec, &candidate.kind))
-            .hash(&mut hasher);
+        content_of(dependency).hash(&mut hasher);
     }
     hasher.finish()
+}
+
+/// Output and input signatures of one plan's operations, each computed at
+/// most once. A stage item depends on every install, and an install's content
+/// is its artifact's bytes, so without this one artifact is hashed once per
+/// consumer.
+pub(crate) struct PlanSignatures<'a> {
+    spec: &'a ResolvedBuildSpec,
+    plan: &'a ExecutionPlan,
+    /// Operation id to its position in `plan.operations` (the first one wins).
+    index: HashMap<&'a str, usize>,
+    contents: RefCell<HashMap<usize, Option<String>>>,
+    outputs: RefCell<HashMap<usize, Option<String>>>,
+}
+
+impl<'a> PlanSignatures<'a> {
+    pub(crate) fn new(spec: &'a ResolvedBuildSpec, plan: &'a ExecutionPlan) -> Self {
+        let mut index = HashMap::new();
+        for (position, operation) in plan.operations.iter().enumerate() {
+            index.entry(operation.id.as_str()).or_insert(position);
+        }
+        Self {
+            spec,
+            plan,
+            index,
+            contents: RefCell::default(),
+            outputs: RefCell::default(),
+        }
+    }
+
+    /// [`operation_output_signature`] of the operation at `position`.
+    pub(crate) fn output_signature(&self, position: usize) -> Option<String> {
+        cached(&self.outputs, position, || {
+            operation_output_signature(self.spec, &self.plan.operations[position].kind)
+        })
+    }
+
+    /// [`operation_content_signature`] of the operation at `position`.
+    fn content_signature(&self, position: usize) -> Option<String> {
+        cached(&self.contents, position, || {
+            operation_content_signature(self.spec, &self.plan.operations[position].kind)
+        })
+    }
+
+    /// [`operation_input_signature`] of the operation at `position`.
+    pub(crate) fn input_signature(&self, position: usize) -> u64 {
+        input_signature_from(&self.plan.operations[position], |dependency| {
+            self.index
+                .get(dependency.as_str())
+                .and_then(|&found| self.content_signature(found))
+        })
+    }
+}
+
+/// `compute`, memoized in `cache` under `key`.
+fn cached<K: Eq + std::hash::Hash>(
+    cache: &RefCell<HashMap<K, Option<String>>>,
+    key: K,
+    compute: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    // The lookup borrow ends before `compute` runs, so `compute` may use the cache.
+    let hit = cache.borrow().get(&key).cloned();
+    if let Some(value) = hit {
+        return value;
+    }
+    let value = compute();
+    cache.borrow_mut().insert(key, value.clone());
+    value
 }
 
 pub fn operation_output_signature(
@@ -1141,5 +1310,16 @@ pub(crate) fn checkpoint_optionality(
 pub(crate) mod content;
 
 #[cfg(test)]
+thread_local! {
+    /// Content hashes of files and trees made on this thread (see
+    /// `content_path_signature`), counted by the signature tests.
+    pub(crate) static CONTENT_HASHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
 #[path = "reuse_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "reuse_signature_tests.rs"]
+mod signature_tests;

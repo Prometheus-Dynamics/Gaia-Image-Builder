@@ -298,7 +298,7 @@ Dynamic choices:
 - `choices_from.version_scheme`: `versionish` or `semver`.
 - `choices_from.prefer_stable`: rank stable releases before prerelease-looking refs.
 - `choices_from.limit`: truncate the resolved list.
-- `choices_from.refresh`: `auto`, `always`, or `never`.
+- `choices_from.refresh`: `auto`, `always`, or `never`. With `auto` and no `cache_ttl_seconds`, a successful fetch is kept in memory for 60 seconds within one `gaia` process (variants and validate-then-plan share it); `always` fetches every time.
 - `choices_from.cache_ttl_seconds`: reuse a local `.gaia/input-cache` entry while fresh; stale cache is also used if the remote fetch fails.
 - `choices_from.max_age_warning_seconds`: warn when a cache entry is older than this threshold.
 - `choices_from.fallback_choices`: offline/error fallback if no cache is available.
@@ -1255,6 +1255,10 @@ Source kinds:
 Policies:
 - `refresh = "auto" | "always" | "never"`
 - `pin = "floating" | "locked"`
+
+A floating ref's plan-time `git ls-remote` is reused for 60 seconds within one
+process. `GAIA_FLOATING_REF_TTL_SECONDS` sets that window; `0` resolves the ref
+for every plan.
 
 `pin = "locked"` on its own only means "do not re-fetch once materialized":
 each machine keeps whatever commit it fetched first. To pin git sources to
