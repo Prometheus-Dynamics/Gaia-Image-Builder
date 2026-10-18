@@ -475,6 +475,7 @@ pub(crate) fn validate_image_assembly(
         image_assembly_layout::validate_disk_layout(disk, diagnostics);
     }
 
+    crate::image_assembly_devices::validate_devices(assembly, &tree_ids, diagnostics);
     image_assembly_layout::validate_transform_levels(assembly, diagnostics);
     crate::image_assembly_options::validate_transform_options(
         spec,
@@ -647,7 +648,7 @@ fn expected_image_name_from_output(output: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn validate_relative_dest(
+pub(crate) fn validate_relative_dest(
     dest: &str,
     code: &'static str,
     diagnostics: &mut Vec<ValidationDiagnostic>,

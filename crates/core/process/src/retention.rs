@@ -166,17 +166,21 @@ fn apply_stream_message(message: StreamMessage, state: &mut StreamDrainState) {
         } => {
             state.stderr.push_bytes(&bytes);
         }
-        StreamMessage::Line {
+        StreamMessage::Lines {
             stream: ProcessLogStream::Stdout,
-            line,
+            lines,
         } => {
-            state.stdout.push_line(line);
+            for line in lines {
+                state.stdout.push_line(line);
+            }
         }
-        StreamMessage::Line {
+        StreamMessage::Lines {
             stream: ProcessLogStream::Stderr,
-            line,
+            lines,
         } => {
-            state.stderr.push_line(line);
+            for line in lines {
+                state.stderr.push_line(line);
+            }
         }
         StreamMessage::Done {
             stream: ProcessLogStream::Stdout,

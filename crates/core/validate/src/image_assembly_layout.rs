@@ -7,9 +7,9 @@ use crate::diagnostics::error;
 use crate::image_assembly::{validate_assembly_path_template, validate_exclude};
 use crate::image_assembly_collected::validate_collected_reference;
 
-/// ustar `name` field length; longer names are rejected rather than split
-/// into the `prefix` field.
-const TAR_NAME_MAX_BYTES: usize = 100;
+/// Longest tar member name: names past the ustar `name` field use the
+/// `prefix` field or PAX records (see the assembly tar writer).
+const TAR_NAME_MAX_BYTES: usize = 4096;
 const GZIP_LEVELS: std::ops::RangeInclusive<u32> = 1..=9;
 const ZSTD_LEVELS: std::ops::RangeInclusive<u32> = 1..=19;
 const XZ_LEVELS: std::ops::RangeInclusive<u32> = 0..=9;
@@ -446,7 +446,7 @@ fn tar_member_name_problem(name: &str) -> Option<&'static str> {
         return Some("cannot be empty");
     }
     if name.len() > TAR_NAME_MAX_BYTES {
-        return Some("is longer than the 100-byte ustar name limit");
+        return Some("is longer than the 4096-byte tar member name limit");
     }
     if name.starts_with('/') || name.ends_with('/') {
         return Some("must be a relative file path");

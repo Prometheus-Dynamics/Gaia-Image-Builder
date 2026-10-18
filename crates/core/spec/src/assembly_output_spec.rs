@@ -31,6 +31,11 @@ pub struct AssemblyTransformSpec {
     pub salt: Option<String>,
     /// `verity` only: the superblock UUID; `None` derives it from the data.
     pub uuid: Option<String>,
+    /// `zstd` only: long-distance matching with a 2^27-byte window, for
+    /// level 19 and up over inputs above 128 MiB. Decoding such a stream
+    /// needs `zstd -d --long=27` (or a decoder that accepts that window).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub long: bool,
 }
 
 impl AssemblyTransformSpec {
@@ -106,6 +111,10 @@ pub struct AssemblyFilesystemSpec {
     /// FAT12, and `mformat`'s own choice otherwise.
     #[serde(skip_serializing_if = "crate::fingerprint::is_default")]
     pub fat_size: Option<u32>,
+    /// `ext4` only: the percentage of blocks reserved for root. `None` is 0:
+    /// the whole image is usable, with no 5% reserve.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reserved_percent: Option<u32>,
 }
 
 /// The FAT types a `vfat` filesystem's `fat_size` accepts.

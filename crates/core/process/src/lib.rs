@@ -1,5 +1,6 @@
 use std::ffi::OsStr;
 use std::fs::File;
+use std::io::PipeReader;
 use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::Arc;
@@ -15,6 +16,11 @@ const MAX_RETAINED_STREAM_LINES: usize = 1_000;
 const STREAM_READ_BUFFER_BYTES: usize = 8 * 1024;
 const MAX_RETAINED_LINE_BYTES: usize = 64 * 1024;
 const STREAM_MESSAGE_QUEUE_BOUND: usize = 64;
+/// The longest a running command goes unchecked for cancel and timeout (the
+/// run loop otherwise wakes on each chunk of output).
+const POLL_TICK: Duration = Duration::from_millis(100);
+/// How often the run loop checks for the exit once the pipes have closed.
+const EXIT_POLL_TICK: Duration = Duration::from_millis(1);
 
 mod build_progress;
 mod docker;
@@ -40,7 +46,7 @@ use retention::{
     wait_for_stream_message,
 };
 pub use step_time::{STEP_TIME_PREFIX, parse_step_time, step_time_message};
-use stream::spawn_stream_reader;
+use stream::{StreamKeep, spawn_stream_reader};
 pub use tar::{TarArchiveValidationError, validate_tar_archive_entries};
 pub use trash::{TRASH_DIR, discard, purge_trash};
 
@@ -111,13 +117,15 @@ impl Default for ProcessOutputRetention {
 
 #[derive(Debug)]
 pub(crate) enum StreamMessage {
+    /// The retained tail of one read chunk.
     Bytes {
         stream: ProcessLogStream,
         bytes: Vec<u8>,
     },
-    Line {
+    /// The retained lines of one read chunk, in order.
+    Lines {
         stream: ProcessLogStream,
-        line: String,
+        lines: Vec<String>,
     },
     Done {
         stream: ProcessLogStream,
@@ -152,6 +160,7 @@ pub fn run_command_with_timeout_and_retention(
     run_command_capturing(
         command,
         StdoutCapture::Piped,
+        None,
         timeout,
         label,
         retention,
@@ -169,6 +178,34 @@ pub fn run_command_stdout_to_file_with_timeout_and_retention(
     sink: Option<ProcessLogSink>,
     cancel_check: Option<ProcessCancelCheck>,
 ) -> Result<ProcessRunResult, ProcessRunError> {
+    run_command_stdout_to_file_with_stdin(
+        command,
+        None,
+        output_path,
+        timeout,
+        label,
+        retention,
+        sink,
+        cancel_check,
+    )
+}
+
+/// Like [`run_command_stdout_to_file_with_timeout_and_retention`], with the
+/// command's standard input read from `stdin` (the read end of a pipe whose
+/// write end another thread fills). The command gets no input when `stdin`
+/// is `None`. The write end must be dropped by its writer once it is done,
+/// or the command waits for more input until its timeout.
+#[allow(clippy::too_many_arguments)]
+pub fn run_command_stdout_to_file_with_stdin(
+    command: &mut Command,
+    stdin: Option<PipeReader>,
+    output_path: &Path,
+    timeout: Duration,
+    label: &str,
+    retention: ProcessOutputRetention,
+    sink: Option<ProcessLogSink>,
+    cancel_check: Option<ProcessCancelCheck>,
+) -> Result<ProcessRunResult, ProcessRunError> {
     let stdout = File::create(output_path).map_err(|error| ProcessRunError {
         kind: ProcessRunErrorKind::RuntimeState,
         message: format!(
@@ -179,6 +216,7 @@ pub fn run_command_stdout_to_file_with_timeout_and_retention(
     run_command_capturing(
         command,
         StdoutCapture::File(stdout),
+        stdin,
         timeout,
         label,
         retention,
@@ -199,9 +237,11 @@ enum StdoutCapture {
 /// command in its own process group, drains stderr (and stdout when piped)
 /// into the retention limits, and enforces the timeout, cancellation and
 /// pause handling.
+#[allow(clippy::too_many_arguments)]
 fn run_command_capturing(
     command: &mut Command,
     stdout: StdoutCapture,
+    stdin: Option<PipeReader>,
     timeout: Duration,
     label: &str,
     retention: ProcessOutputRetention,
@@ -226,7 +266,10 @@ fn run_command_capturing(
     // Commands run in their own process group: one reading the terminal
     // would be stopped (SIGTTIN) and hang until its timeout. Nothing Gaia
     // runs takes input.
-    command.stdin(Stdio::null());
+    command.stdin(match stdin {
+        Some(reader) => Stdio::from(reader),
+        None => Stdio::null(),
+    });
     configure_process_group(command);
     let mut child = spawn_retrying_busy_executable(command).map_err(|error| {
         tracing::warn!(
@@ -260,13 +303,23 @@ fn run_command_capturing(
             child.stdout.take(),
             ProcessLogStream::Stdout,
             sink.clone(),
+            StreamKeep {
+                bytes: retention.stdout_bytes,
+                lines: retention.stdout_lines,
+                sink: sink.is_some(),
+            },
             tx.clone(),
         );
     }
     spawn_stream_reader(
         child.stderr.take(),
         ProcessLogStream::Stderr,
-        sink,
+        sink.clone(),
+        StreamKeep {
+            bytes: retention.stderr_bytes,
+            lines: retention.stderr_lines,
+            sink: sink.is_some(),
+        },
         tx.clone(),
     );
     drop(tx);
@@ -322,7 +375,16 @@ fn run_command_capturing(
                         message: format!("{label} timed out after {}s", timeout.as_secs()),
                     });
                 }
-                wait_for_stream_message(&rx, &mut stream_state, Duration::from_millis(10));
+                // Blocks on the output channel, so a chatty child wakes the
+                // loop per chunk. Cancel and timeout are checked at least every
+                // POLL_TICK. Once the pipes close, the exit is picked up within
+                // a millisecond instead: the child is about to be reaped.
+                let tick = if stream_state.is_done() {
+                    EXIT_POLL_TICK
+                } else {
+                    POLL_TICK
+                };
+                wait_for_stream_message(&rx, &mut stream_state, tick);
             }
             Err(error) => {
                 terminate_child_tree(&mut child, &process_group);

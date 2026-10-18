@@ -23,6 +23,9 @@ pub struct ImageAssemblySpec {
     pub busybox_initramfs: Vec<AssemblyBusyboxInitramfsSpec>,
     pub binaries: Vec<AssemblyBinarySpec>,
     pub kernel_modules: Vec<AssemblyKernelModulesSpec>,
+    /// Device nodes and FIFOs the cpio filesystems add to their archives.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub devices: Vec<AssemblyDeviceSpec>,
     /// The `strip` program for `strip = true` entries; `None` searches the
     /// provider's tools, then the host.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -48,6 +51,50 @@ impl ImageAssemblySpec {
             && self.busybox_initramfs.is_empty()
             && self.binaries.is_empty()
             && self.kernel_modules.is_empty()
+            && self.devices.is_empty()
+    }
+}
+
+/// A device node or FIFO a cpio filesystem adds to the archive of its source
+/// tree, so an unprivileged build can ship e.g. `/dev/console` in an
+/// initramfs.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct AssemblyDeviceSpec {
+    pub tree: AssemblyTreeId,
+    /// The node's path inside the tree, relative (`dev/console`).
+    pub path: String,
+    pub kind: AssemblyDeviceKindSpec,
+    /// Char and block devices: the device numbers. Fifos have none.
+    pub major: Option<u32>,
+    pub minor: Option<u32>,
+    /// Permission bits in octal (`0600`); `None` is `0600`.
+    pub mode: Option<String>,
+}
+
+impl AssemblyDeviceSpec {
+    /// The permission bits, with the default applied.
+    pub fn permission_bits(&self) -> u32 {
+        self.mode
+            .as_deref()
+            .and_then(|mode| u32::from_str_radix(mode, 8).ok())
+            .unwrap_or(0o600)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum AssemblyDeviceKindSpec {
+    Char,
+    Block,
+    Fifo,
+}
+
+impl AssemblyDeviceKindSpec {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Char => "char",
+            Self::Block => "block",
+            Self::Fifo => "fifo",
+        }
     }
 }
 

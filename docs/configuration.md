@@ -2232,7 +2232,7 @@ Assembly behavior:
 - `strip = true` on a file entry strips each copied ELF file (the `src`, or each `src_glob` match) with the strip tool described under the tree; a copied file that is not ELF is left alone. It is refused on `content` and `json` entries.
 - Transform kinds currently implemented are `copy`, `gzip`, `zstd`, `xz`, `compile-dts`, and `verity` (see [dm-verity and ext4](#dm-verity-and-ext4)).
 - `gzip` runs `gzip -n -c [-<level>] <src>`. `-n` leaves the name and the modification time out of the header, so the same input and level give the same bytes on every run. The optional `level` (1-9) is accepted on `gzip` transforms and defaults to gzip's own.
-- `zstd` runs `zstd -q -c --no-progress -T0 [-<level>] <src>`, resolving `zstd` from provider host tools first, then host `PATH`; the tool path and version are recorded in assembly state. The optional `level` (1-19) is only accepted on `zstd` transforms and defaults to zstd's own default.
+- `zstd` runs `zstd -q -c --no-progress -T0 [-<level>] <src>`, resolving `zstd` from provider host tools first, then host `PATH`; the tool path and version are recorded in assembly state. The optional `level` (1-19) is only accepted on `zstd` transforms and defaults to 19, the level `cpio-zstd` uses (it was zstd's own default of 3). `long = true` (`zstd` only, default `false`) adds `--long=27` when the level is 19 and the input is over 128 MiB: a 2^27-byte match window. A stream written that way decodes only with `zstd -d --long=27` (or a decoder that accepts that window); the default output decodes with any zstd.
 - `xz` runs `xz -T0 --block-size=24MiB -c [-<level>] <src>`, resolved like `zstd`. Its fixed block size makes the output the same for any core count. The optional `level` (0-9, xz's preset) is only accepted on `xz`, `zstd` and `gzip` transforms, as `gzip`'s and `zstd`'s own levels are. Use it to compress another disk into the output dir, for example `kind = "xz"`, `src = "$assembly.work/slots/<id>.img"`, `dest = "$assembly.out/<id>.img.xz"`.
 - A transform, verity, archive or disk output written under `$assembly.out` is a published output of the run: it is listed in the summary and copied by `--export` (see `image.output.disk` above for raw disks).
 - `compile-dts` resolves `dtc` from provider host tools first, then host `PATH`.
@@ -2253,10 +2253,10 @@ Assembly behavior:
 - Symlinks inside the sysroot are followed (an absolute link target means the sysroot's root). The tree gets each file the loader reaches as a real copy at its absolute path, and each symlink crossed on the way as a symlink with the same target text, so a soname such as `libc.so.6` resolves in the tree as it does on the target. The interpreter is placed at its exact path. A static binary copies nothing. A NEEDED name that is not found under the sysroot fails the build, and the error lists every missing name. The tree must not create a directory that the sysroot links (for example `lib` when the sysroot has `/lib -> usr/lib`), since the link cannot replace it.
 - For a cross-compiled BusyBox taken from a Buildroot target tree, set `sysroot = "$provider.target"` (or leave it unset when the binary sits at `$provider.target/bin/busybox`). The reuse fingerprint covers the sysroot, the interpreter, every symlink and the digest of every library file, so a changed libc rebuilds the assembly.
 - Filesystem kinds currently implemented are `vfat`, `cpio`, `cpio-gzip`, `cpio-zstd`, `cpio-xz`, `ext4` (see [dm-verity and ext4](#dm-verity-and-ext4)), `squashfs` and `erofs` (see [squashfs and EROFS](#squashfs-and-erofs)).
-- `cpio` kinds write a newc archive with uid and gid 0, entries in sorted order and zero timestamps, so the same tree packs to the same bytes. `cpio-zstd` compresses that archive with `zstd -q -c --no-progress -T0 -<compression_level>`, resolving `zstd` like the zstd transform; `compression_level` (1-19) is only accepted on `cpio-zstd` and defaults to 19.
+- `cpio` kinds write a newc archive with uid and gid 0, entries in sorted order and zero timestamps, so the same tree packs to the same bytes. `cpio-zstd` compresses that archive with `zstd -q -c --no-progress -T0 -<compression_level>`, resolving `zstd` like the zstd transform; `compression_level` (1-19) is only accepted on `cpio-zstd` and defaults to 19. A hard-linked file is stored once: its links share one inode number and link count, and the data goes with the last link in archive order (the form cpio and the kernel's initramfs unpacker read). Device nodes and FIFOs in the tree are written with their mode and device numbers, and `[[image.assembly.devices]]` adds more (see [Device nodes](#device-nodes)). `cpio-gzip` and `cpio-zstd` stream the archive into the compressor's standard input, so no full cpio copy is written; `zstd` is given the planned size (`--stream-size`), which makes its output the same as from a file. `cpio-xz` still writes the cpio to a file first, as its proven-bootable command was tested with that input.
 - `cpio-xz` compresses the same newc archive with `xz -T2 --check=crc32 --lzma2=preset=<compression_level>,dict=<size> -c`. The CRC32 check is the one the kernel's XZ initramfs decoder reads. That decoder allocates the whole LZMA2 dictionary, so the dictionary is capped at 1 MiB (or the cpio's size rounded up to 4 KiB, when smaller) whatever the level: the 64 MiB dictionary of `-9` gives an initramfs the kernel cannot unpack. `compression_level` (0-9) is accepted on `cpio-xz` (default 6) and `cpio-zstd` (1-19, default 19 there). Threaded mode writes the block sizes into the block header, which the kernel also needed (a `-T1` stream, without them, did not boot), and xz's own threaded block size is kept: with `--block-size` set to the cpio size xz wrote a shorter block header that did not boot either. The fixed thread count keeps the output the same on every host and run. Of the encodings tried on a Raspberry Pi kernel, only this one booted, with a padded 20-byte block header; a 64 MiB dictionary, a `-T1` stream without sizes, and a 16-byte header from `--block-size` each died before /init. For a small, safe initramfs on that board, `cpio-zstd` is the tested choice; boot-test a `cpio-xz` image (and any one over 3 MiB, which xz splits into several blocks) before relying on it.
 - `publish = true` on a filesystem also copies its image to the image output dir (`$assembly.out`, the collect dir by default) under the output's file name, and the published image is reported like a raw disk: in the run summary, its image sizes, and the content digests. The name must not collide with another output or published copy. In a RAM work dir the image is built in RAM and copied to the image output dir when built.
-- `vfat` uses `mtools` (`mformat` and `mcopy`), resolving provider host tools first, then host `PATH`; `size` accepts byte values or binary `K`, `M`, `G`, and `T` suffixes, or `size = "auto"`. Without `size` the image is 32M.
+- `vfat` uses `mtools` (`mformat` and `mcopy`), resolving provider host tools first, then host `PATH`; `size` accepts byte values or binary `K`, `M`, `G`, and `T` suffixes, or `size = "auto"`. Without `size` the image is 32M. With `deterministic = true` (the default) the volume serial is fixed (`mformat -N`, derived from the filesystem `id`), every entry carries the modification time 1980-01-01 00:00 UTC (copied from a staging tree, then kept by `mcopy -m`), and mtools runs with `TZ=UTC`: the same spec gives the same bytes on every run and host.
 - `fat_size` (vfat only, optional): the FAT type, `12`, `16` or `32`. Without it a vfat image from 3 MiB up to 16 MiB is formatted FAT16 (one sector per cluster) rather than the FAT12 `mformat` picks at those sizes, because some boot firmwares (e.g. Raspberry Pi's) do not boot from FAT12; other sizes keep `mformat`'s choice (FAT12 below 3 MiB, FAT16 from 16 MiB). `fat_size = 12` keeps `mformat`'s choice at every size, `16` is the default rule, and `32` formats FAT32. With `fat_size` set, the build fails when the image size cannot hold that type: FAT12 needs less than 16 MiB, FAT16 at least 3 MiB.
 - `free = "256M"` (only with `size = "auto"`) leaves that much free space beyond the content estimate: the margin becomes the larger of the automatic margin and `free`, and the result is still rounded up to a whole MiB. Use it when files will be added to the image later.
 - `size = "auto"` (vfat and ext4) sizes the image from its source tree; the vfat rule is: each file is counted rounded up to 4 KiB, each directory as 4 KiB, plus 1 MiB for the FAT tables and root directory, plus a margin of 5% (at least 1 MiB), rounded up to a whole MiB. The size depends only on the tree's content, so the same tree always gets the same size. The 4 KiB per entry is an estimate of the cluster size mtools picks: a tree that overruns it fails while copying, rather than being truncated.
@@ -2281,6 +2281,14 @@ path on disk when built; the copy is sparse, so the zeros of an unwritten
 partition cost no disk writes. The RAM copies are removed when
 the assembly ends, whether it succeeded or not.
 
+`/dev/shm` is shared, so `/dev/shm/gaia-<user>` must be a real directory the
+current user owns: Gaia creates it private (0700) when it is missing, and a
+symbolic link, a file or a directory another user owns stops the build with
+an error. Each run records its owner (pid, start time and build dir) in its
+`<hash>` dir. Before a run starts, the `<hash>` dirs of dead runs are removed:
+those older than 24 hours whose owner pid is gone, whose build dir no longer
+exists, or that have no owner record.
+
 In RAM mode a filesystem image such as `boot.vfat` is an intermediate and is
 not left in the collect dir; use `"disk"` to keep it there, or set `publish = true`
 on the filesystem to copy it to the image output dir.
@@ -2298,6 +2306,25 @@ disk and the run says why (`assembly work dir falls back to disk: ...`).
 
 The assembly state records `work_dir.placement` (`ram` or `disk`),
 `work_dir.path` and `work_dir.expected_bytes`.
+
+#### Device nodes
+
+`[[image.assembly.devices]]` adds a device node or FIFO to the cpio archive of a tree, so a build that cannot `mknod` into the tree (no root) can still ship `/dev/console` in an initramfs. The filesystems that pack the tree as cpio (`cpio`, `cpio-gzip`, `cpio-xz`, `cpio-zstd`) add them; missing parent directories are added as directories (mode 0755).
+
+```toml
+[[image.assembly.devices]]
+tree = "rootfs"
+path = "dev/console"
+kind = "char"        # char | block | fifo
+major = 5            # char and block only
+minor = 1            # char and block only
+mode = "0600"        # permission bits, octal; default 0600
+```
+
+- `tree`: a tree id. `path`: relative, inside the tree, and not already an entry of it.
+- `kind = "char"` or `"block"` needs both `major` and `minor`; `kind = "fifo"` takes neither.
+- `mode`: one to four octal digits, at most `7777`.
+- A device node already in the tree (created by a root build) is kept as it is; the list adds nodes the tree does not have.
 
 #### Disk partitions
 
@@ -2370,14 +2397,14 @@ Assembly results report, per published raw disk image (and the primary image), `
 - `tree = "<tree id>"` and `src_dir = "<path template>"` archive every entry under that root, stored under `prefix` (empty, or a relative path ending in `/`). `name` may be left empty for these. Entries are walked in sorted order, a directory before its contents: regular files keep mode 0644, or 0755 when executable; directories are 0755; symbolic links are stored as links and not followed. Only regular files appear in the archive's state. A `tree` member reads its tree's root, so it runs after the steps that fill the tree, and its fingerprint covers the tree's content.
 - `src_glob = "<pattern>"` archives each file the pattern matches under `name`, a directory prefix ending in `/`, followed by the file's own name.
 - `exclude = [...]` on a `tree` or `src_glob` member leaves out files (not directories) by name, simple `*` globs allowed.
-- Archive paths follow the ustar rule: a name, or a link target, longer than 100 bytes fails the build with an error naming it (the `prefix` field is not used to split names).
+- Names and link targets longer than 100 bytes are written as ustar allows or as PAX extended headers say: a name that splits at a `/` into a directory part of at most 155 bytes and a base of at most 100 uses the ustar `prefix` field; any other long name, and any long link target, goes in a PAX `path` or `linkpath` record. `tar -tf` lists such archives.
 - `generated`: ordered list of generated members (`name`, `entries`). They are written **before** all `members`; to interleave generated and file members, put `entries` directly on a `members` item instead.
 - `entries`: `[["KEY", "value"], ...]`, rendered as one `KEY=value` line per entry in order. Keys must match `[A-Za-z_][A-Za-z0-9_]*`. Values made only of `A-Z a-z 0-9 _ @ % + = : , . / -` are written as-is; anything else (including an empty value) is wrapped in single quotes with embedded `'` written as `'\''`, so the file can be sourced by `sh`. Values cannot contain newlines.
 - Entry values may contain `${assembly.sha256:<path template>}`, replaced at assembly time by the lowercase hex sha256 of that file (an assembly output such as a transform result, or any other file). The file must exist when the archive is built. Normal config interpolation such as `${build.version}` runs first and may also appear inside the path (`${assembly.sha256:$assembly.out/${build.name}.img}`). Any other `${...}` left in a value is a validation error.
 - Entry values may also contain `${assembly.size:<path template>}`, replaced by the size of that file in bytes.
 - Entry values may also contain `${assembly.verity:<path template>:<field>}`, replaced by a field of a `verity` transform's output. The path must be the transform's `dest` written exactly as in the transform. The fields are `root_hash`, `salt`, `hash_offset`, `data_blocks`, `data_block_size` and `hash_block_size`; see [dm-verity and ext4](#dm-verity-and-ext4). A token that names no verity transform output is a validation error, and an unknown field name is rejected at validation too.
 
-Archive output is deterministic: entries appear in the configured order with mtime 0, uid/gid 0, empty user and group names, and mode `0644`. Member names must be relative paths of at most 100 bytes (the ustar name field; prefix splitting is not used) without `.`/`..` components, and must be unique per archive. The archive is written to a temporary file and published atomically; state records `archives.N.output`, `bytes`, `sha256`, and per-member name, source, size, and sha256. Archive outputs are treated as expected outputs, so a bundle in the collect dir is not reported as a large unexpected file. Reuse fingerprints cover the archive config and the state of every member and digest input file.
+Archive output is deterministic: entries appear in the configured order with mtime 0, uid/gid 0, empty user and group names, and mode `0644`. Member names must be relative paths of at most 4096 bytes (longer names use PAX records, see above) without `.`/`..` components, and must be unique per archive. The archive is written to a temporary file and published atomically; state records `archives.N.output`, `bytes`, `sha256`, and per-member name, source, size, and sha256. Archive outputs are treated as expected outputs, so a bundle in the collect dir is not reported as a large unexpected file. Reuse fingerprints cover the archive config and the state of every member and digest input file.
 
 #### Generated content
 
@@ -2475,6 +2502,7 @@ To open the tree, the hash device is `dest` when appended or `hash_dest` otherwi
 **`ext4`** (a filesystem) packs `source_tree` into an ext4 image with `mkfs.ext4 -d`, resolved like `veritysetup` (`mkfs.ext4` and `debugfs` from provider host tools, then `PATH`). Options, for `kind = "ext4"` only:
 - `size` (required): a byte size with a binary suffix, or `"auto"`. The size must be a multiple of 4 KiB. Auto sizing counts each file and directory in whole 4 KiB blocks, the inode tables (two inodes per entry plus 64, 256 bytes each), 8 MiB of fixed overhead and the journal, plus a margin of 5% (at least 4 MiB), rounded up to a whole MiB.
 - `label` (optional): at most 16 bytes, no `/`.
+- `reserved_percent` (optional, 0-50): the percentage of blocks reserved for root, passed as `mkfs.ext4 -m`. Unset is 0, so the whole image is usable; mke2fs's own default of 5% is not used. Set it (for example to 5) for an image that needs the root reserve.
 - `uuid` (optional): a UUID. Unset, it is derived from the filesystem `id`.
 - `journal` (optional): `false` for no journal; the default is a journal of 1/64 of the image, between 4 and 128 MiB.
 

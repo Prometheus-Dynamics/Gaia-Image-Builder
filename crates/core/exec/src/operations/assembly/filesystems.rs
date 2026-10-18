@@ -1,7 +1,27 @@
+use super::cpio::{plan_newc, run_compressor_from_plan, write_newc_file};
 use super::*;
 
 /// The zstd level of a `cpio-zstd` image when the spec sets none.
 const CPIO_ZSTD_DEFAULT_LEVEL: u32 = 19;
+
+/// The `[[image.assembly.devices]]` entries whose tree is `filesystem`'s
+/// source tree: the device nodes its cpio archive adds.
+fn tree_devices<'a>(
+    spec: &'a ResolvedBuildSpec,
+    filesystem: &gaia_spec::AssemblyFilesystemSpec,
+) -> Vec<&'a gaia_spec::AssemblyDeviceSpec> {
+    spec.image
+        .assembly
+        .as_ref()
+        .map(|assembly| {
+            assembly
+                .devices
+                .iter()
+                .filter(|device| device.tree.as_str() == filesystem.source_tree.as_str())
+                .collect()
+        })
+        .unwrap_or_default()
+}
 /// The size of a vfat image when the spec sets none.
 const VFAT_DEFAULT_BYTES: u64 = 32 * 1024 * 1024;
 /// The cluster size `size = "auto"` assumes for every file and directory:
@@ -50,7 +70,8 @@ pub(super) fn execute_assembly_filesystem(
     match filesystem.kind {
         gaia_spec::AssemblyFilesystemKindSpec::Cpio => {
             let temp = temporary_assembly_output_path(&output);
-            write_newc_archive(source_tree, &temp)?;
+            let plan = plan_newc(source_tree, &tree_devices(spec, filesystem))?;
+            write_newc_file(&plan, &temp)?;
             let sha256 = publish_assembly_output(&temp, &output)?;
             Ok(AssemblyFilesystemSummary {
                 bytes: file_len(&output)?,
@@ -64,19 +85,17 @@ pub(super) fn execute_assembly_filesystem(
             let tool = resolve_assembly_tool(roots, "gzip")?;
             tracing::Span::current().record("tool_path", tool.display.as_str());
             let temp = temporary_assembly_output_path(&output);
-            let temp_cpio = temp.with_extension("cpio.tmp");
-            write_newc_archive(source_tree, &temp_cpio)?;
+            // The archive goes into gzip's stdin: no full cpio copy on disk.
+            let plan = plan_newc(source_tree, &tree_devices(spec, filesystem))?;
             let mut command = Command::new(&tool.program);
-            command.arg("-n").arg("-c").arg(&temp_cpio);
-            let gzip_output = run_command_stdout_to_file(
-                spec,
-                &mut command,
-                &temp,
-                process_output_retention(spec),
-                cancel_check,
-            )?;
-            let _ = std_fs::remove_file(&temp_cpio);
+            command.arg("-n").arg("-c");
+            let gzip_output =
+                run_compressor_from_plan(spec, &mut command, &plan, &temp, cancel_check)
+                    .inspect_err(|_| {
+                        let _ = std_fs::remove_file(&temp);
+                    })?;
             if !gzip_output.status.success() {
+                let _ = std_fs::remove_file(&temp);
                 return Err(format!(
                     "cpio-gzip compressor failed for '{}' using '{}': {}",
                     source_tree.display(),
@@ -99,7 +118,10 @@ pub(super) fn execute_assembly_filesystem(
             tracing::Span::current().record("tool_path", tool.display.as_str());
             let temp = temporary_assembly_output_path(&output);
             let temp_cpio = temp.with_extension("cpio.tmp");
-            write_newc_archive(source_tree, &temp_cpio)?;
+            // xz keeps its input as a file: its block headers (and so the
+            // proven-bootable bytes) are the ones a file input gives.
+            let plan = plan_newc(source_tree, &tree_devices(spec, filesystem))?;
+            write_newc_file(&plan, &temp_cpio)?;
             // The kernel's XZ decoder reads CRC32 (or no) checks only, and it
             // allocates the whole dictionary up front: an initramfs with the
             // 64 MiB dictionary of `-9` fails to unpack before /init runs.
@@ -152,8 +174,10 @@ pub(super) fn execute_assembly_filesystem(
             let tool = resolve_assembly_tool(roots, "zstd")?;
             tracing::Span::current().record("tool_path", tool.display.as_str());
             let temp = temporary_assembly_output_path(&output);
-            let temp_cpio = temp.with_extension("cpio.tmp");
-            write_newc_archive(source_tree, &temp_cpio)?;
+            // The archive goes into zstd's stdin. `--stream-size` gives the
+            // size the plan computed, so the frame records it as a file input
+            // does and the bytes match.
+            let plan = plan_newc(source_tree, &tree_devices(spec, filesystem))?;
             // Same flags as the zstd transform; the level is fixed by the
             // spec, so the output is the same for any thread count.
             let level = filesystem
@@ -163,18 +187,12 @@ pub(super) fn execute_assembly_filesystem(
             command
                 .args(["-q", "-c", "--no-progress", "-T0"])
                 .arg(format!("-{level}"))
-                .arg(&temp_cpio);
-            let zstd_output = run_command_stdout_to_file(
-                spec,
-                &mut command,
-                &temp,
-                process_output_retention(spec),
-                cancel_check,
-            )
-            .inspect_err(|_| {
-                let _ = std_fs::remove_file(&temp);
-            })?;
-            let _ = std_fs::remove_file(&temp_cpio);
+                .arg(format!("--stream-size={}", plan.bytes()));
+            let zstd_output =
+                run_compressor_from_plan(spec, &mut command, &plan, &temp, cancel_check)
+                    .inspect_err(|_| {
+                        let _ = std_fs::remove_file(&temp);
+                    })?;
             if !zstd_output.status.success() {
                 let _ = std_fs::remove_file(&temp);
                 return Err(format!(
@@ -226,6 +244,8 @@ pub(super) fn execute_assembly_filesystem(
                 output: &temp,
                 bytes,
                 fat_size: filesystem.fat_size,
+                deterministic: filesystem.deterministic,
+                volume_id: filesystem.id.as_str(),
                 mformat: &mformat,
                 mcopy: &mcopy,
                 retention: process_output_retention(spec),
@@ -249,6 +269,11 @@ struct VfatWriteContext<'a> {
     output: &'a Path,
     bytes: u64,
     fat_size: Option<u32>,
+    /// A deterministic image gets a fixed volume serial and keeps the
+    /// entries' modification times.
+    deterministic: bool,
+    /// The filesystem id: the serial of a deterministic image derives from it.
+    volume_id: &'a str,
     mformat: &'a ResolvedTool,
     mcopy: &'a ResolvedTool,
     retention: gaia_process::ProcessOutputRetention,
@@ -395,6 +420,16 @@ fn vfat_content_bytes(dir: &Path) -> Result<u64, String> {
     Ok(total)
 }
 
+/// The volume serial a deterministic vfat image gets: four bytes of the
+/// sha256 of the filesystem's id, so one id always gives the same serial.
+pub(super) fn vfat_volume_serial(volume_id: &str) -> String {
+    let digest = Sha256::digest(format!("gaia vfat volume serial\n{volume_id}").as_bytes());
+    format!(
+        "{:02X}{:02X}{:02X}{:02X}",
+        digest[0], digest[1], digest[2], digest[3]
+    )
+}
+
 fn write_vfat_filesystem(context: VfatWriteContext<'_>) -> Result<(), AssemblyError> {
     let VfatWriteContext {
         spec,
@@ -402,6 +437,8 @@ fn write_vfat_filesystem(context: VfatWriteContext<'_>) -> Result<(), AssemblyEr
         output,
         bytes,
         fat_size,
+        deterministic,
+        volume_id,
         mformat,
         mcopy,
         retention,
@@ -423,6 +460,12 @@ fn write_vfat_filesystem(context: VfatWriteContext<'_>) -> Result<(), AssemblyEr
 
     let mut format_command = Command::new(&mformat.program);
     format_command.args(vfat_mformat_args(bytes, fat_size));
+    if deterministic {
+        format_command
+            .env("TZ", "UTC")
+            .arg("-N")
+            .arg(vfat_volume_serial(volume_id));
+    }
     format_command.arg("-i").arg(output).arg("::");
     let format_output =
         run_command_capture_tail(spec, &mut format_command, retention, cancel_check.clone())?;
@@ -437,60 +480,145 @@ fn write_vfat_filesystem(context: VfatWriteContext<'_>) -> Result<(), AssemblyEr
     }
     check_vfat_fat_size(output, bytes, fat_size)?;
 
-    let mut children = std_fs::read_dir(source_tree)
-        .map_err(|error| {
-            format!(
-                "failed to read vfat source tree '{}': {error}",
-                source_tree.display()
-            )
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| {
-            format!(
-                "failed to read vfat source tree '{}': {error}",
-                source_tree.display()
-            )
-        })?;
-    children.sort_by_key(|entry| entry.path());
-    for child in children {
-        let mut copy_command = Command::new(&mcopy.program);
-        copy_command
-            .arg("-i")
-            .arg(output)
-            .arg("-s")
-            .arg(child.path())
-            .arg("::");
-        let copy_output =
-            run_command_capture_tail(spec, &mut copy_command, retention, cancel_check.clone())?;
-        if !copy_output.status.success() {
-            return Err(format!(
-                "vfat copy failed for '{}' into '{}' using '{}': {}",
-                child.path().display(),
-                output.display(),
-                mcopy.display,
-                copy_output.failure_context(&copy_command)
-            )
-            .into());
+    // A deterministic image is copied from a staging copy of the tree whose
+    // entries carry one fixed modification time: `mcopy -m` keeps it, so the
+    // timestamps do not depend on when the tree was built.
+    let staging = deterministic.then(|| {
+        output.with_file_name(format!(
+            "{}.tree",
+            output.file_name().unwrap_or_default().to_string_lossy()
+        ))
+    });
+    let copied = (|| -> Result<(), AssemblyError> {
+        let from = match &staging {
+            Some(staging) => {
+                stage_vfat_tree(source_tree, staging)?;
+                staging.as_path()
+            }
+            None => source_tree,
+        };
+        let mut children = std_fs::read_dir(from)
+            .map_err(|error| {
+                format!(
+                    "failed to read vfat source tree '{}': {error}",
+                    from.display()
+                )
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| {
+                format!(
+                    "failed to read vfat source tree '{}': {error}",
+                    from.display()
+                )
+            })?;
+        children.sort_by_key(|entry| entry.path());
+        for child in children {
+            let mut copy_command = Command::new(&mcopy.program);
+            copy_command.arg("-i").arg(output);
+            if deterministic {
+                // mtools stores local times: UTC keeps the image the same on
+                // every host.
+                copy_command.env("TZ", "UTC").arg("-m");
+            }
+            copy_command.arg("-s").arg(child.path()).arg("::");
+            let copy_output =
+                run_command_capture_tail(spec, &mut copy_command, retention, cancel_check.clone())?;
+            if !copy_output.status.success() {
+                return Err(format!(
+                    "vfat copy failed for '{}' into '{}' using '{}': {}",
+                    child.path().display(),
+                    output.display(),
+                    mcopy.display,
+                    copy_output.failure_context(&copy_command)
+                )
+                .into());
+            }
         }
+        Ok(())
+    })();
+    if let Some(staging) = &staging {
+        let _ = std_fs::remove_dir_all(staging);
     }
-    Ok(())
+    copied
 }
 
-fn write_newc_archive(source_tree: &Path, output: &Path) -> Result<(), String> {
-    let mut entries = collect_archive_entries(source_tree)?;
-    entries.sort_by(|left, right| left.0.cmp(&right.0));
-    let mut file = std_fs::File::create(output).map_err(|error| {
+/// The modification time every entry of a deterministic vfat image gets: the
+/// FAT epoch, 1980-01-01 00:00:00 UTC (FAT cannot store earlier times).
+const VFAT_FIXED_MTIME_SECS: u64 = 315_532_800;
+
+/// Copies the entries of `source` (files followed through their links, as
+/// `mcopy` reads them) into `staging`, each with the fixed modification time.
+fn stage_vfat_tree(source: &Path, staging: &Path) -> Result<(), AssemblyError> {
+    let _ = std_fs::remove_dir_all(staging);
+    std_fs::create_dir_all(staging).map_err(|error| {
         format!(
-            "failed to create cpio archive '{}': {error}",
-            output.display()
+            "failed to create vfat staging dir '{}': {error}",
+            staging.display()
         )
     })?;
-    let mut ino = 1u32;
-    for (name, path) in entries {
-        write_newc_entry(&mut file, source_tree, &name, &path, ino)?;
-        ino = ino.saturating_add(1);
+    let fixed = std::time::UNIX_EPOCH + Duration::from_secs(VFAT_FIXED_MTIME_SECS);
+    let entries = collect_archive_entries(source)?;
+    for (name, path) in &entries {
+        let target = staging.join(name);
+        let metadata = match std_fs::metadata(path) {
+            Ok(metadata) => metadata,
+            // A dangling link has nothing to copy.
+            Err(_) => continue,
+        };
+        if metadata.is_dir() {
+            std_fs::create_dir_all(&target).map_err(|error| {
+                format!(
+                    "failed to create vfat staging dir '{}': {error}",
+                    target.display()
+                )
+            })?;
+        } else if metadata.is_file() {
+            std_fs::copy(path, &target).map_err(|error| {
+                format!(
+                    "failed to stage vfat file '{}' to '{}': {error}",
+                    path.display(),
+                    target.display()
+                )
+            })?;
+        } else {
+            continue;
+        }
+        let file = std_fs::File::open(&target).map_err(|error| {
+            format!(
+                "failed to open vfat staging entry '{}': {error}",
+                target.display()
+            )
+        })?;
+        file.set_times(std::fs::FileTimes::new().set_modified(fixed))
+            .map_err(|error| {
+                format!(
+                    "failed to set the time of vfat staging entry '{}': {error}",
+                    target.display()
+                )
+            })?;
     }
-    write_newc_record_bytes(&mut file, "TRAILER!!!", 0, 0o100644, &[])?;
+    // Directory times last: copying into a directory changes its time.
+    let mut dirs: Vec<PathBuf> = entries
+        .iter()
+        .filter(|(_, path)| std_fs::metadata(path).is_ok_and(|metadata| metadata.is_dir()))
+        .map(|(name, _)| staging.join(name))
+        .collect();
+    dirs.sort_by_key(|dir| std::cmp::Reverse(dir.components().count()));
+    for dir in dirs {
+        let file = std_fs::File::open(&dir).map_err(|error| {
+            format!(
+                "failed to open vfat staging dir '{}': {error}",
+                dir.display()
+            )
+        })?;
+        file.set_times(std::fs::FileTimes::new().set_modified(fixed))
+            .map_err(|error| {
+                format!(
+                    "failed to set the time of vfat staging dir '{}': {error}",
+                    dir.display()
+                )
+            })?;
+    }
     Ok(())
 }
 
@@ -530,134 +658,6 @@ fn collect_archive_entries_inner(
         {
             collect_archive_entries_inner(root, &path, entries)?;
         }
-    }
-    Ok(())
-}
-
-fn write_newc_entry(
-    file: &mut std_fs::File,
-    source_tree: &Path,
-    name: &str,
-    path: &Path,
-    ino: u32,
-) -> Result<(), String> {
-    let metadata = std_fs::symlink_metadata(path).map_err(|error| {
-        format!(
-            "failed to inspect assembly archive entry '{}': {error}",
-            path.display()
-        )
-    })?;
-    #[cfg(unix)]
-    let permissions = {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o7777
-    };
-    #[cfg(not(unix))]
-    let permissions = 0o644;
-    if metadata.file_type().is_dir() {
-        return write_newc_record_bytes(file, name, ino, 0o040000 | permissions.max(0o755), &[]);
-    }
-    if metadata.file_type().is_symlink() {
-        let target = std_fs::read_link(path).map_err(|error| {
-            format!(
-                "failed to read assembly archive symlink '{}': {error}",
-                path.display()
-            )
-        })?;
-        return write_newc_record_bytes(
-            file,
-            name,
-            ino,
-            0o120000 | 0o777,
-            target.to_string_lossy().as_bytes(),
-        );
-    }
-    if metadata.is_file() {
-        let file_size = u32::try_from(metadata.len()).map_err(|_| {
-            format!(
-                "assembly archive file '{}' exceeds the cpio newc size limit",
-                path.display()
-            )
-        })?;
-        let mode = 0o100000 | permissions.max(0o644);
-        write_newc_record_header(file, name, ino, file_size, mode)?;
-        let mut source = std_fs::File::open(path).map_err(|error| {
-            format!(
-                "failed to open assembly archive file '{}': {error}",
-                path.display()
-            )
-        })?;
-        let copied = std::io::copy(&mut source, file).map_err(|error| {
-            format!(
-                "failed to stream assembly archive file '{}': {error}",
-                path.display()
-            )
-        })?;
-        if copied != metadata.len() {
-            return Err(format!(
-                "assembly archive file '{}' changed while it was being archived",
-                path.display()
-            ));
-        }
-        return pad_newc(file, file_size as usize);
-    }
-    Err(format!(
-        "assembly archive entry '{}' under '{}' is not supported",
-        path.display(),
-        source_tree.display()
-    ))
-}
-
-fn write_newc_record_bytes(
-    file: &mut std_fs::File,
-    name: &str,
-    ino: u32,
-    mode: u32,
-    data: &[u8],
-) -> Result<(), String> {
-    let file_size = u32::try_from(data.len())
-        .map_err(|_| format!("assembly archive entry '{name}' exceeds the cpio newc size limit"))?;
-    write_newc_record_header(file, name, ino, file_size, mode)?;
-    file.write_all(data)
-        .map_err(|error| format!("failed to write cpio data: {error}"))?;
-    pad_newc(file, data.len())
-}
-
-fn write_newc_record_header(
-    file: &mut std_fs::File,
-    name: &str,
-    ino: u32,
-    file_size: u32,
-    mode: u32,
-) -> Result<(), String> {
-    let name_size = name.len() + 1;
-    write!(
-        file,
-        "070701{ino:08x}{mode:08x}{uid:08x}{gid:08x}{nlink:08x}{mtime:08x}{file_size:08x}{dev_major:08x}{dev_minor:08x}{rdev_major:08x}{rdev_minor:08x}{name_size:08x}{check:08x}",
-        uid = 0,
-        gid = 0,
-        nlink = 1,
-        mtime = 0,
-        dev_major = 0,
-        dev_minor = 0,
-        rdev_major = 0,
-        rdev_minor = 0,
-        check = 0,
-    )
-    .map_err(|error| format!("failed to write cpio header: {error}"))?;
-    file.write_all(name.as_bytes())
-        .map_err(|error| format!("failed to write cpio name: {error}"))?;
-    file.write_all(&[0])
-        .map_err(|error| format!("failed to write cpio name terminator: {error}"))?;
-    pad_newc(file, 110 + name_size)
-}
-
-fn pad_newc(file: &mut std_fs::File, written: usize) -> Result<(), String> {
-    const PADDING: [u8; 3] = [0; 3];
-    let padding = (4 - (written % 4)) % 4;
-    if padding > 0 {
-        file.write_all(&PADDING[..padding])
-            .map_err(|error| format!("failed to write cpio padding: {error}"))?;
     }
     Ok(())
 }

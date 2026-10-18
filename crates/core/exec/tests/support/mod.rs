@@ -330,6 +330,7 @@ pub fn assembly_transform(
         hash_dest: None,
         data_block_size: None,
         hash_block_size: None,
+        long: false,
         salt: None,
         uuid: None,
     }
@@ -356,6 +357,7 @@ pub fn assembly_filesystem(
         journal: None,
         compressed: Default::default(),
         fat_size: None,
+        reserved_percent: None,
     }
 }
 

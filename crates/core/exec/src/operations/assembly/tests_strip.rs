@@ -78,6 +78,7 @@ fn packed(assembly: &mut ImageAssemblySpec) {
             journal: None,
             compressed: Default::default(),
             fat_size: None,
+            reserved_percent: None,
         });
 }
 
@@ -202,6 +203,75 @@ fn a_packed_tree_with_strip_is_stripped_before_it_is_packed() {
             .iter()
             .any(|line| line.contains("stripped 1 file(s) in tree 'rootfs'"))
     );
+}
+
+#[test]
+fn a_file_read_by_seeking_gives_the_same_sections_as_its_bytes() {
+    let source = std::env::current_exe().expect("test binary");
+    let bytes = fs::read(&source).expect("bytes");
+    let by_bytes = gaia_plan::elf_sections(&bytes).expect("readable");
+    let mut file = fs::File::open(&source).expect("open");
+    let by_seek = gaia_plan::elf_sections_of_file(&mut file).expect("readable");
+    assert!(by_bytes.is_some());
+    assert_eq!(by_seek, by_bytes);
+    let scratch = TempDir::new("gaia-exec-strip-seek");
+    let plain = scratch.join("plain.txt");
+    fs::write(&plain, "not an ELF file\n").expect("text");
+    let mut text = fs::File::open(&plain).expect("open");
+    assert_eq!(gaia_plan::elf_sections_of_file(&mut text), Ok(None));
+}
+
+#[cfg(unix)]
+#[test]
+fn many_stripped_files_are_batched_and_their_totals_add_up() {
+    if !host_has("strip") || !host_has("cc") {
+        eprintln!("skipping: no strip or cc on PATH");
+        return;
+    }
+    let scratch = TempDir::new("gaia-exec-strip-batch");
+    let root = scratch.join("gaia-strip-batch");
+    fs::create_dir_all(&root).expect("test root");
+    let source = root.join("unit.c");
+    fs::write(&source, "int unit_value(int x) { return x * 2; }\n").expect("source");
+    let object = root.join("unit.o");
+    let built = std::process::Command::new("cc")
+        .args(["-c", "-g"])
+        .arg(&source)
+        .arg("-o")
+        .arg(&object)
+        .status()
+        .expect("cc");
+    assert!(built.success());
+    let object_len = fs::metadata(&object).expect("object").len();
+    // More files than one strip run takes, so several runs share the work.
+    let copies = 150;
+    let files: Vec<AssemblyFileSpec> = (0..copies)
+        .map(|index| file_entry(&object, &format!("bin/unit{index:03}.o"), false))
+        .collect();
+    let tree = root.join("build/assembly/rootfs");
+    let mut spec = strip_spec(&root);
+    let mut assembly = assembly(&tree, true, files);
+    packed(&mut assembly);
+    spec.image.assembly = Some(assembly);
+
+    let summary = stage(&spec);
+
+    assert_eq!(state_value(&summary, "strip.1.files"), copies.to_string());
+    let saved: u64 = state_value(&summary, "strip.1.saved_bytes")
+        .parse()
+        .expect("bytes");
+    let mut left = 0u64;
+    for index in 0..copies {
+        let copy = tree.join(format!("bin/unit{index:03}.o"));
+        left += fs::metadata(&copy).expect("copy").len();
+        let bytes = fs::read(&copy).expect("read copy");
+        let sections = gaia_plan::elf_sections(&bytes)
+            .expect("readable")
+            .expect("ELF");
+        assert!(!sections.has_debug, "{}", copy.display());
+    }
+    assert_eq!(saved, copies * object_len - left);
+    assert!(saved > 0);
 }
 
 #[cfg(unix)]

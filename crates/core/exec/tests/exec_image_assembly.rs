@@ -344,6 +344,7 @@ fn image_assembly_transform_failure_cleans_prior_outputs() {
                 hash_dest: None,
                 data_block_size: None,
                 hash_block_size: None,
+                long: false,
                 salt: None,
                 uuid: None,
             },
@@ -356,6 +357,7 @@ fn image_assembly_transform_failure_cleans_prior_outputs() {
                 hash_dest: None,
                 data_block_size: None,
                 hash_block_size: None,
+                long: false,
                 salt: None,
                 uuid: None,
             },
@@ -441,6 +443,7 @@ fn image_assembly_disk_failure_cleans_generated_filesystem_output() {
             journal: None,
             compressed: Default::default(),
             fat_size: None,
+            reserved_percent: None,
         }],
         disks: vec![AssemblyDiskSpec {
             id: "sdcard".into(),
@@ -635,6 +638,7 @@ fn image_assembly_filesystem_failure_cleans_temp_and_final_outputs() {
             journal: None,
             compressed: Default::default(),
             fat_size: None,
+            reserved_percent: None,
         }],
         ..ImageAssemblySpec::default()
     });

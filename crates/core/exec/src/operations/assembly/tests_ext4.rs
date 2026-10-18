@@ -121,6 +121,7 @@ fn ext4_assembly(
             journal,
             compressed: Default::default(),
             fat_size: None,
+            reserved_percent: None,
         }],
         ..ImageAssemblySpec::default()
     }
@@ -304,7 +305,8 @@ fn ext4_auto_bytes_cover_the_content_in_whole_mib() {
     fs::create_dir_all(tree.join("a")).expect("dir");
     fs::write(tree.join("a/big"), vec![1u8; 3 * 1024 * 1024 + 1]).expect("big");
     fs::write(tree.join("small"), "x").expect("small");
-    let bytes = ext4_auto_bytes(&tree, 0).expect("auto bytes");
+    let entries = collect_archive_entries(&tree).expect("walk");
+    let bytes = ext4_auto_bytes(&entries, 0).expect("auto bytes");
     let content = 3 * 1024 * 1024 + 1 + 4096 + 4096 + 4096 + 4096;
     assert_eq!(bytes % MIB_BYTES, 0);
     assert!(
@@ -320,6 +322,67 @@ fn ext4_rejects_a_name_debugfs_cannot_set() {
     let tree = scratch.join("tree");
     fs::create_dir_all(&tree).expect("tree");
     fs::write(tree.join("quo\"te"), "x").expect("file");
-    let error = ext4_normalize_script(&tree).expect_err("quote in name");
+    let entries = collect_archive_entries(&tree).expect("walk");
+    let error = ext4_normalize_script(&entries).expect_err("quote in name");
     assert!(error.contains("cannot set"), "{error}");
+}
+
+#[test]
+fn normalize_script_sets_each_entry_the_same_way_as_before() {
+    // The entries are root's, in the archive's order, with the fixed times:
+    // the script is the one each entry used to get line by line.
+    let entries = vec![
+        ("a".to_string(), PathBuf::from("/unused/a")),
+        ("a/b c".to_string(), PathBuf::from("/unused/a/b c")),
+    ];
+    let script = ext4_normalize_script(&entries).expect("script");
+    let mut expected = String::new();
+    for path in ["/", "/lost+found", "/a", "/a/b c"] {
+        for (field, value) in [
+            ("uid", "0"),
+            ("gid", "0"),
+            ("atime", "0"),
+            ("mtime", "0"),
+            ("ctime", "0"),
+            ("crtime", "0"),
+        ] {
+            expected.push_str(&format!("set_inode_field \"{path}\" {field} {value}\n"));
+        }
+    }
+    assert_eq!(script, expected);
+}
+
+#[test]
+fn ext4_reserves_no_root_blocks_unless_reserved_percent_asks() {
+    if !e2fs_tools_present() {
+        return;
+    }
+    let scratch = TempDir::new("gaia-exec-ext4-reserve");
+    let root = scratch.join("gaia-assembly-ext4-reserve");
+    write_rootfs_assets(&root);
+    let reserved = |percent: Option<u32>| -> u64 {
+        let mut assembly =
+            ext4_assembly("$assembly.work/rootfs.ext4", Some("16M"), None, None, None);
+        assembly.filesystems[0].reserved_percent = percent;
+        let mut spec = roomy_spec(&root);
+        spec.image.assembly = Some(assembly);
+        let operation = OperationId::image_assembly();
+        stage_image_assembly_with(&spec, &operation, None, disk_env_panic).expect("ext4 assembly");
+        let image = root.join("build/assembly/rootfs.ext4");
+        let stats = Command::new("dumpe2fs")
+            .arg("-h")
+            .arg(&image)
+            .output()
+            .expect("dumpe2fs");
+        let stats = String::from_utf8_lossy(&stats.stdout);
+        dumpe2fs_field(&stats, "Reserved block count:")
+            .expect("reserved count")
+            .parse()
+            .expect("number")
+    };
+    assert_eq!(reserved(None), 0, "no root reserve by default");
+    assert!(
+        reserved(Some(5)) > 0,
+        "reserved_percent = 5 keeps a reserve"
+    );
 }

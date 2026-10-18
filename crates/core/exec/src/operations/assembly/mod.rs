@@ -18,6 +18,7 @@ mod binaries;
 mod busybox;
 mod compressed_fs;
 mod content;
+mod cpio;
 mod disks;
 mod ext4;
 mod files;
@@ -26,14 +27,19 @@ mod gpt;
 mod kernel_modules;
 mod mbr;
 mod placement;
+mod placement_owner;
 mod produced;
 mod runtime_closure;
 mod state;
 mod steps;
+mod steps_jobs;
+mod steps_jobs_fs;
 mod steps_order;
+mod steps_schedule;
 mod steps_strip;
 mod strip;
 mod tar;
+mod tools;
 mod transforms;
 mod verity;
 
@@ -51,6 +57,7 @@ use gpt::*;
 use kernel_modules::*;
 use mbr::*;
 use placement::*;
+use placement_owner::*;
 use strip::*;
 
 use produced::ProducedRecorder;
@@ -61,10 +68,9 @@ pub(crate) use state::{
 };
 use steps::StepRun;
 use steps_order::{ordered_assembly_steps, remove_stale_step_outputs};
+use tools::*;
 use transforms::*;
 use verity::*;
-
-const TOOL_VERSION_TIMEOUT_SECONDS: u64 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AssemblyStagingSummary {
@@ -180,7 +186,13 @@ pub(crate) fn stage_image_assembly_with(
             },
             messages,
         ),
+        AssemblyPlacement::Refused(reason) => Err(AssemblyError::runtime(reason)),
         AssemblyPlacement::Ram(ram) => {
+            // Work dirs of dead runs go; this run's `<hash>` dir records its
+            // owner so a later run can tell it is gone.
+            let hash_dir = ram.root.parent().unwrap_or(&ram.root).to_path_buf();
+            sweep_stale_ram_dirs(&ram.user_dir, &hash_dir);
+            write_ram_owner(&hash_dir, &disk_roots.assembly_work)?;
             // Copies left by an earlier run (or a crash) are re-created.
             discard_ram_root(&ram.root);
             for path in &ram.stale {
@@ -201,6 +213,7 @@ pub(crate) fn stage_image_assembly_with(
                 messages,
             );
             discard_ram_root(&ram.root);
+            let _ = std_fs::remove_dir_all(&hash_dir);
             result
         }
     }
@@ -312,9 +325,7 @@ fn stage_steps(
         run.disk_publish = ram.disk_publish.clone();
     }
     run.produced = ProducedRecorder::new(spec, view.disk_assembly, view.disk_roots);
-    for step in order {
-        run.run(step)?;
-    }
+    steps_schedule::run_steps(&mut run, &order, &step_paths)?;
     run.finish();
     let StepRun {
         mut state,
@@ -698,101 +709,6 @@ fn read_tail_bytes(mut reader: impl Read, limit: usize) -> std::io::Result<Vec<u
         retained.extend_from_slice(&buffer[..read]);
     }
     Ok(retained)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ResolvedTool {
-    pub(super) program: PathBuf,
-    pub(super) display: String,
-}
-
-fn resolve_assembly_tool(roots: &AssemblyRoots, name: &str) -> Result<ResolvedTool, String> {
-    if let Some(provider_host) = &roots.provider_host {
-        // Buildroot installs system tools (veritysetup, mkfs.ext4, debugfs,
-        // depmod) into host/sbin.
-        for relative in [
-            PathBuf::from("bin").join(name),
-            PathBuf::from("sbin").join(name),
-            PathBuf::from("usr/bin").join(name),
-            PathBuf::from("usr/sbin").join(name),
-            PathBuf::from(name),
-        ] {
-            let candidate = provider_host.join(relative);
-            if candidate.is_file() {
-                return Ok(ResolvedTool {
-                    display: candidate.display().to_string(),
-                    program: candidate,
-                });
-            }
-        }
-    }
-
-    if let Some(path) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&path) {
-            let candidate = dir.join(name);
-            if candidate.is_file() {
-                return Ok(ResolvedTool {
-                    display: candidate.display().to_string(),
-                    program: candidate,
-                });
-            }
-        }
-    }
-
-    Err(format!(
-        "assembly tool '{name}' was not found in provider host tools or host PATH"
-    ))
-}
-
-/// `--version` probes already run in this process, keyed by program path and
-/// arguments. A probe can take up to `TOOL_VERSION_TIMEOUT_SECONDS`, and every
-/// step that records a tool would otherwise repeat it.
-type ToolVersionCache =
-    std::sync::Mutex<std::collections::HashMap<(PathBuf, String), Option<String>>>;
-static TOOL_VERSIONS: std::sync::OnceLock<ToolVersionCache> = std::sync::OnceLock::new();
-
-fn tool_version<const N: usize>(tool: &ResolvedTool, args: [&str; N]) -> Option<String> {
-    let key = (PathBuf::from(&tool.program), args.join(" "));
-    let cache = TOOL_VERSIONS.get_or_init(Default::default);
-    if let Ok(cached) = cache.lock()
-        && let Some(version) = cached.get(&key)
-    {
-        return version.clone();
-    }
-    let version = probe_tool_version(tool, args);
-    if let Ok(mut cached) = cache.lock() {
-        cached.insert(key, version.clone());
-    }
-    version
-}
-
-fn probe_tool_version<const N: usize>(tool: &ResolvedTool, args: [&str; N]) -> Option<String> {
-    let mut command = Command::new(&tool.program);
-    command.args(args);
-    let result = gaia_process::run_command_with_timeout_and_retention(
-        &mut command,
-        Duration::from_secs(TOOL_VERSION_TIMEOUT_SECONDS),
-        "assembly tool version",
-        gaia_process::ProcessOutputRetention {
-            stdout_bytes: 4096,
-            stderr_bytes: 4096,
-            stdout_lines: 4,
-            stderr_lines: 4,
-        },
-        None,
-        None,
-    )
-    .ok()?;
-    if !result.output.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8_lossy(&result.output.stdout);
-    let stderr = String::from_utf8_lossy(&result.output.stderr);
-    stdout
-        .lines()
-        .chain(stderr.lines())
-        .next()
-        .map(str::to_string)
 }
 
 #[cfg(test)]

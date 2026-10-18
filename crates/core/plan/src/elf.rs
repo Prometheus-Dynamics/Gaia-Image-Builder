@@ -303,15 +303,49 @@ pub struct ElfSections {
 /// bytes. Bytes without the ELF magic are `Ok(None)`; a truncated or corrupt
 /// ELF file is an error.
 pub fn elf_sections(bytes: &[u8]) -> Result<Option<ElfSections>, String> {
-    if !bytes.starts_with(ELF_MAGIC) {
+    elf_sections_from(bytes.len() as u64, |start, len| {
+        slice(bytes, start, len).map(<[u8]>::to_vec)
+    })
+}
+
+/// [`elf_sections`] for a file, read by seeking: only the ELF header, the
+/// section table and the section names are read, never the whole file.
+pub fn elf_sections_of_file(
+    file: &mut (impl std::io::Read + std::io::Seek),
+) -> Result<Option<ElfSections>, String> {
+    use std::io::SeekFrom;
+    let len = file
+        .seek(SeekFrom::End(0))
+        .map_err(|error| format!("failed to size ELF file: {error}"))?;
+    elf_sections_from(len, |start, len| {
+        file.seek(SeekFrom::Start(start))
+            .map_err(|error| format!("failed to seek in ELF file: {error}"))?;
+        let mut buffer =
+            vec![0u8; usize::try_from(len).map_err(|_| "ELF size out of range".to_string())?];
+        file.read_exact(&mut buffer)
+            .map_err(|error| format!("ELF file is truncated: {error}"))?;
+        Ok(buffer)
+    })
+}
+
+/// The section scan over `read(start, len)`, which returns exactly `len`
+/// bytes at `start` of a file `file_len` bytes long.
+fn elf_sections_from(
+    file_len: u64,
+    mut read: impl FnMut(u64, u64) -> Result<Vec<u8>, String>,
+) -> Result<Option<ElfSections>, String> {
+    // The ELF64 header is the largest one the fields read here sit in.
+    const HEADER_BYTES: u64 = 64;
+    let head = read(0, file_len.min(HEADER_BYTES))?;
+    if !head.starts_with(ELF_MAGIC) {
         return Ok(None);
     }
-    let is_64bit = match bytes.get(4) {
+    let is_64bit = match head.get(4) {
         Some(1) => false,
         Some(2) => true,
         _ => return Err("unknown ELF class".into()),
     };
-    let little_endian = match bytes.get(5) {
+    let little_endian = match head.get(5) {
         Some(1) => true,
         Some(2) => false,
         _ => return Err("unknown ELF data encoding".into()),
@@ -320,6 +354,7 @@ pub fn elf_sections(bytes: &[u8]) -> Result<Option<ElfSections>, String> {
         is_64bit,
         little_endian,
     };
+    let bytes = &head[..];
     let object_type = layout.half(slice(bytes, 0x10, 2)?)?;
     let machine = layout.half(slice(bytes, 0x12, 2)?)?;
     let (shoff, shentsize, shnum, shstrndx) = if is_64bit {
@@ -349,11 +384,17 @@ pub fn elf_sections(bytes: &[u8]) -> Result<Option<ElfSections>, String> {
     if shstrndx >= shnum {
         return Err("ELF section name table index is out of range".into());
     }
-    let header = |index: u64| section_header(bytes, layout, shoff, shentsize, index);
+    // The section table, then the names it points at; the headers index the
+    // table from its start.
+    let table_len = shnum
+        .checked_mul(shentsize)
+        .ok_or_else(|| "ELF section table size out of range".to_string())?;
+    let table = read(shoff, table_len)?;
+    let header = |index: u64| section_header(&table, layout, 0, shentsize, index);
     let names_header = header(shstrndx)?;
-    let names = slice(bytes, names_header.offset, names_header.size)?;
+    let names = read(names_header.offset, names_header.size)?;
     for index in 0..shnum {
-        let name = string_at(names, u64::from(header(index)?.name))?;
+        let name = string_at(&names, u64::from(header(index)?.name))?;
         if name == b".symtab" {
             sections.has_symtab = true;
         } else if (name.starts_with(b".debug_") && name != b".debug_gdb_scripts")

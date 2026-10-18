@@ -9,6 +9,7 @@ mod image;
 mod image_assembly;
 mod image_assembly_collected;
 mod image_assembly_compressed;
+mod image_assembly_devices;
 mod image_assembly_generated;
 mod image_assembly_gpt;
 mod image_assembly_layout;

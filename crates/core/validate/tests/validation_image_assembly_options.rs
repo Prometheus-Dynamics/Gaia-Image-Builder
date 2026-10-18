@@ -58,6 +58,80 @@ dest = "$assembly.work/rootfs.verity.erofs"
 "#;
 
 #[test]
+fn devices_are_checked_against_their_tree_and_numbers() {
+    let contents = assembly(
+        r#"
+[[image.assembly.devices]]
+tree = "rootfs"
+path = "dev/console"
+kind = "char"
+major = 5
+minor = 1
+mode = "0600"
+
+[[image.assembly.devices]]
+tree = "missing"
+path = "dev/null"
+kind = "block"
+major = 1
+
+[[image.assembly.devices]]
+tree = "rootfs"
+path = "run/fifo"
+kind = "fifo"
+major = 3
+mode = "0999"
+"#,
+    );
+    assert_eq!(
+        assembly_codes(&contents),
+        vec![
+            "assembly_device_tree_unknown",
+            "assembly_device_numbers_missing",
+            "assembly_device_numbers_unsupported",
+            "assembly_device_mode_invalid",
+        ]
+    );
+}
+
+#[test]
+fn zstd_long_and_ext4_reserved_percent_are_checked_per_kind() {
+    let contents = assembly(
+        r#"
+[[image.assembly.transforms]]
+kind = "gzip"
+src = "$assembly.work/rootfs/etc/motd"
+dest = "$assembly.work/motd.gz"
+long = true
+
+[[image.assembly.filesystems]]
+id = "root"
+kind = "ext4"
+source_tree = "rootfs"
+output = "$assembly.work/root.ext4"
+size = "auto"
+reserved_percent = 60
+
+[[image.assembly.filesystems]]
+id = "boot"
+kind = "vfat"
+source_tree = "rootfs"
+output = "$assembly.work/boot.vfat"
+size = "auto"
+reserved_percent = 5
+"#,
+    );
+    assert_eq!(
+        assembly_codes(&contents),
+        vec![
+            "assembly_transform_option_unsupported",
+            "assembly_filesystem_reserved_percent_invalid",
+            "assembly_filesystem_option_unsupported",
+        ]
+    );
+}
+
+#[test]
 fn verity_transform_and_its_archive_tokens_validate() {
     let contents = assembly(&format!(
         r#"{VERITY_OK}

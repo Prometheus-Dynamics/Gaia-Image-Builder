@@ -18,6 +18,8 @@ use crate::image_assembly::validate_assembly_path_template;
 const EXT4_LABEL_MAX_BYTES: usize = 16;
 /// ext4 images are whole blocks.
 const EXT4_BLOCK_BYTES: u64 = 4096;
+/// The largest `reserved_percent` an ext4 filesystem accepts.
+const EXT4_MAX_RESERVED_PERCENT: u32 = 50;
 /// The smallest and largest dm-verity block size: a power of two that the
 /// kernel accepts for a data or hash device.
 const VERITY_BLOCK_SIZE_MIN: u32 = 512;
@@ -34,6 +36,15 @@ pub(crate) fn validate_transform_options(
     let location = || Some("image.assembly.transforms".into());
     for transform in &assembly.transforms {
         let kind = transform.kind.as_str();
+        if transform.long && transform.kind != AssemblyTransformKindSpec::Zstd {
+            diagnostics.push(error(
+                "assembly_transform_option_unsupported",
+                format!(
+                    "assembly transform kind '{kind}' does not accept long; only kind 'zstd' does"
+                ),
+                location(),
+            ));
+        }
         if transform.kind != AssemblyTransformKindSpec::Verity {
             for (set, option) in [
                 (transform.hash_dest.is_some(), "hash_dest"),
@@ -124,6 +135,28 @@ pub(crate) fn validate_filesystem_options(
     let location = || Some("image.assembly.filesystems".into());
     for filesystem in &assembly.filesystems {
         let erofs = filesystem.kind == AssemblyFilesystemKindSpec::Erofs;
+        if let Some(percent) = filesystem.reserved_percent {
+            if filesystem.kind != AssemblyFilesystemKindSpec::Ext4 {
+                diagnostics.push(error(
+                    "assembly_filesystem_option_unsupported",
+                    format!(
+                        "assembly filesystem '{}' kind '{}' does not accept reserved_percent; only kind 'ext4' does",
+                        filesystem.id,
+                        filesystem.kind.as_str()
+                    ),
+                    location(),
+                ));
+            } else if percent > EXT4_MAX_RESERVED_PERCENT {
+                diagnostics.push(error(
+                    "assembly_filesystem_reserved_percent_invalid",
+                    format!(
+                        "assembly filesystem '{}' reserved_percent {percent} must be 0 to {EXT4_MAX_RESERVED_PERCENT}",
+                        filesystem.id
+                    ),
+                    location(),
+                ));
+            }
+        }
         if let Some(fat_size) = filesystem.fat_size {
             if filesystem.kind != AssemblyFilesystemKindSpec::Vfat {
                 diagnostics.push(error(

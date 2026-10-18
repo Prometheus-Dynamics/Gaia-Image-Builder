@@ -555,6 +555,7 @@ mod tests {
                 journal: None,
                 compressed: Default::default(),
                 fat_size: None,
+                reserved_percent: None,
             }],
             ..ImageAssemblySpec::default()
         };
@@ -602,6 +603,7 @@ mod tests {
             journal: None,
             compressed: Default::default(),
             fat_size: None,
+            reserved_percent: None,
         };
         assert_eq!(filesystem.publish_template(), None);
         filesystem.publish = true;
@@ -741,6 +743,7 @@ mod tests {
                 hash_block_size: None,
                 salt: None,
                 uuid: None,
+                long: false,
             }],
             ..ImageAssemblySpec::default()
         };

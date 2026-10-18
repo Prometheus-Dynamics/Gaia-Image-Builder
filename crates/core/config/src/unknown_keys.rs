@@ -134,6 +134,11 @@ const ASSEMBLY_CHILDREN: &[Section] = &[
         struct_fields::<raw_assembly::RawAssemblyKernelModulesConfig>,
         &[],
     ),
+    section(
+        "devices",
+        struct_fields::<raw_assembly::RawAssemblyDeviceConfig>,
+        &[],
+    ),
 ];
 
 const SECTIONS: &[Section] = &[

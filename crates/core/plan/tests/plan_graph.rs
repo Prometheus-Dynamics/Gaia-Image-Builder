@@ -671,6 +671,7 @@ fn image_assembly_fingerprint_does_not_hash_generated_filesystem_partition_outpu
             journal: None,
             compressed: Default::default(),
             fat_size: None,
+            reserved_percent: None,
         }],
         disks: vec![AssemblyDiskSpec {
             id: "sdcard".into(),

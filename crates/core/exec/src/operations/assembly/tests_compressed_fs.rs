@@ -99,6 +99,7 @@ fn filesystem(
         free: None,
         compressed,
         fat_size: None,
+        reserved_percent: None,
     }
 }
 
@@ -445,6 +446,7 @@ fn squashfs_image_is_the_data_of_a_verity_transform() {
         hash_dest: None,
         data_block_size: None,
         hash_block_size: None,
+        long: false,
         salt: None,
         uuid: None,
     }];

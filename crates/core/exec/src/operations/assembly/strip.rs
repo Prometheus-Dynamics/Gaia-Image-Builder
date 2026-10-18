@@ -6,6 +6,8 @@
 use super::*;
 use gaia_spec::AssemblyPathTemplate;
 use std::collections::HashMap;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// `e_machine` values the strip tool is chosen by.
 const EM_ARM: u16 = 40;
@@ -91,16 +93,23 @@ impl<'a> Stripper<'a> {
             }
         }
 
+        // Every file is planned from its headers first, then the planned
+        // files are stripped in batches; the hard-linked copies follow their
+        // first file once it is stripped.
+        let mut jobs = Vec::new();
+        for (group_index, group) in groups.iter().enumerate() {
+            if let Some(job) = self.plan_strip(&group[0], group_index)? {
+                jobs.push(job);
+            }
+        }
+        let stripped = run_strip_jobs(self.spec, self.cancel_check.clone(), &jobs)?;
         let mut summary = StripSummary::default();
-        for group in groups {
-            let first = &group[0];
-            let Some(saved) = self.strip_one(first)? else {
-                continue;
-            };
+        for (group_index, saved) in stripped {
             summary.files += 1;
             summary.saved_bytes += saved;
+            let group = &groups[group_index];
             for other in &group[1..] {
-                relink(first, other)?;
+                relink(&group[0], other)?;
             }
         }
         Ok(summary)
@@ -108,18 +117,19 @@ impl<'a> Stripper<'a> {
 
     /// Strips one file in place when it is an ELF file that still has what
     /// its kind strips. `Ok(None)` leaves a file alone.
-    fn strip_one(&mut self, path: &Path) -> Result<Option<u64>, AssemblyError> {
+    fn plan_strip(&mut self, path: &Path, group: usize) -> Result<Option<StripJob>, AssemblyError> {
         // Most tree files are not ELF: their magic settles it without a read.
         if !has_elf_magic(path) {
             return Ok(None);
         }
-        let bytes = std_fs::read(path).map_err(|error| {
+        // Only the headers and section names are read, by seeking.
+        let mut file = std_fs::File::open(path).map_err(|error| {
             format!(
                 "failed to read assembly file '{}' for strip: {error}",
                 path.display()
             )
         })?;
-        let Some(sections) = gaia_plan::elf_sections(&bytes).map_err(|error| {
+        let Some(sections) = gaia_plan::elf_sections_of_file(&mut file).map_err(|error| {
             format!(
                 "assembly file '{}' is not a readable ELF file: {error}",
                 path.display()
@@ -143,34 +153,21 @@ impl<'a> Stripper<'a> {
             return Ok(None);
         }
         let tool = self.tool_for(sections.machine, path)?;
-        let before = bytes.len() as u64;
-        drop(bytes);
-        let mut command = Command::new(&tool.program);
-        command.arg(flag).arg(path);
-        let output = run_command_capture_tail(
-            self.spec,
-            &mut command,
-            process_output_retention(self.spec),
-            self.cancel_check.clone(),
-        )?;
-        if !output.status.success() {
-            return Err(format!(
-                "strip of '{}' with '{}' failed: {}",
-                path.display(),
-                tool.display,
-                output.failure_context(&command)
-            )
-            .into());
-        }
-        let after = std_fs::metadata(path)
+        let before = std_fs::metadata(path)
             .map_err(|error| {
                 format!(
-                    "failed to read stripped assembly file '{}': {error}",
+                    "failed to read assembly file '{}' for strip: {error}",
                     path.display()
                 )
             })?
             .len();
-        Ok(Some(before.saturating_sub(after)))
+        Ok(Some(StripJob {
+            group,
+            path: path.to_path_buf(),
+            flag,
+            tool,
+            before,
+        }))
     }
 
     /// The strip tool for files of `machine`. A configured tool is used for
@@ -220,6 +217,120 @@ impl<'a> Stripper<'a> {
             program: path,
         }))
     }
+}
+
+/// Files per strip invocation: one tool run per chunk, not per file.
+const STRIP_CHUNK_FILES: usize = 64;
+
+/// An ELF file to strip, planned from its headers.
+struct StripJob {
+    /// The hard-link group of the file, by its index in the pass.
+    group: usize,
+    path: PathBuf,
+    flag: &'static str,
+    tool: ResolvedTool,
+    /// The file's size before stripping.
+    before: u64,
+}
+
+/// Strips the planned files: chunks of up to `STRIP_CHUNK_FILES` jobs that
+/// share a tool and a flag, one tool run each, with the chunks run in
+/// parallel. Returns each job's group and the bytes it saved, in job order.
+fn run_strip_jobs(
+    spec: &ResolvedBuildSpec,
+    cancel_check: Option<gaia_process::ProcessCancelCheck>,
+    jobs: &[StripJob],
+) -> Result<Vec<(usize, u64)>, AssemblyError> {
+    let mut chunks: Vec<Vec<usize>> = Vec::new();
+    let mut open: HashMap<(PathBuf, &'static str), usize> = HashMap::new();
+    for (index, job) in jobs.iter().enumerate() {
+        let key = (job.tool.program.clone(), job.flag);
+        let slot = match open.get(&key) {
+            Some(&slot) if chunks[slot].len() < STRIP_CHUNK_FILES => slot,
+            _ => {
+                chunks.push(Vec::new());
+                open.insert(key, chunks.len() - 1);
+                chunks.len() - 1
+            }
+        };
+        chunks[slot].push(index);
+    }
+
+    let workers = std::thread::available_parallelism()
+        .map_or(1, usize::from)
+        .min(chunks.len())
+        .max(1);
+    let next = AtomicUsize::new(0);
+    let outcomes = Mutex::new(Vec::with_capacity(chunks.len()));
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| {
+                loop {
+                    let chunk = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(indices) = chunks.get(chunk) else {
+                        break;
+                    };
+                    let result = run_strip_chunk(spec, cancel_check.clone(), jobs, indices);
+                    let mut done = outcomes.lock().unwrap_or_else(|poison| poison.into_inner());
+                    done.push((chunk, result));
+                }
+            });
+        }
+    });
+    // The earliest failing chunk is the error, whatever order they ran in.
+    let mut outcomes = outcomes
+        .into_inner()
+        .unwrap_or_else(|poison| poison.into_inner());
+    outcomes.sort_by_key(|(chunk, _)| *chunk);
+    if let Some((_, Err(error))) = outcomes.into_iter().find(|(_, result)| result.is_err()) {
+        return Err(error);
+    }
+
+    let mut saved = Vec::with_capacity(jobs.len());
+    for job in jobs {
+        let after = std_fs::metadata(&job.path)
+            .map_err(|error| {
+                format!(
+                    "failed to read stripped assembly file '{}': {error}",
+                    job.path.display()
+                )
+            })?
+            .len();
+        saved.push((job.group, job.before.saturating_sub(after)));
+    }
+    Ok(saved)
+}
+
+/// One strip run over the files of `indices`, which share a tool and a flag.
+fn run_strip_chunk(
+    spec: &ResolvedBuildSpec,
+    cancel_check: Option<gaia_process::ProcessCancelCheck>,
+    jobs: &[StripJob],
+    indices: &[usize],
+) -> Result<(), AssemblyError> {
+    let first = &jobs[indices[0]];
+    let mut command = Command::new(&first.tool.program);
+    command.arg(first.flag);
+    for index in indices {
+        command.arg(&jobs[*index].path);
+    }
+    let output = run_command_capture_tail(
+        spec,
+        &mut command,
+        process_output_retention(spec),
+        cancel_check,
+    )?;
+    if !output.status.success() {
+        return Err(format!(
+            "strip of {} file(s) starting at '{}' with '{}' failed: {}",
+            indices.len(),
+            first.path.display(),
+            first.tool.display,
+            output.failure_context(&command)
+        )
+        .into());
+    }
+    Ok(())
 }
 
 /// The strip tool for an ELF `machine` when none is configured.

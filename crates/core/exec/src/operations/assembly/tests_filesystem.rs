@@ -65,6 +65,7 @@ fn cpio_zstd_assembly(work_dir: &str, output: &str, publish: bool) -> ImageAssem
             journal: None,
             compressed: Default::default(),
             fat_size: None,
+            reserved_percent: None,
         }],
         ..ImageAssemblySpec::default()
     }
@@ -372,6 +373,7 @@ fn vfat_auto_size_builds_an_image_that_holds_the_tree() {
             journal: None,
             compressed: Default::default(),
             fat_size: None,
+            reserved_percent: None,
         }],
         ..ImageAssemblySpec::default()
     });
@@ -434,6 +436,15 @@ fn build_vfat(
     size: &str,
     fat_size: Option<u32>,
 ) -> Result<std::path::PathBuf, String> {
+    build_vfat_with(root, size, fat_size, false)
+}
+
+fn build_vfat_with(
+    root: &std::path::Path,
+    size: &str,
+    fat_size: Option<u32>,
+    deterministic: bool,
+) -> Result<std::path::PathBuf, String> {
     fs::create_dir_all(root).expect("test root");
     write_assets(root);
     let mut spec = test_spec(root);
@@ -466,7 +477,7 @@ fn build_vfat(
             source_tree: "boot".into(),
             output: "$assembly.work/boot.vfat".into(),
             size: Some(size.into()),
-            deterministic: false,
+            deterministic,
             compression_level: None,
             publish: false,
             label: None,
@@ -474,12 +485,35 @@ fn build_vfat(
             journal: None,
             compressed: Default::default(),
             fat_size,
+            reserved_percent: None,
         }],
         ..ImageAssemblySpec::default()
     });
     stage_image_assembly_with(&spec, &OperationId::image_assembly(), None, disk_env_panic)
         .map(|_| root.join("build/assembly/boot.vfat"))
         .map_err(|error| error.message)
+}
+
+#[test]
+fn deterministic_vfat_images_are_the_same_on_every_run() {
+    let scratch = TempDir::new("gaia-exec-test");
+    if !tool_runs("mformat") || !tool_runs("mcopy") {
+        return;
+    }
+    let first = build_vfat_with(&scratch.join("first"), "8M", None, true).expect("first run");
+    // Pause past a second boundary: a run that stamped the copy time would differ.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let second = build_vfat_with(&scratch.join("second"), "8M", None, true).expect("second run");
+    let bytes = fs::read(&first).expect("first image");
+    assert_eq!(bytes, fs::read(&second).expect("second image"));
+    // The FAT12/16 boot sector holds the volume serial at offset 39, little
+    // endian: the one derived from the filesystem id.
+    let serial = vfat_volume_serial("boot");
+    let stored = format!(
+        "{:02X}{:02X}{:02X}{:02X}",
+        bytes[42], bytes[41], bytes[40], bytes[39]
+    );
+    assert_eq!(stored, serial);
 }
 
 #[test]

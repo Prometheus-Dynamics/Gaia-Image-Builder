@@ -76,14 +76,20 @@ impl PlacementEnv {
 /// The decision for one assembly run.
 #[derive(Debug)]
 pub(super) enum AssemblyPlacement {
-    Disk { messages: Vec<String> },
+    Disk {
+        messages: Vec<String>,
+    },
     Ram(Box<RamPlacement>),
+    /// RAM was asked for and the RAM base cannot be trusted: the run stops.
+    Refused(String),
 }
 
 #[derive(Debug)]
 pub(super) struct RamPlacement {
     /// `<base>/gaia-<user>/<hash>/assembly`, removed when the run ends.
     pub(super) root: PathBuf,
+    /// `<base>/gaia-<user>`: the stale work dirs of earlier runs live here.
+    pub(super) user_dir: PathBuf,
     /// The spec with every path absolute, the intermediates in RAM.
     pub(super) assembly: ImageAssemblySpec,
     /// The same paths as [`AssemblyRoots`] for `assembly`.
@@ -110,8 +116,14 @@ pub(super) fn decide_placement(
             messages: Vec::new(),
         };
     }
-    match ram_placement(spec, assembly, disk_roots, &env()) {
-        Ok(ram) => AssemblyPlacement::Ram(Box::new(ram)),
+    let env = env();
+    match ram_placement(spec, assembly, disk_roots, &env) {
+        // The RAM base is shared (a world-writable tmpfs): only a directory
+        // this user owns is used, and a foreign or linked one stops the build.
+        Ok(ram) => match check_ram_user_dir(&env.ram_base, &env.user) {
+            Ok(()) => AssemblyPlacement::Ram(Box::new(ram)),
+            Err(reason) => AssemblyPlacement::Refused(reason),
+        },
         Err(reason) => AssemblyPlacement::Disk {
             messages: vec![format!(
                 "assembly work dir falls back to disk: {reason}; building on disk"
@@ -183,6 +195,7 @@ fn ram_placement(
     )];
     Ok(RamPlacement {
         root,
+        user_dir: env.ram_base.join(format!("gaia-{}", env.user)),
         assembly: rewritten,
         roots,
         disk_publish: plan.disk_publish,

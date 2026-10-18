@@ -498,3 +498,83 @@ fn retained_stream_keeps_newest_lines_and_bytes() {
     assert!(disabled.take_lines().is_empty());
     assert!(disabled.take_bytes().is_empty());
 }
+
+#[test]
+fn zero_retention_drains_a_chatty_command_and_keeps_nothing() {
+    let result = run_command_with_timeout_and_retention(
+        Command::new("sh")
+            .arg("-c")
+            .arg("seq 1 50000; seq 1 50000 >&2"),
+        Duration::from_secs(20),
+        "zero-retention-test",
+        ProcessOutputRetention {
+            stdout_bytes: 0,
+            stderr_bytes: 0,
+            stdout_lines: 0,
+            stderr_lines: 0,
+        },
+        None,
+        None,
+    )
+    .expect("command should complete");
+
+    assert!(result.output.status.success());
+    assert!(result.output.stdout.is_empty());
+    assert!(result.output.stderr.is_empty());
+    assert!(result.stdout_lines.is_empty());
+    assert!(result.stderr_lines.is_empty());
+}
+
+#[test]
+fn log_sink_sees_every_line_while_retention_keeps_the_newest() {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+    let seen = Arc::new(AtomicUsize::new(0));
+    let sink_seen = Arc::clone(&seen);
+    let sink: ProcessLogSink = Arc::new(move |_line: ProcessLogLine| {
+        sink_seen.fetch_add(1, Ordering::SeqCst);
+    });
+    let result = run_command_with_timeout_and_retention(
+        Command::new("sh").arg("-c").arg("seq 1 30000"),
+        Duration::from_secs(20),
+        "sink-and-retention-test",
+        ProcessOutputRetention {
+            stdout_bytes: 0,
+            stderr_bytes: 0,
+            stdout_lines: 3,
+            stderr_lines: 0,
+        },
+        Some(sink),
+        None,
+    )
+    .expect("command should complete");
+
+    assert_eq!(seen.load(Ordering::SeqCst), 30_000);
+    // The newest lines, across the chunks the reader sent them in.
+    assert_eq!(result.stdout_lines, vec!["29998", "29999", "30000"]);
+}
+
+#[test]
+fn a_line_split_across_read_chunks_is_retained_whole() {
+    let long = "x".repeat(20_000);
+    let result = run_command_with_timeout_and_retention(
+        Command::new("sh")
+            .arg("-c")
+            .arg(format!("printf 'a{long}\\nb\\n'")),
+        Duration::from_secs(20),
+        "split-line-test",
+        ProcessOutputRetention {
+            stdout_bytes: 1 << 20,
+            stderr_bytes: 0,
+            stdout_lines: 10,
+            stderr_lines: 0,
+        },
+        None,
+        None,
+    )
+    .expect("command should complete");
+
+    assert_eq!(result.stdout_lines.len(), 2);
+    assert_eq!(result.stdout_lines[0], format!("a{long}"));
+    assert_eq!(result.stdout_lines[1], "b");
+}

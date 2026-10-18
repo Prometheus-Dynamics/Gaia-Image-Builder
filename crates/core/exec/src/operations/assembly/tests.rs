@@ -499,6 +499,7 @@ fn boot_assembly(
             journal: None,
             compressed: Default::default(),
             fat_size: None,
+            reserved_percent: None,
         }],
         ..ImageAssemblySpec::default()
     }
@@ -514,6 +515,7 @@ fn copy_transform(src: &str, dest: &str) -> gaia_spec::AssemblyTransformSpec {
         hash_dest: None,
         data_block_size: None,
         hash_block_size: None,
+        long: false,
         salt: None,
         uuid: None,
     }
@@ -641,6 +643,8 @@ mod tests_filesystem;
 mod tests_generated;
 #[path = "tests_gpt.rs"]
 mod tests_gpt;
+#[path = "tests_schedule.rs"]
+mod tests_schedule;
 
 #[path = "tests_compressed_fs.rs"]
 mod tests_compressed_fs;

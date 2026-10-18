@@ -34,11 +34,10 @@ const EXT4_UUID_DOMAIN: &[u8] = b"gaia ext4 uuid\n";
 /// The image size for `size = "auto"`: the content (each file and directory
 /// rounded up to a block), the inode tables, the fixed overhead and the
 /// journal, plus a margin, rounded up to 1 MiB. It depends only on the
-/// tree's content.
-pub(super) fn ext4_auto_bytes(source_tree: &Path, free: u64) -> Result<u64, String> {
-    let entries = collect_archive_entries(source_tree)?;
+/// tree's content. `entries` is the tree's entry list (one walk per build).
+pub(super) fn ext4_auto_bytes(entries: &[(String, PathBuf)], free: u64) -> Result<u64, String> {
     let mut content = EXT4_BLOCK_BYTES;
-    for (_, path) in &entries {
+    for (_, path) in entries {
         let metadata = std_fs::symlink_metadata(path)
             .map_err(|error| format!("failed to read ext4 source '{}': {error}", path.display()))?;
         content += if metadata.is_file() {
@@ -76,8 +75,11 @@ pub(super) fn execute_ext4_filesystem(
     let debugfs = resolve_assembly_tool(roots, "debugfs")?;
     let tool_path = format!("mkfs.ext4={};debugfs={}", mkfs.display, debugfs.display);
     tracing::Span::current().record("tool_path", tool_path.as_str());
+    // One walk of the tree serves the size, the inode count and the
+    // ownership script.
+    let entries = collect_archive_entries(source_tree)?;
     let bytes = if filesystem.size.as_deref() == Some("auto") {
-        ext4_auto_bytes(source_tree, auto_free_bytes(filesystem)?)?
+        ext4_auto_bytes(&entries, auto_free_bytes(filesystem)?)?
     } else {
         filesystem
             .parsed_size()
@@ -106,6 +108,7 @@ pub(super) fn execute_ext4_filesystem(
         Ext4WriteContext {
             filesystem,
             source_tree,
+            entries: &entries,
             output: &temp,
             script: &script,
             bytes,
@@ -134,6 +137,7 @@ pub(super) fn execute_ext4_filesystem(
 struct Ext4WriteContext<'a> {
     filesystem: &'a gaia_spec::AssemblyFilesystemSpec,
     source_tree: &'a Path,
+    entries: &'a [(String, PathBuf)],
     output: &'a Path,
     script: &'a Path,
     bytes: u64,
@@ -151,6 +155,7 @@ fn write_ext4_image(
     let Ext4WriteContext {
         filesystem,
         source_tree,
+        entries,
         output,
         script,
         bytes,
@@ -174,7 +179,6 @@ fn write_ext4_image(
     })?;
     drop(image);
 
-    let entries = collect_archive_entries(source_tree)?.len();
     let journal_mib = ext4_journal_bytes(bytes) / MIB;
     let mut mkfs_command = Command::new(&mkfs.program);
     mkfs_command
@@ -182,7 +186,11 @@ fn write_ext4_image(
         .args(["-q", "-F", "-t", "ext4", "-b", "4096", "-I"])
         .arg(EXT4_INODE_BYTES.to_string())
         .arg("-N")
-        .arg(ext4_inode_count(entries).to_string())
+        .arg(ext4_inode_count(entries.len()).to_string())
+        // No root reserve unless the spec asks for one: the image is all
+        // usable space, as a read-only initramfs or rootfs wants.
+        .arg("-m")
+        .arg(ext4_reserved_percent(filesystem).to_string())
         .arg("-U")
         .arg(uuid)
         .arg("-E")
@@ -213,7 +221,7 @@ fn write_ext4_image(
         .into());
     }
 
-    let commands = ext4_normalize_script(source_tree)?;
+    let commands = ext4_normalize_script(entries)?;
     std_fs::write(script, commands).map_err(|error| {
         format!(
             "failed to write ext4 normalization script '{}': {error}",
@@ -259,28 +267,61 @@ fn write_ext4_image(
 /// The `debugfs` commands that set every entry of the image to root:root
 /// with fixed times: the root directory, `lost+found` (made by `mke2fs`),
 /// then every entry of the tree.
-pub(super) fn ext4_normalize_script(source_tree: &Path) -> Result<String, String> {
-    let mut paths = vec!["/".to_string(), "/lost+found".to_string()];
-    for (name, _) in collect_archive_entries(source_tree)? {
+pub(super) fn ext4_normalize_script(entries: &[(String, PathBuf)]) -> Result<String, String> {
+    // Built in one buffer: the script of a large tree runs to tens of
+    // thousands of lines.
+    let fields_bytes: usize = NORMALIZE_FIELDS
+        .iter()
+        .map(|(field, value)| "set_inode_field \"\" ".len() + field.len() + value.len() + 2)
+        .sum();
+    let mut script = String::with_capacity(
+        (entries.len() + 2) * (fields_bytes + EXT4_NORMALIZE_PATH_HINT_BYTES),
+    );
+    push_normalize_path(&mut script, "/");
+    push_normalize_path(&mut script, "/lost+found");
+    for (name, _) in entries {
         if name.contains(['"', '\\', '\n', '\r', '\0']) {
             return Err(format!(
                 "ext4 entry '{name}' has a quote, backslash or control character in its name, which debugfs cannot set"
             ));
         }
-        paths.push(format!("/{name}"));
-    }
-    let mut script = String::new();
-    for path in paths {
-        for (field, value) in [
-            ("uid", "0"),
-            ("gid", "0"),
-            ("atime", EXT4_ENTRY_TIME),
-            ("mtime", EXT4_ENTRY_TIME),
-            ("ctime", EXT4_ENTRY_TIME),
-            ("crtime", EXT4_ENTRY_TIME),
-        ] {
-            script.push_str(&format!("set_inode_field \"{path}\" {field} {value}\n"));
-        }
+        push_normalize_fields(&mut script, name);
     }
     Ok(script)
+}
+
+/// The debugfs fields every entry is set to: root:root and the fixed times.
+const NORMALIZE_FIELDS: [(&str, &str); 6] = [
+    ("uid", "0"),
+    ("gid", "0"),
+    ("atime", EXT4_ENTRY_TIME),
+    ("mtime", EXT4_ENTRY_TIME),
+    ("ctime", EXT4_ENTRY_TIME),
+    ("crtime", EXT4_ENTRY_TIME),
+];
+/// A typical entry path, for sizing the script buffer.
+const EXT4_NORMALIZE_PATH_HINT_BYTES: usize = 48;
+
+fn push_normalize_path(script: &mut String, path: &str) {
+    push_normalize_fields(script, path.trim_start_matches('/'));
+}
+
+/// The `set_inode_field` lines for the entry at `/relative` (`relative` has
+/// no leading slash).
+fn push_normalize_fields(script: &mut String, relative: &str) {
+    for (field, value) in NORMALIZE_FIELDS {
+        script.push_str("set_inode_field \"/");
+        script.push_str(relative);
+        script.push_str("\" ");
+        script.push_str(field);
+        script.push(' ');
+        script.push_str(value);
+        script.push('\n');
+    }
+}
+
+/// The reserved-block percentage `mkfs.ext4 -m` gets: the spec's
+/// `reserved_percent`, or none.
+fn ext4_reserved_percent(filesystem: &gaia_spec::AssemblyFilesystemSpec) -> u32 {
+    filesystem.reserved_percent.unwrap_or(0)
 }

@@ -1,5 +1,5 @@
 use super::*;
-use crate::raw_assembly::{RawAssemblyArchiveConfig, RawAssemblyJsonValue};
+use crate::raw_assembly::{RawAssemblyArchiveConfig, RawAssemblyDeviceKind, RawAssemblyJsonValue};
 use gaia_spec::{
     AssemblyArchiveMemberSpec, AssemblyArchiveSpec, AssemblyBinarySpec, AssemblyCompressedFsSpec,
     AssemblyGptDiskSpec, AssemblyGptPartitionSpec, AssemblyJsonValue,
@@ -201,6 +201,7 @@ pub(crate) fn compile_image_assembly(
                 hash_block_size: transform.hash_block_size,
                 salt: transform.salt,
                 uuid: transform.uuid,
+                long: transform.long,
             })
             .collect(),
         filesystems: raw
@@ -230,6 +231,7 @@ pub(crate) fn compile_image_assembly(
                     ztailpacking: filesystem.ztailpacking,
                 },
                 fat_size: filesystem.fat_size,
+                reserved_percent: filesystem.reserved_percent,
             })
             .collect(),
         disks: raw
@@ -310,6 +312,22 @@ pub(crate) fn compile_image_assembly(
                 modules: modules.modules,
                 depmod: modules.depmod.map(Into::into),
                 metadata: modules.metadata,
+            })
+            .collect(),
+        devices: raw
+            .devices
+            .into_iter()
+            .map(|device| AssemblyDeviceSpec {
+                tree: device.tree.into(),
+                path: device.path,
+                kind: match device.kind {
+                    RawAssemblyDeviceKind::Char => AssemblyDeviceKindSpec::Char,
+                    RawAssemblyDeviceKind::Block => AssemblyDeviceKindSpec::Block,
+                    RawAssemblyDeviceKind::Fifo => AssemblyDeviceKindSpec::Fifo,
+                },
+                major: device.major,
+                minor: device.minor,
+                mode: device.mode,
             })
             .collect(),
         strip_tool: raw.strip_tool.map(Into::into),

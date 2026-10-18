@@ -9,6 +9,14 @@ pub(super) struct AssemblyTransformSummary {
     pub(super) tool_version: Option<String>,
 }
 
+/// The zstd level of a `zstd` transform when the spec sets none: the same
+/// as `cpio-zstd`.
+const ZSTD_TRANSFORM_DEFAULT_LEVEL: u32 = 19;
+/// `--long` is only worth its window for inputs past this size.
+const ZSTD_LONG_MIN_INPUT_BYTES: u64 = 128 * 1024 * 1024;
+/// The long-distance window `--long` asks for: 2^27 bytes.
+const ZSTD_LONG_OPTION: &str = "--long=27";
+
 pub(super) fn execute_assembly_transform(
     spec: &ResolvedBuildSpec,
     roots: &AssemblyRoots,
@@ -71,9 +79,9 @@ pub(super) fn execute_assembly_transform(
             compress_to_dest(spec, roots, "gzip", &args, src, dest, cancel_check)
         }
         gaia_spec::AssemblyTransformKindSpec::Zstd => {
-            let level = transform.level.map(|level| format!("-{level}"));
-            let mut args = vec!["-q", "-c", "--no-progress", "-T0"];
-            args.extend(level.as_deref());
+            let input_bytes = std_fs::metadata(&src).map_or(0, |metadata| metadata.len());
+            let args = zstd_transform_args(transform.level, transform.long, input_bytes);
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
             compress_to_dest(spec, roots, "zstd", &args, src, dest, cancel_check)
         }
         gaia_spec::AssemblyTransformKindSpec::Xz => {
@@ -132,6 +140,26 @@ pub(super) fn execute_assembly_transform(
     }
 }
 
+/// The zstd arguments of a `zstd` transform: level 19 unless the spec sets
+/// one, the same default as `cpio-zstd`. The level is fixed, so the output is
+/// the same for any thread count. `--long` only where the window matters and
+/// only when asked (`long = true`): the default output decodes with a stock
+/// `zstd -d`.
+pub(super) fn zstd_transform_args(level: Option<u32>, long: bool, input_bytes: u64) -> Vec<String> {
+    let level = level.unwrap_or(ZSTD_TRANSFORM_DEFAULT_LEVEL);
+    let mut args = vec![
+        "-q".to_string(),
+        "-c".to_string(),
+        "--no-progress".to_string(),
+        "-T0".to_string(),
+        format!("-{level}"),
+    ];
+    if long && level >= ZSTD_TRANSFORM_DEFAULT_LEVEL && input_bytes > ZSTD_LONG_MIN_INPUT_BYTES {
+        args.push(ZSTD_LONG_OPTION.to_string());
+    }
+    args
+}
+
 /// Runs `<tool> <args> <src>` with stdout published to `dest`.
 fn compress_to_dest(
     spec: &ResolvedBuildSpec,
@@ -173,4 +201,33 @@ fn compress_to_dest(
         tool_path: Some(tool.display.clone()),
         tool_version: tool_version(&tool, ["--version"]),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zstd_transform_defaults_to_level_19_and_long_is_opt_in() {
+        let big = ZSTD_LONG_MIN_INPUT_BYTES + 1;
+        assert_eq!(
+            zstd_transform_args(None, false, big),
+            ["-q", "-c", "--no-progress", "-T0", "-19"]
+        );
+        assert_eq!(
+            zstd_transform_args(Some(3), false, big).last().unwrap(),
+            "-3"
+        );
+        // `long = true` adds the window for level 19 over 128 MiB only.
+        assert_eq!(
+            zstd_transform_args(None, true, big).last().unwrap(),
+            "--long=27"
+        );
+        assert!(
+            !zstd_transform_args(None, true, ZSTD_LONG_MIN_INPUT_BYTES)
+                .contains(&ZSTD_LONG_OPTION.to_string())
+        );
+        assert!(!zstd_transform_args(Some(18), true, big).contains(&ZSTD_LONG_OPTION.to_string()));
+        assert!(!zstd_transform_args(Some(19), false, big).contains(&ZSTD_LONG_OPTION.to_string()));
+    }
 }

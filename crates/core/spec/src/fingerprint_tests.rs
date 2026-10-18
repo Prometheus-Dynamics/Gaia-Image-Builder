@@ -225,6 +225,7 @@ fn compressed_and_gpt_options_are_encoded_only_when_set() {
         free: None,
         compressed: Default::default(),
         fat_size: None,
+        reserved_percent: None,
     };
     assert!(!canonical_json(&filesystem).contains("compressed"));
     assert!(!canonical_json(&filesystem).contains("fat_size"));

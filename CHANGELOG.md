@@ -6,6 +6,39 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Assembly: output changes (rebuild the affected images)
+
+These change image bytes, approved for this release. Reuse does not notice a tool or code change, so an image built before this release with an unchanged spec is reused as it is: remove the affected images to get the new bytes.
+
+- **ext4 has no root reserve by default.** `mkfs.ext4` runs with `-m 0`, so the whole image is usable (mke2fs keeps 5%). The new option `reserved_percent` (0-50) restores a reserve. Images that relied on the 5% block reserve must set `reserved_percent = 5`.
+- **Hard links are stored once in cpio archives.** The links of one file share an inode number and link count, and the data goes with the last link, so busybox-style hard links no longer duplicate their data. Inode numbers stay sequential in archive order; a tree without hard links packs to the same bytes as before.
+- **The zstd transform defaults to level 19** (it was zstd's 3), the level `cpio-zstd` already used. `level` still overrides it. `long = true` (zstd only, default `false`) adds `--long=27` for level 19 and up over 128 MiB; a stream written that way decodes only with `zstd -d --long=27`, which is why it is opt-in.
+- **Deterministic vfat images are reproducible.** `deterministic = true` (the default) now fixes the volume serial (`mformat -N`, from the filesystem id), gives every entry the modification time 1980-01-01 00:00 UTC (`mcopy -m` from a staging tree), and runs mtools with `TZ=UTC`. Before, the serial and the copy times changed on every run, so the image never repeated.
+
+### Assembly: concurrent steps, cpio and tar
+
+- **Independent assembly steps run concurrently.** The steps run on a worker pool (one per core) in dependency order: the writers of a tree run one after another, and a step that reads or writes a path another step uses waits for it. The state, messages and outputs are recorded in step order, so a run is the same as a serial one; the first failing step in step order decides the error, and the steps after it do not start. Measured on a synthetic assembly (six 40 MB files in three trees, two `cpio-gzip` filesystems and three `gzip` transforms, 24 cores): 19.9 s serial, 8.9 s concurrent, with the same state and messages.
+- **cpio streams into the compressor.** `cpio-gzip` and `cpio-zstd` pipe the archive into the compressor's stdin instead of a full temporary cpio, and `zstd` gets `--stream-size` so its output is the file-input output. The archive is written through a buffered writer, and its size is planned from metadata first. `cpio-xz` keeps the temporary file: its proven-bootable command is unchanged. The output bytes of `cpio-gzip` and `cpio-zstd` are unchanged (checked against the file-input output in a test).
+- **Device nodes and FIFOs in cpio.** A char, block or fifo entry in the tree is written with its mode and device numbers (it errored before). `[[image.assembly.devices]]` adds nodes the tree does not have, e.g. `dev/console` (char 5:1, mode `0600`) for an unprivileged build; missing parent directories are added. Validated: the tree, the path, the device numbers for the kind, and the mode.
+- **Long tar member names and link targets.** The ustar `prefix` field holds a name that splits at a `/`; other long names, and long link targets, use PAX `path` and `linkpath` records. Member names may be up to 4096 bytes (100 before). `tar -tf` lists a 250-character path as written.
+- **strip runs in batches.** ELF files are planned from their headers (read by seeking, not read whole), and the planned files are stripped in chunks of up to 64 per strip run, the chunks in parallel. The totals and the output are the same.
+- **verity reads its report regardless of `output_retention`.** The root hash is read from a fixed retention for the tool report, so a small `output_retention` cannot break a verity build.
+
+### Assembly: RAM work dirs are checked
+
+- Before a RAM run starts, `/dev/shm/gaia-<user>/<hash>` dirs of dead runs are removed: older than 24 hours, and their owner pid is gone, their build dir no longer exists, or they have no owner record. Each run now records its owner (`owner`: pid, start time, build dir) in its `<hash>` dir.
+- `/dev/shm/gaia-<user>` must be a real directory owned by the current user (created with mode 0700 when missing). A symbolic link, a non-directory, or a directory another user owns stops the build with an error; the tmpfs is shared, so such a directory is not used.
+
+### Process: less work per output chunk
+
+- A command's output is read into chunks the drain keeps: with `output_retention` at 0, nothing is copied or split into lines, so a chatty command costs the reader thread a read per chunk. Retained lines are sent one message per chunk, not one per line, and a line is split with a slice search, not per byte.
+- The run loop wakes on output (at most every 100 ms when the child is quiet, so cancel and timeout still answer within 100 ms) instead of every 10 ms, and polls for the exit every millisecond only once the pipes have closed.
+- Measured with `yes | head -c N` (process CPU, read from `/proc`): 20 MB with zero retention went from 8.2 s CPU and 268 s wall to 0.07 s CPU for 200 MB (12 s wall, the pipeline itself). With the default retention, 20 MB went from 8.8 s CPU and 181 s wall to 3 s CPU per 20 MB (30 s for 200 MB, 428 s wall): the default retention still keeps every line, which is the remaining cost.
+
+### Assembly: ext4 walks the tree once
+
+- An ext4 image walks its tree once: the size, the inode count and the ownership script share one entry list (three walks before), and the debugfs script is written in one buffer without a `format!` per field. The script's lines are the same as before.
+
 ### Git sources: faster materialization
 
 - **Upgrading rebuilds the dependents of each git source once.** A git source's recorded `materialized_tree_digest` is now a git tree id (`git-tree:<id>`) for a clean checkout, not a hash of every file, so the state the dependents read changes form.- A git source's checkout is updated in place on each run instead of being deleted and cloned again. The checkout is made to match its commit: tracked files reset, untracked and ignored files removed, `.gaia` state kept, and any failure (another origin, a damaged `.git`, a commit that will not check out) falls back to a fresh clone. Measured on a 727-file local repository, an unchanged source went from about 0.30 s to 0.02 to 0.09 s and a locked source from 0.28 s to 0.02 s; a new commit went from 0.30 s to 0.06 s.

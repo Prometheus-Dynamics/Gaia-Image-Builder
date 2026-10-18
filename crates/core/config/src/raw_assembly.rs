@@ -18,6 +18,7 @@ pub struct RawImageAssemblyConfig {
     pub busybox_initramfs: Vec<RawAssemblyBusyboxInitramfsConfig>,
     pub binaries: Vec<RawAssemblyBinaryConfig>,
     pub kernel_modules: Vec<RawAssemblyKernelModulesConfig>,
+    pub devices: Vec<RawAssemblyDeviceConfig>,
     /// The `strip` program for `strip = true` entries: a program name
     /// (looked up like other assembly tools) or a path. Unset searches the
     /// provider's tools, then the host.
@@ -40,6 +41,32 @@ pub struct RawAssemblyDirConfig {
     pub tree: String,
     pub path: String,
     pub mode: Option<String>,
+}
+
+/// `[[image.assembly.devices]]`: a device node or FIFO added to the cpio
+/// archive of `tree`, e.g. `path = "dev/console"`, `kind = "char"`,
+/// `major = 5`, `minor = 1`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawAssemblyDeviceConfig {
+    pub tree: String,
+    pub path: String,
+    pub kind: RawAssemblyDeviceKind,
+    /// `char` and `block` only: the major device number.
+    pub major: Option<u32>,
+    /// `char` and `block` only: the minor device number.
+    pub minor: Option<u32>,
+    /// Permission bits in octal, e.g. `"0600"` (the default).
+    pub mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum RawAssemblyDeviceKind {
+    #[default]
+    Char,
+    Block,
+    Fifo,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -96,6 +123,10 @@ pub struct RawAssemblyTransformConfig {
     pub salt: Option<String>,
     /// `verity` only: superblock UUID; unset derives it from the data image.
     pub uuid: Option<String>,
+    /// `zstd` only: long-distance matching (2^27-byte window) for level 19
+    /// and up over inputs above 128 MiB. Default false: the output decodes
+    /// with a stock `zstd -d`.
+    pub long: bool,
 }
 
 impl Default for RawAssemblyTransformConfig {
@@ -111,6 +142,7 @@ impl Default for RawAssemblyTransformConfig {
             hash_block_size: None,
             salt: None,
             uuid: None,
+            long: false,
         }
     }
 }
@@ -165,6 +197,9 @@ pub struct RawAssemblyFilesystemConfig {
     pub free: Option<String>,
     /// `vfat` only: the FAT type, 12, 16 or 32.
     pub fat_size: Option<u32>,
+    /// `ext4` only: the percentage of blocks reserved for root (0-50). Unset
+    /// is 0, the whole image usable.
+    pub reserved_percent: Option<u32>,
 }
 
 impl Default for RawAssemblyFilesystemConfig {
@@ -188,6 +223,7 @@ impl Default for RawAssemblyFilesystemConfig {
             uuid: None,
             journal: None,
             fat_size: None,
+            reserved_percent: None,
             free: None,
         }
     }

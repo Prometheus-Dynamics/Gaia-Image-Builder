@@ -14,6 +14,17 @@ use std::collections::BTreeMap;
 /// Length of a sha256 root hash in hex.
 const ROOT_HASH_HEX_LEN: usize = 64;
 
+/// What `veritysetup format` keeps of its report. The root hash and block
+/// count are read from the stdout tail, so this retention is fixed rather
+/// than the user's `output_retention`: a small setting must not drop them.
+const VERITY_REPORT_RETENTION: gaia_process::ProcessOutputRetention =
+    gaia_process::ProcessOutputRetention {
+        stdout_bytes: 64 * 1024,
+        stderr_bytes: 64 * 1024,
+        stdout_lines: 256,
+        stderr_lines: 256,
+    };
+
 /// What one verity transform wrote, and the values to open it with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct VerityOutput {
@@ -160,7 +171,7 @@ pub(super) fn execute_assembly_verity(
         let output = run_command_capture_tail(
             spec,
             &mut command,
-            process_output_retention(spec),
+            VERITY_REPORT_RETENTION,
             cancel_check.clone(),
         )?;
         if !output.status.success() {

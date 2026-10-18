@@ -32,6 +32,7 @@ fn roots_for(root: &Path) -> (ResolvedBuildSpec, AssemblyRoots) {
             journal: None,
             compressed: Default::default(),
             fat_size: None,
+            reserved_percent: None,
         }],
         ..ImageAssemblySpec::default()
     });
@@ -282,6 +283,97 @@ fn sparse_copy_writes_the_same_bytes() {
         std::fs::metadata(&copied).expect("meta").len(),
         SPARSE_CHUNK as u64 + 10
     );
+}
+
+#[test]
+fn a_linked_ram_user_dir_refuses_the_run_and_a_new_one_is_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let scratch = TempDir::new("gaia-placement-owner");
+    let root = scratch.join("root");
+    let (spec, roots) = roots_for(&root);
+    let assembly = spec.image.assembly.clone().expect("assembly");
+    let base = root.join("ram");
+    std::fs::create_dir_all(&base).expect("base");
+    let elsewhere = root.join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).expect("elsewhere");
+    std::os::unix::fs::symlink(&elsewhere, base.join("gaia-tester")).expect("link");
+    let refused = decide_placement(&spec, &assembly, &roots, || {
+        env(&base, Some(64 * GIB), Some(64 * GIB))
+    });
+    let AssemblyPlacement::Refused(reason) = refused else {
+        panic!("expected a refusal, got {refused:?}");
+    };
+    assert!(reason.contains("symbolic link"), "{reason}");
+
+    // A missing user dir is created private, and the run uses it.
+    let fresh_base = root.join("ram-fresh");
+    std::fs::create_dir_all(&fresh_base).expect("fresh base");
+    let placed = decide_placement(&spec, &assembly, &roots, || {
+        env(&fresh_base, Some(64 * GIB), Some(64 * GIB))
+    });
+    assert!(matches!(placed, AssemblyPlacement::Ram(_)), "{placed:?}");
+    let mode = std::fs::metadata(fresh_base.join("gaia-tester"))
+        .expect("user dir")
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o700);
+}
+
+#[test]
+fn stale_ram_work_dirs_are_swept_and_live_or_recent_ones_kept() {
+    let scratch = TempDir::new("gaia-placement-sweep");
+    let user_dir = scratch.join("gaia-tester");
+    let build = scratch.join("build");
+    std::fs::create_dir_all(&build).expect("build dir");
+    let marker = |dir: &Path, text: String| {
+        std::fs::create_dir_all(dir).expect("dir");
+        std::fs::write(dir.join("owner"), text).expect("owner");
+    };
+    let long_ago = 1_000;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    let keep = user_dir.join("keep");
+    std::fs::create_dir_all(&keep).expect("keep");
+    // Owner pid gone and its build dir too: removed.
+    marker(
+        &user_dir.join("dead"),
+        format!("pid=4294967294\nstarted={long_ago}\nbuild_dir=/nonexistent/build\n"),
+    );
+    // Owner gone, but its build dir is there: still a dead run, removed.
+    marker(
+        &user_dir.join("dead-with-build"),
+        format!(
+            "pid=4294967294\nstarted={long_ago}\nbuild_dir={}\n",
+            build.display()
+        ),
+    );
+    // Old but its owner is this process: kept.
+    marker(
+        &user_dir.join("live"),
+        format!(
+            "pid={}\nstarted={long_ago}\nbuild_dir={}\n",
+            std::process::id(),
+            build.display()
+        ),
+    );
+    // Owner gone but started just now: kept, a run may be starting.
+    marker(
+        &user_dir.join("recent"),
+        format!("pid=4294967294\nstarted={now}\nbuild_dir=/nonexistent/build\n"),
+    );
+    // A stray file is never a work dir.
+    std::fs::write(user_dir.join("stray"), "x").expect("stray");
+
+    sweep_stale_ram_dirs(&user_dir, &keep);
+
+    assert!(!user_dir.join("dead").exists());
+    assert!(!user_dir.join("dead-with-build").exists());
+    assert!(user_dir.join("live").exists());
+    assert!(user_dir.join("recent").exists());
+    assert!(keep.exists());
+    assert!(user_dir.join("stray").exists());
 }
 
 #[test]

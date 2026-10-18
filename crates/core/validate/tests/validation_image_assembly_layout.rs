@@ -249,7 +249,7 @@ output = ""
 }
 
 #[test]
-fn long_archive_member_names_are_rejected() {
+fn archive_member_names_past_4096_bytes_are_rejected() {
     let codes = assembly_codes(&format!(
         r#"
 build_name = "long-name"
@@ -271,7 +271,7 @@ output = "$provider.images/bundle.tar"
 name = "{}"
 src = "$provider.images/a.img"
 "#,
-        "n".repeat(101)
+        "n".repeat(4097)
     ));
     assert_eq!(codes, vec!["assembly_archive_member_name_invalid"]);
 }

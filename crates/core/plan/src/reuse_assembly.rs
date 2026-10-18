@@ -465,6 +465,7 @@ mod tests {
                 journal: None,
                 compressed: Default::default(),
                 fat_size: None,
+                reserved_percent: None,
             }],
             ..ImageAssemblySpec::default()
         });
