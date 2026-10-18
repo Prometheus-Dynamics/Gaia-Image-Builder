@@ -177,4 +177,3 @@ fn copy_support_file(
     }
     Ok(())
 }
-
