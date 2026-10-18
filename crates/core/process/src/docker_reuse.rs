@@ -99,6 +99,7 @@ mod tests {
             mounts: Vec::new(),
             extra_env: vec![("EXTRA".into(), "1".into())],
             map_workspace_user: false,
+            pull_never: false,
         };
         let mut command = Command::new("make");
         command.arg("-j4").env("MAKEFLAGS", "");
@@ -163,6 +164,9 @@ fn start_reused_container(
         .arg("--rm")
         .arg("--init")
         .args(user);
+    if spec.pull_never {
+        run.arg("--pull=never");
+    }
     for (mount, read_only) in mounts {
         let suffix = if *read_only { ":ro" } else { "" };
         run.arg("-v")

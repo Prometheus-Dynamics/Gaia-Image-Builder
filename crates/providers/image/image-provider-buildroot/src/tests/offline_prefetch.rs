@@ -29,6 +29,7 @@ fn image() -> ImageSpec {
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec::default(),
         assembly: None,
+        signing: None,
     }
 }
 
