@@ -378,7 +378,10 @@ pub fn plan_build_operations(
     // the final image; otherwise Build alone does the work once. A build with
     // variants always prepares: the Buildroot base is then one operation all
     // variants share, whichever of them build against it.
+    // A prefetch (`gaia prefetch`) plans the base alone: its download step is
+    // the prepare operation.
     let prepare_needed = !spec.selection.variants.is_empty()
+        || spec.policy.execution.prefetch
         || spec
             .artifacts
             .iter()

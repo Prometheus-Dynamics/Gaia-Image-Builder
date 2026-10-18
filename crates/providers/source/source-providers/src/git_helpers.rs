@@ -113,6 +113,9 @@ pub(crate) enum MirrorRefresh<'a> {
     /// Fetch every time, because the wanted ref may have moved. A failed
     /// fetch is an error, so nothing is resolved from a stale mirror.
     Always,
+    /// Never fetch (offline): the mirror as it is, and an error when there is
+    /// none.
+    Never,
 }
 
 /// Runs `fetch` for an existing mirror as `refresh` asks. It returns without
@@ -140,6 +143,7 @@ where
             Ok(())
         }
         MirrorRefresh::Always => fetch(),
+        MirrorRefresh::Never => Ok(()),
     }
 }
 
@@ -176,6 +180,13 @@ pub(crate) fn ensure_remote_git_cache(
             run.run(fetch, "refresh remote git source cache")
         })?;
         return Ok(mirror_dir);
+    }
+    if refresh == MirrorRefresh::Never {
+        return Err(SourceProviderError::backend_command(format!(
+            "offline: no git mirror of '{}' in '{}'; run 'gaia prefetch' (or 'gaia run --prefetch') online first",
+            redact_url_userinfo(&git.repo),
+            mirror_dir.display()
+        )));
     }
     let mut clone = git_command();
     clone

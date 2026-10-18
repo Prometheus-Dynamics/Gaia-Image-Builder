@@ -482,6 +482,60 @@ operations (`policy.failure.rollback_completed`), the comment says those run
 again instead. Secret values in `--env` and `--set` are masked as the report
 shows them (`***`); the line then says to enter them again.
 
+### `prefetch`
+
+`gaia prefetch <build.toml>` (the same as `gaia run <build.toml> --prefetch`)
+downloads what a build needs and stops before anything is built:
+
+- every source is materialized: git mirrors and checkouts, archives and
+  downloads, as a run would fetch them;
+- for Buildroot, the tree is configured exactly as a run configures it
+  (defconfig, fragments, `config_overrides`, the cache settings), then
+  `make source` downloads the source of every enabled package into the
+  download cache (`BR2_DL_DIR`). Nothing is extracted, built or installed, and
+  no image is written.
+
+The output names the source files the run added, and the size of the download
+cache. `--json` works as for `run`. A prefetch with `--offline`, `--only`,
+`--rebuild`, `--rebuild-package`, `--export` or `--dry-run` is a usage error,
+and so is a build with `[[variants]]`. A prefetch records no reuse state: the
+next run plans its operations again as usual, and the Buildroot base is built
+then, never taken from the prefetch.
+
+Prefetch does not yet fetch the git dependencies of cargo artifacts
+(`cargo_git_sources`): the first artifact build does that, so an offline build
+of such an artifact needs that build to have run once online.
+
+### Offline builds
+
+`gaia run <build.toml> --offline` (or `[execution] offline = true` in the
+build config) builds without network access. Each provider then uses only
+what is already local:
+
+- Buildroot: `BR2_PRIMARY_SITE` is the download cache (a `file://` URL),
+  `BR2_PRIMARY_SITE_ONLY=y` and `BR2_BACKUP_SITE` is empty, so a source missing
+  from the cache fails the make instead of reaching the network. The failure
+  names the package and suggests `gaia prefetch`. These settings say only where
+  files come from: they do not change the Buildroot output fingerprint or the
+  package cache keys, so an offline build reuses what an online one built.
+  Turning offline on or off reruns the configuration steps once.
+- Git sources: a remote checkout comes from the cached mirror. No `ls-remote`
+  and no fetch run. A floating branch or tag resolves to the commit the mirror
+  holds as of its last fetch; a locked or `rev` commit the mirror lacks is an
+  error that names it. A remote source with no mirror is an error. Plan-time
+  ref resolution and the opt-in `dynamic_inputs` git lookups are skipped
+  offline, so use a `gaia lock` or prefetch a build online before going offline.
+- Cargo artifacts: `CARGO_NET_OFFLINE=true`, so cargo uses only the registry and
+  git caches already on the machine.
+- Docker: the execution image is run with `--pull=never`, so a missing image
+  fails the run instead of being pulled. Docker-backed Buildroot, starting-point
+  and source commands are not yet covered by this flag.
+
+To prepare an offline build, run `gaia prefetch <build.toml>` on a connected
+machine, then `gaia run <build.toml> --offline` on the offline one, with the
+same workspace and cache directories (see `docs/configuration.md`, Download
+Cache).
+
 ### `cache`
 
 `gaia cache` lists, prunes and clears the Buildroot package cache (see

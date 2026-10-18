@@ -42,6 +42,7 @@ pub(super) enum KnownOverrideKey {
     ProvenanceIdentityChannel,
     PolicyFailureRollbackOnError,
     ExecutionJobs,
+    ExecutionOffline,
     ExecutionDockerEnabled,
     ExecutionDockerImage,
     ExecutionOutputRetentionStdoutBytes,
@@ -200,6 +201,9 @@ impl<'a> OverrideKey<'a> {
             }
             "execution.jobs" | "policy.execution.jobs" => {
                 Self::Known(KnownOverrideKey::ExecutionJobs)
+            }
+            "execution.offline" | "policy.execution.offline" => {
+                Self::Known(KnownOverrideKey::ExecutionOffline)
             }
             "execution.docker.enabled" | "policy.execution.docker.enabled" => {
                 Self::Known(KnownOverrideKey::ExecutionDockerEnabled)

@@ -39,6 +39,12 @@ pub struct AppArgs {
     pub json: bool,
     /// `--ci` for run: CI log output (also when `CI` is set).
     pub ci: bool,
+    /// `--offline` for run, preview, plan and prefetch: no network (the same
+    /// as `--set execution.offline=true`).
+    pub offline: bool,
+    /// `--prefetch` for run, or the `prefetch` command: download what the
+    /// build needs and stop before any artifact build, install or image build.
+    pub prefetch: bool,
     /// `--fail-on-clean` for preview: exit 3 when a run would clean or delete.
     pub fail_on_clean: bool,
     /// `--export <dir>` for run: copy the primary image output there after a
@@ -109,6 +115,7 @@ impl AppArgs {
             ..Self::default()
         };
 
+        let prefetch_word = args.peek().is_some_and(|word| word == "prefetch");
         let command = match args.peek().map(String::as_str) {
             Some("-h" | "--help" | "help") => Some(AppCommand::Help),
             Some("-V" | "--version" | "version") => Some(AppCommand::Version),
@@ -126,6 +133,7 @@ impl AppArgs {
             Some("status") => Some(AppCommand::Status),
             Some("lock") => Some(AppCommand::Lock),
             Some("run") => Some(AppCommand::Run),
+            Some("prefetch") => Some(AppCommand::Run),
             _ => None,
         };
         if let Some(command) = command {
@@ -223,6 +231,8 @@ impl AppArgs {
                 "--follow" | "-f" => parsed.follow = true,
                 "--json" => parsed.json = true,
                 "--ci" => parsed.ci = true,
+                "--offline" => parsed.offline = true,
+                "--prefetch" => parsed.prefetch = true,
                 "--fail-on-clean" => parsed.fail_on_clean = true,
                 "--export" => parsed.export_dir = value("--export", &mut parsed.usage_errors),
                 "--no-export" => parsed.no_export = true,
@@ -281,6 +291,9 @@ impl AppArgs {
         if !parsed.build_explicit {
             parsed.build = default_build_config();
         }
+        if prefetch_word {
+            parsed.prefetch = true;
+        }
         if parsed.export_dir.is_some() && parsed.no_export {
             parsed
                 .usage_errors
@@ -315,6 +328,8 @@ impl Default for AppArgs {
             follow: false,
             json: false,
             ci: false,
+            offline: false,
+            prefetch: false,
             fail_on_clean: false,
             export_dir: None,
             no_export: false,
@@ -508,6 +523,35 @@ mod tests {
         assert_eq!(args.rebuild_packages, ["libfoo", "bar", "baz"]);
         let missing = parse(&["plan", "build.toml", "--rebuild"]);
         assert_eq!(missing.usage_errors, ["--rebuild requires a value"]);
+    }
+
+    #[test]
+    fn prefetch_command_and_flags_parse() {
+        let prefetch = parse(&["prefetch", "build.toml"]);
+        assert_eq!(prefetch.command, AppCommand::Run);
+        assert!(prefetch.prefetch && !prefetch.offline);
+        assert_eq!(prefetch.build, "build.toml");
+        assert!(
+            prefetch.usage_errors.is_empty(),
+            "{:?}",
+            prefetch.usage_errors
+        );
+
+        let flag = parse(&["run", "build.toml", "--prefetch"]);
+        assert_eq!(flag.command, AppCommand::Run);
+        assert!(flag.prefetch);
+        assert!(flag.usage_errors.is_empty(), "{:?}", flag.usage_errors);
+
+        let offline = parse(&["run", "build.toml", "--offline"]);
+        assert!(offline.offline && !offline.prefetch);
+        assert!(
+            offline.usage_errors.is_empty(),
+            "{:?}",
+            offline.usage_errors
+        );
+
+        let plain = parse(&["run", "build.toml"]);
+        assert!(!plain.prefetch && !plain.offline);
     }
 
     #[test]

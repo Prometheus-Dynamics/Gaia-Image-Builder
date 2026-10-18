@@ -162,6 +162,8 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
         },
         execution: ExecutionPolicySpec {
             jobs: raw.execution.jobs,
+            offline: raw.execution.offline,
+            prefetch: false,
             docker: compile_docker_execution(&raw.execution, raw.providers.docker.reuse_container),
             output_retention: compile_output_retention(&raw.execution.output_retention),
         },

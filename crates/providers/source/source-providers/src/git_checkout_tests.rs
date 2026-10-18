@@ -10,7 +10,7 @@ use std::cell::Cell;
 
 /// A build whose workspace is the scratch dir holding `build_dir`, so the
 /// git mirror cache lands in scratch too.
-fn spec_for(build_dir: &Path) -> ResolvedBuildSpec {
+pub(crate) fn spec_for(build_dir: &Path) -> ResolvedBuildSpec {
     let mut spec = ResolvedBuildSpec::new("test");
     spec.workspace = WorkspaceSpec {
         root_dir: build_dir
@@ -26,7 +26,7 @@ fn spec_for(build_dir: &Path) -> ResolvedBuildSpec {
     spec
 }
 
-fn git_spec(repo: String, locked: Option<String>) -> GitSourceSpec {
+pub(crate) fn git_spec(repo: String, locked: Option<String>) -> GitSourceSpec {
     GitSourceSpec {
         repo,
         branch: Some("main".into()),
@@ -48,7 +48,7 @@ fn source_for(repo: &Path, locked: Option<String>) -> SourceSpec {
     )
 }
 
-fn git(dir: &Path, args: &[&str]) -> String {
+pub(crate) fn git(dir: &Path, args: &[&str]) -> String {
     let output = std::process::Command::new("git")
         .arg("-C")
         .arg(dir)
@@ -63,7 +63,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-fn init_repo(dir: &Path) {
+pub(crate) fn init_repo(dir: &Path) {
     fs::create_dir_all(dir).expect("repo dir");
     git(dir, &["init", "-q", "-b", "main"]);
     git(dir, &["config", "user.email", "gaia@example.com"]);
@@ -71,7 +71,7 @@ fn init_repo(dir: &Path) {
 }
 
 /// Stages everything (deletions included) and commits; returns the new HEAD.
-fn commit_all(dir: &Path, message: &str) -> String {
+pub(crate) fn commit_all(dir: &Path, message: &str) -> String {
     git(dir, &["add", "-A"]);
     git(dir, &["commit", "-q", "-m", message]);
     git(dir, &["rev-parse", "HEAD"])

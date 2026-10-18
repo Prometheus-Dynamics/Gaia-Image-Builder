@@ -78,7 +78,8 @@ pub(crate) fn applies(spec: &ResolvedBuildSpec, git: &GitSourceSpec) -> bool {
         && git.rev.is_none()
         && git.tag.is_none()
         && (local_repo_path(&git.repo).is_some()
-            || spec.policy.providers.git.allow_remote_resolution)
+            || (spec.policy.providers.git.allow_remote_resolution
+                && !spec.policy.execution.offline))
         && (git.git_backend != GitBackendSpec::Execution || spec.policy.execution.docker.is_none())
 }
 

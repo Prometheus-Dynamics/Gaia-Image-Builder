@@ -364,6 +364,9 @@ fn apply_known_override(
             raw.failure.rollback_on_error = Some(parse_bool_override(key, value)?)
         }
         KnownOverrideKey::ExecutionJobs => raw.execution.jobs = parse_u32_override(key, value)?,
+        KnownOverrideKey::ExecutionOffline => {
+            raw.execution.offline = parse_bool_override(key, value)?
+        }
         KnownOverrideKey::ExecutionDockerEnabled => {
             raw.execution.docker.enabled = parse_bool_override(key, value)?
         }

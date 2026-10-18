@@ -155,6 +155,8 @@ mod git_backend_tests;
 mod git_checkout_tests;
 mod git_helpers;
 mod git_import;
+#[cfg(test)]
+mod git_offline_tests;
 mod path;
 mod state;
 #[cfg(test)]

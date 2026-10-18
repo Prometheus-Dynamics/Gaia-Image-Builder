@@ -406,6 +406,23 @@ pub(crate) fn buildroot_cache_overrides(
     if let Some(download_dir) = configured_download_dir(spec, policy)? {
         overrides.push(("BR2_DL_DIR".to_string(), quoted_path_value(&download_dir)?));
     }
+    if spec.policy.execution.offline {
+        // Offline: a package's download can only come from the download
+        // cache. The primary site is that directory (a file:// URL), and no
+        // other site is tried, so a missing file fails the make instead of
+        // reaching the network. Like BR2_DL_DIR these only say where files
+        // come from: they are excluded from the output and package keys.
+        let download_dir = match configured_download_dir(spec, policy)? {
+            Some(dir) => dir,
+            None => default_cache_dir(spec, DEFAULT_BUILDROOT_DOWNLOAD_DIR, "buildroot download")?,
+        };
+        overrides.push((
+            "BR2_PRIMARY_SITE".to_string(),
+            kconfig_string_value(&format!("file://{}", download_dir.display()))?,
+        ));
+        overrides.push(("BR2_PRIMARY_SITE_ONLY".to_string(), "y".to_string()));
+        overrides.push(("BR2_BACKUP_SITE".to_string(), "\"\"".to_string()));
+    }
     if policy.ccache_enabled {
         let ccache_dir = buildroot_ccache_dir(spec, policy)?;
         // Run time only: ccache.conf is read by ccache, never by Buildroot's
@@ -451,7 +468,7 @@ pub(crate) fn buildroot_cache_overrides(
 }
 
 /// Under the user cache root, or the workspace when that is unavailable.
-const DEFAULT_BUILDROOT_DOWNLOAD_DIR: &str = "buildroot/dl";
+pub(crate) const DEFAULT_BUILDROOT_DOWNLOAD_DIR: &str = "buildroot/dl";
 const DEFAULT_BUILDROOT_CCACHE_DIR: &str = gaia_spec::USER_BUILDROOT_CCACHE_DIR;
 const MIB: u64 = 1024 * 1024;
 
@@ -622,7 +639,7 @@ pub(crate) fn apply_buildroot_policy_env(
     Ok(())
 }
 
-fn configured_download_dir(
+pub(crate) fn configured_download_dir(
     spec: &ResolvedBuildSpec,
     policy: &ImageExecutionPolicy,
 ) -> Result<Option<PathBuf>, ImageProviderError> {

@@ -6,6 +6,12 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Offline builds and prefetch
+
+- **`gaia prefetch <build>` and `gaia run --prefetch`** download what a build needs and stop before anything is built. Every source is materialized; for Buildroot the tree is configured as a run configures it, then `make source` fills the download cache. The output names the new source files and the cache size. Prefetch does not yet fetch cargo git dependencies (`cargo_git_sources`): the first artifact build does that.
+- **`gaia run --offline`, or `[execution] offline = true`,** builds without network access. Buildroot takes its sources from the download cache only (`BR2_PRIMARY_SITE` as a `file://` URL, `BR2_PRIMARY_SITE_ONLY=y`, no backup site), and these settings leave the output fingerprint and package cache keys unchanged. A missing download fails the make and names the package and `gaia prefetch`. Git sources check out from the cached mirror with no `ls-remote` or fetch; a commit the mirror lacks is an error. Cargo runs with `CARGO_NET_OFFLINE=true`, and Docker-backed artifacts run with `--pull=never`.
+- Docs: `docs/cli.md` (prefetch, offline builds) and `docs/configuration.md` (`[execution] offline`).
+
 ### Config: locations, kind-checked keys, JSON Schema, fewer loads
 
 - **Config errors name their place.** A parse error or a value of the wrong type reports `file:line:col` (from toml's span). An unknown key reports the line and column of the key, with a did-you-mean among the keys its table takes.

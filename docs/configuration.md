@@ -641,6 +641,13 @@ Output retention controls how much external command output Gaia keeps in memory 
 
 Each value defaults to the shown release default when omitted or set to `0`. The same fields can be set from the CLI with `--set execution.output_retention.<field>=...` or `--set policy.execution.output_retention.<field>=...`.
 
+`offline = true` builds without network access, as `gaia run --offline` does (see `docs/cli.md`, Offline builds). It is a run setting: the build config records what to build, and a run decides whether to reach the network. The default is `false`.
+
+```toml
+[execution]
+offline = true
+```
+
 `jobs` controls Gaia's operation scheduler. It limits how many independent Gaia operations may run at once; it is not forwarded to backend build tools as-is.
 
 Ready operations that can run in parallel start first, in plan order, while an exclusive operation waits. An exclusive operation starts once nothing else runs, and nothing starts beside it. So that it cannot wait forever, once eight starts have passed a waiting operation, Gaia starts nothing new until that operation can run. An operation never runs beside one that holds the same resource (the same destination, output or package directory).

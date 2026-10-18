@@ -47,6 +47,8 @@ const LITERAL_KEYS: &[&str] = &[
     "policy.failure.rollback_on_error",
     "execution.jobs",
     "policy.execution.jobs",
+    "execution.offline",
+    "policy.execution.offline",
     "execution.docker.enabled",
     "policy.execution.docker.enabled",
     "execution.docker.image",

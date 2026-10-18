@@ -238,6 +238,8 @@ pub struct RawCleanProfileConfig {
 #[serde(default)]
 pub struct RawExecutionPolicyConfig {
     pub jobs: u32,
+    /// `offline = true`: no network. See docs/configuration.md (Execution Policy).
+    pub offline: bool,
     pub docker: RawDockerExecutionConfig,
     pub output_retention: RawOutputRetentionPolicyConfig,
 }

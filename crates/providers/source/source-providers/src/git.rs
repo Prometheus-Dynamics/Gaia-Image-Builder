@@ -86,8 +86,12 @@ impl GitSourceProvider {
         // A source that checks out is updated in place (see
         // checkout_git_commit), so its checkout is only emptied when it is
         // not checked out at all.
-        let checks_out =
-            is_local_git_repo(&git.repo) || spec.policy.providers.git.allow_remote_resolution;
+        // Offline, the checkout comes from the mirror (see
+        // resolve_offline_checkout), so a remote source checks out too.
+        let offline = spec.policy.execution.offline;
+        let checks_out = is_local_git_repo(&git.repo)
+            || spec.policy.providers.git.allow_remote_resolution
+            || offline;
         if !checks_out {
             prepare_materialized_dir(&materialized_dir)?;
         }
@@ -138,6 +142,7 @@ impl GitSourceProvider {
             )?;
         } else if let Some(locked_commit) = &git.locked_commit
             && spec.policy.providers.git.allow_remote_resolution
+            && !offline
         {
             // The lockfile names the commit, so the mirror is only fetched
             // when it lacks that commit.
@@ -168,7 +173,7 @@ impl GitSourceProvider {
                     lock_marker(git),
                 ),
             )?;
-        } else if !spec.policy.providers.git.allow_remote_resolution {
+        } else if !spec.policy.providers.git.allow_remote_resolution && !offline {
             let reason = format!(
                 "remote git resolution for '{}' skipped because policy.providers.git.allow_remote_resolution=false",
                 git.repo
@@ -195,7 +200,12 @@ impl GitSourceProvider {
                 ),
             )?;
         } else {
-            match resolve_remote_checkout(git, &run) {
+            let remote = if offline {
+                resolve_offline_checkout(git, &run)
+            } else {
+                resolve_remote_checkout(git, &run)
+            };
+            match remote {
                 Ok(remote) => {
                     checkout_git_commit(
                         git,
@@ -233,6 +243,9 @@ impl GitSourceProvider {
                         ),
                     )?;
                 }
+                // Offline, a failed resolution is the answer: the fallback
+                // below would clone, which is the network.
+                Err(error) if offline => return Err(error),
                 Err(error) => {
                     let has_explicit_ref =
                         git.branch.is_some() || git.tag.is_some() || git.rev.is_some();
@@ -384,6 +397,42 @@ pub(crate) fn resolve_remote_checkout(
             })
         }
     }
+}
+
+/// Offline (`[execution] offline`): what a remote checkout would resolve to,
+/// read from the cached mirror alone. Nothing is fetched and no `ls-remote`
+/// runs. A lock names the commit; a floating ref resolves to where the mirror
+/// has it as of its last fetch. A commit the mirror lacks is an error.
+pub(crate) fn resolve_offline_checkout(
+    git: &GitSourceSpec,
+    run: &GitRun,
+) -> Result<RemoteCheckout, SourceProviderError> {
+    let mirror = ensure_remote_git_cache(git, run, MirrorRefresh::Never)?;
+    let (kind, value) = git_selected_ref(git);
+    let (wanted, ref_name) = match (&git.locked_commit, kind) {
+        (Some(locked), _) => (locked.clone(), value.to_string()),
+        (None, "branch") => (format!("refs/heads/{value}"), format!("refs/heads/{value}")),
+        (None, "tag") => (format!("refs/tags/{value}"), format!("refs/tags/{value}")),
+        (None, "rev") => (value.to_string(), value.to_string()),
+        (None, _) => ("HEAD".to_string(), "HEAD".to_string()),
+    };
+    let commit = resolve_commit_in(&mirror, &wanted).ok_or_else(|| {
+        SourceProviderError::backend_command(format!(
+            "offline: {} is not in the git mirror of '{}' ('{}'); run 'gaia prefetch' (or 'gaia run --prefetch') online first",
+            if git.locked_commit.is_some() {
+                format!("locked commit {wanted}")
+            } else {
+                format!("{kind} '{value}'")
+            },
+            redact_url_userinfo(&git.repo),
+            mirror.display()
+        ))
+    })?;
+    Ok(RemoteCheckout {
+        mirror,
+        refs: format!("{commit}\t{ref_name}\n"),
+        target: commit,
+    })
 }
 
 /// Lockfile details recorded in the source state, empty for unlocked sources

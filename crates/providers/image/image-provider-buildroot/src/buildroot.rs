@@ -96,6 +96,20 @@ pub(crate) fn run_buildroot_with(
     request: BuildrootRunRequest<'_>,
     options: BuildrootMakeOptions<'_>,
 ) -> Result<Vec<String>, ImageProviderError> {
+    if !request.spec.policy.execution.offline {
+        return run_buildroot_steps(request, options);
+    }
+    // Offline, a download the cache lacks fails the make: name the package
+    // whose download it was (see offline.rs).
+    let guard = offline::OfflineDownloadGuard::new(&request)?;
+    let request = guard.request(request);
+    run_buildroot_steps(request, options).map_err(|error| guard.explain(error))
+}
+
+fn run_buildroot_steps(
+    request: BuildrootRunRequest<'_>,
+    options: BuildrootMakeOptions<'_>,
+) -> Result<Vec<String>, ImageProviderError> {
     let BuildrootRunRequest {
         spec,
         image,
@@ -571,6 +585,7 @@ const BUILDROOT_NON_OUTPUT_SETTINGS: &[&str] = &[
     "BR2_JLEVEL",
     "BR2_PRIMARY_SITE",
     "BR2_BACKUP_SITE",
+    "BR2_PRIMARY_SITE_ONLY",
     "BR2_KERNEL_MIRROR",
     "BR2_GNU_MIRROR",
     "BR2_LUAROCKS_MIRROR",

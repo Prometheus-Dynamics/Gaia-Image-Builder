@@ -43,6 +43,12 @@ pub struct BuildPolicySpec {
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct ExecutionPolicySpec {
     pub jobs: u32,
+    /// No network for the whole run (`[execution] offline`, `--offline`).
+    pub offline: bool,
+    /// `gaia prefetch` / `gaia run --prefetch`: plan only the sources and the
+    /// Buildroot base, and download what they need instead of building.
+    /// Set by the command, never by the build config.
+    pub prefetch: bool,
     pub docker: Option<DockerExecutionSpec>,
     pub output_retention: OutputRetentionPolicySpec,
 }

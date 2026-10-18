@@ -66,6 +66,7 @@ mod feed_archive_expected_images;
 mod feed_archive_overlay;
 mod finalize_marker;
 mod make_retry;
+mod offline_prefetch;
 mod override_check;
 mod provider_squashfs_fs;
 mod single_pass_shared;

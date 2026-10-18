@@ -38,6 +38,8 @@ const DEFAULT_POST_BUILD_HOOK_TIMEOUT_SECONDS: u64 = 300;
 /// says it resumes.
 const RUN_INTERRUPTED_FILE: &str = ".gaia-run-interrupted";
 
+/// `gaia run`, or with `prefetch` the `gaia prefetch` plan: the sources and
+/// the Buildroot base only (see [`prefetch_targets`]).
 pub fn run_build_command(
     context: &AppContext,
     build: &str,
@@ -45,6 +47,7 @@ pub fn run_build_command(
     targets: &[PlanTarget],
     rebuild: &RebuildRequest,
     variants: &[String],
+    prefetch: bool,
 ) -> CommandOutcome {
     let loaded = match VariantBuild::load(build, options) {
         Ok(loaded) => loaded,
@@ -62,6 +65,17 @@ pub fn run_build_command(
             };
         }
     };
+    if prefetch && (specs[0].selection.variant.is_some() || !variants.is_empty()) {
+        return CommandOutcome::Failed {
+            message: "gaia prefetch does not support a build with [[variants]] yet; prefetch a build without them"
+                .into(),
+        };
+    }
+    for spec in &mut specs {
+        spec.policy.execution.prefetch = prefetch;
+    }
+    let prefetch_plan = prefetch.then(|| prefetch_targets(&specs[0]));
+    let targets = prefetch_plan.as_deref().unwrap_or(targets);
     if specs[0].selection.variant.is_some() {
         return super::variants::run_variants(
             context,
@@ -89,6 +103,21 @@ pub fn run_build_command(
         ReuseScope::Build,
         None,
     ))
+}
+
+/// What `gaia prefetch` plans: every source, and for Buildroot the base
+/// operation, whose make downloads the packages. Nothing that builds an
+/// artifact, installs or assembles an image. Other image kinds have no base
+/// operation: their prefetch is the sources.
+pub fn prefetch_targets(spec: &ResolvedBuildSpec) -> Vec<PlanTarget> {
+    let mut targets = vec![PlanTarget::Domain(gaia_plan::PlanDomain::Sources)];
+    if matches!(
+        spec.image.definition,
+        gaia_spec::ImageDefinition::Buildroot(_)
+    ) {
+        targets.push(PlanTarget::Operation("image:prepare".to_string()));
+    }
+    targets
 }
 
 /// The plan of a resolved spec against its reuse state. A `structure`
@@ -249,7 +278,11 @@ pub(super) fn collect_run_artifacts_for_spec(
     );
     // Record finished work before anything else can fail, including after a
     // failed or cancelled run.
-    save_reuse_state(&spec, &plan, &outcome, reuse_state.as_ref());
+    // A prefetch records no reuse state: its Buildroot base is configured and
+    // downloaded, not built, and a later run must not take it for built.
+    if !spec.policy.execution.prefetch {
+        save_reuse_state(&spec, &plan, &outcome, reuse_state.as_ref());
+    }
     if let ReuseScope::Variant { shared } = scope {
         save_shared_state(&spec, &plan, &outcome, shared);
     }

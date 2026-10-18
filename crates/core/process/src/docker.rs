@@ -14,6 +14,8 @@ pub struct DockerRunSpec {
     pub mounts: Vec<PathBuf>,
     pub extra_env: Vec<(OsString, OsString)>,
     pub map_workspace_user: bool,
+    /// `--pull=never`: an offline run uses the image as it is, never pulls it.
+    pub pull_never: bool,
 }
 
 impl DockerRunSpec {
@@ -35,6 +37,7 @@ impl DockerRunSpec {
             mounts,
             extra_env: Vec::new(),
             map_workspace_user: true,
+            pull_never: false,
         }
     }
 
@@ -55,7 +58,14 @@ impl DockerRunSpec {
             current_dir,
             extra_env: Vec::new(),
             map_workspace_user: true,
+            pull_never: false,
         }
+    }
+
+    /// Offline runs never pull: a missing image fails the run instead.
+    pub fn with_pull_never(mut self, pull_never: bool) -> Self {
+        self.pull_never = pull_never;
+        self
     }
 
     pub fn with_extra_env(mut self, key: impl Into<OsString>, value: impl Into<OsString>) -> Self {
@@ -108,6 +118,9 @@ pub fn docker_run_command(
         .arg(new_container_id_file());
     if spec.map_workspace_user {
         wrapped.args(docker_workspace_user_args(&spec.workspace_root));
+    }
+    if spec.pull_never {
+        wrapped.arg("--pull=never");
     }
     // A missing source would be created by docker as root (see
     // `docker_mount_candidates`): only existing directories are mounted.

@@ -415,7 +415,8 @@ fn docker_command(
         command,
     )
     .with_extra_env("HOME", &docker_home)
-    .with_extra_env("XDG_CACHE_HOME", &docker_cache);
+    .with_extra_env("XDG_CACHE_HOME", &docker_cache)
+    .with_pull_never(contract.offline);
     // Containers run with --rm, so tool caches inside the image are lost after
     // every build. Keep them in the workspace cache unless the artifact sets
     // its own location.

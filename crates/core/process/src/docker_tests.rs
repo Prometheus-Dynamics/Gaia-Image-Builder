@@ -42,6 +42,24 @@ fn docker_run(docker: &Path, cidfile: &Path) -> Command {
 }
 
 #[test]
+fn offline_docker_runs_pass_pull_never_and_online_ones_do_not() {
+    let scratch = TempDir::new("gaia-docker-pull-never");
+    let workspace = temp_dir(&scratch, "workspace");
+    let command = Command::new("true");
+    let args_of = |spec: &DockerRunSpec| -> Vec<String> {
+        docker_run_command(&command, spec)
+            .expect("docker command")
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    };
+    let online = DockerRunSpec::discovered_mounts("image:latest", &workspace, &command);
+    assert!(!args_of(&online).iter().any(|arg| arg == "--pull=never"));
+    let offline = online.clone().with_pull_never(true);
+    assert!(args_of(&offline).iter().any(|arg| arg == "--pull=never"));
+}
+
+#[test]
 fn timed_out_docker_run_removes_its_container() {
     let scratch = TempDir::new("gaia-process-docker-test");
     let dir = temp_dir(&scratch, "timeout");

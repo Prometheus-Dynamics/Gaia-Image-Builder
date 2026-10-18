@@ -392,7 +392,10 @@ impl ImageProvider for BuildrootImageProvider {
                     log_sink: request.log_sink,
                     cancel_check: request.cancel_check,
                 };
-                let mut messages = if request.policy.shared_output {
+                // A prefetch configures the private tree and downloads; it
+                // neither shares nor builds an output tree (see below).
+                let prefetch = request.spec.policy.execution.prefetch;
+                let mut messages = if request.policy.shared_output && !prefetch {
                     let clock = gaia_process::ActiveClock::start();
                     let shared = shared_buildroot_output(
                         request.spec,
@@ -426,13 +429,34 @@ impl ImageProvider for BuildrootImageProvider {
                         ..command
                     };
                     let mut messages = tree.messages;
-                    messages.extend(run_buildroot(BuildrootRunRequest {
+                    let request_for_make = BuildrootRunRequest {
                         spec: request.spec,
                         image: request.image,
                         buildroot_dir: &tree.source,
                         output_dir: &tree.work.dir,
                         command,
-                    })?);
+                    };
+                    if prefetch {
+                        messages.extend(prefetch_buildroot_sources(request_for_make)?);
+                        drop(tree.watchdog);
+                        return Ok(ImageExecutionResult {
+                            provider_id: self.id().into(),
+                            collect_dir: None,
+                            archive_path: None,
+                            emit_report: false,
+                            reused: false,
+                            reuse_details: Vec::new(),
+                            warnings: override_check_warnings(&messages),
+                            disk_images: Vec::new(),
+                            notes: summary_notes(&messages),
+                            messages,
+                            state_details: vec![(
+                                "backend_mode".to_string(),
+                                "buildroot-prefetch".to_string(),
+                            )],
+                        });
+                    }
+                    messages.extend(run_buildroot(request_for_make)?);
                     drop(tree.watchdog);
                     messages
                 };
@@ -686,11 +710,14 @@ mod host_tools_probe;
 mod interrupted_make;
 mod kernel_modules;
 mod make_progress;
+mod offline;
 mod override_check;
 mod package_cache;
 mod package_cache_files;
 mod package_graph;
 mod package_keys;
+mod prefetch;
+use prefetch::prefetch_buildroot_sources;
 mod preview;
 mod ram_tree;
 mod ram_tree_dir;

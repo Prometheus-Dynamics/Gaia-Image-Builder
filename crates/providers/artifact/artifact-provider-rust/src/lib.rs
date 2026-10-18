@@ -656,6 +656,16 @@ fn cargo_build_command(
     command
 }
 
+/// The environment an offline run gives cargo: it uses only the registry and
+/// git caches that are already there, and never contacts a registry.
+fn offline_cargo_env(offline: bool) -> Vec<(&'static str, &'static str)> {
+    if offline {
+        vec![("CARGO_NET_OFFLINE", "true")]
+    } else {
+        Vec::new()
+    }
+}
+
 fn run_cargo_build(
     source_dir: &str,
     packages: &[String],
@@ -678,6 +688,7 @@ fn run_cargo_build(
     let mut command = cargo_build_command(source_dir, packages, flags, contract, &target.dir);
     command.envs(git_env.iter().map(|(key, value)| (key, value)));
     command.envs(sccache.iter().map(|(key, value)| (key, value)));
+    command.envs(offline_cargo_env(contract.offline));
     let label = match packages {
         [package] => format!("cargo build for package '{package}'"),
         _ => format!("cargo build for packages '{}'", packages.join("', '")),

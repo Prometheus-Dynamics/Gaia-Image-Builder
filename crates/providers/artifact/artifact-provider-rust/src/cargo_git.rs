@@ -215,11 +215,21 @@ fn pin_commit(
     commit: &str,
     timeout: Duration,
     log_sink: Option<&ProcessLogSink>,
+    offline: bool,
 ) -> Result<(), ArtifactProviderError> {
     if !is_full_commit(commit) {
         return Err(provider_error(
             ArtifactProviderErrorKind::PolicyBlocked,
             format!("Cargo.lock pins '{url}' at '{commit}', which is not a full commit id"),
+        ));
+    }
+    if !commit_present(mirror, commit) && offline {
+        return Err(provider_error(
+            ArtifactProviderErrorKind::BackendCommand,
+            redact_url_userinfo(&format!(
+                "offline: cargo git dependency '{url}' is locked at commit {commit}, which the git mirror '{}' does not contain; run 'gaia prefetch' (or 'gaia run --prefetch') online first",
+                mirror.display()
+            )),
         ));
     }
     if !commit_present(mirror, commit) {
@@ -274,9 +284,19 @@ fn ensure_mirror(
     mirror: &Path,
     timeout: Duration,
     log_sink: Option<&ProcessLogSink>,
+    offline: bool,
 ) -> Result<(), ArtifactProviderError> {
     if mirror.join("HEAD").is_file() {
         return Ok(());
+    }
+    if offline {
+        return Err(provider_error(
+            ArtifactProviderErrorKind::BackendCommand,
+            redact_url_userinfo(&format!(
+                "offline: no git mirror of '{repo}' in '{}'; run 'gaia prefetch' (or 'gaia run --prefetch') online first",
+                mirror.display()
+            )),
+        ));
     }
     if let Some(parent) = mirror.parent() {
         fs::create_dir_all(parent).map_err(|error| {
@@ -413,11 +433,19 @@ pub(crate) fn cargo_git_env(
         let mirror = remote_git_mirror_dir(&cache_dir, &mapping.repo);
         let lock = mirror_lock(&mirror);
         let _held = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        ensure_mirror(&mapping.repo, &mirror, timeout, log_sink)?;
+        ensure_mirror(&mapping.repo, &mirror, timeout, log_sink, contract.offline)?;
         gaia_process::register_read_only_docker_mount(&mirror);
         for (url, commits) in by_url {
             for commit in &commits {
-                pin_commit(&mirror, mapping, &url, commit, timeout, log_sink)?;
+                pin_commit(
+                    &mirror,
+                    mapping,
+                    &url,
+                    commit,
+                    timeout,
+                    log_sink,
+                    contract.offline,
+                )?;
             }
             if let Some(sink) = log_sink {
                 sink(ProcessLogLine {
@@ -544,6 +572,50 @@ checksum = "abc"
     }
 
     #[test]
+    fn offline_cargo_runs_fetch_nothing_and_name_the_prefetch() {
+        assert_eq!(
+            crate::offline_cargo_env(true),
+            vec![("CARGO_NET_OFFLINE", "true")]
+        );
+        assert!(crate::offline_cargo_env(false).is_empty());
+
+        let scratch = gaia_testkit::TempDir::new("gaia-cargo-git-offline");
+        let timeout = Duration::from_secs(5);
+        // No mirror: nothing is cloned.
+        let missing = scratch.join("missing.git");
+        let error = ensure_mirror(
+            "https://offline-test.invalid/dep.git",
+            &missing,
+            timeout,
+            None,
+            true,
+        )
+        .expect_err("no mirror offline");
+        assert!(error.message.contains("offline:"), "{}", error.message);
+        assert!(error.message.contains("gaia prefetch"), "{}", error.message);
+        assert!(!missing.exists());
+
+        // A mirror without the locked commit: nothing is fetched to find it.
+        let bare = scratch.join("bare.git");
+        let init = std::process::Command::new("git")
+            .args(["init", "-q", "--bare"])
+            .arg(&bare)
+            .status()
+            .expect("git init");
+        assert!(init.success());
+        let commit = "2".repeat(40);
+        let mapping = CargoGitSourceSpec {
+            url: "https://offline-test.invalid/dep.git".into(),
+            source: gaia_spec::SourceId::new("dep"),
+            repo: "https://offline-test.invalid/dep.git".into(),
+        };
+        let error = pin_commit(&bare, &mapping, &mapping.url, &commit, timeout, None, true)
+            .expect_err("a missing locked commit offline");
+        assert!(error.message.contains("offline:"), "{}", error.message);
+        assert!(error.message.contains(&commit), "{}", error.message);
+    }
+
+    #[test]
     fn insteadof_env_starts_at_zero_or_appends_after_existing_entries() {
         let rewrites = vec![
             (
@@ -665,10 +737,28 @@ checksum = "abc"
         };
         let timeout = Duration::from_secs(30);
         assert_eq!(locked_ref_commit(&mirror, &commit), None);
-        pin_commit(&mirror, &mapping, &mapping.url, &commit, timeout, None).expect("first pin");
+        pin_commit(
+            &mirror,
+            &mapping,
+            &mapping.url,
+            &commit,
+            timeout,
+            None,
+            false,
+        )
+        .expect("first pin");
         assert_eq!(locked_ref_commit(&mirror, &commit), Some(commit.clone()));
         // A second pin finds the branch in place and writes nothing new.
-        pin_commit(&mirror, &mapping, &mapping.url, &commit, timeout, None).expect("second pin");
+        pin_commit(
+            &mirror,
+            &mapping,
+            &mapping.url,
+            &commit,
+            timeout,
+            None,
+            false,
+        )
+        .expect("second pin");
         assert_eq!(locked_ref_commit(&mirror, &commit), Some(commit));
     }
 

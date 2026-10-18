@@ -240,6 +240,27 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
     {
         usage_errors.push("'cache stats' takes no --level, --package, --remove or --clear".into());
     }
+    if args.offline
+        && !matches!(
+            args.command,
+            AppCommand::Run | AppCommand::Plan | AppCommand::Preview
+        )
+    {
+        usage_errors.push("--offline applies to 'run', 'plan', 'preview' and 'prefetch'".into());
+    }
+    if args.prefetch {
+        if args.command != AppCommand::Run {
+            usage_errors.push("--prefetch applies to 'run' and 'prefetch' (not --dry-run)".into());
+        }
+        if args.offline {
+            usage_errors.push("--prefetch needs the network; drop --offline".into());
+        }
+        if !args.only.is_empty() || !rebuild.is_empty() || args.export_dir.is_some() {
+            usage_errors.push(
+                "--prefetch downloads only; it takes no --only, --rebuild, --rebuild-package or --export".into(),
+            );
+        }
+    }
     if !usage_errors.is_empty() {
         return CommandOutcome::Failed {
             message: format!(
@@ -337,6 +358,7 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
             &targets,
             &rebuild,
             &args.variants,
+            args.prefetch,
         ),
     }
 }
@@ -415,6 +437,9 @@ fn help_text() -> String {
         "  gaia preview [build-config] [--set key=value] [--only ...] [--json] [--fail-on-clean]",
         "  gaia run [build-config] --dry-run     (same as 'gaia preview')",
         "  gaia run [build-config] --ci     (GitHub Actions log groups; also when CI is set)",
+        "  gaia prefetch [build-config]     (download sources and Buildroot packages; no build)",
+        "  gaia run [build-config] --prefetch  (same as 'gaia prefetch')",
+        "  gaia run [build-config] --offline   (no network: the caches must be complete)",
         "  gaia --help",
         "  gaia --version",
         "",
@@ -463,11 +488,17 @@ fn version_text() -> String {
 }
 
 fn resolve_options(args: &AppArgs) -> ResolveOptions {
+    // `--offline` is `--set execution.offline=true`, so it wins over the
+    // build config like any explicit override.
+    let mut explicit_overrides = args.explicit_overrides.clone();
+    if args.offline {
+        explicit_overrides.push(("execution.offline".to_string(), "true".to_string()));
+    }
     ResolveOptions {
         preset: args.preset.clone(),
         env_files: args.env_files.clone(),
         env_overrides: args.env_overrides.clone(),
-        explicit_overrides: args.explicit_overrides.clone(),
+        explicit_overrides,
         variant_presets: Vec::new(),
         selected_variants: args.variants.clone(),
         resolve_unpinned_import_sources: false,
