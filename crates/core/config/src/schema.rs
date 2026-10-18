@@ -147,10 +147,22 @@ mod tests {
         config_schema()
     }
 
-    /// Every `.toml` file under `dir`, recursively.
+    /// Every `.toml` file under `dir`, recursively. Build output left in an
+    /// example by a local run (gitignored `build`, `out`, `.gaia`, `target`,
+    /// `seed`) is skipped, and so is anything unreadable in it.
     fn toml_files(dir: &Path, out: &mut Vec<PathBuf>) {
-        for entry in std::fs::read_dir(dir).expect("readable directory") {
-            let path = entry.expect("entry").path();
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let generated = matches!(
+                entry.file_name().to_str(),
+                Some("build" | "out" | ".gaia" | "target" | "seed")
+            );
+            if generated {
+                continue;
+            }
             if path.is_dir() {
                 toml_files(&path, out);
             } else if path

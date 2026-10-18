@@ -233,10 +233,21 @@ fn toml_blocks(markdown: &str) -> Vec<(usize, String)> {
     blocks
 }
 
-/// Every TOML file under `dir`, recursively.
+/// Every TOML file under `dir`, recursively, skipping build output a local
+/// run left in an example (gitignored `build`, `out`, `.gaia`, `target`,
+/// `seed`) and anything unreadable.
 fn toml_files_under(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
-    for entry in std::fs::read_dir(dir).expect("readable directory") {
-        let path = entry.expect("entry").path();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if matches!(
+            entry.file_name().to_str(),
+            Some("build" | "out" | ".gaia" | "target" | "seed")
+        ) {
+            continue;
+        }
         if path.is_dir() {
             toml_files_under(&path, out);
         } else if path
@@ -345,7 +356,9 @@ fn scan_unknown_keys_in_directories() {
     let mut stack: Vec<std::path::PathBuf> = dirs.split(':').map(Into::into).collect();
     while let Some(path) = stack.pop() {
         if path.is_dir() {
-            let Ok(entries) = std::fs::read_dir(&path) else { continue };
+            let Ok(entries) = std::fs::read_dir(&path) else {
+                continue;
+            };
             for entry in entries.flatten() {
                 let name = entry.file_name();
                 if name == "build" || name == "output" || name == ".gaia" || name == "target" {
@@ -353,14 +366,22 @@ fn scan_unknown_keys_in_directories() {
                 }
                 stack.push(entry.path());
             }
-        } else if path.extension().is_some_and(|ext| ext == "toml")
-            && !path.ends_with("Cargo.toml")
+        } else if path.extension().is_some_and(|ext| ext == "toml") && !path.ends_with("Cargo.toml")
         {
-            let Ok(text) = std::fs::read_to_string(&path) else { continue };
-            let Ok(value) = toml::from_str::<toml::Value>(&text) else { continue };
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(value) = toml::from_str::<toml::Value>(&text) else {
+                continue;
+            };
             files += 1;
             for key in unknown_config_keys(&value) {
-                problems.push(format!("{}: {} ({})", path.display(), key.path, key.suggestion));
+                problems.push(format!(
+                    "{}: {} ({})",
+                    path.display(),
+                    key.path,
+                    key.suggestion
+                ));
             }
         }
     }

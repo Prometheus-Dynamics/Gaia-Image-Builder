@@ -155,7 +155,10 @@ mod tests {
         fs::create_dir_all(&user_dir).expect("shared dir");
         fs::set_permissions(&user_dir, fs::Permissions::from_mode(0o755)).expect("chmod");
         tree_dir(&base, output).expect("our own directory with a loose mode is accepted");
-        let mode = fs::metadata(&user_dir).expect("user dir").permissions().mode();
+        let mode = fs::metadata(&user_dir)
+            .expect("user dir")
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o777, 0o700, "the mode is tightened");
     }
 }
