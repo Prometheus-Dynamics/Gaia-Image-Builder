@@ -25,7 +25,8 @@ pub(crate) fn materialize_buildroot_package_overrides(
     output_dir: &Path,
 ) -> Result<MaterializedBuildrootPackageOverrides, ImageProviderError> {
     let package_override_dirs = buildroot_package_override_dirs(spec);
-    if package_override_dirs.is_empty() {
+    let erofs_lines = erofs_make_lines(spec);
+    if package_override_dirs.is_empty() && erofs_lines.is_none() {
         return Ok(MaterializedBuildrootPackageOverrides {
             generated_external_tree: None,
             replacement_count: 0,
@@ -103,7 +104,7 @@ pub(crate) fn materialize_buildroot_package_overrides(
     package_names.sort();
     replacement_names.sort();
 
-    let generated_external_tree = if package_names.is_empty() {
+    let generated_external_tree = if package_names.is_empty() && erofs_lines.is_none() {
         if external_tree_dir.exists() {
             fs::remove_dir_all(&external_tree_dir).map_err(|error| {
                 ImageProviderError::backend_command(format!(
@@ -114,7 +115,11 @@ pub(crate) fn materialize_buildroot_package_overrides(
         }
         None
     } else {
-        write_generated_external_tree_metadata(&external_tree_dir, &package_names)?;
+        write_generated_external_tree_metadata(
+            &external_tree_dir,
+            &package_names,
+            erofs_lines.as_deref(),
+        )?;
         Some(GeneratedBuildrootExternalTree {
             path: external_tree_dir,
             package_count: package_names.len(),
@@ -124,7 +129,7 @@ pub(crate) fn materialize_buildroot_package_overrides(
         generated_external_tree,
         replacement_count: replacement_names.len(),
         replacement_digest: (!replacement_names.is_empty())
-            .then(|| package_override_content_digest(&package_override_dirs)),
+            .then(|| package_override_content_digest(Some(output_dir), &package_override_dirs)),
         legacy_replacement_digest: (!replacement_names.is_empty())
             .then(|| package_override_dirs_digest(&package_override_dirs)),
     })
@@ -176,9 +181,62 @@ fn package_override_dirs_digest(dirs: &[PathBuf]) -> String {
         .join(";")
 }
 
+/// Digest standing for the `mkfs.erofs` multithreading settings in the
+/// generated tree. The tree's `external.mk` is not a configured external
+/// tree, so its settings reach package keys and rebuilds through this.
+const EROFS_MULTITHREADING_DIGEST: &str = "erofs-multithreading:v1";
+
+/// The Gaia-written settings that change a package's build, by package name
+/// and a digest of them (for package keys and the rebuild record). Empty when
+/// none apply.
+pub(crate) fn generated_package_digests(spec: &ResolvedBuildSpec) -> BTreeMap<String, String> {
+    let mut digests = BTreeMap::new();
+    if erofs_workers_setting(spec) != gaia_spec::ErofsWorkersSpec::Off {
+        digests.insert(
+            "host-erofs-utils".to_string(),
+            EROFS_MULTITHREADING_DIGEST.to_string(),
+        );
+    }
+    digests
+}
+
+/// The buildroot policy's `erofs_workers` (Off for other image providers).
+fn erofs_workers_setting(spec: &ResolvedBuildSpec) -> gaia_spec::ErofsWorkersSpec {
+    if spec.image.provider_kind() == gaia_spec::ImageProviderKind::Buildroot {
+        spec.policy.providers.buildroot.erofs_workers
+    } else {
+        gaia_spec::ErofsWorkersSpec::Off
+    }
+}
+
+/// The lines of the generated `external.mk` that build erofs-utils with
+/// multithreading and pass `--workers` to `mkfs.erofs` on EROFS rootfs
+/// images. `None` when `erofs_workers` is off. `auto` is the smaller of 8 and
+/// the host's cores, evaluated by make, so the file is the same on every host.
+/// The image is byte-identical for any worker count.
+pub(crate) fn erofs_make_lines(spec: &ResolvedBuildSpec) -> Option<String> {
+    let workers = match erofs_workers_setting(spec) {
+        gaia_spec::ErofsWorkersSpec::Off => return None,
+        gaia_spec::ErofsWorkersSpec::Auto => {
+            "GAIA_EROFS_WORKERS ?= $(shell n=$$(nproc 2>/dev/null || echo 1); \
+             if [ $$n -gt 8 ]; then echo 8; else echo $$n; fi)"
+                .to_string()
+        }
+        gaia_spec::ErofsWorkersSpec::Count(count) => format!("GAIA_EROFS_WORKERS = {count}"),
+    };
+    Some(format!(
+        "# Written by Gaia (erofs_workers).\n{workers}\n\
+         ifeq ($(BR2_TARGET_ROOTFS_EROFS),y)\n\
+         HOST_EROFS_UTILS_CONF_OPTS += --enable-multithreading\n\
+         ROOTFS_EROFS_ARGS += --workers=$(GAIA_EROFS_WORKERS)\n\
+         endif\n"
+    ))
+}
+
 fn write_generated_external_tree_metadata(
     external_tree_dir: &Path,
     package_names: &[String],
+    erofs_lines: Option<&str>,
 ) -> Result<(), ImageProviderError> {
     fs::write(
         external_tree_dir.join("external.desc"),
@@ -205,7 +263,8 @@ fn write_generated_external_tree_metadata(
     fs::write(
         external_tree_dir.join("external.mk"),
         format!(
-            "include $(sort $(wildcard $(BR2_EXTERNAL_{GENERATED_EXTERNAL_NAME}_PATH)/package/*/*.mk))\n"
+            "include $(sort $(wildcard $(BR2_EXTERNAL_{GENERATED_EXTERNAL_NAME}_PATH)/package/*/*.mk))\n{}",
+            erofs_lines.unwrap_or_default()
         ),
     )
     .map_err(|error| {

@@ -2,18 +2,16 @@ use gaia_image_providers::{
     ImageExecutionPolicy, ImageExecutionResult, ImageOutputContract, ImagePlan, ImagePreview,
     ImageProvider, ImageProviderError, ImageProviderErrorKind, ImageProviderOperation,
     ImageProviderValidationIssue, ProcessCancelCheck, ProcessLogSink, ProcessOutputRetention,
-    build_image_contract_state_details, build_state_details, dir_digest,
+    TreeFileDigests, build_image_contract_state_details, build_state_details, dir_digest,
     file_sha256_or_placeholder, materialize_image_output,
 };
 use gaia_process::{
-    DockerRunSpec, ProcessRetryBackoffStrategy, ProcessRunErrorKind, docker_run_command,
-    label_process_log_sink, retry_backoff_duration as process_retry_backoff_duration,
+    DockerRunSpec, ProcessRunErrorKind, docker_run_command, label_process_log_sink,
     run_command_stdout_to_file_with_timeout_and_retention, run_command_with_timeout_and_retention,
-    sleep_with_cancel,
 };
 use gaia_spec::{
     BuildrootExpectedImageFormatSpec, BuildrootExternalTreeModeSpec, ImageDefinition, ImageSpec,
-    ResolvedBuildSpec, RetryBackoffStrategySpec, SourceId,
+    ResolvedBuildSpec, SourceId,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -215,6 +213,31 @@ impl ImageProvider for BuildrootImageProvider {
             let clock = gaia_process::ActiveClock::start();
             let collected = collect_expected_images_hashed(image, &tree_dir, &collect_dir)?;
             messages.push(phase_step_message("collect expected images", &clock, &[]));
+            messages.extend(timed_phase("package sizes", || {
+                build_reports::package_size_report(
+                    &spec.identity.build_name,
+                    &tree_dir,
+                    &collect_dir,
+                )
+            })?);
+            if let ImageDefinition::Buildroot(buildroot) = &image.definition
+                && buildroot.legal_info
+            {
+                messages.extend(timed_phase("legal-info", || {
+                    build_reports::legal_info_archive(build_reports::LegalInfoRequest {
+                        spec,
+                        buildroot_dir: &buildroot_dir,
+                        tree_dir: &tree_dir,
+                        collect_dir: &collect_dir,
+                        command: ImageCommandContext {
+                            execution: &execution,
+                            policy,
+                            log_sink: log_sink.clone(),
+                            cancel_check: cancel_check.clone(),
+                        },
+                    })
+                })?);
+            }
             let matched_expected_images = collected.matched;
             let collected_digests = collected.digests;
             if let Some(archive_path) = &archive_path
@@ -639,6 +662,7 @@ fn should_archive_buildroot_output(image: &ImageSpec, archive_path: &Path) -> bo
 use defconfig_support::materialize_defconfig_support_files;
 
 mod archive;
+mod build_reports;
 mod build_times;
 mod buildroot;
 mod buildroot_caches;
@@ -669,6 +693,7 @@ mod package_graph;
 mod package_keys;
 mod preview;
 mod ram_tree;
+mod ram_tree_dir;
 mod rebuild_inputs;
 mod requested_rebuilds;
 mod rootfs_exclude;

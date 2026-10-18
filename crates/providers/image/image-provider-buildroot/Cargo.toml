@@ -13,6 +13,7 @@ gaia-image-providers.workspace = true
 gaia-process.workspace = true
 gaia-spec.workspace = true
 libc.workspace = true
+memchr.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tracing.workspace = true

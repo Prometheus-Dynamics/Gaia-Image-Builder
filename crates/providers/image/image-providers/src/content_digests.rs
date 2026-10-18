@@ -30,11 +30,11 @@ pub const TEMP_FILE_SUFFIX: &str = ".gaia.tmp";
 const HASH_BUFFER_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct Entry {
-    relative: String,
-    size: u64,
-    mtime_ns: u128,
-    digest: String,
+pub(crate) struct Entry {
+    pub(crate) relative: String,
+    pub(crate) size: u64,
+    pub(crate) mtime_ns: u128,
+    pub(crate) digest: String,
 }
 
 /// Whether a directory entry is provider bookkeeping or a temporary file, and
@@ -69,6 +69,11 @@ fn collect_into(dir: &Path, files: &mut Vec<PathBuf>) {
             files.push(path);
         }
     }
+}
+
+/// Lowercase hex of `bytes`.
+pub fn hex_lower(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// Lowercase hex sha256 of a file's contents.
@@ -171,7 +176,7 @@ pub fn record_collect_dir_digests(dir: &Path) -> io::Result<()> {
     record_content_digests(dir, &collect_content_files(dir))
 }
 
-fn relative_key(base: &Path, path: &Path) -> Option<String> {
+pub(crate) fn relative_key(base: &Path, path: &Path) -> Option<String> {
     let relative = path
         .strip_prefix(base)
         .ok()?
@@ -185,7 +190,7 @@ fn relative_key(base: &Path, path: &Path) -> Option<String> {
     Some(relative)
 }
 
-fn modified_ns(metadata: &fs::Metadata) -> Option<u128> {
+pub(crate) fn modified_ns(metadata: &fs::Metadata) -> Option<u128> {
     metadata
         .modified()
         .ok()?
@@ -194,7 +199,7 @@ fn modified_ns(metadata: &fs::Metadata) -> Option<u128> {
         .map(|duration| duration.as_nanos())
 }
 
-fn read_entries(base: &Path) -> Vec<Entry> {
+pub(crate) fn read_entries(base: &Path) -> Vec<Entry> {
     let Ok(text) = fs::read_to_string(base.join(CONTENT_DIGESTS_FILE)) else {
         return Vec::new();
     };
@@ -221,7 +226,7 @@ fn parse_entry(line: &str) -> Option<Entry> {
     })
 }
 
-fn write_entries(base: &Path, entries: &[Entry]) -> io::Result<()> {
+pub(crate) fn write_entries(base: &Path, entries: &[Entry]) -> io::Result<()> {
     let manifest = base.join(CONTENT_DIGESTS_FILE);
     let temp = base.join(format!("{CONTENT_DIGESTS_FILE}{TEMP_FILE_SUFFIX}"));
     let mut text = String::new();

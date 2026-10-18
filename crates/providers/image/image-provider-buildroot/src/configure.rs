@@ -251,19 +251,31 @@ pub(crate) fn tree_changes(
                         )
                     })
         });
-    let override_digests = package_override_digests(&buildroot_package_override_dirs(spec));
-    let mut override_changes = match read_package_override_digests(output_dir) {
-        Some(previous) => changed_override_packages(&previous, &override_digests),
+    // Gaia-written settings (the erofs multithreading of host-erofs-utils)
+    // are recorded beside the override trees, so changing them rebuilds the
+    // packages they touch, and a record from before them rebuilds those too.
+    let generated_digests = generated_package_digests(spec);
+    let mut override_digests =
+        package_override_digests(Some(output_dir), &buildroot_package_override_dirs(spec));
+    override_digests.extend(generated_digests.clone());
+    let previous_overrides = read_package_override_digests(output_dir);
+    let mut override_changes = match &previous_overrides {
+        Some(previous) => changed_override_packages(previous, &override_digests),
         // Older state has one digest for all override trees: when it
         // changed, any override package may have.
         None if replacement_clean_needed => override_digests.keys().cloned().collect(),
         None => BTreeSet::new(),
     };
+    // A tree with no record has never built these settings: their packages
+    // are rebuilt once (host-erofs-utils must support `--workers`).
+    if previous_overrides.is_none() {
+        override_changes.extend(generated_digests.keys().cloned());
+    }
     // BR2_EXTERNAL files: the packages they touch are rebuilt. A changed file
     // that touches none is classified by what the configured tree reads it
     // through (see external_classify); only a `.mk` file is a full clean.
     let trees = external_trees_of(spec);
-    let external_files = current_external_files(spec);
+    let external_files = current_external_files(spec, output_dir);
     let external = external_changes_since_build(output_dir, &external_files);
     let config = fs::read_to_string(output_dir.join(".config")).unwrap_or_default();
     let previous_graph = PackageGraph::load(output_dir);

@@ -344,6 +344,21 @@ pub struct RawCommandProviderPolicyConfig {
     pub host_tools: RawBuildrootHostToolsConfig,
     /// Java only: "workspace" (default) or "user-cache".
     pub gradle_home: Option<String>,
+    /// Buildroot only: seconds the long `make` may run; 0 (default) for none.
+    pub make_timeout_seconds: u64,
+    /// Buildroot only: attempts of the long `make`; 0 means 1. A failure is
+    /// retried only when it looks transient.
+    pub make_retry_attempts: u32,
+    /// Buildroot only: "auto" (default), "off", or a thread count.
+    pub erofs_workers: Option<RawErofsWorkers>,
+}
+
+/// `erofs_workers`: a thread count (`0` is off) or a word (`auto`, `off`).
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum RawErofsWorkers {
+    Count(u32),
+    Text(String),
 }
 
 /// `[providers.buildroot.host_tools]`: `default` plus one policy string per
@@ -698,6 +713,9 @@ pub enum RawImageDefinition {
         defconfig_path: Option<String>,
         #[serde(default)]
         allow_fallback: bool,
+        /// Run `make legal-info` after the image build (see `legal_info` in the docs).
+        #[serde(default)]
+        legal_info: bool,
         #[serde(default)]
         config_fragments: Vec<String>,
         #[serde(default)]
@@ -738,6 +756,7 @@ impl Default for RawImageDefinition {
             defconfig: None,
             defconfig_path: None,
             allow_fallback: false,
+            legal_info: false,
             config_fragments: Vec::new(),
             config_overrides: Vec::new(),
             external_tree: None,

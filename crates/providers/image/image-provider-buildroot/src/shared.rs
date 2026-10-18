@@ -168,7 +168,7 @@ pub(crate) fn shared_output_key_material(
     if !package_dirs.is_empty() {
         material.push_str(&format!(
             "package_overrides={}\n",
-            package_override_content_digest(&package_dirs)
+            package_override_content_digest(None, &package_dirs)
         ));
     }
     material.push_str(&format!("ccache={}\n", policy.ccache_enabled));

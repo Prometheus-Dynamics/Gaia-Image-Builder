@@ -569,6 +569,7 @@ fn buildroot_package_overrides_replace_existing_source_packages() {
         output: ImageOutputSpec::default(),
         assembly: None,
     };
+    spec.policy.providers.buildroot.erofs_workers = gaia_spec::ErofsWorkersSpec::Off;
     let execution = test_execution();
     let policy = ImageExecutionPolicy::default();
 

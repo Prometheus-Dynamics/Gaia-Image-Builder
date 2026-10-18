@@ -224,7 +224,7 @@ pub(crate) fn work_dir_facts(
     let setting = WorkDirSetting::parse(&policy.work_dir.work_dir);
     let base = setting.base();
     let tree = match &base {
-        Some(base) => tree_dir(base, output_dir),
+        Some(base) => tree_dir(base, output_dir)?,
         None => output_dir.to_path_buf(),
     };
     let tree_exists = tree.is_dir();

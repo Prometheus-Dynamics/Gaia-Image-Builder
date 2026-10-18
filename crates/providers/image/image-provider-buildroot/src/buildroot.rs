@@ -469,7 +469,7 @@ pub(crate) fn run_buildroot_with(
         command,
         "buildroot make",
         command_context.execution,
-        command_context.policy,
+        &make_policy(command_context.policy),
         command_context.log_sink.clone(),
         command_context.cancel_check.clone(),
     );

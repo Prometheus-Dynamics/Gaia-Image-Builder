@@ -34,6 +34,35 @@ fn has_code(report: &ValidationReport, severity: DiagnosticSeverity, code: &str)
 }
 
 #[test]
+fn erofs_workers_must_be_auto_off_or_a_count() {
+    let report = report_for("[providers.buildroot]\nerofs_workers = \"lots\"\n");
+    assert!(has_code(
+        &report,
+        DiagnosticSeverity::Error,
+        "buildroot_erofs_workers_invalid"
+    ));
+    assert!(report.errors.iter().any(|message| {
+        message.contains("providers.buildroot.erofs_workers") && message.contains("'lots'")
+    }));
+
+    for valid in [
+        "erofs_workers = \"auto\"",
+        "erofs_workers = 4",
+        "erofs_workers = 0",
+    ] {
+        let report = report_for(&format!("[providers.buildroot]\n{valid}\n"));
+        assert!(
+            !has_code(
+                &report,
+                DiagnosticSeverity::Error,
+                "buildroot_erofs_workers_invalid"
+            ),
+            "{valid}"
+        );
+    }
+}
+
+#[test]
 fn ram_budget_must_parse_and_be_positive() {
     let report = report_for("[providers.buildroot]\nram_budget = \"lots\"\n");
     assert!(has_code(

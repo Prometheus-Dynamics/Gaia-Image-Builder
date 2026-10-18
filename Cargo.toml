@@ -57,6 +57,7 @@ gaia-image-provider-buildroot = { path = "crates/providers/image/image-provider-
 gaia-image-provider-starting-point = { path = "crates/providers/image/image-provider-starting-point", version = "2.0.0" }
 crossterm = "0.29"
 libc = "0.2"
+memchr = "2"
 ratatui = "0.30"
 serde = { version = "1", features = ["derive"] }
 semver = "1"

@@ -108,6 +108,9 @@ fn prepare_operation_reruns_even_when_expected_buildroot_images_exist() {
     fs::write(images_dir.join("rootfs.tar"), "image").expect("expected image");
 
     let mut spec = ResolvedBuildSpec::new("buildroot-prepare-reuse");
+    // Trees from before erofs_workers have no record of its multithreading:
+    // these fixtures predate it, so the setting stays off.
+    spec.policy.providers.buildroot.erofs_workers = gaia_spec::ErofsWorkersSpec::Off;
     spec.workspace.root_dir = workspace_root.display().to_string();
     spec.workspace.build_dir = "build".into();
     spec.workspace.out_dir = "out".into();
@@ -260,6 +263,9 @@ fn prepare_operation_does_not_reuse_partial_target_tree() {
     fs::write(target_dir.join("marker"), "stale").expect("partial marker");
 
     let mut spec = ResolvedBuildSpec::new("buildroot-prepare-partial");
+    // Trees from before erofs_workers have no record of its multithreading:
+    // these fixtures predate it, so the setting stays off.
+    spec.policy.providers.buildroot.erofs_workers = gaia_spec::ErofsWorkersSpec::Off;
     spec.workspace.root_dir = workspace_root.display().to_string();
     spec.workspace.build_dir = "build".into();
     spec.workspace.out_dir = "out".into();

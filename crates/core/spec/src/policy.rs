@@ -257,6 +257,18 @@ pub struct CommandProviderPolicySpec {
     /// Buildroot only: reuse packages built by any build with the same
     /// inputs (requires `parallel_packages`).
     pub package_cache: BuildrootPackageCachePolicySpec,
+    /// Buildroot only: the timeout of the long `make` that builds the image
+    /// in seconds, 0 for none (`make_timeout_seconds`).
+    pub make_timeout_seconds: u64,
+    /// Buildroot only: attempts of that `make`. A failure is retried only when
+    /// it looks transient (see `make_retry_attempts` in the docs).
+    pub make_retry_attempts: u32,
+    /// Buildroot only: `mkfs.erofs --workers` and the multithreaded host
+    /// `erofs-utils` (see [`ErofsWorkersSpec`]).
+    pub erofs_workers: ErofsWorkersSpec,
+    /// Buildroot only: the `erofs_workers` text when it is not a known value.
+    /// Validation reports it; the build uses `auto`.
+    pub erofs_workers_invalid: Option<String>,
     /// Buildroot only: where the output tree is built.
     pub work_dir: BuildrootWorkDirPolicySpec,
     /// Buildroot only: where each host tool (ccache, pkgconf) comes from.
@@ -269,6 +281,36 @@ pub struct CommandProviderPolicySpec {
     /// Whether `gradle_home` is set in this provider's table. Only the Java
     /// table reads it; validation warns about it anywhere else.
     pub gradle_home_configured: bool,
+}
+
+/// How many threads `mkfs.erofs` uses for an EROFS rootfs image
+/// (`[providers.buildroot] erofs_workers`). The image is byte-identical for
+/// every count.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub enum ErofsWorkersSpec {
+    /// The smaller of 8 and the cores the build host has (the default).
+    #[default]
+    Auto,
+    /// No multithreading: `mkfs.erofs` is single-threaded and erofs-utils is
+    /// built without `--enable-multithreading`.
+    Off,
+    /// This many threads (at least 1).
+    Count(u32),
+}
+
+impl ErofsWorkersSpec {
+    /// Parses `auto`, `off`, `0` (off) or a thread count.
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.trim() {
+            "auto" => Some(Self::Auto),
+            "off" | "0" => Some(Self::Off),
+            other => other
+                .parse::<u32>()
+                .ok()
+                .filter(|count| *count > 0)
+                .map(Self::Count),
+        }
+    }
 }
 
 /// Where Gradle's user home (dependency and wrapper caches) lives for

@@ -8,7 +8,7 @@
 //! build produces, so image operations fingerprint it.
 
 use crate::buildroot_external_files::{ExternalTree, resolve_tree_path};
-use crate::sha256_hex;
+use crate::{hex_lower as hex, sha256_hex};
 use gaia_spec::{BuildrootImageSpec, WorkspaceSpec};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -191,10 +191,6 @@ fn script_digest(script: &Path) -> String {
 
 fn file_digest(path: &Path) -> String {
     sha256_hex(path).unwrap_or_else(|error| format!("unreadable:{error}"))
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 #[cfg(test)]

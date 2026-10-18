@@ -1,4 +1,5 @@
 use super::*;
+use gaia_image_providers::{AttemptFailure, RetryRun, run_with_retries};
 use std::collections::HashMap;
 
 pub(crate) fn stderr_or_stdout(output: &Output) -> String {
@@ -180,19 +181,19 @@ pub(crate) fn run_command(
 ) -> Result<Vec<String>, ImageProviderError> {
     let attempts = policy.retry_attempts.max(1);
     let timeout = Duration::from_secs(policy.timeout_seconds.max(1));
-    let mut last_error = String::new();
     let label = format!("starting-point archive build '{}'", archive_path.display());
-    for attempt in 1..=attempts {
-        tracing::debug!(
-            command_label = label.as_str(),
-            provider_domain = "image.starting-point",
-            backend = execution_backend(execution),
-            docker_image = execution.docker_image.as_deref(),
-            attempt,
-            attempts,
-            timeout_seconds = timeout.as_secs(),
-            "running image provider command"
-        );
+    let run = RetryRun {
+        domain: "image.starting-point",
+        label: &label,
+        backend: execution_backend(execution),
+        docker_image: execution.docker_image.as_deref(),
+        timeout,
+        attempts,
+        backoff_strategy: policy.retry_backoff_strategy,
+        backoff_ms: policy.retry_backoff_ms,
+        cancel_check: cancel_check.as_ref(),
+    };
+    run_with_retries(&run, |attempt| {
         let output = command_output_with_timeout(
             &mut command,
             execution,
@@ -202,63 +203,18 @@ pub(crate) fn run_command(
             cancel_check.clone(),
         )?;
         if output.status.success() {
-            tracing::debug!(
-                command_label = label.as_str(),
-                provider_domain = "image.starting-point",
-                backend = execution_backend(execution),
-                attempt,
-                attempts,
-                "image provider command succeeded"
-            );
-            return Ok(Vec::new());
+            return Ok(None);
         }
-        last_error = format!(
-            "starting-point archive build failed for '{}' on attempt {attempt}/{attempts}: {}",
-            archive_path.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-        if attempt < attempts {
-            let retry_backoff = retry_backoff_duration(
-                policy.retry_backoff_strategy,
-                policy.retry_backoff_ms,
-                attempt,
-            );
-            tracing::warn!(
-                command_label = label.as_str(),
-                provider_domain = "image.starting-point",
-                backend = execution_backend(execution),
-                attempt,
-                attempts,
-                backoff_ms = retry_backoff.as_millis(),
-                "image provider command failed; retrying"
-            );
-            if !sleep_with_cancel(retry_backoff, cancel_check.as_ref()) {
-                tracing::warn!(
-                    command_label = label.as_str(),
-                    provider_domain = "image.starting-point",
-                    backend = execution_backend(execution),
-                    attempt,
-                    attempts,
-                    "image provider retry backoff cancelled"
-                );
-                return Err(ImageProviderError::new(
-                    ImageProviderErrorKind::Cancelled,
-                    format!(
-                        "starting-point archive build '{}' cancelled during retry backoff",
-                        archive_path.display()
-                    ),
-                ));
-            }
-        }
-    }
-    tracing::warn!(
-        command_label = label.as_str(),
-        provider_domain = "image.starting-point",
-        backend = execution_backend(execution),
-        attempts,
-        "image provider command exhausted retries"
-    );
-    Err(ImageProviderError::backend_command(last_error))
+        Ok(Some(AttemptFailure {
+            message: format!(
+                "starting-point archive build failed for '{}' on attempt {attempt}/{attempts}: {}",
+                archive_path.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+            retryable: true,
+        }))
+    })
+    .map(|()| Vec::new())
 }
 
 fn execution_backend(execution: &ImageExecutionContext) -> &'static str {
@@ -267,21 +223,6 @@ fn execution_backend(execution: &ImageExecutionContext) -> &'static str {
     } else {
         "host"
     }
-}
-
-pub(crate) fn retry_backoff_duration(
-    strategy: RetryBackoffStrategySpec,
-    base_backoff_ms: u64,
-    attempt: u32,
-) -> Duration {
-    process_retry_backoff_duration(
-        match strategy {
-            RetryBackoffStrategySpec::Fixed => ProcessRetryBackoffStrategy::Fixed,
-            RetryBackoffStrategySpec::Exponential => ProcessRetryBackoffStrategy::Exponential,
-        },
-        base_backoff_ms,
-        attempt,
-    )
 }
 
 pub(crate) fn command_output_with_timeout(

@@ -504,6 +504,9 @@ fn merge_command_policy(
         ram_budget: overlay.ram_budget.or(base.ram_budget),
         keep_ram_tree: overlay.keep_ram_tree.or(base.keep_ram_tree),
         gradle_home: overlay.gradle_home.or(base.gradle_home),
+        make_timeout_seconds: base.make_timeout_seconds.max(overlay.make_timeout_seconds),
+        make_retry_attempts: base.make_retry_attempts.max(overlay.make_retry_attempts),
+        erofs_workers: overlay.erofs_workers.or(base.erofs_workers),
         host_tools: {
             let mut tools = base.host_tools.tools;
             tools.extend(overlay.host_tools.tools);

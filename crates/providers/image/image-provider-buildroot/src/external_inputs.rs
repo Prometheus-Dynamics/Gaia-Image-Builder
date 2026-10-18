@@ -9,7 +9,7 @@
 use super::*;
 use gaia_image_providers::{
     ExternalChanges, ExternalFile, ExternalTree, encode_external_state, external_changes,
-    external_package_digests, external_tree_files, external_trees,
+    external_package_digests, external_tree_files_cached, external_trees,
 };
 
 /// The `BR2_EXTERNAL` trees of the spec.
@@ -21,9 +21,13 @@ pub(crate) fn external_trees_of(spec: &ResolvedBuildSpec) -> Vec<ExternalTree> {
     external_trees(&spec.workspace, external_tree)
 }
 
-/// The files of the spec's external trees (see `external_tree_files`).
-pub(crate) fn current_external_files(spec: &ResolvedBuildSpec) -> BTreeMap<String, ExternalFile> {
-    external_tree_files(&external_trees_of(spec))
+/// The files of the spec's external trees (see `external_tree_files_cached`),
+/// with the digests cached in `output_dir`'s manifest.
+pub(crate) fn current_external_files(
+    spec: &ResolvedBuildSpec,
+    output_dir: &Path,
+) -> BTreeMap<String, ExternalFile> {
+    external_tree_files_cached(&external_trees_of(spec), Some(output_dir))
 }
 
 /// The message a tree with no record of its external files gets: its
@@ -32,8 +36,15 @@ pub(crate) const NO_RECORD_BASELINE: &str = "buildroot external files: no earlie
 
 /// The digest of the external files that touch each package, for the package
 /// cache keys.
-pub(crate) fn external_package_key_digests(spec: &ResolvedBuildSpec) -> BTreeMap<String, String> {
-    external_package_digests(&current_external_files(spec))
+pub(crate) fn external_package_key_digests(
+    spec: &ResolvedBuildSpec,
+    output_dir: &Path,
+) -> BTreeMap<String, String> {
+    let mut digests = external_package_digests(&current_external_files(spec, output_dir));
+    for (package, digest) in generated_package_digests(spec) {
+        digests.entry(package).or_default().push_str(&digest);
+    }
+    digests
 }
 
 /// The files the last build recorded.

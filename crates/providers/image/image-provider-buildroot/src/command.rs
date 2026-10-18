@@ -1,4 +1,5 @@
 use super::*;
+use gaia_image_providers::{AttemptFailure, RetryRun, run_with_retries};
 
 /// Runs a command (with the policy's retries and timeout), returning its
 /// step time; a failure carries it too.
@@ -18,6 +19,46 @@ pub(crate) fn run_command(
     }
 }
 
+/// A timeout no build reaches, for a `make` with `make_timeout_seconds = 0`.
+const NO_TIMEOUT: Duration = Duration::from_secs(10 * 365 * 24 * 60 * 60);
+
+/// Stderr fragments that name a download or network failure. Only these make
+/// a failed `make` worth another attempt: a compile error fails the same way
+/// again.
+const NETWORK_FAILURE_MARKERS: &[&str] = &[
+    "failed to download",
+    "download failed",
+    "failed to fetch",
+    "spurious network error",
+    "could not resolve host",
+    "unable to resolve host",
+    "temporary failure in name resolution",
+    "connection timed out",
+    "connection reset",
+    "connection refused",
+    "network is unreachable",
+    "curl: (",
+    "wget: ",
+];
+
+/// Whether a failed command's stderr reports a download or network failure.
+pub(crate) fn looks_like_network_failure(stderr: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(stderr).to_ascii_lowercase();
+    NETWORK_FAILURE_MARKERS
+        .iter()
+        .any(|marker| text.contains(marker))
+}
+
+/// The policy the long `make` that builds the image runs with: its own
+/// timeout and attempts. The other Buildroot commands keep the provider's.
+pub(crate) fn make_policy(policy: &ImageExecutionPolicy) -> ImageExecutionPolicy {
+    ImageExecutionPolicy {
+        timeout_seconds: policy.make_timeout_seconds,
+        retry_attempts: policy.make_retry_attempts,
+        ..policy.clone()
+    }
+}
+
 fn run_command_attempts(
     mut command: Command,
     label: &str,
@@ -26,20 +67,25 @@ fn run_command_attempts(
     log_sink: Option<ProcessLogSink>,
     cancel_check: Option<ProcessCancelCheck>,
 ) -> Result<(), ImageProviderError> {
+    let is_make = command.get_program() == "make";
+    let timeout = if policy.timeout_seconds == 0 {
+        NO_TIMEOUT
+    } else {
+        Duration::from_secs(policy.timeout_seconds.max(1))
+    };
     let attempts = policy.retry_attempts.max(1);
-    let timeout = Duration::from_secs(policy.timeout_seconds.max(1));
-    let mut last_error = String::new();
-    for attempt in 1..=attempts {
-        tracing::debug!(
-            command_label = label,
-            provider_domain = "image.buildroot",
-            backend = execution_backend(execution),
-            docker_image = execution.docker_image.as_deref(),
-            attempt,
-            attempts,
-            timeout_seconds = timeout.as_secs(),
-            "running image provider command"
-        );
+    let run = RetryRun {
+        domain: "image.buildroot",
+        label,
+        backend: execution_backend(execution),
+        docker_image: execution.docker_image.as_deref(),
+        timeout,
+        attempts,
+        backoff_strategy: policy.retry_backoff_strategy,
+        backoff_ms: policy.retry_backoff_ms,
+        cancel_check: cancel_check.as_ref(),
+    };
+    run_with_retries(&run, |attempt| {
         let output = command_output_with_timeout(
             &mut command,
             execution,
@@ -50,59 +96,18 @@ fn run_command_attempts(
             cancel_check.clone(),
         )?;
         if output.status.success() {
-            tracing::debug!(
-                command_label = label,
-                provider_domain = "image.buildroot",
-                backend = execution_backend(execution),
-                attempt,
-                attempts,
-                "image provider command succeeded"
-            );
-            return Ok(());
+            return Ok(None);
         }
-        last_error = format!(
-            "{label} failed on attempt {attempt}/{attempts}: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-        if attempt < attempts {
-            let retry_backoff = retry_backoff_duration(
-                policy.retry_backoff_strategy,
-                policy.retry_backoff_ms,
-                attempt,
-            );
-            tracing::warn!(
-                command_label = label,
-                provider_domain = "image.buildroot",
-                backend = execution_backend(execution),
-                attempt,
-                attempts,
-                backoff_ms = retry_backoff.as_millis(),
-                "image provider command failed; retrying"
-            );
-            if !sleep_with_cancel(retry_backoff, cancel_check.as_ref()) {
-                tracing::warn!(
-                    command_label = label,
-                    provider_domain = "image.buildroot",
-                    backend = execution_backend(execution),
-                    attempt,
-                    attempts,
-                    "image provider retry backoff cancelled"
-                );
-                return Err(ImageProviderError::new(
-                    ImageProviderErrorKind::Cancelled,
-                    format!("{label} cancelled during retry backoff"),
-                ));
-            }
-        }
-    }
-    tracing::warn!(
-        command_label = label,
-        provider_domain = "image.buildroot",
-        backend = execution_backend(execution),
-        attempts,
-        "image provider command exhausted retries"
-    );
-    Err(ImageProviderError::backend_command(last_error))
+        // A make that failed for any other reason (a compile error) fails the
+        // same way again: it is not retried.
+        Ok(Some(AttemptFailure {
+            message: format!(
+                "{label} failed on attempt {attempt}/{attempts}: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+            retryable: !is_make || looks_like_network_failure(&output.stderr),
+        }))
+    })
 }
 
 fn execution_backend(execution: &ImageExecutionContext) -> &'static str {
@@ -111,21 +116,6 @@ fn execution_backend(execution: &ImageExecutionContext) -> &'static str {
     } else {
         "host"
     }
-}
-
-pub(crate) fn retry_backoff_duration(
-    strategy: RetryBackoffStrategySpec,
-    base_backoff_ms: u64,
-    attempt: u32,
-) -> Duration {
-    process_retry_backoff_duration(
-        match strategy {
-            RetryBackoffStrategySpec::Fixed => ProcessRetryBackoffStrategy::Fixed,
-            RetryBackoffStrategySpec::Exponential => ProcessRetryBackoffStrategy::Exponential,
-        },
-        base_backoff_ms,
-        attempt,
-    )
 }
 
 pub(crate) fn command_output_with_timeout(

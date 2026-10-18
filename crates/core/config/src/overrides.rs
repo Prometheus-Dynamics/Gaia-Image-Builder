@@ -229,6 +229,12 @@ fn apply_known_override(
                 *allow_fallback = parse_bool_override(key, value)?;
             }
         }
+        KnownOverrideKey::ImageBuildrootLegalInfo => {
+            if let raw::RawImageDefinition::Buildroot { legal_info, .. } = &mut raw.image.definition
+            {
+                *legal_info = parse_bool_override(key, value)?;
+            }
+        }
         KnownOverrideKey::ImageBuildrootExternalTree => {
             if let raw::RawImageDefinition::Buildroot { external_tree, .. } =
                 &mut raw.image.definition
@@ -474,6 +480,16 @@ fn apply_known_override(
         }
         KnownOverrideKey::PolicyProvidersBuildrootLocalJobs => {
             raw.providers.buildroot.local_jobs = parse_u32_override(key, value)?
+        }
+        KnownOverrideKey::PolicyProvidersBuildrootMakeTimeoutSeconds => {
+            raw.providers.buildroot.make_timeout_seconds = parse_u64_override(key, value)?
+        }
+        KnownOverrideKey::PolicyProvidersBuildrootMakeRetryAttempts => {
+            raw.providers.buildroot.make_retry_attempts = parse_u32_override(key, value)?
+        }
+        KnownOverrideKey::PolicyProvidersBuildrootErofsWorkers => {
+            raw.providers.buildroot.erofs_workers =
+                Some(crate::raw::RawErofsWorkers::Text(value.to_string()))
         }
         KnownOverrideKey::PolicyProvidersBuildrootDownloadDir => {
             raw.providers.buildroot.download_dir = Some(value.to_string())

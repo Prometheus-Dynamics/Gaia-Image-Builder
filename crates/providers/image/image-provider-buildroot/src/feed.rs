@@ -193,7 +193,9 @@ pub(crate) fn materialize_fallback_rootfs(
     Ok(matched)
 }
 
-fn assembly_expected_image_names(image: &ImageSpec) -> std::collections::HashSet<String> {
+pub(crate) fn assembly_expected_image_names(
+    image: &ImageSpec,
+) -> std::collections::HashSet<String> {
     let Some(assembly) = &image.assembly else {
         return std::collections::HashSet::new();
     };

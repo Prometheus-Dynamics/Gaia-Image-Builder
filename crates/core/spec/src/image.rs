@@ -53,6 +53,11 @@ pub struct BuildrootImageSpec {
     pub defconfig: Option<String>,
     pub defconfig_path: Option<String>,
     pub allow_fallback: bool,
+    /// Run `make legal-info` after the image build and publish its archive
+    /// (`legal-info.tar.zst`). Left out of serialized specs when off, so
+    /// existing builds keep their reuse digests.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub legal_info: bool,
     pub config_fragments: Vec<String>,
     pub config_overrides: Vec<(String, String)>,
     pub external_tree: Option<String>,
@@ -80,6 +85,7 @@ impl Default for BuildrootImageSpec {
             defconfig: None,
             defconfig_path: None,
             allow_fallback: false,
+            legal_info: false,
             config_fragments: Vec::new(),
             config_overrides: Vec::new(),
             external_tree: None,

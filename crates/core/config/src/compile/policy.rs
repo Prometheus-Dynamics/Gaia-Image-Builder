@@ -95,6 +95,10 @@ pub(crate) fn compile_command_policy(
             max_size: raw.ccache.max_size.clone(),
         },
         parallel_packages: raw.parallel_packages,
+        make_timeout_seconds: raw.make_timeout_seconds,
+        make_retry_attempts: compile_provider_retry_attempts(raw.make_retry_attempts),
+        erofs_workers: compile_erofs_workers(raw.erofs_workers.as_ref()).0,
+        erofs_workers_invalid: compile_erofs_workers(raw.erofs_workers.as_ref()).1,
         work_dir: gaia_spec::BuildrootWorkDirPolicySpec {
             work_dir: raw.work_dir.clone().unwrap_or_else(|| "disk".to_string()),
             ram_budget: raw.ram_budget.clone(),
@@ -140,6 +144,21 @@ pub(crate) fn compile_command_policy(
                 gaia_spec::BuildrootOverrideCheckSpec::Off
             }
         },
+    }
+}
+
+/// The erofs worker setting, and the text when it is not a known value.
+pub(crate) fn compile_erofs_workers(
+    raw: Option<&crate::raw::RawErofsWorkers>,
+) -> (gaia_spec::ErofsWorkersSpec, Option<String>) {
+    let text = match raw {
+        None => return (gaia_spec::ErofsWorkersSpec::default(), None),
+        Some(crate::raw::RawErofsWorkers::Count(count)) => count.to_string(),
+        Some(crate::raw::RawErofsWorkers::Text(text)) => text.clone(),
+    };
+    match gaia_spec::ErofsWorkersSpec::parse(&text) {
+        Some(workers) => (workers, None),
+        None => (gaia_spec::ErofsWorkersSpec::default(), Some(text)),
     }
 }
 

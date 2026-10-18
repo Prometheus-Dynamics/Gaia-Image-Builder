@@ -594,6 +594,7 @@ fn interpolate_image_definition(
             defconfig,
             defconfig_path,
             allow_fallback,
+            legal_info,
             config_fragments,
             config_overrides,
             external_tree,
@@ -607,6 +608,7 @@ fn interpolate_image_definition(
             defconfig_path: defconfig_path
                 .map(|value| resolver::interpolate_string(value, raw, env)),
             allow_fallback,
+            legal_info,
             config_fragments: config_fragments
                 .into_iter()
                 .map(|value| resolver::interpolate_string(value, raw, env))

@@ -1,20 +1,23 @@
 mod buildroot_external_files;
 mod buildroot_scripts;
 mod content_digests;
+mod digest_batch;
 mod materialize;
 mod preview;
+mod retry;
 
 pub use buildroot_external_files::{
     ExternalChanges, ExternalFile, ExternalTree, decode_external_state, encode_external_state,
-    external_changes, external_package_digests, external_tree_files, external_trees,
-    packages_assigned_by, resolve_tree_path,
+    external_changes, external_package_digests, external_tree_files, external_tree_files_cached,
+    external_trees, packages_assigned_by, resolve_tree_path,
 };
 pub use buildroot_scripts::{POST_SCRIPT_SETTINGS, expand_external_paths, post_script_components};
 pub use content_digests::{
-    COLLECT_STATE_FILE, CONTENT_DIGESTS_FILE, TEMP_FILE_SUFFIX, collect_content_files,
+    COLLECT_STATE_FILE, CONTENT_DIGESTS_FILE, TEMP_FILE_SUFFIX, collect_content_files, hex_lower,
     is_content_walk_excluded, record_collect_dir_digests, record_content_digests, recorded_sha256,
     sha256_hex,
 };
+pub use digest_batch::{TreeFileDigests, digests_of_files, parallel_map, regular_files_under};
 pub use gaia_process::{
     ProcessCancelCheck, ProcessLogLine, ProcessLogSink, ProcessOutputRetention,
 };
@@ -23,6 +26,7 @@ use gaia_spec::{
     RetryBackoffStrategySpec,
 };
 pub use materialize::{finalize_temp_image_output, materialize_image_output};
+pub use retry::{AttemptFailure, RetryRun, retry_backoff_duration, run_with_retries};
 
 /// Records digests the caller already computed from the files' current bytes
 /// (see [`recorded_sha256`]), so no file is hashed again. Entries whose
@@ -216,6 +220,12 @@ pub struct ImageExecutionPolicy {
     /// Buildroot: build independent packages concurrently (per-package
     /// directories and a top-level `make -j`).
     pub parallel_packages: bool,
+    /// Buildroot: seconds the long `make` may run; 0 for none.
+    pub make_timeout_seconds: u64,
+    /// Buildroot: attempts of the long `make` (a transient failure only).
+    pub make_retry_attempts: u32,
+    /// Buildroot: threads `mkfs.erofs` uses (see `erofs_workers`).
+    pub erofs_workers: gaia_spec::ErofsWorkersSpec,
     /// Buildroot: reuse built packages from a cache shared by every build.
     pub package_cache: gaia_spec::BuildrootPackageCachePolicySpec,
     /// Buildroot: where the output tree is built (disk, ram, or a directory).
@@ -251,6 +261,9 @@ impl Default for ImageExecutionPolicy {
             ccache_dir: None,
             ccache_max_size: None,
             parallel_packages: false,
+            make_timeout_seconds: 0,
+            make_retry_attempts: 1,
+            erofs_workers: gaia_spec::ErofsWorkersSpec::default(),
             package_cache: gaia_spec::BuildrootPackageCachePolicySpec::default(),
             work_dir: gaia_spec::BuildrootWorkDirPolicySpec::default(),
             host_tools: gaia_spec::BuildrootHostToolsPolicySpec::default(),

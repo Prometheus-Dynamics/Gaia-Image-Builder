@@ -687,6 +687,20 @@ compile`), fails at once: the same inputs fail the same way.
 
 Command providers may also expose provider-local worker counts. Buildroot uses `local_jobs` for `make -j`; leave it at `0` to let Buildroot choose its own default or set it explicitly to avoid nested oversubscription.
 
+Buildroot's long `make` (the build itself) has its own settings, because a
+build takes hours and a compile error fails the same way every time:
+- `make_timeout_seconds` (default `0`, no timeout) bounds that `make`. The
+  other Buildroot commands (defconfig, olddefconfig, clean) keep
+  `timeout_seconds`.
+- `make_retry_attempts` (default `1`) is retried only when stderr reports a
+  download or network failure (`failed to download`, `could not resolve host`,
+  `connection timed out`, ...). A compile error is never retried.
+- `erofs_workers` (default `"auto"`, the smaller of 8 and the host's cores)
+  builds erofs-utils with `--enable-multithreading` and passes `--workers` to
+  `mkfs.erofs` for EROFS rootfs images. The image is byte-identical for every
+  count, so the setting does not change outputs. `"off"` or `0` leaves both
+  alone. Changing it on or off rebuilds `host-erofs-utils` once.
+
 Example:
 
 ```toml
@@ -713,6 +727,9 @@ retry_attempts = 1
 retry_backoff_ms = 0
 retry_backoff_strategy = "fixed"
 timeout_seconds = 900
+make_timeout_seconds = 0          # the long make that builds the image; 0 = none
+make_retry_attempts = 1           # its attempts, retried only for network failures
+erofs_workers = "auto"            # mkfs.erofs threads: "auto", "off", or a count
 local_jobs = 4
 parallel_packages = true
 # download_dir = "/srv/buildroot-dl"     # default: the user cache below
@@ -782,6 +799,12 @@ keep_ram_tree = true              # keep the tree after a build for fast rebuild
 makes compiles and tree writes much faster. The tree is kept for rebuilds
 unless `keep_ram_tree = false`, and the build falls back to disk when RAM is
 short (`ram_budget` caps the RAM the tree may take).
+
+The tree lives in `/dev/shm/gaia-<user>/`, named by the account name of the
+real user id (from the password database, not `$USER`, which any process can
+set). Gaia creates that directory with mode 0700, tightens an existing one of
+yours to 0700, and refuses to use it when it is a symbolic link or is owned by
+another user, with a message naming the directory to remove.
 
 #### Host tools
 
@@ -1869,6 +1892,10 @@ Buildroot fields:
   that adds a tree must list the full combination.
 - `external_tree_mode = "auto" | "required" | "disabled"`
 - `expected_images[]`
+- `legal_info = true` (under `[image]`): after the build, runs `make legal-info`
+  and publishes `legal-info.tar.zst` (the license and manifest files of every
+  package) in the collect dir. Needs `tar` with zstd support. Off by default;
+  see "Package sizes and legal info" below.
 - A defconfig's support files: a file that the defconfig or a config fragment
   names by a relative path (`-c genimage.cfg`, `overlays/config.txt`) is copied
   into the output dir, where Buildroot resolves it. Nothing else beside the
@@ -2048,6 +2075,28 @@ One Buildroot tree can build every package while an image leaves some of them
 out of its root filesystem, without a second tree. `image:build` removes the
 files of the listed packages from `target/` before the image's post-build
 scripts and before the filesystem images, so `rootfs.*` does not contain them.
+
+#### Package sizes and legal info
+
+Every Buildroot image build writes `<build>.package-sizes.json` into the collect
+dir: the bytes each package installs into `target/` (its regular files, from
+`build/packages-file-list.txt`), largest first, with the total. The run notes
+name the ten largest packages and their change since the previous build of the
+same name (`+2.0 KiB`, `unchanged`, `new`). Files a package puts in `images/`
+are not counted.
+
+```toml
+[image]
+kind = "buildroot"
+legal_info = true   # publish legal-info.tar.zst after the build
+```
+
+With `legal_info = true`, `make legal-info` runs after a successful build and
+its `legal-info/` directory (`manifest.csv`, `host-manifest.csv`, the license
+files) is archived as `legal-info.tar.zst` in the collect dir. The archive is
+kept, not made again, while the package list is unchanged; it is recorded in
+the output tree. `make legal-info` may fetch sources that are not downloaded
+yet, so run it on a machine with network access.
 Names are lowercase Buildroot package names; a name listed twice is an error.
 `--set image.rootfs.exclude_packages=libcamera,libpisp` sets the list (a
 variant can set it the same way). Layered configs concatenate their lists.

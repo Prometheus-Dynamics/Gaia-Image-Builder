@@ -22,7 +22,6 @@
 //! margin; otherwise the build runs on disk. During the build a watchdog
 //! stops it cleanly when available memory or tmpfs space runs low.
 use super::*;
-use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -37,6 +36,8 @@ pub(crate) const RAM_MARGIN: u64 = 8 * GIB;
 const RAM_LOW: u64 = 4 * GIB;
 /// Size of the last RAM tree, next to the output path on disk.
 const RAM_SIZE_FILE: &str = ".gaia-ram-tree-size";
+pub(crate) use crate::ram_tree_dir::{create_private_tree_parent, tree_dir};
+
 pub(crate) const RAM_BASE: &str = "/dev/shm";
 
 /// Where this build's tree is.
@@ -94,6 +95,7 @@ pub(crate) fn place_work_dir(
                 fs::create_dir_all(parent).map_err(|e| error("create", parent, e))?;
             }
             if placement.create {
+                create_private_tree_parent(&dir)?;
                 fs::create_dir_all(&dir).map_err(|e| error("create", &dir, e))?;
             }
             if placement.relink {
@@ -117,23 +119,6 @@ pub(crate) fn place_work_dir(
             })
         }
     }
-}
-
-/// `<base>/gaia-<user>/<hash of output_dir>/buildroot-output`.
-pub(crate) fn tree_dir(base: &Path, output_dir: &Path) -> PathBuf {
-    let user = std::env::var("USER")
-        .ok()
-        .filter(|user| !user.is_empty() && !user.contains('/'))
-        .unwrap_or_else(|| {
-            use std::os::unix::fs::MetadataExt;
-            fs::metadata("/proc/self")
-                .map(|metadata| metadata.uid().to_string())
-                .unwrap_or_else(|_| "user".to_string())
-        });
-    let digest = Sha256::digest(output_dir.to_string_lossy().as_bytes());
-    base.join(format!("gaia-{user}"))
-        .join(hex(&digest[..6]))
-        .join("buildroot-output")
 }
 
 /// Written in a mirror after its copy succeeds: the identity of the source it

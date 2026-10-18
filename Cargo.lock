@@ -598,6 +598,7 @@ dependencies = [
  "gaia-spec",
  "gaia-testkit",
  "libc",
+ "memchr",
  "serde_json",
  "sha2 0.11.0",
  "tracing",
@@ -623,6 +624,7 @@ dependencies = [
  "gaia-spec",
  "gaia-testkit",
  "sha2 0.11.0",
+ "tracing",
 ]
 
 [[package]]

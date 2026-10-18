@@ -1,4 +1,5 @@
 use super::*;
+use crate::feed::assembly_expected_image_names;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn refresh_buildroot_images_after_feed_overlay(
@@ -64,6 +65,9 @@ pub(crate) fn refresh_buildroot_images_after_feed_overlay(
         .arg(format!("O={}", output_dir.display()))
         .arg("target-post-image")
         .current_dir(buildroot_dir);
+    // The same environment as every other make of the tree (the download and
+    // compiler caches, the host tools, the parallel job count).
+    apply_buildroot_policy_env(&mut command, spec, policy)?;
     let generated_external_tree = output_dir
         .join("gaia-buildroot-external")
         .is_dir()
@@ -86,25 +90,6 @@ pub(crate) fn refresh_buildroot_images_after_feed_overlay(
         log_sink,
         cancel_check,
     )
-}
-
-fn assembly_expected_image_names(image: &ImageSpec) -> BTreeSet<&str> {
-    let Some(assembly) = &image.assembly else {
-        return BTreeSet::new();
-    };
-    assembly
-        .filesystems
-        .iter()
-        .map(|filesystem| filesystem.output.as_ref())
-        .chain(assembly.disks.iter().map(|disk| disk.output.as_ref()))
-        .chain(
-            assembly
-                .archives
-                .iter()
-                .map(|archive| archive.output.as_ref()),
-        )
-        .filter_map(|output| Path::new(output).file_name()?.to_str())
-        .collect()
 }
 
 pub(crate) fn refresh_buildroot_post_image_direct(

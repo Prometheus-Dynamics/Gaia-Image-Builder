@@ -11,6 +11,17 @@ pub(crate) fn validate_buildroot_policy(
 ) {
     let buildroot = &spec.policy.providers.buildroot;
 
+    // Compilation falls back to `auto` for an unknown value, so it is reported.
+    if let Some(text) = &buildroot.erofs_workers_invalid {
+        diagnostics.push(error(
+            "buildroot_erofs_workers_invalid",
+            format!(
+                "providers.buildroot.erofs_workers '{text}': expected 'auto', 'off', or a thread count"
+            ),
+            Some("providers.buildroot.erofs_workers".into()),
+        ));
+    }
+
     let work_dir = &buildroot.work_dir.work_dir;
     if work_dir.trim().is_empty() {
         diagnostics.push(error(

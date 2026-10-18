@@ -334,6 +334,80 @@ fn resolves_execution_output_retention_overrides() {
     assert_eq!(retention.failure_tail_lines, 7);
 }
 
+fn buildroot_policy_with(overrides: &[(&str, &str)]) -> gaia_spec::CommandProviderPolicySpec {
+    gaia_config::resolve_config_with_options(
+        &default_config_path(),
+        &gaia_config::ResolveOptions {
+            explicit_overrides: overrides
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect(),
+            ..gaia_config::ResolveOptions::default()
+        },
+    )
+    .policy
+    .providers
+    .buildroot
+}
+
+#[test]
+fn image_legal_info_reaches_the_buildroot_definition() {
+    let legal_info = |overrides: &[(&str, &str)]| {
+        let spec = gaia_config::resolve_config_with_options(
+            &default_config_path(),
+            &gaia_config::ResolveOptions {
+                explicit_overrides: overrides
+                    .iter()
+                    .map(|(key, value)| (key.to_string(), value.to_string()))
+                    .collect(),
+                ..gaia_config::ResolveOptions::default()
+            },
+        );
+        match spec.image.definition {
+            gaia_spec::ImageDefinition::Buildroot(buildroot) => buildroot.legal_info,
+            _ => panic!("the default example is a Buildroot image"),
+        }
+    };
+    assert!(!legal_info(&[]), "off by default");
+    assert!(legal_info(&[("image.legal_info", "true")]));
+    assert!(legal_info(&[("image.buildroot.legal_info", "true")]));
+}
+
+#[test]
+fn resolves_buildroot_erofs_workers_and_make_settings() {
+    use gaia_spec::ErofsWorkersSpec;
+
+    let defaults = buildroot_policy_with(&[]);
+    assert_eq!(defaults.erofs_workers, ErofsWorkersSpec::Auto);
+    assert_eq!(defaults.erofs_workers_invalid, None);
+    assert_eq!(defaults.make_timeout_seconds, 0, "no timeout by default");
+    assert_eq!(defaults.make_retry_attempts, 1);
+
+    let key = "policy.providers.buildroot.erofs_workers";
+    assert_eq!(
+        buildroot_policy_with(&[(key, "4")]).erofs_workers,
+        ErofsWorkersSpec::Count(4)
+    );
+    assert_eq!(
+        buildroot_policy_with(&[(key, "off")]).erofs_workers,
+        ErofsWorkersSpec::Off
+    );
+    assert_eq!(
+        buildroot_policy_with(&[(key, "0")]).erofs_workers,
+        ErofsWorkersSpec::Off
+    );
+    let invalid = buildroot_policy_with(&[(key, "lots")]);
+    assert_eq!(invalid.erofs_workers, ErofsWorkersSpec::Auto);
+    assert_eq!(invalid.erofs_workers_invalid.as_deref(), Some("lots"));
+
+    let make = buildroot_policy_with(&[
+        ("policy.providers.buildroot.make_timeout_seconds", "7200"),
+        ("policy.providers.buildroot.make_retry_attempts", "3"),
+    ]);
+    assert_eq!(make.make_timeout_seconds, 7200);
+    assert_eq!(make.make_retry_attempts, 3);
+}
+
 #[test]
 fn resolves_buildroot_local_jobs_without_changing_scheduler_jobs() {
     let spec = gaia_config::resolve_config_with_options(

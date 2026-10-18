@@ -101,6 +101,9 @@ pub fn image_execution_policy(spec: &ResolvedBuildSpec) -> ImageExecutionPolicy 
         ccache_max_size: policy.ccache.max_size,
         parallel_packages: spec.image.provider_kind() == gaia_spec::ImageProviderKind::Buildroot
             && spec.policy.providers.buildroot.parallel_packages,
+        make_timeout_seconds: spec.policy.providers.buildroot.make_timeout_seconds,
+        make_retry_attempts: spec.policy.providers.buildroot.make_retry_attempts,
+        erofs_workers: spec.policy.providers.buildroot.erofs_workers,
         package_cache: spec.policy.providers.buildroot.package_cache.clone(),
         work_dir: spec.policy.providers.buildroot.work_dir.clone(),
         host_tools: spec.policy.providers.buildroot.host_tools.clone(),

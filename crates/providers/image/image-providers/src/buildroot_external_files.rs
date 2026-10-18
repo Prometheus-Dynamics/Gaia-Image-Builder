@@ -102,18 +102,54 @@ fn tree_name(dir: &Path) -> String {
 /// Every file of every tree, keyed `<tree name>:<path in tree>`, recursively,
 /// skipping `.git`. A symlink is described by its target, not followed.
 pub fn external_tree_files(trees: &[ExternalTree]) -> BTreeMap<String, ExternalFile> {
-    let mut files = BTreeMap::new();
+    external_tree_files_cached(trees, None)
+}
+
+/// [`external_tree_files`], with the content digests of the plain files
+/// reused from the manifest in `manifest_dir` while their size and mtime
+/// match, and the rest hashed in parallel (see `digest_batch`). The result is
+/// the same either way.
+pub fn external_tree_files_cached(
+    trees: &[ExternalTree],
+    manifest_dir: Option<&Path>,
+) -> BTreeMap<String, ExternalFile> {
+    // The first file of each key wins, as with a map of first insertions.
+    let mut pending: BTreeMap<String, (String, PathBuf)> = BTreeMap::new();
     for tree in trees {
         let mut found = Vec::new();
         collect_files(&tree.dir, &tree.dir, &mut found);
         for (relative, path) in found {
-            let key = format!("{}:{relative}", tree.name);
-            files
-                .entry(key)
-                .or_insert_with(|| describe_file(&path, &relative));
+            pending
+                .entry(format!("{}:{relative}", tree.name))
+                .or_insert((relative, path));
         }
     }
-    files
+    // Plain files (not symlinks, not makefiles) are digested as a batch: a
+    // makefile is read whole anyway, to find the packages it assigns.
+    let plain = pending
+        .values()
+        .filter(|(relative, path)| is_plain_file(path, relative))
+        .map(|(_, path)| path.clone())
+        .collect::<Vec<_>>();
+    let mut digests = plain
+        .iter()
+        .cloned()
+        .zip(crate::digests_of_files(manifest_dir, &plain))
+        .collect::<BTreeMap<_, _>>();
+    pending
+        .into_iter()
+        .map(|(key, (relative, path))| {
+            let precomputed = digests.remove(&path);
+            (key, describe_file(&path, &relative, precomputed))
+        })
+        .collect()
+}
+
+/// A regular file whose digest is its content's sha256 (not a symlink, and
+/// not a `.mk` file, which is parsed as well).
+fn is_plain_file(path: &Path, relative: &str) -> bool {
+    !relative.ends_with(".mk")
+        && fs::symlink_metadata(path).is_ok_and(|meta| !meta.file_type().is_symlink())
 }
 
 fn collect_files(root: &Path, dir: &Path, found: &mut Vec<(String, PathBuf)>) {
@@ -145,7 +181,11 @@ fn collect_files(root: &Path, dir: &Path, found: &mut Vec<(String, PathBuf)>) {
     }
 }
 
-fn describe_file(path: &Path, relative: &str) -> ExternalFile {
+fn describe_file(
+    path: &Path,
+    relative: &str,
+    plain_digest: Option<std::io::Result<String>>,
+) -> ExternalFile {
     let is_symlink = fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink());
     let mut packages = package_of_path(relative);
     // A `packages/<name>/` override tree: its own package is covered by the
@@ -171,7 +211,7 @@ fn describe_file(path: &Path, relative: &str) -> ExternalFile {
             Err(error) => format!("unreadable:{error}"),
         }
     } else {
-        match sha256_hex(path) {
+        match plain_digest.unwrap_or_else(|| sha256_hex(path)) {
             Ok(digest) => format!("sha256:{digest}"),
             Err(error) => format!("unreadable:{error}"),
         }

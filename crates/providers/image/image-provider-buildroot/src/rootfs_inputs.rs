@@ -39,7 +39,11 @@ pub(crate) fn rootfs_inputs_digest(
     trees: &[ExternalTree],
 ) -> String {
     let mut hasher = Sha256::new();
-    hash_target_tree(&output_dir.join("target"), &mut hasher);
+    // The target tree is the big one: its files are digested up front, in
+    // parallel, and only the ones whose size or mtime changed are read.
+    let target = output_dir.join("target");
+    let files = TreeFileDigests::for_roots(Some(output_dir), &[target.as_path()]);
+    hash_target_tree(&target, &mut hasher, &files);
     // The packages left out of target/ (image.rootfs.exclude_packages): the
     // images change with them even where the tree listing alone would not.
     let excluded = applied_rootfs_exclude(output_dir);
@@ -67,7 +71,10 @@ pub(crate) fn rootfs_inputs_digest(
     for image in package_images {
         hasher.update(b"image\0");
         hasher.update(image.as_bytes());
-        hasher.update(path_content_digest(&output_dir.join("images").join(&image)));
+        hasher.update(path_content_digest(
+            Some(output_dir),
+            &output_dir.join("images").join(&image),
+        ));
     }
 
     let config = fs::read_to_string(output_dir.join(".config")).unwrap_or_default();
@@ -88,16 +95,19 @@ pub(crate) fn rootfs_inputs_digest(
             };
             hasher.update(b"file\0");
             hasher.update(resolved.display().to_string().as_bytes());
-            hasher.update(path_content_digest(&resolved));
+            hasher.update(path_content_digest(Some(output_dir), &resolved));
             if let Some(parent) = resolved.parent() {
-                hasher.update(path_content_digest(parent));
+                hasher.update(path_content_digest(Some(output_dir), parent));
             }
         }
     }
 
     for tool_dir in ["fs", "support/scripts"] {
         hasher.update(tool_dir.as_bytes());
-        hasher.update(path_content_digest(&buildroot_dir.join(tool_dir)));
+        hasher.update(path_content_digest(
+            Some(output_dir),
+            &buildroot_dir.join(tool_dir),
+        ));
     }
     let mut host_packages = fs::read_dir(output_dir.join("build"))
         .into_iter()
@@ -153,8 +163,8 @@ fn resolve_setting_file(
 
 /// Every entry of the target tree, in sorted order: path, type, mode,
 /// size, and content (files) or target (links).
-fn hash_target_tree(root: &Path, hasher: &mut Sha256) {
-    fn visit(root: &Path, dir: &Path, hasher: &mut Sha256) {
+fn hash_target_tree(root: &Path, hasher: &mut Sha256, files: &TreeFileDigests) {
+    fn visit(root: &Path, dir: &Path, hasher: &mut Sha256, files: &TreeFileDigests) {
         let mut entries = fs::read_dir(dir)
             .into_iter()
             .flatten()
@@ -176,16 +186,16 @@ fn hash_target_tree(root: &Path, hasher: &mut Sha256) {
                 }
             } else if metadata.is_dir() {
                 hasher.update(b"\0dir\0");
-                visit(root, &path, hasher);
+                visit(root, &path, hasher, files);
             } else {
                 hasher.update(b"\0file\0");
                 hasher.update(metadata.len().to_le_bytes());
-                hasher.update(file_sha256_or_placeholder(&path).as_bytes());
+                hasher.update(files.sha256_or_placeholder(&path).as_bytes());
             }
             hasher.update(b"\0");
         }
     }
-    visit(root, root, hasher);
+    visit(root, root, hasher, files);
 }
 
 /// The digest recorded with the current images, if any.

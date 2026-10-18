@@ -160,7 +160,11 @@ pub(crate) fn write_config_snapshot(output_dir: &Path) -> Result<(), ImageProvid
 /// first tree providing a package wins, as when they are materialized.
 const OVERRIDE_DIGESTS_STATE: &str = ".gaia-buildroot-package-overrides.digests";
 
-pub(crate) fn package_override_digests(dirs: &[PathBuf]) -> BTreeMap<String, String> {
+/// `manifest_dir` holds the digest cache of the trees (see `TreeFileDigests`).
+pub(crate) fn package_override_digests(
+    manifest_dir: Option<&Path>,
+    dirs: &[PathBuf],
+) -> BTreeMap<String, String> {
     let mut digests = BTreeMap::new();
     for dir in dirs {
         let Ok(entries) = fs::read_dir(dir) else {
@@ -172,8 +176,9 @@ pub(crate) fn package_override_digests(dirs: &[PathBuf]) -> BTreeMap<String, Str
                 continue;
             };
             if path.is_dir() && !digests.contains_key(&name) {
+                let files = TreeFileDigests::for_roots(manifest_dir, &[path.as_path()]);
                 let mut hasher = Sha256::new();
-                hash_tree(&path, &path, &mut hasher);
+                hash_tree(&path, &path, &mut hasher, &files);
                 digests.insert(name, hex(&hasher.finalize()));
             }
         }
@@ -225,30 +230,36 @@ pub(crate) fn changed_override_packages(
 
 /// Content digest of a file or directory tree (paths relative to it, modes,
 /// contents, symlink targets).
-pub(crate) fn path_content_digest(path: &Path) -> String {
+/// `manifest_dir` holds the digest cache (see `TreeFileDigests`); `None`
+/// hashes every file.
+pub(crate) fn path_content_digest(manifest_dir: Option<&Path>, path: &Path) -> String {
+    let files = TreeFileDigests::for_roots(manifest_dir, &[path]);
     let mut hasher = Sha256::new();
-    hash_tree(path, path, &mut hasher);
+    hash_tree(path, path, &mut hasher, &files);
     hex(&hasher.finalize())
 }
 
-pub(crate) fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
+pub(crate) use gaia_image_providers::hex_lower as hex;
 
 /// Digest of the package override trees by content: relative paths, file
 /// modes, file contents and symlink targets. Unlike timestamps or absolute
 /// paths, it does not change when the trees are re-synced, re-checked out,
 /// or read from an import-source checkout whose directory name holds the rev.
-pub(crate) fn package_override_content_digest(dirs: &[PathBuf]) -> String {
+pub(crate) fn package_override_content_digest(
+    manifest_dir: Option<&Path>,
+    dirs: &[PathBuf],
+) -> String {
+    let roots = dirs.iter().map(PathBuf::as_path).collect::<Vec<_>>();
+    let files = TreeFileDigests::for_roots(manifest_dir, &roots);
     let mut hasher = Sha256::new();
     for dir in dirs {
         hasher.update(b"\0dir\0");
-        hash_tree(dir, dir, &mut hasher);
+        hash_tree(dir, dir, &mut hasher, &files);
     }
     format!("content-v1:{}", hex(&hasher.finalize()))
 }
 
-fn hash_tree(root: &Path, path: &Path, hasher: &mut Sha256) {
+fn hash_tree(root: &Path, path: &Path, hasher: &mut Sha256, files: &TreeFileDigests) {
     let Ok(metadata) = fs::symlink_metadata(path) else {
         return;
     };
@@ -264,7 +275,7 @@ fn hash_tree(root: &Path, path: &Path, hasher: &mut Sha256) {
         }
     } else if metadata.is_file() {
         hasher.update(b"file:");
-        hasher.update(file_sha256_or_placeholder(path).as_bytes());
+        hasher.update(files.sha256_or_placeholder(path).as_bytes());
     } else if metadata.is_dir() {
         hasher.update(b"dir");
         let mut entries = fs::read_dir(path)
@@ -277,7 +288,7 @@ fn hash_tree(root: &Path, path: &Path, hasher: &mut Sha256) {
             .unwrap_or_default();
         entries.sort();
         for entry in entries {
-            hash_tree(root, &entry, hasher);
+            hash_tree(root, &entry, hasher, files);
         }
     }
     hasher.update([0]);
@@ -419,10 +430,10 @@ mod tests {
         };
         write("libcamera", "LIBCAMERA_VERSION = 1\n");
         write("mesa3d", "MESA3D_VERSION = 1\n");
-        let before = package_override_digests(std::slice::from_ref(&base));
+        let before = package_override_digests(None, std::slice::from_ref(&base));
         write("libcamera", "LIBCAMERA_VERSION = 2\n");
         write("pd-image-slots", "PD_IMAGE_SLOTS_VERSION = 1\n");
-        let after = package_override_digests(std::slice::from_ref(&base));
+        let after = package_override_digests(None, std::slice::from_ref(&base));
         assert_eq!(
             changed_override_packages(&before, &after),
             BTreeSet::from(["libcamera".to_string(), "pd-image-slots".to_string()])
@@ -461,13 +472,13 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(20));
         write(&second, "LIBCAMERA_VERSION = 1\n");
         assert_eq!(
-            package_override_content_digest(std::slice::from_ref(&first)),
-            package_override_content_digest(std::slice::from_ref(&second))
+            package_override_content_digest(None, std::slice::from_ref(&first)),
+            package_override_content_digest(None, std::slice::from_ref(&second))
         );
         write(&second, "LIBCAMERA_VERSION = 2\n");
         assert_ne!(
-            package_override_content_digest(std::slice::from_ref(&first)),
-            package_override_content_digest(std::slice::from_ref(&second))
+            package_override_content_digest(None, std::slice::from_ref(&first)),
+            package_override_content_digest(None, std::slice::from_ref(&second))
         );
     }
 }

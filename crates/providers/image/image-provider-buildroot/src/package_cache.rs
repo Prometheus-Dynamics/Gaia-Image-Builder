@@ -657,10 +657,24 @@ impl PackageCache {
         let mut rewrite = Vec::new();
         let mut relocatable = true;
         let mut size = 0u64;
+        // Every regular file is scanned for the output dir's path, in
+        // parallel; the results are then read in member order.
+        let scanned_paths = own
+            .iter()
+            .filter(|(_, regular, _)| *regular)
+            .map(|(member, _, _)| output_dir.join(member))
+            .collect::<Vec<_>>();
+        let mut scanned = gaia_image_providers::parallel_map(&scanned_paths, |path| {
+            file_holds(path, output_text.as_bytes())
+        })
+        .into_iter();
         for (member, regular, length) in own {
             if regular {
                 size += length;
-                match file_holds(&output_dir.join(&member), output_text.as_bytes()) {
+                let holds = scanned
+                    .next()
+                    .unwrap_or_else(|| Err(std::io::Error::other("scan interrupted")));
+                match holds {
                     Ok(Holds::Text) => rewrite.push(member.clone()),
                     Ok(Holds::Binary) => relocatable = false,
                     Ok(Holds::No) => {}

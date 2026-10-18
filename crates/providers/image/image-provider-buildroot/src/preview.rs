@@ -513,7 +513,7 @@ pub(crate) fn preview_buildroot(
             if !system_tools.is_empty() {
                 identity = format!("{identity} {system_tools}");
             }
-            let external = external_package_key_digests(spec);
+            let external = external_package_key_digests(spec, &scratch.tree);
             let keys = package_keys(&KeyInputs {
                 buildroot_dir: &buildroot_dir,
                 output_dir: &scratch.tree,

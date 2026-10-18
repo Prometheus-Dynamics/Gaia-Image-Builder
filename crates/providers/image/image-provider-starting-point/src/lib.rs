@@ -6,13 +6,12 @@ use gaia_image_providers::{
     file_sha256_or_placeholder, materialize_image_output,
 };
 use gaia_process::{
-    DockerRunSpec, ProcessRetryBackoffStrategy, ProcessRunErrorKind, docker_run_command,
-    label_process_log_sink, retry_backoff_duration as process_retry_backoff_duration,
-    run_command_with_timeout, run_command_with_timeout_and_retention, sleep_with_cancel,
+    DockerRunSpec, ProcessRunErrorKind, docker_run_command, label_process_log_sink,
+    run_command_with_timeout, run_command_with_timeout_and_retention,
 };
 use gaia_spec::{
-    ImageDefinition, ImageSpec, ResolvedBuildSpec, RetryBackoffStrategySpec, SourceId,
-    StartingPointOutputModeSpec, StartingPointPackagesSpec, StartingPointRootfsValidationModeSpec,
+    ImageDefinition, ImageSpec, ResolvedBuildSpec, SourceId, StartingPointOutputModeSpec,
+    StartingPointPackagesSpec, StartingPointRootfsValidationModeSpec,
 };
 use std::collections::BTreeMap;
 use std::fs;

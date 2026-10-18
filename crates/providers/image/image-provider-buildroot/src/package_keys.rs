@@ -257,7 +257,7 @@ impl KeyContext<'_> {
         if let Some(digest) = self.path_digests.get(path) {
             return digest.clone();
         }
-        let digest = path_content_digest(path);
+        let digest = path_content_digest(Some(self.inputs.output_dir), path);
         self.path_digests.insert(path.to_path_buf(), digest.clone());
         digest
     }

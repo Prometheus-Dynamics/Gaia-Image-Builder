@@ -435,34 +435,48 @@ pub(crate) enum Holds {
     Binary,
 }
 
+/// The read size of `file_holds`.
+const HOLDS_CHUNK_BYTES: usize = 1 << 20;
+
+thread_local! {
+    /// The read buffer `file_holds` reuses on each thread, so scanning many
+    /// files allocates one buffer per thread rather than one per file.
+    static HOLDS_BUFFER: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// Searches a file for `needle` in chunks, without reading it whole.
 pub(crate) fn file_holds(path: &Path, needle: &[u8]) -> std::io::Result<Holds> {
     use std::io::Read;
-    let mut file = fs::File::open(path)?;
-    let mut buffer = vec![0u8; 1 << 20];
-    let mut carry = Vec::new();
-    let (mut found, mut binary) = (false, false);
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
+    HOLDS_BUFFER.with(|cell| {
+        let mut buffer = cell.borrow_mut();
+        if buffer.len() < HOLDS_CHUNK_BYTES {
+            buffer.resize(HOLDS_CHUNK_BYTES, 0);
         }
-        let chunk = &buffer[..read];
-        binary |= chunk.contains(&0);
-        if !found {
-            carry.extend_from_slice(chunk);
-            found = find_bytes(&carry, needle).is_some();
-            let keep = needle.len().saturating_sub(1).min(carry.len());
-            carry.drain(..carry.len() - keep);
+        let mut file = fs::File::open(path)?;
+        let mut carry = Vec::new();
+        let (mut found, mut binary) = (false, false);
+        loop {
+            let read = file.read(&mut buffer[..])?;
+            if read == 0 {
+                break;
+            }
+            let chunk = &buffer[..read];
+            binary |= chunk.contains(&0);
+            if !found {
+                carry.extend_from_slice(chunk);
+                found = find_bytes(&carry, needle).is_some();
+                let keep = needle.len().saturating_sub(1).min(carry.len());
+                carry.drain(..carry.len() - keep);
+            }
+            if found && binary {
+                break;
+            }
         }
-        if found && binary {
-            break;
-        }
-    }
-    Ok(match (found, binary) {
-        (false, _) => Holds::No,
-        (true, false) => Holds::Text,
-        (true, true) => Holds::Binary,
+        Ok(match (found, binary) {
+            (false, _) => Holds::No,
+            (true, false) => Holds::Text,
+            (true, true) => Holds::Binary,
+        })
     })
 }
 
@@ -470,9 +484,7 @@ pub(crate) fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() {
         return None;
     }
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
+    memchr::memmem::find(haystack, needle)
 }
 
 pub(crate) fn replace_bytes(haystack: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
@@ -485,4 +497,68 @@ pub(crate) fn replace_bytes(haystack: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> 
     }
     result.extend_from_slice(rest);
     result
+}
+
+#[cfg(test)]
+mod scan_tests {
+    use super::*;
+    use gaia_testkit::TempDir;
+
+    #[test]
+    fn find_bytes_matches_a_naive_search() {
+        let haystack = b"abcabcabd and a longer tail with abd at the end abd";
+        for needle in [&b"abd"[..], b"a", b"tail", b"abcabcabd", b"zz", b"end abd"] {
+            let naive = haystack
+                .windows(needle.len())
+                .position(|window| window == needle);
+            assert_eq!(find_bytes(haystack, needle), naive, "{needle:?}");
+        }
+        assert_eq!(
+            find_bytes(haystack, b""),
+            None,
+            "an empty needle finds nothing"
+        );
+        assert_eq!(find_bytes(b"ab", b"abc"), None);
+    }
+
+    #[test]
+    fn replace_bytes_replaces_every_occurrence() {
+        assert_eq!(
+            replace_bytes(b"/out/x /out/y", b"/out", b"/new"),
+            b"/new/x /new/y"
+        );
+        assert_eq!(replace_bytes(b"none", b"/out", b"/new"), b"none");
+    }
+
+    #[test]
+    fn a_needle_across_the_read_chunk_is_found_and_binary_is_detected() {
+        let scratch = TempDir::new("gaia-scan-holds");
+        let needle = b"/work/output/tree";
+        // The needle straddles the boundary of the first read.
+        let mut text = vec![b'x'; HOLDS_CHUNK_BYTES - 7];
+        text.extend_from_slice(needle);
+        text.extend_from_slice(b"\nmore text\n");
+        let text_path = scratch.join("text.txt");
+        fs::write(&text_path, &text).expect("write text");
+        assert!(matches!(
+            file_holds(&text_path, needle).expect("scan"),
+            Holds::Text
+        ));
+
+        let mut binary = needle.to_vec();
+        binary.extend_from_slice(&[0, 1, 2]);
+        let binary_path = scratch.join("binary.bin");
+        fs::write(&binary_path, &binary).expect("write binary");
+        assert!(matches!(
+            file_holds(&binary_path, needle).expect("scan"),
+            Holds::Binary
+        ));
+
+        let absent = scratch.join("absent.txt");
+        fs::write(&absent, b"nothing to see").expect("write absent");
+        assert!(matches!(
+            file_holds(&absent, needle).expect("scan"),
+            Holds::No
+        ));
+    }
 }

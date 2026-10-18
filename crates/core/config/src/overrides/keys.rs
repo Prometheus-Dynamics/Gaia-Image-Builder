@@ -23,6 +23,7 @@ pub(super) enum KnownOverrideKey {
     ImageFeedStageServices,
     ImageBuildrootDefconfig,
     ImageBuildrootAllowFallback,
+    ImageBuildrootLegalInfo,
     ImageBuildrootExternalTree,
     ImageBuildrootSource,
     ImageBuildrootExternalTreeMode,
@@ -78,6 +79,9 @@ pub(super) enum KnownOverrideKey {
     PolicyProvidersBuildrootRetryAttempts,
     PolicyProvidersBuildrootTimeoutSeconds,
     PolicyProvidersBuildrootLocalJobs,
+    PolicyProvidersBuildrootMakeTimeoutSeconds,
+    PolicyProvidersBuildrootMakeRetryAttempts,
+    PolicyProvidersBuildrootErofsWorkers,
     PolicyProvidersBuildrootDownloadDir,
     PolicyProvidersBuildrootCcacheEnabled,
     PolicyProvidersBuildrootCcacheDir,
@@ -149,6 +153,9 @@ impl<'a> OverrideKey<'a> {
             "image.buildroot.defconfig" => Self::Known(KnownOverrideKey::ImageBuildrootDefconfig),
             "image.allow_fallback" | "image.buildroot.allow_fallback" => {
                 Self::Known(KnownOverrideKey::ImageBuildrootAllowFallback)
+            }
+            "image.legal_info" | "image.buildroot.legal_info" => {
+                Self::Known(KnownOverrideKey::ImageBuildrootLegalInfo)
             }
             "image.buildroot.external_tree" => {
                 Self::Known(KnownOverrideKey::ImageBuildrootExternalTree)
@@ -307,6 +314,15 @@ impl<'a> OverrideKey<'a> {
             }
             "policy.providers.buildroot.local_jobs" => {
                 Self::Known(KnownOverrideKey::PolicyProvidersBuildrootLocalJobs)
+            }
+            "policy.providers.buildroot.make_timeout_seconds" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersBuildrootMakeTimeoutSeconds)
+            }
+            "policy.providers.buildroot.make_retry_attempts" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersBuildrootMakeRetryAttempts)
+            }
+            "policy.providers.buildroot.erofs_workers" => {
+                Self::Known(KnownOverrideKey::PolicyProvidersBuildrootErofsWorkers)
             }
             "policy.providers.buildroot.download_dir" => {
                 Self::Known(KnownOverrideKey::PolicyProvidersBuildrootDownloadDir)
