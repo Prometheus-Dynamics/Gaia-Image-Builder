@@ -65,7 +65,7 @@ pub use assembly_order::{
 };
 pub use assembly_output_spec::{
     AssemblyFilesystemKindSpec, AssemblyFilesystemSpec, AssemblyTransformKindSpec,
-    AssemblyTransformSpec, VERITY_DEFAULT_BLOCK_SIZE,
+    AssemblyTransformSpec, VERITY_DEFAULT_BLOCK_SIZE, VFAT_FAT_SIZES,
 };
 pub use assembly_spec::{
     AssemblyBinarySpec, AssemblyBusyboxInitramfsSpec, AssemblyDirSpec, AssemblyDiskPartitionSpec,

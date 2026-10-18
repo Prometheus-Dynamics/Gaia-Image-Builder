@@ -498,6 +498,7 @@ fn boot_assembly(
             uuid: None,
             journal: None,
             compressed: Default::default(),
+            fat_size: None,
         }],
         ..ImageAssemblySpec::default()
     }

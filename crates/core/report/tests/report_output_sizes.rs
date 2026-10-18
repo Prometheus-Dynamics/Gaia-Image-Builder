@@ -259,6 +259,7 @@ fn spec_with_filesystem_and_transform(
             uuid: None,
             journal: None,
             compressed: Default::default(),
+            fat_size: None,
         }],
         transforms: vec![gaia_spec::AssemblyTransformSpec {
             kind: gaia_spec::AssemblyTransformKindSpec::Gzip,

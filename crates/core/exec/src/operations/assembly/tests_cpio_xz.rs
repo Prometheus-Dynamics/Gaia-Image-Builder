@@ -42,6 +42,7 @@ fn filesystem(id: &str, kind: AssemblyFilesystemKindSpec, output: &str) -> Assem
         uuid: None,
         journal: None,
         compressed: Default::default(),
+        fat_size: None,
     }
 }
 

@@ -31,6 +31,7 @@ fn roots_for(root: &Path) -> (ResolvedBuildSpec, AssemblyRoots) {
             uuid: None,
             journal: None,
             compressed: Default::default(),
+            fat_size: None,
         }],
         ..ImageAssemblySpec::default()
     });

@@ -64,6 +64,7 @@ fn cpio_zstd_assembly(work_dir: &str, output: &str, publish: bool) -> ImageAssem
             uuid: None,
             journal: None,
             compressed: Default::default(),
+            fat_size: None,
         }],
         ..ImageAssemblySpec::default()
     }
@@ -370,6 +371,7 @@ fn vfat_auto_size_builds_an_image_that_holds_the_tree() {
             uuid: None,
             journal: None,
             compressed: Default::default(),
+            fat_size: None,
         }],
         ..ImageAssemblySpec::default()
     });
@@ -398,11 +400,107 @@ fn vfat_auto_size_builds_an_image_that_holds_the_tree() {
 }
 
 #[test]
-fn small_vfat_images_ask_for_fat16_clusters() {
-    assert_eq!(vfat_sectors_per_cluster(2 * MIB), None);
-    assert_eq!(vfat_sectors_per_cluster(3 * MIB), Some(1));
-    assert_eq!(vfat_sectors_per_cluster(12 * MIB), Some(1));
-    assert_eq!(vfat_sectors_per_cluster(16 * MIB - 1), Some(1));
-    assert_eq!(vfat_sectors_per_cluster(16 * MIB), None);
-    assert_eq!(vfat_sectors_per_cluster(128 * MIB), None);
+fn small_vfat_images_ask_for_fat16_clusters_unless_fat_size_says_otherwise() {
+    for fat_size in [None, Some(16)] {
+        assert!(vfat_mformat_args(2 * MIB, fat_size).is_empty());
+        assert_eq!(vfat_mformat_args(3 * MIB, fat_size), ["-c", "1"]);
+        assert_eq!(vfat_mformat_args(12 * MIB, fat_size), ["-c", "1"]);
+        assert_eq!(vfat_mformat_args(16 * MIB - 1, fat_size), ["-c", "1"]);
+        assert!(vfat_mformat_args(16 * MIB, fat_size).is_empty());
+        assert!(vfat_mformat_args(128 * MIB, fat_size).is_empty());
+    }
+    assert!(vfat_mformat_args(12 * MIB, Some(12)).is_empty());
+    assert_eq!(vfat_mformat_args(12 * MIB, Some(32)), ["-F"]);
+    assert_eq!(vfat_mformat_args(128 * MIB, Some(32)), ["-F"]);
+}
+
+#[test]
+fn vfat_fat_size_reads_the_boot_sector_type() {
+    let mut sector = [0u8; 90];
+    assert_eq!(vfat_fat_size(&sector), None);
+    sector[54..62].copy_from_slice(b"FAT12   ");
+    assert_eq!(vfat_fat_size(&sector), Some(12));
+    sector[54..62].copy_from_slice(b"FAT16   ");
+    assert_eq!(vfat_fat_size(&sector), Some(16));
+    sector[54..62].fill(0);
+    sector[82..90].copy_from_slice(b"FAT32   ");
+    assert_eq!(vfat_fat_size(&sector), Some(32));
+    assert_eq!(vfat_fat_size(&sector[..60]), None);
+}
+
+/// Builds a one-file vfat image of `size` with `fat_size`.
+fn build_vfat(
+    root: &std::path::Path,
+    size: &str,
+    fat_size: Option<u32>,
+) -> Result<std::path::PathBuf, String> {
+    fs::create_dir_all(root).expect("test root");
+    write_assets(root);
+    let mut spec = test_spec(root);
+    spec.image.assembly = Some(ImageAssemblySpec {
+        work_dir: Some("$assembly.work".into()),
+        trees: vec![AssemblyTreeSpec {
+            strip: false,
+            id: "boot".into(),
+            path: "$assembly.work/boot".into(),
+        }],
+        files: vec![AssemblyFileSpec {
+            include: Vec::new(),
+            strip: false,
+            exclude: Vec::new(),
+            tree: "boot".into(),
+            src: Some("@assets/config.txt".into()),
+            src_glob: None,
+            dest: "config.txt".into(),
+            mode: None,
+            optional: false,
+            preserve_symlink: false,
+            allow_missing_libs: false,
+            content: None,
+            json: None,
+        }],
+        filesystems: vec![gaia_spec::AssemblyFilesystemSpec {
+            free: None,
+            id: "boot".into(),
+            kind: gaia_spec::AssemblyFilesystemKindSpec::Vfat,
+            source_tree: "boot".into(),
+            output: "$assembly.work/boot.vfat".into(),
+            size: Some(size.into()),
+            deterministic: false,
+            compression_level: None,
+            publish: false,
+            label: None,
+            uuid: None,
+            journal: None,
+            compressed: Default::default(),
+            fat_size,
+        }],
+        ..ImageAssemblySpec::default()
+    });
+    stage_image_assembly_with(&spec, &OperationId::image_assembly(), None, disk_env_panic)
+        .map(|_| root.join("build/assembly/boot.vfat"))
+        .map_err(|error| error.message)
+}
+
+#[test]
+fn vfat_fat_size_picks_the_fat_type_or_fails() {
+    let scratch = TempDir::new("gaia-exec-test");
+    if !tool_runs("mformat") || !tool_runs("mcopy") {
+        return;
+    }
+    let fat_type = |image: &std::path::Path| {
+        vfat_fat_size(&fs::read(image).expect("image bytes")[..90]).expect("fat type")
+    };
+    let fat12 = build_vfat(&scratch.join("fat12"), "auto", Some(12)).expect("fat12");
+    assert_eq!(fat_type(&fat12), 12);
+    let fat32 = build_vfat(&scratch.join("fat32"), "auto", Some(32)).expect("fat32");
+    assert_eq!(fat_type(&fat32), 32);
+    let default = build_vfat(&scratch.join("default"), "auto", None).expect("default");
+    assert_eq!(fat_type(&default), 16);
+
+    let error = build_vfat(&scratch.join("too-big"), "32M", Some(12)).expect_err("too big");
+    assert!(
+        error.contains("asks for fat_size = 12, but mformat made FAT16"),
+        "{error}"
+    );
 }

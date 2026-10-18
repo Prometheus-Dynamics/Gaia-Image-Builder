@@ -225,3 +225,25 @@ label = "boot"
         ]
     );
 }
+
+#[test]
+fn vfat_fat_size_is_checked_and_only_for_vfat() {
+    let filesystem = |id: &str, kind: &str, fat_size: u32| {
+        format!(
+            "\n[[image.assembly.filesystems]]\nid = \"{id}\"\nkind = \"{kind}\"\nsource_tree = \"rootfs\"\noutput = \"$provider.images/{id}.img\"\nsize = \"16M\"\nfat_size = {fat_size}\n"
+        )
+    };
+    let ok = [12, 16, 32]
+        .map(|fat_size| filesystem(&format!("fat{fat_size}"), "vfat", fat_size))
+        .concat();
+    assert_eq!(assembly_codes(&assembly(&ok)), Vec::<&str>::new());
+
+    let bad = filesystem("fat24", "vfat", 24) + &filesystem("cpio", "cpio", 16);
+    assert_eq!(
+        assembly_codes(&assembly(&bad)),
+        vec![
+            "assembly_filesystem_fat_size_invalid",
+            "assembly_filesystem_option_unsupported",
+        ]
+    );
+}

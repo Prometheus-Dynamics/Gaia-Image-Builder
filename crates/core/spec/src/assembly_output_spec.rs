@@ -100,7 +100,15 @@ pub struct AssemblyFilesystemSpec {
     /// `squashfs` and `erofs` only: compression, block size and the erofs
     /// layout options.
     pub compressed: AssemblyCompressedFsSpec,
+    /// `vfat` only: the FAT type to format, 12, 16 or 32; the run fails if
+    /// `mformat` cannot make that type at the image's size. `None` keeps the
+    /// default: FAT16 from 3 MiB up to 16 MiB, where `mformat` would pick
+    /// FAT12, and `mformat`'s own choice otherwise.
+    pub fat_size: Option<u32>,
 }
+
+/// The FAT types a `vfat` filesystem's `fat_size` accepts.
+pub const VFAT_FAT_SIZES: [u32; 3] = [12, 16, 32];
 
 impl AssemblyFilesystemSpec {
     pub fn parsed_size(&self) -> Result<Option<ByteSize>, ByteSizeParseError> {

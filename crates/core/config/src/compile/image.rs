@@ -229,6 +229,7 @@ pub(crate) fn compile_image_assembly(
                     fragments: filesystem.fragments,
                     ztailpacking: filesystem.ztailpacking,
                 },
+                fat_size: filesystem.fat_size,
             })
             .collect(),
         disks: raw

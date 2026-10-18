@@ -225,6 +225,7 @@ pub(super) fn execute_assembly_filesystem(
                 source_tree,
                 output: &temp,
                 bytes,
+                fat_size: filesystem.fat_size,
                 mformat: &mformat,
                 mcopy: &mcopy,
                 retention: process_output_retention(spec),
@@ -247,6 +248,7 @@ struct VfatWriteContext<'a> {
     source_tree: &'a Path,
     output: &'a Path,
     bytes: u64,
+    fat_size: Option<u32>,
     mformat: &'a ResolvedTool,
     mcopy: &'a ResolvedTool,
     retention: gaia_process::ProcessOutputRetention,
@@ -259,16 +261,62 @@ const VFAT_FAT16_DEFAULT_FROM_BYTES: u64 = 16 * MIB;
 /// minimum of 4085 clusters, with room for the FATs and root directory.
 const VFAT_FAT16_MIN_BYTES: u64 = 3 * MIB;
 
-/// The cluster size to ask `mformat` for, if not its own. Below 16 MiB it
-/// picks FAT12, which the Raspberry Pi firmware is not known to boot from (a
-/// USB-boot `boot.img` on FAT12 never started its kernel, the same files on
-/// FAT16 are what the vendor image uses): one sector per cluster makes those
-/// images FAT16. Images too small for FAT16, and images of 16 MiB or more,
-/// keep `mformat`'s choice.
-pub(super) fn vfat_sectors_per_cluster(bytes: u64) -> Option<u32> {
-    (VFAT_FAT16_MIN_BYTES..VFAT_FAT16_DEFAULT_FROM_BYTES)
-        .contains(&bytes)
-        .then_some(1)
+/// The `mformat` options for an image of `bytes` with the filesystem's
+/// `fat_size`. Below 16 MiB `mformat` picks FAT12, which some boot firmwares
+/// (e.g. Raspberry Pi's) do not boot from, so with no `fat_size` and with
+/// `fat_size = 16` one sector per cluster makes those images FAT16. Images too
+/// small for FAT16, and images of 16 MiB or more, keep `mformat`'s choice;
+/// `fat_size = 12` always does, and `fat_size = 32` asks for FAT32.
+pub(super) fn vfat_mformat_args(bytes: u64, fat_size: Option<u32>) -> Vec<&'static str> {
+    match fat_size {
+        Some(12) => Vec::new(),
+        Some(32) => vec!["-F"],
+        _ if (VFAT_FAT16_MIN_BYTES..VFAT_FAT16_DEFAULT_FROM_BYTES).contains(&bytes) => {
+            vec!["-c", "1"]
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// The FAT type `mformat` wrote, from the boot sector's type string: 12 or
+/// 16 at offset 54, 32 at offset 82. `None` when neither names one.
+pub(super) fn vfat_fat_size(boot_sector: &[u8]) -> Option<u32> {
+    let at = |offset: usize| boot_sector.get(offset..offset + 8);
+    match (at(54), at(82)) {
+        (Some(b"FAT12   "), _) => Some(12),
+        (Some(b"FAT16   "), _) => Some(16),
+        (_, Some(b"FAT32   ")) => Some(32),
+        _ => None,
+    }
+}
+
+/// With a `fat_size` set, fails when `mformat` wrote another FAT type, as it
+/// does when the image is too small or too large for the asked type.
+fn check_vfat_fat_size(output: &Path, bytes: u64, fat_size: Option<u32>) -> Result<(), String> {
+    let Some(wanted) = fat_size else {
+        return Ok(());
+    };
+    let mut boot_sector = [0u8; 90];
+    std_fs::File::open(output)
+        .and_then(|mut image| std::io::Read::read_exact(&mut image, &mut boot_sector))
+        .map_err(|error| {
+            format!(
+                "failed to read the boot sector of vfat image '{}': {error}",
+                output.display()
+            )
+        })?;
+    match vfat_fat_size(&boot_sector) {
+        Some(made) if made == wanted => Ok(()),
+        made => Err(format!(
+            "vfat image '{}' of {bytes} bytes asks for fat_size = {wanted}, but mformat made {}; \
+             FAT12 needs less than 16 MiB, FAT16 at least 3 MiB",
+            output.display(),
+            made.map_or_else(
+                || "an unknown FAT type".to_string(),
+                |made| format!("FAT{made}")
+            )
+        )),
+    }
 }
 
 /// The margin `size = "auto"` leaves: 5% of the content or the minimum,
@@ -353,6 +401,7 @@ fn write_vfat_filesystem(context: VfatWriteContext<'_>) -> Result<(), AssemblyEr
         source_tree,
         output,
         bytes,
+        fat_size,
         mformat,
         mcopy,
         retention,
@@ -373,11 +422,7 @@ fn write_vfat_filesystem(context: VfatWriteContext<'_>) -> Result<(), AssemblyEr
     drop(image);
 
     let mut format_command = Command::new(&mformat.program);
-    if let Some(sectors_per_cluster) = vfat_sectors_per_cluster(bytes) {
-        format_command
-            .arg("-c")
-            .arg(sectors_per_cluster.to_string());
-    }
+    format_command.args(vfat_mformat_args(bytes, fat_size));
     format_command.arg("-i").arg(output).arg("::");
     let format_output =
         run_command_capture_tail(spec, &mut format_command, retention, cancel_check.clone())?;
@@ -390,6 +435,7 @@ fn write_vfat_filesystem(context: VfatWriteContext<'_>) -> Result<(), AssemblyEr
         )
         .into());
     }
+    check_vfat_fat_size(output, bytes, fat_size)?;
 
     let mut children = std_fs::read_dir(source_tree)
         .map_err(|error| {

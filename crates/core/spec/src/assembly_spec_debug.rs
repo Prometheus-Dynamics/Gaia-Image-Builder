@@ -116,8 +116,8 @@ impl std::fmt::Debug for AssemblyBinarySpec {
     }
 }
 
-// The squashfs and erofs options print only when set, so filesystems that
-// do not set them keep their fingerprints.
+// The squashfs and erofs options and `fat_size` print only when set, so
+// filesystems that do not set them keep their fingerprints.
 impl std::fmt::Debug for crate::AssemblyFilesystemSpec {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut debug = formatter.debug_struct("AssemblyFilesystemSpec");
@@ -136,6 +136,9 @@ impl std::fmt::Debug for crate::AssemblyFilesystemSpec {
             .field("free", &self.free);
         if self.compressed != crate::AssemblyCompressedFsSpec::default() {
             debug.field("compressed", &self.compressed);
+        }
+        if let Some(fat_size) = &self.fat_size {
+            debug.field("fat_size", fat_size);
         }
         debug.finish()
     }
@@ -258,6 +261,7 @@ mod debug_tests {
             journal: None,
             free: None,
             compressed: Default::default(),
+            fat_size: None,
         };
         assert!(format!("{filesystem:?}").ends_with("journal: None, free: None }"));
         filesystem.compressed.compression = Some("zstd".into());
@@ -320,5 +324,35 @@ mod debug_tests {
         assert!(
             format!("{assembly:?}").ends_with("strip_tool: AssemblyPathTemplate(\"llvm-strip\") }")
         );
+    }
+
+    /// `fat_size` prints only when set; unset, the text is the derived one.
+    #[test]
+    fn fat_size_prints_only_when_set() {
+        let filesystem = |fat_size: Option<u32>| crate::AssemblyFilesystemSpec {
+            id: "boot".into(),
+            kind: crate::AssemblyFilesystemKindSpec::Vfat,
+            source_tree: "boot".into(),
+            output: AssemblyPathTemplate::new("$assembly.work/boot.vfat"),
+            size: Some("auto".into()),
+            deterministic: false,
+            compression_level: None,
+            publish: false,
+            label: None,
+            uuid: None,
+            journal: None,
+            free: None,
+            compressed: Default::default(),
+            fat_size,
+        };
+        assert_eq!(
+            format!("{:?}", filesystem(None)),
+            "AssemblyFilesystemSpec { id: AssemblyFilesystemId(\"boot\"), kind: Vfat, \
+             source_tree: AssemblyTreeId(\"boot\"), \
+             output: AssemblyPathTemplate(\"$assembly.work/boot.vfat\"), size: Some(\"auto\"), \
+             deterministic: false, compression_level: None, publish: false, label: None, \
+             uuid: None, journal: None, free: None }"
+        );
+        assert!(format!("{:?}", filesystem(Some(12))).ends_with("free: None, fat_size: 12 }"));
     }
 }

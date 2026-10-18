@@ -120,6 +120,7 @@ fn ext4_assembly(
             uuid: uuid.map(Into::into),
             journal,
             compressed: Default::default(),
+            fat_size: None,
         }],
         ..ImageAssemblySpec::default()
     }

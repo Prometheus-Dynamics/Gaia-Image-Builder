@@ -77,6 +77,7 @@ fn packed(assembly: &mut ImageAssemblySpec) {
             uuid: None,
             journal: None,
             compressed: Default::default(),
+            fat_size: None,
         });
 }
 

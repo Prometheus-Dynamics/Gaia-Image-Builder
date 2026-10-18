@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use gaia_spec::{
     AssemblyFilesystemKindSpec, AssemblyTransformKindSpec, AssemblyValueToken, ImageAssemblySpec,
-    ResolvedBuildSpec, assembly_value_tokens,
+    ResolvedBuildSpec, VFAT_FAT_SIZES, assembly_value_tokens,
 };
 
 use crate::ValidationDiagnostic;
@@ -124,6 +124,28 @@ pub(crate) fn validate_filesystem_options(
     let location = || Some("image.assembly.filesystems".into());
     for filesystem in &assembly.filesystems {
         let erofs = filesystem.kind == AssemblyFilesystemKindSpec::Erofs;
+        if let Some(fat_size) = filesystem.fat_size {
+            if filesystem.kind != AssemblyFilesystemKindSpec::Vfat {
+                diagnostics.push(error(
+                    "assembly_filesystem_option_unsupported",
+                    format!(
+                        "assembly filesystem '{}' kind '{}' does not accept fat_size; only kind 'vfat' does",
+                        filesystem.id,
+                        filesystem.kind.as_str()
+                    ),
+                    location(),
+                ));
+            } else if !VFAT_FAT_SIZES.contains(&fat_size) {
+                diagnostics.push(error(
+                    "assembly_filesystem_fat_size_invalid",
+                    format!(
+                        "assembly filesystem '{}' fat_size {fat_size} must be 12, 16 or 32",
+                        filesystem.id
+                    ),
+                    location(),
+                ));
+            }
+        }
         if filesystem.kind != AssemblyFilesystemKindSpec::Ext4 {
             for (set, option, kinds) in [
                 (

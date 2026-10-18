@@ -163,6 +163,8 @@ pub struct RawAssemblyFilesystemConfig {
     /// With `size = "auto"` only: free space to leave beyond the content
     /// estimate (a byte size). The auto margin is used when larger.
     pub free: Option<String>,
+    /// `vfat` only: the FAT type, 12, 16 or 32.
+    pub fat_size: Option<u32>,
 }
 
 impl Default for RawAssemblyFilesystemConfig {
@@ -185,6 +187,7 @@ impl Default for RawAssemblyFilesystemConfig {
             label: None,
             uuid: None,
             journal: None,
+            fat_size: None,
             free: None,
         }
     }

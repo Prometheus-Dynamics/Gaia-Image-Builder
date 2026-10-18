@@ -80,6 +80,7 @@ fn ram_test_assembly(work_dir: &str) -> ImageAssemblySpec {
             uuid: None,
             journal: None,
             compressed: Default::default(),
+            fat_size: None,
         }],
         disks: vec![gaia_spec::AssemblyDiskSpec {
             id: "sdcard".into(),

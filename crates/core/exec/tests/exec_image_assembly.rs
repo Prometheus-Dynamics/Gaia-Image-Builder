@@ -440,6 +440,7 @@ fn image_assembly_disk_failure_cleans_generated_filesystem_output() {
             uuid: None,
             journal: None,
             compressed: Default::default(),
+            fat_size: None,
         }],
         disks: vec![AssemblyDiskSpec {
             id: "sdcard".into(),
@@ -633,6 +634,7 @@ fn image_assembly_filesystem_failure_cleans_temp_and_final_outputs() {
             uuid: None,
             journal: None,
             compressed: Default::default(),
+            fat_size: None,
         }],
         ..ImageAssemblySpec::default()
     });

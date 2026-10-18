@@ -98,6 +98,7 @@ fn filesystem(
         journal: None,
         free: None,
         compressed,
+        fat_size: None,
     }
 }
 
