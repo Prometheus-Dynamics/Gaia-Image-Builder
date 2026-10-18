@@ -2,10 +2,13 @@ use std::fmt;
 use std::io::{self, IsTerminal};
 
 use tracing::{Event, Subscriber};
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::Layer;
+use tracing_subscriber::filter::Targets;
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields};
+use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::util::SubscriberInitExt;
 
 /// Filter used when `RUST_LOG` is unset or empty. WARN and above keeps the
 /// console quiet for interactive runs; `RUST_LOG=info` or `RUST_LOG=debug`
@@ -19,23 +22,19 @@ fn main() {
 
 fn bootstrap_logging() {
     let rust_log = std::env::var("RUST_LOG").ok();
-    let filter = EnvFilter::try_new(log_filter_directive(rust_log.as_deref()))
-        .unwrap_or_else(|_| EnvFilter::new(DEFAULT_LOG_DIRECTIVE));
+    let filter = log_filter(rust_log.as_deref());
     let ansi = io::stderr().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+    let layer = tracing_subscriber::fmt::layer()
+        .with_ansi(ansi)
+        .event_format(QuietFormat { ansi });
 
     if std::env::args().nth(1).as_deref() == Some("tui") {
-        let _ = tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_ansi(ansi)
-            .event_format(QuietFormat { ansi })
-            .with_writer(io::sink)
+        let _ = tracing_subscriber::registry()
+            .with(layer.with_writer(io::sink).with_filter(filter))
             .try_init();
     } else {
-        let _ = tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_ansi(ansi)
-            .event_format(QuietFormat { ansi })
-            .with_writer(io::stderr)
+        let _ = tracing_subscriber::registry()
+            .with(layer.with_writer(io::stderr).with_filter(filter))
             .try_init();
     }
 
@@ -49,6 +48,16 @@ fn log_filter_directive(rust_log: Option<&str>) -> &str {
         Some(value) if !value.is_empty() => value,
         _ => DEFAULT_LOG_DIRECTIVE,
     }
+}
+
+/// The `RUST_LOG` filter: comma-separated `level` and `target=level` entries,
+/// the forms `Targets` parses without a regex engine. A value it cannot parse
+/// falls back to the quiet default.
+fn log_filter(rust_log: Option<&str>) -> Targets {
+    log_filter_directive(rust_log)
+        .parse()
+        .or_else(|_| DEFAULT_LOG_DIRECTIVE.parse())
+        .unwrap_or_default()
 }
 
 /// One line per event: level, message, then the event's own fields. Span
@@ -90,8 +99,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT_LOG_DIRECTIVE, log_filter_directive};
-    use tracing_subscriber::EnvFilter;
+    use super::{DEFAULT_LOG_DIRECTIVE, log_filter, log_filter_directive};
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::{Layer, filter::Targets};
 
     #[test]
     fn unset_or_blank_rust_log_uses_quiet_default() {
@@ -127,12 +137,13 @@ mod tests {
     fn quiet_format_prints_level_message_and_fields_without_spans() {
         let captured = Captured::default();
         let writer = captured.clone();
-        let subscriber = tracing_subscriber::fmt()
-            .with_env_filter(EnvFilter::new(log_filter_directive(None)))
-            .with_ansi(false)
-            .event_format(super::QuietFormat { ansi: false })
-            .with_writer(move || writer.clone())
-            .finish();
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .event_format(super::QuietFormat { ansi: false })
+                .with_writer(move || writer.clone())
+                .with_filter(log_filter(None)),
+        );
 
         tracing::subscriber::with_default(subscriber, || {
             let span = tracing::info_span!("run_build", build = "build.toml");
@@ -148,7 +159,24 @@ mod tests {
 
     #[test]
     fn quiet_default_is_a_valid_filter() {
-        assert!(EnvFilter::try_new(log_filter_directive(None)).is_ok());
-        assert!(EnvFilter::try_new(log_filter_directive(Some("gaia_exec=debug"))).is_ok());
+        assert!(log_filter_directive(None).parse::<Targets>().is_ok());
+        assert!(
+            log_filter_directive(Some("gaia_exec=debug"))
+                .parse::<Targets>()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn rust_log_levels_and_targets_filter_events() {
+        use tracing::Level;
+        let filter = log_filter(Some("warn,gaia_exec=debug"));
+        assert!(filter.would_enable("gaia_exec::steps", &Level::DEBUG));
+        assert!(!filter.would_enable("gaia_app", &Level::DEBUG));
+        assert!(filter.would_enable("gaia_app", &Level::WARN));
+        assert!(!log_filter(Some("off")).would_enable("anything", &Level::ERROR));
+        let broken = log_filter(Some("gaia_exec=bogus"));
+        assert!(broken.would_enable("gaia_app", &Level::WARN));
+        assert!(!broken.would_enable("gaia_app", &Level::INFO));
     }
 }

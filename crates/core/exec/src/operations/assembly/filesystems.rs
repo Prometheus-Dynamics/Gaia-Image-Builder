@@ -51,10 +51,10 @@ pub(super) fn execute_assembly_filesystem(
         gaia_spec::AssemblyFilesystemKindSpec::Cpio => {
             let temp = temporary_assembly_output_path(&output);
             write_newc_archive(source_tree, &temp)?;
-            publish_assembly_output(&temp, &output)?;
+            let sha256 = publish_assembly_output(&temp, &output)?;
             Ok(AssemblyFilesystemSummary {
                 bytes: file_len(&output)?,
-                sha256: file_sha256(&output)?,
+                sha256,
                 output,
                 tool_path: None,
                 tool_version: None,
@@ -85,10 +85,10 @@ pub(super) fn execute_assembly_filesystem(
                 )
                 .into());
             }
-            publish_assembly_output(&temp, &output)?;
+            let sha256 = publish_assembly_output(&temp, &output)?;
             Ok(AssemblyFilesystemSummary {
                 bytes: file_len(&output)?,
-                sha256: file_sha256(&output)?,
+                sha256,
                 output,
                 tool_path: Some(tool.display.clone()),
                 tool_version: tool_version(&tool, ["--version"]),
@@ -139,10 +139,10 @@ pub(super) fn execute_assembly_filesystem(
                 )
                 .into());
             }
-            publish_assembly_output(&temp, &output)?;
+            let sha256 = publish_assembly_output(&temp, &output)?;
             Ok(AssemblyFilesystemSummary {
                 bytes: file_len(&output)?,
-                sha256: file_sha256(&output)?,
+                sha256,
                 output,
                 tool_path: Some(tool.display.clone()),
                 tool_version: tool_version(&tool, ["--version"]),
@@ -185,10 +185,10 @@ pub(super) fn execute_assembly_filesystem(
                 )
                 .into());
             }
-            publish_assembly_output(&temp, &output)?;
+            let sha256 = publish_assembly_output(&temp, &output)?;
             Ok(AssemblyFilesystemSummary {
                 bytes: file_len(&output)?,
-                sha256: file_sha256(&output)?,
+                sha256,
                 output,
                 tool_path: Some(tool.display.clone()),
                 tool_version: tool_version(&tool, ["--version"]),
@@ -221,10 +221,10 @@ pub(super) fn execute_assembly_filesystem(
                 retention: process_output_retention(spec),
                 cancel_check,
             })?;
-            publish_assembly_output(&temp, &output)?;
+            let sha256 = publish_assembly_output(&temp, &output)?;
             Ok(AssemblyFilesystemSummary {
                 bytes: file_len(&output)?,
-                sha256: file_sha256(&output)?,
+                sha256,
                 output,
                 tool_path: Some(tool_path),
                 tool_version: tool_version(&mformat, ["--version"]),

@@ -52,11 +52,11 @@ pub(super) fn execute_assembly_transform(
                     temp.display()
                 )
             })?;
-            publish_assembly_output(&temp, &dest)?;
+            let sha256 = publish_assembly_output(&temp, &dest)?;
             Ok(AssemblyTransformSummary {
                 src,
                 bytes: file_len(&dest)?,
-                sha256: file_sha256(&dest)?,
+                sha256,
                 dest,
                 tool_path: None,
                 tool_version: None,
@@ -119,11 +119,11 @@ pub(super) fn execute_assembly_transform(
                 )
                 .into());
             }
-            publish_assembly_output(&temp, &dest)?;
+            let sha256 = publish_assembly_output(&temp, &dest)?;
             Ok(AssemblyTransformSummary {
                 src,
                 bytes: file_len(&dest)?,
-                sha256: file_sha256(&dest)?,
+                sha256,
                 dest,
                 tool_path: Some(tool.display.clone()),
                 tool_version: tool_version(&tool, ["--version"]),
@@ -164,11 +164,11 @@ fn compress_to_dest(
         )
         .into());
     }
-    publish_assembly_output(&temp, &dest)?;
+    let sha256 = publish_assembly_output(&temp, &dest)?;
     Ok(AssemblyTransformSummary {
         src,
         bytes: file_len(&dest)?,
-        sha256: file_sha256(&dest)?,
+        sha256,
         dest,
         tool_path: Some(tool.display.clone()),
         tool_version: tool_version(&tool, ["--version"]),

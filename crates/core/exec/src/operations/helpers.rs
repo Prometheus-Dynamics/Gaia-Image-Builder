@@ -281,12 +281,23 @@ pub(crate) fn write_runtime_state(path: PathBuf, state: &KeyValueState) -> Resul
             )
         })?;
     }
-    std_fs::write(&path, state.render()).map_err(|error| {
-        format!(
-            "failed to write runtime state '{}': {error}",
-            path.display()
-        )
-    })
+    // Write a temporary file and rename it over the state: a crash or a
+    // concurrent reader sees the old or the new state, never a partial one.
+    let temp = path.with_file_name(format!(
+        "{}.gaia.tmp",
+        path.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    let written = std_fs::write(&temp, state.render()).and_then(|()| std_fs::rename(&temp, &path));
+    written
+        .inspect_err(|_| {
+            let _ = std_fs::remove_file(&temp);
+        })
+        .map_err(|error| {
+            format!(
+                "failed to write runtime state '{}': {error}",
+                path.display()
+            )
+        })
 }
 
 pub(crate) fn success_from_messages(

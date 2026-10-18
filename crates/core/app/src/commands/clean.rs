@@ -1,5 +1,5 @@
 use gaia_config::{ResolveOptions, try_resolve_config_with_options};
-use gaia_spec::{CleanProfileSpec, ResolvedBuildSpec, SourceDefinition};
+use gaia_spec::{ArtifactDefinition, CleanProfileSpec, ResolvedBuildSpec, SourceDefinition};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -201,14 +201,26 @@ const SHARED_CACHE_DIRS: &[&str] = &[
     gaia_source_providers::DOWNLOAD_CACHE_DIR,
     ".gaia/cache/buildroot/dl",
     ".gaia/docker-cache",
+    ".gaia/cache/import-sources",
+    ".gaia/docker-home",
 ];
 
+/// Name of the directory inside a shared cargo target dir that records which
+/// source directory each local package was built from (see the rust provider).
+const SHARED_OWNERS_DIR: &str = "gaia-owners";
+
 /// Paths removed by the `caches` target (or `--all-caches`):
-/// - git mirrors under `.gaia/cache/git` that no git source of this build
-///   uses (including mirrors from the old one-per-ref layout),
 /// - `.<source>.gaia-preserved` stashes left by an interrupted re-clone,
 /// - Buildroot `target.refresh` work trees left by squashfs refreshes,
-/// - with `--all-caches`, the shared caches in [`SHARED_CACHE_DIRS`].
+/// - stale shared cargo target dirs under the user cache (see
+///   [`stale_shared_cargo_targets`]),
+/// - with `--unused-mirrors`, git mirrors under `.gaia/cache/git` that no git
+///   source or cargo git dependency of this build uses,
+/// - with `--all-caches`, every git mirror and the shared caches in
+///   [`SHARED_CACHE_DIRS`].
+///
+/// Git mirrors are shared by every build in the workspace, so they are pruned
+/// only on request: a build cannot see the mirrors another build still needs.
 fn cache_clean_paths(
     spec: &ResolvedBuildSpec,
     clean_args: &CleanArgs,
@@ -225,24 +237,11 @@ fn cache_clean_paths(
 
     if clean_args.all_caches {
         paths.extend(SHARED_CACHE_DIRS.iter().map(|dir| cache_root.join(dir)));
-    } else {
-        let used = spec
-            .sources
-            .iter()
-            .filter_map(|source| match &source.definition {
-                SourceDefinition::Git(git) => {
-                    Some(gaia_source_providers::remote_git_mirror_dir_name(&git.repo))
-                }
-                _ => None,
-            })
-            .collect::<BTreeSet<_>>();
-        let mirrors = cache_root.join(gaia_source_providers::GIT_MIRROR_CACHE_DIR);
-        paths.extend(
-            sorted_children(&mirrors)
-                .into_iter()
-                .filter(|path| !path_name(path).is_some_and(|name| used.contains(name))),
-        );
+    } else if clean_args.unused_mirrors {
+        paths.extend(unused_mirror_paths(spec, &cache_root));
     }
+    let user_cache = gaia_spec::user_cache_root();
+    paths.extend(stale_shared_cargo_targets(user_cache.as_deref()));
 
     let sources_dir = PathBuf::from(&spec.workspace.build_dir).join("sources");
     paths.extend(sorted_children(&sources_dir).into_iter().filter(|path| {
@@ -258,6 +257,53 @@ fn cache_clean_paths(
             .filter(|path| path.is_dir()),
     );
     Ok(dedupe_paths(paths))
+}
+
+/// Git mirrors under `.gaia/cache/git` that no git source of this build
+/// fetches and no cargo git dependency of this build maps to. Includes the
+/// mirrors of the old one-per-ref layout.
+fn unused_mirror_paths(spec: &ResolvedBuildSpec, cache_root: &Path) -> Vec<PathBuf> {
+    let mut used = BTreeSet::new();
+    for source in &spec.sources {
+        if let SourceDefinition::Git(git) = &source.definition {
+            used.insert(gaia_source_providers::remote_git_mirror_dir_name(&git.repo));
+        }
+    }
+    for artifact in &spec.artifacts {
+        if let ArtifactDefinition::Rust(rust) = &artifact.definition {
+            for mapping in &rust.cargo_git_sources {
+                used.insert(gaia_source_providers::remote_git_mirror_dir_name(
+                    &mapping.repo,
+                ));
+            }
+        }
+    }
+    let mirrors = cache_root.join(gaia_source_providers::GIT_MIRROR_CACHE_DIR);
+    sorted_children(&mirrors)
+        .into_iter()
+        .filter(|path| !path_name(path).is_some_and(|name| used.contains(name)))
+        .collect()
+}
+
+/// Shared cargo target dirs (`<user cache>/cargo-target/<key>`) that no live
+/// source owns: every package claim in their `gaia-owners` directory names a
+/// source directory that no longer exists. A dir with no claims is kept, since
+/// a build may be filling it right now, and so is a dir whose owner exists.
+fn stale_shared_cargo_targets(user_cache: Option<&Path>) -> Vec<PathBuf> {
+    let Some(root) = user_cache else {
+        return Vec::new();
+    };
+    sorted_children(&root.join("cargo-target"))
+        .into_iter()
+        .filter(|dir| {
+            let claims = sorted_children(&dir.join(SHARED_OWNERS_DIR));
+            !claims.is_empty()
+                && claims.iter().all(|claim| {
+                    fs::read_to_string(claim)
+                        .is_ok_and(|owner| !owner.is_empty() && !Path::new(&owner).exists())
+                })
+        })
+        .collect()
 }
 
 fn sorted_children(dir: &Path) -> Vec<PathBuf> {
@@ -347,5 +393,37 @@ fn remove_path(path: &Path) -> std::io::Result<()> {
         gaia_process::discard(path)
     } else {
         fs::remove_file(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SHARED_OWNERS_DIR, stale_shared_cargo_targets};
+    use gaia_testkit::TempDir;
+    use std::fs;
+
+    #[test]
+    fn shared_cargo_target_is_stale_only_when_every_owner_is_gone() {
+        let scratch = TempDir::new("gaia-clean-cargo-targets");
+        let cache = scratch.join("cache");
+        let targets = cache.join("cargo-target");
+        let live_source = scratch.join("live-source");
+        fs::create_dir_all(&live_source).expect("live source");
+        let claim_dir = |key: &str| targets.join(key).join(SHARED_OWNERS_DIR);
+        let claim = |key: &str, name: &str, owner: &std::path::Path| {
+            fs::create_dir_all(claim_dir(key)).expect("owners dir");
+            fs::write(claim_dir(key).join(name), owner.display().to_string()).expect("claim");
+        };
+        // Every owner is gone: stale.
+        claim("gone", "orion-0.1.0", &scratch.join("removed-source"));
+        // One owner still exists: kept.
+        claim("live", "orion-0.1.0", &scratch.join("removed-source"));
+        claim("live", "vega-0.1.0", &live_source);
+        // No claims at all (a build may be filling it): kept.
+        fs::create_dir_all(targets.join("unclaimed")).expect("unclaimed");
+
+        let stale = stale_shared_cargo_targets(Some(&cache));
+        assert_eq!(stale, vec![targets.join("gone")], "{stale:?}");
+        assert!(stale_shared_cargo_targets(None).is_empty());
     }
 }

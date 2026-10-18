@@ -455,12 +455,12 @@ fn archive_assembly_disk_output(
                 archive_path.display()
             ))
         })?;
-        publish_assembly_output(&temp_archive, &archive_path)?;
+        let sha256 = publish_assembly_output(&temp_archive, &archive_path)?;
         return Ok(Some(AssemblyArchiveSummary {
             output: archive_path.clone(),
             source: source.clone(),
             bytes: file_len(&archive_path)?,
-            sha256: file_sha256(&archive_path)?,
+            sha256,
         }));
     };
     // All cores; the output is the same for any thread count.
@@ -486,7 +486,7 @@ fn archive_assembly_disk_output(
             output.stderr_tail()
         )));
     }
-    publish_assembly_output(&temp_archive, &archive_path)?;
+    let sha256 = publish_assembly_output(&temp_archive, &archive_path)?;
     messages.extend(archive_log_messages(
         &archive_path,
         compressor,
@@ -497,7 +497,7 @@ fn archive_assembly_disk_output(
         output: archive_path.clone(),
         source: source.clone(),
         bytes: file_len(&archive_path)?,
-        sha256: file_sha256(&archive_path)?,
+        sha256,
     }))
 }
 
@@ -534,20 +534,25 @@ fn temporary_assembly_output_path(output: &Path) -> PathBuf {
     gaia_image_providers::temporary_publish_output_path(output, "assembly-output")
 }
 
-fn publish_assembly_output(temp: &Path, output: &Path) -> Result<(), String> {
+/// Publishes `temp` as `output` and returns the output's sha256. The digest
+/// is computed once: the caller's summary reports it, and it is recorded in
+/// the directory's content manifest so the next plan does not read the file
+/// again. A missing manifest entry is best effort and only costs a re-hash.
+fn publish_assembly_output(temp: &Path, output: &Path) -> Result<String, String> {
     gaia_image_providers::publish_replace_output(
         temp,
         output,
         "assembly output",
         "assembly-output",
     )?;
-    // Record the output's digest in its directory's content manifest so the
-    // next plan does not read it again. Best effort: a missing entry only
-    // costs one re-hash.
+    let sha256 = file_sha256(output)?;
     if let (true, Some(parent)) = (output.is_file(), output.parent()) {
-        let _ = gaia_image_providers::record_content_digests(parent, &[output.to_path_buf()]);
+        let _ = gaia_image_providers::record_content_digests_known(
+            parent,
+            vec![(output.to_path_buf(), Some(sha256.clone()))],
+        );
     }
-    Ok(())
+    Ok(sha256)
 }
 
 fn temporary_assembly_backup_path(output: &Path) -> PathBuf {
@@ -735,7 +740,29 @@ fn resolve_assembly_tool(roots: &AssemblyRoots, name: &str) -> Result<ResolvedTo
     ))
 }
 
+/// `--version` probes already run in this process, keyed by program path and
+/// arguments. A probe can take up to `TOOL_VERSION_TIMEOUT_SECONDS`, and every
+/// step that records a tool would otherwise repeat it.
+type ToolVersionCache =
+    std::sync::Mutex<std::collections::HashMap<(PathBuf, String), Option<String>>>;
+static TOOL_VERSIONS: std::sync::OnceLock<ToolVersionCache> = std::sync::OnceLock::new();
+
 fn tool_version<const N: usize>(tool: &ResolvedTool, args: [&str; N]) -> Option<String> {
+    let key = (PathBuf::from(&tool.program), args.join(" "));
+    let cache = TOOL_VERSIONS.get_or_init(Default::default);
+    if let Ok(cached) = cache.lock()
+        && let Some(version) = cached.get(&key)
+    {
+        return version.clone();
+    }
+    let version = probe_tool_version(tool, args);
+    if let Ok(mut cached) = cache.lock() {
+        cached.insert(key, version.clone());
+    }
+    version
+}
+
+fn probe_tool_version<const N: usize>(tool: &ResolvedTool, args: [&str; N]) -> Option<String> {
     let mut command = Command::new(&tool.program);
     command.args(args);
     let result = gaia_process::run_command_with_timeout_and_retention(

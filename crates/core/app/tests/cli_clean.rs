@@ -96,11 +96,34 @@ branch = "main"
         ),
     );
 
+    // Without --unused-mirrors the mirrors are shared and kept.
+    let plain = run_with_args(AppArgs::parse_from([
+        "clean",
+        &build,
+        "--target",
+        "caches",
+        "--dry-run",
+    ]));
+    match plain {
+        CommandOutcome::Cleaned { report, .. } => {
+            assert!(
+                !report
+                    .removed
+                    .iter()
+                    .any(|path| path.starts_with(&git_cache)),
+                "{:?}",
+                report.removed
+            );
+        }
+        other => panic!("expected cleaned outcome, got {other:?}"),
+    }
+
     let dry_run = run_with_args(AppArgs::parse_from([
         "clean",
         &build,
         "--target",
         "caches",
+        "--unused-mirrors",
         "--dry-run",
     ]));
     match dry_run {
@@ -113,7 +136,13 @@ branch = "main"
     }
     assert!(orphan_mirror.exists());
 
-    let cleaned = run_with_args(AppArgs::parse_from(["clean", &build, "--target", "caches"]));
+    let cleaned = run_with_args(AppArgs::parse_from([
+        "clean",
+        &build,
+        "--target",
+        "caches",
+        "--unused-mirrors",
+    ]));
     match cleaned {
         CommandOutcome::Cleaned { report, .. } => {
             assert_eq!(report.freed_bytes(), 1024);

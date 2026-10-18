@@ -55,7 +55,6 @@ gaia-artifact-provider-python = { path = "crates/providers/artifact/artifact-pro
 gaia-artifact-provider-go = { path = "crates/providers/artifact/artifact-provider-go", version = "2.0.0" }
 gaia-image-provider-buildroot = { path = "crates/providers/image/image-provider-buildroot", version = "2.0.0" }
 gaia-image-provider-starting-point = { path = "crates/providers/image/image-provider-starting-point", version = "2.0.0" }
-clap = { version = "4", features = ["derive", "env"] }
 crossterm = "0.29"
 libc = "0.2"
 ratatui = "0.30"
@@ -66,7 +65,7 @@ sha2 = "0.11.0"
 tempfile = "3"
 toml = "1.1.6"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
@@ -77,3 +76,11 @@ unused_attributes = "deny"
 dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
+
+[profile.release]
+# Gaia is a single binary; LTO, one codegen unit and stripped symbols keep it
+# small. `panic` stays "unwind": `gaia-app` converts command panics into a
+# failed outcome with catch_unwind, which "abort" would turn into a crash.
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

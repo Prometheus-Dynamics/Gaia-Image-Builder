@@ -149,6 +149,66 @@ pub fn run_command_with_timeout_and_retention(
     sink: Option<ProcessLogSink>,
     cancel_check: Option<ProcessCancelCheck>,
 ) -> Result<ProcessRunResult, ProcessRunError> {
+    run_command_capturing(
+        command,
+        StdoutCapture::Piped,
+        timeout,
+        label,
+        retention,
+        sink,
+        cancel_check,
+    )
+}
+
+pub fn run_command_stdout_to_file_with_timeout_and_retention(
+    command: &mut Command,
+    output_path: &Path,
+    timeout: Duration,
+    label: &str,
+    retention: ProcessOutputRetention,
+    sink: Option<ProcessLogSink>,
+    cancel_check: Option<ProcessCancelCheck>,
+) -> Result<ProcessRunResult, ProcessRunError> {
+    let stdout = File::create(output_path).map_err(|error| ProcessRunError {
+        kind: ProcessRunErrorKind::RuntimeState,
+        message: format!(
+            "failed to create stdout file for {label} at '{}': {error}",
+            output_path.display()
+        ),
+    })?;
+    run_command_capturing(
+        command,
+        StdoutCapture::File(stdout),
+        timeout,
+        label,
+        retention,
+        sink,
+        cancel_check,
+    )
+}
+
+/// Where a command's stdout goes: read back through a pipe, or written
+/// straight to a file (the run result then holds no stdout).
+enum StdoutCapture {
+    Piped,
+    File(File),
+}
+
+/// The shared run loop of [`run_command_with_timeout_and_retention`] and
+/// [`run_command_stdout_to_file_with_timeout_and_retention`]: spawns the
+/// command in its own process group, drains stderr (and stdout when piped)
+/// into the retention limits, and enforces the timeout, cancellation and
+/// pause handling.
+fn run_command_capturing(
+    command: &mut Command,
+    stdout: StdoutCapture,
+    timeout: Duration,
+    label: &str,
+    retention: ProcessOutputRetention,
+    sink: Option<ProcessLogSink>,
+    cancel_check: Option<ProcessCancelCheck>,
+) -> Result<ProcessRunResult, ProcessRunError> {
+    let piped = matches!(stdout, StdoutCapture::Piped);
     let description = command_description(command);
     tracing::debug!(
         command_label = label,
@@ -158,7 +218,11 @@ pub fn run_command_with_timeout_and_retention(
         timeout_seconds = timeout.as_secs(),
         "starting process"
     );
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    command.stdout(match stdout {
+        StdoutCapture::Piped => Stdio::piped(),
+        StdoutCapture::File(file) => Stdio::from(file),
+    });
+    command.stderr(Stdio::piped());
     // Commands run in their own process group: one reading the terminal
     // would be stopped (SIGTTIN) and hang until its timeout. Nothing Gaia
     // runs takes input.
@@ -190,17 +254,25 @@ pub fn run_command_with_timeout_and_retention(
         "process started"
     );
 
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let stdout_sink = sink.clone();
-    let stderr_sink = sink;
     let (tx, rx) = mpsc::sync_channel::<StreamMessage>(STREAM_MESSAGE_QUEUE_BOUND);
-
-    spawn_stream_reader(stdout, ProcessLogStream::Stdout, stdout_sink, tx.clone());
-    spawn_stream_reader(stderr, ProcessLogStream::Stderr, stderr_sink, tx.clone());
+    if piped {
+        spawn_stream_reader(
+            child.stdout.take(),
+            ProcessLogStream::Stdout,
+            sink.clone(),
+            tx.clone(),
+        );
+    }
+    spawn_stream_reader(
+        child.stderr.take(),
+        ProcessLogStream::Stderr,
+        sink,
+        tx.clone(),
+    );
     drop(tx);
 
     let mut stream_state = StreamDrainState::with_retention(retention);
+    stream_state.stdout_done = !piped;
 
     // Timeouts count only time not paused (see `pause`).
     let start = ActiveClock::start();
@@ -296,150 +368,6 @@ pub fn run_command_with_timeout_and_retention(
             stderr: stream_state.stderr.take_bytes(),
         },
         stdout_lines: stream_state.stdout.take_lines(),
-        stderr_lines: stream_state.stderr.take_lines(),
-    })
-}
-
-pub fn run_command_stdout_to_file_with_timeout_and_retention(
-    command: &mut Command,
-    output_path: &Path,
-    timeout: Duration,
-    label: &str,
-    retention: ProcessOutputRetention,
-    sink: Option<ProcessLogSink>,
-    cancel_check: Option<ProcessCancelCheck>,
-) -> Result<ProcessRunResult, ProcessRunError> {
-    let description = command_description(command);
-    let stdout = File::create(output_path).map_err(|error| ProcessRunError {
-        kind: ProcessRunErrorKind::RuntimeState,
-        message: format!(
-            "failed to create stdout file for {label} at '{}': {error}",
-            output_path.display()
-        ),
-    })?;
-    command.stdout(Stdio::from(stdout)).stderr(Stdio::piped());
-    // Commands run in their own process group: one reading the terminal
-    // would be stopped (SIGTTIN) and hang until its timeout. Nothing Gaia
-    // runs takes input.
-    command.stdin(Stdio::null());
-    configure_process_group(command);
-    let mut child = spawn_retrying_busy_executable(command).map_err(|error| {
-        tracing::warn!(
-            command_label = label,
-            command_program = %description.program,
-            command_args = ?description.args,
-            command_cwd = description.cwd.as_deref().unwrap_or("<inherit>"),
-            error = %error,
-            "process start failed"
-        );
-        ProcessRunError {
-            kind: ProcessRunErrorKind::ToolStart,
-            message: format!("failed to start {label}: {error}"),
-        }
-    })?;
-    let child_id = child.id();
-    let process_group = ProcessGroup::for_child(&child, command);
-    tracing::debug!(
-        command_label = label,
-        command_program = %description.program,
-        command_args = ?description.args,
-        command_cwd = description.cwd.as_deref().unwrap_or("<inherit>"),
-        pid = child_id,
-        timeout_seconds = timeout.as_secs(),
-        "process started"
-    );
-
-    let stderr = child.stderr.take();
-    let (tx, rx) = mpsc::sync_channel::<StreamMessage>(STREAM_MESSAGE_QUEUE_BOUND);
-    spawn_stream_reader(stderr, ProcessLogStream::Stderr, sink, tx.clone());
-    drop(tx);
-
-    let mut stream_state = StreamDrainState::with_retention(retention);
-    stream_state.stdout_done = true;
-
-    // Timeouts count only time not paused (see `pause`).
-    let start = ActiveClock::start();
-    let mut stopped = false;
-    let status = loop {
-        drain_stream_messages(&rx, &mut stream_state);
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => {
-                stopped = follow_pause(&process_group, stopped);
-                if cancel_check.as_ref().is_some_and(|cancel| cancel()) {
-                    terminate_child_tree(&mut child, &process_group);
-                    drain_stream_messages_until_idle(
-                        &rx,
-                        &mut stream_state,
-                        Duration::from_millis(250),
-                    );
-                    tracing::warn!(
-                        command_label = label,
-                        command_program = %description.program,
-                        pid = child_id,
-                        elapsed_ms = start.elapsed().as_millis(),
-                        "process cancelled"
-                    );
-                    return Err(ProcessRunError {
-                        kind: ProcessRunErrorKind::Cancelled,
-                        message: format!("{label} cancelled"),
-                    });
-                }
-                if start.elapsed() >= timeout {
-                    terminate_child_tree(&mut child, &process_group);
-                    drain_stream_messages_until_idle(
-                        &rx,
-                        &mut stream_state,
-                        Duration::from_millis(250),
-                    );
-                    tracing::warn!(
-                        command_label = label,
-                        command_program = %description.program,
-                        pid = child_id,
-                        timeout_seconds = timeout.as_secs(),
-                        elapsed_ms = start.elapsed().as_millis(),
-                        "process timed out"
-                    );
-                    return Err(ProcessRunError {
-                        kind: ProcessRunErrorKind::Timeout,
-                        message: format!("{label} timed out after {}s", timeout.as_secs()),
-                    });
-                }
-                wait_for_stream_message(&rx, &mut stream_state, Duration::from_millis(10));
-            }
-            Err(error) => {
-                terminate_child_tree(&mut child, &process_group);
-                drain_stream_messages_until_idle(
-                    &rx,
-                    &mut stream_state,
-                    Duration::from_millis(250),
-                );
-                tracing::warn!(
-                    command_label = label,
-                    command_program = %description.program,
-                    pid = child_id,
-                    elapsed_ms = start.elapsed().as_millis(),
-                    error = %error,
-                    "process poll failed"
-                );
-                return Err(ProcessRunError {
-                    kind: ProcessRunErrorKind::RuntimeState,
-                    message: format!("failed to poll {label}: {error}"),
-                });
-            }
-        }
-    };
-
-    process_group.finished();
-    drain_stream_messages_until_idle(&rx, &mut stream_state, Duration::from_millis(500));
-
-    Ok(ProcessRunResult {
-        output: Output {
-            status,
-            stdout: Vec::new(),
-            stderr: stream_state.stderr.take_bytes(),
-        },
-        stdout_lines: Vec::new(),
         stderr_lines: stream_state.stderr.take_lines(),
     })
 }

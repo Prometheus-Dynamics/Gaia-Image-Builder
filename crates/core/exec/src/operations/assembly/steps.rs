@@ -309,10 +309,12 @@ impl<'a> StepRun<'a> {
         let sources = assembly_file_sources(self.spec, self.roots, file)?;
         if sources.is_empty() && file.optional {
             self.skipped_count += 1;
+            // Skipped entries live under `file.skipped.<entry>`: staged files
+            // use `file.<count>.*`, so the two numberings never share a key.
             self.state
-                .insert(format!("file.{entry_index}.skipped"), "true");
+                .insert(format!("file.skipped.{entry_index}.empty"), "true");
             self.state
-                .insert(format!("file.{entry_index}.tree"), &file.tree);
+                .insert(format!("file.skipped.{entry_index}.tree"), &file.tree);
             return Ok(());
         }
         if sources.is_empty() {
@@ -335,8 +337,10 @@ impl<'a> StepRun<'a> {
             if !source.exists() {
                 if file.optional {
                     self.skipped_count += 1;
-                    self.state
-                        .insert(format!("file.{entry_index}.skipped"), source.display());
+                    self.state.insert(
+                        format!("file.skipped.{entry_index}.source"),
+                        source.display(),
+                    );
                     continue;
                 }
                 return Err(

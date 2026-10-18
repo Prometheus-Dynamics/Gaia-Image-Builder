@@ -51,10 +51,10 @@ pub(super) fn execute_assembly_disk(
     let partitions = plan_mbr_partitions(spec, roots, disk)?;
     let temp = temporary_assembly_output_path(&output);
     write_mbr_disk(&temp, disk, &partitions)?;
-    publish_assembly_output(&temp, &output)?;
+    let sha256 = publish_assembly_output(&temp, &output)?;
     Ok(AssemblyDiskSummary {
         bytes: file_len(&output)?,
-        sha256: file_sha256(&output)?,
+        sha256,
         output,
         partitions,
     })
@@ -253,7 +253,9 @@ fn write_mbr_disk(
                     partition.name
                 )
             })?;
-        std::io::copy(&mut image, &mut output_file).map_err(|error| {
+        // Zero runs stay holes: an unwritten partition costs no disk space.
+        // The disk file was sized up front, so no length change is needed.
+        super::placement::copy_sparse_into(&mut image, &mut output_file).map_err(|error| {
             format!(
                 "failed to copy partition image '{}' into disk '{}': {error}",
                 image_path.display(),

@@ -252,21 +252,29 @@ Built-in targets:
   Use the profile named by `clean.default`.
 - `--target caches`
   Prune cache leftovers without touching build or output directories:
-  - git mirrors under `.gaia/cache/git` that no git source of this build uses
-    (including mirrors left from the older one-mirror-per-ref layout; a
-    mirror used only by another build in the same workspace is pruned too
-    and re-created on its next fetch),
+  - shared cargo target dirs under the user cache (`<cache>/cargo-target/<key>`)
+    whose packages were all built from source directories that no longer
+    exist (the `gaia-owners` claims name them). A dir with no claims, or
+    with a claim whose source still exists, is kept,
   - `.<source>.gaia-preserved` stashes left in `build_dir/sources` by an
     interrupted re-clone,
   - Buildroot `target.refresh` work trees under
     `build_dir/image/buildroot-output/build/buildroot-fs/*/`.
 
   Gaia reports the size of each removed cache path and the total freed.
+- `--unused-mirrors` (with `--target caches`)
+  Also remove git mirrors under `.gaia/cache/git` that no git source of this
+  build uses, and no cargo git dependency (`cargo_git_sources`) of this
+  build maps to. Mirrors are shared by the whole workspace, so this prunes a
+  mirror another build still needs (it is re-created on that build's next
+  fetch). Use it only when this build is the workspace's only build.
 - `--all-caches`
-  Also remove the shared workspace caches wholesale: `.gaia/cache/git`,
-  `.gaia/cache/downloads`, `.gaia/cache/buildroot/dl` and
+  Also remove the shared workspace caches wholesale: every git mirror under
+  `.gaia/cache/git`, `.gaia/cache/downloads`, `.gaia/cache/buildroot/dl`,
   `.gaia/docker-cache` (cargo registry/git and sccache for Docker artifact
-  builds). They refill on the next build, at the cost of re-downloading.
+  builds), `.gaia/cache/import-sources` (git import checkouts) and
+  `.gaia/docker-home` (the tool homes of Docker builds). They refill on the
+  next build, at the cost of re-downloading.
   Implies `--target caches`; on its own it does not clean build or output
   directories.
 

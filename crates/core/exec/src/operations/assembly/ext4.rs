@@ -121,10 +121,10 @@ pub(super) fn execute_ext4_filesystem(
         let _ = std_fs::remove_file(&temp);
         return Err(error);
     }
-    publish_assembly_output(&temp, output)?;
+    let sha256 = publish_assembly_output(&temp, output)?;
     Ok(AssemblyFilesystemSummary {
         bytes: file_len(output)?,
-        sha256: file_sha256(output)?,
+        sha256,
         output: output.to_path_buf(),
         tool_path: Some(tool_path),
         tool_version: tool_version(&mkfs, ["-V"]),

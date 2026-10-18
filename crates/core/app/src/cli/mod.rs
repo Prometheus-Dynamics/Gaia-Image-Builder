@@ -53,6 +53,10 @@ pub struct CleanArgs {
     /// `--all-caches`: with the `caches` target, also remove the shared
     /// git, download, Buildroot download and docker tool caches.
     pub all_caches: bool,
+    /// `--unused-mirrors`: with the `caches` target, also remove git mirrors
+    /// that this build does not use. Mirrors are shared by the whole workspace,
+    /// so use it only when this build is the workspace's only build.
+    pub unused_mirrors: bool,
 }
 
 /// `gaia cache`: lists the package cache unless `remove` or `clear` is given.
@@ -197,6 +201,7 @@ impl AppArgs {
                     }
                 }
                 "--all-caches" => parsed.clean.all_caches = true,
+                "--unused-mirrors" => parsed.clean.unused_mirrors = true,
                 "--follow" | "-f" => parsed.follow = true,
                 "--json" => parsed.json = true,
                 "--fail-on-clean" => parsed.fail_on_clean = true,

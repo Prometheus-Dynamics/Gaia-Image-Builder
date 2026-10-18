@@ -182,6 +182,9 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
     if args.clean.all_caches && args.command != AppCommand::Clean {
         usage_errors.push("--all-caches applies to 'clean'".into());
     }
+    if args.clean.unused_mirrors && args.command != AppCommand::Clean {
+        usage_errors.push("--unused-mirrors applies to 'clean'".into());
+    }
     let cache = &args.cache;
     if (cache.level.is_some()
         || cache.clear.is_some()
@@ -300,7 +303,7 @@ fn help_text() -> String {
         "  gaia clean [build-config] --profile <name>",
         "  gaia clean [build-config] --path <path>",
         "  gaia clean [build-config] --dry-run",
-        "  gaia clean [build-config] --target caches [--all-caches]",
+        "  gaia clean [build-config] --target caches [--unused-mirrors] [--all-caches]",
         "  gaia cache [build-config] [--list] [--level system|project] [--package <glob>]",
         "  gaia cache [build-config] --remove <package>[@key-prefix][,...] [--dry-run]",
         "  gaia cache [build-config] --remove-legacy [--dry-run]",
@@ -353,8 +356,9 @@ fn help_text() -> String {
         "",
         "'gaia lock' records the commit of every git source in <build>.gaia.lock",
         "next to the build file; builds then check out exactly those commits.",
-        "'clean --target caches' prunes orphaned git mirrors and leftover work",
-        "dirs; --all-caches also removes the shared download and tool caches.",
+        "'clean --target caches' prunes stale shared cargo target dirs and leftover",
+        "work dirs; --unused-mirrors also prunes git mirrors this build does not use,",
+        "and --all-caches removes every git mirror and the shared download and tool caches.",
         "",
         "Default build config: examples/default-workspace/configs/default.toml",
     ]

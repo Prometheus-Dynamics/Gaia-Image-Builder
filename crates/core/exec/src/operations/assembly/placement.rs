@@ -27,7 +27,6 @@ use gaia_spec::{
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap};
-use std::io::Read;
 
 const GIB: u64 = 1024 * 1024 * 1024;
 const MIB: u64 = 1024 * 1024;
@@ -532,16 +531,28 @@ pub(super) fn publish_copy_to_disk(source: &Path, target: &Path) -> Result<(), S
             target.display()
         ));
     }
-    publish_assembly_output(&temp, target)
+    publish_assembly_output(&temp, target).map(|_| ())
 }
 
 /// Copies a file, leaving its zero runs as holes: the copy is the same bytes
 /// and a raw disk image with unwritten partitions costs only its data.
 pub(super) fn copy_sparse(source: &Path, target: &Path) -> std::io::Result<()> {
-    use std::io::{Seek, SeekFrom, Write};
     let mut input = std_fs::File::open(source)?;
     let len = input.metadata()?.len();
     let mut output = std_fs::File::create(target)?;
+    copy_sparse_into(&mut input, &mut output)?;
+    output.set_len(len)
+}
+
+/// Copies `input` into `output` from their current positions, skipping zero
+/// runs with a seek so they stay holes where `output` is a fresh (or
+/// truncated) file. The bytes are the same as a plain copy. A copy that ends
+/// in a zero run does not extend `output`: the caller sets its length.
+pub(super) fn copy_sparse_into(
+    input: &mut std_fs::File,
+    output: &mut std_fs::File,
+) -> std::io::Result<()> {
+    use std::io::{Read, Seek, SeekFrom, Write};
     let mut buffer = vec![0u8; SPARSE_CHUNK];
     loop {
         let read = input.read(&mut buffer)?;
@@ -554,7 +565,7 @@ pub(super) fn copy_sparse(source: &Path, target: &Path) -> std::io::Result<()> {
             output.write_all(&buffer[..read])?;
         }
     }
-    output.set_len(len)
+    Ok(())
 }
 
 /// Removes the RAM copies of a run. Best effort: they are re-creatable.

@@ -24,6 +24,31 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - Collected expected images and assembly inputs were byte-copied on every build, which lost sparseness and copied multi-GB files each time. A collected file is now reflinked (`FICLONE`) where the filesystem supports it, else copied with zero runs left as holes. Its mtime follows the source, and a copy whose size and mtime already match is not written again. Hard links are not used, because later image steps rewrite the Buildroot images in place.
 
+### Release binary: smaller and stripped
+
+- The workspace has a `[profile.release]` with `lto = "thin"`, `codegen-units = 1` and `strip = "symbols"`. `panic` stays `unwind`: the app turns command panics into a failed outcome with `catch_unwind`. Measured on a clean `cargo build --release -p gaia` with the same toolchain: 19.2 MB (default release, unstripped) became 10.2 MB, and the build went from 71 s to 198 s.
+- `tracing-subscriber`'s `env-filter` feature (and its regex engine) is gone. `RUST_LOG` still takes the same `level` and `target=level` lists, parsed by `tracing_subscriber::filter::Targets`; a value it cannot parse falls back to `warn`, as before. Span-field directives (`target[{field}]=level`) are no longer honoured. The filter adds about 0.56 MB less than the profile alone.
+- The unused workspace dependency `clap` is removed.
+
+### Clean: caches it missed, and mirrors only on request
+
+- `clean --target caches` now also removes shared cargo target dirs under the user cache (`<cache>/cargo-target/<key>`) whose source directories are all gone (the `gaia-owners` claims name them). A dir with no claims, or whose claimed source still exists, is kept.
+- `--all-caches` also removes `.gaia/cache/import-sources` and `.gaia/docker-home`.
+- Git mirrors are shared by the whole workspace, so `--target caches` no longer prunes them by default. The new `--unused-mirrors` prunes the mirrors this build does not use, counting the mirrors of `cargo_git_sources` as used. `--all-caches` still removes every mirror. Use `--unused-mirrors` only when this build is the workspace's only build.
+
+### Assembly: less hashing, sparse disks, fewer probes
+
+- Each published assembly output is hashed once. Its digest is computed when the output is published and used both for the step's summary and for the content manifest (it was hashed up to three times).
+- A disk's partition images are copied with holes kept for zero runs, so unwritten partition space stays sparse on disk. The output bytes are unchanged.
+- A tool's `--version` probe runs once per process for each program path and argument list, instead of at every step that records the tool.
+- Runtime state files are written to a temporary file and renamed into place, so a reader never sees a partial file.
+- Skipped file entries are recorded under `file.skipped.<entry>.*`. They used `file.<entry>.*`, which shared the numbering of staged files (`file.<count>.*`). Nothing read these keys back.
+- `partition_table = "gpt"` is rejected by validation (`assembly_disk_partition_table_unsupported`), which stops the run before any assembly step; the assembly-time error remains as a backstop.
+
+### Process: one run loop for captured and file output
+
+- `run_command_with_timeout_and_retention` and `run_command_stdout_to_file_with_timeout_and_retention` share one run loop (timeouts, cancellation, pauses, output retention). The file variant now also logs the completion debug line the piped variant logs. Behaviour is otherwise unchanged.
+
 ### Buildroot EROFS: lzma without the extra image
 
 - With `BR2_TARGET_ROOTFS_EROFS_LZMA=y`, Buildroot's generic image compression (keyed on the same symbol) also ran `lzma -9` over `rootfs.erofs`, writing a second image larger than the first and costing about 35 s per build. The settings step now rewrites that choice to `custom` with `BR2_TARGET_ROOTFS_EROFS_COMPRESSION_ALGORITHMS="lzma,<level>"`, which gives `mkfs.erofs` the same `-zlzma,<level>` argument, and reports it. Other filesystems are unchanged. The `config_overrides` check accepts that rewrite: a requested `BR2_TARGET_ROOTFS_EROFS_LZMA=y` and its `_LZMA_LEVEL` count as honored when the final `.config` has the custom choice with the same `lzma,<level>` (517a311 reported them as dropped and failed the build).

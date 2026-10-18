@@ -201,7 +201,7 @@ pub(super) fn execute_assembly_verity(
             return Err(error);
         }
     };
-    publish_assembly_output(&temp_data, &dest)?;
+    let sha256 = publish_assembly_output(&temp_data, &dest)?;
     if let Some(hash_dest) = &hash_dest {
         publish_assembly_output(&temp_hash, hash_dest)?;
     }
@@ -210,7 +210,7 @@ pub(super) fn execute_assembly_verity(
         src: src.clone(),
         data: dest.clone(),
         bytes: file_len(&dest)?,
-        sha256: file_sha256(&dest)?,
+        sha256,
         hash,
         root_hash,
         salt,

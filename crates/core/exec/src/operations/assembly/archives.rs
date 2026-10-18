@@ -39,10 +39,10 @@ pub(super) fn execute_assembly_archive(
     let members = write_archive(spec, roots, archive, verity, &temp).inspect_err(|_| {
         let _ = std_fs::remove_file(&temp);
     })?;
-    publish_assembly_output(&temp, &output)?;
+    let sha256 = publish_assembly_output(&temp, &output)?;
     Ok(AssemblyTarArchiveSummary {
         bytes: file_len(&output)?,
-        sha256: file_sha256(&output)?,
+        sha256,
         output,
         members,
     })
