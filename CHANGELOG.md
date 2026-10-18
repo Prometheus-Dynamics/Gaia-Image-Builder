@@ -58,6 +58,23 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - Floating git refs resolved for a plan are reused for 60 seconds in the same process instead of being cleared when the plan ends. `GAIA_FLOATING_REF_TTL_SECONDS` changes the window (`0` resolves every plan, as before). A branch that moves within the window is seen once it expires.
 - Long-running processes (the TUI) no longer keep stale values: `${project.commit}`, `${project.describe}` and `${build.date}` follow new commits and branch moves at once (the `-dirty` suffix can lag by up to 10 seconds), and the tool-version and docker image signatures are re-probed after 60 seconds.
 
+### CLI: `--json` everywhere scripts need it
+
+- `--json` now applies to `run`, `plan`, `status`, `validate` and `cache` as well as `preview`. Each prints one JSON document on stdout (progress and logs stay on stderr), with `schema_version` (1), `command`, `exit_code` and `status` in every document, and an `error` field when the command fails. `run --json` carries the run summary as written to `<build>.summary.json` (including `sizes`, `operation_timings` and the new `critical_path`), the report files, diagnostics, execution errors and the export/resume lines; `plan --json` the operations with their dependencies and reasons and the estimate; `validate --json` the diagnostics; `status --json` the runs with their live status snapshot; `cache --json` the entries, removals or stats. `--follow` does not combine with `--json`. Without the flag the output is unchanged. The schema is documented in docs/cli.md.
+
+### `gaia cache stats`
+
+- Lists every cache Gaia keeps for a build with its path, disk usage and file count: git mirrors, downloads, import-sources, the Buildroot download dir, package cache levels and shared output trees, ccache, `docker-cache`, `docker-home`, the shared `cargo-target/<key>` dirs, the Gradle and Java homes and the user-wide Buildroot download, package and compiler caches under the user cache root, then the total. Usage is counted like `du`: allocated blocks, hard links once (by device and inode, also across caches), symlinks never followed, a few threads walking each tree. `--json` gives the same with apparent sizes. Without a build config that resolves, it reports the user-wide caches and the current directory's workspace caches.
+
+### Run profile: critical path and Chrome trace
+
+- After a run, the summary prints the actual critical path from the recorded start and finish times and the plan's dependencies, e.g. `critical path 9m40s: source:eidos 5s → artifact:helios-api 3m18s → image:build 4m12s → image:assembly 58s`. It is the chain ending at the operation that finished last, each step back taking the dependency that finished last; reused operations are passed through. The summary report has it as `critical_path`, and each operation timing gains `start_ms`.
+- Each run writes `<build>.trace.json` beside the reports: Chrome trace events, loadable in `chrome://tracing` or Perfetto, with one slice per operation on non-overlapping rows (status, duration, pause and critical-path flag in its args) and the assembly steps as slices inside the assembly operation.
+
+### CI output: log groups per operation
+
+- With `--ci`, or when `CI` is set (as GitHub Actions and most CI services do), `gaia run` prints no progress lines. Each operation's output is kept until it finishes and printed as one GitHub Actions log group (`::group::<operation>: done in 1m20s` ... `::endgroup::`), so parallel operations never interleave; a failure is also reported as an `::error::` annotation. Output that looks like a workflow command is wrapped in `::stop-commands::`. The last 5,000 lines of each operation are kept.
+
 ### Buildroot EROFS: lzma without the extra image
 
 - With `BR2_TARGET_ROOTFS_EROFS_LZMA=y`, Buildroot's generic image compression (keyed on the same symbol) also ran `lzma -9` over `rootfs.erofs`, writing a second image larger than the first and costing about 35 s per build. The settings step now rewrites that choice to `custom` with `BR2_TARGET_ROOTFS_EROFS_COMPRESSION_ALGORITHMS="lzma,<level>"`, which gives `mkfs.erofs` the same `-zlzma,<level>` argument, and reports it. Other filesystems are unchanged. The `config_overrides` check accepts that rewrite: a requested `BR2_TARGET_ROOTFS_EROFS_LZMA=y` and its `_LZMA_LEVEL` count as honored when the final `.config` has the custom choice with the same `lzma,<level>` (517a311 reported them as dropped and failed the build).

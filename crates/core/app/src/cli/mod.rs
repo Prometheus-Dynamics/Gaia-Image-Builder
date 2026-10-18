@@ -30,8 +30,11 @@ pub struct AppArgs {
     pub rebuild_packages: Vec<String>,
     /// `--follow` / `-f` for status: refresh until the run ends.
     pub follow: bool,
-    /// `--json` for preview: the report as JSON.
+    /// `--json` for run, preview, plan, status, validate and cache: one JSON
+    /// document on stdout instead of the text output.
     pub json: bool,
+    /// `--ci` for run: CI log output (also when `CI` is set).
+    pub ci: bool,
     /// `--fail-on-clean` for preview: exit 3 when a run would clean or delete.
     pub fail_on_clean: bool,
     /// `--export <dir>` for run: copy the primary image output there after a
@@ -73,6 +76,9 @@ pub struct CacheArgs {
     /// `--remove-legacy`: entries of the first cache format (zstd tarballs).
     pub remove_legacy: bool,
     pub dry_run: bool,
+    /// `gaia cache stats`: disk usage of every cache instead of the package
+    /// cache listing.
+    pub stats: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -123,6 +129,9 @@ impl AppArgs {
         }
         if matches!(parsed.command, AppCommand::Help | AppCommand::Version) {
             return parsed;
+        }
+        if parsed.command == AppCommand::Cache && args.next_if_eq("stats").is_some() {
+            parsed.cache.stats = true;
         }
 
         while let Some(arg) = args.next() {
@@ -204,6 +213,7 @@ impl AppArgs {
                 "--unused-mirrors" => parsed.clean.unused_mirrors = true,
                 "--follow" | "-f" => parsed.follow = true,
                 "--json" => parsed.json = true,
+                "--ci" => parsed.ci = true,
                 "--fail-on-clean" => parsed.fail_on_clean = true,
                 "--export" => parsed.export_dir = value("--export", &mut parsed.usage_errors),
                 "--no-export" => parsed.no_export = true,
@@ -295,6 +305,7 @@ impl Default for AppArgs {
             rebuild_packages: Vec::new(),
             follow: false,
             json: false,
+            ci: false,
             fail_on_clean: false,
             export_dir: None,
             no_export: false,
@@ -434,6 +445,19 @@ mod tests {
             [("image.defconfig".to_string(), "x".to_string())]
         );
         assert!(args.usage_errors.is_empty(), "{:?}", args.usage_errors);
+    }
+
+    #[test]
+    fn json_ci_and_cache_stats_parse() {
+        let args = parse(&["run", "build.toml", "--json", "--ci"]);
+        assert!(args.json && args.ci);
+        assert!(args.usage_errors.is_empty(), "{:?}", args.usage_errors);
+        let stats = parse(&["cache", "stats", "build.toml", "--json"]);
+        assert_eq!(stats.command, AppCommand::Cache);
+        assert!(stats.cache.stats && stats.json);
+        assert_eq!(stats.build, "build.toml");
+        let listing = parse(&["cache", "build.toml"]);
+        assert!(!listing.cache.stats);
     }
 
     #[test]

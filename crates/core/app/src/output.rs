@@ -1,117 +1,13 @@
 //! Human-readable command output: outcome printing and overview lines.
 
 use crate::output_images::print_image_outputs;
+use crate::output_profile::plan_estimate_lines;
+use crate::output_profile::{critical_path_line, slowest_operation_lines, slowest_step_lines};
 use crate::output_variants::print_variants;
 use crate::{CommandOutcome, commands};
 use gaia_report::{mask_pairs, mask_value};
 use gaia_spec::ResolvedBuildSpec;
 use std::time::Duration;
-
-/// `gaia plan` estimate lines: total work and the critical path, from the
-/// durations recorded by earlier runs.
-pub(crate) fn plan_estimate_lines(estimate: &gaia_plan::PlanEstimate) -> Vec<String> {
-    use gaia_plan::format_duration_short;
-    if estimate.executing_operations() == 0 {
-        return vec!["plan estimate: nothing to execute".into()];
-    }
-    if estimate.timed_operations == 0 {
-        return vec![format!(
-            "plan estimate: unknown (no recorded timings for the {} operation(s) that will execute)",
-            estimate.executing_operations()
-        )];
-    }
-    let mut lines = vec![format!(
-        "plan estimate: critical-path={} total-work={} timed={}/{}",
-        format_duration_short(estimate.critical_path_duration),
-        format_duration_short(estimate.total_work),
-        estimate.timed_operations,
-        estimate.executing_operations(),
-    )];
-    if !estimate.critical_path.is_empty() {
-        lines.push(format!(
-            "plan critical path: {}",
-            estimate
-                .critical_path
-                .iter()
-                .map(|id| id.as_str())
-                .collect::<Vec<_>>()
-                .join(" -> ")
-        ));
-    }
-    if !estimate.untimed_operations.is_empty() {
-        lines.push(format!(
-            "plan estimate excludes untimed: {}",
-            estimate
-                .untimed_operations
-                .iter()
-                .map(|id| id.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    lines
-}
-
-/// The `limit` slowest operations that actually ran, slowest first.
-fn slowest_operation_lines(
-    timings: &[gaia_report::OperationTimingRecord],
-    limit: usize,
-) -> Vec<String> {
-    let mut ran = timings
-        .iter()
-        .filter(|timing| timing.status != "reused")
-        .collect::<Vec<_>>();
-    ran.sort_by_key(|timing| std::cmp::Reverse(timing.duration_ms));
-    ran.into_iter()
-        .take(limit)
-        .map(|timing| {
-            let paused = if timing.paused_ms > 0 {
-                format!(
-                    ", paused {}",
-                    gaia_plan::format_duration_short(std::time::Duration::from_millis(
-                        timing.paused_ms
-                    ))
-                )
-            } else {
-                String::new()
-            };
-            format!(
-                "operation time: {} {} ({}{paused})",
-                gaia_plan::format_duration_short(std::time::Duration::from_millis(
-                    timing.duration_ms
-                )),
-                timing.operation_id,
-                timing.status
-            )
-        })
-        .collect()
-}
-
-/// The `limit` slowest steps inside operations, slowest first, so a run
-/// shows where its time went (the Buildroot make, a package cache restore,
-/// an assembly step, the slowest Buildroot packages).
-fn slowest_step_lines(timings: &[gaia_report::OperationTimingRecord], limit: usize) -> Vec<String> {
-    let mut steps = timings
-        .iter()
-        .flat_map(|timing| {
-            timing
-                .steps
-                .iter()
-                .map(move |step| (step.duration_ms, &timing.operation_id, &step.step))
-        })
-        .collect::<Vec<_>>();
-    steps.sort_by_key(|(duration_ms, _, _)| std::cmp::Reverse(*duration_ms));
-    steps
-        .into_iter()
-        .take(limit)
-        .map(|(duration_ms, operation_id, step)| {
-            format!(
-                "step time: {} {operation_id} > {step}",
-                gaia_plan::format_duration_short(std::time::Duration::from_millis(duration_ms))
-            )
-        })
-        .collect()
-}
 
 pub(crate) fn print_outcome(outcome: &CommandOutcome) {
     match outcome {
@@ -223,6 +119,7 @@ pub(crate) fn print_outcome(outcome: &CommandOutcome) {
         }
         CommandOutcome::Previewed { report } => crate::commands::print_preview(report),
         CommandOutcome::Text { text } => println!("{text}"),
+        CommandOutcome::Json { value } => println!("{value}"),
         CommandOutcome::Cleaned { spec, report } => {
             let action = if report.dry_run {
                 "would clean"
@@ -326,6 +223,9 @@ pub(crate) fn print_outcome(outcome: &CommandOutcome) {
                     report.summary.skipped_operation_ids.len(),
                     report.summary.skipped_operation_ids.join(", ")
                 );
+            }
+            if let Some(path) = &report.summary.critical_path {
+                println!("{}", critical_path_line(path));
             }
             for line in slowest_operation_lines(&report.summary.operation_timings, 5) {
                 println!("{line}");

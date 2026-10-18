@@ -42,6 +42,16 @@ fn preview_only_flags_are_refused_for_other_commands() {
     let outcome = run_with_args(AppArgs::parse_from([
         "plan",
         starting_point_raw_image_example_build_path().as_str(),
+        "--fail-on-clean",
+    ]));
+    assert!(
+        matches!(&outcome, CommandOutcome::Failed { message } if message.contains("--fail-on-clean")),
+        "{outcome:?}"
+    );
+    // --json is for the commands with a JSON document.
+    let outcome = run_with_args(AppArgs::parse_from([
+        "lock",
+        starting_point_raw_image_example_build_path().as_str(),
         "--json",
     ]));
     assert!(

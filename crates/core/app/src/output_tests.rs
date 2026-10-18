@@ -33,6 +33,7 @@ fn slowest_operations_skip_reused_and_sort_descending() {
     let record = |id: &str, ms: u64, status: &str| gaia_report::OperationTimingRecord {
         steps: Vec::new(),
         operation_id: id.into(),
+        start_ms: 0,
         duration_ms: ms,
         paused_ms: 0,
         status: status.into(),
@@ -63,6 +64,7 @@ fn slowest_steps_span_operations_and_sort_descending() {
     let record = |id: &str, steps| gaia_report::OperationTimingRecord {
         steps,
         operation_id: id.into(),
+        start_ms: 0,
         duration_ms: 0,
         paused_ms: 0,
         status: "built".into(),
@@ -109,4 +111,36 @@ fn validate_verdict_line_states_pass_or_fail_with_the_counts() {
         validate_verdict_line(&failed),
         "validate: FAILED (2 error(s), 0 warning(s))"
     );
+}
+
+#[test]
+fn critical_path_line_is_compact_and_keeps_the_ends_of_long_paths() {
+    let entry = |id: &str, ms: u64| gaia_report::CriticalPathEntry {
+        operation_id: id.into(),
+        start_ms: 0,
+        duration_ms: ms,
+        status: "built".into(),
+    };
+    let path = gaia_report::CriticalPathRecord {
+        duration_ms: 580_000,
+        operations: vec![
+            entry("source:eidos", 5_000),
+            entry("artifact:helios-api", 198_000),
+            entry("image:assembly", 58_000),
+        ],
+    };
+    assert_eq!(
+        critical_path_line(&path),
+        "critical path 9m40s: source:eidos 5s → artifact:helios-api 3m18s → image:assembly 58s"
+    );
+    let long = gaia_report::CriticalPathRecord {
+        duration_ms: 10_000,
+        operations: (0..12)
+            .map(|index| entry(&format!("op:{index}"), 1_000))
+            .collect(),
+    };
+    let line = critical_path_line(&long);
+    assert!(line.contains("op:3 1s → … 4 more → op:8 1s"), "{line}");
+    assert!(line.starts_with("critical path 10s: op:0 1s"), "{line}");
+    assert!(line.ends_with("op:11 1s"), "{line}");
 }

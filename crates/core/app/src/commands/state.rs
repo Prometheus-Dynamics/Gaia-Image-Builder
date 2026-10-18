@@ -514,6 +514,7 @@ mod tests {
         let timing = |id: &str, ms: u64, status| gaia_exec::OperationTiming {
             steps: Vec::new(),
             operation_id: gaia_plan::OperationId::new(id),
+            started: std::time::Duration::ZERO,
             duration: std::time::Duration::from_millis(ms),
             paused: std::time::Duration::ZERO,
             status,

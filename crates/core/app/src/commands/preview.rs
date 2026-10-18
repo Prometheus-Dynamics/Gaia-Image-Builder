@@ -677,7 +677,7 @@ mod tests {
 
 #[path = "preview_render.rs"]
 mod render;
-pub(crate) use render::print_preview;
+pub(crate) use render::{preview_json, print_preview};
 
 #[cfg(test)]
 #[path = "preview_detail_tests.rs"]

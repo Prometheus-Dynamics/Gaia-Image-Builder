@@ -10,6 +10,8 @@ Gaia emits both human-facing CLI output and machine-readable reports.
 - `default.provenance.json`
 - `default.manifest.json`
 - `default.rebuild-reasons.json`
+- `default.trace.json`: the run as Chrome trace events, for `chrome://tracing`
+  or Perfetto (see [Run profile](cli.md#run-profile))
 
 The base filename uses canonical `build_name`, not display name.
 
@@ -29,6 +31,11 @@ Includes:
 - failure policy
 - failure-class counts
 - image output sizes and their change since the previous run (`sizes`)
+- operation timings: start (`start_ms`, since execution began), duration,
+  time paused, status and timed steps (`operation_timings`)
+- the actual critical path (`critical_path`: `duration_ms` and the
+  `operations` on it, each with `operation_id`, `start_ms`, `duration_ms` and
+  `status`); `null` when nothing was built
 
 ### Selection
 

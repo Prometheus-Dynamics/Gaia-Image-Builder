@@ -11,6 +11,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use super::live_status::LiveRecorder;
+use super::progress_ci::{CiGroups, ci_output};
 
 /// How often the progress thread wakes up without events.
 const TICK: Duration = Duration::from_secs(1);
@@ -39,6 +40,9 @@ pub(super) struct ConsoleProgress {
     last_log: BTreeMap<String, String>,
     /// Inner progress (Buildroot packages) of running operations.
     build_progress: BTreeMap<String, gaia_process::BuildProgress>,
+    /// CI mode (see `progress_ci`): grouped per-operation logs instead of
+    /// progress lines.
+    ci: Option<CiGroups>,
     last_status_at: Instant,
     last_event_at: Instant,
     live: LiveRecorder,
@@ -60,6 +64,7 @@ impl ConsoleProgress {
             terminal: BTreeSet::new(),
             last_log: BTreeMap::new(),
             build_progress: BTreeMap::new(),
+            ci: (print && ci_output()).then(CiGroups::default),
             last_status_at: Instant::now() - Duration::from_secs(30),
             last_event_at: Instant::now(),
             live,
@@ -70,6 +75,12 @@ impl ConsoleProgress {
     /// status recorder so the caller can record the run's outcome.
     pub(super) fn run(mut self) -> LiveRecorder {
         self.live.flush(Instant::now());
+        if self.ci.is_some() {
+            eprintln!(
+                "run: {} operation(s); CI output, one log group per operation",
+                self.total
+            );
+        }
         self.print_line("run", "starting execution plan");
         loop {
             match self.rx.recv_timeout(TICK) {
@@ -101,6 +112,9 @@ impl ConsoleProgress {
             ExecutionEvent::Started { operation_id } => {
                 let id = operation_id.as_str().to_string();
                 self.running.insert(id.clone(), Instant::now());
+                if let Some(ci) = &mut self.ci {
+                    ci.started(&id);
+                }
                 self.print_line(&id, "started");
             }
             ExecutionEvent::Log {
@@ -112,6 +126,8 @@ impl ConsoleProgress {
                     if self.running.contains_key(&id) {
                         self.build_progress.insert(id, progress);
                     }
+                } else if let Some(ci) = &mut self.ci {
+                    ci.log(&id, message);
                 } else if self.running.contains_key(&id) {
                     self.last_log.insert(id, compact_log_line(message));
                     if self.last_status_at.elapsed() >= Duration::from_secs(12) {
@@ -145,6 +161,7 @@ impl ConsoleProgress {
     }
 
     fn finish_operation(&mut self, operation_id: &str, status: &str) {
+        let raw_status = status;
         let status = match self.running.get(operation_id) {
             Some(started_at) if status == "done" => format!(
                 "{status} in {}",
@@ -157,10 +174,19 @@ impl ConsoleProgress {
         self.last_log.remove(operation_id);
         self.build_progress.remove(operation_id);
         self.terminal.insert(operation_id.to_string());
+        if let Some(ci) = &mut self.ci {
+            for line in ci.finished(operation_id, raw_status) {
+                eprintln!("{line}");
+            }
+            return;
+        }
         self.print_line(operation_id, status);
     }
 
     fn print_heartbeat(&mut self) {
+        if self.ci.is_some() {
+            return;
+        }
         let Some((operation_id, started_at)) = self
             .running
             .iter()
@@ -180,7 +206,7 @@ impl ConsoleProgress {
 
     fn print_line(&mut self, operation_id: &str, detail: &str) {
         self.last_status_at = Instant::now();
-        if !self.print {
+        if !self.print || self.ci.is_some() {
             return;
         }
         let done = self.terminal.len();

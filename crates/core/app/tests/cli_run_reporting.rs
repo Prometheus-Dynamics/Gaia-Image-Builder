@@ -134,7 +134,7 @@ fn validate_and_run_commands_preserve_masked_selection_and_outputs() {
                     .any(|record| record.id == "base-image"
                         && record.state.get("backend") == Some(&"local".to_string()))
             );
-            assert_eq!(report_outputs.files.len(), 5);
+            assert_eq!(report_outputs.files.len(), 6);
             assert!(
                 report_outputs.files.iter().any(|file| file
                     .path

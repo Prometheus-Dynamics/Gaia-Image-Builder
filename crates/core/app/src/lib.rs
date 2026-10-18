@@ -3,6 +3,8 @@ mod commands;
 mod export;
 mod output;
 mod output_images;
+mod output_json;
+mod output_profile;
 mod output_variants;
 mod run_finish;
 #[cfg(feature = "tui")]
@@ -21,6 +23,7 @@ pub use commands::{
 };
 use output::print_outcome;
 pub use output::{backend_overview_lines, runtime_overview_lines};
+pub use output_json::{JSON_SCHEMA_VERSION, outcome_json};
 pub use run_finish::{RunFinish, run_finish};
 
 #[derive(Default)]
@@ -47,6 +50,23 @@ pub fn run() -> i32 {
     commands::run_registry::enable_recording();
     let args = AppArgs::from_env();
     let outcome = run_with_args(args.clone());
+    if args.json {
+        // One document on stdout; the finish lines go into it.
+        let finish = run_finish(&args, &outcome);
+        let exit_code = if finish.export_failed {
+            1
+        } else {
+            outcome.exit_code()
+        };
+        if let CommandOutcome::Failed { message } = &outcome {
+            eprintln!("{message}");
+        }
+        println!(
+            "{}",
+            output_json::outcome_json(args.command, &outcome, &finish, exit_code)
+        );
+        return exit_code;
+    }
     print_outcome(&outcome);
     let finish = run_finish(&args, &outcome);
     for line in &finish.lines {

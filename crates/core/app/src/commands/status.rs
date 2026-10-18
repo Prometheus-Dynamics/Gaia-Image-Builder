@@ -29,18 +29,28 @@ const RECENT_LOG_LINES: usize = 10;
 
 /// `build` is the build config or run named on the command line, `None` when
 /// there is none.
+/// `json` (never with `follow`) returns the report as `--json` fields.
 #[cfg(unix)]
 pub fn status_command(
     build: Option<&str>,
     options: &ResolveOptions,
     follow: bool,
+    json: bool,
 ) -> CommandOutcome {
     let Some(selector) = build else {
+        if json {
+            return CommandOutcome::Json {
+                value: super::status_json::listing_json(&list_runs()),
+            };
+        }
         return status_listing(follow);
     };
     match select_run(&list_runs(), selector) {
+        Ok(Some(run)) if json => CommandOutcome::Json {
+            value: super::status_json::one_run_json(&inspect_run(run.run.clone())),
+        },
         Ok(Some(run)) => status_of_run(run.run.clone(), follow),
-        Ok(None) => status_of_build(selector, options, follow),
+        Ok(None) => status_of_build(selector, options, follow, json),
         Err(message) => CommandOutcome::Failed { message },
     }
 }
@@ -50,6 +60,7 @@ pub fn status_command(
     _build: Option<&str>,
     _options: &ResolveOptions,
     _follow: bool,
+    _json: bool,
 ) -> CommandOutcome {
     CommandOutcome::Failed {
         message: "gaia status needs a Unix system".into(),
@@ -88,7 +99,12 @@ fn status_of_run(run: RegisteredRun, follow: bool) -> CommandOutcome {
 /// `gaia status <build config>` for a build no registered run uses: its build
 /// dir is read directly.
 #[cfg(unix)]
-fn status_of_build(build: &str, options: &ResolveOptions, follow: bool) -> CommandOutcome {
+fn status_of_build(
+    build: &str,
+    options: &ResolveOptions,
+    follow: bool,
+    json: bool,
+) -> CommandOutcome {
     let spec = match try_resolve_config_with_options(build, options) {
         Ok(spec) => spec,
         Err(error) => {
@@ -99,6 +115,16 @@ fn status_of_build(build: &str, options: &ResolveOptions, follow: bool) -> Comma
     };
     let build_dir = PathBuf::from(&spec.workspace.build_dir);
     let name = spec.identity.display_name.clone();
+    if json {
+        return CommandOutcome::Json {
+            value: super::status_json::build_dir_json(
+                &name,
+                &build_dir,
+                live_run(&build_dir).as_ref(),
+                read_last(&build_dir).as_ref(),
+            ),
+        };
+    }
     if !follow {
         let (text, _) = build_dir_status_text(&name, &build_dir);
         return CommandOutcome::Text { text };

@@ -268,6 +268,7 @@ pub fn execute_plan_with_rebuilds(
                 result,
                 duration,
                 paused,
+                started,
                 unit_finished,
                 heavy,
             }) = result_rx.recv()
@@ -314,7 +315,7 @@ pub fn execute_plan_with_rebuilds(
                         result.cleanup_paths.clone(),
                     ));
                 }
-                runtime.record_timed(result, duration, paused);
+                runtime.record_timed(result, started, duration, paused);
                 continue;
             }
 
@@ -363,7 +364,7 @@ pub fn execute_plan_with_rebuilds(
                 }
             }
 
-            runtime.record_timed(result, duration, paused);
+            runtime.record_timed(result, started, duration, paused);
         }
     });
 

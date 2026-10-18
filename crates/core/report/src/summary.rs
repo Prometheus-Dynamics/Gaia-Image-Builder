@@ -122,7 +122,7 @@ pub fn render_summary(
         },
         &read_baseline(&baseline_path(spec)),
     );
-    RunSummary {
+    let mut summary = RunSummary {
         build_name: spec.identity.display_name.clone(),
         build_version: spec.identity.version.clone(),
         build_description: spec.metadata.description.clone(),
@@ -173,6 +173,7 @@ pub fn render_summary(
             .iter()
             .map(|timing| OperationTimingRecord {
                 operation_id: timing.operation_id.as_str().to_string(),
+                start_ms: u64::try_from(timing.started.as_millis()).unwrap_or(u64::MAX),
                 duration_ms: u64::try_from(timing.duration.as_millis()).unwrap_or(u64::MAX),
                 paused_ms: u64::try_from(timing.paused.as_millis()).unwrap_or(u64::MAX),
                 status: timing.status.as_str().to_string(),
@@ -186,10 +187,13 @@ pub fn render_summary(
                     .collect(),
             })
             .collect(),
+        critical_path: None,
         image_sizes,
         cancelled: outcome.cancelled,
         sizes,
-    }
+    };
+    summary.critical_path = crate::profile::critical_path(plan, &summary.operation_timings);
+    summary
 }
 
 pub fn render_execution_failures(outcome: &ExecutionOutcome) -> Vec<ExecutionFailureReport> {

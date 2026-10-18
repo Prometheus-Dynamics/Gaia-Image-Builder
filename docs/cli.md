@@ -12,6 +12,7 @@ gaia preview <build.toml>
 gaia clean <build.toml>
 gaia lock <build.toml>
 gaia cache <build.toml>
+gaia cache stats [build.toml]
 gaia run <build.toml> [--export <dir> | --no-export]
 gaia pause [run]
 gaia resume [run]
@@ -353,6 +354,7 @@ The `tui` subcommand writes its logs nowhere, so they do not disturb the screen.
 After execution completes, prints:
 - execution summary
 - skipped operations (with `policy.failure.keep_going`)
+- the critical path (see [Run profile](#run-profile))
 - the slowest operations and their durations
 - failure policy
 - rollback summary
@@ -401,6 +403,65 @@ workspace root. An empty value is an error. Precedence, highest first:
 any configured export for that run; combining it with `--export` is a usage
 error.
 
+#### Run profile
+
+After a run, the summary prints the run's actual critical path, from the
+recorded start and finish time of each operation and the plan's dependencies:
+
+```text
+critical path 9m40s: source:eidos 5s → artifact:helios-api 3m18s → image:prepare 21s → image:build 4m12s → image:assembly 58s
+```
+
+It is the chain ending at the operation that finished last; each step back
+takes the dependency that finished last, the one the operation waited for.
+Reused operations take no time and are passed through to their own
+dependencies. The total runs from the start of the first operation on the path
+to the end of the last, without the time those operations were paused; gaps
+on the path are time spent waiting for a free job slot. A path of more than
+nine operations shows the first and last four. The summary report
+(`<build>.summary.json`) has it as `critical_path`, and each entry of
+`operation_timings` has `start_ms` (milliseconds since execution began, pauses
+included) besides `duration_ms` and `paused_ms`. `gaia plan` shows the
+*estimated* critical path from earlier runs' durations.
+
+Each run also writes `<build>.trace.json` beside the reports: the run as
+[Chrome trace events](https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU),
+to open in `chrome://tracing` or [Perfetto](https://ui.perfetto.dev). Each
+operation is one slice, on the first row free when it started, so parallel
+operations sit on separate rows. Its args hold the status, the duration, the
+time paused, whether it is on the critical path, and the steps it timed. The
+assembly operation's steps (filesystems, disks, transforms, ...) are slices
+inside it; only their durations are recorded, so they are laid end to end from
+the operation's start, and steps under 100 ms are not reported.
+
+#### CI output
+
+With `--ci`, or when the `CI` environment variable is set to anything but
+empty, `0` or `false` (GitHub Actions, GitLab CI and most CI services set
+`CI=true`), `gaia run` prints no live progress lines or heartbeats. Each
+operation's output is kept until the operation finishes, then printed on stderr
+as one GitHub Actions log group, so the log folds per operation and parallel
+operations never interleave:
+
+```text
+run: 42 operation(s); CI output, one log group per operation
+source:eidos: reused
+::group::artifact:helios-api: done in 3m18s
+...the operation's output...
+::endgroup::
+::group::image:build: failed: make exited with status 2 in 4m12s
+...
+::endgroup::
+::error title=gaia image:build failed::make exited with status 2
+```
+
+An operation that wrote nothing is one line, without a group. A failure is
+repeated as an `::error::` annotation. Output lines that look like workflow
+commands (`::...`) are wrapped in `::stop-commands::` so a build log cannot
+issue one. The last 5,000 lines of each operation are kept. The live status
+files (`gaia status`) and the final summary are unchanged; `GAIA_RUN_PROGRESS=quiet`
+still turns console output off entirely.
+
 #### Resuming a failed or cancelled run
 
 When a `gaia run` fails or is cancelled, its last line is the command that
@@ -416,6 +477,38 @@ invocation rather than starting over. When a rollback unwound completed
 operations (`policy.failure.rollback_completed`), the comment says those run
 again instead. Secret values in `--env` and `--set` are masked as the report
 shows them (`***`); the line then says to enter them again.
+
+### `cache`
+
+`gaia cache` lists, prunes and clears the Buildroot package cache (see
+[Buildroot package cache](configuration.md)). `gaia cache stats` lists every
+cache Gaia keeps for the build with its path, disk usage and file count, then
+the total:
+
+```text
+git-mirrors                  1.2 GiB      18342 files  /work/.gaia/cache/git
+downloads                        -                    /work/.gaia/cache/downloads  (not present)
+buildroot-dl                 3.4 GiB       1210 files  /home/me/.cache/gaia/buildroot/dl
+buildroot-packages (project) 612.0 MiB     40211 files  /work/.gaia/cache/buildroot/packages
+ccache                       9.8 GiB     201113 files  /home/me/.cache/gaia/buildroot/ccache
+cargo-target/3f9c2a1b4d5e   2.1 GiB      30022 files  /home/me/.cache/gaia/cargo-target/3f9c2a1b4d5e
+total: 17.1 GiB in 290898 files, 11 of 16 caches present (hard links counted once)
+```
+
+The caches: git mirrors, downloads and import-source checkouts under
+`<workspace>/.gaia/cache`; the Buildroot download dir (configured, else under
+the user cache root, and the workspace fallback); the package cache levels;
+shared Buildroot output trees; the compiler cache; `.gaia/docker-cache` and
+`.gaia/docker-home`; and under the user cache root the shared
+`cargo-target/<key>` dirs, `gradle-home` and `java-home`, and the user-wide
+Buildroot defaults (`buildroot-dl (user)`, `buildroot-packages (user)`,
+`ccache (user)`) when this build's config points elsewhere, since other builds
+use them. Usage is counted like
+`du`: allocated blocks of files and directories, a file with several hard
+links once (also across caches, for the total), symlinks counted as links and
+never followed. A cache inside another listed one is left out of the total.
+Without a build config that resolves (and none named), it reports the
+user-wide caches and the current directory's workspace caches.
 
 ### `pause`, `resume`, `cancel`
 
@@ -574,6 +667,70 @@ build and exits once it stops, and a third exits immediately. `Esc` from the
 monitor returns to setup without stopping the build, and `m` goes back.
 
 Logs keep the most recent 5,000 lines per operation in the TUI.
+
+## JSON Output
+
+`--json` makes `run`, `preview` (`run --dry-run`), `plan`, `status`,
+`validate` and `cache` print one JSON document on stdout instead of their
+text output. Progress, logs and warnings stay on stderr, so
+`gaia run build.toml --json > result.json` captures only the document. The
+exit code is the same as without the flag. `--follow` does not combine with
+`--json`, and other commands reject it.
+
+Every document is an object with:
+
+| Field | Meaning |
+| --- | --- |
+| `schema_version` | `1`. Fields are only added within a version; a rename or removal bumps it. |
+| `command` | `run`, `preview`, `plan`, `status`, `validate` or `cache` |
+| `exit_code` | the process exit code |
+| `status` | per command, below; `error` when the command could not run |
+| `error` | with `status: "error"`: the message (also printed on stderr) |
+
+Per command:
+
+- `run`: `status` is `succeeded`, `failed` or `cancelled`. `build`,
+  `run_duration_ms`, `summary` (the object written to `<build>.summary.json`:
+  counts, `operation_timings`, `critical_path`, `sizes`, `errors`, ...),
+  `report_files` (`kind`, `path`, `bytes`; `kind` is `summary`, `selection`,
+  `provenance`, `manifest`, `rebuild-reasons` or `trace`),
+  `validation_diagnostics`, `plan_diagnostics`, `execution_errors`
+  (`operation_id`, `code`, `message`, `output_tail`), `post_build_output`,
+  `finish` (the export and resume lines) and `export_failed`.
+  A build with variants has `header` and `variants`, one object per variant
+  with its `id`, `exit_code` and the fields above.
+- `plan`: `status` is `ok`, or `diagnostics` when the plan has some. `build`,
+  `operation_count`, `execute_count`, `operations` (`id`, `depends_on`,
+  `optionality`, `execute`, `reason` `{code, message}` or null, `reused_from`),
+  `estimate` (`executing_operations`, `timed_operations`, `total_work_ms`,
+  `critical_path_ms`, `critical_path`, `untimed_operations`) and `diagnostics`
+  (`code`, `message`).
+- `validate`: `status` is `ok` or `failed`. `build`, `error_count`,
+  `warning_count` and `diagnostics` (`severity` `error` or `warning`, `code`,
+  `location`, `message`).
+- `preview`: `status` is `ok`, or `tripped` when `--fail-on-clean` trips; the
+  report fields as before (`build`, `verdict`, `invalidation`, `operations`,
+  `images` with every deletion, ...).
+- `status`: with no run named, `runs`; with one, `run`. A run has `number`
+  (its position in the listing), `pid`, `build_id`, `build_name`,
+  `display_name`, `build_config`, `build_dir`, `cwd`, `argv`, `started_at`
+  (unix seconds), `state` (`running`, `paused`, `ended`, or `none` for a build
+  dir with no run), `outcome` and `ended_at` for an ended run, `errors`, and
+  `status`: the live status snapshot as in `.gaia-run.status.json` (or the
+  final one). A build config no registered run uses gives `display_name`,
+  `build_dir` and the state fields.
+- `cache`: `action` says which. `list`: `entries` (`level`, `package`, `key`,
+  `version`, `bytes`, `relocatable`, `legacy`, `paths`), `levels` (`level`,
+  `dir`, `entries`, `bytes`) and `legacy` (`entries`, `bytes`). `remove` and
+  `clear`: `dry_run`, `removed` and `total_bytes` (`clear` also has `target`).
+  `stats`: `caches` (`name`, `path`, `exists`, `nested`, `bytes` allocated,
+  `apparent_bytes`, `files`, `dirs`) and `total` (`bytes`, `apparent_bytes`,
+  `files`, `dirs`).
+
+```bash
+gaia run build.toml --json | jq '.summary.critical_path.operations[].operation_id'
+gaia cache stats --json | jq '.caches[] | select(.exists) | [.name, .bytes]'
+```
 
 ## Exit Codes
 

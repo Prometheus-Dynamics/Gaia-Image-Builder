@@ -31,22 +31,58 @@ pub struct CacheEntry {
     pub paths: Vec<PathBuf>,
 }
 
-pub fn cache_command(build: &str, options: &ResolveOptions, args: &CacheArgs) -> CommandOutcome {
+/// What a `gaia cache` command did, as text lines and as its `--json` fields.
+pub(super) struct CacheReport {
+    pub lines: Vec<String>,
+    pub json: serde_json::Value,
+}
+
+/// `build_explicit` is false when the build config is a default: `cache
+/// stats` then still reports the user-wide caches if it does not resolve.
+pub fn cache_command(
+    build: &str,
+    build_explicit: bool,
+    options: &ResolveOptions,
+    args: &CacheArgs,
+    json: bool,
+) -> CommandOutcome {
     let spec = match try_resolve_config_with_options(build, options) {
         Ok(spec) => spec,
+        Err(_) if args.stats && !build_explicit => super::cache_stats::workspace_spec(),
         Err(error) => {
             return CommandOutcome::Failed {
                 message: error.to_string(),
             };
         }
     };
-    match run_cache_command(&spec, args) {
-        Ok(text) => CommandOutcome::Text { text },
+    let report = if args.stats {
+        Ok(super::cache_stats::cache_stats(&spec))
+    } else {
+        run_cache_command(&spec, args)
+    };
+    match report {
+        Ok(report) if json => CommandOutcome::Json { value: report.json },
+        Ok(report) => CommandOutcome::Text {
+            text: report.lines.join("\n"),
+        },
         Err(message) => CommandOutcome::Failed { message },
     }
 }
 
-fn run_cache_command(spec: &ResolvedBuildSpec, args: &CacheArgs) -> Result<String, String> {
+fn entry_json(entry: &CacheEntry) -> serde_json::Value {
+    serde_json::json!({
+        "level": entry.level.as_str(),
+        "package": entry.package,
+        "key": entry.key,
+        "version": entry.version,
+        "bytes": entry.bytes,
+        "relocatable": entry.relocatable,
+        "legacy": entry.legacy,
+        "paths": entry.paths.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
+    })
+}
+
+fn run_cache_command(spec: &ResolvedBuildSpec, args: &CacheArgs) -> Result<CacheReport, String> {
     let level = args
         .level
         .as_deref()
@@ -83,6 +119,7 @@ fn run_cache_command(spec: &ResolvedBuildSpec, args: &CacheArgs) -> Result<Strin
                 ));
             }
         };
+        let mut removed = Vec::new();
         for dir in dirs.into_iter().filter(|dir| dir.exists()) {
             let bytes = tree_bytes(&dir);
             if !args.dry_run {
@@ -90,11 +127,25 @@ fn run_cache_command(spec: &ResolvedBuildSpec, args: &CacheArgs) -> Result<Strin
                     .map_err(|error| format!("failed to remove '{}': {error}", dir.display()))?;
             }
             lines.push(format!("{verb} {} ({})", dir.display(), human(bytes)));
+            removed.push(serde_json::json!({ "path": dir.display().to_string(), "bytes": bytes }));
         }
         if lines.is_empty() {
             lines.push(format!("{target} cache: nothing to remove"));
         }
-        return Ok(lines.join("\n"));
+        let total = removed
+            .iter()
+            .filter_map(|item| item["bytes"].as_u64())
+            .sum::<u64>();
+        return Ok(CacheReport {
+            lines,
+            json: serde_json::json!({
+                "action": "clear",
+                "target": target,
+                "dry_run": args.dry_run,
+                "removed": removed,
+                "total_bytes": total,
+            }),
+        });
     }
 
     let mut entries = levels
@@ -111,6 +162,7 @@ fn run_cache_command(spec: &ResolvedBuildSpec, args: &CacheArgs) -> Result<Strin
 
     if !args.remove.is_empty() || args.remove_legacy {
         let mut removed_bytes = 0;
+        let mut removed = Vec::new();
         for entry in &entries {
             let selected = (args.remove_legacy && entry.legacy)
                 || args.remove.iter().any(|selector| {
@@ -129,6 +181,7 @@ fn run_cache_command(spec: &ResolvedBuildSpec, args: &CacheArgs) -> Result<Strin
                 }
             }
             removed_bytes += entry.bytes;
+            removed.push(entry_json(entry));
             lines.push(format!(
                 "{verb} {} {}@{} ({})",
                 entry.level.as_str(),
@@ -142,7 +195,15 @@ fn run_cache_command(spec: &ResolvedBuildSpec, args: &CacheArgs) -> Result<Strin
         } else {
             lines.push(format!("{verb} {} in total", human(removed_bytes)));
         }
-        return Ok(lines.join("\n"));
+        return Ok(CacheReport {
+            lines,
+            json: serde_json::json!({
+                "action": "remove",
+                "dry_run": args.dry_run,
+                "removed": removed,
+                "total_bytes": removed_bytes,
+            }),
+        });
     }
 
     // Listing: largest first, then totals per level.
@@ -182,6 +243,7 @@ fn run_cache_command(spec: &ResolvedBuildSpec, args: &CacheArgs) -> Result<Strin
             human(legacy_bytes)
         ));
     }
+    let mut level_json = Vec::new();
     for (level, dir) in &levels {
         let (count, bytes) = entries
             .iter()
@@ -196,8 +258,22 @@ fn run_cache_command(spec: &ResolvedBuildSpec, args: &CacheArgs) -> Result<Strin
             human(bytes),
             dir.display()
         ));
+        level_json.push(serde_json::json!({
+            "level": level.as_str(),
+            "dir": dir.display().to_string(),
+            "entries": count,
+            "bytes": bytes,
+        }));
     }
-    Ok(lines.join("\n"))
+    Ok(CacheReport {
+        lines,
+        json: serde_json::json!({
+            "action": "list",
+            "entries": entries.iter().map(entry_json).collect::<Vec<_>>(),
+            "levels": level_json,
+            "legacy": { "entries": legacy_count, "bytes": legacy_bytes },
+        }),
+    })
 }
 
 /// The package cache levels of a build, in lookup order: the configured
@@ -234,7 +310,7 @@ pub fn package_cache_levels(spec: &ResolvedBuildSpec) -> Vec<(PackageCacheLevelS
     levels
 }
 
-fn ccache_dirs(spec: &ResolvedBuildSpec) -> Vec<PathBuf> {
+pub(super) fn ccache_dirs(spec: &ResolvedBuildSpec) -> Vec<PathBuf> {
     let workspace = PathBuf::from(&spec.workspace.root_dir);
     match spec.policy.providers.buildroot.ccache.dir.as_deref() {
         Some(dir) if Path::new(dir).is_absolute() => vec![PathBuf::from(dir)],
@@ -335,7 +411,7 @@ fn short_key(key: &str) -> &str {
     &key[..key.len().min(12)]
 }
 
-fn human(bytes: u64) -> String {
+pub(super) fn human(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
     let mut unit = 0;
@@ -390,7 +466,12 @@ mod tests {
         entry(&root, "project", "photonvision", "dddd4444", 40);
         let spec = spec(&root);
 
-        let listing = run_cache_command(&spec, &args()).expect("list");
+        let report = run_cache_command(&spec, &args()).expect("list");
+        assert_eq!(report.json["action"], "list");
+        assert_eq!(report.json["entries"].as_array().map(Vec::len), Some(4));
+        assert_eq!(report.json["entries"][0]["package"], "photonvision");
+        assert_eq!(report.json["levels"][0]["level"], "project");
+        let listing = report.lines.join("\n");
         assert!(listing.contains("system level: 3 entries"), "{listing}");
         assert!(listing.contains("project level: 1 entry"), "{listing}");
         assert!(
@@ -411,6 +492,9 @@ mod tests {
             },
         )
         .expect("dry run");
+        assert_eq!(dry.json["removed"][0]["key"], "bbbb2222");
+        assert_eq!(dry.json["total_bytes"], 20);
+        let dry = dry.lines.join("\n");
         assert!(dry.contains("would remove system mesa3d@bbbb2222"), "{dry}");
         assert!(root.join("system/mesa3d/bbbb2222").is_dir());
 
@@ -421,7 +505,9 @@ mod tests {
                 ..args()
             },
         )
-        .expect("remove");
+        .expect("remove")
+        .lines
+        .join("\n");
         assert!(
             removed.contains("removed system mesa3d@bbbb2222"),
             "{removed}"

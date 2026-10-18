@@ -77,6 +77,8 @@ pub(crate) struct ScheduledResult {
     pub(crate) duration: Duration,
     /// Time the build spent paused while it ran.
     pub(crate) paused: Duration,
+    /// When the unit started.
+    pub(crate) started: std::time::Instant,
     /// Set on the last result of a unit: its job slot is free again.
     pub(crate) unit_finished: bool,
     pub(crate) heavy: bool,
@@ -204,6 +206,7 @@ pub(crate) fn schedule_ready_operations<'scope, 'env>(
                     result,
                     duration,
                     paused,
+                    started: started.started_at(),
                     unit_finished: position == last,
                     heavy,
                 });

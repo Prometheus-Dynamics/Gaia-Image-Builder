@@ -316,8 +316,14 @@ fn writes_report_bundle_files_with_sizes() {
 
     let written = write_report_bundle(&spec, &report).expect("report files should be written");
 
-    assert_eq!(written.files.len(), 5);
+    assert_eq!(written.files.len(), 6);
     assert!(written.files.iter().all(|file| file.bytes > 0));
+    let trace = written
+        .files
+        .iter()
+        .find(|file| matches!(file.kind, ReportFileKind::Trace))
+        .expect("trace file");
+    assert!(trace.path.display().to_string().ends_with(".trace.json"));
     assert!(
         written
             .files

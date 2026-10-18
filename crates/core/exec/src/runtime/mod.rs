@@ -8,7 +8,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::{
     ExecutionCleanupStatus, ExecutionError, ExecutionEvent, OperationExecutionResult,
@@ -53,6 +53,9 @@ pub struct ExecutionOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationTiming {
     pub operation_id: OperationId,
+    /// When it started, as wall-clock time since execution began (pauses
+    /// included).
+    pub started: Duration,
     /// Time it ran, not counting time the build was paused.
     pub duration: Duration,
     /// Time the build was paused while it ran.
@@ -112,6 +115,8 @@ pub struct ExecutionRuntime {
     outcome: ExecutionOutcome,
     cleanup_stack: Vec<(OperationId, Option<RollbackDomain>, Vec<PathBuf>)>,
     event_sender: Option<Sender<ExecutionEvent>>,
+    /// When execution began; operation start times are offsets from it.
+    started_at: Instant,
 }
 
 impl ExecutionRuntime {
@@ -121,6 +126,7 @@ impl ExecutionRuntime {
             outcome: ExecutionOutcome::default(),
             cleanup_stack: Vec::new(),
             event_sender,
+            started_at: Instant::now(),
         }
     }
 
@@ -128,11 +134,12 @@ impl ExecutionRuntime {
         &self.context
     }
 
-    /// Records a result together with the time it took and the time the
-    /// build was paused meanwhile.
+    /// Records a result together with when it started, the time it took and
+    /// the time the build was paused meanwhile.
     pub fn record_timed(
         &mut self,
         result: OperationExecutionResult,
+        started: Instant,
         duration: Duration,
         paused: Duration,
     ) {
@@ -155,6 +162,7 @@ impl ExecutionRuntime {
             .collect();
         self.outcome.operation_timings.push(OperationTiming {
             operation_id: result.operation_id.clone(),
+            started: started.saturating_duration_since(self.started_at),
             duration,
             paused,
             status,

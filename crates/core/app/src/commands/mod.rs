@@ -1,13 +1,16 @@
 mod cache;
+mod cache_stats;
 mod clean;
 #[cfg(unix)]
 pub(crate) mod control;
+mod disk_usage;
 mod interrupt;
 pub(crate) mod live_status;
 mod lock;
 mod plan;
 mod preview;
 mod progress;
+mod progress_ci;
 mod rebuild;
 mod resolve;
 mod reuse_reasons;
@@ -15,6 +18,8 @@ mod run;
 pub(crate) mod run_registry;
 mod state;
 pub(crate) mod status;
+#[cfg(unix)]
+mod status_json;
 mod validate;
 mod variants;
 
@@ -33,8 +38,8 @@ pub use cache::cache_command;
 pub use clean::{CleanReport, clean_build_command};
 pub use lock::{LockChange, LockReport, LockReportEntry, lock_build_command};
 pub use plan::plan_build_command;
-pub(crate) use preview::print_preview;
 pub use preview::{PreviewReport, preview_build_command};
+pub(crate) use preview::{preview_json, print_preview};
 pub use resolve::resolve_build_command;
 pub use run::run_build_command;
 pub use state::{load_operation_durations, load_reuse_state, save_reuse_state};
@@ -80,6 +85,11 @@ pub enum CommandOutcome {
     /// A command's plain-text report (`gaia cache`, `gaia pause`, ...).
     Text {
         text: String,
+    },
+    /// A command's report as the command-specific fields of its `--json`
+    /// document (`gaia status --json`, `gaia cache --json`).
+    Json {
+        value: serde_json::Value,
     },
     Locked {
         spec: ResolvedBuildSpec,
@@ -169,9 +179,29 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
     {
         usage_errors.push("--only applies to 'run', 'plan' and 'preview'".into());
     }
-    if (args.json || args.fail_on_clean) && args.command != AppCommand::Preview {
-        usage_errors
-            .push("--json and --fail-on-clean apply to 'preview' (or 'run --dry-run')".into());
+    if args.fail_on_clean && args.command != AppCommand::Preview {
+        usage_errors.push("--fail-on-clean applies to 'preview' (or 'run --dry-run')".into());
+    }
+    if args.json
+        && !matches!(
+            args.command,
+            AppCommand::Preview
+                | AppCommand::Run
+                | AppCommand::Plan
+                | AppCommand::Status
+                | AppCommand::Validate
+                | AppCommand::Cache
+        )
+    {
+        usage_errors.push(
+            "--json applies to 'run', 'preview', 'plan', 'status', 'validate' and 'cache'".into(),
+        );
+    }
+    if args.json && args.follow {
+        usage_errors.push("--json cannot be combined with --follow".into());
+    }
+    if args.ci && args.command != AppCommand::Run {
+        usage_errors.push("--ci applies to 'run'".into());
     }
     if args.export_dir.is_some() && args.command != AppCommand::Run {
         usage_errors.push("--export applies to 'run'".into());
@@ -190,7 +220,8 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
         || cache.clear.is_some()
         || !cache.packages.is_empty()
         || !cache.remove.is_empty()
-        || cache.remove_legacy)
+        || cache.remove_legacy
+        || cache.stats)
         && args.command != AppCommand::Cache
     {
         usage_errors.push(
@@ -199,6 +230,15 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
     }
     if cache.clear.is_some() && (!cache.remove.is_empty() || cache.remove_legacy) {
         usage_errors.push("use either --remove or --clear".into());
+    }
+    if cache.stats
+        && (cache.clear.is_some()
+            || !cache.remove.is_empty()
+            || cache.remove_legacy
+            || cache.level.is_some()
+            || !cache.packages.is_empty())
+    {
+        usage_errors.push("'cache stats' takes no --level, --package, --remove or --clear".into());
     }
     if !usage_errors.is_empty() {
         return CommandOutcome::Failed {
@@ -211,6 +251,9 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
     // The build named on the command line; `None` when the command runs
     // without one (status, pause, resume and cancel then use the registry).
     let explicit_build = args.build_explicit.then_some(args.build.as_str());
+    if args.command == AppCommand::Run {
+        progress_ci::set_ci_output(args.ci || ci_from_env());
+    }
     match args.command {
         AppCommand::Help => CommandOutcome::Help { text: help_text() },
         AppCommand::Version => CommandOutcome::Version {
@@ -251,10 +294,19 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
         AppCommand::Pause | AppCommand::Resume | AppCommand::Cancel => CommandOutcome::Failed {
             message: "pause, resume and cancel need a Unix system".into(),
         },
-        AppCommand::Status => {
-            status::status_command(explicit_build, &resolve_options(&args), args.follow)
-        }
-        AppCommand::Cache => cache_command(&args.build, &resolve_options(&args), &args.cache),
+        AppCommand::Status => status::status_command(
+            explicit_build,
+            &resolve_options(&args),
+            args.follow,
+            args.json,
+        ),
+        AppCommand::Cache => cache_command(
+            &args.build,
+            args.build_explicit,
+            &resolve_options(&args),
+            &args.cache,
+            args.json,
+        ),
         AppCommand::Lock => lock_build_command(&args.build, &resolve_options(&args), &args.lock),
         AppCommand::Run => run_build_command(
             context,
@@ -265,6 +317,16 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
             &args.variants,
         ),
     }
+}
+
+/// `CI` set to anything but empty, `0` or `false`, as CI services do.
+fn ci_from_env() -> bool {
+    std::env::var("CI").is_ok_and(|value| {
+        !matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "" | "0" | "false"
+        )
+    })
 }
 
 #[cfg(feature = "tui")]
@@ -308,6 +370,7 @@ fn help_text() -> String {
         "  gaia cache [build-config] --remove <package>[@key-prefix][,...] [--dry-run]",
         "  gaia cache [build-config] --remove-legacy [--dry-run]",
         "  gaia cache [build-config] --clear system|project|ccache [--dry-run]",
+        "  gaia cache stats [build-config]   (disk usage of every cache Gaia keeps)",
         "  gaia pause [run]               (or Ctrl-Z in the running gaia run)",
         "  gaia resume [run]              (or fg)",
         "  gaia cancel [run]              (or Ctrl-C; finished work is kept)",
@@ -328,8 +391,13 @@ fn help_text() -> String {
         "  gaia plan [build-config] --only artifact:<id>",
         "  gaia preview [build-config] [--set key=value] [--only ...] [--json] [--fail-on-clean]",
         "  gaia run [build-config] --dry-run     (same as 'gaia preview')",
+        "  gaia run [build-config] --ci     (GitHub Actions log groups; also when CI is set)",
         "  gaia --help",
         "  gaia --version",
+        "",
+        "--json prints one JSON document on stdout for 'run', 'preview', 'plan',",
+        "'status', 'validate' and 'cache' (schema_version 1, see docs/cli.md);",
+        "progress and logs stay on stderr.",
         "",
         "'preview' shows what 'run' would do without changing anything: which",
         "operations run or are reused and why, what the Buildroot clean would",

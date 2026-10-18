@@ -12,7 +12,7 @@ pub struct ReportBundle {
     pub execution_failures: Vec<ExecutionFailureReport>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct RunSummary {
     pub build_name: String,
     pub build_version: Option<String>,
@@ -64,6 +64,10 @@ pub struct RunSummary {
     pub skipped_operation_ids: Vec<String>,
     /// Wall-clock time of every operation that ran, in completion order.
     pub operation_timings: Vec<OperationTimingRecord>,
+    /// The chain of dependent operations that decided how long the run took,
+    /// from the recorded start and finish times. `None` when nothing was
+    /// built.
+    pub critical_path: Option<CriticalPathRecord>,
     /// Raw and content sizes of the primary image and each raw disk image the
     /// run published. Empty for a reused image.
     pub image_sizes: Vec<ImageSizeRecord>,
@@ -133,6 +137,9 @@ pub struct ImageSizeRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct OperationTimingRecord {
     pub operation_id: String,
+    /// When it started, in milliseconds since execution began (wall clock,
+    /// pauses included). It ended `duration_ms + paused_ms` later.
+    pub start_ms: u64,
     /// Time it ran, not counting time the build was paused.
     pub duration_ms: u64,
     /// Time the build was paused while it ran.
@@ -143,6 +150,36 @@ pub struct OperationTimingRecord {
     /// Steps inside the operation that reported their wall time.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub steps: Vec<StepTimingRecord>,
+}
+
+impl OperationTimingRecord {
+    /// When it finished, in milliseconds since execution began.
+    pub fn end_ms(&self) -> u64 {
+        self.start_ms
+            .saturating_add(self.duration_ms)
+            .saturating_add(self.paused_ms)
+    }
+}
+
+/// The actual critical path of a run: the dependency chain ending at the
+/// operation that finished last, each step back taking the dependency that
+/// finished last (the one the operation waited for).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CriticalPathRecord {
+    /// From the start of the first operation on the path to the end of the
+    /// last, pauses excluded.
+    pub duration_ms: u64,
+    /// In dependency order.
+    pub operations: Vec<CriticalPathEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CriticalPathEntry {
+    pub operation_id: String,
+    pub start_ms: u64,
+    /// Time it ran, pauses excluded.
+    pub duration_ms: u64,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -450,6 +487,8 @@ pub enum ReportFileKind {
     Provenance,
     Manifest,
     RebuildReasons,
+    /// The run's operations as Chrome trace events (`<build>.trace.json`).
+    Trace,
 }
 
 impl ReportFileKind {
@@ -460,6 +499,7 @@ impl ReportFileKind {
             Self::Provenance => "provenance",
             Self::Manifest => "manifest",
             Self::RebuildReasons => "rebuild-reasons",
+            Self::Trace => "trace",
         }
     }
 }

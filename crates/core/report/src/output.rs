@@ -62,6 +62,12 @@ pub fn write_report_bundle(
             ReportFileKind::RebuildReasons,
             &report.rebuild_reasons,
         )?,
+        write_json_file(
+            &report_dir,
+            &format!("{build_name}.trace.json"),
+            ReportFileKind::Trace,
+            &crate::profile::chrome_trace(&report.summary),
+        )?,
     ];
 
     if let Err(error) = write_baseline(spec, &report.summary) {

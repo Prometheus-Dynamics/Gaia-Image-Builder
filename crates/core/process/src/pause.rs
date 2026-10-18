@@ -69,6 +69,11 @@ impl ActiveClock {
         self.start.elapsed().saturating_sub(self.paused())
     }
 
+    /// The instant the clock started.
+    pub fn started_at(&self) -> Instant {
+        self.start
+    }
+
     /// Time spent paused since the start.
     pub fn paused(&self) -> Duration {
         paused_total().saturating_sub(self.paused_at_start)
