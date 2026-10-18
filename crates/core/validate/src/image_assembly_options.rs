@@ -123,17 +123,26 @@ pub(crate) fn validate_filesystem_options(
 ) {
     let location = || Some("image.assembly.filesystems".into());
     for filesystem in &assembly.filesystems {
+        let erofs = filesystem.kind == AssemblyFilesystemKindSpec::Erofs;
         if filesystem.kind != AssemblyFilesystemKindSpec::Ext4 {
-            for (set, option) in [
-                (filesystem.label.is_some(), "label"),
-                (filesystem.uuid.is_some(), "uuid"),
-                (filesystem.journal.is_some(), "journal"),
+            for (set, option, kinds) in [
+                (
+                    filesystem.label.is_some() && !erofs,
+                    "label",
+                    "'ext4' and 'erofs'",
+                ),
+                (
+                    filesystem.uuid.is_some() && !erofs,
+                    "uuid",
+                    "'ext4' and 'erofs'",
+                ),
+                (filesystem.journal.is_some(), "journal", "'ext4'"),
             ] {
                 if set {
                     diagnostics.push(error(
                         "assembly_filesystem_option_unsupported",
                         format!(
-                            "assembly filesystem '{}' kind '{}' does not accept {option}; only kind 'ext4' does",
+                            "assembly filesystem '{}' kind '{}' does not accept {option}; only kinds {kinds} do",
                             filesystem.id,
                             filesystem.kind.as_str()
                         ),
@@ -141,9 +150,8 @@ pub(crate) fn validate_filesystem_options(
                     ));
                 }
             }
-            continue;
         }
-        if filesystem.size.is_none() {
+        if filesystem.kind == AssemblyFilesystemKindSpec::Ext4 && filesystem.size.is_none() {
             diagnostics.push(error(
                 "assembly_filesystem_size_required",
                 format!(
@@ -153,7 +161,11 @@ pub(crate) fn validate_filesystem_options(
                 location(),
             ));
         }
+        if filesystem.kind != AssemblyFilesystemKindSpec::Ext4 && !erofs {
+            continue;
+        }
         if let Ok(Some(size)) = filesystem.parsed_size()
+            && filesystem.kind == AssemblyFilesystemKindSpec::Ext4
             && !size.bytes().is_multiple_of(EXT4_BLOCK_BYTES)
         {
             diagnostics.push(error(

@@ -494,7 +494,9 @@ fn image_assembly_fingerprint_tracks_direct_partition_images() {
                 size: None,
                 wipe: false,
                 materialize: true,
+                gpt: Default::default(),
             }],
+            gpt: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     });
@@ -552,7 +554,9 @@ fn image_assembly_fingerprint_tracks_provider_root_partition_images() {
                 size: None,
                 wipe: false,
                 materialize: true,
+                gpt: Default::default(),
             }],
+            gpt: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     });
@@ -606,7 +610,9 @@ fn image_assembly_fingerprint_tracks_missing_partition_image_becoming_present() 
                 size: None,
                 wipe: false,
                 materialize: true,
+                gpt: Default::default(),
             }],
+            gpt: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     });
@@ -663,6 +669,7 @@ fn image_assembly_fingerprint_does_not_hash_generated_filesystem_partition_outpu
             label: None,
             uuid: None,
             journal: None,
+            compressed: Default::default(),
         }],
         disks: vec![AssemblyDiskSpec {
             id: "sdcard".into(),
@@ -683,7 +690,9 @@ fn image_assembly_fingerprint_does_not_hash_generated_filesystem_partition_outpu
                 size: None,
                 wipe: false,
                 materialize: true,
+                gpt: Default::default(),
             }],
+            gpt: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     });

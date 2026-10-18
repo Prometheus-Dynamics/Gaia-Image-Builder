@@ -46,7 +46,9 @@ fn spec_with_disk(scratch: &TempDir, rootfs_bytes: usize) -> (ResolvedBuildSpec,
                 size: None,
                 wipe: false,
                 materialize: true,
+                gpt: Default::default(),
             }],
+            gpt: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     });
@@ -256,6 +258,7 @@ fn spec_with_filesystem_and_transform(
             label: None,
             uuid: None,
             journal: None,
+            compressed: Default::default(),
         }],
         transforms: vec![gaia_spec::AssemblyTransformSpec {
             kind: gaia_spec::AssemblyTransformKindSpec::Gzip,

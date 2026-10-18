@@ -110,6 +110,9 @@ pub(super) fn interpolate_image_assembly(
             filesystem.uuid = filesystem
                 .uuid
                 .map(|value| resolver::interpolate_string(value, raw, env));
+            filesystem.compression = filesystem
+                .compression
+                .map(|value| resolver::interpolate_string(value, raw, env));
             filesystem
         })
         .collect();
@@ -124,6 +127,9 @@ pub(super) fn interpolate_image_assembly(
                 .map(|value| resolver::interpolate_string(value, raw, env));
             disk.signature_text = disk
                 .signature_text
+                .map(|value| resolver::interpolate_string(value, raw, env));
+            disk.disk_guid = disk
+                .disk_guid
                 .map(|value| resolver::interpolate_string(value, raw, env));
             disk.partitions = disk
                 .partitions
@@ -141,6 +147,9 @@ pub(super) fn interpolate_image_assembly(
                         .map(|value| resolver::interpolate_string(value, raw, env));
                     partition.size = partition
                         .size
+                        .map(|value| resolver::interpolate_string(value, raw, env));
+                    partition.guid = partition
+                        .guid
                         .map(|value| resolver::interpolate_string(value, raw, env));
                     partition
                 })

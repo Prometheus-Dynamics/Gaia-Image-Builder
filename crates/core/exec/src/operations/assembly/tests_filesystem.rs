@@ -63,6 +63,7 @@ fn cpio_zstd_assembly(work_dir: &str, output: &str, publish: bool) -> ImageAssem
             label: None,
             uuid: None,
             journal: None,
+            compressed: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     }
@@ -368,6 +369,7 @@ fn vfat_auto_size_builds_an_image_that_holds_the_tree() {
             label: None,
             uuid: None,
             journal: None,
+            compressed: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     });

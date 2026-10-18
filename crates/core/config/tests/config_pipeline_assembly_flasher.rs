@@ -126,6 +126,7 @@ fn cpio_zstd_and_publish_default_to_off_when_unset() {
         label: None,
         uuid: None,
         journal: None,
+        compressed: Default::default(),
     };
     assert_eq!(spec.publish_template(), None);
     assert_eq!(AssemblyFilesystemKindSpec::CpioZstd.as_str(), "cpio-zstd");

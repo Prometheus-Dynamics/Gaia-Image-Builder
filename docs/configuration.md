@@ -2181,15 +2181,15 @@ Assembly behavior:
 - Runtime libraries are found from the binary's ELF headers, never from the host: the program interpreter, the `DT_NEEDED` names and the `DT_RUNPATH` (or `DT_RPATH`) entries are read from the file, and each name is looked up under the sysroot. The search order is the binary's RUNPATH/RPATH entries (`$ORIGIN` is expanded; an entry with another `$` token, or a relative path, is skipped), then `lib`, `lib64`, `usr/lib`, `usr/lib64`, the `<triplet>` directories present under `lib` and `usr/lib`, and the directories of `etc/ld.so.conf` and its `include` files. A library is used only when its class, byte order and machine match the binary, so a host library is never taken for a target one.
 - Symlinks inside the sysroot are followed (an absolute link target means the sysroot's root). The tree gets each file the loader reaches as a real copy at its absolute path, and each symlink crossed on the way as a symlink with the same target text, so a soname such as `libc.so.6` resolves in the tree as it does on the target. The interpreter is placed at its exact path. A static binary copies nothing. A NEEDED name that is not found under the sysroot fails the build, and the error lists every missing name. The tree must not create a directory that the sysroot links (for example `lib` when the sysroot has `/lib -> usr/lib`), since the link cannot replace it.
 - For a cross-compiled BusyBox taken from a Buildroot target tree, set `sysroot = "$provider.target"` (or leave it unset when the binary sits at `$provider.target/bin/busybox`). The reuse fingerprint covers the sysroot, the interpreter, every symlink and the digest of every library file, so a changed libc rebuilds the assembly.
-- Filesystem kinds currently implemented are `vfat`, `cpio`, `cpio-gzip`, `cpio-zstd`, `cpio-xz`, and `ext4` (see [dm-verity and ext4](#dm-verity-and-ext4)).
+- Filesystem kinds currently implemented are `vfat`, `cpio`, `cpio-gzip`, `cpio-zstd`, `cpio-xz`, `ext4` (see [dm-verity and ext4](#dm-verity-and-ext4)), `squashfs` and `erofs` (see [squashfs and EROFS](#squashfs-and-erofs)).
 - `cpio` kinds write a newc archive with uid and gid 0, entries in sorted order and zero timestamps, so the same tree packs to the same bytes. `cpio-zstd` compresses that archive with `zstd -q -c --no-progress -T0 -<compression_level>`, resolving `zstd` like the zstd transform; `compression_level` (1-19) is only accepted on `cpio-zstd` and defaults to 19.
 - `cpio-xz` compresses the same newc archive with `xz -T2 --check=crc32 --lzma2=preset=<compression_level>,dict=<size> -c`. The CRC32 check is the one the kernel's XZ initramfs decoder reads. That decoder allocates the whole LZMA2 dictionary, so the dictionary is capped at 1 MiB (or the cpio's size rounded up to 4 KiB, when smaller) whatever the level: the 64 MiB dictionary of `-9` gives an initramfs the kernel cannot unpack. `compression_level` (0-9) is accepted on `cpio-xz` (default 6) and `cpio-zstd` (1-19, default 19 there). Threaded mode writes the block sizes into the block header, which the kernel also needed (a `-T1` stream, without them, did not boot), and xz's own threaded block size is kept: with `--block-size` set to the cpio size xz wrote a shorter block header that did not boot either. The fixed thread count keeps the output the same on every host and run. Of the encodings tried on a Raspberry Pi (Raze) kernel, only this one booted, with a padded 20-byte block header; a 64 MiB dictionary, a `-T1` stream without sizes, and a 16-byte header from `--block-size` each died before /init. For a small, safe initramfs on that board, `cpio-zstd` is the tested choice; boot-test a `cpio-xz` image (and any one over 3 MiB, which xz splits into several blocks) before relying on it.
 - `publish = true` on a filesystem also copies its image to the image output dir (`$assembly.out`, the collect dir by default) under the output's file name, and the published image is reported like a raw disk: in the run summary, its image sizes, and the content digests. The name must not collide with another output or published copy. In a RAM work dir the image is built in RAM and copied to the image output dir when built.
 - `vfat` uses `mtools` (`mformat` and `mcopy`), resolving provider host tools first, then host `PATH`; `size` accepts byte values or binary `K`, `M`, `G`, and `T` suffixes, or `size = "auto"`. Without `size` the image is 32M.
 - `free = "256M"` (only with `size = "auto"`) leaves that much free space beyond the content estimate: the margin becomes the larger of the automatic margin and `free`, and the result is still rounded up to a whole MiB. Use it when files will be added to the image later.
 - `size = "auto"` (vfat and ext4) sizes the image from its source tree; the vfat rule is: each file is counted rounded up to 4 KiB, each directory as 4 KiB, plus 1 MiB for the FAT tables and root directory, plus a margin of 5% (at least 1 MiB), rounded up to a whole MiB. The size depends only on the tree's content, so the same tree always gets the same size. The 4 KiB per entry is an estimate of the cluster size mtools picks: a tree that overruns it fails while copying, rather than being truncated.
-- Raw MBR disk assembly writes 1 MiB-aligned partitions sequentially (see [Disk partitions](#disk-partitions)).
-- MBR partition `type` accepts raw `0xNN` values; `type_alias` currently supports `fat32-lba` and `linux`.
+- Raw disk assembly writes 1 MiB-aligned partitions sequentially, with an MBR (`partition_table = "mbr"`, the default) or a GPT (`partition_table = "gpt"`) (see [Disk partitions](#disk-partitions) and [GPT disks](#gpt-disks)).
+- MBR partition `type` accepts raw `0xNN` values; `type_alias` currently supports `fat32-lba` and `linux`. On a GPT disk `type` is a raw type GUID and `type_alias` names one (see [GPT disks](#gpt-disks)).
 - Assembly runtime state is included in provenance and manifest reports with staged file, transform, filesystem, disk, and archive output sizes and digests.
 - Assembly order follows dependencies: a step that reads a path another step writes (the same file, a file in a directory it fills, or a glob it matches) runs after it, whatever its kind or position, so for example a transform compressing a filesystem built by the same assembly sees this run's image. Trees are prepared first; steps that do not depend on each other run in the order dirs, symlinks, files, BusyBox initramfs, kernel modules, transforms, filesystems, disks, archives. Steps that read each other's outputs in a cycle are rejected, by validation and at run time.
 - Before the steps run, outputs of transforms, filesystems, disks and archives left from an earlier run are removed, so a step reading one before it is rebuilt fails instead of using a stale file.
@@ -2230,9 +2230,9 @@ The assembly state records `work_dir.placement` (`ram` or `disk`),
 #### Disk partitions
 
 `[[image.assembly.disks.partitions]]` fields:
-- `name`: label used in state and errors.
-- `type` (raw `0xNN`) or `type_alias` (`fat32-lba`, `linux`); defaults to `linux` (`0x83`).
-- `bootable`: sets the MBR active flag. Only allowed on primary partitions; validation rejects it on logical partitions (`assembly_partition_bootable_logical`).
+- `name`: label used in state and errors; on a GPT disk also the partition name (at most 36 UTF-16 code units, unique on the disk).
+- `type` (raw `0xNN`) or `type_alias` (`fat32-lba`, `linux`); defaults to `linux` (`0x83`). On a GPT disk, a type GUID or a GPT alias (see [GPT disks](#gpt-disks)).
+- `bootable`: sets the MBR active flag (on GPT, the legacy BIOS bootable attribute, bit 2). Only allowed on primary partitions; validation rejects it on logical partitions (`assembly_partition_bootable_logical`).
 - `image`: file written at the partition start. Optional when `size` is set.
 - `size`: partition size in bytes or with a binary `K`/`M`/`G`/`T` suffix (`"16M"`, `"2G"`). Without it the partition is exactly as large as its image (rounded up to 512-byte sectors). With it the image must fit, otherwise assembly fails before the disk is written; the space after the image is left unwritten.
 - `wipe = true`: only for empty partitions (no `image`). Writes zeros over the first 1 MiB of the partition (less if the partition is smaller) so filesystem signatures left by a previous flash do not survive when the image is written to a device. Validation rejects `wipe` together with `image`, since an image already overwrites the partition start.
@@ -2244,6 +2244,38 @@ Layout:
 - With more than 4 partitions Gaia writes the standard sfdisk extended layout: partitions 1-3 are primary (p1-p3), MBR slot 4 becomes an extended partition (type `0x05`), and partitions 4.. become logical partitions p5, p6, ... Each logical partition has an EBR in the first sector of its aligned slot and its data starts at the next `alignment_lba` boundary. EBR entry 0 describes the logical partition relative to its EBR; entry 1 links the next EBR, relative to the extended partition start, and spans that EBR through the end of its logical partition. The extended entry spans from the first EBR to the end of the last logical partition.
 - The disk file is created at its full size with unwritten ranges left as holes, so empty and padded partitions take no space on filesystems that support sparse files.
 - Assembly state records each partition's `start_lba`, `sector_count`, image `bytes`, and for layouts with more than 4 partitions the kernel `number` and the `ebr_lba` of logical partitions; empty partitions record `empty=true` and `wipe_bytes`.
+
+#### GPT disks
+
+`partition_table = "gpt"` writes a GUID partition table: a protective MBR (one `0xEE` entry over the disk), the primary header at LBA 1 with 128 partition entries from LBA 2, and the backup entries and header in the last 33 sectors, each with its CRC32. Partitions are placed as on MBR disks (`first_lba` and `alignment_lba`, both 2048 by default), all of them primary and numbered in order; `first_lba` must be at least 34. The disk ends after the backup header, rounded up to `alignment_lba`, so its last usable LBA is 34 sectors before the end. At most 128 partitions.
+
+Disk options:
+- `disk_guid` (optional): the disk GUID. Unset, it is derived from the disk `id`.
+- `signature`, `signature_text` and `ebr_placement = "packed"` are MBR-only and rejected on a GPT disk; `truncate` is too, since the backup header is at the end of the full-size disk.
+
+Partition options:
+- `type_alias`: one of `linux` (the default), `esp`, `bios-boot`, `microsoft-basic-data`, `xbootldr`, `swap`, `home`, `srv`, `var`, `linux-lvm`, `linux-raid`, and the [Discoverable Partitions](https://uapi-group.org/specifications/specs/discoverable_partitions_specification/) types `linux-root-x86`, `linux-root-x86-64`, `linux-root-arm`, `linux-root-arm64`, `linux-root-riscv64`, `linux-usr-x86-64`, `linux-usr-arm64`, `linux-root-verity-x86-64`, `linux-root-verity-arm64`, `linux-usr-verity-x86-64`, `linux-usr-verity-arm64`.
+- `type`: a raw type GUID, `8-4-4-4-12` hex digits, instead of `type_alias`.
+- `guid` (optional): the unique partition GUID (the `PARTUUID`). Unset, it is derived from the disk GUID and the partition name.
+
+The derived GUIDs depend only on the disk id and the partition names, not on the images, so the same config gives the same disk, and a `root=PARTUUID=<guid>` on a kernel command line stays valid when the images change. The assembly state records `disk_guid`, and per partition its `type` (the type GUID) and `guid`.
+
+```toml
+[[image.assembly.disks]]
+id = "disk"
+output = "$assembly.out/disk.img"
+partition_table = "gpt"
+
+[[image.assembly.disks.partitions]]
+name = "ESP"
+type_alias = "esp"
+image = "$assembly.work/esp.vfat"
+
+[[image.assembly.disks.partitions]]
+name = "root"
+type_alias = "linux-root-arm64"
+image = "$assembly.work/root.erofs"
+```
 
 #### Truncated disks
 
@@ -2319,6 +2351,31 @@ json = { schema = 1, state = "trial", size = "${assembly.size:$assembly.work/slo
 Several binaries may share libraries: each library is copied once per binary, the later copy replacing the same file. Reuse fingerprints cover the binary and its closure, like BusyBox's.
 
 A `[[image.assembly.files]]` entry that copies a dynamic binary without its libraries gets a warning naming them (see [Image Assembly](#image-assembly)); `binaries` is the entry that brings them. Libraries a `binaries` entry or another file entry brings into the tree count, whatever the entries' order.
+
+#### squashfs and EROFS
+
+Read-only compressed images of `source_tree`, as large as their content (neither kind takes `size` or `free`). `squashfs` runs `mksquashfs`, `erofs` runs `mkfs.erofs`, each resolved from provider host tools first, then host `PATH`. Both are reproducible, and `deterministic` must stay `true`: every entry is owned by root (0:0) with the epoch as its time, and extended attributes from the build host (its SELinux labels, for example) are left out. File modes are kept. Two runs over the same tree give the same bytes. Either image can be the `src` of a [`verity`](#dm-verity-and-ext4) transform, a partition image, or a published output (`publish = true`).
+
+Options:
+- `compression`: for `squashfs` one of `gzip` (the default, which every squashfs kernel reads), `xz`, `zstd` or `lz4`; for `erofs` one of `lz4hc` (the default, read by the kernel's LZ4 decoder), `lz4`, `lzma`, `deflate` or `none` (uncompressed).
+- `compression_level`: `squashfs` `gzip` 1-9 and `zstd` 1-22 (`-Xcompression-level`); `erofs` `lz4hc` 0-12, `lzma` and `deflate` 0-9 (`-z<name>,<level>`). The other compressors take no level. Unset uses the tool's default.
+- `block_size`: bytes, a power of two: `squashfs` 4 KiB to 1 MiB (default 128 KiB), `erofs` 512 to 64 KiB (default 4096; the kernel mounts only block sizes up to its page size).
+- `erofs` only: `pcluster_size` (the largest physical cluster, `-C`, a multiple of the block size), and `dedupe`, `fragments`, `ztailpacking` (`-E`), each `false` by default. They need compression.
+- `erofs` only: `label` (at most 16 bytes) and `uuid`. Unset, the UUID is derived from the filesystem `id`.
+
+`mksquashfs` gets `-noappend -all-root -no-xattrs -mkfs-time 0 -all-time 0 -reproducible`; `mkfs.erofs` gets `-T0 --all-root -x-1 -U <uuid>`.
+
+```toml
+[[image.assembly.filesystems]]
+id = "root"
+kind = "erofs"
+source_tree = "rootfs"
+output = "$assembly.work/root.erofs"
+compression = "lz4hc"
+compression_level = 12
+pcluster_size = 65536
+fragments = true
+```
 
 #### dm-verity and ext4
 

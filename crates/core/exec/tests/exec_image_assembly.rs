@@ -439,6 +439,7 @@ fn image_assembly_disk_failure_cleans_generated_filesystem_output() {
             label: None,
             uuid: None,
             journal: None,
+            compressed: Default::default(),
         }],
         disks: vec![AssemblyDiskSpec {
             id: "sdcard".into(),
@@ -465,7 +466,9 @@ fn image_assembly_disk_failure_cleans_generated_filesystem_output() {
                 size: None,
                 wipe: false,
                 materialize: true,
+                gpt: Default::default(),
             }],
+            gpt: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     });
@@ -535,7 +538,9 @@ fn image_assembly_disk_write_failure_cleans_temp_and_final_outputs() {
                 size: None,
                 wipe: false,
                 materialize: true,
+                gpt: Default::default(),
             }],
+            gpt: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     });
@@ -627,6 +632,7 @@ fn image_assembly_filesystem_failure_cleans_temp_and_final_outputs() {
             label: None,
             uuid: None,
             journal: None,
+            compressed: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     });

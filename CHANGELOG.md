@@ -75,6 +75,17 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - With `--ci`, or when `CI` is set (as GitHub Actions and most CI services do), `gaia run` prints no progress lines. Each operation's output is kept until it finishes and printed as one GitHub Actions log group (`::group::<operation>: done in 1m20s` ... `::endgroup::`), so parallel operations never interleave; a failure is also reported as an `::error::` annotation. Output that looks like a workflow command is wrapped in `::stop-commands::`. The last 5,000 lines of each operation are kept.
 
+### Image assembly: squashfs and EROFS filesystems
+
+- New filesystem kinds `squashfs` (`mksquashfs`) and `erofs` (`mkfs.erofs`), resolved from provider host tools, then `PATH`. Options: `compression` (squashfs `gzip`/`xz`/`zstd`/`lz4`, default `gzip`; erofs `lz4`/`lz4hc`/`lzma`/`deflate`/`none`, default `lz4hc`), `compression_level` where the compressor takes one, `block_size`, and for erofs `pcluster_size`, `dedupe`, `fragments`, `ztailpacking`, `label` and `uuid`. Validation checks each against the kind and compressor.
+- Both are reproducible: every entry root-owned with epoch times, no host xattrs, and the erofs UUID derived from the filesystem id. The image is as large as its content, works as a `verity` source and a partition image, and is reported and published like the other filesystems.
+
+### Image assembly: GPT disks
+
+- `partition_table = "gpt"` is implemented (it failed at assembly time as not implemented): a protective MBR, the primary header and 128 entries at LBA 1-33, and the backup entries and header at the end, with their CRC32s. Partitions are aligned as on MBR disks. `type_alias` takes GPT names (`linux`, `esp`, `bios-boot`, `xbootldr`, the Discoverable Partitions root, `/usr` and verity types such as `linux-root-arm64`, and more) and `type` a raw type GUID; the partition `name` is the GPT name, and `bootable` sets the legacy BIOS bootable attribute.
+- The disk GUID (`disk_guid`) and partition GUIDs (`guid`) can be set; unset they are derived from the disk id and partition names, so the same config gives byte-identical disks and stable `PARTUUID`s. MBR-only options (`signature`, `signature_text`, `ebr_placement = "packed"`, `truncate`) are rejected on GPT disks, and GPT options on MBR disks.
+- Fingerprints of existing filesystems and disks are unchanged: the new options are part of them only when set.
+
 ### Buildroot EROFS: lzma without the extra image
 
 - With `BR2_TARGET_ROOTFS_EROFS_LZMA=y`, Buildroot's generic image compression (keyed on the same symbol) also ran `lzma -9` over `rootfs.erofs`, writing a second image larger than the first and costing about 35 s per build. The settings step now rewrites that choice to `custom` with `BR2_TARGET_ROOTFS_EROFS_COMPRESSION_ALGORITHMS="lzma,<level>"`, which gives `mkfs.erofs` the same `-zlzma,<level>` argument, and reports it. Other filesystems are unchanged. The `config_overrides` check accepts that rewrite: a requested `BR2_TARGET_ROOTFS_EROFS_LZMA=y` and its `_LZMA_LEVEL` count as honored when the final `.config` has the custom choice with the same `lzma,<level>` (517a311 reported them as dropped and failed the build).

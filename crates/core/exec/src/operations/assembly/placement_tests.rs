@@ -30,6 +30,7 @@ fn roots_for(root: &Path) -> (ResolvedBuildSpec, AssemblyRoots) {
             label: None,
             uuid: None,
             journal: None,
+            compressed: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     });
@@ -72,7 +73,9 @@ fn ram_moves_intermediates_and_keeps_published_disks_on_disk() {
             size: None,
             wipe: false,
             materialize: true,
+            gpt: Default::default(),
         }],
+        gpt: Default::default(),
     });
     spec.image.assembly = Some(assembly.clone());
     let base = root.join("ram");
@@ -320,6 +323,7 @@ fn a_raw_disk_under_the_work_dir_is_still_published_to_its_path() {
         truncate: None,
         ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
         partitions: Vec::new(),
+        gpt: Default::default(),
     });
     spec.image.assembly = Some(assembly.clone());
     let base = root.join("ram");

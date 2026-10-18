@@ -75,7 +75,9 @@ fn collect_expected_images_skips_required_output_generated_by_assembly() {
                 size: None,
                 wipe: false,
                 materialize: true,
+                gpt: Default::default(),
             }],
+            gpt: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     });

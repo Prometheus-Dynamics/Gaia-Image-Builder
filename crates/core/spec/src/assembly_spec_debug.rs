@@ -116,6 +116,75 @@ impl std::fmt::Debug for AssemblyBinarySpec {
     }
 }
 
+// The squashfs and erofs options print only when set, so filesystems that
+// do not set them keep their fingerprints.
+impl std::fmt::Debug for crate::AssemblyFilesystemSpec {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = formatter.debug_struct("AssemblyFilesystemSpec");
+        debug
+            .field("id", &self.id)
+            .field("kind", &self.kind)
+            .field("source_tree", &self.source_tree)
+            .field("output", &self.output)
+            .field("size", &self.size)
+            .field("deterministic", &self.deterministic)
+            .field("compression_level", &self.compression_level)
+            .field("publish", &self.publish)
+            .field("label", &self.label)
+            .field("uuid", &self.uuid)
+            .field("journal", &self.journal)
+            .field("free", &self.free);
+        if self.compressed != crate::AssemblyCompressedFsSpec::default() {
+            debug.field("compressed", &self.compressed);
+        }
+        debug.finish()
+    }
+}
+
+// The GPT disk GUID prints only when set, so disks that do not set it keep
+// their fingerprints.
+impl std::fmt::Debug for AssemblyDiskSpec {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = formatter.debug_struct("AssemblyDiskSpec");
+        debug
+            .field("id", &self.id)
+            .field("output", &self.output)
+            .field("partition_table", &self.partition_table)
+            .field("signature", &self.signature)
+            .field("signature_text", &self.signature_text)
+            .field("first_lba", &self.first_lba)
+            .field("alignment_lba", &self.alignment_lba)
+            .field("truncate", &self.truncate)
+            .field("ebr_placement", &self.ebr_placement)
+            .field("partitions", &self.partitions);
+        if self.gpt != crate::AssemblyGptDiskSpec::default() {
+            debug.field("gpt", &self.gpt);
+        }
+        debug.finish()
+    }
+}
+
+// The GPT partition GUID prints only when set, so partitions that do not set
+// it keep their fingerprints.
+impl std::fmt::Debug for AssemblyDiskPartitionSpec {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = formatter.debug_struct("AssemblyDiskPartitionSpec");
+        debug
+            .field("name", &self.name)
+            .field("kind", &self.kind)
+            .field("type_alias", &self.type_alias)
+            .field("bootable", &self.bootable)
+            .field("image", &self.image)
+            .field("size", &self.size)
+            .field("wipe", &self.wipe)
+            .field("materialize", &self.materialize);
+        if self.gpt != crate::AssemblyGptPartitionSpec::default() {
+            debug.field("gpt", &self.gpt);
+        }
+        debug.finish()
+    }
+}
+
 #[cfg(test)]
 mod debug_tests {
     use super::*;
@@ -134,6 +203,65 @@ mod debug_tests {
             named.ends_with("assembly_sources: [SourceId(\"app\")] }"),
             "{named}"
         );
+    }
+
+    /// The squashfs/erofs and GPT options print only when set.
+    #[test]
+    fn compressed_and_gpt_options_print_only_when_set() {
+        let partition = AssemblyDiskPartitionSpec {
+            name: "root".into(),
+            kind: None,
+            type_alias: None,
+            bootable: false,
+            image: None,
+            size: Some("1MiB".into()),
+            wipe: false,
+            materialize: true,
+            gpt: Default::default(),
+        };
+        assert_eq!(
+            format!("{partition:?}"),
+            "AssemblyDiskPartitionSpec { name: \"root\", kind: None, type_alias: None, bootable: false, image: None, size: Some(\"1MiB\"), wipe: false, materialize: true }"
+        );
+        let mut disk = AssemblyDiskSpec {
+            id: "disk".into(),
+            output: AssemblyPathTemplate::new("$assembly.out/disk.img"),
+            partition_table: AssemblyPartitionTableSpec::Gpt,
+            signature: None,
+            signature_text: None,
+            first_lba: None,
+            alignment_lba: None,
+            truncate: None,
+            ebr_placement: AssemblyEbrPlacementSpec::Default,
+            gpt: Default::default(),
+            partitions: vec![partition],
+        };
+        assert!(!format!("{disk:?}").contains("gpt:"));
+        disk.gpt.disk_guid = Some("01234567-89ab-4def-8123-456789abcdef".into());
+        disk.partitions[0].gpt.guid = Some("11111111-2222-4333-8444-555555555555".into());
+        let set = format!("{disk:?}");
+        assert!(
+            set.contains("disk_guid") && set.contains("guid: Some"),
+            "{set}"
+        );
+        let mut filesystem = crate::AssemblyFilesystemSpec {
+            id: "root".into(),
+            kind: crate::AssemblyFilesystemKindSpec::Squashfs,
+            source_tree: "root".into(),
+            output: AssemblyPathTemplate::new("$assembly.work/root.img"),
+            size: None,
+            deterministic: true,
+            compression_level: None,
+            publish: false,
+            label: None,
+            uuid: None,
+            journal: None,
+            free: None,
+            compressed: Default::default(),
+        };
+        assert!(format!("{filesystem:?}").ends_with("journal: None, free: None }"));
+        filesystem.compressed.compression = Some("zstd".into());
+        assert!(format!("{filesystem:?}").contains("compression: Some(\"zstd\")"));
     }
 
     /// The options added with `include`, `strip` and `strip_tool` print only

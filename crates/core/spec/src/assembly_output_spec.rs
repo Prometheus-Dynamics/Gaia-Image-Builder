@@ -2,7 +2,8 @@
 //! and files: how each is written, and which options each kind accepts.
 
 use crate::{
-    AssemblyFilesystemId, AssemblyPathTemplate, AssemblyTreeId, ByteSize, ByteSizeParseError,
+    AssemblyCompressedFsSpec, AssemblyFilesystemId, AssemblyPathTemplate, AssemblyTreeId, ByteSize,
+    ByteSizeParseError,
 };
 use std::str::FromStr;
 
@@ -71,7 +72,8 @@ impl AssemblyTransformKindSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+// Debug is in assembly_spec_debug: fingerprints hash it.
+#[derive(Clone, PartialEq, Eq)]
 pub struct AssemblyFilesystemSpec {
     pub id: AssemblyFilesystemId,
     pub kind: AssemblyFilesystemKindSpec,
@@ -95,6 +97,9 @@ pub struct AssemblyFilesystemSpec {
     /// Only with `size = "auto"`: free space to leave beyond the content, a
     /// byte size; `None` leaves only the automatic margin.
     pub free: Option<String>,
+    /// `squashfs` and `erofs` only: compression, block size and the erofs
+    /// layout options.
+    pub compressed: AssemblyCompressedFsSpec,
 }
 
 impl AssemblyFilesystemSpec {
@@ -136,6 +141,10 @@ pub enum AssemblyFilesystemKindSpec {
     CpioXz,
     /// An ext4 image of the tree, built with `mkfs.ext4 -d`.
     Ext4,
+    /// A read-only squashfs image of the tree, built with `mksquashfs`.
+    Squashfs,
+    /// A read-only EROFS image of the tree, built with `mkfs.erofs`.
+    Erofs,
 }
 
 impl AssemblyFilesystemKindSpec {
@@ -147,6 +156,8 @@ impl AssemblyFilesystemKindSpec {
             Self::CpioZstd => "cpio-zstd",
             Self::CpioXz => "cpio-xz",
             Self::Ext4 => "ext4",
+            Self::Squashfs => "squashfs",
+            Self::Erofs => "erofs",
         }
     }
 }

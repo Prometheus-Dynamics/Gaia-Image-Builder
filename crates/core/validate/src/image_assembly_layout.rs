@@ -19,7 +19,8 @@ pub(crate) fn validate_disk_layout(
     diagnostics: &mut Vec<ValidationDiagnostic>,
 ) {
     let location = || Some("image.assembly.disks.partitions".into());
-    let extended = disk.partitions.len() > 4;
+    let extended = disk.partition_table == gaia_spec::AssemblyPartitionTableSpec::Mbr
+        && disk.partitions.len() > 4;
     for (index, partition) in disk.partitions.iter().enumerate() {
         match partition.parsed_size() {
             Ok(Some(size)) if size.bytes() == 0 => diagnostics.push(error(

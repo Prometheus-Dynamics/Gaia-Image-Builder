@@ -341,6 +341,7 @@ fn assembly_disk_helpers_parse_types_aliases_and_signatures() {
         size: None,
         wipe: false,
         materialize: true,
+        gpt: Default::default(),
     };
     let alias = gaia_spec::AssemblyDiskPartitionSpec {
         name: "alias".into(),
@@ -351,6 +352,7 @@ fn assembly_disk_helpers_parse_types_aliases_and_signatures() {
         size: None,
         wipe: false,
         materialize: true,
+        gpt: Default::default(),
     };
     let linux = gaia_spec::AssemblyDiskPartitionSpec {
         name: "linux".into(),
@@ -361,6 +363,7 @@ fn assembly_disk_helpers_parse_types_aliases_and_signatures() {
         size: None,
         wipe: false,
         materialize: true,
+        gpt: Default::default(),
     };
     let disk = gaia_spec::AssemblyDiskSpec {
         id: "sdcard".into(),
@@ -373,6 +376,7 @@ fn assembly_disk_helpers_parse_types_aliases_and_signatures() {
         truncate: None,
         ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
         partitions: Vec::new(),
+        gpt: Default::default(),
     };
 
     assert_eq!(partition_type_byte(&raw).expect("raw type"), 0x0c);
@@ -493,6 +497,7 @@ fn boot_assembly(
             label: None,
             uuid: None,
             journal: None,
+            compressed: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     }
@@ -633,7 +638,11 @@ mod tests_file_libs;
 mod tests_filesystem;
 #[path = "tests_generated.rs"]
 mod tests_generated;
+#[path = "tests_gpt.rs"]
+mod tests_gpt;
 
+#[path = "tests_compressed_fs.rs"]
+mod tests_compressed_fs;
 #[path = "tests_cpio_xz.rs"]
 mod tests_cpio_xz;
 #[path = "tests_entries.rs"]

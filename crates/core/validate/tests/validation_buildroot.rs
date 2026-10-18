@@ -277,7 +277,7 @@ image = "missing.img"
         "assembly_transform_src_required",
         "assembly_path_template_invalid",
         "assembly_filesystem_tree_unknown",
-        "assembly_disk_partition_table_unsupported",
+        "assembly_disk_option_unsupported",
         "assembly_disk_signature_raw_invalid",
         "assembly_partition_type_invalid",
         "assembly_partition_image_unknown",

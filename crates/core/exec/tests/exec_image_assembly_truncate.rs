@@ -40,6 +40,7 @@ fn partition(
         size: size.map(Into::into),
         wipe,
         materialize,
+        gpt: Default::default(),
     }
 }
 
@@ -60,6 +61,7 @@ fn mbr_disk(
         truncate,
         ebr_placement,
         partitions,
+        gpt: Default::default(),
     }
 }
 

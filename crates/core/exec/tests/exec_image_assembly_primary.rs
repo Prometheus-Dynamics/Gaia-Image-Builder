@@ -48,7 +48,9 @@ fn single_disk_spec(
                 size: None,
                 wipe: false,
                 materialize: true,
+                gpt: Default::default(),
             }],
+            gpt: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     });

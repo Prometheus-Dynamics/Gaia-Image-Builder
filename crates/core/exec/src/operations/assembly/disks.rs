@@ -4,6 +4,8 @@ pub(super) struct AssemblyDiskSummary {
     pub(super) output: PathBuf,
     pub(super) bytes: u64,
     pub(super) sha256: String,
+    /// GPT only: the disk GUID.
+    pub(super) disk_guid: Option<gaia_spec::GptGuid>,
     pub(super) partitions: Vec<AssemblyDiskPartitionSummary>,
 }
 
@@ -15,7 +17,10 @@ pub(super) struct AssemblyDiskPartitionSummary {
     pub(super) number: u32,
     /// `None` for an empty partition.
     pub(super) image: Option<PathBuf>,
+    /// The MBR type byte; 0 on a GPT disk, which uses `gpt`.
     pub(super) partition_type: u8,
+    /// GPT only: the type and partition GUIDs.
+    pub(super) gpt: Option<GptPartitionIds>,
     pub(super) bootable: bool,
     pub(super) start_lba: u32,
     pub(super) sector_count: u32,
@@ -32,13 +37,10 @@ pub(super) fn execute_assembly_disk(
     roots: &AssemblyRoots,
     disk: &gaia_spec::AssemblyDiskSpec,
 ) -> Result<AssemblyDiskSummary, String> {
-    if disk.partition_table != gaia_spec::AssemblyPartitionTableSpec::Mbr {
-        return Err(format!(
-            "assembly disk '{}' partition table '{}' is not implemented",
-            disk.id,
-            disk.partition_table.as_str()
-        ));
-    }
+    let disk_guid = match disk.partition_table {
+        gaia_spec::AssemblyPartitionTableSpec::Mbr => None,
+        gaia_spec::AssemblyPartitionTableSpec::Gpt => Some(gpt_disk_guid(disk)?),
+    };
     let output = roots.resolve_path(spec, &disk.output)?;
     if let Some(parent) = output.parent() {
         std_fs::create_dir_all(parent).map_err(|error| {
@@ -48,30 +50,39 @@ pub(super) fn execute_assembly_disk(
             )
         })?;
     }
-    let partitions = plan_mbr_partitions(spec, roots, disk)?;
+    let partitions = plan_disk_partitions(spec, roots, disk, disk_guid)?;
     let temp = temporary_assembly_output_path(&output);
-    write_mbr_disk(&temp, disk, &partitions)?;
+    write_disk(&temp, disk, disk_guid, &partitions)?;
     let sha256 = publish_assembly_output(&temp, &output)?;
     Ok(AssemblyDiskSummary {
         bytes: file_len(&output)?,
         sha256,
         output,
+        disk_guid,
         partitions,
     })
 }
 
-/// Lays partitions out in order. With more than 4 partitions the first 3
-/// stay primary and the rest become logical partitions, each preceded by an
-/// EBR at the start of its aligned slot with the data at the next boundary.
-fn plan_mbr_partitions(
+/// Lays partitions out in order. On an MBR disk with more than 4 partitions
+/// the first 3 stay primary and the rest become logical partitions, each
+/// preceded by an EBR at the start of its aligned slot with the data at the
+/// next boundary. A GPT disk (`disk_guid` set) has only primaries.
+fn plan_disk_partitions(
     spec: &ResolvedBuildSpec,
     roots: &AssemblyRoots,
     disk: &gaia_spec::AssemblyDiskSpec,
+    disk_guid: Option<gaia_spec::GptGuid>,
 ) -> Result<Vec<AssemblyDiskPartitionSummary>, String> {
-    let extended = disk.partitions.len() > MBR_PRIMARY_SLOTS;
+    let extended = disk_guid.is_none() && disk.partitions.len() > MBR_PRIMARY_SLOTS;
     let mut planned = Vec::new();
     let alignment_lba = disk.alignment_lba.unwrap_or(2048).max(1);
     let mut next_lba = disk.first_lba.unwrap_or(2048);
+    if disk_guid.is_some() && next_lba < GPT_MIN_FIRST_LBA {
+        return Err(format!(
+            "assembly disk '{}' first_lba {next_lba} overlaps the GPT header and entries; it must be at least {GPT_MIN_FIRST_LBA}",
+            disk.id
+        ));
+    }
     let packed = extended && disk.ebr_placement == gaia_spec::AssemblyEbrPlacementSpec::Packed;
     // Packed: the EBR chain takes the first sectors of the extended
     // partition, one per logical partition; data starts after it.
@@ -142,7 +153,13 @@ fn plan_mbr_partitions(
             name: partition.name.clone(),
             number: if logical { index + 2 } else { index + 1 } as u32,
             image,
-            partition_type: partition_type_byte(partition)?,
+            partition_type: match disk_guid {
+                Some(_) => 0,
+                None => partition_type_byte(partition)?,
+            },
+            gpt: disk_guid
+                .map(|disk_guid| gpt_partition_ids(disk, disk_guid, partition))
+                .transpose()?,
             bootable: partition.bootable,
             start_lba: start_lba as u32,
             sector_count: sector_count as u32,
@@ -191,16 +208,27 @@ fn partition_sector_count(
     }
 }
 
-fn write_mbr_disk(
+fn write_disk(
     output: &Path,
     disk: &gaia_spec::AssemblyDiskSpec,
+    disk_guid: Option<gaia_spec::GptGuid>,
     partitions: &[AssemblyDiskPartitionSummary],
 ) -> Result<(), String> {
-    let total_sectors = partitions
+    let last_end = partitions
         .iter()
         .map(|partition| partition.start_lba as u64 + partition.sector_count as u64)
         .max()
         .unwrap_or(2048);
+    let total_sectors = match disk_guid {
+        Some(_) => gpt_total_sectors(last_end, disk.alignment_lba.unwrap_or(2048).max(1)),
+        None => last_end,
+    };
+    if disk_guid.is_some() && disk.truncate.is_some() {
+        return Err(format!(
+            "assembly disk '{}' cannot truncate a GPT disk: its backup header is at the end",
+            disk.id
+        ));
+    }
     let total_bytes = total_sectors
         .checked_mul(512)
         .ok_or_else(|| format!("assembly disk '{}' is too large", disk.id))?;
@@ -264,7 +292,16 @@ fn write_mbr_disk(
         })?;
     }
 
-    write_mbr_tables(&mut output_file, output, disk, partitions)
+    match disk_guid {
+        Some(disk_guid) => write_gpt_tables(
+            &mut output_file,
+            output,
+            disk_guid,
+            total_sectors,
+            partitions,
+        ),
+        None => write_mbr_tables(&mut output_file, output, disk, partitions),
+    }
 }
 
 /// Length of a `truncate = "last-data"` disk: the end of the partition table
@@ -330,6 +367,9 @@ pub(super) fn record_disk_state(
     );
     state.insert(disk_state.field("bytes"), summary.bytes);
     state.insert(disk_state.field("sha256"), &summary.sha256);
+    if let Some(disk_guid) = summary.disk_guid {
+        state.insert(disk_state.field("disk_guid"), disk_guid.to_string());
+    }
     state.insert(
         disk_state.field("partition_count"),
         summary.partitions.len(),
@@ -337,7 +377,13 @@ pub(super) fn record_disk_state(
     for (partition_index, partition) in summary.partitions.iter().enumerate() {
         let field = |name: &str| disk_state.child_field("partition", partition_index + 1, name);
         state.insert(field("name"), &partition.name);
-        state.insert(field("type"), format!("0x{:02X}", partition.partition_type));
+        match partition.gpt {
+            Some(ids) => {
+                state.insert(field("type"), ids.type_guid.to_string());
+                state.insert(field("guid"), ids.guid.to_string());
+            }
+            None => state.insert(field("type"), format!("0x{:02X}", partition.partition_type)),
+        }
         match &partition.image {
             Some(image) => state.insert(field("image"), image.display().to_string()),
             None => state.insert(field("empty"), true),
@@ -345,7 +391,7 @@ pub(super) fn record_disk_state(
         state.insert(field("start_lba"), partition.start_lba);
         state.insert(field("sector_count"), partition.sector_count);
         state.insert(field("bytes"), partition.bytes);
-        if summary.partitions.len() > MBR_PRIMARY_SLOTS {
+        if summary.disk_guid.is_none() && summary.partitions.len() > MBR_PRIMARY_SLOTS {
             state.insert(field("number"), partition.number);
         }
         if let Some(ebr_lba) = partition.ebr_lba {

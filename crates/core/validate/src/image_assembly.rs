@@ -319,6 +319,8 @@ pub(crate) fn validate_image_assembly(
             | gaia_spec::AssemblyFilesystemKindSpec::CpioZstd
             | gaia_spec::AssemblyFilesystemKindSpec::CpioXz
             | gaia_spec::AssemblyFilesystemKindSpec::Ext4
+            | gaia_spec::AssemblyFilesystemKindSpec::Squashfs
+            | gaia_spec::AssemblyFilesystemKindSpec::Erofs
                 if !filesystem.deterministic =>
             {
                 diagnostics.push(error(
@@ -349,17 +351,7 @@ pub(crate) fn validate_image_assembly(
                 Some("image.assembly.disks".into()),
             ));
         }
-        if disk.partition_table != gaia_spec::AssemblyPartitionTableSpec::Mbr {
-            diagnostics.push(error(
-                "assembly_disk_partition_table_unsupported",
-                format!(
-                    "assembly disk '{}' uses unsupported partition table '{}'",
-                    disk.id,
-                    disk.partition_table.as_str()
-                ),
-                Some("image.assembly.disks".into()),
-            ));
-        }
+        crate::image_assembly_gpt::validate_disk_partition_table(disk, diagnostics);
         if disk.truncate.is_some()
             && disk.partition_table != gaia_spec::AssemblyPartitionTableSpec::Mbr
         {
@@ -413,7 +405,9 @@ pub(crate) fn validate_image_assembly(
                     Some("image.assembly.disks.partitions".into()),
                 ));
             }
-            if partition.kind.is_some() || partition.type_alias.is_some() {
+            if disk.partition_table == gaia_spec::AssemblyPartitionTableSpec::Mbr
+                && (partition.kind.is_some() || partition.type_alias.is_some())
+            {
                 match partition.partition_type() {
                     Ok(_) => {}
                     Err(gaia_spec::MbrPartitionTypeParseError::InvalidRaw(raw)) => {
@@ -489,6 +483,7 @@ pub(crate) fn validate_image_assembly(
         diagnostics,
     );
     crate::image_assembly_options::validate_filesystem_options(assembly, diagnostics);
+    crate::image_assembly_compressed::validate_compressed_filesystems(assembly, diagnostics);
     crate::image_assembly_options::validate_verity_token_targets(assembly, diagnostics);
     crate::image_assembly_outputs::validate_filesystem_outputs(spec, assembly, diagnostics);
     crate::image_assembly_outputs::validate_kernel_modules(spec, assembly, &tree_ids, diagnostics);

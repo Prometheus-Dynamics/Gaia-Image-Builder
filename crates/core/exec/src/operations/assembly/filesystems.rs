@@ -197,6 +197,15 @@ pub(super) fn execute_assembly_filesystem(
         gaia_spec::AssemblyFilesystemKindSpec::Ext4 => {
             execute_ext4_filesystem(spec, roots, filesystem, source_tree, &output, cancel_check)
         }
+        gaia_spec::AssemblyFilesystemKindSpec::Squashfs
+        | gaia_spec::AssemblyFilesystemKindSpec::Erofs => execute_compressed_filesystem(
+            spec,
+            roots,
+            filesystem,
+            source_tree,
+            &output,
+            cancel_check,
+        ),
         gaia_spec::AssemblyFilesystemKindSpec::Vfat => {
             let mformat = resolve_assembly_tool(roots, "mformat")?;
             let mcopy = resolve_assembly_tool(roots, "mcopy")?;

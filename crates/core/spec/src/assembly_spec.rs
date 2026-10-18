@@ -126,7 +126,8 @@ pub struct AssemblyKernelModulesSpec {
     pub metadata: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+// Debug is in assembly_spec_debug: fingerprints hash it.
+#[derive(Clone, PartialEq, Eq)]
 pub struct AssemblyDiskSpec {
     pub id: String,
     pub output: AssemblyPathTemplate,
@@ -143,6 +144,8 @@ pub struct AssemblyDiskSpec {
     /// EBR right before its logical partition; `Packed` writes the whole
     /// chain in the first sectors of the extended partition.
     pub ebr_placement: AssemblyEbrPlacementSpec,
+    /// GPT only: the disk GUID.
+    pub gpt: crate::AssemblyGptDiskSpec,
     pub partitions: Vec<AssemblyDiskPartitionSpec>,
 }
 
@@ -189,7 +192,8 @@ impl AssemblyPartitionTableSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+// Debug is in assembly_spec_debug: fingerprints hash it.
+#[derive(Clone, PartialEq, Eq)]
 pub struct AssemblyDiskPartitionSpec {
     pub name: String,
     pub kind: Option<String>,
@@ -206,6 +210,8 @@ pub struct AssemblyDiskPartitionSpec {
     /// `false` keeps the partition in the table at its full size with
     /// nothing written: no image and no wipe. Requires `size`.
     pub materialize: bool,
+    /// GPT only: the partition GUID. The GPT partition name is `name`.
+    pub gpt: crate::AssemblyGptPartitionSpec,
 }
 
 impl AssemblyDiskPartitionSpec {

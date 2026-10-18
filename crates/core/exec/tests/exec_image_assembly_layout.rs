@@ -27,6 +27,7 @@ fn partition(
         size: size.map(str::to_string),
         wipe: false,
         materialize: true,
+        gpt: Default::default(),
     }
 }
 
@@ -42,6 +43,7 @@ fn disk(output: &Path, partitions: Vec<AssemblyDiskPartitionSpec>) -> AssemblyDi
         truncate: None,
         ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
         partitions,
+        gpt: Default::default(),
     }
 }
 

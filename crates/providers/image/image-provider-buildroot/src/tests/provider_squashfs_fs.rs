@@ -361,7 +361,9 @@ fn build_operation_reruns_when_assembly_provider_input_is_missing() {
                 size: None,
                 wipe: false,
                 materialize: true,
+                gpt: Default::default(),
             }],
+            gpt: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     });

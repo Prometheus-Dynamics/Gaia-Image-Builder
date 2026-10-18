@@ -1,7 +1,8 @@
 use super::*;
 use crate::raw_assembly::{RawAssemblyArchiveConfig, RawAssemblyJsonValue};
 use gaia_spec::{
-    AssemblyArchiveMemberSpec, AssemblyArchiveSpec, AssemblyBinarySpec, AssemblyJsonValue,
+    AssemblyArchiveMemberSpec, AssemblyArchiveSpec, AssemblyBinarySpec, AssemblyCompressedFsSpec,
+    AssemblyGptDiskSpec, AssemblyGptPartitionSpec, AssemblyJsonValue,
 };
 
 pub(crate) fn compile_image_feed(raw: &RawBuildConfig) -> ImageFeedSpec {
@@ -220,6 +221,14 @@ pub(crate) fn compile_image_assembly(
                 label: filesystem.label,
                 uuid: filesystem.uuid,
                 journal: filesystem.journal,
+                compressed: AssemblyCompressedFsSpec {
+                    compression: filesystem.compression,
+                    block_size: filesystem.block_size,
+                    pcluster_size: filesystem.pcluster_size,
+                    dedupe: filesystem.dedupe,
+                    fragments: filesystem.fragments,
+                    ztailpacking: filesystem.ztailpacking,
+                },
             })
             .collect(),
         disks: raw
@@ -252,8 +261,14 @@ pub(crate) fn compile_image_assembly(
                         size: partition.size,
                         wipe: partition.wipe,
                         materialize: partition.materialize.unwrap_or(true),
+                        gpt: AssemblyGptPartitionSpec {
+                            guid: partition.guid,
+                        },
                     })
                     .collect(),
+                gpt: AssemblyGptDiskSpec {
+                    disk_guid: disk.disk_guid,
+                },
             })
             .collect(),
         archives: raw
@@ -328,6 +343,8 @@ fn compile_assembly_filesystem_kind(raw: RawAssemblyFilesystemKind) -> AssemblyF
         RawAssemblyFilesystemKind::CpioZstd => AssemblyFilesystemKindSpec::CpioZstd,
         RawAssemblyFilesystemKind::CpioXz => AssemblyFilesystemKindSpec::CpioXz,
         RawAssemblyFilesystemKind::Ext4 => AssemblyFilesystemKindSpec::Ext4,
+        RawAssemblyFilesystemKind::Squashfs => AssemblyFilesystemKindSpec::Squashfs,
+        RawAssemblyFilesystemKind::Erofs => AssemblyFilesystemKindSpec::Erofs,
     }
 }
 
@@ -337,7 +354,9 @@ fn default_assembly_filesystem_deterministic(raw: RawAssemblyFilesystemKind) -> 
         | RawAssemblyFilesystemKind::CpioGzip
         | RawAssemblyFilesystemKind::CpioZstd
         | RawAssemblyFilesystemKind::CpioXz
-        | RawAssemblyFilesystemKind::Ext4 => true,
+        | RawAssemblyFilesystemKind::Ext4
+        | RawAssemblyFilesystemKind::Squashfs
+        | RawAssemblyFilesystemKind::Erofs => true,
         RawAssemblyFilesystemKind::Vfat => false,
     }
 }

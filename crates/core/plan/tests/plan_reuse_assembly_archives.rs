@@ -97,7 +97,9 @@ fn spec_with_archive(scratch: &TempDir, name: &str) -> (ResolvedBuildSpec, PathB
                 size: Some("2G".into()),
                 wipe: true,
                 materialize: true,
+                gpt: Default::default(),
             }],
+            gpt: Default::default(),
         }],
         archives: vec![AssemblyArchiveSpec {
             id: "update".into(),

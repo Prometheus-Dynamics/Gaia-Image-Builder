@@ -119,6 +119,7 @@ fn ext4_assembly(
             label: label.map(Into::into),
             uuid: uuid.map(Into::into),
             journal,
+            compressed: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     }

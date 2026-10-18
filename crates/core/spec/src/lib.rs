@@ -1,6 +1,8 @@
 mod artifact;
 mod assembly;
 mod assembly_archive_spec;
+mod assembly_compressed_fs_spec;
+mod assembly_gpt_spec;
 mod assembly_json;
 mod assembly_order;
 mod assembly_output_spec;
@@ -47,6 +49,14 @@ pub use assembly_archive_spec::{
     AssemblyDigestToken, AssemblySizeToken, AssemblyTreeDigestToken, AssemblyValueToken,
     AssemblyVerityField, AssemblyVerityToken, assembly_json_string_tokens, assembly_value_tokens,
     whole_tree_digest_token,
+};
+pub use assembly_compressed_fs_spec::{
+    AssemblyCompressedFsSpec, EROFS_BLOCK_SIZES, ErofsCompression, SQUASHFS_BLOCK_SIZES,
+    SquashfsCompression,
+};
+pub use assembly_gpt_spec::{
+    AssemblyGptDiskSpec, AssemblyGptPartitionSpec, GptGuid, GptGuidParseError, GptPartitionType,
+    GptPartitionTypeError,
 };
 pub use assembly_json::{AssemblyJsonValue, TreeDigestResolver, json_string};
 pub use assembly_order::{

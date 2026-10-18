@@ -48,6 +48,7 @@ fn ram_test_assembly(work_dir: &str) -> ImageAssemblySpec {
             size: size.map(str::to_string),
             wipe,
             materialize: true,
+            gpt: Default::default(),
         }
     };
     ImageAssemblySpec {
@@ -78,6 +79,7 @@ fn ram_test_assembly(work_dir: &str) -> ImageAssemblySpec {
             label: None,
             uuid: None,
             journal: None,
+            compressed: Default::default(),
         }],
         disks: vec![gaia_spec::AssemblyDiskSpec {
             id: "sdcard".into(),
@@ -94,6 +96,7 @@ fn ram_test_assembly(work_dir: &str) -> ImageAssemblySpec {
                 partition("copy", Some("$assembly.work/part-copy.bin"), None, false),
                 partition("spare", None, Some("1M"), true),
             ],
+            gpt: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     }

@@ -553,6 +553,7 @@ mod tests {
                 label: None,
                 uuid: None,
                 journal: None,
+                compressed: Default::default(),
             }],
             ..ImageAssemblySpec::default()
         };
@@ -598,6 +599,7 @@ mod tests {
             label: None,
             uuid: None,
             journal: None,
+            compressed: Default::default(),
         };
         assert_eq!(filesystem.publish_template(), None);
         filesystem.publish = true;

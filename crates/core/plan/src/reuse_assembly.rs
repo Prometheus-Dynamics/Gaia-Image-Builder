@@ -239,6 +239,18 @@ pub(crate) fn assembly_input_entries(spec: &ResolvedBuildSpec) -> Vec<(String, S
                 command_signature("debugfs", ["-V"]),
             ));
         }
+        if filesystem.kind == gaia_spec::AssemblyFilesystemKindSpec::Squashfs {
+            parts.push((
+                format!("tool mksquashfs (squashfs {})", filesystem.id),
+                command_signature("mksquashfs", ["-version"]),
+            ));
+        }
+        if filesystem.kind == gaia_spec::AssemblyFilesystemKindSpec::Erofs {
+            parts.push((
+                format!("tool mkfs.erofs (erofs {})", filesystem.id),
+                command_signature("mkfs.erofs", ["--version"]),
+            ));
+        }
     }
     for modules in &assembly.kernel_modules {
         let from = roots
@@ -448,6 +460,7 @@ mod tests {
                 label: None,
                 uuid: None,
                 journal: None,
+                compressed: Default::default(),
             }],
             ..ImageAssemblySpec::default()
         });

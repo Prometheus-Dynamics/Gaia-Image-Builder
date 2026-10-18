@@ -93,6 +93,7 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
             label: None,
             uuid: None,
             journal: None,
+            compressed: Default::default(),
         }],
         disks: vec![AssemblyDiskSpec {
             id: "sdcard".into(),
@@ -114,6 +115,7 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
                     size: None,
                     wipe: false,
                     materialize: true,
+                    gpt: Default::default(),
                 },
                 AssemblyDiskPartitionSpec {
                     name: "rootfs".into(),
@@ -124,8 +126,10 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
                     size: None,
                     wipe: false,
                     materialize: true,
+                    gpt: Default::default(),
                 },
             ],
+            gpt: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     });
@@ -227,6 +231,7 @@ fn archives_single_disk(scratch: &TempDir, archive_name: &str, decompressor: &st
                     size: None,
                     wipe: false,
                     materialize: true,
+                    gpt: Default::default(),
                 },
                 AssemblyDiskPartitionSpec {
                     name: "rootfs".into(),
@@ -237,8 +242,10 @@ fn archives_single_disk(scratch: &TempDir, archive_name: &str, decompressor: &st
                     size: None,
                     wipe: false,
                     materialize: true,
+                    gpt: Default::default(),
                 },
             ],
+            gpt: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     });
@@ -354,6 +361,7 @@ fn vfat_filesystem_honors_mformat_timeout() {
             label: None,
             uuid: None,
             journal: None,
+            compressed: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     });
@@ -416,6 +424,7 @@ fn executes_image_assembly_mbr_disk() {
                     size: None,
                     wipe: false,
                     materialize: true,
+                    gpt: Default::default(),
                 },
                 AssemblyDiskPartitionSpec {
                     name: "rootfs".into(),
@@ -432,8 +441,10 @@ fn executes_image_assembly_mbr_disk() {
                     size: None,
                     wipe: false,
                     materialize: true,
+                    gpt: Default::default(),
                 },
             ],
+            gpt: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     });
@@ -528,6 +539,7 @@ fn executes_image_assembly_mbr_disk_with_explicit_lba_layout() {
                     size: None,
                     wipe: false,
                     materialize: true,
+                    gpt: Default::default(),
                 },
                 AssemblyDiskPartitionSpec {
                     name: "rootfs".into(),
@@ -544,8 +556,10 @@ fn executes_image_assembly_mbr_disk_with_explicit_lba_layout() {
                     size: None,
                     wipe: false,
                     materialize: true,
+                    gpt: Default::default(),
                 },
             ],
+            gpt: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     });
@@ -620,8 +634,10 @@ fn image_assembly_mbr_rejects_bootable_logical_partition_before_writing_disk() {
                     size: None,
                     wipe: false,
                     materialize: true,
+                    gpt: Default::default(),
                 })
                 .collect(),
+            gpt: Default::default(),
         }],
         ..ImageAssemblySpec::default()
     });

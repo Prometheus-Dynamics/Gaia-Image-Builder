@@ -353,6 +353,7 @@ pub fn assembly_filesystem(
         label: None,
         uuid: None,
         journal: None,
+        compressed: Default::default(),
     }
 }
 

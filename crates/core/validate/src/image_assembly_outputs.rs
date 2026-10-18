@@ -28,7 +28,14 @@ pub(crate) fn validate_filesystem_outputs(
     diagnostics: &mut Vec<ValidationDiagnostic>,
 ) {
     for filesystem in &assembly.filesystems {
-        if let Some(level) = filesystem.compression_level {
+        // squashfs and erofs levels depend on the compressor; see
+        // image_assembly_compressed.
+        if let Some(level) = filesystem.compression_level
+            && !matches!(
+                filesystem.kind,
+                AssemblyFilesystemKindSpec::Squashfs | AssemblyFilesystemKindSpec::Erofs
+            )
+        {
             let range = match filesystem.kind {
                 AssemblyFilesystemKindSpec::CpioZstd => Some((1..=19, "1 and 19")),
                 AssemblyFilesystemKindSpec::CpioXz => Some((0..=9, "0 and 9")),

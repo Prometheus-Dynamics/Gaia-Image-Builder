@@ -21,7 +21,7 @@ const HASH_BLOCK: usize = 4096;
 /// e.g. a Buildroot `host/sbin/veritysetup`), else one on PATH. The tests
 /// skip only when there is none, so argument mistakes are caught wherever a
 /// binary exists.
-fn real_veritysetup() -> Option<std::path::PathBuf> {
+pub(super) fn real_veritysetup() -> Option<std::path::PathBuf> {
     let candidate = std::env::var_os("GAIA_TEST_VERITYSETUP")
         .map(std::path::PathBuf::from)
         .or_else(|| {
@@ -44,7 +44,7 @@ fn real_veritysetup() -> Option<std::path::PathBuf> {
 
 /// Puts `veritysetup` where the assembly finds a Buildroot provider's host
 /// tools (`<build>/image/buildroot-output/host/sbin`), as a real build does.
-fn provide_veritysetup(root: &Path, binary: &Path) {
+pub(super) fn provide_veritysetup(root: &Path, binary: &Path) {
     let sbin = root.join("build/image/buildroot-output/host/sbin");
     fs::create_dir_all(&sbin).expect("provider host sbin");
     #[cfg(unix)]

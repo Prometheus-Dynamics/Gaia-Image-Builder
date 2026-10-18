@@ -135,9 +135,23 @@ pub struct RawAssemblyFilesystemConfig {
     pub output: String,
     pub size: Option<String>,
     pub deterministic: Option<bool>,
-    /// zstd level for `cpio-zstd` (defaults to 19), or xz level for `cpio-xz`
-    /// (0-9, defaults to xz's own).
+    /// zstd level for `cpio-zstd` (defaults to 19), xz level for `cpio-xz`
+    /// (0-9, defaults to xz's own), or the level of a `squashfs` or `erofs`
+    /// compressor that takes one.
     pub compression_level: Option<u32>,
+    /// `squashfs` (gzip, xz, zstd, lz4; default gzip) or `erofs` (none, lz4,
+    /// lz4hc, lzma, deflate; default lz4hc) only: the compressor.
+    pub compression: Option<String>,
+    /// `squashfs` and `erofs` only: block size in bytes.
+    pub block_size: Option<u32>,
+    /// `erofs` only: the largest physical cluster in bytes.
+    pub pcluster_size: Option<u32>,
+    /// `erofs` only: deduplicate compressed data.
+    pub dedupe: bool,
+    /// `erofs` only: pack file tails into shared fragments.
+    pub fragments: bool,
+    /// `erofs` only: inline compressed tails in their inodes.
+    pub ztailpacking: bool,
     /// Copy the image to the image output dir under its file name.
     pub publish: bool,
     /// `ext4` only: the volume label, at most 16 bytes.
@@ -161,6 +175,12 @@ impl Default for RawAssemblyFilesystemConfig {
             size: None,
             deterministic: None,
             compression_level: None,
+            compression: None,
+            block_size: None,
+            pcluster_size: None,
+            dedupe: false,
+            fragments: false,
+            ztailpacking: false,
             publish: false,
             label: None,
             uuid: None,
@@ -179,6 +199,8 @@ pub enum RawAssemblyFilesystemKind {
     CpioZstd,
     CpioXz,
     Ext4,
+    Squashfs,
+    Erofs,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -193,6 +215,8 @@ pub struct RawAssemblyDiskConfig {
     pub alignment_lba: Option<u64>,
     pub truncate: Option<RawAssemblyDiskTruncate>,
     pub ebr_placement: Option<RawAssemblyEbrPlacement>,
+    /// GPT only: the disk GUID; unset derives it from the id.
+    pub disk_guid: Option<String>,
     pub partitions: Vec<RawAssemblyDiskPartitionConfig>,
 }
 
@@ -208,6 +232,7 @@ impl Default for RawAssemblyDiskConfig {
             alignment_lba: None,
             truncate: None,
             ebr_placement: None,
+            disk_guid: None,
             partitions: Vec::new(),
         }
     }
@@ -246,6 +271,9 @@ pub struct RawAssemblyDiskPartitionConfig {
     pub wipe: bool,
     /// Defaults to true; `false` leaves the partition unwritten.
     pub materialize: Option<bool>,
+    /// GPT only: the partition GUID; unset derives it from the disk GUID
+    /// and the name.
+    pub guid: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
