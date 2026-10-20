@@ -425,13 +425,19 @@ pub(crate) fn build_with_shared_output(
     let target_dir = output_dir.join("target");
     if image_feed_has_content(image) {
         let signature = build_image_feed_signature(spec, image)?;
+        let ownership = plan_stage_ownership(spec, image)?;
+        if target_dir.is_dir() {
+            messages.extend(prune_stage_ownership(output_dir, &ownership, &target_dir)?);
+        }
         apply_image_feed_to_rootfs(spec, image, &target_dir)?;
         write_image_feed_managed_paths(output_dir, spec, image)?;
         write_image_feed_signature(output_dir, &signature)?;
+        record_stage_ownership(output_dir, &ownership, &target_dir)?;
         messages.push("applied image feed to the private Buildroot target".into());
     } else {
         remove_path_if_exists(&image_feed_signature_path(output_dir))?;
         remove_path_if_exists(&image_feed_managed_paths_path(output_dir))?;
+        messages.extend(clear_stage_ownership(output_dir, &target_dir)?);
     }
 
     let config = fs::read_to_string(shared.dir.join(".config")).unwrap_or_default();

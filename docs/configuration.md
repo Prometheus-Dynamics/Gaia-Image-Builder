@@ -1097,6 +1097,22 @@ run are deleted from `target/` before `make`. If Buildroot does not run the
 script, Gaia falls back to applying the feed after `make` and refreshing the
 images.
 
+Stage files mirror their sources. After each successful apply Gaia records,
+in `<output>/.gaia-image-feed-stage-owned.txt`, the paths each `[[stage.files]]`
+entry installed (files, symlinks and directories, with the size and
+modification time a file had after the copy). On the next apply, a path an
+entry owned and no longer produces is removed before the copy: a file whose
+size and modification time still match, a symlink with the same target, and
+a directory once it is empty. A file a package rewrote, a path that another
+entry or the feed now produces, and anything the stage did not record stay.
+A removed entry's paths are removed the same way. A moved path is kept, not
+removed.
+
+A tree built before this record existed has no record: its leftovers from
+earlier runs are not removed, and the build says so once ("no stage ownership
+record yet"). To remove them, clean that image's Buildroot output (or run a
+clean build) once.
+
 #### Shared Buildroot trees
 
 ```toml

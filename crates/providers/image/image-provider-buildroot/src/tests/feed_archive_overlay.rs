@@ -105,35 +105,6 @@ fn apply_image_feed_to_rootfs_writes_install_file_env_and_service_content() {
 }
 
 #[test]
-fn prunes_removed_stage_file_from_previous_runtime_state() {
-    let workspace_root_scratch = TempDir::new("gaia-buildroot-feed-prune-workspace");
-    let workspace_root = workspace_root_scratch.join("workspace_root");
-    let rootfs_dir_scratch = TempDir::new("gaia-buildroot-feed-prune-rootfs");
-    let rootfs_dir = rootfs_dir_scratch.join("rootfs_dir");
-    let output_dir_scratch = TempDir::new("gaia-buildroot-feed-prune-output");
-    let output_dir = output_dir_scratch.join("output_dir");
-    let runtime_dir = workspace_root.join("out/.gaia/runtime");
-    fs::create_dir_all(rootfs_dir.join("usr/local/bin")).expect("rootfs bin");
-    fs::create_dir_all(&runtime_dir).expect("runtime dir");
-    fs::write(rootfs_dir.join("usr/local/bin/old.sh"), "stale").expect("stale file");
-    fs::write(
-        runtime_dir.join("stage-file-old-script.state"),
-        "kind=stage-file\nitem_id=old-script\nsrc=assets/old.sh\ndest=/usr/local/bin/old.sh\norigin=static-asset\n",
-    )
-    .expect("runtime state");
-
-    let mut spec = ResolvedBuildSpec::new("buildroot-feed-prune-test");
-    spec.workspace.root_dir = workspace_root.display().to_string();
-    spec.workspace.out_dir = workspace_root.join("out").display().to_string();
-    let image = ImageSpec::new(ImageDefinition::Buildroot(BuildrootImageSpec::default()));
-
-    prune_stale_image_feed_outputs(&spec, &image, &rootfs_dir, &output_dir)
-        .expect("prune stale feed");
-
-    assert!(!rootfs_dir.join("usr/local/bin/old.sh").exists());
-}
-
-#[test]
 fn stale_image_feed_outputs_are_pruned_before_overlay() {
     let workspace_root_scratch = TempDir::new("gaia-buildroot-feed-prune-workspace");
     let workspace_root = workspace_root_scratch.join("workspace_root");
@@ -174,9 +145,10 @@ fn stale_image_feed_outputs_are_pruned_before_overlay() {
         fs::read_to_string(rootfs_dir.join("etc/new")).expect("new file"),
         "fresh"
     );
+    // Stage files are tracked by their ownership record, not this list.
     assert_eq!(
         fs::read_to_string(image_feed_managed_paths_path(&output_dir)).expect("managed paths"),
-        "gaia-image-feed-managed-paths-v1\n/etc/new\n"
+        "gaia-image-feed-managed-paths-v1\n"
     );
 }
 

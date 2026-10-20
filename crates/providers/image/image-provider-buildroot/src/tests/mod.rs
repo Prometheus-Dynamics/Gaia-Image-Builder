@@ -70,4 +70,5 @@ mod offline_prefetch;
 mod override_check;
 mod provider_squashfs_fs;
 mod single_pass_shared;
+mod stage_owned;
 mod step_times;

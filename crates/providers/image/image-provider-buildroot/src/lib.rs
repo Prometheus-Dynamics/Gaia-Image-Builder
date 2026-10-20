@@ -575,6 +575,10 @@ fn build_with_private_output(
     let clock = gaia_process::ActiveClock::start();
     let staged_feed = stage_image_feed_for_make(spec, image, output_dir)?;
     let staging_step = phase_step_message("image feed staging", &clock, &[]);
+    let staging_notes = staged_feed
+        .as_ref()
+        .map(|feed| feed.notes.clone())
+        .unwrap_or_default();
     let mut messages = run_buildroot_with(
         BuildrootRunRequest {
             spec,
@@ -591,6 +595,7 @@ fn build_with_private_output(
         },
     )?;
     messages.push(staging_step);
+    messages.extend(staging_notes);
     let Some(staged_feed) = staged_feed else {
         let clock = gaia_process::ActiveClock::start();
         remove_path_if_exists(&image_feed_signature_path(output_dir))?;
@@ -599,6 +604,7 @@ fn build_with_private_output(
             prune_stale_image_feed_outputs(spec, image, &target_dir, output_dir)?;
         }
         remove_path_if_exists(&image_feed_managed_paths_path(output_dir))?;
+        messages.extend(clear_stage_ownership(output_dir, &target_dir)?);
         messages.push(phase_step_message("image feed cleanup", &clock, &[]));
         return Ok(messages);
     };
@@ -636,6 +642,7 @@ fn build_with_private_output(
     let clock = gaia_process::ActiveClock::start();
     write_image_feed_managed_paths(output_dir, spec, image)?;
     write_image_feed_signature(output_dir, &staged_feed.signature)?;
+    record_stage_ownership(output_dir, &staged_feed.ownership, &target_dir)?;
     remove_path_if_exists(&staged_image_feed_dir(output_dir))?;
     messages.push(phase_step_message("image feed records", &clock, &[]));
     Ok(messages)
@@ -703,6 +710,7 @@ mod external_classify;
 mod external_inputs;
 mod feed;
 mod feed_make;
+mod feed_stage_owned;
 mod finalize_state;
 mod fs_util;
 mod host_tools;
@@ -760,6 +768,7 @@ pub(crate) use external_classify::*;
 pub(crate) use external_inputs::*;
 pub(crate) use feed::*;
 pub(crate) use feed_make::*;
+pub(crate) use feed_stage_owned::*;
 pub(crate) use finalize_state::*;
 pub(crate) use fs_util::*;
 pub(crate) use host_tools::*;

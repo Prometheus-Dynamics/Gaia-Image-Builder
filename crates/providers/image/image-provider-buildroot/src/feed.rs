@@ -614,13 +614,6 @@ fn stale_runtime_state_managed_paths(
         .iter()
         .map(|id| id.as_str())
         .collect::<BTreeSet<_>>();
-    let current_stage_file_ids = spec
-        .image
-        .feed
-        .stage_files
-        .iter()
-        .map(|id| id.as_str())
-        .collect::<BTreeSet<_>>();
     let current_stage_env_ids = spec
         .image
         .feed
@@ -665,14 +658,6 @@ fn stale_runtime_state_managed_paths(
             .strip_prefix("install-")
             .and_then(|name| name.strip_suffix(".state"))
             && !current_install_ids.contains(id)
-            && let Some(dest) = state.get("dest")
-        {
-            paths.insert(dest.clone());
-        }
-        if let Some(id) = file_name
-            .strip_prefix("stage-file-")
-            .and_then(|name| name.strip_suffix(".state"))
-            && !current_stage_file_ids.contains(id)
             && let Some(dest) = state.get("dest")
         {
             paths.insert(dest.clone());
@@ -728,7 +713,11 @@ pub(crate) fn write_image_feed_managed_paths(
     image: &ImageSpec,
 ) -> Result<(), ImageProviderError> {
     let mut body = String::from("gaia-image-feed-managed-paths-v1\n");
+    let stage_file_dests = image_feed_stage_file_dests(spec, image)?;
     for path in image_feed_managed_paths(spec, image)? {
+        if stage_file_dests.contains(&path) {
+            continue;
+        }
         body.push_str(&path);
         body.push('\n');
     }
@@ -770,7 +759,7 @@ fn read_image_feed_managed_paths(
         .collect())
 }
 
-fn image_feed_managed_paths(
+pub(crate) fn image_feed_managed_paths(
     spec: &ResolvedBuildSpec,
     image: &ImageSpec,
 ) -> Result<std::collections::BTreeSet<String>, ImageProviderError> {
@@ -849,6 +838,33 @@ fn image_feed_managed_paths(
     }
 
     Ok(paths)
+}
+
+/// The destinations of the feed's stage files. Their removal is decided by
+/// the stage ownership record (see `feed_stage_owned`), not by this list.
+fn image_feed_stage_file_dests(
+    spec: &ResolvedBuildSpec,
+    image: &ImageSpec,
+) -> Result<std::collections::BTreeSet<String>, ImageProviderError> {
+    let mut dests = std::collections::BTreeSet::new();
+    for stage_file_id in &image.feed.stage_files {
+        let stage_file = spec
+            .stage
+            .files
+            .iter()
+            .find(|file| file.id == *stage_file_id)
+            .ok_or_else(|| {
+                ImageProviderError::new(
+                    ImageProviderErrorKind::RuntimeState,
+                    format!(
+                        "image feed references unknown stage file '{}'",
+                        stage_file_id.as_str()
+                    ),
+                )
+            })?;
+        dests.insert(stage_file.dest.clone());
+    }
+    Ok(dests)
 }
 
 pub(crate) fn remove_path_if_exists(path: &Path) -> Result<(), ImageProviderError> {

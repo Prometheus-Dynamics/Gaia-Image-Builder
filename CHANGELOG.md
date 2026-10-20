@@ -6,6 +6,12 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Stage files mirror their sources
+
+- **A `[[stage.files]]` entry removes what its source no longer has.** A directory entry used to keep the files it installed earlier after they were removed from the source (HeliOS's `ui/mock` stayed in `target/` and shipped). Each successful apply now records what every entry installed in `<output>/.gaia-image-feed-stage-owned.txt`. The next apply removes the paths an entry owned and no longer produces, before it copies: a file whose size and modification time still match what the stage left, a symlink with the same target, and a directory once it is empty. A file a package rewrote, a path another entry or the feed now produces (a moved path), and anything the stage did not record are kept. A removed entry's paths go the same way; a single-file entry whose destination changed removes the old one.
+- **Upgrading needs one clean build per existing tree.** The first run after this change has no record, so leftovers from earlier runs cannot be told apart from current files: they are not removed, and the build says "no stage ownership record yet; leftovers from earlier runs are not removed". Clean that image's Buildroot output once (or run a clean build) to drop them. From the next run on, the managed-paths list no longer names stage files and the runtime state no longer removes them: the record decides. On that first run the previous managed-paths list still removes the destinations it names, as before, so a removed stage item's old destination can go then, even when a package changed it.
+- Docs: `docs/configuration.md` (stage files, the image feed).
+
 ### Offline builds and prefetch
 
 - **`gaia prefetch <build>` and `gaia run --prefetch`** download what a build needs and stop before anything is built. Every source is materialized; for Buildroot the tree is configured as a run configures it, then `make source` fills the download cache. The output names the new source files and the cache size. Prefetch does not yet fetch cargo git dependencies (`cargo_git_sources`): the first artifact build does that.

@@ -19,6 +19,10 @@ pub(crate) struct StagedImageFeed {
     marker: PathBuf,
     nonce: String,
     pub(crate) signature: String,
+    /// What the stage entries produce: recorded once the feed is applied.
+    pub(crate) ownership: StageOwnership,
+    /// What the pre-make prune did, for the build messages.
+    pub(crate) notes: Vec<String>,
 }
 
 impl StagedImageFeed {
@@ -47,8 +51,14 @@ pub(crate) fn stage_image_feed_for_make(
         return Ok(None);
     }
     let target_dir = output_dir.join("target");
+    let ownership = plan_stage_ownership(spec, image)?;
+    let mut notes = Vec::new();
     if target_dir.is_dir() {
         prune_stale_image_feed_outputs(spec, image, &target_dir, output_dir)?;
+        if !has_stage_ownership_record(output_dir) {
+            notes.push(NO_STAGE_OWNERSHIP_NOTE.to_string());
+        }
+        notes.extend(prune_stage_ownership(output_dir, &ownership, &target_dir)?);
     }
     let signature = build_image_feed_signature(spec, image)?;
     let rootfs_dir = staged_dir.join("rootfs");
@@ -108,6 +118,8 @@ pub(crate) fn stage_image_feed_for_make(
         marker,
         nonce,
         signature,
+        ownership,
+        notes,
     }))
 }
 
