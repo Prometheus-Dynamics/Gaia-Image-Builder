@@ -60,6 +60,7 @@ fn starting_point_tar_rootfs_accepts_image_feed_overlay() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
     spec.sources.push(SourceSpec::new(
         "base-rootfs",
@@ -189,6 +190,7 @@ fn starting_point_rejects_overlay_on_opaque_file_rootfs() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     let output = ImageOutputContract {

@@ -32,6 +32,7 @@ fn image() -> ImageSpec {
         signing: None,
         layers: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     }
 }
 

@@ -31,6 +31,7 @@ fn archive_buildroot_output_promotes_single_primary_image() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     let matched = vec!["rootfs.squashfs".to_string()];
@@ -83,6 +84,7 @@ fn collect_expected_images_and_archive_promote_raw_board_image() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     let matched = collect_expected_images(&image, &output_dir, &collect_dir)
@@ -149,6 +151,7 @@ fn archive_buildroot_output_compresses_raw_board_image_for_img_xz_output() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     let matched = collect_expected_images(&image, &output_dir, &collect_dir)
@@ -345,6 +348,7 @@ fn image_feed_has_content_is_false_for_bare_image() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     assert!(!image_feed_has_content(&image));
@@ -370,6 +374,7 @@ fn image_feed_has_content_is_true_when_stage_or_install_entries_exist() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     assert!(image_feed_has_content(&image));
@@ -414,6 +419,7 @@ fn archive_buildroot_output_archives_final_raw_image_into_compressed_tar() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     let matched = vec!["rootfs.squashfs".to_string(), "sdcard.img".to_string()];

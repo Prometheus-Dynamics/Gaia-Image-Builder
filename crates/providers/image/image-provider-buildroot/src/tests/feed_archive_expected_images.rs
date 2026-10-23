@@ -28,6 +28,7 @@ fn collect_expected_images_reports_missing_required_output() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     let error = collect_expected_images(&image, &output_dir, &collect_dir)
@@ -124,6 +125,7 @@ fn collect_expected_images_copies_board_style_raw_image() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     let matched =
@@ -166,6 +168,7 @@ fn collect_expected_images_copies_raw_board_image_into_collect_dir() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     let matched = collect_expected_images(&image, &output_dir, &collect_dir)
@@ -206,6 +209,7 @@ fn collect_expected_images_copies_required_cpio_image() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     let matched =
@@ -245,6 +249,7 @@ fn collect_expected_images_skips_missing_optional_cpio_image() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     let matched = collect_expected_images(&image, &output_dir, &collect_dir)
@@ -293,6 +298,7 @@ fn collect_expected_images_copies_ext2_and_ext3_images() {
             },
             assembly: None,
             checks: gaia_spec::ImageChecksSpec::default(),
+            hardware: Vec::new(),
         };
 
         let matched =
@@ -339,6 +345,7 @@ fn collect_expected_images_skips_missing_optional_ext2_and_ext3_images() {
             },
             assembly: None,
             checks: gaia_spec::ImageChecksSpec::default(),
+            hardware: Vec::new(),
         };
 
         let matched = collect_expected_images(&image, &output_dir, &collect_dir)
@@ -398,6 +405,7 @@ fn collect_expected_images_copies_flash_and_erofs_images() {
             },
             assembly: None,
             checks: gaia_spec::ImageChecksSpec::default(),
+            hardware: Vec::new(),
         };
 
         let matched =
@@ -446,6 +454,7 @@ fn collect_expected_images_skips_missing_optional_flash_and_erofs_images() {
             },
             assembly: None,
             checks: gaia_spec::ImageChecksSpec::default(),
+            hardware: Vec::new(),
         };
 
         let matched = collect_expected_images(&image, &output_dir, &collect_dir)
@@ -510,6 +519,7 @@ fn collect_expected_images_copies_lower_priority_images() {
             },
             assembly: None,
             checks: gaia_spec::ImageChecksSpec::default(),
+            hardware: Vec::new(),
         };
 
         let matched =
@@ -559,6 +569,7 @@ fn collect_expected_images_skips_missing_optional_lower_priority_images() {
             },
             assembly: None,
             checks: gaia_spec::ImageChecksSpec::default(),
+            hardware: Vec::new(),
         };
 
         let matched = collect_expected_images(&image, &output_dir, &collect_dir)

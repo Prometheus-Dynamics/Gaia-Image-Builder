@@ -78,6 +78,7 @@ all:\n\t@mkdir -p $(O)/images && touch $(O)/images/rootfs.img && echo images >> 
         output: ImageOutputSpec::default(),
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
     let execution = test_execution();
     let mut policy = ImageExecutionPolicy {

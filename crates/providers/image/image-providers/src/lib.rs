@@ -680,6 +680,7 @@ mod tests {
             signing: None,
             layers: None,
             checks: gaia_spec::ImageChecksSpec::default(),
+            hardware: Vec::new(),
         };
         let preview = DummyImageProvider.preview_image(
             &spec,

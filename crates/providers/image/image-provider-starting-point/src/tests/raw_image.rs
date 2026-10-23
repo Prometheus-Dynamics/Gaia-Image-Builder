@@ -61,6 +61,7 @@ fn starting_point_raw_image_rejects_read_only_overlay_before_root_check() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
     spec.artifacts.push(ArtifactSpec::new(
         "smoke-app",

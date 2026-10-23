@@ -30,6 +30,7 @@ fn run_buildroot_reports_make_failures() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     let execution = test_execution();
@@ -310,6 +311,7 @@ fn buildroot_parallel_packages_and_ccache_configure_and_report() {
         output: ImageOutputSpec::default(),
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
     let execution = test_execution();
     let policy = ImageExecutionPolicy {
@@ -488,6 +490,7 @@ fn buildroot_package_overrides_are_staged_as_external_tree() {
         output: ImageOutputSpec::default(),
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
     let execution = test_execution();
     let policy = ImageExecutionPolicy::default();
@@ -580,6 +583,7 @@ fn buildroot_package_overrides_replace_existing_source_packages() {
         output: ImageOutputSpec::default(),
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
     spec.policy.providers.buildroot.erofs_workers = gaia_spec::ErofsWorkersSpec::Off;
     let execution = test_execution();
@@ -662,6 +666,7 @@ fn buildroot_config_changes_clean_existing_output_before_make() {
         output: ImageOutputSpec::default(),
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
     let execution = test_execution();
     let policy = ImageExecutionPolicy::default();
@@ -724,6 +729,7 @@ fn buildroot_retry_after_failed_post_image_does_not_clean() {
         output: ImageOutputSpec::default(),
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
     let execution = test_execution();
     let policy = ImageExecutionPolicy::default();
@@ -816,6 +822,7 @@ fn buildroot_option_change_rebuilds_only_the_package_and_its_dependents() {
         output: ImageOutputSpec::default(),
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
     let execution = test_execution();
     let policy = ImageExecutionPolicy::default();
@@ -900,6 +907,7 @@ fn buildroot_package_override_missing_config_in_fails_before_make() {
         output: ImageOutputSpec::default(),
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
     let execution = test_execution();
     let policy = ImageExecutionPolicy::default();
@@ -962,6 +970,7 @@ fn buildroot_package_override_detects_generated_external_name_conflict() {
         output: ImageOutputSpec::default(),
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
     let execution = test_execution();
     let policy = ImageExecutionPolicy::default();
@@ -1005,6 +1014,7 @@ fn buildroot_state_digest_ignores_unrelated_build_tree_files() {
         output: ImageOutputSpec::default(),
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
     let before = buildroot_state_digest(&image, &output_dir);
 
@@ -1108,6 +1118,7 @@ fn refresh_buildroot_images_after_feed_overlay_runs_target_post_image_for_non_ta
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     let messages = refresh_buildroot_images_after_feed_overlay(
@@ -1168,6 +1179,7 @@ fn refresh_buildroot_images_after_feed_overlay_disables_legacy_before_target_pos
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     refresh_buildroot_images_after_feed_overlay(
@@ -1223,6 +1235,7 @@ fn refresh_buildroot_images_after_feed_overlay_absolutizes_external_tree() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     refresh_buildroot_images_after_feed_overlay(
@@ -1598,6 +1611,7 @@ fn refresh_buildroot_images_after_feed_overlay_skips_tar_only_outputs() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     let messages = refresh_buildroot_images_after_feed_overlay(
@@ -1648,6 +1662,7 @@ fn refresh_buildroot_images_after_feed_overlay_reports_target_post_image_failure
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     let error = refresh_buildroot_images_after_feed_overlay(

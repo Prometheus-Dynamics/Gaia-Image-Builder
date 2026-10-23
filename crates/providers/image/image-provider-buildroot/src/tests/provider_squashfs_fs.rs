@@ -67,6 +67,7 @@ fn execute_image_refuses_implicit_buildroot_fallback() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     let error = BuildrootImageProvider
@@ -140,6 +141,7 @@ fn prepare_operation_reruns_even_when_expected_buildroot_images_exist() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     let result = BuildrootImageProvider
@@ -222,6 +224,7 @@ fn build_operation_applies_config_overrides_when_expected_images_exist() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     let result = BuildrootImageProvider
@@ -296,6 +299,7 @@ fn prepare_operation_does_not_reuse_partial_target_tree() {
         },
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
 
     BuildrootImageProvider

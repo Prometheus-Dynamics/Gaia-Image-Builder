@@ -11,6 +11,7 @@ fn buildroot_spec(workers: ErofsWorkersSpec) -> ResolvedBuildSpec {
         signing: None,
         layers: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     };
     spec.policy.providers.buildroot.erofs_workers = workers;
     spec

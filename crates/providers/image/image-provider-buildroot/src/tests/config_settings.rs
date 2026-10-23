@@ -23,6 +23,7 @@ fn image(overrides: Vec<(String, String)>, fragments: Vec<String>) -> ImageSpec 
         output: ImageOutputSpec::default(),
         assembly: None,
         checks: gaia_spec::ImageChecksSpec::default(),
+        hardware: Vec::new(),
     }
 }
 
