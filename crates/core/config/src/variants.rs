@@ -303,7 +303,12 @@ fn output_paths(spec: &ResolvedBuildSpec) -> Vec<String> {
                 .iter()
                 .map(|archive| archive.output.as_str().to_string()),
         );
-        outputs.extend(assembly.ocis.iter().map(|oci| oci.dest.as_str().to_string()));
+        outputs.extend(
+            assembly
+                .ocis
+                .iter()
+                .map(|oci| oci.dest.as_str().to_string()),
+        );
         outputs.extend(
             assembly
                 .filesystems
