@@ -94,6 +94,10 @@ fn layers_spec() -> ImageLayersSpec {
         overrides: Vec::new(),
         erofs: false,
         verity: false,
+        erofs_options: gaia_spec::DEFAULT_LAYER_EROFS_OPTIONS
+            .iter()
+            .map(|option| option.to_string())
+            .collect(),
         layers: vec![ImageLayerSpec {
             name: "app".into(),
             packages: Vec::new(),
@@ -101,6 +105,7 @@ fn layers_spec() -> ImageLayersSpec {
             installs: Vec::new(),
             stage: Vec::new(),
             services: Vec::new(),
+            erofs_options: None,
         }],
     }
 }

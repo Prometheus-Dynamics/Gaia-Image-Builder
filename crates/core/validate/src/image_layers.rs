@@ -24,6 +24,27 @@ pub(super) fn validate_image_layers(
             location.clone(),
         ));
     }
+    let option_sets = std::iter::once(("image.layers".to_string(), &layers.erofs_options)).chain(
+        layers.layers.iter().filter_map(|layer| {
+            layer
+                .erofs_options
+                .as_ref()
+                .map(|options| (format!("image.layers.{}", layer.name), options))
+        }),
+    );
+    for (path, options) in option_sets {
+        for option in options {
+            if gaia_owned_erofs_option(option) {
+                diagnostics.push(error(
+                    "image_layers_erofs_option_reserved",
+                    format!(
+                        "{path} erofs_options sets '{option}', which Gaia sets itself (the tar input, owners, times, xattrs and UUID)"
+                    ),
+                    Some(path.clone()),
+                ));
+            }
+        }
+    }
     if layers.order.is_empty() {
         diagnostics.push(error(
             "image_layers_order_missing",
@@ -141,4 +162,24 @@ pub(super) fn validate_image_layers(
 fn is_buildroot_package_glob(name: &str) -> bool {
     let plain: String = name.chars().filter(|c| *c != '*').collect();
     plain.is_empty() || is_buildroot_package_name(&plain) || plain.ends_with('-')
+}
+
+/// `mkfs.erofs` options Gaia passes itself for a layer: its input, owners,
+/// timestamps, xattrs and UUID, which keep the image reproducible.
+fn gaia_owned_erofs_option(option: &str) -> bool {
+    [
+        "--tar",
+        "--all-root",
+        "-T",
+        "-U",
+        "-x",
+        "--uuid",
+        "--ignore-mtime",
+    ]
+    .iter()
+    .any(|owned| {
+        option == *owned
+            || option.starts_with(&format!("{owned}="))
+            || (owned.len() == 2 && option.starts_with(owned))
+    })
 }

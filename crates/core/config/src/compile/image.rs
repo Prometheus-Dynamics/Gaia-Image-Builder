@@ -150,6 +150,12 @@ pub(crate) fn compile_image_layers(raw: RawImageLayersConfig) -> gaia_spec::Imag
         overrides: raw.overrides,
         erofs: raw.erofs.unwrap_or(true),
         verity: raw.verity.unwrap_or(false),
+        erofs_options: raw.erofs_options.unwrap_or_else(|| {
+            gaia_spec::DEFAULT_LAYER_EROFS_OPTIONS
+                .iter()
+                .map(|option| option.to_string())
+                .collect()
+        }),
         layers: raw
             .layers
             .into_iter()
@@ -160,6 +166,7 @@ pub(crate) fn compile_image_layers(raw: RawImageLayersConfig) -> gaia_spec::Imag
                 installs: layer.installs,
                 stage: layer.stage,
                 services: layer.services,
+                erofs_options: layer.erofs_options,
             })
             .collect(),
     }

@@ -2300,6 +2300,19 @@ services = ["helios-*"]     # stage service ids: the unit file
 
 - **Membership.** Each rootfs path goes to the layer of its highest-ranked selector that matches: `paths` first, then `stage`, `installs` and `services`, then `packages` (from `build/packages-file-list.txt`), then `default`. Ids and package names are globbed with `*`. Two layers with selectors of the same rank that claim one non-directory path are an error, unless the path is listed in `overrides`, where the upper layer's copy ships. Directories may repeat: a layer carries the directories above its members so it extracts on its own.
 - **Contents.** Each layer tar keeps every entry's owner, mode and link. Its entries are in path order and carry a fixed mtime (`SOURCE_DATE_EPOCH`, or 0), so the same rootfs gives the same bytes. A hardlink whose target is in another layer becomes a copy of the target's data.
+- **erofs options.** `erofs_options` on `[image.layers]` sets the `mkfs.erofs` options of every layer, and on `[image.layers.<name>]` replaces them for that layer. The default is `["-zlzma,level=6", "-C262144", "-Eall-fragments,dedupe,ztailpacking"]`. Example, large clusters for the layers that rarely change and smaller ones for the app layer, which is read fresh after every update:
+
+  ```toml
+  [image.layers]
+  order = ["base", "platform", "app"]
+  erofs_options = ["-zlzma,level=6", "-C1048576", "-Eall-fragments,dedupe,ztailpacking"]
+
+  [image.layers.app]
+  installs = ["helios-*"]
+  erofs_options = ["-zlzma,level=6", "-C262144", "-Eall-fragments,dedupe,ztailpacking"]
+  ```
+
+  The options are part of each layer's fingerprint. Gaia sets the input, owners, times, xattrs and UUID itself, so `--tar`, `--all-root`, `-T`, `-U`, `-x`, `--uuid` and `--ignore-mtime` are rejected. Each layer's erofs is made from its tar unpacked under `fakeroot` (owners, modes and device nodes kept), not with `mkfs.erofs --tar`: with `-Eall-fragments`, erofs-utils 1.8.10 writes `--tar` images whose file data is lost while `fsck.erofs` still passes.
 - **Outputs.** In the image's collect dir: `layers/<name>.tar`, `layers/<name>.erofs` (unless `erofs = false`; needs `mkfs.erofs`), and `layers/layers.json`. Each layer's record has `name`, `id` (the sha256 of the erofs file as shipped; the board stores layers by it, and it is null without erofs), `tar`, `tar_sha256` (the OCI diff id), `tar_size`, `erofs`, `erofs_sha256`, `erofs_size`, `size` and `sha256` (the same two values under the names Atlas's layered slot reads), `verity` and `inputs` (the layer's fingerprint). With `verity = true` the verity record has `root_hash`, `salt`, `hash_offset`, `data_blocks`, `data_block_size` and `hash_block_size`, named as the verity transform names them for `slot.json`.
 - **Reuse.** A layer's fingerprint covers its members (path, kind, mode, owner, size and content digest or link target) and the output settings. A layer whose fingerprint and outputs are unchanged is reused without writing its tar, erofs or verity. The summary says `reused` or `rebuilt` for each layer.
 - **Checks.** Selector ids that name nothing in the build are errors (globs may match nothing), and so are a `default` or a layer table that is not in `order`, a relative path, and `verity` without `erofs`.

@@ -59,6 +59,9 @@ pub struct ImageLayersSpec {
     pub erofs: bool,
     /// Whether each erofs image gets a dm-verity tree (needs `erofs`).
     pub verity: bool,
+    /// The `mkfs.erofs` options of every layer's erofs (compression, cluster
+    /// size, extended options), unless the layer sets its own.
+    pub erofs_options: Vec<String>,
     /// The selectors of the layers that declare any (a layer may be empty).
     pub layers: Vec<ImageLayerSpec>,
 }
@@ -77,6 +80,28 @@ pub struct ImageLayerSpec {
     pub stage: Vec<String>,
     /// Stage service ids: each service's unit file.
     pub services: Vec<String>,
+    /// This layer's `mkfs.erofs` options, replacing the layer set's.
+    pub erofs_options: Option<Vec<String>>,
+}
+
+/// The `mkfs.erofs` options a layer's erofs is made with when nothing sets
+/// them: LZMA level 6, 256 KiB physical clusters, packed tails, shared
+/// fragments and deduplication (what the HeliOS Raze root used).
+pub const DEFAULT_LAYER_EROFS_OPTIONS: [&str; 3] = [
+    "-zlzma,level=6",
+    "-C262144",
+    "-Eall-fragments,dedupe,ztailpacking",
+];
+
+impl ImageLayersSpec {
+    /// The `mkfs.erofs` options of the layer called `name`.
+    pub fn erofs_options_for(&self, name: &str) -> &[String] {
+        self.layers
+            .iter()
+            .find(|layer| layer.name == name)
+            .and_then(|layer| layer.erofs_options.as_deref())
+            .unwrap_or(&self.erofs_options)
+    }
 }
 
 /// `[image.checks]`. Paths are as written: a relative one resolves against

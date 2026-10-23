@@ -158,7 +158,14 @@ fn build_layers_with(
     let mut rebuilt = Vec::new();
     for (index, name) in layers.order.iter().enumerate() {
         let plan = plan_layer(&members[index], &source)?;
-        let inputs = layer_fingerprint(&plan, &members[index], &source, mtime, layers);
+        let inputs = layer_fingerprint(
+            &plan,
+            &members[index],
+            &source,
+            mtime,
+            layers,
+            layers.erofs_options_for(name),
+        );
         let mut previous = old
             .iter()
             .find(|value| value["name"] == name.as_str())
@@ -293,12 +300,15 @@ fn layer_fingerprint(
     source: &BTreeMap<String, Entry>,
     mtime: u64,
     layers: &ImageLayersSpec,
+    erofs_options: &[String],
 ) -> String {
     let mut hasher = Sha256::new();
     hasher.update(
         format!(
-            "gaia-layer-v1 mtime={mtime} erofs={} verity={}\n",
-            layers.erofs, layers.verity
+            "gaia-layer-v2 mtime={mtime} erofs={} verity={} erofs_options={}\n",
+            layers.erofs,
+            layers.verity,
+            erofs_options.join("\u{1f}")
         )
         .as_bytes(),
     );
@@ -420,6 +430,7 @@ fn build_layer(request: LayerBuild<'_>) -> Result<BuiltLayer, ImageProviderError
             &erofs_temp,
             &tar_path,
             &uuid_from_hex(&tar_sha256),
+            layers.erofs_options_for(name),
         )?;
         // The verity tree is appended before the image is hashed: the id is
         // the sha256 of the file as shipped.

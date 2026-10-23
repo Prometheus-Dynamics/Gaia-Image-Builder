@@ -82,6 +82,7 @@ fn layer(
         installs: installs.iter().map(|s| s.to_string()).collect(),
         stage: stage.iter().map(|s| s.to_string()).collect(),
         services: Vec::new(),
+        erofs_options: None,
     }
 }
 
@@ -92,6 +93,10 @@ fn layers_spec(overrides: &[&str]) -> ImageLayersSpec {
         overrides: overrides.iter().map(|s| s.to_string()).collect(),
         erofs: false,
         verity: false,
+        erofs_options: gaia_spec::DEFAULT_LAYER_EROFS_OPTIONS
+            .iter()
+            .map(|option| option.to_string())
+            .collect(),
         layers: vec![
             layer("platform", &["linux"], &["/lib/modules"], &[], &[]),
             layer("app", &["helios-pkg"], &[], &["helios-*"], &["helios-*"]),
@@ -482,8 +487,8 @@ fn erofs_and_verity_end_to_end_when_the_tools_exist() {
             .output()
             .is_ok()
     };
-    if !tools_present("mkfs.erofs") || !tools_present("veritysetup") {
-        eprintln!("skipped: mkfs.erofs and veritysetup are needed");
+    if !tools_present("mkfs.erofs") || !tools_present("veritysetup") || !tools_present("fakeroot") {
+        eprintln!("skipped: mkfs.erofs, veritysetup and fakeroot are needed");
         return;
     }
     let dir = TempDir::new("layers-erofs-verity");
@@ -492,7 +497,71 @@ fn erofs_and_verity_end_to_end_when_the_tools_exist() {
     let mut layers = layers_spec(&[]);
     layers.erofs = true;
     layers.verity = true;
+    // Base and platform with 1 MiB clusters, the app layer with 256 KiB, as
+    // HeliOS ships them.
+    layers.erofs_options = vec![
+        "-zlzma,level=6".into(),
+        "-C1048576".into(),
+        "-Eall-fragments,dedupe,ztailpacking".into(),
+    ];
+    for layer in &mut layers.layers {
+        if layer.name == "app" {
+            layer.erofs_options = Some(
+                gaia_spec::DEFAULT_LAYER_EROFS_OPTIONS
+                    .iter()
+                    .map(|option| option.to_string())
+                    .collect(),
+            );
+        }
+    }
     build_layers(&build_spec(), &layers, &tree, &collect).expect("build");
+    // Every layer's erofs holds exactly its tar's files (all-fragments with
+    // `mkfs.erofs --tar` loses file data while fsck still passes).
+    for name in ["base", "platform", "app"] {
+        let from_tar = dir.path().join(format!("tar-{name}"));
+        let from_erofs = dir.path().join(format!("erofs-{name}"));
+        fs::create_dir_all(&from_tar).expect("tar dir");
+        let untar = std::process::Command::new("tar")
+            .arg("-xf")
+            .arg(collect.join(format!("layers/{name}.tar")))
+            .arg("-C")
+            .arg(&from_tar)
+            .status()
+            .expect("tar");
+        assert!(untar.success());
+        let extract = std::process::Command::new("fsck.erofs")
+            .arg(format!("--extract={}", from_erofs.display()))
+            .arg(collect.join(format!("layers/{name}.erofs")))
+            .output()
+            .expect("fsck.erofs --extract");
+        assert!(
+            extract.status.success(),
+            "{}",
+            String::from_utf8_lossy(&extract.stderr)
+        );
+        let diff = std::process::Command::new("diff")
+            .arg("-r")
+            .arg("--no-dereference")
+            .arg(&from_tar)
+            .arg(&from_erofs)
+            .output()
+            .expect("diff");
+        assert!(
+            diff.status.success(),
+            "layer {name}: erofs contents differ from its tar:\n{}",
+            String::from_utf8_lossy(&diff.stdout)
+        );
+    }
+    // The same tree and options give the same images.
+    let again = dir.path().join("collect-again");
+    build_layers(&build_spec(), &layers, &tree, &again).expect("build again");
+    for name in ["base", "platform", "app"] {
+        assert_eq!(
+            fs::read(collect.join(format!("layers/{name}.erofs"))).expect("first"),
+            fs::read(again.join(format!("layers/{name}.erofs"))).expect("second"),
+            "layer {name} is not reproducible"
+        );
+    }
     let json: serde_json::Value =
         serde_json::from_slice(&fs::read(collect.join("layers").join(LAYERS_JSON)).expect("json"))
             .expect("parse");

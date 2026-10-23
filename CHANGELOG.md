@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- `[image.layers] erofs_options` (and per layer, `[image.layers.<name>] erofs_options`) sets the layers' `mkfs.erofs` options; the default is LZMA level 6, 256 KiB clusters, all-fragments, dedupe and ztailpacking. Layer erofs images were uncompressed before. They are now made from the layer tar unpacked under `fakeroot` instead of `mkfs.erofs --tar`, which loses file data with `-Eall-fragments` (erofs-utils 1.8.10).
+
 - The Buildroot provider's `.gaia-package-durations` (the progress estimate's per-package times) drops packages the tree no longer builds, so it describes only the current config.
 
 ### Registry checkpoints

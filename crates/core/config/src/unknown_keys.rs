@@ -323,12 +323,26 @@ fn image_fields(kind: Option<&str>) -> Option<Vec<&'static str>> {
 /// `[image.layers]`: its own keys. The layer tables are not listed here: their
 /// names are the user's (see [`image_layer_fields`]).
 fn image_layers_fields() -> Option<&'static [&'static str]> {
-    Some(&["order", "default", "overrides", "erofs", "verity"])
+    Some(&[
+        "order",
+        "default",
+        "overrides",
+        "erofs",
+        "verity",
+        "erofs_options",
+    ])
 }
 
 /// `[image.layers.<name>]`: the selectors of one layer.
 fn image_layer_fields() -> Option<&'static [&'static str]> {
-    Some(&["packages", "paths", "installs", "stage", "services"])
+    Some(&[
+        "packages",
+        "paths",
+        "installs",
+        "stage",
+        "services",
+        "erofs_options",
+    ])
 }
 
 const ARTIFACT_CHILDREN: &[Section] = &[section(
@@ -544,34 +558,9 @@ pub(crate) fn locate_unknown_keys(keys: &mut [UnknownKey], path: &Path, text: &s
     }
 }
 
-/// Warnings for loaded files (the entrypoint, its `extends` chain and its
-/// imports) that set nothing at all: a layer that should provide something
-/// but holds only comments.
-pub(crate) fn collect_empty_layer_warnings(raw: &RawBuildConfig) -> Vec<String> {
-    let mut warnings = Vec::new();
-    let mut visit = vec![raw];
-    while let Some(config) = visit.pop() {
-        if config.sets_nothing {
-            let path = config
-                .source_path
-                .as_deref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| "<build config>".into());
-            let warning = format!("config file '{path}' sets nothing (only comments)");
-            if !warnings.contains(&warning) {
-                warnings.push(warning);
-            }
-        }
-        visit.extend(config.extends_config.as_deref());
-        visit.extend(
-            config
-                .imported_configs
-                .iter()
-                .map(|imported| &imported.config),
-        );
-    }
-    warnings
-}
+#[path = "unknown_keys_empty_layers.rs"]
+mod empty_layers;
+pub(crate) use empty_layers::*;
 
 /// Warning messages for every unknown key in the loaded file, its
 /// `extends` chain and its imports.

@@ -1,5 +1,5 @@
-//! The erofs image and dm-verity tree of one layer: `mkfs.erofs --tar` over
-//! the layer tar, and `veritysetup format` appending the tree, with both
+//! The erofs image and dm-verity tree of one layer: `mkfs.erofs` over the
+//! layer tar's contents, and `veritysetup format` appending the tree, with the
 //! tools taken from Buildroot's host dir first.
 
 use super::layers::{VERITY_BLOCK, file_len, runtime_error};
@@ -19,24 +19,43 @@ pub(crate) fn uuid_from_hex(hex: &str) -> String {
     )
 }
 
-/// `mkfs.erofs` over the layer tar. The tar's owners are kept (no
-/// `--all-root`), and times and xattrs are fixed, so the image is the same
-/// for the same tar.
+/// `mkfs.erofs` with `options` over the layer tar's contents. The tar is
+/// unpacked under `fakeroot` and the image made from that directory in the
+/// same session, so the tar's owners, modes and device nodes are kept (no
+/// `--all-root`). `mkfs.erofs --tar` is not used: with `-Eall-fragments`
+/// (erofs-utils 1.8.10) it writes images whose file data is lost while
+/// `fsck.erofs` still passes. Times, xattrs and the UUID are fixed, so the
+/// same tar and options give the same image.
 pub(crate) fn run_mkfs_erofs(
     host_dir: &Path,
     out: &Path,
     tar: &Path,
     uuid: &str,
+    options: &[String],
 ) -> Result<(), ImageProviderError> {
-    let mut command = Command::new(host_tool(host_dir, "mkfs.erofs"));
+    let staging = out.with_extension("staging");
+    let _ = fs::remove_dir_all(&staging);
+    fs::create_dir_all(&staging).map_err(|error| {
+        runtime_error(format!("failed to create '{}': {error}", staging.display()))
+    })?;
+    let mut command = Command::new(host_tool(host_dir, "fakeroot"));
     command
-        .args(["-T0", "-x-1", "-U", uuid, "--tar=f"])
+        .args(["--", "sh", "-c"])
+        .arg(r#"set -e; tar -xpf "$1" -C "$2" --numeric-owner; shift 2; exec "$@""#)
+        .arg("sh")
+        .arg(tar)
+        .arg(&staging)
+        .arg(host_tool(host_dir, "mkfs.erofs"))
+        .args(["-T0", "-x-1", "-U", uuid])
+        .args(options)
         .arg(out)
-        .arg(tar);
+        .arg(&staging);
     let _ = fs::remove_file(out);
-    let output = command.output().map_err(|error| {
+    let output = command.output();
+    let _ = fs::remove_dir_all(&staging);
+    let output = output.map_err(|error| {
         runtime_error(format!(
-            "image.layers erofs needs mkfs.erofs in Buildroot's host dir or on PATH (set [image.layers] erofs = false to skip it): {error}"
+            "image.layers erofs needs fakeroot and mkfs.erofs in Buildroot's host dir or on PATH (set [image.layers] erofs = false to skip it): {error}"
         ))
     })?;
     if !output.status.success() {

@@ -898,6 +898,9 @@ pub struct RawImageLayersConfig {
     pub erofs: Option<bool>,
     /// Whether each erofs image gets a dm-verity tree (off by default).
     pub verity: Option<bool>,
+    /// The `mkfs.erofs` options of every layer (default: LZMA 6, 256 KiB
+    /// clusters, all-fragments, dedupe, ztailpacking).
+    pub erofs_options: Option<Vec<String>>,
     #[serde(flatten)]
     pub layers: std::collections::BTreeMap<String, RawImageLayerConfig>,
 }
@@ -911,6 +914,8 @@ pub struct RawImageLayerConfig {
     pub installs: Vec<String>,
     pub stage: Vec<String>,
     pub services: Vec<String>,
+    /// This layer's `mkfs.erofs` options, replacing the layer set's.
+    pub erofs_options: Option<Vec<String>>,
 }
 
 /// `[image.checks]`: what `image:check` verifies (see `Image checks` in the docs).
