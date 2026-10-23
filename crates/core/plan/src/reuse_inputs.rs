@@ -119,6 +119,10 @@ pub(crate) fn operation_inputs(
         }
         OperationKind::CheckImage => {
             inputs.value("checks", &spec.image.checks);
+            // Left out when empty, so a build without a hardware list keeps its fingerprint.
+            if !spec.image.hardware.is_empty() {
+                inputs.value("hardware", &spec.image.hardware);
+            }
             inputs.text(
                 "report",
                 gaia_spec::image_checks_report_path(spec)

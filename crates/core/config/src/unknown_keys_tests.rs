@@ -351,6 +351,25 @@ fn image_checks_keys_are_checked() {
 }
 
 #[test]
+fn image_hardware_entries_are_known_and_their_keys_checked() {
+    assert!(
+        unknown(
+            "build_name = \"demo\"\n[image]\nkind = \"buildroot\"\n\
+             [[image.hardware]]\nid = \"ov9782\"\nkind = \"camera-sensor\"\n\
+             modules = [\"ov9282\"]\ncompatible = [\"ovti,ov9782\"]\n\
+             overlays = [\"ov9782\"]\nfiles = [\"/usr/share/x.json\"]\nfirmware = []\n\
+             [[image.hardware]]\nid = \"usb\"\nmodules = []\n"
+        )
+        .is_empty()
+    );
+    let found = unknown(
+        "build_name = \"demo\"\n[image]\nkind = \"buildroot\"\n\
+         [[image.hardware]]\nid = \"ov9782\"\nmodul = [\"ov9282\"]\n",
+    );
+    assert_eq!(found, vec!["image.hardware[0].modul"], "{found:?}");
+}
+
+#[test]
 fn new_buildroot_image_and_provider_keys_are_known() {
     assert!(
         unknown(

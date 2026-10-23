@@ -440,6 +440,7 @@ mod tests {
             output: ImageOutputSpec::default(),
             assembly: None,
             checks: Default::default(),
+            hardware: Vec::new(),
         };
 
         let context = AppContext::with_defaults();

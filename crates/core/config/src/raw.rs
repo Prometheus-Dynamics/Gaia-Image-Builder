@@ -707,6 +707,8 @@ pub struct RawImageConfig {
     pub output: RawImageOutputConfig,
     pub signing: Option<RawImageSigningConfig>,
     pub checks: Option<RawImageChecksConfig>,
+    /// `[[image.hardware]]`: the devices the image must support.
+    pub hardware: Vec<RawImageHardwareConfig>,
     pub assembly: Option<RawImageAssemblyConfig>,
     /// `[image.layers]`: the rootfs split into layer tars.
     pub layers: Option<RawImageLayersConfig>,
@@ -916,6 +918,20 @@ pub struct RawImageChecksConfig {
     pub modules_dir: Option<String>,
     pub symvers: Option<String>,
     pub kernel_image: Option<String>,
+}
+
+/// `[[image.hardware]]`: one device the image must support (see `Image checks`
+/// in the docs). Unknown keys are reported, as everywhere.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawImageHardwareConfig {
+    pub id: String,
+    pub kind: String,
+    pub modules: Vec<String>,
+    pub compatible: Vec<String>,
+    pub overlays: Vec<String>,
+    pub files: Vec<String>,
+    pub firmware: Vec<String>,
 }
 
 /// `[image.signing]`: a signature for each published output that matches `outputs`.

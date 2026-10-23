@@ -21,6 +21,8 @@ pub(super) struct KernelModule {
     pub depends: Vec<String>,
     /// Every `firmware=` value.
     pub firmware: Vec<String>,
+    /// Every `alias=` value: the device-table aliases (`of:N*T*C<compatible>`).
+    pub aliases: Vec<String>,
     /// The `__versions` entries: each imported symbol with the CRC the module
     /// was built against.
     pub versions: Vec<(String, u64)>,
@@ -94,6 +96,7 @@ pub(super) fn parse_module(
     let mut vermagic = None;
     let mut depends = Vec::new();
     let mut firmware = Vec::new();
+    let mut aliases = Vec::new();
     for entry in elf
         .section(".modinfo")
         .unwrap_or_default()
@@ -115,6 +118,7 @@ pub(super) fn parse_module(
                     .map(normalise_name),
             ),
             "firmware" => firmware.push(value.to_string()),
+            "alias" => aliases.push(value.to_string()),
             _ => {}
         }
     }
@@ -158,6 +162,7 @@ pub(super) fn parse_module(
         vermagic,
         depends,
         firmware,
+        aliases,
         versions,
         imports: imports.into_iter().collect(),
         exports,

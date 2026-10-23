@@ -3,6 +3,8 @@
 //! and fails the run on an error. Warnings reach the run summary.
 
 mod elf;
+mod fdt;
+mod hardware;
 mod kernel;
 mod kernel_modules;
 mod module;
@@ -47,6 +49,19 @@ pub(crate) fn execute(
     let builds_kernel = std::fs::read_to_string(buildroot.join(".config"))
         .is_ok_and(|text| text.lines().any(|line| line.trim() == "BR2_LINUX_KERNEL=y"));
     if !builds_kernel && !explicit {
+        // The hardware list needs the kernel's modules: without a kernel it
+        // cannot be met, so it is an error rather than a skip.
+        if !spec.image.hardware.is_empty() {
+            return failure_with_kind(
+                operation_id.clone(),
+                "image_check_failed",
+                ExecutionErrorKind::ImageCheck,
+                format!(
+                    "image hardware list cannot be checked: the Buildroot config builds no kernel (BR2_LINUX_KERNEL is not y), and {} hardware entries need its modules",
+                    spec.image.hardware.len()
+                ),
+            );
+        }
         let message = "image checks skipped: the Buildroot config builds no kernel (BR2_LINUX_KERNEL is not y)";
         let report = report_json(spec, "skipped", None, &[], &[], &buildroot);
         return match write_report(&report_path, &report) {
@@ -73,6 +88,32 @@ pub(crate) fn execute(
         None => find_symvers(&buildroot.join("build")),
     };
     let firmware_dir = buildroot.join("target/lib/firmware");
+    let images_dir = buildroot.join("images");
+    let rootfs = buildroot.join("target");
+    // An assembly's trees hold the boot files the board boots (their overlays,
+    // config.txt and DTBs). The assembly runs before this check, and its RAM
+    // copies are gone by now, so the disk paths hold the result.
+    let assembly_trees: Vec<PathBuf> = match spec.image.assembly.as_ref() {
+        Some(assembly) => match gaia_spec::AssemblyRoots::new(spec, assembly) {
+            Ok(roots) => roots.trees.values().cloned().collect(),
+            Err(message) => {
+                return failure_with_kind(
+                    operation_id.clone(),
+                    "image_check_failed",
+                    ExecutionErrorKind::ImageCheck,
+                    format!("image checks cannot find the assembly trees: {message}"),
+                );
+            }
+        },
+        None => Vec::new(),
+    };
+    let excluded_packages: Vec<String> = match &spec.image.definition {
+        gaia_spec::ImageDefinition::Buildroot(buildroot_spec) => {
+            buildroot_spec.rootfs_exclude_packages.clone()
+        }
+        _ => Vec::new(),
+    };
+    let removed = hardware::rootfs_exclusions(&buildroot, &excluded_packages);
     let outcome = kernel_modules::check(&Inputs {
         kernel_image: &kernel_image,
         modules_root: &modules_root,
@@ -81,6 +122,15 @@ pub(crate) fn execute(
         symvers: symvers.as_deref(),
         symvers_set: checks.symvers.is_some(),
         firmware_dir: Some(&firmware_dir),
+        module_checks: checks.kernel_modules != Some(false),
+        hardware: hardware::Sources {
+            build: spec.identity.id.as_str(),
+            entries: &spec.image.hardware,
+            images_dir: &images_dir,
+            rootfs: &rootfs,
+            assembly_trees: &assembly_trees,
+            removed: &removed,
+        },
     });
 
     let errors: Vec<&Finding> = outcome
@@ -134,10 +184,16 @@ pub(crate) fn execute(
         );
     }
     let release = outcome.release.as_deref().unwrap_or("unknown");
-    let summary = format!(
+    let mut summary = format!(
         "image checks passed: {} kernel modules and {} imports checked against kernel {release}",
         outcome.modules, outcome.imports
     );
+    if !spec.image.hardware.is_empty() {
+        summary.push_str(&format!(
+            "; {} hardware entries checked",
+            spec.image.hardware.len()
+        ));
+    }
     // The warnings reach the run summary through the image result, which
     // names no output: nothing is published for it.
     let image_result = gaia_image_providers::ImageExecutionResult {
@@ -234,6 +290,7 @@ fn report_json(
         "schema": REPORT_SCHEMA,
         "build": spec.identity.id.as_str(),
         "status": status,
+        "hardware_entries": spec.image.hardware.len(),
         "kernel_modules": kernel_modules,
         "errors": errors.iter().map(finding).collect::<Vec<_>>(),
         "warnings": warnings.iter().map(finding).collect::<Vec<_>>(),

@@ -58,6 +58,39 @@ fn validate_image_signing(
     }
 }
 
+/// `[[image.hardware]]`: each entry has an id, and the ids are unique (the
+/// check's reports and errors name the entry by its id).
+fn validate_image_hardware(spec: &ResolvedBuildSpec, diagnostics: &mut Vec<ValidationDiagnostic>) {
+    // Only the Buildroot image is checked (by `image:check`): a list on any
+    // other image would be silently ignored, so it is an error.
+    if !spec.image.hardware.is_empty()
+        && spec.image.provider_kind() != gaia_spec::ImageProviderKind::Buildroot
+    {
+        diagnostics.push(error(
+            "image_hardware_not_buildroot",
+            "image.hardware is checked for Buildroot images only, and this image is not one".into(),
+            Some("image.hardware".into()),
+        ));
+    }
+    let mut seen = HashSet::new();
+    for (index, hardware) in spec.image.hardware.iter().enumerate() {
+        let location = Some(format!("image.hardware[{index}]"));
+        if hardware.id.trim().is_empty() {
+            diagnostics.push(error(
+                "image_hardware_id_missing",
+                format!("image.hardware entry {index} has no id"),
+                location,
+            ));
+        } else if !seen.insert(hardware.id.as_str()) {
+            diagnostics.push(error(
+                "image_hardware_id_duplicate",
+                format!("image.hardware id '{}' is listed twice", hardware.id),
+                location,
+            ));
+        }
+    }
+}
+
 pub(crate) fn validate_image_contract(
     spec: &ResolvedBuildSpec,
     diagnostics: &mut Vec<ValidationDiagnostic>,
@@ -67,6 +100,7 @@ pub(crate) fn validate_image_contract(
         validate_image_signing(signing, diagnostics);
     }
     validate_image_layers(spec, diagnostics);
+    validate_image_hardware(spec, diagnostics);
     match &spec.image.definition {
         ImageDefinition::Buildroot(buildroot) => {
             for (index, name) in buildroot.rootfs_exclude_packages.iter().enumerate() {

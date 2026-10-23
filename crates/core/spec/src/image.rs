@@ -18,6 +18,31 @@ pub struct ImageSpec {
     /// out of serialized specs when unset, so existing builds keep their digests.
     #[serde(skip_serializing_if = "ImageChecksSpec::is_default")]
     pub checks: ImageChecksSpec,
+    /// `[[image.hardware]]`: the hardware the image must support, checked by
+    /// `image:check`. Left out of serialized specs when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hardware: Vec<ImageHardwareSpec>,
+}
+
+/// `[[image.hardware]]`: one device the image must carry. Every list is as
+/// written; the check reads module names with `-` and `_` the same.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct ImageHardwareSpec {
+    pub id: String,
+    /// A free-form label for the reports.
+    pub kind: String,
+    /// Module names the driver is in (built-in drivers too). Empty means any
+    /// shipped or built-in driver may claim the compatibles.
+    pub modules: Vec<String>,
+    /// Device-tree compatibles the driver must claim.
+    pub compatible: Vec<String>,
+    /// `.dtbo` basenames that must ship in a boot overlays directory.
+    pub overlays: Vec<String>,
+    /// Absolute rootfs paths that must exist.
+    pub files: Vec<String>,
+    /// Firmware names that must exist under `/lib/firmware`, with or without
+    /// a compression suffix.
+    pub firmware: Vec<String>,
 }
 
 /// `[image.layers]`: the root filesystem split into one tar per layer.
@@ -132,6 +157,7 @@ impl ImageSpec {
             signing: None,
             layers: None,
             checks: ImageChecksSpec::default(),
+            hardware: Vec::new(),
         }
     }
 

@@ -35,6 +35,8 @@ pub(super) fn merge_image(base: RawImageConfig, overlay: RawImageConfig) -> RawI
         signing: overlay.signing.or(base.signing),
         layers: overlay.layers.or(base.layers),
         checks: overlay.checks.or(base.checks),
+        // Kept in order; a duplicate id is a validation error, not a merge.
+        hardware: [base.hardware, overlay.hardware].concat(),
         kind_given: base.kind_given || overlay.kind_given,
     }
 }

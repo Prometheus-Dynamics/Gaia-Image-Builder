@@ -33,6 +33,18 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - **Upgrading needs one clean build per existing tree.** The first run after this change has no record, so leftovers from earlier runs cannot be told apart from current files: they are not removed, and the build says "no stage ownership record yet; leftovers from earlier runs are not removed". Clean that image's Buildroot output once (or run a clean build) to drop them. From the next run on, the managed-paths list no longer names stage files and the runtime state no longer removes them: the record decides. On that first run the previous managed-paths list still removes the destinations it names, as before, so a removed stage item's old destination can go then, even when a package changed it.
 - Docs: `docs/configuration.md` (stage files, the image feed).
 
+### Image checks: hardware list
+
+- **`[[image.hardware]]` declares what a Buildroot image must support, per device.** Each entry (`id`, `kind`, `modules`, `compatible`, `overlays`, `files`, `firmware`) is checked by `image:check` as a chain: each named module passes the module checks (the copy modprobe loads, for a name shipped twice; built-in drivers count through `modules.builtin`); each compatible is claimed by a driver's `of:` alias and named by an overlay of the entry or a shipped board DTB; each overlay ships as a `.dtbo` in a boot overlays directory; each file and firmware is in the rootfs. An error names the build, the entry and the broken link. `modules` may be empty, meaning any shipped or built-in driver may claim the compatible.
+- **An assembly is checked too.** Its trees' `overlays/`, top-level `*.dtb` and `config.txt` (each `dtoverlay=` must have its `.dtbo`, in the overlays dir next to the config or a Buildroot one) are read alongside Buildroot's. An assembly's boot files are where a board's overlays are built, so an image built with an assembly is checked against them.
+- **Every `dtoverlay=` in `config.txt` must have its `.dtbo`,** whether or not an entry names it.
+- **`files` and `firmware` are checked against the final rootfs:** `target/` without the files of `[image.rootfs] exclude_packages`.
+- **The check reads device trees with a small FDT reader** (header, structure and strings blocks; `compatible` properties; overlay fragments with `target-path` and `__overlay__`). No new crates. A truncated or corrupt file is an error, not a panic.
+- **`kernel_modules = false` turns off only the module checks;** a non-empty hardware list still runs. Without a kernel, a non-empty list is an error (it needs the kernel's modules), not a skip.
+- **Config and validation:** `image.hardware` is a known key (it no longer warns as unknown); a duplicate or missing `id` is an error, and so is a hardware list on a non-Buildroot image (nothing would check it). Adding or changing an entry changes the build's plan fingerprint, so the check runs again.
+- **Report:** `<build>.checks.json` gains `hardware_entries`; the hardware errors use the codes `hardware_*` (listed in `docs/configuration.md`, Hardware list).
+- Docs: `docs/configuration.md` (Image checks, Hardware list).
+
 ### Offline builds and prefetch
 
 - **`gaia prefetch <build>` and `gaia run --prefetch`** download what a build needs and stop before anything is built. Every source is materialized; for Buildroot the tree is configured as a run configures it, then `make source` fills the download cache. The output names the new source files and the cache size. Prefetch does not yet fetch cargo git dependencies (`cargo_git_sources`): the first artifact build does that.

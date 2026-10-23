@@ -2323,7 +2323,32 @@ The kernel module checks run on every shipped `.ko`, `.ko.xz`, `.ko.zst` or `.ko
 - **Errors** fail the run. `vermagic_mismatch`: a module's vermagic does not start with the kernel release. `vermagic_flags_differ`: a module's flags differ from the most common flags. `undefined_symbol`: an import that neither `Module.symvers` nor a shipped module exports. `export_not_shipped`: an import that a module exports, where that module is neither shipped nor built in. `abi_mismatch`: a module's `__versions` CRC for a symbol differs from the kernel's `Module.symvers` (`CONFIG_MODVERSIONS`), the case where a module loads on one kernel and is refused by another. `dependency_missing`: a `depends=` module that is neither shipped nor in `modules.builtin`. `module_invalid`: a file that is not a readable ELF object. `kernel_release`: no banner in the kernel image.
 - **Warnings** do not fail the run and appear in the run summary. `module_duplicate`: a module name shipped more than once. Both copies are checked; the one `modprobe` loads is named, from `modules.dep` (depmod's own entry), else by depmod's search order (`updates`, `extra`, `weak-updates`, then the kernel tree). `firmware_missing`: a `firmware=` file not under `lib/firmware`, with or without a compression suffix. Drivers often list optional firmware, so this is a warning. `symvers_missing`: no `Module.symvers` was found, so imports are not checked.
 
-The report is `<out dir>/<build>.checks.json`, written on success and on failure. It holds `status` (`passed`, `failed` or `skipped`), the release, the module and import counts, and each error and warning with its `code`, `module` and `message`. Paths in it are relative to the Buildroot output.
+The report is `<out dir>/<build>.checks.json`, written on success and on failure. It holds `status` (`passed`, `failed` or `skipped`), `hardware_entries` (the count), the release, the module and import counts, and each error and warning with its `code`, `module` and `message`. Paths in it are relative to the Buildroot output.
+
+#### Hardware list
+
+`[[image.hardware]]` declares what the image must support: one table per device. Atlas owns the lists for its boards, and the file paths in them are the ones the drivers' owners ship. Each entry is checked as a chain, and an error names the build, the entry and the broken link:
+
+```toml
+[[image.hardware]]
+id = "ov9782"                 # unique in the build
+kind = "camera-sensor"        # a free-form label for the reports
+modules = ["ov9282"]          # module names (dashes or underscores); built-in drivers too; empty = any driver may claim
+compatible = ["ovti,ov9782"]  # device-tree compatibles the driver must claim
+overlays = ["ov9782"]         # .dtbo basenames that must ship in a boot overlays directory
+files = ["/usr/share/libcamera/ipa/rpi/pisp/ov9782.json"]  # must exist in the rootfs
+firmware = []                 # must exist under /lib/firmware, with or without a compression suffix
+```
+
+- **Modules:** each named module passes the module checks, with no error on it. A name shipped twice is checked as the copy modprobe loads. A built-in driver (`dwc2`, `ramoops`) is found through `modules.builtin` and its `modules.builtin.modinfo` aliases. An empty `modules` lets any shipped or built-in driver claim the compatible.
+- **Claims:** each compatible must be claimed by a driver, through an `of:N*T*C<compatible>` alias in the module's `.modinfo` or in `modules.alias` (or a built-in's alias). With `modules` set, the module modprobe loads must claim it.
+- **Naming:** each compatible must be named where the board instantiates it: by an overlay of the entry (the `__overlay__` nodes of its fragments) or by a shipped board DTB (`images/*.dtb`). Some overlays only configure a node the board already has, so the board DTB names the compatible.
+- **Overlays:** each `<name>.dtbo` ships in `images/rpi-firmware/overlays`, in an `images/*overlays*` directory, or in an assembly tree's `overlays/` (the assembly's boot tree is where a board's overlays are built, so an assembly image is checked against it too). Board DTBs are read from `images/*.dtb` and each assembly tree's top-level `*.dtb`.
+- **Files:** each `files` path exists in the final rootfs, which is `target/` without the files of `[image.rootfs] exclude_packages` (the paths `build/packages-file-list.txt` lists for those packages, unless a kept package lists them too). Each `firmware` name must exist under `lib/firmware` in that rootfs.
+
+Every `dtoverlay=<name>` in `images/rpi-firmware/config.txt`, and in each assembly tree's top-level `config.txt`, must have its `.dtbo` as well, whether or not an entry names it. A config's own `overlays/` directory and the Buildroot ones are searched. The hardware list runs with `kernel_modules = false` too (that turns off only the module checks). It needs the kernel's modules, so a non-empty list with no kernel (`BR2_LINUX_KERNEL` not `y`) is an error, not a skip.
+
+Errors: `hardware_module_missing`, `hardware_module_faulty` (the module fails its module checks), `hardware_module_unreadable`, `hardware_compatible_unclaimed`, `hardware_compatible_unnamed`, `hardware_overlay_missing`, `hardware_overlay_unreadable`, `hardware_file_missing`, `hardware_firmware_missing`, `hardware_config_overlay_missing` and `hardware_board_unreadable`. Validation reports `image_hardware_id_missing` and `image_hardware_id_duplicate` (an id is required and unique), and `image_hardware_not_buildroot` for a list on an image that is not Buildroot (nothing would check it).
 
 Only the checks listed above are made. A driver that loads but fails in its `probe` is caught by a board test, not here.
 

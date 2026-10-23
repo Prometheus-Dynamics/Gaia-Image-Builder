@@ -1,6 +1,7 @@
 //! The kernel module checks of `image:check`: every shipped module against the
 //! kernel it ships with. Reads only; the tree is never written.
 
+use super::hardware::{self, ModuleView};
 use super::kernel::{Symvers, kernel_release};
 use super::module::{KernelModule, module_name_of, read_module};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -34,6 +35,11 @@ pub(super) struct Inputs<'a> {
     pub symvers_set: bool,
     /// `target/lib/firmware`, for the `firmware=` entries.
     pub firmware_dir: Option<&'a Path>,
+    /// Whether the module checks run (`[image.checks] kernel_modules`). The
+    /// hardware list runs either way.
+    pub module_checks: bool,
+    /// The hardware list, and the paths its links are read from.
+    pub hardware: hardware::Sources<'a>,
 }
 
 #[derive(Debug, Default)]
@@ -47,11 +53,11 @@ pub(super) struct Outcome {
 }
 
 impl Outcome {
-    fn error(&mut self, code: &'static str, module: Option<&str>, message: String) {
+    pub(super) fn error(&mut self, code: &'static str, module: Option<&str>, message: String) {
         self.push(Severity::Error, code, module, message);
     }
 
-    fn warning(&mut self, code: &'static str, module: Option<&str>, message: String) {
+    pub(super) fn warning(&mut self, code: &'static str, module: Option<&str>, message: String) {
         self.push(Severity::Warning, code, module, message);
     }
 
@@ -91,26 +97,37 @@ pub(super) fn check(inputs: &Inputs<'_>) -> Outcome {
         .unwrap_or_else(|| inputs.modules_root.join(&release));
     out.release = Some(release.clone());
     out.modules_dir = Some(dir.clone());
-    if !dir.is_dir() {
+    let dir_ready = dir.is_dir();
+    if !dir_ready {
         let message = format!("no module directory {} for kernel {release}", dir.display());
         if inputs.modules_dir_set {
             out.error("modules_dir_missing", None, message);
-        } else {
+        } else if inputs.module_checks {
             out.warning(
                 "modules_dir_missing",
                 None,
                 format!("{message}: kernel modules are not checked"),
             );
         }
-        return out;
     }
-    let modules = match read_modules(&dir) {
-        Ok(modules) => modules,
-        Err(message) => {
-            out.error("modules_dir_unreadable", None, message);
-            return out;
+    // With no module directory the hardware list still runs: every module it
+    // names is then missing.
+    let modules = if dir_ready {
+        match read_modules(&dir) {
+            Ok(modules) => modules,
+            Err(message) => {
+                out.error("modules_dir_unreadable", None, message);
+                return out;
+            }
         }
+    } else {
+        Vec::new()
     };
+    // Every shipped file by name and path: the copies modprobe chooses between.
+    let files: Vec<(String, String)> = modules
+        .iter()
+        .filter_map(|(_, rel_path)| Some((rel_name(rel_path)?, rel_path.clone())))
+        .collect();
     let mut parsed = Vec::with_capacity(modules.len());
     for (path, rel_path) in modules {
         match read_module(&path, rel_path.clone()) {
@@ -123,31 +140,119 @@ pub(super) fn check(inputs: &Inputs<'_>) -> Outcome {
         }
     }
     out.modules = parsed.len();
-    let builtin = read_builtin(&dir);
-    let shipped: HashSet<&str> = parsed.iter().map(|module| module.name.as_str()).collect();
-    check_duplicates(&parsed, &dir, &mut out);
-    check_vermagic(&parsed, &release, &mut out);
-    check_depends(&parsed, &shipped, &builtin, &mut out);
-    check_firmware(&parsed, inputs.firmware_dir, &mut out);
+    let builtin = if dir_ready {
+        read_builtin(&dir)
+    } else {
+        HashSet::new()
+    };
+    let winners = modprobe_winners(&files, &dir);
+    if inputs.module_checks {
+        let shipped: HashSet<&str> = parsed.iter().map(|module| module.name.as_str()).collect();
+        check_duplicates(&parsed, &winners, &mut out);
+        check_vermagic(&parsed, &release, &mut out);
+        check_depends(&parsed, &shipped, &builtin, &mut out);
+        check_firmware(&parsed, inputs.firmware_dir, &mut out);
 
-    let symvers = read_symvers(inputs, &mut out);
-    if let Some(symvers) = &symvers {
-        out.symvers_checked = true;
-        let shipped_exports = exports_by_symbol(&parsed);
-        for module in &parsed {
-            out.imports += module.imports.len();
-            check_imports(
-                module,
-                symvers,
-                &shipped,
-                &builtin,
-                &shipped_exports,
-                &mut out,
-            );
-            check_crcs(module, symvers, &mut out);
+        let symvers = read_symvers(inputs, &mut out);
+        if let Some(symvers) = &symvers {
+            out.symvers_checked = true;
+            let shipped_exports = exports_by_symbol(&parsed);
+            for module in &parsed {
+                out.imports += module.imports.len();
+                check_imports(
+                    module,
+                    symvers,
+                    &shipped,
+                    &builtin,
+                    &shipped_exports,
+                    &mut out,
+                );
+                check_crcs(module, symvers, &mut out);
+            }
         }
     }
+    let module_errors = errors_by_module(&out.findings);
+    let view = ModuleView {
+        parsed: &parsed,
+        winners: &winners,
+        builtin: &builtin,
+        dir: dir_ready.then_some(dir.as_path()),
+        module_errors: &module_errors,
+    };
+    hardware::check(&inputs.hardware, &view, &mut out);
     out
+}
+
+/// The module name of a path under the modules directory (`updates/ov9282.ko`
+/// is `ov9282`).
+fn rel_name(rel_path: &str) -> Option<String> {
+    rel_path.rsplit('/').next().and_then(module_name_of)
+}
+
+/// The copy modprobe loads for a shipped module name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Winner {
+    /// The copy's path under the modules directory.
+    pub rel: String,
+    /// Whether `modules.dep` lists this copy (depmod's own choice).
+    pub listed: bool,
+}
+
+/// The copy modprobe loads for each shipped name: the one `modules.dep` lists,
+/// else the first by depmod's search order.
+pub(super) fn modprobe_winners(files: &[(String, String)], dir: &Path) -> BTreeMap<String, Winner> {
+    let listed_by_dep = read_dep_winners(dir);
+    let mut copies_of: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for (name, rel) in files {
+        copies_of
+            .entry(name.as_str())
+            .or_default()
+            .push(rel.as_str());
+    }
+    copies_of
+        .into_iter()
+        .map(|(name, copies)| {
+            let listed = listed_by_dep
+                .get(name)
+                .filter(|rel| copies.contains(&rel.as_str()));
+            let winner = match listed {
+                Some(rel) => Winner {
+                    rel: rel.clone(),
+                    listed: true,
+                },
+                None => Winner {
+                    rel: copies
+                        .iter()
+                        .min_by(|left, right| {
+                            search_rank(left)
+                                .cmp(&search_rank(right))
+                                .then(left.cmp(right))
+                        })
+                        .map(|rel| rel.to_string())
+                        .unwrap_or_default(),
+                    listed: false,
+                },
+            };
+            (name.to_string(), winner)
+        })
+        .collect()
+}
+
+/// The error codes the findings name, for each module path.
+pub(super) fn errors_by_module(findings: &[Finding]) -> HashMap<String, Vec<&'static str>> {
+    let mut by_module: HashMap<String, Vec<&'static str>> = HashMap::new();
+    for finding in findings
+        .iter()
+        .filter(|finding| finding.severity == Severity::Error)
+    {
+        if let Some(module) = &finding.module {
+            let codes = by_module.entry(module.clone()).or_default();
+            if !codes.contains(&finding.code) {
+                codes.push(finding.code);
+            }
+        }
+    }
+    by_module
 }
 
 /// Every `.ko`, `.ko.xz`, `.ko.zst` and `.ko.gz` under `dir`, as its path and
@@ -223,8 +328,11 @@ fn search_rank(rel: &str) -> u8 {
     }
 }
 
-fn check_duplicates(modules: &[KernelModule], dir: &Path, out: &mut Outcome) {
-    let winners = read_dep_winners(dir);
+fn check_duplicates(
+    modules: &[KernelModule],
+    winners: &BTreeMap<String, Winner>,
+    out: &mut Outcome,
+) {
     let mut by_name: BTreeMap<&str, Vec<&KernelModule>> = BTreeMap::new();
     for module in modules {
         by_name
@@ -236,35 +344,26 @@ fn check_duplicates(modules: &[KernelModule], dir: &Path, out: &mut Outcome) {
         if copies.len() < 2 {
             continue;
         }
-        let listed = winners
-            .get(name)
-            .filter(|rel| copies.iter().any(|copy| copy.rel_path == **rel));
-        let (winner, reason) = match listed {
-            Some(rel) => (rel.clone(), "as modules.dep lists it"),
-            None => {
-                let best = copies
-                    .iter()
-                    .min_by(|left, right| {
-                        search_rank(&left.rel_path)
-                            .cmp(&search_rank(&right.rel_path))
-                            .then(left.rel_path.cmp(&right.rel_path))
-                    })
-                    .map(|copy| copy.rel_path.clone())
-                    .unwrap_or_default();
-                (best, "by depmod's search order")
-            }
+        let Some(winner) = winners.get(name) else {
+            continue;
+        };
+        let reason = if winner.listed {
+            "as modules.dep lists it"
+        } else {
+            "by depmod's search order"
         };
         let shadowed: Vec<&str> = copies
             .iter()
             .map(|copy| copy.rel_path.as_str())
-            .filter(|rel| *rel != winner)
+            .filter(|rel| *rel != winner.rel)
             .collect();
         out.warning(
             "module_duplicate",
-            Some(winner.as_str()),
+            Some(winner.rel.as_str()),
             format!(
-                "module {name} ships {} times: modprobe loads {winner} ({reason}); shadowed: {}",
+                "module {name} ships {} times: modprobe loads {} ({reason}); shadowed: {}",
                 copies.len(),
+                winner.rel,
                 shadowed.join(", ")
             ),
         );

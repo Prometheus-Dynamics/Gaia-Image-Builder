@@ -472,9 +472,10 @@ pub fn plan_build_operations(
 
     // The image checks read what the build and the assembly produced, so they
     // come after the last of them. Buildroot images only; the kernel checks
-    // skip themselves when the Buildroot config builds no kernel.
+    // skip themselves when the Buildroot config builds no kernel. The hardware
+    // list runs here too, even with the kernel module checks turned off.
     if spec.image.provider_kind() == gaia_spec::ImageProviderKind::Buildroot
-        && spec.image.checks.kernel_modules != Some(false)
+        && (spec.image.checks.kernel_modules != Some(false) || !spec.image.hardware.is_empty())
     {
         operations.push(
             PlannedOperation::new(OperationId::image_check(), OperationKind::CheckImage)

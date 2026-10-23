@@ -3,6 +3,7 @@
 //! Buildroot output when one is present.
 
 use super::elf::ElfObject;
+use super::hardware;
 use super::kernel_modules::{Finding, Inputs, Outcome, Severity, check};
 use super::module::{module_name_of, parse_module};
 use gaia_plan::OperationId;
@@ -106,6 +107,8 @@ struct ModuleFixture<'a> {
     vermagic: Option<&'a str>,
     depends: &'a str,
     firmware: &'a [&'a str],
+    /// `alias=` entries of `.modinfo` (device-table aliases).
+    aliases: &'a [&'a str],
     /// `(name, crc)` entries of `__versions`.
     versions: Vec<(&'a str, u64)>,
     /// Undefined symbols; `true` marks a weak one.
@@ -130,7 +133,9 @@ fn build_module(fixture: &ModuleFixture<'_>) -> Vec<u8> {
             .firmware
             .iter()
             .map(|firmware| format!("firmware={firmware}")),
-    ) {
+    )
+    .chain(fixture.aliases.iter().map(|alias| format!("alias={alias}")))
+    {
         modinfo.extend_from_slice(entry.as_bytes());
         modinfo.push(0);
     }
@@ -288,6 +293,8 @@ fn check_with(tree: &Tree, modules_dir: Option<&Path>, symvers: bool) -> Outcome
     let symvers_path = tree.path("build/linux-custom/Module.symvers");
     let modules_root = tree.path("target/lib/modules");
     let firmware = tree.path("target/lib/firmware");
+    let images = tree.path("images");
+    let rootfs = tree.path("target");
     check(&Inputs {
         kernel_image: &kernel,
         modules_root: &modules_root,
@@ -296,6 +303,15 @@ fn check_with(tree: &Tree, modules_dir: Option<&Path>, symvers: bool) -> Outcome
         symvers: symvers.then_some(symvers_path.as_path()),
         symvers_set: false,
         firmware_dir: Some(&firmware),
+        module_checks: true,
+        hardware: hardware::Sources {
+            build: "image-check-test",
+            entries: &[],
+            images_dir: &images,
+            rootfs: &rootfs,
+            assembly_trees: &[],
+            removed: &std::collections::HashSet::new(),
+        },
     })
 }
 
@@ -617,6 +633,8 @@ fn the_real_buildroot_output_checks_in_well_under_a_second() {
     let kernel = root.join("images/Image");
     let modules_root = root.join("target/lib/modules");
     let firmware = root.join("target/lib/firmware");
+    let images = root.join("images");
+    let rootfs = root.join("target");
     let started = std::time::Instant::now();
     let outcome = check(&Inputs {
         kernel_image: &kernel,
@@ -626,6 +644,15 @@ fn the_real_buildroot_output_checks_in_well_under_a_second() {
         symvers: symvers.as_deref(),
         symvers_set: false,
         firmware_dir: Some(&firmware),
+        module_checks: true,
+        hardware: hardware::Sources {
+            build: "raze",
+            entries: &[],
+            images_dir: &images,
+            rootfs: &rootfs,
+            assembly_trees: &[],
+            removed: &std::collections::HashSet::new(),
+        },
     });
     let elapsed = started.elapsed();
     eprintln!(
@@ -717,3 +744,7 @@ fn warnings_reach_the_run_through_the_image_result() {
     assert!(warnings[0].contains("updates/good.ko"), "{warnings:?}");
     assert!(!result.image_results[0].emit_report);
 }
+
+/// The hardware list checks, in their own file.
+#[path = "hardware_tests.rs"]
+mod hardware_tests;

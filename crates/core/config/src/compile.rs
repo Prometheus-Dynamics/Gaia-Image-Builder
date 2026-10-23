@@ -537,6 +537,20 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
             .unwrap_or_default(),
         assembly: compile_image_assembly(raw.image.assembly),
         layers,
+        hardware: raw
+            .image
+            .hardware
+            .into_iter()
+            .map(|hardware| gaia_spec::ImageHardwareSpec {
+                id: hardware.id,
+                kind: hardware.kind,
+                modules: hardware.modules,
+                compatible: hardware.compatible,
+                overlays: hardware.overlays,
+                files: hardware.files,
+                firmware: hardware.firmware,
+            })
+            .collect(),
     };
     spec.checkpoints.points = raw
         .checkpoints
