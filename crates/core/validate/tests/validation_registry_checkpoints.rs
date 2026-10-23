@@ -49,7 +49,9 @@ upload_policy = "off"
 "#,
     );
     assert!(
-        codes.iter().any(|code| code == "checkpoint_oci_verify_key_missing"),
+        codes
+            .iter()
+            .any(|code| code == "checkpoint_oci_verify_key_missing"),
         "{codes:?}"
     );
 }
@@ -110,7 +112,10 @@ upload_policy = "auto"
         .map(|diagnostic| diagnostic.code)
         .collect();
     assert!(
-        !codes.iter().any(|code| code.starts_with("checkpoint_oci") && *code != "checkpoint_oci_sign_key_missing"),
+        !codes
+            .iter()
+            .any(|code| code.starts_with("checkpoint_oci")
+                && *code != "checkpoint_oci_sign_key_missing"),
         "{codes:?}"
     );
     let oci = spec.checkpoints.points[0]
@@ -165,6 +170,9 @@ upload_policy = "off"
         "checkpoint_oci_sign_kind",
         "checkpoint_oci_trust",
     ] {
-        assert!(bad.iter().any(|code| code == expected), "{expected}: {bad:?}");
+        assert!(
+            bad.iter().any(|code| code == expected),
+            "{expected}: {bad:?}"
+        );
     }
 }

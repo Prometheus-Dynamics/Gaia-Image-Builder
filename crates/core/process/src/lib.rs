@@ -56,8 +56,8 @@ pub use pause::{ActiveClock, is_paused, paused_total, request_pause, request_res
 pub use registry::fake;
 pub use registry::{
     ARTIFACT_TYPE, EMPTY_CONFIG_MEDIA_TYPE, MANIFEST_MEDIA_TYPE, PulledEntry, PushOutcome,
-    created_epoch_seconds,
-    RegistryError, RegistryTarget, RemoteCache, SignatureKind, pack_entry, unpack_entry,
+    RegistryError, RegistryTarget, RemoteCache, SignatureKind, created_epoch_seconds, pack_entry,
+    unpack_entry,
 };
 use retention::{
     StreamDrainState, drain_stream_messages, drain_stream_messages_until_idle,

@@ -234,7 +234,8 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
     }
     let remote_flags = cache.remote || cache.checkpoint.is_some() || cache.keep_days.is_some();
     if (remote_flags || cache.prune) && args.command != AppCommand::Cache {
-        usage_errors.push("--prune, --remote, --checkpoint and --keep-days apply to 'cache'".into());
+        usage_errors
+            .push("--prune, --remote, --checkpoint and --keep-days apply to 'cache'".into());
     }
     if cache.prune && !cache.remote {
         usage_errors.push("'cache --prune' needs --remote (the registry); the local cache is removed with --remove or --clear".into());

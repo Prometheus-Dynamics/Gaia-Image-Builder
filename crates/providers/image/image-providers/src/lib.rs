@@ -27,8 +27,8 @@ use gaia_spec::{
     RetryBackoffStrategySpec,
 };
 pub use materialize::{finalize_temp_image_output, materialize_image_output};
-pub use retry::{AttemptFailure, RetryRun, retry_backoff_duration, run_with_retries};
 pub use registry_cache::{RegistryCacheUse, registry_cache_from_spec, resolve_setting};
+pub use retry::{AttemptFailure, RetryRun, retry_backoff_duration, run_with_retries};
 
 /// Records digests the caller already computed from the files' current bytes
 /// (see [`recorded_sha256`]), so no file is hashed again. Entries whose

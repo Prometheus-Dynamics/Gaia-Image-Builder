@@ -167,7 +167,10 @@ mod created_tests {
     #[test]
     fn created_times_round_trip_through_epoch_seconds() {
         assert_eq!(created_epoch_seconds("1970-01-02T00:00:00Z"), Some(86_400));
-        assert_eq!(created_epoch_seconds("2000-03-01T00:00:00Z"), Some(951_868_800));
+        assert_eq!(
+            created_epoch_seconds("2000-03-01T00:00:00Z"),
+            Some(951_868_800)
+        );
         let now = rfc3339_utc_now();
         let parsed = created_epoch_seconds(&now).expect("parses");
         let actual = SystemTime::now()

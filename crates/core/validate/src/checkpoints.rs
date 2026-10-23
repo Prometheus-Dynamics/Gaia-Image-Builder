@@ -22,7 +22,10 @@ fn validate_oci_backend(
     if backend.backend != "oci" {
         diagnostics.push(error(
             "checkpoint_oci_field_without_backend",
-            format!("checkpoint '{id}' sets registry fields but its backend is '{}', not 'oci'", backend.backend),
+            format!(
+                "checkpoint '{id}' sets registry fields but its backend is '{}', not 'oci'",
+                backend.backend
+            ),
             subject,
         ));
         return;
@@ -37,7 +40,9 @@ fn validate_oci_backend(
     if oci.repository.trim().is_empty() {
         diagnostics.push(error(
             "checkpoint_oci_repository_missing",
-            format!("checkpoint '{id}' (backend oci) needs a repository, such as <owner>/gaia-cache"),
+            format!(
+                "checkpoint '{id}' (backend oci) needs a repository, such as <owner>/gaia-cache"
+            ),
             subject.clone(),
         ));
     }
@@ -61,7 +66,10 @@ fn validate_oci_backend(
     }
     let pulls = checkpoint.use_policy != CheckpointPolicy::Off;
     let pushes = checkpoint.upload_policy != CheckpointPolicy::Off;
-    let verify_missing = oci.verify_key.as_deref().is_none_or(|key| key.trim().is_empty());
+    let verify_missing = oci
+        .verify_key
+        .as_deref()
+        .is_none_or(|key| key.trim().is_empty());
     if pulls && verify_missing && !oci.trust_unsigned() {
         diagnostics.push(error(
             "checkpoint_oci_verify_key_missing",
@@ -71,10 +79,17 @@ fn validate_oci_backend(
             subject.clone(),
         ));
     }
-    if pushes && oci.sign_key.as_deref().is_none_or(|key| key.trim().is_empty()) {
+    if pushes
+        && oci
+            .sign_key
+            .as_deref()
+            .is_none_or(|key| key.trim().is_empty())
+    {
         diagnostics.push(crate::diagnostics::warning(
             "checkpoint_oci_sign_key_missing",
-            format!("checkpoint '{id}' uploads to the registry but has no sign_key: nothing is pushed"),
+            format!(
+                "checkpoint '{id}' uploads to the registry but has no sign_key: nothing is pushed"
+            ),
             subject,
         ));
     }
@@ -89,7 +104,12 @@ pub(crate) fn validate_checkpoints(
         .checkpoints
         .points
         .iter()
-        .filter(|checkpoint| checkpoint.backend.as_ref().is_some_and(|backend| backend.backend == "oci"))
+        .filter(|checkpoint| {
+            checkpoint
+                .backend
+                .as_ref()
+                .is_some_and(|backend| backend.backend == "oci")
+        })
         .count();
     if oci_count > 1 {
         diagnostics.push(error(

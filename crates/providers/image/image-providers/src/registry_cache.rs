@@ -76,7 +76,12 @@ pub fn registry_cache_from_spec(
     let kind_text = oci
         .sign_kind
         .clone()
-        .or_else(|| spec.image.signing.as_ref().map(|signing| signing.kind.clone()))
+        .or_else(|| {
+            spec.image
+                .signing
+                .as_ref()
+                .map(|signing| signing.kind.clone())
+        })
         .unwrap_or_else(|| "minisign".to_string());
     let kind = SignatureKind::parse(&kind_text).ok_or_else(|| {
         format!("checkpoint '{id}' sign_kind '{kind_text}' is not minisign, gpg or cosign-blob")

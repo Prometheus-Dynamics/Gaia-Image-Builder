@@ -138,7 +138,11 @@ impl PackageCache {
 
     /// Pushes the packages `stored` (name and key) that this run stored, on
     /// scoped threads joined before this returns. Returns the run messages.
-    pub(crate) fn push_stored(&self, output_dir: &Path, stored: &[(String, String)]) -> Vec<String> {
+    pub(crate) fn push_stored(
+        &self,
+        output_dir: &Path,
+        stored: &[(String, String)],
+    ) -> Vec<String> {
         let Some(registry) = self.registry.as_ref().filter(|registry| registry.push) else {
             return Vec::new();
         };
@@ -194,7 +198,6 @@ impl PackageCache {
         }
         messages
     }
-
 }
 
 /// One stored package entry to push.
@@ -221,7 +224,10 @@ fn push_one(client: &RemoteCache, job: &PushJob) -> Result<PushOutcome, String> 
             let annotations = BTreeMap::from([
                 (PACKAGE_ANNOTATION.to_string(), job.name.clone()),
                 (STEM_ANNOTATION.to_string(), job.stem.clone()),
-                (RELOCATABLE_ANNOTATION.to_string(), job.relocatable.to_string()),
+                (
+                    RELOCATABLE_ANNOTATION.to_string(),
+                    job.relocatable.to_string(),
+                ),
             ]);
             client
                 .push(PACKAGE_KIND, &job.key, &blob, &annotations)

@@ -113,7 +113,8 @@ mod tests {
 
     #[test]
     fn the_created_time_of_a_manifest_is_read_from_its_annotations() {
-        let manifest = br#"{"annotations":{"org.opencontainers.image.created":"1970-01-02T00:00:00Z"}}"#;
+        let manifest =
+            br#"{"annotations":{"org.opencontainers.image.created":"1970-01-02T00:00:00Z"}}"#;
         assert_eq!(created_time(manifest), Some(86_400));
         assert_eq!(created_time(b"{}"), None);
         assert_eq!(created_time(b"not json"), None);
