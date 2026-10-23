@@ -723,6 +723,7 @@ mod host_tools_probe;
 mod interrupted_make;
 mod kernel_modules;
 mod layers;
+mod layers_erofs;
 mod layers_tar;
 mod make_progress;
 mod offline;

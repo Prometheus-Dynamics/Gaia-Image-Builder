@@ -17,6 +17,7 @@
 //! Each layer is keyed by a fingerprint of its members (path, kind, mode,
 //! owner, size and content digest or link target), so a layer whose members
 //! did not change is reused as it is: no tar, erofs or verity work.
+use super::layers_erofs::{VerityRecord, run_mkfs_erofs, uuid_from_hex, verity_format};
 use super::layers_tar::{
     Entry, EntryKind, LayerTarWriter, copy_data, normalize_path, read_entries,
 };
@@ -36,7 +37,7 @@ const ROOTFS_TAR: &str = "images/rootfs.tar";
 /// The file listing each package's installed paths (`package,./path`).
 const PACKAGE_FILE_LIST: &str = "build/packages-file-list.txt";
 /// The erofs block size and the verity block sizes (both 4 KiB).
-const VERITY_BLOCK: u64 = 4096;
+pub(crate) const VERITY_BLOCK: u64 = 4096;
 
 /// Where each rootfs path's selectors point, read once per build.
 struct Membership {
@@ -152,7 +153,7 @@ pub(crate) fn build_layers(
     Ok(messages)
 }
 
-fn runtime_error(message: impl Into<String>) -> ImageProviderError {
+pub(crate) fn runtime_error(message: impl Into<String>) -> ImageProviderError {
     ImageProviderError::new(ImageProviderErrorKind::RuntimeState, message)
 }
 
@@ -551,7 +552,12 @@ fn build_layer(request: LayerBuild<'_>) -> Result<BuiltLayer, ImageProviderError
     if layers.erofs {
         let erofs_path = layers_dir.join(format!("{name}.erofs"));
         let erofs_temp = layers_dir.join(format!(".{name}.erofs.tmp"));
-        run_mkfs_erofs(host_dir, &erofs_temp, &tar_path, &uuid_from_hex(&tar_sha256))?;
+        run_mkfs_erofs(
+            host_dir,
+            &erofs_temp,
+            &tar_path,
+            &uuid_from_hex(&tar_sha256),
+        )?;
         // The verity tree is appended before the image is hashed: the id is
         // the sha256 of the file as shipped.
         let verity = if layers.verity {
@@ -719,7 +725,7 @@ fn write_one<'a>(
     result.map_err(runtime_error)
 }
 
-fn file_len(path: &Path) -> Result<u64, ImageProviderError> {
+pub(crate) fn file_len(path: &Path) -> Result<u64, ImageProviderError> {
     fs::metadata(path)
         .map(|meta| meta.len())
         .map_err(|error| runtime_error(format!("failed to stat '{}': {error}", path.display())))
@@ -733,141 +739,6 @@ fn publish(temp: &Path, dest: &Path) -> Result<(), ImageProviderError> {
             temp.display(),
             dest.display()
         ))
-    })
-}
-
-/// A UUID derived from a hex digest, so the same layer gets the same UUID.
-fn uuid_from_hex(hex: &str) -> String {
-    let digits: String = hex.chars().take(32).collect();
-    format!(
-        "{}-{}-{}-{}-{}",
-        &digits[0..8],
-        &digits[8..12],
-        &digits[12..16],
-        &digits[16..20],
-        &digits[20..32]
-    )
-}
-
-/// `mkfs.erofs` over the layer tar. The tar's owners are kept (no
-/// `--all-root`), and times and xattrs are fixed, so the image is the same
-/// for the same tar.
-fn run_mkfs_erofs(
-    host_dir: &Path,
-    out: &Path,
-    tar: &Path,
-    uuid: &str,
-) -> Result<(), ImageProviderError> {
-    let mut command = Command::new(host_tool(host_dir, "mkfs.erofs"));
-    command
-        .args(["-T0", "-x-1", "-U", uuid, "--tar=f"])
-        .arg(out)
-        .arg(tar);
-    let _ = fs::remove_file(out);
-    let output = command.output().map_err(|error| {
-        runtime_error(format!(
-            "image.layers erofs needs mkfs.erofs in Buildroot's host dir or on PATH (set [image.layers] erofs = false to skip it): {error}"
-        ))
-    })?;
-    if !output.status.success() {
-        let _ = fs::remove_file(out);
-        return Err(runtime_error(format!(
-            "mkfs.erofs failed for layer tar '{}': {}",
-            tar.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-    Ok(())
-}
-
-/// A tool from Buildroot's host dir (`bin`, `sbin`, `usr/bin`, `usr/sbin`),
-/// as the assembly resolves its tools, else the bare name from PATH.
-fn host_tool(host_dir: &Path, name: &str) -> PathBuf {
-    ["bin", "sbin", "usr/bin", "usr/sbin"]
-        .iter()
-        .map(|dir| host_dir.join(dir).join(name))
-        .find(|candidate| candidate.is_file())
-        .unwrap_or_else(|| PathBuf::from(name))
-}
-
-/// What `veritysetup format` reports for an erofs image.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct VerityRecord {
-    pub(crate) root_hash: String,
-    pub(crate) hash_offset: u64,
-    pub(crate) data_blocks: u64,
-    pub(crate) salt: String,
-}
-
-/// A dm-verity tree appended to the erofs image at `path`, as the verity
-/// transform does: the image is padded to whole data blocks, and the tree
-/// starts at the next hash-block boundary.
-fn verity_format(
-    host_dir: &Path,
-    path: &Path,
-    name: &str,
-) -> Result<VerityRecord, ImageProviderError> {
-    let len = file_len(path)?;
-    let padded = len.div_ceil(VERITY_BLOCK) * VERITY_BLOCK;
-    let data_blocks = padded / VERITY_BLOCK;
-    let hash_offset = padded;
-    let salt = gaia_process::sha256_file(path)
-        .map_err(|error| runtime_error(format!("failed to hash '{}': {error}", path.display())))?;
-    let uuid = uuid_from_hex(&salt);
-    let mut file = fs::OpenOptions::new()
-        .append(true)
-        .open(path)
-        .map_err(|error| runtime_error(format!("failed to open '{}': {error}", path.display())))?;
-    let pad = vec![0u8; (padded - len) as usize];
-    file.write_all(&pad)
-        .map_err(|error| runtime_error(format!("failed to pad '{}': {error}", path.display())))?;
-    drop(file);
-    let output = Command::new(host_tool(host_dir, "veritysetup"))
-        .arg("format")
-        .arg(path)
-        .arg(path)
-        .arg("--hash=sha256")
-        .arg(format!("--data-block-size={VERITY_BLOCK}"))
-        .arg(format!("--hash-block-size={VERITY_BLOCK}"))
-        .arg(format!("--salt={salt}"))
-        .arg(format!("--uuid={uuid}"))
-        .arg(format!("--hash-offset={hash_offset}"))
-        .output()
-        .map_err(|error| {
-            runtime_error(format!(
-                "image.layers verity needs veritysetup in Buildroot's host dir or on PATH (or set verity = false): {error}"
-            ))
-        })?;
-    if !output.status.success() {
-        return Err(runtime_error(format!(
-            "veritysetup failed for layer '{name}': {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-    let report = String::from_utf8_lossy(&output.stdout).into_owned();
-    let root_hash = report_value(&report, "Root hash").ok_or_else(|| {
-        runtime_error(format!(
-            "veritysetup reported no root hash for layer '{name}'"
-        ))
-    })?;
-    let reported_blocks = report_value(&report, "Data blocks").unwrap_or_default();
-    if reported_blocks != data_blocks.to_string() {
-        return Err(runtime_error(format!(
-            "veritysetup covered {reported_blocks} data blocks for layer '{name}', expected {data_blocks}"
-        )));
-    }
-    Ok(VerityRecord {
-        root_hash,
-        hash_offset,
-        data_blocks,
-        salt,
-    })
-}
-
-fn report_value(report: &str, label: &str) -> Option<String> {
-    report.lines().find_map(|line| {
-        let (key, value) = line.split_once(':')?;
-        (key.trim() == label).then(|| value.trim().to_string())
     })
 }
 

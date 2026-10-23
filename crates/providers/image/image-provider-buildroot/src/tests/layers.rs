@@ -1,7 +1,8 @@
 //! `[image.layers`: membership by selector, overlaps, owners, the layer
 //! tars' contents, reuse of unchanged layers, and determinism.
 use crate::layers::layer_json;
-use crate::layers::{LAYERS_JSON, VerityRecord, build_layers};
+use crate::layers::{LAYERS_JSON, build_layers};
+use crate::layers_erofs::VerityRecord;
 use crate::layers_tar::{EntryKind, LayerTarWriter, read_entries};
 use gaia_spec::{
     ArtifactRef, ImageLayerSpec, ImageLayersSpec, InstallEntrySpec, ResolvedBuildSpec,
@@ -532,6 +533,10 @@ fn erofs_and_verity_end_to_end_when_the_tools_exist() {
             .arg(&erofs)
             .output()
             .expect("fsck.erofs");
-        assert!(fsck.status.success(), "{}", String::from_utf8_lossy(&fsck.stderr));
+        assert!(
+            fsck.status.success(),
+            "{}",
+            String::from_utf8_lossy(&fsck.stderr)
+        );
     }
 }
