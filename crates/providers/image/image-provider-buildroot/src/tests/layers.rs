@@ -500,6 +500,8 @@ fn erofs_and_verity_end_to_end_when_the_tools_exist() {
     let erofs = collect.join("layers/app.erofs");
     assert_eq!(app["id"], gaia_process::sha256_file(&erofs).expect("hash"));
     assert_eq!(app["erofs_sha256"], app["id"]);
+    assert_eq!(app["sha256"], app["id"]);
+    assert_eq!(app["size"], app["erofs_size"]);
     assert!(
         app["verity"]["root_hash"]
             .as_str()

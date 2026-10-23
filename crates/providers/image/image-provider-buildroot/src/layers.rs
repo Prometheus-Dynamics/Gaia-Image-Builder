@@ -626,6 +626,10 @@ pub(crate) fn layer_json(
         "erofs": erofs_file,
         "erofs_sha256": erofs_sha256,
         "erofs_size": erofs_size,
+        // The names Atlas's layered slot reads: the shipped file's size and
+        // sha256 (the same values as erofs_size and erofs_sha256).
+        "size": erofs_size,
+        "sha256": erofs_sha256,
         "verity": verity,
         "inputs": inputs,
     })
