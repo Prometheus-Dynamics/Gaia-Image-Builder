@@ -65,19 +65,11 @@ fn exec_command_in(
     exec.arg("exec").arg("-w").arg(&spec.current_dir);
     exec.args(user);
     for (key, value) in &spec.extra_env {
-        exec.arg("-e").arg(format!(
-            "{}={}",
-            key.to_string_lossy(),
-            value.to_string_lossy()
-        ));
+        crate::docker::push_docker_env(&mut exec, key, value);
     }
     for (key, value) in command.get_envs() {
         if let Some(value) = value {
-            exec.arg("-e").arg(format!(
-                "{}={}",
-                key.to_string_lossy(),
-                value.to_string_lossy()
-            ));
+            crate::docker::push_docker_env(&mut exec, key, value);
         }
     }
     exec.arg(container);

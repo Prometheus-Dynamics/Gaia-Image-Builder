@@ -366,6 +366,11 @@ pub fn mask(text: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
+/// Whether `text` holds a registered secret value.
+pub fn contains_secret(text: &str) -> bool {
+    matches!(mask(text), Cow::Owned(_))
+}
+
 /// [`mask`] for lines of text.
 pub fn mask_lines(lines: &[String]) -> Vec<String> {
     lines.iter().map(|line| mask(line).into_owned()).collect()

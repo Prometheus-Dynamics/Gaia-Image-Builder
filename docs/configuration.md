@@ -3239,7 +3239,9 @@ upload_policy = "auto"                 # off: no pushes; any other policy pushes
 
 Not implemented yet: the roots index (a build's list of keys, which would keep older entries that it still uses) and the per-kind hit and miss counts for `gaia cache stats`. Until the roots index exists, `--prune` looks only at age: it can remove an entry that an older build still uses. The next build of that package, artifact or layer rebuilds it and pushes it again.
 
-Gaps. Artifact keys are the plan's 64-bit reuse fingerprint, in 16 hex digits, not a sha256: a collision is possible in principle. Layer entries are pushed before the image's later steps (sizes, legal info and archive), so a failure of those steps still leaves them in the registry.
+Artifact keys are a sha256 over the build's fingerprint, the content of its sources (the git commit; a path source's file contents, wherever the checkout sits; an archive's bytes) and, recursively, the artifacts it depends on: an edited source never pulls an entry built from the old one, and two checkouts of the same content share entries.
+
+Gaps. Layer entries are pushed before the image's later steps (sizes, legal info and archive), so a failure of those steps still leaves them in the registry.
 
 ## Canonical tree path
 

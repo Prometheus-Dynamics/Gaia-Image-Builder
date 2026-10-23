@@ -163,8 +163,8 @@ mod state;
 mod tests;
 
 pub(crate) use command::*;
-pub use digest::path_source_fingerprint;
 pub(crate) use digest::*;
+pub use digest::{path_source_content_fingerprint, path_source_fingerprint};
 pub use download::{DOWNLOAD_CACHE_DIR, download_cache_path};
 pub(crate) use git_helpers::*;
 pub use git_helpers::{

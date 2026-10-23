@@ -140,19 +140,11 @@ pub fn docker_run_command(
     }
     wrapped.arg("-w").arg(&spec.current_dir);
     for (key, value) in &spec.extra_env {
-        wrapped.arg("-e").arg(format!(
-            "{}={}",
-            key.to_string_lossy(),
-            value.to_string_lossy()
-        ));
+        push_docker_env(&mut wrapped, key, value);
     }
     for (key, value) in command.get_envs() {
         if let Some(value) = value {
-            wrapped.arg("-e").arg(format!(
-                "{}={}",
-                key.to_string_lossy(),
-                value.to_string_lossy()
-            ));
+            push_docker_env(&mut wrapped, key, value);
         }
     }
     wrapped.arg(&spec.image);
@@ -162,6 +154,26 @@ pub fn docker_run_command(
 }
 
 /// A fresh path for `docker run --cidfile`; docker refuses an existing file.
+/// Passes `key=value` to the container. A value that holds a secret goes as
+/// `-e KEY` with the value in the docker client's own environment, which
+/// docker reads it from, so it is never on a command line (visible to every
+/// process on the host); other values stay `-e KEY=VALUE`.
+pub(crate) fn push_docker_env(
+    docker: &mut Command,
+    key: &std::ffi::OsStr,
+    value: &std::ffi::OsStr,
+) {
+    if crate::secrets::contains_secret(&value.to_string_lossy()) {
+        docker.arg("-e").arg(key).env(key, value);
+    } else {
+        docker.arg("-e").arg(format!(
+            "{}={}",
+            key.to_string_lossy(),
+            value.to_string_lossy()
+        ));
+    }
+}
+
 fn new_container_id_file() -> PathBuf {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -510,6 +522,57 @@ mod tests {
     }
     use std::ffi::OsStr;
     use std::fs;
+
+    #[test]
+    fn a_secret_env_value_never_appears_on_the_docker_command_line() {
+        let scratch = TempDir::new("gaia-docker-secret");
+        let workspace = scratch.join("ws");
+        fs::create_dir_all(&workspace).expect("workspace");
+        let secret_file = scratch.join("token");
+        fs::write(&secret_file, "s3cr3t-docker-token\n").expect("secret file");
+        let mut permissions = fs::metadata(&secret_file).expect("meta").permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o600);
+        fs::set_permissions(&secret_file, permissions).expect("chmod");
+        crate::secrets::install(
+            vec![crate::secrets::SecretDef {
+                name: "docker_test_token".into(),
+                source: crate::secrets::SecretSource::File(secret_file),
+                required: true,
+            }],
+            "***",
+        );
+        let value = crate::secrets::resolve("docker_test_token")
+            .expect("resolve")
+            .expect("value");
+
+        let mut command = Command::new("build-tool");
+        command
+            .current_dir(&workspace)
+            .env("API_TOKEN", value.expose())
+            .env("PLAIN", "visible");
+        let spec = DockerRunSpec::discovered_mounts("image:latest", &workspace, &command);
+        let wrapped = docker_run_command(&command, &spec).expect("docker command");
+        let args: Vec<String> = wrapped
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            !args.iter().any(|arg| arg.contains("s3cr3t-docker-token")),
+            "{args:?}"
+        );
+        assert!(
+            args.windows(2)
+                .any(|window| window[0] == "-e" && window[1] == "API_TOKEN")
+        );
+        assert!(
+            args.windows(2)
+                .any(|window| window[0] == "-e" && window[1] == "PLAIN=visible")
+        );
+        assert!(
+            wrapped.get_envs().any(|(key, value)| key == "API_TOKEN"
+                && value == Some(OsStr::new("s3cr3t-docker-token")))
+        );
+    }
 
     #[test]
     fn docker_run_command_wraps_program_with_mounts_env_and_workdir() {

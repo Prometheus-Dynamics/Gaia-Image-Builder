@@ -28,7 +28,7 @@ pub use operations::{
 pub use rebuild::{REBUILD_REQUESTED, RebuildRequest};
 pub use reuse::{
     FINGERPRINT_SCHEME_CHANGED, operation_content_signature, operation_input_signature,
-    operation_output_signature, spec_fingerprint,
+    operation_output_signature, source_content_identity, spec_fingerprint,
 };
 pub use reuse_details::{fingerprint_change_detail, operation_components, recorded_fingerprint};
 pub use reuse_explain::{InvalidationSummary, invalidation_summary};

@@ -208,3 +208,76 @@ fn without_a_sign_key_nothing_is_pushed() {
         "no request reached the registry"
     );
 }
+
+#[test]
+fn the_key_follows_the_content_of_the_artifacts_source() {
+    let dir = TempDir::new("artifact-registry-key-source");
+    let root = dir.path().join("ws");
+    let source_dir = root.join("src-tree");
+    fs::create_dir_all(&source_dir).expect("source dir");
+    fs::write(source_dir.join("main.rs"), "fn main() {}\n").expect("source file");
+    let mut spec = spec_in(&root);
+    spec.sources.push(gaia_spec::SourceSpec::new(
+        "app-src",
+        gaia_spec::SourceDefinition::Path(gaia_spec::PathSourceSpec {
+            path: source_dir.display().to_string(),
+            identity_ignore: Vec::new(),
+            refresh_policy: gaia_spec::SourceRefreshPolicySpec::Never,
+            pin_policy: gaia_spec::SourcePinPolicySpec::Locked,
+        }),
+    ));
+    spec.artifacts[0].source = Some(gaia_spec::SourceRef::new("app-src"));
+    let artifact = spec.artifacts[0].clone();
+
+    let first = registry_key(&spec, &artifact);
+    assert_eq!(first.len(), 64);
+    assert!(first.chars().all(|c| c.is_ascii_hexdigit()));
+    assert_eq!(
+        registry_key(&spec, &artifact),
+        first,
+        "stable for the same content"
+    );
+
+    // The build's config is unchanged; only the source's bytes are not.
+    fs::write(
+        source_dir.join("main.rs"),
+        "fn main() { println!(\"changed\"); }\n",
+    )
+    .expect("edit source");
+    let second = registry_key(&spec, &artifact);
+    assert_ne!(second, first, "a source edit must change the key");
+
+    fs::write(source_dir.join("main.rs"), "fn main() {}\n").expect("restore source");
+    assert_eq!(
+        registry_key(&spec, &artifact),
+        first,
+        "the same content gives the same key"
+    );
+}
+
+#[test]
+fn the_same_source_content_in_another_checkout_gives_the_same_key() {
+    let dir = TempDir::new("artifact-registry-key-checkouts");
+    let key_in = |root: &Path| {
+        let source_dir = root.join("src-tree");
+        fs::create_dir_all(&source_dir).expect("source dir");
+        fs::write(source_dir.join("main.rs"), "fn main() {}\n").expect("source file");
+        let mut spec = spec_in(root);
+        spec.sources.push(gaia_spec::SourceSpec::new(
+            "app-src",
+            gaia_spec::SourceDefinition::Path(gaia_spec::PathSourceSpec {
+                path: source_dir.display().to_string(),
+                identity_ignore: Vec::new(),
+                refresh_policy: gaia_spec::SourceRefreshPolicySpec::Never,
+                pin_policy: gaia_spec::SourcePinPolicySpec::Locked,
+            }),
+        ));
+        spec.artifacts[0].source = Some(gaia_spec::SourceRef::new("app-src"));
+        let artifact = spec.artifacts[0].clone();
+        registry_key(&spec, &artifact)
+    };
+    assert_eq!(
+        key_in(&dir.path().join("checkout-a")),
+        key_in(&dir.path().join("checkout-b"))
+    );
+}

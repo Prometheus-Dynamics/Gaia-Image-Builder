@@ -103,6 +103,26 @@ pub fn path_source_fingerprint(
     root: &Path,
     identity_ignore: &[String],
 ) -> String {
+    path_source_fingerprint_with(workspace, root, identity_ignore, true)
+}
+
+/// [`path_source_fingerprint`] without the root's location: the same files
+/// at another path give the same value. For keys shared between machines and
+/// checkouts (the registry cache); local reuse keeps the located one.
+pub fn path_source_content_fingerprint(
+    workspace: &WorkspaceSpec,
+    root: &Path,
+    identity_ignore: &[String],
+) -> String {
+    path_source_fingerprint_with(workspace, root, identity_ignore, false)
+}
+
+fn path_source_fingerprint_with(
+    workspace: &WorkspaceSpec,
+    root: &Path,
+    identity_ignore: &[String],
+    located: bool,
+) -> String {
     let owned = [&workspace.build_dir, &workspace.out_dir]
         .into_iter()
         .map(|value| {
@@ -125,7 +145,9 @@ pub fn path_source_fingerprint(
     };
     let root = normalize_existing_path(root);
     let mut fingerprint = Fingerprint::new("path-source");
-    fingerprint.str(&root.display().to_string());
+    if located {
+        fingerprint.str(&root.display().to_string());
+    }
     match git_listed_files(&root) {
         // Inside a git work tree, git already knows which files matter: the
         // tracked and untracked-but-not-ignored ones. Ignored build output

@@ -412,6 +412,36 @@ pub(crate) fn source_backend_signature(
     }
 }
 
+/// What a source's content is, independent of where it sits: the commit of a
+/// git source, the file contents of a path source, the bytes of an archive,
+/// the definition of a download. Equal on every machine and checkout for
+/// equal content; the registry cache keys builds by it.
+pub fn source_content_identity(spec: &ResolvedBuildSpec, source: &gaia_spec::SourceSpec) -> String {
+    match &source.definition {
+        SourceDefinition::Git(git) => format!(
+            "git:{}|subdir:{}",
+            git_source_state_signature(spec, git),
+            git.subdir.as_deref().unwrap_or("")
+        ),
+        SourceDefinition::Archive(archive) => format!(
+            "archive:{}",
+            content::content_path_signature(&resolve_workspace_path(spec, &archive.path))
+        ),
+        SourceDefinition::Download(download) => format!(
+            "download:{}",
+            serde_json::to_string(download).unwrap_or_default()
+        ),
+        SourceDefinition::Path(path) => format!(
+            "path:{}",
+            gaia_source_providers::path_source_content_fingerprint(
+                &spec.workspace,
+                &resolve_workspace_path(spec, &path.path),
+                &path.identity_ignore,
+            )
+        ),
+    }
+}
+
 /// Content hash of a Dockerfile-built execution image, so editing the
 /// Dockerfile or its context rebuilds the artifact.
 pub(crate) fn artifact_docker_build_signature(

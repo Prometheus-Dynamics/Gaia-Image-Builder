@@ -6,6 +6,9 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- Registry checkpoints: an artifact's registry key is now a sha256 over its build fingerprint, its sources' content (git commit, path-source file contents independent of location, archive bytes) and its dependencies' keys. Before, the key was the build's 64-bit fingerprint alone, which does not carry source content: after a source edit a build could pull the entry built from the old source. Found in the live local-registry test. Entries pushed under the old keys are no longer used.
+- Docker-backed builds pass an environment value that holds a secret as `-e KEY` with the value in the docker client's environment, never on the command line.
+
 - Registry checkpoints: a refused (unverifiable) entry and a failed pull or push are `WARN` lines in the run instead of only operation-log lines; a push overwrites a tag whose entry does not verify instead of skipping it, so a poisoned entry is replaced by the next signed build; an artifact restored from the registry counts as reused. Found in a live test against a local `registry:2` with gpg signing.
 
 - `[image.layers] erofs_options` (and per layer, `[image.layers.<name>] erofs_options`) sets the layers' `mkfs.erofs` options; the default is LZMA level 6, 256 KiB clusters, all-fragments, dedupe and ztailpacking. Layer erofs images were uncompressed before. They are now made from the layer tar unpacked under `fakeroot` instead of `mkfs.erofs --tar`, which loses file data with `-Eall-fragments` (erofs-utils 1.8.10).

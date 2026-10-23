@@ -11,7 +11,8 @@
 //! An entry is `<id>.json` (a record: artifact id, key, whether the output is a
 //! directory, whether a separate state file came with it) and `<id>/output`
 //! (the output file or tree) with `<id>/state` for a file output's state.
-use std::collections::BTreeMap;
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -35,13 +36,73 @@ pub(crate) struct Restore {
     pub(crate) messages: Vec<String>,
 }
 
-/// The registry key of `artifact`: its operation fingerprint (the plan's key
-/// for the build), as 16 lower-case hex digits.
+/// The registry key of `artifact`: a sha256 (64 lower-case hex digits) over
+/// its build's operation fingerprint, its sources' content identities (the
+/// git commit, the path tree's file contents, wherever they sit) and,
+/// recursively, the artifacts it depends on. The build's own fingerprint does
+/// not carry its sources' content (the plan rebuilds it because its source
+/// re-ran), so a key without them would pull an entry built from other
+/// source content; and the sources' plan fingerprints include their location,
+/// so they would keep two checkouts of the same content apart.
 pub(crate) fn registry_key(spec: &ResolvedBuildSpec, artifact: &ArtifactSpec) -> String {
-    let kind = OperationKind::BuildArtifact {
+    let mut hasher = Sha256::new();
+    hasher.update(b"gaia-artifact-key-v2\n");
+    hash_upstream(spec, artifact, &mut hasher, &mut BTreeSet::new());
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// Feeds `artifact`'s fingerprint, its sources' and (once each) its
+/// dependencies' into `hasher`, in a fixed order.
+fn hash_upstream(
+    spec: &ResolvedBuildSpec,
+    artifact: &ArtifactSpec,
+    hasher: &mut Sha256,
+    seen: &mut BTreeSet<String>,
+) {
+    if !seen.insert(artifact.id.as_str().to_string()) {
+        return;
+    }
+    let build = OperationKind::BuildArtifact {
         artifact_id: artifact.id.clone(),
     };
-    format!("{:016x}", operation_fingerprint(spec, &kind))
+    hasher.update(
+        format!(
+            "artifact {} {:016x}\n",
+            artifact.id.as_str(),
+            operation_fingerprint(spec, &build)
+        )
+        .as_bytes(),
+    );
+    let mut sources: Vec<&gaia_spec::SourceId> = artifact
+        .source
+        .iter()
+        .map(|source| &source.id)
+        .chain(&artifact.extra_sources)
+        .collect();
+    sources.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    sources.dedup();
+    for source_id in sources {
+        let identity = spec
+            .sources
+            .iter()
+            .find(|source| source.id == *source_id)
+            .map(|source| gaia_plan::source_content_identity(spec, source))
+            .unwrap_or_else(|| "undefined".into());
+        hasher.update(format!("source {} {identity}\n", source_id.as_str()).as_bytes());
+    }
+    for dependency in &artifact.dependencies {
+        if let Some(upstream) = spec
+            .artifacts
+            .iter()
+            .find(|candidate| candidate.id == dependency.id)
+        {
+            hash_upstream(spec, upstream, hasher, seen);
+        }
+    }
 }
 
 /// Restores `artifact` from the registry when its entry verifies. Called before
