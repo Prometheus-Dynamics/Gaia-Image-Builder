@@ -137,7 +137,9 @@ pub enum PushOutcome {
     /// The key tag already exists: nothing was uploaded.
     AlreadyPresent,
     /// The entry was uploaded and signed; `digest` is the manifest digest.
-    Pushed { digest: String },
+    /// `replaced` is true when the tag held an entry whose signature did not
+    /// verify, which this push overwrote.
+    Pushed { digest: String, replaced: bool },
 }
 
 /// Why a registry operation failed. `Display` never includes tokens or keys.
@@ -280,7 +282,10 @@ impl RemoteCache {
 
     /// Pushes the entry `kind`/`key` from the tar.zst at `blob_path`. `annotations`
     /// are merged into the manifest; `kind` and `key` always win over them.
-    /// Nothing is sent when no sign key is set or the key tag already exists.
+    /// Nothing is sent when no sign key is set, or when the key tag already
+    /// holds an entry that verifies. A tag whose entry does not verify (a
+    /// poisoned or corrupt entry) is overwritten, so a refused entry does not
+    /// stay in the registry; without a verify key the existing tag is kept.
     pub fn push(
         &self,
         kind: &str,
@@ -293,9 +298,26 @@ impl RemoteCache {
         if self.target.sign_key.is_none() {
             return Ok(PushOutcome::Disabled);
         }
-        if self.fetch_manifest(&image, key, "HEAD")?.is_some() {
-            return Ok(PushOutcome::AlreadyPresent);
-        }
+        let replaced = match self.target.verify_key {
+            None => {
+                if self.fetch_manifest(&image, key, "HEAD")?.is_some() {
+                    return Ok(PushOutcome::AlreadyPresent);
+                }
+                false
+            }
+            Some(_) => match self.fetch_manifest(&image, key, "GET")? {
+                None => false,
+                Some(existing) => {
+                    let dir = verify_scratch_dir()?;
+                    let verified = self.verify_manifest(&image, key, &existing.body, &dir);
+                    let _ = std::fs::remove_dir_all(&dir);
+                    if verified.is_ok() {
+                        return Ok(PushOutcome::AlreadyPresent);
+                    }
+                    true
+                }
+            },
+        };
         let blob = describe_file(blob_path, ARTIFACT_TYPE)?;
         let manifest = manifest::build(&entry_annotations(kind, key, annotations), &blob);
         let manifest_digest = manifest::digest_of(&manifest);
@@ -323,6 +345,7 @@ impl RemoteCache {
         self.put_manifest(&image, &format!("{key}.sig"), &signature_manifest)?;
         Ok(PushOutcome::Pushed {
             digest: manifest_digest,
+            replaced,
         })
     }
 
@@ -702,3 +725,17 @@ fn io_error(context: &str, error: std::io::Error) -> RegistryError {
 #[path = "names.rs"]
 mod names;
 use names::*;
+
+/// A fresh scratch directory for checking an existing tag's signature.
+fn verify_scratch_dir() -> Result<PathBuf, RegistryError> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_nanos())
+        .unwrap_or_default();
+    let dir = std::env::temp_dir().join(format!(
+        "gaia-registry-verify-{}-{nanos}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).map_err(|error| io_error("creating a verify dir", error))?;
+    Ok(dir)
+}

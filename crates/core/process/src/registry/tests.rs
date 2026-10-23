@@ -81,7 +81,10 @@ fn push_then_pull_round_trips_bytes_annotations_and_manifest() {
     let client = cache(registry.addr(), &tools, true, true);
     let blob = make_entry(work.path(), "pkg");
 
-    let PushOutcome::Pushed { digest } = client
+    let PushOutcome::Pushed {
+        digest,
+        replaced: false,
+    } = client
         .push("package", KEY, &blob, &extra_annotations())
         .expect("push")
     else {
@@ -142,6 +145,49 @@ fn tampered_manifest_fails_the_signature_and_returns_no_entry() {
     assert!(
         matches!(result, Err(RegistryError::Signature(_))),
         "{result:?}"
+    );
+}
+
+#[test]
+fn a_push_replaces_a_tag_whose_signature_does_not_verify() {
+    let work = TempDir::new("registry-replace-poisoned");
+    let tools = stub_tools(&work);
+    let registry = FakeRegistry::start(None);
+    let client = cache(registry.addr(), &tools, true, true);
+    let blob = make_entry(work.path(), "pkg");
+    client
+        .push("package", KEY, &blob, &BTreeMap::new())
+        .expect("push");
+    // A verified entry is left alone.
+    assert_eq!(
+        client
+            .push("package", KEY, &blob, &BTreeMap::new())
+            .expect("second push"),
+        PushOutcome::AlreadyPresent
+    );
+    // A poisoned one is replaced, and pulls verify again afterwards.
+    registry
+        .state()
+        .manifests
+        .get_mut(IMAGE)
+        .expect("image")
+        .get_mut(KEY)
+        .expect("tag")
+        .push(b' ');
+    let outcome = client
+        .push("package", KEY, &blob, &BTreeMap::new())
+        .expect("replacing push");
+    assert!(
+        matches!(outcome, PushOutcome::Pushed { replaced: true, .. }),
+        "{outcome:?}"
+    );
+    let dest = work.join("pulled");
+    fs::create_dir_all(&dest).expect("dest");
+    assert!(
+        client
+            .pull("package", KEY, &dest)
+            .expect("pull verifies")
+            .is_some()
     );
 }
 
@@ -251,10 +297,12 @@ fn existing_key_is_already_present_without_uploads() {
         .push("package", KEY, &blob, &BTreeMap::new())
         .expect("second push");
     assert_eq!(outcome, PushOutcome::AlreadyPresent);
+    // The existing entry is read and verified, and nothing is uploaded.
     let state = registry.state();
     let sent = &state.requests[before..];
     assert!(
-        sent.iter().all(|request| request.starts_with("HEAD ")),
+        sent.iter()
+            .all(|request| request.starts_with("HEAD ") || request.starts_with("GET ")),
         "{sent:?}"
     );
 }
@@ -344,7 +392,7 @@ fn list_tags_manifest_digest_get_and_delete_manifest() {
     let registry = FakeRegistry::start(None);
     let client = cache(registry.addr(), &tools, true, true);
     let blob = make_entry(work.path(), "pkg");
-    let PushOutcome::Pushed { digest } = client
+    let PushOutcome::Pushed { digest, .. } = client
         .push("package", KEY, &blob, &BTreeMap::new())
         .expect("push")
     else {

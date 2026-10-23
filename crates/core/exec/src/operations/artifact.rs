@@ -109,6 +109,28 @@ fn ensure_execution_image(
     })
 }
 
+/// The result of an artifact restored from the registry: reused (from the
+/// registry), so the run reports it as reused rather than built.
+fn restored_from_registry(
+    operation_id: &OperationId,
+    artifact_id: &ArtifactId,
+    messages: Vec<String>,
+    contract: &ArtifactExecutionContract,
+) -> OperationExecutionResult {
+    let mut result = success_from_messages(
+        operation_id.clone(),
+        messages,
+        format!(
+            "restored artifact '{}' from the registry",
+            artifact_id.as_str()
+        ),
+        RollbackDomain::Artifacts,
+        artifact_cleanup_paths(contract),
+    );
+    result.reused_source = Some("the registry".into());
+    result
+}
+
 /// Turns a provider result into the operation result, exactly as a single
 /// build does.
 fn artifact_result(
@@ -179,15 +201,11 @@ pub(crate) fn execute_artifact_operation(
     let tail = LogTail::for_spec(spec);
     let restore = registry::restore(spec, prepared.artifact);
     if restore.restored {
-        return success_from_messages(
-            operation_id.clone(),
+        return restored_from_registry(
+            operation_id,
+            artifact_id,
             restore.messages,
-            format!(
-                "restored artifact '{}' from the registry",
-                artifact_id.as_str()
-            ),
-            RollbackDomain::Artifacts,
-            artifact_cleanup_paths(&prepared.contract),
+            &prepared.contract,
         );
     }
     if let Err(failure) =
@@ -272,15 +290,11 @@ pub(crate) fn dispatch_artifact_batch(
             Ok(mut prepared) => {
                 let restore = registry::restore(spec, prepared.artifact);
                 if restore.restored {
-                    results[position] = Some(success_from_messages(
-                        operation.id.clone(),
+                    results[position] = Some(restored_from_registry(
+                        &operation.id,
+                        artifact_id,
                         restore.messages,
-                        format!(
-                            "restored artifact '{}' from the registry",
-                            artifact_id.as_str()
-                        ),
-                        RollbackDomain::Artifacts,
-                        artifact_cleanup_paths(&prepared.contract),
+                        &prepared.contract,
                     ));
                     continue;
                 }

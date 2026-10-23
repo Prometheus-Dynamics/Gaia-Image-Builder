@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- Registry checkpoints: a refused (unverifiable) entry and a failed pull or push are `WARN` lines in the run instead of only operation-log lines; a push overwrites a tag whose entry does not verify instead of skipping it, so a poisoned entry is replaced by the next signed build; an artifact restored from the registry counts as reused. Found in a live test against a local `registry:2` with gpg signing.
+
 - `[image.layers] erofs_options` (and per layer, `[image.layers.<name>] erofs_options`) sets the layers' `mkfs.erofs` options; the default is LZMA level 6, 256 KiB clusters, all-fragments, dedupe and ztailpacking. Layer erofs images were uncompressed before. They are now made from the layer tar unpacked under `fakeroot` instead of `mkfs.erofs --tar`, which loses file data with `-Eall-fragments` (erofs-utils 1.8.10).
 
 - The Buildroot provider's `.gaia-package-durations` (the progress estimate's per-package times) drops packages the tree no longer builds, so it describes only the current config.

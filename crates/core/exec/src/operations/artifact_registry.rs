@@ -105,12 +105,15 @@ fn restore_with(
             restored: false,
             messages: Vec::new(),
         },
-        Err(reason) => Restore {
-            restored: false,
-            messages: vec![format!(
-                "registry pull of artifact '{id}' ({key}): {reason}"
-            )],
-        },
+        Err(reason) => {
+            tracing::warn!(artifact = id, key = %key, "registry pull: {reason}");
+            Restore {
+                restored: false,
+                messages: vec![format!(
+                    "registry pull of artifact '{id}' ({key}): {reason}"
+                )],
+            }
+        }
     }
 }
 
@@ -142,14 +145,35 @@ fn publish_with(
     let key = registry_key(spec, artifact);
     let output = output_path(spec, artifact);
     match push(&registry.client(), artifact, &stem, &key, &output) {
-        Ok(PushOutcome::Pushed { .. }) => vec![format!(
-            "artifact '{id}': pushed to the registry checkpoint '{}' ({key})",
-            registry.checkpoint_id
-        )],
+        Ok(PushOutcome::Pushed { replaced, .. }) => {
+            if replaced {
+                tracing::warn!(
+                    artifact = id,
+                    key = %key,
+                    "registry entry whose signature did not verify was replaced with this build's signed entry"
+                );
+            }
+            vec![format!(
+                "artifact '{id}': pushed to the registry checkpoint '{}' ({key}){}",
+                registry.checkpoint_id,
+                if replaced {
+                    ", replacing an entry whose signature did not verify"
+                } else {
+                    ""
+                }
+            )]
+        }
         Ok(PushOutcome::AlreadyPresent | PushOutcome::Disabled) => Vec::new(),
-        Err(reason) => vec![format!(
-            "registry push of artifact '{id}' failed (the build is not affected): {reason}"
-        )],
+        Err(reason) => {
+            tracing::warn!(
+                artifact = id,
+                key = %key,
+                "registry push failed (the build is not affected): {reason}"
+            );
+            vec![format!(
+                "registry push of artifact '{id}' failed (the build is not affected): {reason}"
+            )]
+        }
     }
 }
 
