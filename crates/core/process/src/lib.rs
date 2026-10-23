@@ -29,6 +29,7 @@ mod docker_context;
 mod docker_reuse;
 mod git;
 mod pause;
+mod registry;
 mod retention;
 mod step_time;
 mod stream;
@@ -51,6 +52,13 @@ pub use docker_reuse::{
 };
 pub use git::git_command;
 pub use pause::{ActiveClock, is_paused, paused_total, request_pause, request_resume};
+#[cfg(any(test, feature = "test-support"))]
+pub use registry::fake;
+pub use registry::{
+    ARTIFACT_TYPE, EMPTY_CONFIG_MEDIA_TYPE, MANIFEST_MEDIA_TYPE, PulledEntry, PushOutcome,
+    created_epoch_seconds,
+    RegistryError, RegistryTarget, RemoteCache, SignatureKind, pack_entry, unpack_entry,
+};
 use retention::{
     StreamDrainState, drain_stream_messages, drain_stream_messages_until_idle,
     wait_for_stream_message,

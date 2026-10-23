@@ -45,6 +45,7 @@ use gaia_spec::{
     BuildModeSpec, BuildPolicySpec, BuildrootCcachePolicySpec, BuildrootExpectedImageFormatSpec,
     BuildrootExpectedImageSpec, BuildrootExternalTreeModeSpec, BuildrootImageSpec,
     CheckpointAnchorRef, CheckpointBackendRef, CheckpointId, CheckpointPointSpec, CheckpointPolicy,
+    OciCheckpointSpec,
     CleanProfileSpec, CleanSpec, CommandProviderPolicySpec,
     DEFAULT_ARCHIVE_PROVIDER_TIMEOUT_SECONDS, DEFAULT_BUILDROOT_PROVIDER_TIMEOUT_SECONDS,
     DEFAULT_DOWNLOAD_PROVIDER_TIMEOUT_SECONDS, DEFAULT_GIT_PROVIDER_TIMEOUT_SECONDS,
@@ -163,6 +164,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
         execution: ExecutionPolicySpec {
             jobs: raw.execution.jobs,
             offline: raw.execution.offline,
+            canonical_tree: raw.execution.canonical_tree,
             prefetch: false,
             docker: compile_docker_execution(&raw.execution, raw.providers.docker.reuse_container),
             output_retention: compile_output_retention(&raw.execution.output_retention),

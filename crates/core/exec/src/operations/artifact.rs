@@ -7,6 +7,10 @@ use gaia_artifact_providers::{
 };
 use gaia_spec::{ArtifactId, ArtifactSpec};
 
+/// The registry cache of artifact outputs (restore before a build, publish after).
+#[path = "artifact_registry.rs"]
+mod registry;
+
 struct PreparedArtifact<'env> {
     artifact: &'env ArtifactSpec,
     provider: &'env dyn ArtifactProvider,
@@ -114,15 +118,27 @@ fn artifact_result(
     contract: &ArtifactExecutionContract,
     tail: &LogTail,
     result: Result<Vec<String>, ArtifactProviderError>,
+    carried: Vec<String>,
 ) -> OperationExecutionResult {
     match result {
-        Ok(messages) => success_from_messages(
-            operation_id.clone(),
-            messages,
-            format!("built artifact '{}'", artifact_id.as_str()),
-            RollbackDomain::Artifacts,
-            artifact_cleanup_paths(contract),
-        ),
+        Ok(provider_messages) => {
+            let mut messages = carried;
+            messages.extend(provider_messages);
+            if let Some(artifact) = spec
+                .artifacts
+                .iter()
+                .find(|artifact| artifact.id == *artifact_id)
+            {
+                messages.extend(registry::publish(spec, artifact));
+            }
+            success_from_messages(
+                operation_id.clone(),
+                messages,
+                format!("built artifact '{}'", artifact_id.as_str()),
+                RollbackDomain::Artifacts,
+                artifact_cleanup_paths(contract),
+            )
+        }
         Err(message) if matches!(message.kind, ArtifactProviderErrorKind::Cancelled) => {
             cancelled_with_cleanup(
                 operation_id.clone(),
@@ -161,6 +177,19 @@ pub(crate) fn execute_artifact_operation(
         Err(failure) => return *failure,
     };
     let tail = LogTail::for_spec(spec);
+    let restore = registry::restore(spec, prepared.artifact);
+    if restore.restored {
+        return success_from_messages(
+            operation_id.clone(),
+            restore.messages,
+            format!(
+                "restored artifact '{}' from the registry",
+                artifact_id.as_str()
+            ),
+            RollbackDomain::Artifacts,
+            artifact_cleanup_paths(&prepared.contract),
+        );
+    }
     if let Err(failure) =
         ensure_execution_image(operation_id, spec, &mut prepared.contract, &tail, context)
     {
@@ -180,6 +209,7 @@ pub(crate) fn execute_artifact_operation(
         &prepared.contract,
         &tail,
         result,
+        restore.messages,
     )
 }
 
@@ -224,6 +254,8 @@ pub(crate) fn dispatch_artifact_batch(
     context: &DispatchContext,
 ) -> Vec<OperationExecutionResult> {
     let mut results = operations.iter().map(|_| None).collect::<Vec<_>>();
+    // Registry messages of each member, reported with its build result.
+    let mut carried: Vec<Vec<String>> = operations.iter().map(|_| Vec::new()).collect();
     let mut members = Vec::new();
     for (position, operation) in operations.iter().enumerate() {
         let OperationKind::BuildArtifact { artifact_id } = &operation.kind else {
@@ -238,6 +270,21 @@ pub(crate) fn dispatch_artifact_batch(
             context.job_budget,
         ) {
             Ok(mut prepared) => {
+                let restore = registry::restore(spec, prepared.artifact);
+                if restore.restored {
+                    results[position] = Some(success_from_messages(
+                        operation.id.clone(),
+                        restore.messages,
+                        format!(
+                            "restored artifact '{}' from the registry",
+                            artifact_id.as_str()
+                        ),
+                        RollbackDomain::Artifacts,
+                        artifact_cleanup_paths(&prepared.contract),
+                    ));
+                    continue;
+                }
+                carried[position] = restore.messages;
                 let tail = LogTail::for_spec(spec);
                 match ensure_execution_image(
                     &operation.id,
@@ -292,6 +339,7 @@ pub(crate) fn dispatch_artifact_batch(
                 &prepared.contract,
                 tail,
                 result,
+                std::mem::take(&mut carried[*position]),
             ));
         }
     }

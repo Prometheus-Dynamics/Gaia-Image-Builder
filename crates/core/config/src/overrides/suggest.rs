@@ -49,6 +49,8 @@ const LITERAL_KEYS: &[&str] = &[
     "policy.execution.jobs",
     "execution.offline",
     "policy.execution.offline",
+    "execution.canonical_tree",
+    "policy.execution.canonical_tree",
     "execution.docker.enabled",
     "policy.execution.docker.enabled",
     "execution.docker.image",

@@ -4,6 +4,7 @@ mod content_digests;
 mod digest_batch;
 mod materialize;
 mod preview;
+mod registry_cache;
 mod retry;
 
 pub use buildroot_external_files::{
@@ -27,6 +28,7 @@ use gaia_spec::{
 };
 pub use materialize::{finalize_temp_image_output, materialize_image_output};
 pub use retry::{AttemptFailure, RetryRun, retry_backoff_duration, run_with_retries};
+pub use registry_cache::{RegistryCacheUse, registry_cache_from_spec, resolve_setting};
 
 /// Records digests the caller already computed from the files' current bytes
 /// (see [`recorded_sha256`]), so no file is hashed again. Entries whose
@@ -245,6 +247,9 @@ pub struct ImageExecutionPolicy {
     /// Buildroot: packages named by `--rebuild-package`. They are dircleaned
     /// before make and not restored from the package cache in this run.
     pub rebuild_packages: Vec<String>,
+    /// Buildroot: a RAM tree at a path named by the build's identity, so
+    /// checkouts of the build share it (`[execution] canonical_tree`).
+    pub canonical_tree: bool,
 }
 
 impl Default for ImageExecutionPolicy {
@@ -273,6 +278,7 @@ impl Default for ImageExecutionPolicy {
             kernel_modules_check: BuildrootOverrideCheckSpec::default(),
             output_retention: ProcessOutputRetention::default(),
             rebuild_packages: Vec::new(),
+            canonical_tree: false,
         }
     }
 }

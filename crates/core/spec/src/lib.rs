@@ -83,7 +83,7 @@ pub use assembly_spec::{
 pub use byte_size::{ByteSize, ByteSizeParseError};
 pub use checkpoints::{
     CheckpointAnchorRef, CheckpointBackendRef, CheckpointId, CheckpointPointSpec, CheckpointPolicy,
-    CheckpointSpec,
+    CheckpointSpec, OciCheckpointSpec,
 };
 pub use clean::{CleanProfileSpec, CleanSpec};
 pub use export::ExportSpec;

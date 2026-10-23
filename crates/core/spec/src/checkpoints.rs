@@ -81,6 +81,30 @@ impl std::str::FromStr for CheckpointId {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct CheckpointBackendRef {
     pub backend: String,
+    /// The registry settings of `backend = "oci"`.
+    pub oci: Option<OciCheckpointSpec>,
+}
+
+/// An OCI registry as a checkpoint backend: a cache of build products under
+/// `<registry>/<repository>/<kind>:<key>`. Keys are resolved by the caller
+/// (`env:VAR` names an environment variable that holds the key).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct OciCheckpointSpec {
+    pub registry: String,
+    pub repository: String,
+    pub verify_key: Option<String>,
+    pub sign_key: Option<String>,
+    pub sign_kind: Option<String>,
+    /// `trust`: `"unsigned"` accepts pulls without a signature check (unsafe);
+    /// validation rejects any other value.
+    pub trust: Option<String>,
+}
+
+impl OciCheckpointSpec {
+    /// Whether pulls are accepted without a signature check.
+    pub fn trust_unsigned(&self) -> bool {
+        self.trust.as_deref() == Some("unsigned")
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]

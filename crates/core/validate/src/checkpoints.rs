@@ -5,11 +5,99 @@ use gaia_spec::{CheckpointAnchorRef, CheckpointPolicy, ResolvedBuildSpec};
 use crate::ValidationDiagnostic;
 use crate::diagnostics::error;
 
+/// The registry settings of a checkpoint. Only `backend = "oci"` takes them;
+/// pulls need a verify key (or `trust = "unsigned"`), pushes need a sign key.
+fn validate_oci_backend(
+    checkpoint: &gaia_spec::CheckpointPointSpec,
+    diagnostics: &mut Vec<ValidationDiagnostic>,
+) {
+    let Some(backend) = checkpoint.backend.as_ref() else {
+        return;
+    };
+    let id = checkpoint.id.as_str();
+    let subject = Some(format!("checkpoint:{id}"));
+    let Some(oci) = backend.oci.as_ref() else {
+        return;
+    };
+    if backend.backend != "oci" {
+        diagnostics.push(error(
+            "checkpoint_oci_field_without_backend",
+            format!("checkpoint '{id}' sets registry fields but its backend is '{}', not 'oci'", backend.backend),
+            subject,
+        ));
+        return;
+    }
+    if oci.registry.trim().is_empty() {
+        diagnostics.push(error(
+            "checkpoint_oci_registry_missing",
+            format!("checkpoint '{id}' (backend oci) needs a registry, such as ghcr.io"),
+            subject.clone(),
+        ));
+    }
+    if oci.repository.trim().is_empty() {
+        diagnostics.push(error(
+            "checkpoint_oci_repository_missing",
+            format!("checkpoint '{id}' (backend oci) needs a repository, such as <owner>/gaia-cache"),
+            subject.clone(),
+        ));
+    }
+    if let Some(kind) = oci.sign_kind.as_deref()
+        && !matches!(kind, "minisign" | "gpg" | "cosign-blob")
+    {
+        diagnostics.push(error(
+            "checkpoint_oci_sign_kind",
+            format!("checkpoint '{id}' sign_kind '{kind}' is not minisign, gpg or cosign-blob"),
+            subject.clone(),
+        ));
+    }
+    if let Some(trust) = oci.trust.as_deref()
+        && trust != "unsigned"
+    {
+        diagnostics.push(error(
+            "checkpoint_oci_trust",
+            format!("checkpoint '{id}' trust '{trust}' is not 'unsigned' (the only value)"),
+            subject.clone(),
+        ));
+    }
+    let pulls = checkpoint.use_policy != CheckpointPolicy::Off;
+    let pushes = checkpoint.upload_policy != CheckpointPolicy::Off;
+    let verify_missing = oci.verify_key.as_deref().is_none_or(|key| key.trim().is_empty());
+    if pulls && verify_missing && !oci.trust_unsigned() {
+        diagnostics.push(error(
+            "checkpoint_oci_verify_key_missing",
+            format!(
+                "checkpoint '{id}' pulls from the registry but has no verify_key: pulls are refused. Set verify_key, or trust = \"unsigned\" (unsafe)"
+            ),
+            subject.clone(),
+        ));
+    }
+    if pushes && oci.sign_key.as_deref().is_none_or(|key| key.trim().is_empty()) {
+        diagnostics.push(crate::diagnostics::warning(
+            "checkpoint_oci_sign_key_missing",
+            format!("checkpoint '{id}' uploads to the registry but has no sign_key: nothing is pushed"),
+            subject,
+        ));
+    }
+}
+
 pub(crate) fn validate_checkpoints(
     spec: &ResolvedBuildSpec,
     diagnostics: &mut Vec<ValidationDiagnostic>,
 ) {
     let mut checkpoint_ids = HashSet::new();
+    let oci_count = spec
+        .checkpoints
+        .points
+        .iter()
+        .filter(|checkpoint| checkpoint.backend.as_ref().is_some_and(|backend| backend.backend == "oci"))
+        .count();
+    if oci_count > 1 {
+        diagnostics.push(error(
+            "checkpoint_oci_multiple",
+            "only one checkpoint may use backend oci: the registry cache is one repository".into(),
+            Some("checkpoint".into()),
+        ));
+    }
     for checkpoint in &spec.checkpoints.points {
         if !checkpoint.id.is_valid() {
             diagnostics.push(error(
@@ -38,6 +126,7 @@ pub(crate) fn validate_checkpoints(
                 Some(format!("checkpoint:{}", checkpoint.id.as_str())),
             ));
         }
+        validate_oci_backend(checkpoint, diagnostics);
         match &checkpoint.anchor {
             CheckpointAnchorRef::Image => {}
             CheckpointAnchorRef::Unknown(raw) => diagnostics.push(error(

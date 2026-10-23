@@ -135,6 +135,8 @@ pub(super) fn test_cache(root: &Path, project_packages: &[&str]) -> PackageCache
             ..gaia_spec::BuildrootPackageCachePolicySpec::default()
         },
         note: None,
+        registry: None,
+        registry_warnings: Vec::new(),
     }
 }
 
@@ -246,6 +248,63 @@ fn packages_with_the_path_in_binaries_restore_only_at_that_path() {
     assert_eq!(
         fs::read(first.join("per-package/app/target/usr/bin/app")).expect("app"),
         binary
+    );
+}
+
+/// A pinned package (its binary holds the tree path) built in one checkout
+/// restores into another checkout of the same build when both use the
+/// canonical tree path, and not when each has its own per-checkout path.
+#[test]
+fn a_canonical_tree_path_restores_pinned_packages_into_another_checkout() {
+    use crate::canonical_tree::{CanonicalRequest, canonical_tree_dir};
+    use crate::ram_tree::tree_dir;
+    if !tools_available() {
+        return;
+    }
+    let root_scratch = TempDir::new("canonical-pinned");
+    let root = root_scratch.join("root");
+    let cache = test_cache(&root, &[]);
+    let graph = cache_graph();
+    let keys = BTreeMap::from([
+        ("base".to_string(), Some("k-base".to_string())),
+        ("app".to_string(), Some("k-app".to_string())),
+    ]);
+    let ram = root.join("ram");
+    let identity = CanonicalRequest {
+        build_id: "img".to_string(),
+        identity: "defconfig=a\n".to_string(),
+    };
+    let canonical = canonical_tree_dir(&ram, &identity);
+    let mut binary = b"\0ELF ".to_vec();
+    binary.extend_from_slice(canonical.display().to_string().as_bytes());
+    built_tree(&canonical, &binary);
+    let (stored, skipped) = cache.store(&canonical, &graph, &keys, &[]);
+    assert_eq!(stored, ["app", "base"], "{skipped:?}");
+
+    // The next checkout of the build: the same canonical path, after a wipe.
+    fs::remove_dir_all(&canonical).expect("wipe");
+    fs::create_dir_all(&canonical).expect("canonical");
+    assert_eq!(cache.restore(&canonical, &graph, &keys), ["app", "base"]);
+    assert_eq!(
+        fs::read(canonical.join("per-package/app/target/usr/bin/app")).expect("app"),
+        binary
+    );
+
+    // Without the canonical path, each checkout has its own: the pinned app
+    // does not restore into the other one.
+    let first_checkout = tree_dir(&ram, &root.join("one/build/image/buildroot-output"))
+        .expect("first checkout tree");
+    let second_checkout = tree_dir(&ram, &root.join("two/build/image/buildroot-output"))
+        .expect("second checkout tree");
+    let mut own_binary = b"\0ELF ".to_vec();
+    own_binary.extend_from_slice(first_checkout.display().to_string().as_bytes());
+    built_tree(&first_checkout, &own_binary);
+    cache.store(&first_checkout, &graph, &keys, &[]);
+    fs::create_dir_all(&second_checkout).expect("second checkout");
+    assert_eq!(
+        cache.restore(&second_checkout, &graph, &keys),
+        ["base"],
+        "a pinned package restores only at its own path"
     );
 }
 

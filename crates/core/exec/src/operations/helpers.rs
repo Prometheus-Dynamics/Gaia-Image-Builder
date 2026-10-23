@@ -114,6 +114,7 @@ pub fn image_execution_policy(spec: &ResolvedBuildSpec) -> ImageExecutionPolicy 
         kernel_modules_check: spec.policy.providers.buildroot.kernel_modules_check,
         output_retention: process_output_retention(spec),
         rebuild_packages: Vec::new(),
+        canonical_tree: spec.policy.execution.canonical_tree,
     }
 }
 

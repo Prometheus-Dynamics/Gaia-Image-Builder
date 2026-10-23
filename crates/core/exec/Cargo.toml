@@ -24,6 +24,7 @@ gaia-plan = { workspace = true, features = ["test-fixtures"] }
 gaia-testkit.workspace = true
 gaia-config.workspace = true
 gaia-default-providers.workspace = true
+gaia-process = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true

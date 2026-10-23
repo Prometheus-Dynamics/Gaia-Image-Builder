@@ -22,11 +22,11 @@ impl WorkDirSetting {
         }
     }
 
-    /// The directory the tree goes under; `None` for disk.
-    fn base(&self) -> Option<PathBuf> {
+    /// The directory the tree goes under (`ram_base` for ram); `None` for disk.
+    fn base(&self, ram_base: &Path) -> Option<PathBuf> {
         match self {
             Self::Disk => None,
-            Self::Ram => Some(PathBuf::from(RAM_BASE)),
+            Self::Ram => Some(ram_base.to_path_buf()),
             Self::Path(path) => Some(path.clone()),
         }
     }
@@ -39,8 +39,12 @@ pub(crate) struct WorkDirFacts {
     pub(crate) setting: WorkDirSetting,
     /// `<build_dir>/image/buildroot-output`.
     pub(crate) output_dir: PathBuf,
-    /// Where a tree that is not on disk goes ([`tree_dir`]).
+    /// Where a tree that is not on disk goes ([`tree_dir`], or the canonical
+    /// tree).
     pub(crate) tree: PathBuf,
+    /// The directory the tree goes under (the RAM base or a work dir); empty
+    /// for disk.
+    pub(crate) base: PathBuf,
     /// Most RAM a RAM tree may use.
     pub(crate) budget: u64,
     /// RAM the tree needs: the last RAM tree's size, or the default.
@@ -156,7 +160,7 @@ pub(crate) fn decide_work_dir(facts: &WorkDirFacts) -> WorkDirDecision {
                     budget: facts.budget,
                     available_memory: facts.available_memory,
                     tmpfs_free: facts.tmpfs_free,
-                    base: setting.base().unwrap_or_default(),
+                    base: facts.base.clone(),
                 },
                 dropped: facts.link_target.clone(),
             };
@@ -216,22 +220,28 @@ pub(crate) fn work_dir_messages(decision: &WorkDirDecision, output_dir: &Path) -
     }
 }
 
-/// Reads what [`decide_work_dir`] needs; changes nothing.
+/// Reads what [`decide_work_dir`] needs; changes nothing. `ram_base` is the
+/// RAM base; `tree_override` is the tree to use instead of the per-checkout
+/// one (the canonical tree, already claimed by the caller).
 pub(crate) fn work_dir_facts(
     output_dir: &Path,
     policy: &ImageExecutionPolicy,
+    ram_base: &Path,
+    tree_override: Option<PathBuf>,
 ) -> Result<WorkDirFacts, ImageProviderError> {
     let setting = WorkDirSetting::parse(&policy.work_dir.work_dir);
-    let base = setting.base();
-    let tree = match &base {
-        Some(base) => tree_dir(base, output_dir)?,
-        None => output_dir.to_path_buf(),
+    let base = setting.base(ram_base);
+    let tree = match (tree_override, &base) {
+        (Some(tree), _) => tree,
+        (None, Some(base)) => tree_dir(base, output_dir)?,
+        (None, None) => output_dir.to_path_buf(),
     };
     let tree_exists = tree.is_dir();
     let mut facts = WorkDirFacts {
         setting: setting.clone(),
         output_dir: output_dir.to_path_buf(),
         tree: tree.clone(),
+        base: base.clone().unwrap_or_default(),
         budget: 0,
         need: 0,
         present: 0,
@@ -285,6 +295,7 @@ mod tests {
             setting,
             output_dir: output.clone(),
             tree: PathBuf::from("/dev/shm/gaia-u/abc/buildroot-output"),
+            base: PathBuf::from("/dev/shm"),
             budget: 60 * GIB,
             need: 30 * GIB,
             present: 0,

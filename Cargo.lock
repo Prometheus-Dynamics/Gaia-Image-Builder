@@ -652,6 +652,7 @@ version = "2.0.0"
 dependencies = [
  "gaia-testkit",
  "libc",
+ "serde_json",
  "sha2 0.11.0",
  "tracing",
 ]

@@ -55,6 +55,22 @@ pub fn cache_command(
             };
         }
     };
+    if args.prune {
+        let keep_days = args
+            .keep_days
+            .unwrap_or(super::cache_remote::DEFAULT_KEEP_DAYS);
+        return match super::cache_remote::prune_remote(
+            &spec,
+            args.checkpoint.as_deref(),
+            keep_days,
+            args.dry_run,
+        ) {
+            Ok(lines) => CommandOutcome::Text {
+                text: lines.join("\n"),
+            },
+            Err(message) => CommandOutcome::Failed { message },
+        };
+    }
     let report = if args.stats {
         Ok(super::cache_stats::cache_stats(&spec))
     } else {

@@ -8,6 +8,19 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - The Buildroot provider's `.gaia-package-durations` (the progress estimate's per-package times) drops packages the tree no longer builds, so it describes only the current config.
 
+### Registry checkpoints
+
+- **`[[checkpoints]] backend = "oci"` makes an OCI registry a build cache.** Buildroot package builds, artifact outputs and image layers are stored as signed OCI artifacts at `<repository>/<kind>:<key>` and fetched on a miss before they are built; new ones are pushed after the build. Entries are signed with the `[image.signing]` tool (minisign, gpg or cosign-blob) and a pull is used only when its signature verifies, its annotations name the requested kind and key, and its blob matches the manifest digest. A signature that does not verify refuses the entry with a loud warning. Pulls need a `verify_key` unless `trust = "unsigned"` is set (unsafe). Pull and push failures are warnings.
+- **Registry access is curl.** Gaia runs the external `curl`, `tar` and `zstd`; credentials come from `GAIA_REGISTRY_TOKEN`, the docker config, or `gh auth token` for ghcr.io, and reach curl through a 0600 config file. A bearer realm receives the credentials only on the registry's own host.
+- **`gaia cache --prune --remote --checkpoint <id> [--keep-days 30] [--dry-run]`** deletes registry entries older than the window (created time from the manifest; unreadable times are kept), with their signature tags. Only the generic OCI DELETE is used.
+- Not yet: the roots index (keeping entries an older build still uses) and per-kind hit and miss counts in `gaia cache stats`.
+- Docs: `docs/configuration.md` (Registry checkpoints).
+
+### Canonical tree path
+
+- **`[execution] canonical_tree = true` (opt-in).** With `work_dir = "ram"`, the Buildroot tree lives at `/dev/shm/gaia/<hash>/buildroot-output`, where the hash names the build id and the Buildroot config identity (not the checkout). Checkouts of one build share that tree path, so pinned package-cache entries (built into one output directory) restore into another checkout. A live owner record stops a second build of the same id from sharing the tree: it falls back to its per-checkout tree with a message. Disk work dirs keep the per-checkout placement.
+- Docs: `docs/configuration.md` (Canonical tree path).
+
 ### Image layers
 
 - **`[image.layers]` splits the Buildroot rootfs into layer tars.** Gaia forces `BR2_TARGET_ROOTFS_TAR=y` and splits `rootfs.tar` by path into one deterministic tar per layer (`layers/<name>.tar`), keeping each entry's owner, mode and links. Membership comes from `paths`, the stage, install and service ids, the Buildroot packages (`packages-file-list.txt`) and a default layer; overlapping non-directory paths are an error unless listed in `overrides`. Each layer also gets an erofs image (`mkfs.erofs`, on by default) and an optional dm-verity tree, and `layers/layers.json` describes them (schema 1, with the layer `id` as the erofs sha256).

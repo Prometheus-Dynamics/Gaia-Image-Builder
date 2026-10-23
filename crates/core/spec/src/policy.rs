@@ -45,6 +45,10 @@ pub struct ExecutionPolicySpec {
     pub jobs: u32,
     /// No network for the whole run (`[execution] offline`, `--offline`).
     pub offline: bool,
+    /// Buildroot RAM trees go to a tree named by the build's identity, so
+    /// checkouts of one build share it and its pinned package-cache entries
+    /// (`[execution] canonical_tree`). Off by default.
+    pub canonical_tree: bool,
     /// `gaia prefetch` / `gaia run --prefetch`: plan only the sources and the
     /// Buildroot base, and download what they need instead of building.
     /// Set by the command, never by the build config.

@@ -43,6 +43,7 @@ pub(super) enum KnownOverrideKey {
     PolicyFailureRollbackOnError,
     ExecutionJobs,
     ExecutionOffline,
+    ExecutionCanonicalTree,
     ExecutionDockerEnabled,
     ExecutionDockerImage,
     ExecutionOutputRetentionStdoutBytes,
@@ -204,6 +205,9 @@ impl<'a> OverrideKey<'a> {
             }
             "execution.offline" | "policy.execution.offline" => {
                 Self::Known(KnownOverrideKey::ExecutionOffline)
+            }
+            "execution.canonical_tree" | "policy.execution.canonical_tree" => {
+                Self::Known(KnownOverrideKey::ExecutionCanonicalTree)
             }
             "execution.docker.enabled" | "policy.execution.docker.enabled" => {
                 Self::Known(KnownOverrideKey::ExecutionDockerEnabled)

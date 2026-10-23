@@ -319,6 +319,7 @@ fn merge_execution_policy(
     RawExecutionPolicyConfig {
         jobs: base.jobs.max(overlay.jobs),
         offline: base.offline || overlay.offline,
+        canonical_tree: base.canonical_tree || overlay.canonical_tree,
         docker: crate::raw::RawDockerExecutionConfig {
             enabled: base.docker.enabled || overlay.docker.enabled,
             image: overlay.docker.image.or(base.docker.image),

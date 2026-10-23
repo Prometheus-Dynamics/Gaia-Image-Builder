@@ -1,4 +1,5 @@
 mod cache;
+mod cache_remote;
 mod cache_stats;
 mod clean;
 #[cfg(unix)]
@@ -231,6 +232,19 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
     if cache.clear.is_some() && (!cache.remove.is_empty() || cache.remove_legacy) {
         usage_errors.push("use either --remove or --clear".into());
     }
+    let remote_flags = cache.remote || cache.checkpoint.is_some() || cache.keep_days.is_some();
+    if (remote_flags || cache.prune) && args.command != AppCommand::Cache {
+        usage_errors.push("--prune, --remote, --checkpoint and --keep-days apply to 'cache'".into());
+    }
+    if cache.prune && !cache.remote {
+        usage_errors.push("'cache --prune' needs --remote (the registry); the local cache is removed with --remove or --clear".into());
+    }
+    if remote_flags && !cache.prune {
+        usage_errors.push("--remote, --checkpoint and --keep-days apply to 'cache --prune'".into());
+    }
+    if cache.prune && (cache.clear.is_some() || !cache.remove.is_empty() || cache.stats) {
+        usage_errors.push("'cache --prune' takes no --remove, --clear or --stats".into());
+    }
     if cache.stats
         && (cache.clear.is_some()
             || !cache.remove.is_empty()
@@ -415,6 +429,7 @@ fn help_text() -> String {
         "  gaia cache [build-config] --remove <package>[@key-prefix][,...] [--dry-run]",
         "  gaia cache [build-config] --remove-legacy [--dry-run]",
         "  gaia cache [build-config] --clear system|project|ccache [--dry-run]",
+        "  gaia cache [build-config] --prune --remote --checkpoint <id> [--keep-days 30] [--dry-run]",
         "  gaia cache stats [build-config]   (disk usage of every cache Gaia keeps)",
         "  gaia pause [run]               (or Ctrl-Z in the running gaia run)",
         "  gaia resume [run]              (or fg)",

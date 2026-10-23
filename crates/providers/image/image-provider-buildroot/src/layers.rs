@@ -22,9 +22,17 @@ use super::layers_tar::{
     Entry, EntryKind, LayerTarWriter, copy_data, normalize_path, read_entries,
 };
 use super::*;
+use gaia_process::{PushOutcome, RegistryError, RemoteCache, pack_entry, unpack_entry};
 use gaia_spec::{ImageLayerSpec, ImageLayersSpec, wildcard_match};
 use sha2::{Digest, Sha256};
 use std::io::{BufWriter, Write};
+
+/// The registry kind of layer entries (the image is `<repository>/layer`).
+pub(crate) const LAYER_KIND: &str = "layer";
+/// Annotations of a layer entry: the layer's name and the stem of its archive
+/// and record (both the layer name).
+pub(crate) const LAYER_ANNOTATION: &str = "dev.gaia.layer";
+pub(crate) const LAYER_STEM_ANNOTATION: &str = "dev.gaia.stem";
 
 /// The directory, under the image's collect dir, that holds the layers.
 pub(crate) const LAYERS_DIR: &str = "layers";
@@ -73,13 +81,46 @@ struct BuiltLayer {
 }
 
 /// Splits the image's rootfs tar into layers under `collect_dir/layers`,
-/// reusing every layer whose members did not change. Returns the summary
-/// lines.
+/// reusing every layer whose members did not change, and pulling or pushing
+/// layers through the spec's registry cache. Returns the summary lines.
 pub(crate) fn build_layers(
     spec: &ResolvedBuildSpec,
     layers: &ImageLayersSpec,
     tree_dir: &Path,
     collect_dir: &Path,
+) -> Result<Vec<String>, ImageProviderError> {
+    let mut messages = Vec::new();
+    let registry = match registry_cache_from_spec(spec) {
+        Ok(registry) => registry,
+        Err(error) => {
+            messages.push(format!(
+                "registry cache: {error}; the layers are built locally"
+            ));
+            None
+        }
+    };
+    if let Some(registry) = &registry {
+        messages.extend(registry.warnings.iter().cloned());
+    }
+    messages.extend(build_layers_with(
+        spec,
+        layers,
+        tree_dir,
+        collect_dir,
+        registry.as_ref(),
+    )?);
+    Ok(messages)
+}
+
+/// [`build_layers`] with the registry cache given. A layer whose fingerprint
+/// is not reusable locally is pulled first (when `registry` pulls); a layer
+/// built here is pushed after the layers are written (when it pushes).
+fn build_layers_with(
+    spec: &ResolvedBuildSpec,
+    layers: &ImageLayersSpec,
+    tree_dir: &Path,
+    collect_dir: &Path,
+    registry: Option<&RegistryCacheUse>,
 ) -> Result<Vec<String>, ImageProviderError> {
     let rootfs_tar = tree_dir.join(ROOTFS_TAR);
     if !rootfs_tar.is_file() {
@@ -105,44 +146,96 @@ pub(crate) fn build_layers(
         ))
     })?;
     let old = read_previous(&layers_dir)?;
+    let pull_client = registry
+        .filter(|registry| registry.pull)
+        .map(RegistryCacheUse::client);
     let mut built = Vec::new();
     let mut messages = Vec::new();
     let mut reused = 0usize;
+    let mut pulled = Vec::new();
+    // The layers built here, with their fingerprints and records: pushed after
+    // the layers are written.
+    let mut rebuilt = Vec::new();
     for (index, name) in layers.order.iter().enumerate() {
         let plan = plan_layer(&members[index], &source)?;
         let inputs = layer_fingerprint(&plan, &members[index], &source, mtime, layers);
-        let previous = old.iter().find(|value| value["name"] == name.as_str());
+        let mut previous = old
+            .iter()
+            .find(|value| value["name"] == name.as_str())
+            .cloned();
+        let mut from_registry = false;
+        let reusable_locally = previous
+            .as_ref()
+            .is_some_and(|value| reusable(value, name, &inputs, &layers_dir, layers));
+        if !reusable_locally && let Some(client) = &pull_client {
+            match pull_layer(client, name, &inputs, &layers_dir) {
+                Ok(Some(record)) => {
+                    previous = Some(record);
+                    from_registry = true;
+                }
+                Ok(None) => {}
+                Err(message) => messages.push(message),
+            }
+        }
         let layer =
             match previous.filter(|value| reusable(value, name, &inputs, &layers_dir, layers)) {
                 Some(value) => {
                     reused += 1;
+                    let how = if from_registry {
+                        pulled.push(name.clone());
+                        "pulled from the registry"
+                    } else {
+                        "reused"
+                    };
                     BuiltLayer {
-                        json: value.clone(),
                         line: format!(
-                            "layer {name}: {} bytes, {} entries, reused",
+                            "layer {name}: {} bytes, {} entries, {how}",
                             value["tar_size"],
                             members[index].len()
                         ),
+                        json: value,
                     }
                 }
-                None => build_layer(LayerBuild {
-                    name,
-                    plan: &plan,
-                    members: &members[index],
-                    source: &source,
-                    rootfs_tar: &rootfs_tar,
-                    layers_dir: &layers_dir,
-                    inputs: &inputs,
-                    mtime,
-                    layers,
-                    host_dir: &tree_dir.join("host"),
-                })?,
+                None => {
+                    let layer = build_layer(LayerBuild {
+                        name,
+                        plan: &plan,
+                        members: &members[index],
+                        source: &source,
+                        rootfs_tar: &rootfs_tar,
+                        layers_dir: &layers_dir,
+                        inputs: &inputs,
+                        mtime,
+                        layers,
+                        host_dir: &tree_dir.join("host"),
+                    })?;
+                    rebuilt.push((name.clone(), inputs.clone(), layer.json.clone()));
+                    layer
+                }
             };
         built.push(layer.json);
         messages.push(layer.line);
     }
     remove_stale_outputs(&layers_dir, &layers.order)?;
     write_layers_json(&layers_dir, layers, &built)?;
+    if let Some(registry) = registry {
+        if !pulled.is_empty() {
+            messages.push(format!(
+                "layers: {} pulled from the registry checkpoint '{}': {}",
+                pulled.len(),
+                registry.checkpoint_id,
+                pulled.join(", ")
+            ));
+        }
+        if registry.push {
+            messages.extend(push_layers(
+                &registry.client(),
+                &registry.checkpoint_id,
+                &rebuilt,
+                &layers_dir,
+            ));
+        }
+    }
     messages.push(format!(
         "layers: {} of {} reused, {} rebuilt; described by '{}'",
         reused,
@@ -746,6 +839,194 @@ fn publish(temp: &Path, dest: &Path) -> Result<(), ImageProviderError> {
     })
 }
 
+/// The registry key of a layer: the hex of its fingerprint (the `sha256:`
+/// input key without its prefix). A fingerprint without that prefix is
+/// hashed, so the key is always a hex tag.
+fn registry_key(inputs: &str) -> String {
+    match inputs.strip_prefix("sha256:") {
+        Some(hex) => hex.to_string(),
+        None => gaia_process::hex(&Sha256::digest(inputs.as_bytes())),
+    }
+}
+
+/// Pulls layer `name` for `inputs` from the registry and restores its tar and
+/// erofs into `layers_dir` when its record and both files verify. Returns the
+/// verified record (what `layers.json` records), or `None` when the registry
+/// has no such entry. Nothing is written into `layers_dir` before it verifies.
+fn pull_layer(
+    client: &RemoteCache,
+    name: &str,
+    inputs: &str,
+    layers_dir: &Path,
+) -> Result<Option<serde_json::Value>, String> {
+    let key = registry_key(inputs);
+    let staging = layers_dir.join(format!(".pull-{name}"));
+    let _ = fs::remove_dir_all(&staging);
+    fs::create_dir_all(&staging)
+        .map_err(|error| format!("registry pull of layer '{name}' ({key}): {error}"))?;
+    let result = pull_layer_into(client, name, &key, inputs, layers_dir, &staging);
+    let _ = fs::remove_dir_all(&staging);
+    result.map_err(|reason| format!("registry pull of layer '{name}' ({key}): {reason}"))
+}
+
+fn pull_layer_into(
+    client: &RemoteCache,
+    name: &str,
+    key: &str,
+    inputs: &str,
+    layers_dir: &Path,
+    staging: &Path,
+) -> Result<Option<serde_json::Value>, String> {
+    let entry = match client.pull(LAYER_KIND, key, staging) {
+        Ok(Some(entry)) => entry,
+        Ok(None) => return Ok(None),
+        Err(RegistryError::Signature(reason)) => {
+            return Err(format!(
+                "SIGNATURE DOES NOT VERIFY, entry refused, the layer is built instead: {reason}"
+            ));
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    let annotation = |field: &str| entry.annotations.get(field).map(String::as_str);
+    if annotation(LAYER_ANNOTATION) != Some(name) || annotation(LAYER_STEM_ANNOTATION) != Some(name)
+    {
+        return Err("the entry is for another layer".into());
+    }
+    let unpacked = staging.join("unpacked");
+    unpack_entry(&entry.blob, &unpacked, name).map_err(|error| error.to_string())?;
+    let text = fs::read_to_string(unpacked.join(format!("{name}.json")))
+        .map_err(|error| error.to_string())?;
+    let record: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| "the layer record is unreadable".to_string())?;
+    if record["name"] != name || record["inputs"] != inputs {
+        return Err("the layer record is for another layer or fingerprint".into());
+    }
+    let payload = unpacked.join(name);
+    let tar_name = format!("{name}.tar");
+    if record["tar"] != tar_name.as_str() {
+        return Err("the layer record names another tar".into());
+    }
+    let tar = payload.join(&tar_name);
+    if !tar_matches(
+        &tar,
+        record["tar_size"].as_u64(),
+        record["tar_sha256"].as_str(),
+    ) {
+        return Err("the layer tar does not match its record".into());
+    }
+    let mut moves = vec![(tar, layers_dir.join(&tar_name))];
+    if !record["erofs"].is_null() {
+        let erofs_name = format!("{name}.erofs");
+        if record["erofs"] != erofs_name.as_str() {
+            return Err("the layer record names another erofs".into());
+        }
+        let erofs = payload.join(&erofs_name);
+        if !tar_matches(
+            &erofs,
+            record["erofs_size"].as_u64(),
+            record["erofs_sha256"].as_str(),
+        ) {
+            return Err("the layer erofs does not match its record".into());
+        }
+        moves.push((erofs, layers_dir.join(&erofs_name)));
+    }
+    for (from, to) in moves {
+        fs::rename(&from, &to)
+            .map_err(|error| format!("failed to restore '{}': {error}", to.display()))?;
+    }
+    Ok(Some(record))
+}
+
+/// Pushes the layers built here, one entry each, and returns the run messages.
+fn push_layers(
+    client: &RemoteCache,
+    checkpoint_id: &str,
+    rebuilt: &[(String, String, serde_json::Value)],
+    layers_dir: &Path,
+) -> Vec<String> {
+    let mut messages = Vec::new();
+    let mut pushed = Vec::new();
+    for (name, inputs, record) in rebuilt {
+        match push_layer(client, name, inputs, record, layers_dir) {
+            Ok(PushOutcome::Pushed { .. }) => pushed.push(name.clone()),
+            Ok(PushOutcome::AlreadyPresent | PushOutcome::Disabled) => {}
+            Err(message) => messages.push(message),
+        }
+    }
+    if !pushed.is_empty() {
+        messages.push(format!(
+            "layers: {} pushed to the registry checkpoint '{checkpoint_id}': {}",
+            pushed.len(),
+            pushed.join(", ")
+        ));
+    }
+    messages
+}
+
+/// Packs layer `name` (its tar, its erofs when it has one, and its record) and
+/// pushes it under its fingerprint's key. Nothing is pushed without a sign key.
+fn push_layer(
+    client: &RemoteCache,
+    name: &str,
+    inputs: &str,
+    record: &serde_json::Value,
+    layers_dir: &Path,
+) -> Result<PushOutcome, String> {
+    let key = registry_key(inputs);
+    let staging = layers_dir.join(format!(".push-{name}"));
+    let _ = fs::remove_dir_all(&staging);
+    let result = push_layer_from(client, name, &key, record, layers_dir, &staging);
+    let _ = fs::remove_dir_all(&staging);
+    result.map_err(|reason| {
+        format!("registry push of layer '{name}' failed (the build is not affected): {reason}")
+    })
+}
+
+fn push_layer_from(
+    client: &RemoteCache,
+    name: &str,
+    key: &str,
+    record: &serde_json::Value,
+    layers_dir: &Path,
+    staging: &Path,
+) -> Result<PushOutcome, String> {
+    let payload = staging.join("payload");
+    let dir = payload.join(name);
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let mut files = vec![format!("{name}.tar")];
+    if !record["erofs"].is_null() {
+        files.push(format!("{name}.erofs"));
+    }
+    for file in &files {
+        link_or_copy(&layers_dir.join(file), &dir.join(file))?;
+    }
+    let record_name = format!("{name}.json");
+    let text = serde_json::to_string_pretty(record).map_err(|error| error.to_string())?;
+    fs::write(payload.join(&record_name), format!("{text}\n"))
+        .map_err(|error| error.to_string())?;
+    let blob = staging.join("entry.tar.zst");
+    pack_entry(&payload, &[name, record_name.as_str()], &blob)
+        .map_err(|error| error.to_string())?;
+    let annotations = BTreeMap::from([
+        (LAYER_ANNOTATION.to_string(), name.to_string()),
+        (LAYER_STEM_ANNOTATION.to_string(), name.to_string()),
+    ]);
+    client
+        .push(LAYER_KIND, key, &blob, &annotations)
+        .map_err(|error| error.to_string())
+}
+
+/// A hard link to `from` at `to`, or a copy when linking is not possible. The
+/// archive holds one name per file, so a linked file packs as a regular file.
+fn link_or_copy(from: &Path, to: &Path) -> Result<(), String> {
+    if fs::hard_link(from, to).is_ok() {
+        return Ok(());
+    }
+    fs::copy(from, to)
+        .map(drop)
+        .map_err(|error| format!("failed to stage '{}': {error}", from.display()))
+}
+
 /// The `layers.json` of the previous run, when there is one.
 fn read_previous(layers_dir: &Path) -> Result<Vec<serde_json::Value>, ImageProviderError> {
     let path = layers_dir.join(LAYERS_JSON);
@@ -797,3 +1078,7 @@ fn write_layers_json(
         .map_err(|error| runtime_error(format!("failed to write layers.json: {error}")))?;
     publish(&temp, &layers_dir.join(LAYERS_JSON))
 }
+
+#[cfg(test)]
+#[path = "layers_registry_tests.rs"]
+mod registry_tests;

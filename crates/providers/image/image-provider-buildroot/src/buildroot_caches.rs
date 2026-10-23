@@ -41,6 +41,15 @@ impl CachedPackages {
                 stored.len(),
                 stored.join(", ")
             ));
+            // Pushed before the run ends: this joins every push thread.
+            let pairs = stored
+                .iter()
+                .filter_map(|name| {
+                    let key = self.keys.get(name)?.clone()?;
+                    Some((name.clone(), key))
+                })
+                .collect::<Vec<_>>();
+            messages.extend(self.cache.push_stored(output_dir, &pairs));
         }
         for reason in &skipped {
             tracing::info!(
@@ -158,12 +167,9 @@ pub(crate) fn restore_cached_packages(
     }
     // `--rebuild-package` packages are built again, never restored.
     let requested = requested_package_rebuilds(command_context.policy, Some(&graph))?;
-    let restored = cache.restore_except(
-        output_dir,
-        &graph,
-        &keys,
-        &excluded_from_restore(&keep_source, &requested),
-    );
+    let excluded = excluded_from_restore(&keep_source, &requested);
+    messages.extend(cache.pull_missing(output_dir, &graph, &keys, &excluded));
+    let restored = cache.restore_except(output_dir, &graph, &keys, &excluded);
     let host_current = host_finalized_current(output_dir);
     refresh_current_stamps(output_dir, &graph, &keys);
     if host_current {

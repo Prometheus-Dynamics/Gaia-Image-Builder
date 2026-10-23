@@ -57,6 +57,7 @@ fn empty_public_ids_are_validation_errors() {
             id: CheckpointId::new(""),
             backend: Some(gaia_spec::CheckpointBackendRef {
                 backend: "local".into(),
+                oci: None,
             }),
             use_policy: CheckpointPolicy::Auto,
             upload_policy: CheckpointPolicy::Off,

@@ -3,7 +3,8 @@ use gaia_image_providers::{
     ImageProvider, ImageProviderError, ImageProviderErrorKind, ImageProviderOperation,
     ImageProviderValidationIssue, ProcessCancelCheck, ProcessLogSink, ProcessOutputRetention,
     TreeFileDigests, build_image_contract_state_details, build_state_details, dir_digest,
-    file_sha256_or_placeholder, materialize_image_output,
+    RegistryCacheUse, file_sha256_or_placeholder, materialize_image_output,
+    registry_cache_from_spec,
 };
 use gaia_process::{
     DockerRunSpec, ProcessRunErrorKind, docker_run_command, label_process_log_sink,
@@ -182,10 +183,13 @@ impl ImageProvider for BuildrootImageProvider {
                 ));
                 state_details.push(("buildroot_shared_key".to_string(), shared.key.clone()));
             } else {
+                let canonical =
+                    CanonicalRequest::for_build(spec, image, &buildroot_dir, policy, &execution)?;
                 let tree = place_private_tree(
                     &output_dir,
                     &buildroot_dir,
                     policy,
+                    canonical.as_ref(),
                     cancel_check.clone(),
                     log_sink.clone(),
                 )?;
@@ -422,10 +426,18 @@ impl ImageProvider for BuildrootImageProvider {
                     })?);
                     messages
                 } else {
+                    let canonical = CanonicalRequest::for_build(
+                        request.spec,
+                        request.image,
+                        &buildroot_dir,
+                        request.policy,
+                        &execution,
+                    )?;
                     let tree = place_private_tree(
                         &output_dir,
                         &buildroot_dir,
                         request.policy,
+                        canonical.as_ref(),
                         command.cancel_check.clone(),
                         command.log_sink.clone(),
                     )?;
@@ -526,12 +538,13 @@ fn place_private_tree(
     output_dir: &Path,
     buildroot_dir: &Path,
     policy: &ImageExecutionPolicy,
+    canonical: Option<&CanonicalRequest>,
     cancel_check: Option<ProcessCancelCheck>,
     log_sink: Option<ProcessLogSink>,
 ) -> Result<PrivateTree, ImageProviderError> {
     let clock = gaia_process::ActiveClock::start();
     let mut messages = leave_shared_view(output_dir)?;
-    let work = place_work_dir(output_dir, policy)?;
+    let work = place_work_dir(output_dir, policy, &ram_base(), canonical)?;
     messages.extend(work.messages.iter().cloned());
     messages.push(phase_step_message("work dir placement", &clock, &[]));
     let clock = gaia_process::ActiveClock::start();
@@ -703,6 +716,8 @@ mod build_times;
 mod buildroot;
 mod buildroot_caches;
 mod buildroot_config;
+mod canonical_tree;
+use canonical_tree::CanonicalRequest;
 mod buildroot_external;
 mod buildroot_patches;
 mod clean_decision;
@@ -730,6 +745,7 @@ mod offline;
 mod override_check;
 mod package_cache;
 mod package_cache_files;
+mod package_cache_registry;
 mod package_graph;
 mod package_keys;
 mod prefetch;

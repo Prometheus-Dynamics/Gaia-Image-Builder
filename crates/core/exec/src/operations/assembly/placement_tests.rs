@@ -319,6 +319,32 @@ fn a_linked_ram_user_dir_refuses_the_run_and_a_new_one_is_private() {
     assert_eq!(mode & 0o777, 0o700);
 }
 
+/// A canonical Buildroot tree lives under `<base>/gaia/<hash>`. Even when the
+/// sweep walks that parent, and the hash dir holds an old dead-run marker, the
+/// tree is kept: a dir holding `buildroot-output` is never removed.
+#[test]
+fn a_canonical_buildroot_tree_is_never_swept() {
+    let scratch = TempDir::new("gaia-placement-canonical");
+    let parent = scratch.join("gaia");
+    let hash = parent.join("0123456789ab");
+    std::fs::create_dir_all(hash.join("buildroot-output")).expect("tree");
+    std::fs::write(
+        hash.join("owner"),
+        "pid=4294967294\nstarted=1000\nbuild_dir=/nonexistent/build\n",
+    )
+    .expect("owner");
+    std::fs::write(hash.join("owner.json"), "{}").expect("record");
+    let keep = parent.join("keep");
+    std::fs::create_dir_all(&keep).expect("keep");
+
+    sweep_stale_ram_dirs(&parent, &keep);
+
+    assert!(
+        hash.join("buildroot-output").is_dir(),
+        "a canonical Buildroot tree is never swept"
+    );
+}
+
 #[test]
 fn stale_ram_work_dirs_are_swept_and_live_or_recent_ones_kept() {
     let scratch = TempDir::new("gaia-placement-sweep");

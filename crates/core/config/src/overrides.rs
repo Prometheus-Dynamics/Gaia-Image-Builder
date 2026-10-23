@@ -367,6 +367,9 @@ fn apply_known_override(
         KnownOverrideKey::ExecutionOffline => {
             raw.execution.offline = parse_bool_override(key, value)?
         }
+        KnownOverrideKey::ExecutionCanonicalTree => {
+            raw.execution.canonical_tree = parse_bool_override(key, value)?
+        }
         KnownOverrideKey::ExecutionDockerEnabled => {
             raw.execution.docker.enabled = parse_bool_override(key, value)?
         }

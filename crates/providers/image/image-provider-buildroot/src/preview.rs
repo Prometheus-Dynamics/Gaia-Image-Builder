@@ -8,9 +8,12 @@
 //! [`decide_clean`], ...). What the run would delete or move is then read
 //! from the real tree, and the package cache is planned read-only.
 use super::*;
+use crate::canonical_tree::{CanonicalRequest, busy_holder, canonical_tree_dir};
+use crate::ram_tree::ram_base;
 use crate::requested_rebuilds::{
     excluded_from_restore, requested_package_rebuilds, with_requested_rebuilds,
 };
+use crate::work_dir_decision::WorkDirSetting;
 use gaia_image_providers::{
     ImagePreview, PreviewCleanKind, PreviewDeletion, PreviewDeletionKind, PreviewSection,
 };
@@ -194,12 +197,40 @@ pub(crate) fn preview_buildroot(
         _ => &[][..],
     };
 
-    // Where the tree goes, and what that discards.
-    let facts = work_dir_facts(&output_dir, policy)?;
+    // Where the tree goes, and what that discards. A canonical tree is only
+    // looked at here: a preview claims nothing.
+    let base = ram_base();
+    let canonical = CanonicalRequest::for_build(
+        spec,
+        image,
+        &buildroot_dir,
+        policy,
+        &execution_context(spec),
+    )?;
+    let mut work_lines = Vec::new();
+    let mut tree_override = None;
+    if let Some(request) = &canonical {
+        if WorkDirSetting::parse(&policy.work_dir.work_dir) == WorkDirSetting::Ram {
+            let tree = canonical_tree_dir(&base, request);
+            match busy_holder(&base, request, &output_dir) {
+                Some(holder) => work_lines.push(format!(
+                    "the canonical RAM tree '{}' is in use by {holder}; the per-checkout RAM tree is used",
+                    tree.display()
+                )),
+                None => tree_override = Some(tree),
+            }
+        } else {
+            work_lines.push(
+                "canonical_tree applies to work_dir = \"ram\" only; the tree stays where work_dir puts it"
+                    .to_string(),
+            );
+        }
+    }
+    let facts = work_dir_facts(&output_dir, policy, &base, tree_override)?;
     let work = decide_work_dir(&facts);
     let tree = work.tree(&output_dir);
     let state_dir = recorded_state_dir(&work, &output_dir);
-    let mut work_lines = work_dir_messages(&work, &output_dir);
+    work_lines.extend(work_dir_messages(&work, &output_dir));
     match &work {
         WorkDirDecision::Disk { dropped } | WorkDirDecision::RamFallback { dropped, .. } => {
             if let Some(target) = dropped {

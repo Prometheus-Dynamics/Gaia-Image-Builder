@@ -11,6 +11,9 @@
 //! keeps working; Buildroot itself is given the real path, which is also
 //! what Docker builds mount.
 //!
+//! With `[execution] canonical_tree = true` the tree is instead at a path named
+//! by the build, shared by its checkouts (see [`crate::canonical_tree`]).
+//!
 //! What must survive stays on disk: collected images and archives, the
 //! package cache, ccache, downloads and Gaia's state. A RAM tree is kept
 //! after a build for fast rebuilds (unless `keep_ram_tree = false`); after a
@@ -36,9 +39,18 @@ pub(crate) const RAM_MARGIN: u64 = 8 * GIB;
 const RAM_LOW: u64 = 4 * GIB;
 /// Size of the last RAM tree, next to the output path on disk.
 const RAM_SIZE_FILE: &str = ".gaia-ram-tree-size";
+use crate::canonical_tree::{CanonicalRequest, Claim, TreeClaim, canonical_tree_dir};
 pub(crate) use crate::ram_tree_dir::{create_private_tree_parent, tree_dir};
 
 pub(crate) const RAM_BASE: &str = "/dev/shm";
+
+/// The RAM base the trees go under: `GAIA_RAM_BASE` when set (the assembly
+/// placement reads it too, so tests use a scratch base), else [`RAM_BASE`].
+pub(crate) fn ram_base() -> PathBuf {
+    std::env::var_os("GAIA_RAM_BASE")
+        .filter(|base| !base.is_empty())
+        .map_or_else(|| PathBuf::from(RAM_BASE), PathBuf::from)
+}
 
 /// Where this build's tree is.
 pub(crate) struct WorkDir {
@@ -47,17 +59,50 @@ pub(crate) struct WorkDir {
     /// Set for a RAM tree.
     pub(crate) ram: bool,
     pub(crate) messages: Vec<String>,
+    /// The canonical tree's claim: held (for its drop) while the build uses
+    /// the tree.
+    pub(crate) _claim: Option<TreeClaim>,
 }
 
 /// Places the output tree for this build. `output_dir` is the usual
-/// `<build_dir>/image/buildroot-output`.
+/// `<build_dir>/image/buildroot-output`; `base` is the RAM base (see
+/// [`ram_base`]); `canonical` asks for the canonical tree of a RAM build (see
+/// [`crate::canonical_tree`]).
 pub(crate) fn place_work_dir(
     output_dir: &Path,
     policy: &ImageExecutionPolicy,
+    base: &Path,
+    canonical: Option<&CanonicalRequest>,
 ) -> Result<WorkDir, ImageProviderError> {
-    let facts = work_dir_facts(output_dir, policy)?;
+    let mut notes = Vec::new();
+    let mut tree_override = None;
+    let mut claim = None;
+    if let Some(request) = canonical {
+        if WorkDirSetting::parse(&policy.work_dir.work_dir) == WorkDirSetting::Ram {
+            let tree = canonical_tree_dir(base, request);
+            match crate::canonical_tree::claim(base, request, output_dir)? {
+                Claim::Owned(owned) => {
+                    tree_override = Some(tree);
+                    claim = Some(owned);
+                }
+                Claim::Busy(holder) => notes.push(format!(
+                    "the canonical RAM tree '{}' is in use by {holder}; building in the per-checkout RAM tree instead",
+                    tree.display()
+                )),
+            }
+        } else {
+            notes.push(
+                "canonical_tree applies to work_dir = \"ram\" only; the Buildroot tree stays where work_dir puts it"
+                    .to_string(),
+            );
+        }
+    }
+    let facts = work_dir_facts(output_dir, policy, base, tree_override)?;
     let decision = decide_work_dir(&facts);
-    let messages = work_dir_messages(&decision, output_dir);
+    let messages: Vec<String> = notes
+        .into_iter()
+        .chain(work_dir_messages(&decision, output_dir))
+        .collect();
     let error = |action: &str, path: &Path, error: std::io::Error| {
         ImageProviderError::backend_command(format!(
             "failed to {action} '{}': {error}",
@@ -76,6 +121,7 @@ pub(crate) fn place_work_dir(
                 dir: output_dir.to_path_buf(),
                 ram: false,
                 messages,
+                _claim: None,
             })
         }
         WorkDirDecision::Tree(placement) => {
@@ -116,6 +162,7 @@ pub(crate) fn place_work_dir(
                 dir,
                 ram: placement.ram,
                 messages,
+                _claim: claim,
             })
         }
     }
@@ -491,8 +538,13 @@ mod tests {
         fs::write(output.join("old"), "x").expect("old file");
         let base = root.join("fast");
 
-        let work =
-            place_work_dir(&output, &policy(&base.display().to_string(), None)).expect("work dir");
+        let work = place_work_dir(
+            &output,
+            &policy(&base.display().to_string(), None),
+            &root,
+            None,
+        )
+        .expect("work dir");
         assert!(!work.ram);
         assert!(work.dir.starts_with(&base));
         assert_eq!(fs::read_link(&output).expect("link"), work.dir);
@@ -501,15 +553,25 @@ mod tests {
         assert!(output.join("built").is_file());
 
         // Again: the same tree.
-        let again =
-            place_work_dir(&output, &policy(&base.display().to_string(), None)).expect("again");
+        let again = place_work_dir(
+            &output,
+            &policy(&base.display().to_string(), None),
+            &root,
+            None,
+        )
+        .expect("again");
         assert_eq!(again.dir, work.dir);
         assert!(again.dir.join("built").is_file());
 
         // Gone (a reboot): a fresh one at the same place.
         fs::remove_dir_all(&work.dir).expect("reboot");
-        let fresh =
-            place_work_dir(&output, &policy(&base.display().to_string(), None)).expect("fresh");
+        let fresh = place_work_dir(
+            &output,
+            &policy(&base.display().to_string(), None),
+            &root,
+            None,
+        )
+        .expect("fresh");
         assert!(fresh.dir.is_dir());
         assert!(
             fresh
@@ -519,7 +581,7 @@ mod tests {
         );
 
         // Back to disk: a real directory again.
-        let disk = place_work_dir(&output, &policy("disk", None)).expect("disk");
+        let disk = place_work_dir(&output, &policy("disk", None), &root, None).expect("disk");
         assert_eq!(disk.dir, output);
         assert!(fs::symlink_metadata(&output).is_err() || !output.is_symlink());
     }
@@ -536,7 +598,8 @@ mod tests {
             (500 * GIB).to_string(),
         )
         .expect("size");
-        let work = place_work_dir(&output, &policy("ram", Some("60G"))).expect("fallback");
+        let work =
+            place_work_dir(&output, &policy("ram", Some("60G")), &root, None).expect("fallback");
         assert!(!work.ram);
         assert_eq!(work.dir, output);
         assert!(
@@ -578,6 +641,7 @@ mod tests {
             dir: root.join("tree/buildroot-output"),
             ram: true,
             messages: Vec::new(),
+            _claim: None,
         }
     }
 

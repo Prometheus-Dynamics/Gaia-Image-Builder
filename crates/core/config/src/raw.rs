@@ -240,6 +240,9 @@ pub struct RawExecutionPolicyConfig {
     pub jobs: u32,
     /// `offline = true`: no network. See docs/configuration.md (Execution Policy).
     pub offline: bool,
+    /// `canonical_tree = true`: a RAM tree at a path named by the build's
+    /// identity, shared by its checkouts (see docs/configuration.md).
+    pub canonical_tree: bool,
     pub docker: RawDockerExecutionConfig,
     pub output_retention: RawOutputRetentionPolicyConfig,
 }
@@ -966,6 +969,26 @@ pub struct RawCheckpointConfig {
     pub upload_policy: RawCheckpointPolicy,
     #[serde(default)]
     pub anchor: Option<String>,
+    /// `backend = "oci"`: the registry host, such as `ghcr.io`.
+    #[serde(default)]
+    pub registry: Option<String>,
+    /// `backend = "oci"`: the repository, such as `<owner>/gaia-cache`.
+    #[serde(default)]
+    pub repository: Option<String>,
+    /// `backend = "oci"`: the public key (a path, or `env:VAR`) pulls verify with.
+    #[serde(default)]
+    pub verify_key: Option<String>,
+    /// `backend = "oci"`: the private key (a path, or `env:VAR`) pushes sign with.
+    #[serde(default)]
+    pub sign_key: Option<String>,
+    /// `backend = "oci"`: "minisign", "gpg" or "cosign-blob". Defaults to the
+    /// `[image.signing]` kind, else minisign.
+    #[serde(default)]
+    pub sign_kind: Option<String>,
+    /// `backend = "oci"`: `"unsigned"` accepts pulls without a signature
+    /// check. Unsafe; see the docs.
+    #[serde(default)]
+    pub trust: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]

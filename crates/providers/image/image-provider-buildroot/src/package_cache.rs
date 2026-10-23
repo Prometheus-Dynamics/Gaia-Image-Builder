@@ -67,6 +67,10 @@ pub(crate) struct PackageCache {
     policy: gaia_spec::BuildrootPackageCachePolicySpec,
     /// Where the cache is, when that needs saying.
     pub(crate) note: Option<String>,
+    /// The registry cache (a `backend = "oci"` checkpoint), when configured.
+    pub(crate) registry: Option<RegistryCacheUse>,
+    /// Registry settings that could not be used; reported with the run.
+    pub(crate) registry_warnings: Vec<String>,
 }
 
 /// The configured package cache, or `None` when it is off. It needs
@@ -130,6 +134,10 @@ pub(crate) fn package_cache(
                 })
         })
         .transpose()?;
+    let (registry, registry_warnings) = match registry_cache_from_spec(spec) {
+        Ok(registry) => (registry, Vec::new()),
+        Err(error) => (None, vec![format!("registry cache off: {error}")]),
+    };
     let mut cache = PackageCache {
         system,
         project,
@@ -137,6 +145,8 @@ pub(crate) fn package_cache(
         default_budgets: Vec::new(),
         policy: settings.clone(),
         note,
+        registry,
+        registry_warnings,
     };
     if max_size.is_none() {
         cache.default_budgets = cache
@@ -190,12 +200,29 @@ impl PackageCache {
     }
 
     /// Where a package is stored.
-    fn store_dir(&self, name: &str) -> &Path {
+    pub(crate) fn store_dir(&self, name: &str) -> &Path {
         match self.policy.level_of(name) {
             gaia_spec::PackageCacheLevelSpec::System => {
                 self.system.as_deref().unwrap_or(&self.project)
             }
             gaia_spec::PackageCacheLevelSpec::Project => &self.project,
+        }
+    }
+}
+
+#[cfg(test)]
+impl PackageCache {
+    /// A cache with one level at `project`, for the registry cache's tests.
+    pub(crate) fn with_project_level(project: &Path, registry: Option<RegistryCacheUse>) -> Self {
+        Self {
+            system: None,
+            project: project.to_path_buf(),
+            max_size: None,
+            default_budgets: Vec::new(),
+            policy: gaia_spec::BuildrootPackageCachePolicySpec::default(),
+            note: None,
+            registry,
+            registry_warnings: Vec::new(),
         }
     }
 }
@@ -229,8 +256,8 @@ pub(crate) fn execution_identity(execution: &ImageExecutionContext) -> String {
     }
 }
 
-struct Manifest {
-    output_dir: String,
+pub(crate) struct Manifest {
+    pub(crate) output_dir: String,
     /// Directories (with their modes) and files of the entry, relative to
     /// the output directory.
     dirs: Vec<(String, u32)>,
@@ -242,7 +269,7 @@ struct Manifest {
     rewrite: Vec<String>,
     /// False when a binary holds `output_dir`: the package can only be
     /// restored into a tree at the same path.
-    relocatable: bool,
+    pub(crate) relocatable: bool,
 }
 
 impl Manifest {
@@ -261,7 +288,7 @@ impl Manifest {
         .to_string()
     }
 
-    fn parse(text: &str) -> Option<Self> {
+    pub(crate) fn parse(text: &str) -> Option<Self> {
         let value: serde_json::Value = serde_json::from_str(text).ok()?;
         let strings = |field: &str| -> Option<Vec<String>> {
             value
@@ -305,7 +332,7 @@ impl PackageCache {
     /// A cached build of the package that can be restored into
     /// `output_dir`, from the project level first, then the system level:
     /// a relocatable one, or one built at that path.
-    fn usable(&self, output_dir: &Path, name: &str, key: &str) -> Option<(PathBuf, Manifest)> {
+    pub(crate) fn usable(&self, output_dir: &Path, name: &str, key: &str) -> Option<(PathBuf, Manifest)> {
         self.levels().into_iter().find_map(|(_, level)| {
             [None, Some(output_dir)].into_iter().find_map(|pinned| {
                 let (archive, manifest) = entry_in(level, name, key, pinned);
@@ -327,14 +354,20 @@ pub(crate) fn entry_in(
     pinned: Option<&Path>,
 ) -> (PathBuf, PathBuf) {
     let dir = level.join(name);
-    let stem = match pinned {
+    let stem = entry_stem(key, pinned);
+    (dir.join(&stem), dir.join(format!("{stem}.json")))
+}
+
+/// The file name of an entry (its directory and manifest are this plus
+/// `.json`): the key, or `<key>@<hash>` for an entry pinned to `pinned`.
+pub(crate) fn entry_stem(key: &str, pinned: Option<&Path>) -> String {
+    match pinned {
         None => key.to_string(),
         Some(output_dir) => {
             let digest = sha2::Sha256::digest(output_dir.display().to_string().as_bytes());
             format!("{key}@{}", &hex(&digest)[..16])
         }
-    };
-    (dir.join(&stem), dir.join(format!("{stem}.json")))
+    }
 }
 
 impl PackageCache {

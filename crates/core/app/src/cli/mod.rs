@@ -89,6 +89,16 @@ pub struct CacheArgs {
     /// `gaia cache stats`: disk usage of every cache instead of the package
     /// cache listing.
     pub stats: bool,
+    /// `--prune`: delete registry entries of the checkpoint named by
+    /// `--checkpoint` that are older than `--keep-days`. Needs `--remote`.
+    pub prune: bool,
+    /// `--remote`: the registry cache (with `--prune`).
+    pub remote: bool,
+    /// `--checkpoint <id>`: the `backend = "oci"` checkpoint to prune.
+    pub checkpoint: Option<String>,
+    /// `--keep-days <n>`: entries created within this many days are kept
+    /// (30 when not given).
+    pub keep_days: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -216,6 +226,21 @@ impl AppArgs {
                 "--remove-legacy" => parsed.cache.remove_legacy = true,
                 "--level" => parsed.cache.level = value("--level", &mut parsed.usage_errors),
                 "--clear" => parsed.cache.clear = value("--clear", &mut parsed.usage_errors),
+                "--prune" => parsed.cache.prune = true,
+                "--remote" => parsed.cache.remote = true,
+                "--checkpoint" => {
+                    parsed.cache.checkpoint = value("--checkpoint", &mut parsed.usage_errors);
+                }
+                "--keep-days" => {
+                    if let Some(days) = value("--keep-days", &mut parsed.usage_errors) {
+                        match days.parse::<u32>() {
+                            Ok(days) => parsed.cache.keep_days = Some(days),
+                            Err(_) => parsed.usage_errors.push(format!(
+                                "--keep-days needs a whole number of days, got '{days}'"
+                            )),
+                        }
+                    }
+                }
                 "--package" | "--remove" => {
                     if let Some(list) = value(&arg, &mut parsed.usage_errors) {
                         let list = split_list(&list);
