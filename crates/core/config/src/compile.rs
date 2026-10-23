@@ -525,6 +525,16 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                 key: signing.key,
                 outputs: signing.outputs,
             }),
+        checks: raw
+            .image
+            .checks
+            .map(|checks| gaia_spec::ImageChecksSpec {
+                kernel_modules: checks.kernel_modules,
+                modules_dir: checks.modules_dir,
+                symvers: checks.symvers,
+                kernel_image: checks.kernel_image,
+            })
+            .unwrap_or_default(),
         assembly: compile_image_assembly(raw.image.assembly),
         layers,
     };

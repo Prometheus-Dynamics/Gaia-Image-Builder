@@ -32,8 +32,9 @@ fn generates_report_bundle_for_default_run() {
 
     let report = generate_report(&spec, &validation, &plan, &outcome);
 
-    assert_eq!(report.summary.operation_count, 11);
-    assert_eq!(report.summary.completed_operations, 11);
+    // image:check is the twelfth: it skips itself, as no kernel is built here.
+    assert_eq!(report.summary.operation_count, 12);
+    assert_eq!(report.summary.completed_operations, 12);
     assert_eq!(report.summary.rolled_back_operations, 0);
     assert!(report.summary.rollback_on_error);
     assert!(!report.summary.preserve_failed_outputs);
@@ -246,7 +247,7 @@ fn generates_report_bundle_for_default_run() {
             .any(|record| record.id == "base-image"
                 && record.state.get("backend") == Some(&"local".to_string()))
     );
-    assert_eq!(report.manifest.operations.len(), 11);
+    assert_eq!(report.manifest.operations.len(), 12);
     assert!(report.manifest.rollback_on_error);
     assert!(!report.manifest.preserve_failed_outputs);
     assert_eq!(
@@ -294,7 +295,7 @@ fn generates_report_bundle_for_default_run() {
             && record.backend_state.contains_key("archive_sha256")
             && record.backend_state.get("build_target") == Some(&"generic-aarch64".to_string())
     }));
-    assert_eq!(report.rebuild_reasons.len(), 12);
+    assert_eq!(report.rebuild_reasons.len(), 13);
 }
 
 #[test]

@@ -470,6 +470,31 @@ pub fn plan_build_operations(
         operations.push(assembly);
     }
 
+    // The image checks read what the build and the assembly produced, so they
+    // come after the last of them. Buildroot images only; the kernel checks
+    // skip themselves when the Buildroot config builds no kernel.
+    if spec.image.provider_kind() == gaia_spec::ImageProviderKind::Buildroot
+        && spec.image.checks.kernel_modules != Some(false)
+    {
+        operations.push(
+            PlannedOperation::new(OperationId::image_check(), OperationKind::CheckImage)
+                .with_dependency(if has_image_assembly {
+                    OperationId::image_assembly()
+                } else {
+                    OperationId::image()
+                })
+                .with_parallelism(OperationParallelism::parallelizable(
+                    OperationParallelismDomain::Images,
+                ))
+                .with_optionality(OperationOptionality::Required)
+                .with_fingerprint(operation_fingerprint(spec, &OperationKind::CheckImage))
+                .with_reuse(OperationReuse::execute(
+                    "image_check_required",
+                    "image checks will execute after the image is built and assembled",
+                )),
+        );
+    }
+
     for checkpoint in &spec.checkpoints.points {
         let anchor_dependency = checkpoint_anchor_dependency(&checkpoint.anchor);
         let checkpoint_optionality = checkpoint_optionality(checkpoint);

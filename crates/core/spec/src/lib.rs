@@ -42,8 +42,8 @@ pub use artifact::{
     PythonArtifactSpec, RustArtifactSpec, cargo_git_url_key,
 };
 pub use assembly::{
-    AssemblyRoots, AssemblyWorkDirKeyword, assembly_work_dir_keyword, exclude_names,
-    expand_simple_glob, wildcard_match,
+    AssemblyRoots, AssemblyWorkDirKeyword, assembly_work_dir_keyword, buildroot_output_dir,
+    exclude_names, expand_simple_glob, image_checks_report_path, wildcard_match,
 };
 pub use assembly_archive_spec::{
     AssemblyArchiveMemberSourceSpec, AssemblyArchiveMemberSpec, AssemblyArchiveSpec,
@@ -97,9 +97,9 @@ pub use ids::{
 };
 pub use image::{
     BuildrootExpectedImageFormatSpec, BuildrootExpectedImageSpec, BuildrootExternalTreeModeSpec,
-    BuildrootImageSpec, ImageDefinition, ImageFeedSpec, ImageLayerSpec, ImageLayersSpec,
-    ImageOutputSpec, ImageProviderKind, ImageSigningKind, ImageSigningSpec, ImageSpec,
-    StartingPointImageSpec, StartingPointOutputModeSpec, StartingPointPackagesSpec,
+    BuildrootImageSpec, ImageChecksSpec, ImageDefinition, ImageFeedSpec, ImageLayerSpec,
+    ImageLayersSpec, ImageOutputSpec, ImageProviderKind, ImageSigningKind, ImageSigningSpec,
+    ImageSpec, StartingPointImageSpec, StartingPointOutputModeSpec, StartingPointPackagesSpec,
     StartingPointRootfsValidationModeSpec,
 };
 pub use inputs::{InputKindSpec, InputOptionSpec, InputSpec};

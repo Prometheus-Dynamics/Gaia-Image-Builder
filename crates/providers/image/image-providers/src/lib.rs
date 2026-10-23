@@ -679,6 +679,7 @@ mod tests {
             assembly: None,
             signing: None,
             layers: None,
+            checks: gaia_spec::ImageChecksSpec::default(),
         };
         let preview = DummyImageProvider.preview_image(
             &spec,

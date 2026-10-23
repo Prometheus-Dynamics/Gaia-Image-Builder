@@ -163,11 +163,19 @@ impl AssemblyRoots {
     }
 }
 
-fn buildroot_output_dir(spec: &ResolvedBuildSpec) -> Result<PathBuf, String> {
+/// The Buildroot output directory (`<build dir>/image/buildroot-output`).
+pub fn buildroot_output_dir(spec: &ResolvedBuildSpec) -> Result<PathBuf, String> {
     resolve_workspace_path_or_absolute(
         spec,
         &format!("{}/image/buildroot-output", spec.workspace.build_dir),
     )
+}
+
+/// Where `image:check` writes its report: `<out dir>/<build>.checks.json`.
+pub fn image_checks_report_path(spec: &ResolvedBuildSpec) -> PathBuf {
+    let out_dir = resolve_workspace_path(&spec.workspace, &spec.workspace.out_dir)
+        .unwrap_or_else(|_| PathBuf::from(&spec.workspace.out_dir));
+    out_dir.join(format!("{}.checks.json", spec.identity.id.as_str()))
 }
 
 pub fn expand_simple_glob(

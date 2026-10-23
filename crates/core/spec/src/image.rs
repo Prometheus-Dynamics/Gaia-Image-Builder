@@ -14,6 +14,10 @@ pub struct ImageSpec {
     /// serialized specs when unset, so existing builds keep their digests.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layers: Option<ImageLayersSpec>,
+    /// `[image.checks]`: what `image:check` verifies in the built image. Left
+    /// out of serialized specs when unset, so existing builds keep their digests.
+    #[serde(skip_serializing_if = "ImageChecksSpec::is_default")]
+    pub checks: ImageChecksSpec,
 }
 
 /// `[image.layers]`: the root filesystem split into one tar per layer.
@@ -48,6 +52,27 @@ pub struct ImageLayerSpec {
     pub stage: Vec<String>,
     /// Stage service ids: each service's unit file.
     pub services: Vec<String>,
+}
+
+/// `[image.checks]`. Paths are as written: a relative one resolves against
+/// the workspace root.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct ImageChecksSpec {
+    /// Runs the kernel module checks. `None` takes the default, which is on
+    /// for Buildroot images.
+    pub kernel_modules: Option<bool>,
+    /// The module tree (default `target/lib/modules/<kernel release>`).
+    pub modules_dir: Option<String>,
+    /// The kernel's `Module.symvers` (default `build/linux-*/Module.symvers`).
+    pub symvers: Option<String>,
+    /// The kernel image the release is read from (default `images/Image`).
+    pub kernel_image: Option<String>,
+}
+
+impl ImageChecksSpec {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// `[image.signing]`. `kind` is as written; [`ImageSigningKind::parse`] reads it.
@@ -106,6 +131,7 @@ impl ImageSpec {
             assembly: None,
             signing: None,
             layers: None,
+            checks: ImageChecksSpec::default(),
         }
     }
 

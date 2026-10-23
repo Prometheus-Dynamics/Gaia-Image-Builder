@@ -2304,6 +2304,29 @@ services = ["helios-*"]     # stage service ids: the unit file
 - **Reuse.** A layer's fingerprint covers its members (path, kind, mode, owner, size and content digest or link target) and the output settings. A layer whose fingerprint and outputs are unchanged is reused without writing its tar, erofs or verity. The summary says `reused` or `rebuilt` for each layer.
 - **Checks.** Selector ids that name nothing in the build are errors (globs may match nothing), and so are a `default` or a layer table that is not in `order`, a relative path, and `verity` without `erofs`.
 
+### Image checks
+
+`image:check` reads the built image and the kernel tree of the Buildroot output, and fails the run on an error. It runs after the image build (after the assembly, when there is one), only reads, and is reused while the build it reads is unchanged.
+
+```toml
+[image.checks]
+kernel_modules = true                    # default for Buildroot images; false turns the module checks off
+modules_dir = "build/image/buildroot-output/target/lib/modules/7.2.9"  # default: target/lib/modules/<kernel release>
+symvers = "build/image/buildroot-output/build/linux-custom/Module.symvers"  # default: build/linux-*/Module.symvers
+kernel_image = "build/image/buildroot-output/images/Image"  # default: images/Image
+```
+
+Paths are as written: a relative one resolves against the workspace root. The three paths are overrides for a build that keeps its kernel elsewhere; an override that names no file or directory is an error, while a default that is missing is a warning.
+
+The kernel module checks run on every shipped `.ko`, `.ko.xz`, `.ko.zst` or `.ko.gz` (compressed modules are decompressed with `xz`, `zstd` or `gzip` from `PATH`). The kernel release is read from the shipped kernel image's `Linux version <release>` banner, gunzipped first when the image is gzip, so a kernel and modules from different builds are caught. When the Buildroot config has no `BR2_LINUX_KERNEL=y` (and no override is set) the check is reported as skipped.
+
+- **Errors** fail the run. `vermagic_mismatch`: a module's vermagic does not start with the kernel release. `vermagic_flags_differ`: a module's flags differ from the most common flags. `undefined_symbol`: an import that neither `Module.symvers` nor a shipped module exports. `export_not_shipped`: an import that a module exports, where that module is neither shipped nor built in. `abi_mismatch`: a module's `__versions` CRC for a symbol differs from the kernel's `Module.symvers` (`CONFIG_MODVERSIONS`), the case where a module loads on one kernel and is refused by another. `dependency_missing`: a `depends=` module that is neither shipped nor in `modules.builtin`. `module_invalid`: a file that is not a readable ELF object. `kernel_release`: no banner in the kernel image.
+- **Warnings** do not fail the run and appear in the run summary. `module_duplicate`: a module name shipped more than once. Both copies are checked; the one `modprobe` loads is named, from `modules.dep` (depmod's own entry), else by depmod's search order (`updates`, `extra`, `weak-updates`, then the kernel tree). `firmware_missing`: a `firmware=` file not under `lib/firmware`, with or without a compression suffix. Drivers often list optional firmware, so this is a warning. `symvers_missing`: no `Module.symvers` was found, so imports are not checked.
+
+The report is `<out dir>/<build>.checks.json`, written on success and on failure. It holds `status` (`passed`, `failed` or `skipped`), the release, the module and import counts, and each error and warning with its `code`, `module` and `message`. Paths in it are relative to the Buildroot output.
+
+Only the checks listed above are made. A driver that loads but fails in its `probe` is caught by a board test, not here.
+
 ### Image Assembly
 
 Image assembly runs after the image provider has produced its base outputs. It creates named work trees, stages selected files, runs typed transforms, and can package trees into supported filesystem artifacts.

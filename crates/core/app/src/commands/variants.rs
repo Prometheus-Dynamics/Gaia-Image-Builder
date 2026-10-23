@@ -268,7 +268,8 @@ fn classify_planned(
             | OperationKind::RenderStageService { .. }
             | OperationKind::CaptureCheckpoint { .. }
             | OperationKind::BuildImage
-            | OperationKind::AssembleImage => {}
+            | OperationKind::AssembleImage
+            | OperationKind::CheckImage => {}
             OperationKind::MaterializeSource { source_id } => {
                 if same {
                     shared.insert(id.clone());

@@ -31,6 +31,7 @@ fn image() -> ImageSpec {
         assembly: None,
         signing: None,
         layers: None,
+        checks: gaia_spec::ImageChecksSpec::default(),
     }
 }
 

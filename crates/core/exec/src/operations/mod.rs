@@ -1,6 +1,7 @@
 mod artifact;
 mod assembly;
 mod helpers;
+mod image_check;
 pub use helpers::image_execution_policy;
 
 pub(crate) use artifact::{artifact_batch_key, dispatch_artifact_batch};
@@ -78,6 +79,8 @@ pub struct ExecutionError {
 pub enum ExecutionErrorKind {
     MissingSpec,
     MissingProvider,
+    /// `image:check` found an error in the image, or could not write its report.
+    ImageCheck,
     ToolStart,
     Timeout,
     Cancelled,
@@ -570,6 +573,7 @@ pub(crate) fn dispatch_operation(
                 }
                 success
             }
+            OperationKind::CheckImage => image_check::execute(spec, &operation.id),
             OperationKind::CaptureCheckpoint { checkpoint_id } => {
                 let checkpoint = spec
                     .checkpoints

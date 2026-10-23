@@ -439,6 +439,7 @@ mod tests {
             feed: gaia_spec::ImageFeedSpec::default(),
             output: ImageOutputSpec::default(),
             assembly: None,
+            checks: Default::default(),
         };
 
         let context = AppContext::with_defaults();

@@ -27,6 +27,7 @@ fn a_failed_make_still_reports_its_step_times() {
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec::default(),
         assembly: None,
+        checks: gaia_spec::ImageChecksSpec::default(),
     };
     let execution = test_execution();
     let policy = ImageExecutionPolicy::default();
@@ -78,6 +79,7 @@ fn prepare_finalizes_the_target_without_making_images() {
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec::default(),
         assembly: None,
+        checks: gaia_spec::ImageChecksSpec::default(),
     };
     let execution = test_execution();
     for parallel_packages in [true, false] {
@@ -138,6 +140,7 @@ fn a_build_operations_steps_cover_its_duration() {
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec::default(),
         assembly: None,
+        checks: gaia_spec::ImageChecksSpec::default(),
     };
     let output = ImageOutputContract {
         collect_dir: Some(workspace.join("collect").display().to_string()),

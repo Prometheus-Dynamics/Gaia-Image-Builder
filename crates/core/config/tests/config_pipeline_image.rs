@@ -40,6 +40,65 @@ defconfig = "dummy_defconfig"
 }
 
 #[test]
+fn image_checks_table_resolves_into_the_spec() {
+    let path = write_temp_config(
+        r#"
+build_name = "image-checks"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[image]
+kind = "buildroot"
+defconfig = "dummy_defconfig"
+
+[image.checks]
+kernel_modules = false
+modules_dir = "custom/modules"
+symvers = "custom/Module.symvers"
+kernel_image = "custom/Image"
+"#,
+    );
+    let spec = gaia_config::resolve_config(path.to_str().expect("temp path should be utf-8"));
+    assert_eq!(spec.image.checks.kernel_modules, Some(false));
+    assert_eq!(
+        spec.image.checks.modules_dir.as_deref(),
+        Some("custom/modules")
+    );
+    assert_eq!(
+        spec.image.checks.symvers.as_deref(),
+        Some("custom/Module.symvers")
+    );
+    assert_eq!(
+        spec.image.checks.kernel_image.as_deref(),
+        Some("custom/Image")
+    );
+}
+
+#[test]
+fn image_checks_stay_at_their_default_when_the_table_is_absent() {
+    let path = write_temp_config(
+        r#"
+build_name = "image-checks-default"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[image]
+kind = "buildroot"
+defconfig = "dummy_defconfig"
+"#,
+    );
+    let spec = gaia_config::resolve_config(path.to_str().expect("temp path should be utf-8"));
+    assert!(spec.image.checks.is_default());
+    assert_eq!(spec.image.checks.kernel_modules, None);
+}
+
+#[test]
 fn resolves_image_assembly_tables() {
     let path = write_temp_config(
         r#"

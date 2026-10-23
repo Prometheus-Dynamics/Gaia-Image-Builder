@@ -117,6 +117,15 @@ pub(crate) fn operation_inputs(
             // so the one that changed is named.
             inputs.map("assembly inputs", &assembly_input_entries(spec));
         }
+        OperationKind::CheckImage => {
+            inputs.value("checks", &spec.image.checks);
+            inputs.text(
+                "report",
+                gaia_spec::image_checks_report_path(spec)
+                    .display()
+                    .to_string(),
+            );
+        }
         OperationKind::CaptureCheckpoint { checkpoint_id } => {
             if let Some(checkpoint) = spec
                 .checkpoints
@@ -242,6 +251,8 @@ fn image_inputs(spec: &ResolvedBuildSpec, include_post_image: bool, inputs: &mut
     // Disk assembly is fingerprinted by its own operation; a partition
     // layout change must not re-run the Buildroot build.
     take_field(&mut rest, "", "assembly");
+    // The image checks are fingerprinted by their own operation.
+    take_field(&mut rest, "", "checks");
     let buildroot_definition = "/definition/Buildroot";
     // Where and under what name images are collected and archived, the image
     // feed (installs, stage files, services) and leaving packages out of the

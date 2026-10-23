@@ -264,6 +264,7 @@ fn classify_execution_error(error: &ExecutionError) -> FailureClass {
         gaia_exec::ExecutionErrorKind::BackendCommand => FailureClass::BackendCommand,
         gaia_exec::ExecutionErrorKind::PolicyBlocked => FailureClass::PolicyBlocked,
         gaia_exec::ExecutionErrorKind::RuntimeState => FailureClass::RuntimeState,
+        gaia_exec::ExecutionErrorKind::ImageCheck => FailureClass::ImageCheck,
         gaia_exec::ExecutionErrorKind::Unknown => match error.code {
             code if code.starts_with("missing_") => {
                 if code.ends_with("_provider") {

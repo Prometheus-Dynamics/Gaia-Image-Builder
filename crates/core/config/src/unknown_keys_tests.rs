@@ -341,6 +341,16 @@ fn examples_and_docs_name_no_unknown_key() {
 }
 
 #[test]
+fn image_checks_keys_are_checked() {
+    let found = unknown(
+        "build_name = \"demo\"\n[image]\nkind = \"buildroot\"\n\
+         [image.checks]\nkernel_module = true\n",
+    );
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].contains("kernel_module"), "{found:?}");
+}
+
+#[test]
 fn new_buildroot_image_and_provider_keys_are_known() {
     assert!(
         unknown(
@@ -350,7 +360,8 @@ fn new_buildroot_image_and_provider_keys_are_known() {
              [providers.rust]\nsccache = true\nstrip = true\n\
              [providers.docker]\nreuse_container = true\n\
              [image]\nkind = \"buildroot\"\nlegal_info = true\n\
-             [image.signing]\nkind = \"gpg\"\nkey = \"env:KEY\"\noutputs = [\"*.img.xz\"]\n"
+             [image.signing]\nkind = \"gpg\"\nkey = \"env:KEY\"\noutputs = [\"*.img.xz\"]\n\
+             [image.checks]\nkernel_modules = false\nmodules_dir = \"m\"\nsymvers = \"s\"\nkernel_image = \"k\"\n"
         )
         .is_empty(),
         "{:?}",
@@ -361,7 +372,8 @@ fn new_buildroot_image_and_provider_keys_are_known() {
              [providers.rust]\nsccache = true\nstrip = true\n\
              [providers.docker]\nreuse_container = true\n\
              [image]\nkind = \"buildroot\"\nlegal_info = true\n\
-             [image.signing]\nkind = \"gpg\"\nkey = \"env:KEY\"\noutputs = [\"*.img.xz\"]\n"
+             [image.signing]\nkind = \"gpg\"\nkey = \"env:KEY\"\noutputs = [\"*.img.xz\"]\n\
+             [image.checks]\nkernel_modules = false\nmodules_dir = \"m\"\nsymvers = \"s\"\nkernel_image = \"k\"\n"
         )
     );
 }

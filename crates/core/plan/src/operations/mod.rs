@@ -52,6 +52,10 @@ impl OperationId {
         Self::new("image:assembly")
     }
 
+    pub fn image_check() -> Self {
+        Self::new("image:check")
+    }
+
     pub fn checkpoint(checkpoint_id: &CheckpointId) -> Self {
         Self::new(format!("checkpoint:{}", checkpoint_id.as_str()))
     }
@@ -268,6 +272,8 @@ pub enum OperationKind {
     PrepareImage,
     BuildImage,
     AssembleImage,
+    /// `image:check`: reads the built image and its kernel tree, and writes the report.
+    CheckImage,
     CaptureCheckpoint {
         checkpoint_id: CheckpointId,
     },

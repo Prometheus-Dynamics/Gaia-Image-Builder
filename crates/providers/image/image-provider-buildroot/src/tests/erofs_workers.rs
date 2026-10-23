@@ -10,6 +10,7 @@ fn buildroot_spec(workers: ErofsWorkersSpec) -> ResolvedBuildSpec {
         assembly: None,
         signing: None,
         layers: None,
+        checks: gaia_spec::ImageChecksSpec::default(),
     };
     spec.policy.providers.buildroot.erofs_workers = workers;
     spec

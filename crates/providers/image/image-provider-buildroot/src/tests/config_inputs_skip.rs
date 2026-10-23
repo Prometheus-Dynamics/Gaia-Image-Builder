@@ -25,6 +25,7 @@ fn image(overrides: Vec<(String, String)>) -> ImageSpec {
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec::default(),
         assembly: None,
+        checks: gaia_spec::ImageChecksSpec::default(),
     }
 }
 

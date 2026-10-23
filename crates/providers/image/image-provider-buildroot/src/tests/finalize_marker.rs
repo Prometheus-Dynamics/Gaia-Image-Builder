@@ -77,6 +77,7 @@ all:\n\t@mkdir -p $(O)/images && touch $(O)/images/rootfs.img && echo images >> 
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec::default(),
         assembly: None,
+        checks: gaia_spec::ImageChecksSpec::default(),
     };
     let execution = test_execution();
     let mut policy = ImageExecutionPolicy {

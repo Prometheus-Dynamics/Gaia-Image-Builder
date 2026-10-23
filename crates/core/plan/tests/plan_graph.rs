@@ -22,7 +22,8 @@ fn default_plan_has_valid_operations_and_rebuild_reasons() {
     let plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
 
     assert!(plan.validate().is_empty());
-    assert_eq!(plan.operations.len(), 11);
+    // image:check is the twelfth: the default Buildroot image runs its checks.
+    assert_eq!(plan.operations.len(), 12);
     assert!(
         plan.operations
             .iter()

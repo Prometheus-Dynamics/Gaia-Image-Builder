@@ -706,6 +706,7 @@ pub struct RawImageConfig {
     pub feed: RawImageFeedConfig,
     pub output: RawImageOutputConfig,
     pub signing: Option<RawImageSigningConfig>,
+    pub checks: Option<RawImageChecksConfig>,
     pub assembly: Option<RawImageAssemblyConfig>,
     /// `[image.layers]`: the rootfs split into layer tars.
     pub layers: Option<RawImageLayersConfig>,
@@ -905,6 +906,16 @@ pub struct RawImageLayerConfig {
     pub installs: Vec<String>,
     pub stage: Vec<String>,
     pub services: Vec<String>,
+}
+
+/// `[image.checks]`: what `image:check` verifies (see `Image checks` in the docs).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawImageChecksConfig {
+    pub kernel_modules: Option<bool>,
+    pub modules_dir: Option<String>,
+    pub symvers: Option<String>,
+    pub kernel_image: Option<String>,
 }
 
 /// `[image.signing]`: a signature for each published output that matches `outputs`.

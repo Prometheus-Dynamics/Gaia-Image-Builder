@@ -49,6 +49,7 @@ fn contribution_key(kind: &OperationKind) -> Option<String> {
             "image".to_string()
         }
         OperationKind::ResolveBuild
+        | OperationKind::CheckImage
         | OperationKind::CaptureCheckpoint { .. }
         | OperationKind::EmitReport => return None,
     })

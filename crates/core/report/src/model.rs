@@ -214,6 +214,8 @@ pub enum FailureClass {
     BackendCommand,
     PolicyBlocked,
     RuntimeState,
+    /// `image:check` found an error in the built image.
+    ImageCheck,
     Unknown,
 }
 

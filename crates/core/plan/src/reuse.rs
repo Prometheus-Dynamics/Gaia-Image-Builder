@@ -789,6 +789,7 @@ fn operation_outputs_present(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
             collect_exists || archive_exists
         }
         OperationKind::AssembleImage => assembly_state_path(spec).is_file(),
+        OperationKind::CheckImage => gaia_spec::image_checks_report_path(spec).is_file(),
     }
 }
 
@@ -868,9 +869,9 @@ pub fn operation_content_signature(
                 item.map(|item| item.unit_path.as_str()),
             ))
         }
-        OperationKind::AssembleImage | OperationKind::CaptureCheckpoint { .. } => {
-            operation_output_signature(spec, kind)
-        }
+        OperationKind::AssembleImage
+        | OperationKind::CheckImage
+        | OperationKind::CaptureCheckpoint { .. } => operation_output_signature(spec, kind),
     }
 }
 
@@ -1041,6 +1042,10 @@ pub fn operation_output_signature(
         // rewritten state file (see reuse_content).
         OperationKind::BuildImage => content::image_build_content_signature(spec),
         OperationKind::AssembleImage => Some(content::image_assembly_content_signature(spec)),
+        // The report is the check's whole result, so its content is the signature.
+        OperationKind::CheckImage => Some(content_state_signature(
+            &gaia_spec::image_checks_report_path(spec),
+        )),
         OperationKind::CaptureCheckpoint { checkpoint_id } => Some(provider_state_signature(
             &checkpoint_state_path(spec, checkpoint_id),
         )),
