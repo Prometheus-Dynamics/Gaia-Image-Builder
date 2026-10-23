@@ -79,7 +79,7 @@ impl LogTail {
 pub(crate) fn output_tail(lines: &[String], spec: &ResolvedBuildSpec) -> Vec<String> {
     let tail_lines = spec.policy.execution.output_retention.failure_tail_lines;
     let start = lines.len().saturating_sub(tail_lines);
-    lines[start..].to_vec()
+    gaia_process::secrets::mask_lines(&lines[start..])
 }
 
 /// The policy an image operation of `spec` runs with (also used by previews).
@@ -379,6 +379,10 @@ pub(crate) fn failure_with_kind_and_tail(
     message: String,
     output_tail: Vec<String>,
 ) -> OperationExecutionResult {
+    // A failure message can quote a command or a value, so it is masked like
+    // the captured output.
+    let message = gaia_process::secrets::mask(&message).into_owned();
+    let output_tail = gaia_process::secrets::mask_lines(&output_tail);
     OperationExecutionResult {
         events: vec![ExecutionEvent::Failed {
             operation_id: operation_id.clone(),

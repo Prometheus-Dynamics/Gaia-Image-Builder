@@ -181,17 +181,15 @@ pub(crate) fn signing_command(
     command
 }
 
-/// The key the setting names: the setting itself, or the value of the
-/// variable `env:VAR` names. The error names the variable, never its value.
+/// The key the setting names: the setting itself, the value of the variable
+/// `env:VAR` names, or the value of the `[secrets]` entry `secret:NAME`. It is
+/// read now, when the signing starts. Errors name the variable or entry, never
+/// its value.
 fn resolve_key(setting: &str) -> Result<String, String> {
-    let Some(name) = setting.strip_prefix("env:") else {
-        return Ok(setting.to_string());
-    };
-    match std::env::var(name) {
-        Ok(value) if !value.trim().is_empty() => Ok(value.trim().to_string()),
-        _ => Err(format!(
-            "[image.signing] key: environment variable '{name}' is not set or empty"
-        )),
+    match gaia_process::secrets::key_setting(setting) {
+        Ok(Some(key)) => Ok(key),
+        Ok(None) => Ok(String::new()),
+        Err(error) => Err(format!("[image.signing] key: {error}")),
     }
 }
 
@@ -251,6 +249,7 @@ pub(crate) fn sign_outcome(
             }
         }
         Err(message) => {
+            let message = gaia_process::secrets::mask(&message).into_owned();
             let operation_id = plan
                 .operations
                 .iter()
@@ -524,5 +523,42 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&verified.stderr)
         );
+    }
+}
+
+#[cfg(test)]
+mod secret_key_tests {
+    use super::*;
+
+    #[test]
+    fn a_secret_reference_key_is_read_when_signing_and_named_when_missing() {
+        gaia_process::secrets::install(
+            vec![
+                gaia_process::secrets::SecretDef {
+                    name: "gaia_sign_key_ref".into(),
+                    source: gaia_process::secrets::SecretSource::Command(vec![
+                        "printf".into(),
+                        "gaia-test-signing-key-id".into(),
+                    ]),
+                    required: true,
+                },
+                gaia_process::secrets::SecretDef {
+                    name: "gaia_sign_key_missing".into(),
+                    source: gaia_process::secrets::SecretSource::Env(
+                        "GAIA_TEST_SIGN_KEY_UNSET_Z9".into(),
+                    ),
+                    required: true,
+                },
+            ],
+            "",
+        );
+
+        assert_eq!(
+            resolve_key("secret:gaia_sign_key_ref"),
+            Ok("gaia-test-signing-key-id".to_string())
+        );
+        let error = resolve_key("secret:gaia_sign_key_missing").expect_err("unset variable");
+        assert!(error.contains("gaia_sign_key_missing"), "{error}");
+        assert!(error.contains("GAIA_TEST_SIGN_KEY_UNSET_Z9"), "{error}");
     }
 }

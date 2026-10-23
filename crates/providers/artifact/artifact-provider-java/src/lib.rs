@@ -148,7 +148,7 @@ fn run_java_build(
             contract,
             gradle_home,
             user_cache.as_deref(),
-        );
+        )?;
         command.current_dir(source_dir);
         return Ok((
             "custom-command".to_string(),
@@ -178,7 +178,7 @@ fn run_java_build(
             contract,
             gradle_home,
             user_cache.as_deref(),
-        );
+        )?;
         command.current_dir(source_dir);
         return Ok((
             "maven".to_string(),
@@ -205,7 +205,7 @@ fn run_java_build(
             contract,
             gradle_home,
             user_cache.as_deref(),
-        );
+        )?;
         command.current_dir(source_dir);
         return Ok((
             "gradle-wrapper".to_string(),
@@ -232,7 +232,7 @@ fn run_java_build(
             contract,
             gradle_home,
             user_cache.as_deref(),
-        );
+        )?;
         command.current_dir(source_dir);
         return Ok((
             "gradle".to_string(),
@@ -289,21 +289,23 @@ fn apply_java_build_env(
     contract: &ArtifactExecutionContract,
     gradle_home: GradleHomeSpec,
     user_cache: Option<&Path>,
-) {
+) -> Result<(), ArtifactProviderError> {
     let env: &[(String, String)] = match &artifact.definition {
         ArtifactDefinition::Java(java) => &java.build_env,
         _ => &[],
     };
-    apply_build_env(command, env, contract, gradle_home, user_cache);
+    apply_build_env(command, env, contract, gradle_home, user_cache)
 }
 
+/// Sets the build's environment. A `${secret:NAME}` in a value is read here,
+/// when the process starts, and its value goes only to the process.
 fn apply_build_env(
     command: &mut Command,
     env: &[(String, String)],
     contract: &ArtifactExecutionContract,
     gradle_home: GradleHomeSpec,
     user_cache: Option<&Path>,
-) {
+) -> Result<(), ArtifactProviderError> {
     let docker = matches!(
         contract.execution_backend,
         ArtifactExecutionBackend::Docker(_)
@@ -319,8 +321,15 @@ fn apply_build_env(
         register_docker_mount(dir);
     }
     for (key, value) in &env {
+        let value = gaia_process::secrets::expand_child_value(value).map_err(|error| {
+            ArtifactProviderError::new(
+                ArtifactProviderErrorKind::PolicyBlocked,
+                format!("build_env '{key}': {error}"),
+            )
+        })?;
         command.env(key, value);
     }
+    Ok(())
 }
 
 /// Points `GRADLE_USER_HOME` at `<user cache>/gradle-home` when the build's

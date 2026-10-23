@@ -11,6 +11,7 @@ description = "Reporting, provenance, and summary layer for Gaia."
 [dependencies]
 gaia-exec.workspace = true
 gaia-plan.workspace = true
+gaia-process.workspace = true
 gaia-spec.workspace = true
 gaia-validate.workspace = true
 serde.workspace = true

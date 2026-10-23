@@ -667,6 +667,7 @@ dependencies = [
  "gaia-exec",
  "gaia-image-providers",
  "gaia-plan",
+ "gaia-process",
  "gaia-source-providers",
  "gaia-spec",
  "gaia-testkit",
@@ -711,6 +712,7 @@ dependencies = [
  "gaia-source-providers",
  "gaia-spec",
  "gaia-testkit",
+ "serde_json",
 ]
 
 [[package]]

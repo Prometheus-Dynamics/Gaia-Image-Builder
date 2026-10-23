@@ -195,6 +195,9 @@ fn emit_line(
     batch: &mut LineBatch,
     line: String,
 ) {
+    // Every line is masked before it is kept or shown: a build that echoes a
+    // secret must not put its value in a log, a tail or a failure message.
+    let line = crate::secrets::mask(&line).into_owned();
     if let Some(sink) = sink
         && !line.is_empty()
     {

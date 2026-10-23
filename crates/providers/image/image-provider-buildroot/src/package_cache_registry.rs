@@ -281,6 +281,8 @@ mod tests {
                 sign_key: sign.then(|| "/keys/gaia.sec".to_string()),
                 verify_key: Some("/keys/gaia.pub".to_string()),
                 trust_unsigned: false,
+                token: None,
+                username: None,
                 tool_dir: Some(tools.to_path_buf()),
             },
             pull: true,

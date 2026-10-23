@@ -92,11 +92,14 @@ fn write_json_file<T: Serialize>(
     value: &T,
 ) -> io::Result<ReportOutputFile> {
     let path = report_dir.join(filename);
-    let bytes = serde_json::to_vec_pretty(value).map_err(|error| {
+    let text = serde_json::to_string_pretty(value).map_err(|error| {
         io::Error::other(format!(
             "failed to serialize report file '{filename}': {error}"
         ))
     })?;
+    // A report can quote a command's output or an error, so the secret values
+    // in it are replaced before it is written.
+    let bytes = gaia_process::secrets::mask(&text).into_owned().into_bytes();
     fs::write(&path, &bytes)?;
     tracing::trace!(
         kind = ?kind,
@@ -110,4 +113,38 @@ fn write_json_file<T: Serialize>(
         path,
         bytes: bytes.len() as u64,
     })
+}
+
+#[cfg(test)]
+mod secret_tests {
+    use super::*;
+
+    #[test]
+    fn a_report_file_replaces_a_secret_value_it_quotes() {
+        let scratch = gaia_testkit::TempDir::new("gaia-report-secret");
+        let dir = scratch.join("report");
+        std::fs::create_dir_all(&dir).expect("report dir");
+        gaia_process::secrets::install(
+            vec![gaia_process::secrets::SecretDef {
+                name: "gaia_test_report".into(),
+                source: gaia_process::secrets::SecretSource::Command(vec![
+                    "printf".into(),
+                    "gaia-report-secret-88".into(),
+                ]),
+                required: true,
+            }],
+            "",
+        );
+        gaia_process::secrets::resolve("gaia_test_report").expect("resolve");
+        let value = serde_json::json!({
+            "message": "push failed with gaia-report-secret-88",
+        });
+
+        let file = write_json_file(&dir, "summary.json", ReportFileKind::Summary, &value)
+            .expect("report written");
+
+        let text = std::fs::read_to_string(&file.path).expect("read back");
+        assert!(text.contains("push failed with ***"), "{text}");
+        assert!(!text.contains("gaia-report-secret-88"), "{text}");
+    }
 }

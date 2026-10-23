@@ -10,7 +10,7 @@
 use serde_json::{Map, Value, json};
 
 use crate::unknown_keys::layout::{self, keys_for_kind, nested, root_fields, top_sections};
-use crate::unknown_keys::{Known, Section};
+use crate::unknown_keys::{FieldsFn, Known, Section};
 
 const SCHEMA_DRAFT: &str = "https://json-schema.org/draft/2020-12/schema";
 
@@ -24,7 +24,7 @@ fn config_schema() -> Value {
     let mut properties = Map::new();
     for field in root_fields() {
         let schema = match sections.iter().find(|node| node.key == field) {
-            Some(node) => section_schema(node.key, node.known, node.children, None),
+            Some(node) => section_schema(node.key, node.known, node.children, node.entries, None),
             None => json!({}),
         };
         properties.insert(field.to_string(), schema);
@@ -41,23 +41,36 @@ fn config_schema() -> Value {
 
 /// A section: a table, or an array of tables. A kinded section is one table
 /// shape per kind it names; `kind` restricts a single shape to that kind.
-fn section_schema(key: &str, known: Known, children: &[Section], kind: Option<&str>) -> Value {
+/// `entries` is set for a named-table section (`[secrets]`): its own keys are
+/// the names of tables that each take `entries`.
+fn section_schema(
+    key: &str,
+    known: Known,
+    children: &[Section],
+    entries: Option<FieldsFn>,
+    kind: Option<&str>,
+) -> Value {
     let table = match known {
         Known::ByKind(_) if kind.is_none() => {
             let shapes = layout::kinds_of(key)
                 .iter()
-                .map(|kind| table_schema(known, children, Some(kind)))
+                .map(|kind| table_schema(known, children, None, Some(kind)))
                 .collect::<Vec<_>>();
             json!({ "anyOf": shapes })
         }
-        _ => table_schema(known, children, kind),
+        _ => table_schema(known, children, entries, kind),
     };
     json!({ "anyOf": [table.clone(), { "type": "array", "items": table }] })
 }
 
 /// One table shape: the keys it takes, each unconstrained, and its nested
 /// sections. A table whose keys are not known accepts any key.
-fn table_schema(known: Known, children: &[Section], kind: Option<&str>) -> Value {
+fn table_schema(
+    known: Known,
+    children: &[Section],
+    entries: Option<FieldsFn>,
+    kind: Option<&str>,
+) -> Value {
     let mut properties = Map::new();
     let fields = keys_for_kind(known, kind);
     if let Some(fields) = &fields {
@@ -69,16 +82,22 @@ fn table_schema(known: Known, children: &[Section], kind: Option<&str>) -> Value
         properties.insert("kind".to_string(), json!({ "const": kind }));
     }
     for child in children {
-        let (key, child_known, grandchildren) = nested(child);
+        let (key, child_known, grandchildren, child_entries) = nested(child);
         properties.insert(
             key.to_string(),
-            section_schema(key, child_known, grandchildren, None),
+            section_schema(key, child_known, grandchildren, child_entries, None),
         );
     }
     let mut schema = Map::new();
     schema.insert("type".into(), json!("object"));
     schema.insert("properties".into(), Value::Object(properties));
-    if fields.is_some() {
+    if let Some(entry) = entries {
+        // Each key names a table, and that table takes the entry's keys.
+        schema.insert(
+            "additionalProperties".into(),
+            table_schema(Known::Fixed(entry), &[], None, None),
+        );
+    } else if fields.is_some() {
         schema.insert("additionalProperties".into(), json!(false));
     }
     Value::Object(schema)
@@ -116,12 +135,22 @@ mod tests {
                     return vec![format!("{at}: expected a table")];
                 };
                 let properties = schema.get("properties").and_then(Value::as_object);
-                if schema.get("additionalProperties") == Some(&json!(false)) {
-                    for key in table.keys() {
-                        if properties.is_none_or(|known| !known.contains_key(key)) {
-                            found.push(format!("{at}.{key}: unknown key"));
+                match schema.get("additionalProperties") {
+                    Some(Value::Bool(false)) => {
+                        for key in table.keys() {
+                            if properties.is_none_or(|known| !known.contains_key(key)) {
+                                found.push(format!("{at}.{key}: unknown key"));
+                            }
                         }
                     }
+                    Some(extra @ Value::Object(_)) => {
+                        for (key, value) in table {
+                            if properties.is_none_or(|known| !known.contains_key(key)) {
+                                found.extend(problems(value, extra, &format!("{at}.{key}")));
+                            }
+                        }
+                    }
+                    _ => {}
                 }
                 for (key, child_schema) in properties.into_iter().flatten() {
                     if let Some(value) = table.get(key) {
@@ -186,6 +215,26 @@ mod tests {
             assert!(properties.contains_key(key), "{key} is in the schema");
         }
         assert_eq!(schema["additionalProperties"], json!(false));
+    }
+
+    #[test]
+    fn a_secret_entry_takes_only_its_source_keys() {
+        let schema = schema();
+        let good: toml::Value =
+            toml::from_str("[ghcr]\ncommand = [\"gh\", \"auth\", \"token\"]\nrequired = false\n")
+                .expect("toml");
+        let bad: toml::Value = toml::from_str("[ghcr]\ncomand = [\"gh\"]\n").expect("toml");
+        let good = serde_json::to_value(good).expect("json");
+        let bad = serde_json::to_value(bad).expect("json");
+        let secrets = &schema["properties"]["secrets"];
+        assert!(problems(&good, secrets, "secrets").is_empty());
+        assert!(
+            problems(&bad, secrets, "secrets")
+                .iter()
+                .any(|problem| problem.contains("secrets.ghcr.comand")),
+            "{:?}",
+            problems(&bad, secrets, "secrets")
+        );
     }
 
     #[test]

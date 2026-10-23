@@ -87,8 +87,9 @@ impl SignatureKind {
     }
 }
 
-/// Where the registry is and how its entries are trusted. Keys are resolved by
-/// the caller (`env:VAR` already expanded). `Debug` never shows key values.
+/// Where the registry is and how its entries are trusted. Keys are settings
+/// (a path, `env:VAR` or `secret:NAME`) that are read when a signature is
+/// made or checked, so no key value is held here. `Debug` never shows them.
 #[derive(Clone, PartialEq, Eq)]
 pub struct RegistryTarget {
     /// `host[:port]`, for example `ghcr.io` or `127.0.0.1:5000`.
@@ -96,12 +97,17 @@ pub struct RegistryTarget {
     /// `<owner>/gaia-cache`; the image of an entry is this plus its kind.
     pub repository: String,
     pub kind: SignatureKind,
-    /// The key that signs pushed manifests. `None` disables pushing.
+    /// The key setting that signs pushed manifests. `None` disables pushing.
     pub sign_key: Option<String>,
-    /// The key that verifies pulled manifests. `None` refuses pulls unless `trust_unsigned`.
+    /// The key setting that verifies pulled manifests. `None` refuses pulls unless `trust_unsigned`.
     pub verify_key: Option<String>,
     /// Explicit unsafe opt-in: pulls with no verify key skip the signature check.
     pub trust_unsigned: bool,
+    /// The checkpoint's `token`: `secret:NAME` or `env:VAR`. It comes before
+    /// every other credential source. `None` uses the usual sources.
+    pub token: Option<String>,
+    /// The user name paired with `token`. `None` means `gaia`.
+    pub username: Option<String>,
     /// Directory holding the signing tool. `None` searches `PATH`.
     pub tool_dir: Option<PathBuf>,
 }
@@ -115,6 +121,8 @@ impl fmt::Debug for RegistryTarget {
             .field("sign_key", &self.sign_key.as_ref().map(|_| "<set>"))
             .field("verify_key", &self.verify_key.as_ref().map(|_| "<set>"))
             .field("trust_unsigned", &self.trust_unsigned)
+            .field("token", &self.token.as_ref().map(|_| "<set>"))
+            .field("username", &self.username)
             .field("tool_dir", &self.tool_dir)
             .finish()
     }
@@ -182,7 +190,7 @@ pub struct RemoteCache {
 /// State shared by the clones of one cache.
 struct Session {
     /// Resolved on first use from the environment, or set up front by a test.
-    credentials: OnceLock<Credentials>,
+    credentials: OnceLock<Result<Credentials, String>>,
     /// Bearer token per image, as issued by the registry's token service.
     bearers: Mutex<BTreeMap<String, String>>,
 }
@@ -208,11 +216,14 @@ impl RemoteCache {
     #[cfg(test)]
     fn with_credentials(target: RegistryTarget, credentials: Credentials) -> Self {
         let cell = OnceLock::new();
-        let _ = cell.set(credentials);
+        let _ = cell.set(Ok(credentials));
         Self::with_cell(target, cell)
     }
 
-    fn with_cell(target: RegistryTarget, credentials: OnceLock<Credentials>) -> Self {
+    fn with_cell(
+        target: RegistryTarget,
+        credentials: OnceLock<Result<Credentials, String>>,
+    ) -> Self {
         Self {
             target: Arc::new(target),
             session: Arc::new(Session {
@@ -456,7 +467,7 @@ impl RemoteCache {
                 self.remember_bearer(image, &token);
                 Auth::Bearer(token)
             }
-            _ => match self.basic_auth() {
+            _ => match self.basic_auth()? {
                 Some(auth) => auth,
                 None => return Ok(response),
             },
@@ -464,20 +475,30 @@ impl RemoteCache {
         http::send(&request)
     }
 
-    fn credentials(&self) -> &Credentials {
+    /// The credentials, resolved on first use. A checkpoint token whose
+    /// secret cannot be read is an error of the request, not an anonymous try.
+    fn credentials(&self) -> Result<&Credentials, RegistryError> {
         self.session
             .credentials
-            .get_or_init(|| auth::resolve(&self.target.registry))
+            .get_or_init(|| {
+                auth::resolve(
+                    &self.target.registry,
+                    self.target.token.as_deref(),
+                    self.target.username.as_deref(),
+                )
+            })
+            .as_ref()
+            .map_err(|error| RegistryError::Io(error.clone()))
     }
 
-    fn basic_auth(&self) -> Option<Auth> {
-        match self.credentials() {
+    fn basic_auth(&self) -> Result<Option<Auth>, RegistryError> {
+        Ok(match self.credentials()? {
             Credentials::Anonymous => None,
             Credentials::Basic { username, secret } => Some(Auth::Basic {
                 user: username.clone(),
                 secret: secret.clone(),
             }),
-        }
+        })
     }
 
     fn cached_bearer(&self, image: &str) -> Option<String> {
@@ -515,7 +536,7 @@ impl RemoteCache {
         // The credentials only go to the registry's own host: a challenge
         // that names another realm must not receive them.
         request.auth = if realm_host(realm) == Some(host_of(&self.target.registry)) {
-            self.basic_auth().unwrap_or(Auth::Anonymous)
+            self.basic_auth()?.unwrap_or(Auth::Anonymous)
         } else {
             Auth::Anonymous
         };

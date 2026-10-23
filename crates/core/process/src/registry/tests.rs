@@ -51,6 +51,8 @@ fn target(addr: &str, tools: &Path, sign: bool, verify: bool) -> RegistryTarget 
         sign_key: sign.then(|| "/unused/secret.key".to_string()),
         verify_key: verify.then(|| "/unused/public.key".to_string()),
         trust_unsigned: false,
+        token: None,
+        username: None,
         tool_dir: Some(tools.to_path_buf()),
     }
 }

@@ -31,6 +31,7 @@ mod git;
 mod pause;
 mod registry;
 mod retention;
+pub mod secrets;
 mod step_time;
 mod stream;
 mod tar;
@@ -462,7 +463,12 @@ struct ProcessCommandDescription {
 fn command_description(command: &Command) -> ProcessCommandDescription {
     ProcessCommandDescription {
         program: os_str_lossy(command.get_program()),
-        args: sanitized_args(command.get_args().map(os_str_lossy)),
+        // A Docker run passes build environment values as `-e KEY=VALUE`
+        // arguments, so the arguments are masked as well as sanitized.
+        args: sanitized_args(command.get_args().map(os_str_lossy))
+            .into_iter()
+            .map(|arg| secrets::mask(&arg).into_owned())
+            .collect(),
         cwd: command
             .get_current_dir()
             .map(|path| path.display().to_string()),
@@ -617,11 +623,12 @@ pub fn label_process_log_sink(label: impl Into<String>, sink: ProcessLogSink) ->
 
 pub(crate) fn output_text(output: &Output) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    if stderr.is_empty() {
+    let text = if stderr.is_empty() {
         String::from_utf8_lossy(&output.stdout).trim().to_string()
     } else {
         stderr
-    }
+    };
+    secrets::mask(&text).into_owned()
 }
 
 /// Spawns `command`, retrying briefly when the executable is "busy".

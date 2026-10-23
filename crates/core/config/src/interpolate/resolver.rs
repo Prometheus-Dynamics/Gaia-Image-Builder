@@ -4,12 +4,18 @@ use std::cell::RefCell;
 use std::env;
 use std::path::{Path, PathBuf};
 
+/// Name parts that mark an environment variable as a secret. A `${env:NAME}`
+/// whose name contains one is warned about: its value lands in the spec.
+const SECRET_LIKE_PATTERNS: &[&str] = &["TOKEN", "SECRET", "PASSWORD", "API_KEY", "KEY"];
+
 thread_local! {
     /// Tokens whose values are being resolved, outermost first. A token that
     /// is already here would resolve forever.
     static RESOLVING: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     /// The first cycle met during the current `checked` pass.
     static CYCLE: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+    /// Secret-looking `${env:NAME}` names resolved during the current pass.
+    static SECRET_LIKE_ENV: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Runs one interpolation pass over a config and returns the first
@@ -18,11 +24,25 @@ thread_local! {
 pub(crate) fn checked<T>(pass: impl FnOnce() -> T) -> Result<T, Vec<String>> {
     RESOLVING.with(|stack| stack.borrow_mut().clear());
     CYCLE.with(|slot| *slot.borrow_mut() = None);
+    SECRET_LIKE_ENV.with(|names| names.borrow_mut().clear());
     let value = pass();
     match CYCLE.with(|slot| slot.borrow_mut().take()) {
         Some(cycle) => Err(cycle),
         None => Ok(value),
     }
+}
+
+/// The secret-looking `${env:NAME}` names the last pass resolved, in order.
+pub(crate) fn take_secret_like_env() -> Vec<String> {
+    SECRET_LIKE_ENV.with(|names| std::mem::take(&mut *names.borrow_mut()))
+}
+
+/// Whether an environment variable's name looks like it holds a secret.
+pub(crate) fn looks_secret(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    SECRET_LIKE_PATTERNS
+        .iter()
+        .any(|pattern| upper.contains(pattern))
 }
 
 pub(crate) fn interpolate_string(
@@ -80,8 +100,19 @@ fn resolve_guarded(token: &str, raw: &RawBuildConfig, env: &ResolvedEnvironment)
 
 fn resolve_token(token: &str, raw: &RawBuildConfig, env: &ResolvedEnvironment) -> String {
     if let Some(key) = token.strip_prefix("env:") {
-        return env.get(key).unwrap_or_default().to_string();
+        let value = env.get(key).unwrap_or_default().to_string();
+        if !value.is_empty() && looks_secret(key) {
+            SECRET_LIKE_ENV.with(|names| {
+                let mut names = names.borrow_mut();
+                if !names.iter().any(|name| name == key) {
+                    names.push(key.to_string());
+                }
+            });
+        }
+        return value;
     }
+    // `${secret:NAME}` is kept as written: it is read when a build-time
+    // process starts, so the spec holds the reference, not the value.
 
     match token {
         "build.name" => interpolate_string(raw.build_name.clone(), raw, env),

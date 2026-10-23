@@ -98,6 +98,11 @@ pub struct OciCheckpointSpec {
     /// `trust`: `"unsigned"` accepts pulls without a signature check (unsafe);
     /// validation rejects any other value.
     pub trust: Option<String>,
+    /// `token`: `secret:NAME` or `env:VAR`, the registry token. It comes before
+    /// `GAIA_REGISTRY_TOKEN`, the docker config and `gh`.
+    pub token: Option<String>,
+    /// `username`: the user name paired with `token`. `gaia` when not set.
+    pub username: Option<String>,
 }
 
 impl OciCheckpointSpec {

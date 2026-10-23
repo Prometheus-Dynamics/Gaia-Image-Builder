@@ -60,7 +60,9 @@ fn compile_checkpoint_backend(raw: &RawCheckpointConfig) -> Option<CheckpointBac
         || raw.verify_key.is_some()
         || raw.sign_key.is_some()
         || raw.sign_kind.is_some()
-        || raw.trust.is_some();
+        || raw.trust.is_some()
+        || raw.token.is_some()
+        || raw.username.is_some();
     let oci = (backend == "oci" || has_oci_fields).then(|| OciCheckpointSpec {
         registry: raw.registry.clone().unwrap_or_default(),
         repository: raw.repository.clone().unwrap_or_default(),
@@ -68,6 +70,8 @@ fn compile_checkpoint_backend(raw: &RawCheckpointConfig) -> Option<CheckpointBac
         sign_key: raw.sign_key.clone(),
         sign_kind: raw.sign_kind.clone(),
         trust: raw.trust.clone(),
+        token: raw.token.clone(),
+        username: raw.username.clone(),
     });
     Some(CheckpointBackendRef { backend, oci })
 }

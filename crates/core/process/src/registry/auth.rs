@@ -1,8 +1,10 @@
 //! Where registry credentials come from, and how a bearer challenge is read.
 //!
-//! Resolution order: `GAIA_REGISTRY_TOKEN` (user from `GAIA_REGISTRY_USER`), the
-//! docker config (`auths`, `credHelpers`, `credsStore`), `gh auth token` for
-//! `ghcr.io`, then anonymous. Secrets are never printed or logged.
+//! Resolution order: the checkpoint's `token` (a `secret:` or `env:` reference,
+//! user from its `username`, default `gaia`), `GAIA_REGISTRY_TOKEN` (user from
+//! `GAIA_REGISTRY_USER`), the docker config (`auths`, `credHelpers`,
+//! `credsStore`), `gh auth token` for `ghcr.io`, then anonymous. Secrets are
+//! never printed or logged.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -12,6 +14,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use serde_json::Value;
+
+use crate::secrets;
 
 /// Environment variable holding a registry token.
 const TOKEN_ENV: &str = "GAIA_REGISTRY_TOKEN";
@@ -54,12 +58,32 @@ pub(super) enum Challenge {
     Other,
 }
 
-/// Resolves the credentials for `registry`, falling back to anonymous.
-pub(super) fn resolve(registry: &str) -> Credentials {
-    env_credentials()
+/// Resolves the credentials for `registry`, falling back to anonymous. The
+/// checkpoint `token` is read first; an error reading it is returned, since a
+/// configured token that cannot be read must not become an anonymous try.
+pub(super) fn resolve(
+    registry: &str,
+    token: Option<&str>,
+    username: Option<&str>,
+) -> Result<Credentials, String> {
+    if let Some(setting) = token
+        && let Some(value) = secrets::credential_setting(setting)?
+    {
+        let username = match username {
+            Some(setting) => secrets::key_setting(setting)?
+                .filter(|user| !user.trim().is_empty())
+                .unwrap_or_else(|| DEFAULT_USER.to_string()),
+            None => DEFAULT_USER.to_string(),
+        };
+        return Ok(Credentials::Basic {
+            username,
+            secret: value.expose().to_string(),
+        });
+    }
+    Ok(env_credentials()
         .or_else(|| docker_credentials(registry))
         .or_else(|| gh_credentials(registry))
-        .unwrap_or(Credentials::Anonymous)
+        .unwrap_or(Credentials::Anonymous))
 }
 
 fn env_credentials() -> Option<Credentials> {
@@ -260,4 +284,43 @@ fn parse_params(text: &str) -> BTreeMap<String, String> {
         rest = remainder.trim_start().trim_start_matches(',').trim_start();
     }
     params
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_checkpoint_token_secret_is_the_credential_with_its_user() {
+        crate::secrets::install(
+            vec![crate::secrets::SecretDef {
+                name: "gaia_test_auth_token".into(),
+                source: crate::secrets::SecretSource::Command(vec![
+                    "printf".into(),
+                    "gaia-auth-token-value-5".into(),
+                ]),
+                required: true,
+            }],
+            "",
+        );
+
+        let credentials = resolve(
+            "ghcr.io",
+            Some("secret:gaia_test_auth_token"),
+            Some("ci-bot"),
+        )
+        .expect("the token resolves");
+        assert_eq!(
+            credentials,
+            Credentials::Basic {
+                username: "ci-bot".into(),
+                secret: "gaia-auth-token-value-5".into(),
+            }
+        );
+        assert!(!format!("{credentials:?}").contains("gaia-auth-token-value-5"));
+
+        let error = resolve("ghcr.io", Some("secret:gaia_test_auth_undefined"), None)
+            .expect_err("an undefined secret");
+        assert!(error.contains("gaia_test_auth_undefined"), "{error}");
+    }
 }

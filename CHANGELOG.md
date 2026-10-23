@@ -12,6 +12,14 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - The Buildroot provider's `.gaia-package-durations` (the progress estimate's per-package times) drops packages the tree no longer builds, so it describes only the current config.
 
+### Secrets
+
+- **`[secrets]` names values a build reads without storing them.** An entry takes one source: `env = "VAR"`, `file = "path"` (mode 0600 or stricter, `~` expanded, refused with `chmod 600` named otherwise) or `command = [...]` (trimmed stdout, stderr discarded). `required = false` makes a missing source resolve to nothing. Values are read when they are used, never at load, so they are not in the resolved spec, fingerprints, state, provenance or `gaia config show`.
+- **References.** `secret:NAME` as a whole value in `[image.signing] key` and in checkpoint `sign_key`, `verify_key`, `token` and `username`; `${secret:NAME}` inside an artifact's `build_env` only, substituted when the build process starts. Anywhere else `${secret:...}` is a validation error. Checkpoints gain `token` (`secret:` or `env:`, before `GAIA_REGISTRY_TOKEN`, the docker config and `gh`) and `username` (default `gaia`).
+- **Masking.** Each resolved value of at least four characters is replaced with `reporting.masking.replacement` in captured output, operation logs, failure messages and report files, whatever `masking.enabled` says.
+- **`${env:NAME}` warning.** Validation warns when a `${env:NAME}` whose name contains `TOKEN`, `SECRET`, `PASSWORD`, `API_KEY` or `KEY` lands in the spec.
+- Docs: `docs/configuration.md` (Secrets, Registry checkpoints, Image signing).
+
 ### Registry checkpoints
 
 - **`[[checkpoints]] backend = "oci"` makes an OCI registry a build cache.** Buildroot package builds, artifact outputs and image layers are stored as signed OCI artifacts at `<repository>/<kind>:<key>` and fetched on a miss before they are built; new ones are pushed after the build. Entries are signed with the `[image.signing]` tool (minisign, gpg or cosign-blob) and a pull is used only when its signature verifies, its annotations name the requested kind and key, and its blob matches the manifest digest. A signature that does not verify refuses the entry with a loud warning. Pulls need a `verify_key` unless `trust = "unsigned"` is set (unsafe). Pull and push failures are warnings.

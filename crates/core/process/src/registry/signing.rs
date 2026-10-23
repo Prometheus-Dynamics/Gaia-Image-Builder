@@ -9,18 +9,16 @@ use std::process::{Command, Output, Stdio};
 
 use super::scratch::Scratch;
 use super::{RegistryError, RegistryTarget, SignatureKind};
+use crate::secrets;
 
 /// Signs the bytes of `data` with the sign key and returns the signature bytes.
 /// The signature file the tool writes beside `data` is removed before returning.
 pub(super) fn sign_bytes(target: &RegistryTarget, data: &Path) -> Result<Vec<u8>, RegistryError> {
     let kind = target.kind;
-    let key = target
-        .sign_key
-        .as_deref()
-        .ok_or_else(|| RegistryError::Signature("no sign key is configured".into()))?;
+    let key = key_text(target.sign_key.as_deref(), "sign key")?;
     let tool = resolve_tool(target, kind.program())?;
     let signature = Scratch::named(with_suffix(data, ".sig"));
-    let command = sign_command(kind, &tool, key, data, signature.path());
+    let command = sign_command(kind, &tool, &key, data, signature.path());
     run(command, kind.program(), data)?;
     std::fs::read(signature.path()).map_err(|error| {
         RegistryError::Io(format!("cannot read the signature the tool wrote: {error}"))
@@ -35,20 +33,29 @@ pub(super) fn verify_bytes(
     signature: &Path,
 ) -> Result<(), RegistryError> {
     let kind = target.kind;
-    let key = target
-        .verify_key
-        .as_deref()
-        .ok_or_else(|| RegistryError::Signature("no verify key is configured".into()))?;
+    let key = key_text(target.verify_key.as_deref(), "verify key")?;
     let tool = resolve_tool(target, kind.program())?;
-    let command = verify_command(kind, &tool, key, data, signature);
+    let command = verify_command(kind, &tool, &key, data, signature);
     let output = run(command, kind.program(), data)?;
-    if kind == SignatureKind::Gpg && !gpg_names_key(&output.stdout, key) {
+    if kind == SignatureKind::Gpg && !gpg_names_key(&output.stdout, &key) {
         return Err(RegistryError::Signature(format!(
             "gpg reported no good signature from the expected key for {}",
             file_name(data)
         )));
     }
     Ok(())
+}
+
+/// The key a setting names, read now (the setting is a path, `env:VAR` or
+/// `secret:NAME`). Errors name the setting, never the key.
+fn key_text(setting: Option<&str>, what: &str) -> Result<String, RegistryError> {
+    let setting =
+        setting.ok_or_else(|| RegistryError::Signature(format!("no {what} is configured")))?;
+    match secrets::key_setting(setting) {
+        Ok(Some(key)) => Ok(key),
+        Ok(None) => Err(RegistryError::Signature(format!("the {what} is empty"))),
+        Err(error) => Err(RegistryError::Signature(format!("{what}: {error}"))),
+    }
 }
 
 /// `data` with `suffix` appended to its name.

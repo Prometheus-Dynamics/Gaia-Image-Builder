@@ -24,6 +24,7 @@ mod provenance;
 mod raw_disk_archive;
 mod redact;
 mod reporting;
+mod secrets;
 mod selection;
 mod source;
 mod source_dirs;
@@ -132,6 +133,7 @@ pub use reporting::{
     DEFAULT_LARGE_UNEXPECTED_OUTPUT_BYTES, DEFAULT_TRANSIENT_DIR_NAMES, OutputHygieneSpec,
     PostBuildHookSpec, ReportingOutputsSpec, ReportingSpec, SecretMaskingSpec,
 };
+pub use secrets::{SecretSpec, SecretsSpec, install_secrets};
 pub use selection::{ImportSourceSpec, SelectionSpec};
 pub use source::{
     ArchiveSourceSpec, DownloadSourceSpec, GitBackendSpec, GitSourceSpec, PathSourceSpec,
@@ -179,6 +181,7 @@ pub struct ResolvedBuildSpec {
     pub image: ImageSpec,
     pub checkpoints: CheckpointSpec,
     pub reporting: ReportingSpec,
+    pub secrets: SecretsSpec,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -215,6 +218,7 @@ impl ResolvedBuildSpec {
             image: ImageSpec::new(ImageDefinition::Buildroot(BuildrootImageSpec::default())),
             checkpoints: CheckpointSpec::default(),
             reporting: ReportingSpec::default(),
+            secrets: SecretsSpec::default(),
         }
     }
 

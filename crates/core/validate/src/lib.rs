@@ -25,6 +25,7 @@ mod java_policy;
 mod model;
 mod providers;
 mod reporting;
+mod secrets;
 mod sources;
 mod workspace;
 

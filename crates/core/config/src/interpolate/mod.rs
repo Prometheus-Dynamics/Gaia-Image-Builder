@@ -21,8 +21,10 @@ pub fn interpolate_config(
     raw: RawBuildConfig,
     env: &ResolvedEnvironment,
 ) -> Result<RawBuildConfig, ConfigError> {
-    resolver::checked(|| interpolate_fields(raw, env))
-        .map_err(|cycle| ConfigError::InterpolationCycle { cycle })
+    let mut interpolated = resolver::checked(|| interpolate_fields(raw, env))
+        .map_err(|cycle| ConfigError::InterpolationCycle { cycle })?;
+    interpolated.secret_env_like = resolver::take_secret_like_env();
+    Ok(interpolated)
 }
 
 fn interpolate_fields(raw: RawBuildConfig, env: &ResolvedEnvironment) -> RawBuildConfig {

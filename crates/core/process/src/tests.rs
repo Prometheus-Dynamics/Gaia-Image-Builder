@@ -578,3 +578,64 @@ fn a_line_split_across_read_chunks_is_retained_whole() {
     assert_eq!(result.stdout_lines[0], format!("a{long}"));
     assert_eq!(result.stdout_lines[1], "b");
 }
+
+#[test]
+fn a_build_that_echoes_a_secret_shows_it_masked_in_the_captured_log() {
+    use std::os::unix::fs::PermissionsExt;
+    let scratch = TempDir::new("gaia-secret-echo-log");
+    let token = scratch.join("token");
+    fs::write(&token, "gaia-test-echo-value-4411\n").expect("write");
+    fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).expect("mode");
+    secrets::install(
+        vec![secrets::SecretDef {
+            name: "gaia_test_echo".into(),
+            source: secrets::SecretSource::File(token),
+            required: true,
+        }],
+        "",
+    );
+    let value = secrets::resolve("gaia_test_echo")
+        .expect("resolve")
+        .expect("set");
+
+    let mut command = Command::new("sh");
+    command
+        .arg("-c")
+        .arg("echo \"build used $GAIA_TEST_ECHO\"; echo \"warn $GAIA_TEST_ECHO\" >&2")
+        .env("GAIA_TEST_ECHO", value.expose());
+    let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let sink_lines = captured.clone();
+    let sink: ProcessLogSink = std::sync::Arc::new(move |line: ProcessLogLine| {
+        sink_lines
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .push(line.line);
+    });
+    let result = run_command_with_timeout(
+        &mut command,
+        Duration::from_secs(30),
+        "echo build",
+        Some(sink),
+        None,
+    )
+    .expect("the build runs");
+
+    let lines = captured
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .clone();
+    assert!(
+        lines.iter().any(|line| line == "build used ***"),
+        "{lines:?}"
+    );
+    assert!(lines.iter().any(|line| line == "warn ***"), "{lines:?}");
+    assert!(
+        result
+            .stdout_lines
+            .iter()
+            .chain(&result.stderr_lines)
+            .all(|line| !line.contains(value.expose())),
+        "{:?}",
+        result.stdout_lines
+    );
+}

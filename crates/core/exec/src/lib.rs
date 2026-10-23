@@ -85,6 +85,7 @@ pub fn execute_plan_with_rebuilds(
     event_sender: Option<Sender<ExecutionEvent>>,
     rebuild_packages: &[String],
 ) -> ExecutionOutcome {
+    gaia_spec::install_secrets(spec);
     let max_parallel_jobs = resolve_parallel_jobs(spec);
     let span = tracing::info_span!(
         "execute_plan",

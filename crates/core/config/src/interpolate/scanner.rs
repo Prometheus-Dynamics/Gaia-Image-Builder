@@ -667,10 +667,14 @@ fn scan_string(location: &str, value: &str, unresolved: &mut Vec<RawUnresolvedIn
             return;
         };
         let token = &remainder[..end];
-        unresolved.push(RawUnresolvedInterpolation {
-            location: location.to_string(),
-            token: token.to_string(),
-        });
+        // A secret reference is kept for the process that uses it; validation
+        // checks where it may appear.
+        if !token.starts_with("secret:") {
+            unresolved.push(RawUnresolvedInterpolation {
+                location: location.to_string(),
+                token: token.to_string(),
+            });
+        }
         rest = &remainder[end + 1..];
     }
 }

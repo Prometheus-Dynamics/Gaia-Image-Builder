@@ -18,7 +18,7 @@ use crate::overrides::did_you_mean_among;
 use crate::raw::{self, RawBuildConfig};
 use crate::raw_assembly;
 
-type FieldsFn = fn() -> Option<&'static [&'static str]>;
+pub(crate) type FieldsFn = fn() -> Option<&'static [&'static str]>;
 
 /// The keys of a table whose own keys depend on its `kind`: the keys every
 /// kind takes and the keys of the named kind. `None` when the kind is not one
@@ -320,6 +320,16 @@ fn image_fields(kind: Option<&str>) -> Option<Vec<&'static str>> {
     Some(IMAGE_COMMON_KEYS.iter().chain(&own).copied().collect())
 }
 
+/// `[secrets]` has no fixed keys: every key names an entry.
+fn no_fixed_fields() -> Option<&'static [&'static str]> {
+    Some(&[])
+}
+
+/// `[secrets.<name>]`: the source and the `required` flag of one entry.
+fn secret_entry_fields() -> Option<&'static [&'static str]> {
+    Some(&["env", "file", "command", "required"])
+}
+
 /// `[image.layers]`: its own keys. The layer tables are not listed here: their
 /// names are the user's (see [`image_layer_fields`]).
 fn image_layers_fields() -> Option<&'static [&'static str]> {
@@ -515,6 +525,7 @@ const SECTIONS: &[Section] = &[
         ],
     ),
     section("install", struct_fields::<raw::RawInstallConfig>, &[]),
+    named_tables("secrets", no_fixed_fields, secret_entry_fields, &[]),
     section(
         "checkpoints",
         struct_fields::<raw::RawCheckpointConfig>,
@@ -719,7 +730,7 @@ impl<'de> Deserializer<'de> for FieldNames {
 
 /// The layout the JSON schema is written from (see `schema`).
 pub(crate) mod layout {
-    use super::{Known, RawBuildConfig, SECTIONS, Section, struct_fields};
+    use super::{FieldsFn, Known, RawBuildConfig, SECTIONS, Section, struct_fields};
 
     /// The keys of the build file's top level.
     pub(crate) fn root_fields() -> Vec<&'static str> {
@@ -734,6 +745,7 @@ pub(crate) mod layout {
         pub(crate) key: &'static str,
         pub(crate) known: Known,
         pub(crate) children: &'static [Section],
+        pub(crate) entries: Option<FieldsFn>,
     }
 
     /// The sections the unknown-key check looks into.
@@ -744,14 +756,23 @@ pub(crate) mod layout {
                 key: section.key,
                 known: section.known,
                 children: section.children,
+                entries: section.entries,
             })
             .collect()
     }
 
-    /// A nested section, for the schema: its key, how its keys are known and
-    /// its own nested sections.
-    pub(crate) fn nested(section: &Section) -> (&'static str, Known, &'static [Section]) {
-        (section.key, section.known, section.children)
+    /// A nested section, for the schema: its key, how its keys are known, its
+    /// own nested sections and, for a named-table section, the keys each named
+    /// table takes.
+    pub(crate) fn nested(
+        section: &Section,
+    ) -> (&'static str, Known, &'static [Section], Option<FieldsFn>) {
+        (
+            section.key,
+            section.known,
+            section.children,
+            section.entries,
+        )
     }
 
     /// The keys a table of a section takes when its `kind` is `kind` (`None`

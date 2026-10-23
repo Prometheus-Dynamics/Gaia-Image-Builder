@@ -271,7 +271,8 @@ fn default_gradle_build_redirects_gradle_home_when_configured() {
         &contract,
         GradleHomeSpec::UserCache,
         Some(&cache),
-    );
+    )
+    .expect("build env");
 
     let expected = cache.join("gradle-home");
     let home = cache.join("java-home");
@@ -301,7 +302,8 @@ fn default_build_without_build_env_gets_a_persistent_gradle_home_only_in_user_ca
         &contract,
         GradleHomeSpec::Workspace,
         Some(&cache),
-    );
+    )
+    .expect("build env");
     assert_eq!(command.get_envs().count(), 0);
     assert!(!cache.join("gradle-home").exists());
 
@@ -314,7 +316,8 @@ fn default_build_without_build_env_gets_a_persistent_gradle_home_only_in_user_ca
         &contract,
         GradleHomeSpec::UserCache,
         Some(&cache),
-    );
+    )
+    .expect("build env");
     let envs = command
         .get_envs()
         .map(|(key, value)| {
@@ -451,5 +454,77 @@ fn persistent_home_keeps_a_build_s_own_home_and_ignores_host_builds() {
             "HOME".to_string(),
             cache.join("java-home").display().to_string()
         )]
+    );
+}
+
+#[test]
+fn a_build_env_secret_reference_is_read_when_the_build_starts() {
+    gaia_process::secrets::install(
+        vec![gaia_process::secrets::SecretDef {
+            name: "gaia_java_env_secret".into(),
+            source: gaia_process::secrets::SecretSource::Command(vec![
+                "printf".into(),
+                "gaia-java-env-secret-17".into(),
+            ]),
+            required: true,
+        }],
+        "",
+    );
+    let artifact = default_gradle_artifact(vec![(
+        "GAIA_JAVA_SECRET_ENV".into(),
+        "${secret:gaia_java_env_secret}".into(),
+    )]);
+    let contract = docker_contract(&artifact);
+    let mut command = Command::new("gradle");
+
+    apply_java_build_env(
+        &mut command,
+        &artifact,
+        &contract,
+        GradleHomeSpec::Workspace,
+        None,
+    )
+    .expect("the build env applies");
+
+    let envs: Vec<(String, Option<String>)> = command
+        .get_envs()
+        .map(|(key, value)| {
+            (
+                key.to_string_lossy().into_owned(),
+                value.map(|value| value.to_string_lossy().into_owned()),
+            )
+        })
+        .collect();
+    assert!(
+        envs.contains(&(
+            "GAIA_JAVA_SECRET_ENV".to_string(),
+            Some("gaia-java-env-secret-17".to_string())
+        )),
+        "{envs:?}"
+    );
+}
+
+#[test]
+fn a_build_env_secret_that_is_not_defined_fails_the_build_naming_it() {
+    let artifact = default_gradle_artifact(vec![(
+        "GAIA_JAVA_SECRET_UNDEFINED".into(),
+        "${secret:gaia_java_env_undefined}".into(),
+    )]);
+    let contract = docker_contract(&artifact);
+    let mut command = Command::new("gradle");
+
+    let error = apply_java_build_env(
+        &mut command,
+        &artifact,
+        &contract,
+        GradleHomeSpec::Workspace,
+        None,
+    )
+    .expect_err("an undefined secret");
+
+    assert!(
+        error.message.contains("gaia_java_env_undefined"),
+        "{}",
+        error.message
     );
 }

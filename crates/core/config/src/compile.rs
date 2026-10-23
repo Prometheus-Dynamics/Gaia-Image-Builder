@@ -559,6 +559,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
         .into_iter()
         .map(compile_checkpoint)
         .collect();
+    spec.secrets = compile_secrets(raw.secrets, raw.secret_env_like);
     spec.reporting = ReportingSpec {
         outputs: ReportingOutputsSpec {
             summary: raw.reporting.summary,
@@ -599,4 +600,25 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
         }),
     };
     spec
+}
+
+/// The `[secrets]` table. Entries keep their source as written; the values
+/// are read when they are used.
+fn compile_secrets(
+    entries: std::collections::BTreeMap<String, crate::raw::RawSecretConfig>,
+    env_like: Vec<String>,
+) -> gaia_spec::SecretsSpec {
+    gaia_spec::SecretsSpec {
+        entries: entries
+            .into_iter()
+            .map(|(name, entry)| gaia_spec::SecretSpec {
+                name,
+                env: entry.env,
+                file: entry.file,
+                command: entry.command,
+                required: entry.required.unwrap_or(true),
+            })
+            .collect(),
+        env_like,
+    }
 }

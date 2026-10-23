@@ -470,3 +470,15 @@ fn image_layers_keys_and_layer_tables_are_checked() {
         vec!["image.layers.orderr"]
     );
 }
+
+#[test]
+fn secrets_entries_take_only_their_source_keys() {
+    assert!(
+        unknown("[secrets.ghcr]\ncommand = [\"gh\", \"auth\", \"token\"]\nrequired = false\n")
+            .is_empty()
+    );
+    assert_eq!(
+        unknown("[secrets.ghcr]\ncomand = [\"gh\"]\n"),
+        vec!["secrets.ghcr.comand"]
+    );
+}

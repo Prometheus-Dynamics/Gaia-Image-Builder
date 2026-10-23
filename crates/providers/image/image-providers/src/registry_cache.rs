@@ -9,6 +9,10 @@
 //! `trust = "unsigned"`; validation rejects a configuration that cannot
 //! pull, so a key that is set in the environment but missing here is a
 //! warning, not a failure of the build.
+//!
+//! Keys and the token are settings (`secret:NAME`, `env:VAR` or a path), and
+//! their values are read when a signature is made or checked, or a request
+//! is sent. This module only checks that each setting can be read.
 
 use gaia_process::{RegistryTarget, RemoteCache, SignatureKind};
 use gaia_spec::{CheckpointBackendRef, CheckpointPolicy, ResolvedBuildSpec};
@@ -42,6 +46,9 @@ impl RegistryCacheUse {
 pub fn registry_cache_from_spec(
     spec: &ResolvedBuildSpec,
 ) -> Result<Option<RegistryCacheUse>, String> {
+    // The client reads `secret:` settings when it uses them, so the entries of
+    // the spec must be known to the process layer from here on.
+    gaia_spec::install_secrets(spec);
     let Some(point) = spec.checkpoints.points.iter().find(|point| {
         point
             .backend
@@ -62,9 +69,9 @@ pub fn registry_cache_from_spec(
         .and_then(|backend: &CheckpointBackendRef| backend.oci.as_ref())
         .ok_or_else(|| format!("checkpoint '{id}': backend oci has no registry settings"))?;
     let mut warnings = Vec::new();
-    let verify_key = resolve_setting(oci.verify_key.as_deref())
+    let verify_key = check_setting(oci.verify_key.as_deref())
         .map_err(|error| format!("checkpoint '{id}' verify_key: {error}"))?;
-    let sign_key = match resolve_setting(oci.sign_key.as_deref()) {
+    let sign_key = match check_setting(oci.sign_key.as_deref()) {
         Ok(key) => key,
         Err(error) => {
             warnings.push(format!(
@@ -98,6 +105,8 @@ pub fn registry_cache_from_spec(
         sign_key: sign_key.clone(),
         verify_key,
         trust_unsigned: oci.trust_unsigned(),
+        token: oci.token.clone(),
+        username: oci.username.clone(),
         tool_dir: None,
     };
     Ok(Some(RegistryCacheUse {
@@ -109,10 +118,12 @@ pub fn registry_cache_from_spec(
     }))
 }
 
-/// A key setting: `env:VAR` names an environment variable that holds the key;
-/// anything else is the key (or a path to it). `None` when the setting is not
-/// given. The error names the variable, never its value.
-pub fn resolve_setting(setting: Option<&str>) -> Result<Option<String>, String> {
+/// A key setting as the registry client keeps it: the setting text, when it
+/// is given. `env:VAR` must name a variable that is set now, so a missing
+/// variable is reported at the start of the run; the value itself is read
+/// later, when it is used. `None` when the setting is not given. The error
+/// names the variable, never its value.
+fn check_setting(setting: Option<&str>) -> Result<Option<String>, String> {
     let Some(setting) = setting.map(str::trim).filter(|text| !text.is_empty()) else {
         return Ok(None);
     };
@@ -120,7 +131,7 @@ pub fn resolve_setting(setting: Option<&str>) -> Result<Option<String>, String> 
         return Ok(Some(setting.to_string()));
     };
     match std::env::var(name) {
-        Ok(value) if !value.trim().is_empty() => Ok(Some(value.trim().to_string())),
+        Ok(value) if !value.trim().is_empty() => Ok(Some(setting.to_string())),
         _ => Err(format!("environment variable '{name}' is not set or empty")),
     }
 }
@@ -130,14 +141,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_plain_setting_is_the_key_and_env_names_a_variable() {
-        assert_eq!(resolve_setting(None), Ok(None));
-        assert_eq!(resolve_setting(Some("  ")), Ok(None));
+    fn a_plain_setting_is_kept_and_env_must_name_a_set_variable() {
+        assert_eq!(check_setting(None), Ok(None));
+        assert_eq!(check_setting(Some("  ")), Ok(None));
         assert_eq!(
-            resolve_setting(Some("/keys/gaia.pub")),
+            check_setting(Some("/keys/gaia.pub")),
             Ok(Some("/keys/gaia.pub".to_string()))
         );
-        let error = resolve_setting(Some("env:GAIA_TEST_REGISTRY_KEY_UNSET_ZZ")).unwrap_err();
+        assert_eq!(
+            check_setting(Some("secret:gaia_signing_key")),
+            Ok(Some("secret:gaia_signing_key".to_string()))
+        );
+        let error = check_setting(Some("env:GAIA_TEST_REGISTRY_KEY_UNSET_ZZ")).unwrap_err();
         assert!(error.contains("GAIA_TEST_REGISTRY_KEY_UNSET_ZZ"), "{error}");
     }
 }

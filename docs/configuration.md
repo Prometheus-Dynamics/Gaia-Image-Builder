@@ -581,6 +581,65 @@ that names the cycle. For example, `build_name = "x-${build.display_name}"`
 with `display_name = "${build.name}"` fails with
 `interpolation cycle: build.display_name -> build.name -> build.display_name`.
 
+## Secrets
+
+A `[secrets]` table names values a build reads without storing them: registry tokens, signing keys and API keys. Each entry names where its value comes from, and the value is read when it is used.
+
+```toml
+[secrets.ghcr]
+command = ["gh", "auth", "token"]        # the standard output, trimmed
+
+[secrets.signing]
+file = "~/.config/gaia/secrets/signing-key"   # relative paths are taken from the workspace root
+required = false                         # default true; false makes a missing source resolve to nothing
+
+[secrets.ci]
+env = "CI_TOKEN"                         # the value of an environment variable
+```
+
+Each entry names exactly one source. Validation rejects an entry with none or with two, an empty source, and a name that uses characters other than letters, digits, `_`, `-` and `.`. An unknown key in an entry is reported like any other unknown key.
+
+- `env = "VAR"`: the variable's value, as it is.
+- `file = "path"`: the file's contents without its trailing newline. `~` is the home directory. The file must not be readable by group or others: a file with any group or other permission is refused, and the error names the path and the fix, `chmod 600 <path>`. Gaia does not change the mode.
+- `command = ["program", "arg", ...]`: the program and its arguments, run without a shell. Its standard output, trimmed, is the value. Its standard error is discarded, never echoed. A non-zero exit is an error that names the entry and the program.
+- `required` (default `true`): a missing variable, a missing or unreadable file, or a failed command is an error when the secret is used, and the error names the entry and its source. With `required = false` the reference resolves to nothing instead: a signing key is then empty, and the step that needs it reports that; a token falls through to the next registry credential source; and a `${secret:NAME}` in `build_env` becomes empty.
+
+Values are read lazily: when a signature is made or checked, when a registry request needs credentials, or when a build process starts. Loading the build file reads none of them. A command runs once per process.
+
+**References.** A reference names an entry. There are three forms:
+
+- `secret:NAME` as a whole value in a secret-capable field: `[image.signing] key`, and a checkpoint's `sign_key`, `verify_key`, `token` and `username`. The field receives the value, so for `minisign` and `cosign-blob` the secret holds the key path and for `gpg` the key id.
+- `env:VAR` as a whole value, in the same fields. It works as before, and a `token` takes it too.
+- `${secret:NAME}` inside a string, only where a build-time process environment is set: an artifact's `build_env` (the `java` artifact). The resolved spec keeps the text `${secret:NAME}`, so fingerprints, reuse state, provenance and `gaia config show` see the reference and not the value. The value is substituted when the build process starts, and it goes only to that process. Anywhere else, `${secret:...}` is a validation error that names the places where it is allowed: the `build_env` of an artifact. A stage environment set, a file, an image field or an interpolation value that lands outside `build_env` is refused the same way.
+
+A checkpoint's `token` must be a reference (`secret:NAME` or `env:VAR`). A literal token in the build file is a validation error, so the token never sits in a file that is committed.
+
+**Environment references.** `${env:NAME}` still works and may hold a value that is not a secret. Its value is stored in the resolved spec, so when `NAME` contains `TOKEN`, `SECRET`, `PASSWORD`, `API_KEY` or `KEY`, validation warns: use a `[secrets]` entry and `secret:` or `${secret:}` so the value is not stored.
+
+**What is never stored.** A resolved value is never in the resolved spec, the fingerprints, the reuse state, provenance, the reports or `gaia config show`. Those hold the reference, the entry's name and its source (a variable name, a file path or a command).
+
+**Masking.** Every resolved value of at least four characters is registered for masking, and each occurrence is replaced with `[reporting.masking] replacement` (`***` by default) in captured process output and operation logs, failure messages and output tails, and the report files (the run summary, provenance and the manifest). Masking applies even when `[reporting.masking] enabled = false`, because it is by value and not by key name. A value shorter than four characters is not masked. Masking finds the value as written: a build that transforms a secret (encodes or splits it) can still print a form that is not masked.
+
+**Example: a GHCR registry cache.** The token comes from the GitHub CLI, or from a 0600 file instead:
+
+```toml
+[secrets.ghcr]
+command = ["gh", "auth", "token"]
+# or: file = "~/.config/gaia/secrets/ghcr-token"   (chmod 600)
+
+[[checkpoints]]
+id = "registry"
+backend = "oci"
+registry = "ghcr.io"
+repository = "owner/gaia-cache"
+verify_key = "/keys/gaia.pub"
+sign_key = "/keys/gaia.sec"
+token = "secret:ghcr"
+username = "owner"                      # default "gaia"
+use_policy = "auto"
+upload_policy = "auto"
+```
+
 ## Failure Policy
 
 ```toml
@@ -2266,7 +2325,7 @@ If omitted, the current compiler auto-feeds all entries in the corresponding dom
 ```toml
 [image.signing]
 kind = "gpg"                           # "minisign" | "gpg" | "cosign-blob"
-key = "env:GAIA_SIGNING_KEY"           # a key path, or env:VAR naming a variable that holds it
+key = "env:GAIA_SIGNING_KEY"           # a key path, env:VAR naming a variable that holds it, or secret:NAME ([secrets])
 outputs = ["*.img.xz", "*.slot.tar"]   # globs over the published output file names
 ```
 
@@ -2274,7 +2333,7 @@ outputs = ["*.img.xz", "*.slot.tar"]   # globs over the published output file na
 - `gpg`: writes `<file>.asc`, an armored detached signature, with `gpg --detach-sign --local-user <key>`. For gpg the key is a key id or user id, not a path.
 - `cosign-blob`: writes `<file>.sig` with `cosign sign-blob --key <key>`.
 
-A verity root hash file (a published output named `*.roothash`) is signed whether or not `outputs` names it. The signature files join the published outputs in the report. Gaia uses the tool from `PATH` and holds no key material; it never prints the key. The validator rejects an unknown kind, an empty key or an empty `outputs` before the build. A missing tool or key fails the run at the signing step, and the message names the variable or the tool, never the key.
+A verity root hash file (a published output named `*.roothash`) is signed whether or not `outputs` names it. The signature files join the published outputs in the report. Gaia uses the tool from `PATH` and holds no key material; it never prints the key. A `key = "secret:NAME"` names a `[secrets]` entry, read when the signing starts; the value is then the key path (minisign, cosign-blob) or key id (gpg), and it is never stored or printed (see [Secrets](#secrets)). The validator rejects an unknown kind, an empty key or an empty `outputs` before the build. A missing tool or key fails the run at the signing step, and the message names the variable or the tool, never the key.
 
 ### Image Layers
 
@@ -3159,18 +3218,20 @@ backend = "oci"
 registry = "ghcr.io"                   # host[:port]
 repository = "owner/gaia-cache"        # entries are <repository>/<kind>:<key>
 verify_key = "env:GAIA_VERIFY_PUB"     # public key; pulls need it
-sign_key = "env:GAIA_SIGN_KEY"         # private key; without it nothing is pushed
+sign_key = "env:GAIA_SIGN_KEY"         # private key; without it nothing is pushed (a path, env:VAR or secret:NAME)
+token = "secret:ghcr"                  # registry token (secret:NAME or env:VAR); see Secrets
+username = "gaia"                      # user paired with token; default gaia
 sign_kind = "minisign"                 # "minisign" | "gpg" | "cosign-blob"; default [image.signing] kind, else minisign
 use_policy = "auto"                    # off: no pulls; any other policy pulls on a miss
 upload_policy = "auto"                 # off: no pushes; any other policy pushes what a run built
 ```
 
 - `registry`, `repository` and `verify_key` are required when pulls are on. Only one checkpoint may use `backend = "oci"`. `anchor` is not used: the registry holds entries of every kind. `auto` and `always` behave the same for registry entries.
-- A key is a path, or `env:VAR` naming a variable that holds it. A key given as `env:VAR` whose variable is unset is a warning in the run (for a sign key, nothing is pushed); the error message names the variable, never its value.
+- A key is a path, `env:VAR` naming a variable that holds it, or `secret:NAME` naming a `[secrets]` entry that holds it (see [Secrets](#secrets)). A key given as `env:VAR` whose variable is unset is a warning in the run (for a sign key, nothing is pushed); the error message names the variable, never its value. A `secret:` key is read when a signature is made, so its failure is a failed push, a warning in the run.
 - **Entries.** Each entry is an OCI artifact at `<repository>/<kind>:<key>` with media type `application/vnd.gaia.cache.v1+tar`: one layer, a tar.zst of the entry's files, and the empty config descriptor. Annotations hold the Gaia version, `dev.gaia.kind`, `dev.gaia.key`, `org.opencontainers.image.created` (the push time, used by prune) and, for packages, the package name, the entry's file stem and whether it is relocatable. The signature is a second artifact at tag `<key>.sig` whose blob is the signature over the exact bytes of the entry's manifest.
 - **Signing and verification.** The signature tool and its flags are the same as `[image.signing]` (`minisign -S`, `gpg --detach-sign`, `cosign sign-blob`) and verification uses the matching verify command (`minisign -V`, `gpg --verify`, `cosign verify-blob`). A pulled entry is used only when its manifest verifies, its annotations name the requested kind and key, and its blob matches the manifest's digest. A signature that does not verify refuses the entry and the run says so loudly; the package is then built.
 - **Unsigned pulls are unsafe.** `trust = "unsigned"` accepts pulls without a signature check: a registry tag that someone else wrote can then reach the build. It is for a registry you fully control. Without `verify_key` and without `trust`, validation rejects pulls.
-- **Credentials.** The token is taken from `GAIA_REGISTRY_TOKEN` (with `GAIA_REGISTRY_USER`, default `gaia`), else `~/.docker/config.json` (`auths`, `credHelpers` or `credsStore`), else `gh auth token` for `ghcr.io`, else anonymous. A bearer challenge is answered with a token from its realm, and the credentials go to that realm only when it is on the registry's own host. Credentials are passed to `curl` through a 0600 config file that is removed after each request, never on a command line, and never printed.
+- **Credentials.** The token is taken from the checkpoint's `token` (`secret:NAME` or `env:VAR`, with the user from `username`, default `gaia`), else `GAIA_REGISTRY_TOKEN` (with `GAIA_REGISTRY_USER`, default `gaia`), else `~/.docker/config.json` (`auths`, `credHelpers` or `credsStore`), else `gh auth token` for `ghcr.io`, else anonymous. A literal token in the build file is refused; a `token` whose secret cannot be read fails the request instead of falling back to anonymous. A bearer challenge is answered with a token from its realm, and the credentials go to that realm only when it is on the registry's own host. Credentials are passed to `curl` through a 0600 config file that is removed after each request, never on a command line, and never printed.
 - **Failures are warnings.** A pull or push that fails (network, a missing tag, a refused write) is a `WARN` line in the run and the build goes on. Pushes run on scoped threads that are joined before the build step returns. A push is skipped when the tag already holds an entry that verifies; a tag whose entry does not verify (poisoned or corrupt) is overwritten with this build's signed entry, with a `WARN` saying so, so a refused entry does not stay in the registry. Without a `verify_key` the pusher cannot check, and an existing tag is kept.
 - **Restored artifacts** count as reused (from the registry) in the run summary.
 - **Transport.** Gaia runs the external `curl`, `tar` and `zstd` programs; a `registry` on `localhost`, `127.0.0.1` or `[::1]` is spoken to over plain HTTP (for local test registries), any other host over HTTPS.
@@ -3211,6 +3272,8 @@ enabled = true
 replacement = "***"
 patterns = ["TOKEN", "SECRET", "PASSWORD", "API_KEY"]
 ```
+
+`patterns` hide the value of a key whose name contains a pattern (in the provenance and the selection). Resolved `[secrets]` values are masked by value in every output, whatever `enabled` says; see [Secrets](#secrets).
 
 ## Template Files
 

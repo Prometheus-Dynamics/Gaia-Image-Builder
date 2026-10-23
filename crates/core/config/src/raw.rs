@@ -52,6 +52,8 @@ pub struct RawBuildConfig {
     pub provenance: RawProvenanceConfig,
     pub reporting: RawReportingConfig,
     pub expect: RawExpectConfig,
+    /// `[secrets]`: names for values the build reads when it uses them, never stores.
+    pub secrets: BTreeMap<String, RawSecretConfig>,
     #[serde(skip)]
     pub source_path: Option<PathBuf>,
     #[serde(skip)]
@@ -71,12 +73,30 @@ pub struct RawBuildConfig {
     pub imported_configs: Vec<RawImportedConfig>,
     #[serde(skip)]
     pub unresolved_tokens: Vec<RawUnresolvedInterpolation>,
+    /// Names of `${env:NAME}` references, in the interpolated file, whose name
+    /// looks like a secret (their values are then in the spec).
+    #[serde(skip)]
+    pub secret_env_like: Vec<String>,
     /// Keys in this file that Gaia does not know.
     #[serde(skip)]
     pub(crate) unknown_keys: Vec<crate::unknown_keys::UnknownKey>,
     /// The file sets nothing at all (only comments).
     #[serde(skip)]
     pub sets_nothing: bool,
+}
+
+/// One `[secrets]` entry: exactly one of `env`, `file` and `command`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawSecretConfig {
+    /// `env = "VAR"`: the value of an environment variable.
+    pub env: Option<String>,
+    /// `file = "path"`: the file's contents. Must be mode 0600 or stricter.
+    pub file: Option<String>,
+    /// `command = ["gh", "auth", "token"]`: the trimmed standard output.
+    pub command: Option<Vec<String>>,
+    /// Default true: a missing or failed source is an error when used.
+    pub required: Option<bool>,
 }
 
 /// `[expect]`: ids the build must end up with, so a layer that silently
@@ -994,6 +1014,12 @@ pub struct RawCheckpointConfig {
     /// check. Unsafe; see the docs.
     #[serde(default)]
     pub trust: Option<String>,
+    /// `backend = "oci"`: the registry token, `secret:NAME` or `env:VAR`.
+    #[serde(default)]
+    pub token: Option<String>,
+    /// `backend = "oci"`: the user name paired with `token` (default `gaia`).
+    #[serde(default)]
+    pub username: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
