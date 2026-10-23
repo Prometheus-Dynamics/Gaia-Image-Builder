@@ -244,8 +244,25 @@ fn load_package_durations(output_dir: &Path) -> BTreeMap<String, f64> {
 }
 
 /// After a `make`: keeps how long each package took, for the next estimate.
+/// Packages the tree no longer builds (no `build/<name>-<version>` dir, as
+/// after a config change) are dropped, so the file only describes this build.
 pub(crate) fn record_package_durations(output_dir: &Path) {
-    let durations = load_package_durations(output_dir);
+    let mut durations = load_package_durations(output_dir);
+    if let Ok(entries) = fs::read_dir(output_dir.join("build")) {
+        let dirs: Vec<String> = entries
+            .flatten()
+            .filter(|entry| entry.path().is_dir())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        durations.retain(|name, _| {
+            dirs.iter().any(|dir| {
+                dir == name
+                    || dir
+                        .strip_prefix(name.as_str())
+                        .is_some_and(|rest| rest.starts_with('-'))
+            })
+        });
+    }
     if durations.is_empty() {
         return;
     }
@@ -504,10 +521,29 @@ mod tests {
             "1:start:build: zlib\n13:end:build: zlib\n",
         )
         .expect("log");
+        fs::create_dir_all(output.join("build/zlib-1.3.1")).expect("zlib build dir");
         record_package_durations(&output);
         assert_eq!(
             fs::read_to_string(output.join(PACKAGE_DURATIONS)).expect("durations"),
             "zlib 12.0\n"
+        );
+    }
+
+    #[test]
+    fn durations_of_packages_the_tree_no_longer_builds_are_dropped() {
+        let dir = TempDir::new("gaia-durations-prune");
+        let output = dir.path().join("output");
+        fs::create_dir_all(output.join("build/zlib-1.3.1")).expect("zlib");
+        fs::create_dir_all(output.join("build/linux-custom")).expect("linux");
+        fs::write(
+            output.join(PACKAGE_DURATIONS),
+            "zlib 12.0\nlinux 82.0\ntensorflow-lite 250.0\nlinux-firmware 3.0\n",
+        )
+        .expect("durations");
+        record_package_durations(&output);
+        assert_eq!(
+            fs::read_to_string(output.join(PACKAGE_DURATIONS)).expect("durations"),
+            "linux 82.0\nzlib 12.0\n"
         );
     }
 }

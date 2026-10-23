@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- The Buildroot provider's `.gaia-package-durations` (the progress estimate's per-package times) drops packages the tree no longer builds, so it describes only the current config.
+
 ### Image layers
 
 - **`[image.layers]` splits the Buildroot rootfs into layer tars.** Gaia forces `BR2_TARGET_ROOTFS_TAR=y` and splits `rootfs.tar` by path into one deterministic tar per layer (`layers/<name>.tar`), keeping each entry's owner, mode and links. Membership comes from `paths`, the stage, install and service ids, the Buildroot packages (`packages-file-list.txt`) and a default layer; overlapping non-directory paths are an error unless listed in `overrides`. Each layer also gets an erofs image (`mkfs.erofs`, on by default) and an optional dm-verity tree, and `layers/layers.json` describes them (schema 1, with the layer `id` as the erofs sha256).
