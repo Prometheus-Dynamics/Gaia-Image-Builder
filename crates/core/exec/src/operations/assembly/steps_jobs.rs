@@ -54,6 +54,7 @@ pub(super) fn run_job<'a>(
         AssemblyStep::Archive(index) => {
             super::steps_jobs_fs::job_archive(ctx, index, input.lib_checks, &input.verity)
         }
+        AssemblyStep::Oci(index) => super::steps_jobs_fs::job_oci(ctx, index, input.lib_checks),
     }
 }
 

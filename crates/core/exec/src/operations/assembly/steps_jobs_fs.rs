@@ -291,6 +291,58 @@ pub(super) fn job_archive<'a>(
     }))
 }
 
+pub(super) fn job_oci<'a>(
+    ctx: &JobCtx<'a>,
+    index: usize,
+    lib_checks: Vec<PendingLibCheck>,
+) -> Result<Record<'a>, AssemblyError> {
+    let oci = &ctx.assembly.ocis[index];
+    let span = tracing::info_span!(
+        "assembly_oci",
+        operation_id = %ctx.operation_id.as_str(),
+        oci_id = %oci.id
+    );
+    let _span_guard = span.enter();
+    // Each tree layer is complete: every step that fills it ran before this
+    // one (the order reads its root).
+    let warnings = lib_check_messages(&lib_checks);
+    let trees: Vec<String> = oci
+        .layers
+        .iter()
+        .filter_map(|layer| layer.tree.as_ref().map(ToString::to_string))
+        .collect();
+    let trees: Vec<&str> = trees.iter().map(String::as_str).collect();
+    let strips = strip_trees_job(ctx, &trees)?;
+    let clock = gaia_process::ActiveClock::start();
+    let summary = execute_assembly_oci(ctx.spec, ctx.roots, oci, ctx.cancel.clone())?;
+    let elapsed = clock.elapsed();
+    let reused = summary.layers.iter().filter(|layer| layer.reused).count();
+    let compressed = if oci.compression == "none" {
+        0
+    } else {
+        summary.layers.len() - reused
+    };
+    let message = format!(
+        "built assembly oci image '{}' at '{}' ({} layer(s): {compressed} compressed, {reused} from cache) in {:.2}s",
+        oci.id,
+        summary.output.display(),
+        summary.layers.len(),
+        elapsed.as_secs_f64()
+    );
+    let published = under_out_dir(ctx, &summary.output);
+    Ok(Box::new(move |run: &mut StepRun<'a>| {
+        record_lib_warnings(run, warnings);
+        record_strip_trees(run, strips);
+        if published {
+            run.published_outputs.push(summary.output.clone());
+        }
+        run.produced.record_oci(index, summary.bytes);
+        run.oci_count += 1;
+        record_oci_state(&mut run.state, run.oci_count, oci, &summary);
+        run.messages.push(message);
+    }))
+}
+
 /// The warning text of a copied dynamic file whose runtime libraries its
 /// tree lacks, or `None` when they are all there. A tree may overlay a full
 /// rootfs, so this is a warning, not an error.

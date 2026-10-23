@@ -26,6 +26,7 @@ pub enum AssemblyStep {
     Filesystem(usize),
     Disk(usize),
     Archive(usize),
+    Oci(usize),
 }
 
 impl AssemblyStep {
@@ -64,6 +65,7 @@ impl AssemblyStep {
             Self::Filesystem(index) => format!("filesystem '{}'", assembly.filesystems[index].id),
             Self::Disk(index) => format!("disk '{}'", assembly.disks[index].id),
             Self::Archive(index) => format!("archive '{}'", assembly.archives[index].id),
+            Self::Oci(index) => format!("oci image '{}'", assembly.ocis[index].id),
         }
     }
 
@@ -72,7 +74,11 @@ impl AssemblyStep {
     pub fn replaces_outputs(self) -> bool {
         matches!(
             self,
-            Self::Transform(_) | Self::Filesystem(_) | Self::Disk(_) | Self::Archive(_)
+            Self::Transform(_)
+                | Self::Filesystem(_)
+                | Self::Disk(_)
+                | Self::Archive(_)
+                | Self::Oci(_)
         )
     }
 }
@@ -237,6 +243,20 @@ pub fn assembly_step_paths(
             reads,
             vec![resolve(&archive.output)],
         );
+    }
+    for (index, oci) in assembly.ocis.iter().enumerate() {
+        // A layer tar is read as it is; a tree layer reads its root, so it
+        // waits for every step that fills the tree.
+        let reads = oci
+            .layers
+            .iter()
+            .filter_map(|layer| match layer.source() {
+                Some(crate::AssemblyOciLayerSource::Tar(tar)) => Some(resolve(tar)),
+                Some(crate::AssemblyOciLayerSource::Tree(tree_id)) => Some(tree(tree_id.as_str())),
+                None => None,
+            })
+            .collect();
+        push(AssemblyStep::Oci(index), reads, vec![resolve(&oci.dest)]);
     }
     steps
 }
@@ -437,6 +457,27 @@ mod tests {
             ])
         );
         assert!(assembly_steps_reading_later_outputs(&steps).is_empty());
+    }
+
+    #[test]
+    fn an_oci_image_runs_after_the_steps_that_write_its_layers() {
+        let steps = vec![
+            step(
+                AssemblyStep::Oci(0),
+                &["/out/base.tar", "/work/app"],
+                &["/out/image.oci"],
+            ),
+            step(AssemblyStep::Transform(0), &[], &["/out/base.tar"]),
+            step(AssemblyStep::File(0), &[], &["/work/app/bin/app"]),
+        ];
+        let order = order_assembly_steps(&steps).expect("order");
+        assert_eq!(order.last(), Some(&AssemblyStep::Oci(0)));
+        assert!(
+            order
+                .iter()
+                .position(|step| *step == AssemblyStep::Transform(0))
+                < order.iter().position(|step| *step == AssemblyStep::Oci(0))
+        );
     }
 
     #[test]

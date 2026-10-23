@@ -5,8 +5,8 @@
 //!
 //! A step must follow an earlier one when they can interfere:
 //! - the writers of a tree run one after another in step order, and a
-//!   filesystem or archive that packs a tree is one of them (it strips the
-//!   tree too);
+//!   filesystem, archive or OCI image that packs a tree is one of them (it
+//!   strips the tree too);
 //! - a step whose paths overlap an earlier step's (a transform reading an
 //!   image another step writes, a disk built from filesystems, a file
 //!   copied out of a tree another step writes) follows it: any step that is
@@ -254,6 +254,14 @@ fn job_input(run: &mut StepRun<'_>, step: AssemblyStep) -> JobInput {
             disk_publish: run.disk_publish.get(index).cloned(),
             ..JobInput::default()
         },
+        AssemblyStep::Oci(index) => {
+            let trees = oci_tree_layers(&run.assembly.ocis[index]);
+            let trees: Vec<&str> = trees.iter().map(String::as_str).collect();
+            JobInput {
+                lib_checks: run.take_lib_checks(&trees),
+                ..JobInput::default()
+            }
+        }
         _ => JobInput::default(),
     }
 }
@@ -292,8 +300,18 @@ fn tree_writes(assembly: &ImageAssemblySpec, step: AssemblyStep) -> Vec<String> 
             .iter()
             .filter_map(|member| member.tree.as_ref().map(|tree| tree.as_str().to_string()))
             .collect(),
+        AssemblyStep::Oci(index) => oci_tree_layers(&assembly.ocis[index]),
         AssemblyStep::Transform(_) | AssemblyStep::Disk(_) => Vec::new(),
     }
+}
+
+/// The trees an OCI image packs as layers (each is stripped, and checked for
+/// runtime libraries, before it is tarred).
+fn oci_tree_layers(oci: &gaia_spec::AssemblyOciSpec) -> Vec<String> {
+    oci.layers
+        .iter()
+        .filter_map(|layer| layer.tree.as_ref().map(|tree| tree.as_str().to_string()))
+        .collect()
 }
 
 fn is_verity(assembly: &ImageAssemblySpec, step: AssemblyStep) -> bool {

@@ -13,6 +13,7 @@ mod image_assembly_devices;
 mod image_assembly_generated;
 mod image_assembly_gpt;
 mod image_assembly_layout;
+mod image_assembly_oci;
 mod image_assembly_options;
 mod image_assembly_order;
 mod image_assembly_outputs;

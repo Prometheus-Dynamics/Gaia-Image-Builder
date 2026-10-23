@@ -1,8 +1,8 @@
 use crate::assembly_output_spec::{AssemblyFilesystemSpec, AssemblyTransformSpec};
 use crate::file_mode::{FileMode, FileModeParseError};
 use crate::{
-    AssemblyArchiveSpec, AssemblyJsonValue, AssemblyTreeId, ByteSize, ByteSizeParseError,
-    ImageProviderKind, SourceId,
+    AssemblyArchiveSpec, AssemblyJsonValue, AssemblyOciSpec, AssemblyTreeId, ByteSize,
+    ByteSizeParseError, ImageProviderKind, SourceId,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -20,6 +20,9 @@ pub struct ImageAssemblySpec {
     pub filesystems: Vec<AssemblyFilesystemSpec>,
     pub disks: Vec<AssemblyDiskSpec>,
     pub archives: Vec<AssemblyArchiveSpec>,
+    /// OCI images, written after the archives.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ocis: Vec<AssemblyOciSpec>,
     pub busybox_initramfs: Vec<AssemblyBusyboxInitramfsSpec>,
     pub binaries: Vec<AssemblyBinarySpec>,
     pub kernel_modules: Vec<AssemblyKernelModulesSpec>,
@@ -48,6 +51,7 @@ impl ImageAssemblySpec {
             && self.filesystems.is_empty()
             && self.disks.is_empty()
             && self.archives.is_empty()
+            && self.ocis.is_empty()
             && self.busybox_initramfs.is_empty()
             && self.binaries.is_empty()
             && self.kernel_modules.is_empty()

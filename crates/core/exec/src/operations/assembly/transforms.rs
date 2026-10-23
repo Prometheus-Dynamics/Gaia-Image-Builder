@@ -161,7 +161,7 @@ pub(super) fn zstd_transform_args(level: Option<u32>, long: bool, input_bytes: u
 }
 
 /// Runs `<tool> <args> <src>` with stdout published to `dest`.
-fn compress_to_dest(
+pub(super) fn compress_to_dest(
     spec: &ResolvedBuildSpec,
     roots: &AssemblyRoots,
     tool_name: &str,

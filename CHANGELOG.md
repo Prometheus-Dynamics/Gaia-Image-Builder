@@ -13,6 +13,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - **Without `[image.layers]` nothing changes:** no tar is forced and the full image is built as before.
 - Docs: `docs/configuration.md` (Image Layers).
 
+### OCI images from layers, without a daemon
+
+- **`[[image.assembly.oci]]` writes an OCI image.** Its layers are uncompressed layer tars (`{ tar = ... }`) or assembly trees (`{ tree = ... }`), lowest first. The output is an OCI image layout directory (`format = "oci-layout"`, the default; `podman load`, `skopeo` and `docker load` read it) or a `docker load` tarball (`format = "docker-archive"`). Layers are gzip (default), zstd or uncompressed. The image config takes the architecture (required, `amd64` or `arm64`), `os`, `entrypoint`, `cmd`, `env`, `working_dir`, `stop_signal`, `labels` and an optional `ref`.
+- **Same inputs, same bytes.** Tree layers are tarred deterministically (sorted, mtime 0, uid and gid 0, modes kept, symlinks and hard links kept). The config's `created` is `SOURCE_DATE_EPOCH` or the epoch.
+- **Only what changed is compressed.** Compressed blobs are cached under the build dir by layer `diff_id`, so an app-only change rewrites one blob, the config and the manifest. The run state records each layer's digest and whether its blob was reused.
+- Docs: `docs/configuration.md` (OCI images).
+
 ### Stage files mirror their sources
 
 - **A `[[stage.files]]` entry removes what its source no longer has.** A directory entry used to keep the files it installed earlier after they were removed from the source (HeliOS's `ui/mock` stayed in `target/` and shipped). Each successful apply now records what every entry installed in `<output>/.gaia-image-feed-stage-owned.txt`. The next apply removes the paths an entry owned and no longer produces, before it copies: a file whose size and modification time still match what the stage left, a symlink with the same target, and a directory once it is empty. A file a package rewrote, a path another entry or the feed now produces (a moved path), and anything the stage did not record are kept. A removed entry's paths go the same way; a single-file entry whose destination changed removes the old one.

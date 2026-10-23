@@ -133,6 +133,7 @@ fn image_assembly_output_cleanup_paths(
         .iter()
         .map(|disk| &disk.output)
         .chain(assembly.archives.iter().map(|archive| &archive.output))
+        .chain(assembly.ocis.iter().map(|oci| &oci.dest))
     {
         if let Ok(path) = roots.resolve_path(spec, output) {
             paths.push(temporary_assembly_output_path(&path));

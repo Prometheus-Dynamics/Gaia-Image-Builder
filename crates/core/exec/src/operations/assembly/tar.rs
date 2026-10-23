@@ -22,6 +22,8 @@ pub(super) enum TarKind {
     File,
     Dir,
     Symlink,
+    /// A hard link to an earlier member, named by the link target field.
+    Hardlink,
 }
 
 impl TarKind {
@@ -30,6 +32,7 @@ impl TarKind {
             Self::File => b'0',
             Self::Dir => b'5',
             Self::Symlink => b'2',
+            Self::Hardlink => b'1',
         }
     }
 }
@@ -97,12 +100,28 @@ impl<W: Write> TarWriter<W> {
 
     /// Appends a directory entry; `name` should end in `/`.
     pub(super) fn append_dir(&mut self, name: &str) -> Result<(), String> {
-        self.write_header(name, 0, 0o755, TarKind::Dir, "")
+        self.append_dir_mode(name, 0o755)
+    }
+
+    /// Appends a directory entry with the permission bits `mode`.
+    pub(super) fn append_dir_mode(&mut self, name: &str, mode: u32) -> Result<(), String> {
+        self.write_header(name, 0, mode, TarKind::Dir, "")
     }
 
     /// Appends a symbolic link entry pointing at `target`, stored as is.
     pub(super) fn append_symlink(&mut self, name: &str, target: &str) -> Result<(), String> {
         self.write_header(name, 0, 0o777, TarKind::Symlink, target)
+    }
+
+    /// Appends a hard link named `name` to the earlier member `target`, with
+    /// the mode of the file it links to.
+    pub(super) fn append_hardlink(
+        &mut self,
+        name: &str,
+        target: &str,
+        mode: u32,
+    ) -> Result<(), String> {
+        self.write_header(name, 0, mode, TarKind::Hardlink, target)
     }
 
     /// Writes the two zero blocks that end the archive and returns the

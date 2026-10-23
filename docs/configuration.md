@@ -2443,8 +2443,8 @@ Assembly behavior:
 - Raw disk assembly writes 1 MiB-aligned partitions sequentially, with an MBR (`partition_table = "mbr"`, the default) or a GPT (`partition_table = "gpt"`) (see [Disk partitions](#disk-partitions) and [GPT disks](#gpt-disks)).
 - MBR partition `type` accepts raw `0xNN` values; `type_alias` currently supports `fat32-lba` and `linux`. On a GPT disk `type` is a raw type GUID and `type_alias` names one (see [GPT disks](#gpt-disks)).
 - Assembly runtime state is included in provenance and manifest reports with staged file, transform, filesystem, disk, and archive output sizes and digests.
-- Assembly order follows dependencies: a step that reads a path another step writes (the same file, a file in a directory it fills, or a glob it matches) runs after it, whatever its kind or position, so for example a transform compressing a filesystem built by the same assembly sees this run's image. Trees are prepared first; steps that do not depend on each other run in the order dirs, symlinks, files, BusyBox initramfs, kernel modules, transforms, filesystems, disks, archives. Steps that read each other's outputs in a cycle are rejected, by validation and at run time.
-- Before the steps run, outputs of transforms, filesystems, disks and archives left from an earlier run are removed, so a step reading one before it is rebuilt fails instead of using a stale file.
+- Assembly order follows dependencies: a step that reads a path another step writes (the same file, a file in a directory it fills, or a glob it matches) runs after it, whatever its kind or position, so for example a transform compressing a filesystem built by the same assembly sees this run's image. Trees are prepared first; steps that do not depend on each other run in the order dirs, symlinks, files, BusyBox initramfs, kernel modules, transforms, filesystems, disks, archives, OCI images. Steps that read each other's outputs in a cycle are rejected, by validation and at run time.
+- Before the steps run, outputs of transforms, filesystems, disks, archives and OCI images left from an earlier run are removed, so a step reading one before it is rebuilt fails instead of using a stale file.
 
 #### Work directory and RAM
 
@@ -2585,6 +2585,42 @@ Assembly results report, per published raw disk image (and the primary image), `
 - Entry values may also contain `${assembly.verity:<path template>:<field>}`, replaced by a field of a `verity` transform's output. The path must be the transform's `dest` written exactly as in the transform. The fields are `root_hash`, `salt`, `hash_offset`, `data_blocks`, `data_block_size` and `hash_block_size`; see [dm-verity and ext4](#dm-verity-and-ext4). A token that names no verity transform output is a validation error, and an unknown field name is rejected at validation too.
 
 Archive output is deterministic: entries appear in the configured order with mtime 0, uid/gid 0, empty user and group names, and mode `0644`. Member names must be relative paths of at most 4096 bytes (longer names use PAX records, see above) without `.`/`..` components, and must be unique per archive. The archive is written to a temporary file and published atomically; state records `archives.N.output`, `bytes`, `sha256`, and per-member name, source, size, and sha256. Archive outputs are treated as expected outputs, so a bundle in the collect dir is not reported as a large unexpected file. Reuse fingerprints cover the archive config and the state of every member and digest input file.
+
+#### OCI images
+
+`[[image.assembly.oci]]` builds an OCI image from layers after the archives, with no container daemon and no `docker` or `podman` needed to build it:
+- `id`: unique id.
+- `dest`: path template. With `format = "oci-layout"` (the default) it is a directory holding an OCI image layout (`oci-layout`, `index.json`, `blobs/sha256/...`), which `podman load`, `skopeo copy oci:...` and `docker load` (Docker 25 and later) read. With `format = "docker-archive"` it is a `.tar` for `docker load` of older Docker versions.
+- `layers`: lowest first, at least one. Each layer is `{ tar = "<path template>" }`, an uncompressed layer tar used as it is (such as `$provider.images/layers/base.tar`), or `{ tree = "<tree id>" }`, an assembly tree that Gaia tars itself. Exactly one of the two per layer. A tree layer strips its tree first when the tree says `strip = true`, as archives do.
+- `compression`: `"gzip"` (the default), `"zstd"` or `"none"`. `docker-archive` takes gzip or none.
+- `ref`: optional, such as `"helios-sim:dev"`. It is the `org.opencontainers.image.ref.name` annotation of an OCI layout, or the `RepoTags` entry of a docker archive.
+- `[image.assembly.oci.config]` is the image config:
+  - `architecture`: required, `"amd64"` or `"arm64"`.
+  - `os`: `"linux"` (the default and the only value).
+  - `entrypoint`, `cmd`, `env` (`KEY=value` strings), `working_dir` (an absolute path), `stop_signal`, and `labels` (a table). Empty settings are left out of the config.
+  - Label values and the other strings take `${source.<id>...}` tokens, as the rest of `[image.assembly]` does.
+
+```toml
+[[image.assembly.oci]]
+id = "sim"
+dest = "$assembly.out/helios-sim.oci"
+layers = [ { tar = "$provider.images/layers/base.tar" }, { tree = "app-tree" } ]
+ref = "helios-sim:dev"
+
+[image.assembly.oci.config]
+architecture = "amd64"
+entrypoint = ["/sbin/init"]
+env = ["container=docker"]
+working_dir = "/"
+stop_signal = "SIGRTMIN+3"
+labels = { "org.opencontainers.image.revision" = "${source.x.commit}" }
+```
+
+Output is deterministic: the same inputs give the same bytes and digests. A tree layer is tarred with entries sorted, a directory before its contents, mtime 0, uid and gid 0 (assembly trees do not record ownership), the permission bits kept, symbolic links kept as links, and a second name for a file written as a hard link to the first. Device nodes and FIFOs in a tree are an error for a layer. The config's `created` time is `SOURCE_DATE_EPOCH` when that is set, else `1970-01-01T00:00:00Z`. Compression runs the assembly's `gzip -n -c -6` or `zstd -q -c -3` (one thread, fixed levels).
+
+Each layer's `diff_id` is the sha256 of its uncompressed tar. Compressed blobs are cached under the build dir (`<build dir>/oci-blobs/<diff_id>.gzip` or `.zstd`), so an unchanged layer is not compressed again: an app-only change rewrites one blob, the config and the manifest. The layer tar of a `tar` layer is read each run to get its `diff_id`; a tree layer is tarred each run.
+
+State records `oci.N.id`, `format`, `compression`, `output`, `bytes`, `config_digest`, `manifest_digest` and `layer_count`, and for each layer `oci.N.layer.M.source`, `diff_id`, `blob_digest`, `blob_bytes` and `reused`. The output is an expected output of the assembly, so it is reported with its size. Reuse fingerprints cover the OCI config, the state of each `tar` layer, and the content digest of each `tree` layer.
 
 #### Generated content
 

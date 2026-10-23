@@ -15,6 +15,9 @@ pub struct RawImageAssemblyConfig {
     pub filesystems: Vec<RawAssemblyFilesystemConfig>,
     pub disks: Vec<RawAssemblyDiskConfig>,
     pub archives: Vec<RawAssemblyArchiveConfig>,
+    /// `[[image.assembly.oci]]`: OCI images built from layers.
+    #[serde(rename = "oci")]
+    pub ocis: Vec<RawAssemblyOciConfig>,
     pub busybox_initramfs: Vec<RawAssemblyBusyboxInitramfsConfig>,
     pub binaries: Vec<RawAssemblyBinaryConfig>,
     pub kernel_modules: Vec<RawAssemblyKernelModulesConfig>,
@@ -343,6 +346,52 @@ pub struct RawAssemblyArchiveMemberConfig {
     pub prefix: String,
     /// `tree` and `src_glob`: file names (simple `*` globs allowed) left out.
     pub exclude: Vec<String>,
+}
+
+/// `[[image.assembly.oci]]`: an OCI image (layout directory, or a
+/// `docker load` tarball with `format = "docker-archive"`) built from
+/// `layers`, lowest first, with the `[image.assembly.oci.config]` table.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawAssemblyOciConfig {
+    pub id: String,
+    pub dest: String,
+    /// `oci-layout` (the default) or `docker-archive`.
+    pub format: Option<String>,
+    pub layers: Vec<RawAssemblyOciLayerConfig>,
+    /// `gzip` (the default), `zstd` or `none`.
+    pub compression: Option<String>,
+    /// The image's reference, e.g. `helios-sim:dev`.
+    #[serde(rename = "ref")]
+    pub reference: Option<String>,
+    pub config: RawAssemblyOciImageConfig,
+}
+
+/// One layer: exactly one of `tar` and `tree`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawAssemblyOciLayerConfig {
+    /// An uncompressed layer tar, used as it is.
+    pub tar: Option<String>,
+    /// An assembly tree, tarred deterministically.
+    pub tree: Option<String>,
+}
+
+/// `[image.assembly.oci.config]`: the image config.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawAssemblyOciImageConfig {
+    /// `amd64` or `arm64`; required.
+    pub architecture: Option<String>,
+    /// `linux` (the default).
+    pub os: Option<String>,
+    pub entrypoint: Vec<String>,
+    pub cmd: Vec<String>,
+    /// `KEY=value` strings.
+    pub env: Vec<String>,
+    pub working_dir: Option<String>,
+    pub stop_signal: Option<String>,
+    pub labels: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

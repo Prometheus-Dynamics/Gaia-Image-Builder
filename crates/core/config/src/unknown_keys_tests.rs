@@ -120,6 +120,25 @@ fn assembly_archive_tables_are_checked() {
 }
 
 #[test]
+fn assembly_oci_tables_are_checked() {
+    assert_eq!(
+        unknown(
+            "[[image.assembly.oci]]\nid = \"sim\"\ndest = \"sim.oci\"\nformat = \"oci-layout\"\n\
+                 compression = \"gzip\"\nref = \"sim:dev\"\n\
+                 layers = [ { tar = \"a.tar\" }, { tree = \"app\", tre = \"x\" } ]\n\
+                 [image.assembly.oci.config]\narchitecture = \"amd64\"\nos = \"linux\"\n\
+                 entrypoint = []\nlabels = { \"k\" = \"v\" }\nworking_directory = \"/\"\n\
+                 [[image.assembly.oci]]\nid = \"b\"\ndest = \"b.oci\"\nreference = \"x\"\n"
+        ),
+        vec![
+            "image.assembly.oci[0].config.working_directory",
+            "image.assembly.oci[0].layers[1].tre",
+            "image.assembly.oci[1].reference",
+        ]
+    );
+}
+
+#[test]
 fn a_source_key_is_checked_against_its_kind() {
     assert_eq!(
         unknown_with_hints(

@@ -104,6 +104,7 @@ pub enum ProducedOutputKind {
     Disk,
     Filesystem,
     Transform,
+    Oci,
 }
 
 impl ProducedOutputKind {
@@ -113,6 +114,7 @@ impl ProducedOutputKind {
             Self::Disk => "disk",
             Self::Filesystem => "filesystem",
             Self::Transform => "transform",
+            Self::Oci => "oci",
         }
     }
 
@@ -122,6 +124,7 @@ impl ProducedOutputKind {
             "disk" => Some(Self::Disk),
             "filesystem" => Some(Self::Filesystem),
             "transform" => Some(Self::Transform),
+            "oci" => Some(Self::Oci),
             _ => None,
         }
     }

@@ -169,6 +169,22 @@ const ASSEMBLY_CHILDREN: &[Section] = &[
         ],
     ),
     section(
+        "oci",
+        struct_fields::<raw_assembly::RawAssemblyOciConfig>,
+        &[
+            section(
+                "layers",
+                struct_fields::<raw_assembly::RawAssemblyOciLayerConfig>,
+                &[],
+            ),
+            section(
+                "config",
+                struct_fields::<raw_assembly::RawAssemblyOciImageConfig>,
+                &[],
+            ),
+        ],
+    ),
+    section(
         "busybox_initramfs",
         struct_fields::<raw_assembly::RawAssemblyBusyboxInitramfsConfig>,
         &[],

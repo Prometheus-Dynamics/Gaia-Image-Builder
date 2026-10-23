@@ -172,6 +172,51 @@ pub(crate) fn visit_assembly_strings(assembly: &mut ImageAssemblySpec, visit: &m
             }
         }
     }
+    for oci in &mut assembly.ocis {
+        text(&mut oci.id, "image.assembly.oci.id", visit);
+        path_value(&mut oci.dest, "image.assembly.oci.dest", visit);
+        text(&mut oci.format, "image.assembly.oci.format", visit);
+        text(
+            &mut oci.compression,
+            "image.assembly.oci.compression",
+            visit,
+        );
+        opt_text(&mut oci.reference, "image.assembly.oci.ref", visit);
+        for layer in &mut oci.layers {
+            path(&mut layer.tar, "image.assembly.oci.layers.tar", visit);
+            if let Some(tree) = &mut layer.tree {
+                tree_id(tree, "image.assembly.oci.layers.tree", visit);
+            }
+        }
+        let config = &mut oci.config;
+        text(
+            &mut config.architecture,
+            "image.assembly.oci.config.architecture",
+            visit,
+        );
+        text(&mut config.os, "image.assembly.oci.config.os", visit);
+        texts(
+            &mut config.entrypoint,
+            "image.assembly.oci.config.entrypoint",
+            visit,
+        );
+        texts(&mut config.cmd, "image.assembly.oci.config.cmd", visit);
+        texts(&mut config.env, "image.assembly.oci.config.env", visit);
+        opt_text(
+            &mut config.working_dir,
+            "image.assembly.oci.config.working_dir",
+            visit,
+        );
+        opt_text(
+            &mut config.stop_signal,
+            "image.assembly.oci.config.stop_signal",
+            visit,
+        );
+        // Label keys are names, not values: only the values take tokens.
+        for (_, value) in &mut config.labels {
+            text(value, "image.assembly.oci.config.labels", visit);
+        }
+    }
     for initramfs in &mut assembly.busybox_initramfs {
         tree_id(
             &mut initramfs.tree,

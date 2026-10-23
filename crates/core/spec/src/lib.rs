@@ -4,6 +4,7 @@ mod assembly_archive_spec;
 mod assembly_compressed_fs_spec;
 mod assembly_gpt_spec;
 mod assembly_json;
+mod assembly_oci_spec;
 mod assembly_order;
 mod assembly_output_spec;
 mod assembly_spec;
@@ -59,6 +60,10 @@ pub use assembly_gpt_spec::{
     GptPartitionTypeError,
 };
 pub use assembly_json::{AssemblyJsonValue, TreeDigestResolver, json_string};
+pub use assembly_oci_spec::{
+    AssemblyOciCompressionSpec, AssemblyOciConfigSpec, AssemblyOciFormatSpec,
+    AssemblyOciLayerSource, AssemblyOciLayerSpec, AssemblyOciSpec,
+};
 pub use assembly_order::{
     AssemblyCycle, AssemblyStep, AssemblyStepPaths, assembly_step_paths,
     assembly_steps_reading_later_outputs, order_assembly_steps,

@@ -90,6 +90,13 @@ impl ProducedRecorder<'_> {
         );
     }
 
+    /// Records the OCI image at `index`, `bytes` long in all (its blobs and
+    /// documents, or the tarball).
+    pub(super) fn record_oci(&mut self, index: usize, bytes: u64) {
+        let assembly = self.assembly;
+        self.record_produced(ProducedOutputKind::Oci, &assembly.ocis[index].dest, bytes);
+    }
+
     /// Records an output the step wrote, `bytes` long, at the path `template`
     /// names in the spec. A template that does not resolve is not recorded;
     /// its size is then measured from the file, as before.

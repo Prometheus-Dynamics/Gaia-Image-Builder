@@ -114,6 +114,50 @@ pub(crate) fn archive_input_entries(
     parts
 }
 
+/// Fingerprint entries for OCI image inputs: each layer tar's state, and
+/// each tree layer's content digest. The OCI config itself is covered by
+/// the hashed assembly spec.
+pub(crate) fn oci_input_entries(
+    spec: &ResolvedBuildSpec,
+    roots: &AssemblyRoots,
+    assembly: &gaia_spec::ImageAssemblySpec,
+    generated_outputs: &BTreeSet<PathBuf>,
+) -> Vec<(String, String)> {
+    use gaia_spec::AssemblyOciLayerSource;
+    let mut parts = Vec::new();
+    for oci in &assembly.ocis {
+        for (index, layer) in oci.layers.iter().enumerate() {
+            let owner = format!("oci {}/layer {}", oci.id, index + 1);
+            let part_owner = format!("{}:layer{}", oci.id, index + 1);
+            match layer.source() {
+                Some(AssemblyOciLayerSource::Tar(tar)) => {
+                    parts.push(input_part(
+                        "oci-layer",
+                        &owner,
+                        &part_owner,
+                        resolve(spec, roots, tar),
+                        generated_outputs,
+                    ));
+                }
+                Some(AssemblyOciLayerSource::Tree(tree)) => {
+                    if let Ok(root) = roots.tree_path(tree.as_str()) {
+                        parts.push((
+                            format!("{owner} {}", root.display()),
+                            format!(
+                                "oci-tree:{part_owner}:{}:{}",
+                                root.display(),
+                                crate::tree_digest::tree_digest_signature(root)
+                            ),
+                        ));
+                    }
+                }
+                None => {}
+            }
+        }
+    }
+    parts
+}
+
 /// Fingerprint entries for the files a text value's `${assembly...}` tokens
 /// read, named after `owner` (for example `archive a/m` or `file tree:dest`)
 /// and tagged with `kind`.

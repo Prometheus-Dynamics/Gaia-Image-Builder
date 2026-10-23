@@ -45,6 +45,7 @@ pub(super) struct StepRun<'a> {
     pub(super) filesystem_count: usize,
     pub(super) disk_count: usize,
     pub(super) archive_count: usize,
+    pub(super) oci_count: usize,
     pub(super) kernel_modules_count: usize,
     /// The verity transforms' outputs, for archive entries that name them.
     pub(super) verity_outputs: VerityOutputs,
@@ -99,6 +100,7 @@ impl<'a> StepRun<'a> {
             filesystem_count: 0,
             disk_count: 0,
             archive_count: 0,
+            oci_count: 0,
             kernel_modules_count: 0,
             verity_outputs: VerityOutputs::new(),
             filesystem_published: Vec::new(),
@@ -172,6 +174,9 @@ impl<'a> StepRun<'a> {
         }
         if !self.assembly.archives.is_empty() {
             state.insert("completed_archive_count", self.archive_count);
+        }
+        if !self.assembly.ocis.is_empty() {
+            state.insert("completed_oci_count", self.oci_count);
         }
     }
 }

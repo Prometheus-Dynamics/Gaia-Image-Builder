@@ -162,6 +162,11 @@ pub(super) fn interpolate_image_assembly(
         .into_iter()
         .map(|archive| assembly_archives::interpolate_assembly_archive(archive, raw, env))
         .collect();
+    assembly.ocis = assembly
+        .ocis
+        .into_iter()
+        .map(|oci| super::assembly_oci::interpolate_assembly_oci(oci, raw, env))
+        .collect();
     assembly.busybox_initramfs = assembly
         .busybox_initramfs
         .into_iter()

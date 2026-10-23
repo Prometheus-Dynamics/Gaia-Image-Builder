@@ -641,6 +641,8 @@ mod tests_file_libs;
 mod tests_filesystem;
 #[path = "tests_generated.rs"]
 mod tests_generated;
+#[path = "tests_oci.rs"]
+mod tests_oci;
 #[path = "tests_gpt.rs"]
 mod tests_gpt;
 #[path = "tests_schedule.rs"]

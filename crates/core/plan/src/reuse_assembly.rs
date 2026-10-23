@@ -377,6 +377,12 @@ pub(crate) fn assembly_input_entries(spec: &ResolvedBuildSpec) -> Vec<(String, S
     );
     let archive_input_count = archive_inputs.len();
     parts.extend(archive_inputs);
+    parts.extend(crate::reuse_assembly_archives::oci_input_entries(
+        spec,
+        &roots,
+        assembly,
+        &generated_outputs,
+    ));
     tracing::debug!(
         archives = assembly.archives.len(),
         archive_inputs = archive_input_count,

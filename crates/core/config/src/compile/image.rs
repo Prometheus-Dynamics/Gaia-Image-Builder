@@ -1,9 +1,12 @@
 use super::*;
 use crate::raw::RawImageLayersConfig;
-use crate::raw_assembly::{RawAssemblyArchiveConfig, RawAssemblyDeviceKind, RawAssemblyJsonValue};
+use crate::raw_assembly::{
+    RawAssemblyArchiveConfig, RawAssemblyDeviceKind, RawAssemblyJsonValue, RawAssemblyOciConfig,
+};
 use gaia_spec::{
     AssemblyArchiveMemberSpec, AssemblyArchiveSpec, AssemblyBinarySpec, AssemblyCompressedFsSpec,
-    AssemblyGptDiskSpec, AssemblyGptPartitionSpec, AssemblyJsonValue,
+    AssemblyGptDiskSpec, AssemblyGptPartitionSpec, AssemblyJsonValue, AssemblyOciConfigSpec,
+    AssemblyOciLayerSpec, AssemblyOciSpec,
 };
 
 pub(crate) fn compile_image_feed(raw: &RawBuildConfig) -> ImageFeedSpec {
@@ -320,6 +323,7 @@ pub(crate) fn compile_image_assembly(
             .into_iter()
             .map(compile_assembly_archive)
             .collect(),
+        ocis: raw.ocis.into_iter().map(compile_assembly_oci).collect(),
         binaries: raw
             .binaries
             .into_iter()
@@ -466,6 +470,37 @@ fn compile_assembly_archive(raw: RawAssemblyArchiveConfig) -> AssemblyArchiveSpe
         id: raw.id,
         output: raw.output.into(),
         members: generated.chain(members).collect(),
+    }
+}
+
+/// An `[[image.assembly.oci]]` entry. The defaults are the spec's: an OCI
+/// layout, gzip layers and `linux`. The validator reports the rest.
+fn compile_assembly_oci(raw: RawAssemblyOciConfig) -> AssemblyOciSpec {
+    let config = raw.config;
+    AssemblyOciSpec {
+        id: raw.id,
+        dest: raw.dest.into(),
+        format: raw.format.unwrap_or_else(|| "oci-layout".into()),
+        layers: raw
+            .layers
+            .into_iter()
+            .map(|layer| AssemblyOciLayerSpec {
+                tar: layer.tar.map(Into::into),
+                tree: layer.tree.map(Into::into),
+            })
+            .collect(),
+        compression: raw.compression.unwrap_or_else(|| "gzip".into()),
+        reference: raw.reference,
+        config: AssemblyOciConfigSpec {
+            architecture: config.architecture.unwrap_or_default(),
+            os: config.os.unwrap_or_else(|| "linux".into()),
+            entrypoint: config.entrypoint,
+            cmd: config.cmd,
+            env: config.env,
+            working_dir: config.working_dir,
+            stop_signal: config.stop_signal,
+            labels: config.labels.into_iter().collect(),
+        },
     }
 }
 

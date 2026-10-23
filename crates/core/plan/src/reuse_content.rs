@@ -84,6 +84,7 @@ pub(crate) fn image_assembly_content_signature(spec: &ResolvedBuildSpec) -> Stri
                 .iter()
                 .map(|archive| ("archive", &archive.output)),
         )
+        .chain(assembly.ocis.iter().map(|oci| ("oci", &oci.dest)))
         .chain(published.iter().map(|template| ("published", template)));
     outputs
         .map(|(kind, template)| output_part(spec, &roots, kind, template))
