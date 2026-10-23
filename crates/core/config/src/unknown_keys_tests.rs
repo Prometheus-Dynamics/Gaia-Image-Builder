@@ -396,3 +396,27 @@ fn scan_unknown_keys_in_directories() {
         println!("UNKNOWN {problem}");
     }
 }
+
+#[test]
+fn image_layers_keys_and_layer_tables_are_checked() {
+    // The layer names are the user's; each layer's own keys are checked.
+    assert!(
+        unknown(
+            "[image]\nkind = \"buildroot\"\n[image.layers]\norder = [\"base\", \"app\"]\n\
+             default = \"base\"\noverrides = [\"/etc/x\"]\nerofs = true\nverity = false\n\
+             [image.layers.app]\npackages = [\"linux-ext-*\"]\npaths = [\"/opt\"]\n\
+             installs = [\"raze-*\"]\nstage = [\"raze-*\"]\nservices = [\"raze-*\"]\n"
+        )
+        .is_empty()
+    );
+    assert_eq!(
+        unknown(
+            "[image]\nkind = \"buildroot\"\n[image.layers]\norder = [\"base\"]\n[image.layers.app]\npackges = [\"x\"]\n"
+        ),
+        vec!["image.layers.app.packges"]
+    );
+    assert_eq!(
+        unknown("[image]\nkind = \"buildroot\"\n[image.layers]\norderr = [\"base\"]\n"),
+        vec!["image.layers.orderr"]
+    );
+}

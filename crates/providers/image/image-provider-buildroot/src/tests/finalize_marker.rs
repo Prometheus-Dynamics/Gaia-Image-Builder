@@ -68,6 +68,7 @@ all:\n\t@mkdir -p $(O)/images && touch $(O)/images/rootfs.img && echo images >> 
     spec.workspace.root_dir = workspace.display().to_string();
     let image = |value: &str| ImageSpec {
         signing: None,
+        layers: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             defconfig: Some("test_defconfig".into()),
             config_overrides: vec![("BR2_PACKAGE_FOO".into(), value.into())],

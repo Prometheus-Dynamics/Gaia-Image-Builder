@@ -65,6 +65,7 @@ mod feed_archive;
 mod feed_archive_expected_images;
 mod feed_archive_overlay;
 mod finalize_marker;
+mod layers;
 mod make_retry;
 mod offline_prefetch;
 mod override_check;

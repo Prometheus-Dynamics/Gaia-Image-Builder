@@ -6,6 +6,13 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+### Image layers
+
+- **`[image.layers]` splits the Buildroot rootfs into layer tars.** Gaia forces `BR2_TARGET_ROOTFS_TAR=y` and splits `rootfs.tar` by path into one deterministic tar per layer (`layers/<name>.tar`), keeping each entry's owner, mode and links. Membership comes from `paths`, the stage, install and service ids, the Buildroot packages (`packages-file-list.txt`) and a default layer; overlapping non-directory paths are an error unless listed in `overrides`. Each layer also gets an erofs image (`mkfs.erofs`, on by default) and an optional dm-verity tree, and `layers/layers.json` describes them (schema 1, with the layer `id` as the erofs sha256).
+- **Unchanged layers are reused.** Each layer's fingerprint covers its members and output settings; a layer whose fingerprint and outputs are unchanged is reused without rewriting its tar, erofs or verity, and the summary says reused or rebuilt per layer.
+- **Without `[image.layers]` nothing changes:** no tar is forced and the full image is built as before.
+- Docs: `docs/configuration.md` (Image Layers).
+
 ### Stage files mirror their sources
 
 - **A `[[stage.files]]` entry removes what its source no longer has.** A directory entry used to keep the files it installed earlier after they were removed from the source (HeliOS's `ui/mock` stayed in `target/` and shipped). Each successful apply now records what every entry installed in `<output>/.gaia-image-feed-stage-owned.txt`. The next apply removes the paths an entry owned and no longer produces, before it copies: a file whose size and modification time still match what the stage left, a symlink with the same target, and a directory once it is empty. A file a package rewrote, a path another entry or the feed now produces (a moved path), and anything the stage did not record are kept. A removed entry's paths go the same way; a single-file entry whose destination changed removes the old one.

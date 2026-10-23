@@ -429,6 +429,7 @@ mod tests {
         ));
         spec.image = ImageSpec {
             signing: None,
+            layers: None,
             definition: ImageDefinition::Buildroot(BuildrootImageSpec {
                 source: Some(SourceId::new("buildroot")),
                 defconfig: Some("test_defconfig".into()),

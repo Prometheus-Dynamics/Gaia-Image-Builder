@@ -10,6 +10,44 @@ pub struct ImageSpec {
     /// `[image.signing]`: signatures written next to the published outputs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signing: Option<ImageSigningSpec>,
+    /// `[image.layers]`: the rootfs split into layer tars. Left out of
+    /// serialized specs when unset, so existing builds keep their digests.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layers: Option<ImageLayersSpec>,
+}
+
+/// `[image.layers]`: the root filesystem split into one tar per layer.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ImageLayersSpec {
+    /// Layer names, lowest first.
+    pub order: Vec<String>,
+    /// The layer that takes every path no selector claims.
+    pub default: String,
+    /// Non-directory paths that more than one layer selects, which ship from
+    /// the upper layer (the lower copy is left out).
+    pub overrides: Vec<String>,
+    /// Whether each layer also gets an erofs image.
+    pub erofs: bool,
+    /// Whether each erofs image gets a dm-verity tree (needs `erofs`).
+    pub verity: bool,
+    /// The selectors of the layers that declare any (a layer may be empty).
+    pub layers: Vec<ImageLayerSpec>,
+}
+
+/// One layer's selectors. Ids and package names are globbed (`*`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct ImageLayerSpec {
+    pub name: String,
+    /// Buildroot package names: every path the package installs.
+    pub packages: Vec<String>,
+    /// Absolute rootfs path prefixes.
+    pub paths: Vec<String>,
+    /// Install entry ids: each install's destination.
+    pub installs: Vec<String>,
+    /// Stage file ids: the paths each stage entry wrote.
+    pub stage: Vec<String>,
+    /// Stage service ids: each service's unit file.
+    pub services: Vec<String>,
 }
 
 /// `[image.signing]`. `kind` is as written; [`ImageSigningKind::parse`] reads it.
@@ -67,6 +105,7 @@ impl ImageSpec {
             output: ImageOutputSpec::default(),
             assembly: None,
             signing: None,
+            layers: None,
         }
     }
 

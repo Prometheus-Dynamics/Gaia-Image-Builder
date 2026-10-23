@@ -2276,6 +2276,34 @@ outputs = ["*.img.xz", "*.slot.tar"]   # globs over the published output file na
 
 A verity root hash file (a published output named `*.roothash`) is signed whether or not `outputs` names it. The signature files join the published outputs in the report. Gaia uses the tool from `PATH` and holds no key material; it never prints the key. The validator rejects an unknown kind, an empty key or an empty `outputs` before the build. A missing tool or key fails the run at the signing step, and the message names the variable or the tool, never the key.
 
+### Image Layers
+
+`[image.layers]` splits a Buildroot image's root filesystem into one tar per layer (for example `base`, `platform` and `app`), so each layer can be shipped, verified and reused on its own. It is off unless the table is set; without it the image is built exactly as before. Gaia forces `BR2_TARGET_ROOTFS_TAR=y` when it is set, and splits Buildroot's `rootfs.tar`, which carries the ownership Buildroot applied.
+
+```toml
+[image.layers]
+order = ["base", "platform", "app"]   # lowest first
+default = "base"                      # takes every path no selector claims
+erofs = true                          # an erofs image per layer (default true)
+verity = false                        # a dm-verity tree appended to each erofs (default false; needs erofs)
+overrides = []                        # non-directory paths two layers select: the upper copy ships
+
+[image.layers.platform]
+packages = ["linux", "linux-ext-*", "rpi-firmware"]   # Buildroot packages: every path they install
+paths = ["/lib/modules", "/lib/firmware"]             # rootfs path prefixes
+
+[image.layers.app]
+installs = ["helios-*"]     # install ids: the install's destination
+stage = ["helios-*"]        # stage file ids: the paths each entry wrote
+services = ["helios-*"]     # stage service ids: the unit file
+```
+
+- **Membership.** Each rootfs path goes to the layer of its highest-ranked selector that matches: `paths` first, then `stage`, `installs` and `services`, then `packages` (from `build/packages-file-list.txt`), then `default`. Ids and package names are globbed with `*`. Two layers with selectors of the same rank that claim one non-directory path are an error, unless the path is listed in `overrides`, where the upper layer's copy ships. Directories may repeat: a layer carries the directories above its members so it extracts on its own.
+- **Contents.** Each layer tar keeps every entry's owner, mode and link. Its entries are in path order and carry a fixed mtime (`SOURCE_DATE_EPOCH`, or 0), so the same rootfs gives the same bytes. A hardlink whose target is in another layer becomes a copy of the target's data.
+- **Outputs.** In the image's collect dir: `layers/<name>.tar`, `layers/<name>.erofs` (unless `erofs = false`; needs `mkfs.erofs`), and `layers/layers.json`. Each layer's record has `name`, `id` (the sha256 of the erofs file as shipped; the board stores layers by it, and it is null without erofs), `tar`, `tar_sha256` (the OCI diff id), `tar_size`, `erofs`, `erofs_sha256`, `erofs_size`, `verity` and `inputs` (the layer's fingerprint). With `verity = true` the verity record has `root_hash`, `salt`, `hash_offset`, `data_blocks`, `data_block_size` and `hash_block_size`, named as the verity transform names them for `slot.json`.
+- **Reuse.** A layer's fingerprint covers its members (path, kind, mode, owner, size and content digest or link target) and the output settings. A layer whose fingerprint and outputs are unchanged is reused without writing its tar, erofs or verity. The summary says `reused` or `rebuilt` for each layer.
+- **Checks.** Selector ids that name nothing in the build are errors (globs may match nothing), and so are a `default` or a layer table that is not in `order`, a relative path, and `verity` without `erofs`.
+
 ### Image Assembly
 
 Image assembly runs after the image provider has produced its base outputs. It creates named work trees, stages selected files, runs typed transforms, and can package trees into supported filesystem artifacts.

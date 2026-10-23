@@ -16,6 +16,7 @@ fn ran(calls: &str, step: &str) -> bool {
 fn image(overrides: Vec<(String, String)>) -> ImageSpec {
     ImageSpec {
         signing: None,
+        layers: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             defconfig: Some("test_defconfig".into()),
             config_overrides: overrides,

@@ -678,6 +678,7 @@ mod tests {
             output: gaia_spec::ImageOutputSpec::default(),
             assembly: None,
             signing: None,
+            layers: None,
         };
         let preview = DummyImageProvider.preview_image(
             &spec,

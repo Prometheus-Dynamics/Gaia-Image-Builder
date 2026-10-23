@@ -9,6 +9,7 @@ fn buildroot_spec(workers: ErofsWorkersSpec) -> ResolvedBuildSpec {
         output: ImageOutputSpec::default(),
         assembly: None,
         signing: None,
+        layers: None,
     };
     spec.policy.providers.buildroot.erofs_workers = workers;
     spec

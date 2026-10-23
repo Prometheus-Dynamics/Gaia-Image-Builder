@@ -30,6 +30,7 @@ fn image() -> ImageSpec {
         output: ImageOutputSpec::default(),
         assembly: None,
         signing: None,
+        layers: None,
     }
 }
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::raw::RawImageLayersConfig;
 use crate::raw_assembly::{RawAssemblyArchiveConfig, RawAssemblyDeviceKind, RawAssemblyJsonValue};
 use gaia_spec::{
     AssemblyArchiveMemberSpec, AssemblyArchiveSpec, AssemblyBinarySpec, AssemblyCompressedFsSpec,
@@ -132,6 +133,46 @@ pub(crate) fn compile_starting_point_output_mode(
         RawStartingPointOutputMode::ArchiveOnly => StartingPointOutputModeSpec::ArchiveOnly,
         RawStartingPointOutputMode::CopyAndArchive => StartingPointOutputModeSpec::CopyAndArchive,
     }
+}
+
+/// `[image.layers]` as the spec holds it. The layers are sorted by name, so
+/// the spec does not depend on the order the tables were written in.
+pub(crate) fn compile_image_layers(raw: RawImageLayersConfig) -> gaia_spec::ImageLayersSpec {
+    let default = raw
+        .default
+        .unwrap_or_else(|| raw.order.first().cloned().unwrap_or_default());
+    gaia_spec::ImageLayersSpec {
+        order: raw.order,
+        default,
+        overrides: raw.overrides,
+        erofs: raw.erofs.unwrap_or(true),
+        verity: raw.verity.unwrap_or(false),
+        layers: raw
+            .layers
+            .into_iter()
+            .map(|(name, layer)| gaia_spec::ImageLayerSpec {
+                name,
+                packages: layer.packages,
+                paths: layer.paths,
+                installs: layer.installs,
+                stage: layer.stage,
+                services: layer.services,
+            })
+            .collect(),
+    }
+}
+
+/// Sets `BR2_TARGET_ROOTFS_TAR=y` (replacing any value the file gave): with
+/// layers, Buildroot must write the rootfs tar the layers are split from.
+pub(crate) fn force_rootfs_tar_override(
+    mut overrides: Vec<(String, String)>,
+) -> Vec<(String, String)> {
+    const KEY: &str = "BR2_TARGET_ROOTFS_TAR";
+    match overrides.iter_mut().find(|(key, _)| key == KEY) {
+        Some((_, value)) => *value = "y".into(),
+        None => overrides.push((KEY.into(), "y".into())),
+    }
+    overrides
 }
 
 pub(crate) fn compile_image_assembly(

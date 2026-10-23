@@ -707,6 +707,8 @@ pub struct RawImageConfig {
     pub output: RawImageOutputConfig,
     pub signing: Option<RawImageSigningConfig>,
     pub assembly: Option<RawImageAssemblyConfig>,
+    /// `[image.layers]`: the rootfs split into layer tars.
+    pub layers: Option<RawImageLayersConfig>,
     /// Whether this file or a layer it merges says `kind`. Set by the loader:
     /// a layer that omits `kind` parses as an empty buildroot definition,
     /// which merges under the kind a build file sets.
@@ -875,6 +877,34 @@ pub enum RawStartingPointOutputMode {
     CopyRootfs,
     ArchiveOnly,
     CopyAndArchive,
+}
+
+/// `[image.layers]`: the rootfs split into one tar per layer. The layers
+/// are the named tables (`[image.layers.<name>]`), which are flattened into
+/// `layers`; the other keys are the layer set's own.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawImageLayersConfig {
+    pub order: Vec<String>,
+    pub default: Option<String>,
+    pub overrides: Vec<String>,
+    /// Whether each layer also gets an erofs image (on by default).
+    pub erofs: Option<bool>,
+    /// Whether each erofs image gets a dm-verity tree (off by default).
+    pub verity: Option<bool>,
+    #[serde(flatten)]
+    pub layers: std::collections::BTreeMap<String, RawImageLayerConfig>,
+}
+
+/// `[image.layers.<name>]`: the selectors of one layer.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawImageLayerConfig {
+    pub packages: Vec<String>,
+    pub paths: Vec<String>,
+    pub installs: Vec<String>,
+    pub stage: Vec<String>,
+    pub services: Vec<String>,
 }
 
 /// `[image.signing]`: a signature for each published output that matches `outputs`.

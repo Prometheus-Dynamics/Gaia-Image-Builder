@@ -10,8 +10,8 @@ use artifact::{compile_artifact, complete_build_groups};
 use checkpoint::{compile_checkpoint, compile_stage_content_origin};
 use image::{
     compile_buildroot_expected_image_format, compile_buildroot_external_tree_mode,
-    compile_image_assembly, compile_image_feed, compile_rootfs_validation_mode,
-    compile_starting_point_output_mode,
+    compile_image_assembly, compile_image_feed, compile_image_layers,
+    compile_rootfs_validation_mode, compile_starting_point_output_mode, force_rootfs_tar_override,
 };
 use policy::{
     compile_backoff_strategy, compile_command_policy, compile_docker_execution, compile_input_kind,
@@ -438,6 +438,8 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
             unit_path: service.unit_path,
         })
         .collect();
+    // Layers are split from Buildroot's rootfs.tar, so the tar is forced on.
+    let layers = raw.image.layers.clone().map(compile_image_layers);
     spec.image = ImageSpec {
         definition: match raw.image.definition {
             RawImageDefinition::Buildroot {
@@ -459,7 +461,11 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                 allow_fallback,
                 legal_info,
                 config_fragments,
-                config_overrides,
+                config_overrides: if layers.is_some() {
+                    force_rootfs_tar_override(config_overrides)
+                } else {
+                    config_overrides
+                },
                 external_tree,
                 external_tree_mode: compile_buildroot_external_tree_mode(external_tree_mode),
                 expected_images: expected_images
@@ -520,6 +526,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                 outputs: signing.outputs,
             }),
         assembly: compile_image_assembly(raw.image.assembly),
+        layers,
     };
     spec.checkpoints.points = raw
         .checkpoints

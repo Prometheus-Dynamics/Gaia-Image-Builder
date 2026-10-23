@@ -213,6 +213,11 @@ impl ImageProvider for BuildrootImageProvider {
             let clock = gaia_process::ActiveClock::start();
             let collected = collect_expected_images_hashed(image, &tree_dir, &collect_dir)?;
             messages.push(phase_step_message("collect expected images", &clock, &[]));
+            if let Some(layers) = &image.layers {
+                messages.extend(timed_phase("image layers", || {
+                    layers::build_layers(spec, layers, &tree_dir, &collect_dir)
+                })?);
+            }
             messages.extend(timed_phase("package sizes", || {
                 build_reports::package_size_report(
                     &spec.identity.build_name,
@@ -717,6 +722,8 @@ mod host_tools;
 mod host_tools_probe;
 mod interrupted_make;
 mod kernel_modules;
+mod layers;
+mod layers_tar;
 mod make_progress;
 mod offline;
 mod override_check;

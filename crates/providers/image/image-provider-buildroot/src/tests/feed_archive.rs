@@ -13,6 +13,7 @@ fn archive_buildroot_output_promotes_single_primary_image() {
     fs::write(collect_dir.join("rootfs.squashfs"), "primary image").expect("image");
     let image = ImageSpec {
         signing: None,
+        layers: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             expected_images: vec![BuildrootExpectedImageSpec {
                 name: "rootfs.squashfs".into(),
@@ -63,6 +64,7 @@ fn collect_expected_images_and_archive_promote_raw_board_image() {
     fs::write(output_dir.join("images/sdcard.img"), "raw board image").expect("raw image");
     let image = ImageSpec {
         signing: None,
+        layers: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             expected_images: vec![BuildrootExpectedImageSpec {
                 name: "sdcard.img".into(),
@@ -120,6 +122,7 @@ fn archive_buildroot_output_compresses_raw_board_image_for_img_xz_output() {
     fs::write(output_dir.join("images/sdcard.img"), "raw image").expect("raw image");
     let image = ImageSpec {
         signing: None,
+        layers: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             expected_images: vec![
                 BuildrootExpectedImageSpec {
@@ -328,6 +331,7 @@ fn fake_xz_script(dir: &Path, name: &str, body: &str) -> PathBuf {
 fn image_feed_has_content_is_false_for_bare_image() {
     let image = ImageSpec {
         signing: None,
+        layers: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec::default()),
         feed: gaia_spec::ImageFeedSpec::default(),
         output: ImageOutputSpec {
@@ -346,6 +350,7 @@ fn image_feed_has_content_is_false_for_bare_image() {
 fn image_feed_has_content_is_true_when_stage_or_install_entries_exist() {
     let image = ImageSpec {
         signing: None,
+        layers: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec::default()),
         feed: gaia_spec::ImageFeedSpec {
             install_entries: vec!["install-app".into()],
@@ -379,6 +384,7 @@ fn archive_buildroot_output_archives_final_raw_image_into_compressed_tar() {
     fs::write(collect_dir.join("ignored.txt"), "not expected").expect("ignored");
     let image = ImageSpec {
         signing: None,
+        layers: None,
         definition: ImageDefinition::Buildroot(BuildrootImageSpec {
             expected_images: vec![
                 BuildrootExpectedImageSpec {

@@ -40,6 +40,9 @@ pub(crate) struct Section {
     key: &'static str,
     known: Known,
     children: &'static [Section],
+    /// For a table whose other keys are named by the user (`[image.layers]`'s
+    /// layers): the keys each such table takes. `None` for every other table.
+    entries: Option<FieldsFn>,
 }
 
 const fn section(key: &'static str, fields: FieldsFn, children: &'static [Section]) -> Section {
@@ -47,6 +50,23 @@ const fn section(key: &'static str, fields: FieldsFn, children: &'static [Sectio
         key,
         known: Known::Fixed(fields),
         children,
+        entries: None,
+    }
+}
+
+/// A table whose fixed keys are `fields`, and whose other keys are tables
+/// that each take `entries` (names the user picks, such as layer names).
+const fn named_tables(
+    key: &'static str,
+    fields: FieldsFn,
+    entries: FieldsFn,
+    children: &'static [Section],
+) -> Section {
+    Section {
+        key,
+        known: Known::Fixed(fields),
+        children,
+        entries: Some(entries),
     }
 }
 
@@ -55,6 +75,7 @@ const fn by_kind(key: &'static str, kinds: KindFieldsFn, children: &'static [Sec
         key,
         known: Known::ByKind(kinds),
         children,
+        entries: None,
     }
 }
 
@@ -242,7 +263,7 @@ fn artifact_fields(kind: Option<&str>) -> Option<Vec<&'static str>> {
 /// `[image]`: the keys every image takes, then the keys of its kind. Without
 /// a `kind` (a layer that leaves it to the layer it extends) every kind's
 /// keys are accepted.
-const IMAGE_COMMON_KEYS: &[&str] = &["kind", "feed", "output", "signing", "assembly"];
+const IMAGE_COMMON_KEYS: &[&str] = &["kind", "feed", "output", "signing", "assembly", "layers"];
 const BUILDROOT_IMAGE_KEYS: &[&str] = &[
     "source",
     "defconfig",
@@ -281,6 +302,17 @@ fn image_fields(kind: Option<&str>) -> Option<Vec<&'static str>> {
     Some(IMAGE_COMMON_KEYS.iter().chain(&own).copied().collect())
 }
 
+/// `[image.layers]`: its own keys. The layer tables are not listed here: their
+/// names are the user's (see [`image_layer_fields`]).
+fn image_layers_fields() -> Option<&'static [&'static str]> {
+    Some(&["order", "default", "overrides", "erofs", "verity"])
+}
+
+/// `[image.layers.<name>]`: the selectors of one layer.
+fn image_layer_fields() -> Option<&'static [&'static str]> {
+    Some(&["packages", "paths", "installs", "stage", "services"])
+}
+
 const ARTIFACT_CHILDREN: &[Section] = &[section(
     "execution",
     struct_fields::<raw::RawArtifactExecutionConfig>,
@@ -294,6 +326,7 @@ const ARTIFACT_CHILDREN: &[Section] = &[section(
 const IMAGE_CHILDREN: &[Section] = &[
     section("output", struct_fields::<raw::RawImageOutputConfig>, &[]),
     section("signing", struct_fields::<raw::RawImageSigningConfig>, &[]),
+    named_tables("layers", image_layers_fields, image_layer_fields, &[]),
     section("feed", struct_fields::<raw::RawImageFeedConfig>, &[]),
     section(
         "assembly",
@@ -468,7 +501,7 @@ pub(crate) struct UnknownKey {
 pub(crate) fn unknown_config_keys(value: &toml::Value) -> Vec<UnknownKey> {
     let mut unknown = Vec::new();
     let root = |_: &toml::Table| struct_fields::<RawBuildConfig>().map(<[&str]>::to_vec);
-    check_table(value, "", &root, SECTIONS, &mut unknown);
+    check_table(value, "", &root, SECTIONS, None, &mut unknown);
     unknown.sort_by(|left, right| left.path.cmp(&right.path));
     unknown
 }
@@ -557,6 +590,7 @@ fn check_table(
     prefix: &str,
     known: &dyn Fn(&toml::Table) -> Option<Vec<&'static str>>,
     children: &'static [Section],
+    entries: Option<FieldsFn>,
     unknown: &mut Vec<UnknownKey>,
 ) {
     let tables: Vec<(String, &toml::Table)> = match value {
@@ -584,6 +618,18 @@ fn check_table(
             if let Some(fields) = &fields
                 && !fields.contains(&key.as_str())
             {
+                if let (Some(entry), toml::Value::Table(_)) = (entries, child) {
+                    // A named table (a layer): its own keys are checked.
+                    check_table(
+                        child,
+                        &child_path,
+                        &|_: &toml::Table| entry().map(<[&str]>::to_vec),
+                        &[],
+                        None,
+                        unknown,
+                    );
+                    continue;
+                }
                 unknown.push(UnknownKey {
                     path: child_path,
                     suggestion: did_you_mean_among(key, fields),
@@ -598,6 +644,7 @@ fn check_table(
                     &child_path,
                     &move |table| fields_of(section_known, table),
                     section.children,
+                    section.entries,
                     unknown,
                 );
             }
