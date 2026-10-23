@@ -2,7 +2,8 @@
 //! images the Buildroot provider collects (its `expected_images`), so a
 //! reference to any other name would fail at assembly time. Names the assembly
 //! produces itself (filesystem, disk or archive outputs) are not collected
-//! inputs and are not checked.
+//! inputs and are not checked, and neither is `layers`, which the provider
+//! writes there whenever `[image.layers]` is set.
 
 use std::collections::HashSet;
 
@@ -13,6 +14,8 @@ use crate::diagnostics::error;
 use crate::image_assembly::assembly_expected_image_names;
 
 const PROVIDER_IMAGES: &str = "$provider.images";
+/// The directory `[image.layers]` writes into the collected images.
+const LAYERS_DIR: &str = "layers";
 
 /// Checks every `$provider.images/<name>` reference in `value`.
 ///
@@ -38,7 +41,10 @@ pub(crate) fn validate_collected_reference(
         .iter()
         .map(|image| image.name.as_str())
         .collect();
-    let produced = assembly_expected_image_names(spec);
+    let mut produced = assembly_expected_image_names(spec);
+    if spec.image.layers.is_some() {
+        produced.insert(LAYERS_DIR.to_string());
+    }
     for component in images_components(value) {
         if component.is_empty() {
             continue;

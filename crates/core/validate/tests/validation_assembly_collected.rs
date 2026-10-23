@@ -206,3 +206,30 @@ required = true
         "{raw:?}"
     );
 }
+
+#[test]
+fn layer_outputs_count_as_collected_when_image_layers_is_set() {
+    let assembly = r#"
+[[image.assembly.files]]
+tree = "t"
+src = "$provider.images/layers/layers.json"
+dest = "layers.json"
+
+[[image.assembly.files]]
+tree = "t"
+src = "$provider.images/layers/*.erofs"
+dest = "layers/"
+"#;
+    let without = config(FLASH_ID, assembly);
+    assert_eq!(not_collected(&without).len(), 2, "{without}");
+
+    let with_layers = config(
+        &format!("{FLASH_ID}\n[image.layers]\norder = [\"base\", \"app\"]\ndefault = \"base\"\n"),
+        assembly,
+    );
+    assert!(
+        not_collected(&with_layers).is_empty(),
+        "{:?}",
+        not_collected(&with_layers)
+    );
+}
