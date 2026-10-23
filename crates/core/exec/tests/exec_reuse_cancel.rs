@@ -83,7 +83,7 @@ fn executes_reused_plan_and_records_reused_operations() {
         },
     );
 
-    assert_eq!(outcome.completed_operations, 11);
+    assert_eq!(outcome.completed_operations, 12);
     assert_eq!(
         outcome.reused_ids.len(),
         8,

@@ -40,7 +40,7 @@ fn assert_default_plan_executes(spec: gaia_spec::ResolvedBuildSpec) {
         },
     );
 
-    assert_eq!(outcome.completed_operations, 11);
+    assert_eq!(outcome.completed_operations, 12);
     assert!(outcome.errors.is_empty());
     assert!(outcome.reused_ids.is_empty());
     assert!(
