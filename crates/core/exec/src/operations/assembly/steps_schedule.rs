@@ -320,9 +320,15 @@ fn is_verity(assembly: &ImageAssemblySpec, step: AssemblyStep) -> bool {
 }
 
 /// Whether two steps' paths can interfere: one writes a path the other reads
-/// or writes, the paths being equal or one inside the other.
+/// or writes, the paths being equal or one inside the other, or a read glob
+/// matching the write. The same test as the step ordering: with a plain
+/// `starts_with`, a glob over `tree/overlays/*.dtbo` did not follow the step
+/// copying `tree/overlays/x.dtbo` and could run before it.
 fn paths_conflict(earlier: &AssemblyStepPaths, later: &AssemblyStepPaths) -> bool {
-    let overlap = |left: &Path, right: &Path| left.starts_with(right) || right.starts_with(left);
+    let overlap = |left: &Path, right: &Path| {
+        gaia_spec::assembly_paths_overlap(left, right)
+            || gaia_spec::assembly_paths_overlap(right, left)
+    };
     earlier.writes.iter().any(|written| {
         later
             .writes

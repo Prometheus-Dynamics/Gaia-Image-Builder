@@ -428,3 +428,51 @@ fn generated_content_runs_after_the_steps_whose_outputs_its_tokens_read() {
             > transform
     );
 }
+
+#[test]
+fn a_glob_runs_after_a_file_copied_from_a_transforms_output() {
+    // Atlas's slots.toml chain: the transform compiles boot/overlays/x.dtbo,
+    // a file copies it into payload/overlays/, and the FAT tree's glob over
+    // payload/overlays/*.dtbo is declared first.
+    let steps = [
+        step(
+            AssemblyStep::File(0),
+            &["/payload/overlays/*.dtbo"],
+            &["/fat/overlays"],
+        ),
+        step(
+            AssemblyStep::File(1),
+            &["/src/config.txt"],
+            &["/fat/config.txt"],
+        ),
+        step(
+            AssemblyStep::File(2),
+            &["/boot/overlays/x.dtbo"],
+            &["/payload/overlays/x.dtbo"],
+        ),
+        step(
+            AssemblyStep::File(3),
+            &["/src/stock.dtbo"],
+            &["/payload/overlays/stock.dtbo"],
+        ),
+        step(
+            AssemblyStep::Transform(0),
+            &["/src/x.dts"],
+            &["/boot/overlays/x.dtbo"],
+        ),
+    ];
+    let order = order_assembly_steps(&steps).expect("order");
+    let at = |step: AssemblyStep| order.iter().position(|s| *s == step).expect("step");
+    assert!(
+        at(AssemblyStep::Transform(0)) < at(AssemblyStep::File(2)),
+        "{order:?}"
+    );
+    assert!(
+        at(AssemblyStep::File(2)) < at(AssemblyStep::File(0)),
+        "{order:?}"
+    );
+    assert!(
+        at(AssemblyStep::File(3)) < at(AssemblyStep::File(0)),
+        "{order:?}"
+    );
+}

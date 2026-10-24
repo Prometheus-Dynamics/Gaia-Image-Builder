@@ -67,7 +67,7 @@ pub use assembly_oci_spec::{
     AssemblyOciLayerSource, AssemblyOciLayerSpec, AssemblyOciSpec,
 };
 pub use assembly_order::{
-    AssemblyCycle, AssemblyStep, AssemblyStepPaths, assembly_step_paths,
+    AssemblyCycle, AssemblyStep, AssemblyStepPaths, assembly_paths_overlap, assembly_step_paths,
     assembly_steps_reading_later_outputs, order_assembly_steps,
 };
 pub use assembly_output_spec::{

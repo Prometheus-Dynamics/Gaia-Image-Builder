@@ -165,3 +165,104 @@ fn a_ram_assembly_leaves_its_boot_files_for_image_check() {
     }
     assert!(!copy.join("slots/a/kernel8.img").exists());
 }
+
+/// Atlas's slots.toml chain: a transform writes `boot/overlays/ov9782.dtbo`,
+/// a file copies it into `payload/overlays/`, and the FAT tree's glob over
+/// `payload/overlays/*.dtbo` (declared first) must see it.
+fn chain_spec(scratch: &TempDir, work_dir: &str) -> ResolvedBuildSpec {
+    let mut spec = test_spec(scratch);
+    let sources = Path::new(&spec.workspace.build_dir).join("sources");
+    fs::create_dir_all(&sources).expect("sources");
+    fs::write(sources.join("ov9782.dtbo"), "compiled overlay").expect("overlay");
+    fs::write(sources.join("stock.dtbo"), "stock overlay").expect("stock");
+    fs::write(sources.join("config.txt"), "dtoverlay=ov9782\n").expect("config");
+    let src = |name: &str| sources.join(name).display().to_string();
+    let mut glob = assembly_file("fat", "", "overlays/");
+    glob.src = None;
+    glob.src_glob = Some("$assembly.tree.payload/overlays/*.dtbo".into());
+    spec.image.assembly = Some(ImageAssemblySpec {
+        work_dir: Some(work_dir.into()),
+        trees: vec![
+            assembly_tree("boot", "$assembly.work/boot"),
+            assembly_tree("payload", "$assembly.work/payload"),
+            assembly_tree("fat", "$assembly.work/fat"),
+        ],
+        files: vec![
+            glob,
+            assembly_file("fat", src("config.txt"), "config.txt"),
+            assembly_file(
+                "payload",
+                "$assembly.tree.boot/overlays/ov9782.dtbo",
+                "overlays/ov9782.dtbo",
+            ),
+            assembly_file("payload", src("stock.dtbo"), "overlays/stock.dtbo"),
+        ],
+        transforms: vec![support::assembly_transform(
+            gaia_spec::AssemblyTransformKindSpec::Copy,
+            src("ov9782.dtbo"),
+            "$assembly.tree.boot/overlays/ov9782.dtbo",
+        )],
+        ..ImageAssemblySpec::default()
+    });
+    spec
+}
+
+#[test]
+fn a_glob_sees_a_file_copied_from_a_transforms_output() {
+    scratch_ram_base();
+    for work_dir in ["disk", "ram"] {
+        let scratch = TempDir::new("gaia-assembly-glob-chain");
+        let spec = chain_spec(&scratch, work_dir);
+        let errors = assemble(&spec);
+        assert!(errors.is_empty(), "{work_dir}: {errors:?}");
+        let fat = gaia_spec::boot_tree_snapshot_dir(&spec).join("fat/overlays");
+        for overlay in ["stock.dtbo", "ov9782.dtbo"] {
+            assert!(
+                fat.join(overlay).is_file(),
+                "{work_dir}: the FAT tree's glob missed {overlay}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_tree_digest_lists_files_copied_from_a_transforms_output() {
+    use gaia_spec::AssemblyJsonValue;
+    scratch_ram_base();
+    for work_dir in ["disk", "ram"] {
+        let scratch = TempDir::new("gaia-assembly-digest-chain");
+        let mut spec = chain_spec(&scratch, work_dir);
+        let assembly = spec.image.assembly.as_mut().expect("assembly");
+        // slot.json, declared before the payload's files, digests the payload.
+        let mut slot = support::assembly_file("fat", "", "slot.json");
+        slot.src = None;
+        slot.json = Some(AssemblyJsonValue::Object(vec![(
+            "boot".into(),
+            AssemblyJsonValue::Object(vec![(
+                "files".into(),
+                AssemblyJsonValue::String("${assembly.sha256_tree:payload}".into()),
+            )]),
+        )]));
+        assembly.files.insert(0, slot);
+        // The finished slot.json, copied out by a check (a RAM tree is gone
+        // after the assembly).
+        let copied = scratch.join("slot.json");
+        assembly.checks.push(check(
+            "copy-slot-json",
+            &[
+                "cp",
+                "$assembly.tree.fat/slot.json",
+                copied.to_str().expect("utf-8 path"),
+            ],
+        ));
+        let errors = assemble(&spec);
+        assert!(errors.is_empty(), "{work_dir}: {errors:?}");
+        let slot = fs::read_to_string(&copied).expect("slot.json copied by the check");
+        for listed in ["overlays/ov9782.dtbo", "overlays/stock.dtbo"] {
+            assert!(
+                slot.contains(listed),
+                "{work_dir}: slot.json misses {listed}: {slot}"
+            );
+        }
+    }
+}

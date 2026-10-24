@@ -296,6 +296,11 @@ fn json_token_reads(
 /// Whether a read (a path, or a pattern with `*` components) and a write
 /// touch the same files: one is inside the other, or the write is a path
 /// the pattern matches, is inside one, or holds the directory it scans.
+/// [`overlaps`], for the step scheduler: the same test as the ordering.
+pub fn assembly_paths_overlap(read: &Path, write: &Path) -> bool {
+    overlaps(read, write)
+}
+
 fn overlaps(read: &Path, write: &Path) -> bool {
     let read_components = read
         .components()
