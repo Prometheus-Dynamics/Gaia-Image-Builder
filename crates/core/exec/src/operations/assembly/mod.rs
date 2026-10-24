@@ -15,6 +15,7 @@ use super::helpers::{process_output_retention, runtime_state_dir};
 mod archive_log;
 mod archives;
 mod binaries;
+mod boot_snapshot;
 mod busybox;
 mod checks;
 mod compressed_fs;
@@ -339,6 +340,7 @@ fn stage_steps(
         cancel_check.clone(),
         &mut run.messages,
     )?;
+    boot_snapshot::write_boot_tree_snapshot(spec, roots)?;
     let StepRun {
         mut state,
         mut messages,

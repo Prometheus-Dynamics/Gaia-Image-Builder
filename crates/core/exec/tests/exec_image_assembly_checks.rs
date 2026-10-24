@@ -105,3 +105,63 @@ fn a_failing_check_fails_the_assembly_with_its_output() {
         "{errors}"
     );
 }
+
+/// Points RAM work dirs at a scratch base, so the test never touches the
+/// real /dev/shm/gaia-<user>.
+fn scratch_ram_base() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let base = std::env::temp_dir().join("gaia-test-ram-base");
+        fs::create_dir_all(&base).expect("scratch RAM base");
+        // SAFETY: set once, before any assembly of this test binary reads it.
+        unsafe { std::env::set_var("GAIA_RAM_BASE", base) };
+    });
+}
+
+#[test]
+fn a_ram_assembly_leaves_its_boot_files_for_image_check() {
+    scratch_ram_base();
+    let scratch = TempDir::new("gaia-assembly-boot-snapshot");
+    let mut spec = test_spec(&scratch);
+    let sources = Path::new(&spec.workspace.build_dir).join("sources");
+    fs::create_dir_all(&sources).expect("sources");
+    for (name, body) in [
+        ("config.txt", "include default.txt\ndtoverlay=ov9782\n"),
+        ("default.txt", "os_prefix=slots/a/\n"),
+        ("ov9782.dtbo", "dtbo"),
+        ("README", "overlays\n"),
+        ("kernel8.img", "a kernel the snapshot leaves out"),
+    ] {
+        fs::write(sources.join(name), body).expect("source file");
+    }
+    let src = |name: &str| sources.join(name).display().to_string();
+    spec.image.assembly = Some(ImageAssemblySpec {
+        work_dir: Some("ram".into()),
+        trees: vec![assembly_tree("slots-fat", "$assembly.work/fat")],
+        files: vec![
+            assembly_file("slots-fat", src("config.txt"), "config.txt"),
+            assembly_file("slots-fat", src("default.txt"), "default.txt"),
+            assembly_file(
+                "slots-fat",
+                src("ov9782.dtbo"),
+                "slots/a/overlays/ov9782.dtbo",
+            ),
+            assembly_file("slots-fat", src("README"), "slots/a/overlays/README"),
+            assembly_file("slots-fat", src("kernel8.img"), "slots/a/kernel8.img"),
+        ],
+        ..ImageAssemblySpec::default()
+    });
+    let errors = assemble(&spec);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let copy = gaia_spec::boot_tree_snapshot_dir(&spec).join("slots-fat");
+    for kept in [
+        "config.txt",
+        "default.txt",
+        "slots/a/overlays/ov9782.dtbo",
+        "slots/a/overlays/README",
+    ] {
+        assert!(copy.join(kept).is_file(), "{kept} is not in the snapshot");
+    }
+    assert!(!copy.join("slots/a/kernel8.img").exists());
+}

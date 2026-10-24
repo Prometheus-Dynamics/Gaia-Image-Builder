@@ -99,6 +99,8 @@ fn fixture(scratch: &TempDir) -> Fixture {
     fs::write(collect.join(".gaia-image-state.txt"), provider_state(1)).expect("state");
     fs::create_dir_all(assembly_output.parent().expect("assembly dir")).expect("assembly dir");
     fs::write(&assembly_output, "assembly-v1").expect("assembly output");
+    // An assembly leaves its boot tree snapshot (empty without boot trees).
+    fs::create_dir_all(gaia_spec::boot_tree_snapshot_dir(&spec)).expect("boot tree snapshot");
 
     let runtime = out_dir.join(".gaia/runtime");
     fs::write(

@@ -92,11 +92,24 @@ pub(crate) fn execute(
     let images_dir = buildroot.join("images");
     let rootfs = buildroot.join("target");
     // An assembly's trees hold the boot files the board boots (their overlays,
-    // config.txt and DTBs). The assembly runs before this check, and its RAM
-    // copies are gone by now, so the disk paths hold the result.
+    // config.txt and DTBs). A RAM work dir's trees are gone by now, so each
+    // tree is read from the copy of its boot files the assembly left
+    // (`boot_tree_snapshot_dir`), and from its disk path only without one.
+    let snapshot = gaia_spec::boot_tree_snapshot_dir(spec);
     let assembly_trees: Vec<PathBuf> = match spec.image.assembly.as_ref() {
         Some(assembly) => match gaia_spec::AssemblyRoots::new(spec, assembly) {
-            Ok(roots) => roots.trees.values().cloned().collect(),
+            Ok(roots) => roots
+                .trees
+                .iter()
+                .map(|(id, path)| {
+                    let copy = snapshot.join(id.as_str());
+                    if copy.join("config.txt").is_file() {
+                        copy
+                    } else {
+                        path.clone()
+                    }
+                })
+                .collect(),
             Err(message) => {
                 return failure_with_kind(
                     operation_id.clone(),

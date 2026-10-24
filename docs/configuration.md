@@ -3262,6 +3262,8 @@ Artifact keys are a sha256 over the build's fingerprint, the content of its sour
 
 Gaps. Layer entries are pushed before the image's later steps (sizes, legal info and archive), so a failure of those steps still leaves them in the registry.
 
+Boot trees for `image:check`: after every assembly, Gaia copies the boot files of each tree with a top-level `config.txt` (every `*.txt`, `README`, `.dtbo` and `.dtb`, at their paths in the tree) to `<build_dir>/image-check/boot-trees/<tree id>/`, and `image:check` reads the firmware rule and the hardware list from that copy. A RAM work dir's trees are removed when the assembly ends, so the copy is what the check can read; it is replaced on every assembly run.
+
 ## Assembly checks
 
 ```toml

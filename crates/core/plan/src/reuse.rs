@@ -818,7 +818,11 @@ fn operation_outputs_present(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
             };
             collect_exists || archive_exists
         }
-        OperationKind::AssembleImage => assembly_state_path(spec).is_file(),
+        // The boot tree snapshot is an output too: an assembly from before it
+        // existed runs once more, so image:check reads this run's boot trees.
+        OperationKind::AssembleImage => {
+            assembly_state_path(spec).is_file() && gaia_spec::boot_tree_snapshot_dir(spec).is_dir()
+        }
         OperationKind::CheckImage => gaia_spec::image_checks_report_path(spec).is_file(),
     }
 }

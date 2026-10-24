@@ -185,6 +185,15 @@ pub fn buildroot_output_dir(spec: &ResolvedBuildSpec) -> Result<PathBuf, String>
 }
 
 /// Where `image:check` writes its report: `<out dir>/<build>.checks.json`.
+/// Where the assembly leaves a copy of each boot tree's boot files (its
+/// `*.txt`, READMEs, `.dtbo` and `.dtb` files), one directory per tree id, for
+/// `image:check`: a RAM work dir's trees are gone by the time it runs.
+pub fn boot_tree_snapshot_dir(spec: &ResolvedBuildSpec) -> PathBuf {
+    let build_dir = resolve_workspace_path(&spec.workspace, &spec.workspace.build_dir)
+        .unwrap_or_else(|_| PathBuf::from(&spec.workspace.build_dir));
+    build_dir.join("image-check").join("boot-trees")
+}
+
 pub fn image_checks_report_path(spec: &ResolvedBuildSpec) -> PathBuf {
     let out_dir = resolve_workspace_path(&spec.workspace, &spec.workspace.out_dir)
         .unwrap_or_else(|_| PathBuf::from(&spec.workspace.out_dir));

@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- `image:check` reads the assembly's boot trees from a copy of their boot files (`*.txt`, READMEs, `.dtbo`, `.dtb`) that the assembly leaves in `<build_dir>/image-check/boot-trees/<tree>`: with a RAM work dir (the `auto` default when it fits) the trees are gone when the check runs, so the firmware rule and the hardware list saw only Buildroot's overlay dirs and reported overlays the assembly compiles (Raze's ov9782 and raze-fan) as missing. An assembly from before this runs once more to leave the copy.
+
 - `[[image.assembly.checks]]`: commands (`command = [...]`, assembly tokens expanded, optional `timeout_secs`) run after every assembly step over the finished trees and outputs; a non-zero exit fails the build with the output tail.
 
 - `image:check` follows the Raspberry Pi firmware's boot model. It passed an image whose camera overlay (`ov9782.dtbo`) lived only in a slot's `overlays/` that has no README: the firmware reads the root `overlays/` there, so the shipped images had no camera. That false pass is closed. Every boot tree's `config.txt` and `tryboot.txt` are read as the firmware reads them (`include`, `os_prefix`, the README rule), each `dtoverlay` must have its `.dtbo` in the directory read, a slot `overlays/` without its README is an error, and the root fallback copy must hold the slot's overlays. Hardware overlays are looked up in the same directories only. `[image.checks] pi_model` evaluates the model sections.
