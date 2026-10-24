@@ -142,6 +142,19 @@ impl AssemblyRoots {
         resolve_workspace_path_or_absolute(spec, &resolved)
     }
 
+    /// `raw` with its assembly tokens (`$assembly.tree.<id>`, `$assembly.work`,
+    /// `$provider.images`, ...) expanded, as text: not resolved against the
+    /// workspace, for values that are not paths (a check's arguments).
+    pub fn resolve_text(
+        &self,
+        spec: &ResolvedBuildSpec,
+        raw: impl AsRef<str>,
+    ) -> Result<String, String> {
+        AssemblyPathTemplate::new(raw.as_ref())
+            .resolve(&self.template_context(spec))
+            .map_err(|error| error.to_string())
+    }
+
     fn template_context(&self, spec: &ResolvedBuildSpec) -> AssemblyPathTemplateContext<'_> {
         AssemblyPathTemplateContext {
             provider_kind: spec.image.provider_kind(),

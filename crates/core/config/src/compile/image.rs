@@ -331,6 +331,15 @@ pub(crate) fn compile_image_assembly(
             .map(compile_assembly_archive)
             .collect(),
         ocis: raw.ocis.into_iter().map(compile_assembly_oci).collect(),
+        checks: raw
+            .checks
+            .into_iter()
+            .map(|check| gaia_spec::AssemblyCheckSpec {
+                id: check.id,
+                command: check.command,
+                timeout_secs: check.timeout_secs,
+            })
+            .collect(),
         binaries: raw
             .binaries
             .into_iter()

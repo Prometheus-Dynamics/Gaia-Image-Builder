@@ -63,6 +63,7 @@ fn merge_image_assembly(
                 archive.id.clone()
             }),
             ocis: merge_by_key(base.ocis, overlay.ocis, |oci| oci.id.clone()),
+            checks: merge_by_key(base.checks, overlay.checks, |check| check.id.clone()),
             busybox_initramfs: [base.busybox_initramfs, overlay.busybox_initramfs].concat(),
             binaries: [base.binaries, overlay.binaries].concat(),
             kernel_modules: [base.kernel_modules, overlay.kernel_modules].concat(),

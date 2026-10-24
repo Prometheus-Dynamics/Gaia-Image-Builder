@@ -162,6 +162,18 @@ pub(super) fn interpolate_image_assembly(
         .into_iter()
         .map(|archive| assembly_archives::interpolate_assembly_archive(archive, raw, env))
         .collect();
+    assembly.checks = assembly
+        .checks
+        .into_iter()
+        .map(|mut check| {
+            check.command = check
+                .command
+                .into_iter()
+                .map(|arg| resolver::interpolate_string(arg, raw, env))
+                .collect();
+            check
+        })
+        .collect();
     assembly.ocis = assembly
         .ocis
         .into_iter()

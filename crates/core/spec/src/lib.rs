@@ -74,12 +74,12 @@ pub use assembly_output_spec::{
     AssemblyTransformSpec, VERITY_DEFAULT_BLOCK_SIZE, VFAT_FAT_SIZES,
 };
 pub use assembly_spec::{
-    AssemblyBinarySpec, AssemblyBusyboxInitramfsSpec, AssemblyDeviceKindSpec, AssemblyDeviceSpec,
-    AssemblyDirSpec, AssemblyDiskPartitionSpec, AssemblyDiskSpec, AssemblyDiskTruncateSpec,
-    AssemblyEbrPlacementSpec, AssemblyFileSpec, AssemblyKernelModulesSpec,
-    AssemblyPartitionTableSpec, AssemblyPathTemplate, AssemblyPathTemplateContext,
-    AssemblyPathTemplateError, AssemblySymlinkSpec, AssemblyTreeSpec, ImageAssemblySpec,
-    MbrPartitionType, MbrPartitionTypeParseError,
+    AssemblyBinarySpec, AssemblyBusyboxInitramfsSpec, AssemblyCheckSpec, AssemblyDeviceKindSpec,
+    AssemblyDeviceSpec, AssemblyDirSpec, AssemblyDiskPartitionSpec, AssemblyDiskSpec,
+    AssemblyDiskTruncateSpec, AssemblyEbrPlacementSpec, AssemblyFileSpec,
+    AssemblyKernelModulesSpec, AssemblyPartitionTableSpec, AssemblyPathTemplate,
+    AssemblyPathTemplateContext, AssemblyPathTemplateError, AssemblySymlinkSpec, AssemblyTreeSpec,
+    ImageAssemblySpec, MbrPartitionType, MbrPartitionTypeParseError,
 };
 pub use byte_size::{ByteSize, ByteSizeParseError};
 pub use checkpoints::{

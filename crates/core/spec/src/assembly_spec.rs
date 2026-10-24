@@ -29,6 +29,9 @@ pub struct ImageAssemblySpec {
     /// Device nodes and FIFOs the cpio filesystems add to their archives.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub devices: Vec<AssemblyDeviceSpec>,
+    /// Commands run after every step, over the finished trees and outputs.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<AssemblyCheckSpec>,
     /// The `strip` program for `strip = true` entries; `None` searches the
     /// provider's tools, then the host.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,6 +59,7 @@ impl ImageAssemblySpec {
             && self.binaries.is_empty()
             && self.kernel_modules.is_empty()
             && self.devices.is_empty()
+            && self.checks.is_empty()
     }
 }
 
@@ -768,4 +772,14 @@ mod tests {
             vec!["boot", "rootfs"]
         );
     }
+}
+
+/// `[[image.assembly.checks]]`: a command run after every assembly step, over
+/// the finished trees, filesystems and disks; a non-zero exit fails the
+/// build. Assembly tokens are expanded in each argument.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct AssemblyCheckSpec {
+    pub id: String,
+    pub command: Vec<String>,
+    pub timeout_secs: Option<u64>,
 }

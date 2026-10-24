@@ -7,6 +7,7 @@ mod core;
 mod diagnostics;
 mod image;
 mod image_assembly;
+mod image_assembly_checks;
 mod image_assembly_collected;
 mod image_assembly_compressed;
 mod image_assembly_devices;

@@ -22,6 +22,8 @@ pub struct RawImageAssemblyConfig {
     pub binaries: Vec<RawAssemblyBinaryConfig>,
     pub kernel_modules: Vec<RawAssemblyKernelModulesConfig>,
     pub devices: Vec<RawAssemblyDeviceConfig>,
+    /// `[[image.assembly.checks]]`: commands run over the finished assembly.
+    pub checks: Vec<RawAssemblyCheckConfig>,
     /// The `strip` program for `strip = true` entries: a program name
     /// (looked up like other assembly tools) or a path. Unset searches the
     /// provider's tools, then the host.
@@ -511,4 +513,18 @@ pub struct RawAssemblyBusyboxInitramfsConfig {
     /// Root for the runtime libraries; derived from `busybox` when unset.
     pub sysroot: Option<String>,
     pub applets: Vec<String>,
+}
+
+/// `[[image.assembly.checks]]`: a command run after every assembly step; a
+/// non-zero exit fails the build.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawAssemblyCheckConfig {
+    pub id: String,
+    /// The program and its arguments, run without a shell. Assembly tokens
+    /// (`$assembly.tree.<id>`, `$assembly.work`, `$provider.images`, ...)
+    /// are expanded in each argument.
+    pub command: Vec<String>,
+    /// Seconds the command may run before it is stopped and fails.
+    pub timeout_secs: Option<u64>,
 }

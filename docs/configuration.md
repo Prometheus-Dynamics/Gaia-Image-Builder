@@ -3243,6 +3243,17 @@ Artifact keys are a sha256 over the build's fingerprint, the content of its sour
 
 Gaps. Layer entries are pushed before the image's later steps (sizes, legal info and archive), so a failure of those steps still leaves them in the registry.
 
+## Assembly checks
+
+```toml
+[[image.assembly.checks]]
+id = "boot-overlays"
+command = ["@self/scripts/check-boot-overlays.sh", "$assembly.tree.slots-fat"]
+timeout_secs = 60          # default: the image provider's command timeout
+```
+
+A check is a program and its arguments, run without a shell from the workspace root after every assembly step (trees, files, filesystems, disks, archives, OCI images), so it sees the finished trees and outputs at the paths the steps wrote them, RAM work dirs included. Assembly tokens are expanded in every argument: `$assembly.tree.<id>`, `$assembly.work`, `$assembly.out`, `$provider.images`, `$provider.buildroot_output` and the rest, plus `@self` and `${...}` as in any config value. A non-zero exit fails the assembly, and so the build, with the command's stdout and stderr tails in the error; a passing check's output lines go to the operation log. Validation requires a unique `id`, a non-empty `command`, and trees that exist for every `$assembly.tree.<id>` an argument names. A check runs whenever the assembly does: when the assembly is reused, its checks are not run again (editing the script itself does not re-run the assembly).
+
 ## Canonical tree path
 
 ```toml

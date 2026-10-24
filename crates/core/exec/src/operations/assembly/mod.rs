@@ -16,6 +16,7 @@ mod archive_log;
 mod archives;
 mod binaries;
 mod busybox;
+mod checks;
 mod compressed_fs;
 mod content;
 mod cpio;
@@ -329,6 +330,15 @@ fn stage_steps(
     run.produced = ProducedRecorder::new(spec, view.disk_assembly, view.disk_roots);
     steps_schedule::run_steps(&mut run, &order, &step_paths)?;
     run.finish();
+    // The checks see every tree, filesystem and disk this run made, at the
+    // paths the steps wrote them (RAM work dirs included).
+    checks::run_assembly_checks(
+        spec,
+        roots,
+        &assembly.checks,
+        cancel_check.clone(),
+        &mut run.messages,
+    )?;
     let StepRun {
         mut state,
         mut messages,
