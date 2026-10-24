@@ -8,6 +8,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - `[[image.assembly.checks]]`: commands (`command = [...]`, assembly tokens expanded, optional `timeout_secs`) run after every assembly step over the finished trees and outputs; a non-zero exit fails the build with the output tail.
 
+- `image:check` follows the Raspberry Pi firmware's boot model. It passed an image whose camera overlay (`ov9782.dtbo`) lived only in a slot's `overlays/` that has no README: the firmware reads the root `overlays/` there, so the shipped images had no camera. That false pass is closed. Every boot tree's `config.txt` and `tryboot.txt` are read as the firmware reads them (`include`, `os_prefix`, the README rule), each `dtoverlay` must have its `.dtbo` in the directory read, a slot `overlays/` without its README is an error, and the root fallback copy must hold the slot's overlays. Hardware overlays are looked up in the same directories only. `[image.checks] pi_model` evaluates the model sections.
+
 - Registry checkpoints: an artifact's registry key is now a sha256 over its build fingerprint, its sources' content (git commit, path-source file contents independent of location, archive bytes) and its dependencies' keys. Before, the key was the build's 64-bit fingerprint alone, which does not carry source content: after a source edit a build could pull the entry built from the old source. Found in the live local-registry test. Entries pushed under the old keys are no longer used.
 - Docker-backed builds pass an environment value that holds a secret as `-e KEY` with the value in the docker client's environment, never on the command line.
 

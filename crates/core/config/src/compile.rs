@@ -535,6 +535,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                 modules_dir: checks.modules_dir,
                 symvers: checks.symvers,
                 kernel_image: checks.kernel_image,
+                pi_model: checks.pi_model,
             })
             .unwrap_or_default(),
         assembly: compile_image_assembly(raw.image.assembly),

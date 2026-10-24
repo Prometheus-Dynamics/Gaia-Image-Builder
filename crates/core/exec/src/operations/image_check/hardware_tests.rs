@@ -144,6 +144,7 @@ fn passing_tree() -> Tree {
         "images/rpi-firmware/overlays/widget.dtbo",
         &overlay_dtb("acme,widget"),
     );
+    tree.write("images/rpi-firmware/config.txt", b"kernel=kernel8.img\n");
     tree.write("target/usr/share/widget.json", b"{}");
     tree
 }
@@ -528,6 +529,7 @@ fn check_with_sources(
             rootfs: &rootfs,
             assembly_trees: assembly,
             removed,
+            pi_model: None,
         },
     })
 }
@@ -537,7 +539,9 @@ fn hardware_findings(outcome: &Outcome) -> Vec<String> {
     outcome
         .findings
         .iter()
-        .filter(|finding| finding.code.starts_with("hardware_"))
+        .filter(|finding| {
+            finding.code.starts_with("hardware_") || finding.code.starts_with("boot_")
+        })
         .map(|finding| finding.message.clone())
         .collect()
 }
@@ -548,6 +552,7 @@ fn an_entry_overlay_in_an_assembly_tree_is_found() {
     let boot = tree.scratch.join("assembly/boot");
     std::fs::create_dir_all(boot.join("overlays")).expect("dirs");
     std::fs::write(boot.join("overlays/asm.dtbo"), overlay_dtb("acme,widget")).expect("write");
+    std::fs::write(boot.join("config.txt"), b"kernel=kernel8.img\n").expect("write");
     let mut entry = widget_entry();
     entry.overlays = vec!["asm".into()];
     let outcome = check_with_sources(&tree, &[entry], &[boot], &Default::default());
@@ -627,7 +632,7 @@ fn the_real_raze_output_checks_atlas_hardware_list() {
     assert!(!entries.is_empty(), "the hardware list has entries");
     // The assembly's boot tree (the board's config.txt, overlays and DTBs).
     let boot = PathBuf::from(
-        "/run/media/sozo/bd1d96d9-fa81-4fac-b25e-193cfcac2dcb/Github/HeliOS-architecture-overhaul/gaia/build/helios-full-raze/assembly/boot",
+        "/run/media/sozo/bd1d96d9-fa81-4fac-b25e-193cfcac2dcb/Github/HeliOS-architecture-overhaul/gaia/build/helios-full-raze/assembly/slots/fat",
     );
     let assembly_trees: Vec<PathBuf> = if boot.is_dir() {
         vec![boot]
@@ -657,6 +662,7 @@ fn the_real_raze_output_checks_atlas_hardware_list() {
             rootfs: &rootfs,
             assembly_trees: &assembly_trees,
             removed: &std::collections::HashSet::new(),
+            pi_model: None,
         },
     });
     let elapsed = started.elapsed();

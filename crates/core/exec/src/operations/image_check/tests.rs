@@ -311,6 +311,7 @@ fn check_with(tree: &Tree, modules_dir: Option<&Path>, symvers: bool) -> Outcome
             rootfs: &rootfs,
             assembly_trees: &[],
             removed: &std::collections::HashSet::new(),
+            pi_model: None,
         },
     })
 }
@@ -652,6 +653,7 @@ fn the_real_buildroot_output_checks_in_well_under_a_second() {
             rootfs: &rootfs,
             assembly_trees: &[],
             removed: &std::collections::HashSet::new(),
+            pi_model: None,
         },
     });
     let elapsed = started.elapsed();

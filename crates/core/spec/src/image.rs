@@ -117,6 +117,10 @@ pub struct ImageChecksSpec {
     pub symvers: Option<String>,
     /// The kernel image the release is read from (default `images/Image`).
     pub kernel_image: Option<String>,
+    /// The Raspberry Pi model the boot config's `[model]` sections are read
+    /// for, such as `cm5`. Unset, every model section applies.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pi_model: Option<String>,
 }
 
 impl ImageChecksSpec {

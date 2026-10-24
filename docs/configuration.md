@@ -2386,6 +2386,7 @@ kernel_modules = true                    # default for Buildroot images; false t
 modules_dir = "build/image/buildroot-output/target/lib/modules/7.2.9"  # default: target/lib/modules/<kernel release>
 symvers = "build/image/buildroot-output/build/linux-custom/Module.symvers"  # default: build/linux-*/Module.symvers
 kernel_image = "build/image/buildroot-output/images/Image"  # default: images/Image
+pi_model = "cm5"                         # optional: evaluate the boot config's [model] sections for this board
 ```
 
 Paths are as written: a relative one resolves against the workspace root. The three paths are overrides for a build that keeps its kernel elsewhere; an override that names no file or directory is an error, while a default that is missing is a warning.
@@ -2397,6 +2398,24 @@ The kernel module checks run on every shipped `.ko`, `.ko.xz`, `.ko.zst` or `.ko
 
 The report is `<out dir>/<build>.checks.json`, written on success and on failure. It holds `status` (`passed`, `failed` or `skipped`), `hardware_entries` (the count), the release, the module and import counts, and each error and warning with its `code`, `module` and `message`. Paths in it are relative to the Buildroot output.
 
+#### Boot config
+
+Every boot tree with a top-level `config.txt` is read as the Raspberry Pi firmware reads it: Buildroot's `images/rpi-firmware` and each assembly tree. The firmware reads `config.txt` on a normal boot and `tryboot.txt` (when present) on a trial boot, so each path is read on its own, with the rules Atlas's `check-boot-overlays.sh` uses:
+
+- `include <file>` reads a file relative to the tree root, as if its text were in place of the line. `#` comments, CRs and surrounding whitespace are dropped, and file names compare without regard to case (a FAT volume).
+- Section filters (`[all]`, `[cm5]`, ...) are not evaluated by default: every `dtoverlay=` counts, whatever its section. That is stricter than the firmware, and right for a must-exist check. With `pi_model = "cm5"` in `[image.checks]` they are evaluated for that model: `[all]` and `[none]` as written, `[tryboot]` on the trial path only, a model filter (`pi*`, `cm*`) only when it names that model. An unknown filter applies, with a `boot_filter_note` warning.
+- `os_prefix=` is the last value on the path (it may be empty). `overlay_prefix=` (default `overlays/`) is read the same way and names the directory relative to `os_prefix`.
+- The firmware reads overlays from `${os_prefix}${overlay_prefix}` when that directory holds a `README` (any content), else from `${overlay_prefix}` at the root. `dtoverlay=<name>[,params]` names the overlay before the first comma or colon; an empty name is skipped; `dtparam` is ignored.
+
+What fails the run, per boot path:
+
+- `boot_overlay_missing`: a `dtoverlay` whose `<name>.dtbo` is not in the directory the firmware reads. The error names the tree, the boot file, the overlay and that directory, and says where the `.dtbo` is when it is elsewhere: `slots/<id>/overlays/ has ov9782.dtbo but no README, so the firmware reads overlays/`.
+- `boot_overlays_without_readme`: a `${os_prefix}${overlay_prefix}` directory that exists with no README. The firmware ignores it, so its overlays do not boot even when the root has them.
+- `boot_fallback_overlay_missing`: on `config.txt`, when the slot's directory is read, the root `overlays/` (the firmware's fallback copy) must hold every `.dtbo` the slot ships.
+- `boot_include_missing` and `boot_include_cycle`: an `include` that names no file, or loops.
+
+Not handled: `autoboot.txt`, `boot_partition` and `upstream_kernel`.
+
 #### Hardware list
 
 `[[image.hardware]]` declares what the image must support: one table per device. Atlas owns the lists for its boards, and the file paths in them are the ones the drivers' owners ship. Each entry is checked as a chain, and an error names the build, the entry and the broken link:
@@ -2407,7 +2426,7 @@ id = "ov9782"                 # unique in the build
 kind = "camera-sensor"        # a free-form label for the reports
 modules = ["ov9282"]          # module names (dashes or underscores); built-in drivers too; empty = any driver may claim
 compatible = ["ovti,ov9782"]  # device-tree compatibles the driver must claim
-overlays = ["ov9782"]         # .dtbo basenames that must ship in a boot overlays directory
+overlays = ["ov9782"]         # .dtbo basenames that must ship in the overlays directory a boot config reads
 files = ["/usr/share/libcamera/ipa/rpi/pisp/ov9782.json"]  # must exist in the rootfs
 firmware = []                 # must exist under /lib/firmware, with or without a compression suffix
 ```
@@ -2415,12 +2434,12 @@ firmware = []                 # must exist under /lib/firmware, with or without 
 - **Modules:** each named module passes the module checks, with no error on it. A name shipped twice is checked as the copy modprobe loads. A built-in driver (`dwc2`, `ramoops`) is found through `modules.builtin` and its `modules.builtin.modinfo` aliases. An empty `modules` lets any shipped or built-in driver claim the compatible.
 - **Claims:** each compatible must be claimed by a driver, through an `of:N*T*C<compatible>` alias in the module's `.modinfo` or in `modules.alias` (or a built-in's alias). With `modules` set, the module modprobe loads must claim it.
 - **Naming:** each compatible must be named where the board instantiates it: by an overlay of the entry (the `__overlay__` nodes of its fragments) or by a shipped board DTB (`images/*.dtb`). Some overlays only configure a node the board already has, so the board DTB names the compatible.
-- **Overlays:** each `<name>.dtbo` ships in `images/rpi-firmware/overlays`, in an `images/*overlays*` directory, or in an assembly tree's `overlays/` (the assembly's boot tree is where a board's overlays are built, so an assembly image is checked against it too). Board DTBs are read from `images/*.dtb` and each assembly tree's top-level `*.dtb`.
+- **Overlays:** each `<name>.dtbo` must be in the overlays directory that the normal boot path (`config.txt`) of at least one boot tree reads (see Boot config). The old search of every `overlays/` directory is gone: a `.dtbo` beside the wrong directory fails. Board DTBs are read from `images/*.dtb` and each assembly tree's top-level `*.dtb`.
 - **Files:** each `files` path exists in the final rootfs, which is `target/` without the files of `[image.rootfs] exclude_packages` (the paths `build/packages-file-list.txt` lists for those packages, unless a kept package lists them too). Each `firmware` name must exist under `lib/firmware` in that rootfs.
 
-Every `dtoverlay=<name>` in `images/rpi-firmware/config.txt`, and in each assembly tree's top-level `config.txt`, must have its `.dtbo` as well, whether or not an entry names it. A config's own `overlays/` directory and the Buildroot ones are searched. The hardware list runs with `kernel_modules = false` too (that turns off only the module checks). It needs the kernel's modules, so a non-empty list with no kernel (`BR2_LINUX_KERNEL` not `y`) is an error, not a skip.
+Every `dtoverlay=<name>` on each boot path (see Boot config), whether or not an entry names it, must have its `.dtbo` in the directory that path reads. The hardware list runs with `kernel_modules = false` too (that turns off only the module checks). It needs the kernel's modules, so a non-empty list with no kernel (`BR2_LINUX_KERNEL` not `y`) is an error, not a skip.
 
-Errors: `hardware_module_missing`, `hardware_module_faulty` (the module fails its module checks), `hardware_module_unreadable`, `hardware_compatible_unclaimed`, `hardware_compatible_unnamed`, `hardware_overlay_missing`, `hardware_overlay_unreadable`, `hardware_file_missing`, `hardware_firmware_missing`, `hardware_config_overlay_missing` and `hardware_board_unreadable`. Validation reports `image_hardware_id_missing` and `image_hardware_id_duplicate` (an id is required and unique), and `image_hardware_not_buildroot` for a list on an image that is not Buildroot (nothing would check it).
+Errors: `hardware_module_missing`, `hardware_module_faulty` (the module fails its module checks), `hardware_module_unreadable`, `hardware_compatible_unclaimed`, `hardware_compatible_unnamed`, `hardware_overlay_missing`, `hardware_overlay_unreadable`, `hardware_file_missing`, `hardware_firmware_missing` and `hardware_board_unreadable`. The boot config reports `boot_overlay_missing`, `boot_overlays_without_readme`, `boot_fallback_overlay_missing`, `boot_include_missing` and `boot_include_cycle` (errors), and `boot_filter_note` (a warning). Validation reports `image_hardware_id_missing` and `image_hardware_id_duplicate` (an id is required and unique), and `image_hardware_not_buildroot` for a list on an image that is not Buildroot (nothing would check it).
 
 Only the checks listed above are made. A driver that loads but fails in its `probe` is caught by a board test, not here.
 

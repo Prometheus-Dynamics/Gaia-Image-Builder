@@ -5,6 +5,7 @@
 //! overlay of the entry or by a shipped board DTB; each overlay ships in a boot
 //! overlays directory; the files and firmware are in the rootfs. Reads only.
 
+use super::boot::{self, OverlayDir};
 use super::fdt::{self, Fragment};
 use super::kernel_modules::{Outcome, Winner};
 use super::module::{KernelModule, normalise_name};
@@ -16,7 +17,7 @@ use std::path::{Path, PathBuf};
 pub(super) struct Sources<'a> {
     pub build: &'a str,
     pub entries: &'a [ImageHardwareSpec],
-    /// Buildroot's `images/`: the board DTBs, the boot overlays and `config.txt`.
+    /// Buildroot's `images/`: the board DTBs, and `rpi-firmware/`, a boot tree.
     pub images_dir: &'a Path,
     /// Buildroot's `target/`: the rootfs that `files` are read from.
     pub rootfs: &'a Path,
@@ -26,6 +27,9 @@ pub(super) struct Sources<'a> {
     /// Rootfs paths (relative to `target/`) that the final rootfs does not
     /// ship: the files of the excluded packages (`image.rootfs.exclude_packages`).
     pub removed: &'a HashSet<String>,
+    /// The Raspberry Pi model whose boot-config sections are evaluated
+    /// (`[image.checks] pi_model`); unset, every section counts.
+    pub pi_model: Option<&'a str>,
 }
 
 /// The module tree as the module checks left it.
@@ -60,13 +64,13 @@ struct Cx<'a> {
     build: &'a str,
     rootfs: &'a Path,
     removed: &'a HashSet<String>,
-    images_dir: &'a Path,
     view: &'a ModuleView<'a>,
     builtin_aliases: &'a HashMap<String, Vec<String>>,
     modules_alias: &'a [(String, String)],
     /// Every alias of every shipped and built-in driver.
     claims: &'a [Claim],
-    overlay_dirs: &'a [PathBuf],
+    /// The overlays directory each boot tree's normal boot path reads.
+    overlay_dirs: &'a [OverlayDir],
     boards: &'a [Board],
 }
 
@@ -92,17 +96,11 @@ pub(super) fn check(sources: &Sources<'_>, view: &ModuleView<'_>, out: &mut Outc
         by: module.clone(),
         alias: alias.clone(),
     }));
-    // Buildroot's overlays directories, then every assembly tree's `overlays/`.
-    let buildroot_dirs = overlay_dirs(sources.images_dir);
-    let mut overlay_dirs = buildroot_dirs.clone();
-    overlay_dirs.extend(
-        sources
-            .assembly_trees
-            .iter()
-            .map(|tree| tree.join("overlays"))
-            .filter(|dir| dir.is_dir()),
-    );
-    check_config(sources, &buildroot_dirs, out);
+    // The boot trees: Buildroot's rpi-firmware, then each assembly tree. Each
+    // one with a config.txt is read as the firmware reads it.
+    let mut boot_trees = vec![sources.images_dir.join("rpi-firmware")];
+    boot_trees.extend(sources.assembly_trees.iter().cloned());
+    let overlay_dirs = boot::check(sources.build, &boot_trees, sources.pi_model, out);
     if sources.entries.is_empty() {
         return;
     }
@@ -129,7 +127,6 @@ pub(super) fn check(sources: &Sources<'_>, view: &ModuleView<'_>, out: &mut Outc
         build: sources.build,
         rootfs: sources.rootfs,
         removed: sources.removed,
-        images_dir: sources.images_dir,
         view,
         builtin_aliases: &builtin_aliases,
         modules_alias: &modules_alias,
@@ -147,13 +144,13 @@ fn check_entry(entry: &ImageHardwareSpec, cx: &Cx<'_>, out: &mut Outcome) {
     let mut fragments: Vec<(String, Fragment)> = Vec::new();
     for overlay in &entry.overlays {
         let file = format!("{overlay}.dtbo");
-        match find_file(cx.overlay_dirs, &file) {
+        match find_overlay(cx.overlay_dirs, &file) {
             None => out.error(
                 "hardware_overlay_missing",
                 None,
                 format!(
                     "{who}: overlay {file} is in no boot overlays dir ({})",
-                    dirs_text(cx.overlay_dirs, cx.images_dir)
+                    dirs_text(cx.overlay_dirs)
                 ),
             ),
             Some(path) => match read_overlay(&path) {
@@ -345,97 +342,20 @@ fn alias_claims(alias: &str, compatible: &str) -> bool {
     alias == base || alias == format!("{base}C*") || alias == format!("{base}*")
 }
 
-/// `dtoverlay=<name>` in every shipped `config.txt` (Buildroot's, and each
-/// assembly tree's) must have its `.dtbo`: in the overlays directory next to
-/// that config, or in a Buildroot one.
-fn check_config(sources: &Sources<'_>, buildroot_dirs: &[PathBuf], out: &mut Outcome) {
-    let mut configs = vec![sources.images_dir.join("rpi-firmware/config.txt")];
-    configs.extend(
-        sources
-            .assembly_trees
-            .iter()
-            .map(|tree| tree.join("config.txt")),
-    );
-    for config in configs {
-        let Ok(text) = std::fs::read_to_string(&config) else {
-            continue;
-        };
-        let mut dirs = Vec::new();
-        if let Some(parent) = config.parent() {
-            dirs.push(parent.join("overlays"));
-        }
-        dirs.extend(buildroot_dirs.iter().cloned());
-        dirs.retain(|dir| dir.is_dir());
-        let mut seen = BTreeSet::new();
-        for line in text.lines() {
-            let Some(value) = line.trim().strip_prefix("dtoverlay=") else {
-                continue;
-            };
-            let name = value
-                .split(|c: char| c == ',' || c.is_whitespace())
-                .next()
-                .unwrap_or_default();
-            if name.is_empty() || !seen.insert(name.to_string()) {
-                continue;
-            }
-            let file = format!("{name}.dtbo");
-            if find_file(&dirs, &file).is_none() {
-                out.error(
-                    "hardware_config_overlay_missing",
-                    None,
-                    format!(
-                        "{}: config.txt enables overlay {name}, but {file} is in no boot overlays dir ({}) (config {})",
-                        sources.build,
-                        dirs_text(&dirs, sources.images_dir),
-                        config.display()
-                    ),
-                );
-            }
-        }
-    }
+/// The first boot overlays directory (a tree's normal boot path) with the file.
+fn find_overlay(dirs: &[OverlayDir], file: &str) -> Option<PathBuf> {
+    dirs.iter().find_map(|dir| boot::find_file(&dir.dir, file))
 }
 
-/// The boot overlays directories: `rpi-firmware/overlays`, and any other
-/// `images/*overlays*` directory (Raze's `raze-overlays`).
-fn overlay_dirs(images: &Path) -> Vec<PathBuf> {
-    let mut dirs = vec![images.join("rpi-firmware/overlays")];
-    if let Ok(entries) = std::fs::read_dir(images) {
-        dirs.extend(
-            entries
-                .filter_map(Result::ok)
-                .map(|entry| entry.path())
-                .filter(|path| {
-                    path.file_name()
-                        .and_then(|name| name.to_str())
-                        .is_some_and(|name| name.contains("overlays"))
-                }),
-        );
-    }
-    dirs.retain(|dir| dir.is_dir());
-    dirs.sort();
-    dirs.dedup();
-    dirs
-}
-
-fn dirs_text(dirs: &[PathBuf], images: &Path) -> String {
+/// The overlays directories, for a message: `<tree>: <dir>`, or that there are none.
+fn dirs_text(dirs: &[OverlayDir]) -> String {
     if dirs.is_empty() {
-        return "there is no boot overlays directory".into();
+        return "there is no boot config.txt".into();
     }
     dirs.iter()
-        .map(|dir| {
-            dir.strip_prefix(images)
-                .unwrap_or(dir)
-                .display()
-                .to_string()
-        })
+        .map(|dir| dir.label.clone())
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-fn find_file(dirs: &[PathBuf], file: &str) -> Option<PathBuf> {
-    dirs.iter()
-        .map(|dir| dir.join(file))
-        .find(|path| path.is_file())
 }
 
 fn read_overlay(path: &Path) -> Result<Vec<Fragment>, String> {

@@ -946,6 +946,8 @@ pub struct RawImageChecksConfig {
     pub modules_dir: Option<String>,
     pub symvers: Option<String>,
     pub kernel_image: Option<String>,
+    /// The Raspberry Pi model whose `[model]` sections of the boot config apply.
+    pub pi_model: Option<String>,
 }
 
 /// `[[image.hardware]]`: one device the image must support (see `Image checks`

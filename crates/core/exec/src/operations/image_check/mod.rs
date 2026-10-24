@@ -2,6 +2,7 @@
 //! against each other. It writes nothing but its report, `<out>/<build>.checks.json`,
 //! and fails the run on an error. Warnings reach the run summary.
 
+mod boot;
 mod elf;
 mod fdt;
 mod hardware;
@@ -130,6 +131,7 @@ pub(crate) fn execute(
             rootfs: &rootfs,
             assembly_trees: &assembly_trees,
             removed: &removed,
+            pi_model: checks.pi_model.as_deref(),
         },
     });
 
