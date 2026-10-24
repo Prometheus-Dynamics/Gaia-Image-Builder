@@ -2400,7 +2400,7 @@ The report is `<out dir>/<build>.checks.json`, written on success and on failure
 
 #### Boot config
 
-Every boot tree with a top-level `config.txt` is read as the Raspberry Pi firmware reads it: Buildroot's `images/rpi-firmware` and each assembly tree. The firmware reads `config.txt` on a normal boot and `tryboot.txt` (when present) on a trial boot, so each path is read on its own, with the rules Atlas's `check-boot-overlays.sh` uses:
+The boot trees the image ships are read as the Raspberry Pi firmware reads them: each assembly tree with a top-level `config.txt`, or, when the assembly makes none (Buildroot's own image is the boot partition), Buildroot's `images/rpi-firmware`. With an assembled boot tree, Buildroot's `rpi-firmware/config.txt` is only an input the assembly copies from and is not checked. The firmware reads `config.txt` on a normal boot and `tryboot.txt` (when present) on a trial boot, so each path is read on its own, with the rules Atlas's `check-boot-overlays.sh` uses:
 
 - `include <file>` reads a file relative to the tree root, as if its text were in place of the line. `#` comments, CRs and surrounding whitespace are dropped, and file names compare without regard to case (a FAT volume).
 - Section filters (`[all]`, `[cm5]`, ...) are not evaluated by default: every `dtoverlay=` counts, whatever its section. That is stricter than the firmware, and right for a must-exist check. With `pi_model = "cm5"` in `[image.checks]` they are evaluated for that model: `[all]` and `[none]` as written, `[tryboot]` on the trial path only, a model filter (`pi*`, `cm*`) only when it names that model. An unknown filter applies, with a `boot_filter_note` warning.

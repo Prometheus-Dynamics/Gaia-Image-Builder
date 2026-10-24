@@ -679,3 +679,37 @@ fn the_real_raze_output_checks_atlas_hardware_list() {
     }
     assert_eq!(outcome.release.as_deref(), Some(RELEASE));
 }
+
+#[test]
+fn with_an_assembled_boot_tree_buildroots_rpi_firmware_config_is_not_checked() {
+    // A slot image boots the assembly's FAT tree; Buildroot's own
+    // rpi-firmware/config.txt (here including a file it lacks) is only an
+    // input the assembly copies from.
+    let tree = passing_tree();
+    tree.write(
+        "images/rpi-firmware/config.txt",
+        b"include raze-device.txt\ndtoverlay=gone\n",
+    );
+    let boot = tree.scratch.join("assembly/slots-fat");
+    std::fs::create_dir_all(boot.join("overlays")).expect("dirs");
+    std::fs::write(boot.join("overlays/asm.dtbo"), overlay_dtb("acme,widget")).expect("write");
+    std::fs::write(boot.join("raze-device.txt"), b"dtoverlay=asm\n").expect("write");
+    std::fs::write(boot.join("config.txt"), b"include raze-device.txt\n").expect("write");
+    let outcome = check_with_sources(&tree, &[], std::slice::from_ref(&boot), &Default::default());
+    assert!(
+        hardware_findings(&outcome).is_empty(),
+        "{:?}",
+        hardware_findings(&outcome)
+    );
+
+    // Without an assembled boot tree, Buildroot's config.txt is the boot
+    // config and is checked.
+    let outcome = check_with_sources(&tree, &[], &[], &Default::default());
+    assert!(
+        hardware_findings(&outcome)
+            .iter()
+            .any(|message| message.contains("raze-device.txt")),
+        "{:?}",
+        hardware_findings(&outcome)
+    );
+}

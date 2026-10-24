@@ -96,10 +96,22 @@ pub(super) fn check(sources: &Sources<'_>, view: &ModuleView<'_>, out: &mut Outc
         by: module.clone(),
         alias: alias.clone(),
     }));
-    // The boot trees: Buildroot's rpi-firmware, then each assembly tree. Each
-    // one with a config.txt is read as the firmware reads it.
-    let mut boot_trees = vec![sources.images_dir.join("rpi-firmware")];
-    boot_trees.extend(sources.assembly_trees.iter().cloned());
+    // The boot trees the image ships, read as the firmware reads them: the
+    // assembly trees with a top-level config.txt. Buildroot's rpi-firmware
+    // dir is the boot tree only when the assembly makes none (Buildroot's own
+    // image packs it); otherwise it is just an input the assembly copies
+    // from, and the board never reads its config.txt.
+    let assembled: Vec<PathBuf> = sources
+        .assembly_trees
+        .iter()
+        .filter(|tree| tree.join("config.txt").is_file())
+        .cloned()
+        .collect();
+    let boot_trees = if assembled.is_empty() {
+        vec![sources.images_dir.join("rpi-firmware")]
+    } else {
+        assembled
+    };
     let overlay_dirs = boot::check(sources.build, &boot_trees, sources.pi_model, out);
     if sources.entries.is_empty() {
         return;

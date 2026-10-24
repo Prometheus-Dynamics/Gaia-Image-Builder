@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- `image:check` evaluates the firmware rule on the boot trees the image ships: the assembly trees with a `config.txt`, and Buildroot's `images/rpi-firmware` only when the assembly makes none. A slot image's build failed on Buildroot's own `rpi-firmware/config.txt` (an include it lacks), which the board never reads.
+
 - Assembly: the parallel step scheduler compared paths with a plain prefix test, so a step reading a glob (`$assembly.tree.payload/overlays/*.dtbo`) did not wait for a step writing a file the glob matches (`payload/overlays/ov9782.dtbo`, copied from a transform's output) and could run first, silently missing that file. It now uses the same glob-aware test as the step ordering. Since the parallel scheduler (0c5a6a9), images whose trees fill from globs over files other steps write could miss files; Raze slots lost ov9782.dtbo and raze-fan.dtbo from the FAT root overlays this way (found by Atlas).
 
 - `image:check` reads the assembly's boot trees from a copy of their boot files (`*.txt`, READMEs, `.dtbo`, `.dtb`) that the assembly leaves in `<build_dir>/image-check/boot-trees/<tree>`: with a RAM work dir (the `auto` default when it fits) the trees are gone when the check runs, so the firmware rule and the hardware list saw only Buildroot's overlay dirs and reported overlays the assembly compiles (Raze's ov9782 and raze-fan) as missing. An assembly from before this runs once more to leave the copy.
