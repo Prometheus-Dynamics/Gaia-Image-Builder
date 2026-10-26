@@ -49,7 +49,13 @@ pub(crate) fn check_required_gaia_version_against(
             format!("installed gaia version '{installed}' is not semver: {error}"),
         )
     })?;
-    if parsed.matches(&installed_version) {
+    // A dev build (`2.0.1-dev`) carries everything its release number does,
+    // so it also matches as its release number: semver would otherwise
+    // refuse a pre-release against a plain requirement such as `>=2.0.0`.
+    // An exact pre-release requirement (`=2.0.1-dev`) still matches as is.
+    let mut release = installed_version.clone();
+    release.pre = semver::Prerelease::EMPTY;
+    if parsed.matches(&installed_version) || parsed.matches(&release) {
         return Ok(());
     }
     Err(ConfigError::GaiaVersionUnsupported {
@@ -78,6 +84,22 @@ mod tests {
         let value = config("gaia_version = \">=2.1.0\"\n");
         assert!(check_required_gaia_version_against(Path::new("b.toml"), &value, "2.1.0").is_ok());
         assert!(check_required_gaia_version_against(Path::new("b.toml"), &value, "3.0.0").is_ok());
+    }
+
+    #[test]
+    fn a_dev_build_satisfies_requirements_up_to_its_release_number() {
+        for requirement in [">=2.0.0", ">=2.0.1", "^2.0", "2"] {
+            let value = config(&format!("gaia_version = \"{requirement}\"\n"));
+            assert!(
+                check_required_gaia_version_against(Path::new("b.toml"), &value, "2.0.1-dev")
+                    .is_ok(),
+                "{requirement}"
+            );
+        }
+        let value = config("gaia_version = \">=2.0.2\"\n");
+        assert!(
+            check_required_gaia_version_against(Path::new("b.toml"), &value, "2.0.1-dev").is_err()
+        );
     }
 
     #[test]
