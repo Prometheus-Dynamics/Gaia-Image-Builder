@@ -686,14 +686,21 @@ fn run_command_capture_tail(
     })
 }
 
+/// The timeout of an assembly command when the image provider has no command policy of its own
+/// (`[image] kind = "none"`): packing a package or an archive of a large tree takes minutes.
+const UNSET_ASSEMBLY_COMMAND_TIMEOUT_SECONDS: u64 = 3600;
+
 fn assembly_command_timeout(spec: &ResolvedBuildSpec) -> Duration {
-    Duration::from_secs(
-        spec.policy
-            .providers
-            .image_command_policy(spec.image.provider_kind())
-            .timeout_seconds
-            .max(1),
-    )
+    let timeout_seconds = spec
+        .policy
+        .providers
+        .image_command_policy(spec.image.provider_kind())
+        .timeout_seconds;
+    Duration::from_secs(if timeout_seconds == 0 {
+        UNSET_ASSEMBLY_COMMAND_TIMEOUT_SECONDS
+    } else {
+        timeout_seconds
+    })
 }
 
 fn command_display(command: &Command) -> String {
