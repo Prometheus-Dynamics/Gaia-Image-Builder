@@ -1825,6 +1825,13 @@ built against them: a rust program cross-compiled to an aarch64 PIE with
 16 KiB segments and glibc needs up to `GLIBC_2.34`, packed into an ipk that
 passes the device checks.
 
+On a SystemCore (ALPHA 18), `opkg print-architecture` lists `all`, `noarch`
+and `aarch64`: a package with binaries uses `Architecture = "aarch64"`, and
+`all` is for packages without any (as Limelight's own add-ons are). An
+`aarch64` ipk with `debian_binary = false` (Limelight's layout) installs and
+upgrades with `opkg install --force-reinstall`, keeping its conffiles. The
+standard layout (`debian_binary = true`) is not yet confirmed on the device.
+
 A build that cross-compiles a rust program for SystemCore, packs it into an
 ipk and checks the ipk against the SDK's sysroot:
 
