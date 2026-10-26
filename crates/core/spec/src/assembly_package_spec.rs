@@ -28,6 +28,46 @@ pub struct AssemblyPackageSpec {
     pub allowed_prefixes: Vec<String>,
     pub control: AssemblyPackageControlSpec,
     pub scripts: AssemblyPackageScriptsSpec,
+    /// `[image.assembly.packages.device]`: checks the package's ELF files
+    /// against the device's sysroot before it is written. `None` skips them.
+    /// Not serialized when unset, so packages without it keep their fingerprints.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device: Option<AssemblyPackageDeviceSpec>,
+}
+
+/// The device a package runs on, as checks of its ELF files against the
+/// device's sysroot (the libraries and the C library of the device OS).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct AssemblyPackageDeviceSpec {
+    /// The `[[toolchains]]` id whose sysroot is the device's. Exactly one of
+    /// this and `sysroot` is set (the validator reports otherwise).
+    pub toolchain: Option<String>,
+    /// A directory, as a workspace path, that is the device's sysroot.
+    pub sysroot: Option<String>,
+    /// The highest `GLIBC_x.y` a file may need, as written (`2.17`). `None`
+    /// takes the highest version the sysroot's C library defines.
+    pub max_glibc: Option<String>,
+    /// The smallest `PT_LOAD` alignment a file may have, in bytes. `None`
+    /// takes the device toolchain's `page_size`, or
+    /// `DEFAULT_DEVICE_MIN_PAGE_SIZE` when there is none.
+    pub min_page_size: Option<u64>,
+    /// Whether every `DT_NEEDED` library (and the program interpreter) must be
+    /// found in the sysroot or in the package.
+    pub check_needed: bool,
+}
+
+/// The smallest `PT_LOAD` alignment checked when neither the device table nor
+/// its toolchain names one: 4 KiB, the smallest page size a kernel uses.
+pub const DEFAULT_DEVICE_MIN_PAGE_SIZE: u64 = 4096;
+
+/// Parses a `GLIBC_x.y` version (or `x.y`) into its `(major, minor)` pair.
+/// `None` for anything else, such as `GLIBC_PRIVATE` or `2`.
+pub fn parse_glibc_version(text: &str) -> Option<(u32, u32)> {
+    let text = text.strip_prefix("GLIBC_").unwrap_or(text);
+    let (major, minor) = text.split_once('.')?;
+    let major = major.parse().ok()?;
+    let minor = minor.parse().ok()?;
+    Some((major, minor))
 }
 
 impl AssemblyPackageSpec {

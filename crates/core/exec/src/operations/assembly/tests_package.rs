@@ -143,6 +143,7 @@ fn package(
             postrm: None,
             conffiles: vec!["/etc/helios/startup.toml".into()],
         },
+        device: None,
     }
 }
 

@@ -18,6 +18,9 @@ pub struct ArtifactExecutionContract {
     pub execution_backend_explicit: bool,
     pub execution_backend: ArtifactExecutionBackend,
     pub artifact_target: Option<String>,
+    /// Rust only: the `[[toolchains]]` SDK the build cross-compiles with,
+    /// resolved to its paths. `None` for a build with the host toolchain.
+    pub toolchain: Option<crate::ArtifactToolchainContract>,
     pub build_version: Option<String>,
     pub build_branch: Option<String>,
     pub build_target: Option<String>,
@@ -93,6 +96,7 @@ impl ArtifactExecutionContract {
                 })
                 .unwrap_or(ArtifactExecutionBackend::Host),
             artifact_target: artifact.target.clone(),
+            toolchain: None,
             build_version: None,
             build_branch: None,
             build_target: None,

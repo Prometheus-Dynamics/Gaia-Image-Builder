@@ -16,7 +16,7 @@ use std::io::{BufWriter, Write};
 use super::oci::append_tree;
 use super::package_archive::{TarEntryKind, list_tar, write_ar};
 use super::package_control::{control_text, generated_script};
-use super::package_verify::verify_ipk;
+use super::package_verify::{verify_device, verify_ipk};
 use super::tar::TarWriter;
 use super::transforms::compress_to_dest;
 use super::*;
@@ -93,6 +93,16 @@ fn build_package(
     output: &Path,
     cancel: Option<gaia_process::ProcessCancelCheck>,
 ) -> Result<PackageSummary, AssemblyError> {
+    // The device checks read the tree as installed, before anything is packed:
+    // a package for the wrong device never reaches the archive.
+    if let Some(device) = &package.device {
+        let check = verify_device(spec, package, device, root)?;
+        tracing::info!(
+            package = package.id.as_str(),
+            elf_files = check.elf_files,
+            "package device checks passed"
+        );
+    }
     let mtime = entry_mtime();
     let data_tar = stage.join("data.tar");
     write_data_tar(root, &data_tar, mtime).map_err(|error| {

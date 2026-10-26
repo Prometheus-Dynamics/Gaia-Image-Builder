@@ -1456,6 +1456,28 @@ Source kinds:
 - `archive`
 - `download`
 
+An `archive` source takes either `path` (an archive in the workspace) or `url`
+with its `sha256`, never both (`sha256` alone, with `path`, is an error). A
+`url` archive is downloaded into the download cache (see "Download Cache"
+below), its bytes are hashed and checked against `sha256` before anything is
+extracted (a mismatch is an error that names the expected and the actual
+digest, and nothing is stored or extracted), and then it is extracted as a
+`path` archive is, with `strip_components`. Its content is its `sha256`, so
+two checkouts with the same archive share their build entries. It is pinned
+(`pin = "locked"`) by default, as a download with a checksum is. Offline
+(`[execution] offline`) it is read from the cache only, and a missing entry is
+an error that says to prefetch online first. `url` takes `http://`,
+`https://` or `file://`.
+
+```toml
+[[sources]]
+id = "seed-rootfs"
+kind = "archive"
+url = "https://example.invalid/base-rootfs.tar.gz"
+sha256 = "<64 hex digits of the archive>"
+strip_components = 0
+```
+
 Policies:
 - `refresh = "auto" | "always" | "never"`
 - `pin = "floating" | "locked"`
@@ -1594,11 +1616,192 @@ at the same repository (ignoring a trailing `.git`) at different refs.
 
 Download sources with a `sha256` are stored after verification in a
 content-addressed cache, `<workspace>/.gaia/cache/downloads/sha256/<sha>`,
-shared by every build in the workspace. Re-materializing the source copies
+shared by every build in the workspace. An archive source with a `url` uses
+the same cache, under the same name. Re-materializing the source copies
 the cached file instead of downloading it again. Downloads without a
 `sha256` are always fetched. The file is hashed once per download, both to
 verify it and to record `output_sha256` in the source state. Remove the cache
 with `gaia clean <build> --all-caches`.
+
+## Toolchains
+
+`[[toolchains]]` declares a cross toolchain that an external OS SDK provides,
+so a rust artifact can be built for a device. Gaia installs nothing: the SDK
+is read where it is. The SDK is a source (a downloaded and verified archive,
+for example) or a local directory.
+
+```toml
+[[toolchains]]
+id = "systemcore"
+kind = "buildroot-sdk"
+source = "systemcore-sdk"                 # the SDK root is this source's tree ...
+# path = "/opt/systemcore-sdk"            # ... or this directory (exactly one of the two)
+relocate = true                           # run <root>/relocate-sdk.sh once per extracted location
+prefix = "aarch64-buildroot-linux-gnu-"   # compiler prefix in <root>/bin (default: "<triple>-")
+triple = "aarch64-buildroot-linux-gnu"
+sysroot = "aarch64-buildroot-linux-gnu/sysroot"   # under the root ... (or: sysroot_source = "<source id>")
+rust_target = "aarch64-unknown-linux-gnu"
+```
+
+- `id`: unique; the artifacts and device tables name it.
+- `kind`: `"buildroot-sdk"`, the only kind. The SDK has `<root>/bin/<prefix>gcc`
+  (and `g++`, `ar`) and a sysroot.
+- `source` or `path`: the SDK root. A source's tree is the root once the
+  source is materialized; the artifact waits for it.
+- `relocate`: `false` by default. When `true`, `<root>/relocate-sdk.sh` runs
+  once per root, and a marker file `.gaia-relocated` records that it ran, so
+  later builds skip it. An SDK without the script is used as it is, and the
+  build log says so.
+- `prefix`: the compiler prefix in `<root>/bin`. Default: the triple followed
+  by `-`.
+- `triple`: required. The GNU triple of the SDK's compiler.
+- `sysroot` (a path under the root, or absolute) or `sysroot_source` (a
+  source whose tree is the sysroot): exactly one.
+- `rust_target`: the Rust target the compiler serves. A rust artifact without
+  a `target` of its own builds for it.
+- `page_size`: the device's page size in bytes, a power of two of at least
+  4096 (optional). Set, a rust artifact of this toolchain links with
+  `-z max-page-size=<page_size>`, and a package built with it checks its
+  segments against that size by default (see "Device checks"). The reason: the
+  dynamic loader refuses a library whose `PT_LOAD` `p_align` is not a multiple of
+  the kernel's page size, and a kernel with 16 KiB pages needs each segment's
+  `p_vaddr` and `p_offset` congruent modulo 16 KiB. An SDK's linker writes 4 KiB
+  segments by default, so a device with larger pages needs this. The flag is
+  part of the toolchain's identity, so changing `page_size` rebuilds the
+  artifacts.
+
+A rust artifact names its toolchain with `toolchain = "<id>"`. Only rust
+artifacts take one, and each needs a target (its own `target`, or the
+toolchain's `rust_target`). The artifact then depends on the toolchain's
+sources (the SDK's tree and the sysroot's), so it waits for them and rebuilds
+when they change. Gaia runs cargo for the target with this environment (a
+variable the calling environment already sets is kept in front of Gaia's
+flags):
+
+- `--target <rust_target>`, unless the artifact has its own `target`.
+- `CARGO_TARGET_<TRIPLE>_LINKER` = `<root>/bin/<prefix>gcc`.
+- `CARGO_TARGET_<TRIPLE>_RUSTFLAGS` = `RUSTFLAGS` (or the target's own
+  variable) from the calling environment, then `-C link-arg=--sysroot=<sysroot>`.
+  Cargo reads the environment before `.cargo/config.toml`, so a
+  `[target.<triple>] rustflags` in a config file is replaced by this variable:
+  put such flags in `RUSTFLAGS` instead.
+- `CC_`, `CXX_` and `AR_` for the target (the `cc` crate's names, with
+  underscores): `<root>/bin/<prefix>gcc`, `<prefix>g++` and `<prefix>ar`.
+- `CFLAGS_<target>` and `CXXFLAGS_<target>`: `--sysroot=<sysroot>` after the
+  calling environment's value.
+- `PKG_CONFIG_SYSROOT_DIR`, `PKG_CONFIG_PATH` (the sysroot's `usr/lib` and
+  `usr/share` pkg-config directories) and `PKG_CONFIG_ALLOW_CROSS=1`.
+
+With `execution` = docker, the SDK root and the sysroot are mounted at their
+host paths, so the compiler and the sysroot are the ones the environment names.
+
+The toolchain is part of the artifact's fingerprint and of its registry key:
+a source root is identified by its content (its source identity), a local
+`path` by its configured path together with the compiler's version. Another
+SDK, prefix, sysroot or Rust target is another build.
+
+Validation: an unknown toolchain id, a toolchain on a non-rust artifact, a
+missing root, sysroot or triple, both `source` and `path` (or `sysroot` and
+`sysroot_source`), and a rust artifact with no target are errors.
+
+### SystemCore
+
+Limelight's SystemCore OS is built with a Buildroot SDK. Its releases are on
+GitHub (`LimelightVision/systemcore-os-public`). The ALPHA release is
+`limelightosr-2027.0.0-alpha17-403` and the BETA release is
+`limelightosr-2027.0.0-beta17-233`. The SDK is the `systemcore-aarch64-toolchain.tar.gz`
+asset of ALPHA, and `systemcorebeta-aarch64-toolchain.tar.gz` of BETA. The
+device OS archive (`systemcorelinux.tar.xz` for ALPHA,
+`systemcorebetalinux.tar.xz` for BETA) is a separate asset this example does
+not use. The checksums are placeholders below: take each `sha256` from the
+release you use.
+
+A build that cross-compiles a rust program for SystemCore, packs it into an
+ipk and checks the ipk against the SDK's sysroot:
+
+```toml
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[providers.rust]
+allow_nested_build = true
+
+# ALPHA. For BETA, use the systemcorebeta-* asset names and its release tag.
+[[sources]]
+id = "systemcore-sdk"
+kind = "archive"
+url = "https://github.com/LimelightVision/systemcore-os-public/releases/download/limelightosr-2027.0.0-alpha17-403/systemcore-aarch64-toolchain.tar.gz"
+sha256 = "<sha256 of systemcore-aarch64-toolchain.tar.gz>"
+strip_components = 0                       # 1 when the archive has one top directory
+
+[[sources]]
+id = "helios"
+kind = "path"
+path = "helios"
+
+[[toolchains]]
+id = "systemcore"
+kind = "buildroot-sdk"
+source = "systemcore-sdk"
+relocate = true
+triple = "aarch64-buildroot-linux-gnu"
+sysroot = "aarch64-buildroot-linux-gnu/sysroot"
+rust_target = "aarch64-unknown-linux-gnu"
+page_size = 16384                          # the device's pages are 16 KiB
+
+[[artifacts]]
+id = "helios"
+kind = "rust"
+package = "helios"
+source = "helios"
+toolchain = "systemcore"
+profile = "release"
+output_path = "${workspace.out_dir}/artifacts/helios"
+
+[image]
+kind = "none"
+
+[image.assembly]
+work_dir = "${workspace.build_dir}/assembly"
+out_dir = "${workspace.out_dir}"
+
+[[image.assembly.trees]]
+id = "pkg-root"
+path = "$assembly.work/pkg-root"
+
+[[image.assembly.files]]
+tree = "pkg-root"
+src = "${workspace.out_dir}/artifacts/helios"
+dest = "usr/bin/helios"
+mode = "0755"
+
+[[image.assembly.packages]]
+id = "helios"
+tree = "pkg-root"
+dest = "$assembly.out/"
+allowed_prefixes = ["/usr/bin"]
+
+[image.assembly.packages.control]
+Package = "helios"
+Version = "${build.version}"
+Architecture = "aarch64"
+Maintainer = "Helios Team <dev@example.invalid>"
+Description = "Helios for SystemCore."
+Depends = ["libc6 (>= 2.38)"]
+
+[image.assembly.packages.device]
+toolchain = "systemcore"                   # the device's libraries: the SDK's sysroot
+```
+
+The SDK's sysroot is taken as the device's: the device checks read its
+`libc.so.6` for the architecture and the highest `GLIBC_x.y` (`max_glibc`
+defaults to it). The toolchain's `page_size` makes the rust binary link for
+16 KiB pages, and the device checks take `min_page_size` from it (16 KiB here),
+so nothing else is needed. Without a `page_size`, the checks default to 4 KiB,
+and a binary the SDK links with 4 KiB segments passes them. An explicit
+`min_page_size` in the device table always wins.
 
 ## Artifacts
 
@@ -1680,6 +1883,8 @@ Artifact kinds:
   - `all_features` (bool, passed as `--all-features`; cannot be combined with
     `features` or `no_default_features`)
 
+  - `toolchain` (string; the `[[toolchains]]` id to cross-compile with; see
+    [Toolchains](#toolchains))
   - `build_group` (string; see [Rust build groups](#rust-build-groups))
   - `cargo_git_sources` (table: repository URL as Cargo.lock records it →
     the id of a declared `kind = "git"` source; see
@@ -2848,6 +3053,53 @@ Output is deterministic: the data and control tars are written with entries sort
 
 State records `package.N.id`, `format`, `output`, `bytes`, `sha256`, `files` (the non-directory entries of the data) and `installed_kib`. The package is an expected output of the assembly, so it is reported with its size. Reuse fingerprints cover the tree's content digest and any script file the spec names.
 
+##### Device checks
+
+`[image.assembly.packages.device]` checks the package's ELF files against the
+device before the package is written, so a package built for the wrong device
+never reaches the archive. The device is a sysroot: the libraries and the C
+library of the device OS. It takes one of:
+- `toolchain = "<id>"`: the sysroot of a `[[toolchains]]` entry (see
+  [Toolchains](#toolchains)); the package waits for that toolchain's sources.
+- `sysroot = "<path>"`: a directory (a workspace path) that is the sysroot.
+
+and these limits, all optional:
+- `max_glibc = "2.17"`: the highest `GLIBC_x.y` a file may need. Default: the
+  highest version the sysroot's `libc.so.6` defines (`GLIBC_PRIVATE` is not a
+  level and is ignored).
+- `min_page_size`: the smallest `PT_LOAD` alignment, in bytes, a power of two.
+  Default: the toolchain's `page_size` when `toolchain` names one that sets it,
+  else 4096 (the smallest page size a kernel uses). An explicit value wins.
+- `check_needed = true`: every `DT_NEEDED` library, and the program
+  interpreter, must be found in the sysroot or in the package itself. A
+  `$ORIGIN` in RUNPATH or RPATH is taken as the file's directory, as the loader
+  does. Set `false` to skip this.
+
+The checks are:
+1. The architecture: the sysroot's `libc.so.6` gives the class, byte order and
+   machine every ELF file must have. An x86-64 file in an AArch64 package is a
+   problem, as is an ELF file that cannot be read.
+2. Symbol versions: each `GLIBC_x.y` a file needs (its `DT_VERNEED` entries)
+   must be at most `max_glibc`.
+3. Alignment: each `PT_LOAD` segment's `p_align` must be at least
+   `min_page_size`.
+4. Libraries (with `check_needed`): each `DT_NEEDED` name resolves, the way
+   the loader would look it up, in the package or the sysroot.
+
+Only regular files are read (symlinks are not followed), and the files are
+read as bytes: nothing in the package runs. Every problem is reported at once,
+one line per file and problem, named by the file's path in the package and by
+the symbol version, alignment or library. A package with problems fails the
+build, and no `.ipk` is written.
+
+```toml
+[image.assembly.packages.device]
+toolchain = "systemcore"
+max_glibc = "2.41"
+min_page_size = 16384
+check_needed = true
+```
+
 #### Generated content
 
 Three ways to write generated text or JSON into a tree or an archive. All three render `${assembly...}` tokens at assembly time and run after the steps whose outputs they read, so a file can name a transform's output that is declared after it.
@@ -3345,7 +3597,7 @@ upload_policy = "auto"                 # off: no pushes; any other policy pushes
 
 Not implemented yet: the roots index (a build's list of keys, which would keep older entries that it still uses) and the per-kind hit and miss counts for `gaia cache stats`. Until the roots index exists, `--prune` looks only at age: it can remove an entry that an older build still uses. The next build of that package, artifact or layer rebuilds it and pushes it again.
 
-Artifact keys are a sha256 over the build's fingerprint, the content of its sources (the git commit; a path source's file contents, wherever the checkout sits; an archive's bytes) and, recursively, the artifacts it depends on: an edited source never pulls an entry built from the old one, and two checkouts of the same content share entries.
+Artifact keys are a sha256 over the build's fingerprint, the content of its sources (the git commit; a path source's file contents, wherever the checkout sits; an archive's bytes, or its `sha256` for a `url` archive), the identity of the toolchain it builds with (see [Toolchains](#toolchains)) and, recursively, the artifacts it depends on: an edited source never pulls an entry built from the old one, and two checkouts of the same content share entries.
 
 Gaps. Layer entries are pushed before the image's later steps (sizes, legal info and archive), so a failure of those steps still leaves them in the registry.
 

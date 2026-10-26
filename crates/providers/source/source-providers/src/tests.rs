@@ -277,8 +277,10 @@ fn archive_provider_errors_for_missing_archive() {
     let spec = test_spec(&build_dir);
     let source = SourceSpec::new(
         "archive-source",
-        SourceDefinition::Archive(ArchiveSourceSpec {
+        SourceDefinition::Archive(gaia_spec::ArchiveSourceSpec {
             path: missing_archive.display().to_string(),
+            url: None,
+            sha256: None,
             strip_components: 0,
             refresh_policy: SourceRefreshPolicySpec::Auto,
             pin_policy: SourcePinPolicySpec::Floating,

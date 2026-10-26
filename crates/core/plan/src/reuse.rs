@@ -395,6 +395,13 @@ pub(crate) fn source_backend_signature(
             command_signature("git", ["--version"]),
             git_source_state_signature(spec, git)
         ),
+        // A downloaded archive has no file in the workspace to watch: its
+        // content is its sha256 (see `source_content_identity`).
+        SourceDefinition::Archive(archive) if archive.is_url() => format!(
+            "{}|{}",
+            command_signature("tar", ["--version"]),
+            command_signature("curl", ["--version"])
+        ),
         SourceDefinition::Archive(archive) => format!(
             "{}|{}",
             command_signature("tar", ["--version"]),
@@ -422,6 +429,16 @@ pub fn source_content_identity(spec: &ResolvedBuildSpec, source: &gaia_spec::Sou
             "git:{}|subdir:{}",
             git_source_state_signature(spec, git),
             git.subdir.as_deref().unwrap_or("")
+        ),
+        // A downloaded archive is its checksum: verified before extraction, so
+        // equal digests are equal content wherever the cache entry sits.
+        SourceDefinition::Archive(archive) if archive.is_url() => format!(
+            "archive-url:{}",
+            archive
+                .sha256
+                .as_deref()
+                .unwrap_or("unverified")
+                .to_ascii_lowercase()
         ),
         SourceDefinition::Archive(archive) => format!(
             "archive:{}",

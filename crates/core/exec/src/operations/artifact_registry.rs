@@ -94,6 +94,17 @@ fn hash_upstream(
             .unwrap_or_else(|| "undefined".into());
         hasher.update(format!("source {} {identity}\n", source_id.as_str()).as_bytes());
     }
+    // The toolchain an artifact cross-compiles with is part of what it is:
+    // another SDK, prefix, sysroot or Rust target gives another entry.
+    if let Some(toolchain) = &artifact.toolchain {
+        hasher.update(
+            format!(
+                "toolchain {}\n",
+                gaia_plan::toolchain_identity(spec, toolchain)
+            )
+            .as_bytes(),
+        );
+    }
     for dependency in &artifact.dependencies {
         if let Some(upstream) = spec
             .artifacts

@@ -158,10 +158,22 @@ pub(crate) fn collect_unresolved_tokens(raw: &RawBuildConfig) -> Vec<RawUnresolv
                     &mut unresolved,
                 );
             }
-            RawSourceDefinition::Archive { path, .. } => {
-                scan_string(
+            RawSourceDefinition::Archive {
+                path, url, sha256, ..
+            } => {
+                scan_optional(
                     &format!("sources.{}.archive.path", source.id),
-                    path,
+                    path.as_deref(),
+                    &mut unresolved,
+                );
+                scan_optional(
+                    &format!("sources.{}.archive.url", source.id),
+                    url.as_deref(),
+                    &mut unresolved,
+                );
+                scan_optional(
+                    &format!("sources.{}.archive.sha256", source.id),
+                    sha256.as_deref(),
                     &mut unresolved,
                 );
             }

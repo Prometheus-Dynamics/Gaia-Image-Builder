@@ -417,6 +417,14 @@ fn docker_command(
     .with_extra_env("HOME", &docker_home)
     .with_extra_env("XDG_CACHE_HOME", &docker_cache)
     .with_pull_never(contract.offline);
+    // A cross build's SDK is read at its own host paths (the linker, the
+    // sysroot): mount its root and sysroot where they are. Only arguments are
+    // scanned for paths, so an environment variable's path is not mounted by
+    // itself.
+    if let Some(toolchain) = &contract.toolchain {
+        spec.mounts.push(toolchain.root.clone());
+        spec.mounts.push(toolchain.sysroot.clone());
+    }
     // Containers run with --rm, so tool caches inside the image are lost after
     // every build. Keep them in the workspace cache unless the artifact sets
     // its own location.
@@ -436,6 +444,8 @@ fn docker_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ArtifactToolchainContract;
+    use crate::contract::{ArtifactDockerExecution, ArtifactExecutionBackend};
     use gaia_spec::{
         ArtifactDefinition, ArtifactOutputSpec, ArtifactSpec, ArtifactVariantSpec,
         OutputRetentionPolicySpec, RustArtifactSpec,
@@ -471,6 +481,52 @@ mod tests {
             policy,
             OutputRetentionPolicySpec::default(),
         )
+    }
+
+    #[test]
+    fn docker_mounts_the_sdk_root_and_sysroot_of_a_cross_build() {
+        let scratch = TempDir::new("gaia-docker-sdk-mount");
+        let workspace = scratch.join("ws");
+        let root = scratch.join("sdk");
+        let sysroot = root.join("aarch64-buildroot-linux-gnu/sysroot");
+        fs::create_dir_all(&sysroot).expect("sdk sysroot");
+        fs::create_dir_all(&workspace).expect("workspace");
+        let mut contract = contract(1);
+        contract.workspace_root = Some(workspace.display().to_string());
+        contract.execution_backend = ArtifactExecutionBackend::Docker(ArtifactDockerExecution {
+            image: "builder:latest".into(),
+            build: None,
+        });
+        contract.toolchain = Some(ArtifactToolchainContract {
+            id: "sdk".into(),
+            root: root.clone(),
+            sysroot: sysroot.clone(),
+            prefix: "aarch64-buildroot-linux-gnu-".into(),
+            triple: "aarch64-buildroot-linux-gnu".into(),
+            rust_target: Some("aarch64-unknown-linux-gnu".into()),
+            page_size: None,
+            relocate: false,
+        });
+        // The compiler is named by its path, so the command carries the SDK in
+        // an environment variable as the Rust provider sets it.
+        let mut command = Command::new("cargo");
+        command.env(
+            "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER",
+            root.join("bin/aarch64-buildroot-linux-gnu-gcc"),
+        );
+        let wrapped = command_for_execution(&command, &contract).expect("docker command");
+        let args: Vec<String> = wrapped
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        for path in [&root, &sysroot] {
+            let mount = format!("{0}:{0}", path.display());
+            assert!(
+                args.windows(2)
+                    .any(|pair| pair[0] == "-v" && pair[1] == mount),
+                "{mount} is mounted: {args:?}"
+            );
+        }
     }
 
     /// A fake tool that appends one line to `calls` per run, then runs `body`.

@@ -39,6 +39,12 @@ pub(super) fn interpolate_assembly_package(
     opt(&mut scripts.prerm, raw, env);
     opt(&mut scripts.postrm, raw, env);
     all(&mut scripts.conffiles, raw, env);
+
+    if let Some(device) = &mut package.device {
+        opt(&mut device.toolchain, raw, env);
+        opt(&mut device.sysroot, raw, env);
+        opt(&mut device.max_glibc, raw, env);
+    }
     package
 }
 

@@ -130,7 +130,14 @@ const GIT_SOURCE_KEYS: &[&str] = &[
     "git_backend",
 ];
 const PATH_SOURCE_KEYS: &[&str] = &["path", "identity_ignore", "refresh", "pin"];
-const ARCHIVE_SOURCE_KEYS: &[&str] = &["path", "strip_components", "refresh", "pin"];
+const ARCHIVE_SOURCE_KEYS: &[&str] = &[
+    "path",
+    "url",
+    "sha256",
+    "strip_components",
+    "refresh",
+    "pin",
+];
 const DOWNLOAD_SOURCE_KEYS: &[&str] = &["url", "sha256", "output_path", "refresh", "pin"];
 
 fn source_fields(kind: Option<&str>) -> Option<Vec<&'static str>> {
@@ -150,6 +157,7 @@ const ARTIFACT_COMMON_KEYS: &[&str] = &[
     "kind",
     "when",
     "source",
+    "toolchain",
     "sources",
     "execution",
     "target",
@@ -438,6 +446,7 @@ const SECTIONS: &[Section] = &[
         ],
     ),
     section("install", struct_fields::<raw::RawInstallConfig>, &[]),
+    section("toolchains", struct_fields::<raw::RawToolchainConfig>, &[]),
     named_tables("secrets", no_fixed_fields, secret_entry_fields, &[]),
     section(
         "checkpoints",

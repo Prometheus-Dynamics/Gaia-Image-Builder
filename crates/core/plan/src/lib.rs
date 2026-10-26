@@ -33,17 +33,21 @@ pub use reuse::{
 pub use reuse_details::{fingerprint_change_detail, operation_components, recorded_fingerprint};
 pub use reuse_explain::{InvalidationSummary, invalidation_summary};
 pub use reuse_inputs::operation_fingerprint;
+pub use reuse_toolchain::toolchain_identity;
 pub use runtime_libs::{
-    RuntimeClosure, RuntimeEntry, derive_sysroot, is_dynamic_elf, missing_runtime_libraries,
-    resolve_runtime_closure,
+    RuntimeClosure, RuntimeEntry, derive_sysroot, find_sysroot_library, is_dynamic_elf,
+    missing_runtime_libraries, missing_runtime_libraries_in_roots, resolve_runtime_closure,
 };
+pub use elf::{ElfObject, VersionNeed, parse_elf};
 pub use targets::{PlanDomain, PlanTarget};
 pub use tree_digest::{tree_digest_members, tree_digest_signature};
 
 /// ELF objects for tests that copy binaries (`test-fixtures` feature).
 #[cfg(feature = "test-fixtures")]
 pub mod test_fixtures {
-    pub use crate::elf::tests::{EM_AARCH64, EM_X86_64, ElfFixture, build_elf};
+    pub use crate::elf::tests::{
+        EM_AARCH64, EM_X86_64, ElfFixture, ElfVersions, build_elf, build_elf_with,
+    };
 }
 
 use gaia_artifact_providers::{ArtifactProviderCatalog, ArtifactProviderOperation};

@@ -88,6 +88,11 @@ pub(super) const ASSEMBLY_CHILDREN: &[Section] = &[
                 struct_fields::<raw_assembly::RawAssemblyPackageScriptsConfig>,
                 &[],
             ),
+            section(
+                "device",
+                struct_fields::<raw_assembly::RawAssemblyPackageDeviceConfig>,
+                &[],
+            ),
         ],
     ),
     section(

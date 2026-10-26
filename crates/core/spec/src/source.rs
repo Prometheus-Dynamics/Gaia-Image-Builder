@@ -125,7 +125,18 @@ impl AsRef<Path> for PathSourceSpec {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ArchiveSourceSpec {
+    /// The archive file, as a workspace path. Empty when the archive is
+    /// downloaded from `url` instead.
     pub path: String,
+    /// Where the archive is downloaded from (`url`), instead of `path`. The
+    /// download goes to the shared download cache, keyed by `sha256`.
+    /// Not serialized when unset, so the fingerprints of `path` archives keep.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// The archive's SHA-256, lowercase hex. Required with `url` and checked
+    /// before the archive is extracted; not allowed with `path`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
     pub strip_components: u32,
     pub refresh_policy: SourceRefreshPolicySpec,
     pub pin_policy: SourcePinPolicySpec,
@@ -134,6 +145,11 @@ pub struct ArchiveSourceSpec {
 impl ArchiveSourceSpec {
     pub fn as_path(&self) -> &Path {
         Path::new(&self.path)
+    }
+
+    /// Whether the archive is downloaded from `url` rather than read from `path`.
+    pub fn is_url(&self) -> bool {
+        self.url.is_some()
     }
 }
 

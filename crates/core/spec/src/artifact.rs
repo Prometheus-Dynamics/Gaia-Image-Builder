@@ -13,6 +13,11 @@ pub struct ArtifactSpec {
     pub extra_sources: Vec<SourceId>,
     pub execution: Option<ArtifactExecutionSpec>,
     pub target: Option<String>,
+    /// The `[[toolchains]]` id a rust artifact builds with (see
+    /// `ResolvedToolchain`). Not serialized when unset, so the fingerprints of
+    /// artifacts without one keep.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub toolchain: Option<String>,
     pub build_mode: Option<BuildModeSpec>,
     pub dependencies: Vec<ArtifactRef>,
     pub after_image_prepare: bool,
@@ -34,6 +39,7 @@ impl ArtifactSpec {
             extra_sources: Vec::new(),
             execution: None,
             target: None,
+            toolchain: None,
             build_mode: None,
             dependencies: Vec::new(),
             after_image_prepare: false,

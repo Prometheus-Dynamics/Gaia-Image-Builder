@@ -132,6 +132,91 @@ pub fn download_cache_path(workspace_root: &Path, sha: &str) -> Option<PathBuf> 
     })
 }
 
+/// The download cache file of `url` with the SHA-256 `sha256`, verified. It is
+/// fetched into the cache when it is not there yet: the bytes are hashed
+/// before they are stored, and a mismatch is an error that names the expected
+/// and the actual digest (nothing is stored). A cached file is used as it is,
+/// the same trust a `download` source gets. Offline, the cache is all there is:
+/// a missing entry is an error.
+pub(crate) fn cached_verified_download(
+    spec: &ResolvedBuildSpec,
+    execution: &SourceExecutionContext,
+    url: &str,
+    sha256: &str,
+    log_sink: Option<ProcessLogSink>,
+    cancel_check: Option<ProcessCancelCheck>,
+) -> Result<PathBuf, SourceProviderError> {
+    let sha = sha256.to_ascii_lowercase();
+    let cache_path = download_cache_path(&execution.workspace_root, &sha).ok_or_else(|| {
+        SourceProviderError::new(
+            SourceProviderErrorKind::PolicyBlocked,
+            format!(
+                "archive url '{}' needs a SHA-256 digest, got '{sha256}'",
+                redact_url_userinfo(url)
+            ),
+        )
+    })?;
+    if cache_path.is_file() {
+        return Ok(cache_path);
+    }
+    let url_text = redact_url_userinfo(url);
+    if spec.policy.execution.offline {
+        return Err(SourceProviderError::new(
+            SourceProviderErrorKind::PolicyBlocked,
+            format!(
+                "offline: archive '{url_text}' (sha256 {sha}) is not in the download cache at '{}'; run gaia prefetch (or a build online) first",
+                cache_path.display()
+            ),
+        ));
+    }
+    let parent = cache_path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).map_err(|error| {
+        SourceProviderError::backend_command(format!(
+            "failed to create download cache dir '{}': {error}",
+            parent.display()
+        ))
+    })?;
+    // Fetched beside the entry under a temporary name, then renamed: a
+    // partial download is never visible under the entry's name.
+    let temp = parent.join(format!(".{sha}.{}.download", std::process::id()));
+    let mut command = Command::new("curl");
+    command.arg("-LfsS").arg(url).arg("-o").arg(&temp);
+    let fetched = run_command_with_policy(
+        command,
+        execution,
+        "download archive source",
+        SourceCommandPolicy {
+            attempts: spec.policy.providers.download.retry_attempts.max(1),
+            retry_backoff_ms: spec.policy.providers.download.retry_backoff_ms,
+            retry_backoff_strategy: spec.policy.providers.download.retry_backoff_strategy,
+            timeout_seconds: spec.policy.providers.download.timeout_seconds.max(1),
+            output_retention: process_output_retention(spec),
+        },
+        log_sink,
+        cancel_check,
+    );
+    if let Err(error) = fetched {
+        let _ = fs::remove_file(&temp);
+        return Err(error);
+    }
+    let actual = sha256_or_placeholder(&temp);
+    if !actual.eq_ignore_ascii_case(&sha) {
+        let _ = fs::remove_file(&temp);
+        return Err(SourceProviderError::new(
+            SourceProviderErrorKind::OutputMissing,
+            format!("archive '{url_text}' sha256 mismatch: expected {sha}, got {actual}"),
+        ));
+    }
+    fs::rename(&temp, &cache_path).map_err(|error| {
+        let _ = fs::remove_file(&temp);
+        SourceProviderError::backend_command(format!(
+            "failed to store archive in the download cache '{}': {error}",
+            cache_path.display()
+        ))
+    })?;
+    Ok(cache_path)
+}
+
 /// Copies a verified download into the cache through a temporary file, so a
 /// partially written entry is never visible under its final name.
 fn store_in_download_cache(file: &Path, cache_path: &Path) -> std::io::Result<()> {

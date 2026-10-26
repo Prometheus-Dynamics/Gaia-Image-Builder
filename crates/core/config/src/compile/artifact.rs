@@ -64,6 +64,7 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig, sources: &[SourceSpec]) -
         extra_sources,
         execution: compile_artifact_execution(raw.execution),
         target: raw.target,
+        toolchain: raw.toolchain,
         build_mode: raw.profile.map(compile_build_mode),
         dependencies: raw.dependencies.into_iter().map(ArtifactRef::new).collect(),
         after_image_prepare: raw.after_image_prepare,

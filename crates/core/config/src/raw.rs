@@ -39,6 +39,8 @@ pub struct RawBuildConfig {
     pub env: BTreeMap<String, String>,
     pub workspace: RawWorkspaceConfig,
     pub sources: Vec<RawSourceConfig>,
+    /// `[[toolchains]]`: cross toolchains from an external SDK.
+    pub toolchains: Vec<RawToolchainConfig>,
     pub artifacts: Vec<RawArtifactConfig>,
     pub install: Vec<RawInstallConfig>,
     pub stage: RawStageConfig,
@@ -507,7 +509,16 @@ pub enum RawSourceDefinition {
         pin: Option<RawSourcePinPolicy>,
     },
     Archive {
-        path: String,
+        /// The archive file (a workspace path). Exactly one of `path` and `url`.
+        #[serde(default)]
+        path: Option<String>,
+        /// Download the archive from here, verified by `sha256`, into the
+        /// download cache.
+        #[serde(default)]
+        url: Option<String>,
+        #[serde(default)]
+        sha256: Option<String>,
+        #[serde(default)]
         strip_components: u32,
         #[serde(default)]
         refresh: Option<RawSourceRefreshPolicy>,
@@ -524,6 +535,48 @@ pub enum RawSourceDefinition {
         #[serde(default)]
         pin: Option<RawSourcePinPolicy>,
     },
+}
+
+/// `[[toolchains]]`: a cross toolchain. Exactly one of `source` and `path`
+/// names the SDK root, and exactly one of `sysroot` and `sysroot_source` the
+/// sysroot; the validator reports the rest.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct RawToolchainConfig {
+    pub id: String,
+    pub kind: RawToolchainKind,
+    /// The SDK root is the tree of this source.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// The SDK root is this directory (a workspace path).
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Run `<root>/relocate-sdk.sh` once per extracted location.
+    #[serde(default)]
+    pub relocate: bool,
+    /// The compiler prefix in `<root>/bin` (default: the triple and `-`).
+    #[serde(default)]
+    pub prefix: Option<String>,
+    #[serde(default)]
+    pub triple: Option<String>,
+    /// The sysroot, relative to the root (or absolute).
+    #[serde(default)]
+    pub sysroot: Option<String>,
+    /// The sysroot is the tree of this source.
+    #[serde(default)]
+    pub sysroot_source: Option<String>,
+    #[serde(default)]
+    pub rust_target: Option<String>,
+    /// The device's page size in bytes (a power of two, at least 4096): Rust
+    /// artifacts link for it, and the device checks of a package built with
+    /// this toolchain default their `min_page_size` to it.
+    #[serde(default)]
+    pub page_size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum RawToolchainKind {
+    BuildrootSdk,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -555,6 +608,9 @@ pub struct RawArtifactConfig {
     pub when: Option<RawWhenConfig>,
     #[serde(default)]
     pub source: Option<String>,
+    /// Rust only: the `[[toolchains]]` id the artifact cross-compiles with.
+    #[serde(default)]
+    pub toolchain: Option<String>,
     /// Sources the artifact reads besides `source`: the artifact is rebuilt
     /// when one of them changes.
     #[serde(default)]

@@ -29,6 +29,7 @@ mod providers;
 mod reporting;
 mod secrets;
 mod sources;
+mod toolchains;
 mod workspace;
 
 pub use core::validate_spec;

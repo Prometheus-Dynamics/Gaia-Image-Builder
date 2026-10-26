@@ -647,6 +647,8 @@ mod tests_gpt;
 mod tests_oci;
 #[path = "tests_package.rs"]
 mod tests_package;
+#[path = "tests_package_device.rs"]
+mod tests_package_device;
 #[path = "tests_schedule.rs"]
 mod tests_schedule;
 

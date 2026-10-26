@@ -8,17 +8,29 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use gaia_spec::AssemblyPackageSpec;
+use gaia_spec::{AssemblyPackageDeviceSpec, AssemblyPackageSpec, ResolvedBuildSpec};
 
 use super::package_archive::{
     ArMember, TarEntry, TarEntryKind, extract_member, list_tar, read_ar, read_tar_entry,
 };
 use super::package_control::{check_control_fields, control_value, parse_control};
+use super::package_device::{self, DeviceCheck};
 
 /// What the check counted.
 pub(super) struct PackageCheck {
     /// The non-directory entries of the data.
     pub(super) files: usize,
+}
+
+/// The device checks of a package's tree (see `package_device`): its ELF files
+/// against the device's sysroot. `Err` names every problem.
+pub(super) fn verify_device(
+    spec: &ResolvedBuildSpec,
+    package: &AssemblyPackageSpec,
+    device: &AssemblyPackageDeviceSpec,
+    tree: &Path,
+) -> Result<DeviceCheck, String> {
+    package_device::check_device(spec, package, device, tree)
 }
 
 /// Checks the written package at `output`. `stage` is scratch space for the

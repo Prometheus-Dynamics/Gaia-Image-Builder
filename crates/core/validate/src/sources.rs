@@ -69,7 +69,20 @@ pub(crate) fn validate_sources(
                     ));
                 }
             }
+            SourceDefinition::Archive(archive) if archive.is_url() => {
+                validate_archive_url(source.id.as_str(), archive, diagnostics);
+            }
             SourceDefinition::Archive(archive) => {
+                if archive.sha256.is_some() {
+                    diagnostics.push(error(
+                        "archive_sha256_without_url",
+                        format!(
+                            "archive source '{}' sets sha256 without url; sha256 checks a downloaded archive",
+                            source.id.as_str()
+                        ),
+                        Some(format!("source:{}", source.id.as_str())),
+                    ));
+                }
                 if archive.path.trim().is_empty() {
                     diagnostics.push(error(
                         "archive_source_empty",
@@ -111,6 +124,63 @@ pub(crate) fn validate_sources(
     validate_git_source_refs(spec, diagnostics);
     validate_git_lockfile(spec, diagnostics);
     source_ids
+}
+
+/// An archive source that is downloaded: `url` with its `sha256`, and no
+/// `path`. The checksum is what the archive is verified against before it is
+/// extracted, so it is required.
+fn validate_archive_url(
+    id: &str,
+    archive: &gaia_spec::ArchiveSourceSpec,
+    diagnostics: &mut Vec<ValidationDiagnostic>,
+) {
+    let location = Some(format!("source:{id}"));
+    if !archive.path.trim().is_empty() {
+        diagnostics.push(error(
+            "archive_path_and_url",
+            format!("archive source '{id}' sets both path and url; choose one"),
+            location.clone(),
+        ));
+    }
+    let url = archive.url.as_deref().unwrap_or_default();
+    if url.trim().is_empty() {
+        diagnostics.push(error(
+            "archive_url_empty",
+            format!("archive source '{id}' has an empty url"),
+            location.clone(),
+        ));
+    } else if !["https://", "http://", "file://"]
+        .iter()
+        .any(|scheme| url.starts_with(scheme))
+    {
+        diagnostics.push(error(
+            "archive_url_invalid",
+            format!(
+                "archive source '{id}' url '{url}' must start with https://, http:// or file://"
+            ),
+            location.clone(),
+        ));
+    }
+    match archive.sha256.as_deref() {
+        None => diagnostics.push(error(
+            "archive_sha256_missing",
+            format!(
+                "archive source '{id}' downloads from url and needs sha256 (the archive is verified before it is extracted)"
+            ),
+            location,
+        )),
+        Some(sha) if !is_sha256_hex(sha) => diagnostics.push(error(
+            "archive_sha256_invalid",
+            format!("archive source '{id}' sha256 must be 64 hexadecimal digits"),
+            location,
+        )),
+        Some(_) => {}
+    }
+}
+
+/// A SHA-256 written as 64 hexadecimal digits (either case).
+pub(crate) fn is_sha256_hex(sha: &str) -> bool {
+    sha.len() == 64 && sha.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 /// Normalizes a repository URL for comparison (`.git` suffix, trailing `/`).

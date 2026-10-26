@@ -284,6 +284,7 @@ fn merge_two(mut base: RawBuildConfig, overlay: RawBuildConfig) -> RawBuildConfi
     base.sources = merge_by_key(base.sources, overlay.sources, |item| item.id.clone());
     base.artifacts = merge_by_key(base.artifacts, overlay.artifacts, |item| item.id.clone());
     base.install = merge_by_key(base.install, overlay.install, |item| item.id.clone());
+    base.toolchains = merge_by_key(base.toolchains, overlay.toolchains, |item| item.id.clone());
     base.stage = merge_stage(base.stage, overlay.stage);
 
     base.image = merge_image(base.image, overlay.image);

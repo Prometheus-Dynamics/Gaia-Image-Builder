@@ -17,6 +17,7 @@ use std::process::Command;
 
 mod cargo_errors;
 mod cargo_git;
+mod toolchain;
 mod tools;
 
 use cargo_errors::cargo_failing_packages;
@@ -159,10 +160,11 @@ impl ArtifactProvider for RustProvider {
             _ => String::new(),
         };
         Some(format!(
-            "{group}features={:?}|source={:?}|target={:?}|profile={:?}|backend={:?}|timeout={}|retries={}/{}/{:?}|jobs={:?}|retention={:?}",
+            "{group}features={:?}|source={:?}|target={:?}|toolchain={:?}|profile={:?}|backend={:?}|timeout={}|retries={}/{}/{:?}|jobs={:?}|retention={:?}",
             CargoFeatureFlags::of(artifact),
             contract.source_dir,
             contract.artifact_target,
+            contract.toolchain,
             contract.build_mode,
             contract.execution_backend,
             contract.timeout_seconds,
@@ -685,9 +687,11 @@ fn run_cargo_build(
     let git_env =
         cargo_git::cargo_git_env(&flags.git_sources, contract, source_dir, log_sink.as_ref())?;
     let sccache = sccache_env(contract, log_sink.as_ref());
+    let toolchain_env = toolchain::cargo_env(contract)?;
     let mut command = cargo_build_command(source_dir, packages, flags, contract, &target.dir);
     command.envs(git_env.iter().map(|(key, value)| (key, value)));
     command.envs(sccache.iter().map(|(key, value)| (key, value)));
+    command.envs(toolchain_env.iter().map(|(key, value)| (key, value)));
     command.envs(offline_cargo_env(contract.offline));
     let label = match packages {
         [package] => format!("cargo build for package '{package}'"),

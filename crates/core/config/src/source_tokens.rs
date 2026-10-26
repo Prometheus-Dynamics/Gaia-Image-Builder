@@ -59,6 +59,28 @@ pub(crate) fn short_commit(commit: &str) -> String {
     commit.chars().take(8).collect()
 }
 
+/// The sources of the toolchains that a package's device checks name (the
+/// toolchain's root and sysroot trees, when a source provides them).
+fn device_toolchain_sources(spec: &ResolvedBuildSpec) -> BTreeSet<SourceId> {
+    let Some(assembly) = &spec.image.assembly else {
+        return BTreeSet::new();
+    };
+    assembly
+        .packages
+        .iter()
+        .filter_map(|package| package.device.as_ref())
+        .filter_map(|device| device.toolchain.as_ref())
+        .filter_map(|id| spec.toolchains.iter().find(|toolchain| toolchain.id == *id))
+        .flat_map(|toolchain| {
+            toolchain
+                .root_source
+                .iter()
+                .chain(toolchain.sysroot_source.iter())
+                .cloned()
+        })
+        .collect()
+}
+
 /// Substitutes `${source.<id>.commit}` and `${source.<id>.path}`, and drops
 /// the tokens it resolved from the unresolved list.
 pub(crate) fn substitute_source_tokens(spec: &mut ResolvedBuildSpec) {
@@ -71,6 +93,7 @@ pub(crate) fn substitute_source_tokens(spec: &mut ResolvedBuildSpec) {
         .iter()
         .map(|source| source.id.clone())
         .collect::<BTreeSet<SourceId>>();
+    let device_sources = device_toolchain_sources(spec);
     if let Some(assembly) = spec.image.assembly.as_mut() {
         let mut leftovers = Vec::new();
         let mut referenced = BTreeSet::new();
@@ -84,7 +107,10 @@ pub(crate) fn substitute_source_tokens(spec: &mut ResolvedBuildSpec) {
             }));
         });
         // The declared sources the assembly names: it depends on each one
-        // (an unknown id stays an unresolved token instead).
+        // (an unknown id stays an unresolved token instead). A device sysroot
+        // that a toolchain's source provides is read by the package checks, so
+        // the assembly waits for that source too.
+        referenced.extend(device_sources);
         assembly.assembly_sources = referenced
             .into_iter()
             .filter(|id| declared.contains(id))

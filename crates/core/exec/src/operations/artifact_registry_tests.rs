@@ -281,3 +281,45 @@ fn the_same_source_content_in_another_checkout_gives_the_same_key() {
         key_in(&dir.path().join("checkout-b"))
     );
 }
+
+#[test]
+fn the_key_follows_the_toolchain_an_artifact_builds_with() {
+    let dir = TempDir::new("artifact-registry-key-toolchain");
+    let root = dir.path().join("ws");
+    let mut spec = spec_in(&root);
+    let artifact_key = |spec: &ResolvedBuildSpec| {
+        let artifact = spec.artifacts[0].clone();
+        registry_key(spec, &artifact)
+    };
+    let without = artifact_key(&spec);
+
+    spec.toolchains.push(gaia_spec::ToolchainSpec {
+        id: "sdk".into(),
+        kind: gaia_spec::ToolchainKindSpec::BuildrootSdk,
+        root_source: None,
+        root_path: Some(root.join("sdk").display().to_string()),
+        relocate: false,
+        prefix: Some("aarch64-linux-".into()),
+        triple: "aarch64-buildroot-linux-gnu".into(),
+        sysroot_path: Some("sysroot".into()),
+        sysroot_source: None,
+        rust_target: Some("aarch64-unknown-linux-gnu".into()),
+        page_size: None,
+    });
+    spec.artifacts[0].toolchain = Some("sdk".into());
+    let with_sdk = artifact_key(&spec);
+    assert_ne!(with_sdk, without, "a toolchain changes the entry");
+
+    spec.toolchains[0].prefix = Some("aarch64-other-".into());
+    assert_ne!(
+        artifact_key(&spec),
+        with_sdk,
+        "another compiler prefix is another toolchain"
+    );
+    spec.toolchains[0].prefix = Some("aarch64-linux-".into());
+    assert_eq!(
+        artifact_key(&spec),
+        with_sdk,
+        "the same toolchain, the same key"
+    );
+}

@@ -2,7 +2,7 @@ use super::*;
 use crate::raw::RawImageLayersConfig;
 use crate::raw_assembly::{
     RawAssemblyArchiveConfig, RawAssemblyDeviceKind, RawAssemblyJsonValue, RawAssemblyOciConfig,
-    RawAssemblyPackageConfig, RawAssemblyPackageControlConfig,
+    RawAssemblyPackageConfig, RawAssemblyPackageControlConfig, RawAssemblyPackageDeviceConfig,
 };
 use gaia_spec::{
     AssemblyArchiveMemberSpec, AssemblyArchiveSpec, AssemblyBinarySpec, AssemblyCompressedFsSpec,
@@ -532,6 +532,7 @@ fn compile_assembly_package(raw: RawAssemblyPackageConfig) -> gaia_spec::Assembl
     let control = compile_package_control(raw.control);
     let output = gaia_spec::AssemblyPackageSpec::output_for(&raw.dest, &control);
     let scripts = raw.scripts;
+    let device = raw.device.map(compile_package_device);
     gaia_spec::AssemblyPackageSpec {
         id: raw.id,
         format: raw
@@ -551,6 +552,21 @@ fn compile_assembly_package(raw: RawAssemblyPackageConfig) -> gaia_spec::Assembl
             postrm: scripts.postrm.map(Into::into),
             conffiles: scripts.conffiles,
         },
+        device,
+    }
+}
+
+/// `[image.assembly.packages.device]`. Which of `toolchain` and `sysroot` is
+/// set is checked by the validator.
+fn compile_package_device(
+    raw: RawAssemblyPackageDeviceConfig,
+) -> gaia_spec::AssemblyPackageDeviceSpec {
+    gaia_spec::AssemblyPackageDeviceSpec {
+        toolchain: raw.toolchain,
+        sysroot: raw.sysroot,
+        max_glibc: raw.max_glibc,
+        min_page_size: raw.min_page_size,
+        check_needed: raw.check_needed.unwrap_or(true),
     }
 }
 

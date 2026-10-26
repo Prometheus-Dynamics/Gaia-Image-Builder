@@ -106,6 +106,17 @@ pub(crate) fn validate_packages(
 
         validate_control(package, &label, diagnostics);
         validate_scripts(package, &label, diagnostics);
+        if let Some(device) = &package.device {
+            let toolchain_ids = crate::toolchains::toolchain_ids(&spec.toolchains);
+            crate::toolchains::validate_device_sysroot(
+                spec,
+                &toolchain_ids,
+                package.id.as_str(),
+                device,
+                location(),
+                diagnostics,
+            );
+        }
     }
 }
 

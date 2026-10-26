@@ -4,6 +4,7 @@ mod image;
 mod policy;
 mod precedence;
 mod source;
+mod toolchain;
 mod when;
 
 use artifact::{compile_artifact, complete_build_groups};
@@ -20,6 +21,7 @@ use policy::{
 };
 use precedence::{precedence_layers, selection_precedence_order};
 use source::{compile_source_pin_policy, compile_source_refresh_policy};
+use toolchain::{add_toolchain_sources, compile_toolchain};
 use when::apply_when_selection;
 
 use crate::raw::{
@@ -350,18 +352,31 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                 }),
                 RawSourceDefinition::Archive {
                     path,
+                    url,
+                    sha256,
                     strip_components,
                     refresh,
                     pin,
-                } => SourceDefinition::Archive(gaia_spec::ArchiveSourceSpec {
-                    path,
-                    strip_components,
-                    refresh_policy: compile_source_refresh_policy(
-                        refresh,
-                        SourceRefreshPolicySpec::Auto,
-                    ),
-                    pin_policy: compile_source_pin_policy(pin, SourcePinPolicySpec::Floating),
-                }),
+                } => {
+                    // A downloaded archive is pinned by its checksum, as a
+                    // download with a sha256 is.
+                    let default_pin_policy = if url.is_some() {
+                        SourcePinPolicySpec::Locked
+                    } else {
+                        SourcePinPolicySpec::Floating
+                    };
+                    SourceDefinition::Archive(gaia_spec::ArchiveSourceSpec {
+                        path: path.unwrap_or_default(),
+                        url,
+                        sha256,
+                        strip_components,
+                        refresh_policy: compile_source_refresh_policy(
+                            refresh,
+                            SourceRefreshPolicySpec::Auto,
+                        ),
+                        pin_policy: compile_source_pin_policy(pin, default_pin_policy),
+                    })
+                }
                 RawSourceDefinition::Download {
                     url,
                     sha256,
@@ -389,11 +404,13 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
             SourceSpec::new(source.id, definition)
         })
         .collect();
+    spec.toolchains = raw.toolchains.into_iter().map(compile_toolchain).collect();
     spec.artifacts = raw
         .artifacts
         .into_iter()
         .map(|artifact| compile_artifact(artifact, &spec.sources))
         .collect();
+    add_toolchain_sources(&mut spec.artifacts, &spec.toolchains);
     complete_build_groups(&mut spec.artifacts);
     spec.install.entries = raw
         .install

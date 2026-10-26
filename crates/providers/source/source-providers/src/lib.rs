@@ -6,7 +6,7 @@ use gaia_process::{
 };
 pub use gaia_process::{ProcessCancelCheck, ProcessLogLine, ProcessLogSink};
 use gaia_spec::{
-    ArchiveSourceSpec, GitBackendSpec, GitSourceSpec, ResolvedBuildSpec, RetryBackoffStrategySpec,
+    GitBackendSpec, GitSourceSpec, ResolvedBuildSpec, RetryBackoffStrategySpec,
     SourceDefinition, SourcePinPolicySpec, SourceProviderKind, SourceRefreshPolicySpec, SourceSpec,
     WorkspaceSpec, redact_url_userinfo,
 };
@@ -161,6 +161,8 @@ mod path;
 mod state;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_archive_url;
 
 pub(crate) use command::*;
 pub(crate) use digest::*;

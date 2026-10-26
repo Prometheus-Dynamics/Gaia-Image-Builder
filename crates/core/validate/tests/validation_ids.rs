@@ -101,6 +101,8 @@ fn workspace_paths_cannot_escape_workspace_or_alias_roots() {
         SourceId::new("alias-traversal"),
         SourceDefinition::Archive(gaia_spec::ArchiveSourceSpec {
             path: "@assets/../../outside.tar".into(),
+            url: None,
+            sha256: None,
             strip_components: 0,
             refresh_policy: gaia_spec::SourceRefreshPolicySpec::Never,
             pin_policy: gaia_spec::SourcePinPolicySpec::Locked,

@@ -197,6 +197,14 @@ fn artifact_inputs(spec: &ResolvedBuildSpec, artifact: &ArtifactSpec, inputs: &m
         inputs.json("extra sources", extra_sources);
     }
     inputs.json("execution", take_field(&mut rest, "", "execution"));
+    // The `[[toolchains]]` entry the artifact cross-compiles with: its SDK's
+    // identity, prefix, sysroot and Rust target (see `toolchain_identity`).
+    if let Some(toolchain) = &artifact.toolchain {
+        inputs.text(
+            "build toolchain",
+            crate::reuse_toolchain::toolchain_identity(spec, toolchain),
+        );
+    }
     inputs.text(
         "toolchain",
         format!(

@@ -16,6 +16,57 @@ use gaia_spec::{ArtifactDefinition, ArtifactExecutionSpec, ArtifactSpec, Resolve
 
 use crate::reuse::{COMMAND_SIGNATURE_TIMEOUT_SECONDS, command_signature};
 
+/// What a `[[toolchains]]` entry is, for the fingerprints and registry keys of
+/// the rust artifacts that build with it: its id, kind, compiler prefix, triple,
+/// Rust target and relocation, the content identity of its root and sysroot
+/// sources (or the configured path of a local directory), and the version the
+/// compiler reports. Equal content gives equal identities on every machine.
+/// `"undefined"` for an id the build does not declare.
+pub fn toolchain_identity(spec: &ResolvedBuildSpec, id: &str) -> String {
+    let Some(toolchain) = spec.toolchains.iter().find(|toolchain| toolchain.id == id) else {
+        return "undefined".into();
+    };
+    let source_identity = |source: &gaia_spec::SourceId| {
+        spec.sources
+            .iter()
+            .find(|candidate| candidate.id == *source)
+            .map(|candidate| crate::reuse::source_content_identity(spec, candidate))
+            .unwrap_or_else(|| "undefined".into())
+    };
+    let root = match (&toolchain.root_source, &toolchain.root_path) {
+        (Some(source), _) => source_identity(source),
+        (None, Some(path)) => format!("path:{path}"),
+        (None, None) => "none".into(),
+    };
+    let sysroot = match (&toolchain.sysroot_source, &toolchain.sysroot_path) {
+        (Some(source), _) => source_identity(source),
+        (None, Some(path)) => format!("path:{path}"),
+        (None, None) => "none".into(),
+    };
+    // The compiler's own version: a changed SDK at a configured path is seen
+    // even when the path is the same.
+    let compiler = match gaia_spec::resolve_toolchain(spec, id) {
+        Ok(resolved) => {
+            command_signature(&resolved.tool("gcc").display().to_string(), ["--version"])
+        }
+        Err(_) => "unresolved".into(),
+    };
+    format!(
+        "toolchain {id} kind={} root=[{root}] sysroot=[{sysroot}] triple={} prefix={} rust_target={} relocate={} page_size={} compiler=[{compiler}]",
+        toolchain.kind.as_str(),
+        toolchain.triple,
+        toolchain
+            .prefix
+            .clone()
+            .unwrap_or_else(|| gaia_spec::default_toolchain_prefix(&toolchain.triple)),
+        toolchain.rust_target.as_deref().unwrap_or("none"),
+        toolchain.relocate,
+        toolchain
+            .page_size
+            .map_or_else(|| "default".to_string(), |page| page.to_string()),
+    )
+}
+
 /// Where an artifact's build tools come from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ArtifactToolchain<'a> {
@@ -307,5 +358,62 @@ mod tests {
         assert!(program_on_path("sh"));
         assert!(!program_on_path("gaia-definitely-not-a-tool"));
         assert!(!program_on_path("/nonexistent/gaia-tool"));
+    }
+
+    #[test]
+    fn a_toolchain_identity_names_its_prefix_target_and_roots() {
+        let mut spec = gaia_spec::ResolvedBuildSpec::new("toolchain-identity");
+        spec.toolchains.push(gaia_spec::ToolchainSpec {
+            id: "sdk".into(),
+            kind: gaia_spec::ToolchainKindSpec::BuildrootSdk,
+            root_source: None,
+            root_path: Some("/no/such/sdk".into()),
+            relocate: false,
+            prefix: Some("aarch64-linux-".into()),
+            triple: "aarch64-buildroot-linux-gnu".into(),
+            sysroot_path: Some("sysroot".into()),
+            sysroot_source: None,
+            rust_target: Some("aarch64-unknown-linux-gnu".into()),
+            page_size: Some(16384),
+        });
+        let identity = toolchain_identity(&spec, "sdk");
+        assert!(identity.contains("prefix=aarch64-linux-"), "{identity}");
+        assert!(
+            identity.contains("rust_target=aarch64-unknown-linux-gnu"),
+            "{identity}"
+        );
+        assert!(identity.contains("root=[path:/no/such/sdk]"), "{identity}");
+        assert!(identity.contains("page_size=16384"), "{identity}");
+        assert_eq!(toolchain_identity(&spec, "ghost"), "undefined");
+
+        // The prefix defaults to the triple followed by a dash.
+        spec.toolchains[0].prefix = None;
+        assert!(
+            toolchain_identity(&spec, "sdk").contains("prefix=aarch64-buildroot-linux-gnu-"),
+            "{}",
+            toolchain_identity(&spec, "sdk")
+        );
+    }
+
+    #[test]
+    fn a_url_archive_is_identified_by_its_checksum() {
+        let mut spec = gaia_spec::ResolvedBuildSpec::new("archive-identity");
+        let sha = "AB".repeat(32);
+        let source = gaia_spec::SourceSpec::new(
+            "bundle",
+            gaia_spec::SourceDefinition::Archive(gaia_spec::ArchiveSourceSpec {
+                path: String::new(),
+                url: Some("https://example.invalid/bundle.tar.gz".into()),
+                sha256: Some(sha.clone()),
+                strip_components: 0,
+                refresh_policy: gaia_spec::SourceRefreshPolicySpec::Never,
+                pin_policy: gaia_spec::SourcePinPolicySpec::Locked,
+            }),
+        );
+        spec.sources.push(source.clone());
+        assert_eq!(
+            crate::reuse::source_content_identity(&spec, &source),
+            format!("archive-url:{}", sha.to_ascii_lowercase())
+        );
     }
 }

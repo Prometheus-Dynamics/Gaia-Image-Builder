@@ -12,7 +12,8 @@ use crate::ConfigError;
 use crate::env::ResolvedEnvironment;
 use crate::raw::{
     RawArtifactConfig, RawArtifactDefinition, RawBuildConfig, RawCheckpointConfig,
-    RawImageDefinition, RawSourceConfig, RawSourceDefinition, RawWorkspaceNamedPathConfig,
+    RawImageDefinition, RawSourceConfig, RawSourceDefinition, RawToolchainConfig,
+    RawWorkspaceNamedPathConfig,
 };
 use assembly::interpolate_image_assembly;
 
@@ -170,6 +171,12 @@ fn interpolate_fields(raw: RawBuildConfig, env: &ResolvedEnvironment) -> RawBuil
         .iter()
         .cloned()
         .map(|source| interpolate_source(source, &snapshot, env))
+        .collect();
+    interpolated.toolchains = snapshot
+        .toolchains
+        .iter()
+        .cloned()
+        .map(|toolchain| interpolate_toolchain(toolchain, &snapshot, env))
         .collect();
     interpolated.artifacts = snapshot
         .artifacts
@@ -369,6 +376,26 @@ fn interpolate_fields(raw: RawBuildConfig, env: &ResolvedEnvironment) -> RawBuil
     interpolated
 }
 
+fn interpolate_toolchain(
+    mut toolchain: RawToolchainConfig,
+    raw: &RawBuildConfig,
+    env: &ResolvedEnvironment,
+) -> RawToolchainConfig {
+    let text = |value: &mut Option<String>| {
+        if let Some(value) = value {
+            *value = resolver::interpolate_string(std::mem::take(value), raw, env);
+        }
+    };
+    text(&mut toolchain.source);
+    text(&mut toolchain.path);
+    text(&mut toolchain.prefix);
+    text(&mut toolchain.triple);
+    text(&mut toolchain.sysroot);
+    text(&mut toolchain.sysroot_source);
+    text(&mut toolchain.rust_target);
+    toolchain
+}
+
 fn interpolate_source(
     mut source: RawSourceConfig,
     raw: &RawBuildConfig,
@@ -413,11 +440,15 @@ fn interpolate_source(
         },
         RawSourceDefinition::Archive {
             path,
+            url,
+            sha256,
             strip_components,
             refresh,
             pin,
         } => RawSourceDefinition::Archive {
-            path: resolver::interpolate_string(path, raw, env),
+            path: path.map(|value| resolver::interpolate_string(value, raw, env)),
+            url: url.map(|value| resolver::interpolate_string(value, raw, env)),
+            sha256: sha256.map(|value| resolver::interpolate_string(value, raw, env)),
             strip_components,
             refresh,
             pin,
@@ -466,6 +497,9 @@ fn interpolate_artifact(
         .map(|value| resolver::interpolate_string(value, raw, env));
     artifact.target = artifact
         .target
+        .map(|value| resolver::interpolate_string(value, raw, env));
+    artifact.toolchain = artifact
+        .toolchain
         .map(|value| resolver::interpolate_string(value, raw, env));
     artifact.profile = artifact
         .profile

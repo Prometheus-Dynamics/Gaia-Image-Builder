@@ -167,6 +167,58 @@ pub fn missing_runtime_libraries(binary: &Path, sysroot: &Path) -> Result<Vec<St
     Ok(resolver.missing.into_iter().collect())
 }
 
+/// The libraries a dynamically linked file needs that none of `roots` holds,
+/// sorted. Each root is searched as [`missing_runtime_libraries`] searches a
+/// sysroot, so a library in the package itself (a root of its own tree) counts
+/// as found, as does one in the device sysroot. A name is reported only when
+/// every root misses it.
+pub fn missing_runtime_libraries_in_roots(
+    binary: &Path,
+    roots: &[&Path],
+) -> Result<Vec<String>, String> {
+    let mut missing: Option<BTreeMap<String, String>> = None;
+    for root in roots {
+        let names = missing_runtime_libraries(binary, root)?;
+        let here: BTreeMap<String, String> = names
+            .into_iter()
+            .map(|message| (missing_name(&message).to_string(), message))
+            .collect();
+        missing = Some(match missing {
+            None => here,
+            Some(previous) => previous
+                .into_iter()
+                .filter(|(name, _)| here.contains_key(name))
+                .collect(),
+        });
+    }
+    Ok(missing.unwrap_or_default().into_values().collect())
+}
+
+/// The name a missing-library message starts with: `libc.so.6` of
+/// `libc.so.6 (needed by /usr/bin/x)`.
+fn missing_name(message: &str) -> &str {
+    message.split(" (").next().unwrap_or(message)
+}
+
+/// The file `name` (such as `libc.so.6`) of a sysroot, found in the library
+/// directories the loader searches, with its symlinks followed inside the
+/// sysroot. `None` when no directory has it.
+pub fn find_sysroot_library(sysroot: &Path, name: &str) -> Result<Option<PathBuf>, String> {
+    let mut dirs: Vec<String> = DEFAULT_LIBRARY_DIRS
+        .iter()
+        .map(|dir| (*dir).to_string())
+        .collect();
+    for base in ["/lib", "/usr/lib"] {
+        dirs.extend(multiarch_dirs(sysroot, base)?);
+    }
+    for dir in dedupe(dirs) {
+        if let Some(walked) = walk(sysroot, &join_guest(&dir, name))? {
+            return Ok(Some(sysroot.join(walked.real.trim_start_matches('/'))));
+        }
+    }
+    Ok(None)
+}
+
 /// Whether the file at `path` is a dynamically linked ELF file: it names a
 /// program interpreter or a NEEDED library. A file that is not ELF, cannot be
 /// read, or is static is `false`.

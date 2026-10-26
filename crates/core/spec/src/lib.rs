@@ -32,6 +32,7 @@ mod source_dirs;
 mod stage;
 mod state;
 mod target_arch;
+mod toolchain;
 mod user_cache;
 mod variant;
 mod workspace;
@@ -76,7 +77,9 @@ pub use assembly_output_spec::{
     AssemblyTransformSpec, VERITY_DEFAULT_BLOCK_SIZE, VFAT_FAT_SIZES,
 };
 pub use assembly_package_spec::{
-    AssemblyPackageControlSpec, AssemblyPackageScriptsSpec, AssemblyPackageSpec, PACKAGE_FORMAT_IPK,
+    AssemblyPackageControlSpec, AssemblyPackageDeviceSpec, AssemblyPackageScriptsSpec,
+    AssemblyPackageSpec, DEFAULT_DEVICE_MIN_PAGE_SIZE,
+    PACKAGE_FORMAT_IPK, parse_glibc_version,
 };
 pub use assembly_spec::{
     AssemblyBinarySpec, AssemblyBusyboxInitramfsSpec, AssemblyCheckSpec, AssemblyDeviceKindSpec,
@@ -159,6 +162,10 @@ pub use target_arch::{TargetArch, target_arch};
 pub use user_cache::{
     USER_BUILDROOT_CCACHE_DIR, USER_BUILDROOT_PACKAGE_CACHE_DIR, user_cache_root,
 };
+pub use toolchain::{
+    ResolvedToolchain, ToolchainKindSpec, ToolchainSpec, default_toolchain_prefix,
+    resolve_toolchain, toolchain_root,
+};
 pub use variant::{
     DEFAULT_VARIANT_ID, VariantSpec, is_valid_variant_id, runtime_state_dir_name,
     variant_name_suffix,
@@ -180,6 +187,10 @@ pub struct ResolvedBuildSpec {
     pub workspace: WorkspaceSpec,
     pub export: ExportSpec,
     pub sources: Vec<SourceSpec>,
+    /// `[[toolchains]]`, in config order. Not serialized when empty, so a
+    /// build without toolchains keeps its fingerprints.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub toolchains: Vec<ToolchainSpec>,
     pub artifacts: Vec<ArtifactSpec>,
     pub install: InstallSpec,
     pub stage: StageSpec,
@@ -217,6 +228,7 @@ impl ResolvedBuildSpec {
             workspace: WorkspaceSpec::default(),
             export: ExportSpec::default(),
             sources: Vec::new(),
+            toolchains: Vec::new(),
             artifacts: Vec::new(),
             install: InstallSpec::default(),
             stage: StageSpec::default(),

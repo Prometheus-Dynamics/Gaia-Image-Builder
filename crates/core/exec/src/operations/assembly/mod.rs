@@ -32,6 +32,7 @@ mod oci;
 mod package;
 mod package_archive;
 mod package_control;
+mod package_device;
 mod package_verify;
 mod placement;
 mod placement_owner;

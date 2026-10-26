@@ -35,9 +35,41 @@ impl<'a> ElfFixture<'a> {
 /// whole file here, so reading DT_STRTAB exercises the address mapping.
 const VADDR_BASE: u64 = 0x40_0000;
 
+/// Symbol versions and the load alignment a fixture adds to its object.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ElfVersions<'a> {
+    /// `(library, version)` pairs the object needs, such as
+    /// `("libc.so.6", "GLIBC_2.34")`.
+    pub needs: &'a [(&'a str, &'a str)],
+    /// Versions the object defines, such as `GLIBC_2.41` for a C library.
+    pub defs: &'a [&'a str],
+    /// `p_align` of the PT_LOAD segment; 0 when not given.
+    pub load_align: u64,
+}
+
 /// Builds an ELF object with a PT_LOAD over the whole file, a PT_DYNAMIC, an
 /// optional PT_INTERP, and the dynamic entries the fixture asks for.
 pub fn build_elf(fixture: &ElfFixture<'_>) -> Vec<u8> {
+    build_elf_with(fixture, &ElfVersions::default())
+}
+
+/// Appends `value` as a `width`-byte integer in the object's byte order.
+fn push_int(buf: &mut Vec<u8>, value: u64, width: usize, little: bool) {
+    let bytes = if little {
+        value.to_le_bytes()
+    } else {
+        value.to_be_bytes()
+    };
+    if little {
+        buf.extend_from_slice(&bytes[..width]);
+    } else {
+        buf.extend_from_slice(&bytes[8 - width..]);
+    }
+}
+
+/// [`build_elf`] with symbol versions (`DT_VERNEED`, `DT_VERDEF`) and a
+/// `PT_LOAD` alignment.
+pub fn build_elf_with(fixture: &ElfFixture<'_>, versions: &ElfVersions<'_>) -> Vec<u8> {
     let is_64 = fixture.is_64bit;
     let little = fixture.little_endian;
     let word = if is_64 { 8 } else { 4 };
@@ -46,18 +78,62 @@ pub fn build_elf(fixture: &ElfFixture<'_>) -> Vec<u8> {
     let dynentsize = 2 * word;
 
     let mut strtab = vec![0u8];
-    let mut name_offsets = Vec::new();
-    for name in fixture.needed {
-        name_offsets.push(strtab.len() as u64);
-        strtab.extend_from_slice(name.as_bytes());
-        strtab.push(0);
-    }
-    let runpath_offset = fixture.runpath.map(|path| {
+    let intern = |strtab: &mut Vec<u8>, text: &str| -> u64 {
         let offset = strtab.len() as u64;
-        strtab.extend_from_slice(path.as_bytes());
+        strtab.extend_from_slice(text.as_bytes());
         strtab.push(0);
         offset
-    });
+    };
+    let mut name_offsets = Vec::new();
+    for name in fixture.needed {
+        name_offsets.push(intern(&mut strtab, name));
+    }
+    let runpath_offset = fixture.runpath.map(|path| intern(&mut strtab, path));
+
+    // Verneed: one entry per library, its versions in Vernaux entries after
+    // it; Verdef: one entry per defined version, each with one Verdaux.
+    let mut libraries: Vec<(&str, Vec<&str>)> = Vec::new();
+    for &(file, version) in versions.needs {
+        match libraries.iter_mut().find(|(library, _)| *library == file) {
+            Some((_, list)) => list.push(version),
+            None => libraries.push((file, vec![version])),
+        }
+    }
+    let mut tables: Vec<u8> = Vec::new();
+    let verneed_at = tables.len() as u64;
+    for (index, (file, list)) in libraries.iter().enumerate() {
+        let file_offset = intern(&mut strtab, file);
+        let last = index + 1 == libraries.len();
+        let entry_size = 16 + 16 * list.len() as u64;
+        push_int(&mut tables, 1, 2, little); // vn_version
+        push_int(&mut tables, list.len() as u64, 2, little); // vn_cnt
+        push_int(&mut tables, file_offset, 4, little); // vn_file
+        push_int(&mut tables, 16, 4, little); // vn_aux
+        push_int(&mut tables, if last { 0 } else { entry_size }, 4, little); // vn_next
+        for (position, version) in list.iter().enumerate() {
+            let name = intern(&mut strtab, version);
+            let last_aux = position + 1 == list.len();
+            push_int(&mut tables, 0, 4, little); // vna_hash
+            push_int(&mut tables, 0, 2, little); // vna_flags
+            push_int(&mut tables, position as u64 + 2, 2, little); // vna_other
+            push_int(&mut tables, name, 4, little); // vna_name
+            push_int(&mut tables, if last_aux { 0 } else { 16 }, 4, little); // vna_next
+        }
+    }
+    let verdef_at = tables.len() as u64;
+    for (index, version) in versions.defs.iter().enumerate() {
+        let name = intern(&mut strtab, version);
+        let last = index + 1 == versions.defs.len();
+        push_int(&mut tables, 1, 2, little); // vd_version
+        push_int(&mut tables, 0, 2, little); // vd_flags
+        push_int(&mut tables, index as u64 + 2, 2, little); // vd_ndx
+        push_int(&mut tables, 1, 2, little); // vd_cnt
+        push_int(&mut tables, 0, 4, little); // vd_hash
+        push_int(&mut tables, 20, 4, little); // vd_aux
+        push_int(&mut tables, if last { 0 } else { 28 }, 4, little); // vd_next
+        push_int(&mut tables, name, 4, little); // vda_name
+        push_int(&mut tables, 0, 4, little); // vda_next
+    }
 
     let mut dynamic: Vec<(u64, u64)> = name_offsets.iter().map(|offset| (1, *offset)).collect();
     if let Some(offset) = runpath_offset {
@@ -70,10 +146,14 @@ pub fn build_elf(fixture: &ElfFixture<'_>) -> Vec<u8> {
 
     let phoff = ehsize as u64;
     let dynamic_offset = phoff + (phnum * phentsize) as u64;
-    // The entries, plus the DT_STRTAB and DT_NULL terminators.
-    let dynamic_size = ((dynamic.len() + 2) * dynentsize) as u64;
+    // The entries, plus the DT_STRTAB and DT_NULL terminators, and the
+    // version table tags when there are such tables.
+    let version_tags =
+        if libraries.is_empty() { 0 } else { 2 } + if versions.defs.is_empty() { 0 } else { 2 };
+    let dynamic_size = ((dynamic.len() + version_tags + 2) * dynentsize) as u64;
     let strtab_offset = dynamic_offset + dynamic_size;
-    let interp_offset = strtab_offset + strtab.len() as u64;
+    let tables_offset = strtab_offset + strtab.len() as u64;
+    let interp_offset = tables_offset + tables.len() as u64;
     let total = interp_offset + interp_bytes.as_ref().map_or(0, |bytes| bytes.len()) as u64;
     let vaddr = |offset: u64| VADDR_BASE + offset;
 
@@ -140,11 +220,27 @@ pub fn build_elf(fixture: &ElfFixture<'_>) -> Vec<u8> {
             put(&mut out, base + 16, *filesz, 4);
             put(&mut out, base + 20, *filesz, 4);
         }
+        if *p_type == 1 {
+            // p_align: the last field of both program header classes.
+            if is_64 {
+                put(&mut out, base + 48, versions.load_align, 8);
+            } else {
+                put(&mut out, base + 28, versions.load_align, 4);
+            }
+        }
     }
 
     // Dynamic section.
     let mut entries = dynamic.clone();
     entries.push((5, vaddr(strtab_offset)));
+    if !libraries.is_empty() {
+        entries.push((0x6fff_fffe, vaddr(tables_offset + verneed_at))); // DT_VERNEED
+        entries.push((0x6fff_ffff, libraries.len() as u64)); // DT_VERNEEDNUM
+    }
+    if !versions.defs.is_empty() {
+        entries.push((0x6fff_fffc, vaddr(tables_offset + verdef_at))); // DT_VERDEF
+        entries.push((0x6fff_fffd, versions.defs.len() as u64)); // DT_VERDEFNUM
+    }
     entries.push((0, 0));
     for (index, (tag, value)) in entries.iter().enumerate() {
         let at = dynamic_offset + (index * dynentsize) as u64;
@@ -154,6 +250,8 @@ pub fn build_elf(fixture: &ElfFixture<'_>) -> Vec<u8> {
 
     let strtab_at = strtab_offset as usize;
     out[strtab_at..strtab_at + strtab.len()].copy_from_slice(&strtab);
+    let tables_at = tables_offset as usize;
+    out[tables_at..tables_at + tables.len()].copy_from_slice(&tables);
     if let Some(bytes) = interp_bytes {
         let at = interp_offset as usize;
         out[at..at + bytes.len()].copy_from_slice(&bytes);
@@ -274,4 +372,66 @@ fn elf_sections_rejects_a_truncated_section_table() {
     bytes[0x3c..0x3e].copy_from_slice(&1u16.to_le_bytes());
     bytes[0x3e..0x40].copy_from_slice(&0u16.to_le_bytes());
     assert!(elf_sections(&bytes).is_err());
+}
+
+#[test]
+fn reads_load_alignment_and_symbol_versions_in_all_class_and_byte_order_combinations() {
+    let needs = [
+        ("libc.so.6", "GLIBC_2.17"),
+        ("libc.so.6", "GLIBC_2.34"),
+        ("libm.so.6", "GLIBC_2.29"),
+    ];
+    let defs = ["GLIBC_2.38", "GLIBC_2.41"];
+    for is_64bit in [false, true] {
+        for little_endian in [false, true] {
+            let fixture = ElfFixture {
+                is_64bit,
+                little_endian,
+                machine: EM_AARCH64,
+                interpreter: None,
+                needed: &["libc.so.6"],
+                runpath: None,
+            };
+            let bytes = build_elf_with(
+                &fixture,
+                &ElfVersions {
+                    needs: &needs,
+                    defs: &defs,
+                    load_align: 0x10000,
+                },
+            );
+            let object = parse_elf(&bytes).expect("fixture parses");
+            assert_eq!(
+                object.load_alignments,
+                vec![0x10000],
+                "{is_64bit} {little_endian}"
+            );
+            assert_eq!(object.needed, vec!["libc.so.6".to_string()]);
+            assert_eq!(
+                object.version_needs,
+                needs
+                    .iter()
+                    .map(|(file, version)| VersionNeed {
+                        file: file.to_string(),
+                        version: version.to_string(),
+                    })
+                    .collect::<Vec<_>>(),
+                "{is_64bit} {little_endian}"
+            );
+            assert_eq!(
+                object.version_defs,
+                defs.iter().map(|d| d.to_string()).collect::<Vec<_>>(),
+                "{is_64bit} {little_endian}"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_object_without_version_tables_has_no_versions_and_zero_alignment() {
+    let bytes = build_elf(&ElfFixture::dynamic(EM_X86_64, &["libz.so.1"]));
+    let object = parse_elf(&bytes).expect("fixture parses");
+    assert_eq!(object.load_alignments, vec![0]);
+    assert!(object.version_needs.is_empty());
+    assert!(object.version_defs.is_empty());
 }

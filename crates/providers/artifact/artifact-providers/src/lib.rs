@@ -2,8 +2,11 @@ mod command;
 mod contract;
 mod digest;
 mod outputs;
+mod toolchain;
 #[cfg(test)]
 mod tests;
+
+pub use toolchain::{ArtifactToolchainContract, RELOCATED_MARKER, ensure_relocated};
 
 pub use command::{
     apply_job_budget, command_for_execution, command_output_with_timeout,

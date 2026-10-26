@@ -399,6 +399,25 @@ pub struct RawAssemblyPackageConfig {
     pub allowed_prefixes: Vec<String>,
     pub control: RawAssemblyPackageControlConfig,
     pub scripts: RawAssemblyPackageScriptsConfig,
+    /// `[image.assembly.packages.device]`: the ELF checks against a sysroot.
+    pub device: Option<RawAssemblyPackageDeviceConfig>,
+}
+
+/// `[image.assembly.packages.device]`: the device sysroot the package's ELF
+/// files are checked against, and the limits.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawAssemblyPackageDeviceConfig {
+    /// The `[[toolchains]]` id whose sysroot is the device's.
+    pub toolchain: Option<String>,
+    /// A directory (workspace path) that is the device sysroot, instead of a toolchain's.
+    pub sysroot: Option<String>,
+    /// The highest `GLIBC_x.y` a file may need, such as `"2.17"`.
+    pub max_glibc: Option<String>,
+    /// The smallest `PT_LOAD` alignment, in bytes (default 16384).
+    pub min_page_size: Option<u64>,
+    /// Whether `DT_NEEDED` libraries must be found (default true).
+    pub check_needed: Option<bool>,
 }
 
 /// `[image.assembly.packages.control]`: the control fields. `Architecture`

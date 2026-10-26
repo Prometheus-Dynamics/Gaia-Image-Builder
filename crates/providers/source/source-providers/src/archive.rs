@@ -1,4 +1,5 @@
 use super::*;
+use crate::download::cached_verified_download;
 
 impl SourceProvider for ArchiveSourceProvider {
     fn id(&self) -> &'static str {
@@ -26,9 +27,31 @@ impl SourceProvider for ArchiveSourceProvider {
         prepare_materialized_dir(&materialized_dir)?;
         let execution = execution_context(spec);
 
+        // A downloaded archive is verified in the download cache before it is
+        // extracted; a `path` archive is read where it is.
+        let archive_file = match (&archive.url, &archive.sha256) {
+            (Some(url), Some(sha)) => cached_verified_download(
+                spec,
+                &execution,
+                url,
+                sha,
+                log_sink.clone(),
+                cancel_check.clone(),
+            )?,
+            (Some(_), None) => {
+                return Err(SourceProviderError::new(
+                    SourceProviderErrorKind::PolicyBlocked,
+                    format!(
+                        "archive source '{}' downloads from url without sha256",
+                        source.id.as_str()
+                    ),
+                ));
+            }
+            (None, _) => resolve_workspace_path(&spec.workspace, &archive.path)?,
+        };
         extract_archive(
-            archive,
-            &spec.workspace,
+            &archive_file,
+            archive.strip_components,
             &materialized_dir,
             &execution,
             SourceCommandPolicy {
@@ -41,18 +64,39 @@ impl SourceProvider for ArchiveSourceProvider {
             log_sink,
             cancel_check,
         )?;
-        let archive_path = resolve_workspace_path(&spec.workspace, &archive.path)?;
+        let origin = match &archive.url {
+            Some(url) => format!(
+                "archive_url={}\narchive_sha256={}",
+                redact_url_userinfo(url),
+                archive
+                    .sha256
+                    .as_deref()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+            ),
+            None => format!(
+                "archive={}\narchive_sha256={}",
+                archive.path,
+                sha256_or_placeholder(&archive_file)
+            ),
+        };
         write_source_marker(
             spec,
             self.id(),
             source,
             &materialized_dir,
             &format!(
-                "archive={}\narchive_sha256={}\nchecksum_policy={}\nchecksum_source={}\nextracted_tree_digest={}\nstrip_components={}\n",
-                archive.path,
-                sha256_or_placeholder(&archive_path),
-                "observed-only",
-                "archive-file",
+                "{origin}\nchecksum_policy={}\nchecksum_source={}\nextracted_tree_digest={}\nstrip_components={}\n",
+                if archive.url.is_some() {
+                    "verified"
+                } else {
+                    "observed-only"
+                },
+                if archive.url.is_some() {
+                    "config"
+                } else {
+                    "archive-file"
+                },
                 tree_digest(&materialized_dir, &["source.txt", ".gaia-source-state.txt"]),
                 archive.strip_components
             ),
@@ -65,19 +109,20 @@ impl SourceProvider for ArchiveSourceProvider {
     }
 }
 
+/// Extracts the archive file `archive_path` into `output_dir`, dropping
+/// `strip_components` leading path components.
 pub(crate) fn extract_archive(
-    archive: &ArchiveSourceSpec,
-    workspace: &WorkspaceSpec,
+    archive_path: &Path,
+    strip_components: u32,
     output_dir: &Path,
     execution: &SourceExecutionContext,
     policy: SourceCommandPolicy,
     log_sink: Option<ProcessLogSink>,
     cancel_check: Option<ProcessCancelCheck>,
 ) -> Result<(), SourceProviderError> {
-    let archive_path = resolve_workspace_path(workspace, &archive.path)?;
     gaia_process::validate_tar_archive_entries(
-        &archive_path,
-        usize::try_from(archive.strip_components).unwrap_or(usize::MAX),
+        archive_path,
+        usize::try_from(strip_components).unwrap_or(usize::MAX),
         Duration::from_secs(policy.timeout_seconds.max(1)),
         "validate archive source entries",
         log_sink.clone(),
@@ -89,14 +134,14 @@ pub(crate) fn extract_archive(
     let mut command = Command::new("tar");
     command
         .arg("-xf")
-        .arg(&archive_path)
+        .arg(archive_path)
         .arg("--no-same-owner")
         .arg("--no-same-permissions")
         .arg("--delay-directory-restore")
         .arg("-C")
         .arg(output_dir);
-    if archive.strip_components > 0 {
-        command.arg(format!("--strip-components={}", archive.strip_components));
+    if strip_components > 0 {
+        command.arg(format!("--strip-components={strip_components}"));
     }
     run_command_with_policy(
         command,

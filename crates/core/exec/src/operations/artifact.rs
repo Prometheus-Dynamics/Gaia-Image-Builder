@@ -72,6 +72,28 @@ fn prepare_artifact<'env>(
         ))
     })?;
     contract.job_budget = job_budget;
+    if let Some(id) = &artifact.toolchain {
+        let resolved = gaia_spec::resolve_toolchain(spec, id).map_err(|message| {
+            Box::new(failure_with_kind(
+                operation_id.clone(),
+                "artifact_toolchain_invalid",
+                ExecutionErrorKind::MissingSpec,
+                format!("artifact '{}': {message}", artifact_id.as_str()),
+            ))
+        })?;
+        let relocate = spec
+            .toolchains
+            .iter()
+            .any(|toolchain| toolchain.id == *id && toolchain.relocate);
+        // A rust artifact builds for the SDK's target unless it names one.
+        contract.artifact_target = contract
+            .artifact_target
+            .take()
+            .or_else(|| resolved.rust_target.clone());
+        contract.toolchain = Some(
+            gaia_artifact_providers::ArtifactToolchainContract::from_resolved(&resolved, relocate),
+        );
+    }
     Ok(PreparedArtifact {
         artifact,
         provider,
@@ -107,6 +129,35 @@ fn ensure_execution_image(
             Vec::new(),
         ))
     })
+}
+
+/// Sets up the SDK an artifact cross-compiles with, once per SDK root: its
+/// `relocate-sdk.sh` runs when the toolchain asks for it and has not run yet.
+fn ensure_toolchain(
+    operation_id: &OperationId,
+    spec: &ResolvedBuildSpec,
+    contract: &ArtifactExecutionContract,
+    tail: &LogTail,
+) -> Result<(), Box<OperationExecutionResult>> {
+    let Some(toolchain) = &contract.toolchain else {
+        return Ok(());
+    };
+    match gaia_artifact_providers::ensure_relocated(toolchain) {
+        Ok(Some(note)) => {
+            tracing::info!("{note}");
+            Ok(())
+        }
+        Ok(None) => Ok(()),
+        Err(message) => Err(Box::new(failure_with_cleanup_and_tail(
+            operation_id.clone(),
+            "artifact_toolchain_failed",
+            ExecutionErrorKind::BackendCommand,
+            message.clone(),
+            tail.failure_tail(&message, spec),
+            RollbackDomain::Artifacts,
+            Vec::new(),
+        ))),
+    }
 }
 
 /// The result of an artifact restored from the registry: reused (from the
@@ -213,6 +264,9 @@ pub(crate) fn execute_artifact_operation(
     {
         return *failure;
     }
+    if let Err(failure) = ensure_toolchain(operation_id, spec, &prepared.contract, &tail) {
+        return *failure;
+    }
     let log_sink = tail.sink(operation_id.clone(), context.event_sender.clone());
     let result = prepared.provider.execute_artifact(
         prepared.artifact,
@@ -306,7 +360,9 @@ pub(crate) fn dispatch_artifact_batch(
                     &mut prepared.contract,
                     &tail,
                     context,
-                ) {
+                )
+                .and_then(|()| ensure_toolchain(&operation.id, spec, &prepared.contract, &tail))
+                {
                     Ok(()) => members.push((position, artifact_id, prepared)),
                     Err(failure) => results[position] = Some(*failure),
                 }

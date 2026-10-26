@@ -16,6 +16,18 @@ const DT_NEEDED: u64 = 1;
 const DT_STRTAB: u64 = 5;
 const DT_RPATH: u64 = 15;
 const DT_RUNPATH: u64 = 29;
+const DT_VERDEF: u64 = 0x6fff_fffc;
+const DT_VERDEFNUM: u64 = 0x6fff_fffd;
+const DT_VERNEED: u64 = 0x6fff_fffe;
+const DT_VERNEEDNUM: u64 = 0x6fff_ffff;
+
+/// One symbol version the object needs from a library: `version` (such as
+/// `GLIBC_2.17`) of the library named `file` (such as `libc.so.6`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersionNeed {
+    pub file: String,
+    pub version: String,
+}
 
 /// What the loader needs from one ELF object.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +45,14 @@ pub struct ElfObject {
     /// `DT_RUNPATH` entries, or `DT_RPATH` when there is no RUNPATH: the
     /// directories this object's own dependencies are searched in first.
     pub search_paths: Vec<String>,
+    /// `p_align` of every `PT_LOAD` segment, in file order. A loader on a
+    /// kernel with larger pages needs each to be a multiple of its page size.
+    pub load_alignments: Vec<u64>,
+    /// The symbol versions this object needs (`DT_VERNEED`), in file order.
+    pub version_needs: Vec<VersionNeed>,
+    /// The symbol versions this object defines (`DT_VERDEF`), in file order.
+    /// A C library lists its `GLIBC_x.y` versions here.
+    pub version_defs: Vec<String>,
 }
 
 impl ElfObject {
@@ -108,6 +128,7 @@ struct LoadSegment {
     vaddr: u64,
     offset: u64,
     filesz: u64,
+    align: u64,
 }
 
 /// Parses an ELF object's loader-visible metadata from its file bytes.
@@ -156,6 +177,7 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfObject, String> {
                 vaddr: p_vaddr,
                 offset: p_offset,
                 filesz: p_filesz,
+                align: program_header_align(layout, header)?,
             }),
             PT_DYNAMIC => dynamic = Some((p_offset, p_filesz)),
             PT_INTERP => {
@@ -171,6 +193,8 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfObject, String> {
     let mut rpath_offset = None;
     let mut runpath_offset = None;
     let mut strtab_vaddr = None;
+    let mut verneed = None;
+    let mut verdef = None;
     if let Some((offset, size)) = dynamic {
         let entry_size = if is_64bit { 16 } else { 8 };
         let count = size / entry_size;
@@ -190,6 +214,10 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfObject, String> {
                 DT_RPATH => rpath_offset = Some(value),
                 DT_RUNPATH => runpath_offset = Some(value),
                 DT_STRTAB => strtab_vaddr = Some(value),
+                DT_VERNEED => verneed = Some((value, verneed.map_or(0, |(_, count)| count))),
+                DT_VERNEEDNUM => verneed = Some((verneed.map_or(0, |(vaddr, _)| vaddr), value)),
+                DT_VERDEF => verdef = Some((value, verdef.map_or(0, |(_, count)| count))),
+                DT_VERDEFNUM => verdef = Some((verdef.map_or(0, |(vaddr, _)| vaddr), value)),
                 _ => {}
             }
         }
@@ -213,7 +241,7 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfObject, String> {
         Ok((needed, search_paths))
     };
 
-    let (needed, search_paths) = match strtab_vaddr {
+    let (needed, search_paths, version_needs, version_defs) = match strtab_vaddr {
         Some(vaddr) => {
             let offset = vaddr_to_offset(&loads, vaddr)?;
             // The string table has no length in the dynamic section that
@@ -221,9 +249,12 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfObject, String> {
             let table = bytes
                 .get(usize::try_from(offset).map_err(|_| "ELF offset out of range")?..)
                 .ok_or_else(|| "truncated ELF file".to_string())?;
-            needed_and_paths(table)?
+            let (needed, search_paths) = needed_and_paths(table)?;
+            let version_needs = read_version_needs(bytes, layout, &loads, table, verneed)?;
+            let version_defs = read_version_defs(bytes, layout, &loads, table, verdef)?;
+            (needed, search_paths, version_needs, version_defs)
         }
-        None if needed_offsets.is_empty() => (Vec::new(), Vec::new()),
+        None if needed_offsets.is_empty() => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
         None => return Err("dynamic section has DT_NEEDED but no DT_STRTAB".into()),
     };
 
@@ -234,7 +265,97 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfObject, String> {
         interpreter,
         needed,
         search_paths,
+        load_alignments: loads.iter().map(|segment| segment.align).collect(),
+        version_needs,
+        version_defs,
     })
+}
+
+/// The `DT_VERNEED` table: each library the object needs symbol versions from,
+/// and each version of it. `verneed` is `(vaddr, count)`, from the dynamic
+/// section; an object without the table needs no versions.
+fn read_version_needs(
+    bytes: &[u8],
+    layout: Layout,
+    loads: &[LoadSegment],
+    table: &[u8],
+    verneed: Option<(u64, u64)>,
+) -> Result<Vec<VersionNeed>, String> {
+    let Some((vaddr, count)) = verneed.filter(|(vaddr, _)| *vaddr != 0) else {
+        return Ok(Vec::new());
+    };
+    // Elf_Verneed: vn_version(2) vn_cnt(2) vn_file(4) vn_aux(4) vn_next(4);
+    // Elf_Vernaux: vna_hash(4) vna_flags(2) vna_other(2) vna_name(4) vna_next(4).
+    let mut needs = Vec::new();
+    let mut offset = vaddr_to_offset(loads, vaddr)?;
+    for _ in 0..count {
+        let entry = slice(bytes, offset, 16)?;
+        let version_count = layout.half(&entry[2..4])?;
+        let file = text(string_at(table, u64::from(layout.word32(&entry[4..8])?))?)?;
+        let aux = u64::from(layout.word32(&entry[8..12])?);
+        let next = u64::from(layout.word32(&entry[12..16])?);
+        let mut aux_offset = offset + aux;
+        for _ in 0..version_count {
+            let aux_entry = slice(bytes, aux_offset, 16)?;
+            let name = u64::from(layout.word32(&aux_entry[8..12])?);
+            let version = text(string_at(table, name)?)?;
+            needs.push(VersionNeed {
+                file: file.clone(),
+                version,
+            });
+            let aux_next = u64::from(layout.word32(&aux_entry[12..16])?);
+            if aux_next == 0 {
+                break;
+            }
+            aux_offset += aux_next;
+        }
+        if next == 0 {
+            break;
+        }
+        offset += next;
+    }
+    Ok(needs)
+}
+
+/// The `DT_VERDEF` table: the version names the object defines. The first
+/// name of each entry is its own; later ones are its parents, not listed.
+fn read_version_defs(
+    bytes: &[u8],
+    layout: Layout,
+    loads: &[LoadSegment],
+    table: &[u8],
+    verdef: Option<(u64, u64)>,
+) -> Result<Vec<String>, String> {
+    let Some((vaddr, count)) = verdef.filter(|(vaddr, _)| *vaddr != 0) else {
+        return Ok(Vec::new());
+    };
+    // Elf_Verdef: vd_version(2) vd_flags(2) vd_ndx(2) vd_cnt(2) vd_hash(4)
+    // vd_aux(4) vd_next(4); Elf_Verdaux: vda_name(4) vda_next(4).
+    let mut defs = Vec::new();
+    let mut offset = vaddr_to_offset(loads, vaddr)?;
+    for _ in 0..count {
+        let entry = slice(bytes, offset, 20)?;
+        let aux = u64::from(layout.word32(&entry[12..16])?);
+        let next = u64::from(layout.word32(&entry[16..20])?);
+        let aux_entry = slice(bytes, offset + aux, 8)?;
+        let name = u64::from(layout.word32(&aux_entry[0..4])?);
+        defs.push(text(string_at(table, name)?)?);
+        if next == 0 {
+            break;
+        }
+        offset += next;
+    }
+    Ok(defs)
+}
+
+/// `p_align` of a program header: the 8-byte field of ELF64, the 4-byte one of
+/// ELF32.
+fn program_header_align(layout: Layout, header: &[u8]) -> Result<u64, String> {
+    if layout.is_64bit {
+        Ok(layout.word(slice(header, 48, 8)?)?)
+    } else {
+        Ok(u64::from(layout.word32(slice(header, 28, 4)?)?))
+    }
 }
 
 /// `(p_type, p_offset, p_vaddr, p_filesz)` from one program header.
