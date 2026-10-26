@@ -2414,7 +2414,7 @@ input values (a declared `default`, or a `--set input.<name>=` value), so
 `default = "${project.commit_short}"` gives an input the build file's own
 commit. A build file in a linked git worktree resolves to that worktree's
 `HEAD`.
-`${project.commit_short}` is the first 8 characters of `${project.commit}`,
+`${project.commit_count}` is `git rev-list --count HEAD`, which only grows along a branch: put it before the commit in a package version (`2026.2.0-dev.${project.commit_count}+${project.commit_short}`) so opkg and dpkg order dev builds. `${project.commit_short}` is the first 8 characters of `${project.commit}`,
 with the `-dirty` suffix kept. Use them to make image versions unique per build:
 
 ```toml
@@ -3136,14 +3136,14 @@ State records `oci.N.id`, `format`, `compression`, `output`, `bytes`, `config_di
 
 - `id`: unique id.
 - `format`: `"ipk"` (default) or `"deb"`. A `deb` always starts with `debian-binary`, so `debian_binary = false` is an error there; its `Architecture` uses Debian names (`arm64`, `amd64`, `armhf`).
-- `tree`: the assembly tree whose files, as installed, are the data.
+- `tree`: the assembly tree whose files, as installed, are the data. An ipk's data tar has no `./` root entry (opkg records it as a file named `.` and treats it as obsolete on upgrades); a deb's keeps it, as dpkg-deb writes it.
 - `dest`: a directory when it ends in `/`, and the package file is named `<Package>_<Version>_<Architecture>.ipk` (or `.deb`) in it; otherwise the path of the file.
 - `debian_binary`: `true` (the default) writes the `debian-binary` member first, holding `2.0`. `false` gives the layout of Limelight's examples, with only `control.tar.gz` and `data.tar.gz`.
 - `allowed_prefixes`: optional absolute paths. Every file, symlink and hard link of the data must be under one of them; directories are not checked, so the parents of an allowed file are fine.
 - `[image.assembly.packages.control]`: the control fields, in the spelling opkg and dpkg use. `Package`, `Version`, `Architecture`, `Maintainer` and `Description` are required. `Architecture` has no default, so name the target (such as `aarch64`) rather than `all`. `Depends` is a list, joined with `, `. `Section`, `Priority`, `Source` and `Homepage` are optional single-line strings. `Description` takes continuation lines after its first line; an empty line is written as ` .`. `Installed-Size` is added by Gaia (the regular files' bytes, rounded up to KiB).
   - `[image.assembly.packages.control.extra]`: further fields, as `X-Port = "5801"`. A name is letters, digits and `-`, and may not repeat a field the package sets. Values are single lines.
 - `[image.assembly.packages.scripts]`:
-  - `services`: systemd unit file names, each of which must be in the tree under `etc/systemd/system` or `usr/lib/systemd/system`. Gaia generates the maintainer scripts for them: `postinst` runs `daemon-reload`, then enables and starts each unit; `prerm` stops and disables each one, tolerating failures; `postrm` runs `daemon-reload` and resets each unit. Each script is POSIX sh and ends in `exit 0`. With no services, no script is generated.
+  - `services`: systemd unit file names, each of which must be in the tree under `etc/systemd/system` or `usr/lib/systemd/system`. Gaia generates the maintainer scripts for them: `postinst` runs `daemon-reload`, then for each unit `reset-failed` (so a unit the old version left failed at its start limit is not refused), `enable` and `start`; `prerm` stops and disables each one, tolerating failures; `postrm` runs `daemon-reload` and resets each unit. Each script is POSIX sh and ends in `exit 0`. With no services, no script is generated.
   - `postinst`, `preinst`, `prerm` and `postrm`: a file that replaces the generated script (or, for `preinst`, adds one). `@self/...` paths are resolved as in other config files.
   - `conffiles`: absolute guest paths, each a file of the tree. They are listed in the control tar's `conffiles`.
 

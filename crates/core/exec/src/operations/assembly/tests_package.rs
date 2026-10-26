@@ -308,6 +308,15 @@ fn control_parses_back_with_the_spec_fields_and_the_installed_size() {
         "{postinst}"
     );
     assert!(postinst.ends_with("exit 0\n"), "{postinst}");
+    // A unit left failed (start limit hit) by the old version is reset
+    // before it is started again.
+    let reset = postinst
+        .find("systemctl reset-failed 'helios-api.service'")
+        .expect("reset-failed in postinst");
+    let start = postinst
+        .find("systemctl start 'helios-api.service'")
+        .expect("start in postinst");
+    assert!(reset < start, "{postinst}");
 }
 
 #[cfg(unix)]
@@ -322,10 +331,10 @@ fn data_holds_the_tree_as_installed_under_dot_slash_paths() {
     ));
     let ipk = PathBuf::from(state_value(&summary, "package.1.output"));
     let data_tar = member_tar(&ipk, "data.tar.gz", &scratch.join("parts"));
+    // No `./` root: opkg would record it as an obsolete file named `.`.
     assert_eq!(
         entry_names(&data_tar),
         [
-            "./",
             "./etc/",
             "./etc/helios/",
             "./etc/helios/startup.toml",
@@ -514,6 +523,12 @@ fn a_deb_is_named_dot_deb_and_reads_back_with_dpkg_deb() {
         .map(|member| member.name)
         .collect();
     assert_eq!(members, ["debian-binary", "control.tar.gz", "data.tar.gz"]);
+    // A deb keeps the `./` root entry dpkg-deb writes.
+    let data_tar = member_tar(&path, "data.tar.gz", &scratch.join("deb-parts"));
+    assert_eq!(
+        entry_names(&data_tar).first().map(String::as_str),
+        Some("./")
+    );
     // dpkg-deb, where it is installed, parses the control and lists the data.
     if Command::new("dpkg-deb").arg("--version").output().is_ok() {
         let info = String::from_utf8(tool("dpkg-deb", &["-I", path.to_str().expect("utf-8")]))

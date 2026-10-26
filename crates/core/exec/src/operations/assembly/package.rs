@@ -108,7 +108,8 @@ fn build_package(
     }
     let mtime = entry_mtime();
     let data_tar = stage.join("data.tar");
-    write_data_tar(root, &data_tar, mtime).map_err(|error| {
+    let with_root = package.format == gaia_spec::PACKAGE_FORMAT_DEB;
+    write_data_tar(root, &data_tar, mtime, with_root).map_err(|error| {
         format!(
             "assembly package '{}' (tree '{}'): {error}",
             package.id, package.tree
@@ -193,13 +194,18 @@ fn entry_mtime() -> u64 {
         .unwrap_or(0)
 }
 
-/// The data tar: a `./` root, then the tree's entries in the OCI layer order.
-fn write_data_tar(root: &Path, tar: &Path, mtime: u64) -> Result<(), String> {
+/// The data tar: the tree's entries in the OCI layer order, after a `./`
+/// root entry when `with_root`. An ipk leaves the root out: opkg records it
+/// as a file named `.` and treats it as obsolete on the next upgrade. A deb
+/// keeps it, as dpkg-deb writes it.
+fn write_data_tar(root: &Path, tar: &Path, mtime: u64, with_root: bool) -> Result<(), String> {
     let file = File::create(tar)
         .map_err(|error| format!("failed to create '{}': {error}", tar.display()))?;
     let mut writer = TarWriter::new(BufWriter::new(file)).with_mtime(mtime);
     let mut first_names = HashMap::new();
-    writer.append_dir_mode("./", 0o755)?;
+    if with_root {
+        writer.append_dir_mode("./", 0o755)?;
+    }
     append_tree(&mut writer, root, "./", &mut first_names)?;
     finish_tar(writer, tar)
 }

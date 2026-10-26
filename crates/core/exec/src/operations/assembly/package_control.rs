@@ -72,6 +72,11 @@ pub(super) fn generated_script(name: &str, services: &[String]) -> Option<String
             out.push_str("systemctl daemon-reload\n");
             for unit in services {
                 let unit = shell_quote(unit);
+                // A unit that hit its start limit under the old version is
+                // refused by `start` until it is reset.
+                out.push_str(&format!(
+                    "systemctl reset-failed {unit} >/dev/null 2>&1 || true\n"
+                ));
                 out.push_str(&format!("systemctl enable {unit}\n"));
                 out.push_str(&format!(
                     "systemctl start {unit} || echo \"Failed to start {unit}\" >&2\n"

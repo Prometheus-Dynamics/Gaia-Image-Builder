@@ -1,5 +1,7 @@
-//! `${project.commit}`, `${project.commit_short}` (its first 8 characters)
-//! and `${project.describe}`: the git identity of the
+//! `${project.commit}`, `${project.commit_short}` (its first 8 characters),
+//! `${project.commit_count}` (the number of commits HEAD has, which only
+//! grows along a branch, so package versions order) and
+//! `${project.describe}`: the git identity of the
 //! repository holding the build file, so image versions can be unique per
 //! build (`version = "1.4.0+${project.describe}"`).
 
@@ -22,6 +24,7 @@ const DIRTY_TTL: Duration = Duration::from_secs(10);
 struct ProjectGit {
     commit: Option<String>,
     describe: Option<String>,
+    commit_count: Option<String>,
 }
 
 struct CachedIdentity {
@@ -68,6 +71,9 @@ fn project_git(dir: &Path) -> ProjectGit {
         describe: commit
             .as_ref()
             .and_then(|_| git(&["describe", "--tags", "--always", "--dirty"])),
+        commit_count: commit
+            .as_ref()
+            .and_then(|_| git(&["rev-list", "--count", "HEAD"])),
         commit,
     };
     if let (Some(stamp), Ok(mut cache)) = (stamp, cache.lock()) {
@@ -141,6 +147,7 @@ pub(super) fn resolve(token: &str, build_file_dir: &str) -> Option<String> {
         "project.commit" => |git: ProjectGit| git.commit,
         "project.commit_short" => |git: ProjectGit| git.commit.map(|commit| short_commit(&commit)),
         "project.describe" => |git: ProjectGit| git.describe,
+        "project.commit_count" => |git: ProjectGit| git.commit_count,
         _ => return None,
     };
     if build_file_dir.is_empty() {

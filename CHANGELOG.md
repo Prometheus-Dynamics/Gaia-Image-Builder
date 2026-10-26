@@ -6,6 +6,9 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- Packages: an ipk's data tar leaves out the `./` root entry, which opkg recorded as a file `.` and reported as obsolete on upgrades ("Removing obsolete file ."); a deb keeps it. The generated postinst runs `systemctl reset-failed <unit>` before enabling and starting it, so a unit that hit its start limit under the old version starts after the upgrade (both seen on a SystemCore).
+- `${project.commit_count}`: the number of commits HEAD has, for versions that order (`...-dev.${project.commit_count}+${project.commit_short}`).
+
 - Version: the workspace is `2.0.1-dev` (dev builds carry `-dev`; only PATCH moves until a release). `gaia_version` requirements compare the installed version without its pre-release tag, so `2.0.1-dev` satisfies `>=2.0.0` and `>=2.0.1`. Products can stamp their commit with `${project.commit_short}` / `${project.describe}` (already available).
 
 - Assembly with `[image] kind = "none"`: commands (package compression, checks) got a 1 s timeout because no image provider sets one; an unset timeout now means 3600 s (found by HeliOS packing its SystemCore ipk).
