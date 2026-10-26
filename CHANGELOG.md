@@ -6,6 +6,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- Assembly with `[image] kind = "none"`: commands (package compression, checks) got a 1 s timeout because no image provider sets one; an unset timeout now means 3600 s (found by HeliOS packing its SystemCore ipk).
+
 - Profiles: one build file makes several device profiles from shared layers. A layer selected by `when = { target = ... }` adds to the shared software; `--set build.target=<name>` picks the profile. Patch entries: an `[[artifacts]]`, `[[install]]`, `[[stage.files]]` or `[[stage.services]]` entry without its declaring key (`kind`, `artifact`, `src`, `name`) changes the earlier entry with its id, key by key (a table value replaces the whole table). A patch with no earlier entry, or with no key but `id`, is an error that names its layer and line. The merge records what each patch and each image kind switch changed (`note:` lines in `validate` and `plan`, and `config_notes` in the spec). A later layer that sets `[image] kind` to another kind replaces the kind-specific image fields (the feed, checks, hardware, layers, signing and the Buildroot or starting-point fields) and keeps `[image.output]` and `[image.assembly]`. A toolchain id may be interpolated (`toolchain = "${input.toolchain}"`); empty means the host. `examples/profiles` builds a Buildroot `raze` image and a `systemcore` ipk from one file. Docs: `docs/configuration.md` ("Profiles").
 
 - `[image] kind = "none"` no longer feeds the installs and stage entries of the build to an image: the feed is empty unless `[image.feed]` sets it (the rootfs defaults made every such build fail validation).

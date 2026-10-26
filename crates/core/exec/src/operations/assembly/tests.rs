@@ -691,3 +691,24 @@ fn assembly_tools_are_found_in_the_provider_host_sbin() {
         resolve_assembly_tool(&roots, "gaia-test-only-veritysetup").expect("found in host/sbin");
     assert_eq!(resolved.program, tool);
 }
+
+#[test]
+fn a_build_with_no_image_provider_gets_a_real_assembly_command_timeout() {
+    // kind = "none" has no provider command policy (timeout 0). That used to
+    // become 1 s, so packing a large package's data tar timed out.
+    let mut spec = ResolvedBuildSpec::new("none-timeout");
+    spec.image.definition = gaia_spec::ImageDefinition::None;
+    assert_eq!(
+        assembly_command_timeout(&spec),
+        Duration::from_secs(UNSET_ASSEMBLY_COMMAND_TIMEOUT_SECONDS)
+    );
+    // A provider's own timeout still wins.
+    let mut buildroot = ResolvedBuildSpec::new("buildroot-timeout");
+    buildroot.policy.providers.buildroot.timeout_seconds = 42;
+    if buildroot.image.provider_kind() == gaia_spec::ImageProviderKind::Buildroot {
+        assert_eq!(
+            assembly_command_timeout(&buildroot),
+            Duration::from_secs(42)
+        );
+    }
+}
