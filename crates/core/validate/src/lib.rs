@@ -18,6 +18,7 @@ mod image_assembly_oci;
 mod image_assembly_options;
 mod image_assembly_order;
 mod image_assembly_outputs;
+mod image_assembly_package;
 mod image_assembly_strip;
 mod image_layers;
 mod inputs;

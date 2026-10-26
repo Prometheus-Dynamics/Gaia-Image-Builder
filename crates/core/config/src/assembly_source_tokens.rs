@@ -172,6 +172,98 @@ pub(crate) fn visit_assembly_strings(assembly: &mut ImageAssemblySpec, visit: &m
             }
         }
     }
+    for package in &mut assembly.packages {
+        text(&mut package.id, "image.assembly.packages.id", visit);
+        tree_id(&mut package.tree, "image.assembly.packages.tree", visit);
+        path_value(&mut package.dest, "image.assembly.packages.dest", visit);
+        path_value(&mut package.output, "image.assembly.packages.dest", visit);
+        texts(
+            &mut package.allowed_prefixes,
+            "image.assembly.packages.allowed_prefixes",
+            visit,
+        );
+        let control = &mut package.control;
+        text(
+            &mut control.package,
+            "image.assembly.packages.control",
+            visit,
+        );
+        text(
+            &mut control.version,
+            "image.assembly.packages.control",
+            visit,
+        );
+        text(
+            &mut control.architecture,
+            "image.assembly.packages.control",
+            visit,
+        );
+        text(
+            &mut control.maintainer,
+            "image.assembly.packages.control",
+            visit,
+        );
+        text(
+            &mut control.description,
+            "image.assembly.packages.control",
+            visit,
+        );
+        texts(
+            &mut control.depends,
+            "image.assembly.packages.control",
+            visit,
+        );
+        opt_text(
+            &mut control.section,
+            "image.assembly.packages.control",
+            visit,
+        );
+        opt_text(
+            &mut control.priority,
+            "image.assembly.packages.control",
+            visit,
+        );
+        opt_text(
+            &mut control.source,
+            "image.assembly.packages.control",
+            visit,
+        );
+        opt_text(
+            &mut control.homepage,
+            "image.assembly.packages.control",
+            visit,
+        );
+        for (_, value) in &mut control.extra {
+            text(value, "image.assembly.packages.control.extra", visit);
+        }
+        let scripts = &mut package.scripts;
+        texts(
+            &mut scripts.services,
+            "image.assembly.packages.scripts",
+            visit,
+        );
+        path(
+            &mut scripts.postinst,
+            "image.assembly.packages.scripts",
+            visit,
+        );
+        path(
+            &mut scripts.preinst,
+            "image.assembly.packages.scripts",
+            visit,
+        );
+        path(&mut scripts.prerm, "image.assembly.packages.scripts", visit);
+        path(
+            &mut scripts.postrm,
+            "image.assembly.packages.scripts",
+            visit,
+        );
+        texts(
+            &mut scripts.conffiles,
+            "image.assembly.packages.scripts",
+            visit,
+        );
+    }
     for oci in &mut assembly.ocis {
         text(&mut oci.id, "image.assembly.oci.id", visit);
         path_value(&mut oci.dest, "image.assembly.oci.dest", visit);

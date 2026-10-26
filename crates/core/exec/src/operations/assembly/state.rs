@@ -134,6 +134,7 @@ fn image_assembly_output_cleanup_paths(
         .map(|disk| &disk.output)
         .chain(assembly.archives.iter().map(|archive| &archive.output))
         .chain(assembly.ocis.iter().map(|oci| &oci.dest))
+        .chain(assembly.packages.iter().map(|package| &package.output))
     {
         if let Ok(path) = roots.resolve_path(spec, output) {
             paths.push(temporary_assembly_output_path(&path));

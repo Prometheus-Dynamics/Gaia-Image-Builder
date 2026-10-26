@@ -179,6 +179,11 @@ pub(super) fn interpolate_image_assembly(
         .into_iter()
         .map(|oci| super::assembly_oci::interpolate_assembly_oci(oci, raw, env))
         .collect();
+    assembly.packages = assembly
+        .packages
+        .into_iter()
+        .map(|package| super::assembly_package::interpolate_assembly_package(package, raw, env))
+        .collect();
     assembly.busybox_initramfs = assembly
         .busybox_initramfs
         .into_iter()

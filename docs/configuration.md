@@ -2761,6 +2761,52 @@ Each layer's `diff_id` is the sha256 of its uncompressed tar. Compressed blobs a
 
 State records `oci.N.id`, `format`, `compression`, `output`, `bytes`, `config_digest`, `manifest_digest` and `layer_count`, and for each layer `oci.N.layer.M.source`, `diff_id`, `blob_digest`, `blob_bytes` and `reused`. The output is an expected output of the assembly, so it is reported with its size. Reuse fingerprints cover the OCI config, the state of each `tar` layer, and the content digest of each `tree` layer.
 
+#### Packages (ipk)
+
+`[[image.assembly.packages]]` writes an opkg package (`.ipk`) from an assembly tree: the tree as installed is the package's data, and the control, the maintainer scripts and the conffiles come from the spec. It runs after the OCI images, with no `opkg-build` or `dpkg-deb` needed. Each entry takes:
+- `id`: unique id.
+- `format`: `"ipk"` (the default and the only value written). `"deb"` is reserved and is a validation error for now.
+- `tree`: the assembly tree whose files, as installed, are the data.
+- `dest`: a directory when it ends in `/`, and the package file is named `<Package>_<Version>_<Architecture>.ipk` in it; otherwise the path of the file.
+- `debian_binary`: `true` (the default) writes the `debian-binary` member first, holding `2.0`. `false` gives the layout of Limelight's examples, with only `control.tar.gz` and `data.tar.gz`.
+- `allowed_prefixes`: optional absolute paths. Every file, symlink and hard link of the data must be under one of them; directories are not checked, so the parents of an allowed file are fine.
+- `[image.assembly.packages.control]`: the control fields, in the spelling opkg and dpkg use. `Package`, `Version`, `Architecture`, `Maintainer` and `Description` are required. `Architecture` has no default, so name the target (such as `aarch64`) rather than `all`. `Depends` is a list, joined with `, `. `Section`, `Priority`, `Source` and `Homepage` are optional single-line strings. `Description` takes continuation lines after its first line; an empty line is written as ` .`. `Installed-Size` is added by Gaia (the regular files' bytes, rounded up to KiB).
+  - `[image.assembly.packages.control.extra]`: further fields, as `X-Port = "5801"`. A name is letters, digits and `-`, and may not repeat a field the package sets. Values are single lines.
+- `[image.assembly.packages.scripts]`:
+  - `services`: systemd unit file names, each of which must be in the tree under `etc/systemd/system` or `usr/lib/systemd/system`. Gaia generates the maintainer scripts for them: `postinst` runs `daemon-reload`, then enables and starts each unit; `prerm` stops and disables each one, tolerating failures; `postrm` runs `daemon-reload` and resets each unit. Each script is POSIX sh and ends in `exit 0`. With no services, no script is generated.
+  - `postinst`, `preinst`, `prerm` and `postrm`: a file that replaces the generated script (or, for `preinst`, adds one). `@self/...` paths are resolved as in other config files.
+  - `conffiles`: absolute guest paths, each a file of the tree. They are listed in the control tar's `conffiles`.
+
+```toml
+[[image.assembly.packages]]
+id = "helios-systemcore"
+format = "ipk"
+tree = "pkg-root"
+dest = "$assembly.out/"
+debian_binary = true
+allowed_prefixes = ["/usr/local", "/etc/systemd/system"]
+
+[image.assembly.packages.control]
+Package = "helios"
+Version = "${build.version}"
+Architecture = "aarch64"
+Maintainer = "Helios Team <dev@example.com>"
+Description = "Helios SystemCore services"
+Depends = ["libc6 (>= 2.38)"]
+Section = "base"
+Priority = "optional"
+extra = { X-Port = "5801" }
+
+[image.assembly.packages.scripts]
+services = ["helios-api.service"]
+postinst = "@self/pkg/postinst"
+conffiles = ["/etc/helios/startup.toml"]
+```
+
+Output is deterministic: the data and control tars are written with entries sorted, a directory before its contents, `./`-prefixed names, mtime `SOURCE_DATE_EPOCH` when that is set (else 0), uid and gid 0, the permission bits kept, and links kept. Both tars are gzipped with `gzip -n -9`, so the same inputs give the same bytes. The archive is read back before it is published: the members must be in order and gunzip and list, the control must parse and name the package, the scripts must be executable, each service unit and conffile must be in the data, and every file must be under `allowed_prefixes`. A failed check fails the build and leaves no package in `dest`.
+
+State records `package.N.id`, `format`, `output`, `bytes`, `sha256`, `files` (the non-directory entries of the data) and `installed_kib`. The package is an expected output of the assembly, so it is reported with its size. Reuse fingerprints cover the tree's content digest and any script file the spec names.
+
 #### Generated content
 
 Three ways to write generated text or JSON into a tree or an archive. All three render `${assembly...}` tokens at assembly time and run after the steps whose outputs they read, so a file can name a transform's output that is declared after it.

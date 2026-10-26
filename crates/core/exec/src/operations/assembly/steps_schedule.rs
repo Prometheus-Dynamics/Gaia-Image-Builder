@@ -301,7 +301,7 @@ fn tree_writes(assembly: &ImageAssemblySpec, step: AssemblyStep) -> Vec<String> 
             .filter_map(|member| member.tree.as_ref().map(|tree| tree.as_str().to_string()))
             .collect(),
         AssemblyStep::Oci(index) => oci_tree_layers(&assembly.ocis[index]),
-        AssemblyStep::Transform(_) | AssemblyStep::Disk(_) => Vec::new(),
+        AssemblyStep::Transform(_) | AssemblyStep::Disk(_) | AssemblyStep::Package(_) => Vec::new(),
     }
 }
 

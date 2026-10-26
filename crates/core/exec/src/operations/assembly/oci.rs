@@ -601,8 +601,11 @@ pub(super) fn write_tree_tar(root: &Path, tar: &Path) -> Result<String, String> 
         .map_err(|error| format!("failed to write '{}': {error}", tar.display()))
 }
 
-fn append_tree(
-    writer: &mut TarWriter<HashingWriter<BufWriter<std_fs::File>>>,
+/// Appends the entries of the tree at `dir` to `writer`, under `prefix`
+/// (`""` for an OCI layer, `"./"` for a package's data). Shared with the
+/// package writer, which keeps the same order and metadata.
+pub(super) fn append_tree<W: Write>(
+    writer: &mut TarWriter<W>,
     dir: &Path,
     prefix: &str,
     first_names: &mut HashMap<(u64, u64), (String, u32)>,

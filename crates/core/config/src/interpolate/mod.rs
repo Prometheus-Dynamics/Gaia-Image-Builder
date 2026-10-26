@@ -1,6 +1,7 @@
 mod assembly;
 mod assembly_archives;
 mod assembly_oci;
+mod assembly_package;
 mod build_date;
 mod export;
 mod project_git;

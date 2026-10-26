@@ -7,6 +7,7 @@ mod assembly_json;
 mod assembly_oci_spec;
 mod assembly_order;
 mod assembly_output_spec;
+mod assembly_package_spec;
 mod assembly_spec;
 mod byte_size;
 mod checkpoints;
@@ -73,6 +74,9 @@ pub use assembly_order::{
 pub use assembly_output_spec::{
     AssemblyFilesystemKindSpec, AssemblyFilesystemSpec, AssemblyTransformKindSpec,
     AssemblyTransformSpec, VERITY_DEFAULT_BLOCK_SIZE, VFAT_FAT_SIZES,
+};
+pub use assembly_package_spec::{
+    AssemblyPackageControlSpec, AssemblyPackageScriptsSpec, AssemblyPackageSpec, PACKAGE_FORMAT_IPK,
 };
 pub use assembly_spec::{
     AssemblyBinarySpec, AssemblyBusyboxInitramfsSpec, AssemblyCheckSpec, AssemblyDeviceKindSpec,

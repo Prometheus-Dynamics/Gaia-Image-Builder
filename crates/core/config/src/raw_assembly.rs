@@ -18,6 +18,8 @@ pub struct RawImageAssemblyConfig {
     /// `[[image.assembly.oci]]`: OCI images built from layers.
     #[serde(rename = "oci")]
     pub ocis: Vec<RawAssemblyOciConfig>,
+    /// `[[image.assembly.packages]]`: package files built from a tree.
+    pub packages: Vec<RawAssemblyPackageConfig>,
     pub busybox_initramfs: Vec<RawAssemblyBusyboxInitramfsConfig>,
     pub binaries: Vec<RawAssemblyBinaryConfig>,
     pub kernel_modules: Vec<RawAssemblyKernelModulesConfig>,
@@ -377,6 +379,72 @@ pub struct RawAssemblyOciLayerConfig {
     pub tar: Option<String>,
     /// An assembly tree, tarred deterministically.
     pub tree: Option<String>,
+}
+
+/// `[[image.assembly.packages]]`: a package file (opkg `ipk`) whose data is
+/// `tree` as installed, with the `control`, `scripts` tables.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawAssemblyPackageConfig {
+    pub id: String,
+    /// `ipk` (the default); `deb` is reserved.
+    pub format: Option<String>,
+    /// The assembly tree whose files, as installed, are the package's data.
+    pub tree: String,
+    /// A file, or a directory (ending in `/`) the package is named in.
+    pub dest: String,
+    /// Whether the archive starts with `debian-binary` (the default true).
+    pub debian_binary: Option<bool>,
+    /// Absolute paths every non-directory entry of the data must be under.
+    pub allowed_prefixes: Vec<String>,
+    pub control: RawAssemblyPackageControlConfig,
+    pub scripts: RawAssemblyPackageScriptsConfig,
+}
+
+/// `[image.assembly.packages.control]`: the control fields. `Architecture`
+/// has no default; the rest of the names are the Debian spelling.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawAssemblyPackageControlConfig {
+    #[serde(rename = "Package")]
+    pub package: Option<String>,
+    #[serde(rename = "Version")]
+    pub version: Option<String>,
+    #[serde(rename = "Architecture")]
+    pub architecture: Option<String>,
+    #[serde(rename = "Maintainer")]
+    pub maintainer: Option<String>,
+    /// The synopsis, then continuation lines (a line may be empty).
+    #[serde(rename = "Description")]
+    pub description: Option<String>,
+    #[serde(rename = "Depends")]
+    pub depends: Vec<String>,
+    #[serde(rename = "Section")]
+    pub section: Option<String>,
+    #[serde(rename = "Priority")]
+    pub priority: Option<String>,
+    #[serde(rename = "Source")]
+    pub source: Option<String>,
+    #[serde(rename = "Homepage")]
+    pub homepage: Option<String>,
+    /// `[image.assembly.packages.control.extra]`: further fields, named
+    /// `[A-Za-z0-9-]+` (`X-Port = "5801"`).
+    pub extra: std::collections::BTreeMap<String, String>,
+}
+
+/// `[image.assembly.packages.scripts]`: the systemd services the generated
+/// maintainer scripts handle, the scripts that replace them, and the conffiles.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct RawAssemblyPackageScriptsConfig {
+    /// Unit file names, e.g. `helios-api.service`.
+    pub services: Vec<String>,
+    pub postinst: Option<String>,
+    pub preinst: Option<String>,
+    pub prerm: Option<String>,
+    pub postrm: Option<String>,
+    /// Absolute guest paths, each a file of the tree.
+    pub conffiles: Vec<String>,
 }
 
 /// `[image.assembly.oci.config]`: the image config.

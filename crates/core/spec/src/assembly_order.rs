@@ -27,6 +27,7 @@ pub enum AssemblyStep {
     Disk(usize),
     Archive(usize),
     Oci(usize),
+    Package(usize),
 }
 
 impl AssemblyStep {
@@ -66,6 +67,7 @@ impl AssemblyStep {
             Self::Disk(index) => format!("disk '{}'", assembly.disks[index].id),
             Self::Archive(index) => format!("archive '{}'", assembly.archives[index].id),
             Self::Oci(index) => format!("oci image '{}'", assembly.ocis[index].id),
+            Self::Package(index) => format!("package '{}'", assembly.packages[index].id),
         }
     }
 
@@ -79,6 +81,7 @@ impl AssemblyStep {
                 | Self::Disk(_)
                 | Self::Archive(_)
                 | Self::Oci(_)
+                | Self::Package(_)
         )
     }
 }
@@ -257,6 +260,16 @@ pub fn assembly_step_paths(
             })
             .collect();
         push(AssemblyStep::Oci(index), reads, vec![resolve(&oci.dest)]);
+    }
+    for (index, package) in assembly.packages.iter().enumerate() {
+        // The package reads its tree as installed, so it waits for every
+        // step that fills the tree.
+        let reads = vec![tree(package.tree.as_str())];
+        push(
+            AssemblyStep::Package(index),
+            reads,
+            vec![resolve(&package.output)],
+        );
     }
     steps
 }

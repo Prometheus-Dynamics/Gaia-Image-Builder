@@ -645,6 +645,8 @@ mod tests_generated;
 mod tests_gpt;
 #[path = "tests_oci.rs"]
 mod tests_oci;
+#[path = "tests_package.rs"]
+mod tests_package;
 #[path = "tests_schedule.rs"]
 mod tests_schedule;
 

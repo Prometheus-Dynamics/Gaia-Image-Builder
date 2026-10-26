@@ -75,6 +75,22 @@ pub(super) const ASSEMBLY_CHILDREN: &[Section] = &[
         ],
     ),
     section(
+        "packages",
+        struct_fields::<raw_assembly::RawAssemblyPackageConfig>,
+        &[
+            section(
+                "control",
+                struct_fields::<raw_assembly::RawAssemblyPackageControlConfig>,
+                &[],
+            ),
+            section(
+                "scripts",
+                struct_fields::<raw_assembly::RawAssemblyPackageScriptsConfig>,
+                &[],
+            ),
+        ],
+    ),
+    section(
         "checks",
         struct_fields::<raw_assembly::RawAssemblyCheckConfig>,
         &[],

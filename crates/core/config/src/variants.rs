@@ -311,6 +311,12 @@ fn output_paths(spec: &ResolvedBuildSpec) -> Vec<String> {
         );
         outputs.extend(
             assembly
+                .packages
+                .iter()
+                .map(|package| package.dest.as_str().to_string()),
+        );
+        outputs.extend(
+            assembly
                 .filesystems
                 .iter()
                 .map(|filesystem| filesystem.output.as_str().to_string()),

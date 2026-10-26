@@ -343,6 +343,35 @@ pub(super) fn job_oci<'a>(
     }))
 }
 
+pub(super) fn job_package<'a>(ctx: &JobCtx<'a>, index: usize) -> Result<Record<'a>, AssemblyError> {
+    let package = &ctx.assembly.packages[index];
+    let span = tracing::info_span!(
+        "assembly_package",
+        operation_id = %ctx.operation_id.as_str(),
+        package_id = %package.id
+    );
+    let _span_guard = span.enter();
+    let summary =
+        super::package::execute_assembly_package(ctx.spec, ctx.roots, package, ctx.cancel.clone())?;
+    let message = format!(
+        "package '{}': {} ({} bytes), {} files",
+        package.id,
+        summary.output.display(),
+        summary.bytes,
+        summary.files
+    );
+    let published = under_out_dir(ctx, &summary.output);
+    Ok(Box::new(move |run: &mut StepRun<'a>| {
+        if published {
+            run.published_outputs.push(summary.output.clone());
+        }
+        run.produced.record_package(index, summary.bytes);
+        run.package_count += 1;
+        super::package::record_package_state(&mut run.state, run.package_count, package, &summary);
+        run.messages.push(message);
+    }))
+}
+
 /// The warning text of a copied dynamic file whose runtime libraries its
 /// tree lacks, or `None` when they are all there. A tree may overlay a full
 /// rootfs, so this is a warning, not an error.

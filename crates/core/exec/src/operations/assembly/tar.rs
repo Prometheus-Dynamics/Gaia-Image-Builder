@@ -37,17 +37,27 @@ impl TarKind {
     }
 }
 
-/// Writes a deterministic POSIX ustar stream: mtime 0, uid/gid 0, empty
+/// Writes a deterministic POSIX ustar stream: mtime 0 (or the one
+/// [`TarWriter::with_mtime`] sets), uid/gid 0, empty
 /// user/group names. Names and link targets that ustar cannot hold use the
 /// `prefix` field or PAX records. Regular files take the mode given (0644 or
 /// 0755 in practice), directories 0755, symlinks 0777.
 pub(super) struct TarWriter<W: Write> {
     inner: W,
+    /// The mtime every entry carries: 0 unless [`TarWriter::with_mtime`] set one.
+    mtime: u64,
 }
 
 impl<W: Write> TarWriter<W> {
     pub(super) fn new(inner: W) -> Self {
-        Self { inner }
+        Self { inner, mtime: 0 }
+    }
+
+    /// Sets the mtime every entry is written with (a package uses
+    /// `SOURCE_DATE_EPOCH`; a tar layer keeps 0).
+    pub(super) fn with_mtime(mut self, mtime: u64) -> Self {
+        self.mtime = mtime;
+        self
     }
 
     /// Appends a regular file with mode 0644; see [`TarWriter::append_file`].
@@ -142,7 +152,7 @@ impl<W: Write> TarWriter<W> {
         kind: TarKind,
         link: &str,
     ) -> Result<(), String> {
-        let blocks = entry_header_blocks(name, size, mode, kind, link)?;
+        let blocks = entry_header_blocks_at(name, size, mode, kind, link, self.mtime)?;
         self.inner
             .write_all(&blocks)
             .map_err(|error| format!("failed to write tar header for '{name}': {error}"))
@@ -175,12 +185,25 @@ pub(super) fn ustar_header(name: &str, size: u64) -> Result<[u8; TAR_BLOCK], Str
 /// The blocks that precede an entry's data: a PAX extended header carrying
 /// the `path` and/or `linkpath` that the ustar fields cannot hold, then the
 /// ustar header. The result is a whole number of blocks.
+#[cfg(test)]
 fn entry_header_blocks(
     name: &str,
     size: u64,
     mode: u32,
     kind: TarKind,
     link: &str,
+) -> Result<Vec<u8>, String> {
+    entry_header_blocks_at(name, size, mode, kind, link, 0)
+}
+
+/// [`entry_header_blocks`] with the entry's mtime.
+fn entry_header_blocks_at(
+    name: &str,
+    size: u64,
+    mode: u32,
+    kind: TarKind,
+    link: &str,
+    mtime: u64,
 ) -> Result<Vec<u8>, String> {
     if name.is_empty() || name.len() > TAR_PATH_MAX {
         return Err(format!(
@@ -216,6 +239,7 @@ fn entry_header_blocks(
             data.len() as u64,
             PAX_HEADER_FLAG,
             &[],
+            0,
         ));
         blocks.extend_from_slice(&data);
         let remainder = data.len() % TAR_BLOCK;
@@ -230,6 +254,7 @@ fn entry_header_blocks(
         size,
         kind.type_flag(),
         link_field,
+        mtime,
     ));
     Ok(blocks)
 }
@@ -294,6 +319,7 @@ fn ustar_block(
     size: u64,
     flag: u8,
     link: &[u8],
+    mtime: u64,
 ) -> [u8; TAR_BLOCK] {
     let mut header = [0u8; TAR_BLOCK];
     header[..name.len()].copy_from_slice(name);
@@ -301,7 +327,7 @@ fn ustar_block(
     write_octal(&mut header[108..116], 0); // uid
     write_octal(&mut header[116..124], 0); // gid
     write_octal(&mut header[124..136], size);
-    write_octal(&mut header[136..148], 0); // mtime
+    write_octal(&mut header[136..148], mtime);
     header[156] = flag;
     header[157..157 + link.len()].copy_from_slice(link);
     header[257..263].copy_from_slice(b"ustar\0");
@@ -427,6 +453,22 @@ mod tests {
             .parse()
             .expect("number");
         assert_eq!(length, text.len());
+    }
+
+    #[test]
+    fn an_entry_takes_the_writers_mtime_and_zero_by_default() {
+        let mtime_of = |writer: TarWriter<Vec<u8>>| {
+            let out = writer.finish().expect("finish");
+            let field = std::str::from_utf8(&out[136..148]).expect("octal field");
+            u64::from_str_radix(field.trim_matches(|c| c == '\0' || c == ' '), 8)
+                .expect("octal mtime")
+        };
+        let mut plain = TarWriter::new(Vec::new());
+        plain.append_dir_mode("./", 0o755).expect("dir");
+        assert_eq!(mtime_of(plain), 0);
+        let mut stamped = TarWriter::new(Vec::new()).with_mtime(1_700_000_000);
+        stamped.append_dir_mode("./", 0o755).expect("dir");
+        assert_eq!(mtime_of(stamped), 1_700_000_000);
     }
 
     #[test]

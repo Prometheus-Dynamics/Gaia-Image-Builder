@@ -490,6 +490,7 @@ pub(crate) fn validate_image_assembly(
     crate::image_assembly_outputs::validate_kernel_modules(spec, assembly, &tree_ids, diagnostics);
     image_assembly_layout::validate_archives(spec, assembly, &tree_ids, diagnostics);
     crate::image_assembly_oci::validate_ocis(spec, assembly, &tree_ids, diagnostics);
+    crate::image_assembly_package::validate_packages(spec, assembly, &tree_ids, diagnostics);
     crate::image_assembly_checks::validate_checks(assembly, &tree_ids, diagnostics);
     image_assembly_generated::validate_binaries(spec, &tree_ids, assembly, diagnostics);
     image_assembly_generated::validate_token_reads(assembly, diagnostics);

@@ -158,6 +158,51 @@ pub(crate) fn oci_input_entries(
     parts
 }
 
+/// Fingerprint entries for package inputs: each package's tree, by content
+/// digest, and each maintainer script given as a file. The control fields
+/// are covered by the hashed assembly spec.
+pub(crate) fn package_input_entries(
+    spec: &ResolvedBuildSpec,
+    roots: &AssemblyRoots,
+    assembly: &gaia_spec::ImageAssemblySpec,
+    generated_outputs: &BTreeSet<PathBuf>,
+) -> Vec<(String, String)> {
+    let mut parts = Vec::new();
+    for package in &assembly.packages {
+        let owner = format!("package {}", package.id);
+        if let Ok(root) = roots.tree_path(package.tree.as_str()) {
+            parts.push((
+                format!("{owner} {}", root.display()),
+                format!(
+                    "package-tree:{}:{}:{}",
+                    package.id,
+                    root.display(),
+                    crate::tree_digest::tree_digest_signature(root)
+                ),
+            ));
+        }
+        let scripts = &package.scripts;
+        let overrides = [
+            ("postinst", &scripts.postinst),
+            ("preinst", &scripts.preinst),
+            ("prerm", &scripts.prerm),
+            ("postrm", &scripts.postrm),
+        ];
+        for (name, script) in overrides {
+            if let Some(script) = script {
+                parts.push(input_part(
+                    "package-script",
+                    &format!("{owner} {name}"),
+                    &format!("{}:{name}", package.id),
+                    resolve(spec, roots, script),
+                    generated_outputs,
+                ));
+            }
+        }
+    }
+    parts
+}
+
 /// Fingerprint entries for the files a text value's `${assembly...}` tokens
 /// read, named after `owner` (for example `archive a/m` or `file tree:dest`)
 /// and tagged with `kind`.

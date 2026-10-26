@@ -97,6 +97,16 @@ impl ProducedRecorder<'_> {
         self.record_produced(ProducedOutputKind::Oci, &assembly.ocis[index].dest, bytes);
     }
 
+    /// Records the package at `index`, `bytes` long.
+    pub(super) fn record_package(&mut self, index: usize, bytes: u64) {
+        let assembly = self.assembly;
+        self.record_produced(
+            ProducedOutputKind::Package,
+            &assembly.packages[index].output,
+            bytes,
+        );
+    }
+
     /// Records an output the step wrote, `bytes` long, at the path `template`
     /// names in the spec. A template that does not resolve is not recorded;
     /// its size is then measured from the file, as before.

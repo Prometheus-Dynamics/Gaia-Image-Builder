@@ -2,6 +2,7 @@ use super::*;
 use crate::raw::RawImageLayersConfig;
 use crate::raw_assembly::{
     RawAssemblyArchiveConfig, RawAssemblyDeviceKind, RawAssemblyJsonValue, RawAssemblyOciConfig,
+    RawAssemblyPackageConfig, RawAssemblyPackageControlConfig,
 };
 use gaia_spec::{
     AssemblyArchiveMemberSpec, AssemblyArchiveSpec, AssemblyBinarySpec, AssemblyCompressedFsSpec,
@@ -331,6 +332,11 @@ pub(crate) fn compile_image_assembly(
             .map(compile_assembly_archive)
             .collect(),
         ocis: raw.ocis.into_iter().map(compile_assembly_oci).collect(),
+        packages: raw
+            .packages
+            .into_iter()
+            .map(compile_assembly_package)
+            .collect(),
         checks: raw
             .checks
             .into_iter()
@@ -517,6 +523,54 @@ fn compile_assembly_oci(raw: RawAssemblyOciConfig) -> AssemblyOciSpec {
             stop_signal: config.stop_signal,
             labels: config.labels.into_iter().collect(),
         },
+    }
+}
+
+/// An `[[image.assembly.packages]]` entry. The defaults are the spec's: the
+/// `ipk` format and a `debian-binary` member. The validator reports the rest.
+fn compile_assembly_package(raw: RawAssemblyPackageConfig) -> gaia_spec::AssemblyPackageSpec {
+    let control = compile_package_control(raw.control);
+    let output = gaia_spec::AssemblyPackageSpec::output_for(&raw.dest, &control);
+    let scripts = raw.scripts;
+    gaia_spec::AssemblyPackageSpec {
+        id: raw.id,
+        format: raw
+            .format
+            .unwrap_or_else(|| gaia_spec::PACKAGE_FORMAT_IPK.into()),
+        tree: raw.tree.into(),
+        dest: raw.dest.into(),
+        output: output.into(),
+        debian_binary: raw.debian_binary.unwrap_or(true),
+        allowed_prefixes: raw.allowed_prefixes,
+        control,
+        scripts: gaia_spec::AssemblyPackageScriptsSpec {
+            services: scripts.services,
+            postinst: scripts.postinst.map(Into::into),
+            preinst: scripts.preinst.map(Into::into),
+            prerm: scripts.prerm.map(Into::into),
+            postrm: scripts.postrm.map(Into::into),
+            conffiles: scripts.conffiles,
+        },
+    }
+}
+
+/// The control fields of a package. A missing required field is left empty
+/// for the validator to report.
+fn compile_package_control(
+    raw: RawAssemblyPackageControlConfig,
+) -> gaia_spec::AssemblyPackageControlSpec {
+    gaia_spec::AssemblyPackageControlSpec {
+        package: raw.package.unwrap_or_default(),
+        version: raw.version.unwrap_or_default(),
+        architecture: raw.architecture.unwrap_or_default(),
+        maintainer: raw.maintainer.unwrap_or_default(),
+        description: raw.description.unwrap_or_default(),
+        depends: raw.depends,
+        section: raw.section,
+        priority: raw.priority,
+        source: raw.source,
+        homepage: raw.homepage,
+        extra: raw.extra.into_iter().collect(),
     }
 }
 

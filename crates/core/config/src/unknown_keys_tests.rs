@@ -139,6 +139,24 @@ fn assembly_oci_tables_are_checked() {
 }
 
 #[test]
+fn assembly_package_tables_are_checked() {
+    assert_eq!(
+        unknown(
+            "[[image.assembly.packages]]\nid = \"helios\"\nformt = \"ipk\"\ntree = \"pkg-root\"\n\
+             dest = \"out/\"\n\
+             [image.assembly.packages.control]\nPackage = \"helios\"\nVersoin = \"1\"\n\
+             extra = { \"X-Port\" = \"5801\" }\n\
+             [image.assembly.packages.scripts]\nservices = []\nconffile = []\n"
+        ),
+        vec![
+            "image.assembly.packages[0].control.Versoin",
+            "image.assembly.packages[0].formt",
+            "image.assembly.packages[0].scripts.conffile",
+        ]
+    );
+}
+
+#[test]
 fn a_source_key_is_checked_against_its_kind() {
     assert_eq!(
         unknown_with_hints(

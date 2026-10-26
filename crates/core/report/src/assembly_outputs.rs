@@ -40,6 +40,9 @@ pub(crate) fn assembly_outputs(spec: &ResolvedBuildSpec) -> AssemblyOutputs {
     for oci in &assembly.ocis {
         push(&mut known, resolve(&oci.dest), "oci");
     }
+    for package in &assembly.packages {
+        push(&mut known, resolve(&package.output), "package");
+    }
     for disk in &assembly.disks {
         push(&mut known, resolve(&disk.output), "disk");
     }
