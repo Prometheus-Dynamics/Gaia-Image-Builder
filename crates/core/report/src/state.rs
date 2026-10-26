@@ -68,6 +68,9 @@ pub(crate) fn image_contract(spec: &ResolvedBuildSpec) -> BTreeMap<String, Strin
                 starting_point.output_mode.as_str().to_string(),
             );
         }
+        ImageDefinition::None => {
+            contract.insert("provider".into(), "none".into());
+        }
     }
     contract
 }

@@ -1,0 +1,69 @@
+# `kind = "none"`: no rootfs, kernel or image is built. The build is one
+# opkg package (ipk) of the files below, for a device OS that installs it
+# (see docs/configuration.md, "Packages (ipk)"). Nothing here needs a
+# toolchain: the one source is a plain directory.
+
+build_name = "systemcore-package"
+version = "1.0.0"
+description = "An opkg package for an external device OS, with no rootfs or image."
+target = "local"
+profile = "release"
+
+[workspace]
+root_dir = "examples/systemcore-package"
+build_dir = "../../.gaia/examples/systemcore-package/build"
+out_dir = "../../.gaia/examples/systemcore-package/out"
+
+[reporting]
+summary = true
+provenance = true
+manifest = true
+
+[[sources]]
+id = "device-files"
+kind = "path"
+path = "files"
+identity_ignore = [".gaia"]
+refresh = "never"
+pin = "locked"
+
+[image]
+kind = "none"
+
+[image.assembly]
+work_dir = "${workspace.build_dir}/assembly"
+out_dir = "${workspace.out_dir}"
+
+[[image.assembly.trees]]
+id = "package-root"
+path = "$assembly.work/package-root"
+
+[[image.assembly.files]]
+tree = "package-root"
+src = "${source.device-files.path}/systemcore-demo.service"
+dest = "etc/systemd/system/systemcore-demo.service"
+mode = "0644"
+
+[[image.assembly.files]]
+tree = "package-root"
+src = "${source.device-files.path}/systemcore-demo"
+dest = "usr/bin/systemcore-demo"
+mode = "0755"
+
+[[image.assembly.packages]]
+id = "systemcore-demo"
+tree = "package-root"
+dest = "$assembly.out/"
+allowed_prefixes = ["/usr/bin", "/etc/systemd/system"]
+
+[image.assembly.packages.control]
+Package = "systemcore-demo"
+Version = "${build.version}"
+Architecture = "all"
+Maintainer = "Example Maintainer <maintainer@example.invalid>"
+Description = "Demo service for the device OS."
+Section = "base"
+Priority = "optional"
+
+[image.assembly.packages.scripts]
+services = ["systemcore-demo.service"]

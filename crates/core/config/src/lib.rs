@@ -241,6 +241,7 @@ fn drop_unused_import_sources(spec: &mut ResolvedBuildSpec, unused: &[String]) {
     let image_source = match &spec.image.definition {
         gaia_spec::ImageDefinition::Buildroot(buildroot) => buildroot.source.clone(),
         gaia_spec::ImageDefinition::StartingPoint(starting_point) => starting_point.source.clone(),
+        gaia_spec::ImageDefinition::None => None,
     };
     let built_from = |id: &str| {
         image_source

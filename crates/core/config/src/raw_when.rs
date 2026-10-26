@@ -28,6 +28,7 @@ pub struct RawWhenConfig {
 pub enum RawWhenImageKind {
     Buildroot,
     StartingPoint,
+    None,
 }
 
 /// Input values in a `when.input` table, as their string form: a boolean or

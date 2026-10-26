@@ -58,7 +58,9 @@ impl AssemblyRoots {
         let buildroot_output = buildroot_output_dir(spec)?;
         let provider_target = match spec.image.provider_kind() {
             crate::ImageProviderKind::Buildroot => buildroot_output.join("target"),
-            crate::ImageProviderKind::StartingPoint => provider_images.join("rootfs"),
+            crate::ImageProviderKind::StartingPoint | crate::ImageProviderKind::None => {
+                provider_images.join("rootfs")
+            }
         };
         let provider_host = (spec.image.provider_kind() == crate::ImageProviderKind::Buildroot)
             .then(|| buildroot_output.join("host"));

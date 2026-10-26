@@ -68,6 +68,7 @@ pub(crate) fn image_provider_label(spec: &ResolvedBuildSpec) -> &'static str {
     match spec.image.provider_kind() {
         gaia_spec::ImageProviderKind::Buildroot => "Buildroot",
         gaia_spec::ImageProviderKind::StartingPoint => "StartingPoint",
+        gaia_spec::ImageProviderKind::None => "none (no image)",
     }
 }
 

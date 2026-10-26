@@ -687,6 +687,7 @@ fn interpolate_image_definition(
             rootfs_validation_mode,
             output_mode,
         },
+        RawImageDefinition::None {} => RawImageDefinition::None {},
     }
 }
 

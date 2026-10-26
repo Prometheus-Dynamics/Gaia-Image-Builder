@@ -8,6 +8,7 @@ pub(crate) fn apply_when_selection(raw: &mut RawBuildConfig) {
         image_kind: match raw.image.definition {
             RawImageDefinition::Buildroot { .. } => RawWhenImageKind::Buildroot,
             RawImageDefinition::StartingPoint { .. } => RawWhenImageKind::StartingPoint,
+            RawImageDefinition::None {} => RawWhenImageKind::None,
         },
         inputs: raw.selected_inputs.iter().cloned().collect(),
     };

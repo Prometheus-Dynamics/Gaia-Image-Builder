@@ -101,7 +101,11 @@ pub(crate) fn validate_image_contract(
     }
     validate_image_layers(spec, diagnostics);
     validate_image_hardware(spec, diagnostics);
+    if matches!(spec.image.definition, ImageDefinition::None) {
+        validate_image_none(spec, diagnostics);
+    }
     match &spec.image.definition {
+        ImageDefinition::None => {}
         ImageDefinition::Buildroot(buildroot) => {
             for (index, name) in buildroot.rootfs_exclude_packages.iter().enumerate() {
                 let path = Some("image.rootfs.exclude_packages".to_string());
@@ -586,6 +590,50 @@ fn validate_raw_archive_source(
                  raw disk image Buildroot produces (for example sdcard.img)"
             ),
             Some("image.output.archive_name".into()),
+        ));
+    }
+}
+
+/// `kind = "none"`: no rootfs, kernel or image is built, so nothing may
+/// target one. The sources, artifacts and assembly still build.
+fn validate_image_none(spec: &ResolvedBuildSpec, diagnostics: &mut Vec<ValidationDiagnostic>) {
+    let feed = [
+        (
+            "image.feed.install_entries",
+            !spec.image.feed.install_entries.is_empty(),
+        ),
+        (
+            "image.feed.stage_files",
+            !spec.image.feed.stage_files.is_empty(),
+        ),
+        (
+            "image.feed.stage_env_sets",
+            !spec.image.feed.stage_env_sets.is_empty(),
+        ),
+        (
+            "image.feed.stage_services",
+            !spec.image.feed.stage_services.is_empty(),
+        ),
+    ];
+    for (path, set) in feed {
+        if set {
+            diagnostics.push(error(
+                "image_none_feed",
+                format!(
+                    "{path} feeds a rootfs, and [image] kind = \"none\" builds no rootfs: \
+                     install and stage entries reach an assembly tree through \
+                     [image.assembly] instead"
+                ),
+                Some(path.into()),
+            ));
+        }
+    }
+    if !spec.image.checks.is_default() {
+        diagnostics.push(error(
+            "image_none_checks",
+            "[image.checks] checks a built kernel and rootfs, and [image] kind = \"none\" builds neither"
+                .into(),
+            Some("image.checks".into()),
         ));
     }
 }

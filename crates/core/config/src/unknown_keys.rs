@@ -205,6 +205,8 @@ const BUILDROOT_IMAGE_KEYS: &[&str] = &[
     "expected_images",
     "rootfs",
 ];
+/// `kind = "none"` takes no kind-specific keys.
+const NONE_IMAGE_KEYS: &[&str] = &[];
 const STARTING_POINT_IMAGE_KEYS: &[&str] = &[
     "source",
     "source_path",
@@ -220,6 +222,7 @@ fn image_fields(kind: Option<&str>) -> Option<Vec<&'static str>> {
     let own: Vec<&'static str> = match kind {
         Some("buildroot") => BUILDROOT_IMAGE_KEYS.to_vec(),
         Some("starting-point") => STARTING_POINT_IMAGE_KEYS.to_vec(),
+        Some("none") => NONE_IMAGE_KEYS.to_vec(),
         Some(_) => return None,
         None => BUILDROOT_IMAGE_KEYS
             .iter()
@@ -699,7 +702,7 @@ pub(crate) mod layout {
         match key {
             "sources" => &["git", "path", "archive", "download"],
             "artifacts" => &["rust", "java", "node", "python", "go"],
-            "image" => &["buildroot", "starting-point"],
+            "image" => &["buildroot", "starting-point", "none"],
             _ => &[],
         }
     }

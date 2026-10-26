@@ -311,7 +311,9 @@ fn image_fields_change_the_fingerprints_of_the_steps_that_apply_them() {
 fn buildroot(image: &mut ImageSpec) -> &mut BuildrootImageSpec {
     match &mut image.definition {
         ImageDefinition::Buildroot(buildroot) => buildroot,
-        ImageDefinition::StartingPoint(_) => unreachable!("the test image is Buildroot"),
+        ImageDefinition::StartingPoint(_) | ImageDefinition::None => {
+            unreachable!("the test image is Buildroot")
+        }
     }
 }
 

@@ -403,6 +403,9 @@ impl AssemblyPathTemplate {
     ) -> Result<(), AssemblyPathTemplateError> {
         for token in assembly_template_tokens(&self.0) {
             if let Some(variable) = token.strip_prefix("$provider.") {
+                if provider_kind == ImageProviderKind::None {
+                    return Err(AssemblyPathTemplateError::NoImageProvider(token.into()));
+                }
                 match variable {
                     "images" | "target" => {}
                     "buildroot_output" if provider_kind == ImageProviderKind::Buildroot => {}
@@ -476,6 +479,9 @@ pub struct AssemblyPathTemplateContext<'a> {
 
 impl AssemblyPathTemplateContext<'_> {
     fn resolve_token(&self, token: &str) -> Result<String, AssemblyPathTemplateError> {
+        if token.starts_with("$provider.") && self.provider_kind == ImageProviderKind::None {
+            return Err(AssemblyPathTemplateError::NoImageProvider(token.into()));
+        }
         let path = match token {
             "$provider.images" => Some(self.provider_images),
             "$provider.buildroot_output" if self.provider_kind == ImageProviderKind::Buildroot => {
@@ -564,6 +570,8 @@ pub enum AssemblyPathTemplateError {
     UnknownAssemblyVariable(String),
     UnknownProviderVariable(String),
     UnavailableProviderVariable(String),
+    /// A `$provider.*` token under `kind = "none"`, which has no image provider.
+    NoImageProvider(String),
 }
 
 impl std::fmt::Display for AssemblyPathTemplateError {
@@ -590,6 +598,10 @@ impl std::fmt::Display for AssemblyPathTemplateError {
             Self::UnavailableProviderVariable(variable) => write!(
                 formatter,
                 "assembly path references provider variable '{variable}' that is not available for the active image provider"
+            ),
+            Self::NoImageProvider(variable) => write!(
+                formatter,
+                "assembly path references '{variable}', but the image is kind = \"none\" and has no image provider (use $assembly.* or workspace paths)"
             ),
         }
     }
@@ -774,6 +786,24 @@ mod tests {
             )
             .referenced_tree_ids(),
             vec!["boot", "rootfs"]
+        );
+    }
+
+    #[test]
+    fn assembly_path_template_rejects_provider_tokens_without_an_image_provider() {
+        let template = AssemblyPathTemplate::new("$provider.images/pkg.ipk");
+        let error = template
+            .validate_tokens(ImageProviderKind::None, |_| true)
+            .expect_err("no provider tokens");
+        assert_eq!(
+            error,
+            AssemblyPathTemplateError::NoImageProvider("$provider.images".into())
+        );
+        assert!(error.to_string().contains("kind = \"none\""), "{error}");
+        assert!(
+            AssemblyPathTemplate::new("$assembly.work/pkg")
+                .validate_tokens(ImageProviderKind::None, |_| true)
+                .is_ok()
         );
     }
 }

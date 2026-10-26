@@ -519,6 +519,7 @@ pub(crate) fn collect_unresolved_tokens(raw: &RawBuildConfig) -> Vec<RawUnresolv
                 );
             }
         }
+        RawImageDefinition::None {} => {}
     }
     for (index, install_entry) in raw.image.feed.install_entries.iter().enumerate() {
         scan_string(

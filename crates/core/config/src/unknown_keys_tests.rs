@@ -229,6 +229,25 @@ fn every_kind_of_image_takes_its_own_keys_only() {
 }
 
 #[test]
+fn kind_none_takes_no_kind_keys() {
+    assert!(
+        unknown(
+            "[image]\nkind = \"none\"\n[image.output]\ncollect_dir = \"out\"\n\
+             [image.assembly]\n[[image.assembly.packages]]\nid = \"p\"\n"
+        )
+        .is_empty()
+    );
+    assert_eq!(
+        unknown("[image]\nkind = \"none\"\nsource = \"s\"\ndefconfig = \"d\"\n"),
+        vec!["image.defconfig", "image.source"]
+    );
+    assert_eq!(
+        unknown("[image]\nkind = \"none\"\nrootfs_path = \"r\"\n"),
+        vec!["image.rootfs_path"]
+    );
+}
+
+#[test]
 fn a_misspelled_image_key_suggests_its_sibling() {
     assert_eq!(
         unknown_with_hints("[image]\nkind = \"starting-point\"\nrootfs_pth = \"r\"\n"),

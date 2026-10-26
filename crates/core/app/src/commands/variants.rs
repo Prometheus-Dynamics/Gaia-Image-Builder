@@ -226,6 +226,7 @@ fn classify_planned(
                         .map(|id| id.as_str().to_string()),
                 );
             }
+            gaia_spec::ImageDefinition::None => {}
         }
     }
     for (id, kind) in &kinds {

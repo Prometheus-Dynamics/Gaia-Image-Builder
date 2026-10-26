@@ -212,6 +212,25 @@ pub(crate) fn validate_checkpoints(
             }
         }
 
+        if spec.image.provider_kind() == gaia_spec::ImageProviderKind::None
+            && checkpoint.anchor == CheckpointAnchorRef::Image
+            && !spec
+                .image
+                .assembly
+                .as_ref()
+                .is_some_and(|assembly| !assembly.is_empty())
+        {
+            diagnostics.push(error(
+                "checkpoint_anchor_without_assembly",
+                format!(
+                    "checkpoint '{}' anchors to 'image', and [image] kind = \"none\" has no image: \
+                     anchor it to a stage or install entry, or give [image.assembly] to anchor it to the assembly",
+                    checkpoint.id.as_str()
+                ),
+                Some(format!("checkpoint:{}", checkpoint.id.as_str())),
+            ));
+        }
+
         if !anchor_is_supported_by_image_flow(spec, &checkpoint.anchor) {
             diagnostics.push(error(
             "illegal_checkpoint_anchor_domain",

@@ -511,6 +511,8 @@ pub(crate) fn image_backend_signature(
                 source_signature
             )
         }
+        // No image provider: no toolchain or image state to sign.
+        ImageDefinition::None => "no-image-provider".to_string(),
     }
 }
 

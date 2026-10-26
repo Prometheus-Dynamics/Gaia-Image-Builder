@@ -4,7 +4,7 @@ use gaia_spec::ResolvedBuildSpec;
 use gaia_validate::ValidationReport;
 use std::collections::BTreeMap;
 
-use crate::assembly_outputs::assembly_outputs;
+use crate::assembly_outputs::{assembly_outputs, first_assembly_deliverable};
 use crate::image_sizes::{image_size_note, image_size_records, summary_image_paths};
 use crate::model::{
     CleanupStatus, ExecutionFailureReport, FailureClass, FailureClassCount, OperationTimingRecord,
@@ -43,15 +43,23 @@ pub fn render_summary(
             ) && matches!(operation.reuse, OperationReuse::Reuse { .. })
         })
         .count();
+    // Without an image provider the primary output is the assembly's first
+    // deliverable (a package, then an archive or disk), not an image archive.
+    let no_image_deliverable = if spec.image.provider_kind() == gaia_spec::ImageProviderKind::None {
+        first_assembly_deliverable(&assembly_outputs(spec))
+    } else {
+        None
+    };
     let primary_image_output = outcome
         .image_results
         .iter()
-        .find_map(|result| result.archive_path.as_ref())
+        .find_map(|result| result.archive_path.clone())
+        .or(no_image_deliverable)
         .or_else(|| {
             outcome
                 .image_results
                 .iter()
-                .find_map(|result| result.collect_dir.as_ref())
+                .find_map(|result| result.collect_dir.clone())
         })
         .map(|path| path.display().to_string());
     let image_reuse_details = outcome

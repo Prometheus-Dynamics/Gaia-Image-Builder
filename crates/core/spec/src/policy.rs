@@ -143,6 +143,8 @@ impl ProviderExecutionPolicySpec {
             ImageProviderKind::StartingPoint => {
                 ResolvedCommandPolicySpec::from(&self.starting_point)
             }
+            // No image provider runs commands of its own.
+            ImageProviderKind::None => ResolvedCommandPolicySpec::default(),
         }
     }
 }

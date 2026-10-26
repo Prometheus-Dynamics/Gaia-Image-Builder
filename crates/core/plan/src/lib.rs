@@ -336,10 +336,20 @@ pub fn plan_build_operations(
         });
     }
 
-    let provider = image_catalog
-        .find_for_kind(spec.image.provider_kind())
-        .expect("image provider must be registered before planning");
-    let image_plan = provider.plan_image(&spec.image);
+    // `kind = "none"` has no image provider: no image operation is planned,
+    // and the assembly stands in for the image (see below).
+    let has_image_provider = spec.image.provider_kind() != gaia_spec::ImageProviderKind::None;
+    let image_plan = if has_image_provider {
+        let provider = image_catalog
+            .find_for_kind(spec.image.provider_kind())
+            .expect("image provider must be registered before planning");
+        provider.plan_image(&spec.image)
+    } else {
+        gaia_image_providers::ImagePlan {
+            operations: Vec::new(),
+            output: gaia_image_providers::ImageOutputContract::default(),
+        }
+    };
     let mut image_prepare_dependencies = vec![OperationId::resolve()];
     let mut image_finalize_dependencies =
         if stage_operation_ids.is_empty() && stage_dependencies.is_empty() {
@@ -368,6 +378,7 @@ pub fn plan_build_operations(
                 image_finalize_dependencies.push(OperationId::source(source_id));
             }
         }
+        ImageDefinition::None => {}
     }
     image_prepare_dependencies.sort_by(|left, right| left.as_str().cmp(right.as_str()));
     image_prepare_dependencies.dedup_by(|left, right| left.as_str() == right.as_str());
@@ -447,7 +458,6 @@ pub fn plan_build_operations(
     if has_image_assembly {
         let mut assembly =
             PlannedOperation::new(OperationId::image_assembly(), OperationKind::AssembleImage)
-                .with_dependency(OperationId::image())
                 .with_parallelism(OperationParallelism::parallelizable(
                     OperationParallelismDomain::Images,
                 ))
@@ -457,6 +467,27 @@ pub fn plan_build_operations(
                     "image_assembly_required",
                     "image assembly will execute after provider image output is available",
                 ));
+        if has_image_provider {
+            assembly = assembly.with_dependency(OperationId::image());
+        } else {
+            // Without a provider the assembly is the build's last step: it
+            // reads what the artifacts, installs and stage entries produced.
+            for artifact in &spec.artifacts {
+                assembly = assembly.with_dependency(OperationId::artifact(&artifact.id));
+            }
+            for install in &spec.install.entries {
+                assembly = assembly.with_dependency(OperationId::install(&install.id));
+            }
+            for file in &spec.stage.files {
+                assembly = assembly.with_dependency(OperationId::stage_file(&file.id));
+            }
+            for env_set in &spec.stage.env_sets {
+                assembly = assembly.with_dependency(OperationId::stage_env_set(&env_set.id));
+            }
+            for service in &spec.stage.services {
+                assembly = assembly.with_dependency(OperationId::stage_service(&service.id));
+            }
+        }
         // Declared sources its `${source.<id>...}` tokens name: a change to
         // one reruns the assembly, as it does for an artifact.
         for source in spec
@@ -497,7 +528,12 @@ pub fn plan_build_operations(
     }
 
     for checkpoint in &spec.checkpoints.points {
-        let anchor_dependency = checkpoint_anchor_dependency(&checkpoint.anchor);
+        // With no image, an anchor at the image is the assembly (validation
+        // requires one for it).
+        let anchor_dependency = match (&checkpoint.anchor, has_image_provider) {
+            (gaia_spec::CheckpointAnchorRef::Image, false) => OperationId::image_assembly(),
+            _ => checkpoint_anchor_dependency(&checkpoint.anchor),
+        };
         let checkpoint_optionality = checkpoint_optionality(checkpoint);
         operations.push(
             PlannedOperation::new(
@@ -534,15 +570,21 @@ pub fn plan_build_operations(
         ))
         .with_optionality(OperationOptionality::Required)
         .with_fingerprint(operation_fingerprint(spec, &OperationKind::EmitReport))
-        .with_dependency(if has_image_assembly {
-            OperationId::image_assembly()
-        } else {
-            OperationId::image()
-        })
         .with_reuse(OperationReuse::execute(
             "report_emission_required",
             "report emission always runs at the end of a plan",
         ));
+    if has_image_assembly {
+        report = report.with_dependency(OperationId::image_assembly());
+    } else if has_image_provider {
+        report = report.with_dependency(OperationId::image());
+    } else {
+        // No image and no assembly: the report comes after everything the
+        // build made.
+        for operation in &operations {
+            report = report.with_dependency(operation.id.clone());
+        }
+    }
     for checkpoint in &spec.checkpoints.points {
         if checkpoint_optionality(checkpoint) != OperationOptionality::BestEffort {
             report = report.with_dependency(OperationId::checkpoint(&checkpoint.id));

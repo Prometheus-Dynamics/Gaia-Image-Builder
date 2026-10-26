@@ -561,7 +561,10 @@ pub(crate) fn dispatch_operation(
                         .flatten();
                     success =
                         success.with_image_result(gaia_image_providers::ImageExecutionResult {
-                            provider_id: format!("image.{}", spec.image.provider_kind().as_str()),
+                            provider_id: match spec.image.provider_kind() {
+                                gaia_spec::ImageProviderKind::None => "assembly".to_string(),
+                                kind => format!("image.{}", kind.as_str()),
+                            },
                             collect_dir,
                             archive_path: summary.archive_path,
                             emit_report: spec.image.output.emit_report,

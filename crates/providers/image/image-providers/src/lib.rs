@@ -399,6 +399,7 @@ pub fn build_image_contract_state_details(image: &ImageSpec) -> Vec<(String, Str
                 starting_point.output_mode.as_str().to_string(),
             ));
         }
+        ImageDefinition::None => {}
     }
 
     details

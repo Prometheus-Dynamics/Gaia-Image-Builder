@@ -700,6 +700,7 @@ fn provider_root_supported(spec: &ResolvedBuildSpec, variable: &str) -> bool {
         gaia_spec::ImageProviderKind::StartingPoint => {
             matches!(variable, "provider.images" | "provider.target")
         }
+        gaia_spec::ImageProviderKind::None => false,
     }
 }
 

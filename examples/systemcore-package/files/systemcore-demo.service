@@ -1,0 +1,10 @@
+[Unit]
+Description=Systemcore demo service
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/systemcore-demo
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

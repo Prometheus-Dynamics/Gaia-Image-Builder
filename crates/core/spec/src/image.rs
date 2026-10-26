@@ -199,6 +199,10 @@ impl ImageSpec {
 pub enum ImageDefinition {
     Buildroot(BuildrootImageSpec),
     StartingPoint(StartingPointImageSpec),
+    /// `kind = "none"`: no rootfs, kernel or image is built. The build is its
+    /// sources, artifacts and `[image.assembly]` only (a package for a device
+    /// OS, for example). There is no image provider.
+    None,
 }
 
 impl ImageDefinition {
@@ -206,6 +210,7 @@ impl ImageDefinition {
         match self {
             Self::Buildroot(_) => ImageProviderKind::Buildroot,
             Self::StartingPoint(_) => ImageProviderKind::StartingPoint,
+            Self::None => ImageProviderKind::None,
         }
     }
 }
@@ -475,6 +480,8 @@ impl ImageOutputSpec {
 pub enum ImageProviderKind {
     Buildroot,
     StartingPoint,
+    /// No image provider: `[image] kind = "none"` builds no image.
+    None,
 }
 
 impl ImageProviderKind {
@@ -482,6 +489,7 @@ impl ImageProviderKind {
         match self {
             Self::Buildroot => "buildroot",
             Self::StartingPoint => "starting-point",
+            Self::None => "none",
         }
     }
 }
@@ -499,6 +507,7 @@ impl std::str::FromStr for ImageProviderKind {
         match value {
             "buildroot" => Ok(Self::Buildroot),
             "starting-point" => Ok(Self::StartingPoint),
+            "none" => Ok(Self::None),
             other => Err(format!("unknown image provider kind `{other}`")),
         }
     }
@@ -517,6 +526,10 @@ mod tests {
         assert_eq!(
             "starting-point".parse::<ImageProviderKind>(),
             Ok(ImageProviderKind::StartingPoint)
+        );
+        assert_eq!(
+            "none".parse::<ImageProviderKind>(),
+            Ok(ImageProviderKind::None)
         );
         assert!("unknown".parse::<ImageProviderKind>().is_err());
     }

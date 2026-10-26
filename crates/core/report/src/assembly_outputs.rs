@@ -61,6 +61,19 @@ pub(crate) fn assembly_outputs(spec: &ResolvedBuildSpec) -> AssemblyOutputs {
     }
 }
 
+/// The first deliverable of an assembly with no image provider (`kind =
+/// "none"`): the first package, then the first archive, then the first disk,
+/// that exists on disk. `None` when none does.
+pub(crate) fn first_assembly_deliverable(outputs: &AssemblyOutputs) -> Option<PathBuf> {
+    ["package", "archive", "disk"].iter().find_map(|kind| {
+        outputs
+            .known
+            .iter()
+            .find(|output| output.kind == *kind && output.path.is_file())
+            .map(|output| output.path.clone())
+    })
+}
+
 fn push(known: &mut Vec<KnownOutput>, path: Option<PathBuf>, kind: &'static str) {
     if let Some(path) = path {
         known.push(KnownOutput { path, kind });
@@ -70,6 +83,39 @@ fn push(known: &mut Vec<KnownOutput>, path: Option<PathBuf>, kind: &'static str)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_first_deliverable_is_a_package_before_an_archive_or_disk() {
+        let scratch = gaia_testkit::TempDir::new("gaia-first-deliverable");
+        let root = scratch.path().to_path_buf();
+        let disk = root.join("a.img");
+        let package = root.join("app.ipk");
+        std::fs::write(&disk, "disk").expect("disk");
+        std::fs::write(&package, "package").expect("package");
+        let outputs = AssemblyOutputs {
+            known: vec![
+                KnownOutput {
+                    path: disk.clone(),
+                    kind: "disk",
+                },
+                KnownOutput {
+                    path: root.join("missing.ipk"),
+                    kind: "package",
+                },
+                KnownOutput {
+                    path: package.clone(),
+                    kind: "package",
+                },
+            ],
+            dirs: Vec::new(),
+        };
+        assert_eq!(first_assembly_deliverable(&outputs), Some(package));
+        let no_packages = AssemblyOutputs {
+            known: outputs.known[..1].to_vec(),
+            dirs: Vec::new(),
+        };
+        assert_eq!(first_assembly_deliverable(&no_packages), Some(disk));
+    }
 
     #[test]
     fn push_skips_unresolved_outputs() {

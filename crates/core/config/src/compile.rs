@@ -511,6 +511,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                 rootfs_validation_mode: compile_rootfs_validation_mode(rootfs_validation_mode),
                 output_mode: compile_starting_point_output_mode(output_mode),
             }),
+            RawImageDefinition::None {} => ImageDefinition::None,
         },
         feed: compiled_image_feed,
         output: ImageOutputSpec {

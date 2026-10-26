@@ -111,6 +111,7 @@ impl ImportWhenContext {
             image_kind: match raw.image.definition {
                 RawImageDefinition::Buildroot { .. } => RawWhenImageKind::Buildroot,
                 RawImageDefinition::StartingPoint { .. } => RawWhenImageKind::StartingPoint,
+                RawImageDefinition::None {} => RawWhenImageKind::None,
             },
             inputs: scoped_inputs(raw, global),
         }

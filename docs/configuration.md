@@ -14,7 +14,7 @@ Config files can use:
 - table imports with `when` for conditional fragments, for example
   `{ path = "full.toml", when = { profile = "full" } }`
 
-The image `kind` (`kind = "buildroot"` or `kind = "starting-point"`) may be set
+The image `kind` (`kind = "buildroot"`, `kind = "starting-point"` or `kind = "none"`) may be set
 by the build file or by any layer it extends. A layer that only adds
 `[image.assembly]` or `[image.rootfs]` tables can leave `kind` out; it merges
 under the kind the build file sets. A build that has an `[image]` table and in
@@ -119,7 +119,7 @@ conditions:
 
 - `target`, `profile`, `branch`: the build's value (`${build.*}` is allowed
   in the expected value of an import's `when`)
-- `image_kind`: `buildroot` or `starting-point`
+- `image_kind`: `buildroot`, `starting-point` or `none`
 - `input = { name = "value", ... }`: each named input must have that value,
   compared as a string. A boolean or integer is written as it reads in TOML
   (`input = { flag = true }` matches the input value `"true"`). The names
@@ -223,7 +223,7 @@ The check covers top-level keys and the `workspace`, `product`,
 `[[sources]]`, `[[artifacts]]` and `[image]` are checked by their `kind`: a
 source takes the keys of its `kind` (`git`, `path`, `archive`, `download`), an
 artifact those of its `kind` (`rust`, `java`, `node`, `python`, `go`), and the
-image those of its `kind` (`buildroot`, `starting-point`), including the
+image those of its `kind` (`buildroot`, `starting-point`, `none`), including the
 `[image.rootfs]`, `[[image.expected_images]]` and `[image.packages]` tables.
 A table with no `kind` (a layer that leaves it to the layer it extends) takes
 the keys of every kind. Free-form maps (`inputs`, `presets`, `env`) are not
@@ -2307,6 +2307,47 @@ Output modes:
 - `copy-rootfs`
 - `archive-only`
 - `copy-and-archive`
+
+### None
+
+```toml
+[image]
+kind = "none"
+
+[image.output]
+collect_dir = "${workspace.out_dir}"
+```
+
+`kind = "none"` builds no rootfs, kernel or image, and no image provider runs.
+The plan has no `image:prepare`, `image:build` or `image:check` operation. The
+build is its sources, artifacts, installs and `[image.assembly]`: the assembly
+makes the deliverable, typically an ipk package for an external device OS (see
+"Packages (ipk)" below). `examples/systemcore-package` is a complete build.
+
+How the rest of the build fits:
+- `[image.assembly]` is optional. Without it, the build makes its sources and
+  artifacts, and the report comes last, after all of them.
+- With an assembly, `image:assembly` takes the place of the image: it waits for
+  every artifact, install and stage entry of the build, and for the sources its
+  `${source.<id>...}` tokens name (there is no `image:build` to wait for).
+- `$assembly.work`, `$assembly.out`, `$assembly.tree.<id>` and workspace paths
+  work. A `$provider.*` token is a validation error, because there is no image
+  provider.
+- `[image.output]` `collect_dir` is the assembly's output directory unless
+  `[image.assembly] out_dir` says otherwise. `archive_name` and `disk` name an
+  assembly archive or disk as they do for a Buildroot image.
+- `[image.feed]`, `[image.checks]`, `[[image.hardware]]` and `[image.layers]`
+  are validation errors: each acts on a rootfs or kernel this build does not
+  make. The feed's installs and stage entries reach an assembly tree through
+  `[[image.assembly.files]]` instead.
+- A checkpoint anchored at `image` (the default) anchors at the assembly, so it
+  needs `[image.assembly]`; an anchor at a feed entry is an error here.
+
+The primary output (the one the run summary names and `gaia run` exports) is
+`image.output.archive_name`'s archive when it is set. Otherwise it is the first
+existing assembly deliverable, in this order: the first
+`[[image.assembly.packages]]` package, then the first archive, then the first
+disk.
 
 ### Image Feed
 

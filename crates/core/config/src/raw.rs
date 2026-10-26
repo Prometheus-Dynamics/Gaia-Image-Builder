@@ -788,6 +788,9 @@ pub enum RawImageDefinition {
         #[serde(default)]
         output_mode: Option<RawStartingPointOutputMode>,
     },
+    /// `kind = "none"`: no rootfs, kernel or image. Only the assembly (and
+    /// the sources and artifacts it uses) is built.
+    None {},
 }
 
 impl Default for RawImageDefinition {

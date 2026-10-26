@@ -315,6 +315,7 @@ fn image_inputs(spec: &ResolvedBuildSpec, include_post_image: bool, inputs: &mut
         ImageDefinition::StartingPoint(_) => {
             inputs.json("starting point", take_field(&mut rest, "", "definition"));
         }
+        ImageDefinition::None => {}
     }
     inputs.json("image", rest);
     inputs.text("toolchain", image_backend_signature(spec, image));
