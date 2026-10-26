@@ -38,6 +38,9 @@ pub(crate) fn print_outcome(outcome: &CommandOutcome) {
                 validation.errors.len(),
                 validation.warnings.len()
             );
+            for note in &spec.metadata.config_notes {
+                println!("note: {note}");
+            }
             print_selection(spec);
             for line in backend_overview_lines(spec) {
                 println!("{line}");
@@ -64,6 +67,9 @@ pub(crate) fn print_outcome(outcome: &CommandOutcome) {
                 plan.build_id.as_str(),
                 plan.operations.len()
             );
+            for note in &spec.metadata.config_notes {
+                println!("note: {note}");
+            }
             let required = plan
                 .operations
                 .iter()

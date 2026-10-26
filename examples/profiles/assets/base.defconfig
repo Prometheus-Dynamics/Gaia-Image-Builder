@@ -1,0 +1,6 @@
+# Placeholder Buildroot defconfig for the shared base of the examples/profiles
+# build. `validate` and `plan` read only its path; a real build needs a
+# defconfig for the board.
+BR2_x86_64=y
+BR2_TOOLCHAIN_BUILDROOT=y
+BR2_TARGET_ROOTFS_TAR=y

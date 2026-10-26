@@ -69,6 +69,13 @@ Clean all runnable example artifacts with `rm -rf .gaia/examples`.
   Use it when you want a small distro-style config with multiple artifacts, runtime content, checkpoints, and a real non-`tar` output contract.
   Output: `rootfs.squashfs`
 
+### Device Profiles
+
+- [profiles/build.toml](profiles/build.toml)
+  Two device profiles from one build file: `raze` (a Buildroot image) and `systemcore` (an ipk package built with that OS's SDK, no image). Shared software in `software.toml`; the profiles are layers selected by `--set build.target=<name>`.
+  Use it to see patch entries, the image kind switch and the notes `validate` and `plan` print.
+  Output: `rootfs.tar` for `raze`, the ipk package for `systemcore`. Validate and plan only; the SDK path is a placeholder.
+
 ## Templates
 
 - [templates/full/README.md](templates/full/README.md)

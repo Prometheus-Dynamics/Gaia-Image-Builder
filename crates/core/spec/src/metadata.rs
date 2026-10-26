@@ -13,6 +13,10 @@ pub struct BuildMetadataSpec {
     /// Loaded config files that set nothing (only comments), reported as
     /// validation warnings.
     pub empty_layers: Vec<String>,
+    /// What the merge of the layers changed beyond their own values: the
+    /// layer that set each patched field, and the fields a kind switch
+    /// replaced. Shown by `validate` and `plan`.
+    pub config_notes: Vec<String>,
     /// `[expect]`: ids the build must have.
     pub expected: ExpectedItemsSpec,
 }

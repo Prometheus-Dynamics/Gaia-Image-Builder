@@ -168,7 +168,7 @@ pub(crate) fn load_merged(
     let unknown_key_warnings = unknown_keys::collect_unknown_key_warnings(&raw);
     let empty_layer_warnings = unknown_keys::collect_empty_layer_warnings(&raw);
     let selected = apply_preset_selection(raw, build, options);
-    let merged = merge_config(selected);
+    let merged = merge_config(selected)?;
     variants::validate_declared(&merged)?;
     Ok(MergedBuild {
         raw: merged,
@@ -214,6 +214,7 @@ pub(crate) fn resolve_merged(
     }
     spec.metadata.config_warnings = loaded.unknown_key_warnings.clone();
     spec.metadata.empty_layers = loaded.empty_layer_warnings.clone();
+    spec.metadata.config_notes = loaded.raw.config_notes.clone();
     spec.selection.import_sources = loaded.import_sources.clone();
     drop_unused_import_sources(&mut spec, &loaded.unused_import_sources);
     apply_lockfile(&mut spec);
@@ -327,6 +328,12 @@ pub enum ConfigError {
     },
     ConfigShape {
         path: String,
+        message: String,
+    },
+    /// A patch entry (see `raw::RawEntryPatch`) that names no earlier entry,
+    /// sets no field, or does not make a valid entry. The message names the
+    /// patch and its `<layer>:<line>`.
+    ConfigPatch {
         message: String,
     },
     ConfigImportCycle {
@@ -485,6 +492,7 @@ impl fmt::Display for ConfigError {
                     "failed to parse build config '{path}': {message}"
                 )
             }
+            Self::ConfigPatch { message } => write!(formatter, "{message}"),
             Self::ConfigImportCycle { cycle } => {
                 write!(
                     formatter,

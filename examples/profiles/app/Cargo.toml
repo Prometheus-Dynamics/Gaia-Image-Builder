@@ -1,0 +1,14 @@
+[package]
+name = "helios-app"
+version = "2.0.0"
+edition = "2021"
+
+[[bin]]
+name = "helios-api"
+path = "src/bin/helios-api.rs"
+
+[[bin]]
+name = "helios-cli"
+path = "src/bin/helios-cli.rs"
+
+[dependencies]

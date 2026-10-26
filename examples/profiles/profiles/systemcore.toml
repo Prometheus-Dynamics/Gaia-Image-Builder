@@ -1,0 +1,82 @@
+# The systemcore device: helios as an ipk package for the SystemCore OS,
+# built with that OS's SDK. `kind = "none"` builds no image, so the
+# Buildroot fields of software.toml are replaced; the assembly makes the
+# package from the two artifacts and a service file.
+
+[[sources]]
+id = "device-files"
+kind = "path"
+path = "files"
+identity_ignore = [".gaia"]
+refresh = "never"
+pin = "locked"
+
+[[toolchains]]
+id = "systemcore"
+kind = "buildroot-sdk"
+path = "sdk/systemcore"
+triple = "aarch64-buildroot-linux-gnu"
+sysroot = "aarch64-buildroot-linux-gnu/sysroot"
+rust_target = "aarch64-unknown-linux-gnu"
+page_size = 16384
+
+# Patch entries: software.toml's artifacts with only the keys that change.
+[[artifacts]]
+id = "helios-api"
+toolchain = "systemcore"
+
+[[artifacts]]
+id = "helios-cli"
+toolchain = "systemcore"
+
+# Patch entry: the CLI goes to /usr/local/bin on this device.
+[[install]]
+id = "install-helios-cli"
+dest = "/usr/local/bin/helios-cli"
+
+[image]
+kind = "none"
+
+[image.assembly]
+work_dir = "${workspace.build_dir}/assembly"
+out_dir = "${workspace.out_dir}"
+
+[[image.assembly.trees]]
+id = "package-root"
+path = "$assembly.work/package-root"
+
+[[image.assembly.files]]
+tree = "package-root"
+src = "${workspace.out_dir}/artifacts/helios-api"
+dest = "usr/bin/helios-api"
+mode = "0755"
+
+[[image.assembly.files]]
+tree = "package-root"
+src = "${workspace.out_dir}/artifacts/helios-cli"
+dest = "usr/local/bin/helios-cli"
+mode = "0755"
+
+[[image.assembly.files]]
+tree = "package-root"
+src = "${source.device-files.path}/helios-api.service"
+dest = "etc/systemd/system/helios-api.service"
+mode = "0644"
+
+[[image.assembly.packages]]
+id = "helios-systemcore"
+tree = "package-root"
+dest = "$assembly.out/"
+allowed_prefixes = ["/usr/bin", "/usr/local/bin", "/etc/systemd/system"]
+
+[image.assembly.packages.control]
+Package = "helios"
+Version = "${build.version}"
+Architecture = "aarch64"
+Maintainer = "Helios Team <dev@example.invalid>"
+Description = "Helios services for SystemCore."
+Section = "base"
+Priority = "optional"
+
+[image.assembly.packages.scripts]
+services = ["helios-api.service"]

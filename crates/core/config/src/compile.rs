@@ -122,6 +122,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
         },
         config_warnings: Vec::new(),
         empty_layers: Vec::new(),
+        config_notes: Vec::new(),
         expected: gaia_spec::ExpectedItemsSpec {
             artifacts: raw.expect.artifacts,
             installs: raw.expect.installs,

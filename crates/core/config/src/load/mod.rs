@@ -1,3 +1,4 @@
+mod entry_patches;
 mod import_sources;
 mod path_tokens;
 
@@ -13,6 +14,7 @@ use gaia_spec::ImportSourceSpec;
 use crate::overrides::source_path_override_id;
 use crate::raw::{RawBuildConfig, RawImportConfig};
 use crate::{ConfigError, ResolveOptions};
+use entry_patches::{layer_label, take_entry_patches};
 use import_sources::ImportSources;
 use path_tokens::rewrite_path_tokens;
 
@@ -74,6 +76,10 @@ pub(crate) fn load_build_config(
         options,
         global_inputs: BTreeMap::new(),
         files: &files,
+        label_base: entrypoint
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf(),
     };
     let config = loader.load(&entrypoint, None, true)?;
     tracing::debug!(
@@ -108,6 +114,8 @@ struct Loader<'a> {
     /// conditions see (set while the entrypoint's imports are read).
     global_inputs: BTreeMap<String, String>,
     files: &'a ConfigFiles,
+    /// The entrypoint's directory: layers are named relative to it in notes.
+    label_base: PathBuf,
 }
 
 /// The config files read during one resolution, by canonical path, as their
@@ -207,6 +215,12 @@ impl Loader<'_> {
                 .as_table()
                 .is_none_or(|table| table.contains_key("kind"))
         });
+        let layer = layer_label(&canonical_path, &self.label_base);
+        let explicit_kind = value
+            .get("image")
+            .and_then(toml::Value::as_table)
+            .is_some_and(|table| table.contains_key("kind"));
+        let entry_patches = take_entry_patches(&mut value, contents, &layer)?;
         if let Some(image) = value.get_mut("image").and_then(toml::Value::as_table_mut)
             && !image_kind_given
         {
@@ -217,6 +231,8 @@ impl Loader<'_> {
             Err(error) => return Err(value_error(&canonical_path, contents, &error)),
         };
         raw.image.kind_given = image_kind_given;
+        raw.image.kind_layer = explicit_kind.then(|| layer.clone());
+        raw.entry_patches = entry_patches;
         raw.source_path = Some(canonical_path.clone());
         raw.unknown_keys = unknown_keys;
         raw.sets_nothing = sets_nothing;

@@ -1,0 +1,35 @@
+# Two device profiles from one build file: `raze` gets a Buildroot rootfs
+# image, `systemcore` an ipk package for an external device OS built with
+# that OS's SDK. The shared software is in software.toml (extended here);
+# each profile is a layer selected by `build.target`. See docs/configuration.md,
+# "Profiles".
+#
+#   gaia validate examples/profiles/build.toml                          # raze (the base target)
+#   gaia plan examples/profiles/build.toml --set build.target=systemcore
+
+extends = "software.toml"
+build_name = "profiles"
+version = "1.0.0"
+description = "Two device profiles from shared software layers."
+target = "raze"
+profile = "release"
+
+imports = [
+  { path = "profiles/raze.toml", when = { target = "raze" } },
+  { path = "profiles/systemcore.toml", when = { target = "systemcore" } },
+]
+
+[workspace]
+root_dir = "examples/profiles"
+build_dir = "../../.gaia/examples/profiles/build"
+out_dir = "../../.gaia/examples/profiles/out"
+
+[[workspace.named_paths]]
+alias = "assets"
+path = "assets"
+kind = "host"
+
+[reporting]
+summary = true
+provenance = true
+manifest = true

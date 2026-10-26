@@ -11,8 +11,16 @@ use gaia_spec::{
 };
 
 pub(crate) fn compile_image_feed(raw: &RawBuildConfig) -> ImageFeedSpec {
+    // With no image (`kind = "none"`) the defaults below (every install and
+    // stage entry) are not fed: those are a rootfs's entries, and an assembly
+    // takes its files from the tree. An explicit feed is kept, and rejected by
+    // validation.
+    let no_image = matches!(
+        raw.image.definition,
+        crate::raw::RawImageDefinition::None {}
+    );
     ImageFeedSpec {
-        install_entries: if raw.image.feed.install_entries.is_empty() {
+        install_entries: if raw.image.feed.install_entries.is_empty() && !no_image {
             raw.install
                 .iter()
                 .map(|entry| InstallId::new(entry.id.clone()))
@@ -26,7 +34,7 @@ pub(crate) fn compile_image_feed(raw: &RawBuildConfig) -> ImageFeedSpec {
                 .map(InstallId::new)
                 .collect()
         },
-        stage_files: if raw.image.feed.stage_files.is_empty() {
+        stage_files: if raw.image.feed.stage_files.is_empty() && !no_image {
             raw.stage
                 .files
                 .iter()
@@ -41,7 +49,7 @@ pub(crate) fn compile_image_feed(raw: &RawBuildConfig) -> ImageFeedSpec {
                 .map(StageItemId::new)
                 .collect()
         },
-        stage_env_sets: if raw.image.feed.stage_env_sets.is_empty() {
+        stage_env_sets: if raw.image.feed.stage_env_sets.is_empty() && !no_image {
             raw.stage
                 .env_sets
                 .iter()
@@ -56,7 +64,7 @@ pub(crate) fn compile_image_feed(raw: &RawBuildConfig) -> ImageFeedSpec {
                 .map(StageItemId::new)
                 .collect()
         },
-        stage_services: if raw.image.feed.stage_services.is_empty() {
+        stage_services: if raw.image.feed.stage_services.is_empty() && !no_image {
             raw.stage
                 .services
                 .iter()

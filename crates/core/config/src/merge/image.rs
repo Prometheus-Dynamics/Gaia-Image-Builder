@@ -6,8 +6,29 @@ use crate::raw_assembly::RawImageAssemblyConfig;
 
 use super::{merge_by_key, merge_expected_images, merge_override_pairs, merge_string_lists};
 
-pub(super) fn merge_image(base: RawImageConfig, overlay: RawImageConfig) -> RawImageConfig {
-    RawImageConfig {
+/// Merges the `[image]` of a later layer onto the merged one. When the later
+/// layer sets `kind` to another kind, the kind-specific fields are replaced
+/// instead (see `kind_switch`). Returns the merged image and its notes.
+pub(super) fn merge_image(
+    base: RawImageConfig,
+    overlay: RawImageConfig,
+) -> (RawImageConfig, Vec<String>) {
+    if let Some(note) = kind_switch_note(&base, &overlay) {
+        let merged = RawImageConfig {
+            definition: overlay.definition,
+            feed: overlay.feed,
+            signing: overlay.signing,
+            checks: overlay.checks,
+            hardware: overlay.hardware,
+            layers: overlay.layers,
+            output: merge_output(base.output, overlay.output),
+            assembly: merge_image_assembly(base.assembly, overlay.assembly),
+            kind_given: true,
+            kind_layer: overlay.kind_layer,
+        };
+        return (merged, vec![note]);
+    }
+    let merged = RawImageConfig {
         definition: merge_image_definition(base.definition, overlay.definition),
         feed: RawImageFeedConfig {
             install_entries: merge_string_lists(
@@ -24,13 +45,7 @@ pub(super) fn merge_image(base: RawImageConfig, overlay: RawImageConfig) -> RawI
                 overlay.feed.stage_services,
             ),
         },
-        output: RawImageOutputConfig {
-            collect_dir: overlay.output.collect_dir.or(base.output.collect_dir),
-            archive_name: overlay.output.archive_name.or(base.output.archive_name),
-            disk: overlay.output.disk.or(base.output.disk),
-            export_dir: overlay.output.export_dir.or(base.output.export_dir),
-            emit_report: base.output.emit_report || overlay.output.emit_report,
-        },
+        output: merge_output(base.output, overlay.output),
         assembly: merge_image_assembly(base.assembly, overlay.assembly),
         signing: overlay.signing.or(base.signing),
         layers: overlay.layers.or(base.layers),
@@ -38,7 +53,124 @@ pub(super) fn merge_image(base: RawImageConfig, overlay: RawImageConfig) -> RawI
         // Kept in order; a duplicate id is a validation error, not a merge.
         hardware: [base.hardware, overlay.hardware].concat(),
         kind_given: base.kind_given || overlay.kind_given,
+        kind_layer: overlay.kind_layer.or(base.kind_layer),
+    };
+    (merged, Vec::new())
+}
+
+fn merge_output(base: RawImageOutputConfig, overlay: RawImageOutputConfig) -> RawImageOutputConfig {
+    RawImageOutputConfig {
+        collect_dir: overlay.collect_dir.or(base.collect_dir),
+        archive_name: overlay.archive_name.or(base.archive_name),
+        disk: overlay.disk.or(base.disk),
+        export_dir: overlay.export_dir.or(base.export_dir),
+        emit_report: base.emit_report || overlay.emit_report,
     }
+}
+
+/// The note of a kind switch: a later layer that sets `image.kind` to a kind
+/// other than the merged base's. `None` when the kinds agree, or the base
+/// has no kind of its own (its kind came from a layer without one).
+fn kind_switch_note(base: &RawImageConfig, overlay: &RawImageConfig) -> Option<String> {
+    let base_kind = kind_name(&base.definition);
+    let overlay_kind = kind_name(&overlay.definition);
+    let layer = overlay.kind_layer.as_deref()?;
+    base.kind_layer.as_ref()?;
+    if base_kind == overlay_kind {
+        return None;
+    }
+    let fields = kind_specific_fields(base);
+    let replaced = if fields.is_empty() {
+        "no fields set".to_string()
+    } else {
+        fields.join(", ")
+    };
+    Some(format!(
+        "image kind {overlay_kind} ({layer}) replaces {base_kind} fields: {replaced}"
+    ))
+}
+
+fn kind_name(definition: &RawImageDefinition) -> &'static str {
+    match definition {
+        RawImageDefinition::Buildroot { .. } => "buildroot",
+        RawImageDefinition::StartingPoint { .. } => "starting-point",
+        RawImageDefinition::None {} => "none",
+    }
+}
+
+/// The fields of `image` that a kind switch replaces: the definition's own
+/// keys and the feed, signing, checks, hardware and layers. `[image.output]`
+/// and `[image.assembly]` are shared by every kind and keep merging.
+fn kind_specific_fields(image: &RawImageConfig) -> Vec<&'static str> {
+    let mut fields = Vec::new();
+    match &image.definition {
+        RawImageDefinition::Buildroot {
+            source,
+            defconfig,
+            defconfig_path,
+            allow_fallback,
+            legal_info,
+            config_fragments,
+            config_overrides,
+            external_tree,
+            external_tree_mode,
+            expected_images,
+            rootfs,
+        } => {
+            let set = [
+                (source.is_some(), "source"),
+                (defconfig.is_some(), "defconfig"),
+                (defconfig_path.is_some(), "defconfig_path"),
+                (*allow_fallback, "allow_fallback"),
+                (*legal_info, "legal_info"),
+                (!config_fragments.is_empty(), "config_fragments"),
+                (!config_overrides.is_empty(), "config_overrides"),
+                (external_tree.is_some(), "external_tree"),
+                (external_tree_mode.is_some(), "external_tree_mode"),
+                (!expected_images.is_empty(), "expected_images"),
+                (
+                    !rootfs.exclude_packages.is_empty(),
+                    "rootfs.exclude_packages",
+                ),
+            ];
+            fields.extend(set.iter().filter(|(on, _)| *on).map(|(_, name)| *name));
+        }
+        RawImageDefinition::StartingPoint {
+            source,
+            source_path,
+            rootfs_path,
+            image_partition,
+            image_read_only,
+            packages,
+            rootfs_validation_mode,
+            output_mode,
+        } => {
+            let set = [
+                (source.is_some(), "source"),
+                (source_path.is_some(), "source_path"),
+                (!rootfs_path.trim().is_empty(), "rootfs_path"),
+                (image_partition.is_some(), "image_partition"),
+                (!*image_read_only, "image_read_only"),
+                (
+                    *packages != RawStartingPointPackagesConfig::default(),
+                    "packages",
+                ),
+                (rootfs_validation_mode.is_some(), "rootfs_validation_mode"),
+                (output_mode.is_some(), "output_mode"),
+            ];
+            fields.extend(set.iter().filter(|(on, _)| *on).map(|(_, name)| *name));
+        }
+        RawImageDefinition::None {} => {}
+    }
+    let shared = [
+        (image.feed != RawImageFeedConfig::default(), "feed"),
+        (image.signing.is_some(), "signing"),
+        (image.checks.is_some(), "checks"),
+        (!image.hardware.is_empty(), "hardware"),
+        (image.layers.is_some(), "layers"),
+    ];
+    fields.extend(shared.iter().filter(|(on, _)| *on).map(|(_, name)| *name));
+    fields
 }
 
 fn merge_image_assembly(

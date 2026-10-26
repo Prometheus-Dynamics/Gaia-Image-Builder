@@ -26,6 +26,11 @@ Merging rules:
 - free-form override pairs stay user-controlled
 - conditional imports are selected from top-level build metadata, including
   `build.target`, `build.profile`, and `build.branch` overrides
+- a patch entry (an `[[artifacts]]`, `[[install]]`, `[[stage.files]]` or
+  `[[stage.services]]` entry without its declaring key) changes the earlier
+  entry with its id; see "Patch entries" under "Profiles"
+- a later `[image] kind` that differs from the merged base's replaces the
+  kind-specific image fields; see "Image kind switch" under "Profiles"
 
 ### Imports From a Git Source
 
@@ -544,6 +549,97 @@ Limits:
   or version, or its own `image.output.archive_name`.
 - Variants run one after another in one process. A failing variant stops the
   run; the variants before it keep their outputs.
+
+## Profiles
+
+One build file can make several device profiles from shared software layers.
+A profile is a layer that an `imports` entry selects with `when`, usually by
+`build.target`:
+
+```toml
+# build.toml
+extends = "software.toml"                  # shared: sources, artifacts, installs
+build_name = "profiles"
+target = "raze"
+imports = [
+  { path = "profiles/raze.toml", when = { target = "raze" } },
+  { path = "profiles/systemcore.toml", when = { target = "systemcore" } },
+]
+```
+
+`--set build.target=systemcore` selects the second profile for `validate`,
+`plan` and `run`. `examples/profiles` is a complete build of both: `raze` is a
+Buildroot image, and `systemcore` is an ipk package built with that OS's
+toolchain, with no image (`kind = "none"`). Its validation and plan are
+checked by the examples test.
+
+The shared `[image]` in `software.toml` is the Buildroot base both profiles
+start from. The systemcore layer switches the kind to `none`, so that base's
+kind-specific fields are dropped for that profile (see "Image kind switch").
+
+[[variants]] also builds several images from one file, but the variants share
+one Buildroot base: a variant that drops the base's source or image is an
+error (see "Variants"). Use a `when = { target = ... }` layer per profile when
+the profiles differ in their image.
+
+### Patch entries
+
+A layer changes an entry of an id-keyed table without repeating it. The entry
+has no key that marks a full declaration, so it is a patch:
+
+| table | declaring key (a patch lacks it) | patch example |
+|---|---|---|
+| `[[artifacts]]` | `kind` | `[[artifacts]] id = "helios-api"` `toolchain = "systemcore"` |
+| `[[install]]` | `artifact` | `[[install]] id = "install-helios-cli"` `dest = "/usr/local/bin/helios-cli"` |
+| `[[stage.files]]` | `src` | `[[stage.files]] id = "motd"` `mode = 0o600` |
+| `[[stage.services]]` | `name` | `[[stage.services]] id = "helios"` `unit_path = "helios-2.service"` |
+
+`[stage.env_sets]` has no patch form: its entries are full declarations.
+
+Rules:
+- Each key the patch sets replaces that key of the earlier entry. A key it
+  leaves out keeps the earlier value.
+- A table value (such as `execution`, or `execution.docker`) replaces the whole
+  table, not its keys: a patch with `[artifacts.execution] backend = "host"`
+  drops the earlier `execution.docker` too.
+- A patch may not set `id` only: that is an error, `sets no field to change`.
+- A patch applies to the entry declared by a layer before it. Within one file,
+  its declarations come before its patches. The entrypoint is the last layer,
+  so an entry the entrypoint declares cannot be patched by one of its imports:
+  declare shared entries in an `extends` base, or in an import, instead.
+- A patch whose id no earlier entry declares is an error, and names the layer
+  and line:
+  `artifact patch 'x' in profiles/systemcore.toml:12 has no earlier [[artifacts]] entry to patch; add kind to declare it`.
+  The error says which key declares the table (`kind`, `artifact`, `src` or
+  `name`).
+- A patch is applied to the merged entry, so `${...}` tokens in the patched
+  fields are interpolated like any other value.
+
+The merge records each patch in the build's notes, which `validate` and `plan`
+print with a `note:` prefix. Each note names the layer that set each field:
+
+```text
+note: artifact 'helios-api': toolchain set by profiles/systemcore.toml:24
+note: install 'install-helios-cli': dest set by profiles/systemcore.toml:33
+```
+
+### Image kind switch
+
+A later layer that sets `[image] kind` to a different kind than the merged base
+replaces the kind-specific image fields instead of merging into them. Replaced:
+the definition's own keys (the Buildroot `source`, `defconfig`,
+`defconfig_path`, `config_fragments`, `config_overrides`, `external_tree`,
+`external_tree_mode`, `expected_images`, `rootfs`; the starting point's
+`source`, `source_path`, `rootfs_path`, `packages` and so on), and the feed,
+`signing`, `checks`, `[[image.hardware]]` and `layers`. Kept, and still
+merged: `[image.output]` and `[image.assembly]`. A layer that sets the same kind
+merges as before, and a layer without `kind` merges under the base's kind.
+
+The note names the layer and the replaced keys that the base set:
+
+```text
+note: image kind none (profiles/systemcore.toml) replaces buildroot fields: source, defconfig_path, external_tree_mode, expected_images, feed
+```
 
 ## Interpolation
 
@@ -1702,6 +1798,11 @@ a source root is identified by its content (its source identity), a local
 `path` by its configured path together with the compiler's version. Another
 SDK, prefix, sysroot or Rust target is another build.
 
+`toolchain` is interpolated like the other artifact fields, so one artifact
+can take its toolchain from an input: `toolchain = "${input.toolchain}"`. An
+empty value after interpolation means no toolchain: the artifact builds for the
+host.
+
 Validation: an unknown toolchain id, a toolchain on a non-rust artifact, a
 missing root, sysroot or triple, both `source` and `path` (or `sysroot` and
 `sysroot_source`), and a rust artifact with no target are errors.
@@ -2523,6 +2624,11 @@ Output modes:
 - `copy-and-archive`
 
 ### None
+
+With `kind = "none"` the feed defaults to empty. The defaults of a rootfs image
+(every install and stage entry is fed to the image) do not apply, and setting
+`[image.feed]` is a validation error. A layer that switches a build to `none`
+replaces the Buildroot fields it set (see "Image kind switch", under "Profiles").
 
 ```toml
 [image]

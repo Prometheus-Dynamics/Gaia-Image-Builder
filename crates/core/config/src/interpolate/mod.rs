@@ -500,9 +500,12 @@ fn interpolate_artifact(
     artifact.target = artifact
         .target
         .map(|value| resolver::interpolate_string(value, raw, env));
+    // After interpolation an empty id (`toolchain = "${input.toolchain}"`
+    // with that input empty) means no toolchain: the host builds the artifact.
     artifact.toolchain = artifact
         .toolchain
-        .map(|value| resolver::interpolate_string(value, raw, env));
+        .map(|value| resolver::interpolate_string(value, raw, env))
+        .filter(|value| !value.trim().is_empty());
     artifact.profile = artifact
         .profile
         .map(|value| resolver::interpolate_string(value, raw, env));

@@ -1,7 +1,9 @@
+mod entries;
 mod image;
 
 use std::collections::BTreeMap;
 
+use crate::ConfigError;
 use crate::overrides::collect_selected_inputs;
 use crate::raw::{
     RawBuildConfig, RawBuildrootExpectedImageConfig, RawExecutionPolicyConfig,
@@ -12,28 +14,39 @@ use crate::raw::{
     RawReportingMaskingConfig, RawRustProviderPolicyConfig, RawStageConfig, RawWhenConfig,
     RawWhenImageKind, RawWorkspaceNamedPathConfig,
 };
+use entries::apply_or_defer;
 use image::merge_image;
 
-pub fn merge_config(raw: RawBuildConfig) -> RawBuildConfig {
+/// Merges the entrypoint's layers into one config. A patch entry left
+/// without an earlier entry to patch is an error.
+pub fn merge_config(raw: RawBuildConfig) -> Result<RawBuildConfig, ConfigError> {
     let global = selected_inputs_for_imports(&raw);
-    merge_config_with(raw, &global)
+    let merged = merge_config_with(raw, &global)?;
+    match merged.pending_patches.first() {
+        Some(patch) => Err(ConfigError::ConfigPatch {
+            message: patch.missing_base_message(),
+        }),
+        None => Ok(merged),
+    }
 }
 
 /// `merge_config` for a file of the tree. `global` holds the input values the
 /// entrypoint selects (defaults, presets, `--set`, variant overrides); every
 /// file's `when` sees them, so an import in an imported file follows them too.
-fn merge_config_with(raw: RawBuildConfig, global: &BTreeMap<String, String>) -> RawBuildConfig {
-    let mut merged = raw
-        .extends_config
-        .as_deref()
-        .cloned()
-        .map(|extends| merge_config_with(extends, global))
-        .unwrap_or_default();
+fn merge_config_with(
+    raw: RawBuildConfig,
+    global: &BTreeMap<String, String>,
+) -> Result<RawBuildConfig, ConfigError> {
+    let mut merged = match raw.extends_config.as_deref().cloned() {
+        Some(extends) => merge_config_with(extends, global)?,
+        None => RawBuildConfig::default(),
+    };
 
     let context = ImportWhenContext::from_raw(&raw, global);
     for imported in &raw.imported_configs {
         if import_when_matches(imported.import.when.as_ref(), &context) {
-            merged = merge_two(merged, merge_config_with(imported.config.clone(), global));
+            let layer = merge_config_with(imported.config.clone(), global)?;
+            merged = merge_two(merged, layer)?;
         }
     }
 
@@ -225,7 +238,19 @@ fn interpolate_import_context_value(
     output
 }
 
-fn merge_two(mut base: RawBuildConfig, overlay: RawBuildConfig) -> RawBuildConfig {
+/// Merges `overlay`, a later layer, onto `base`, everything before it.
+///
+/// Patch order: the patches `overlay` carries from its own imports resolve
+/// against `base` before `overlay`'s declarations (they come before them in
+/// the file order); the patches of `overlay`'s own file apply after its
+/// declarations.
+fn merge_two(
+    mut base: RawBuildConfig,
+    mut overlay: RawBuildConfig,
+) -> Result<RawBuildConfig, ConfigError> {
+    for patch in std::mem::take(&mut overlay.pending_patches) {
+        apply_or_defer(&mut base, patch)?;
+    }
     if !overlay.build_name.trim().is_empty() {
         base.build_name = overlay.build_name;
     }
@@ -287,7 +312,9 @@ fn merge_two(mut base: RawBuildConfig, overlay: RawBuildConfig) -> RawBuildConfi
     base.toolchains = merge_by_key(base.toolchains, overlay.toolchains, |item| item.id.clone());
     base.stage = merge_stage(base.stage, overlay.stage);
 
-    base.image = merge_image(base.image, overlay.image);
+    let (image, image_notes) = merge_image(base.image, overlay.image);
+    base.image = image;
+    base.config_notes.extend(image_notes);
     base.checkpoints = merge_by_key(base.checkpoints, overlay.checkpoints, |item| {
         item.id.clone()
     });
@@ -299,7 +326,11 @@ fn merge_two(mut base: RawBuildConfig, overlay: RawBuildConfig) -> RawBuildConfi
     base.provenance = merge_provenance(base.provenance, overlay.provenance);
     base.reporting = merge_reporting(base.reporting, overlay.reporting);
 
-    base
+    for patch in std::mem::take(&mut overlay.entry_patches) {
+        apply_or_defer(&mut base, patch)?;
+    }
+    base.config_notes.extend(overlay.config_notes);
+    Ok(base)
 }
 
 fn merge_clean(

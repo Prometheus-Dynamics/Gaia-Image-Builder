@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use serde::{Deserialize, Deserializer, de};
+use serde::{Deserialize, Deserializer, Serialize, de};
 
 use crate::raw_assembly::RawImageAssemblyConfig;
 pub use crate::raw_variant::RawVariantConfig;
@@ -12,7 +12,7 @@ mod raw_inputs;
 
 pub use raw_inputs::*;
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct RawBuildConfig {
     /// Semver requirement on the Gaia binary, checked before anything else.
@@ -85,6 +85,91 @@ pub struct RawBuildConfig {
     /// The file sets nothing at all (only comments).
     #[serde(skip)]
     pub sets_nothing: bool,
+    /// Entries of this file that patch an earlier entry: they have no key
+    /// that marks a full declaration (see `PatchTable::marker`). Applied by
+    /// the merge, in file order, after this file's declarations.
+    #[serde(skip)]
+    pub entry_patches: Vec<RawEntryPatch>,
+    /// Patches carried up from merged layers that did not find their entry
+    /// in the layers before them. Any left at the end of the merge is an
+    /// error: a patch needs an earlier entry.
+    #[serde(skip)]
+    pub pending_patches: Vec<RawEntryPatch>,
+    /// What the merge changed beyond the files' own values: which layer set
+    /// each patched field, and which image fields a kind switch replaced.
+    /// Reported by `validate` and `plan`.
+    #[serde(skip)]
+    pub config_notes: Vec<String>,
+}
+
+/// An entry of `[[artifacts]]`, `[[install]]`, `[[stage.files]]` or
+/// `[[stage.services]]` without the key that marks a full declaration. It
+/// patches the earlier entry with the same `id`: each key it sets replaces
+/// that key of the entry, and the keys it leaves out keep their value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RawEntryPatch {
+    pub table: PatchTable,
+    pub id: String,
+    /// The keys the patch sets, other than `id`, with their values as written.
+    pub fields: toml::Table,
+    /// `<layer>:<line>` of the patch entry, as the notes and errors name it.
+    pub location: String,
+}
+
+/// The id-keyed tables that take patch entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PatchTable {
+    Artifact,
+    Install,
+    StageFile,
+    StageService,
+}
+
+impl PatchTable {
+    /// The table's name in messages, such as "artifact patch".
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Artifact => "artifact",
+            Self::Install => "install",
+            Self::StageFile => "stage file",
+            Self::StageService => "stage service",
+        }
+    }
+
+    /// The table's path in the file: `artifacts`, `install`, `stage.files`.
+    pub fn key_path(self) -> &'static str {
+        match self {
+            Self::Artifact => "artifacts",
+            Self::Install => "install",
+            Self::StageFile => "stage.files",
+            Self::StageService => "stage.services",
+        }
+    }
+
+    /// The key that marks a full declaration in this table: an entry
+    /// without it is a patch.
+    pub fn marker(self) -> &'static str {
+        match self {
+            Self::Artifact => "kind",
+            Self::Install => "artifact",
+            Self::StageFile => "src",
+            Self::StageService => "name",
+        }
+    }
+}
+
+impl RawEntryPatch {
+    /// The error for a patch whose entry no earlier layer declares.
+    pub fn missing_base_message(&self) -> String {
+        format!(
+            "{} patch '{}' in {} has no earlier [[{}]] entry to patch; add {} to declare it",
+            self.table.name(),
+            self.id,
+            self.location,
+            self.table.key_path(),
+            self.table.marker()
+        )
+    }
 }
 
 /// One `[secrets]` entry: exactly one of `env`, `file` and `command`.
@@ -120,7 +205,7 @@ pub struct RawImportConfig {
     pub when: Option<RawWhenConfig>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RawImportedConfig {
     pub import: RawImportConfig,
     pub config: RawBuildConfig,
@@ -604,7 +689,7 @@ pub enum RawSourcePinPolicy {
     Locked,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RawArtifactConfig {
     pub id: String,
     #[serde(default)]
@@ -646,14 +731,14 @@ pub struct RawArtifactConfig {
     pub definition: RawArtifactDefinition,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct RawArtifactExecutionConfig {
     pub backend: Option<RawArtifactExecutionBackend>,
     pub docker: RawArtifactDockerExecutionConfig,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct RawArtifactDockerExecutionConfig {
     pub image: Option<String>,
@@ -661,14 +746,14 @@ pub struct RawArtifactDockerExecutionConfig {
     pub context: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum RawArtifactExecutionBackend {
     Host,
     Docker,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum RawArtifactInstallClass {
     Binary,
@@ -679,7 +764,7 @@ pub enum RawArtifactInstallClass {
     Data,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum RawArtifactDefinition {
     Rust {
@@ -715,7 +800,7 @@ pub enum RawArtifactDefinition {
     },
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RawInstallConfig {
     pub id: String,
     #[serde(default)]
@@ -740,7 +825,7 @@ pub struct RawStageConfig {
     pub services: Vec<RawStageServiceConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RawStageFileConfig {
     pub id: String,
     #[serde(default)]
@@ -753,7 +838,7 @@ pub struct RawStageFileConfig {
     pub origin: Option<RawStageContentOrigin>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum RawStageContentOrigin {
     StaticAsset,
@@ -771,7 +856,7 @@ pub struct RawStageEnvSetConfig {
     pub entries: Vec<(String, String)>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RawStageServiceConfig {
     pub id: String,
     #[serde(default)]
@@ -799,6 +884,10 @@ pub struct RawImageConfig {
     /// which merges under the kind a build file sets.
     #[serde(skip)]
     pub kind_given: bool,
+    /// The layer (`<file>`, relative to the entrypoint's directory) that set
+    /// `kind` last, for the notes of a kind switch. Set by the loader.
+    #[serde(skip)]
+    pub kind_layer: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]

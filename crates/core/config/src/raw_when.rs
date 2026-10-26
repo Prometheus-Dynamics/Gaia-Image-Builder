@@ -3,11 +3,11 @@
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Deserializer, de};
+use serde::{Deserialize, Deserializer, Serialize, de};
 
 use crate::raw::RawBuildConfig;
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct RawWhenConfig {
     pub target: Option<String>,
@@ -23,7 +23,7 @@ pub struct RawWhenConfig {
     pub not: Option<Box<RawWhenConfig>>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum RawWhenImageKind {
     Buildroot,
