@@ -121,10 +121,15 @@ fn the_required_control_fields_are_reported_when_missing() {
 }
 
 #[test]
-fn the_format_is_ipk_and_deb_is_not_yet_supported() {
+fn the_format_is_ipk_or_deb_and_a_deb_keeps_debian_binary() {
+    assert!(codes(&package("helios", "deb", "app", CONTROL, SCRIPTS)).is_empty());
+    let without = package("helios", "deb", "app", CONTROL, SCRIPTS).replace(
+        "dest = \"$assembly.out/\"\n",
+        "dest = \"$assembly.out/\"\ndebian_binary = false\n",
+    );
     assert_eq!(
-        codes(&package("helios", "deb", "app", CONTROL, SCRIPTS)),
-        vec!["assembly_package_format_unsupported"]
+        codes(&without),
+        vec!["assembly_package_deb_needs_debian_binary"]
     );
     assert_eq!(
         codes(&package("helios", "rpm", "app", CONTROL, SCRIPTS)),

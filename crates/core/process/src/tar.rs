@@ -26,6 +26,31 @@ pub fn validate_tar_archive_entries(
     sink: Option<ProcessLogSink>,
     cancel_check: Option<ProcessCancelCheck>,
 ) -> Result<(), TarArchiveValidationError> {
+    validate_tar_archive_entries_with(
+        archive_path,
+        strip_components,
+        false,
+        timeout,
+        label,
+        sink,
+        cancel_check,
+    )
+}
+
+/// [`validate_tar_archive_entries`], optionally accepting symlinks with an
+/// absolute target. A root filesystem or an SDK's sysroot holds them
+/// (`usr/bin/iptables-xml -> /usr/sbin/xtables-legacy-multi`), meant
+/// relative to that root; the link is created inside the destination, and
+/// GNU tar does not write through a link it extracted.
+pub fn validate_tar_archive_entries_with(
+    archive_path: &Path,
+    strip_components: usize,
+    allow_absolute_symlinks: bool,
+    timeout: Duration,
+    label: &str,
+    sink: Option<ProcessLogSink>,
+    cancel_check: Option<ProcessCancelCheck>,
+) -> Result<(), TarArchiveValidationError> {
     let listing = ListingFile::beside(archive_path);
     let mut command = Command::new("tar");
     command
@@ -59,7 +84,7 @@ pub fn validate_tar_archive_entries(
         let line = line.map_err(|error| TarArchiveValidationError {
             message: format!("failed to read {label} listing: {error}"),
         })?;
-        validate_tar_listing_line(&line, strip_components)?;
+        validate_tar_listing_line_with(&line, strip_components, allow_absolute_symlinks)?;
     }
     Ok(())
 }
@@ -96,9 +121,18 @@ impl Drop for ListingFile {
     }
 }
 
+#[cfg(test)]
 fn validate_tar_listing_line(
     line: &str,
     strip_components: usize,
+) -> Result<(), TarArchiveValidationError> {
+    validate_tar_listing_line_with(line, strip_components, false)
+}
+
+fn validate_tar_listing_line_with(
+    line: &str,
+    strip_components: usize,
+    allow_absolute_symlinks: bool,
 ) -> Result<(), TarArchiveValidationError> {
     let entry_kind = line.chars().next().unwrap_or('-');
     let quoted = parse_c_quoted_strings(line).ok_or_else(|| TarArchiveValidationError {
@@ -118,11 +152,35 @@ fn validate_tar_listing_line(
                     message: format!("tar symlink entry '{entry_path}' did not include a target"),
                 });
             };
+            if allow_absolute_symlinks && Path::new(target).is_absolute() {
+                return Ok(());
+            }
             validate_relative_link_target(&stripped_path, target)
         }
-        'h' => Err(TarArchiveValidationError {
-            message: format!("tar hardlink entry '{entry_path}' is not allowed"),
-        }),
+        'h' => {
+            // A hard link names another member of the archive by its archive
+            // path; it must resolve inside the archive and survive the strip.
+            let Some(target) = quoted.get(1) else {
+                return Err(TarArchiveValidationError {
+                    message: format!("tar hardlink entry '{entry_path}' did not include a target"),
+                });
+            };
+            let resolved = resolve_inside_archive(Path::new(target)).ok_or_else(|| {
+                TarArchiveValidationError {
+                    message: format!(
+                        "tar hardlink '{entry_path}' points to '{target}', which escapes the extraction destination"
+                    ),
+                }
+            })?;
+            if resolved.components().count() <= strip_components {
+                return Err(TarArchiveValidationError {
+                    message: format!(
+                        "tar hardlink '{entry_path}' points to '{target}', which strip_components removes"
+                    ),
+                });
+            }
+            Ok(())
+        }
         other => Err(TarArchiveValidationError {
             message: format!("tar entry '{entry_path}' has unsupported type '{other}'"),
         }),
@@ -190,9 +248,39 @@ fn validate_relative_link_target(
             ),
         });
     }
+    // `..` in a link target is resolved against the link's directory; only
+    // a target that leaves the extraction destination is refused (headers
+    // link `include/dt-bindings/input/../../uapi/...`, which stays inside).
     let parent = entry_path.parent().unwrap_or_else(|| Path::new(""));
     let joined = parent.join(target_path);
-    normalize_archive_path(&joined.display().to_string()).map(|_| ())
+    resolve_inside_archive(&joined)
+        .map(|_| ())
+        .ok_or_else(|| TarArchiveValidationError {
+            message: format!(
+                "tar symlink '{}' points to '{}', which escapes the extraction destination",
+                entry_path.display(),
+                target
+            ),
+        })
+}
+
+/// `path` with `.` and `..` resolved lexically, or `None` when it is absolute
+/// or a `..` would climb above the archive root.
+fn resolve_inside_archive(path: &Path) -> Option<PathBuf> {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => out.push(part),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !out.pop() {
+                    return None;
+                }
+            }
+            Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    Some(out)
 }
 
 fn parse_c_quoted_strings(line: &str) -> Option<Vec<String>> {
@@ -338,6 +426,61 @@ mod tests {
     }
 
     #[test]
+    fn absolute_symlinks_are_refused_unless_allowed() {
+        let line = "lrwxrwxrwx root/root 0 2026-01-01 \"sysroot/usr/bin/iptables-xml\" -> \"/usr/sbin/xtables-legacy-multi\"";
+        assert!(validate_tar_listing_line_with(line, 0, false).is_err());
+        assert!(validate_tar_listing_line_with(line, 0, true).is_ok());
+        // Entry names stay strict either way.
+        assert!(
+            validate_tar_listing_line_with(
+                "-rw-r--r-- root/root 0 2026-01-01 \"/etc/passwd\"",
+                0,
+                true
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn links_resolving_inside_the_archive_are_allowed_and_escaping_ones_refused() {
+        // A kernel-header symlink that climbs and comes back down.
+        assert!(validate_tar_listing_line(
+            "lrwxrwxrwx root/root 0 2026-01-01 \"sys/include/dt-bindings/input/linux-event-codes.h\" -> \"../../uapi/linux/input-event-codes.h\"",
+            0,
+        )
+        .is_ok());
+        assert!(
+            validate_tar_listing_line(
+                "lrwxrwxrwx root/root 0 2026-01-01 \"sys/a\" -> \"../../../etc/passwd\"",
+                0,
+            )
+            .is_err()
+        );
+        // Hard links between members (toolchains link gcc to gcc-14.x).
+        assert!(
+            validate_tar_listing_line(
+                "hrwxr-xr-x root/root 0 2026-01-01 \"sdk/bin/gcc\" link to \"sdk/bin/gcc-14.2.0\"",
+                1,
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_tar_listing_line(
+                "hrwxr-xr-x root/root 0 2026-01-01 \"sdk/bin/gcc\" link to \"../outside\"",
+                0,
+            )
+            .is_err()
+        );
+        assert!(
+            validate_tar_listing_line(
+                "hrwxr-xr-x root/root 0 2026-01-01 \"sdk/bin/gcc\" link to \"sdk\"",
+                1,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn validate_tar_archive_entries_rejects_absolute_paths() {
         let error =
             validate_tar_listing_line("-rw-r--r-- root/root 0 2026-01-01 \"/etc/passwd\"", 0)
@@ -400,7 +543,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn validate_tar_archive_entries_rejects_hardlinks() {
+    fn validate_tar_archive_entries_accept_hardlinks_inside_the_archive() {
         let scratch = TempDir::new("gaia-process-test");
         let dir = scratch.join("hardlink-tar");
         let src = dir.join("src");
@@ -410,7 +553,8 @@ mod tests {
         let archive = dir.join("hardlink.tar");
         create_tar(&archive, &src, &["file.txt", "hard.txt"]);
 
-        let error = validate_tar_archive_entries(
+        // GNU tar lists the second name as `h... "hard.txt" link to "file.txt"`.
+        validate_tar_archive_entries(
             &archive,
             0,
             Duration::from_secs(5),
@@ -418,9 +562,7 @@ mod tests {
             None,
             None,
         )
-        .expect_err("hardlink archive should fail");
-
-        assert!(error.message.contains("hardlink"));
+        .expect("a hard link to another member is allowed");
     }
 
     #[test]

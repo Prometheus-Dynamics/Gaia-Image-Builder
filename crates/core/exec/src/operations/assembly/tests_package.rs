@@ -131,7 +131,7 @@ fn package(
         format: "ipk".into(),
         tree: "pkg-root".into(),
         dest: dest.into(),
-        output: AssemblyPackageSpec::output_for(dest, &control).into(),
+        output: AssemblyPackageSpec::output_for(dest, &control, "ipk").into(),
         debian_binary,
         allowed_prefixes: allowed_prefixes.iter().map(|p| p.to_string()).collect(),
         control,
@@ -493,4 +493,37 @@ fn dpkg_deb_and_ar_read_the_ipk() {
     );
     let members = String::from_utf8(tool("ar", &["t", ipk.as_str()])).expect("utf-8");
     assert_eq!(members, "debian-binary\ncontrol.tar.gz\ndata.tar.gz\n");
+}
+
+#[test]
+fn a_deb_is_named_dot_deb_and_reads_back_with_dpkg_deb() {
+    let scratch = TempDir::new("gaia-package-deb");
+    let fixture = fixture(&scratch.join("deb"));
+    let mut deb = package("$assembly.out/", true, &[], &["helios-api.service"]);
+    deb.format = "deb".into();
+    deb.control.architecture = "arm64".into();
+    deb.output = AssemblyPackageSpec::output_for("$assembly.out/", &deb.control, "deb").into();
+    assert!(deb.output.as_str().ends_with("helios_2.0.0_arm64.deb"));
+    let summary = run(&package_spec(&fixture, deb));
+    let path = PathBuf::from(state_value(&summary, "package.1.output"));
+    assert!(path.is_file(), "{}", path.display());
+    let members: Vec<String> = read_ar(&path)
+        .expect("ar")
+        .into_iter()
+        .map(|member| member.name)
+        .collect();
+    assert_eq!(members, ["debian-binary", "control.tar.gz", "data.tar.gz"]);
+    // dpkg-deb, where it is installed, parses the control and lists the data.
+    if Command::new("dpkg-deb").arg("--version").output().is_ok() {
+        let info = String::from_utf8(tool("dpkg-deb", &["-I", path.to_str().expect("utf-8")]))
+            .expect("utf-8");
+        assert!(info.contains("Package: helios"), "{info}");
+        assert!(info.contains("Architecture: arm64"), "{info}");
+        let listing = String::from_utf8(tool("dpkg-deb", &["-c", path.to_str().expect("utf-8")]))
+            .expect("utf-8");
+        assert!(
+            listing.contains("./etc/systemd/system/helios-api.service"),
+            "{listing}"
+        );
+    }
 }

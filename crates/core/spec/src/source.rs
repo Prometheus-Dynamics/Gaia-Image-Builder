@@ -138,6 +138,11 @@ pub struct ArchiveSourceSpec {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
     pub strip_components: u32,
+    /// Accept symlinks whose target is absolute (a root filesystem's or a
+    /// sysroot's links, meant relative to that root). Not serialized when
+    /// false, so existing archive sources keep their fingerprints.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub allow_absolute_symlinks: bool,
     pub refresh_policy: SourceRefreshPolicySpec,
     pub pin_policy: SourcePinPolicySpec,
 }

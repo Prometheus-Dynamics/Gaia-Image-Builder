@@ -104,6 +104,7 @@ fn workspace_paths_cannot_escape_workspace_or_alias_roots() {
             url: None,
             sha256: None,
             strip_components: 0,
+            allow_absolute_symlinks: false,
             refresh_policy: gaia_spec::SourceRefreshPolicySpec::Never,
             pin_policy: gaia_spec::SourcePinPolicySpec::Locked,
         }),

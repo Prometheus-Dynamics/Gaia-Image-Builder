@@ -45,7 +45,10 @@ pub(super) fn execute_assembly_package(
     package: &AssemblyPackageSpec,
     cancel: Option<gaia_process::ProcessCancelCheck>,
 ) -> Result<PackageSummary, AssemblyError> {
-    if package.format != gaia_spec::PACKAGE_FORMAT_IPK {
+    let known = [gaia_spec::PACKAGE_FORMAT_IPK, gaia_spec::PACKAGE_FORMAT_DEB];
+    if !known.contains(&package.format.as_str())
+        || (package.format == gaia_spec::PACKAGE_FORMAT_DEB && !package.debian_binary)
+    {
         return Err(format!(
             "assembly package '{}' has an unsupported format '{}'",
             package.id, package.format

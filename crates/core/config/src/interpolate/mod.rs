@@ -443,6 +443,7 @@ fn interpolate_source(
             url,
             sha256,
             strip_components,
+            allow_absolute_symlinks,
             refresh,
             pin,
         } => RawSourceDefinition::Archive {
@@ -450,6 +451,7 @@ fn interpolate_source(
             url: url.map(|value| resolver::interpolate_string(value, raw, env)),
             sha256: sha256.map(|value| resolver::interpolate_string(value, raw, env)),
             strip_components,
+            allow_absolute_symlinks,
             refresh,
             pin,
         },

@@ -6,6 +6,11 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- Archive sources: `allow_absolute_symlinks = true` accepts symlinks with an absolute target (a rootfs or SDK sysroot); still refused by default. Verified against Limelight's SystemCore ALPHA 17 SDK: downloaded and checked by sha256, extracted, relocated, used to cross-build a rust program with 16 KiB pages into an ipk that passes the device checks. A tree packaged with `device` checks no longer warns that it lacks the libraries the device provides.
+
+- Packages: `format = "deb"` writes a Debian package (the ipk layout with `debian-binary` required, `<Package>_<Version>_<Architecture>.deb` names); `dpkg-deb` reads it back.
+- Tar sources: a symlink target with `..` that stays inside the archive (kernel headers' `include/dt-bindings/input/../../uapi/...`) and hard links between members (toolchains link `gcc` to `gcc-14.x`) are extracted; links that resolve outside are still refused. An archive source's `url` download uses the archive provider's `timeout_seconds` and retries.
+
 - `[[toolchains]] page_size` (a power of two, at least 4096): a rust artifact of the toolchain links with `-z max-page-size=<page_size>` (in its flags, part of its fingerprint), and a device package of it checks segments against that size by default. Explicit `min_page_size` wins.
 
 - Cross builds against a Buildroot SDK. `[[toolchains]]` declares an SDK (its root is a source's tree or a local directory; its compiler prefix, triple, sysroot and Rust target; `relocate` runs `relocate-sdk.sh` once per root). A rust artifact takes `toolchain = "<id>"`: Gaia cross-compiles it with the SDK's linker, C compiler and `--sysroot`, in the docker backend too, and the toolchain is part of the artifact's fingerprint and registry key. Validation covers the ids, the roots and sysroots, the non-rust use and the missing target. Docs: `docs/configuration.md` (Toolchains, with the SystemCore example; Sources; Packages (ipk)).

@@ -282,6 +282,7 @@ fn archive_provider_errors_for_missing_archive() {
             url: None,
             sha256: None,
             strip_components: 0,
+            allow_absolute_symlinks: false,
             refresh_policy: SourceRefreshPolicySpec::Auto,
             pin_policy: SourcePinPolicySpec::Floating,
         }),

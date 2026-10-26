@@ -66,7 +66,9 @@ use retention::{
 };
 pub use step_time::{STEP_TIME_PREFIX, parse_step_time, step_time_message};
 use stream::{StreamKeep, spawn_stream_reader};
-pub use tar::{TarArchiveValidationError, validate_tar_archive_entries};
+pub use tar::{
+    TarArchiveValidationError, validate_tar_archive_entries, validate_tar_archive_entries_with,
+};
 pub use trash::{TRASH_DIR, discard, purge_trash};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

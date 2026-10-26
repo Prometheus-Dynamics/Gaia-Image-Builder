@@ -355,6 +355,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                     url,
                     sha256,
                     strip_components,
+                    allow_absolute_symlinks,
                     refresh,
                     pin,
                 } => {
@@ -370,6 +371,7 @@ pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                         url,
                         sha256,
                         strip_components,
+                        allow_absolute_symlinks,
                         refresh_policy: compile_source_refresh_policy(
                             refresh,
                             SourceRefreshPolicySpec::Auto,

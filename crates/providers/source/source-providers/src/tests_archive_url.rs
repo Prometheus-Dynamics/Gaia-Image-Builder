@@ -58,6 +58,7 @@ fn url_source(url: &Path, sha: &str, strip_components: u32) -> SourceSpec {
             url: Some(format!("file://{}", url.display())),
             sha256: Some(sha.to_string()),
             strip_components,
+            allow_absolute_symlinks: false,
             refresh_policy: SourceRefreshPolicySpec::Auto,
             pin_policy: SourcePinPolicySpec::Locked,
         }),

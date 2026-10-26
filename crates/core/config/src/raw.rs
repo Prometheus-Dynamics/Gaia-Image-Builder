@@ -520,6 +520,9 @@ pub enum RawSourceDefinition {
         sha256: Option<String>,
         #[serde(default)]
         strip_components: u32,
+        /// Accept symlinks with an absolute target (a rootfs or sysroot).
+        #[serde(default)]
+        allow_absolute_symlinks: bool,
         #[serde(default)]
         refresh: Option<RawSourceRefreshPolicy>,
         #[serde(default)]

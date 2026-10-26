@@ -1,15 +1,16 @@
 use crate::{AssemblyPathTemplate, AssemblyTreeId};
 
-/// The format `[[image.assembly.packages]]` writes: an opkg `ipk`. `deb` is
-/// reserved for the Debian writer that follows.
+/// The formats `[[image.assembly.packages]]` writes: an opkg `ipk`, or a
+/// Debian `deb` (the same ar layout, with `debian-binary` required).
 pub const PACKAGE_FORMAT_IPK: &str = "ipk";
+pub const PACKAGE_FORMAT_DEB: &str = "deb";
 
 /// A package file built from an assembly tree: its data is the tree as
 /// installed, its control and maintainer scripts come from the spec.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyPackageSpec {
     pub id: String,
-    /// `ipk`; checked by the validator.
+    /// `ipk` or `deb`; checked by the validator.
     pub format: String,
     /// The tree whose files, as installed, make the package's data.
     pub tree: AssemblyTreeId,
@@ -72,11 +73,17 @@ pub fn parse_glibc_version(text: &str) -> Option<(u32, u32)> {
 
 impl AssemblyPackageSpec {
     /// The `output` a `dest` and `control` give: `dest` when it names a file,
-    /// `dest` plus `<Package>_<Version>_<Architecture>.ipk` when it ends in `/`.
-    pub fn output_for(dest: &str, control: &AssemblyPackageControlSpec) -> String {
+    /// `dest` plus `<Package>_<Version>_<Architecture>.<format>` when it ends
+    /// in `/`.
+    pub fn output_for(dest: &str, control: &AssemblyPackageControlSpec, format: &str) -> String {
         if dest.ends_with('/') {
+            let extension = if format == PACKAGE_FORMAT_DEB {
+                "deb"
+            } else {
+                "ipk"
+            };
             format!(
-                "{dest}{}_{}_{}.ipk",
+                "{dest}{}_{}_{}.{extension}",
                 control.package, control.version, control.architecture
             )
         } else {

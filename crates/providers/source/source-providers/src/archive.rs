@@ -51,7 +51,7 @@ impl SourceProvider for ArchiveSourceProvider {
         };
         extract_archive(
             &archive_file,
-            archive.strip_components,
+            archive,
             &materialized_dir,
             &execution,
             SourceCommandPolicy {
@@ -109,20 +109,22 @@ impl SourceProvider for ArchiveSourceProvider {
     }
 }
 
-/// Extracts the archive file `archive_path` into `output_dir`, dropping
-/// `strip_components` leading path components.
+/// Extracts the archive file `archive_path` into `output_dir`, dropping the
+/// source's `strip_components` leading path components and checking its
+/// entries under its link rules (`allow_absolute_symlinks`).
 pub(crate) fn extract_archive(
     archive_path: &Path,
-    strip_components: u32,
+    archive: &gaia_spec::ArchiveSourceSpec,
     output_dir: &Path,
     execution: &SourceExecutionContext,
     policy: SourceCommandPolicy,
     log_sink: Option<ProcessLogSink>,
     cancel_check: Option<ProcessCancelCheck>,
 ) -> Result<(), SourceProviderError> {
-    gaia_process::validate_tar_archive_entries(
+    gaia_process::validate_tar_archive_entries_with(
         archive_path,
-        usize::try_from(strip_components).unwrap_or(usize::MAX),
+        usize::try_from(archive.strip_components).unwrap_or(usize::MAX),
+        archive.allow_absolute_symlinks,
         Duration::from_secs(policy.timeout_seconds.max(1)),
         "validate archive source entries",
         log_sink.clone(),
@@ -140,8 +142,8 @@ pub(crate) fn extract_archive(
         .arg("--delay-directory-restore")
         .arg("-C")
         .arg(output_dir);
-    if strip_components > 0 {
-        command.arg(format!("--strip-components={strip_components}"));
+    if archive.strip_components > 0 {
+        command.arg(format!("--strip-components={}", archive.strip_components));
     }
     run_command_with_policy(
         command,

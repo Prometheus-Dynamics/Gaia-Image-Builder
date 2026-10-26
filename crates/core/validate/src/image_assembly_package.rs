@@ -53,14 +53,15 @@ pub(crate) fn validate_packages(
 
         match package.format.as_str() {
             "ipk" => {}
-            "deb" => diagnostics.push(error(
-                "assembly_package_format_unsupported",
-                format!("{label} format 'deb' is not supported yet; use ipk"),
+            "deb" if !package.debian_binary => diagnostics.push(error(
+                "assembly_package_deb_needs_debian_binary",
+                format!("{label} is a deb, which always starts with debian-binary; remove debian_binary = false"),
                 location(),
             )),
+            "deb" => {}
             other => diagnostics.push(error(
                 "assembly_package_format_invalid",
-                format!("{label} format '{other}' is not known; use ipk"),
+                format!("{label} format '{other}' is not known; use ipk or deb"),
                 location(),
             )),
         }

@@ -78,7 +78,8 @@ pub use assembly_output_spec::{
 };
 pub use assembly_package_spec::{
     AssemblyPackageControlSpec, AssemblyPackageDeviceSpec, AssemblyPackageScriptsSpec,
-    AssemblyPackageSpec, DEFAULT_DEVICE_MIN_PAGE_SIZE, PACKAGE_FORMAT_IPK, parse_glibc_version,
+    AssemblyPackageSpec, DEFAULT_DEVICE_MIN_PAGE_SIZE, PACKAGE_FORMAT_DEB, PACKAGE_FORMAT_IPK,
+    parse_glibc_version,
 };
 pub use assembly_spec::{
     AssemblyBinarySpec, AssemblyBusyboxInitramfsSpec, AssemblyCheckSpec, AssemblyDeviceKindSpec,

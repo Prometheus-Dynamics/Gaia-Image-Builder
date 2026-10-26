@@ -530,14 +530,15 @@ fn compile_assembly_oci(raw: RawAssemblyOciConfig) -> AssemblyOciSpec {
 /// `ipk` format and a `debian-binary` member. The validator reports the rest.
 fn compile_assembly_package(raw: RawAssemblyPackageConfig) -> gaia_spec::AssemblyPackageSpec {
     let control = compile_package_control(raw.control);
-    let output = gaia_spec::AssemblyPackageSpec::output_for(&raw.dest, &control);
+    let format = raw
+        .format
+        .unwrap_or_else(|| gaia_spec::PACKAGE_FORMAT_IPK.into());
+    let output = gaia_spec::AssemblyPackageSpec::output_for(&raw.dest, &control, &format);
     let scripts = raw.scripts;
     let device = raw.device.map(compile_package_device);
     gaia_spec::AssemblyPackageSpec {
         id: raw.id,
-        format: raw
-            .format
-            .unwrap_or_else(|| gaia_spec::PACKAGE_FORMAT_IPK.into()),
+        format,
         tree: raw.tree.into(),
         dest: raw.dest.into(),
         output: output.into(),

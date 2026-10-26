@@ -1456,9 +1456,11 @@ Source kinds:
 - `archive`
 - `download`
 
+An archive's symlinks must resolve inside it: a target with `..` that stays inside (`include/dt-bindings/input/../../uapi/...`) is fine, one that leaves is refused, and so is an absolute target unless the source sets `allow_absolute_symlinks = true`. A root filesystem or an SDK's sysroot needs that: its absolute links are meant relative to that root, the link is created inside the destination, and GNU tar does not write through a link it extracted. Hard links between members of the archive are extracted; one to a path outside it, or one that `strip_components` removes, is refused.
+
 An `archive` source takes either `path` (an archive in the workspace) or `url`
 with its `sha256`, never both (`sha256` alone, with `path`, is an error). A
-`url` archive is downloaded into the download cache (see "Download Cache"
+`url` archive is downloaded (with the archive provider's `timeout_seconds` and retries: `[providers.archive] timeout_seconds = 3600` for a large SDK) into the download cache (see "Download Cache"
 below), its bytes are hashed and checked against `sha256` before anything is
 extracted (a mismatch is an error that names the expected and the actual
 digest, and nothing is stored or extracted), and then it is extracted as a
@@ -1710,11 +1712,17 @@ Limelight's SystemCore OS is built with a Buildroot SDK. Its releases are on
 GitHub (`LimelightVision/systemcore-os-public`). The ALPHA release is
 `limelightosr-2027.0.0-alpha17-403` and the BETA release is
 `limelightosr-2027.0.0-beta17-233`. The SDK is the `systemcore-aarch64-toolchain.tar.gz`
-asset of ALPHA, and `systemcorebeta-aarch64-toolchain.tar.gz` of BETA. The
-device OS archive (`systemcorelinux.tar.xz` for ALPHA,
-`systemcorebetalinux.tar.xz` for BETA) is a separate asset this example does
-not use. The checksums are placeholders below: take each `sha256` from the
-release you use.
+asset of ALPHA, and `systemcorebeta-aarch64-toolchain.tar.gz` of BETA: a
+Buildroot SDK (`bin/aarch64-buildroot-linux-gnu-*`, `relocate-sdk.sh`, a
+glibc 2.42 sysroot) under one top directory. `systemcorelinux.tar.xz`
+(`systemcorebetalinux.tar.xz` for BETA) is SystemCore's Linux kernel source
+tree with its `Module.symvers`, for out-of-tree kernel modules; it is not a
+sysroot and this example does not use it. GitHub publishes each asset's
+sha256 (`gh api repos/LimelightVision/systemcore-os-public/releases/tags/<tag>`,
+the `digest` field). The values below are ALPHA 17's, and this example was
+built against them: a rust program cross-compiled to an aarch64 PIE with
+16 KiB segments and glibc needs up to `GLIBC_2.34`, packed into an ipk that
+passes the device checks.
 
 A build that cross-compiles a rust program for SystemCore, packs it into an
 ipk and checks the ipk against the SDK's sysroot:
@@ -1733,8 +1741,9 @@ allow_nested_build = true
 id = "systemcore-sdk"
 kind = "archive"
 url = "https://github.com/LimelightVision/systemcore-os-public/releases/download/limelightosr-2027.0.0-alpha17-403/systemcore-aarch64-toolchain.tar.gz"
-sha256 = "<sha256 of systemcore-aarch64-toolchain.tar.gz>"
-strip_components = 0                       # 1 when the archive has one top directory
+sha256 = "889ea7f6e6cc0d571aa43b4f02954f251016c5a5739f05c962d526429ae71990"
+strip_components = 1                       # the SDK root is systemcore-aarch64-toolchain/
+allow_absolute_symlinks = true             # its sysroot has absolute links (usr/bin/iptables-xml -> /usr/sbin/...)
 
 [[sources]]
 id = "helios"
@@ -2527,7 +2536,7 @@ collect_dir = "${workspace.out_dir}"
 The plan has no `image:prepare`, `image:build` or `image:check` operation. The
 build is its sources, artifacts, installs and `[image.assembly]`: the assembly
 makes the deliverable, typically an ipk package for an external device OS (see
-"Packages (ipk)" below). `examples/systemcore-package` is a complete build.
+"Packages (ipk, deb)" below). `examples/systemcore-package` is a complete build.
 
 How the rest of the build fits:
 - `[image.assembly]` is optional. Without it, the build makes its sources and
@@ -3007,13 +3016,14 @@ Each layer's `diff_id` is the sha256 of its uncompressed tar. Compressed blobs a
 
 State records `oci.N.id`, `format`, `compression`, `output`, `bytes`, `config_digest`, `manifest_digest` and `layer_count`, and for each layer `oci.N.layer.M.source`, `diff_id`, `blob_digest`, `blob_bytes` and `reused`. The output is an expected output of the assembly, so it is reported with its size. Reuse fingerprints cover the OCI config, the state of each `tar` layer, and the content digest of each `tree` layer.
 
-#### Packages (ipk)
+#### Packages (ipk, deb)
 
-`[[image.assembly.packages]]` writes an opkg package (`.ipk`) from an assembly tree: the tree as installed is the package's data, and the control, the maintainer scripts and the conffiles come from the spec. It runs after the OCI images, with no `opkg-build` or `dpkg-deb` needed. Each entry takes:
+`[[image.assembly.packages]]` turns an assembly tree into a package an existing OS installs: an opkg `ipk` (OpenWrt, Yocto/Buildroot-based OSes such as Limelight's SystemCore) or a Debian `deb` (Debian, Ubuntu, Raspberry Pi OS). It is how one build ships the same software as a guest on someone else's OS instead of owning the image; pair it with `[image] kind = "none"` when no image is built at all, and with `[[toolchains]]` to build against that OS's SDK. Both formats are an `ar` archive of `debian-binary` (`2.0`), `control.tar.gz` and `data.tar.gz`, written byte-identically for the same inputs; no `opkg-build` or `dpkg-deb` is needed. It runs after the OCI images. Each entry takes:
+
 - `id`: unique id.
-- `format`: `"ipk"` (the default and the only value written). `"deb"` is reserved and is a validation error for now.
+- `format`: `"ipk"` (default) or `"deb"`. A `deb` always starts with `debian-binary`, so `debian_binary = false` is an error there; its `Architecture` uses Debian names (`arm64`, `amd64`, `armhf`).
 - `tree`: the assembly tree whose files, as installed, are the data.
-- `dest`: a directory when it ends in `/`, and the package file is named `<Package>_<Version>_<Architecture>.ipk` in it; otherwise the path of the file.
+- `dest`: a directory when it ends in `/`, and the package file is named `<Package>_<Version>_<Architecture>.ipk` (or `.deb`) in it; otherwise the path of the file.
 - `debian_binary`: `true` (the default) writes the `debian-binary` member first, holding `2.0`. `false` gives the layout of Limelight's examples, with only `control.tar.gz` and `data.tar.gz`.
 - `allowed_prefixes`: optional absolute paths. Every file, symlink and hard link of the data must be under one of them; directories are not checked, so the parents of an allowed file are fine.
 - `[image.assembly.packages.control]`: the control fields, in the spelling opkg and dpkg use. `Package`, `Version`, `Architecture`, `Maintainer` and `Description` are required. `Architecture` has no default, so name the target (such as `aarch64`) rather than `all`. `Depends` is a list, joined with `, `. `Section`, `Priority`, `Source` and `Homepage` are optional single-line strings. `Description` takes continuation lines after its first line; an empty line is written as ` .`. `Installed-Size` is added by Gaia (the regular files' bytes, rounded up to KiB).

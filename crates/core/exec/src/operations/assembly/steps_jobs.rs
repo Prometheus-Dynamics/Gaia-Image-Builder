@@ -198,12 +198,22 @@ fn job_file<'a>(
             None
         };
         let regular = std_fs::symlink_metadata(&dest).is_ok_and(|metadata| metadata.is_file());
-        let pending = (regular && !file.allow_missing_libs && gaia_plan::is_dynamic_elf(&dest))
-            .then(|| PendingLibCheck {
-                tree: file.tree.as_str().to_string(),
-                tree_path: tree_path.to_path_buf(),
-                file: dest.clone(),
-            });
+        // A tree a package with device checks is made from relies on the
+        // device's own libraries; the package step checks them against the
+        // device sysroot instead.
+        let device_checked = assembly
+            .packages
+            .iter()
+            .any(|package| package.tree == file.tree && package.device.is_some());
+        let pending = (regular
+            && !file.allow_missing_libs
+            && !device_checked
+            && gaia_plan::is_dynamic_elf(&dest))
+        .then(|| PendingLibCheck {
+            tree: file.tree.as_str().to_string(),
+            tree_path: tree_path.to_path_buf(),
+            file: dest.clone(),
+        });
         let bytes = file_len(&dest)?;
         let sha256 = file_sha256(&dest)?;
         staged.push(StagedFile::Copied {
