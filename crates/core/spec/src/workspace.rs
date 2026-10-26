@@ -150,7 +150,22 @@ pub fn resolve_workspace_path(
     if path.is_absolute() {
         normalize_path(path)
     } else {
-        resolve_under(&root, raw, raw)
+        resolve_under(&root, raw, raw).or_else(|error| {
+            // The workspace's own build and out dirs may sit outside its root
+            // (`build_dir = "../../.gaia/<name>/build"`); paths inside them
+            // are the workspace's too.
+            let joined = normalize_path(&root.join(raw))?;
+            let owned = [&workspace.build_dir, &workspace.out_dir]
+                .into_iter()
+                .filter(|dir| !dir.trim().is_empty())
+                .filter_map(|dir| normalize_path(&root.join(dir)).ok());
+            let mut owned = owned;
+            if owned.any(|dir| dir != Path::new(".") && joined.starts_with(&dir)) {
+                Ok(joined)
+            } else {
+                Err(error)
+            }
+        })
     }
 }
 
@@ -246,6 +261,34 @@ mod tests {
         assert!(matches!(
             resolve_workspace_path(&workspace, "@missing/file"),
             Err(WorkspacePathError::UnknownAlias { .. })
+        ));
+    }
+
+    #[test]
+    fn paths_inside_build_and_out_dirs_outside_the_root_resolve() {
+        // The examples keep their build and out dirs outside their root.
+        let workspace = WorkspaceSpec {
+            root_dir: "/repo/examples/demo".into(),
+            build_dir: "../../.gaia/demo/build".into(),
+            out_dir: "../../.gaia/demo/out".into(),
+            ..WorkspaceSpec::default()
+        };
+        assert_eq!(
+            resolve_workspace_path(&workspace, "../../.gaia/demo/build/assembly").unwrap(),
+            PathBuf::from("/repo/.gaia/demo/build/assembly")
+        );
+        assert_eq!(
+            resolve_workspace_path(&workspace, "../../.gaia/demo/out/pkg.ipk").unwrap(),
+            PathBuf::from("/repo/.gaia/demo/out/pkg.ipk")
+        );
+        // Anything else outside the root is still refused.
+        assert!(matches!(
+            resolve_workspace_path(&workspace, "../../.gaia/other/file"),
+            Err(WorkspacePathError::ParentTraversal { .. })
+        ));
+        assert!(matches!(
+            resolve_workspace_path(&workspace, "../../.gaia/demo/buildx"),
+            Err(WorkspacePathError::ParentTraversal { .. })
         ));
     }
 }
