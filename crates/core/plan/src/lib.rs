@@ -17,6 +17,7 @@ mod runtime_libs;
 mod targets;
 mod tree_digest;
 
+pub use elf::{ElfObject, VersionNeed, parse_elf};
 pub use elf::{ElfSections, elf_sections, elf_sections_of_file};
 pub use estimate::{PlanEstimate, estimate_plan, format_duration_short};
 pub use graph::{ExecutionPlan, PlanDiagnostic, ReuseState};
@@ -38,7 +39,6 @@ pub use runtime_libs::{
     RuntimeClosure, RuntimeEntry, derive_sysroot, find_sysroot_library, is_dynamic_elf,
     missing_runtime_libraries, missing_runtime_libraries_in_roots, resolve_runtime_closure,
 };
-pub use elf::{ElfObject, VersionNeed, parse_elf};
 pub use targets::{PlanDomain, PlanTarget};
 pub use tree_digest::{tree_digest_members, tree_digest_signature};
 

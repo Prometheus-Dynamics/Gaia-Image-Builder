@@ -78,8 +78,7 @@ pub use assembly_output_spec::{
 };
 pub use assembly_package_spec::{
     AssemblyPackageControlSpec, AssemblyPackageDeviceSpec, AssemblyPackageScriptsSpec,
-    AssemblyPackageSpec, DEFAULT_DEVICE_MIN_PAGE_SIZE,
-    PACKAGE_FORMAT_IPK, parse_glibc_version,
+    AssemblyPackageSpec, DEFAULT_DEVICE_MIN_PAGE_SIZE, PACKAGE_FORMAT_IPK, parse_glibc_version,
 };
 pub use assembly_spec::{
     AssemblyBinarySpec, AssemblyBusyboxInitramfsSpec, AssemblyCheckSpec, AssemblyDeviceKindSpec,
@@ -159,12 +158,12 @@ pub use state::{
     RUNTIME_STATE_DIR_NAME,
 };
 pub use target_arch::{TargetArch, target_arch};
-pub use user_cache::{
-    USER_BUILDROOT_CCACHE_DIR, USER_BUILDROOT_PACKAGE_CACHE_DIR, user_cache_root,
-};
 pub use toolchain::{
     ResolvedToolchain, ToolchainKindSpec, ToolchainSpec, default_toolchain_prefix,
     resolve_toolchain, toolchain_root,
+};
+pub use user_cache::{
+    USER_BUILDROOT_CCACHE_DIR, USER_BUILDROOT_PACKAGE_CACHE_DIR, user_cache_root,
 };
 pub use variant::{
     DEFAULT_VARIANT_ID, VariantSpec, is_valid_variant_id, runtime_state_dir_name,

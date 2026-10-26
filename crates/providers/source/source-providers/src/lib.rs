@@ -5,13 +5,13 @@ use gaia_process::{
     run_command_with_timeout_and_retention, sleep_with_cancel,
 };
 pub use gaia_process::{ProcessCancelCheck, ProcessLogLine, ProcessLogSink};
-use gaia_spec::{
-    GitBackendSpec, GitSourceSpec, ResolvedBuildSpec, RetryBackoffStrategySpec,
-    SourceDefinition, SourcePinPolicySpec, SourceProviderKind, SourceRefreshPolicySpec, SourceSpec,
-    WorkspaceSpec, redact_url_userinfo,
-};
 #[cfg(test)]
 use gaia_spec::{DownloadSourceSpec, PathSourceSpec};
+use gaia_spec::{
+    GitBackendSpec, GitSourceSpec, ResolvedBuildSpec, RetryBackoffStrategySpec, SourceDefinition,
+    SourcePinPolicySpec, SourceProviderKind, SourceRefreshPolicySpec, SourceSpec, WorkspaceSpec,
+    redact_url_userinfo,
+};
 #[cfg(test)]
 use std::ffi::OsStr;
 use std::fs;

@@ -2,9 +2,9 @@ mod command;
 mod contract;
 mod digest;
 mod outputs;
-mod toolchain;
 #[cfg(test)]
 mod tests;
+mod toolchain;
 
 pub use toolchain::{ArtifactToolchainContract, RELOCATED_MARKER, ensure_relocated};
 
