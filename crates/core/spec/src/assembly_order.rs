@@ -127,12 +127,15 @@ pub fn assembly_step_paths(
         );
     }
     for (index, file) in assembly.files.iter().enumerate() {
-        let mut reads = match (&file.src, &file.src_glob) {
-            (Some(src), _) => vec![resolve(src)],
+        let mut reads = match (&file.src, &file.src_glob, &file.src_dir) {
+            (Some(src), _, _) => vec![resolve(src)],
             // A glob reads what its pattern matches.
-            (None, Some(glob)) => vec![resolve(glob)],
+            (None, Some(glob), _) => vec![resolve(glob)],
+            // A directory copy reads the directory, so it waits for every
+            // step that writes inside it.
+            (None, None, Some(src_dir)) => vec![resolve(src_dir)],
             // Generated content reads the paths its tokens name.
-            (None, None) => {
+            (None, None, None) => {
                 let mut token_reads = Vec::new();
                 if let Some(content) = &file.content {
                     value_token_reads(content, resolve, &mut token_reads);

@@ -124,6 +124,9 @@ fn job_file<'a>(
         output_path = tracing::field::Empty
     );
     let _span_guard = span.enter();
+    if file.src_dir.is_some() {
+        return super::files_tree::job_file_tree(ctx, entry_index, file);
+    }
     let tree_path = ctx.roots.tree_path(&file.tree)?;
     let mode = file.mode.clone();
     if file.content.is_some() || file.json.is_some() {

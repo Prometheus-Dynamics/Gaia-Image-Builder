@@ -12,10 +12,14 @@ pub(super) fn assembly_file_sources(
     let Some(src_glob) = &file.src_glob else {
         return Ok(Vec::new());
     };
+    // A directory that matches is skipped: the glob copies files and links.
     let matches = gaia_spec::exclude_names(
         gaia_spec::expand_simple_glob(spec, roots, src_glob)?,
         &file.exclude,
-    );
+    )
+    .into_iter()
+    .filter(|path| !std_fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir()))
+    .collect::<Vec<_>>();
     if file.include.is_empty() {
         return Ok(matches);
     }

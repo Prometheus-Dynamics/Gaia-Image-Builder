@@ -118,6 +118,7 @@ fn optional_assembly_options_are_encoded_only_when_set() {
         dest: "overlays/".into(),
         mode: None,
         optional: false,
+        src_dir: None,
         preserve_symlink: false,
         allow_missing_libs,
     };

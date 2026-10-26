@@ -22,7 +22,7 @@ pub(crate) fn validate_include(
     if file.src_glob.is_none() {
         diagnostics.push(error(
             "assembly_include_not_allowed",
-            format!("files[{index}].include only applies to src_glob, not to src, content or json"),
+            format!("files[{index}].include only applies to src_glob, not to src, src_dir, content or json"),
             Some("image.assembly.files".into()),
         ));
     }
@@ -47,7 +47,7 @@ pub(crate) fn validate_strip_file(
         diagnostics.push(error(
             "assembly_strip_not_allowed",
             format!(
-                "files[{index}].strip only applies to a copied file (src or src_glob), not generated content"
+                "files[{index}].strip only applies to a copied file (src, src_glob or src_dir), not generated content"
             ),
             Some("image.assembly.files".into()),
         ));

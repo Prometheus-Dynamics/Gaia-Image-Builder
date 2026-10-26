@@ -34,6 +34,7 @@ pub(crate) fn visit_assembly_strings(assembly: &mut ImageAssemblySpec, visit: &m
         tree_id(&mut file.tree, "image.assembly.files.tree", visit);
         path(&mut file.src, "image.assembly.files.src", visit);
         path(&mut file.src_glob, "image.assembly.files.src_glob", visit);
+        path(&mut file.src_dir, "image.assembly.files.src_dir", visit);
         texts(&mut file.exclude, "image.assembly.files.exclude", visit);
         opt_text(&mut file.content, "image.assembly.files.content", visit);
         if let Some(json) = &mut file.json {

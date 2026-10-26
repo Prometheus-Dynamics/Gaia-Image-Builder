@@ -95,6 +95,7 @@ fn file_entry(src: &Path, dest: &str, mode: &str) -> AssemblyFileSpec {
         dest: dest.into(),
         mode: Some(mode.into()),
         optional: false,
+        src_dir: None,
         preserve_symlink: false,
         allow_missing_libs: false,
     }
@@ -524,6 +525,60 @@ fn a_deb_is_named_dot_deb_and_reads_back_with_dpkg_deb() {
         assert!(
             listing.contains("./etc/systemd/system/helios-api.service"),
             "{listing}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_src_dir_copied_into_the_package_tree_lists_its_nested_paths_in_the_data() {
+    let scratch = TempDir::new("gaia-exec-package-src-dir");
+    let root = scratch.join("nested");
+    let fixture = fixture(&root);
+    let site = root.join("assets/site");
+    fs::create_dir_all(site.join("_app/immutable/chunks")).expect("site dirs");
+    fs::write(site.join("index.html"), "<html></html>\n").expect("index");
+    fs::write(site.join("_app/immutable/chunks/abc123.js"), "export {};\n").expect("chunk");
+    let mut spec = package_spec(
+        &fixture,
+        package("$assembly.out/", true, &[], &["helios-api.service"]),
+    );
+    spec.image
+        .assembly
+        .as_mut()
+        .expect("assembly")
+        .files
+        .push(AssemblyFileSpec {
+            include: Vec::new(),
+            strip: false,
+            tree: "pkg-root".into(),
+            src: None,
+            src_glob: None,
+            src_dir: Some(site.display().to_string().into()),
+            exclude: Vec::new(),
+            content: None,
+            json: None,
+            dest: "var/www/helios/".into(),
+            mode: None,
+            optional: false,
+            preserve_symlink: false,
+            allow_missing_libs: false,
+        });
+    let summary = run(&spec);
+    let ipk = PathBuf::from(state_value(&summary, "package.1.output"));
+    let data_tar = member_tar(&ipk, "data.tar.gz", &scratch.join("parts"));
+    let names = entry_names(&data_tar);
+    for expected in [
+        "./var/www/helios/",
+        "./var/www/helios/index.html",
+        "./var/www/helios/_app/",
+        "./var/www/helios/_app/immutable/",
+        "./var/www/helios/_app/immutable/chunks/",
+        "./var/www/helios/_app/immutable/chunks/abc123.js",
+    ] {
+        assert!(
+            names.iter().any(|name| name == expected),
+            "{expected} is missing from the data: {names:?}"
         );
     }
 }

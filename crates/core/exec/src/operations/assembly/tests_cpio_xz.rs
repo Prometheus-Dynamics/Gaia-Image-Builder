@@ -70,6 +70,7 @@ fn initramfs(root: &Path, filesystems: Vec<AssemblyFilesystemSpec>) -> ImageAsse
             dest: "etc/config.txt".into(),
             mode: None,
             optional: false,
+            src_dir: None,
             preserve_symlink: false,
             allow_missing_libs: false,
         }],

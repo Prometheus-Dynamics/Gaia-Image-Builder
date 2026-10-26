@@ -58,6 +58,9 @@ pub(super) fn interpolate_image_assembly(
             file.src_glob = file
                 .src_glob
                 .map(|value| resolver::interpolate_string(value, raw, env));
+            file.src_dir = file
+                .src_dir
+                .map(|value| resolver::interpolate_string(value, raw, env));
             file.content = file
                 .content
                 .map(|value| assembly_archives::interpolate_content(&value, raw, env));

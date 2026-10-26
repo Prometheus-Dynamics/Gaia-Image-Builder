@@ -222,6 +222,7 @@ fn stage_image_assembly_cleans_tree_and_skips_optional_missing_sources() {
                 dest: "config.txt".into(),
                 mode: None,
                 optional: false,
+                src_dir: None,
                 preserve_symlink: false,
                 allow_missing_libs: false,
                 content: None,
@@ -237,6 +238,7 @@ fn stage_image_assembly_cleans_tree_and_skips_optional_missing_sources() {
                 dest: "missing.txt".into(),
                 mode: None,
                 optional: true,
+                src_dir: None,
                 preserve_symlink: false,
                 allow_missing_libs: false,
                 content: None,
@@ -278,6 +280,7 @@ fn copy_assembly_file_copies_regular_files_and_applies_mode() {
         dest: "dest".into(),
         mode: Some("0755".into()),
         optional: false,
+        src_dir: None,
         preserve_symlink: false,
         allow_missing_libs: false,
         content: None,
@@ -317,6 +320,7 @@ fn copy_assembly_file_preserves_symlinks_when_requested() {
         dest: "dest-link".into(),
         mode: None,
         optional: false,
+        src_dir: None,
         preserve_symlink: true,
         allow_missing_libs: false,
         content: None,
@@ -478,6 +482,7 @@ fn boot_assembly(
             dest: "config.txt".into(),
             mode: None,
             optional: false,
+            src_dir: None,
             preserve_symlink: false,
             allow_missing_libs: false,
             content: None,
@@ -660,6 +665,8 @@ mod tests_cpio_xz;
 mod tests_entries;
 #[path = "tests_kernel_modules.rs"]
 mod tests_kernel_modules;
+#[path = "tests_src_dir.rs"]
+mod tests_src_dir;
 #[path = "tests_strip.rs"]
 mod tests_strip;
 #[path = "tests_verity.rs"]

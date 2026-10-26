@@ -90,7 +90,11 @@ pub struct RawAssemblyFileConfig {
     pub tree: String,
     pub src: Option<String>,
     pub src_glob: Option<String>,
-    /// `src_glob` only: file names (simple `*` globs allowed) left out of the match set.
+    /// A directory whose whole tree is copied under `dest` (its contents).
+    /// Exclusive with `src`, `src_glob`, `content` and `json`.
+    pub src_dir: Option<String>,
+    /// `src_glob` and `src_dir`: file names (simple `*` globs allowed) left out
+    /// of the match set, at any depth for `src_dir`.
     pub exclude: Vec<String>,
     /// `src_glob` only: when set, only the matches whose file name one of
     /// these names (simple `*` globs allowed) matches are copied. An entry

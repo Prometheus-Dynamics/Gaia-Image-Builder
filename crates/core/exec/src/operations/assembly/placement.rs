@@ -412,6 +412,7 @@ fn rewrite_assembly(
     for file in &mut rewritten.files {
         file.src = absolute_opt(&file.src)?;
         file.src_glob = absolute_opt(&file.src_glob)?;
+        file.src_dir = absolute_opt(&file.src_dir)?;
         file.content = file.content.as_deref().map(rewrite_text).transpose()?;
         if let Some(json) = &mut file.json {
             rewrite_json_strings(json, &rewrite_text)?;

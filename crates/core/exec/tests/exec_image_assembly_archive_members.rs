@@ -305,6 +305,7 @@ fn file_src_glob_exclude_skips_named_matches() {
             dest: "overlays/".into(),
             mode: None,
             optional: false,
+            src_dir: None,
             preserve_symlink: false,
             allow_missing_libs: false,
         }],

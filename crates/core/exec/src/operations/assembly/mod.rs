@@ -24,6 +24,7 @@ mod cpio;
 mod disks;
 mod ext4;
 mod files;
+mod files_tree;
 mod filesystems;
 mod gpt;
 mod kernel_modules;

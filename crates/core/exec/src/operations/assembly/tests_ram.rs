@@ -33,6 +33,7 @@ fn ram_test_assembly(work_dir: &str) -> ImageAssemblySpec {
         dest: dest.into(),
         mode: None,
         optional: false,
+        src_dir: None,
         preserve_symlink: false,
         allow_missing_libs: false,
         content: None,

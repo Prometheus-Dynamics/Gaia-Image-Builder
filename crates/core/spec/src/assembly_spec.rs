@@ -145,7 +145,13 @@ pub struct AssemblyFileSpec {
     pub tree: AssemblyTreeId,
     pub src: Option<AssemblyPathTemplate>,
     pub src_glob: Option<AssemblyPathTemplate>,
-    /// `src_glob` only: file names (simple `*` globs allowed) left out of the match set.
+    /// A directory whose whole tree is copied under `dest`: its contents, not
+    /// the directory itself. Exclusive with `src`, `src_glob`, `content` and
+    /// `json`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub src_dir: Option<AssemblyPathTemplate>,
+    /// `src_glob` and `src_dir`: file names (simple `*` globs allowed) left out
+    /// of the match set, at any depth for `src_dir`.
     pub exclude: Vec<String>,
     /// `src_glob` only: when non-empty, only the matches whose file name one
     /// of these names (simple `*` globs allowed) matches are copied.

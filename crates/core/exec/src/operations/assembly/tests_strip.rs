@@ -36,6 +36,7 @@ fn file_entry(src: &Path, dest: &str, strip: bool) -> AssemblyFileSpec {
         dest: dest.into(),
         mode: None,
         optional: false,
+        src_dir: None,
         preserve_symlink: false,
         allow_missing_libs: false,
     }

@@ -238,6 +238,7 @@ fn spec_with_filesystem_and_transform(
             dest: "init".into(),
             mode: Some("0755".into()),
             optional: false,
+            src_dir: None,
             preserve_symlink: false,
             allow_missing_libs: false,
             include: Vec::new(),

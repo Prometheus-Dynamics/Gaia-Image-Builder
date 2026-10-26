@@ -122,8 +122,25 @@ pub(crate) fn assembly_input_entries(spec: &ResolvedBuildSpec) -> Vec<(String, S
                 ),
             ));
         }
+        if let Some(src_dir) = &file.src_dir {
+            let resolved = roots
+                .resolve_path(spec, src_dir)
+                .unwrap_or_else(|_| PathBuf::from(src_dir.as_str()));
+            parts.push((
+                format!("src_dir {}", resolved.display()),
+                format!(
+                    "src-dir:{}:{}",
+                    resolved.display(),
+                    crate::tree_digest::tree_copy_signature(&resolved)
+                ),
+            ));
+        }
         if let Some(src_glob) = &file.src_glob {
-            let matches = gaia_spec::expand_simple_glob(spec, &roots, src_glob).unwrap_or_default();
+            let matches = gaia_spec::expand_simple_glob(spec, &roots, src_glob)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|path| !fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir()))
+                .collect::<Vec<_>>();
             glob_match_count += matches.len();
             parts.push((
                 format!("glob {src_glob}"),

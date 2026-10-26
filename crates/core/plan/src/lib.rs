@@ -40,7 +40,7 @@ pub use runtime_libs::{
     missing_runtime_libraries, missing_runtime_libraries_in_roots, resolve_runtime_closure,
 };
 pub use targets::{PlanDomain, PlanTarget};
-pub use tree_digest::{tree_digest_members, tree_digest_signature};
+pub use tree_digest::{tree_copy_signature, tree_digest_members, tree_digest_signature};
 
 /// ELF objects for tests that copy binaries (`test-fixtures` feature).
 #[cfg(feature = "test-fixtures")]

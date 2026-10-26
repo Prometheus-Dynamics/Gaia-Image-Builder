@@ -24,6 +24,7 @@ fn glob_entry(glob: &Path, dest: &str, include: &[&str], optional: bool) -> Asse
         dest: dest.into(),
         mode: None,
         optional,
+        src_dir: None,
         preserve_symlink: false,
         allow_missing_libs: false,
     }

@@ -193,6 +193,7 @@ fn oci_spec(fixture: &Fixture, oci: AssemblyOciSpec) -> ResolvedBuildSpec {
             dest: "bin/app".into(),
             mode: Some("0755".into()),
             optional: false,
+            src_dir: None,
             preserve_symlink: false,
             allow_missing_libs: false,
         }],

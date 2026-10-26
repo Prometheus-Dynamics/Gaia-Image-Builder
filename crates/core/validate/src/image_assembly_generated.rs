@@ -98,11 +98,11 @@ pub(crate) fn validate_generated_file(
             location.clone(),
         ));
     }
-    if file.src.is_some() || file.src_glob.is_some() {
+    if file.src.is_some() || file.src_glob.is_some() || file.src_dir.is_some() {
         diagnostics.push(error(
             "assembly_file_source_invalid",
             format!(
-                "assembly file '{}:{}' sets content or json, so it cannot also set src or src_glob",
+                "assembly file '{}:{}' sets content or json, so it cannot also set src, src_glob or src_dir",
                 file.tree, file.dest
             ),
             location.clone(),

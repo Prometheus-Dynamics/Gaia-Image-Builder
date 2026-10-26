@@ -184,6 +184,7 @@ fn kernel_modules_fill_the_tree_before_it_is_packed_and_published_copies_are_wri
             dest: "boot.img".into(),
             mode: None,
             optional: false,
+            src_dir: None,
             preserve_symlink: false,
             allow_missing_libs: false,
             content: None,
@@ -288,6 +289,7 @@ fn a_tree_digest_runs_after_the_steps_that_fill_its_tree() {
             dest: dest.into(),
             mode: None,
             optional: false,
+            src_dir: None,
             preserve_symlink: false,
             allow_missing_libs: false,
         }
@@ -364,6 +366,7 @@ fn generated_content_runs_after_the_steps_whose_outputs_its_tokens_read() {
                 dest: "cmdline.txt".into(),
                 mode: None,
                 optional: false,
+                src_dir: None,
                 preserve_symlink: false,
                 allow_missing_libs: false,
             },
@@ -384,6 +387,7 @@ fn generated_content_runs_after_the_steps_whose_outputs_its_tokens_read() {
                 dest: "state.json".into(),
                 mode: None,
                 optional: false,
+                src_dir: None,
                 preserve_symlink: false,
                 allow_missing_libs: false,
             },
@@ -474,5 +478,22 @@ fn a_glob_runs_after_a_file_copied_from_a_transforms_output() {
     assert!(
         at(AssemblyStep::File(3)) < at(AssemblyStep::File(0)),
         "{order:?}"
+    );
+}
+
+#[test]
+fn a_src_dir_copy_runs_after_the_steps_writing_inside_its_directory() {
+    // The copy reads its directory, so a file written into it runs first.
+    let steps = [
+        step(AssemblyStep::File(0), &["/work/site"], &["/out/web"]),
+        step(
+            AssemblyStep::File(1),
+            &["/src/index.html"],
+            &["/work/site/index.html"],
+        ),
+    ];
+    assert_eq!(
+        order_assembly_steps(&steps),
+        Ok(vec![AssemblyStep::File(1), AssemblyStep::File(0)])
     );
 }

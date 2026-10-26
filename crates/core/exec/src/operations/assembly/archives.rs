@@ -106,11 +106,17 @@ fn write_archive(
                 Some(entries)
             }
             Some(AssemblyArchiveMemberSourceSpec::Glob(pattern)) => {
+                // A directory that matches is skipped: the glob archives files and links.
                 let matches = gaia_spec::exclude_names(
                     gaia_spec::expand_simple_glob(spec, roots, pattern.as_str())
                         .map_err(context)?,
                     &member.exclude,
-                );
+                )
+                .into_iter()
+                .filter(|path| {
+                    !std_fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir())
+                })
+                .collect::<Vec<_>>();
                 let mut entries = Vec::new();
                 for path in matches {
                     let metadata = std_fs::metadata(&path).map_err(|error| {

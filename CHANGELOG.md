@@ -12,6 +12,8 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 - `[image] kind = "none"` no longer feeds the installs and stage entries of the build to an image: the feed is empty unless `[image.feed]` sets it (the rootfs defaults made every such build fail validation).
 
+- `src_dir = "<path>"` on `[[image.assembly.files]]` copies a whole directory tree under `dest` (its contents): recursive, sorted, symbolic links kept as links, regular files keep their modes unless `mode` is set, `exclude` by name at any depth, an absent or empty directory fails unless `optional`. Each copied file gets `strip` and the dynamic-library check as `src` does. The assembly's fingerprint covers the tree's names, contents, modes and link targets, so a nested change reruns it. `src_glob` (file entries and archive members) now skips a directory that matches instead of failing.
+
 - Archive sources: `allow_absolute_symlinks = true` accepts symlinks with an absolute target (a rootfs or SDK sysroot); still refused by default. Verified against Limelight's SystemCore ALPHA 17 SDK: downloaded and checked by sha256, extracted, relocated, used to cross-build a rust program with 16 KiB pages into an ipk that passes the device checks. A tree packaged with `device` checks no longer warns that it lacks the libraries the device provides.
 
 - Packages: `format = "deb"` writes a Debian package (the ipk layout with `debian-binary` required, `<Package>_<Version>_<Architecture>.deb` names); `dpkg-deb` reads it back.

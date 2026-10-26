@@ -104,7 +104,7 @@ pub(crate) fn validate_image_assembly(
         }
         validate_exclude(
             &file.exclude,
-            file.src_glob.is_some(),
+            file.src_glob.is_some() || file.src_dir.is_some(),
             &format!("files[{index}].exclude"),
             "image.assembly.files",
             diagnostics,
@@ -115,7 +115,7 @@ pub(crate) fn validate_image_assembly(
             diagnostics.push(error(
                 "assembly_allow_missing_libs_not_allowed",
                 format!(
-                    "files[{index}].allow_missing_libs only applies to a copied file (src or src_glob), not generated content"
+                    "files[{index}].allow_missing_libs only applies to a copied file (src, src_glob or src_dir), not generated content"
                 ),
                 Some("image.assembly.files".into()),
             ));
@@ -124,45 +124,75 @@ pub(crate) fn validate_image_assembly(
             image_assembly_generated::validate_generated_file(spec, &tree_ids, file, diagnostics);
             continue;
         }
-        match (file.src.as_ref(), file.src_glob.as_ref()) {
-            (Some(_), Some(_)) | (None, None) => diagnostics.push(error(
+        let source_count = [
+            file.src.is_some(),
+            file.src_glob.is_some(),
+            file.src_dir.is_some(),
+        ]
+        .into_iter()
+        .filter(|set| *set)
+        .count();
+        if source_count != 1 {
+            diagnostics.push(error(
                 "assembly_file_source_invalid",
-                "assembly file entries must set exactly one of src, src_glob, content or json"
+                "assembly file entries must set exactly one of src, src_glob, src_dir, content or json"
                     .into(),
                 Some("image.assembly.files".into()),
-            )),
-            (Some(src), None) => {
-                validate_assembly_path_template(
-                    spec,
-                    &tree_ids,
-                    src,
-                    "image.assembly.files.src",
-                    diagnostics,
-                );
-                validate_collected_reference(
-                    spec,
-                    src,
-                    &format!("files[{index}].src"),
-                    "image.assembly.files",
-                    diagnostics,
-                );
-            }
-            (None, Some(src_glob)) => {
-                validate_assembly_path_template(
-                    spec,
-                    &tree_ids,
-                    src_glob,
-                    "image.assembly.files.src_glob",
-                    diagnostics,
-                );
-                validate_collected_reference(
-                    spec,
-                    src_glob,
-                    &format!("files[{index}].src_glob"),
-                    "image.assembly.files",
-                    diagnostics,
-                );
-                validate_simple_glob_pattern(src_glob, diagnostics);
+            ));
+        } else if let Some(src) = &file.src {
+            validate_assembly_path_template(
+                spec,
+                &tree_ids,
+                src,
+                "image.assembly.files.src",
+                diagnostics,
+            );
+            validate_collected_reference(
+                spec,
+                src,
+                &format!("files[{index}].src"),
+                "image.assembly.files",
+                diagnostics,
+            );
+        } else if let Some(src_glob) = &file.src_glob {
+            validate_assembly_path_template(
+                spec,
+                &tree_ids,
+                src_glob,
+                "image.assembly.files.src_glob",
+                diagnostics,
+            );
+            validate_collected_reference(
+                spec,
+                src_glob,
+                &format!("files[{index}].src_glob"),
+                "image.assembly.files",
+                diagnostics,
+            );
+            validate_simple_glob_pattern(src_glob, diagnostics);
+        } else if let Some(src_dir) = &file.src_dir {
+            validate_assembly_path_template(
+                spec,
+                &tree_ids,
+                src_dir,
+                "image.assembly.files.src_dir",
+                diagnostics,
+            );
+            validate_collected_reference(
+                spec,
+                src_dir,
+                &format!("files[{index}].src_dir"),
+                "image.assembly.files",
+                diagnostics,
+            );
+            if file.preserve_symlink {
+                diagnostics.push(error(
+                    "assembly_preserve_symlink_not_allowed",
+                    format!(
+                        "files[{index}].preserve_symlink does not apply to src_dir: its symbolic links are always kept as links"
+                    ),
+                    Some("image.assembly.files".into()),
+                ));
             }
         }
         validate_relative_dest(&file.dest, "assembly_file_dest_invalid", diagnostics);
@@ -601,7 +631,7 @@ pub(crate) fn validate_exclude(
         diagnostics.push(error(
             "assembly_exclude_not_allowed",
             format!(
-                "{label} sets exclude, which only applies to src_glob (or tree for archive members)"
+                "{label} sets exclude, which only applies to src_glob or src_dir (or tree for archive members)"
             ),
             Some(location.into()),
         ));

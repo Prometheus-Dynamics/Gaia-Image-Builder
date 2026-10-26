@@ -235,6 +235,7 @@ pub(crate) fn compile_image_assembly(
                 tree: file.tree.into(),
                 src: file.src.map(Into::into),
                 src_glob: file.src_glob.map(Into::into),
+                src_dir: file.src_dir.map(Into::into),
                 exclude: file.exclude,
                 include: file.include,
                 strip: file.strip,
