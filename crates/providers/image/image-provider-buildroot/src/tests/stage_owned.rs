@@ -13,6 +13,7 @@ fn stage_spec(workspace_root: &Path, entries: &[(&str, &str, &str)]) -> Resolved
         spec.stage.files.push(gaia_spec::StageFileSpec {
             id: (*id).into(),
             src: (*src).into(),
+            content: None,
             dest: (*dest).into(),
             mode: None,
             origin: gaia_spec::StageContentOriginSpec::StaticAsset,
@@ -248,6 +249,7 @@ fn a_dir_entry_mirrors_its_source_through_make() {
     spec.stage.files.push(gaia_spec::StageFileSpec {
         id: "tree".into(),
         src: "assets/tree".into(),
+        content: None,
         dest: "/opt/tree".into(),
         mode: None,
         origin: gaia_spec::StageContentOriginSpec::StaticAsset,

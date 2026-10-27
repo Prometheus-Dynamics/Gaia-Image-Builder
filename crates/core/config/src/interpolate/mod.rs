@@ -213,6 +213,9 @@ fn interpolate_fields(raw: RawBuildConfig, env: &ResolvedEnvironment) -> RawBuil
             file.id = resolver::interpolate_string(file.id, &snapshot, env);
             file.when = file.when.map(|when| interpolate_when(when, &snapshot, env));
             file.src = resolver::interpolate_string(file.src, &snapshot, env);
+            file.content = file
+                .content
+                .map(|value| resolver::interpolate_string(value, &snapshot, env));
             file.dest = resolver::interpolate_string(file.dest, &snapshot, env);
             file
         })

@@ -366,6 +366,11 @@ pub(crate) fn collect_unresolved_tokens(raw: &RawBuildConfig) -> Vec<RawUnresolv
             &file.src,
             &mut unresolved,
         );
+        scan_optional(
+            &format!("stage.files.{}.content", file.id),
+            file.content.as_deref(),
+            &mut unresolved,
+        );
         scan_string(
             &format!("stage.files.{}.dest", file.id),
             &file.dest,

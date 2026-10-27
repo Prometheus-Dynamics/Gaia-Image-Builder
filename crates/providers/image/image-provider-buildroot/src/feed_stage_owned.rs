@@ -88,7 +88,7 @@ pub(crate) fn plan_stage_ownership(
                     ),
                 )
             })?;
-        let src = resolve_workspace_path(spec, &stage_file.src)?;
+        let src = gaia_image_providers::stage_file_source(spec, stage_file)?;
         let dest = normalize_rel(&stage_file.dest);
         let mut paths = Vec::new();
         plan_source(&src, &dest, &mut paths)?;

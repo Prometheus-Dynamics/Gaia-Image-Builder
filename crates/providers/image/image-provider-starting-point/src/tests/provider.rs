@@ -48,7 +48,7 @@ fn starting_point_tar_rootfs_accepts_image_feed_overlay() {
         }),
         feed: gaia_spec::ImageFeedSpec {
             install_entries: vec!["install-smoke-app".into()],
-            stage_files: vec!["motd".into()],
+            stage_files: vec!["motd".into(), "issue".into()],
             stage_env_sets: vec!["runtime-env".into()],
             stage_services: vec!["runtime-service".into()],
         },
@@ -101,10 +101,14 @@ fn starting_point_tar_rootfs_accepts_image_feed_overlay() {
     spec.stage.files.push(StageFileSpec {
         id: "motd".into(),
         src: motd.display().to_string(),
+        content: None,
         dest: "/etc/motd".into(),
         mode: None,
         origin: StageContentOriginSpec::StaticAsset,
     });
+    spec.stage.files.push(
+        StageFileSpec::generated("issue", "", "/etc/issue").with_content("Smoke 2026.2.0-dev.7\n"),
+    );
     spec.stage.env_sets.push(StageEnvSetSpec {
         id: "runtime-env".into(),
         name: "runtime".into(),
@@ -138,6 +142,10 @@ fn starting_point_tar_rootfs_accepts_image_feed_overlay() {
     assert_eq!(
         fs::read_to_string(collect_dir.join("rootfs/etc/motd")).expect("motd"),
         "hello motd\n"
+    );
+    assert_eq!(
+        fs::read_to_string(collect_dir.join("rootfs/etc/issue")).expect("issue"),
+        "Smoke 2026.2.0-dev.7\n"
     );
     assert_eq!(
         fs::read_to_string(collect_dir.join("rootfs/etc/default/runtime.env"))

@@ -439,3 +439,56 @@ unit_path = "assets/provision.target"
             .any(|diagnostic| { diagnostic.code == "stage_service_name_unusual" })
     );
 }
+
+#[test]
+fn a_stage_file_takes_src_or_content_but_not_both() {
+    let path = write_temp_config(
+        r#"
+build_name = "stage-content"
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[image]
+kind = "starting-point"
+rootfs_path = "/tmp/rootfs"
+
+[[stage.files]]
+id = "os-release"
+content = "VERSION_ID=\"1\"\n"
+dest = "/etc/os-release"
+
+[[stage.files]]
+id = "motd"
+src = "assets/motd"
+content = "hello\n"
+dest = "/etc/motd"
+"#,
+    );
+
+    let spec = resolve_config(path.to_str().expect("temp path utf-8"));
+    let report = validate_spec(&spec);
+
+    let for_item = |id: &str| {
+        report
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.location == Some(format!("stage:{id}")))
+            .map(|diagnostic| diagnostic.code)
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        for_item("os-release").is_empty(),
+        "{:?}",
+        report.diagnostics
+    );
+    assert!(
+        for_item("motd").contains(&"stage_file_src_and_content"),
+        "{:?}",
+        report.diagnostics
+    );
+
+    let _ = fs::remove_file(path);
+}

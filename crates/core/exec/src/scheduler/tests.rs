@@ -193,6 +193,7 @@ fn stage_spec(files: &[(&str, &str)]) -> ResolvedBuildSpec {
         .map(|(id, dest)| StageFileSpec {
             id: StageItemId::new(*id),
             src: (*id).into(),
+            content: None,
             dest: (*dest).into(),
             mode: None,
             origin: StageContentOriginSpec::StaticAsset,
@@ -340,6 +341,7 @@ fn scheduler_blocks_parallel_stage_files_with_same_destination() {
         StageFileSpec {
             id: StageItemId::new("motd-a"),
             src: "a".into(),
+            content: None,
             dest: "/etc/motd".into(),
             mode: None,
             origin: StageContentOriginSpec::StaticAsset,
@@ -347,6 +349,7 @@ fn scheduler_blocks_parallel_stage_files_with_same_destination() {
         StageFileSpec {
             id: StageItemId::new("motd-b"),
             src: "b".into(),
+            content: None,
             dest: "/etc/motd".into(),
             mode: None,
             origin: StageContentOriginSpec::StaticAsset,
@@ -380,6 +383,7 @@ fn scheduler_allows_parallel_stage_files_with_different_destinations() {
         StageFileSpec {
             id: StageItemId::new("motd"),
             src: "a".into(),
+            content: None,
             dest: "/etc/motd".into(),
             mode: None,
             origin: StageContentOriginSpec::StaticAsset,
@@ -387,6 +391,7 @@ fn scheduler_allows_parallel_stage_files_with_different_destinations() {
         StageFileSpec {
             id: StageItemId::new("issue"),
             src: "b".into(),
+            content: None,
             dest: "/etc/issue".into(),
             mode: None,
             origin: StageContentOriginSpec::StaticAsset,

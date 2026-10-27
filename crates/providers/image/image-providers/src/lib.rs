@@ -6,6 +6,7 @@ mod materialize;
 mod preview;
 mod registry_cache;
 mod retry;
+mod stage_content;
 
 pub use buildroot_external_files::{
     ExternalChanges, ExternalFile, ExternalTree, decode_external_state, encode_external_state,
@@ -29,6 +30,7 @@ use gaia_spec::{
 pub use materialize::{finalize_temp_image_output, materialize_image_output};
 pub use registry_cache::{RegistryCacheUse, registry_cache_from_spec};
 pub use retry::{AttemptFailure, RetryRun, retry_backoff_duration, run_with_retries};
+pub use stage_content::stage_file_source;
 
 /// Records digests the caller already computed from the files' current bytes
 /// (see [`recorded_sha256`]), so no file is hashed again. Entries whose

@@ -50,6 +50,7 @@ fn apply_image_feed_to_rootfs_writes_install_file_env_and_service_content() {
     spec.stage.files.push(gaia_spec::StageFileSpec {
         id: "motd".into(),
         src: "assets/motd".into(),
+        content: None,
         dest: "/etc/motd".into(),
         mode: Some(0o755),
         origin: gaia_spec::StageContentOriginSpec::StaticAsset,
@@ -129,6 +130,7 @@ fn stale_image_feed_outputs_are_pruned_before_overlay() {
     spec.stage.files.push(gaia_spec::StageFileSpec {
         id: "new".into(),
         src: "assets/new".into(),
+        content: None,
         dest: "/etc/new".into(),
         mode: None,
         origin: gaia_spec::StageContentOriginSpec::StaticAsset,
@@ -208,6 +210,7 @@ fn final_tar_image_contains_install_stage_env_and_service_content() {
     spec.stage.files.push(gaia_spec::StageFileSpec {
         id: "motd".into(),
         src: "assets/motd".into(),
+        content: None,
         dest: "/etc/motd".into(),
         mode: Some(0o755),
         origin: gaia_spec::StageContentOriginSpec::StaticAsset,

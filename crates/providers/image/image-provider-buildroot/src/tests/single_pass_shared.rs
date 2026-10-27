@@ -50,6 +50,7 @@ pub(super) fn feed_spec(workspace_root: &Path, name: &str, build_dir: &str) -> R
         spec.stage.files.push(gaia_spec::StageFileSpec {
             id: id.into(),
             src: format!("assets/{id}"),
+            content: None,
             dest: dest.into(),
             mode,
             origin: gaia_spec::StageContentOriginSpec::StaticAsset,

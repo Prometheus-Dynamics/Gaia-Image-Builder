@@ -33,7 +33,7 @@ pub(super) fn take_entry_patches(
             let patch_fields = match entry.as_table() {
                 Some(fields)
                     if fields.get("id").and_then(toml::Value::as_str).is_some()
-                        && !fields.contains_key(table.marker()) =>
+                        && !table.declares(fields) =>
                 {
                     fields.clone()
                 }

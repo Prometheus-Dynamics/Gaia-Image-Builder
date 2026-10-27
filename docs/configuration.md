@@ -591,7 +591,7 @@ has no key that marks a full declaration, so it is a patch:
 |---|---|---|
 | `[[artifacts]]` | `kind` | `[[artifacts]] id = "helios-api"` `toolchain = "systemcore"` |
 | `[[install]]` | `artifact` | `[[install]] id = "install-helios-cli"` `dest = "/usr/local/bin/helios-cli"` |
-| `[[stage.files]]` | `src` | `[[stage.files]] id = "motd"` `mode = 0o600` |
+| `[[stage.files]]` | `src` or `content` | `[[stage.files]] id = "motd"` `mode = 0o600` |
 | `[[stage.services]]` | `name` | `[[stage.services]] id = "helios"` `unit_path = "helios-2.service"` |
 
 `[stage.env_sets]` has no patch form: its entries are full declarations.
@@ -2270,6 +2270,28 @@ Stage file origins:
 - `static-asset`
 - `generated`
 - `provider-emitted`
+
+A stage file takes `src` (copied) or `content` (text written to `dest`), not
+both. Config tokens in `content` are rendered, so a file can carry the build's
+own version:
+
+```toml
+[[stage.files]]
+id = "os-release"
+content = """
+NAME="Acme"
+VERSION_ID="${build.version}"
+IMAGE_VERSION="${build.version}"
+"""
+dest = "/etc/os-release"
+mode = 0o644
+```
+
+The text is written to `<build_dir>/stage-content/<id>` and fed like a copied
+file; it is part of the entry's fingerprint, so a new version restages it. A
+patch that sets `content` replaces the entry's `src`, and the reverse.
+`content` declares a new entry only together with `dest`; without `dest` it
+patches the earlier entry with that id.
 
 ## Image
 

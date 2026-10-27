@@ -214,6 +214,33 @@ fn install_and_stage_patches_retarget_their_entries() {
 }
 
 #[test]
+fn a_stage_file_content_entry_renders_config_tokens_and_patches_switch_src_and_content() {
+    let scratch = TempDir::new("gaia-config-stage-content");
+    let base = format!(
+        "version = \"2026.2.0-dev.7\"\n{BASE}\n[[stage.files]]\nid = \"os-release\"\ncontent = \"VERSION_ID=\\\"${{build.version}}\\\"\\n\"\ndest = \"/etc/os-release\"\n\n[[stage.files]]\nid = \"motd\"\nsrc = \"assets/motd\"\ndest = \"/etc/motd\"\n"
+    );
+    let layer = "[[stage.files]]\nid = \"motd\"\ncontent = \"hello\\n\"\n";
+    let entry = build_with(&scratch, &base, layer);
+
+    let spec = resolve(&entry);
+
+    let file = |id: &str| {
+        spec.stage
+            .files
+            .iter()
+            .find(|file| file.id.as_str() == id)
+            .expect("the stage file")
+    };
+    assert_eq!(
+        file("os-release").content.as_deref(),
+        Some("VERSION_ID=\"2026.2.0-dev.7\"\n")
+    );
+    assert_eq!(file("os-release").src, "");
+    assert_eq!(file("motd").content.as_deref(), Some("hello\n"));
+    assert_eq!(file("motd").src, "", "content replaces the declared src");
+}
+
+#[test]
 fn a_stage_patch_without_an_earlier_entry_names_its_declaring_key() {
     let scratch = TempDir::new("gaia-config-patch-stage-missing");
     let entry = build_with(
@@ -226,7 +253,7 @@ fn a_stage_patch_without_an_earlier_entry_names_its_declaring_key() {
 
     assert_eq!(
         error,
-        "stage file patch 'motd' in layer.toml:1 has no earlier [[stage.files]] entry to patch; add src to declare it"
+        "stage file patch 'motd' in layer.toml:1 has no earlier [[stage.files]] entry to patch; add src or content to declare it"
     );
 }
 

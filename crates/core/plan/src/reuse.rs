@@ -901,7 +901,8 @@ pub fn operation_content_signature(
                 spec,
                 &stage_state_path(spec, "file", item_id),
                 item.map(canonical_json).unwrap_or_default(),
-                item.map(|item| item.src.as_str()),
+                item.filter(|item| item.content.is_none())
+                    .map(|item| item.src.as_str()),
             ))
         }
         OperationKind::RenderStageEnvSet { item_id } => {

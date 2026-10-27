@@ -11,7 +11,12 @@ pub struct StageSpec {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct StageFileSpec {
     pub id: StageItemId,
+    /// Empty when `content` is set.
     pub src: String,
+    /// Text written to `dest` in place of a copied `src`, with config tokens
+    /// (`${build.version}`) already rendered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
     pub dest: String,
     pub mode: Option<u32>,
     pub origin: StageContentOriginSpec,
@@ -27,6 +32,7 @@ impl StageFileSpec {
         Self {
             id: id.into(),
             src: src.into(),
+            content: None,
             dest: dest.into(),
             mode: None,
             origin,
@@ -60,6 +66,12 @@ impl StageFileSpec {
         dest: impl Into<String>,
     ) -> Self {
         Self::new(id, src, dest, StageContentOriginSpec::ProviderEmitted)
+    }
+
+    pub fn with_content(mut self, content: impl Into<String>) -> Self {
+        self.src.clear();
+        self.content = Some(content.into());
+        self
     }
 
     pub fn src_path(&self) -> &Path {

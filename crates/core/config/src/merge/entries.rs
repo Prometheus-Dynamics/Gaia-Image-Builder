@@ -20,10 +20,18 @@ pub(super) fn apply_or_defer(
     patch: RawEntryPatch,
 ) -> Result<(), ConfigError> {
     let applied = match patch.table {
-        PatchTable::Artifact => patch_entry(&mut base.artifacts, |item| &item.id, &patch),
-        PatchTable::Install => patch_entry(&mut base.install, |item| &item.id, &patch),
-        PatchTable::StageFile => patch_entry(&mut base.stage.files, |item| &item.id, &patch),
-        PatchTable::StageService => patch_entry(&mut base.stage.services, |item| &item.id, &patch),
+        PatchTable::Artifact => patch_entry(&mut base.artifacts, |item| &item.id, &patch, &[]),
+        PatchTable::Install => patch_entry(&mut base.install, |item| &item.id, &patch, &[]),
+        // A patch giving `content` replaces the entry's `src`, and the reverse.
+        PatchTable::StageFile => patch_entry(
+            &mut base.stage.files,
+            |item| &item.id,
+            &patch,
+            &["src", "content"],
+        ),
+        PatchTable::StageService => {
+            patch_entry(&mut base.stage.services, |item| &item.id, &patch, &[])
+        }
     }
     .map_err(|message| ConfigError::ConfigPatch {
         message: format!(
@@ -51,10 +59,13 @@ pub(super) fn apply_or_defer(
 
 /// Replaces the keys of the entry in `items` whose id is the patch's id.
 /// Returns whether such an entry exists; an error names an invalid result.
+/// The `exclusive` keys replace one another: a patch setting one of them
+/// drops the others from the entry.
 fn patch_entry<T>(
     items: &mut [T],
     id: impl Fn(&T) -> &str,
     patch: &RawEntryPatch,
+    exclusive: &[&str],
 ) -> Result<bool, String>
 where
     T: Serialize + DeserializeOwned,
@@ -67,6 +78,11 @@ where
         .as_table()
         .cloned()
         .unwrap_or_default();
+    if exclusive.iter().any(|key| patch.fields.contains_key(*key)) {
+        for key in exclusive {
+            fields.remove(*key);
+        }
+    }
     for (key, value) in &patch.fields {
         fields.insert(key.clone(), value.clone());
     }

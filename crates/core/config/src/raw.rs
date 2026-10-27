@@ -146,14 +146,27 @@ impl PatchTable {
         }
     }
 
-    /// The key that marks a full declaration in this table: an entry
-    /// without it is a patch.
-    pub fn marker(self) -> &'static str {
+    /// The keys that mark a full declaration in this table, as messages
+    /// name them; see [`Self::declares`].
+    pub fn markers(self) -> &'static [&'static str] {
         match self {
-            Self::Artifact => "kind",
-            Self::Install => "artifact",
-            Self::StageFile => "src",
-            Self::StageService => "name",
+            Self::Artifact => &["kind"],
+            Self::Install => &["artifact"],
+            Self::StageFile => &["src", "content"],
+            Self::StageService => &["name"],
+        }
+    }
+
+    /// Whether an entry with `fields` is a full declaration: it has a marker
+    /// key. A stage file's `content` declares only together with `dest`, so
+    /// a patch can switch an entry from `src` to `content`.
+    pub fn declares(self, fields: &toml::Table) -> bool {
+        match self {
+            Self::StageFile => {
+                fields.contains_key("src")
+                    || (fields.contains_key("content") && fields.contains_key("dest"))
+            }
+            _ => self.markers().iter().any(|key| fields.contains_key(*key)),
         }
     }
 }
@@ -167,7 +180,7 @@ impl RawEntryPatch {
             self.id,
             self.location,
             self.table.key_path(),
-            self.table.marker()
+            self.table.markers().join(" or ")
         )
     }
 }
@@ -830,7 +843,12 @@ pub struct RawStageFileConfig {
     pub id: String,
     #[serde(default)]
     pub when: Option<RawWhenConfig>,
+    /// Exclusive with `content`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub src: String,
+    /// Text written to `dest`, with config tokens rendered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
     pub dest: String,
     #[serde(default)]
     pub mode: Option<u32>,

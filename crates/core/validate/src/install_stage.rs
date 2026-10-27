@@ -68,11 +68,21 @@ pub(crate) fn validate_install_and_stage(
                 Some(format!("stage:{}", file.id.as_str())),
             ));
         }
-        if file.src.trim().is_empty() || file.dest.trim().is_empty() {
+        let has_src = !file.src.trim().is_empty();
+        if has_src && file.content.is_some() {
+            diagnostics.push(error(
+                "stage_file_src_and_content",
+                format!(
+                    "stage file '{}' sets both src and content; give one of them",
+                    file.id.as_str()
+                ),
+                Some(format!("stage:{}", file.id.as_str())),
+            ));
+        } else if (!has_src && file.content.is_none()) || file.dest.trim().is_empty() {
             diagnostics.push(error(
                 "stage_file_path_empty",
                 format!(
-                    "stage file '{}' must have both src and dest",
+                    "stage file '{}' must have dest and one of src or content",
                     file.id.as_str()
                 ),
                 Some(format!("stage:{}", file.id.as_str())),
@@ -102,7 +112,7 @@ pub(crate) fn validate_install_and_stage(
                 Some(format!("stage:{}", file.id.as_str())),
             ));
         }
-        if file.origin == StageContentOriginSpec::StaticAsset {
+        if file.origin == StageContentOriginSpec::StaticAsset && has_src {
             match resolve_workspace_path(spec, &file.src) {
                 Ok(resolved_path) => {
                     if !resolved_path.exists() {

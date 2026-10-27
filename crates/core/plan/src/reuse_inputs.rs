@@ -81,7 +81,10 @@ pub(crate) fn operation_inputs(
         OperationKind::RenderStageFile { item_id } => {
             if let Some(item) = spec.stage.files.iter().find(|item| item.id == *item_id) {
                 inputs.value("stage entry", item);
-                inputs.text("source file", config_path_fingerprint(spec, &item.src));
+                // A `content` entry's text is in the entry itself.
+                if item.content.is_none() {
+                    inputs.text("source file", config_path_fingerprint(spec, &item.src));
+                }
             }
         }
         OperationKind::RenderStageEnvSet { item_id } => {

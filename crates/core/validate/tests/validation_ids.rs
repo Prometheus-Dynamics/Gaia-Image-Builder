@@ -48,6 +48,7 @@ fn empty_public_ids_are_validation_errors() {
     spec.stage.files.push(StageFileSpec {
         id: StageItemId::new(""),
         src: "assets/demo".into(),
+        content: None,
         dest: "/etc/demo".into(),
         mode: None,
         origin: gaia_spec::StageContentOriginSpec::Generated,

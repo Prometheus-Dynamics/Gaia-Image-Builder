@@ -80,7 +80,7 @@ pub(crate) fn apply_image_feed_to_rootfs(
                     ),
                 )
             })?;
-        let src = resolve_workspace_path(spec, &stage_file.src)?;
+        let src = gaia_image_providers::stage_file_source(spec, stage_file)?;
         let dest = rootfs_path(rootfs_dir, &stage_file.dest);
         copy_into_rootfs(&src, &dest)?;
         #[cfg(unix)]
