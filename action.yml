@@ -1,0 +1,146 @@
+# Gaia as a GitHub Action: installs Gaia, restores its caches, runs one
+# command on a build file and uploads what the run exports.
+#
+#   - uses: Prometheus-Dynamics/Gaia-Image-Builder@main
+#     with:
+#       config: configs/builds/device.toml
+#       args: --only artifacts
+#
+# See docs/ci.md for hosted and self-hosted runners, caching and secrets.
+name: Gaia image build
+description: Install Gaia, restore its caches, run a build file and upload the exported outputs.
+branding:
+  icon: package
+  color: blue
+
+inputs:
+  config:
+    description: The build file, relative to working-directory.
+    required: true
+  command:
+    description: The gaia command to run (run, validate, plan or prefetch).
+    default: run
+  args:
+    description: Extra arguments for the command, split on spaces, such as `--only artifacts --set build.version=1.2.3`.
+    default: ""
+  working-directory:
+    description: The directory gaia runs in.
+    default: .
+  gaia-ref:
+    description: >-
+      A git ref of Gaia to install instead of this action's own copy (for
+      example a tag). Empty builds the copy the action was checked out at.
+    default: ""
+  cache:
+    description: >-
+      Restore and save Gaia's download, git and compiler caches with
+      actions/cache. Turn off on self-hosted runners, whose caches stay on disk.
+    default: "true"
+  cache-key:
+    description: An extra part of the cache key, to keep separate caches per build.
+    default: ""
+  cache-paths:
+    description: The cache directories, one per line (relative to the repository root, or absolute).
+    default: |
+      ~/.cache/gaia/buildroot/dl
+      ~/.cache/gaia/buildroot/ccache
+      ~/.cache/gaia/cargo-target
+      .gaia/cache/downloads
+      .gaia/cache/git
+  export-dir:
+    description: Where `gaia run` exports its outputs (`--export`), relative to working-directory.
+    default: gaia-export
+  upload:
+    description: Upload the export directory as a workflow artifact after a successful run.
+    default: "true"
+  upload-name:
+    description: The name of the uploaded artifact.
+    default: gaia-outputs
+  retention-days:
+    description: How long the uploaded artifact is kept (0 uses the repository default).
+    default: "0"
+
+outputs:
+  export-dir:
+    description: The absolute export directory.
+    value: ${{ steps.paths.outputs.export-dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve paths
+      id: paths
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        EXPORT_DIR: ${{ inputs.export-dir }}
+        ACTION_PATH: ${{ github.action_path }}
+        GAIA_REF: ${{ inputs.gaia-ref }}
+      run: |
+        echo "export-dir=$(realpath -m "$EXPORT_DIR")" >> "$GITHUB_OUTPUT"
+        # The binary cache key: the Gaia ref asked for, or the content of
+        # this action's own copy.
+        if [[ -n "$GAIA_REF" ]]; then
+          key="ref-$GAIA_REF"
+        else
+          key="src-$(cd "$ACTION_PATH" && find Cargo.toml Cargo.lock rust-toolchain.toml crates -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)"
+        fi
+        echo "gaia-key=$key" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the Gaia binary
+      id: gaia-bin
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/bin/gaia
+        key: gaia-bin-${{ runner.os }}-${{ runner.arch }}-${{ steps.paths.outputs.gaia-key }}
+
+    - name: Install Gaia
+      if: steps.gaia-bin.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        GAIA_REF: ${{ inputs.gaia-ref }}
+      run: |
+        if [[ -n "$GAIA_REF" ]]; then
+          cargo install --locked --git https://github.com/Prometheus-Dynamics/Gaia-Image-Builder --rev "$GAIA_REF" gaia
+        else
+          (cd "$ACTION_PATH" && rustup toolchain install && cargo install --locked --path crates/core/gaia)
+        fi
+
+    - name: Restore Gaia caches
+      if: inputs.cache == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ${{ inputs.cache-paths }}
+        key: gaia-cache-${{ runner.os }}-${{ inputs.cache-key }}-${{ hashFiles(format('{0}/{1}', inputs.working-directory, inputs.config)) }}-${{ github.run_id }}
+        restore-keys: |
+          gaia-cache-${{ runner.os }}-${{ inputs.cache-key }}-${{ hashFiles(format('{0}/{1}', inputs.working-directory, inputs.config)) }}-
+          gaia-cache-${{ runner.os }}-${{ inputs.cache-key }}-
+
+    - name: gaia ${{ inputs.command }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CI: "true"
+        GAIA_COMMAND: ${{ inputs.command }}
+        GAIA_CONFIG: ${{ inputs.config }}
+        GAIA_ARGS: ${{ inputs.args }}
+        GAIA_EXPORT_DIR: ${{ steps.paths.outputs.export-dir }}
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        gaia --version
+        read -r -a extra <<< "$GAIA_ARGS"
+        if [[ "$GAIA_COMMAND" == "run" ]]; then
+          gaia run "$GAIA_CONFIG" --export "$GAIA_EXPORT_DIR" "${extra[@]}"
+        else
+          gaia "$GAIA_COMMAND" "$GAIA_CONFIG" "${extra[@]}"
+        fi
+
+    - name: Upload the exported outputs
+      if: inputs.upload == 'true' && inputs.command == 'run' && success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.upload-name }}
+        path: ${{ steps.paths.outputs.export-dir }}
+        if-no-files-found: ignore
+        retention-days: ${{ inputs.retention-days }}

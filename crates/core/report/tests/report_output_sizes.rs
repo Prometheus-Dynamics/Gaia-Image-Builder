@@ -147,7 +147,7 @@ fn second_run_reports_the_growth_since_the_first() {
 fn reused_assembly_still_reports_its_outputs_unchanged() {
     let scratch = TempDir::new("gaia-report-sizes");
     let (spec, sdcard) = spec_with_disk(&scratch, 2048);
-    run(&spec, false);
+    let first = run(&spec, false);
     let bytes = fs::metadata(&sdcard).expect("disk").len();
 
     let reused = run(&spec, true);
@@ -155,6 +155,16 @@ fn reused_assembly_still_reports_its_outputs_unchanged() {
     assert_eq!(record.bytes, bytes);
     assert_eq!(record.change, SizeChange::Unchanged);
     assert_eq!(reused.summary.reused_operations, 1);
+    // The outputs carry over, so `--export` still has an image to copy.
+    assert!(first.summary.primary_image_output.is_some());
+    assert_eq!(
+        reused.summary.primary_image_output,
+        first.summary.primary_image_output
+    );
+    assert_eq!(
+        reused.summary.published_outputs,
+        first.summary.published_outputs
+    );
 }
 
 #[test]

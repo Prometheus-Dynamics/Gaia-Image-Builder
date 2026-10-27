@@ -10,8 +10,9 @@ This is the rebuilt documentation set for the current typed Gaia system.
 4. [providers.md](providers.md)
 5. [platform-support.md](platform-support.md)
 6. [reporting-and-state.md](reporting-and-state.md)
-7. [migration-from-legacy.md](migration-from-legacy.md)
-8. [future-features.md](future-features.md)
+7. [ci.md](ci.md)
+8. [migration-from-legacy.md](migration-from-legacy.md)
+9. [future-features.md](future-features.md)
 
 ## What Each Doc Covers
 
@@ -21,6 +22,9 @@ This is the rebuilt documentation set for the current typed Gaia system.
 - [cli.md](cli.md)
   Actual supported commands and overrides:
   `resolve`, `validate`, `plan`, `run`, default `tui`, `--preset`, `--env-file`, `--env`, `--set`.
+
+- [ci.md](ci.md)
+  Gaia on CI runners: the GitHub Action, annotations and the job summary, fast per-push jobs, caches, secrets, self-hosted runners.
 
 - [execution.md](execution.md)
   How Gaia turns config into a validated spec, then into a typed plan, then into execution with reuse, rollback, and cancellation.

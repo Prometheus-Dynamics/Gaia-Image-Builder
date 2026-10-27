@@ -480,7 +480,7 @@ pub(crate) fn format_bytes(bytes: u64) -> String {
     }
 }
 
-fn format_elapsed(duration: Duration) -> String {
+pub(crate) fn format_elapsed(duration: Duration) -> String {
     let seconds = duration.as_secs();
     let hours = seconds / 3600;
     let minutes = (seconds % 3600) / 60;

@@ -1,0 +1,37 @@
+# Runs this repository's own action (action.yml) on the smallest example: it
+# installs Gaia from this checkout, builds the image and uploads the export.
+name: Gaia action
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  imported-rootfs-minimal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build the example with the action
+        id: gaia
+        uses: ./
+        with:
+          config: examples/imported-rootfs-minimal/build.toml
+          cache-key: imported-rootfs-minimal
+          upload-name: imported-rootfs-minimal
+
+      - name: Check the export
+        shell: bash
+        env:
+          EXPORT_DIR: ${{ steps.gaia.outputs.export-dir }}
+        run: |
+          ls -l "$EXPORT_DIR"
+          compgen -G "$EXPORT_DIR/*.tar*" > /dev/null

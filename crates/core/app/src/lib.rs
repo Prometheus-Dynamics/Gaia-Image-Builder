@@ -1,6 +1,7 @@
 mod cli;
 mod commands;
 mod export;
+mod github;
 mod output;
 mod output_images;
 mod output_json;
@@ -61,6 +62,7 @@ pub fn run() -> i32 {
         if let CommandOutcome::Failed { message } = &outcome {
             eprintln!("{message}");
         }
+        github::write_github_output(args.command, &outcome, &finish, false);
         println!(
             "{}",
             output_json::outcome_json(args.command, &outcome, &finish, exit_code)
@@ -72,6 +74,7 @@ pub fn run() -> i32 {
     for line in &finish.lines {
         println!("{line}");
     }
+    github::write_github_output(args.command, &outcome, &finish, true);
     if finish.export_failed {
         1
     } else {

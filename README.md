@@ -70,6 +70,7 @@ Supported CLI modifiers:
 - [docs/configuration.md](docs/configuration.md): full config model
 - [docs/cli.md](docs/cli.md): command-line behavior
 - [docs/execution.md](docs/execution.md): planning, execution, rollback, cancellation, reuse
+- [docs/ci.md](docs/ci.md): the GitHub Action and running Gaia on CI runners
 - [docs/providers.md](docs/providers.md): source, artifact, and image providers
 - [docs/reporting-and-state.md](docs/reporting-and-state.md): reports, runtime state, provider state, reuse state
 - [docs/migration-from-legacy.md](docs/migration-from-legacy.md): how to translate old Gaia configs

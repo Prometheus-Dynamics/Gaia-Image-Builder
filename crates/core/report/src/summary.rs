@@ -3,6 +3,7 @@ use gaia_plan::{ExecutionPlan, OperationKind, OperationReuse};
 use gaia_spec::ResolvedBuildSpec;
 use gaia_validate::ValidationReport;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use crate::assembly_outputs::{assembly_outputs, first_assembly_deliverable};
 use crate::image_sizes::{image_size_note, image_size_records, summary_image_paths};
@@ -50,6 +51,24 @@ pub fn render_summary(
     } else {
         None
     };
+    let previous_outputs = read_previous_outputs(&summary_path(spec));
+    // A reused image or assembly operation writes nothing: the outputs the
+    // previous run published are this run's, as far as they are still there.
+    let image_carried_over = plan.operations.iter().any(|operation| {
+        matches!(
+            operation.kind,
+            OperationKind::BuildImage | OperationKind::AssembleImage
+        ) && matches!(operation.reuse, OperationReuse::Reuse { .. })
+    });
+    let carried_outputs: Vec<PathBuf> = if image_carried_over && outcome.image_results.is_empty() {
+        previous_outputs
+            .iter()
+            .filter(|path| path.exists())
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    };
     let primary_image_output = outcome
         .image_results
         .iter()
@@ -61,6 +80,7 @@ pub fn render_summary(
                 .iter()
                 .find_map(|result| result.collect_dir.clone())
         })
+        .or_else(|| carried_outputs.first().cloned())
         .map(|path| path.display().to_string());
     let image_reuse_details = outcome
         .image_results
@@ -82,7 +102,8 @@ pub fn render_summary(
         outcome
             .image_results
             .iter()
-            .flat_map(|result| result.disk_images.clone()),
+            .flat_map(|result| result.disk_images.clone())
+            .chain(carried_outputs),
     );
     let image_sizes = image_size_records(&published_outputs);
     let mut image_notes: Vec<String> = outcome
@@ -98,7 +119,6 @@ pub fn render_summary(
             OperationKind::PrepareImage | OperationKind::BuildImage | OperationKind::AssembleImage
         )
     };
-    let previous_outputs = read_previous_outputs(&summary_path(spec));
     let assembly = assembly_outputs(spec);
     // A reused assembly wrote nothing, so the outputs it recorded when it
     // last ran are this run's.
@@ -118,12 +138,7 @@ pub fn render_summary(
             known: &assembly.known,
             produced: &produced_outputs,
             dirs: &assembly.dirs,
-            carry_over: plan.operations.iter().any(|operation| {
-                matches!(
-                    operation.kind,
-                    OperationKind::BuildImage | OperationKind::AssembleImage
-                ) && matches!(operation.reuse, OperationReuse::Reuse { .. })
-            }),
+            carry_over: image_carried_over,
             removals: !outcome.cancelled
                 && error_count == 0
                 && plan.operations.iter().any(image_op),
