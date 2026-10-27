@@ -142,6 +142,23 @@ pub(crate) fn validate_artifact_toolchains(
             continue;
         };
         let location = Some(format!("artifact:{}", artifact.id.as_str()));
+        // Cargo prefers RUSTFLAGS over the target flags the toolchain sets
+        // (its linker settings and page size), so they would be dropped.
+        if let ArtifactDefinition::Rust(rust) = &artifact.definition
+            && let Some((key, _)) = rust
+                .build_env
+                .iter()
+                .find(|(key, _)| key == "RUSTFLAGS" || key == "CARGO_ENCODED_RUSTFLAGS")
+        {
+            diagnostics.push(error(
+                "artifact_toolchain_rustflags",
+                format!(
+                    "artifact '{}' builds with toolchain '{id}' and sets {key} in build_env, which would replace the toolchain's flags; set CARGO_TARGET_<TRIPLE>_RUSTFLAGS in the environment Gaia runs in instead",
+                    artifact.id.as_str()
+                ),
+                location.clone(),
+            ));
+        }
         if !matches!(artifact.definition, ArtifactDefinition::Rust(_)) {
             diagnostics.push(error(
                 "artifact_toolchain_non_rust",

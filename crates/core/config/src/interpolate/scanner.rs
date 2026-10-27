@@ -245,6 +245,7 @@ pub(crate) fn collect_unresolved_tokens(raw: &RawBuildConfig) -> Vec<RawUnresolv
                 package,
                 target_name,
                 features,
+                build_env,
                 ..
             } => {
                 for (index, value) in features.iter().enumerate() {
@@ -264,6 +265,18 @@ pub(crate) fn collect_unresolved_tokens(raw: &RawBuildConfig) -> Vec<RawUnresolv
                     target_name.as_deref(),
                     &mut unresolved,
                 );
+                for (index, (key, value)) in build_env.iter().enumerate() {
+                    scan_string(
+                        &format!("artifacts.{}.rust.build_env.{index}.key", artifact.id),
+                        key,
+                        &mut unresolved,
+                    );
+                    scan_string(
+                        &format!("artifacts.{}.rust.build_env.{index}.value", artifact.id),
+                        value,
+                        &mut unresolved,
+                    );
+                }
             }
             RawArtifactDefinition::Java {
                 build_target,

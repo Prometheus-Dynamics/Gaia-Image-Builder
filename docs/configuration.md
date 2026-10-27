@@ -706,7 +706,7 @@ Values are read lazily: when a signature is made or checked, when a registry req
 
 - `secret:NAME` as a whole value in a secret-capable field: `[image.signing] key`, and a checkpoint's `sign_key`, `verify_key`, `token` and `username`. The field receives the value, so for `minisign` and `cosign-blob` the secret holds the key path and for `gpg` the key id.
 - `env:VAR` as a whole value, in the same fields. It works as before, and a `token` takes it too.
-- `${secret:NAME}` inside a string, only where a build-time process environment is set: an artifact's `build_env` (the `java` artifact). The resolved spec keeps the text `${secret:NAME}`, so fingerprints, reuse state, provenance and `gaia config show` see the reference and not the value. The value is substituted when the build process starts, and it goes only to that process. Anywhere else, `${secret:...}` is a validation error that names the places where it is allowed: the `build_env` of an artifact. A stage environment set, a file, an image field or an interpolation value that lands outside `build_env` is refused the same way.
+- `${secret:NAME}` inside a string, only where a build-time process environment is set: an artifact's `build_env` (`rust` and `java` artifacts). The resolved spec keeps the text `${secret:NAME}`, so fingerprints, reuse state, provenance and `gaia config show` see the reference and not the value. The value is substituted when the build process starts, and it goes only to that process. Anywhere else, `${secret:...}` is a validation error that names the places where it is allowed: the `build_env` of an artifact. A stage environment set, a file, an image field or an interpolation value that lands outside `build_env` is refused the same way.
 
 A checkpoint's `token` must be a reference (`secret:NAME` or `env:VAR`). A literal token in the build file is a validation error, so the token never sits in a file that is committed.
 
@@ -1999,6 +1999,30 @@ Artifact kinds:
   - `no_default_features` (bool, passed as `--no-default-features`)
   - `all_features` (bool, passed as `--all-features`; cannot be combined with
     `features` or `no_default_features`)
+  - `build_env` (list of `[KEY, value]` pairs set for cargo, in order; values
+    take config tokens and `${secret:NAME}`, read when cargo starts and passed
+    to a docker build as `-e KEY` with the value kept off the command line).
+    Gaia's own variables for the toolchain, sccache and offline mode win over
+    these. `RUSTFLAGS` and `CARGO_ENCODED_RUSTFLAGS` are refused for an
+    artifact with a `toolchain`: cargo would let them replace the toolchain's
+    flags.
+
+    ```toml
+    [secrets.git_token]
+    env = "GIT_TOKEN"
+
+    [[artifacts]]
+    id = "helios-api"
+    kind = "rust"
+    package = "helios-api"
+    output_path = "out/helios-api"
+    build_env = [
+      ["CARGO_NET_GIT_FETCH_WITH_CLI", "true"],
+      ["GIT_CONFIG_COUNT", "1"],
+      ["GIT_CONFIG_KEY_0", "url.https://x-access-token:${secret:git_token}@github.com/.insteadOf"],
+      ["GIT_CONFIG_VALUE_0", "https://github.com/"],
+    ]
+    ```
 
   - `toolchain` (string; the `[[toolchains]]` id to cross-compile with; see
     [Toolchains](#toolchains))
@@ -2064,8 +2088,8 @@ build without `[providers.rust] batch_builds`. Each member still collects its
 own output (`package`, `target_name`, `output_path`) and has its own install
 identity.
 
-Members must share `source`, `target`, `profile`, `execution` and
-`no_default_features`/`all_features`; validation reports the conflicting
+Members must share `source`, `target`, `profile`, `execution`,
+`no_default_features`/`all_features` and `build_env`; validation reports the conflicting
 members otherwise. `build_group` on a non-rust artifact is an error. A group
 of one is allowed. Since one `--features` list serves every selected
 package, prefer `package/feature` names so each feature is enabled on the
@@ -2931,7 +2955,7 @@ Assembly behavior:
 - `strip = true` on a tree strips every ELF file in it right before a filesystem or archive packs the tree (the steps that fill the tree have run by then). Executables and shared libraries lose their symbols (`strip --strip-unneeded`), kernel modules (`*.ko`) lose only their debug data (`--strip-debug`), and relocatable objects and non-ELF files are left alone. Only the copies in the tree change, never a source. Hard links are stripped once and stay linked, symlinks are left as they are, and a file that is already stripped is skipped. The run state and summary record the files stripped and the bytes saved per tree.
 - `strip_tool = "<program>"` (under `[image.assembly]`) names the strip program every `strip = true` entry uses: a program name looked up in the provider's host tools and then on `PATH`, or a path (it may use `$provider.*` tokens). Unset, the tool is a `<triplet>-strip` in the provider's host tools matching the ELF machine (`aarch64-*-strip`, `arm-*-strip`, `x86_64-*-strip`), else `llvm-strip` on `PATH`, else a plain `strip` when the file is for the host's own machine. When none is found the build fails, naming the file and these options.
 - File entries use exactly one of `src`, `src_glob`, `src_dir`, `content` or `json`. `content` and `json` write a generated file (see [Generated content](#generated-content)).
-- `src_dir = "<path template>"` copies a whole directory tree under `dest`: the directory's contents, not the directory itself, so a static site's `_app/immutable/chunks/...` lands at the same paths under `dest`. `dest` names a directory: `.`, a path ending in `/`, or a bare directory path. Entries are copied recursively in sorted order, a directory before its contents. Symbolic links are kept as links and never followed. A regular file keeps its permission bits unless `mode` is set, which then applies to regular files only (directories get the default mode). A hard link is copied as a regular file. `exclude = [...]` leaves out entries by file name at any depth, and an excluded directory is skipped with its contents. An absent or empty directory fails the build unless `optional = true`. `strip = true`, the dynamic-library check and the package device checks apply to each copied regular file as they do to `src`. `src_dir` is refused together with `src`, `src_glob`, `content` or `json`, with `include`, and with `preserve_symlink` (links are always kept). The step reads the directory, so it runs after the steps that write inside it. Its fingerprint covers the whole tree (names, contents, modes and link targets): adding, removing or changing a nested entry reruns the assembly.
+- `src_dir = "<path template>"` copies a whole directory tree under `dest`: the directory's contents, not the directory itself, so a static site's `_app/immutable/chunks/...` lands at the same paths under `dest`. `dest` names a directory: `.`, a path ending in `/`, or a bare directory path. Entries are copied recursively in sorted order, a directory before its contents. Symbolic links are kept as links and never followed. A regular file keeps its permission bits unless `mode` is set, which then applies to regular files only. A directory keeps its source directory's permission bits unless `dir_mode` is set (for example `dir_mode = "0750"`), which then applies to every copied directory; directory modes are set after the contents are copied, so a read-only directory still receives its files. `dir_mode` on any other entry is an error. A hard link is copied as a regular file. `exclude = [...]` leaves out entries by file name at any depth, and an excluded directory is skipped with its contents. An absent or empty directory fails the build unless `optional = true`. `strip = true`, the dynamic-library check and the package device checks apply to each copied regular file as they do to `src`. `src_dir` is refused together with `src`, `src_glob`, `content` or `json`, with `include`, and with `preserve_symlink` (links are always kept). The step reads the directory, so it runs after the steps that write inside it. Its fingerprint covers the whole tree (names, contents, modes and link targets): adding, removing or changing a nested entry reruns the assembly.
 - `exclude = ["dwc2.dtbo", "i2c*.dtbo"]` on a `src_glob` entry leaves out matches by file name (simple `*` globs allowed). Use it to copy a stock set except the names a later entry provides, so the result does not depend on copy order. It is refused on other entries.
 - Glob staging is deterministic and currently supports simple non-recursive `*` filename patterns. A directory that matches is skipped: a `src_glob` copies its files and links (the same holds for an archive member's `src_glob`).
 - A `dest` of `.` or ending in `/` is a directory the sources are copied into; any other `dest` is the file a single source is copied to. A `src_glob` that matches several files needs a directory `dest` (otherwise every match would land on one file) and fails without one.

@@ -55,6 +55,7 @@ fn spec_with_tree(scratch: &TempDir, name: &str) -> (ResolvedBuildSpec, PathBuf)
             )])),
             dest: "slot.json".into(),
             mode: None,
+            dir_mode: None,
             optional: false,
             src_dir: None,
             preserve_symlink: false,

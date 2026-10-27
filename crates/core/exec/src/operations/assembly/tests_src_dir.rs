@@ -23,6 +23,7 @@ fn dir_entry(src: &Path, dest: &str, exclude: &[&str], mode: Option<&str>) -> As
         json: None,
         dest: dest.into(),
         mode: mode.map(str::to_string),
+        dir_mode: None,
         optional: false,
         preserve_symlink: false,
         allow_missing_libs: false,
@@ -156,6 +157,47 @@ fn regular_files_keep_their_mode_unless_mode_is_set() {
 
 #[cfg(unix)]
 #[test]
+fn directories_keep_their_mode_unless_dir_mode_is_set() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = |path: &Path| fs::metadata(path).expect("metadata").permissions().mode() & 0o7777;
+    let scratch = TempDir::new("gaia-exec-src-dir-dir-mode");
+    let root = scratch.join("root");
+    let dir = root.join("src/conf");
+    fs::create_dir_all(dir.join("private/keys")).expect("dirs");
+    fs::write(dir.join("private/keys/id"), "key\n").expect("file");
+    // A read-only directory with contents: its mode must go on after them.
+    fs::set_permissions(dir.join("private/keys"), fs::Permissions::from_mode(0o555))
+        .expect("keys mode");
+    fs::set_permissions(dir.join("private"), fs::Permissions::from_mode(0o750))
+        .expect("private mode");
+
+    let (tree, result) = copy_dir(&scratch, dir_entry(&dir, "etc/conf/", &[], None));
+    result.expect("the tree copies");
+    assert_eq!(mode(&tree.join("etc/conf/private")), 0o750);
+    assert_eq!(mode(&tree.join("etc/conf/private/keys")), 0o555);
+    assert!(tree.join("etc/conf/private/keys/id").is_file());
+    // Leave the scratch removable.
+    fs::set_permissions(
+        tree.join("etc/conf/private/keys"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .expect("restore");
+
+    let scratch = TempDir::new("gaia-exec-src-dir-dir-mode-set");
+    let mut entry = dir_entry(&dir, "etc/conf/", &[], None);
+    entry.dir_mode = Some("0700".into());
+    let (tree, result) = copy_dir(&scratch, entry);
+    let summary = result.expect("the tree copies");
+    assert_eq!(mode(&tree.join("etc/conf/private")), 0o700);
+    assert_eq!(mode(&tree.join("etc/conf/private/keys")), 0o700);
+    let state = summary.state.render();
+    assert!(state.contains(".dir_mode=0700"), "{state}");
+    fs::set_permissions(dir.join("private/keys"), fs::Permissions::from_mode(0o755))
+        .expect("restore");
+}
+
+#[cfg(unix)]
+#[test]
 fn symbolic_links_are_kept_as_links_and_not_followed() {
     let scratch = TempDir::new("gaia-exec-src-dir-links");
     let root = scratch.join("root");
@@ -265,6 +307,7 @@ fn src_glob_skips_a_matching_directory_and_copies_the_files() {
         json: None,
         dest: "out/".into(),
         mode: None,
+        dir_mode: None,
         optional: false,
         preserve_symlink: false,
         allow_missing_libs: false,

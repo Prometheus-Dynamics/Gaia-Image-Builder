@@ -155,3 +155,24 @@ exclude = ["*.map"]
     assert_eq!(*code, "assembly_exclude_not_allowed");
     assert!(message.contains("src_dir"), "{message}");
 }
+
+#[test]
+fn dir_mode_applies_to_src_dir_only_and_must_be_octal() {
+    let src_dir =
+        "[[image.assembly.files]]\ntree = \"rootfs\"\nsrc_dir = \"site\"\ndest = \"srv/\"\n";
+    assert!(
+        codes(&format!("{src_dir}dir_mode = \"0750\"\n")).is_empty(),
+        "{:?}",
+        diagnostics(&format!("{src_dir}dir_mode = \"0750\"\n"))
+    );
+    assert_eq!(
+        codes(&format!("{src_dir}dir_mode = \"rwx\"\n")),
+        ["assembly_file_mode_invalid"]
+    );
+    assert_eq!(
+        codes(
+            "[[image.assembly.files]]\ntree = \"rootfs\"\nsrc = \"motd\"\ndest = \"etc/motd\"\ndir_mode = \"0750\"\n"
+        ),
+        ["assembly_file_dir_mode_not_allowed"]
+    );
+}

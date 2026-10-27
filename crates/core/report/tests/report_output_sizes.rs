@@ -237,6 +237,7 @@ fn spec_with_filesystem_and_transform(
             src_glob: None,
             dest: "init".into(),
             mode: Some("0755".into()),
+            dir_mode: None,
             optional: false,
             src_dir: None,
             preserve_symlink: false,

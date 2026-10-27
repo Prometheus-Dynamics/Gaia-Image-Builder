@@ -69,6 +69,11 @@ pub(crate) fn validate_build_groups(
                     leader_rust.all_features.to_string(),
                     member_rust.all_features.to_string(),
                 ),
+                (
+                    "build_env",
+                    format!("{:?}", leader_rust.build_env),
+                    format!("{:?}", member_rust.build_env),
+                ),
             ];
             for (field, leader_value, member_value) in conflicts {
                 if leader_value != member_value {

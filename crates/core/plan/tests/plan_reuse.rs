@@ -357,6 +357,7 @@ fn plan_rebuilds_assembly_when_runtime_state_is_missing_even_if_outputs_exist() 
             src_glob: None,
             dest: "config.txt".into(),
             mode: None,
+            dir_mode: None,
             optional: false,
             src_dir: None,
             preserve_symlink: false,

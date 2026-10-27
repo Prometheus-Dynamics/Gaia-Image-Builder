@@ -15,11 +15,13 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod build_env;
 mod cargo_errors;
 mod cargo_git;
 mod toolchain;
 mod tools;
 
+use build_env::{cargo_build_env, offline_cargo_env};
 use cargo_errors::cargo_failing_packages;
 
 use tools::{host_toolchain_identity, sccache_env, strip_collected_output, toolchain_version};
@@ -582,6 +584,8 @@ struct CargoFeatureFlags {
     /// `cargo_git_sources`: prepared on the host before cargo runs. Not in
     /// the state fields: the artifact's fingerprint covers them.
     git_sources: Vec<CargoGitSourceSpec>,
+    /// `build_env`: in the fingerprint, not the state fields, like the above.
+    build_env: Vec<(String, String)>,
 }
 
 impl CargoFeatureFlags {
@@ -592,6 +596,7 @@ impl CargoFeatureFlags {
                 no_default_features: rust.no_default_features,
                 all_features: rust.all_features,
                 git_sources: rust.cargo_git_sources.clone(),
+                build_env: rust.build_env.clone(),
             },
             _ => Self::default(),
         }
@@ -658,16 +663,6 @@ fn cargo_build_command(
     command
 }
 
-/// The environment an offline run gives cargo: it uses only the registry and
-/// git caches that are already there, and never contacts a registry.
-fn offline_cargo_env(offline: bool) -> Vec<(&'static str, &'static str)> {
-    if offline {
-        vec![("CARGO_NET_OFFLINE", "true")]
-    } else {
-        Vec::new()
-    }
-}
-
 fn run_cargo_build(
     source_dir: &str,
     packages: &[String],
@@ -689,6 +684,7 @@ fn run_cargo_build(
     let sccache = sccache_env(contract, log_sink.as_ref());
     let toolchain_env = toolchain::cargo_env(contract)?;
     let mut command = cargo_build_command(source_dir, packages, flags, contract, &target.dir);
+    command.envs(cargo_build_env(&flags.build_env)?);
     command.envs(git_env.iter().map(|(key, value)| (key, value)));
     command.envs(sccache.iter().map(|(key, value)| (key, value)));
     command.envs(toolchain_env.iter().map(|(key, value)| (key, value)));

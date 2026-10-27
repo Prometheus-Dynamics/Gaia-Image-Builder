@@ -574,10 +574,10 @@ checksum = "abc"
     #[test]
     fn offline_cargo_runs_fetch_nothing_and_name_the_prefetch() {
         assert_eq!(
-            crate::offline_cargo_env(true),
+            crate::build_env::offline_cargo_env(true),
             vec![("CARGO_NET_OFFLINE", "true")]
         );
-        assert!(crate::offline_cargo_env(false).is_empty());
+        assert!(crate::build_env::offline_cargo_env(false).is_empty());
 
         let scratch = gaia_testkit::TempDir::new("gaia-cargo-git-offline");
         let timeout = Duration::from_secs(5);

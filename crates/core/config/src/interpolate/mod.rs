@@ -475,6 +475,24 @@ fn interpolate_source(
     source
 }
 
+/// An artifact's `build_env`: keys and values interpolated, `${secret:...}`
+/// kept as written.
+fn interpolate_env(
+    pairs: Vec<(String, String)>,
+    raw: &RawBuildConfig,
+    env: &ResolvedEnvironment,
+) -> Vec<(String, String)> {
+    pairs
+        .into_iter()
+        .map(|(key, value)| {
+            (
+                resolver::interpolate_string(key, raw, env),
+                resolver::interpolate_string(value, raw, env),
+            )
+        })
+        .collect()
+}
+
 fn interpolate_artifact(
     mut artifact: RawArtifactConfig,
     raw: &RawBuildConfig,
@@ -550,6 +568,7 @@ fn interpolate_artifact(
             features,
             no_default_features,
             all_features,
+            build_env,
         } => RawArtifactDefinition::Rust {
             package: resolver::interpolate_string(package, raw, env),
             target_name: target_name.map(|value| resolver::interpolate_string(value, raw, env)),
@@ -560,6 +579,7 @@ fn interpolate_artifact(
                 .collect(),
             no_default_features,
             all_features,
+            build_env: interpolate_env(build_env, raw, env),
         },
         RawArtifactDefinition::Java {
             build_target,
@@ -576,15 +596,7 @@ fn interpolate_artifact(
                 .into_iter()
                 .map(|value| resolver::interpolate_string(value, raw, env))
                 .collect(),
-            build_env: build_env
-                .into_iter()
-                .map(|(key, value)| {
-                    (
-                        resolver::interpolate_string(key, raw, env),
-                        resolver::interpolate_string(value, raw, env),
-                    )
-                })
-                .collect(),
+            build_env: interpolate_env(build_env, raw, env),
         },
         RawArtifactDefinition::Node { package_dir } => RawArtifactDefinition::Node {
             package_dir: resolver::interpolate_string(package_dir, raw, env),

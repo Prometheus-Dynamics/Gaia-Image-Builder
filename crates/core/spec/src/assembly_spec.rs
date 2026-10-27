@@ -166,6 +166,10 @@ pub struct AssemblyFileSpec {
     pub json: Option<AssemblyJsonValue>,
     pub dest: String,
     pub mode: Option<String>,
+    /// `src_dir` only: the mode of every copied directory. Unset, each
+    /// directory keeps its source's permission bits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dir_mode: Option<String>,
     pub optional: bool,
     pub preserve_symlink: bool,
     /// Lets a copied dynamically linked file keep a missing runtime library
@@ -177,6 +181,10 @@ pub struct AssemblyFileSpec {
 impl AssemblyFileSpec {
     pub fn parsed_mode(&self) -> Result<Option<FileMode>, FileModeParseError> {
         self.mode.as_deref().map(FileMode::from_str).transpose()
+    }
+
+    pub fn parsed_dir_mode(&self) -> Result<Option<FileMode>, FileModeParseError> {
+        self.dir_mode.as_deref().map(FileMode::from_str).transpose()
     }
 }
 

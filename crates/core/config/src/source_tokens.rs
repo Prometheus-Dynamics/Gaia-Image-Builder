@@ -171,6 +171,11 @@ fn substitute_outside_assembly(spec: &mut ResolvedBuildSpec, values: &BTreeMap<S
                 *value = substitute(value, values, &mut referenced);
             }
         }
+        if let ArtifactDefinition::Rust(rust) = &mut artifact.definition {
+            for (_, value) in &mut rust.build_env {
+                *value = substitute(value, values, &mut referenced);
+            }
+        }
         add_extra_sources(artifact, referenced, &declared);
     }
 }

@@ -201,7 +201,7 @@ fn check_placement(
             diagnostics.push(error(
                 "secret_placement",
                 format!(
-                    "${{secret:{name}}} is allowed only in an artifact's java build_env, not at {location}. Use a secret: reference (for example sign_key = \"secret:{name}\") in a secret-capable field"
+                    "${{secret:{name}}} is allowed only in an artifact's build_env (rust or java), not at {location}. Use a secret: reference (for example sign_key = \"secret:{name}\") in a secret-capable field"
                 ),
                 Some(location),
             ));

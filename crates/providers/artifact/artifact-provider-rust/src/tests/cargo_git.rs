@@ -150,6 +150,7 @@ fn app_contract(
             build_group: None,
             group_packages: Vec::new(),
             cargo_git_sources: sources,
+            build_env: Vec::new(),
         }),
         None,
         ArtifactOutputSpec {

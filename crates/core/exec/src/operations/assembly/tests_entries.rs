@@ -23,6 +23,7 @@ fn glob_entry(glob: &Path, dest: &str, include: &[&str], optional: bool) -> Asse
         json: None,
         dest: dest.into(),
         mode: None,
+        dir_mode: None,
         optional,
         src_dir: None,
         preserve_symlink: false,

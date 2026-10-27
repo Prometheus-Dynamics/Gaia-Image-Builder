@@ -241,6 +241,7 @@ pub(crate) fn compile_image_assembly(
                 strip: file.strip,
                 dest: file.dest,
                 mode: file.mode,
+                dir_mode: file.dir_mode,
                 optional: file.optional,
                 preserve_symlink: file.preserve_symlink,
                 allow_missing_libs: file.allow_missing_libs,

@@ -1,7 +1,8 @@
 //! A `src_dir` file entry: the whole tree under a directory copied into a
 //! tree under `dest`. Entries are walked in sorted order, a directory before
 //! its contents; symbolic links are kept as links and never followed; a
-//! regular file keeps its permission bits unless `mode` is set. Each copied
+//! regular file keeps its permission bits unless `mode` is set, and a
+//! directory keeps its own unless `dir_mode` is set. Each copied
 //! regular file gets the same strip and runtime-library check as a `src`
 //! copy.
 
@@ -11,7 +12,7 @@ use super::*;
 
 /// One entry under a `src_dir`, by its path relative to it.
 enum TreeEntry {
-    Dir { rel: PathBuf },
+    Dir { rel: PathBuf, src: PathBuf },
     Link { rel: PathBuf, target: String },
     File { rel: PathBuf, src: PathBuf },
 }
@@ -103,6 +104,7 @@ pub(super) fn job_file_tree<'a>(
     let root_display = root.display().to_string();
     let dest_display = dest_dir.display().to_string();
     let mode = file.mode.clone();
+    let dir_mode = file.dir_mode.clone();
     Ok(Box::new(move |run: &mut StepRun<'a>| {
         if let Some(strip) = strip {
             run.strip.add(strip);
@@ -124,6 +126,10 @@ pub(super) fn job_file_tree<'a>(
         if let Some(mode) = &mode {
             run.state
                 .insert(format!("file.tree.{entry_index}.mode"), mode);
+        }
+        if let Some(dir_mode) = &dir_mode {
+            run.state
+                .insert(format!("file.tree.{entry_index}.dir_mode"), dir_mode);
         }
     }))
 }
@@ -172,7 +178,10 @@ fn walk_tree(
             .map_err(|error| format!("failed to read '{}': {error}", child.display()))?;
         let file_type = metadata.file_type();
         if file_type.is_dir() {
-            entries.push(TreeEntry::Dir { rel: rel.clone() });
+            entries.push(TreeEntry::Dir {
+                rel: rel.clone(),
+                src: child.clone(),
+            });
             walk_tree(root, &rel, exclude, entries)?;
         } else if file_type.is_symlink() {
             let target = std_fs::read_link(&child)
@@ -202,6 +211,7 @@ fn copy_tree(
     file: &gaia_spec::AssemblyFileSpec,
 ) -> Result<TreeCopy, String> {
     let mode = file.parsed_mode().map_err(|error| error.to_string())?;
+    let dir_mode = file.parsed_dir_mode().map_err(|error| error.to_string())?;
     std_fs::create_dir_all(dest_dir).map_err(|error| {
         format!(
             "failed to create assembly src_dir destination '{}': {error}",
@@ -209,9 +219,10 @@ fn copy_tree(
         )
     })?;
     let mut copy = TreeCopy::default();
+    let mut dirs = Vec::new();
     for entry in entries {
         match entry {
-            TreeEntry::Dir { rel } => {
+            TreeEntry::Dir { rel, src } => {
                 let dest = dest_dir.join(rel);
                 clear_for_copy(&dest, true)?;
                 std_fs::create_dir_all(&dest).map_err(|error| {
@@ -220,6 +231,7 @@ fn copy_tree(
                         dest.display()
                     )
                 })?;
+                dirs.push((dest, src));
                 copy.dirs += 1;
             }
             TreeEntry::Link { rel, target } => {
@@ -246,7 +258,40 @@ fn copy_tree(
             }
         }
     }
+    // Directory modes go on last, deepest first, so a directory without
+    // write permission does not stop its own contents from being copied.
+    for (dest, src) in dirs.iter().rev() {
+        set_dir_mode(dest, src, dir_mode.map(gaia_spec::FileMode::bits))?;
+    }
     Ok(copy)
+}
+
+/// Gives a copied directory `bits`, or its source directory's permission
+/// bits when `bits` is unset.
+#[cfg(unix)]
+fn set_dir_mode(dest: &Path, src: &Path, bits: Option<u32>) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let bits = match bits {
+        Some(bits) => bits,
+        None => {
+            std_fs::metadata(src)
+                .map_err(|error| format!("failed to read '{}': {error}", src.display()))?
+                .permissions()
+                .mode()
+                & 0o7777
+        }
+    };
+    std_fs::set_permissions(dest, std_fs::Permissions::from_mode(bits)).map_err(|error| {
+        format!(
+            "failed to set directory mode '{bits:04o}' on '{}': {error}",
+            dest.display()
+        )
+    })
+}
+
+#[cfg(not(unix))]
+fn set_dir_mode(_dest: &Path, _src: &Path, _bits: Option<u32>) -> Result<(), String> {
+    Ok(())
 }
 
 /// Makes `dest` free for a copy: an existing file or link is removed, and an

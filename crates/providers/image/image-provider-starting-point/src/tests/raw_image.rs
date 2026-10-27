@@ -75,6 +75,7 @@ fn starting_point_raw_image_rejects_read_only_overlay_before_root_check() {
             build_group: None,
             group_packages: Vec::new(),
             cargo_git_sources: Vec::new(),
+            build_env: Vec::new(),
         }),
         None,
         ArtifactOutputSpec {

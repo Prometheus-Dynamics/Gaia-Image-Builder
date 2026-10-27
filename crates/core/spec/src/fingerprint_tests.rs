@@ -117,6 +117,7 @@ fn optional_assembly_options_are_encoded_only_when_set() {
         json: None,
         dest: "overlays/".into(),
         mode: None,
+        dir_mode: None,
         optional: false,
         src_dir: None,
         preserve_symlink: false,

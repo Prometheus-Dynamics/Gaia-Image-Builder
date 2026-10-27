@@ -24,6 +24,7 @@ fn file_entry(src: &Path, dest: &str) -> AssemblyFileSpec {
         json: None,
         dest: dest.into(),
         mode: None,
+        dir_mode: None,
         optional: false,
         src_dir: None,
         preserve_symlink: false,

@@ -30,6 +30,7 @@ fn empty_public_ids_are_validation_errors() {
             build_group: None,
             group_packages: Vec::new(),
             cargo_git_sources: Vec::new(),
+            build_env: Vec::new(),
         }),
         None,
         ArtifactOutputSpec {

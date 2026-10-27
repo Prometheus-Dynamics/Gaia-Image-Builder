@@ -166,6 +166,7 @@ pub fn artifact_failure_spec_with_overrides(
         build_group: None,
         group_packages: Vec::new(),
         cargo_git_sources: Vec::new(),
+        build_env: Vec::new(),
     });
     spec.artifacts.push(bad_artifact);
     spec
@@ -308,6 +309,7 @@ pub fn assembly_file(tree: &str, src: impl ToString, dest: &str) -> gaia_spec::A
         src_glob: None,
         dest: dest.into(),
         mode: None,
+        dir_mode: None,
         optional: false,
         src_dir: None,
         preserve_symlink: false,

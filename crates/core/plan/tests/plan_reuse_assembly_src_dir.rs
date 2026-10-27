@@ -45,6 +45,7 @@ fn spec_with_site(scratch: &TempDir, name: &str) -> (ResolvedBuildSpec, PathBuf)
             json: None,
             dest: ".".into(),
             mode: None,
+            dir_mode: None,
             optional: false,
             preserve_symlink: false,
             allow_missing_libs: false,

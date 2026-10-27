@@ -203,6 +203,19 @@ pub(crate) fn validate_image_assembly(
                 Some("image.assembly.files".into()),
             ));
         }
+        if file.dir_mode.is_some() && file.src_dir.is_none() {
+            diagnostics.push(error(
+                "assembly_file_dir_mode_not_allowed",
+                format!("files[{index}].dir_mode only applies to src_dir entries"),
+                Some("image.assembly.files".into()),
+            ));
+        } else if let Err(parse_error) = file.parsed_dir_mode() {
+            diagnostics.push(error(
+                "assembly_file_mode_invalid",
+                format!("invalid assembly file dir_mode: {parse_error}"),
+                Some("image.assembly.files".into()),
+            ));
+        }
     }
 
     for (index, transform) in assembly.transforms.iter().enumerate() {

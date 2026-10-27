@@ -115,6 +115,11 @@ pub struct RustArtifactSpec {
     /// `url`. Empty unless the artifact sets `cargo_git_sources`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub cargo_git_sources: Vec<CargoGitSourceSpec>,
+    /// Variables set for cargo, in order; `${secret:NAME}` in a value is read
+    /// when cargo starts. Gaia's own variables (toolchain, sccache, offline)
+    /// win over these. Every member of a build group sets the same ones.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub build_env: Vec<(String, String)>,
 }
 
 /// One cargo git dependency the build takes from a declared git source
@@ -397,6 +402,7 @@ mod tests {
             build_group: None,
             group_packages: Vec::new(),
             cargo_git_sources: Vec::new(),
+            build_env: Vec::new(),
         }
     }
 

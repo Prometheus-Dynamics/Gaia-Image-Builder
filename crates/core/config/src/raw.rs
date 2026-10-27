@@ -792,6 +792,8 @@ pub enum RawArtifactDefinition {
         no_default_features: bool,
         #[serde(default)]
         all_features: bool,
+        #[serde(default)]
+        build_env: Vec<(String, String)>,
     },
     Java {
         build_target: String,

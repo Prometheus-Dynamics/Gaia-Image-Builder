@@ -222,6 +222,7 @@ mod tests {
                 build_group: None,
                 group_packages: Vec::new(),
                 cargo_git_sources: Vec::new(),
+                build_env: Vec::new(),
             }),
             None,
             gaia_spec::ArtifactOutputSpec {

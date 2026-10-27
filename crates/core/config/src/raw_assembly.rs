@@ -108,6 +108,8 @@ pub struct RawAssemblyFileConfig {
     pub json: Option<RawAssemblyJsonValue>,
     pub dest: String,
     pub mode: Option<String>,
+    /// `src_dir` only: the mode of every copied directory.
+    pub dir_mode: Option<String>,
     pub optional: bool,
     pub preserve_symlink: bool,
     /// A copied dynamically linked file whose libraries the tree lacks is

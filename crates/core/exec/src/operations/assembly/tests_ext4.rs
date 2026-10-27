@@ -68,6 +68,7 @@ fn rootfs_file(src: &str, dest: &str, mode: Option<&str>) -> AssemblyFileSpec {
         src_glob: None,
         dest: dest.into(),
         mode: mode.map(Into::into),
+        dir_mode: None,
         optional: false,
         src_dir: None,
         preserve_symlink: false,
