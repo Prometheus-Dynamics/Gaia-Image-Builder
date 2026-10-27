@@ -43,7 +43,8 @@ gaia-validate = { path = "crates/core/validate", version = "2.0.1-dev" }
 gaia-plan = { path = "crates/core/plan", version = "2.0.1-dev" }
 gaia-exec = { path = "crates/core/exec", version = "2.0.1-dev" }
 gaia-report = { path = "crates/core/report", version = "2.0.1-dev" }
-gaia-testkit = { path = "crates/core/testkit", version = "2.0.1-dev" }
+# Dev-only and never published: no version, so `cargo package` drops it.
+gaia-testkit = { path = "crates/core/testkit" }
 gaia-source-providers = { path = "crates/providers/source/source-providers", version = "2.0.1-dev" }
 gaia-default-providers = { path = "crates/providers/default-providers", version = "2.0.1-dev" }
 gaia-artifact-providers = { path = "crates/providers/artifact/artifact-providers", version = "2.0.1-dev" }

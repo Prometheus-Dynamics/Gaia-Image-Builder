@@ -6,6 +6,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- CI: `cargo package --workspace` failed on every push since 2026-10-18 (the GitHub `docs-and-lints` job): the dev-only, unpublished `gaia-testkit` was declared with a version, so packaging looked it up on crates.io. It is now a path-only dev-dependency, which packaging drops.
 - Rust artifacts take `build_env` (`[KEY, value]` pairs for cargo, config tokens and `${secret:NAME}` in values): the secret is read when cargo starts and reaches a docker build as `-e KEY`, never the command line or the spec. Gaia's toolchain, sccache and offline variables win; `RUSTFLAGS`/`CARGO_ENCODED_RUSTFLAGS` are refused with a toolchain (cargo would drop the toolchain's flags), and build group members must share `build_env`.
 - `src_dir` copies keep each directory's source permission bits; `dir_mode = "0750"` sets every copied directory instead. Modes are applied after the contents, deepest first, so read-only directories copy.
 - Gate speed: the gate runs its tests with cargo-nextest (`.config/nextest.toml`; `scripts/ci.sh` falls back to `cargo test` where nextest is missing, CI installs it and uploads a JUnit report), and the dev profile keeps line tables only (no debuginfo for dependencies). Measured on a 24-core machine, cold: clippy 11 s, test build 31 s → 24 s, tests 63 s (`cargo test`) → 9 s; target dir 19 GB → 8.6 GB; full gate (fmt, sizes, clippy, tests, doc tests) 17 s warm. The two slowest tests no longer wait 10 s for a timeout or scan a 256 MiB disk.
