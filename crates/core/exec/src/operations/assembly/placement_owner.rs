@@ -1,4 +1,4 @@
-//! The RAM work dirs of a shared tmpfs: the `gaia-<user>` dir must be the's
+//! The RAM work dirs of a shared tmpfs: the `gaia-<user>` dir must be the
 //! user's own, and the dirs of dead runs are removed before a run starts.
 
 use super::*;
@@ -36,6 +36,13 @@ pub(super) fn check_ram_user_dir(base: &Path, user: &str) -> Result<(), String> 
             base.display()
         )
     })?;
+    match std_fs::DirBuilder::new().mode(0o700).create(&dir) {
+        Ok(()) => return Ok(()),
+        // Made before, possibly by another run starting at the same time:
+        // whoever made it, it is checked below.
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(format!("failed to create '{}': {error}", dir.display())),
+    }
     match std_fs::symlink_metadata(&dir) {
         Ok(metadata) => {
             if metadata.file_type().is_symlink() {
@@ -59,10 +66,6 @@ pub(super) fn check_ram_user_dir(base: &Path, user: &str) -> Result<(), String> 
             }
             Ok(())
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => std_fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&dir)
-            .map_err(|error| format!("failed to create '{}': {error}", dir.display())),
         Err(error) => Err(format!("failed to read '{}': {error}", dir.display())),
     }
 }
@@ -171,5 +174,41 @@ pub(super) fn sweep_stale_ram_dirs(user_dir: &Path, keep: &Path) {
         if old_enough && owner_gone {
             let _ = std_fs::remove_dir_all(&dir);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gaia_testkit::TempDir;
+
+    #[test]
+    fn runs_starting_together_all_accept_the_user_dir_one_of_them_made() {
+        let scratch = TempDir::new("gaia-ram-user-dir-race");
+        let base = scratch.join("base");
+        let results: Vec<Result<(), String>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..16)
+                .map(|_| scope.spawn(|| check_ram_user_dir(&base, "runner")))
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().expect("thread"))
+                .collect()
+        });
+        assert!(results.iter().all(Result::is_ok), "{results:?}");
+        let metadata = std_fs::metadata(base.join("gaia-runner")).expect("user dir");
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o700);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symbolic_link_in_place_of_the_user_dir_is_refused() {
+        let scratch = TempDir::new("gaia-ram-user-dir-link");
+        let base = scratch.join("base");
+        std_fs::create_dir_all(&base).expect("base");
+        std::os::unix::fs::symlink(scratch.path(), base.join("gaia-runner")).expect("link");
+        let error = check_ram_user_dir(&base, "runner").expect_err("a link");
+        assert!(error.contains("symbolic link"), "{error}");
     }
 }
