@@ -552,7 +552,7 @@ pub(crate) fn command_signature<const N: usize>(program: &str, args: [&str; N]) 
     if let Some(signature) = cache.lock().ok().and_then(|cache| fresh(cache.get(&key))) {
         return signature;
     }
-    let signature = probe_command_signature(program, args);
+    let signature = probe_command_signature(program, args, COMMAND_SIGNATURE_TIMEOUT_SECONDS);
     if let Ok(mut cache) = cache.lock() {
         cache.insert(key, (Instant::now(), signature.clone()));
     }
@@ -566,7 +566,11 @@ pub(crate) fn fresh(entry: Option<&(Instant, String)>) -> Option<String> {
         .map(|(_, value)| value.clone())
 }
 
-fn probe_command_signature<const N: usize>(program: &str, args: [&str; N]) -> String {
+pub(crate) fn probe_command_signature<const N: usize>(
+    program: &str,
+    args: [&str; N],
+    timeout_seconds: u64,
+) -> String {
     // Checked first so a missing tool does not log a process start failure.
     if !crate::reuse_toolchain::program_on_path(program) {
         return format!("{program}:unavailable");
@@ -581,7 +585,7 @@ fn probe_command_signature<const N: usize>(program: &str, args: [&str; N]) -> St
     };
     match gaia_process::run_command_with_timeout_and_retention(
         &mut command,
-        Duration::from_secs(COMMAND_SIGNATURE_TIMEOUT_SECONDS),
+        Duration::from_secs(timeout_seconds),
         "reuse command signature",
         retention,
         None,
@@ -605,7 +609,7 @@ fn probe_command_signature<const N: usize>(program: &str, args: [&str; N]) -> St
         Ok(result) => format!("{program}:exit-{}", result.output.status),
         Err(error) => match error.kind {
             gaia_process::ProcessRunErrorKind::Timeout => {
-                format!("{program}:timeout-{COMMAND_SIGNATURE_TIMEOUT_SECONDS}s")
+                format!("{program}:timeout-{timeout_seconds}s")
             }
             gaia_process::ProcessRunErrorKind::Cancelled => format!("{program}:cancelled"),
             gaia_process::ProcessRunErrorKind::ToolStart => format!("{program}:unavailable"),

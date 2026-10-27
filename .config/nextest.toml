@@ -1,0 +1,12 @@
+# cargo-nextest: the gate's test runner (scripts/ci.sh, .github/workflows/ci.yml).
+# Each test runs in its own process, so the whole suite runs in parallel.
+
+[profile.default]
+# A test that hangs is reported after 30 s and killed after 2 min.
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+[profile.ci]
+fail-fast = false
+
+[profile.ci.junit]
+path = "junit.xml"

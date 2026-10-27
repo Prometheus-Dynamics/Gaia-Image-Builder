@@ -86,3 +86,11 @@ unimplemented = "deny"
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+[profile.dev]
+# Line tables keep panics and backtraces readable at a fraction of full
+# debuginfo: a test build's target dir drops from ~19 GB and links faster.
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

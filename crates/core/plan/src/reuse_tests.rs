@@ -1,4 +1,4 @@
-use super::{COMMAND_SIGNATURE_TIMEOUT_SECONDS, command_signature};
+use super::{command_signature, probe_command_signature};
 use gaia_testkit::TempDir;
 use std::fs;
 use std::path::PathBuf;
@@ -45,15 +45,13 @@ fn command_signature_times_out_hanging_tools() {
     );
     let started = Instant::now();
 
-    let signature = command_signature(script.to_str().expect("script path"), ["--version"]);
+    let signature =
+        probe_command_signature(script.to_str().expect("script path"), ["--version"], 1);
 
     assert!(started.elapsed() < Duration::from_secs(25));
     assert_eq!(
         signature,
-        format!(
-            "{}:timeout-{COMMAND_SIGNATURE_TIMEOUT_SECONDS}s",
-            script.to_str().expect("script path")
-        )
+        format!("{}:timeout-1s", script.to_str().expect("script path"))
     );
 
     let _ = fs::remove_file(script);

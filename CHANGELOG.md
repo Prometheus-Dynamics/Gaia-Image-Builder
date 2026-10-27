@@ -6,6 +6,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- Gate speed: the gate runs its tests with cargo-nextest (`.config/nextest.toml`; `scripts/ci.sh` falls back to `cargo test` where nextest is missing, CI installs it and uploads a JUnit report), and the dev profile keeps line tables only (no debuginfo for dependencies). Measured on a 24-core machine, cold: clippy 11 s, test build 31 s → 24 s, tests 63 s (`cargo test`) → 9 s; target dir 19 GB → 8.6 GB; full gate (fmt, sizes, clippy, tests, doc tests) 17 s warm. The two slowest tests no longer wait 10 s for a timeout or scan a 256 MiB disk.
 - `[[stage.files]] content = "..."`: text written to `dest` in place of a copied `src` (exclusive), with config tokens rendered, so `/etc/os-release` can carry `${build.version}` (asked by HeliOS, whose static os-release showed the release number instead of the build). A patch setting `content` replaces the entry's `src`, and the reverse.
 - Packages: an ipk's data tar leaves out the `./` root entry, which opkg recorded as a file `.` and reported as obsolete on upgrades ("Removing obsolete file ."); a deb keeps it. The generated postinst runs `systemctl reset-failed <unit>` before enabling and starting it, so a unit that hit its start limit under the old version starts after the upgrade (both seen on a SystemCore).
 - `${project.commit_count}`: the number of commits HEAD has, for versions that order (`...-dev.${project.commit_count}+${project.commit_short}`).

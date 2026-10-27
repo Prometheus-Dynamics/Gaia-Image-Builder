@@ -26,7 +26,14 @@ echo "==> Checking app without default features"
 cargo check -p gaia-app --no-default-features
 
 echo "==> Running tests"
-cargo test --workspace --all-features
+# nextest runs every test in parallel (~15 s here against ~60 s for cargo
+# test); cargo test stays the fallback where it is not installed.
+if cargo nextest --version >/dev/null 2>&1; then
+  cargo nextest run --workspace --all-features --profile "${GAIA_NEXTEST_PROFILE:-default}"
+  cargo test --workspace --all-features --doc
+else
+  cargo test --workspace --all-features
+fi
 
 if [[ "${GAIA_CI_SKIP_E2E:-0}" != "1" ]]; then
   echo "==> Running slow end-to-end tests"

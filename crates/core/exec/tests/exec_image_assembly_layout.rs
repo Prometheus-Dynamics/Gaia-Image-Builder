@@ -263,7 +263,7 @@ fn partition_size_pads_images_and_empty_partitions_stay_sparse() {
     let boot = images.join("boot.vfat");
     fs::write(&boot, vec![0xB0; 4096]).expect("boot");
     let output = build_dir.join("sized-output/disk.img");
-    let mut empty = partition("spare", "linux", None, Some("256M"));
+    let mut empty = partition("spare", "linux", None, Some("32M"));
     empty.wipe = true;
     spec.image.assembly = Some(ImageAssemblySpec {
         disks: vec![disk(
@@ -280,11 +280,11 @@ fn partition_size_pads_images_and_empty_partitions_stay_sparse() {
 
     assert!(outcome.errors.is_empty(), "{:?}", outcome.errors);
     let metadata = fs::metadata(&output).expect("disk metadata");
-    // boot: 2048 + 16384 sectors; spare: 256 MiB starting at 18432.
-    assert_eq!(metadata.len(), (18432 + 524_288) * 512);
+    // boot: 2048 + 16384 sectors; spare: 32 MiB starting at 18432.
+    assert_eq!(metadata.len(), (18432 + 65_536) * 512);
     let bytes = fs::read(&output).expect("disk");
     assert_eq!(entry(&bytes, 0), (0x00, 0x0c, 2048, 16384));
-    assert_eq!(entry(&bytes, 1), (0x00, 0x83, 18432, 524_288));
+    assert_eq!(entry(&bytes, 1), (0x00, 0x83, 18432, 65_536));
     assert_eq!(entry(&bytes, 2), (0, 0, 0, 0));
     assert_eq!(&bytes[2048 * 512..2048 * 512 + 4096], &[0xB0; 4096][..]);
     assert!(bytes[2048 * 512 + 4096..].iter().all(|byte| *byte == 0));
