@@ -15,9 +15,34 @@ use tracing_subscriber::util::SubscriberInitExt;
 /// brings the INFO/DEBUG lines back.
 const DEFAULT_LOG_DIRECTIVE: &str = "warn";
 
+/// Commands that only print a report. Piped into `head` or a pager that
+/// quits early, they should end quietly like other Unix tools, not panic on
+/// the broken pipe.
+const PRINT_ONLY_COMMANDS: &[&str] =
+    &["config", "resolve", "validate", "plan", "preview", "status"];
+
 fn main() {
+    if std::env::args()
+        .nth(1)
+        .is_some_and(|command| PRINT_ONLY_COMMANDS.contains(&command.as_str()))
+    {
+        exit_quietly_on_broken_pipe();
+    }
     bootstrap_logging();
     std::process::exit(gaia_app::run());
+}
+
+/// Restores the default SIGPIPE action (Rust ignores it, so a write to a
+/// closed pipe fails and `println!` panics). Only for the print-only
+/// commands: a build writes to its children's pipes and must see those
+/// errors instead of being killed.
+fn exit_quietly_on_broken_pipe() {
+    #[cfg(unix)]
+    // SAFETY: called first thing in main, before any other thread exists;
+    // `signal` with SIG_DFL installs no handler code.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
 }
 
 fn bootstrap_logging() {
