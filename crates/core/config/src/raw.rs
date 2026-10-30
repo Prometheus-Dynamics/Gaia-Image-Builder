@@ -4,17 +4,17 @@ use std::path::PathBuf;
 use serde::{Deserialize, Deserializer, Serialize, de};
 
 use crate::raw_assembly::RawImageAssemblyConfig;
-pub use crate::raw_variant::RawVariantConfig;
-pub use crate::raw_when::{RawWhenConfig, RawWhenImageKind};
 
 #[path = "raw_inputs.rs"]
 mod raw_inputs;
 
-pub use raw_inputs::*;
+pub(crate) use crate::raw_variant::RawVariantConfig;
+pub(crate) use crate::raw_when::{RawWhenConfig, RawWhenImageKind};
+pub(crate) use raw_inputs::*;
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 #[serde(default)]
-pub struct RawBuildConfig {
+pub(crate) struct RawBuildConfig {
     /// Semver requirement on the Gaia binary, checked before anything else.
     pub gaia_version: Option<String>,
     pub build_name: String,
@@ -107,7 +107,7 @@ pub struct RawBuildConfig {
 /// patches the earlier entry with the same `id`: each key it sets replaces
 /// that key of the entry, and the keys it leaves out keep their value.
 #[derive(Debug, Clone, PartialEq)]
-pub struct RawEntryPatch {
+pub(crate) struct RawEntryPatch {
     pub table: PatchTable,
     pub id: String,
     /// The keys the patch sets, other than `id`, with their values as written.
@@ -118,7 +118,7 @@ pub struct RawEntryPatch {
 
 /// The id-keyed tables that take patch entries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PatchTable {
+pub(crate) enum PatchTable {
     Artifact,
     Install,
     StageFile,
@@ -173,7 +173,7 @@ impl PatchTable {
 
 impl RawEntryPatch {
     /// The error for a patch whose entry no earlier layer declares.
-    pub fn missing_base_message(&self) -> String {
+    pub(crate) fn missing_base_message(&self) -> String {
         format!(
             "{} patch '{}' in {} has no earlier [[{}]] entry to patch; add {} to declare it",
             self.table.name(),
@@ -188,7 +188,7 @@ impl RawEntryPatch {
 /// One `[secrets]` entry: exactly one of `env`, `file` and `command`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawSecretConfig {
+pub(crate) struct RawSecretConfig {
     /// `env = "VAR"`: the value of an environment variable.
     pub env: Option<String>,
     /// `file = "path"`: the file's contents. Must be mode 0600 or stricter.
@@ -204,14 +204,14 @@ pub struct RawSecretConfig {
 /// validation.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawExpectConfig {
+pub(crate) struct RawExpectConfig {
     pub artifacts: Vec<String>,
     pub installs: Vec<String>,
     pub sources: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RawImportConfig {
+pub(crate) struct RawImportConfig {
     pub path: String,
     /// Git source whose checkout `path` is read from (`load/import_sources.rs`).
     pub source: Option<String>,
@@ -219,7 +219,7 @@ pub struct RawImportConfig {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct RawImportedConfig {
+pub(crate) struct RawImportedConfig {
     pub import: RawImportConfig,
     pub config: RawBuildConfig,
 }
@@ -255,7 +255,7 @@ impl<'de> Deserialize<'de> for RawImportConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawPresetConfig {
+pub(crate) struct RawPresetConfig {
     pub env_files: Vec<String>,
     pub env: BTreeMap<String, String>,
     // Preset overrides intentionally remain loose so presets can target any top-level override key.
@@ -263,14 +263,14 @@ pub struct RawPresetConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RawUnresolvedInterpolation {
+pub(crate) struct RawUnresolvedInterpolation {
     pub location: String,
     pub token: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawWorkspaceConfig {
+pub(crate) struct RawWorkspaceConfig {
     pub root_dir: String,
     pub build_dir: String,
     pub out_dir: String,
@@ -280,7 +280,7 @@ pub struct RawWorkspaceConfig {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct RawWorkspaceNamedPathConfig {
+pub(crate) struct RawWorkspaceNamedPathConfig {
     pub alias: String,
     pub path: String,
     pub kind: RawWorkspacePathKind,
@@ -315,7 +315,7 @@ impl<'de> Deserialize<'de> for RawWorkspaceNamedPathConfig {
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawWorkspacePathKind {
+pub(crate) enum RawWorkspacePathKind {
     #[default]
     Host,
     Logical,
@@ -323,7 +323,7 @@ pub enum RawWorkspacePathKind {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawProductConfig {
+pub(crate) struct RawProductConfig {
     pub family: Option<String>,
     pub name: Option<String>,
     pub sku: Option<String>,
@@ -331,7 +331,7 @@ pub struct RawProductConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawInterpolationConfig {
+pub(crate) struct RawInterpolationConfig {
     pub allow_unresolved: bool,
     // Interpolation values intentionally remain free-form pairs because they define user-owned
     // variable namespaces rather than closed spec enums.
@@ -340,14 +340,14 @@ pub struct RawInterpolationConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawCleanConfig {
+pub(crate) struct RawCleanConfig {
     pub default: Option<String>,
     pub profiles: BTreeMap<String, RawCleanProfileConfig>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawCleanProfileConfig {
+pub(crate) struct RawCleanProfileConfig {
     pub description: Option<String>,
     pub build: bool,
     pub out: bool,
@@ -356,7 +356,7 @@ pub struct RawCleanProfileConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawExecutionPolicyConfig {
+pub(crate) struct RawExecutionPolicyConfig {
     pub jobs: u32,
     /// `offline = true`: no network. See docs/configuration.md (Execution Policy).
     pub offline: bool,
@@ -369,7 +369,7 @@ pub struct RawExecutionPolicyConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawDockerExecutionConfig {
+pub(crate) struct RawDockerExecutionConfig {
     pub enabled: bool,
     pub image: Option<String>,
 }
@@ -377,7 +377,7 @@ pub struct RawDockerExecutionConfig {
 /// `[providers.docker]`: how docker execution runs commands.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawDockerProviderPolicyConfig {
+pub(crate) struct RawDockerProviderPolicyConfig {
     /// Run every command of a gaia run in one long-lived container per image,
     /// mount set and user (`docker exec`), instead of one `docker run` each.
     pub reuse_container: bool,
@@ -385,7 +385,7 @@ pub struct RawDockerProviderPolicyConfig {
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawOutputRetentionPolicyConfig {
+pub(crate) struct RawOutputRetentionPolicyConfig {
     pub stdout_bytes: usize,
     pub stderr_bytes: usize,
     pub stdout_lines: usize,
@@ -395,7 +395,7 @@ pub struct RawOutputRetentionPolicyConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawFailurePolicyConfig {
+pub(crate) struct RawFailurePolicyConfig {
     pub rollback_on_error: Option<bool>,
     pub preserve_failed_outputs: Option<bool>,
     pub rollback_domains: Option<Vec<RawRollbackDomain>>,
@@ -405,7 +405,7 @@ pub struct RawFailurePolicyConfig {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawRollbackDomain {
+pub(crate) enum RawRollbackDomain {
     Sources,
     Artifacts,
     Installs,
@@ -416,7 +416,7 @@ pub enum RawRollbackDomain {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawProviderPoliciesConfig {
+pub(crate) struct RawProviderPoliciesConfig {
     pub rust: RawRustProviderPolicyConfig,
     pub git: RawGitProviderPolicyConfig,
     pub docker: RawDockerProviderPolicyConfig,
@@ -432,7 +432,7 @@ pub struct RawProviderPoliciesConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawRustProviderPolicyConfig {
+pub(crate) struct RawRustProviderPolicyConfig {
     pub allow_nested_build: bool,
     pub batch_builds: Option<bool>,
     pub shared_target_dir: Option<bool>,
@@ -446,7 +446,7 @@ pub struct RawRustProviderPolicyConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawGitProviderPolicyConfig {
+pub(crate) struct RawGitProviderPolicyConfig {
     pub allow_remote_resolution: bool,
     pub retry_attempts: u32,
     pub retry_backoff_ms: u64,
@@ -456,7 +456,7 @@ pub struct RawGitProviderPolicyConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawCommandProviderPolicyConfig {
+pub(crate) struct RawCommandProviderPolicyConfig {
     pub retry_attempts: u32,
     pub retry_backoff_ms: u64,
     pub retry_backoff_strategy: RawRetryBackoffStrategy,
@@ -491,7 +491,7 @@ pub struct RawCommandProviderPolicyConfig {
 /// `erofs_workers`: a thread count (`0` is off) or a word (`auto`, `off`).
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
-pub enum RawErofsWorkers {
+pub(crate) enum RawErofsWorkers {
     Count(u32),
     Text(String),
 }
@@ -500,7 +500,7 @@ pub enum RawErofsWorkers {
 /// tool (for example `ccache = "system,build"`).
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawBuildrootHostToolsConfig {
+pub(crate) struct RawBuildrootHostToolsConfig {
     pub default: Option<String>,
     #[serde(flatten)]
     pub tools: std::collections::BTreeMap<String, String>,
@@ -508,7 +508,7 @@ pub struct RawBuildrootHostToolsConfig {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum RawBuildrootOverrideCheck {
+pub(crate) enum RawBuildrootOverrideCheck {
     Error,
     Warn,
     Off,
@@ -516,7 +516,7 @@ pub enum RawBuildrootOverrideCheck {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawBuildrootPackageCacheConfig {
+pub(crate) struct RawBuildrootPackageCacheConfig {
     pub enabled: bool,
     pub level: Option<RawPackageCacheLevel>,
     /// Same as `system_dir` (the name before cache levels).
@@ -530,14 +530,14 @@ pub struct RawBuildrootPackageCacheConfig {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum RawPackageCacheLevel {
+pub(crate) enum RawPackageCacheLevel {
     System,
     Project,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawBuildrootCcachePolicyConfig {
+pub(crate) struct RawBuildrootCcachePolicyConfig {
     pub enabled: bool,
     pub dir: Option<String>,
     pub max_size: Option<String>,
@@ -545,7 +545,7 @@ pub struct RawBuildrootCcachePolicyConfig {
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawRetryBackoffStrategy {
+pub(crate) enum RawRetryBackoffStrategy {
     #[default]
     Fixed,
     Exponential,
@@ -553,13 +553,13 @@ pub enum RawRetryBackoffStrategy {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawProvenanceConfig {
+pub(crate) struct RawProvenanceConfig {
     pub identity: RawProvenanceIdentityConfig,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawProvenanceIdentityConfig {
+pub(crate) struct RawProvenanceIdentityConfig {
     pub project: Option<String>,
     pub vendor: Option<String>,
     pub channel: Option<String>,
@@ -568,7 +568,7 @@ pub struct RawProvenanceIdentityConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct RawSourceConfig {
+pub(crate) struct RawSourceConfig {
     pub id: String,
     #[serde(flatten)]
     pub definition: RawSourceDefinition,
@@ -576,7 +576,7 @@ pub struct RawSourceConfig {
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum RawSourceDefinition {
+pub(crate) enum RawSourceDefinition {
     Git {
         repo: String,
         #[serde(default)]
@@ -642,7 +642,7 @@ pub enum RawSourceDefinition {
 /// names the SDK root, and exactly one of `sysroot` and `sysroot_source` the
 /// sysroot; the validator reports the rest.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct RawToolchainConfig {
+pub(crate) struct RawToolchainConfig {
     pub id: String,
     pub kind: RawToolchainKind,
     /// The SDK root is the tree of this source.
@@ -676,13 +676,13 @@ pub struct RawToolchainConfig {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawToolchainKind {
+pub(crate) enum RawToolchainKind {
     BuildrootSdk,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawSourceRefreshPolicy {
+pub(crate) enum RawSourceRefreshPolicy {
     Auto,
     Always,
     Never,
@@ -690,20 +690,20 @@ pub enum RawSourceRefreshPolicy {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum RawGitBackend {
+pub(crate) enum RawGitBackend {
     Host,
     Execution,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawSourcePinPolicy {
+pub(crate) enum RawSourcePinPolicy {
     Floating,
     Locked,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-pub struct RawArtifactConfig {
+pub(crate) struct RawArtifactConfig {
     pub id: String,
     #[serde(default)]
     pub when: Option<RawWhenConfig>,
@@ -746,14 +746,14 @@ pub struct RawArtifactConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawArtifactExecutionConfig {
+pub(crate) struct RawArtifactExecutionConfig {
     pub backend: Option<RawArtifactExecutionBackend>,
     pub docker: RawArtifactDockerExecutionConfig,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawArtifactDockerExecutionConfig {
+pub(crate) struct RawArtifactDockerExecutionConfig {
     pub image: Option<String>,
     pub dockerfile: Option<String>,
     pub context: Option<String>,
@@ -761,14 +761,14 @@ pub struct RawArtifactDockerExecutionConfig {
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawArtifactExecutionBackend {
+pub(crate) enum RawArtifactExecutionBackend {
     Host,
     Docker,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawArtifactInstallClass {
+pub(crate) enum RawArtifactInstallClass {
     Binary,
     Library,
     Archive,
@@ -779,7 +779,7 @@ pub enum RawArtifactInstallClass {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum RawArtifactDefinition {
+pub(crate) enum RawArtifactDefinition {
     Rust {
         package: String,
         #[serde(default)]
@@ -816,7 +816,7 @@ pub enum RawArtifactDefinition {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-pub struct RawInstallConfig {
+pub(crate) struct RawInstallConfig {
     pub id: String,
     #[serde(default)]
     pub when: Option<RawWhenConfig>,
@@ -834,14 +834,14 @@ pub struct RawInstallConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawStageConfig {
+pub(crate) struct RawStageConfig {
     pub files: Vec<RawStageFileConfig>,
     pub env_sets: Vec<RawStageEnvSetConfig>,
     pub services: Vec<RawStageServiceConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-pub struct RawStageFileConfig {
+pub(crate) struct RawStageFileConfig {
     pub id: String,
     #[serde(default)]
     pub when: Option<RawWhenConfig>,
@@ -860,14 +860,14 @@ pub struct RawStageFileConfig {
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawStageContentOrigin {
+pub(crate) enum RawStageContentOrigin {
     StaticAsset,
     Generated,
     ProviderEmitted,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct RawStageEnvSetConfig {
+pub(crate) struct RawStageEnvSetConfig {
     pub id: String,
     #[serde(default)]
     pub when: Option<RawWhenConfig>,
@@ -877,7 +877,7 @@ pub struct RawStageEnvSetConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-pub struct RawStageServiceConfig {
+pub(crate) struct RawStageServiceConfig {
     pub id: String,
     #[serde(default)]
     pub when: Option<RawWhenConfig>,
@@ -887,7 +887,7 @@ pub struct RawStageServiceConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawImageConfig {
+pub(crate) struct RawImageConfig {
     #[serde(flatten)]
     pub definition: RawImageDefinition,
     pub feed: RawImageFeedConfig,
@@ -912,7 +912,7 @@ pub struct RawImageConfig {
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum RawImageDefinition {
+pub(crate) enum RawImageDefinition {
     Buildroot {
         #[serde(default)]
         source: Option<String>,
@@ -981,7 +981,7 @@ impl Default for RawImageDefinition {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawImageFeedConfig {
+pub(crate) struct RawImageFeedConfig {
     // Feed references remain raw strings here because they compile into typed ids in the canonical spec.
     pub install_entries: Vec<String>,
     pub stage_files: Vec<String>,
@@ -990,7 +990,7 @@ pub struct RawImageFeedConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct RawBuildrootExpectedImageConfig {
+pub(crate) struct RawBuildrootExpectedImageConfig {
     pub name: String,
     pub format: RawBuildrootExpectedImageFormat,
     #[serde(default)]
@@ -1000,14 +1000,14 @@ pub struct RawBuildrootExpectedImageConfig {
 /// `[image.rootfs]` of a Buildroot image.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawBuildrootRootfsConfig {
+pub(crate) struct RawBuildrootRootfsConfig {
     /// Buildroot packages whose files are left out of the root filesystem.
     pub exclude_packages: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawStartingPointPackagesConfig {
+pub(crate) struct RawStartingPointPackagesConfig {
     pub enabled: bool,
     pub execute: bool,
     pub manager: Option<String>,
@@ -1027,7 +1027,7 @@ fn default_true() -> bool {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawBuildrootExpectedImageFormat {
+pub(crate) enum RawBuildrootExpectedImageFormat {
     Tar,
     Cpio,
     Ext2,
@@ -1053,7 +1053,7 @@ pub enum RawBuildrootExpectedImageFormat {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawBuildrootExternalTreeMode {
+pub(crate) enum RawBuildrootExternalTreeMode {
     Auto,
     Required,
     Disabled,
@@ -1061,7 +1061,7 @@ pub enum RawBuildrootExternalTreeMode {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawStartingPointRootfsValidationMode {
+pub(crate) enum RawStartingPointRootfsValidationMode {
     RequireExists,
     RequireDirectory,
     RequireFile,
@@ -1070,7 +1070,7 @@ pub enum RawStartingPointRootfsValidationMode {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawStartingPointOutputMode {
+pub(crate) enum RawStartingPointOutputMode {
     CopyRootfs,
     ArchiveOnly,
     CopyAndArchive,
@@ -1081,7 +1081,7 @@ pub enum RawStartingPointOutputMode {
 /// `layers`; the other keys are the layer set's own.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawImageLayersConfig {
+pub(crate) struct RawImageLayersConfig {
     pub order: Vec<String>,
     pub default: Option<String>,
     pub overrides: Vec<String>,
@@ -1099,7 +1099,7 @@ pub struct RawImageLayersConfig {
 /// `[image.layers.<name>]`: the selectors of one layer.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawImageLayerConfig {
+pub(crate) struct RawImageLayerConfig {
     pub packages: Vec<String>,
     pub paths: Vec<String>,
     pub installs: Vec<String>,
@@ -1112,7 +1112,7 @@ pub struct RawImageLayerConfig {
 /// `[image.checks]`: what `image:check` verifies (see `Image checks` in the docs).
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawImageChecksConfig {
+pub(crate) struct RawImageChecksConfig {
     pub kernel_modules: Option<bool>,
     pub modules_dir: Option<String>,
     pub symvers: Option<String>,
@@ -1125,7 +1125,7 @@ pub struct RawImageChecksConfig {
 /// in the docs). Unknown keys are reported, as everywhere.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawImageHardwareConfig {
+pub(crate) struct RawImageHardwareConfig {
     pub id: String,
     pub kind: String,
     pub modules: Vec<String>,
@@ -1138,7 +1138,7 @@ pub struct RawImageHardwareConfig {
 /// `[image.signing]`: a signature for each published output that matches `outputs`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawImageSigningConfig {
+pub(crate) struct RawImageSigningConfig {
     /// `minisign`, `gpg` or `cosign-blob`.
     pub kind: String,
     /// A key path, or `env:VAR`.
@@ -1149,7 +1149,7 @@ pub struct RawImageSigningConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawImageOutputConfig {
+pub(crate) struct RawImageOutputConfig {
     pub collect_dir: Option<String>,
     pub archive_name: Option<String>,
     /// The assembly disk the raw disk archive is built from (see the spec).
@@ -1160,7 +1160,7 @@ pub struct RawImageOutputConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct RawCheckpointConfig {
+pub(crate) struct RawCheckpointConfig {
     pub id: String,
     pub backend: Option<String>,
     pub use_policy: RawCheckpointPolicy,
@@ -1197,7 +1197,7 @@ pub struct RawCheckpointConfig {
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawCheckpointPolicy {
+pub(crate) enum RawCheckpointPolicy {
     #[default]
     Off,
     Auto,
@@ -1206,7 +1206,7 @@ pub enum RawCheckpointPolicy {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawReportingConfig {
+pub(crate) struct RawReportingConfig {
     pub summary: bool,
     pub provenance: bool,
     pub manifest: bool,
@@ -1217,21 +1217,21 @@ pub struct RawReportingConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawOutputHygieneConfig {
+pub(crate) struct RawOutputHygieneConfig {
     pub large_file_threshold_bytes: Option<u64>,
     pub transient_dir_names: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawPostBuildHookConfig {
+pub(crate) struct RawPostBuildHookConfig {
     pub script: String,
     pub timeout_seconds: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawReportingMaskingConfig {
+pub(crate) struct RawReportingMaskingConfig {
     pub enabled: bool,
     pub replacement: String,
     pub patterns: Vec<String>,

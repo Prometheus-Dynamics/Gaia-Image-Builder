@@ -16,7 +16,7 @@ use serde_json::json;
 use crate::sha256_hex_bytes;
 
 /// The bearer token the fake's token service issues.
-pub const BEARER: &str = "fake-bearer-token";
+pub(crate) const BEARER: &str = "fake-bearer-token";
 const REALM_PATH: &str = "/token";
 
 /// Everything the fake has seen and stores. Tests read and edit it directly.
@@ -78,7 +78,7 @@ impl FakeRegistry {
 
 /// The base64 standard encoding, with padding. Used to build the expected
 /// Basic header.
-pub fn base64(bytes: &[u8]) -> String {
+pub(crate) fn base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::new();
     for chunk in bytes.chunks(3) {

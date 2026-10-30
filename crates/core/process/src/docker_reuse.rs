@@ -27,7 +27,7 @@ fn reused_containers() -> std::sync::MutexGuard<'static, HashMap<String, String>
 /// and user starts it (`docker run -d ... sleep infinity`); later commands
 /// with the same key reuse it. The working directory, the environment and the
 /// command itself are passed to each `docker exec`, so they need no new
-/// container. Containers are removed by [`remove_reused_containers`].
+/// container. Containers are removed by `remove_reused_containers`.
 pub fn docker_reused_exec_command(
     command: &Command,
     spec: &DockerRunSpec,
@@ -186,7 +186,7 @@ fn start_reused_container(
 /// Removes every container [`docker_reused_exec_command`] started in this
 /// process, killing whatever still runs in them. A container that is already
 /// gone is not an error.
-pub fn remove_reused_containers() {
+pub(crate) fn remove_reused_containers() {
     let ids: Vec<String> = reused_containers().drain().map(|(_, id)| id).collect();
     for id in ids {
         let _ = Command::new("docker")

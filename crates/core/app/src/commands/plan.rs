@@ -10,7 +10,7 @@ use super::reuse_reasons::{explain_rebuild_reasons, recorded_for_explanation};
 use super::variants::{ReuseScope, plan_variants, scoped_reuse_state};
 use super::{CommandOutcome, load_operation_durations};
 
-pub fn plan_build_command(
+pub(crate) fn plan_build_command(
     context: &AppContext,
     build: &str,
     options: &ResolveOptions,

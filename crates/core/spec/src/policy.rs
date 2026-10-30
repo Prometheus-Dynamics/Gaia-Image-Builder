@@ -1,9 +1,7 @@
-use crate::{ArtifactProviderKind, ImageProviderKind, SourceProviderKind};
+use crate::{ArtifactProviderKind, ImageProviderKind};
 
 pub const DEFAULT_COMMAND_RETRY_ATTEMPTS: u32 = 1;
 pub const DEFAULT_COMMAND_RETRY_BACKOFF_MS: u64 = 0;
-pub const DEFAULT_COMMAND_RETRY_BACKOFF_STRATEGY: RetryBackoffStrategySpec =
-    RetryBackoffStrategySpec::Fixed;
 
 pub const DEFAULT_RUST_PROVIDER_TIMEOUT_SECONDS: u64 = 300;
 pub const DEFAULT_GIT_PROVIDER_TIMEOUT_SECONDS: u64 = 1800;
@@ -15,20 +13,20 @@ pub const DEFAULT_NODE_PROVIDER_TIMEOUT_SECONDS: u64 = 300;
 pub const DEFAULT_PYTHON_PROVIDER_TIMEOUT_SECONDS: u64 = 300;
 pub const DEFAULT_BUILDROOT_PROVIDER_TIMEOUT_SECONDS: u64 = 900;
 pub const DEFAULT_STARTING_POINT_PROVIDER_TIMEOUT_SECONDS: u64 = 120;
-pub const DEFAULT_PROVIDER_LOCAL_JOBS: u32 = 0;
 
-pub const DEFAULT_OUTPUT_RETENTION_STDOUT_BYTES: usize = 1024 * 1024;
-pub const DEFAULT_OUTPUT_RETENTION_STDERR_BYTES: usize = 1024 * 1024;
-pub const DEFAULT_OUTPUT_RETENTION_STDOUT_LINES: usize = 1_000;
-pub const DEFAULT_OUTPUT_RETENTION_STDERR_LINES: usize = 1_000;
-pub const DEFAULT_OUTPUT_RETENTION_FAILURE_TAIL_LINES: usize = 100;
-pub const DEFAULT_OUTPUT_RETENTION_POLICY: OutputRetentionPolicySpec = OutputRetentionPolicySpec {
-    stdout_bytes: DEFAULT_OUTPUT_RETENTION_STDOUT_BYTES,
-    stderr_bytes: DEFAULT_OUTPUT_RETENTION_STDERR_BYTES,
-    stdout_lines: DEFAULT_OUTPUT_RETENTION_STDOUT_LINES,
-    stderr_lines: DEFAULT_OUTPUT_RETENTION_STDERR_LINES,
-    failure_tail_lines: DEFAULT_OUTPUT_RETENTION_FAILURE_TAIL_LINES,
-};
+pub(crate) const DEFAULT_OUTPUT_RETENTION_STDOUT_BYTES: usize = 1024 * 1024;
+pub(crate) const DEFAULT_OUTPUT_RETENTION_STDERR_BYTES: usize = 1024 * 1024;
+pub(crate) const DEFAULT_OUTPUT_RETENTION_STDOUT_LINES: usize = 1_000;
+pub(crate) const DEFAULT_OUTPUT_RETENTION_STDERR_LINES: usize = 1_000;
+pub(crate) const DEFAULT_OUTPUT_RETENTION_FAILURE_TAIL_LINES: usize = 100;
+pub(crate) const DEFAULT_OUTPUT_RETENTION_POLICY: OutputRetentionPolicySpec =
+    OutputRetentionPolicySpec {
+        stdout_bytes: DEFAULT_OUTPUT_RETENTION_STDOUT_BYTES,
+        stderr_bytes: DEFAULT_OUTPUT_RETENTION_STDERR_BYTES,
+        stdout_lines: DEFAULT_OUTPUT_RETENTION_STDOUT_LINES,
+        stderr_lines: DEFAULT_OUTPUT_RETENTION_STDERR_LINES,
+        failure_tail_lines: DEFAULT_OUTPUT_RETENTION_FAILURE_TAIL_LINES,
+    };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct BuildPolicySpec {
@@ -125,15 +123,6 @@ impl ProviderExecutionPolicySpec {
             ArtifactProviderKind::Java => ResolvedCommandPolicySpec::from(&self.java),
             ArtifactProviderKind::Node => ResolvedCommandPolicySpec::from(&self.node),
             ArtifactProviderKind::Python => ResolvedCommandPolicySpec::from(&self.python),
-        }
-    }
-
-    pub fn source_command_policy(&self, provider: SourceProviderKind) -> ResolvedCommandPolicySpec {
-        match provider {
-            SourceProviderKind::Git => ResolvedCommandPolicySpec::from(&self.git),
-            SourceProviderKind::Archive => ResolvedCommandPolicySpec::from(&self.archive),
-            SourceProviderKind::Download => ResolvedCommandPolicySpec::from(&self.download),
-            SourceProviderKind::Path => ResolvedCommandPolicySpec::default(),
         }
     }
 
@@ -705,16 +694,6 @@ mod tests {
         let buildroot_policy = providers.image_command_policy(ImageProviderKind::Buildroot);
         assert_eq!(buildroot_policy.timeout_seconds, 900);
         assert_eq!(buildroot_policy.local_jobs, 2);
-        assert_eq!(
-            providers
-                .source_command_policy(SourceProviderKind::Download)
-                .retry_attempts,
-            4
-        );
-        assert_eq!(
-            providers.source_command_policy(SourceProviderKind::Path),
-            ResolvedCommandPolicySpec::default()
-        );
     }
 }
 

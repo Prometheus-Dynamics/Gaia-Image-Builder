@@ -100,7 +100,7 @@ fn ran_dependencies<'a>(
 /// per operation, on rows that never overlap, and the assembly steps as
 /// slices inside the assembly operation. Times are microseconds since
 /// execution began.
-pub fn chrome_trace(summary: &RunSummary) -> Value {
+pub(crate) fn chrome_trace(summary: &RunSummary) -> Value {
     let critical = summary
         .critical_path
         .iter()

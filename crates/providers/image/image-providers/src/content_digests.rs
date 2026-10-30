@@ -22,9 +22,9 @@ use std::time::UNIX_EPOCH;
 pub const CONTENT_DIGESTS_FILE: &str = ".gaia-content-digests";
 /// Provider bookkeeping in a collect dir, rewritten on every run and so
 /// excluded from content walks.
-pub const COLLECT_STATE_FILE: &str = ".gaia-image-state.txt";
+pub(crate) const COLLECT_STATE_FILE: &str = ".gaia-image-state.txt";
 /// Suffix of temporary files written before a rename into place.
-pub const TEMP_FILE_SUFFIX: &str = ".gaia.tmp";
+pub(crate) const TEMP_FILE_SUFFIX: &str = ".gaia.tmp";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Entry {
@@ -36,7 +36,7 @@ pub(crate) struct Entry {
 
 /// Whether a directory entry is provider bookkeeping or a temporary file, and
 /// so is not part of a collect dir's content.
-pub fn is_content_walk_excluded(name: &str) -> bool {
+pub(crate) fn is_content_walk_excluded(name: &str) -> bool {
     name == COLLECT_STATE_FILE || name == CONTENT_DIGESTS_FILE || name.ends_with(TEMP_FILE_SUFFIX)
 }
 
@@ -98,7 +98,7 @@ pub fn recorded_sha256(base: &Path, path: &Path) -> Option<String> {
 /// Records the digests of `paths` (regular files under `base`) in the
 /// manifest, hashing only those whose entry is missing or stale. Files outside
 /// `base` and non-files are skipped.
-pub fn record_content_digests(base: &Path, paths: &[PathBuf]) -> io::Result<()> {
+pub(crate) fn record_content_digests(base: &Path, paths: &[PathBuf]) -> io::Result<()> {
     record_content_entries(
         base,
         paths.iter().map(|path| (path.clone(), None)).collect(),

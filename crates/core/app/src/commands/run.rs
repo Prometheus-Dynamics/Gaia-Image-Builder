@@ -40,7 +40,7 @@ const RUN_INTERRUPTED_FILE: &str = ".gaia-run-interrupted";
 
 /// `gaia run`, or with `prefetch` the `gaia prefetch` plan: the sources and
 /// the Buildroot base only (see [`prefetch_targets`]).
-pub fn run_build_command(
+pub(crate) fn run_build_command(
     context: &AppContext,
     build: &str,
     options: &ResolveOptions,
@@ -109,7 +109,7 @@ pub fn run_build_command(
 /// operation, whose make downloads the packages. Nothing that builds an
 /// artifact, installs or assembles an image. Other image kinds have no base
 /// operation: their prefetch is the sources.
-pub fn prefetch_targets(spec: &ResolvedBuildSpec) -> Vec<PlanTarget> {
+pub(crate) fn prefetch_targets(spec: &ResolvedBuildSpec) -> Vec<PlanTarget> {
     let mut targets = vec![PlanTarget::Domain(gaia_plan::PlanDomain::Sources)];
     if matches!(
         spec.image.definition,

@@ -39,11 +39,6 @@ impl StageFileSpec {
         }
     }
 
-    pub fn with_mode(mut self, mode: u32) -> Self {
-        self.mode = Some(mode);
-        self
-    }
-
     pub fn static_asset(
         id: impl Into<StageItemId>,
         src: impl Into<String>,
@@ -60,22 +55,10 @@ impl StageFileSpec {
         Self::new(id, src, dest, StageContentOriginSpec::Generated)
     }
 
-    pub fn provider_emitted(
-        id: impl Into<StageItemId>,
-        src: impl Into<String>,
-        dest: impl Into<String>,
-    ) -> Self {
-        Self::new(id, src, dest, StageContentOriginSpec::ProviderEmitted)
-    }
-
     pub fn with_content(mut self, content: impl Into<String>) -> Self {
         self.src.clear();
         self.content = Some(content.into());
         self
-    }
-
-    pub fn src_path(&self) -> &Path {
-        Path::new(&self.src)
     }
 
     pub fn dest_path(&self) -> &Path {
@@ -97,11 +80,6 @@ impl StageEnvSetSpec {
             name: name.into(),
             entries: Vec::new(),
         }
-    }
-
-    pub fn with_entry(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.entries.push((key.into(), value.into()));
-        self
     }
 }
 
@@ -161,12 +139,12 @@ mod tests {
     fn stage_constructors_make_common_cases_explicit() {
         let file = StageFileSpec::static_asset("motd", "assets/motd", "/etc/motd");
         let generated = StageFileSpec::generated("hostname", "generated/hostname", "/etc/hostname");
-        let env = StageEnvSetSpec::new("env", "demo").with_entry("RUST_LOG", "info");
+        let env = StageEnvSetSpec::new("env", "demo");
         let service = StageServiceSpec::new("service", "demo.service", "assets/demo.service");
 
         assert_eq!(file.origin, StageContentOriginSpec::StaticAsset);
         assert_eq!(generated.origin, StageContentOriginSpec::Generated);
-        assert_eq!(env.entries, vec![("RUST_LOG".into(), "info".into())]);
+        assert!(env.entries.is_empty());
         assert_eq!(service.unit_path(), Path::new("assets/demo.service"));
     }
 }

@@ -36,11 +36,6 @@ impl std::fmt::Display for GptGuidParseError {
 }
 
 impl GptGuid {
-    /// The GUID from its bytes in text order (as written, big-endian).
-    pub const fn from_text_bytes(bytes: [u8; 16]) -> Self {
-        Self(bytes)
-    }
-
     pub fn parse(raw: &str) -> Result<Self, GptGuidParseError> {
         let invalid = || GptGuidParseError(raw.to_string());
         let text = raw.trim();
@@ -92,10 +87,10 @@ impl std::fmt::Display for GptGuid {
 
 /// Partition type GUIDs by alias: the common ones and the Discoverable
 /// Partitions Specification's root, `/usr` and verity types.
-pub struct GptPartitionType;
+pub(crate) struct GptPartitionType;
 
 impl GptPartitionType {
-    pub const ALIASES: &'static [(&'static str, &'static str)] = &[
+    pub(crate) const ALIASES: &'static [(&'static str, &'static str)] = &[
         ("linux", "0FC63DAF-8483-4772-8E79-3D69D8477DE4"),
         ("esp", "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"),
         ("bios-boot", "21686148-6449-6E6F-744E-656564454649"),
@@ -135,7 +130,7 @@ impl GptPartitionType {
         ),
     ];
 
-    pub fn from_alias(alias: &str) -> Option<GptGuid> {
+    pub(crate) fn from_alias(alias: &str) -> Option<GptGuid> {
         Self::ALIASES
             .iter()
             .find(|(name, _)| *name == alias)

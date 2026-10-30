@@ -16,7 +16,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExecutionContext {
+pub(crate) struct ExecutionContext {
     pub build_name: String,
 }
 
@@ -105,12 +105,12 @@ impl ExecutionCancellation {
         self.cancelled.store(true, Ordering::SeqCst);
     }
 
-    pub fn is_cancelled(&self) -> bool {
+    pub(crate) fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst)
     }
 }
 
-pub struct ExecutionRuntime {
+pub(crate) struct ExecutionRuntime {
     context: ExecutionContext,
     outcome: ExecutionOutcome,
     cleanup_stack: Vec<(OperationId, Option<RollbackDomain>, Vec<PathBuf>)>,
@@ -136,7 +136,7 @@ impl ExecutionRuntime {
 
     /// Records a result together with when it started, the time it took and
     /// the time the build was paused meanwhile.
-    pub fn record_timed(
+    pub(crate) fn record_timed(
         &mut self,
         result: OperationExecutionResult,
         started: Instant,
@@ -215,7 +215,7 @@ impl ExecutionRuntime {
         self.outcome.completed_ids.push(result.operation_id);
     }
 
-    pub fn emit_event(&mut self, event: ExecutionEvent) {
+    pub(crate) fn emit_event(&mut self, event: ExecutionEvent) {
         if let Some(sender) = &self.event_sender {
             let _ = sender.send(event.clone());
         }
@@ -247,7 +247,7 @@ impl ExecutionRuntime {
     /// Removes (or deliberately keeps) the partial outputs of one failed
     /// operation, without touching operations that succeeded. Used on its
     /// own under `keep_going`, where finished work is kept for reuse.
-    pub fn clean_failed_outputs(
+    pub(crate) fn clean_failed_outputs(
         &mut self,
         failed_operation_id: &OperationId,
         failed_cleanup_domain: Option<RollbackDomain>,
@@ -453,7 +453,7 @@ impl ExecutionRuntime {
     }
 }
 
-pub fn process_log_sink(
+pub(crate) fn process_log_sink(
     operation_id: OperationId,
     sender: Option<Sender<ExecutionEvent>>,
 ) -> Option<ProcessLogSink> {

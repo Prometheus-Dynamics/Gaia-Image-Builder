@@ -49,7 +49,7 @@ pub struct ExternalFile {
 
 /// Resolves a path from a build spec: `@alias` paths through the workspace,
 /// absolute paths as they are, and relative paths from the workspace root.
-pub fn resolve_tree_path(workspace: &WorkspaceSpec, raw: &str) -> PathBuf {
+pub(crate) fn resolve_tree_path(workspace: &WorkspaceSpec, raw: &str) -> PathBuf {
     let path = Path::new(raw);
     if path.is_absolute() {
         return path.to_path_buf();
@@ -259,7 +259,7 @@ fn package_of_path(relative: &str) -> BTreeSet<String> {
 /// The Buildroot packages a makefile's assignments name, by the rule
 /// `^\s*(HOST_)?([A-Z0-9_]+?)_(SUFFIX)\s*[+:?]?=`: `HOST_EROFS_UTILS_CONF_OPTS
 /// +=` names `host-erofs-utils`. Each package name is lowercase with `-`.
-pub fn packages_assigned_by(text: &str) -> BTreeSet<String> {
+pub(crate) fn packages_assigned_by(text: &str) -> BTreeSet<String> {
     let mut packages = BTreeSet::new();
     for line in text.lines() {
         let line = line.trim_start();
@@ -284,7 +284,7 @@ pub fn packages_assigned_by(text: &str) -> BTreeSet<String> {
 }
 
 /// The package a package variable (without operator) belongs to.
-pub fn package_of_variable(variable: &str) -> Option<String> {
+pub(crate) fn package_of_variable(variable: &str) -> Option<String> {
     if let Some(rest) = variable.strip_prefix("HOST_")
         && let Some(name) = package_of_suffixed(rest)
     {

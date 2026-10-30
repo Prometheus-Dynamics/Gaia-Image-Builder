@@ -16,7 +16,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The script settings, with the label each component is named by.
-pub const POST_SCRIPT_SETTINGS: &[(&str, &str)] = &[
+pub(crate) const POST_SCRIPT_SETTINGS: &[(&str, &str)] = &[
     ("BR2_ROOTFS_POST_BUILD_SCRIPT", "post-build script"),
     ("BR2_ROOTFS_POST_IMAGE_SCRIPT", "post-image script"),
     ("BR2_ROOTFS_POST_FAKEROOT_SCRIPT", "post-fakeroot script"),
@@ -27,7 +27,7 @@ const SIBLING_HASH_LIMIT: u64 = 1 << 20;
 
 /// The settings a build resolves to. Precedence, lowest first: the defconfig,
 /// the config fragments, the config overrides.
-pub fn resolved_settings(
+pub(crate) fn resolved_settings(
     workspace: &WorkspaceSpec,
     buildroot: &BuildrootImageSpec,
     trees: &[ExternalTree],

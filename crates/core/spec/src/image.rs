@@ -248,10 +248,6 @@ impl BuildrootImageSpec {
     pub fn defconfig_path(&self) -> Option<&Path> {
         self.defconfig_path.as_deref().map(Path::new)
     }
-
-    pub fn external_tree_path(&self) -> Option<&Path> {
-        self.external_tree.as_deref().map(Path::new)
-    }
 }
 
 impl Default for BuildrootImageSpec {
@@ -468,12 +464,6 @@ pub struct ImageOutputSpec {
     /// than one disk.
     pub disk: Option<String>,
     pub emit_report: bool,
-}
-
-impl ImageOutputSpec {
-    pub fn collect_dir_path(&self) -> Option<&Path> {
-        self.collect_dir.as_deref().map(Path::new)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]

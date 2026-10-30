@@ -11,15 +11,14 @@ mod stage_content;
 pub use buildroot_external_files::{
     ExternalChanges, ExternalFile, ExternalTree, decode_external_state, encode_external_state,
     external_changes, external_package_digests, external_tree_files, external_tree_files_cached,
-    external_trees, packages_assigned_by, resolve_tree_path,
+    external_trees,
 };
-pub use buildroot_scripts::{POST_SCRIPT_SETTINGS, expand_external_paths, post_script_components};
+pub use buildroot_scripts::{expand_external_paths, post_script_components};
 pub use content_digests::{
-    COLLECT_STATE_FILE, CONTENT_DIGESTS_FILE, TEMP_FILE_SUFFIX, collect_content_files, hex_lower,
-    is_content_walk_excluded, record_collect_dir_digests, record_content_digests, recorded_sha256,
-    sha256_hex,
+    CONTENT_DIGESTS_FILE, collect_content_files, hex_lower, record_collect_dir_digests,
+    recorded_sha256, sha256_hex,
 };
-pub use digest_batch::{TreeFileDigests, digests_of_files, parallel_map, regular_files_under};
+pub use digest_batch::{TreeFileDigests, parallel_map};
 pub use gaia_process::{
     ProcessCancelCheck, ProcessLogLine, ProcessLogSink, ProcessOutputRetention,
 };
@@ -27,7 +26,7 @@ use gaia_spec::{
     BuildrootOverrideCheckSpec, ImageDefinition, ImageProviderKind, ImageSpec, ResolvedBuildSpec,
     RetryBackoffStrategySpec,
 };
-pub use materialize::{finalize_temp_image_output, materialize_image_output};
+pub use materialize::materialize_image_output;
 pub use registry_cache::{RegistryCacheUse, registry_cache_from_spec};
 pub use retry::{AttemptFailure, RetryRun, retry_backoff_duration, run_with_retries};
 pub use stage_content::stage_file_source;
@@ -41,6 +40,7 @@ pub fn record_content_digests_known(
 ) -> std::io::Result<()> {
     content_digests::record_content_entries(base, items)
 }
+pub(crate) use digest_batch::digests_of_files;
 use gaia_spec::Fingerprint;
 pub use preview::{
     ImagePreview, PreviewCleanKind, PreviewDeletion, PreviewDeletionKind, PreviewSection,

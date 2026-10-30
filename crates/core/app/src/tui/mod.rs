@@ -29,7 +29,7 @@ use crate::commands::{
 };
 
 /// How the TUI was invoked from the command line.
-pub struct TuiLaunch<'a> {
+pub(crate) struct TuiLaunch<'a> {
     pub build: &'a str,
     /// Whether the user named a build config, as opposed to a default.
     pub build_explicit: bool,
@@ -37,7 +37,7 @@ pub struct TuiLaunch<'a> {
     pub builds_dir: Option<&'a str>,
 }
 
-pub fn run_tui_command(
+pub(crate) fn run_tui_command(
     context: &AppContext,
     launch: TuiLaunch<'_>,
     options: &ResolveOptions,

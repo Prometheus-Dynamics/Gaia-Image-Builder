@@ -326,7 +326,7 @@ impl MbrPartitionType {
         }
     }
 
-    pub fn from_alias(raw: &str) -> Result<Self, MbrPartitionTypeParseError> {
+    pub(crate) fn from_alias(raw: &str) -> Result<Self, MbrPartitionTypeParseError> {
         match raw {
             "fat32-lba" => Ok(Self::Fat32Lba),
             "linux" => Ok(Self::Linux),
@@ -334,7 +334,7 @@ impl MbrPartitionType {
         }
     }
 
-    pub fn from_raw_hex(raw: &str) -> Result<Self, MbrPartitionTypeParseError> {
+    pub(crate) fn from_raw_hex(raw: &str) -> Result<Self, MbrPartitionTypeParseError> {
         let trimmed = raw.trim();
         let value = trimmed
             .strip_prefix("0x")
@@ -458,7 +458,7 @@ impl AssemblyPathTemplate {
         Ok(())
     }
 
-    pub fn resolve(
+    pub(crate) fn resolve(
         &self,
         context: &AssemblyPathTemplateContext<'_>,
     ) -> Result<String, AssemblyPathTemplateError> {
@@ -479,7 +479,7 @@ impl AssemblyPathTemplate {
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize)]
-pub struct AssemblyPathTemplateContext<'a> {
+pub(crate) struct AssemblyPathTemplateContext<'a> {
     pub provider_kind: ImageProviderKind,
     pub provider_images: &'a Path,
     pub provider_buildroot_output: Option<&'a Path>,

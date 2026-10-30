@@ -337,7 +337,7 @@ fn output_paths(spec: &ResolvedBuildSpec) -> Vec<String> {
 }
 
 /// Messages for every pair of variants that would write the same output
-/// path (see [`output_paths`]). `specs` are the resolved, output-scoped
+/// path (see `output_paths`). `specs` are the resolved, output-scoped
 /// variant specs.
 pub fn variant_output_collisions(specs: &[ResolvedBuildSpec]) -> Vec<String> {
     let mut by_path = BTreeMap::<String, Vec<&str>>::new();

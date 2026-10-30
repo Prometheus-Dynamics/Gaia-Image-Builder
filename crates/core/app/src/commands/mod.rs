@@ -35,16 +35,16 @@ use std::time::Duration;
 use crate::{AppArgs, AppCommand, AppContext};
 use gaia_config::ResolveOptions;
 
-pub use cache::cache_command;
-pub use clean::{CleanReport, clean_build_command};
-pub use lock::{LockChange, LockReport, LockReportEntry, lock_build_command};
-pub use plan::plan_build_command;
-pub use preview::{PreviewReport, preview_build_command};
+pub(crate) use cache::cache_command;
+pub(crate) use clean::{CleanReport, clean_build_command};
+pub(crate) use lock::{LockChange, LockReport, lock_build_command};
+pub(crate) use plan::plan_build_command;
+pub(crate) use preview::{PreviewReport, preview_build_command};
 pub(crate) use preview::{preview_json, print_preview};
-pub use resolve::resolve_build_command;
-pub use run::run_build_command;
-pub use state::{load_operation_durations, load_reuse_state, save_reuse_state};
-pub use validate::validate_build_command;
+pub(crate) use resolve::resolve_build_command;
+pub(crate) use run::run_build_command;
+pub(crate) use state::{load_operation_durations, load_reuse_state, save_reuse_state};
+pub(crate) use validate::validate_build_command;
 
 // Keep command outcomes value-typed so tests and callers can match complete
 // results without chasing boxed variants through the command boundary.
@@ -126,10 +126,8 @@ pub struct VariantOutcome {
     pub outcome: CommandOutcome,
 }
 
-pub type CommandResult = CommandOutcome;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RunArtifacts {
+pub(crate) struct RunArtifacts {
     pub spec: ResolvedBuildSpec,
     pub validation: ValidationReport,
     pub plan: ExecutionPlan,

@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-pub const RUNTIME_STATE_DIR_NAME: &str = ".gaia/runtime";
 pub const IMAGE_ASSEMBLY_STATE_FILE_NAME: &str = "image-assembly.state";
 pub const IMAGE_ASSEMBLY_STATE_KIND: &str = "image-assembly";
 

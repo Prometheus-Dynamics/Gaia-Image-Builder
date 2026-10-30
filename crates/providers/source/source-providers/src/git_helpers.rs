@@ -468,7 +468,7 @@ fn write_selected_subdir_marker(
 }
 
 /// One mirror per repository, shared by every branch, tag and revision.
-pub fn remote_git_cache_key(repo: &str) -> String {
+pub(crate) fn remote_git_cache_key(repo: &str) -> String {
     let mut fingerprint = gaia_spec::Fingerprint::new("git-mirror");
     fingerprint.str(repo);
     format!("repo-{}", fingerprint.finish().short_hex())

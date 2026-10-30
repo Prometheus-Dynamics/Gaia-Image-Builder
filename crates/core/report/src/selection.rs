@@ -4,7 +4,7 @@ use crate::masking::{mask_pairs, mask_value};
 use crate::model::{PrecedenceLayerReport, SelectionReport};
 use crate::state::rollback_domains;
 
-pub fn render_selection(spec: &ResolvedBuildSpec) -> SelectionReport {
+pub(crate) fn render_selection(spec: &ResolvedBuildSpec) -> SelectionReport {
     SelectionReport {
         requested_build: spec.selection.requested_build.clone(),
         selected_build_file: spec.selection.selected_build_file.clone(),

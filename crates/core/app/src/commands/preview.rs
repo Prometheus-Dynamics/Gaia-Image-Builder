@@ -115,7 +115,7 @@ impl PreviewReport {
 
 // The flags are the command's own; a struct would only move them.
 #[allow(clippy::too_many_arguments)]
-pub fn preview_build_command(
+pub(crate) fn preview_build_command(
     context: &AppContext,
     build: &str,
     options: &ResolveOptions,

@@ -1,3 +1,4 @@
+use crate::outputs::materialize_artifact_output;
 use crate::*;
 use gaia_spec::{
     ArtifactDefinition, ArtifactExecutionSpec, ArtifactOutputSpec, ArtifactVariantSpec,
@@ -412,7 +413,8 @@ fn artifact_execution_backend_prefers_explicit_setting_over_global_default() {
         ArtifactExecutionContract::default_command_policy(),
         gaia_spec::OutputRetentionPolicySpec::default(),
     )
-    .with_build_context(&spec);
+    .try_with_build_context(&spec)
+    .expect("build context");
     let explicit_host_contract = ArtifactExecutionContract::from_spec(
         &explicit_host,
         None,
@@ -420,7 +422,8 @@ fn artifact_execution_backend_prefers_explicit_setting_over_global_default() {
         ArtifactExecutionContract::default_command_policy(),
         gaia_spec::OutputRetentionPolicySpec::default(),
     )
-    .with_build_context(&spec);
+    .try_with_build_context(&spec)
+    .expect("build context");
 
     assert!(matches!(
         inherited_contract.execution_backend,

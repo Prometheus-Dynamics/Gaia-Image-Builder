@@ -27,7 +27,7 @@ pub fn is_valid_variant_id(id: &str) -> bool {
 }
 
 /// `@<variant>` for a variant spec, empty for a build with no variants.
-pub fn variant_name_suffix(variant: Option<&str>) -> String {
+pub(crate) fn variant_name_suffix(variant: Option<&str>) -> String {
     variant
         .map(|variant| format!("@{variant}"))
         .unwrap_or_default()

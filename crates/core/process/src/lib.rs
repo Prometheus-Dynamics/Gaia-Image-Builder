@@ -37,28 +37,22 @@ mod stream;
 mod tar;
 mod trash;
 
-pub use build_progress::{
-    BUILD_PROGRESS_PREFIX, BuildProgress, build_progress_message, parse_build_progress,
-};
+pub use build_progress::{BuildProgress, build_progress_message, parse_build_progress};
 pub use digest::{hex, sha256_file, sha256_hex_bytes};
 pub use docker::{
-    DockerRunError, DockerRunSpec, absolute_docker_mount_candidate, discover_docker_mounts,
-    docker_image_build_command, docker_image_id_command, docker_local_image_tag,
-    docker_mount_candidates, docker_run_command, normalize_docker_mount_path,
-    register_docker_mount, register_read_only_docker_mount,
+    DockerRunError, DockerRunSpec, docker_image_build_command, docker_image_id_command,
+    docker_local_image_tag, docker_run_command, register_docker_mount,
+    register_read_only_docker_mount,
 };
 pub use docker_context::docker_build_context_hash;
-pub use docker_reuse::{
-    ReusedContainersGuard, docker_reused_exec_command, remove_reused_containers,
-};
+pub use docker_reuse::{ReusedContainersGuard, docker_reused_exec_command};
 pub use git::git_command;
 pub use pause::{ActiveClock, is_paused, paused_total, request_pause, request_resume};
 #[cfg(any(test, feature = "test-support"))]
 pub use registry::fake;
 pub use registry::{
-    ARTIFACT_TYPE, EMPTY_CONFIG_MEDIA_TYPE, MANIFEST_MEDIA_TYPE, PulledEntry, PushOutcome,
-    RegistryError, RegistryTarget, RemoteCache, SignatureKind, created_epoch_seconds, pack_entry,
-    unpack_entry,
+    PushOutcome, RegistryError, RegistryTarget, RemoteCache, SignatureKind, created_epoch_seconds,
+    pack_entry, unpack_entry,
 };
 use retention::{
     StreamDrainState, drain_stream_messages, drain_stream_messages_until_idle,

@@ -18,7 +18,7 @@ use crate::{
 
 /// Resolves a `${assembly.sha256_tree:...}` value: each regular file's path
 /// under the tree, with its sha256 hex.
-pub type TreeDigestResolver<'a> =
+pub(crate) type TreeDigestResolver<'a> =
     dyn FnMut(&AssemblyPathTemplate) -> Result<Vec<(String, String)>, String> + 'a;
 
 /// One JSON value of a generated document.
@@ -209,7 +209,7 @@ fn push_separator(out: &mut String, index: usize, len: usize) {
 }
 
 /// `text` as a JSON string literal.
-pub fn json_string(text: &str) -> String {
+pub(crate) fn json_string(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 2);
     out.push('"');
     for ch in text.chars() {

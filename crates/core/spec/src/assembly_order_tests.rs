@@ -47,10 +47,6 @@ fn readers_run_after_writers_whatever_their_kind() {
             AssemblyStep::Archive(0),
         ])
     );
-    assert_eq!(
-        assembly_steps_reading_later_outputs(&steps),
-        [(AssemblyStep::Transform(0), AssemblyStep::Filesystem(0))]
-    );
 }
 
 #[test]
@@ -72,7 +68,6 @@ fn independent_steps_keep_the_classic_order() {
             AssemblyStep::Disk(0),
         ])
     );
-    assert!(assembly_steps_reading_later_outputs(&steps).is_empty());
 }
 
 #[test]

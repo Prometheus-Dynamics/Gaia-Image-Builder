@@ -271,7 +271,7 @@ impl DockerContainer {
     }
 }
 
-pub fn discover_docker_mounts(
+pub(crate) fn discover_docker_mounts(
     command: &Command,
     workspace_root: &Path,
     current_dir: &Path,
@@ -286,11 +286,6 @@ pub fn discover_docker_mounts(
     mounts.into_iter().collect()
 }
 
-/// The first directory [`docker_mount_candidates`] finds in `arg`.
-pub fn absolute_docker_mount_candidate(arg: &str) -> Option<PathBuf> {
-    docker_mount_candidates(arg).into_iter().next()
-}
-
 /// The existing directories to mount for the absolute paths in `arg`: a
 /// path itself, `file://<path>`, or `NAME=<value>` whose value may list
 /// several whitespace-separated paths (`BR2_ROOTFS_POST_BUILD_SCRIPT=/a.sh
@@ -298,7 +293,7 @@ pub fn absolute_docker_mount_candidate(arg: &str) -> Option<PathBuf> {
 /// mounted: docker would create a missing bind-mount source as root, and a
 /// value read as one path (`/a.sh board`) left a root-owned directory the
 /// build user can no longer remove.
-pub fn docker_mount_candidates(arg: &str) -> Vec<PathBuf> {
+pub(crate) fn docker_mount_candidates(arg: &str) -> Vec<PathBuf> {
     let value = arg
         .strip_prefix("file://")
         .or_else(|| arg.split_once('=').map(|(_, value)| value))
@@ -319,14 +314,6 @@ fn existing_mount_dir(path: &Path) -> Option<PathBuf> {
     path.parent()
         .filter(|parent| parent.is_dir())
         .map(Path::to_path_buf)
-}
-
-pub fn normalize_docker_mount_path(path: &Path) -> PathBuf {
-    if path.is_dir() {
-        path.to_path_buf()
-    } else {
-        path.parent().unwrap_or(path).to_path_buf()
-    }
 }
 
 /// Directories every container of this process mounts at their own path:
@@ -642,10 +629,6 @@ mod tests {
         // The script's directory; never `<script> board/...` (read as one
         // path, docker created it as root) and never the missing path.
         assert_eq!(docker_mount_candidates(&arg), vec![scripts.clone()]);
-        assert_eq!(
-            absolute_docker_mount_candidate(&format!("file://{}", scripts.display())),
-            Some(scripts.clone())
-        );
     }
 
     #[test]

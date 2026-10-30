@@ -1,4 +1,5 @@
 use super::*;
+use crate::download::download_cache_path;
 use gaia_spec::{CleanPolicy, GitBackendSpec, SourceSpec, WorkspaceSpec};
 use gaia_testkit::TempDir;
 

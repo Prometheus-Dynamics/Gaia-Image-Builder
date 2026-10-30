@@ -18,7 +18,7 @@ mod source_tokens;
 mod unknown_keys;
 mod variants;
 
-pub use compile::compile_config;
+pub(crate) use compile::compile_config;
 pub use gaia_version::GAIA_VERSION;
 pub use schema::config_schema_json;
 pub use variants::{

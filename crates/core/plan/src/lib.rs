@@ -17,30 +17,31 @@ mod runtime_libs;
 mod targets;
 mod tree_digest;
 
-pub use elf::{ElfObject, VersionNeed, parse_elf};
-pub use elf::{ElfSections, elf_sections, elf_sections_of_file};
+pub use elf::{ElfObject, parse_elf};
+pub use elf::{elf_sections, elf_sections_of_file};
 pub use estimate::{PlanEstimate, estimate_plan, format_duration_short};
 pub use graph::{ExecutionPlan, PlanDiagnostic, ReuseState};
+pub use operations::RebuildReason;
 pub use operations::{
     OperationId, OperationKind, OperationOptionality, OperationParallelism,
     OperationParallelismDomain, OperationParallelismMode, OperationReuse, PlannedOperation,
-    RebuildReason,
 };
-pub use rebuild::{REBUILD_REQUESTED, RebuildRequest};
+pub(crate) use rebuild::REBUILD_REQUESTED;
+pub use rebuild::RebuildRequest;
 pub use reuse::{
-    FINGERPRINT_SCHEME_CHANGED, operation_content_signature, operation_input_signature,
-    operation_output_signature, source_content_identity, spec_fingerprint,
+    operation_content_signature, operation_input_signature, operation_output_signature,
+    source_content_identity, spec_fingerprint,
 };
 pub use reuse_details::{fingerprint_change_detail, operation_components, recorded_fingerprint};
 pub use reuse_explain::{InvalidationSummary, invalidation_summary};
 pub use reuse_inputs::operation_fingerprint;
 pub use reuse_toolchain::toolchain_identity;
 pub use runtime_libs::{
-    RuntimeClosure, RuntimeEntry, derive_sysroot, find_sysroot_library, is_dynamic_elf,
-    missing_runtime_libraries, missing_runtime_libraries_in_roots, resolve_runtime_closure,
+    RuntimeClosure, RuntimeEntry, find_sysroot_library, is_dynamic_elf, missing_runtime_libraries,
+    missing_runtime_libraries_in_roots, resolve_runtime_closure,
 };
 pub use targets::{PlanDomain, PlanTarget};
-pub use tree_digest::{tree_copy_signature, tree_digest_members, tree_digest_signature};
+pub use tree_digest::tree_digest_members;
 
 /// ELF objects for tests that copy binaries (`test-fixtures` feature).
 #[cfg(feature = "test-fixtures")]

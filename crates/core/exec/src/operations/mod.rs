@@ -159,7 +159,7 @@ pub fn recorded_assembly_outputs(spec: &gaia_spec::ResolvedBuildSpec) -> Vec<Pro
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OperationExecutionResult {
+pub(crate) struct OperationExecutionResult {
     pub operation_id: OperationId,
     pub events: Vec<ExecutionEvent>,
     pub error: Option<ExecutionError>,

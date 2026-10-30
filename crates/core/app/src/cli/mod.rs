@@ -2,7 +2,7 @@ use std::{env, fs, path::Path};
 
 /// The error for a command that needs a build config when none was named
 /// and the current directory has none.
-pub const NO_BUILD_CONFIG_ERROR: &str = "no build config found; pass a path or run in a directory with build.toml or another *.toml build config";
+pub(crate) const NO_BUILD_CONFIG_ERROR: &str = "no build config found; pass a path or run in a directory with build.toml or another *.toml build config";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppArgs {

@@ -15,7 +15,7 @@ use super::CommandOutcome;
 
 /// One cached build of a package.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CacheEntry {
+pub(crate) struct CacheEntry {
     pub level: PackageCacheLevelSpec,
     pub package: String,
     /// The entry's file stem: the package key, with `@<path digest>` for a
@@ -39,7 +39,7 @@ pub(super) struct CacheReport {
 
 /// `build_explicit` is false when the build config is a default: `cache
 /// stats` then still reports the user-wide caches if it does not resolve.
-pub fn cache_command(
+pub(crate) fn cache_command(
     build: &str,
     build_explicit: bool,
     options: &ResolveOptions,
@@ -295,7 +295,9 @@ fn run_cache_command(spec: &ResolvedBuildSpec, args: &CacheArgs) -> Result<Cache
 /// The package cache levels of a build, in lookup order: the configured
 /// directories, or the defaults Gaia uses (the system level under the user
 /// cache root, the project level in the workspace).
-pub fn package_cache_levels(spec: &ResolvedBuildSpec) -> Vec<(PackageCacheLevelSpec, PathBuf)> {
+pub(crate) fn package_cache_levels(
+    spec: &ResolvedBuildSpec,
+) -> Vec<(PackageCacheLevelSpec, PathBuf)> {
     let settings = &spec.policy.providers.buildroot.package_cache;
     let workspace = PathBuf::from(&spec.workspace.root_dir);
     let resolve = |dir: &str| {
@@ -343,7 +345,7 @@ pub(super) fn ccache_dirs(spec: &ResolvedBuildSpec) -> Vec<PathBuf> {
 
 /// The entries of one level: `<package>/<key>.json` manifests with their
 /// `<key>/` directory (or the `<key>.tar.zst` archive of earlier versions).
-pub fn cache_entries(level: PackageCacheLevelSpec, dir: &Path) -> Vec<CacheEntry> {
+pub(crate) fn cache_entries(level: PackageCacheLevelSpec, dir: &Path) -> Vec<CacheEntry> {
     let mut entries = Vec::new();
     for package in fs::read_dir(dir).into_iter().flatten().flatten() {
         let Some(package_name) = package.file_name().to_str().map(str::to_string) else {

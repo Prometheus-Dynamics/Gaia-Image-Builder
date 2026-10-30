@@ -154,7 +154,7 @@ pub struct OperationTimingRecord {
 
 impl OperationTimingRecord {
     /// When it finished, in milliseconds since execution began.
-    pub fn end_ms(&self) -> u64 {
+    pub(crate) fn end_ms(&self) -> u64 {
         self.start_ms
             .saturating_add(self.duration_ms)
             .saturating_add(self.paused_ms)

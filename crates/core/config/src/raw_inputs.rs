@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawInputOptionConfig {
+pub(crate) struct RawInputOptionConfig {
     pub description: Option<String>,
     pub kind: RawInputKind,
     pub required: bool,
@@ -14,7 +14,7 @@ pub struct RawInputOptionConfig {
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawInputKind {
+pub(crate) enum RawInputKind {
     #[default]
     String,
     Integer,
@@ -24,14 +24,14 @@ pub enum RawInputKind {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawInputDefaultFrom {
+pub(crate) enum RawInputDefaultFrom {
     FirstChoice,
     LatestStable,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawInputChoicesFromConfig {
+pub(crate) struct RawInputChoicesFromConfig {
     pub kind: RawInputChoicesFromKind,
     pub repo: String,
     pub source: Option<String>,
@@ -101,7 +101,7 @@ impl Default for RawInputChoicesFromConfig {
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawInputChoicesFromKind {
+pub(crate) enum RawInputChoicesFromKind {
     #[default]
     GitTags,
     GitBranches,
@@ -112,7 +112,7 @@ pub enum RawInputChoicesFromKind {
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawInputChoicesSort {
+pub(crate) enum RawInputChoicesSort {
     LexicalAsc,
     LexicalDesc,
     VersionAsc,
@@ -124,7 +124,7 @@ pub enum RawInputChoicesSort {
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawInputVersionScheme {
+pub(crate) enum RawInputVersionScheme {
     Semver,
     #[default]
     Versionish,
@@ -132,7 +132,7 @@ pub enum RawInputVersionScheme {
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawInputChoicesRefresh {
+pub(crate) enum RawInputChoicesRefresh {
     #[default]
     Auto,
     Always,
@@ -141,7 +141,7 @@ pub enum RawInputChoicesRefresh {
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawInputChoicesErrorMode {
+pub(crate) enum RawInputChoicesErrorMode {
     #[default]
     Fail,
     Warn,

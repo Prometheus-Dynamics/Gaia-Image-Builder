@@ -29,7 +29,7 @@ macro_rules! id_type {
                 Self(value.into())
             }
 
-            pub fn try_new(value: impl Into<String>) -> Result<Self, IdError> {
+            pub(crate) fn try_new(value: impl Into<String>) -> Result<Self, IdError> {
                 let value = value.into();
                 if value.trim().is_empty() {
                     Err(IdError::empty())

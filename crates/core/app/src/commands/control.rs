@@ -61,7 +61,7 @@ pub(crate) fn control_target<'a>(
     }
 }
 
-pub fn control_command(
+pub(crate) fn control_command(
     build: Option<&str>,
     options: &ResolveOptions,
     command: AppCommand,

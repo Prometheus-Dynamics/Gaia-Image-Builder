@@ -25,14 +25,14 @@ use scheduler::{
     next_pending_operation_id, resolve_parallel_jobs, schedule_ready_operations,
 };
 
+pub(crate) use operations::OperationExecutionResult;
 pub use operations::{
-    ExecutionCleanupStatus, ExecutionError, ExecutionErrorKind, ExecutionEvent,
-    OperationExecutionResult, ProducedOutput, ProducedOutputKind, image_execution_policy,
-    recorded_assembly_outputs,
+    ExecutionCleanupStatus, ExecutionError, ExecutionErrorKind, ExecutionEvent, ProducedOutput,
+    ProducedOutputKind, image_execution_policy, recorded_assembly_outputs,
 };
+pub(crate) use runtime::ExecutionContext;
 pub use runtime::{
-    CleanupFailure, ExecutionCancellation, ExecutionContext, ExecutionOutcome, OperationTiming,
-    OperationTimingStatus,
+    CleanupFailure, ExecutionCancellation, ExecutionOutcome, OperationTiming, OperationTimingStatus,
 };
 
 pub struct ExecutionProviders<'a> {

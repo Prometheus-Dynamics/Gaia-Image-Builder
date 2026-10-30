@@ -39,11 +39,11 @@ pub use manifest::created_epoch_seconds;
 use scratch::Scratch;
 
 /// Artifact type of an entry's layer.
-pub const ARTIFACT_TYPE: &str = "application/vnd.gaia.cache.v1+tar";
+pub(crate) const ARTIFACT_TYPE: &str = "application/vnd.gaia.cache.v1+tar";
 /// Media type of the empty config blob every entry and signature carries.
-pub const EMPTY_CONFIG_MEDIA_TYPE: &str = "application/vnd.oci.empty.v1+json";
+pub(crate) const EMPTY_CONFIG_MEDIA_TYPE: &str = "application/vnd.oci.empty.v1+json";
 /// Media type of the manifests this client writes and reads.
-pub const MANIFEST_MEDIA_TYPE: &str = "application/vnd.oci.image.manifest.v1+json";
+pub(crate) const MANIFEST_MEDIA_TYPE: &str = "application/vnd.oci.image.manifest.v1+json";
 
 /// Media type of a signature manifest's layer.
 const SIGNATURE_LAYER_MEDIA_TYPE: &str = "application/vnd.gaia.signature.v1";

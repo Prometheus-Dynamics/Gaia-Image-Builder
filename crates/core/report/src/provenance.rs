@@ -10,7 +10,10 @@ use crate::state::{
     output_hygiene_warnings, read_backend_state, rollback_domains, runtime_state_dir,
 };
 
-pub fn render_provenance(spec: &ResolvedBuildSpec, outcome: &ExecutionOutcome) -> ProvenanceReport {
+pub(crate) fn render_provenance(
+    spec: &ResolvedBuildSpec,
+    outcome: &ExecutionOutcome,
+) -> ProvenanceReport {
     let mut source_providers = Vec::new();
     for source in &spec.sources {
         let provider = format!("{:?}", source.provider_kind());

@@ -30,7 +30,7 @@ pub(crate) const COMMAND_SIGNATURE_TIMEOUT_SECONDS: u64 = 10;
 
 /// Reason code of an operation whose reuse state predates the current
 /// fingerprint scheme.
-pub const FINGERPRINT_SCHEME_CHANGED: &str = "fingerprint_scheme_changed";
+pub(crate) const FINGERPRINT_SCHEME_CHANGED: &str = "fingerprint_scheme_changed";
 
 /// Fingerprint of the whole spec, recorded in the reuse state's first line.
 pub fn spec_fingerprint(spec: &ResolvedBuildSpec) -> u64 {

@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 /// Prefix of the log messages that carry an operation's inner progress.
-pub const BUILD_PROGRESS_PREFIX: &str = "build progress: ";
+pub(crate) const BUILD_PROGRESS_PREFIX: &str = "build progress: ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildProgress {

@@ -114,7 +114,7 @@ impl AssemblyValueToken {
 
     /// Whether the token's text is a decimal integer, so a JSON value that is
     /// exactly this token is written as a number.
-    pub fn is_numeric(&self) -> bool {
+    pub(crate) fn is_numeric(&self) -> bool {
         match self {
             Self::Digest(_) | Self::TreeDigest(_) => false,
             Self::Verity(token) => token.field.is_numeric(),
@@ -187,7 +187,7 @@ pub enum AssemblyVerityField {
 
 impl AssemblyVerityField {
     /// Whether the field is a decimal integer rather than hex text.
-    pub fn is_numeric(self) -> bool {
+    pub(crate) fn is_numeric(self) -> bool {
         !matches!(self, Self::RootHash | Self::Salt)
     }
 

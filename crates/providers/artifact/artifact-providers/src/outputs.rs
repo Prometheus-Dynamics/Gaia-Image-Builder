@@ -5,7 +5,7 @@ use crate::{
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub fn materialize_artifact_output(
+pub(crate) fn materialize_artifact_output(
     contract: &ArtifactExecutionContract,
     contents: &str,
 ) -> Result<(), ArtifactProviderError> {
@@ -56,7 +56,7 @@ pub fn materialize_artifact_output(
     Ok(())
 }
 
-pub fn finalize_temp_output(
+pub(crate) fn finalize_temp_output(
     temp_output: &Path,
     output_path: &Path,
     label: &str,
@@ -127,7 +127,9 @@ pub fn copy_artifact_file_to_output(
     finalize_temp_output(&temp_output, output_path, label)
 }
 
-pub fn artifact_marker_contract(contract: &ArtifactExecutionContract) -> ArtifactExecutionContract {
+pub(crate) fn artifact_marker_contract(
+    contract: &ArtifactExecutionContract,
+) -> ArtifactExecutionContract {
     ArtifactExecutionContract {
         output: crate::ArtifactOutputContract {
             path: artifact_sidecar_path(contract, "gaia-build.txt")
@@ -172,7 +174,7 @@ pub fn artifact_sidecar_path(contract: &ArtifactExecutionContract, suffix: &str)
     }
 }
 
-pub fn materialize_artifact_state(
+pub(crate) fn materialize_artifact_state(
     contract: &ArtifactExecutionContract,
     contents: &str,
 ) -> Result<(), ArtifactProviderError> {
@@ -197,7 +199,7 @@ pub fn materialize_artifact_state(
         .map_err(ArtifactProviderError::runtime_state)
 }
 
-pub fn render_build_context_state(contract: &ArtifactExecutionContract) -> String {
+pub(crate) fn render_build_context_state(contract: &ArtifactExecutionContract) -> String {
     let (execution_backend, execution_backend_image) = match &contract.execution_backend {
         ArtifactExecutionBackend::Host => ("host", ""),
         ArtifactExecutionBackend::Docker(docker) => ("docker", docker.image.as_str()),

@@ -8,7 +8,7 @@ use gaia_spec::ResolvedToolchain;
 
 /// The file a relocated SDK root gets, so `relocate-sdk.sh` runs once per
 /// extracted location.
-pub const RELOCATED_MARKER: &str = ".gaia-relocated";
+pub(crate) const RELOCATED_MARKER: &str = ".gaia-relocated";
 
 /// A toolchain resolved for one artifact build: its paths on this machine.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -12,7 +12,7 @@ use crate::state::{
     output_hygiene_warnings, read_backend_state, rollback_domains, runtime_state_dir,
 };
 
-pub fn render_manifest(spec: &ResolvedBuildSpec, plan: &ExecutionPlan) -> ManifestReport {
+pub(crate) fn render_manifest(spec: &ResolvedBuildSpec, plan: &ExecutionPlan) -> ManifestReport {
     ManifestReport {
         rollback_on_error: spec.policy.failure.rollback_on_error,
         preserve_failed_outputs: spec.policy.failure.preserve_failed_outputs,
@@ -192,7 +192,7 @@ pub fn render_manifest(spec: &ResolvedBuildSpec, plan: &ExecutionPlan) -> Manife
     }
 }
 
-pub fn render_manifest_with_outcome(
+pub(crate) fn render_manifest_with_outcome(
     spec: &ResolvedBuildSpec,
     plan: &ExecutionPlan,
     outcome: &ExecutionOutcome,

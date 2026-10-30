@@ -18,17 +18,16 @@ use gaia_source_providers::SourceProviderCatalog;
 use std::any::Any;
 use std::panic::{self, AssertUnwindSafe};
 
-pub use cli::{AppArgs, AppCommand, CacheArgs, CleanArgs, LockArgs};
-pub use commands::{
-    CommandOutcome, CommandResult, LockChange, LockReport, LockReportEntry, VariantOutcome,
-};
+pub use cli::{AppArgs, AppCommand};
+pub(crate) use cli::{CacheArgs, CleanArgs, LockArgs};
+pub use commands::{CommandOutcome, VariantOutcome};
 use output::print_outcome;
 pub use output::{backend_overview_lines, runtime_overview_lines};
 pub use output_json::{JSON_SCHEMA_VERSION, outcome_json};
 pub use run_finish::{RunFinish, run_finish};
 
 #[derive(Default)]
-pub struct AppContext {
+pub(crate) struct AppContext {
     pub source_catalog: SourceProviderCatalog,
     pub artifact_catalog: ArtifactProviderCatalog,
     pub image_catalog: ImageProviderCatalog,

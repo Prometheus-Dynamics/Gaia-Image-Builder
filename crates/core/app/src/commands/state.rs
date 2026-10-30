@@ -16,7 +16,7 @@ const SCHEME_PREFIX: &str = "scheme=";
 /// Last recorded wall-clock duration (ms) per operation id. Read tolerantly:
 /// malformed lines are skipped, and durations are kept even when the rest of
 /// the state no longer matches the spec, since they are only estimates.
-pub fn load_operation_durations(spec: &ResolvedBuildSpec) -> BTreeMap<String, u64> {
+pub(crate) fn load_operation_durations(spec: &ResolvedBuildSpec) -> BTreeMap<String, u64> {
     fs::read_to_string(reuse_state_path(spec))
         .map(|contents| parse_operation_durations(&contents))
         .unwrap_or_default()
@@ -38,7 +38,7 @@ fn parse_operation_durations(contents: &str) -> BTreeMap<String, u64> {
 /// fingerprint they were recorded under. Read from the `.details` sidecar of
 /// the reuse state, which older Gaia versions never read or write.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RecordedComponents {
+pub(crate) struct RecordedComponents {
     pub fingerprint: u64,
     /// `(name, digest)` pairs as `gaia_plan::operation_components` lists them.
     pub components: Vec<(String, String)>,
@@ -46,7 +46,9 @@ pub struct RecordedComponents {
 
 /// Recorded inputs per operation id. Missing or unreadable details yield an
 /// empty map, so the preview falls back to naming no input.
-pub fn load_operation_components(spec: &ResolvedBuildSpec) -> BTreeMap<String, RecordedComponents> {
+pub(crate) fn load_operation_components(
+    spec: &ResolvedBuildSpec,
+) -> BTreeMap<String, RecordedComponents> {
     fs::read_to_string(reuse_details_path(spec))
         .map(|contents| parse_operation_components(&contents))
         .unwrap_or_default()
@@ -113,7 +115,7 @@ fn reuse_details_path(spec: &ResolvedBuildSpec) -> PathBuf {
     PathBuf::from(format!("{}.details", reuse_state_path(spec).display()))
 }
 
-pub fn load_reuse_state(spec: &ResolvedBuildSpec) -> Option<ReuseState> {
+pub(crate) fn load_reuse_state(spec: &ResolvedBuildSpec) -> Option<ReuseState> {
     let path = reuse_state_path(spec);
     let contents = fs::read_to_string(path).ok()?;
     let mut lines = contents.lines();
@@ -185,7 +187,7 @@ pub fn load_reuse_state(spec: &ResolvedBuildSpec) -> Option<ReuseState> {
 /// are kept for operations this run did not attempt; their recorded input
 /// signature makes the planner rebuild them if something they depend on has
 /// changed since.
-pub fn save_reuse_state(
+pub(crate) fn save_reuse_state(
     spec: &ResolvedBuildSpec,
     plan: &ExecutionPlan,
     outcome: &ExecutionOutcome,

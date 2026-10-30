@@ -18,7 +18,7 @@ use entry_patches::{layer_label, take_entry_patches};
 use import_sources::ImportSources;
 use path_tokens::rewrite_path_tokens;
 
-pub fn discover_build_root() -> Result<PathBuf, ConfigError> {
+pub(crate) fn discover_build_root() -> Result<PathBuf, ConfigError> {
     let mut current = env::current_dir().map_err(ConfigError::current_dir)?;
     loop {
         if current.join("Cargo.toml").is_file() {

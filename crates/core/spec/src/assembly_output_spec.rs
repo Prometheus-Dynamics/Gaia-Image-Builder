@@ -8,7 +8,7 @@ use crate::{
 use std::str::FromStr;
 
 /// The dm-verity data and hash block size when the spec sets none.
-pub const VERITY_DEFAULT_BLOCK_SIZE: u32 = 4096;
+pub(crate) const VERITY_DEFAULT_BLOCK_SIZE: u32 = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AssemblyTransformSpec {

@@ -20,7 +20,7 @@ pub fn command_output_with_timeout(
         .map(|result| result.output)
 }
 
-pub fn command_output_with_timeout_and_sink(
+pub(crate) fn command_output_with_timeout_and_sink(
     command: &mut Command,
     timeout: Duration,
     label: &str,
@@ -38,7 +38,7 @@ pub fn command_output_with_timeout_and_sink(
     })
 }
 
-pub fn command_output_with_timeout_sink_and_retention(
+pub(crate) fn command_output_with_timeout_sink_and_retention(
     command: &mut Command,
     timeout: Duration,
     label: &str,
@@ -94,7 +94,7 @@ const JOB_BUDGET_ENV: [&str; 3] = [
 /// Caps the tool parallelism of `command` at `jobs` through the usual
 /// environment variables. A variable the command or the calling environment
 /// already sets is left alone, so users keep control.
-pub fn apply_job_budget(command: &mut Command, jobs: usize) {
+pub(crate) fn apply_job_budget(command: &mut Command, jobs: usize) {
     let jobs = jobs.max(1);
     for key in JOB_BUDGET_ENV {
         let set_on_command = command.get_envs().any(|(name, _)| name == key);
@@ -131,7 +131,7 @@ const TRANSIENT_FAILURE_MARKERS: [&str; 12] = [
 /// it was killed by a signal, or its stderr reports network trouble. Anything
 /// else, a compile error above all, is deterministic: the same inputs fail the
 /// same way, so it is not retried.
-pub fn failure_is_transient(killed_by_signal: bool, stderr: &str) -> bool {
+pub(crate) fn failure_is_transient(killed_by_signal: bool, stderr: &str) -> bool {
     if killed_by_signal {
         return true;
     }

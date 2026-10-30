@@ -25,7 +25,7 @@ impl CleanReport {
     }
 }
 
-pub fn clean_build_command(
+pub(crate) fn clean_build_command(
     build: &str,
     options: &ResolveOptions,
     clean_args: &CleanArgs,

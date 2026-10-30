@@ -312,7 +312,7 @@ fn json_token_reads(
 /// Whether a read (a path, or a pattern with `*` components) and a write
 /// touch the same files: one is inside the other, or the write is a path
 /// the pattern matches, is inside one, or holds the directory it scans.
-/// [`overlaps`], for the step scheduler: the same test as the ordering.
+/// `overlaps`, for the step scheduler: the same test as the ordering.
 pub fn assembly_paths_overlap(read: &Path, write: &Path) -> bool {
     overlaps(read, write)
 }
@@ -382,23 +382,6 @@ pub fn order_assembly_steps(
         }
     }
     Ok(ordered)
-}
-
-/// Steps that read what a step declared after them writes, as
-/// `(reader, writer)`: they now run after it, where earlier Gaia versions
-/// ran them first, on the previous run's files.
-pub fn assembly_steps_reading_later_outputs(
-    steps: &[AssemblyStepPaths],
-) -> Vec<(AssemblyStep, AssemblyStep)> {
-    let mut found = Vec::new();
-    for reader in steps {
-        for writer in steps {
-            if writer.step > reader.step && depends_on(reader, writer) {
-                found.push((reader.step, writer.step));
-            }
-        }
-    }
-    found
 }
 
 #[cfg(test)]

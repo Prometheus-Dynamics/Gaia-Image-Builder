@@ -6,7 +6,7 @@ use serde::Deserialize;
 /// `overrides` (`key = value` pairs in `--set` form) that define it.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawVariantConfig {
+pub(crate) struct RawVariantConfig {
     pub id: String,
     pub description: Option<String>,
     /// `preset = "name"`: a preset applied for this variant, like `--preset`.

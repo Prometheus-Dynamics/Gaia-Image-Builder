@@ -136,21 +136,6 @@ fn is_archive_placeholder(path: &Path) -> bool {
         })
 }
 
-pub fn finalize_temp_image_output(
-    temp_output: &Path,
-    output_path: &Path,
-    label: &str,
-) -> Result<(), ImageProviderError> {
-    fs::rename(temp_output, output_path).map_err(|error| {
-        let _ = fs::remove_file(temp_output);
-        ImageProviderError::backend_command(format!(
-            "failed to move {label} '{}' into place '{}': {error}",
-            temp_output.display(),
-            output_path.display()
-        ))
-    })
-}
-
 fn render_image_state(result: &ImageExecutionResult, archive_digest: Option<&str>) -> String {
     let mut state = gaia_spec::KeyValueState::new()
         .with("provider", result.provider_id.as_str())

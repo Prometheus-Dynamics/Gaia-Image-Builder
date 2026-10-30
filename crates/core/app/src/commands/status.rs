@@ -31,7 +31,7 @@ const RECENT_LOG_LINES: usize = 10;
 /// there is none.
 /// `json` (never with `follow`) returns the report as `--json` fields.
 #[cfg(unix)]
-pub fn status_command(
+pub(crate) fn status_command(
     build: Option<&str>,
     options: &ResolveOptions,
     follow: bool,
@@ -56,7 +56,7 @@ pub fn status_command(
 }
 
 #[cfg(not(unix))]
-pub fn status_command(
+pub(crate) fn status_command(
     _build: Option<&str>,
     _options: &ResolveOptions,
     _follow: bool,

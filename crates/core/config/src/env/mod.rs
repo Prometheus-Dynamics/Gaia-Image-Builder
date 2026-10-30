@@ -7,7 +7,7 @@ use crate::ConfigError;
 use crate::raw::RawBuildConfig;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ResolvedEnvironment {
+pub(crate) struct ResolvedEnvironment {
     pub vars: BTreeMap<String, String>,
 }
 
@@ -17,7 +17,9 @@ impl ResolvedEnvironment {
     }
 }
 
-pub fn resolve_environment(raw: &RawBuildConfig) -> Result<ResolvedEnvironment, ConfigError> {
+pub(crate) fn resolve_environment(
+    raw: &RawBuildConfig,
+) -> Result<ResolvedEnvironment, ConfigError> {
     let mut vars = BTreeMap::new();
 
     let repo_env = discover_repo_env(raw);

@@ -17,15 +17,12 @@ use gaia_plan::ExecutionPlan;
 use gaia_spec::ResolvedBuildSpec;
 use gaia_validate::ValidationReport;
 
-pub use manifest::{render_manifest, render_manifest_with_outcome};
 pub use masking::{mask_pairs, mask_value};
 pub use model::*;
 pub use output::write_report_bundle;
-pub use profile::{chrome_trace, critical_path};
-pub use provenance::render_provenance;
+pub use profile::critical_path;
+
 pub use rebuild::render_rebuild_reasons;
-pub use selection::render_selection;
-pub use summary::{render_execution_failures, render_summary};
 
 pub fn generate_report(
     spec: &ResolvedBuildSpec,

@@ -122,7 +122,7 @@ pub const DOWNLOAD_CACHE_DIR: &str = ".gaia/cache/downloads";
 /// Cache location for a verified download with the given SHA-256:
 /// `<workspace>/.gaia/cache/downloads/sha256/<sha>`. `None` when `sha` is not
 /// a hex SHA-256, so malformed checksums never address the cache.
-pub fn download_cache_path(workspace_root: &Path, sha: &str) -> Option<PathBuf> {
+pub(crate) fn download_cache_path(workspace_root: &Path, sha: &str) -> Option<PathBuf> {
     let valid = sha.len() == 64 && sha.bytes().all(|byte| byte.is_ascii_hexdigit());
     valid.then(|| {
         workspace_root

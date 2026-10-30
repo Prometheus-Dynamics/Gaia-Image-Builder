@@ -59,7 +59,10 @@ fn stat_of(path: &Path) -> Option<(u64, u128)> {
 /// `manifest_dir` records with a matching size and mtime are not read again;
 /// the others are hashed in parallel and recorded there. A file that cannot
 /// be read yields its error.
-pub fn digests_of_files(manifest_dir: Option<&Path>, paths: &[PathBuf]) -> Vec<io::Result<String>> {
+pub(crate) fn digests_of_files(
+    manifest_dir: Option<&Path>,
+    paths: &[PathBuf],
+) -> Vec<io::Result<String>> {
     let mut known: BTreeMap<String, Entry> = manifest_dir
         .map(|base| {
             read_entries(base)
@@ -126,9 +129,9 @@ pub fn digests_of_files(manifest_dir: Option<&Path>, paths: &[PathBuf]) -> Vec<i
         .collect()
 }
 
-/// Runs `work` over `items` on up to [`MAX_HASH_THREADS`] threads, returning
+/// Runs `work` over `items` on up to `MAX_HASH_THREADS` threads, returning
 /// the results in item order.
-/// Runs `work` over `items` on up to [`MAX_HASH_THREADS`] threads, returning
+/// Runs `work` over `items` on up to `MAX_HASH_THREADS` threads, returning
 /// the results in item order. A thread that panics yields no results for its
 /// items, so the result can be shorter than `items`.
 pub fn parallel_map<T: Sync, R: Send>(items: &[T], work: impl Fn(&T) -> R + Sync) -> Vec<R> {
@@ -154,7 +157,7 @@ pub fn parallel_map<T: Sync, R: Send>(items: &[T], work: impl Fn(&T) -> R + Sync
 
 /// The regular files under `root`, in no particular order. Directories are
 /// followed; symbolic links are not (a link is not content of its own).
-pub fn regular_files_under(root: &Path) -> Vec<PathBuf> {
+pub(crate) fn regular_files_under(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     let mut pending = vec![root.to_path_buf()];
     while let Some(dir) = pending.pop() {
@@ -183,7 +186,7 @@ pub struct TreeFileDigests {
 }
 
 impl TreeFileDigests {
-    /// Digests every regular file under `roots` (see [`digests_of_files`]).
+    /// Digests every regular file under `roots` (see `digests_of_files`).
     pub fn for_roots(manifest_dir: Option<&Path>, roots: &[&Path]) -> Self {
         let paths = roots
             .iter()

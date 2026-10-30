@@ -139,10 +139,10 @@ impl SourceProviderCatalog {
     }
 }
 
-pub struct GitSourceProvider;
-pub struct PathSourceProvider;
-pub struct ArchiveSourceProvider;
-pub struct DownloadSourceProvider;
+pub(crate) struct GitSourceProvider;
+pub(crate) struct PathSourceProvider;
+pub(crate) struct ArchiveSourceProvider;
+pub(crate) struct DownloadSourceProvider;
 
 mod archive;
 mod command;
@@ -167,10 +167,10 @@ mod tests_archive_url;
 pub(crate) use command::*;
 pub(crate) use digest::*;
 pub use digest::{path_source_content_fingerprint, path_source_fingerprint};
-pub use download::{DOWNLOAD_CACHE_DIR, download_cache_path};
+pub use download::DOWNLOAD_CACHE_DIR;
 pub(crate) use git_helpers::*;
 pub use git_helpers::{
-    GIT_MIRROR_CACHE_DIR, remote_git_cache_key, remote_git_mirror_dir, remote_git_mirror_dir_name,
+    GIT_MIRROR_CACHE_DIR, remote_git_mirror_dir, remote_git_mirror_dir_name,
     resolve_git_source_commit,
 };
 pub use git_import::{IMPORT_SOURCE_CACHE_DIR, ensure_git_revision_checkout};

@@ -70,7 +70,7 @@ use gaia_spec::{
     WorkspacePathKindSpec, WorkspaceSpec,
 };
 
-pub fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
+pub(crate) fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
     apply_when_selection(&mut raw);
     let precedence_order = selection_precedence_order(&raw);
     let precedence_layers = precedence_layers(&raw);

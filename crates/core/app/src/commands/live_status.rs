@@ -21,8 +21,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use gaia_exec::{ExecutionEvent, ExecutionOutcome};
 use serde::{Deserialize, Serialize};
 
+// The TUI's cached reads of the status files.
+#[cfg(feature = "tui")]
 mod cache;
 mod tracker;
+#[cfg(feature = "tui")]
 pub(crate) use cache::SnapshotCache;
 pub(crate) use tracker::{Change, RunTracker, live_variant, plan_operations, run_selection_label};
 
@@ -483,7 +486,6 @@ pub(crate) fn fixture_status() -> LiveStatus {
 
 #[cfg(test)]
 mod tests {
-    use super::cache::FileCache;
     use super::*;
     use gaia_plan::OperationId;
     use gaia_testkit::TempDir;
@@ -515,8 +517,10 @@ mod tests {
         LiveRecorder::new(dir, info())
     }
 
+    #[cfg(feature = "tui")]
     #[test]
     fn file_cache_reads_a_changed_file_again() {
+        use super::cache::FileCache;
         let dir = temp_dir("file-cache");
         let path = dir.path().join("values.json");
         let mut cache = FileCache::<u32>::default();

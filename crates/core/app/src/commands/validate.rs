@@ -12,7 +12,7 @@ use super::variants::{VariantSource, prepare_variants, selected_variants, varian
 /// Validates the build. A build with `[[variants]]` is validated as every
 /// variant (or the ones `--variant` names), each resolved the way `run` and
 /// `preview` resolve it, with every diagnostic prefixed by its variant.
-pub fn validate_build_command(
+pub(crate) fn validate_build_command(
     context: &AppContext,
     build: &str,
     options: &ResolveOptions,

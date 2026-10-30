@@ -26,7 +26,7 @@ pub(super) struct Node {
 
 impl Node {
     /// The raw value of a property, when the node has it.
-    pub fn prop(&self, name: &str) -> Option<&[u8]> {
+    pub(crate) fn prop(&self, name: &str) -> Option<&[u8]> {
         self.props
             .iter()
             .find(|(key, _)| key == name)

@@ -124,11 +124,6 @@ impl ArtifactExecutionContract {
         }
     }
 
-    pub fn with_build_context(mut self, spec: &ResolvedBuildSpec) -> Self {
-        self.apply_build_context(spec);
-        self
-    }
-
     pub fn try_with_build_context(
         mut self,
         spec: &ResolvedBuildSpec,
@@ -316,7 +311,10 @@ impl ArtifactDockerExecution {
         }
     }
 
-    pub fn from_artifact(artifact_id: &str, spec: &gaia_spec::DockerArtifactExecutionSpec) -> Self {
+    pub(crate) fn from_artifact(
+        artifact_id: &str,
+        spec: &gaia_spec::DockerArtifactExecutionSpec,
+    ) -> Self {
         let build = spec
             .dockerfile
             .as_ref()

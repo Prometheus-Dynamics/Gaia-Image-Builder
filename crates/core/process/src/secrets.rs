@@ -7,7 +7,7 @@
 //! The spec keeps the reference (`secret:NAME`, or `${secret:NAME}` inside a
 //! build-time process environment), and this module turns it into a value.
 //!
-//! Every value of at least [`MIN_MASKED_LEN`] characters that was resolved is
+//! Every value of at least `MIN_MASKED_LEN` characters that was resolved is
 //! registered with the masker. Captured process output, failure messages and
 //! report files replace it with the replacement text (`***` by default), so a
 //! build that echoes its secret does not put it in a log or a report.
@@ -24,10 +24,10 @@ use std::process::{Command, Stdio};
 use std::sync::{Mutex, RwLock};
 
 /// Replacement text for a masked secret when a run sets none.
-pub const DEFAULT_REPLACEMENT: &str = "***";
+pub(crate) const DEFAULT_REPLACEMENT: &str = "***";
 /// Shorter values are not masked: a one- or two-character value would hide
 /// ordinary text.
-pub const MIN_MASKED_LEN: usize = 4;
+pub(crate) const MIN_MASKED_LEN: usize = 4;
 /// Prefix of a reference to a `[secrets]` entry.
 pub const SECRET_PREFIX: &str = "secret:";
 /// Prefix of a reference to an environment variable.
@@ -144,11 +144,6 @@ pub fn install(defs: Vec<SecretDef>, replacement: &str) {
             .write()
             .unwrap_or_else(|poison| poison.into_inner()) = replacement.to_string();
     }
-}
-
-/// Whether an entry of this name was installed.
-pub fn is_defined(name: &str) -> bool {
-    lock(&CATALOG).defs.contains_key(name)
 }
 
 /// The value of the entry `name`. `Ok(None)` when the entry is optional and
@@ -279,7 +274,7 @@ pub fn key_setting(setting: &str) -> Result<Option<String>, String> {
 /// Resolves a credential setting, which must name a secret: `secret:NAME`, or
 /// `env:VAR` (the variable's value is then registered as a secret too).
 /// `Ok(None)` when an optional secret is missing or the setting is empty.
-pub fn credential_setting(setting: &str) -> Result<Option<SecretValue>, String> {
+pub(crate) fn credential_setting(setting: &str) -> Result<Option<SecretValue>, String> {
     let setting = setting.trim();
     if setting.is_empty() {
         return Ok(None);
@@ -367,7 +362,7 @@ pub fn mask(text: &str) -> Cow<'_, str> {
 }
 
 /// Whether `text` holds a registered secret value.
-pub fn contains_secret(text: &str) -> bool {
+pub(crate) fn contains_secret(text: &str) -> bool {
     matches!(mask(text), Cow::Owned(_))
 }
 

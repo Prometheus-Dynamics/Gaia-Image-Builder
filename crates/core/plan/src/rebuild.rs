@@ -6,7 +6,7 @@ use crate::{ExecutionPlan, OperationKind, PlanTarget};
 use gaia_spec::wildcard_match;
 
 /// Reason code of an operation that executes because of a rebuild request.
-pub const REBUILD_REQUESTED: &str = "rebuild_requested";
+pub(crate) const REBUILD_REQUESTED: &str = "rebuild_requested";
 
 /// What a run was asked to rebuild, from the command line.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -67,7 +67,7 @@ impl RebuildRequest {
 
     /// The request with names that stand for another operation of `plan`
     /// replaced by it (see [`image_prepare_alias`]).
-    pub fn resolve_aliases(&self, plan: &ExecutionPlan) -> RebuildRequest {
+    pub(crate) fn resolve_aliases(&self, plan: &ExecutionPlan) -> RebuildRequest {
         let mut resolved = self.clone();
         for target in &mut resolved.targets {
             if let PlanTarget::Operation(pattern) = target
@@ -113,7 +113,7 @@ impl RebuildRequest {
 /// `image:build` for the name `image:prepare` when `plan` has no prepare
 /// step: a build without one does its whole Buildroot make in `image:build`,
 /// so forcing the name forces that make. `None` for any other name.
-pub fn image_prepare_alias(pattern: &str, plan: &ExecutionPlan) -> Option<&'static str> {
+pub(crate) fn image_prepare_alias(pattern: &str, plan: &ExecutionPlan) -> Option<&'static str> {
     let prepare_planned = plan
         .operations
         .iter()

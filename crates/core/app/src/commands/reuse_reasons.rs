@@ -22,7 +22,7 @@ const NO_DETAIL: &str = "fingerprint changed (no detail recorded)";
 ///
 /// A variant's shared operations were recorded by the shared store (see
 /// `variants::scoped_reuse_state`), so their inputs come from its sidecar.
-pub fn recorded_for_explanation(
+pub(crate) fn recorded_for_explanation(
     spec: &ResolvedBuildSpec,
     reuse_state: Option<&ReuseState>,
     scope: ReuseScope<'_>,
@@ -46,7 +46,7 @@ pub fn recorded_for_explanation(
 /// recorded ones, such as `config_overrides changed (BR2_A)`. The plan is
 /// explained whole, before any target restriction, because an operation's
 /// dependencies are part of its inputs.
-pub fn explain_rebuild_reasons(
+pub(crate) fn explain_rebuild_reasons(
     spec: &ResolvedBuildSpec,
     plan: &mut ExecutionPlan,
     reuse_state: Option<&ReuseState>,

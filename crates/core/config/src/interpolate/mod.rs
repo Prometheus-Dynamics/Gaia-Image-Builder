@@ -19,7 +19,7 @@ use assembly::interpolate_image_assembly;
 
 /// Interpolates every string field. Fails with the cycle when a `${...}`
 /// reference leads back to a token it is already resolving.
-pub fn interpolate_config(
+pub(crate) fn interpolate_config(
     raw: RawBuildConfig,
     env: &ResolvedEnvironment,
 ) -> Result<RawBuildConfig, ConfigError> {

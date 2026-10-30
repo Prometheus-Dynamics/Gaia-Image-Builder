@@ -4,7 +4,7 @@ use std::fmt;
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawImageAssemblyConfig {
+pub(crate) struct RawImageAssemblyConfig {
     pub work_dir: Option<String>,
     pub out_dir: Option<String>,
     pub trees: Vec<RawAssemblyTreeConfig>,
@@ -34,7 +34,7 @@ pub struct RawImageAssemblyConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyTreeConfig {
+pub(crate) struct RawAssemblyTreeConfig {
     pub id: String,
     pub path: String,
     /// Strips every ELF file in the tree right before a filesystem or
@@ -44,7 +44,7 @@ pub struct RawAssemblyTreeConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyDirConfig {
+pub(crate) struct RawAssemblyDirConfig {
     pub tree: String,
     pub path: String,
     pub mode: Option<String>,
@@ -55,7 +55,7 @@ pub struct RawAssemblyDirConfig {
 /// `major = 5`, `minor = 1`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyDeviceConfig {
+pub(crate) struct RawAssemblyDeviceConfig {
     pub tree: String,
     pub path: String,
     pub kind: RawAssemblyDeviceKind,
@@ -69,7 +69,7 @@ pub struct RawAssemblyDeviceConfig {
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawAssemblyDeviceKind {
+pub(crate) enum RawAssemblyDeviceKind {
     #[default]
     Char,
     Block,
@@ -78,7 +78,7 @@ pub enum RawAssemblyDeviceKind {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblySymlinkConfig {
+pub(crate) struct RawAssemblySymlinkConfig {
     pub tree: String,
     pub path: String,
     pub target: String,
@@ -86,7 +86,7 @@ pub struct RawAssemblySymlinkConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyFileConfig {
+pub(crate) struct RawAssemblyFileConfig {
     pub tree: String,
     pub src: Option<String>,
     pub src_glob: Option<String>,
@@ -119,7 +119,7 @@ pub struct RawAssemblyFileConfig {
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyTransformConfig {
+pub(crate) struct RawAssemblyTransformConfig {
     pub kind: RawAssemblyTransformKind,
     pub src: Option<String>,
     pub dest: String,
@@ -162,7 +162,7 @@ impl Default for RawAssemblyTransformConfig {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawAssemblyTransformKind {
+pub(crate) enum RawAssemblyTransformKind {
     CompileDts,
     Gzip,
     Zstd,
@@ -173,7 +173,7 @@ pub enum RawAssemblyTransformKind {
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyFilesystemConfig {
+pub(crate) struct RawAssemblyFilesystemConfig {
     pub id: String,
     pub kind: RawAssemblyFilesystemKind,
     pub source_tree: String,
@@ -244,7 +244,7 @@ impl Default for RawAssemblyFilesystemConfig {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawAssemblyFilesystemKind {
+pub(crate) enum RawAssemblyFilesystemKind {
     Vfat,
     Cpio,
     CpioGzip,
@@ -257,7 +257,7 @@ pub enum RawAssemblyFilesystemKind {
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyDiskConfig {
+pub(crate) struct RawAssemblyDiskConfig {
     pub id: String,
     pub output: String,
     pub partition_table: RawAssemblyPartitionTable,
@@ -292,27 +292,27 @@ impl Default for RawAssemblyDiskConfig {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawAssemblyDiskTruncate {
+pub(crate) enum RawAssemblyDiskTruncate {
     LastData,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawAssemblyEbrPlacement {
+pub(crate) enum RawAssemblyEbrPlacement {
     Default,
     Packed,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawAssemblyPartitionTable {
+pub(crate) enum RawAssemblyPartitionTable {
     Mbr,
     Gpt,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyDiskPartitionConfig {
+pub(crate) struct RawAssemblyDiskPartitionConfig {
     pub name: String,
     #[serde(rename = "type")]
     pub kind: Option<String>,
@@ -330,7 +330,7 @@ pub struct RawAssemblyDiskPartitionConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyArchiveConfig {
+pub(crate) struct RawAssemblyArchiveConfig {
     pub id: String,
     pub output: String,
     /// Ordered members; each sets `src` (a file) or `entries` (generated).
@@ -341,7 +341,7 @@ pub struct RawAssemblyArchiveConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyArchiveMemberConfig {
+pub(crate) struct RawAssemblyArchiveMemberConfig {
     pub name: String,
     pub src: Option<String>,
     pub entries: Option<Vec<(String, String)>>,
@@ -363,7 +363,7 @@ pub struct RawAssemblyArchiveMemberConfig {
 /// `layers`, lowest first, with the `[image.assembly.oci.config]` table.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyOciConfig {
+pub(crate) struct RawAssemblyOciConfig {
     pub id: String,
     pub dest: String,
     /// `oci-layout` (the default) or `docker-archive`.
@@ -380,7 +380,7 @@ pub struct RawAssemblyOciConfig {
 /// One layer: exactly one of `tar` and `tree`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyOciLayerConfig {
+pub(crate) struct RawAssemblyOciLayerConfig {
     /// An uncompressed layer tar, used as it is.
     pub tar: Option<String>,
     /// An assembly tree, tarred deterministically.
@@ -391,7 +391,7 @@ pub struct RawAssemblyOciLayerConfig {
 /// `tree` as installed, with the `control`, `scripts` tables.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyPackageConfig {
+pub(crate) struct RawAssemblyPackageConfig {
     pub id: String,
     /// `ipk` (the default); `deb` is reserved.
     pub format: Option<String>,
@@ -413,7 +413,7 @@ pub struct RawAssemblyPackageConfig {
 /// files are checked against, and the limits.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyPackageDeviceConfig {
+pub(crate) struct RawAssemblyPackageDeviceConfig {
     /// The `[[toolchains]]` id whose sysroot is the device's.
     pub toolchain: Option<String>,
     /// A directory (workspace path) that is the device sysroot, instead of a toolchain's.
@@ -430,7 +430,7 @@ pub struct RawAssemblyPackageDeviceConfig {
 /// has no default; the rest of the names are the Debian spelling.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyPackageControlConfig {
+pub(crate) struct RawAssemblyPackageControlConfig {
     #[serde(rename = "Package")]
     pub package: Option<String>,
     #[serde(rename = "Version")]
@@ -461,7 +461,7 @@ pub struct RawAssemblyPackageControlConfig {
 /// maintainer scripts handle, the scripts that replace them, and the conffiles.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyPackageScriptsConfig {
+pub(crate) struct RawAssemblyPackageScriptsConfig {
     /// Unit file names, e.g. `helios-api.service`.
     pub services: Vec<String>,
     pub postinst: Option<String>,
@@ -475,7 +475,7 @@ pub struct RawAssemblyPackageScriptsConfig {
 /// `[image.assembly.oci.config]`: the image config.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyOciImageConfig {
+pub(crate) struct RawAssemblyOciImageConfig {
     /// `amd64` or `arm64`; required.
     pub architecture: Option<String>,
     /// `linux` (the default).
@@ -491,7 +491,7 @@ pub struct RawAssemblyOciImageConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyArchiveGeneratedConfig {
+pub(crate) struct RawAssemblyArchiveGeneratedConfig {
     pub name: String,
     /// `KEY = "value"` lines; unset with `json` unset writes an empty file.
     pub entries: Option<Vec<(String, String)>>,
@@ -502,7 +502,7 @@ pub struct RawAssemblyArchiveGeneratedConfig {
 /// keys in the order the file wrote them (the `toml` crate's `preserve_order`
 /// feature). Floats are rejected; a datetime is taken as its text.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RawAssemblyJsonValue {
+pub(crate) enum RawAssemblyJsonValue {
     String(String),
     Integer(i64),
     Bool(bool),
@@ -570,7 +570,7 @@ impl<'de> Visitor<'de> for JsonValueVisitor {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyBinaryConfig {
+pub(crate) struct RawAssemblyBinaryConfig {
     pub tree: String,
     pub src: String,
     pub dest: String,
@@ -585,7 +585,7 @@ pub struct RawAssemblyBinaryConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyKernelModulesConfig {
+pub(crate) struct RawAssemblyKernelModulesConfig {
     pub tree: String,
     pub from: String,
     pub kernel_version: Option<String>,
@@ -599,7 +599,7 @@ pub struct RawAssemblyKernelModulesConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyBusyboxInitramfsConfig {
+pub(crate) struct RawAssemblyBusyboxInitramfsConfig {
     pub tree: String,
     pub busybox: String,
     pub include_runtime_libs: bool,
@@ -612,7 +612,7 @@ pub struct RawAssemblyBusyboxInitramfsConfig {
 /// non-zero exit fails the build.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RawAssemblyCheckConfig {
+pub(crate) struct RawAssemblyCheckConfig {
     pub id: String,
     /// The program and its arguments, run without a shell. Assembly tokens
     /// (`$assembly.tree.<id>`, `$assembly.work`, `$provider.images`, ...)

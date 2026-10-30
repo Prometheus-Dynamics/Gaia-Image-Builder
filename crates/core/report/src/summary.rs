@@ -17,7 +17,7 @@ use crate::output_sizes::{
 };
 use crate::state::{output_hygiene_warnings, rollback_domains};
 
-pub fn render_summary(
+pub(crate) fn render_summary(
     spec: &ResolvedBuildSpec,
     validation: &ValidationReport,
     plan: &ExecutionPlan,
@@ -219,7 +219,7 @@ pub fn render_summary(
     summary
 }
 
-pub fn render_execution_failures(outcome: &ExecutionOutcome) -> Vec<ExecutionFailureReport> {
+pub(crate) fn render_execution_failures(outcome: &ExecutionOutcome) -> Vec<ExecutionFailureReport> {
     outcome
         .errors
         .iter()

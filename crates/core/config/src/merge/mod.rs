@@ -19,7 +19,7 @@ use image::merge_image;
 
 /// Merges the entrypoint's layers into one config. A patch entry left
 /// without an earlier entry to patch is an error.
-pub fn merge_config(raw: RawBuildConfig) -> Result<RawBuildConfig, ConfigError> {
+pub(crate) fn merge_config(raw: RawBuildConfig) -> Result<RawBuildConfig, ConfigError> {
     let global = selected_inputs_for_imports(&raw);
     let merged = merge_config_with(raw, &global)?;
     match merged.pending_patches.first() {

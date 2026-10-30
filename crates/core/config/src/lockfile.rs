@@ -12,8 +12,8 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const LOCKFILE_VERSION: u32 = 1;
-pub const LOCKFILE_SUFFIX: &str = ".gaia.lock";
+pub(crate) const LOCKFILE_VERSION: u32 = 1;
+pub(crate) const LOCKFILE_SUFFIX: &str = ".gaia.lock";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct GitLockfile {
@@ -137,7 +137,7 @@ fn toml_string(value: &str) -> String {
 
 /// Lockfile path for a build entrypoint: `configs/builds/evk.toml` locks into
 /// `configs/builds/evk.gaia.lock`.
-pub fn lockfile_path_for_build_file(build_file: &Path) -> PathBuf {
+pub(crate) fn lockfile_path_for_build_file(build_file: &Path) -> PathBuf {
     let stem = build_file
         .file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
@@ -155,7 +155,7 @@ pub fn lockfile_path(spec: &ResolvedBuildSpec) -> Option<PathBuf> {
 
 /// Applies matching lock entries to the spec's git sources. Stale entries
 /// are left for validation to report.
-pub fn apply_git_lockfile(spec: &mut ResolvedBuildSpec, lock: &GitLockfile) {
+pub(crate) fn apply_git_lockfile(spec: &mut ResolvedBuildSpec, lock: &GitLockfile) {
     for source in &mut spec.sources {
         let source_id = source.id.as_str().to_string();
         if let SourceDefinition::Git(git) = &mut source.definition

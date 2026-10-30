@@ -85,7 +85,7 @@ pub fn default_toolchain_prefix(triple: &str) -> String {
 }
 
 /// The SDK root a toolchain names, resolved against the workspace.
-pub fn toolchain_root(
+pub(crate) fn toolchain_root(
     spec: &ResolvedBuildSpec,
     toolchain: &ToolchainSpec,
 ) -> Result<PathBuf, String> {

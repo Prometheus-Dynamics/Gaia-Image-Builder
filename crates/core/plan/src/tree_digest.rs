@@ -20,7 +20,7 @@ pub fn tree_digest_members(root: &Path) -> Result<Vec<(String, String)>, String>
 
 /// A digest of [`tree_digest_members`], for fingerprints: `missing` when
 /// `root` is not a directory.
-pub fn tree_digest_signature(root: &Path) -> String {
+pub(crate) fn tree_digest_signature(root: &Path) -> String {
     if !root.is_dir() {
         return "missing".into();
     }
@@ -48,7 +48,7 @@ pub fn tree_digest_signature(root: &Path) -> String {
 /// permission bits and sha256, and a link's target. Directories and links
 /// are included, so a renamed, added or retargeted entry changes it, as a
 /// changed mode does. `missing` when `root` is not a directory.
-pub fn tree_copy_signature(root: &Path) -> String {
+pub(crate) fn tree_copy_signature(root: &Path) -> String {
     if !root.is_dir() {
         return "missing".into();
     }

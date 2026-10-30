@@ -41,11 +41,11 @@ impl Default for ProviderCatalogs {
     }
 }
 
-pub fn default_source_provider_catalog() -> SourceProviderCatalog {
+pub(crate) fn default_source_provider_catalog() -> SourceProviderCatalog {
     SourceProviderCatalog::with_defaults()
 }
 
-pub fn default_artifact_provider_catalog() -> ArtifactProviderCatalog {
+pub(crate) fn default_artifact_provider_catalog() -> ArtifactProviderCatalog {
     let mut catalog = ArtifactProviderCatalog::new();
     catalog.register(Box::new(RustProvider));
     catalog.register(Box::new(JavaProvider));
@@ -55,7 +55,7 @@ pub fn default_artifact_provider_catalog() -> ArtifactProviderCatalog {
     catalog
 }
 
-pub fn default_image_provider_catalog() -> ImageProviderCatalog {
+pub(crate) fn default_image_provider_catalog() -> ImageProviderCatalog {
     let mut catalog = ImageProviderCatalog::new();
     catalog.register(Box::new(BuildrootImageProvider));
     catalog.register(Box::new(StartingPointImageProvider));

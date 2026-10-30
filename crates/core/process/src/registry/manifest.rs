@@ -104,7 +104,7 @@ pub(super) fn rfc3339_utc_now() -> String {
     )
 }
 
-/// The epoch seconds of a time as [`rfc3339_utc_now`] writes it
+/// The epoch seconds of a time as `rfc3339_utc_now` writes it
 /// (`YYYY-MM-DDTHH:MM:SSZ`). `None` for any other text.
 pub fn created_epoch_seconds(text: &str) -> Option<i64> {
     let bytes = text.as_bytes();

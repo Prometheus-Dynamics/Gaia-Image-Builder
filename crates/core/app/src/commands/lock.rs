@@ -34,7 +34,7 @@ pub enum LockChange {
     Unchanged,
 }
 
-pub fn lock_build_command(
+pub(crate) fn lock_build_command(
     build: &str,
     options: &ResolveOptions,
     lock_args: &LockArgs,

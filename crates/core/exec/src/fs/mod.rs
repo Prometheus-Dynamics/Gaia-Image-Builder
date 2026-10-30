@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FsMutation {
+pub(crate) enum FsMutation {
     Install { target: String },
     Stage { target: String },
 }

@@ -9,7 +9,7 @@ use crate::raw::RawBuildConfig;
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
-pub struct RawWhenConfig {
+pub(crate) struct RawWhenConfig {
     pub target: Option<String>,
     pub profile: Option<String>,
     pub branch: Option<String>,
@@ -25,7 +25,7 @@ pub struct RawWhenConfig {
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-pub enum RawWhenImageKind {
+pub(crate) enum RawWhenImageKind {
     Buildroot,
     StartingPoint,
     None,

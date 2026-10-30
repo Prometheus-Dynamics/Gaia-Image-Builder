@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProcessSpec {
+pub(crate) struct ProcessSpec {
     pub label: String,
 }
 

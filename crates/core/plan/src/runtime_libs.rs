@@ -57,7 +57,7 @@ pub struct RuntimeClosure {
 /// directory above its `bin/` or `sbin/`, or above `usr/bin/` or `usr/sbin/`.
 /// `None` when the binary is not in one of those, or the sysroot would be the
 /// host's root.
-pub fn derive_sysroot(binary: &Path) -> Option<PathBuf> {
+pub(crate) fn derive_sysroot(binary: &Path) -> Option<PathBuf> {
     let dir = binary.parent()?;
     let name = dir.file_name()?.to_str()?;
     if name != "bin" && name != "sbin" {

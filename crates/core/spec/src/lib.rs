@@ -51,45 +51,44 @@ pub use assembly::{
 };
 pub use assembly_archive_spec::{
     AssemblyArchiveMemberSourceSpec, AssemblyArchiveMemberSpec, AssemblyArchiveSpec,
-    AssemblyDigestToken, AssemblySizeToken, AssemblyTreeDigestToken, AssemblyValueToken,
-    AssemblyVerityField, AssemblyVerityToken, assembly_json_string_tokens, assembly_value_tokens,
-    whole_tree_digest_token,
+    AssemblyTreeDigestToken, AssemblyValueToken, AssemblyVerityField, assembly_json_string_tokens,
+    assembly_value_tokens, whole_tree_digest_token,
 };
 pub use assembly_compressed_fs_spec::{
     AssemblyCompressedFsSpec, EROFS_BLOCK_SIZES, ErofsCompression, SQUASHFS_BLOCK_SIZES,
     SquashfsCompression,
 };
 pub use assembly_gpt_spec::{
-    AssemblyGptDiskSpec, AssemblyGptPartitionSpec, GptGuid, GptGuidParseError, GptPartitionType,
-    GptPartitionTypeError,
+    AssemblyGptDiskSpec, AssemblyGptPartitionSpec, GptGuid, GptPartitionTypeError,
 };
-pub use assembly_json::{AssemblyJsonValue, TreeDigestResolver, json_string};
+pub use assembly_json::AssemblyJsonValue;
 pub use assembly_oci_spec::{
     AssemblyOciCompressionSpec, AssemblyOciConfigSpec, AssemblyOciFormatSpec,
     AssemblyOciLayerSource, AssemblyOciLayerSpec, AssemblyOciSpec,
 };
 pub use assembly_order::{
-    AssemblyCycle, AssemblyStep, AssemblyStepPaths, assembly_paths_overlap, assembly_step_paths,
-    assembly_steps_reading_later_outputs, order_assembly_steps,
+    AssemblyStep, AssemblyStepPaths, assembly_paths_overlap, assembly_step_paths,
+    order_assembly_steps,
 };
 pub use assembly_output_spec::{
     AssemblyFilesystemKindSpec, AssemblyFilesystemSpec, AssemblyTransformKindSpec,
-    AssemblyTransformSpec, VERITY_DEFAULT_BLOCK_SIZE, VFAT_FAT_SIZES,
+    AssemblyTransformSpec, VFAT_FAT_SIZES,
 };
 pub use assembly_package_spec::{
     AssemblyPackageControlSpec, AssemblyPackageDeviceSpec, AssemblyPackageScriptsSpec,
     AssemblyPackageSpec, DEFAULT_DEVICE_MIN_PAGE_SIZE, PACKAGE_FORMAT_DEB, PACKAGE_FORMAT_IPK,
     parse_glibc_version,
 };
+pub(crate) use assembly_spec::AssemblyPathTemplateContext;
 pub use assembly_spec::{
     AssemblyBinarySpec, AssemblyBusyboxInitramfsSpec, AssemblyCheckSpec, AssemblyDeviceKindSpec,
     AssemblyDeviceSpec, AssemblyDirSpec, AssemblyDiskPartitionSpec, AssemblyDiskSpec,
     AssemblyDiskTruncateSpec, AssemblyEbrPlacementSpec, AssemblyFileSpec,
     AssemblyKernelModulesSpec, AssemblyPartitionTableSpec, AssemblyPathTemplate,
-    AssemblyPathTemplateContext, AssemblyPathTemplateError, AssemblySymlinkSpec, AssemblyTreeSpec,
-    ImageAssemblySpec, MbrPartitionType, MbrPartitionTypeParseError,
+    AssemblySymlinkSpec, AssemblyTreeSpec, ImageAssemblySpec, MbrPartitionTypeParseError,
 };
-pub use byte_size::{ByteSize, ByteSizeParseError};
+pub use byte_size::ByteSize;
+pub use byte_size::ByteSizeParseError;
 pub use checkpoints::{
     CheckpointAnchorRef, CheckpointBackendRef, CheckpointId, CheckpointPointSpec, CheckpointPolicy,
     CheckpointSpec, OciCheckpointSpec,
@@ -97,12 +96,11 @@ pub use checkpoints::{
 pub use clean::{CleanProfileSpec, CleanSpec};
 pub use export::ExportSpec;
 pub use file_mode::{FileMode, FileModeParseError};
-pub use fingerprint::{
-    FINGERPRINT_SCHEME, Fingerprint, FingerprintDigest, canonical_json, sha256_hex,
-};
+pub use fingerprint::FingerprintDigest;
+pub use fingerprint::{FINGERPRINT_SCHEME, Fingerprint, canonical_json, sha256_hex};
+pub use ids::IdError;
 pub use ids::{
-    ArtifactId, AssemblyFilesystemId, AssemblyTreeId, BuildId, IdError, InstallId, SourceId,
-    StageItemId,
+    ArtifactId, AssemblyFilesystemId, AssemblyTreeId, BuildId, InstallId, SourceId, StageItemId,
 };
 pub use image::{
     BuildrootExpectedImageFormatSpec, BuildrootExpectedImageSpec, BuildrootExternalTreeModeSpec,
@@ -112,20 +110,17 @@ pub use image::{
     StartingPointOutputModeSpec, StartingPointPackagesSpec, StartingPointRootfsValidationModeSpec,
 };
 pub use inputs::{InputKindSpec, InputOptionSpec, InputSpec};
-pub use install::{InstallEntrySpec, InstallSpec};
+pub use install::InstallEntrySpec;
+pub use install::InstallSpec;
 pub use metadata::{BuildMetadataSpec, ExpectedItemsSpec, ProductIdentitySpec};
 pub use policy::{
     BuildPolicySpec, BuildrootCcachePolicySpec, BuildrootHostToolsPolicySpec,
     BuildrootOverrideCheckSpec, BuildrootPackageCachePolicySpec, BuildrootWorkDirPolicySpec,
     CommandProviderPolicySpec, DEFAULT_ARCHIVE_PROVIDER_TIMEOUT_SECONDS,
     DEFAULT_BUILDROOT_PROVIDER_TIMEOUT_SECONDS, DEFAULT_COMMAND_RETRY_ATTEMPTS,
-    DEFAULT_COMMAND_RETRY_BACKOFF_MS, DEFAULT_COMMAND_RETRY_BACKOFF_STRATEGY,
-    DEFAULT_DOWNLOAD_PROVIDER_TIMEOUT_SECONDS, DEFAULT_GIT_PROVIDER_TIMEOUT_SECONDS,
-    DEFAULT_GO_PROVIDER_TIMEOUT_SECONDS, DEFAULT_JAVA_PROVIDER_TIMEOUT_SECONDS,
-    DEFAULT_NODE_PROVIDER_TIMEOUT_SECONDS, DEFAULT_OUTPUT_RETENTION_FAILURE_TAIL_LINES,
-    DEFAULT_OUTPUT_RETENTION_POLICY, DEFAULT_OUTPUT_RETENTION_STDERR_BYTES,
-    DEFAULT_OUTPUT_RETENTION_STDERR_LINES, DEFAULT_OUTPUT_RETENTION_STDOUT_BYTES,
-    DEFAULT_OUTPUT_RETENTION_STDOUT_LINES, DEFAULT_PROVIDER_LOCAL_JOBS,
+    DEFAULT_COMMAND_RETRY_BACKOFF_MS, DEFAULT_DOWNLOAD_PROVIDER_TIMEOUT_SECONDS,
+    DEFAULT_GIT_PROVIDER_TIMEOUT_SECONDS, DEFAULT_GO_PROVIDER_TIMEOUT_SECONDS,
+    DEFAULT_JAVA_PROVIDER_TIMEOUT_SECONDS, DEFAULT_NODE_PROVIDER_TIMEOUT_SECONDS,
     DEFAULT_PYTHON_PROVIDER_TIMEOUT_SECONDS, DEFAULT_RUST_PROVIDER_TIMEOUT_SECONDS,
     DEFAULT_STARTING_POINT_PROVIDER_TIMEOUT_SECONDS, DockerExecutionSpec, ErofsWorkersSpec,
     ExecutionPolicySpec, FailureHandlingPolicySpec, GitProviderPolicySpec, GradleHomeSpec,
@@ -151,27 +146,22 @@ pub use source::{
 pub use source_dirs::{
     source_build_dir, source_build_dir_by_id, source_checkout_dir, source_materialized_dir,
 };
-pub use stage::{
-    StageContentOriginSpec, StageEnvSetSpec, StageFileSpec, StageServiceSpec, StageSpec,
-};
-pub use state::{
-    IMAGE_ASSEMBLY_STATE_FILE_NAME, IMAGE_ASSEMBLY_STATE_KIND, KeyValueState,
-    RUNTIME_STATE_DIR_NAME,
-};
+pub use stage::StageSpec;
+pub use stage::{StageContentOriginSpec, StageEnvSetSpec, StageFileSpec, StageServiceSpec};
+pub use state::{IMAGE_ASSEMBLY_STATE_FILE_NAME, IMAGE_ASSEMBLY_STATE_KIND, KeyValueState};
 pub use target_arch::{TargetArch, target_arch};
 pub use toolchain::{
     ResolvedToolchain, ToolchainKindSpec, ToolchainSpec, default_toolchain_prefix,
-    resolve_toolchain, toolchain_root,
+    resolve_toolchain,
 };
 pub use user_cache::{
     USER_BUILDROOT_CCACHE_DIR, USER_BUILDROOT_PACKAGE_CACHE_DIR, user_cache_root,
 };
-pub use variant::{
-    DEFAULT_VARIANT_ID, VariantSpec, is_valid_variant_id, runtime_state_dir_name,
-    variant_name_suffix,
-};
+pub(crate) use variant::variant_name_suffix;
+pub use variant::{DEFAULT_VARIANT_ID, VariantSpec, is_valid_variant_id, runtime_state_dir_name};
+pub use workspace::WorkspacePathError;
 pub use workspace::{
-    CleanPolicy, WorkspaceNamedPathSpec, WorkspacePathError, WorkspacePathKindSpec, WorkspaceSpec,
+    CleanPolicy, WorkspaceNamedPathSpec, WorkspacePathKindSpec, WorkspaceSpec,
     default_image_collect_dir, resolve_workspace_path,
 };
 
