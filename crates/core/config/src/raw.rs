@@ -358,10 +358,10 @@ pub(crate) struct RawCleanProfileConfig {
 #[serde(default)]
 pub(crate) struct RawExecutionPolicyConfig {
     pub jobs: u32,
-    /// `offline = true`: no network. See docs/configuration.md (Execution Policy).
+    /// `offline = true`: no network. See docs/configuration-policy.md (Execution Policy).
     pub offline: bool,
     /// `canonical_tree = true`: a RAM tree at a path named by the build's
-    /// identity, shared by its checkouts (see docs/configuration.md).
+    /// identity, shared by its checkouts (see docs/configuration-checkpoints.md).
     pub canonical_tree: bool,
     pub docker: RawDockerExecutionConfig,
     pub output_retention: RawOutputRetentionPolicyConfig,

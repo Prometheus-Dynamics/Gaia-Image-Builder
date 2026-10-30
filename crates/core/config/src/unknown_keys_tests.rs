@@ -349,7 +349,7 @@ fn examples_and_docs_name_no_unknown_key() {
     // migration starts from, and the lockfile `gaia lock` writes.
     const NOT_BUILD_CONFIG: &[(&str, &str)] = &[
         ("migration-from-legacy.md", "[program.install]"),
-        ("configuration.md", "[[git]]"),
+        ("configuration-sources.md", "[[git]]"),
         // The taplo rule that points at the schema, not a build config.
         ("configuration.md", "[[rule]]"),
     ];

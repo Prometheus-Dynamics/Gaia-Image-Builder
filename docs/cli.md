@@ -20,6 +20,7 @@ gaia cancel [run]
 gaia status [run]
 gaia tui [build.toml]
 gaia config schema
+gaia config keys
 ```
 
 If no command is provided, Gaia treats the first positional argument as a build path and defaults to `run`.
@@ -305,7 +306,7 @@ Resolves the commit each git source's `branch`, `tag` (or `HEAD`) points at
 and writes it to the build's lockfile, `<build>.gaia.lock` next to the build
 entrypoint (`configs/builds/evk.toml` locks into
 `configs/builds/evk.gaia.lock`). Commit the lockfile. See
-[Git Source Lockfile](configuration.md#git-source-lockfile).
+[Git Source Lockfile](configuration-sources.md#git-source-lockfile).
 
 ```bash
 gaia lock configs/builds/evk.toml                    # add missing entries, keep existing ones
@@ -580,6 +581,14 @@ both settings:
 ```bash
 gaia config schema > gaia-build.schema.json
 ```
+
+### `config keys`
+
+`gaia config keys` prints the key reference: every table a build file can
+have, each kind of a kinded table (`[[sources]]` with `kind = "git"`, and so
+on) and the keys it takes, with a link to the page that describes it. It is
+written from the same layout as the schema. The committed copy is
+[reference/config-keys.md](reference/config-keys.md).
 
 ### `pause`, `resume`, `cancel`
 

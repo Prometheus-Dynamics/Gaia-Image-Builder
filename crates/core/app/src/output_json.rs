@@ -44,7 +44,7 @@ fn command_name(command: AppCommand) -> &'static str {
         AppCommand::Plan => "plan",
         AppCommand::Clean => "clean",
         AppCommand::Cache => "cache",
-        AppCommand::ConfigSchema => "config",
+        AppCommand::ConfigSchema | AppCommand::ConfigKeys => "config",
         AppCommand::Pause => "pause",
         AppCommand::Resume => "resume",
         AppCommand::Cancel => "cancel",

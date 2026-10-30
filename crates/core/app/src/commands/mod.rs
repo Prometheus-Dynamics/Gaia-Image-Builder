@@ -287,6 +287,7 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
         AppCommand::Help
             | AppCommand::Version
             | AppCommand::ConfigSchema
+            | AppCommand::ConfigKeys
             | AppCommand::Tui
             | AppCommand::Pause
             | AppCommand::Resume
@@ -315,6 +316,9 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
         AppCommand::Tui => run_tui_command(context, &args),
         AppCommand::ConfigSchema => CommandOutcome::Text {
             text: gaia_config::config_schema_json(),
+        },
+        AppCommand::ConfigKeys => CommandOutcome::Text {
+            text: gaia_config::config_key_reference_markdown(),
         },
         AppCommand::Resolve => resolve_build_command(&args.build, &resolve_options(&args)),
         AppCommand::Validate => validate_build_command(
@@ -424,6 +428,7 @@ fn help_text() -> String {
         "  gaia clean [build-config] --dry-run",
         "  gaia clean [build-config] --target caches [--unused-mirrors] [--all-caches]",
         "  gaia config schema                 JSON Schema of the build config, for editors (taplo, Even Better TOML)",
+        "  gaia config keys                   Every table and key a build file takes (docs/reference/config-keys.md)",
         "  gaia cache [build-config] [--list] [--level system|project] [--package <glob>]",
         "  gaia cache [build-config] --remove <package>[@key-prefix][,...] [--dry-run]",
         "  gaia cache [build-config] --remove-legacy [--dry-run]",

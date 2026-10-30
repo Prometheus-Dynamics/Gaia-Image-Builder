@@ -102,7 +102,7 @@ tree. `[providers.buildroot] override_check` (`"error"` by default, `"warn"`,
 before the long `make` or is returned as a warning on the image result
 (`ImageExecutionResult::warnings`), which the run output, `summary.json`
 (`image_warnings`) and `manifest.json` report. See
-[configuration](configuration.md#dropped-config-overrides).
+[configuration](configuration-policy.md#dropped-config-overrides).
 
 ### Starting Point
 

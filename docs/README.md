@@ -17,7 +17,14 @@ This is the rebuilt documentation set for the current typed Gaia system.
 ## What Each Doc Covers
 
 - [configuration.md](configuration.md)
-  Full TOML surface for build metadata, inputs, presets, env, workspace, sources, artifacts, install, stage, image, checkpoints, reporting, and policy.
+  The build file: loading, conditions, top-level fields, interpolation and secrets, with one page per part:
+  [inputs and variants](configuration-inputs.md), [policy, workspace and clean](configuration-policy.md),
+  [sources and toolchains](configuration-sources.md), [artifacts, install and stage](configuration-artifacts.md),
+  [image](configuration-image.md), [image assembly](configuration-assembly.md) and
+  [checkpoints, registry and reporting](configuration-checkpoints.md).
+
+- [reference/config-keys.md](reference/config-keys.md)
+  Every table and key a build file takes, generated from the layout Gaia validates against (`gaia config keys`).
 
 - [cli.md](cli.md)
   Actual supported commands and overrides:

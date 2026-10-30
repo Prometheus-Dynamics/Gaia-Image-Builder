@@ -4,6 +4,7 @@ mod dynamic_inputs;
 mod env;
 mod gaia_version;
 mod interpolate;
+mod key_reference;
 mod load;
 mod locate;
 pub mod lockfile;
@@ -20,6 +21,7 @@ mod variants;
 
 pub(crate) use compile::compile_config;
 pub use gaia_version::GAIA_VERSION;
+pub use key_reference::config_key_reference_markdown;
 pub use schema::config_schema_json;
 pub use variants::{
     VariantBuild, resolve_variant_specs, resolve_variant_specs_scoped, variant_output_collisions,

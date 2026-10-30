@@ -67,7 +67,8 @@ Supported CLI modifiers:
 ## Where To Start
 
 - [docs/README.md](docs/README.md): documentation index
-- [docs/configuration.md](docs/configuration.md): full config model
+- [docs/configuration.md](docs/configuration.md): the build file, one page per part
+- [docs/reference/config-keys.md](docs/reference/config-keys.md): every table and key, generated
 - [docs/cli.md](docs/cli.md): command-line behavior
 - [docs/execution.md](docs/execution.md): planning, execution, rollback, cancellation, reuse
 - [docs/ci.md](docs/ci.md): the GitHub Action and running Gaia on CI runners

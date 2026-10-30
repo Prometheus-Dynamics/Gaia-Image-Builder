@@ -119,7 +119,7 @@ Gaia reuses work through three layers. On CI they are kept like this:
 3. **A registry (`[[checkpoints]] backend = "oci"`).** This is the cache that
    works across runners and machines. Built Buildroot packages, artifacts and
    image layers are pushed as signed OCI artifacts, and any runner pulls them
-   on a miss. See [Registry checkpoints](configuration.md#registry-checkpoints).
+   on a miss. See [Registry checkpoints](configuration-checkpoints.md#registry-checkpoints).
    A runner that only reads the cache needs the verify key and pull access. A
    runner that writes needs the sign key and push access too.
 

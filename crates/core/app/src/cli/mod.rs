@@ -156,9 +156,13 @@ impl AppArgs {
         if parsed.command == AppCommand::Cache && args.next_if_eq("stats").is_some() {
             parsed.cache.stats = true;
         }
-        // `gaia config schema` is the only action `config` takes.
+        // `gaia config schema` (the default) or `gaia config keys`.
         if parsed.command == AppCommand::ConfigSchema {
-            let _ = args.next_if_eq("schema");
+            if args.next_if_eq("keys").is_some() {
+                parsed.command = AppCommand::ConfigKeys;
+            } else {
+                let _ = args.next_if_eq("schema");
+            }
         }
 
         while let Some(arg) = args.next() {
@@ -423,6 +427,8 @@ pub enum AppCommand {
     Cache,
     /// `gaia config schema`: the JSON Schema of the build config.
     ConfigSchema,
+    /// `gaia config keys`: the build file key reference, as Markdown.
+    ConfigKeys,
     /// Signal the running `gaia run` of a build.
     Pause,
     Resume,
@@ -514,6 +520,9 @@ mod tests {
         let schema = parse(&["config", "schema"]);
         assert_eq!(schema.command, AppCommand::ConfigSchema);
         assert!(schema.usage_errors.is_empty(), "{:?}", schema.usage_errors);
+        let keys = parse(&["config", "keys"]);
+        assert_eq!(keys.command, AppCommand::ConfigKeys);
+        assert!(keys.usage_errors.is_empty(), "{:?}", keys.usage_errors);
     }
 
     #[test]
