@@ -5,6 +5,7 @@
 //! `live_status`), so `gaia status` and the TUI can follow a run started
 //! elsewhere even when the console output is turned off.
 
+use crate::output::format_elapsed;
 use gaia_exec::ExecutionEvent;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -194,7 +195,7 @@ impl ConsoleProgress {
         else {
             return;
         };
-        let elapsed = format_progress_elapsed(started_at.elapsed());
+        let elapsed = format_elapsed(started_at.elapsed());
         let detail = self
             .last_log
             .get(operation_id)
@@ -227,7 +228,7 @@ impl ConsoleProgress {
                 done,
                 self.total,
                 self.running.len(),
-                format_progress_elapsed(self.started_at.elapsed()),
+                format_elapsed(self.started_at.elapsed()),
                 operation_id,
                 detail
             );
@@ -240,7 +241,7 @@ impl ConsoleProgress {
             done,
             self.total,
             self.running.len(),
-            format_progress_elapsed(self.started_at.elapsed()),
+            format_elapsed(self.started_at.elapsed()),
             operation_id,
             detail
         );
@@ -294,18 +295,6 @@ pub(super) fn progress_bar(done: usize, total: usize) -> String {
         "#".repeat(filled),
         "-".repeat(WIDTH.saturating_sub(filled))
     )
-}
-
-pub(super) fn format_progress_elapsed(duration: Duration) -> String {
-    let seconds = duration.as_secs();
-    let hours = seconds / 3600;
-    let minutes = (seconds % 3600) / 60;
-    let secs = seconds % 60;
-    if hours > 0 {
-        format!("{hours:02}:{minutes:02}:{secs:02}")
-    } else {
-        format!("{minutes:02}:{secs:02}")
-    }
 }
 
 pub(super) fn compact_log_line(line: &str) -> String {

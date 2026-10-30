@@ -2,6 +2,7 @@
 //! and compiler cache settings, and the environment every `make` gets.
 use super::*;
 
+pub(crate) use gaia_process::filesystem_available_bytes;
 /// What the config steps write after defconfig and the fragments: the config
 /// overrides, then the download, compiler cache and parallel build settings.
 pub(crate) struct BuildrootSettingsRequest<'a> {
@@ -516,27 +517,6 @@ pub(crate) fn cache_space_warning(label: &str, dir: &Path, max_size: u64) -> Opt
             gib(available)
         )
     })
-}
-
-/// Free bytes on the filesystem holding `dir` (`df -Pk`).
-pub(crate) fn filesystem_available_bytes(dir: &Path) -> Option<u64> {
-    let output = Command::new("df")
-        .arg("-Pk")
-        .arg(dir)
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()
-        .filter(|output| output.status.success())?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    let available_kib = text
-        .lines()
-        .nth(1)?
-        .split_whitespace()
-        .nth(3)?
-        .parse::<u64>()
-        .ok()?;
-    Some(available_kib * 1024)
 }
 
 /// ccache's `max_size` for a run, as `ccache.conf` spells it: the explicit

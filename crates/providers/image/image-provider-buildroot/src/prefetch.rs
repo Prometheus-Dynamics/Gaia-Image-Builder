@@ -102,10 +102,10 @@ fn prefetch_summary(
     format!(
         "prefetch: {} new source file(s) ({}) downloaded; download cache '{}' now holds {} file(s), {}",
         added.len(),
-        crate::build_reports::human_bytes(added_bytes),
+        crate::build_reports::format_bytes(added_bytes),
         dir.display(),
         after.len(),
-        crate::build_reports::human_bytes(total_bytes)
+        crate::build_reports::format_bytes(total_bytes)
     )
 }
 

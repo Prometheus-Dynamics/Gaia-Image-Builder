@@ -11,6 +11,7 @@
 //! are not counted.
 
 use super::*;
+pub(crate) use gaia_process::format_bytes;
 use sha2::{Digest, Sha256};
 
 /// The `build/` file listing each package's installed files (`package,path`).
@@ -58,28 +59,12 @@ pub(crate) fn package_sizes(output_dir: &Path) -> Vec<(String, u64)> {
     ranked
 }
 
-/// The size of `bytes` in binary units, one decimal place above bytes.
-pub(crate) fn human_bytes(bytes: u64) -> String {
-    const UNITS: [&str; 4] = ["B", "KiB", "MiB", "GiB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{bytes} B")
-    } else {
-        format!("{value:.1} {}", UNITS[unit])
-    }
-}
-
 /// The change from `previous` to `current`, for a note.
 fn size_change(current: u64, previous: u64) -> String {
     match current.cmp(&previous) {
         std::cmp::Ordering::Equal => "unchanged".to_string(),
-        std::cmp::Ordering::Greater => format!("+{}", human_bytes(current - previous)),
-        std::cmp::Ordering::Less => format!("-{}", human_bytes(previous - current)),
+        std::cmp::Ordering::Greater => format!("+{}", format_bytes(current - previous)),
+        std::cmp::Ordering::Less => format!("-{}", format_bytes(previous - current)),
     }
 }
 
@@ -139,7 +124,7 @@ pub(crate) fn package_size_report(
 
     let mut notes = vec![format!(
         "summary: package sizes: {} installed in target/; largest {} (change since the last build)",
-        human_bytes(total),
+        format_bytes(total),
         TOP_PACKAGES.min(sizes.len())
     )];
     for (rank, (name, bytes)) in sizes.iter().take(TOP_PACKAGES).enumerate() {
@@ -151,7 +136,7 @@ pub(crate) fn package_size_report(
         notes.push(format!(
             "summary:   {}. {name} {} ({change})",
             rank + 1,
-            human_bytes(*bytes)
+            format_bytes(*bytes)
         ));
     }
     Ok(notes)
@@ -261,7 +246,7 @@ pub(crate) fn legal_info_archive(
         .unwrap_or(0);
     messages.push(format!(
         "summary: legal-info: wrote {LEGAL_INFO_ARCHIVE} ({})",
-        human_bytes(bytes)
+        format_bytes(bytes)
     ));
     Ok(messages)
 }
@@ -331,13 +316,6 @@ mod tests {
             "{second:?}"
         );
         assert!(second.iter().all(|note| note.starts_with("summary: ")));
-    }
-
-    #[test]
-    fn human_bytes_uses_binary_units() {
-        assert_eq!(human_bytes(12), "12 B");
-        assert_eq!(human_bytes(2048), "2.0 KiB");
-        assert_eq!(human_bytes(3 * 1024 * 1024), "3.0 MiB");
     }
 
     #[test]

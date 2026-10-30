@@ -38,6 +38,18 @@ pub struct AssemblyArchiveMemberSpec {
 }
 
 impl AssemblyArchiveMemberSpec {
+    /// How the member is named in messages: its name, else its source.
+    pub fn label(&self) -> String {
+        if !self.name.is_empty() {
+            return self.name.clone();
+        }
+        match self.source() {
+            Some(AssemblyArchiveMemberSourceSpec::Tree(tree)) => format!("tree {}", tree.as_str()),
+            Some(AssemblyArchiveMemberSourceSpec::Dir(dir)) => format!("src_dir {}", dir.as_str()),
+            _ => String::new(),
+        }
+    }
+
     pub fn source(&self) -> Option<AssemblyArchiveMemberSourceSpec<'_>> {
         let set = [
             self.src.is_some(),

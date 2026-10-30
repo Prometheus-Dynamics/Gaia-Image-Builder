@@ -4,6 +4,7 @@
 
 use crate::{ExecutionPlan, OperationKind, PlanTarget};
 use gaia_spec::wildcard_match;
+use gaia_spec::{did_you_mean_hint, edit_distance};
 
 /// Reason code of an operation that executes because of a rebuild request.
 pub(crate) const REBUILD_REQUESTED: &str = "rebuild_requested";
@@ -128,38 +129,14 @@ pub(crate) fn image_prepare_alias(pattern: &str, plan: &ExecutionPlan) -> Option
 /// `" (did you mean 'a', 'b'?)"` for the closest ids, or nothing.
 fn close_matches_hint(wanted: &str, ids: &[&str]) -> String {
     let limit = (wanted.chars().count() / 3).max(3);
-    let mut scored = ids
+    let scored = ids
         .iter()
         .filter_map(|id| {
             let distance = edit_distance(wanted, id);
             (distance <= limit || id.contains(wanted)).then_some((distance, *id))
         })
         .collect::<Vec<_>>();
-    scored.sort();
-    scored.truncate(3);
-    if scored.is_empty() {
-        return String::new();
-    }
-    let names = scored
-        .iter()
-        .map(|(_, id)| format!("'{id}'"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!(" (did you mean {names}?)")
-}
-
-fn edit_distance(a: &str, b: &str) -> usize {
-    let b = b.chars().collect::<Vec<_>>();
-    let mut previous = (0..=b.len()).collect::<Vec<_>>();
-    for (i, ca) in a.chars().enumerate() {
-        let mut current = vec![i + 1; b.len() + 1];
-        for (j, cb) in b.iter().enumerate() {
-            let substitution = previous[j] + usize::from(ca != *cb);
-            current[j + 1] = substitution.min(previous[j + 1] + 1).min(current[j] + 1);
-        }
-        previous = current;
-    }
-    previous[b.len()]
+    did_you_mean_hint(scored)
 }
 
 #[cfg(test)]
@@ -249,12 +226,5 @@ mod tests {
         let hint = close_matches_hint("artifact:myapp-jar", &ids);
         assert_eq!(hint, " (did you mean 'artifact:myapp-jar'?)");
         assert_eq!(close_matches_hint("zzzzzzzzzzzz", &ids), "");
-    }
-
-    #[test]
-    fn edit_distance_counts_single_edits() {
-        assert_eq!(edit_distance("image", "image"), 0);
-        assert_eq!(edit_distance("image", "imagr"), 1);
-        assert_eq!(edit_distance("", "abc"), 3);
     }
 }

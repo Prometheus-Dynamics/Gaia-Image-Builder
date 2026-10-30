@@ -24,6 +24,7 @@ const EXIT_POLL_TICK: Duration = Duration::from_millis(1);
 
 mod build_progress;
 mod digest;
+mod disk;
 mod docker;
 mod docker_context;
 mod docker_reuse;
@@ -39,6 +40,7 @@ mod trash;
 
 pub use build_progress::{BuildProgress, build_progress_message, parse_build_progress};
 pub use digest::{hex, sha256_file, sha256_hex_bytes};
+pub use disk::{filesystem_available_bytes, format_bytes};
 pub use docker::{
     DockerRunError, DockerRunSpec, docker_image_build_command, docker_image_id_command,
     docker_local_image_tag, docker_run_command, register_docker_mount,

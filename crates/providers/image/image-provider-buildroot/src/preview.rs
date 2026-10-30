@@ -9,6 +9,7 @@
 //! from the real tree, and the package cache is planned read-only.
 use super::*;
 use crate::canonical_tree::{CanonicalRequest, busy_holder, canonical_tree_dir};
+use crate::clean_plan::change_summary;
 use crate::ram_tree::ram_base;
 use crate::requested_rebuilds::{
     excluded_from_restore, requested_package_rebuilds, with_requested_rebuilds,
@@ -148,17 +149,6 @@ fn name_list(names: &[String]) -> String {
     } else {
         shown
     }
-}
-
-/// `name old -> new` for a config change, as the clean reasons name them.
-fn config_change_line(change: &ConfigChange) -> String {
-    let value = |value: &Option<String>| value.clone().unwrap_or_else(|| "unset".to_string());
-    format!(
-        "{} {} -> {}",
-        change.key,
-        value(&change.previous),
-        value(&change.current)
-    )
 }
 
 /// The preview of a Buildroot image operation.
@@ -325,7 +315,7 @@ pub(crate) fn preview_buildroot(
         Err(error) => return Ok(blocked(preview, error.message)),
     }
     for change in &changes.config_changes {
-        config_lines.push(format!("changed: {}", config_change_line(change)));
+        config_lines.push(format!("changed: {}", change_summary(change)));
     }
     if changes.unattributed_config_change {
         config_lines

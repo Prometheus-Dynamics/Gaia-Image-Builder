@@ -5,6 +5,7 @@ use crate::output_profile::plan_estimate_lines;
 use crate::output_profile::{critical_path_line, slowest_operation_lines, slowest_step_lines};
 use crate::output_variants::print_variants;
 use crate::{CommandOutcome, commands};
+pub(crate) use gaia_process::format_bytes;
 use gaia_report::{mask_pairs, mask_value};
 use gaia_spec::ResolvedBuildSpec;
 use std::time::Duration;
@@ -462,22 +463,6 @@ pub(crate) fn validate_verdict_line(validation: &gaia_validate::ValidationReport
         validation.errors.len(),
         validation.warnings.len()
     )
-}
-
-/// A byte count in binary units: `812 B`, `3.4 MiB`, `1.2 GiB`.
-pub(crate) fn format_bytes(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{bytes} B")
-    } else {
-        format!("{value:.1} {}", UNITS[unit])
-    }
 }
 
 pub(crate) fn format_elapsed(duration: Duration) -> String {

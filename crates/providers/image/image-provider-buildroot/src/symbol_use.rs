@@ -11,6 +11,7 @@
 //!   nothing at all: no package is rebuilt; `target/` is reassembled from
 //!   the per-package directories.
 use super::*;
+use crate::package_keys::upper_name;
 
 /// Settings only target finalization reads (some through hooks that
 /// packages such as `skeleton-init-common` register).
@@ -131,7 +132,7 @@ impl SymbolIndex {
             .collect();
         let mut package_prefixes = names
             .keys()
-            .map(|name| (upper(name), name.clone()))
+            .map(|name| (upper_name(name), name.clone()))
             .collect::<Vec<_>>();
         package_prefixes.sort_by_key(|(prefix, _)| std::cmp::Reverse(prefix.len()));
         let external = ExternalMakefiles::parse(
@@ -397,18 +398,6 @@ fn has_word(contents: &str, word: &str) -> bool {
     })
 }
 
-fn upper(name: &str) -> String {
-    name.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_uppercase()
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
 fn collect_makefiles(dir: &Path, prefix: &str, recursive: bool, files: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
         let path = entry.path();
@@ -467,7 +456,7 @@ endif
     fn index(packages: &[(&str, &str)]) -> SymbolIndex {
         let mut package_prefixes = packages
             .iter()
-            .map(|(name, _)| (upper(name), name.to_string()))
+            .map(|(name, _)| (upper_name(name), name.to_string()))
             .collect::<Vec<_>>();
         package_prefixes.sort_by_key(|(prefix, _)| std::cmp::Reverse(prefix.len()));
         SymbolIndex {

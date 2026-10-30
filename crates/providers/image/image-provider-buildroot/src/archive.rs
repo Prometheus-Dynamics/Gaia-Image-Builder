@@ -1,5 +1,6 @@
 use super::*;
 
+use gaia_process::format_bytes;
 pub(crate) struct BuildrootArchiveRequest<'a> {
     pub(crate) image: &'a ImageSpec,
     pub(crate) collect_dir: &'a Path,
@@ -407,12 +408,8 @@ pub(crate) fn archive_log_messages(
         .unwrap_or_else(|| archive_path.display().to_string());
     let output_bytes = fs::metadata(archive_path).map_or(0, |metadata| metadata.len());
     let sizes = match input_bytes {
-        Some(input) => format!(
-            "{} -> {}",
-            format_archive_bytes(input),
-            format_archive_bytes(output_bytes)
-        ),
-        None => format_archive_bytes(output_bytes),
+        Some(input) => format!("{} -> {}", format_bytes(input), format_bytes(output_bytes)),
+        None => format_bytes(output_bytes),
     };
     vec![
         gaia_process::step_time_message(&format!("archive {name} ({label})"), elapsed),
@@ -435,22 +432,6 @@ fn tree_bytes(path: &Path) -> u64 {
             .map(|entry| tree_bytes(&entry.path()))
             .sum()
     })
-}
-
-/// `1.4 GiB`, `142 MiB`, `812 B`.
-fn format_archive_bytes(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-    match unit {
-        0 => format!("{bytes} B"),
-        _ if value >= 100.0 => format!("{value:.0} {}", UNITS[unit]),
-        _ => format!("{value:.1} {}", UNITS[unit]),
-    }
 }
 
 /// The compression of a compressed raw disk archive name (`.img.xz`,
@@ -612,12 +593,5 @@ mod tests {
                 "missing size line in {messages:?}"
             );
         }
-    }
-
-    #[test]
-    fn format_archive_bytes_uses_binary_units() {
-        assert_eq!(format_archive_bytes(812), "812 B");
-        assert_eq!(format_archive_bytes(142 * 1024 * 1024), "142 MiB");
-        assert_eq!(format_archive_bytes(1_503_238_553), "1.4 GiB");
     }
 }

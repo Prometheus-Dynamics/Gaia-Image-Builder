@@ -1,5 +1,7 @@
 //! "Did you mean" hints for override keys that name no setting.
 
+use gaia_spec::{did_you_mean_hint, edit_distance};
+
 /// Every complete key spelling `OverrideKey::parse` accepts, aliases
 /// included. Only used to suggest the closest key for an unknown one; the
 /// test below keeps each entry parseable.
@@ -136,42 +138,18 @@ pub(super) fn did_you_mean(wanted: &str) -> String {
 pub(crate) fn did_you_mean_among(wanted: &str, candidates: &[&str]) -> String {
     let leaf = last_segment(wanted);
     let limit = (leaf.chars().count() / 3).max(2);
-    let mut scored = candidates
+    let scored = candidates
         .iter()
         .filter_map(|id| {
             let distance = edit_distance(wanted, id).min(edit_distance(leaf, last_segment(id)));
             (distance <= limit).then_some((distance, *id))
         })
         .collect::<Vec<_>>();
-    scored.sort();
-    scored.truncate(3);
-    if scored.is_empty() {
-        return String::new();
-    }
-    let names = scored
-        .iter()
-        .map(|(_, id)| format!("'{id}'"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!(" (did you mean {names}?)")
+    did_you_mean_hint(scored)
 }
 
 fn last_segment(key: &str) -> &str {
     key.rsplit('.').next().unwrap_or(key)
-}
-
-fn edit_distance(a: &str, b: &str) -> usize {
-    let b = b.chars().collect::<Vec<_>>();
-    let mut previous = (0..=b.len()).collect::<Vec<_>>();
-    for (i, ca) in a.chars().enumerate() {
-        let mut current = vec![i + 1; b.len() + 1];
-        for (j, cb) in b.iter().enumerate() {
-            let substitution = previous[j] + usize::from(ca != *cb);
-            current[j + 1] = substitution.min(previous[j + 1] + 1).min(current[j] + 1);
-        }
-        previous = current;
-    }
-    previous[b.len()]
 }
 
 #[cfg(test)]
@@ -199,12 +177,5 @@ mod tests {
     #[test]
     fn unrelated_key_gets_no_suggestion() {
         assert_eq!(did_you_mean("zzzz.qqqq.wwww"), "");
-    }
-
-    #[test]
-    fn edit_distance_counts_single_edits() {
-        assert_eq!(edit_distance("name", "name"), 0);
-        assert_eq!(edit_distance("nme", "name"), 1);
-        assert_eq!(edit_distance("", "abc"), 3);
     }
 }

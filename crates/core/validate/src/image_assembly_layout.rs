@@ -195,7 +195,7 @@ pub(crate) fn validate_archives(
         }
         let mut names = HashSet::new();
         for member in &archive.members {
-            let member_label = member_label(member);
+            let member_label = member.label();
             validate_exclude(
                 &member.exclude,
                 matches!(
@@ -404,18 +404,6 @@ fn validate_generated_entries(
                 location(),
             ));
         }
-    }
-}
-
-/// How a member is named in messages: its name, else its source.
-fn member_label(member: &gaia_spec::AssemblyArchiveMemberSpec) -> String {
-    if !member.name.is_empty() {
-        return member.name.clone();
-    }
-    match member.source() {
-        Some(AssemblyArchiveMemberSourceSpec::Tree(tree)) => format!("tree {}", tree.as_str()),
-        Some(AssemblyArchiveMemberSourceSpec::Dir(dir)) => format!("src_dir {}", dir.as_str()),
-        _ => String::new(),
     }
 }
 

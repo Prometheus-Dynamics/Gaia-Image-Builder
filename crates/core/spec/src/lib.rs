@@ -31,6 +31,7 @@ mod source;
 mod source_dirs;
 mod stage;
 mod state;
+mod suggest;
 mod target_arch;
 mod toolchain;
 mod user_cache;
@@ -149,6 +150,7 @@ pub use source_dirs::{
 pub use stage::StageSpec;
 pub use stage::{StageContentOriginSpec, StageEnvSetSpec, StageFileSpec, StageServiceSpec};
 pub use state::{IMAGE_ASSEMBLY_STATE_FILE_NAME, IMAGE_ASSEMBLY_STATE_KIND, KeyValueState};
+pub use suggest::{did_you_mean_hint, edit_distance};
 pub use target_arch::{TargetArch, target_arch};
 pub use toolchain::{
     ResolvedToolchain, ToolchainKindSpec, ToolchainSpec, default_toolchain_prefix,

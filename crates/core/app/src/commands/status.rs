@@ -21,8 +21,9 @@ use super::CommandOutcome;
 use super::live_status::{
     BuildProgressStatus, LastRun, LiveRun, LiveStatus, live_run, read_last, unix_now,
 };
-use super::progress::{build_progress_summary, format_progress_elapsed};
+use super::progress::build_progress_summary;
 use super::run_registry::{ListedRun, RegisteredRun, inspect_run, list_runs, select_run};
+use crate::output::format_elapsed;
 
 /// Log lines `gaia status` prints under the summary.
 const RECENT_LOG_LINES: usize = 10;
@@ -275,8 +276,7 @@ pub(crate) fn live_lines(run: &LiveRun, now: u64) -> Vec<String> {
             run.pid
         )];
     };
-    let elapsed =
-        format_progress_elapsed(Duration::from_secs(now.saturating_sub(status.started_at)));
+    let elapsed = format_elapsed(Duration::from_secs(now.saturating_sub(status.started_at)));
     let state = if run.paused() { "PAUSED" } else { "running" };
     let counts = &status.finished;
     let mut lines = vec![
@@ -306,8 +306,7 @@ pub(crate) fn live_lines(run: &LiveRun, now: u64) -> Vec<String> {
         lines.push("running:".into());
     }
     for op in &status.running {
-        let elapsed =
-            format_progress_elapsed(Duration::from_secs(now.saturating_sub(op.started_at)));
+        let elapsed = format_elapsed(Duration::from_secs(now.saturating_sub(op.started_at)));
         let mut line = format!("  {}  {}", op.id, elapsed);
         if let Some(last) = &op.last_log {
             line.push_str(&format!("  last: {last}"));

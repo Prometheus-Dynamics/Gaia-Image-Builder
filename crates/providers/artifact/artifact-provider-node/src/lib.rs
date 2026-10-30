@@ -1,9 +1,9 @@
 use gaia_artifact_providers::{
-    ArtifactBackendState, ArtifactExecutionContract, ArtifactPlan, ArtifactProvider,
-    ArtifactProviderError, ArtifactProviderErrorKind, ArtifactProviderOperation,
-    ArtifactProviderValidationIssue, ProcessCancelCheck, ProcessLogSink, artifact_output_path,
-    artifact_package_root, command_version_line, copy_artifact_file_to_output,
-    materialize_artifact_marker_and_state, render_artifact_backend_state, run_command_with_retries,
+    ArtifactBackendState, ArtifactExecutionContract, ArtifactProvider, ArtifactProviderError,
+    ArtifactProviderErrorKind, ArtifactProviderValidationIssue, ProcessCancelCheck, ProcessLogSink,
+    artifact_output_path, artifact_package_root, command_version_line,
+    copy_artifact_file_to_output, materialize_artifact_marker_and_state,
+    render_artifact_backend_state, run_command_with_retries,
 };
 use gaia_spec::{ArtifactDefinition, ArtifactSpec, ResolvedBuildSpec};
 use std::fs;
@@ -23,19 +23,6 @@ impl ArtifactProvider for NodeProvider {
 
     fn supports(&self, _spec: &ResolvedBuildSpec) -> bool {
         true
-    }
-
-    fn plan_artifact(&self, artifact: &ArtifactSpec) -> ArtifactPlan {
-        ArtifactPlan {
-            operations: vec![ArtifactProviderOperation::Build],
-            contract: ArtifactExecutionContract::from_spec(
-                artifact,
-                None,
-                false,
-                ArtifactExecutionContract::default_command_policy(),
-                gaia_spec::OutputRetentionPolicySpec::default(),
-            ),
-        }
     }
 
     fn validate_artifact(&self, artifact: &ArtifactSpec) -> Vec<ArtifactProviderValidationIssue> {

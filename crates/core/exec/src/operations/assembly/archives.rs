@@ -84,7 +84,7 @@ fn write_archive(
             format!(
                 "assembly archive '{}' member '{}': {error}",
                 archive.id,
-                member_label(member)
+                member.label()
             )
         };
         let expanded = match member.source() {
@@ -218,18 +218,6 @@ fn hex_digest(hasher: Sha256) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
-}
-
-/// How a member is named in messages: its name, else its source.
-fn member_label(member: &gaia_spec::AssemblyArchiveMemberSpec) -> String {
-    if !member.name.is_empty() {
-        return member.name.clone();
-    }
-    match member.source() {
-        Some(AssemblyArchiveMemberSourceSpec::Tree(tree)) => format!("tree {}", tree.as_str()),
-        Some(AssemblyArchiveMemberSourceSpec::Dir(dir)) => format!("src_dir {}", dir.as_str()),
-        _ => String::new(),
-    }
 }
 
 /// 0755 for an executable file, else 0644.

@@ -20,6 +20,23 @@ pub(crate) struct SourceCommandPolicy {
     pub(crate) output_retention: ProcessOutputRetention,
 }
 
+impl SourceCommandPolicy {
+    /// A source provider's configured policy (`[providers.git]`, `.archive`
+    /// or `.download`), with at least one attempt and a one second timeout.
+    pub(crate) fn new(
+        spec: &ResolvedBuildSpec,
+        policy: gaia_spec::ResolvedCommandPolicySpec,
+    ) -> Self {
+        Self {
+            attempts: policy.retry_attempts.max(1),
+            retry_backoff_ms: policy.retry_backoff_ms,
+            retry_backoff_strategy: policy.retry_backoff_strategy,
+            timeout_seconds: policy.timeout_seconds.max(1),
+            output_retention: process_output_retention(spec),
+        }
+    }
+}
+
 pub(crate) fn command_output_with_timeout(
     command: &mut Command,
     execution: &SourceExecutionContext,

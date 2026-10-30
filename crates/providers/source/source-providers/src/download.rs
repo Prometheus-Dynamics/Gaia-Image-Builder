@@ -57,13 +57,7 @@ impl SourceProvider for DownloadSourceProvider {
                 command,
                 &execution,
                 "download source contents",
-                SourceCommandPolicy {
-                    attempts: spec.policy.providers.download.retry_attempts.max(1),
-                    retry_backoff_ms: spec.policy.providers.download.retry_backoff_ms,
-                    retry_backoff_strategy: spec.policy.providers.download.retry_backoff_strategy,
-                    timeout_seconds: spec.policy.providers.download.timeout_seconds.max(1),
-                    output_retention: process_output_retention(spec),
-                },
+                SourceCommandPolicy::new(spec, (&spec.policy.providers.download).into()),
                 log_sink,
                 cancel_check,
             )?;
@@ -187,13 +181,7 @@ pub(crate) fn cached_verified_download(
         "download archive source",
         // The archive source's own command policy: its timeout and retries
         // are what a large SDK download needs raised.
-        SourceCommandPolicy {
-            attempts: spec.policy.providers.archive.retry_attempts.max(1),
-            retry_backoff_ms: spec.policy.providers.archive.retry_backoff_ms,
-            retry_backoff_strategy: spec.policy.providers.archive.retry_backoff_strategy,
-            timeout_seconds: spec.policy.providers.archive.timeout_seconds.max(1),
-            output_retention: process_output_retention(spec),
-        },
+        SourceCommandPolicy::new(spec, (&spec.policy.providers.archive).into()),
         log_sink,
         cancel_check,
     );

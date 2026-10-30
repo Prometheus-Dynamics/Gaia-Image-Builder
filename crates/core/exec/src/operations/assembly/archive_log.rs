@@ -2,6 +2,7 @@
 //! (compressed raw disks, gzip/zstd transforms, tar archives), so a run
 //! shows what each archive cost and how well it compressed.
 
+pub(super) use gaia_process::format_bytes;
 use std::path::Path;
 use std::time::Duration;
 
@@ -27,20 +28,4 @@ pub(super) fn archive_log_messages(
         gaia_process::step_time_message(&format!("archive {name} ({label})"), elapsed),
         format!("archived {name}: {sizes} in {}s", elapsed.as_secs()),
     ]
-}
-
-/// `1.4 GiB`, `142 MiB`, `812 B`.
-pub(super) fn format_bytes(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-    match unit {
-        0 => format!("{bytes} B"),
-        _ if value >= 100.0 => format!("{value:.0} {}", UNITS[unit]),
-        _ => format!("{value:.1} {}", UNITS[unit]),
-    }
 }

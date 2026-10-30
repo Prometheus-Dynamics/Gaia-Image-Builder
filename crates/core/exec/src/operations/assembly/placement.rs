@@ -67,7 +67,7 @@ impl PlacementEnv {
         Self {
             user: current_user(),
             memory_available: mem_available(),
-            tmpfs_available: tmpfs_available(&ram_base),
+            tmpfs_available: gaia_process::filesystem_available_bytes(&ram_base),
             ram_base,
         }
     }
@@ -624,27 +624,6 @@ fn mem_available() -> Option<u64> {
         .parse::<u64>()
         .ok()
         .map(|kib| kib * 1024)
-}
-
-/// Free bytes on the filesystem holding `dir`, from `df`.
-fn tmpfs_available(dir: &Path) -> Option<u64> {
-    let output = Command::new("df")
-        .arg("-Pk")
-        .arg(dir)
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()
-        .filter(|output| output.status.success())?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    let available_kib = text
-        .lines()
-        .nth(1)?
-        .split_whitespace()
-        .nth(3)?
-        .parse::<u64>()
-        .ok()?;
-    Some(available_kib * 1024)
 }
 
 fn gib(bytes: u64) -> String {

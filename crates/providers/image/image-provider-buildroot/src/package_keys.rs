@@ -304,7 +304,7 @@ fn package_setting(key: &str) -> bool {
         && setting_requires_clean(key)
 }
 
-fn upper_name(name: &str) -> String {
+pub(crate) fn upper_name(name: &str) -> String {
     name.chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() {

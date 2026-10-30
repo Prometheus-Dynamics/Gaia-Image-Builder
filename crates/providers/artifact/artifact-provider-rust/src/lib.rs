@@ -1,8 +1,8 @@
 use gaia_artifact_providers::{
     ArtifactBackendState, ArtifactBatchItem, ArtifactExecutionBackend, ArtifactExecutionContract,
-    ArtifactPlan, ArtifactProvider, ArtifactProviderError, ArtifactProviderErrorKind,
-    ArtifactProviderOperation, ArtifactProviderValidationIssue, ProcessCancelCheck, ProcessLogLine,
-    ProcessLogSink, ProcessLogStream, artifact_output_path, copy_artifact_file_to_output,
+    ArtifactProvider, ArtifactProviderError, ArtifactProviderErrorKind,
+    ArtifactProviderValidationIssue, ProcessCancelCheck, ProcessLogLine, ProcessLogSink,
+    ProcessLogStream, artifact_output_path, copy_artifact_file_to_output,
     materialize_artifact_marker_and_state, render_artifact_backend_state, run_command_with_retries,
 };
 use gaia_process::register_docker_mount;
@@ -39,19 +39,6 @@ impl ArtifactProvider for RustProvider {
 
     fn supports(&self, _spec: &ResolvedBuildSpec) -> bool {
         true
-    }
-
-    fn plan_artifact(&self, artifact: &ArtifactSpec) -> ArtifactPlan {
-        ArtifactPlan {
-            operations: vec![ArtifactProviderOperation::Build],
-            contract: ArtifactExecutionContract::from_spec(
-                artifact,
-                None,
-                false,
-                ArtifactExecutionContract::default_command_policy(),
-                gaia_spec::OutputRetentionPolicySpec::default(),
-            ),
-        }
     }
 
     fn validate_artifact(&self, artifact: &ArtifactSpec) -> Vec<ArtifactProviderValidationIssue> {

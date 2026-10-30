@@ -124,7 +124,7 @@ fn is_toolchain(name: &str) -> bool {
     ) || name.starts_with("toolchain-")
 }
 
-fn change_summary(change: &ConfigChange) -> String {
+pub(crate) fn change_summary(change: &ConfigChange) -> String {
     let value = |value: &Option<String>| value.clone().unwrap_or_else(|| "unset".to_string());
     format!(
         "{} {} -> {}",

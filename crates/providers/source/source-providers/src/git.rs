@@ -97,13 +97,7 @@ impl GitSourceProvider {
         }
 
         let mut messages: Vec<String> = backend_note.into_iter().collect();
-        let policy = SourceCommandPolicy {
-            attempts: spec.policy.providers.git.retry_attempts.max(1),
-            retry_backoff_ms: spec.policy.providers.git.retry_backoff_ms,
-            retry_backoff_strategy: spec.policy.providers.git.retry_backoff_strategy,
-            timeout_seconds: spec.policy.providers.git.timeout_seconds.max(1),
-            output_retention: process_output_retention(spec),
-        };
+        let policy = SourceCommandPolicy::new(spec, (&spec.policy.providers.git).into());
         let run = GitRun {
             execution,
             policy,
