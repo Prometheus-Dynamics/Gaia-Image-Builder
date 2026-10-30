@@ -39,7 +39,7 @@ if [[ "${GAIA_CI_SKIP_E2E:-0}" != "1" ]]; then
   echo "==> Running slow end-to-end tests"
   cargo test -p gaia-exec --test exec_default -- --ignored
   echo "==> Loading and running the OCI outputs (skopeo, podman, docker; each skipped when missing)"
-  cargo test -p gaia-exec --lib tests_oci -- --ignored
+  cargo test -p gaia-exec --lib tests_oci -- --ignored --nocapture
 fi
 
 echo "==> Building docs"

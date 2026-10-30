@@ -60,7 +60,7 @@ jobs:
         run: cargo test -p gaia-exec --test exec_default -- --ignored
 
       - name: Load and run the OCI outputs (skopeo, podman, docker)
-        run: cargo test -p gaia-exec --lib tests_oci -- --ignored
+        run: cargo test -p gaia-exec --lib tests_oci -- --ignored --nocapture
 
   docs-and-lints:
     runs-on: ubuntu-latest
