@@ -59,6 +59,9 @@ jobs:
       - name: Run slow end-to-end tests
         run: cargo test -p gaia-exec --test exec_default -- --ignored
 
+      - name: Load and run the OCI outputs (skopeo, podman, docker)
+        run: cargo test -p gaia-exec --lib tests_oci -- --ignored
+
   docs-and-lints:
     runs-on: ubuntu-latest
     timeout-minutes: 45

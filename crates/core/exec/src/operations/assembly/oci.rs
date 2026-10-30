@@ -1,7 +1,9 @@
 //! The `[[image.assembly.oci]]` output: an OCI image built from layers, with
 //! no daemon. It is written as an OCI image layout directory (`oci-layout`,
-//! `index.json`, `blobs/sha256/...`, which `podman load`, `skopeo` and
-//! `docker load` accept) or as a `docker load` tarball (`docker-archive`).
+//! `index.json`, `blobs/sha256/...`, plus the `manifest.json` that `docker
+//! save` also writes, so `podman load`, `skopeo` and `docker load` with the
+//! classic image store all take a tar of it) or as a `docker load` tarball
+//! (`docker-archive`).
 //!
 //! A layer is a `tar` (an uncompressed layer tar, used as it is) or a `tree`
 //! (an assembly tree, tarred deterministically here). Its `diff_id` is the
@@ -359,7 +361,17 @@ fn write_layout(
     write_document(&build.stage.join("index.json"), &index_bytes)?;
     let layout_bytes = b"{\"imageLayoutVersion\":\"1.0.0\"}\n";
     write_document(&build.stage.join("oci-layout"), layout_bytes)?;
-    bytes += (index_bytes.len() + layout_bytes.len()) as u64;
+    // Docker's classic image store loads only what `manifest.json` names.
+    let docker_bytes = to_json(&docker_manifest(
+        &format!("blobs/sha256/{config_digest}"),
+        reference,
+        layers
+            .iter()
+            .map(|layer| format!("blobs/sha256/{}", layer.blob_digest))
+            .collect(),
+    ))?;
+    write_document(&build.stage.join("manifest.json"), &docker_bytes)?;
+    bytes += (index_bytes.len() + layout_bytes.len() + docker_bytes.len()) as u64;
 
     publish_dir(build.stage, build.output)?;
     Ok(bytes)
@@ -395,14 +407,7 @@ fn write_docker_archive(
         }
         layer_names.push(name);
     }
-    let manifest = serde_json::json!([{
-        "Config": config_name,
-        "RepoTags": reference.map_or(serde_json::Value::Null, |reference| {
-            serde_json::json!([reference])
-        }),
-        "Layers": layer_names,
-    }]);
-    let manifest_bytes = to_json(&manifest)?;
+    let manifest_bytes = to_json(&docker_manifest(&config_name, reference, layer_names))?;
     append_bytes(&mut writer, "manifest.json", &manifest_bytes)?;
     let mut inner = writer.finish()?;
     inner.flush().map_err(|error| {
@@ -426,6 +431,22 @@ fn write_docker_archive(
     let bytes = file_len(build.stage)?;
     publish_assembly_output(build.stage, build.output)?;
     Ok(bytes)
+}
+
+/// Docker's `manifest.json`: the config and layer files, by their paths in
+/// the archive, and the image's tag.
+fn docker_manifest(
+    config: &str,
+    reference: Option<&str>,
+    layers: Vec<String>,
+) -> serde_json::Value {
+    serde_json::json!([{
+        "Config": config,
+        "RepoTags": reference.map_or(serde_json::Value::Null, |reference| {
+            serde_json::json!([reference])
+        }),
+        "Layers": layers,
+    }])
 }
 
 fn append_bytes(

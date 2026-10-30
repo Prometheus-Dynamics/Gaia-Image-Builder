@@ -1,7 +1,8 @@
 //! The OCI image output: the layout and docker-archive writers, the tree
 //! layers' tar, the blob cache, and the image config. Split from `tests.rs`.
 //! The tools these tests read the output with (`tar`, `gzip`, `zstd`) are
-//! the host's; `skopeo` is only used by the ignored test.
+//! the host's. The ignored tests read the output with `skopeo` and load and
+//! run it with `podman` and `docker` (`scripts/ci.sh` and CI run them).
 
 use super::super::oci::{rfc3339_utc, write_tree_tar};
 use super::super::tar::TarWriter;
@@ -580,4 +581,142 @@ fn skopeo_reads_the_oci_layout_and_the_docker_archive() {
         "skopeo inspect docker archive: {}",
         String::from_utf8_lossy(&inspected.stderr)
     );
+}
+
+/// A static x86_64 Linux program, written byte by byte so the test needs no
+/// libc or toolchain: it prints `message` with the `write` system call and
+/// exits 0.
+#[cfg(target_arch = "x86_64")]
+fn static_hello_elf(message: &[u8]) -> Vec<u8> {
+    const BASE: u64 = 0x40_0000;
+    const HEADERS: u64 = 64 + 56;
+    let mut code = Vec::new();
+    code.extend([0xb8, 1, 0, 0, 0]); // mov eax, 1 (write)
+    code.extend([0xbf, 1, 0, 0, 0]); // mov edi, 1 (stdout)
+    code.extend([0x48, 0x8d, 0x35]); // lea rsi, [rip + message]
+    code.extend(16_i32.to_le_bytes()); // the 16 bytes of code after the lea
+    code.extend([0xba]); // mov edx, len
+    code.extend((message.len() as u32).to_le_bytes());
+    code.extend([0x0f, 0x05]); // syscall
+    code.extend([0xb8, 60, 0, 0, 0]); // mov eax, 60 (exit)
+    code.extend([0x31, 0xff]); // xor edi, edi
+    code.extend([0x0f, 0x05]); // syscall
+    let size = HEADERS + code.len() as u64 + message.len() as u64;
+    let mut elf = Vec::new();
+    elf.extend(b"\x7fELF\x02\x01\x01\0\0\0\0\0\0\0\0\0"); // 64-bit, little endian
+    elf.extend(2_u16.to_le_bytes()); // executable
+    elf.extend(0x3e_u16.to_le_bytes()); // x86_64
+    elf.extend(1_u32.to_le_bytes());
+    elf.extend((BASE + HEADERS).to_le_bytes()); // entry
+    elf.extend(64_u64.to_le_bytes()); // program headers
+    elf.extend(0_u64.to_le_bytes()); // no section headers
+    elf.extend(0_u32.to_le_bytes());
+    elf.extend([64, 0, 56, 0, 1, 0, 0, 0, 0, 0, 0, 0]); // sizes and counts
+    elf.extend(1_u32.to_le_bytes()); // PT_LOAD
+    elf.extend(5_u32.to_le_bytes()); // read and execute
+    elf.extend(0_u64.to_le_bytes()); // file offset
+    elf.extend(BASE.to_le_bytes()); // virtual address
+    elf.extend(BASE.to_le_bytes()); // physical address
+    elf.extend(size.to_le_bytes());
+    elf.extend(size.to_le_bytes());
+    elf.extend(0x1000_u64.to_le_bytes()); // alignment
+    elf.extend(code);
+    elf.extend(message);
+    elf
+}
+
+/// Loads both formats with the container engine `engine` and runs them:
+/// the proof that what Gaia writes is an image a container tool starts, not
+/// only one it parses. The image is removed afterwards.
+#[cfg(all(unix, target_arch = "x86_64"))]
+fn load_and_run(engine: &str) {
+    if !Command::new(engine)
+        .args(["info"])
+        .output()
+        .is_ok_and(|output| output.status.success())
+    {
+        eprintln!("skipped: {engine} is not installed or cannot reach its daemon");
+        return;
+    }
+    let scratch = TempDir::new("gaia-exec-oci-run");
+    let root = scratch.join(engine);
+    let fixture = fixture(&root, &static_hello_elf(b"gaia-oci-ok\n"));
+    let mut images = Vec::new();
+    for (format, dest) in [
+        ("oci-layout", "$assembly.out/sim.oci"),
+        ("docker-archive", "$assembly.out/sim.tar"),
+    ] {
+        let mut oci = oci_entry(&fixture, format, "gzip", dest);
+        oci.config.entrypoint = vec!["/bin/app".into()];
+        oci.reference = Some(format!("gaia-oci-proof:{format}"));
+        let output = PathBuf::from(state_value(&run(&oci_spec(&fixture, oci)), "oci.1.output"));
+        // `load` takes a file: the layout directory goes in as a tar of it
+        // (an OCI archive).
+        let input = if output.is_dir() {
+            let archive = root.join("sim.oci.tar");
+            tool(
+                "tar",
+                &[
+                    "-C",
+                    &output.display().to_string(),
+                    "-cf",
+                    &archive.display().to_string(),
+                    ".",
+                ],
+            );
+            archive
+        } else {
+            output
+        };
+        let loaded = Command::new(engine)
+            .arg("load")
+            .arg("-i")
+            .arg(&input)
+            .output()
+            .expect("load");
+        let stdout = String::from_utf8_lossy(&loaded.stdout).into_owned();
+        assert!(
+            loaded.status.success(),
+            "{engine} load {format}: {}",
+            String::from_utf8_lossy(&loaded.stderr)
+        );
+        // Both engines end their output with the loaded image's name or id.
+        let image = stdout
+            .lines()
+            .filter_map(|line| line.rsplit(": ").next())
+            .next_back()
+            .expect("loaded image")
+            .trim()
+            .to_string();
+        images.push(image.clone());
+        let ran = Command::new(engine)
+            .args(["run", "--rm", "--network=none", &image])
+            .output()
+            .expect("run");
+        assert!(
+            ran.status.success(),
+            "{engine} run {format} ({image}): {}",
+            String::from_utf8_lossy(&ran.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&ran.stdout),
+            "gaia-oci-ok\n",
+            "{format}"
+        );
+    }
+    let _ = Command::new(engine).arg("rmi").args(&images).output();
+}
+
+#[cfg(all(unix, target_arch = "x86_64"))]
+#[test]
+#[ignore = "needs podman on the host; run with --ignored"]
+fn podman_loads_and_runs_the_oci_layout_and_the_docker_archive() {
+    load_and_run("podman");
+}
+
+#[cfg(all(unix, target_arch = "x86_64"))]
+#[test]
+#[ignore = "needs a docker daemon; run with --ignored"]
+fn docker_loads_and_runs_the_oci_layout_and_the_docker_archive() {
+    load_and_run("docker");
 }
