@@ -24,6 +24,7 @@ pub struct AppArgs {
     pub clean: CleanArgs,
     pub cache: CacheArgs,
     pub lock: LockArgs,
+    pub layer: LayerArgs,
     /// `--only` targets for run/plan: build domains or operation ids.
     pub only: Vec<String>,
     /// `--rebuild` for run/plan/preview: operations (ids, `*` globs or
@@ -109,6 +110,16 @@ pub struct LockArgs {
     pub sources: Vec<String>,
 }
 
+/// `gaia layer delta <layers> --from <old-layers> --out <dir>`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LayerArgs {
+    /// `--from <dir>[,<dir>...]`: the layers dirs (or `layers.json` files) of
+    /// earlier releases to take deltas against.
+    pub from: Vec<String>,
+    /// `--out <dir>`: where the compressed layers, deltas and `deltas.json` go.
+    pub out: Option<String>,
+}
+
 impl AppArgs {
     pub fn from_env() -> Self {
         Self::parse_from(env::args().skip(1))
@@ -143,6 +154,7 @@ impl AppArgs {
             Some("status") => Some(AppCommand::Status),
             Some("lock") => Some(AppCommand::Lock),
             Some("run") => Some(AppCommand::Run),
+            Some("layer") => Some(AppCommand::LayerDelta),
             Some("prefetch") => Some(AppCommand::Run),
             _ => None,
         };
@@ -163,6 +175,13 @@ impl AppArgs {
             } else {
                 let _ = args.next_if_eq("schema");
             }
+        }
+
+        // `gaia layer delta`, the only layer command.
+        if parsed.command == AppCommand::LayerDelta && args.next_if_eq("delta").is_none() {
+            parsed
+                .usage_errors
+                .push("'gaia layer' takes the subcommand 'delta'".into());
         }
 
         while let Some(arg) = args.next() {
@@ -265,6 +284,12 @@ impl AppArgs {
                 "--fail-on-clean" => parsed.fail_on_clean = true,
                 "--export" => parsed.export_dir = value("--export", &mut parsed.usage_errors),
                 "--no-export" => parsed.no_export = true,
+                "--from" => {
+                    if let Some(dirs) = value("--from", &mut parsed.usage_errors) {
+                        parsed.layer.from.extend(split_list(&dirs));
+                    }
+                }
+                "--out" => parsed.layer.out = value("--out", &mut parsed.usage_errors),
                 "--update" => {
                     parsed.lock.update = true;
                     // `--update [source-id]`: an optional value, taken only
@@ -317,7 +342,13 @@ impl AppArgs {
             }
         }
 
-        if !parsed.build_explicit {
+        if parsed.command == AppCommand::LayerDelta {
+            if !parsed.build_explicit {
+                parsed
+                    .usage_errors
+                    .push("gaia layer delta needs the new layers dir".into());
+            }
+        } else if !parsed.build_explicit {
             parsed.build = default_build_config();
         }
         if prefetch_word {
@@ -351,6 +382,7 @@ impl Default for AppArgs {
             clean: CleanArgs::default(),
             cache: CacheArgs::default(),
             lock: LockArgs::default(),
+            layer: LayerArgs::default(),
             only: Vec::new(),
             rebuild: Vec::new(),
             rebuild_packages: Vec::new(),
@@ -439,6 +471,9 @@ pub enum AppCommand {
     Run,
     /// What `gaia run` would do, without changing anything.
     Preview,
+    /// `gaia layer delta`: the files that update earlier releases' layers
+    /// to a new set.
+    LayerDelta,
 }
 
 #[cfg(test)]
@@ -523,6 +558,36 @@ mod tests {
         let keys = parse(&["config", "keys"]);
         assert_eq!(keys.command, AppCommand::ConfigKeys);
         assert!(keys.usage_errors.is_empty(), "{:?}", keys.usage_errors);
+    }
+
+    #[test]
+    fn layer_delta_takes_its_layers_dir_releases_and_output() {
+        let args = parse(&[
+            "layer",
+            "delta",
+            "new/layers",
+            "--from",
+            "a/layers,b/layers",
+            "--from",
+            "c",
+            "--out",
+            "deltas",
+            "--json",
+        ]);
+        assert_eq!(args.command, AppCommand::LayerDelta);
+        assert_eq!(args.build, "new/layers");
+        assert_eq!(args.layer.from, ["a/layers", "b/layers", "c"]);
+        assert_eq!(args.layer.out.as_deref(), Some("deltas"));
+        assert!(args.usage_errors.is_empty(), "{:?}", args.usage_errors);
+
+        let missing = parse(&["layer", "delta", "--out", "deltas"]);
+        assert_eq!(missing.build, "");
+        assert_eq!(
+            missing.usage_errors,
+            ["gaia layer delta needs the new layers dir"]
+        );
+        let unknown = parse(&["layer", "diff", "x"]);
+        assert!(unknown.usage_errors[0].contains("takes the subcommand 'delta'"));
     }
 
     #[test]

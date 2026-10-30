@@ -21,6 +21,7 @@ gaia status [run]
 gaia tui [build.toml]
 gaia config schema
 gaia config keys
+gaia layer delta <layers-dir> --from <old-layers-dir> --out <dir>
 ```
 
 If no command is provided, Gaia treats the first positional argument as a build path and defaults to `run`.
@@ -590,6 +591,51 @@ on) and the keys it takes, with a link to the page that describes it. It is
 written from the same layout as the schema. The committed copy is
 [reference/config-keys.md](reference/config-keys.md).
 
+### `layer delta`
+
+`gaia layer delta` writes what boards running earlier releases need to update
+to a new set of [`[image.layers]`](configuration-image.md#image-layers)
+layers. It reads `layers.json` and the layer tars from each layers dir, and
+needs no build config. `--from` takes the layers dirs (or `layers.json`
+files) of the earlier releases, comma-separated or repeated; it needs `zstd`
+1.4.7 or later on PATH.
+
+```bash
+gaia layer delta out/raze/layers --from releases/2026.1/layers,releases/2026.2/layers --out out/raze/deltas
+```
+
+For each layer of the new set:
+
+- a layer whose tar matches the same layer in any earlier release is
+  `unchanged`, and needs nothing;
+- a `changed` or `new` layer gets its whole tar compressed
+  (`<name>.tar.zst`), for boards with none of the earlier releases, and per
+  earlier release that has the layer a `zstd --patch-from` delta against that
+  release's tar (`<name>.from-<first 12 digits of its tar_sha256>.tar.zst`),
+  kept only when it is smaller than the whole layer.
+
+Deltas are taken on the uncompressed tars, since deltas of compressed erofs
+images are poor. Every file is decompressed again and checked against the new
+tar's sha256 before it is recorded, and a tar that does not match its
+`layers.json` record is refused. Both sides use zstd level 19 and a window
+that covers the larger tar.
+
+`--out` gets `deltas.json` and a copy of the new `layers.json`. Each layer's
+record in `deltas.json` has `name`, `id`, `tar_sha256`, `tar_size` and
+`status`. A changed or new layer adds `full` and `deltas`, smallest first.
+Each file has `file`, `sha256`, `size` and `window_log`, and a delta adds
+`from_tar_sha256` and `from_id`. A board that has the tar with a delta's
+`from_tar_sha256` applies it:
+
+```bash
+zstd -d --long=<window_log> --patch-from=<old app.tar> app.from-<sha12>.tar.zst -o app.tar
+```
+
+It then checks the result against `tar_sha256` and makes the erofs and verity
+from it with the same `mkfs.erofs` version and options as the build, which
+gives the image `id` records. A board without a matching tar uses
+`<name>.tar.zst` the same way, without `--patch-from`.
+
 ### `pause`, `resume`, `cancel`
 
 Signal a running `gaia run`, from another terminal or a script. With no
@@ -751,7 +797,7 @@ Logs keep the most recent 5,000 lines per operation in the TUI.
 ## JSON Output
 
 `--json` makes `run`, `preview` (`run --dry-run`), `plan`, `status`,
-`validate` and `cache` print one JSON document on stdout instead of their
+`validate`, `cache` and `layer delta` print one JSON document on stdout instead of their
 text output. Progress, logs and warnings stay on stderr, so
 `gaia run build.toml --json > result.json` captures only the document. The
 exit code is the same as without the flag. `--follow` does not combine with
@@ -762,7 +808,7 @@ Every document is an object with:
 | Field | Meaning |
 | --- | --- |
 | `schema_version` | `1`. Fields are only added within a version; a rename or removal bumps it. |
-| `command` | `run`, `preview`, `plan`, `status`, `validate` or `cache` |
+| `command` | `run`, `preview`, `plan`, `status`, `validate`, `cache` or `layer delta` |
 | `exit_code` | the process exit code |
 | `status` | per command, below; `error` when the command could not run |
 | `error` | with `status: "error"`: the message (also printed on stderr) |
@@ -806,6 +852,8 @@ Per command:
   `stats`: `caches` (`name`, `path`, `exists`, `nested`, `bytes` allocated,
   `apparent_bytes`, `files`, `dirs`) and `total` (`bytes`, `apparent_bytes`,
   `files`, `dirs`).
+- `layer delta`: `status` is `ok`. `schema` (`1`) and `layers`, the records
+  of `deltas.json`.
 
 ```bash
 gaia run build.toml --json | jq '.summary.critical_path.operations[].operation_id'

@@ -52,6 +52,7 @@ fn command_name(command: AppCommand) -> &'static str {
         AppCommand::Lock => "lock",
         AppCommand::Run => "run",
         AppCommand::Preview => "preview",
+        AppCommand::LayerDelta => "layer delta",
     }
 }
 

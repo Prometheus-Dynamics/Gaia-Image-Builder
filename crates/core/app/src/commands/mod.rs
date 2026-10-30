@@ -6,6 +6,7 @@ mod clean;
 pub(crate) mod control;
 mod disk_usage;
 mod interrupt;
+mod layer_delta;
 pub(crate) mod live_status;
 mod lock;
 mod plan;
@@ -190,10 +191,11 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
                 | AppCommand::Status
                 | AppCommand::Validate
                 | AppCommand::Cache
+                | AppCommand::LayerDelta
         )
     {
         usage_errors.push(
-            "--json applies to 'run', 'preview', 'plan', 'status', 'validate' and 'cache'".into(),
+            "--json applies to 'run', 'preview', 'plan', 'status', 'validate', 'cache' and 'layer delta'".into(),
         );
     }
     if args.json && args.follow {
@@ -293,6 +295,7 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
             | AppCommand::Resume
             | AppCommand::Cancel
             | AppCommand::Status
+            | AppCommand::LayerDelta
     );
     if needs_build && args.build.is_empty() {
         return CommandOutcome::Failed {
@@ -365,6 +368,12 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
             args.build_explicit,
             &resolve_options(&args),
             &args.cache,
+            args.json,
+        ),
+        AppCommand::LayerDelta => layer_delta::layer_delta_command(
+            &args.build,
+            &args.layer.from,
+            args.layer.out.as_deref(),
             args.json,
         ),
         AppCommand::Lock => lock_build_command(&args.build, &resolve_options(&args), &args.lock),
@@ -459,11 +468,13 @@ fn help_text() -> String {
         "  gaia prefetch [build-config]     (download sources and Buildroot packages; no build)",
         "  gaia run [build-config] --prefetch  (same as 'gaia prefetch')",
         "  gaia run [build-config] --offline   (no network: the caches must be complete)",
+        "  gaia layer delta <layers-dir> --from <old-layers-dir>[,...] --out <dir>",
+        "                                  (zstd deltas of [image.layers] layers against earlier releases)",
         "  gaia --help",
         "  gaia --version",
         "",
         "--json prints one JSON document on stdout for 'run', 'preview', 'plan',",
-        "'status', 'validate' and 'cache' (schema_version 1, see docs/cli.md);",
+        "'status', 'validate', 'cache' and 'layer delta' (schema_version 1, see docs/cli.md);",
         "progress and logs stay on stderr.",
         "",
         "'preview' shows what 'run' would do without changing anything: which",
