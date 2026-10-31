@@ -43,7 +43,7 @@ pub use digest::{hex, sha256_file, sha256_hex_bytes};
 pub use disk::{filesystem_available_bytes, format_bytes};
 pub use docker::{
     DockerRunError, DockerRunSpec, docker_image_build_command, docker_image_id_command,
-    docker_local_image_tag, docker_run_command, register_docker_mount,
+    docker_local_image_tag, docker_run_command, execution_backend_name, register_docker_mount,
     register_read_only_docker_mount,
 };
 pub use docker_context::docker_build_context_hash;
@@ -63,7 +63,8 @@ use retention::{
 pub use step_time::{STEP_TIME_PREFIX, parse_step_time, step_time_message};
 use stream::{StreamKeep, spawn_stream_reader};
 pub use tar::{
-    TarArchiveValidationError, validate_tar_archive_entries, validate_tar_archive_entries_with,
+    TarArchiveValidationError, tar_field_string, tar_header_name, validate_tar_archive_entries,
+    validate_tar_archive_entries_with,
 };
 pub use trash::{TRASH_DIR, discard, purge_trash};
 

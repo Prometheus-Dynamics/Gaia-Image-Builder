@@ -150,6 +150,22 @@ pub fn materialize_artifact_marker_and_state(
     materialize_artifact_state(contract, state_contents)
 }
 
+/// Writes an artifact's marker, `provider=`, `artifact=` and then `fields`
+/// one `key=value` line each, beside its backend state.
+pub fn write_artifact_marker(
+    contract: &ArtifactExecutionContract,
+    provider_id: &str,
+    artifact_id: &str,
+    fields: &[(&str, &str)],
+    state_contents: &str,
+) -> Result<(), ArtifactProviderError> {
+    let mut marker = format!("provider={provider_id}\nartifact={artifact_id}\n");
+    for (key, value) in fields {
+        marker.push_str(&format!("{key}={value}\n"));
+    }
+    materialize_artifact_marker_and_state(contract, &marker, state_contents)
+}
+
 pub fn artifact_state_path(contract: &ArtifactExecutionContract) -> PathBuf {
     artifact_sidecar_path(contract, "gaia-state.txt")
 }

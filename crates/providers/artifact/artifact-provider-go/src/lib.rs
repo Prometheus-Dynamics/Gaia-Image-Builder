@@ -2,7 +2,7 @@ use gaia_artifact_providers::{
     ArtifactBackendState, ArtifactExecutionContract, ArtifactProvider, ArtifactProviderError,
     ArtifactProviderErrorKind, ArtifactProviderValidationIssue, ProcessCancelCheck, ProcessLogSink,
     artifact_output_path, command_version_line, ensure_artifact_output_parent,
-    materialize_artifact_marker_and_state, render_artifact_backend_state, run_command_with_retries,
+    render_artifact_backend_state, run_command_with_retries, write_artifact_marker,
 };
 use gaia_spec::{ArtifactDefinition, ArtifactSpec, ResolvedBuildSpec};
 use std::process::Command;
@@ -60,7 +60,13 @@ impl ArtifactProvider for GoProvider {
         apply_go_target_env(&mut command, contract.artifact_target.as_deref())?;
         run_command(command, &package, contract, log_sink, cancel_check)?;
         let mut messages = Vec::new();
-        write_marker(self.id(), artifact, contract, &package)?;
+        write_artifact_marker(
+            contract,
+            self.id(),
+            artifact.id.as_str(),
+            &[("package", &package)],
+            &artifact_state_contents(self.id(), artifact.id.as_str(), contract, &package),
+        )?;
         messages.push(format!(
             "go artifact '{}' built package '{}' -> {}",
             artifact.id.as_str(),
@@ -115,22 +121,6 @@ fn apply_go_target_env(
             ),
         )),
     }
-}
-
-fn write_marker(
-    provider_id: &str,
-    artifact: &ArtifactSpec,
-    contract: &ArtifactExecutionContract,
-    package: &str,
-) -> Result<(), ArtifactProviderError> {
-    materialize_artifact_marker_and_state(
-        contract,
-        &format!(
-            "provider={provider_id}\nartifact={}\npackage={package}\n",
-            artifact.id.as_str()
-        ),
-        &artifact_state_contents(provider_id, artifact.id.as_str(), contract, package),
-    )
 }
 
 fn artifact_state_contents(

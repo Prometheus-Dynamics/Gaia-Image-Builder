@@ -28,7 +28,7 @@ pub(crate) use outputs::render_build_context_state;
 pub use outputs::{
     artifact_output_path, artifact_package_root, artifact_sidecar_path, artifact_state_path,
     copy_artifact_file_to_output, ensure_artifact_output_parent,
-    materialize_artifact_marker_and_state,
+    materialize_artifact_marker_and_state, write_artifact_marker,
 };
 
 use gaia_spec::{ArtifactProviderKind, ArtifactSpec, ResolvedBuildSpec, RetryBackoffStrategySpec};

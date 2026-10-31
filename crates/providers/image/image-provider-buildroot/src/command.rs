@@ -77,7 +77,7 @@ fn run_command_attempts(
     let run = RetryRun {
         domain: "image.buildroot",
         label,
-        backend: execution_backend(execution),
+        backend: gaia_process::execution_backend_name(execution.docker_image.is_some()),
         docker_image: execution.docker_image.as_deref(),
         timeout,
         attempts,
@@ -108,14 +108,6 @@ fn run_command_attempts(
             retryable: !is_make || looks_like_network_failure(&output.stderr),
         }))
     })
-}
-
-fn execution_backend(execution: &ImageExecutionContext) -> &'static str {
-    if execution.docker_image.is_some() {
-        "docker"
-    } else {
-        "host"
-    }
 }
 
 pub(crate) fn command_output_with_timeout(

@@ -2,8 +2,8 @@ use gaia_artifact_providers::{
     ArtifactBackendState, ArtifactExecutionBackend, ArtifactExecutionContract, ArtifactProvider,
     ArtifactProviderError, ArtifactProviderErrorKind, ArtifactProviderValidationIssue,
     ProcessCancelCheck, ProcessLogSink, artifact_output_path, command_version_line,
-    copy_artifact_file_to_output, materialize_artifact_marker_and_state,
-    render_artifact_backend_state, run_command_with_retries,
+    copy_artifact_file_to_output, render_artifact_backend_state, run_command_with_retries,
+    write_artifact_marker,
 };
 use gaia_process::register_docker_mount;
 use gaia_spec::{ArtifactDefinition, ArtifactSpec, GradleHomeSpec, ResolvedBuildSpec};
@@ -85,7 +85,19 @@ impl ArtifactProvider for JavaProvider {
         let built_path = resolve_java_built_path(source_dir, &build_target)?;
         let output_path = artifact_output_path(contract, source_dir);
         copy_artifact_file_to_output(&built_path, &output_path, "built java artifact")?;
-        write_marker(self.id(), artifact, contract, &build_target, &build_tool)?;
+        write_artifact_marker(
+            contract,
+            self.id(),
+            artifact.id.as_str(),
+            &[("build_target", &build_target)],
+            &artifact_state_contents(
+                self.id(),
+                artifact.id.as_str(),
+                contract,
+                &build_target,
+                &build_tool,
+            ),
+        )?;
         messages.push(format!(
             "java artifact '{}' built target '{}' -> {}",
             artifact.id.as_str(),
@@ -458,29 +470,6 @@ fn run_command(
 ) -> Result<Vec<String>, ArtifactProviderError> {
     run_command_with_retries(&command, contract, label, log_sink, cancel_check)?;
     Ok(Vec::new())
-}
-
-fn write_marker(
-    provider_id: &str,
-    artifact: &ArtifactSpec,
-    contract: &ArtifactExecutionContract,
-    build_target: &str,
-    build_tool: &str,
-) -> Result<(), ArtifactProviderError> {
-    materialize_artifact_marker_and_state(
-        contract,
-        &format!(
-            "provider={provider_id}\nartifact={}\nbuild_target={build_target}\n",
-            artifact.id.as_str()
-        ),
-        &artifact_state_contents(
-            provider_id,
-            artifact.id.as_str(),
-            contract,
-            build_target,
-            build_tool,
-        ),
-    )
 }
 
 fn artifact_state_contents(

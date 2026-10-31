@@ -3,7 +3,7 @@ use gaia_artifact_providers::{
     ArtifactProvider, ArtifactProviderError, ArtifactProviderErrorKind,
     ArtifactProviderValidationIssue, ProcessCancelCheck, ProcessLogLine, ProcessLogSink,
     ProcessLogStream, artifact_output_path, copy_artifact_file_to_output,
-    materialize_artifact_marker_and_state, render_artifact_backend_state, run_command_with_retries,
+    render_artifact_backend_state, run_command_with_retries, write_artifact_marker,
 };
 use gaia_process::register_docker_mount;
 use gaia_spec::{
@@ -317,13 +317,15 @@ impl RustProvider {
         build_mode: &str,
         mut messages: Vec<String>,
     ) -> Result<Vec<String>, ArtifactProviderError> {
-        materialize_artifact_marker_and_state(
+        write_artifact_marker(
             contract,
-            &format!(
-                "provider={}\nartifact={}\npackage={package}\ntarget={target_name}\nmode={build_mode}\n",
-                self.id(),
-                artifact.id.as_str()
-            ),
+            self.id(),
+            artifact.id.as_str(),
+            &[
+                ("package", package),
+                ("target", target_name),
+                ("mode", build_mode),
+            ],
             &artifact_state_contents(
                 self.id(),
                 artifact.id.as_str(),

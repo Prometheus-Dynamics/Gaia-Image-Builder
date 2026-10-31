@@ -460,6 +460,12 @@ pub fn docker_image_build_command(
     command
 }
 
+/// The backend name a command log line reports: `docker` when the step runs
+/// in a container, `host` otherwise.
+pub fn execution_backend_name(in_docker: bool) -> &'static str {
+    if in_docker { "docker" } else { "host" }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

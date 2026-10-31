@@ -160,7 +160,7 @@ pub fn run_command_with_retries(
             attempt,
             attempts,
             timeout_seconds = timeout.as_secs(),
-            backend = execution_backend(contract),
+            backend = contract.execution_backend.name(),
             docker_image = docker_image(contract),
             "running artifact provider command"
         );
@@ -181,7 +181,7 @@ pub fn run_command_with_retries(
                 output = %contract.output.path.as_str(),
                 attempt,
                 attempts,
-                backend = execution_backend(contract),
+                backend = contract.execution_backend.name(),
                 "artifact provider command succeeded"
             );
             return Ok(());
@@ -199,7 +199,7 @@ pub fn run_command_with_retries(
                 output = %contract.output.path.as_str(),
                 attempt,
                 attempts,
-                backend = execution_backend(contract),
+                backend = contract.execution_backend.name(),
                 "artifact provider command failed deterministically; not retried"
             );
             return Err(ArtifactProviderError::new(
@@ -220,7 +220,7 @@ pub fn run_command_with_retries(
                 output = %contract.output.path.as_str(),
                 attempt,
                 attempts,
-                backend = execution_backend(contract),
+                backend = contract.execution_backend.name(),
                 backoff_ms = retry_backoff.as_millis(),
                 "artifact provider command failed; retrying"
             );
@@ -232,7 +232,7 @@ pub fn run_command_with_retries(
                     output = %contract.output.path.as_str(),
                     attempt,
                     attempts,
-                    backend = execution_backend(contract),
+                    backend = contract.execution_backend.name(),
                     "artifact provider retry backoff cancelled"
                 );
                 return Err(ArtifactProviderError::new(
@@ -248,7 +248,7 @@ pub fn run_command_with_retries(
         provider = %contract.provider.as_str(),
         output = %contract.output.path.as_str(),
         attempts,
-        backend = execution_backend(contract),
+        backend = contract.execution_backend.name(),
         "artifact provider command exhausted retries"
     );
     Err(ArtifactProviderError::new(
@@ -347,13 +347,6 @@ pub(crate) fn ensure_docker_execution_image_with(
         "built docker execution image '{tag}' from '{}'",
         build.dockerfile
     )])
-}
-
-fn execution_backend(contract: &ArtifactExecutionContract) -> &'static str {
-    match contract.execution_backend {
-        ArtifactExecutionBackend::Host => "host",
-        ArtifactExecutionBackend::Docker(_) => "docker",
-    }
 }
 
 fn docker_image(contract: &ArtifactExecutionContract) -> Option<&str> {

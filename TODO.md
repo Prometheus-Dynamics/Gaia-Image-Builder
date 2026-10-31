@@ -20,11 +20,6 @@ Items the user pinned for a later release are in "Pinned for later" below.
   - Why: v2's inconsistencies are in every HeliOS, PV and Atlas build file.
   - Done when: `gaia migrate` rewrites each example and HeliOS's and PV's build files to v3, and the v2 and v3 files resolve to the same spec fingerprint (a test). The docs and `docs/reference/config-keys.md` describe v3.
   - Blocked by: nothing. Confirm the design with HeliOS before writing it.
-- **API cleanup: last duplicates**
-  - What: merge the remaining small duplicates: `cstring`, `write_marker` and the `execution_backend` copies.
-  - Why: the cleanup pass covers every duplicate.
-  - Done when: one copy of each remains and the gate passes.
-  - Blocked by: nothing.
 
 ### 2. Hardware support (G1–G9 and board bring-up)
 

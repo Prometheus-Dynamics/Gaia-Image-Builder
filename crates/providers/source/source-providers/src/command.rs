@@ -134,7 +134,7 @@ pub(crate) fn run_command_with_policy(
         tracing::debug!(
             command_label = description,
             provider_domain = "source",
-            backend = execution_backend(execution),
+            backend = gaia_process::execution_backend_name(execution.docker.is_some()),
             docker_image = execution
                 .docker
                 .as_ref()
@@ -158,7 +158,7 @@ pub(crate) fn run_command_with_policy(
             tracing::debug!(
                 command_label = description,
                 provider_domain = "source",
-                backend = execution_backend(execution),
+                backend = gaia_process::execution_backend_name(execution.docker.is_some()),
                 attempt,
                 attempts,
                 "source provider command succeeded"
@@ -178,7 +178,7 @@ pub(crate) fn run_command_with_policy(
             tracing::warn!(
                 command_label = description,
                 provider_domain = "source",
-                backend = execution_backend(execution),
+                backend = gaia_process::execution_backend_name(execution.docker.is_some()),
                 attempt,
                 attempts,
                 backoff_ms = retry_backoff.as_millis(),
@@ -188,7 +188,7 @@ pub(crate) fn run_command_with_policy(
                 tracing::warn!(
                     command_label = description,
                     provider_domain = "source",
-                    backend = execution_backend(execution),
+                    backend = gaia_process::execution_backend_name(execution.docker.is_some()),
                     attempt,
                     attempts,
                     "source provider retry backoff cancelled"
@@ -203,19 +203,11 @@ pub(crate) fn run_command_with_policy(
     tracing::warn!(
         command_label = description,
         provider_domain = "source",
-        backend = execution_backend(execution),
+        backend = gaia_process::execution_backend_name(execution.docker.is_some()),
         attempts,
         "source provider command exhausted retries"
     );
     Err(SourceProviderError::backend_command(last_error))
-}
-
-fn execution_backend(execution: &SourceExecutionContext) -> &'static str {
-    if execution.docker.is_some() {
-        "docker"
-    } else {
-        "host"
-    }
 }
 
 pub(crate) fn process_retry_backoff_strategy(

@@ -279,6 +279,13 @@ pub enum ArtifactExecutionBackend {
     Docker(ArtifactDockerExecution),
 }
 
+impl ArtifactExecutionBackend {
+    /// The name command log lines report: `host` or `docker`.
+    pub fn name(&self) -> &'static str {
+        gaia_process::execution_backend_name(matches!(self, Self::Docker(_)))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactDockerExecution {
     pub image: String,

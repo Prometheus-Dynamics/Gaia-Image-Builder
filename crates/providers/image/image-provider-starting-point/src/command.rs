@@ -185,7 +185,7 @@ pub(crate) fn run_command(
     let run = RetryRun {
         domain: "image.starting-point",
         label: &label,
-        backend: execution_backend(execution),
+        backend: gaia_process::execution_backend_name(execution.docker_image.is_some()),
         docker_image: execution.docker_image.as_deref(),
         timeout,
         attempts,
@@ -215,14 +215,6 @@ pub(crate) fn run_command(
         }))
     })
     .map(|()| Vec::new())
-}
-
-fn execution_backend(execution: &ImageExecutionContext) -> &'static str {
-    if execution.docker_image.is_some() {
-        "docker"
-    } else {
-        "host"
-    }
 }
 
 pub(crate) fn command_output_with_timeout(

@@ -7,6 +7,7 @@
 //! entry. Names that ustar cannot hold go in PAX records. The reader accepts
 //! ustar, GNU long names and PAX headers, which is what `tar` writes.
 
+use gaia_process::{tar_field_string, tar_header_name};
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
@@ -125,8 +126,8 @@ pub(crate) fn read_entries(
                 skip_padding(&mut reader, size)?;
                 position += data_blocks;
                 match typeflag {
-                    b'L' => gnu_name = Some(c_string(&body)),
-                    b'K' => gnu_link = Some(c_string(&body)),
+                    b'L' => gnu_name = Some(tar_field_string(&body)),
+                    b'K' => gnu_link = Some(tar_field_string(&body)),
                     b'x' => {
                         for (key, value) in pax_records(&body)? {
                             match key.as_str() {
@@ -147,11 +148,11 @@ pub(crate) fn read_entries(
         }
         let name = match (pax_path.take(), gnu_name.take()) {
             (Some(name), _) | (None, Some(name)) => name,
-            (None, None) => header_name(&header),
+            (None, None) => tar_header_name(&header),
         };
         let link_name = match (pax_linkpath.take(), gnu_link.take()) {
             (Some(link), _) | (None, Some(link)) => link,
-            (None, None) => c_string(&header[157..257]),
+            (None, None) => tar_field_string(&header[157..257]),
         };
         let uid = pax_uid
             .take()
@@ -316,27 +317,6 @@ fn parse_number(field: &[u8]) -> Result<u64, String> {
         return Ok(0);
     }
     u64::from_str_radix(trimmed, 8).map_err(|_| format!("bad tar numeric field '{trimmed}'"))
-}
-
-fn c_string(field: &[u8]) -> String {
-    let end = field
-        .iter()
-        .position(|byte| *byte == 0)
-        .unwrap_or(field.len());
-    String::from_utf8_lossy(&field[..end]).into_owned()
-}
-
-/// The name of a ustar header: `prefix/name` when the prefix is set.
-fn header_name(header: &[u8; BLOCK]) -> String {
-    let name = c_string(&header[0..100]);
-    let magic = &header[257..263];
-    if magic == b"ustar\0" || magic == b"ustar " {
-        let prefix = c_string(&header[345..500]);
-        if !prefix.is_empty() {
-            return format!("{prefix}/{name}");
-        }
-    }
-    name
 }
 
 /// `len key=value\n` records, where `len` counts the whole record.

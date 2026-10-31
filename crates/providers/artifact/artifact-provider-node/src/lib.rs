@@ -2,8 +2,8 @@ use gaia_artifact_providers::{
     ArtifactBackendState, ArtifactExecutionContract, ArtifactProvider, ArtifactProviderError,
     ArtifactProviderErrorKind, ArtifactProviderValidationIssue, ProcessCancelCheck, ProcessLogSink,
     artifact_output_path, artifact_package_root, command_version_line,
-    copy_artifact_file_to_output, materialize_artifact_marker_and_state,
-    render_artifact_backend_state, run_command_with_retries,
+    copy_artifact_file_to_output, render_artifact_backend_state, run_command_with_retries,
+    write_artifact_marker,
 };
 use gaia_spec::{ArtifactDefinition, ArtifactSpec, ResolvedBuildSpec};
 use std::fs;
@@ -84,7 +84,13 @@ impl ArtifactProvider for NodeProvider {
         let tarball = find_packed_tarball(&pack_dir)?;
         let output_path = artifact_output_path(contract, source_dir);
         copy_artifact_file_to_output(&tarball, &output_path, "packed node artifact")?;
-        write_marker(self.id(), artifact, contract, &package_dir)?;
+        write_artifact_marker(
+            contract,
+            self.id(),
+            artifact.id.as_str(),
+            &[("package_dir", &package_dir)],
+            &artifact_state_contents(self.id(), artifact.id.as_str(), contract, &package_dir),
+        )?;
         messages.push(format!(
             "node artifact '{}' built package '{}' -> {}",
             artifact.id.as_str(),
@@ -159,22 +165,6 @@ fn run_command(
         cancel_check,
     )?;
     Ok(Vec::new())
-}
-
-fn write_marker(
-    provider_id: &str,
-    artifact: &ArtifactSpec,
-    contract: &ArtifactExecutionContract,
-    package_dir: &str,
-) -> Result<(), ArtifactProviderError> {
-    materialize_artifact_marker_and_state(
-        contract,
-        &format!(
-            "provider={provider_id}\nartifact={}\npackage_dir={package_dir}\n",
-            artifact.id.as_str()
-        ),
-        &artifact_state_contents(provider_id, artifact.id.as_str(), contract, package_dir),
-    )
 }
 
 fn artifact_state_contents(

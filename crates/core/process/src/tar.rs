@@ -187,6 +187,29 @@ fn validate_tar_listing_line_with(
     }
 }
 
+/// A NUL-terminated tar header field, decoded lossily. A field that fills
+/// its whole width has no NUL.
+pub fn tar_field_string(field: &[u8]) -> String {
+    let end = field
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(field.len());
+    String::from_utf8_lossy(&field[..end]).into_owned()
+}
+
+/// The name in a tar header block: `prefix/name` when a ustar (or GNU)
+/// header sets the prefix.
+pub fn tar_header_name(header: &[u8]) -> String {
+    let name = tar_field_string(&header[0..100]);
+    if header[257..262] == *b"ustar" {
+        let prefix = tar_field_string(&header[345..500]);
+        if !prefix.is_empty() {
+            return format!("{prefix}/{name}");
+        }
+    }
+    name
+}
+
 fn strip_tar_components(
     path: &str,
     strip_components: usize,

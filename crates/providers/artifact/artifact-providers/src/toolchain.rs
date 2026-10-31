@@ -85,7 +85,7 @@ pub fn ensure_relocated(toolchain: &ArtifactToolchainContract) -> Result<Option<
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-    write_marker(&marker).map_err(|error| {
+    write_relocated_marker(&marker).map_err(|error| {
         format!(
             "toolchain '{}': failed to record the relocation in '{}': {error}",
             toolchain.id,
@@ -99,7 +99,7 @@ pub fn ensure_relocated(toolchain: &ArtifactToolchainContract) -> Result<Option<
     )))
 }
 
-fn write_marker(marker: &Path) -> std::io::Result<()> {
+fn write_relocated_marker(marker: &Path) -> std::io::Result<()> {
     std::fs::write(marker, b"relocated by gaia\n")
 }
 

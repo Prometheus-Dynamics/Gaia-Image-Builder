@@ -3,6 +3,7 @@
 //! ustar and PAX tars inside it. The writer side is in `package.rs`; this
 //! file reads what it wrote, back, to check it.
 
+use gaia_process::{tar_field_string, tar_header_name};
 use std::fs::File;
 use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -232,23 +233,11 @@ pub(super) fn list_tar(path: &Path) -> Result<Vec<TarEntry>, String> {
             .map_err(|error| format!("failed to read '{}': {error}", path.display()))?;
         let name = match pax_path.take() {
             Some(name) => name,
-            None => {
-                let base = cstring(&header[0..100]);
-                if &header[257..262] == b"ustar" {
-                    let prefix = cstring(&header[345..500]);
-                    if prefix.is_empty() {
-                        base
-                    } else {
-                        format!("{prefix}/{base}")
-                    }
-                } else {
-                    base
-                }
-            }
+            None => tar_header_name(&header),
         };
         let link = pax_link
             .take()
-            .unwrap_or_else(|| cstring(&header[157..257]));
+            .unwrap_or_else(|| tar_field_string(&header[157..257]));
         let kind = match typeflag {
             b'0' | 0 => TarEntryKind::File,
             b'5' => TarEntryKind::Dir,
@@ -295,14 +284,6 @@ fn octal(field: &[u8]) -> Option<u64> {
         return Some(0);
     }
     u64::from_str_radix(text, 8).ok()
-}
-
-fn cstring(field: &[u8]) -> String {
-    let end = field
-        .iter()
-        .position(|byte| *byte == 0)
-        .unwrap_or(field.len());
-    String::from_utf8_lossy(&field[..end]).into_owned()
 }
 
 /// The `length key=value\n` records of a PAX header.
