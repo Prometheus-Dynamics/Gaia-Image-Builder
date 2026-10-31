@@ -118,6 +118,9 @@ pub struct LayerArgs {
     pub from: Vec<String>,
     /// `--out <dir>`: where the compressed layers, deltas and `deltas.json` go.
     pub out: Option<String>,
+    /// `--max-window <size>`: the most memory a board has to apply one file,
+    /// such as `32M`.
+    pub max_window: Option<String>,
 }
 
 impl AppArgs {
@@ -290,6 +293,9 @@ impl AppArgs {
                     }
                 }
                 "--out" => parsed.layer.out = value("--out", &mut parsed.usage_errors),
+                "--max-window" => {
+                    parsed.layer.max_window = value("--max-window", &mut parsed.usage_errors);
+                }
                 "--update" => {
                     parsed.lock.update = true;
                     // `--update [source-id]`: an optional value, taken only
@@ -572,12 +578,15 @@ mod tests {
             "c",
             "--out",
             "deltas",
+            "--max-window",
+            "32M",
             "--json",
         ]);
         assert_eq!(args.command, AppCommand::LayerDelta);
         assert_eq!(args.build, "new/layers");
         assert_eq!(args.layer.from, ["a/layers", "b/layers", "c"]);
         assert_eq!(args.layer.out.as_deref(), Some("deltas"));
+        assert_eq!(args.layer.max_window.as_deref(), Some("32M"));
         assert!(args.usage_errors.is_empty(), "{:?}", args.usage_errors);
 
         let missing = parse(&["layer", "delta", "--out", "deltas"]);

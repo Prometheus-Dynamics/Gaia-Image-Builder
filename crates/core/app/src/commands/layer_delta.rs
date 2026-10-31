@@ -15,8 +15,14 @@
 //! Every file written is decompressed again and checked against the new
 //! tar's sha256 before it is recorded. `deltas.json` lists them, and a copy
 //! of the new `layers.json` sits beside it.
+//!
+//! Applying a file takes memory the size of its zstd window. A delta's
+//! window has to cover its whole base tar (zstd raises a smaller `--long`),
+//! so with `--max-window` a delta whose window would be larger is not made,
+//! and the whole layer is compressed with the capped window instead.
 
 use gaia_process::{format_bytes, sha256_file};
+use gaia_spec::ByteSize;
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -86,11 +92,13 @@ impl Release {
     }
 }
 
-/// `gaia layer delta <layers> --from <old-layers> [--from ...] --out <dir>`.
+/// `gaia layer delta <layers> --from <old-layers> [--from ...] --out <dir>
+/// [--max-window <size>]`.
 pub(crate) fn layer_delta_command(
     new: &str,
     from: &[String],
     out: Option<&str>,
+    max_window: Option<&str>,
     json: bool,
 ) -> CommandOutcome {
     let Some(out) = out else {
@@ -98,7 +106,11 @@ pub(crate) fn layer_delta_command(
             message: "gaia layer delta needs --out <dir>".into(),
         };
     };
-    match write_deltas(new, from, Path::new(out)) {
+    let max_window = match max_window.map(max_window_log).transpose() {
+        Ok(max_window) => max_window,
+        Err(message) => return CommandOutcome::Failed { message },
+    };
+    match write_deltas(new, from, Path::new(out), max_window) {
         Ok(document) if json => CommandOutcome::Json { value: document },
         Ok(document) => CommandOutcome::Text {
             text: summary(&document, out),
@@ -107,9 +119,30 @@ pub(crate) fn layer_delta_command(
     }
 }
 
+/// The window log of `--max-window <size>`: the largest power of two that
+/// fits in `size`, within zstd's 1 KiB to 2 GiB.
+fn max_window_log(size: &str) -> Result<u32, String> {
+    let bytes = size
+        .parse::<ByteSize>()
+        .map_err(|error| format!("--max-window '{size}' is not a size: {error}"))?
+        .bytes();
+    if bytes < 1 << 10 {
+        return Err(format!(
+            "--max-window '{size}' is below zstd's smallest window, 1K"
+        ));
+    }
+    Ok((u64::BITS - 1 - bytes.leading_zeros()).min(31))
+}
+
 /// Writes the deltas of the layers in `new` against each release in `from`
-/// to `out`, and returns `deltas.json`.
-fn write_deltas(new: &str, from: &[String], out: &Path) -> Result<Value, String> {
+/// to `out`, and returns `deltas.json`. With `max_window`, no file needs a
+/// larger zstd window than `2^max_window` bytes to apply.
+fn write_deltas(
+    new: &str,
+    from: &[String],
+    out: &Path,
+    max_window: Option<u32>,
+) -> Result<Value, String> {
     let new = Release::read(new)?;
     let old = from
         .iter()
@@ -119,9 +152,12 @@ fn write_deltas(new: &str, from: &[String], out: &Path) -> Result<Value, String>
         .map_err(|error| format!("failed to create '{}': {error}", out.display()))?;
     let mut records = Vec::new();
     for layer in &new.layers {
-        records.push(layer_deltas(layer, &new, &old, out)?);
+        records.push(layer_deltas(layer, &new, &old, out, max_window)?);
     }
-    let document = json!({ "schema": DELTAS_SCHEMA, "layers": records });
+    let mut document = json!({ "schema": DELTAS_SCHEMA, "layers": records });
+    if let Some(max_window) = max_window {
+        document["max_window_log"] = json!(max_window);
+    }
     fs::copy(new.dir.join(LAYERS_JSON), out.join(LAYERS_JSON))
         .map_err(|error| format!("failed to copy layers.json to '{}': {error}", out.display()))?;
     let text = serde_json::to_string_pretty(&document)
@@ -137,6 +173,7 @@ fn layer_deltas(
     new: &Release,
     old: &[Release],
     out: &Path,
+    max_window: Option<u32>,
 ) -> Result<Value, String> {
     let name = layer["name"].as_str().unwrap_or_default();
     let tar_sha256 = layer["tar_sha256"].as_str().unwrap_or_default();
@@ -159,13 +196,15 @@ fn layer_deltas(
     }
     record["status"] = json!(if bases.is_empty() { "new" } else { "changed" });
     let tar = new.tar(layer)?;
-    let window = window_log(&tar, &[]);
+    let cap = |window: u32| max_window.map_or(window, |max| window.min(max));
+    let window = cap(window_log(&tar, &[]));
     let full = out.join(format!("{name}.tar.zst"));
     zstd(&tar, None, window, &full)?;
     let full_record = verified(&full, None, window, tar_sha256)?;
     let full_size = full_record["size"].as_u64().unwrap_or(u64::MAX);
     record["full"] = full_record;
     let mut deltas = Vec::new();
+    let mut over_window = Vec::new();
     for (release, base) in bases {
         let base_sha256 = base["tar_sha256"].as_str().unwrap_or_default();
         // A release without its tar (or with a different one) cannot be a
@@ -173,8 +212,16 @@ fn layer_deltas(
         let Ok(base_tar) = release.tar(base) else {
             continue;
         };
-        let file = out.join(format!("{name}.from-{}.tar.zst", short(base_sha256)));
         let window = window_log(&tar, &[&base_tar]);
+        if cap(window) < window {
+            over_window.push(json!({
+                "from_tar_sha256": base_sha256,
+                "from_id": base["id"],
+                "window_log": window,
+            }));
+            continue;
+        }
+        let file = out.join(format!("{name}.from-{}.tar.zst", short(base_sha256)));
         zstd(&tar, Some(&base_tar), window, &file)?;
         let mut delta = verified(&file, Some(&base_tar), window, tar_sha256)?;
         if delta["size"].as_u64().unwrap_or(u64::MAX) >= full_size {
@@ -187,6 +234,11 @@ fn layer_deltas(
     }
     deltas.sort_by_key(|delta| delta["size"].as_u64());
     record["deltas"] = json!(deltas);
+    if !over_window.is_empty() {
+        // Bases a delta was not made against: applying it would need more
+        // memory than --max-window.
+        record["over_max_window"] = json!(over_window);
+    }
     Ok(record)
 }
 
@@ -293,6 +345,9 @@ fn summary(document: &Value, out: &str) -> String {
                         deltas.len(),
                         format_bytes(best["size"].as_u64().unwrap_or(0)),
                         short(best["from_tar_sha256"].as_str().unwrap_or_default()),
+                    ),
+                    None if layer.get("over_max_window").is_some() => format!(
+                        "layer {name}: whole layer only, a delta would need more than --max-window: {full} (tar {tar})"
                     ),
                     None => format!(
                         "layer {name}: {}, whole layer only: {full} (tar {tar})",

@@ -65,7 +65,7 @@ fn unchanged_layers_need_nothing_and_changed_ones_get_a_verified_delta() {
     );
     let out = scratch.join("out");
 
-    let document = write_deltas(&v2, &[v1], &out).expect("deltas");
+    let document = write_deltas(&v2, &[v1], &out, None).expect("deltas");
 
     let layers = document["layers"].as_array().expect("layers");
     assert_eq!(layers[0]["status"], "unchanged");
@@ -133,7 +133,8 @@ fn an_unrelated_base_gives_no_delta_and_a_missing_base_tar_is_skipped() {
     fs::remove_file(scratch.join("v1/app.tar")).expect("remove tar");
     let new = release(&scratch.join("v2"), &[("app", &noise(9, 32 * 1024))]);
 
-    let document = write_deltas(&new, &[unrelated, gone], &scratch.join("out")).expect("deltas");
+    let document =
+        write_deltas(&new, &[unrelated, gone], &scratch.join("out"), None).expect("deltas");
 
     let app = &document["layers"][0];
     assert_eq!(app["status"], "changed");
@@ -150,16 +151,77 @@ fn a_new_tar_that_does_not_match_layers_json_is_refused() {
     let new = release(&scratch.join("v2"), &[("app", b"one")]);
     fs::write(scratch.join("v2/app.tar"), b"two").expect("rewrite");
 
-    let error = write_deltas(&new, &[], &scratch.join("out")).expect_err("stale tar");
+    let error = write_deltas(&new, &[], &scratch.join("out"), None).expect_err("stale tar");
 
     assert!(error.contains("but layers.json records"), "{error}");
 }
 
 #[test]
 fn the_output_dir_is_required() {
-    let outcome = layer_delta_command("layers", &[], None, false);
+    let outcome = layer_delta_command("layers", &[], None, None, false);
     assert!(
         matches!(&outcome, CommandOutcome::Failed { message } if message.contains("--out")),
         "{outcome:?}"
     );
+}
+
+#[test]
+fn max_window_drops_deltas_that_need_more_memory_and_caps_the_whole_layer() {
+    if zstd_missing() {
+        return;
+    }
+    let scratch = TempDir::new("gaia-layer-delta-window");
+    let app_v1 = noise(2, 256 * 1024);
+    let mut app_v2 = app_v1.clone();
+    app_v2[1000..1100].copy_from_slice(&noise(3, 100));
+    let small_v1 = noise(4, 16 * 1024);
+    let mut small_v2 = small_v1.clone();
+    small_v2[10..20].copy_from_slice(&noise(5, 10));
+    let v1 = release(
+        &scratch.join("v1"),
+        &[("app", &app_v1), ("small", &small_v1)],
+    );
+    let v2 = release(
+        &scratch.join("v2"),
+        &[("app", &app_v2), ("small", &small_v2)],
+    );
+    let out = scratch.join("out");
+
+    // 64 KiB: the app's delta would need 512 KiB, the small layer's 32 KiB.
+    let document = write_deltas(&v2, &[v1], &out, Some(16)).expect("deltas");
+
+    assert_eq!(document["max_window_log"], 16);
+    let app = &document["layers"][0];
+    assert_eq!(app["deltas"], json!([]), "{app}");
+    assert_eq!(app["over_max_window"][0]["window_log"], 19);
+    assert_eq!(app["full"]["window_log"], 16);
+    let rebuilt = scratch.join("app.tar");
+    let status = Command::new("zstd")
+        .args(["-q", "-d", "--long=16", "--memory=64KB"])
+        .arg(out.join("app.tar.zst"))
+        .arg("-o")
+        .arg(&rebuilt)
+        .status()
+        .expect("zstd");
+    assert!(status.success());
+    assert_eq!(fs::read(&rebuilt).expect("rebuilt"), app_v2);
+
+    let small = &document["layers"][1];
+    assert_eq!(small["deltas"][0]["window_log"], 15, "{small}");
+    assert!(small.get("over_max_window").is_none());
+    let text = summary(&document, &out.display().to_string());
+    assert!(
+        text.contains("layer app: whole layer only, a delta would need more than --max-window"),
+        "{text}"
+    );
+}
+
+#[test]
+fn max_window_is_the_largest_power_of_two_in_the_size() {
+    assert_eq!(max_window_log("32M"), Ok(25));
+    assert_eq!(max_window_log("48M"), Ok(25));
+    assert_eq!(max_window_log("1K"), Ok(10));
+    assert_eq!(max_window_log("64G"), Ok(31));
+    assert!(max_window_log("512").is_err());
+    assert!(max_window_log("lots").is_err());
 }

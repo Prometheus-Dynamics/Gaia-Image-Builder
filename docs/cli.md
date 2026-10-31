@@ -636,6 +636,19 @@ from it with the same `mkfs.erofs` version and options as the build, which
 gives the image `id` records. A board without a matching tar uses
 `<name>.tar.zst` the same way, without `--patch-from`.
 
+Applying a file takes memory the size of its window, and a delta's window
+always covers its whole base tar: zstd raises a smaller `--long`. Measured
+with zstd 1.5.7 on a 64 MiB tar, applying a delta peaked at 125 MiB of
+anonymous memory, or 55 MiB with `--mmap-dict`, which reads the base tar
+through the page cache instead. Boards should pass `--mmap-dict`.
+
+`--max-window <size>` (such as `32M`) bounds that memory for boards with
+little RAM. The window is the largest power of two in the size. A delta that
+would need a larger window is not made; the layer's record lists those bases
+under `over_max_window` (`from_tar_sha256`, `from_id` and the `window_log` it
+would need). Whole layers are compressed with the capped window, and
+`deltas.json` records `max_window_log`.
+
 ### `pause`, `resume`, `cancel`
 
 Signal a running `gaia run`, from another terminal or a script. With no
