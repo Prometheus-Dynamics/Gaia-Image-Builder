@@ -26,6 +26,9 @@ const VERITY_BLOCK_SIZE_MIN: u32 = 512;
 const VERITY_BLOCK_SIZE_MAX: u32 = 4096;
 /// The longest salt dm-verity accepts, in bytes.
 const VERITY_SALT_MAX_BYTES: usize = 256;
+/// The smallest U-Boot environment that holds anything: the CRC, the flags
+/// byte of a redundant one, and the two NULs of an empty one.
+const UBOOT_ENV_SIZE_MIN: u64 = 7;
 
 pub(crate) fn validate_transform_options(
     spec: &ResolvedBuildSpec,
@@ -44,6 +47,51 @@ pub(crate) fn validate_transform_options(
                 ),
                 location(),
             ));
+        }
+        if transform.kind == AssemblyTransformKindSpec::UbootEnv {
+            match transform.env_size.as_deref().map(str::parse::<gaia_spec::ByteSize>) {
+                None => diagnostics.push(error(
+                    "assembly_uboot_env_size_invalid",
+                    format!(
+                        "assembly uboot-env transform to '{}' needs env_size, the board's CONFIG_ENV_SIZE",
+                        transform.dest
+                    ),
+                    location(),
+                )),
+                Some(Err(parse_error)) => diagnostics.push(error(
+                    "assembly_uboot_env_size_invalid",
+                    format!(
+                        "assembly uboot-env transform to '{}' has invalid env_size: {parse_error}",
+                        transform.dest
+                    ),
+                    location(),
+                )),
+                Some(Ok(size)) if size.bytes() < UBOOT_ENV_SIZE_MIN => diagnostics.push(error(
+                    "assembly_uboot_env_size_invalid",
+                    format!(
+                        "assembly uboot-env transform to '{}' env_size {} is too small to hold an environment",
+                        transform.dest,
+                        size.bytes()
+                    ),
+                    location(),
+                )),
+                Some(Ok(_)) => {}
+            }
+        } else {
+            for (set, option) in [
+                (transform.env_size.is_some(), "env_size"),
+                (transform.redundant, "redundant"),
+            ] {
+                if set {
+                    diagnostics.push(error(
+                        "assembly_transform_option_unsupported",
+                        format!(
+                            "assembly transform kind '{kind}' does not accept {option}; only kind 'uboot-env' does"
+                        ),
+                        location(),
+                    ));
+                }
+            }
         }
         if transform.kind != AssemblyTransformKindSpec::Verity {
             for (set, option) in [

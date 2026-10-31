@@ -50,6 +50,7 @@ mod strip;
 mod tar;
 mod tools;
 mod transforms;
+mod uboot_env;
 mod verity;
 
 use archive_log::*;

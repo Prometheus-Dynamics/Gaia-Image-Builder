@@ -403,6 +403,8 @@ fn generated_content_runs_after_the_steps_whose_outputs_its_tokens_read() {
             salt: None,
             uuid: None,
             long: false,
+            env_size: None,
+            redundant: false,
         }],
         ..ImageAssemblySpec::default()
     };

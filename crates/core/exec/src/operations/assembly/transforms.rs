@@ -92,6 +92,9 @@ pub(super) fn execute_assembly_transform(
             args.extend(level.as_deref());
             compress_to_dest(spec, roots, "xz", &args, src, dest, cancel_check)
         }
+        gaia_spec::AssemblyTransformKindSpec::UbootEnv => {
+            super::uboot_env::write_uboot_env(transform, src, dest)
+        }
         gaia_spec::AssemblyTransformKindSpec::Verity => Err(format!(
             "assembly transform 'verity' for '{}' runs as a verity step, not a copy",
             dest.display()

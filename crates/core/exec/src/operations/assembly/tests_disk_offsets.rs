@@ -207,3 +207,62 @@ fn an_image_over_another_partition_or_the_table_is_refused() {
         "{error}"
     );
 }
+
+#[test]
+fn a_uboot_env_from_generated_text_lands_at_its_offset() {
+    let scratch = TempDir::new("gaia-exec-disk-offsets-env");
+    let root = scratch.join("env");
+    write_assets(&root);
+    let mut spec = test_spec(&root);
+    let mut env = copy_transform(
+        "$assembly.tree.env/uboot-env.txt",
+        "$assembly.work/uboot.env",
+    );
+    env.kind = gaia_spec::AssemblyTransformKindSpec::UbootEnv;
+    env.env_size = Some("32K".into());
+    env.redundant = true;
+    spec.image.assembly = Some(ImageAssemblySpec {
+        work_dir: Some("$assembly.work".into()),
+        trees: vec![gaia_spec::AssemblyTreeSpec {
+            id: "env".into(),
+            path: "$assembly.work/env".into(),
+            strip: false,
+        }],
+        files: vec![gaia_spec::AssemblyFileSpec {
+            tree: "env".into(),
+            src: None,
+            src_glob: None,
+            src_dir: None,
+            exclude: Vec::new(),
+            include: Vec::new(),
+            strip: false,
+            content: Some("boot_slot=a\nbootcount=0\nbootlimit=3\n".into()),
+            json: None,
+            dest: "uboot-env.txt".into(),
+            mode: None,
+            dir_mode: None,
+            optional: false,
+            preserve_symlink: false,
+            allow_missing_libs: false,
+        }],
+        transforms: vec![env],
+        disks: vec![disk(
+            AssemblyPartitionTableSpec::Gpt,
+            vec![
+                outside_table("env", "$assembly.work/uboot.env", "4M"),
+                partition("rootfs", Some("@assets/root.img")),
+            ],
+        )],
+        ..ImageAssemblySpec::default()
+    });
+
+    stage_image_assembly_with(&spec, &OperationId::image_assembly(), None, disk_env_panic)
+        .map_err(|error| error.message)
+        .expect("assembly");
+
+    let bytes = fs::read(root.join("out/images/disk.img")).expect("disk image");
+    let env = &bytes[4 << 20..(4 << 20) + 32 * 1024];
+    assert_eq!(env[4], 1, "the active flag");
+    assert!(env[5..].starts_with(b"boot_slot=a\0bootcount=0\0bootlimit=3\0\0"));
+    assert_eq!(env[..4], crc32(&env[5..]).to_le_bytes());
+}

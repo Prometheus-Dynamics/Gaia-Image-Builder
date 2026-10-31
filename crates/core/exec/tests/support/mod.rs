@@ -334,6 +334,8 @@ pub fn assembly_transform(
         data_block_size: None,
         hash_block_size: None,
         long: false,
+        env_size: None,
+        redundant: false,
         salt: None,
         uuid: None,
     }

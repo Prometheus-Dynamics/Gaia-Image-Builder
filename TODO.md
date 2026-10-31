@@ -44,7 +44,7 @@ Small targets ship exactly two slots (A/B) plus a data partition. Smaller is bet
   - What: a U-Boot environment image (CRC32, optional redundant copy) holding the A/B variables (`boot_slot`, `bootcount`, `bootlimit`, `altbootcmd`).
   - Why: A/B trial boots on U-Boot boards, which have no `tryboot`. Atlas's updater writes the same variables.
   - Done when: `fw_printenv` reads the image back the same in a test, where installed.
-  - Blocked by: nothing.
+  - Status: done (the uboot-env commit), with byte-level tests of U-Boot's `env_t` layout. u-boot-tools isn't installed here, so the `fw_printenv` read-back waits for a host or board that has it.
 - **G4: riscv64 polish**
   - What: GPT aliases `linux-usr-riscv64`, `linux-root-verity-riscv64` and `linux-usr-verity-riscv64`, plus the riscv64 lp64d loader paths in the runtime-library check.
   - Why: the K230D uses Raze's verity layout.

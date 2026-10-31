@@ -109,7 +109,7 @@ Assembly behavior:
 - `mode = "0755"` applies Unix file modes on Unix hosts.
 - `include = ["<name>", ...]` on a `src_glob` entry copies only the matches whose file name one of the names matches (simple `*` globs allowed); it is applied after `exclude`. An entry that matches no file fails the build, naming it, unless `optional = true`. It is refused on other entries. For example, twelve named overlays out of a directory of several hundred: `src_glob = "$provider.target/boot/overlays/*.dtbo"`, `include = ["vc4-kms-v3d.dtbo", "i2c*.dtbo"]`, `dest = "overlays/"`.
 - `strip = true` on a file entry strips each copied ELF file (the `src`, or each `src_glob` match) with the strip tool described under the tree; a copied file that is not ELF is left alone. It is refused on `content` and `json` entries.
-- Transform kinds currently implemented are `copy`, `gzip`, `zstd`, `xz`, `compile-dts`, and `verity` (see [dm-verity and ext4](#dm-verity-and-ext4)).
+- Transform kinds currently implemented are `copy`, `gzip`, `zstd`, `xz`, `compile-dts`, `verity` (see [dm-verity and ext4](#dm-verity-and-ext4)) and `uboot-env` (see [U-Boot environment](#u-boot-environment)).
 - `gzip` runs `gzip -n -c [-<level>] <src>`. `-n` leaves the name and the modification time out of the header, so the same input and level give the same bytes on every run. The optional `level` (1-9) is accepted on `gzip` transforms and defaults to gzip's own.
 - `zstd` runs `zstd -q -c --no-progress -T0 [-<level>] <src>`, resolving `zstd` from provider host tools first, then host `PATH`; the tool path and version are recorded in assembly state. The optional `level` (1-19) is only accepted on `zstd` transforms and defaults to 19, the level `cpio-zstd` uses (it was zstd's own default of 3). `long = true` (`zstd` only, default `false`) adds `--long=27` when the level is 19 and the input is over 128 MiB: a 2^27-byte match window. A stream written that way decodes only with `zstd -d --long=27` (or a decoder that accepts that window); the default output decodes with any zstd.
 - `xz` runs `xz -T0 --block-size=24MiB -c [-<level>] <src>`, resolved like `zstd`. Its fixed block size makes the output the same for any core count. The optional `level` (0-9, xz's preset) is only accepted on `xz`, `zstd` and `gzip` transforms, as `gzip`'s and `zstd`'s own levels are. Use it to compress another disk into the output dir, for example `kind = "xz"`, `src = "$assembly.work/slots/<id>.img"`, `dest = "$assembly.out/<id>.img.xz"`.
@@ -298,6 +298,39 @@ image = "$assembly.work/root.erofs"
 - `ebr_placement = "packed"`: the EBR chain of the extended partition is written in consecutive sectors at its start (EBR n at the extended start plus n sectors). Logical data starts after the chain, so with `truncate` the file ends after the last logical data and every logical partition is still described at its full size. Each EBR's first entry describes its logical partition relative to that EBR; its second entry links the next EBR, relative to the extended start. The planner errors if the chain leaves no room for the first logical partition. Only affects layouts with more than four partitions; use it with `truncate` when logical partitions are unmaterialized at the end of the disk.
 
 Assembly results report, per published raw disk image (and the primary image), `raw_bytes` (file length) and `content_bytes` (bytes the filesystem allocates, from `st_blocks`, so holes are excluded). The run summary has them in `image_sizes` and adds a note such as `sdcard.img: 1.36 GB raw, 412.00 MB written`. Every published output's file size, and its change since the previous run, is in the summary's `sizes` list (see [Image sizes](reporting-and-state.md#image-sizes)).
+
+#### U-Boot environment
+
+A `uboot-env` transform writes a U-Boot environment image, the bytes `mkenvimage` writes, from a text file of `name=value` lines (`src`). Blank lines and `#` comments are skipped. A line without a name before its `=`, or a name set twice, is an error. Lines do not continue with a trailing backslash.
+
+- `env_size` (required): the board's `CONFIG_ENV_SIZE`, a byte size such as `"64K"`. The image is exactly that long. Variables that do not fit are an error (`assembly_uboot_env_size_invalid` for a missing or too small size).
+- `redundant = true`: the layout of a redundant environment (`CONFIG_ENV_REDUNDAND`): a flags byte after the CRC, set to the active copy. Write the same image at both of the board's environment offsets.
+
+The image is a little-endian CRC32 of the data area, the flags byte when redundant, then each `name=value` and a NUL, one more NUL after the last, and `0xff` to the end. Variables keep their file order. Generate the text with a `content` file to fill in tokens. For example, an A/B environment at a Rockchip board's 4 MiB offset, outside the partition table:
+
+```toml
+[[image.assembly.trees]]
+id = "env"
+path = "$assembly.work/env"
+
+[[image.assembly.files]]
+tree = "env"
+dest = "uboot-env.txt"
+content = "boot_slot=a\nbootcount=0\nbootlimit=3\naltbootcmd=run swap_slot; run bootcmd\nroothash_a=${assembly.verity:$assembly.work/rootfs-a.erofs:root_hash}\n"
+
+[[image.assembly.transforms]]
+kind = "uboot-env"
+src = "$assembly.tree.env/uboot-env.txt"
+dest = "$assembly.work/uboot.env"
+env_size = "32K"
+redundant = true
+
+[[image.assembly.disks.partitions]]
+name = "env"
+image = "$assembly.work/uboot.env"
+offset = "4M"
+table = false
+```
 
 #### Archives
 

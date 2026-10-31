@@ -264,6 +264,8 @@ pub(crate) fn compile_image_assembly(
                 salt: transform.salt,
                 uuid: transform.uuid,
                 long: transform.long,
+                env_size: transform.env_size,
+                redundant: transform.redundant,
             })
             .collect(),
         filesystems: raw
@@ -430,6 +432,7 @@ fn compile_assembly_transform_kind(raw: RawAssemblyTransformKind) -> AssemblyTra
         RawAssemblyTransformKind::Xz => AssemblyTransformKindSpec::Xz,
         RawAssemblyTransformKind::Copy => AssemblyTransformKindSpec::Copy,
         RawAssemblyTransformKind::Verity => AssemblyTransformKindSpec::Verity,
+        RawAssemblyTransformKind::UbootEnv => AssemblyTransformKindSpec::UbootEnv,
     }
 }
 

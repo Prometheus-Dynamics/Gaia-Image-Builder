@@ -154,6 +154,8 @@ fn gzip_transform(src: &Path, dest: &str, level: Option<u32>) -> AssemblyTransfo
         data_block_size: None,
         hash_block_size: None,
         long: false,
+        env_size: None,
+        redundant: false,
         salt: None,
         uuid: None,
     }

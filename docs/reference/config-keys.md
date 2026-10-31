@@ -216,7 +216,7 @@ Keys: `allow_missing_libs`, `content`, `dest`, `dir_mode`, `exclude`, `include`,
 
 Described in [Image assembly](../configuration-assembly.md#image-assembly).
 
-Keys: `data_block_size`, `dest`, `deterministic`, `hash_block_size`, `hash_dest`, `kind`, `level`, `long`, `salt`, `src`, `uuid`.
+Keys: `data_block_size`, `dest`, `deterministic`, `env_size`, `hash_block_size`, `hash_dest`, `kind`, `level`, `long`, `redundant`, `salt`, `src`, `uuid`.
 
 ## `[[image.assembly.filesystems]]`
 

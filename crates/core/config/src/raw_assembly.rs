@@ -140,6 +140,10 @@ pub(crate) struct RawAssemblyTransformConfig {
     /// and up over inputs above 128 MiB. Default false: the output decodes
     /// with a stock `zstd -d`.
     pub long: bool,
+    /// `uboot-env` only: the environment size, such as `64K`.
+    pub env_size: Option<String>,
+    /// `uboot-env` only: the redundant environment layout.
+    pub redundant: bool,
 }
 
 impl Default for RawAssemblyTransformConfig {
@@ -156,6 +160,8 @@ impl Default for RawAssemblyTransformConfig {
             salt: None,
             uuid: None,
             long: false,
+            env_size: None,
+            redundant: false,
         }
     }
 }
@@ -169,6 +175,7 @@ pub(crate) enum RawAssemblyTransformKind {
     Xz,
     Copy,
     Verity,
+    UbootEnv,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]

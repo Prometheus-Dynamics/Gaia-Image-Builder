@@ -321,3 +321,54 @@ fn vfat_fat_size_is_checked_and_only_for_vfat() {
         ]
     );
 }
+
+#[test]
+fn uboot_env_needs_a_size_and_its_options_stay_on_it() {
+    let contents = assembly(
+        r#"
+[[image.assembly.files]]
+tree = "rootfs"
+dest = "uboot-env.txt"
+content = "boot_slot=a\n"
+
+[[image.assembly.transforms]]
+kind = "uboot-env"
+src = "$assembly.tree.rootfs/uboot-env.txt"
+dest = "$assembly.work/uboot.env"
+env_size = "64K"
+redundant = true
+"#,
+    );
+    assert_eq!(assembly_codes(&contents), Vec::<&str>::new());
+
+    let contents = assembly(
+        r#"
+[[image.assembly.transforms]]
+kind = "uboot-env"
+src = "$provider.images/env.txt"
+dest = "$assembly.work/a.env"
+
+[[image.assembly.transforms]]
+kind = "uboot-env"
+src = "$provider.images/env.txt"
+dest = "$assembly.work/b.env"
+env_size = "4"
+
+[[image.assembly.transforms]]
+kind = "copy"
+src = "$provider.images/env.txt"
+dest = "$assembly.work/c.env"
+env_size = "64K"
+redundant = true
+"#,
+    );
+    assert_eq!(
+        assembly_codes(&contents),
+        vec![
+            "assembly_uboot_env_size_invalid",
+            "assembly_uboot_env_size_invalid",
+            "assembly_transform_option_unsupported",
+            "assembly_transform_option_unsupported",
+        ]
+    );
+}

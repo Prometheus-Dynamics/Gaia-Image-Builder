@@ -36,6 +36,14 @@ pub struct AssemblyTransformSpec {
     /// needs `zstd -d --long=27` (or a decoder that accepts that window).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub long: bool,
+    /// `uboot-env` only: the environment's size in bytes, as U-Boot's
+    /// `CONFIG_ENV_SIZE` (a byte size such as `64K`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub env_size: Option<String>,
+    /// `uboot-env` only: the layout of a redundant environment
+    /// (`CONFIG_ENV_REDUNDAND`), with its flags byte.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub redundant: bool,
 }
 
 impl AssemblyTransformSpec {
@@ -62,6 +70,9 @@ pub enum AssemblyTransformKindSpec {
     /// A dm-verity hash tree over a data image (`src`), written to `dest`
     /// with the tree appended or to `hash_dest`.
     Verity,
+    /// A U-Boot environment image from a text file of `name=value` lines,
+    /// as `mkenvimage` writes it.
+    UbootEnv,
 }
 
 impl AssemblyTransformKindSpec {
@@ -73,6 +84,7 @@ impl AssemblyTransformKindSpec {
             Self::Xz => "xz",
             Self::Copy => "copy",
             Self::Verity => "verity",
+            Self::UbootEnv => "uboot-env",
         }
     }
 }
