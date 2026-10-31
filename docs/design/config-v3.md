@@ -1,7 +1,7 @@
 # Config v3 (draft for review)
 
-Status: proposal, not implemented. It is to be confirmed with HeliOS before
-any code is written, because every HeliOS, PV and Atlas build file changes.
+Status: approved by HeliOS on 2026-10-31, with the answers and checks below;
+being implemented.
 
 v3 is a rewrite of the build-file *syntax* only. A v2 file and its `gaia
 migrate` output must resolve to the same spec fingerprint, so nothing that
@@ -29,8 +29,8 @@ allowed is still an error, and the error says which.
 
 The `${inputs.x}` alias of `${input.x}` is dropped.
 
-Open question A: `@assets/` is by far the most used token and is short.
-Keep `@assets/` as the one exception, or move it too?
+`@assets/` is not kept as an exception: one syntax (HeliOS, question A).
+An unknown `${...}` token is an error at its line, never passed through.
 
 ## 2. A `[cache]` table
 
@@ -76,9 +76,9 @@ settable for the rare build that needs another place.
 `image.output.collect_dir` becomes `outputs.images_dir`; HeliOS sets it in
 `gaia/configs/os/base.toml`.
 
-Open question B: HeliOS's `collect_dir` is its `out_dir` plus `/images`,
-the proposed `images_dir` default. When a v2 value equals the v3 default,
-should `migrate` drop it or keep it written out?
+A v2 value equal to the v3 default is dropped, and `migrate` prints each
+dropped key with its file, line and old value, for review (HeliOS,
+question B).
 
 ## 4. Real enums
 
@@ -98,5 +98,8 @@ is nothing left to do.
 
 `gaia migrate <file>` rewrites a v2 file to v3 in place (a `.v2.bak` copy is
 kept) and checks that both resolve to the same fingerprint. Without that
-match it refuses and leaves the file alone. Comments and key order are kept
+match it refuses and leaves the file alone. The fingerprint covers every
+resolved output path, so a migration that would move an output is refused.
+Token references to renamed keys are rewritten too: `${workspace.out_dir}`
+becomes `${outputs.dir}` (HeliOS has 15 of them). Comments and key order are kept
 (`toml_edit`). `--check` exits non-zero when a file is still v2, for CI.

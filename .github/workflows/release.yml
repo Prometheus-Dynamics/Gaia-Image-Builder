@@ -1,0 +1,105 @@
+# Builds the release binaries for a `v*` tag and writes their checksums, as
+# a draft GitHub release to be checked and published by hand. Started by
+# hand (workflow_dispatch) it is a dry run: the same files are uploaded as a
+# workflow artifact and no release is made. Signing comes later.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Check the tag matches the workspace version
+        if: ${{ github.ref_type == 'tag' }}
+        shell: bash
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "gaia") | .version')
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME does not match the workspace version $version" >&2
+            exit 1
+          fi
+
+      - name: Build
+        run: cargo build --release --locked -p gaia --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          "target/$TARGET/release/gaia" --version
+          name="gaia-${GITHUB_REF_NAME}-${TARGET}"
+          mkdir -p "dist/$name"
+          cp "target/$TARGET/release/gaia" README.md CHANGELOG.md LICENSE-APACHE LICENSE-MIT "dist/$name/"
+          tar -C dist --owner=0 --group=0 --numeric-owner --sort=name \
+            -czf "dist/$name.tar.gz" "$name"
+          rm -r "dist/$name"
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: gaia-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download the archives
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: gaia-*
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload the dry run
+        if: ${{ github.ref_type != 'tag' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gaia-release-dry-run
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Draft the release
+        if: ${{ github.ref_type == 'tag' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "Gaia ${GITHUB_REF_NAME#v}" \
+            --notes "See CHANGELOG.md for this release's changes. Verify the archives with \`sha256sum -c SHA256SUMS\`."

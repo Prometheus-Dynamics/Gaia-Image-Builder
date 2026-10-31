@@ -199,3 +199,19 @@ CI=true gaia run configs/builds/device.toml --export out/export
 
 Then cache `.gaia/cache` and `~/.cache/gaia` with that system's cache, and keep
 the export directory as the job's artifact.
+
+## Gaia's own releases
+
+`.github/workflows/release.yml` builds Gaia itself for x86_64 and aarch64
+Linux when a `v*` tag is pushed. It fails if the tag isn't `v` plus the
+workspace version. Each archive holds the `gaia` binary, the README,
+CHANGELOG and both licences, and `SHA256SUMS` covers the archives. The
+result is a draft GitHub release, published by hand after checking. Run by
+hand (Actions → Release → Run workflow), it is a dry run that uploads the
+same files as a workflow artifact and makes no release.
+
+Check a download with:
+
+```bash
+sha256sum -c SHA256SUMS --ignore-missing
+```
