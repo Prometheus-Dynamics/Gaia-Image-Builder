@@ -59,7 +59,7 @@ Small targets ship exactly two slots (A/B) plus a data partition. Smaller is bet
   - What: GPT aliases `linux-usr-arm`, `linux-root-verity-arm` and `linux-usr-verity-arm`; the armhf loader and its library dirs in the runtime-library check; and tests with 32-bit ARM ELF fixtures. Rust's `armv7-unknown-linux-gnueabihf` and `musleabihf` targets already map to `arm`.
   - Why: the user wants full support on Flame's Cortex-A7, the same as the other targets.
   - Done when: tests cover the aliases and an armhf closure.
-  - Blocked by: nothing.
+  - Status: done (the armv7 aliases commit).
 - **G8: UBI images for SPI-NAND**
   - What: a native UBI writer, with no mtd-utils download. It writes one volume per slot (EROFS with verity on ubiblock, layered as on Raze) plus a data volume. It also lays out Rockchip's SPI-NAND idblock and K230 NAND images.
   - Why: the K230D boards, Flame and the Rockchip L variants boot from SPI-NAND.

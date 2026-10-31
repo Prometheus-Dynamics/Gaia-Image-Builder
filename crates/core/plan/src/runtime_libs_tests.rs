@@ -464,3 +464,49 @@ fn an_aarch64_binary_does_not_search_the_riscv64_dirs() {
 
     assert!(error.contains("libz.so.1"), "{error}");
 }
+
+#[cfg(unix)]
+#[test]
+fn armhf_libraries_resolve_from_the_multiarch_dir_and_skip_64_bit_ones() {
+    /// The ELF machine of 32-bit ARM.
+    const EM_ARM: u16 = 40;
+    let arm = |needed: &'static [&'static str]| ElfFixture {
+        is_64bit: false,
+        ..ElfFixture::dynamic(EM_ARM, needed)
+    };
+    let scratch = TempDir::new("gaia-plan");
+    let root = temp_root(&scratch, "armhf");
+    let sysroot = root.join("target");
+    write_file(
+        &sysroot.join("bin/app"),
+        &build_elf(&ElfFixture {
+            interpreter: Some("/lib/ld-linux-armhf.so.3"),
+            ..arm(&["libc.so.6", "libz.so.1"])
+        }),
+    );
+    write_file(
+        &sysroot.join("lib/ld-linux-armhf.so.3"),
+        &build_elf(&arm(&[])),
+    );
+    write_file(&sysroot.join("lib/libc.so.6"), &build_elf(&arm(&[])));
+    // A 64-bit library of the same name comes first and is skipped.
+    write_file(
+        &sysroot.join("lib/libz.so.1"),
+        &build_elf(&ElfFixture::dynamic(EM_AARCH64, &[])),
+    );
+    write_file(
+        &sysroot.join("usr/lib/arm-linux-gnueabihf/libz.so.1"),
+        &build_elf(&arm(&[])),
+    );
+
+    let closure = resolve_runtime_closure(&sysroot.join("bin/app"), None).expect("closure");
+
+    assert_eq!(
+        summary(&closure),
+        vec![
+            "file /lib/ld-linux-armhf.so.3",
+            "file /lib/libc.so.6",
+            "file /usr/lib/arm-linux-gnueabihf/libz.so.1",
+        ]
+    );
+}

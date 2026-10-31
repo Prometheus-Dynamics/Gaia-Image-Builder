@@ -111,11 +111,16 @@ impl GptPartitionType {
         ("linux-root-arm64", "B921B045-1DF0-41C3-AF44-4C6F280D3FAE"),
         ("linux-root-riscv64", "72EC70A6-CF74-40E6-BD49-4BDA08E8F224"),
         ("linux-usr-x86-64", "8484680C-9521-48C6-9C11-B0720656F69E"),
+        ("linux-usr-arm", "7D0359A3-02B3-4F0A-865C-654403E70625"),
         ("linux-usr-arm64", "B0E01050-EE5F-4390-949A-9101B17104E9"),
         ("linux-usr-riscv64", "BEAEC34B-8442-439B-A40B-984381ED097D"),
         (
             "linux-root-verity-x86-64",
             "2C7357ED-EBD2-46D9-AEC1-23D437EC2BF5",
+        ),
+        (
+            "linux-root-verity-arm",
+            "7386CDF2-203C-47A9-A498-F2ECCE45A2D6",
         ),
         (
             "linux-root-verity-arm64",
@@ -124,6 +129,10 @@ impl GptPartitionType {
         (
             "linux-usr-verity-x86-64",
             "77FF5F63-E7B6-4633-ACF4-1565B864C0E6",
+        ),
+        (
+            "linux-usr-verity-arm",
+            "C215D751-7BCD-4649-BE90-6627490A4C05",
         ),
         (
             "linux-usr-verity-arm64",

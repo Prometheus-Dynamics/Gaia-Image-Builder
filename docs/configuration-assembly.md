@@ -264,7 +264,7 @@ Disk options:
 - `signature`, `signature_text` and `ebr_placement = "packed"` are MBR-only and rejected on a GPT disk; `truncate` is too, since the backup header is at the end of the full-size disk.
 
 Partition options:
-- `type_alias`: one of `linux` (the default), `esp`, `bios-boot`, `microsoft-basic-data`, `xbootldr`, `swap`, `home`, `srv`, `var`, `linux-lvm`, `linux-raid`, and the [Discoverable Partitions](https://uapi-group.org/specifications/specs/discoverable_partitions_specification/) types `linux-root-x86`, `linux-root-x86-64`, `linux-root-arm`, `linux-root-arm64`, `linux-root-riscv64`, `linux-usr-x86-64`, `linux-usr-arm64`, `linux-usr-riscv64`, `linux-root-verity-x86-64`, `linux-root-verity-arm64`, `linux-root-verity-riscv64`, `linux-usr-verity-x86-64`, `linux-usr-verity-arm64`, `linux-usr-verity-riscv64`.
+- `type_alias`: one of `linux` (the default), `esp`, `bios-boot`, `microsoft-basic-data`, `xbootldr`, `swap`, `home`, `srv`, `var`, `linux-lvm`, `linux-raid`, and the [Discoverable Partitions](https://uapi-group.org/specifications/specs/discoverable_partitions_specification/) types `linux-root-x86`, `linux-root-x86-64`, `linux-root-arm`, `linux-root-arm64`, `linux-root-riscv64`, `linux-usr-x86-64`, `linux-usr-arm`, `linux-usr-arm64`, `linux-usr-riscv64`, `linux-root-verity-x86-64`, `linux-root-verity-arm`, `linux-root-verity-arm64`, `linux-root-verity-riscv64`, `linux-usr-verity-x86-64`, `linux-usr-verity-arm`, `linux-usr-verity-arm64`, `linux-usr-verity-riscv64`.
 - `type`: a raw type GUID, `8-4-4-4-12` hex digits, instead of `type_alias`.
 - `guid` (optional): the unique partition GUID (the `PARTUUID`). Unset, it is derived from the disk GUID and the partition name.
 
