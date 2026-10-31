@@ -103,6 +103,7 @@ Small targets ship exactly two slots (A/B) plus a data partition. Smaller is bet
   - What: both chips (the user said "make both"). The vendor 6.1 BSP and boot chain are shared with the other Rockchip modules. RK3562 boards use 256–512 MB DDR3L, and 16-bit DDR3 boot on the RK3562 is unproven.
   - Why: the low-cost module tier.
   - Done when: each chip's module boots A/B from SPI-NAND and from eMMC.
+  - Device tree inputs (from the PCB session, 2026-10-31; more pin changes may follow): the HVS_ML01 J1 GPIO map is in `HW-Helios-Platform/projects/HVS_ML01_DEV01/README.md` ("Software / device tree: J1 GPIO map"). The CM5-header SPI0 (J1 GPIO7–11) uses the RK3562 SPI0 **M1** pin group, not M0. The DDR3L byte-lane DQ swaps are in `docs/DDR-MATCHING.md` §18, for the DDR init. Read both again when writing the board's DTS, not this copy.
   - Blocked by: the boards. Downloads approved on 2026-10-30.
 
 ### 3. Release mechanics
