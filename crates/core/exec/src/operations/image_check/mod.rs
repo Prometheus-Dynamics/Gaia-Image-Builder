@@ -10,7 +10,10 @@ mod kernel;
 mod kernel_modules;
 mod module;
 #[cfg(test)]
+mod test_dtb;
+#[cfg(test)]
 mod tests;
+mod uboot;
 
 use super::helpers::{failure_with_kind, success_from_messages};
 use super::{ExecutionErrorKind, OperationExecutionResult};
@@ -47,8 +50,15 @@ pub(crate) fn execute(
     };
     let explicit =
         checks.kernel_image.is_some() || checks.modules_dir.is_some() || checks.symvers.is_some();
-    let builds_kernel = std::fs::read_to_string(buildroot.join(".config"))
-        .is_ok_and(|text| text.lines().any(|line| line.trim() == "BR2_LINUX_KERNEL=y"));
+    let config = std::fs::read_to_string(buildroot.join(".config")).unwrap_or_default();
+    let builds_kernel = config
+        .lines()
+        .any(|line| line.trim() == "BR2_LINUX_KERNEL=y");
+    // `BR2_ARCH="aarch64"`: what the U-Boot check holds kernels to.
+    let arch = config
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("BR2_ARCH="))
+        .and_then(|value| gaia_spec::target_arch(value.trim_matches('"')));
     if !builds_kernel && !explicit {
         // The hardware list needs the kernel's modules: without a kernel it
         // cannot be met, so it is an error rather than a skip.
@@ -96,18 +106,15 @@ pub(crate) fn execute(
     // tree is read from the copy of its boot files the assembly left
     // (`boot_tree_snapshot_dir`), and from its disk path only without one.
     let snapshot = gaia_spec::boot_tree_snapshot_dir(spec);
-    let assembly_trees: Vec<PathBuf> = match spec.image.assembly.as_ref() {
+    let labeled_trees: Vec<(PathBuf, String)> = match spec.image.assembly.as_ref() {
         Some(assembly) => match gaia_spec::AssemblyRoots::new(spec, assembly) {
             Ok(roots) => roots
                 .trees
                 .iter()
                 .map(|(id, path)| {
                     let copy = snapshot.join(id.as_str());
-                    if copy.join("config.txt").is_file() {
-                        copy
-                    } else {
-                        path.clone()
-                    }
+                    let read = if copy.is_dir() { copy } else { path.clone() };
+                    (read, id.as_str().to_string())
                 })
                 .collect(),
             Err(message) => {
@@ -121,6 +128,7 @@ pub(crate) fn execute(
         },
         None => Vec::new(),
     };
+    let assembly_trees: Vec<PathBuf> = labeled_trees.iter().map(|(path, _)| path.clone()).collect();
     let excluded_packages: Vec<String> = match &spec.image.definition {
         gaia_spec::ImageDefinition::Buildroot(buildroot_spec) => {
             buildroot_spec.rootfs_exclude_packages.clone()
@@ -128,7 +136,7 @@ pub(crate) fn execute(
         _ => Vec::new(),
     };
     let removed = hardware::rootfs_exclusions(&buildroot, &excluded_packages);
-    let outcome = kernel_modules::check(&Inputs {
+    let mut outcome = kernel_modules::check(&Inputs {
         kernel_image: &kernel_image,
         modules_root: &modules_root,
         modules_dir: modules_dir.as_deref(),
@@ -147,6 +155,12 @@ pub(crate) fn execute(
             pi_model: checks.pi_model.as_deref(),
         },
     });
+    let mut boot_trees = vec![
+        (images_dir.clone(), "images".to_string()),
+        (rootfs.clone(), "target".to_string()),
+    ];
+    boot_trees.extend(labeled_trees);
+    uboot::check(spec.identity.id.as_str(), &boot_trees, arch, &mut outcome);
 
     let errors: Vec<&Finding> = outcome
         .findings

@@ -39,7 +39,7 @@ Small targets ship exactly two slots (A/B) plus a data partition. Smaller is bet
   - What: check extlinux.conf, boot.scr and FIT boot trees: the kernel arch, the DTBs they name, the initrd and the `roothash=` in the command line.
   - Why: `image check` knows only the Raspberry Pi firmware's boot config.
   - Done when: tests cover extlinux and FIT trees, both good and broken.
-  - Blocked by: nothing.
+  - Status: done (the U-Boot image check commit). A FIT signed with RSA is not verified; only its hashes are.
 - **G3: `uboot-env` transform**
   - What: a U-Boot environment image (CRC32, optional redundant copy) holding the A/B variables (`boot_slot`, `bootcount`, `bootlimit`, `altbootcmd`).
   - Why: A/B trial boots on U-Boot boards, which have no `tryboot`. Atlas's updater writes the same variables.

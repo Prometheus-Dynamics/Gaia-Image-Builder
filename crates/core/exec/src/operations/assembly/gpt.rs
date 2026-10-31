@@ -227,7 +227,7 @@ fn write_at(
 }
 
 /// CRC-32 (IEEE 802.3, reflected), the checksum GPT headers use.
-pub(super) fn crc32(bytes: &[u8]) -> u32 {
+pub(crate) fn crc32(bytes: &[u8]) -> u32 {
     const TABLE: [u32; 256] = {
         let mut table = [0u32; 256];
         let mut index = 0;

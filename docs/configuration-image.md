@@ -554,6 +554,27 @@ What fails the run, per boot path:
 
 Not handled: `autoboot.txt`, `boot_partition` and `upstream_kernel`.
 
+#### U-Boot boot files
+
+The U-Boot files are read in every tree a U-Boot board boots from: Buildroot's `images/`, the rootfs (`target/`, whose `/boot` the board may boot from) and each assembly tree. In each, at the root and under `boot/`:
+
+- `extlinux/extlinux.conf`, as U-Boot's `sysboot` reads it. Keywords compare without regard to case. An absolute path starts at the tree root, which is the partition root on the board; a relative path starts at the file's directory. Each `label` must name a `kernel` or `linux` (or be a `localboot` entry). A `#<config>` suffix on the kernel names a FIT configuration and is dropped for the lookup.
+- `boot.scr`: a legacy U-Boot image, made with `mkimage -T script`.
+- `*.itb`: a FIT, such as a signed kernel, or the `u-boot.itb` in `images/`.
+
+What fails the run:
+
+- `uboot_extlinux_file_missing`: a label's `kernel`/`linux`, `initrd` (each of a comma-separated list), `fdt`/`devicetree`, `fdtoverlays` (each of a space-separated list) or `fdtdir`/`devicetreedir` that is not in the tree.
+- `uboot_extlinux_kernel_missing`: a label with no kernel and no `localboot`.
+- `uboot_extlinux_kernel_invalid`: a kernel that is not an arm64 or riscv `Image`, an arm `zImage`, a FIT, a legacy image or a compressed file. Also a kernel whose header names another architecture than the image's `BR2_ARCH`: a `riscv64 kernel in a aarch64 image`.
+- `uboot_extlinux_fdt_invalid`: an `fdt` that is not a device tree.
+- `uboot_extlinux_default_missing`: a `default` that names no label.
+- `uboot_extlinux_roothash_invalid`: a `roothash=` in `append` that is not 64 hex digits, such as a token left unreplaced.
+- `uboot_script_invalid`: a `boot.scr` without the U-Boot image magic, or whose header or data CRC does not match. U-Boot refuses such a script.
+- `uboot_fit_invalid`: a FIT image whose data (inline `data`, or external `data-offset`/`data-position` with `data-size`) lies outside the file; whose `crc32` or `sha256` hash does not match its data; or a configuration whose `kernel`, `fdt`, `ramdisk`, `firmware` or `loadables` names no image, or a `default` naming no configuration. Other hash algorithms are not checked.
+
+The assembly's boot tree snapshot (see above) covers U-Boot trees too. It copies their `.conf`, `.scr`, `.itb`, `.dtb` and `.dtbo` files and lists every file of the tree in `.gaia-files`, so a kernel or initrd in a RAM work dir counts as present without being copied.
+
 #### Hardware list
 
 `[[image.hardware]]` declares what the image must support: one table per device. Atlas owns the lists for its boards, and the file paths in them are the ones the drivers' owners ship. Each entry is checked as a chain, and an error names the build, the entry and the broken link:

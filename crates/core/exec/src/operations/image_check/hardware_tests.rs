@@ -4,99 +4,10 @@
 //! output with Atlas's hardware list, and is ignored by default.
 
 use super::super::fdt::{self, Fragment};
+use super::super::test_dtb::Dtb;
 use super::*;
 use gaia_spec::ImageHardwareSpec;
 use std::time::Instant;
-
-/// A device tree blob built node by node: enough of the format for the reader.
-#[derive(Default)]
-struct Dtb {
-    structure: Vec<u8>,
-    strings: Vec<u8>,
-}
-
-impl Dtb {
-    fn begin(&mut self, name: &str) {
-        self.word(1);
-        self.structure.extend_from_slice(name.as_bytes());
-        self.structure.push(0);
-        self.align();
-    }
-
-    fn end(&mut self) {
-        self.word(2);
-    }
-
-    fn strings(&mut self, name: &str, values: &[&str]) {
-        let mut bytes = Vec::new();
-        for value in values {
-            bytes.extend_from_slice(value.as_bytes());
-            bytes.push(0);
-        }
-        self.prop(name, &bytes);
-    }
-
-    fn prop(&mut self, name: &str, value: &[u8]) {
-        let offset = self.name_offset(name);
-        self.word(3);
-        self.word(value.len() as u32);
-        self.word(offset);
-        self.structure.extend_from_slice(value);
-        self.align();
-    }
-
-    fn word(&mut self, value: u32) {
-        self.structure.extend_from_slice(&value.to_be_bytes());
-    }
-
-    fn align(&mut self) {
-        while !self.structure.len().is_multiple_of(4) {
-            self.structure.push(0);
-        }
-    }
-
-    fn name_offset(&mut self, name: &str) -> u32 {
-        let mut needle = name.as_bytes().to_vec();
-        needle.push(0);
-        if let Some(found) = self
-            .strings
-            .windows(needle.len())
-            .position(|window| window == needle.as_slice())
-        {
-            return found as u32;
-        }
-        let offset = self.strings.len() as u32;
-        self.strings.extend_from_slice(&needle);
-        offset
-    }
-
-    fn finish(mut self) -> Vec<u8> {
-        self.word(9);
-        // The header, then one empty memory reservation entry.
-        let struct_offset = 40 + 16;
-        let strings_offset = struct_offset + self.structure.len();
-        let total = strings_offset + self.strings.len();
-        let mut out = Vec::with_capacity(total);
-        for word in [
-            0xd00d_feed,
-            total as u32,
-            struct_offset as u32,
-            strings_offset as u32,
-            40,
-            17,
-            16,
-            0,
-            self.strings.len() as u32,
-            self.structure.len() as u32,
-        ] {
-            out.extend_from_slice(&word.to_be_bytes());
-        }
-        out.extend_from_slice(&[0; 16]);
-        out.extend_from_slice(&self.structure);
-        out.extend_from_slice(&self.strings);
-        out
-    }
-}
 
 /// An overlay whose one fragment, by path, sets `compatible` on a node.
 fn overlay_dtb(compatible: &str) -> Vec<u8> {

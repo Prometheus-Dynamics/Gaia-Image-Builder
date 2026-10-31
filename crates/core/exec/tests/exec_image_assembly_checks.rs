@@ -166,6 +166,47 @@ fn a_ram_assembly_leaves_its_boot_files_for_image_check() {
     assert!(!copy.join("slots/a/kernel8.img").exists());
 }
 
+#[test]
+fn a_ram_assembly_snapshots_a_u_boot_tree_and_lists_its_kernel() {
+    scratch_ram_base();
+    let scratch = TempDir::new("gaia-assembly-uboot-snapshot");
+    let mut spec = test_spec(&scratch);
+    let sources = Path::new(&spec.workspace.build_dir).join("sources");
+    fs::create_dir_all(&sources).expect("sources");
+    for (name, body) in [
+        (
+            "extlinux.conf",
+            "label a\n  kernel /Image\n  fdt /board.dtb\n",
+        ),
+        ("board.dtb", "dtb"),
+        ("Image", "a kernel the snapshot lists but leaves out"),
+    ] {
+        fs::write(sources.join(name), body).expect("source file");
+    }
+    let src = |name: &str| sources.join(name).display().to_string();
+    spec.image.assembly = Some(ImageAssemblySpec {
+        work_dir: Some("ram".into()),
+        trees: vec![assembly_tree("boot-a", "$assembly.work/boot-a")],
+        files: vec![
+            assembly_file("boot-a", src("extlinux.conf"), "extlinux/extlinux.conf"),
+            assembly_file("boot-a", src("board.dtb"), "board.dtb"),
+            assembly_file("boot-a", src("Image"), "Image"),
+        ],
+        ..ImageAssemblySpec::default()
+    });
+    let errors = assemble(&spec);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let copy = gaia_spec::boot_tree_snapshot_dir(&spec).join("boot-a");
+    assert!(copy.join("extlinux/extlinux.conf").is_file());
+    assert!(copy.join("board.dtb").is_file());
+    assert!(!copy.join("Image").exists());
+    assert_eq!(
+        fs::read_to_string(copy.join(".gaia-files")).expect("file list"),
+        "Image\nboard.dtb\nextlinux/extlinux.conf\n"
+    );
+}
+
 /// Atlas's slots.toml chain: a transform writes `boot/overlays/ov9782.dtbo`,
 /// a file copies it into `payload/overlays/`, and the FAT tree's glob over
 /// `payload/overlays/*.dtbo` (declared first) must see it.

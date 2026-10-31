@@ -70,6 +70,8 @@ use placement::*;
 use placement_owner::*;
 use strip::*;
 
+pub(crate) use boot_snapshot::BOOT_TREE_FILES_LIST;
+pub(crate) use gpt::crc32;
 use produced::ProducedRecorder;
 use state::AssemblyExecutionContext;
 pub(crate) use state::{
