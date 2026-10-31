@@ -1,7 +1,7 @@
-# Config v3 (draft for review)
+# Config v3
 
-Status: approved by HeliOS on 2026-10-31, with the answers and checks below;
-being implemented.
+Status: approved by HeliOS on 2026-10-31 and implemented the same day;
+see "As implemented" at the end for where it differs from this draft.
 
 v3 is a rewrite of the build-file *syntax* only. A v2 file and its `gaia
 migrate` output must resolve to the same spec fingerprint, so nothing that
@@ -103,3 +103,23 @@ resolved output path, so a migration that would move an output is refused.
 Token references to renamed keys are rewritten too: `${workspace.out_dir}`
 becomes `${outputs.dir}` (HeliOS has 15 of them). Comments and key order are kept
 (`toml_edit`). `--check` exits non-zero when a file is still v2, for CI.
+
+## As implemented (2026-10-31)
+
+Where the implementation differs from the draft above:
+
+- `[cache]` has no `dir` root and no `cargo_target`: it takes v2's keys
+  unchanged (`downloads`, `ccache`, `packages` as a table, `sccache`,
+  `shared_target_dir`). There is no `[providers.<kind>.cache]`; v2 accepted
+  the cache tables under every provider but only Buildroot and Rust read
+  them, so `migrate` refuses one elsewhere instead of moving it.
+- Nothing is dropped for equalling a v3 default. `collect_dir` looked like
+  one, but a build that leaves it unset resolves differently per variant, so
+  dropping it would change builds. The migration only respells and moves.
+- No `.v2.bak` copies. `gaia migrate <build>...` takes builds, not files,
+  rewrites every local file they load, and compares the whole resolved spec
+  (not only the fingerprint) of every preset and variant before and after;
+  on any difference it restores every file and names the first differing key.
+- Comments and order are kept with `toml_parser` events, which Gaia already
+  depends on, instead of adding `toml_edit`.
+- Section 4 (real enums) is not done yet.

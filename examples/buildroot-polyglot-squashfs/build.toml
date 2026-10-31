@@ -1,6 +1,7 @@
 # Small Buildroot example that exercises every artifact provider without dragging in
 # a full distro/module stack. It is meant for fast iteration and plan/validate testing.
 
+config = 3
 build_name = "buildroot-polyglot-squashfs"
 version = "2.0.0"
 description = "Tiny polyglot Buildroot image with simple OS modifications."
@@ -10,7 +11,6 @@ profile = "release"
 [workspace]
 root_dir = "examples/buildroot-polyglot-squashfs"
 build_dir = "../../.gaia/examples/buildroot-polyglot-squashfs/build"
-out_dir = "../../.gaia/examples/buildroot-polyglot-squashfs/out"
 
 [reporting]
 summary = true
@@ -23,9 +23,11 @@ retry_backoff_ms = 0
 retry_backoff_strategy = "fixed"
 timeout_seconds = 7200
 local_jobs = 4
-download_dir = "../../.gaia/cache/buildroot/dl"
 
-[providers.buildroot.ccache]
+[cache]
+downloads = "../../.gaia/cache/buildroot/dl"
+
+[cache.ccache]
 enabled = true
 dir = "../../.gaia/cache/buildroot/ccache"
 
@@ -91,7 +93,7 @@ profile = "${build.profile}"
 install_name = "rust-hello"
 install_class = "binary"
 install_dest_hint = "/usr/bin/rust-hello"
-output_path = "${workspace.out_dir}/artifacts/rust-hello"
+output_path = "${outputs.dir}/artifacts/rust-hello"
 
 [[artifacts]]
 id = "go-hello"
@@ -101,7 +103,7 @@ source = "go-source"
 install_name = "go-hello"
 install_class = "binary"
 install_dest_hint = "/usr/bin/go-hello"
-output_path = "${workspace.out_dir}/artifacts/go-hello"
+output_path = "${outputs.dir}/artifacts/go-hello"
 
 [[artifacts]]
 id = "java-hello"
@@ -111,7 +113,7 @@ source = "java-source"
 install_name = "java-hello"
 install_class = "archive"
 install_dest_hint = "/usr/lib/polyglot/java-hello.jar"
-output_path = "${workspace.out_dir}/artifacts/java-hello.jar"
+output_path = "${outputs.dir}/artifacts/java-hello.jar"
 
 [[artifacts]]
 id = "node-hello"
@@ -121,7 +123,7 @@ source = "node-source"
 install_name = "node-hello"
 install_class = "archive"
 install_dest_hint = "/opt/polyglot/node-hello.tgz"
-output_path = "${workspace.out_dir}/artifacts/node-hello.tgz"
+output_path = "${outputs.dir}/artifacts/node-hello.tgz"
 
 [[artifacts]]
 id = "python-hello"
@@ -131,7 +133,7 @@ source = "python-source"
 install_name = "python-hello"
 install_class = "archive"
 install_dest_hint = "/opt/polyglot/python-hello.whl"
-output_path = "${workspace.out_dir}/artifacts/python-hello.whl"
+output_path = "${outputs.dir}/artifacts/python-hello.whl"
 
 [[install]]
 id = "install-rust-hello"
@@ -180,13 +182,13 @@ group = "root"
 
 [[stage.files]]
 id = "hostname"
-src = "@assets/etc/hostname"
+src = "${assets}/etc/hostname"
 dest = "/etc/hostname"
 origin = "static-asset"
 
 [[stage.files]]
 id = "motd"
-src = "@assets/etc/motd"
+src = "${assets}/etc/motd"
 dest = "/etc/motd"
 origin = "static-asset"
 
@@ -201,12 +203,12 @@ entries = [
 [[stage.services]]
 id = "rust-hello-service"
 name = "rust-hello.service"
-unit_path = "@assets/systemd/rust-hello.service"
+unit_path = "${assets}/systemd/rust-hello.service"
 
 [image]
 kind = "buildroot"
 source = "buildroot-source"
-defconfig_path = "@assets/buildroot-polyglot-squashfs.defconfig"
+defconfig_path = "${assets}/buildroot-polyglot-squashfs.defconfig"
 external_tree_mode = "disabled"
 
 [image.feed]
@@ -226,10 +228,11 @@ name = "rootfs.squashfs"
 format = "squashfs"
 required = true
 
-[image.output]
-collect_dir = "${workspace.out_dir}/images"
+[outputs]
+images_dir = "${outputs.dir}/images"
 archive_name = "${build.name}-${build.version}.squashfs"
-emit_report = true
+report = true
+dir = "../../.gaia/examples/buildroot-polyglot-squashfs/out"
 
 [[checkpoints]]
 id = "base-image"

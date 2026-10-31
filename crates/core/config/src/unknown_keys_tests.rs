@@ -315,6 +315,27 @@ fn toml_files_under(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
     }
 }
 
+/// `text` read as Gaia reads it: a v3 file in the v2 shape the check uses.
+fn read_as_v2(path: &std::path::Path, text: &str) -> toml::Value {
+    let mut value: toml::Value = toml::from_str(text).expect("parses");
+    crate::v3::read_version(path, text, &mut value)
+        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    value
+}
+
+/// A docs block in the v2 shape. The docs describe v3 but their blocks are
+/// fragments without `config = 3`, so a block is read as v3 when it reads
+/// as v3, else as written (the v2 spellings the migration docs show).
+fn doc_block_as_v2(text: &str) -> Option<toml::Value> {
+    let value: toml::Value = toml::from_str(text).ok()?;
+    let v3 = format!("config = 3\n{text}");
+    let mut translated: toml::Value = toml::from_str(&v3).ok()?;
+    match crate::v3::read_version(std::path::Path::new("doc.toml"), &v3, &mut translated) {
+        Ok(_) => Some(translated),
+        Err(_) => Some(value),
+    }
+}
+
 /// The examples' build files and the TOML blocks of the docs name no key
 /// Gaia does not know. (A block that is not a whole TOML document, such
 /// as a fragment with a placeholder, is skipped.)
@@ -333,7 +354,7 @@ fn examples_and_docs_name_no_unknown_key() {
             continue;
         }
         let text = std::fs::read_to_string(&file).expect("example");
-        let value: toml::Value = toml::from_str(&text).expect("example parses");
+        let value = read_as_v2(&file, &text);
         for key in unknown_config_keys(&value) {
             problems.push(format!("{}: {}", file.display(), key.path));
         }
@@ -364,7 +385,7 @@ fn examples_and_docs_name_no_unknown_key() {
             {
                 continue;
             }
-            let Ok(value) = toml::from_str::<toml::Value>(&block) else {
+            let Some(value) = doc_block_as_v2(&block) else {
                 continue;
             };
             checked += 1;

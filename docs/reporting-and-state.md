@@ -160,9 +160,9 @@ Current provider/runtime state files:
   - file outputs: sibling `.gaia-state.txt`
   - directory outputs: nested `.gaia-state.txt`
 - images:
-  - `<collect_dir>/.gaia-image-state.txt`
+  - `<outputs.images_dir>/.gaia-image-state.txt`
 - runtime ops:
-  - `<out_dir>/.gaia/runtime/*.state`
+  - `<outputs.dir>/.gaia/runtime/*.state`
 
 ## Reuse State
 

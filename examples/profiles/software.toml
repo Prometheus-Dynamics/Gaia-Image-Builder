@@ -3,10 +3,12 @@
 # switches the image to `kind = "none"`, which replaces the kind-specific
 # fields below and keeps `[image.output]`.
 
+config = 3
+
 [image]
 kind = "buildroot"
 source = "buildroot-source"
-defconfig_path = "@assets/base.defconfig"
+defconfig_path = "${assets}/base.defconfig"
 external_tree_mode = "disabled"
 
 [image.feed]
@@ -17,9 +19,9 @@ name = "rootfs.tar"
 format = "tar"
 required = true
 
-[image.output]
-collect_dir = "${workspace.out_dir}/images"
-emit_report = true
+[outputs]
+images_dir = "${outputs.dir}/images"
+report = true
 
 [[sources]]
 id = "helios-src"
@@ -39,7 +41,7 @@ profile = "${build.profile}"
 install_name = "helios-api"
 install_class = "binary"
 install_dest_hint = "/usr/bin/helios-api"
-output_path = "${workspace.out_dir}/artifacts/helios-api"
+output_path = "${outputs.dir}/artifacts/helios-api"
 
 [[artifacts]]
 id = "helios-cli"
@@ -51,7 +53,7 @@ profile = "${build.profile}"
 install_name = "helios-cli"
 install_class = "binary"
 install_dest_hint = "/usr/bin/helios-cli"
-output_path = "${workspace.out_dir}/artifacts/helios-cli"
+output_path = "${outputs.dir}/artifacts/helios-cli"
 
 [[install]]
 id = "install-helios-api"

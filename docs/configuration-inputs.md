@@ -163,7 +163,7 @@ Validation:
 
 Interpolation:
 - `${input.target}`
-- `${inputs.target}`
+- `${input.target}`
 
 ## Presets
 
@@ -177,7 +177,7 @@ env_files = ["runtime.env"]
 env = { GAIA_MODE = "release" }
 overrides = [
   ["input.profile", "release"],
-  ["workspace.out_dir", ".gaia/examples/my-build/out-release"],
+  ["outputs.dir", ".gaia/examples/my-build/out-release"],
 ]
 ```
 
@@ -265,12 +265,12 @@ Limits:
   Keep identity the same across variants when the shared work should be
   reused.
 - Variants that would write the same output file are an error. The paths
-  compared are `collect_dir/archive_name` of the raw disk image, the `output`
+  compared are `images_dir/archive_name` of the raw disk image, the `output`
   of each assembly disk, archive and filesystem, and `export_dir/<file name>`
   when exports go to a configured directory. An image with no `archive_name`
   is named from its display name and version. The error names the path and
   the variants. Give each variant its own `input` that changes the image name
-  or version, or its own `image.output.archive_name`.
+  or version, or its own `outputs.archive_name`.
 - Variants run one after another in one process. A failing variant stops the
   run; the variants before it keep their outputs.
 
@@ -356,7 +356,7 @@ the definition's own keys (the Buildroot `source`, `defconfig`,
 `external_tree_mode`, `expected_images`, `rootfs`; the starting point's
 `source`, `source_path`, `rootfs_path`, `packages` and so on), and the feed,
 `signing`, `checks`, `[[image.hardware]]` and `layers`. Kept, and still
-merged: `[image.output]` and `[image.assembly]`. A layer that sets the same kind
+merged: `[outputs]` and `[image.assembly]`. A layer that sets the same kind
 merges as before, and a layer without `kind` merges under the base's kind.
 
 The note names the layer and the replaced keys that the base set:

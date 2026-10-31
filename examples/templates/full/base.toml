@@ -1,6 +1,7 @@
 # Full Gaia base template.
 # Copy this file, then layer artifact/stage/image fragments on top with `imports`.
 
+config = 3
 build_name = "template-image"
 # Optional human-facing label.
 display_name = "Template Image"
@@ -145,9 +146,11 @@ retry_backoff_ms = 0
 retry_backoff_strategy = "fixed"
 timeout_seconds = 900
 local_jobs = 4
-download_dir = ".gaia/cache/buildroot/dl"
 
-[providers.buildroot.ccache]
+[cache]
+downloads = ".gaia/cache/buildroot/dl"
+
+[cache.ccache]
 enabled = true
 dir = ".gaia/cache/buildroot/ccache"
 
@@ -169,7 +172,9 @@ labels = [
 [workspace]
 root_dir = "."
 build_dir = ".gaia/examples/templates/full/build"
-out_dir = ".gaia/examples/templates/full/out"
+
+[outputs]
+dir = ".gaia/examples/templates/full/out"
 
 [[workspace.named_paths]]
 alias = "assets"

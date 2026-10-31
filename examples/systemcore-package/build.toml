@@ -3,6 +3,7 @@
 # (see docs/configuration.md, "Packages (ipk)"). Nothing here needs a
 # toolchain: the one source is a plain directory.
 
+config = 3
 build_name = "systemcore-package"
 version = "1.0.0"
 description = "An opkg package for an external device OS, with no rootfs or image."
@@ -12,7 +13,9 @@ profile = "release"
 [workspace]
 root_dir = "examples/systemcore-package"
 build_dir = "../../.gaia/examples/systemcore-package/build"
-out_dir = "../../.gaia/examples/systemcore-package/out"
+
+[outputs]
+dir = "../../.gaia/examples/systemcore-package/out"
 
 [reporting]
 summary = true
@@ -32,11 +35,11 @@ kind = "none"
 
 [image.assembly]
 work_dir = "${workspace.build_dir}/assembly"
-out_dir = "${workspace.out_dir}"
+out_dir = "${outputs.dir}"
 
 [[image.assembly.trees]]
 id = "package-root"
-path = "$assembly.work/package-root"
+path = "${assembly.work}/package-root"
 
 [[image.assembly.files]]
 tree = "package-root"
@@ -53,7 +56,7 @@ mode = "0755"
 [[image.assembly.packages]]
 id = "systemcore-demo"
 tree = "package-root"
-dest = "$assembly.out/"
+dest = "${assembly.out}/"
 allowed_prefixes = ["/usr/bin", "/etc/systemd/system"]
 
 [image.assembly.packages.control]

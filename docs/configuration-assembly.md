@@ -9,47 +9,47 @@ Image assembly runs after the image provider has produced its base outputs. It c
 ```toml
 [image.assembly]
 work_dir = "${workspace.build_dir}/assembly"
-out_dir = "$provider.images"
+out_dir = "${provider.images}"
 
 [[image.assembly.trees]]
 id = "boot"
-path = "$assembly.work/boot"
+path = "${assembly.work}/boot"
 
 [[image.assembly.trees]]
 id = "initramfs"
-path = "$assembly.work/initramfs"
+path = "${assembly.work}/initramfs"
 
 [[image.assembly.files]]
 tree = "boot"
-src = "@assets/board/config.txt"
+src = "${assets}/board/config.txt"
 dest = "config.txt"
 
 [[image.assembly.files]]
 tree = "boot"
-src_glob = "$provider.images/*.dtb"
+src_glob = "${provider.images}/*.dtb"
 dest = "."
 optional = true
 
 [[image.assembly.files]]
 tree = "initramfs"
-src = "@assets/initramfs/init"
+src = "${assets}/initramfs/init"
 dest = "init"
 mode = "0755"
 
 [[image.assembly.transforms]]
 kind = "gzip"
-src = "$provider.images/Image"
-dest = "$assembly.tree.boot/kernel.img"
+src = "${provider.images}/Image"
+dest = "${assembly.tree.boot}/kernel.img"
 deterministic = true
 
 [[image.assembly.transforms]]
 kind = "compile-dts"
-src = "@assets/overlays/example-overlay.dts"
-dest = "$assembly.tree.boot/overlays/example-overlay.dtbo"
+src = "${assets}/overlays/example-overlay.dts"
+dest = "${assembly.tree.boot}/overlays/example-overlay.dtbo"
 
 [[image.assembly.busybox_initramfs]]
 tree = "initramfs"
-busybox = "$provider.target/bin/busybox"
+busybox = "${provider.target}/bin/busybox"
 include_runtime_libs = false
 applets = ["sh", "mount", "mkdir", "switch_root"]
 
@@ -57,19 +57,19 @@ applets = ["sh", "mount", "mkdir", "switch_root"]
 id = "bootfs"
 kind = "vfat"
 source_tree = "boot"
-output = "$provider.images/boot.vfat"
+output = "${provider.images}/boot.vfat"
 size = "32M"
 
 [[image.assembly.filesystems]]
 id = "initramfs"
 kind = "cpio-gzip"
 source_tree = "initramfs"
-output = "$assembly.tree.boot/initramfs"
+output = "${assembly.tree.boot}/initramfs"
 deterministic = true
 
 [[image.assembly.disks]]
 id = "sdcard"
-output = "$provider.images/sdcard.img"
+output = "${provider.images}/sdcard.img"
 partition_table = "mbr"
 signature = "0x48454c49"
 
@@ -77,28 +77,28 @@ signature = "0x48454c49"
 name = "boot"
 type_alias = "fat32-lba"
 bootable = true
-image = "$provider.images/boot.vfat"
+image = "${provider.images}/boot.vfat"
 
 [[image.assembly.disks.partitions]]
 name = "rootfs"
 type = "0x83"
-image = "$provider.images/rootfs.squashfs"
+image = "${provider.images}/rootfs.squashfs"
 ```
 
 Assembly roots:
-- `$provider.images`: provider image output directory.
-- `$provider.target`: provider target root tree, when the provider exposes one.
-- `$provider.host`: provider host tools directory, when the provider exposes one.
-- `$provider.staging`: provider staging/sysroot directory, when the provider exposes one.
-- `$assembly.work`: configured assembly work directory.
-- `$assembly.out`: configured assembly output directory.
-- `$assembly.tree.<id>`: path for a declared assembly tree.
-- `@assets/...`: workspace asset path.
+- `${provider.images}`: provider image output directory.
+- `${provider.target}`: provider target root tree, when the provider exposes one.
+- `${provider.host}`: provider host tools directory, when the provider exposes one.
+- `${provider.staging}`: provider staging/sysroot directory, when the provider exposes one.
+- `${assembly.work}`: configured assembly work directory.
+- `${assembly.out}`: configured assembly output directory.
+- `${assembly.tree.<id>}`: path for a declared assembly tree.
+- `${assets}/...`: workspace asset path.
 
 Assembly behavior:
 - Declared `trees` are cleaned and recreated before staging.
 - `strip = true` on a tree strips every ELF file in it right before a filesystem or archive packs the tree (the steps that fill the tree have run by then). Executables and shared libraries lose their symbols (`strip --strip-unneeded`), kernel modules (`*.ko`) lose only their debug data (`--strip-debug`), and relocatable objects and non-ELF files are left alone. Only the copies in the tree change, never a source. Hard links are stripped once and stay linked, symlinks are left as they are, and a file that is already stripped is skipped. The run state and summary record the files stripped and the bytes saved per tree.
-- `strip_tool = "<program>"` (under `[image.assembly]`) names the strip program every `strip = true` entry uses: a program name looked up in the provider's host tools and then on `PATH`, or a path (it may use `$provider.*` tokens). Unset, the tool is a `<triplet>-strip` in the provider's host tools matching the ELF machine (`aarch64-*-strip`, `arm-*-strip`, `x86_64-*-strip`), else `llvm-strip` on `PATH`, else a plain `strip` when the file is for the host's own machine. When none is found the build fails, naming the file and these options.
+- `strip_tool = "<program>"` (under `[image.assembly]`) names the strip program every `strip = true` entry uses: a program name looked up in the provider's host tools and then on `PATH`, or a path (it may use `${provider.*}` tokens). Unset, the tool is a `<triplet>-strip` in the provider's host tools matching the ELF machine (`aarch64-*-strip`, `arm-*-strip`, `x86_64-*-strip`), else `llvm-strip` on `PATH`, else a plain `strip` when the file is for the host's own machine. When none is found the build fails, naming the file and these options.
 - File entries use exactly one of `src`, `src_glob`, `src_dir`, `content` or `json`. `content` and `json` write a generated file (see [Generated content](#generated-content)).
 - `src_dir = "<path template>"` copies a whole directory tree under `dest`: the directory's contents, not the directory itself, so a static site's `_app/immutable/chunks/...` lands at the same paths under `dest`. `dest` names a directory: `.`, a path ending in `/`, or a bare directory path. Entries are copied recursively in sorted order, a directory before its contents. Symbolic links are kept as links and never followed. A regular file keeps its permission bits unless `mode` is set, which then applies to regular files only. A directory keeps its source directory's permission bits unless `dir_mode` is set (for example `dir_mode = "0750"`), which then applies to every copied directory; directory modes are set after the contents are copied, so a read-only directory still receives its files. `dir_mode` on any other entry is an error. A hard link is copied as a regular file. `exclude = [...]` leaves out entries by file name at any depth, and an excluded directory is skipped with its contents. An absent or empty directory fails the build unless `optional = true`. `strip = true`, the dynamic-library check and the package device checks apply to each copied regular file as they do to `src`. `src_dir` is refused together with `src`, `src_glob`, `content` or `json`, with `include`, and with `preserve_symlink` (links are always kept). The step reads the directory, so it runs after the steps that write inside it. Its fingerprint covers the whole tree (names, contents, modes and link targets): adding, removing or changing a nested entry reruns the assembly.
 - `exclude = ["dwc2.dtbo", "i2c*.dtbo"]` on a `src_glob` entry leaves out matches by file name (simple `*` globs allowed). Use it to copy a stock set except the names a later entry provides, so the result does not depend on copy order. It is refused on other entries.
@@ -107,21 +107,21 @@ Assembly behavior:
 - `optional = true` skips missing sources without failing the build and records the skip in runtime state.
 - A copied file that is dynamically linked (it names a program interpreter or `DT_NEEDED` libraries) is checked against its tree. Once the steps that fill the tree have run, before a filesystem or archive packs it, each interpreter and library the file needs must be in the tree, looked up as [listed binaries](#listed-binaries) look them up. A missing one is a warning, not an error: the run output and the summary name the file and the libraries (`copy it with [[image.assembly.binaries]] to bring its libraries`). A tree may be an overlay on a full rootfs, which is why it is not an error. `allow_missing_libs = true` on the entry accepts the file without the warning. The check reads only ELF headers, never the host, and a static or non-ELF file is never checked. `allow_missing_libs` is refused on `content` and `json` entries.
 - `mode = "0755"` applies Unix file modes on Unix hosts.
-- `include = ["<name>", ...]` on a `src_glob` entry copies only the matches whose file name one of the names matches (simple `*` globs allowed); it is applied after `exclude`. An entry that matches no file fails the build, naming it, unless `optional = true`. It is refused on other entries. For example, twelve named overlays out of a directory of several hundred: `src_glob = "$provider.target/boot/overlays/*.dtbo"`, `include = ["vc4-kms-v3d.dtbo", "i2c*.dtbo"]`, `dest = "overlays/"`.
+- `include = ["<name>", ...]` on a `src_glob` entry copies only the matches whose file name one of the names matches (simple `*` globs allowed); it is applied after `exclude`. An entry that matches no file fails the build, naming it, unless `optional = true`. It is refused on other entries. For example, twelve named overlays out of a directory of several hundred: `src_glob = "${provider.target}/boot/overlays/*.dtbo"`, `include = ["vc4-kms-v3d.dtbo", "i2c*.dtbo"]`, `dest = "overlays/"`.
 - `strip = true` on a file entry strips each copied ELF file (the `src`, or each `src_glob` match) with the strip tool described under the tree; a copied file that is not ELF is left alone. It is refused on `content` and `json` entries.
 - Transform kinds currently implemented are `copy`, `gzip`, `zstd`, `xz`, `compile-dts`, `verity` (see [dm-verity and ext4](#dm-verity-and-ext4)) and `uboot-env` (see [U-Boot environment](#u-boot-environment)).
 - `gzip` runs `gzip -n -c [-<level>] <src>`. `-n` leaves the name and the modification time out of the header, so the same input and level give the same bytes on every run. The optional `level` (1-9) is accepted on `gzip` transforms and defaults to gzip's own.
 - `zstd` runs `zstd -q -c --no-progress -T0 [-<level>] <src>`, resolving `zstd` from provider host tools first, then host `PATH`; the tool path and version are recorded in assembly state. The optional `level` (1-19) is only accepted on `zstd` transforms and defaults to 19, the level `cpio-zstd` uses (it was zstd's own default of 3). `long = true` (`zstd` only, default `false`) adds `--long=27` when the level is 19 and the input is over 128 MiB: a 2^27-byte match window. A stream written that way decodes only with `zstd -d --long=27` (or a decoder that accepts that window); the default output decodes with any zstd.
-- `xz` runs `xz -T0 --block-size=24MiB -c [-<level>] <src>`, resolved like `zstd`. Its fixed block size makes the output the same for any core count. The optional `level` (0-9, xz's preset) is only accepted on `xz`, `zstd` and `gzip` transforms, as `gzip`'s and `zstd`'s own levels are. Use it to compress another disk into the output dir, for example `kind = "xz"`, `src = "$assembly.work/slots/<id>.img"`, `dest = "$assembly.out/<id>.img.xz"`.
-- A transform, verity, archive or disk output written under `$assembly.out` is a published output of the run: it is listed in the summary and copied by `--export` (see `image.output.disk` above for raw disks).
+- `xz` runs `xz -T0 --block-size=24MiB -c [-<level>] <src>`, resolved like `zstd`. Its fixed block size makes the output the same for any core count. The optional `level` (0-9, xz's preset) is only accepted on `xz`, `zstd` and `gzip` transforms, as `gzip`'s and `zstd`'s own levels are. Use it to compress another disk into the output dir, for example `kind = "xz"`, `src = "${assembly.work}/slots/<id>.img"`, `dest = "${assembly.out}/<id>.img.xz"`.
+- A transform, verity, archive or disk output written under `${assembly.out}` is a published output of the run: it is listed in the summary and copied by `--export` (see `image.output.disk` above for raw disks).
 - `compile-dts` resolves `dtc` from provider host tools first, then host `PATH`.
 - `busybox_initramfs` copies the configured BusyBox binary to `bin/busybox` and creates the requested applet symlinks in `bin`. With `include_runtime_libs = true` it also copies the dynamic loader and the shared libraries the binary needs, from the target's sysroot (see the next bullet). Each entry takes:
   - `tree`, `busybox`, `applets`, `include_runtime_libs`: as above.
-  - `sysroot` (optional): the target root the runtime libraries are read from, as a path template such as `$provider.target`. Unset, it is derived from `busybox`: the directory above its `bin/` or `sbin/`, or two levels up from `usr/bin/` or `usr/sbin/`. A dynamic binary whose sysroot cannot be derived fails the build, asking for `sysroot`.
+  - `sysroot` (optional): the target root the runtime libraries are read from, as a path template such as `${provider.target}`. Unset, it is derived from `busybox`: the directory above its `bin/` or `sbin/`, or two levels up from `usr/bin/` or `usr/sbin/`. A dynamic binary whose sysroot cannot be derived fails the build, asking for `sysroot`.
 - `binaries` copies a binary into a tree together with the runtime it needs (see [Listed binaries](#listed-binaries)).
 - `kernel_modules` copies the named kernel modules, and the modules they depend on, from a kernel's `modules.dep` into a tree under `lib/modules/<kernel version>/` at the same relative paths. It also copies `modules.order`, `modules.builtin` and `modules.builtin.modinfo` when present, then runs `depmod -b <tree> <kernel version>`, so the tree's module index covers exactly the copied set. Each entry takes:
   - `tree`: the tree to fill.
-  - `from`: the directory holding the `<kernel version>` directories, such as `$provider.target/lib/modules`.
+  - `from`: the directory holding the `<kernel version>` directories, such as `${provider.target}/lib/modules`.
   - `modules`: module names. `-` and `_` are the same, and a name may carry `.ko`, `.ko.xz`, `.ko.zst` and similar suffixes or a path.
   - `kernel_version` (optional): the version directory to use. Required when `from` holds more than one.
   - `depmod` (optional): a path template for `depmod`. Unset, it takes the provider's `sbin/depmod`, then the host's `depmod` from `PATH`; a missing depmod fails the build.
@@ -130,11 +130,11 @@ Assembly behavior:
   A module the kernel has built in (listed in `modules.builtin`) is skipped and noted. A name that is neither in `modules.dep` nor built in fails the build, naming it. The step runs with the other tree-populating steps, before the filesystems that pack the tree.
 - Runtime libraries are found from the binary's ELF headers, never from the host: the program interpreter, the `DT_NEEDED` names and the `DT_RUNPATH` (or `DT_RPATH`) entries are read from the file, and each name is looked up under the sysroot. The search order is the binary's RUNPATH/RPATH entries (`$ORIGIN` is expanded; an entry with another `$` token, or a relative path, is skipped), then `lib`, `lib64`, `usr/lib`, `usr/lib64`, the `<triplet>` directories present under `lib` and `usr/lib`, and the directories of `etc/ld.so.conf` and its `include` files. A library is used only when its class, byte order and machine match the binary, so a host library is never taken for a target one.
 - Symlinks inside the sysroot are followed (an absolute link target means the sysroot's root). The tree gets each file the loader reaches as a real copy at its absolute path, and each symlink crossed on the way as a symlink with the same target text, so a soname such as `libc.so.6` resolves in the tree as it does on the target. The interpreter is placed at its exact path. A static binary copies nothing. A NEEDED name that is not found under the sysroot fails the build, and the error lists every missing name. The tree must not create a directory that the sysroot links (for example `lib` when the sysroot has `/lib -> usr/lib`), since the link cannot replace it.
-- For a cross-compiled BusyBox taken from a Buildroot target tree, set `sysroot = "$provider.target"` (or leave it unset when the binary sits at `$provider.target/bin/busybox`). The reuse fingerprint covers the sysroot, the interpreter, every symlink and the digest of every library file, so a changed libc rebuilds the assembly.
+- For a cross-compiled BusyBox taken from a Buildroot target tree, set `sysroot = "${provider.target}"` (or leave it unset when the binary sits at `${provider.target}/bin/busybox`). The reuse fingerprint covers the sysroot, the interpreter, every symlink and the digest of every library file, so a changed libc rebuilds the assembly.
 - Filesystem kinds currently implemented are `vfat`, `cpio`, `cpio-gzip`, `cpio-zstd`, `cpio-xz`, `ext4` (see [dm-verity and ext4](#dm-verity-and-ext4)), `squashfs` and `erofs` (see [squashfs and EROFS](#squashfs-and-erofs)).
 - `cpio` kinds write a newc archive with uid and gid 0, entries in sorted order and zero timestamps, so the same tree packs to the same bytes. `cpio-zstd` compresses that archive with `zstd -q -c --no-progress -T0 -<compression_level>`, resolving `zstd` like the zstd transform; `compression_level` (1-19) is only accepted on `cpio-zstd` and defaults to 19. A hard-linked file is stored once: its links share one inode number and link count, and the data goes with the last link in archive order (the form cpio and the kernel's initramfs unpacker read). Device nodes and FIFOs in the tree are written with their mode and device numbers, and `[[image.assembly.devices]]` adds more (see [Device nodes](#device-nodes)). `cpio-gzip` and `cpio-zstd` stream the archive into the compressor's standard input, so no full cpio copy is written; `zstd` is given the planned size (`--stream-size`), which makes its output the same as from a file. `cpio-xz` still writes the cpio to a file first, as its proven-bootable command was tested with that input.
 - `cpio-xz` compresses the same newc archive with `xz -T2 --check=crc32 --lzma2=preset=<compression_level>,dict=<size> -c`. The CRC32 check is the one the kernel's XZ initramfs decoder reads. That decoder allocates the whole LZMA2 dictionary, so the dictionary is capped at 1 MiB (or the cpio's size rounded up to 4 KiB, when smaller) whatever the level: the 64 MiB dictionary of `-9` gives an initramfs the kernel cannot unpack. `compression_level` (0-9) is accepted on `cpio-xz` (default 6) and `cpio-zstd` (1-19, default 19 there). Threaded mode writes the block sizes into the block header, which the kernel also needed (a `-T1` stream, without them, did not boot), and xz's own threaded block size is kept: with `--block-size` set to the cpio size xz wrote a shorter block header that did not boot either. The fixed thread count keeps the output the same on every host and run. Of the encodings tried on a Raspberry Pi kernel, only this one booted, with a padded 20-byte block header; a 64 MiB dictionary, a `-T1` stream without sizes, and a 16-byte header from `--block-size` each died before /init. For a small, safe initramfs on that board, `cpio-zstd` is the tested choice; boot-test a `cpio-xz` image (and any one over 3 MiB, which xz splits into several blocks) before relying on it.
-- `publish = true` on a filesystem also copies its image to the image output dir (`$assembly.out`, the collect dir by default) under the output's file name, and the published image is reported like a raw disk: in the run summary, its image sizes, and the content digests. The name must not collide with another output or published copy. In a RAM work dir the image is built in RAM and copied to the image output dir when built.
+- `publish = true` on a filesystem also copies its image to the image output dir (`${assembly.out}`, the collect dir by default) under the output's file name, and the published image is reported like a raw disk: in the run summary, its image sizes, and the content digests. The name must not collide with another output or published copy. In a RAM work dir the image is built in RAM and copied to the image output dir when built.
 - `vfat` uses `mtools` (`mformat` and `mcopy`), resolving provider host tools first, then host `PATH`; `size` accepts byte values or binary `K`, `M`, `G`, and `T` suffixes, or `size = "auto"`. Without `size` the image is 32M. With `deterministic = true` (the default) the volume serial is fixed (`mformat -N`, derived from the filesystem `id`), every entry carries the modification time 1980-01-01 00:00 UTC (copied from a staging tree, then kept by `mcopy -m`), and mtools runs with `TZ=UTC`: the same spec gives the same bytes on every run and host.
 - `fat_size` (vfat only, optional): the FAT type, `12`, `16` or `32`. Without it a vfat image from 3 MiB up to 16 MiB is formatted FAT16 (one sector per cluster) rather than the FAT12 `mformat` picks at those sizes, because some boot firmwares (e.g. Raspberry Pi's) do not boot from FAT12; other sizes keep `mformat`'s choice (FAT12 below 3 MiB, FAT16 from 16 MiB). `fat_size = 12` keeps `mformat`'s choice at every size, `16` is the default rule, and `32` formats FAT32. With `fat_size` set, the build fails when the image size cannot hold that type: FAT12 needs less than 16 MiB, FAT16 at least 3 MiB.
 - `free = "256M"` (only with `size = "auto"`) leaves that much free space beyond the content estimate: the margin becomes the larger of the automatic margin and `free`, and the result is still rounded up to a whole MiB. Use it when files will be added to the image later.
@@ -211,7 +211,7 @@ mode = "0600"        # permission bits, octal; default 0600
 - `name`: label used in state and errors; on a GPT disk also the partition name (at most 36 UTF-16 code units, unique on the disk).
 - `type` (raw `0xNN`) or `type_alias` (`fat32-lba`, `linux`); defaults to `linux` (`0x83`). On a GPT disk, a type GUID or a GPT alias (see [GPT disks](#gpt-disks)).
 - `bootable`: sets the MBR active flag (on GPT, the legacy BIOS bootable attribute, bit 2). Only allowed on primary partitions; validation rejects it on logical partitions (`assembly_partition_bootable_logical`).
-- `image`: file written at the partition start: a filesystem, transform or UBI output of the assembly, a provider path or an `@assets/` file (`assembly_partition_image_unknown` otherwise). Optional when `size` is set.
+- `image`: file written at the partition start: a filesystem, transform or UBI output of the assembly, a provider path or an `${assets}/` file (`assembly_partition_image_unknown` otherwise). Optional when `size` is set.
 - `size`: partition size in bytes or with a binary `K`/`M`/`G`/`T` suffix (`"16M"`, `"2G"`). Without it the partition is exactly as large as its image (rounded up to 512-byte sectors). With it the image must fit, otherwise assembly fails before the disk is written; the space after the image is left unwritten.
 - `wipe = true`: only for empty partitions (no `image`). Writes zeros over the first 1 MiB of the partition (less if the partition is smaller) so filesystem signatures left by a previous flash do not survive when the image is written to a device. Validation rejects `wipe` together with `image`, since an image already overwrites the partition start.
 - `materialize = false`: the partition is in the table at its full `size`, but nothing is written to it (no image, no wipe). It needs `size`; validation rejects `image` or `wipe` with it (`assembly_partition_unmaterialized_image`, `assembly_partition_unmaterialized_wipe`). Pair it with `truncate = "last-data"` to leave the partition past the end of the file so it is created on first boot. Defaults to `true`.
@@ -234,24 +234,24 @@ The Rockchip boot ROM reads the loader at sector 64 and U-Boot at 8 MiB, outside
 ```toml
 [[image.assembly.disks]]
 id = "emmc"
-output = "$assembly.out/emmc.img"
+output = "${assembly.out}/emmc.img"
 partition_table = "gpt"
 
 [[image.assembly.disks.partitions]]
 name = "idbloader"
-image = "$provider.images/idbloader.img"
+image = "${provider.images}/idbloader.img"
 offset = "32K"
 table = false
 
 [[image.assembly.disks.partitions]]
 name = "uboot"
-image = "$provider.images/u-boot.itb"
+image = "${provider.images}/u-boot.itb"
 offset = "8M"
 table = false
 
 [[image.assembly.disks.partitions]]
 name = "rootfs-a"
-image = "$assembly.work/rootfs.verity.erofs"
+image = "${assembly.work}/rootfs.verity.erofs"
 offset = "16M"
 ```
 
@@ -273,18 +273,18 @@ The derived GUIDs depend only on the disk id and the partition names, not on the
 ```toml
 [[image.assembly.disks]]
 id = "disk"
-output = "$assembly.out/disk.img"
+output = "${assembly.out}/disk.img"
 partition_table = "gpt"
 
 [[image.assembly.disks.partitions]]
 name = "ESP"
 type_alias = "esp"
-image = "$assembly.work/esp.vfat"
+image = "${assembly.work}/esp.vfat"
 
 [[image.assembly.disks.partitions]]
 name = "root"
 type_alias = "linux-root-arm64"
-image = "$assembly.work/root.erofs"
+image = "${assembly.work}/root.erofs"
 ```
 
 #### Truncated disks
@@ -311,23 +311,23 @@ The image is a little-endian CRC32 of the data area, the flags byte when redunda
 ```toml
 [[image.assembly.trees]]
 id = "env"
-path = "$assembly.work/env"
+path = "${assembly.work}/env"
 
 [[image.assembly.files]]
 tree = "env"
 dest = "uboot-env.txt"
-content = "boot_slot=a\nbootcount=0\nbootlimit=3\naltbootcmd=run swap_slot; run bootcmd\nroothash_a=${assembly.verity:$assembly.work/rootfs-a.erofs:root_hash}\n"
+content = "boot_slot=a\nbootcount=0\nbootlimit=3\naltbootcmd=run swap_slot; run bootcmd\nroothash_a=${assembly.verity:${assembly.work}/rootfs-a.erofs:root_hash}\n"
 
 [[image.assembly.transforms]]
 kind = "uboot-env"
-src = "$assembly.tree.env/uboot-env.txt"
-dest = "$assembly.work/uboot.env"
+src = "${assembly.tree.env}/uboot-env.txt"
+dest = "${assembly.work}/uboot.env"
 env_size = "32K"
 redundant = true
 
 [[image.assembly.disks.partitions]]
 name = "env"
-image = "$assembly.work/uboot.env"
+image = "${assembly.work}/uboot.env"
 offset = "4M"
 table = false
 ```
@@ -346,7 +346,7 @@ loaders (G1's `table = false`).
 ```toml
 [[image.assembly.ubis]]
 id = "nand"
-output = "$assembly.out/nand.ubi"
+output = "${assembly.out}/nand.ubi"
 peb_size = "128K"      # the flash's eraseblock
 min_io_size = "2K"     # the flash's page
 flash_size = "128M"    # the UBI partition's whole flash device
@@ -354,7 +354,7 @@ flash_size = "128M"    # the UBI partition's whole flash device
 
 [[image.assembly.ubis.volumes]]
 name = "rootfs_a"
-image = "$assembly.work/rootfs.erofs"
+image = "${assembly.work}/rootfs.erofs"
 size = "40M"           # room for later, larger updates
 
 [[image.assembly.ubis.volumes]]
@@ -377,7 +377,7 @@ autoresize = true      # grows over the free flash on first attach
   - `name` (required): 1 to 127 bytes, unique in the image.
   - `id` (optional): the volume id; unset, its position in the list. Ids are unique and below the number of volume table records (128 for any LEB over 21.5 KiB).
   - `type` (optional): `dynamic` (the default) or `static`. A static volume records each LEB's size and CRC, which UBI checks when the volume is opened; use it for read-once blobs such as a kernel. Slots that an updater rewrites with `ubiupdatevol` work as either.
-  - `image` (optional): the volume's contents, a filesystem or transform output, a provider path or an `@assets/` file. Unset, the volume is empty.
+  - `image` (optional): the volume's contents, a filesystem or transform output, a provider path or an `${assets}/` file. Unset, the volume is empty.
   - `size` (optional): the bytes reserved for the volume, rounded up to whole LEBs and at least the image. Unset reserves the image's size. A volume needs an `image`, a `size` or `autoresize`.
   - `autoresize = true`: UBI grows this volume over the free PEBs on first attach. At most one volume.
 
@@ -391,7 +391,7 @@ On the target, attach and map a slot with `ubi.mtd=<partition> ubi.block=0,rootf
 
 `[[image.assembly.archives]]` builds a plain POSIX ustar archive after all disks, written by Gaia itself (no external `tar`):
 - `id`: unique archive id.
-- `output`: path template, like other assembly outputs; it can point into the image collect dir (`$provider.images/...`).
+- `output`: path template, like other assembly outputs; it can point into the image collect dir (`${provider.images}/...`).
 - `members`: ordered list. Each member has exactly one source: `src` (a path template; the file is copied, stored as `name`), `entries` (a generated `KEY=value` file, stored as `name`), `json` (a generated JSON document, see [Generated content](#generated-content)), `tree` or `src_dir` (every entry under an assembly tree or a directory), or `src_glob` (each file the pattern matches).
 - `tree = "<tree id>"` and `src_dir = "<path template>"` archive every entry under that root, stored under `prefix` (empty, or a relative path ending in `/`). `name` may be left empty for these. Entries are walked in sorted order, a directory before its contents: regular files keep mode 0644, or 0755 when executable; directories are 0755; symbolic links are stored as links and not followed. Only regular files appear in the archive's state. A `tree` member reads its tree's root, so it runs after the steps that fill the tree, and its fingerprint covers the tree's content.
 - `src_glob = "<pattern>"` archives each file the pattern matches under `name`, a directory prefix ending in `/`, followed by the file's own name.
@@ -399,7 +399,7 @@ On the target, attach and map a slot with `ubi.mtd=<partition> ubi.block=0,rootf
 - Names and link targets longer than 100 bytes are written as ustar allows or as PAX extended headers say: a name that splits at a `/` into a directory part of at most 155 bytes and a base of at most 100 uses the ustar `prefix` field; any other long name, and any long link target, goes in a PAX `path` or `linkpath` record. `tar -tf` lists such archives.
 - `generated`: ordered list of generated members (`name`, `entries`). They are written **before** all `members`; to interleave generated and file members, put `entries` directly on a `members` item instead.
 - `entries`: `[["KEY", "value"], ...]`, rendered as one `KEY=value` line per entry in order. Keys must match `[A-Za-z_][A-Za-z0-9_]*`. Values made only of `A-Z a-z 0-9 _ @ % + = : , . / -` are written as-is; anything else (including an empty value) is wrapped in single quotes with embedded `'` written as `'\''`, so the file can be sourced by `sh`. Values cannot contain newlines.
-- Entry values may contain `${assembly.sha256:<path template>}`, replaced at assembly time by the lowercase hex sha256 of that file (an assembly output such as a transform result, or any other file). The file must exist when the archive is built. Normal config interpolation such as `${build.version}` runs first and may also appear inside the path (`${assembly.sha256:$assembly.out/${build.name}.img}`). Any other `${...}` left in a value is a validation error.
+- Entry values may contain `${assembly.sha256:<path template>}`, replaced at assembly time by the lowercase hex sha256 of that file (an assembly output such as a transform result, or any other file). The file must exist when the archive is built. Normal config interpolation such as `${build.version}` runs first and may also appear inside the path (`${assembly.sha256:${assembly.out}/${build.name}.img}`). Any other `${...}` left in a value is a validation error.
 - Entry values may also contain `${assembly.size:<path template>}`, replaced by the size of that file in bytes.
 - Entry values may also contain `${assembly.verity:<path template>:<field>}`, replaced by a field of a `verity` transform's output. The path must be the transform's `dest` written exactly as in the transform. The fields are `root_hash`, `salt`, `hash_offset`, `data_blocks`, `data_block_size` and `hash_block_size`; see [dm-verity and ext4](#dm-verity-and-ext4). A token that names no verity transform output is a validation error, and an unknown field name is rejected at validation too.
 
@@ -410,7 +410,7 @@ Archive output is deterministic: entries appear in the configured order with mti
 `[[image.assembly.oci]]` builds an OCI image from layers after the archives, with no container daemon and no `docker` or `podman` needed to build it:
 - `id`: unique id.
 - `dest`: path template. With `format = "oci-layout"` (the default) it is a directory holding an OCI image layout (`oci-layout`, `index.json`, `blobs/sha256/...`) plus the `manifest.json` that `docker save` also writes. `skopeo copy oci:<dir> ...` reads the directory; `podman load` and `docker load` (with Docker's classic image store too) take a tar of it (`tar -C <dir> -cf image.tar .`). With `format = "docker-archive"` it is a `.tar` that `docker load` and `podman load` take as it is. Gaia's tests load and run both formats with podman and docker, and read them with skopeo.
-- `layers`: lowest first, at least one. Each layer is `{ tar = "<path template>" }`, an uncompressed layer tar used as it is (such as `$provider.images/layers/base.tar`), or `{ tree = "<tree id>" }`, an assembly tree that Gaia tars itself. Exactly one of the two per layer. A tree layer strips its tree first when the tree says `strip = true`, as archives do.
+- `layers`: lowest first, at least one. Each layer is `{ tar = "<path template>" }`, an uncompressed layer tar used as it is (such as `${provider.images}/layers/base.tar`), or `{ tree = "<tree id>" }`, an assembly tree that Gaia tars itself. Exactly one of the two per layer. A tree layer strips its tree first when the tree says `strip = true`, as archives do.
 - `compression`: `"gzip"` (the default), `"zstd"` or `"none"`. `docker-archive` takes gzip or none.
 - `ref`: optional, such as `"helios-sim:dev"`. It is the `org.opencontainers.image.ref.name` annotation of an OCI layout, or the `RepoTags` entry of a docker archive.
 - `[image.assembly.oci.config]` is the image config:
@@ -422,8 +422,8 @@ Archive output is deterministic: entries appear in the configured order with mti
 ```toml
 [[image.assembly.oci]]
 id = "sim"
-dest = "$assembly.out/helios-sim.oci"
-layers = [ { tar = "$provider.images/layers/base.tar" }, { tree = "app-tree" } ]
+dest = "${assembly.out}/helios-sim.oci"
+layers = [ { tar = "${provider.images}/layers/base.tar" }, { tree = "app-tree" } ]
 ref = "helios-sim:dev"
 
 [image.assembly.oci.config]
@@ -455,7 +455,7 @@ State records `oci.N.id`, `format`, `compression`, `output`, `bytes`, `config_di
   - `[image.assembly.packages.control.extra]`: further fields, as `X-Port = "5801"`. A name is letters, digits and `-`, and may not repeat a field the package sets. Values are single lines.
 - `[image.assembly.packages.scripts]`:
   - `services`: systemd unit file names, each of which must be in the tree under `etc/systemd/system` or `usr/lib/systemd/system`. Gaia generates the maintainer scripts for them: `postinst` runs `daemon-reload`, then for each unit `reset-failed` (so a unit the old version left failed at its start limit is not refused), `enable` and `start`; `prerm` stops and disables each one, tolerating failures; `postrm` runs `daemon-reload` and resets each unit. Each script is POSIX sh and ends in `exit 0`. With no services, no script is generated.
-  - `postinst`, `preinst`, `prerm` and `postrm`: a file that replaces the generated script (or, for `preinst`, adds one). `@self/...` paths are resolved as in other config files.
+  - `postinst`, `preinst`, `prerm` and `postrm`: a file that replaces the generated script (or, for `preinst`, adds one). `${self}/...` paths are resolved as in other config files.
   - `conffiles`: absolute guest paths, each a file of the tree. They are listed in the control tar's `conffiles`.
 
 ```toml
@@ -463,7 +463,7 @@ State records `oci.N.id`, `format`, `compression`, `output`, `bytes`, `config_di
 id = "helios-systemcore"
 format = "ipk"
 tree = "pkg-root"
-dest = "$assembly.out/"
+dest = "${assembly.out}/"
 debian_binary = true
 allowed_prefixes = ["/usr/local", "/etc/systemd/system"]
 
@@ -480,7 +480,7 @@ extra = { X-Port = "5801" }
 
 [image.assembly.packages.scripts]
 services = ["helios-api.service"]
-postinst = "@self/pkg/postinst"
+postinst = "${self}/pkg/postinst"
 conffiles = ["/etc/helios/startup.toml"]
 ```
 
@@ -558,19 +558,19 @@ A token that reads a work or out path no step writes is a validation error (`ass
 [[image.assembly.files]]
 tree = "boot"
 dest = "cmdline.txt"
-content = "console=tty1 roothash=${assembly.verity:$assembly.work/slot/rootfs.erofs:root_hash} rootwait"
+content = "console=tty1 roothash=${assembly.verity:${assembly.work}/slot/rootfs.erofs:root_hash} rootwait"
 
 [[image.assembly.files]]
 tree = "boot"
 dest = "state.json"
-json = { schema = 1, state = "trial", size = "${assembly.size:$assembly.work/slot/rootfs.erofs}" }
+json = { schema = 1, state = "trial", size = "${assembly.size:${assembly.work}/slot/rootfs.erofs}" }
 ```
 
 #### Listed binaries
 
 `[[image.assembly.binaries]]` copies one binary from a target tree into a tree, with the runtime closure a dynamically linked binary needs: its interpreter and its shared libraries, found under a sysroot and copied to the same absolute paths in the tree (symlinks crossed on the way are recreated). A static binary is only copied. Each entry takes:
 - `tree`: the tree to fill.
-- `src`: the binary, a path template such as `$provider.buildroot_output/target/usr/sbin/e2fsck`.
+- `src`: the binary, a path template such as `${provider.buildroot_output}/target/usr/sbin/e2fsck`.
 - `dest`: where it goes in the tree, such as `usr/sbin/e2fsck`. It must be a file path inside the tree.
 - `sysroot` (optional): the target root its libraries are read from. Unset, it is derived from `src`: the directory above its `bin/` or `sbin/` (or `usr/bin/`, `usr/sbin/`).
 - `mode` (optional): octal, `0755` unless set.
@@ -598,7 +598,7 @@ Options:
 id = "root"
 kind = "erofs"
 source_tree = "rootfs"
-output = "$assembly.work/root.erofs"
+output = "${assembly.work}/root.erofs"
 compression = "lz4hc"
 compression_level = 12
 pcluster_size = 65536
@@ -644,28 +644,28 @@ A read-only root slot: the EROFS root filesystem from the image provider (Buildr
 ```toml
 [[image.assembly.transforms]]
 kind = "verity"
-src = "$provider.images/rootfs.erofs"
-dest = "$assembly.work/rootfs.verity.erofs"
+src = "${provider.images}/rootfs.erofs"
+dest = "${assembly.work}/rootfs.verity.erofs"
 
 [[image.assembly.archives]]
 id = "slot"
-output = "$provider.images/slot.update"
+output = "${provider.images}/slot.update"
 
 [[image.assembly.archives.generated]]
 name = "manifest.env"
 entries = [
-  ["ROOTFS_SHA256", "${assembly.sha256:$provider.images/rootfs.erofs}"],
-  ["VERITY_ROOT_HASH", "${assembly.verity:$assembly.work/rootfs.verity.erofs:root_hash}"],
-  ["VERITY_SALT", "${assembly.verity:$assembly.work/rootfs.verity.erofs:salt}"],
-  ["VERITY_HASH_OFFSET", "${assembly.verity:$assembly.work/rootfs.verity.erofs:hash_offset}"],
-  ["VERITY_DATA_BLOCKS", "${assembly.verity:$assembly.work/rootfs.verity.erofs:data_blocks}"],
-  ["VERITY_DATA_BLOCK_SIZE", "${assembly.verity:$assembly.work/rootfs.verity.erofs:data_block_size}"],
-  ["VERITY_HASH_BLOCK_SIZE", "${assembly.verity:$assembly.work/rootfs.verity.erofs:hash_block_size}"],
+  ["ROOTFS_SHA256", "${assembly.sha256:${provider.images}/rootfs.erofs}"],
+  ["VERITY_ROOT_HASH", "${assembly.verity:${assembly.work}/rootfs.verity.erofs:root_hash}"],
+  ["VERITY_SALT", "${assembly.verity:${assembly.work}/rootfs.verity.erofs:salt}"],
+  ["VERITY_HASH_OFFSET", "${assembly.verity:${assembly.work}/rootfs.verity.erofs:hash_offset}"],
+  ["VERITY_DATA_BLOCKS", "${assembly.verity:${assembly.work}/rootfs.verity.erofs:data_blocks}"],
+  ["VERITY_DATA_BLOCK_SIZE", "${assembly.verity:${assembly.work}/rootfs.verity.erofs:data_block_size}"],
+  ["VERITY_HASH_BLOCK_SIZE", "${assembly.verity:${assembly.work}/rootfs.verity.erofs:hash_block_size}"],
 ]
 
 [[image.assembly.archives.members]]
 name = "rootfs.erofs"
-src = "$assembly.work/rootfs.verity.erofs"
+src = "${assembly.work}/rootfs.verity.erofs"
 ```
 
 The bundle's `manifest.env` is the file the updater sources. The root slot is `rootfs.verity.erofs`; the initramfs opens it with the manifest's root hash and hash offset.
@@ -677,16 +677,16 @@ The same slot, with the root's verity values in a JSON manifest and in the kerne
 ```toml
 [[image.assembly.trees]]
 id = "initramfs"
-path = "$assembly.work/initramfs"
+path = "${assembly.work}/initramfs"
 
 [[image.assembly.transforms]]
 kind = "verity"
-src = "$provider.images/rootfs.erofs"
-dest = "$assembly.work/slot/rootfs.erofs"
+src = "${provider.images}/rootfs.erofs"
+dest = "${assembly.work}/slot/rootfs.erofs"
 
 [[image.assembly.files]]
 tree = "initramfs"
-content = "roothash=${assembly.verity:$assembly.work/slot/rootfs.erofs:root_hash}\n"
+content = "roothash=${assembly.verity:${assembly.work}/slot/rootfs.erofs:root_hash}\n"
 dest = "cmdline.txt"
 
 [[image.assembly.files]]
@@ -697,11 +697,11 @@ dest = "default.txt"
 [[image.assembly.files]]
 tree = "initramfs"
 dest = "state.json"
-json = { schema = 1, id = "${input.slot_id}", version = "${build.version}", built = "${build.date}", source = "${project.describe}", image = { size = "${assembly.size:$assembly.work/slot/rootfs.erofs}", sha256 = "${assembly.sha256:$assembly.work/slot/rootfs.erofs}" }, verity = { root_hash = "${assembly.verity:$assembly.work/slot/rootfs.erofs:root_hash}", salt = "${assembly.verity:$assembly.work/slot/rootfs.erofs:salt}", hash_offset = "${assembly.verity:$assembly.work/slot/rootfs.erofs:hash_offset}", data_blocks = "${assembly.verity:$assembly.work/slot/rootfs.erofs:data_blocks}" } }
+json = { schema = 1, id = "${input.slot_id}", version = "${build.version}", built = "${build.date}", source = "${project.describe}", image = { size = "${assembly.size:${assembly.work}/slot/rootfs.erofs}", sha256 = "${assembly.sha256:${assembly.work}/slot/rootfs.erofs}" }, verity = { root_hash = "${assembly.verity:${assembly.work}/slot/rootfs.erofs:root_hash}", salt = "${assembly.verity:${assembly.work}/slot/rootfs.erofs:salt}", hash_offset = "${assembly.verity:${assembly.work}/slot/rootfs.erofs:hash_offset}", data_blocks = "${assembly.verity:${assembly.work}/slot/rootfs.erofs:data_blocks}" } }
 
 [[image.assembly.binaries]]
 tree = "initramfs"
-src = "$provider.buildroot_output/target/usr/sbin/e2fsck"
+src = "${provider.buildroot_output}/target/usr/sbin/e2fsck"
 dest = "usr/sbin/e2fsck"
 ```
 
@@ -716,14 +716,14 @@ A data partition built from a tree of its own, sized from the tree and labelled,
 id = "data"
 kind = "ext4"
 source_tree = "data"
-output = "$provider.images/data.ext4"
+output = "${provider.images}/data.ext4"
 size = "auto"
 label = "data"
 
 [[image.assembly.disks.partitions]]
 name = "data"
 type_alias = "linux"
-image = "$provider.images/data.ext4"
+image = "${provider.images}/data.ext4"
 ```
 
 #### Example: Raspberry Pi CM5 eMMC A/B layout with an update bundle
@@ -747,59 +747,59 @@ work_dir = "${workspace.build_dir}/assembly"
 
 [[image.assembly.trees]]
 id = "autoboot"
-path = "$assembly.work/autoboot"
+path = "${assembly.work}/autoboot"
 
 [[image.assembly.files]]
 tree = "autoboot"
-src = "@assets/autoboot.txt"
+src = "${assets}/autoboot.txt"
 dest = "autoboot.txt"
 
 [[image.assembly.filesystems]]
 id = "autoboot"
 kind = "vfat"
 source_tree = "autoboot"
-output = "$provider.images/autoboot.vfat"
+output = "${provider.images}/autoboot.vfat"
 size = "16M"
 
 [[image.assembly.transforms]]
 kind = "zstd"
-src = "$provider.images/boot.vfat"
-dest = "$assembly.work/boot.vfat.zst"
+src = "${provider.images}/boot.vfat"
+dest = "${assembly.work}/boot.vfat.zst"
 
 [[image.assembly.transforms]]
 kind = "zstd"
-src = "$provider.images/rootfs.ext4"
-dest = "$assembly.work/rootfs.ext4.zst"
+src = "${provider.images}/rootfs.ext4"
+dest = "${assembly.work}/rootfs.ext4.zst"
 level = 19
 
 [[image.assembly.disks]]
 id = "emmc"
-output = "$provider.images/emmc.img"
+output = "${provider.images}/emmc.img"
 partition_table = "mbr"
 
 [[image.assembly.disks.partitions]]
 name = "autoboot"
 type_alias = "fat32-lba"
 bootable = true
-image = "$provider.images/autoboot.vfat"
+image = "${provider.images}/autoboot.vfat"
 size = "16M"
 
 [[image.assembly.disks.partitions]]
 name = "boot-a"
 type_alias = "fat32-lba"
-image = "$provider.images/boot.vfat"
+image = "${provider.images}/boot.vfat"
 size = "128M"
 
 [[image.assembly.disks.partitions]]
 name = "boot-b"
 type_alias = "fat32-lba"
-image = "$provider.images/boot.vfat"
+image = "${provider.images}/boot.vfat"
 size = "128M"
 
 [[image.assembly.disks.partitions]]
 name = "rootfs-a"
 type_alias = "linux"
-image = "$provider.images/rootfs.ext4"
+image = "${provider.images}/rootfs.ext4"
 size = "2G"
 
 [[image.assembly.disks.partitions]]
@@ -811,11 +811,11 @@ wipe = true
 [[image.assembly.disks.partitions]]
 name = "data"
 type_alias = "linux"
-image = "$provider.images/data.ext4"
+image = "${provider.images}/data.ext4"
 
 [[image.assembly.archives]]
 id = "update"
-output = "$provider.images/${build.name}-${build.version}.update"
+output = "${provider.images}/${build.name}-${build.version}.update"
 
 [[image.assembly.archives.members]]
 name = "manifest.env"
@@ -823,17 +823,17 @@ entries = [
   ["MODEL", "cm5"],
   ["VERSION", "${build.version}"],
   ["OS", "my-os"],
-  ["BOOT_SHA256", "${assembly.sha256:$assembly.work/boot.vfat.zst}"],
-  ["ROOTFS_SHA256", "${assembly.sha256:$assembly.work/rootfs.ext4.zst}"],
+  ["BOOT_SHA256", "${assembly.sha256:${assembly.work}/boot.vfat.zst}"],
+  ["ROOTFS_SHA256", "${assembly.sha256:${assembly.work}/rootfs.ext4.zst}"],
 ]
 
 [[image.assembly.archives.members]]
 name = "boot.vfat.zst"
-src = "$assembly.work/boot.vfat.zst"
+src = "${assembly.work}/boot.vfat.zst"
 
 [[image.assembly.archives.members]]
 name = "rootfs.ext4.zst"
-src = "$assembly.work/rootfs.ext4.zst"
+src = "${assembly.work}/rootfs.ext4.zst"
 ```
 
 The bundle `my-os-1.2.3.update` is a tar of `manifest.env` (`MODEL`, `VERSION`, `OS`, `BOOT_SHA256`, `ROOTFS_SHA256`) followed by `boot.vfat.zst` and `rootfs.ext4.zst`, where each digest is the sha256 of the compressed member in the bundle.
@@ -858,14 +858,14 @@ Buildroot migration example:
 ```toml
 [[image.assembly.disks]]
 id = "sdcard"
-output = "$provider.images/sdcard.img"
+output = "${provider.images}/sdcard.img"
 partition_table = "mbr"
 signature_text = "GAIA"
 
 [[image.assembly.disks.partitions]]
 name = "rootfs"
 type_alias = "linux"
-image = "$provider.buildroot_output/images/rootfs.ext4"
+image = "${provider.buildroot_output}/images/rootfs.ext4"
 ```
 
 #### Example: flasher boot image with an initramfs
@@ -889,27 +889,27 @@ defconfig = "flasher_defconfig"
 
 [[image.assembly.trees]]
 id = "initramfs"
-path = "$assembly.work/initramfs"
+path = "${assembly.work}/initramfs"
 
 [[image.assembly.trees]]
 id = "boot"
-path = "$assembly.work/boot"
+path = "${assembly.work}/boot"
 
 # BusyBox and the kernel modules the gadget needs, with their dependencies.
 [[image.assembly.busybox_initramfs]]
 tree = "initramfs"
-busybox = "$provider.target/bin/busybox"
+busybox = "${provider.target}/bin/busybox"
 include_runtime_libs = false
 applets = ["sh", "mount", "mkdir", "modprobe", "switch_root"]
 
 [[image.assembly.kernel_modules]]
 tree = "initramfs"
-from = "$provider.target/lib/modules"
+from = "${provider.target}/lib/modules"
 modules = ["libcomposite", "usb-f-mass-storage"]
 
 [[image.assembly.files]]
 tree = "initramfs"
-src = "@assets/flasher/init"
+src = "${assets}/flasher/init"
 dest = "init"
 mode = "0755"
 
@@ -918,36 +918,36 @@ mode = "0755"
 id = "initramfs"
 kind = "cpio-zstd"
 source_tree = "initramfs"
-output = "$assembly.work/initramfs.cpio.zst"
+output = "${assembly.work}/initramfs.cpio.zst"
 compression_level = 19
 
 # The boot tree: kernel, device tree, config.txt and the initramfs.
 [[image.assembly.files]]
 tree = "boot"
-src = "$provider.images/Image"
+src = "${provider.images}/Image"
 dest = "Image"
 
 [[image.assembly.files]]
 tree = "boot"
-src = "$provider.images/bcm2711-rpi-4-b.dtb"
+src = "${provider.images}/bcm2711-rpi-4-b.dtb"
 dest = "bcm2711-rpi-4-b.dtb"
 
 [[image.assembly.files]]
 tree = "boot"
-src = "@assets/flasher/config.txt"
+src = "${assets}/flasher/config.txt"
 dest = "config.txt"
 
 [[image.assembly.files]]
 tree = "boot"
-src = "$assembly.work/initramfs.cpio.zst"
+src = "${assembly.work}/initramfs.cpio.zst"
 dest = "initramfs.cpio.zst"
 
-# boot.img, published to $provider.images/boot.img.
+# boot.img, published to ${provider.images}/boot.img.
 [[image.assembly.filesystems]]
 id = "boot"
 kind = "vfat"
 source_tree = "boot"
-output = "$assembly.work/boot.img"
+output = "${assembly.work}/boot.img"
 size = "64M"
 publish = true
 ```
@@ -959,8 +959,8 @@ The boot tree's `config.txt` carries the line `initramfs initramfs.cpio.zst foll
 ```toml
 [[image.assembly.checks]]
 id = "boot-overlays"
-command = ["@self/scripts/check-boot-overlays.sh", "$assembly.tree.slots-fat"]
+command = ["${self}/scripts/check-boot-overlays.sh", "${assembly.tree.slots-fat}"]
 timeout_secs = 60          # default: the image provider's command timeout
 ```
 
-A check is a program and its arguments, run without a shell from the workspace root after every assembly step (trees, files, filesystems, disks, archives, OCI images), so it sees the finished trees and outputs at the paths the steps wrote them, RAM work dirs included. Assembly tokens are expanded in every argument: `$assembly.tree.<id>`, `$assembly.work`, `$assembly.out`, `$provider.images`, `$provider.buildroot_output` and the rest, plus `@self` and `${...}` as in any config value. A non-zero exit fails the assembly, and so the build, with the command's stdout and stderr tails in the error; a passing check's output lines go to the operation log. Validation requires a unique `id`, a non-empty `command`, and trees that exist for every `$assembly.tree.<id>` an argument names. A check runs whenever the assembly does: when the assembly is reused, its checks are not run again (editing the script itself does not re-run the assembly).
+A check is a program and its arguments, run without a shell from the workspace root after every assembly step (trees, files, filesystems, disks, archives, OCI images), so it sees the finished trees and outputs at the paths the steps wrote them, RAM work dirs included. Assembly tokens are expanded in every argument: `${assembly.tree.<id>}`, `${assembly.work}`, `${assembly.out}`, `${provider.images}`, `${provider.buildroot_output}` and the rest, plus `${self}` and `${...}` as in any config value. A non-zero exit fails the assembly, and so the build, with the command's stdout and stderr tails in the error; a passing check's output lines go to the operation log. Validation requires a unique `id`, a non-empty `command`, and trees that exist for every `${assembly.tree.<id>}` an argument names. A check runs whenever the assembly does: when the assembly is reused, its checks are not run again (editing the script itself does not re-run the assembly).

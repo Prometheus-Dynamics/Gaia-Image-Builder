@@ -42,6 +42,7 @@ pub(crate) fn print_outcome(outcome: &CommandOutcome) {
             for note in &spec.metadata.config_notes {
                 println!("note: {note}");
             }
+            print_config_v2_note(spec);
             print_selection(spec);
             for line in backend_overview_lines(spec) {
                 println!("{line}");
@@ -71,6 +72,7 @@ pub(crate) fn print_outcome(outcome: &CommandOutcome) {
             for note in &spec.metadata.config_notes {
                 println!("note: {note}");
             }
+            print_config_v2_note(spec);
             let required = plan
                 .operations
                 .iter()
@@ -676,3 +678,15 @@ fn print_selection(spec: &gaia_spec::ResolvedBuildSpec) {
 #[cfg(test)]
 #[path = "output_tests.rs"]
 mod tests;
+
+/// The note that the build still has config v2 files, which `gaia migrate`
+/// rewrites to v3.
+fn print_config_v2_note(spec: &gaia_spec::ResolvedBuildSpec) {
+    let files = &spec.metadata.config_v2_files;
+    if !files.is_empty() {
+        println!(
+            "note: {} of this build's files use config v2, which is deprecated; `gaia migrate <build file>` rewrites them to v3",
+            files.len()
+        );
+    }
+}

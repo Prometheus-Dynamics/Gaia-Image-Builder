@@ -15,6 +15,40 @@ This page covers loading, conditions, the top-level fields, interpolation and se
 - [Checkpoints, registry and reporting](configuration-checkpoints.md): [Checkpoints](configuration-checkpoints.md#checkpoints), [Registry checkpoints](configuration-checkpoints.md#registry-checkpoints), [Canonical tree path](configuration-checkpoints.md#canonical-tree-path), [Reporting](configuration-checkpoints.md#reporting)
 - [Key reference](reference/config-keys.md): every key Gaia accepts, generated from the config schema.
 
+## Config Versions
+
+A file that starts with `config = 3` is written in config v3, the format this
+documentation describes. A file without it is config v2, which Gaia still
+reads, and a build can mix both: each file is read in its own version and the
+files then merge as usual. `gaia validate` and `gaia plan` print a note
+naming the v2 files of a build. `gaia migrate` (see [cli.md](cli.md#migrate))
+rewrites them to v3.
+
+What v3 changes:
+- Every token is `${...}`. v2's `@self`, `@source:<id>`, `@<alias>`,
+  `$provider.<name>` and `$assembly.<name>` are `${self}`, `${source.<id>}`,
+  `${<alias>}`, `${provider.<name>}` and `${assembly.<name>}`. A v2 spelling
+  in a v3 file is an error.
+- A token whose namespace Gaia does not know, or an alias no
+  `[[workspace.named_paths]]` entry declares, is an error at its line instead
+  of a validation warning. The alias names `build`, `workspace`, `env`,
+  `preset`, `input`, `interpolation`, `provider`, `assembly`, `source`,
+  `outputs`, `self` and `choice` are reserved.
+- Where a build writes its outputs is one `[outputs]` table:
+  `dir` (v2 `workspace.out_dir`), `export_dir` (v2 `image.output.export_dir`
+  and `workspace.export_dir`), `images_dir` (v2 `image.output.collect_dir`),
+  `archive_name`, `disk` and `report` (v2 `image.output.emit_report`). See
+  [configuration-policy.md](configuration-policy.md#outputs).
+- Build caches are one `[cache]` table: `downloads`, `ccache` and `packages`
+  (v2 `[providers.buildroot]` `download_dir`, `ccache`, `package_cache`), and
+  `sccache` and `shared_target_dir` (v2 `[providers.rust]`). See
+  [configuration-policy.md](configuration-policy.md#cache).
+- `--set` and preset overrides take the v3 names (`outputs.dir`,
+  `cache.ccache.enabled`, `cache.packages.enabled`, ...) as well as the v2
+  ones.
+
+A v2 key in a v3 file is an error that names its v3 key.
+
 ## File Loading
 
 Gaia accepts:
@@ -85,10 +119,10 @@ rev = "<full commit sha>"   # or an entry in the build's lockfile
 - `when` behaves exactly as for local imports. An import whose `when` does not
   match is not loaded at all, whether it is local or from a source: nothing in
   it is fetched or token-resolved, so a layer selected for one target may use
-  `@source:<id>` while other targets build without that source being
+  `${source.<id>}` while other targets build without that source being
   reachable.
 - A git source used only as an import source (by `source = ...` or
-  `@source:<id>`) that no selected layer uses is left out of the plan; it is
+  `${source.<id>}`) that no selected layer uses is left out of the plan; it is
   kept when an artifact or the image builds from it.
 - Imports and `extends` inside a source-imported file resolve relative to that
   file, like local imports, and must stay inside the checkout: `..` or symlink
@@ -98,20 +132,20 @@ rev = "<full commit sha>"   # or an entry in the build's lockfile
 
 Path tokens, rewritten when each file is loaded, at the start of a string value
 or of any entry of a `:`-separated list such as
-`external_tree = "@source:bsp/devices/myboard/gaia/buildroot-external:myboard/assets/buildroot"`:
-- `@self` / `@self/<rest>`: absolute directory of the file containing the
+`external_tree = "${source.bsp}/devices/myboard/gaia/buildroot-external:myboard/assets/buildroot"`:
+- `${self}` / `${self}/<rest>`: absolute directory of the file containing the
   value. This is the same for local files and source-imported files, so a
-  layer written with `@self/overlays/myboard.dtbo` works from a checkout and from a
+  layer written with `${self}/overlays/myboard.dtbo` works from a checkout and from a
   vendored copy imported by plain path.
-- `@source:<id>` / `@source:<id>/<rest>`: the checkout directory of import
+- `${source.<id>}` / `${source.<id>}/<rest>`: the checkout directory of import
   source `<id>`, for consumers referencing files in the source.
 
 Relative paths elsewhere still resolve against the workspace root, so layers
 meant to be imported from a source should reference their own files with
-`@self`.
+`${self}`.
 
 Local development: `--set sources.<id>.path=<dir>` (absolute, or relative to
-the workspace root) reads imports and `@source:<id>` from `<dir>` without
+the workspace root) reads imports and `${source.<id>}` from `<dir>` without
 fetching or needing a pin, and the source materializes from `<dir>` as a
 `kind = "path"` source with the same id. Only `--set` overrides are honored for
 import resolution, not preset overrides. Do not run `gaia lock` with such an
@@ -310,12 +344,11 @@ Supported interpolation targets include:
 - `${build.profile}`
 - `${workspace.root_dir}`
 - `${workspace.build_dir}`
-- `${workspace.out_dir}`
+- `${outputs.dir}`
 - `${workspace.paths.<alias>}`
 - `${env:NAME}`
 - `${preset.name}`
 - `${input.name}`
-- `${inputs.name}`
 - `${interpolation.values.name}`
 
 If unresolved tokens remain:

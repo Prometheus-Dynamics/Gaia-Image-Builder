@@ -1,5 +1,6 @@
 # Imported base rootfs plus pulled git repos with cross-target Rust and Go artifacts.
 
+config = 3
 build_name = "imported-rootfs-cross-aarch64"
 version = "2.0.0"
 description = "Import a base rootfs tar, cross-build Rust and Go projects for aarch64, and install them into the image."
@@ -9,7 +10,6 @@ profile = "release"
 [workspace]
 root_dir = "examples/imported-rootfs-cross-aarch64"
 build_dir = "../../.gaia/examples/imported-rootfs-cross-aarch64/build"
-out_dir = "../../.gaia/examples/imported-rootfs-cross-aarch64/out"
 
 [reporting]
 summary = true
@@ -70,7 +70,7 @@ profile = "${build.profile}"
 install_name = "rust-app"
 install_class = "binary"
 install_dest_hint = "/usr/bin/rust-app"
-output_path = "${workspace.out_dir}/artifacts/rust-app"
+output_path = "${outputs.dir}/artifacts/rust-app"
 
 [artifacts.execution]
 backend = "docker"
@@ -87,7 +87,7 @@ target = "linux/arm64"
 install_name = "go-app"
 install_class = "binary"
 install_dest_hint = "/usr/bin/go-app"
-output_path = "${workspace.out_dir}/artifacts/go-app"
+output_path = "${outputs.dir}/artifacts/go-app"
 
 [artifacts.execution]
 backend = "docker"
@@ -115,7 +115,7 @@ group = "root"
 
 [[stage.files]]
 id = "motd"
-src = "@assets/etc/motd"
+src = "${assets}/etc/motd"
 dest = "/etc/motd"
 origin = "static-asset"
 
@@ -130,7 +130,8 @@ output_mode = "copy-and-archive"
 install_entries = ["install-rust-app", "install-go-app"]
 stage_files = ["motd"]
 
-[image.output]
-collect_dir = "${workspace.out_dir}/images"
+[outputs]
+images_dir = "${outputs.dir}/images"
 archive_name = "${build.name}-${build.version}.tar"
-emit_report = true
+report = true
+dir = "../../.gaia/examples/imported-rootfs-cross-aarch64/out"

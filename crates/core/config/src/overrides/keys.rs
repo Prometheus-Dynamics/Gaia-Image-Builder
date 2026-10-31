@@ -132,6 +132,9 @@ pub(crate) fn source_path_override_id(key: &str) -> Option<&str> {
 
 impl<'a> OverrideKey<'a> {
     pub(super) fn parse(key: &'a str) -> Self {
+        if let Some((_, v2)) = crate::v3::OVERRIDE_KEYS.iter().find(|(v3, _)| *v3 == key) {
+            return Self::parse(v2);
+        }
         match key {
             "build.name" => Self::Known(KnownOverrideKey::BuildName),
             "build.display_name" => Self::Known(KnownOverrideKey::BuildDisplayName),

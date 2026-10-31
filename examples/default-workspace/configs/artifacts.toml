@@ -1,3 +1,5 @@
+config = 3
+
 [[sources]]
 id = "gaia-upstream"
 kind = "git"
@@ -16,7 +18,7 @@ profile = "${build.profile}"
 install_name = "${build.name}"
 install_class = "binary"
 install_dest_hint = "/usr/bin/${build.name}"
-output_path = "${workspace.out_dir}/artifacts/gaia"
+output_path = "${outputs.dir}/artifacts/gaia"
 
 [[install]]
 id = "install-gaia-app"

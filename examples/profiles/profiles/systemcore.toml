@@ -3,6 +3,8 @@
 # Buildroot fields of software.toml are replaced; the assembly makes the
 # package from the two artifacts and a service file.
 
+config = 3
+
 [[sources]]
 id = "device-files"
 kind = "path"
@@ -39,21 +41,21 @@ kind = "none"
 
 [image.assembly]
 work_dir = "${workspace.build_dir}/assembly"
-out_dir = "${workspace.out_dir}"
+out_dir = "${outputs.dir}"
 
 [[image.assembly.trees]]
 id = "package-root"
-path = "$assembly.work/package-root"
+path = "${assembly.work}/package-root"
 
 [[image.assembly.files]]
 tree = "package-root"
-src = "${workspace.out_dir}/artifacts/helios-api"
+src = "${outputs.dir}/artifacts/helios-api"
 dest = "usr/bin/helios-api"
 mode = "0755"
 
 [[image.assembly.files]]
 tree = "package-root"
-src = "${workspace.out_dir}/artifacts/helios-cli"
+src = "${outputs.dir}/artifacts/helios-cli"
 dest = "usr/local/bin/helios-cli"
 mode = "0755"
 
@@ -66,7 +68,7 @@ mode = "0644"
 [[image.assembly.packages]]
 id = "helios-systemcore"
 tree = "package-root"
-dest = "$assembly.out/"
+dest = "${assembly.out}/"
 allowed_prefixes = ["/usr/bin", "/usr/local/bin", "/etc/systemd/system"]
 
 [image.assembly.packages.control]

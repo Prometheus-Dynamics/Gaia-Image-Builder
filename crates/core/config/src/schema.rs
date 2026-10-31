@@ -29,6 +29,7 @@ fn config_schema() -> Value {
         };
         properties.insert(field.to_string(), schema);
     }
+    v3_properties(&mut properties);
     json!({
         "$schema": SCHEMA_DRAFT,
         "title": "Gaia build config",
@@ -37,6 +38,47 @@ fn config_schema() -> Value {
         "properties": properties,
         "additionalProperties": false,
     })
+}
+
+/// Config v3's `config` version key and its `[outputs]` and `[cache]`
+/// tables. The v2 keys they replace stay in the schema, for v2 files.
+fn v3_properties(properties: &mut Map<String, Value>) {
+    properties.insert(crate::v3::VERSION_KEY.into(), json!({ "const": 3 }));
+    for table in ["outputs", "cache"] {
+        let mut keys = Map::new();
+        for (v3, v2) in crate::v3::MOVED_KEYS {
+            let Some(key) = v3
+                .strip_prefix(table)
+                .and_then(|rest| rest.strip_prefix('.'))
+            else {
+                continue;
+            };
+            let fields = match *v2 {
+                "providers.buildroot.ccache" => crate::unknown_keys::struct_fields::<
+                    crate::raw::RawBuildrootCcachePolicyConfig,
+                >(),
+                "providers.buildroot.package_cache" => crate::unknown_keys::struct_fields::<
+                    crate::raw::RawBuildrootPackageCacheConfig,
+                >(),
+                _ => None,
+            };
+            let schema = match fields {
+                Some(fields) => {
+                    let fields: Map<String, Value> = fields
+                        .iter()
+                        .map(|field| (field.to_string(), json!({})))
+                        .collect();
+                    json!({ "type": "object", "properties": fields, "additionalProperties": false })
+                }
+                None => json!({}),
+            };
+            keys.insert(key.to_string(), schema);
+        }
+        properties.insert(
+            table.into(),
+            json!({ "type": "object", "properties": keys, "additionalProperties": false }),
+        );
+    }
 }
 
 /// A section: a table, or an array of tables. A kinded section is one table

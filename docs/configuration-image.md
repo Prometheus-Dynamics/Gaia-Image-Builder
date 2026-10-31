@@ -10,7 +10,7 @@
 [image]
 kind = "buildroot"
 defconfig = "raspberrypi_defconfig"
-external_tree = "@assets/buildroot"
+external_tree = "${assets}/buildroot"
 external_tree_mode = "required"
 
 [image.feed]
@@ -24,21 +24,20 @@ name = "sdcard.img"
 format = "raw"
 required = true
 
-[image.output]
-collect_dir = "${workspace.out_dir}/images"
+[outputs]
+images_dir = "${outputs.dir}/images"
 archive_name = "${build.name}-${build.version}.img.xz"
 export_dir = "~/images/gaia"
-emit_report = true
+report = true
 ```
 
+The image's outputs are set in [`[outputs]`](configuration-policy.md#outputs).
 `export_dir` is where a successful `gaia run` copies the primary image (see
-[Exporting the image](cli.md#exporting-the-image)). It is set per build here
-and falls back to `[workspace] export_dir`. A path that is not absolute and
-does not start with `~/` is taken from the workspace root; `~` and `~/...`
-expand to the home directory. An empty value is an error. `gaia run --export
-<dir>` overrides both, and `gaia run --no-export` skips the configured
-export for one run. The `--set` keys are `image.output.export_dir` and
-`workspace.export_dir`.
+[Exporting the image](cli.md#exporting-the-image)). A path that is not
+absolute and does not start with `~/` is taken from the workspace root; `~`
+and `~/...` expand to the home directory. An empty value is an error. `gaia
+run --export <dir>` overrides it, and `gaia run --no-export` skips the
+configured export for one run. The `--set` key is `outputs.export_dir`.
 
 An `archive_name` ending in `.img`/`.raw` publishes the raw disk image
 itself; `.img.xz`/`.raw.xz` compresses it with xz (smallest, slow) and
@@ -58,12 +57,12 @@ disk archive that typed assembly builds is written by that step, so the path
 stays absent until then.
 
 When the assembly builds more than one disk, a raw disk archive needs
-`disk = "<assembly disk id>"` in `[image.output]` to say which disk it holds
+`disk = "<assembly disk id>"` in `[outputs]` to say which disk it holds
 (the id must be an `[[image.assembly.disks]]` entry, and the archive name must
 be a raw disk image). Without it the run fails and names the disks:
 
 ```toml
-[image.output]
+[outputs]
 archive_name = "${build.name}-${build.version}.img.xz"
 disk = "sdcard"
 ```
@@ -80,8 +79,8 @@ export it.
 Buildroot fields:
 - `defconfig`
 - `external_tree`: one or more `BR2_EXTERNAL` trees, `:`-separated as
-  Buildroot expects (`"@source:bsp/devices/myboard/gaia/buildroot-external:myboard/assets/buildroot"`).
-  Each entry is resolved on its own: `@self`, `@source:<id>` and `@alias`
+  Buildroot expects (`"${source.bsp}/devices/myboard/gaia/buildroot-external:myboard/assets/buildroot"`).
+  Each entry is resolved on its own: `${self}`, `${source.<id>}` and `${<alias>}`
   tokens may start any entry, and plain relative entries resolve against the
   workspace root. Every tree needs its own `external.desc` with a unique
   `name`. Gaia's generated package-override tree (`GAIA_GENERATED`) is
@@ -192,7 +191,7 @@ so a slot id can carry the commit:
 ```toml
 [[image.assembly.trees]]
 id = "slot-${source.app.commit_short}"
-path = "$assembly.work/slot-${source.app.commit_short}"
+path = "${assembly.work}/slot-${source.app.commit_short}"
 
 [[image.assembly.files]]
 tree = "slot-${source.app.commit_short}"
@@ -410,8 +409,8 @@ replaces the Buildroot fields it set (see "Image kind switch", under "Profiles")
 [image]
 kind = "none"
 
-[image.output]
-collect_dir = "${workspace.out_dir}"
+[outputs]
+images_dir = "${outputs.dir}"
 ```
 
 `kind = "none"` builds no rootfs, kernel or image, and no image provider runs.
@@ -426,10 +425,10 @@ How the rest of the build fits:
 - With an assembly, `image:assembly` takes the place of the image: it waits for
   every artifact, install and stage entry of the build, and for the sources its
   `${source.<id>...}` tokens name (there is no `image:build` to wait for).
-- `$assembly.work`, `$assembly.out`, `$assembly.tree.<id>` and workspace paths
-  work. A `$provider.*` token is a validation error, because there is no image
+- `${assembly.work}`, `${assembly.out}`, `${assembly.tree.<id>}` and workspace paths
+  work. A `${provider.*}` token is a validation error, because there is no image
   provider.
-- `[image.output]` `collect_dir` is the assembly's output directory unless
+- `outputs.images_dir` is the assembly's output directory unless
   `[image.assembly] out_dir` says otherwise. `archive_name` and `disk` name an
   assembly archive or disk as they do for a Buildroot image.
 - `[image.feed]`, `[image.checks]`, `[[image.hardware]]` and `[image.layers]`
@@ -440,7 +439,7 @@ How the rest of the build fits:
   needs `[image.assembly]`; an anchor at a feed entry is an error here.
 
 The primary output (the one the run summary names and `gaia run` exports) is
-`image.output.archive_name`'s archive when it is set. Otherwise it is the first
+`outputs.archive_name`'s archive when it is set. Otherwise it is the first
 existing assembly deliverable, in this order: the first
 `[[image.assembly.packages]]` package, then the first archive, then the first
 disk.

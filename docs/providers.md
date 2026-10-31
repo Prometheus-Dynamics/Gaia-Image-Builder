@@ -124,8 +124,12 @@ Provider command policies support:
 Specialized fields:
 - Rust: `allow_nested_build`
 - Git: `allow_remote_resolution`
-- Buildroot: `local_jobs`, `download_dir`, `ccache`, `shared_output`,
+- Buildroot: `local_jobs`, `shared_output`,
   `shared_output_dir`, `override_check`
+
+The Buildroot download dir, ccache and package cache and Rust's sccache and
+shared target dir are `[cache]` keys (see
+[configuration-policy.md](configuration-policy.md#cache)).
 
 Artifact reuse fingerprints include the artifact's toolchain identity: host
 tool versions for host builds, and the execution image (Dockerfile content

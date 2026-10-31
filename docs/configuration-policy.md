@@ -98,7 +98,8 @@ Build-context hashes (`dockerfile` artifacts) read each file in chunks and skip 
 Provider policy lives under `[providers.*]`.
 
 Rust, Git and Java have extra specialized fields:
-- Rust: `allow_nested_build`, `batch_builds`, `shared_target_dir`, `sccache`, `strip`
+- Rust: `allow_nested_build`, `batch_builds`, `strip` (its cache settings,
+  `sccache` and `shared_target_dir`, are in [`[cache]`](#cache))
 - Git: `allow_remote_resolution`
 - Java: `gradle_home` (see [Java and Gradle](#java-and-gradle))
 
@@ -124,7 +125,7 @@ shared dependency features. Artifacts that must agree on features should use
 a [Rust build group](configuration-artifacts.md#rust-build-groups) instead: groups always build together,
 with or without `batch_builds`.
 
-`sccache` (default `false`) compiles nested cargo artifacts through sccache:
+`cache.sccache` (default `false`) compiles nested cargo artifacts through sccache:
 `RUSTC_WRAPPER=sccache` is set when `sccache --version` runs where cargo runs,
 that is on the host, or inside the docker image. On the host the cache lives
 under the user cache root (`<user cache>/sccache`, unless `SCCACHE_DIR` is set);
@@ -139,7 +140,7 @@ Cargo's own files in the target dir are not touched. A host without any of
 these tools fails the artifact. The setting is part of the recorded state, so
 changing it rebuilds the artifact.
 
-`shared_target_dir` (default `false`) builds the nested cargo artifacts of
+`cache.shared_target_dir` (default `false`) builds the nested cargo artifacts of
 every source into one cargo target directory per toolchain, target triple,
 profile and execution backend, under the user cache:
 `<user cache>/cargo-target/<key>` (`$GAIA_CACHE_DIR`, else
@@ -198,8 +199,6 @@ Example:
 [providers.rust]
 allow_nested_build = false
 batch_builds = true  # opt-in; see above
-shared_target_dir = true  # opt-in; see above
-sccache = true  # opt-in; see above
 strip = true  # opt-in; see above
 retry_attempts = 2
 retry_backoff_ms = 500
@@ -223,9 +222,13 @@ make_retry_attempts = 1           # its attempts, retried only for network failu
 erofs_workers = "auto"            # mkfs.erofs threads: "auto", "off", or a count
 local_jobs = 4
 parallel_packages = true
-# download_dir = "/srv/buildroot-dl"     # default: the user cache below
 
-[providers.buildroot.ccache]
+[cache]
+sccache = true                           # opt-in; see above
+shared_target_dir = true                 # opt-in; see above
+# downloads = "/srv/buildroot-dl"        # default: the user cache below
+
+[cache.ccache]
 enabled = true
 # dir = "/srv/buildroot-ccache"          # default: the user cache below
 # max_size = "50G"                       # default: from free space, see below
@@ -238,10 +241,10 @@ tree was wiped, reuses them. They live under the user cache root:
 (`buildroot/dl` and `buildroot/ccache`), or under `<workspace>/.gaia/cache`
 when that cannot be created.
 
-- `download_dir` is passed as `BR2_DL_DIR` (written to `.config` when set,
+- `cache.downloads` is passed as `BR2_DL_DIR` (written to `.config` when set,
   through the environment otherwise), so source tarballs survive clean
   builds and re-fetching the Buildroot source.
-- `ccache.enabled = true` sets `BR2_CCACHE=y`, `BR2_CCACHE_DIR` and
+- `cache.ccache.enabled = true` sets `BR2_CCACHE=y`, `BR2_CCACHE_DIR` and
   `BR2_CCACHE_USE_BASEDIR=y` (paths relative to the output tree, so trees in
   other directories share cache entries), and sets `max_size` in the cache's
   `ccache.conf`. Buildroot keys entries on its toolchain, so builds with the
@@ -273,7 +276,7 @@ when that cannot be created.
   recorded with the current images, or an expected image is missing. A
   rebuild where nothing those read changed skips EROFS, ext4, squashfs and
   genimage entirely.
-- Turning `ccache.enabled` or `parallel_packages` on or off changes the
+- Turning `cache.ccache.enabled` or `parallel_packages` on or off changes the
   toolchain wrapper or the tree layout, so the next build cleans the output
   tree once.
 
@@ -346,7 +349,7 @@ build image's 1.8.1 has.
 [providers.buildroot]
 parallel_packages = true          # required
 
-[providers.buildroot.package_cache]
+[cache.packages]
 enabled = true
 # level = "system"                # default level for packages: "system" | "project"
 # system_dir = "/srv/buildroot-packages"   # default: see below
@@ -414,7 +417,7 @@ gaia cache build.toml --remove mesa3d --dry-run
 ```
 
 To build without the cache for one run, pass
-`--set policy.providers.buildroot.package_cache.enabled=false`.
+`--set cache.packages.enabled=false`.
 
 The keys ignore Gaia's own patches to Buildroot (such as the reflink copy of
 per-package directories), so a build with and without them shares entries.
@@ -553,7 +556,7 @@ at `<shared_output_dir>/<key>`. The key is a digest of:
 - `defconfig`, `defconfig_path` and `config_fragments` (paths and content),
 - `config_overrides`,
 - the external tree and package override directories,
-- `ccache.enabled`, `parallel_packages` (when on) and the Docker image.
+- `cache.ccache.enabled`, `parallel_packages` (when on) and the Docker image.
 
 The build name, build directory and image feed are not part of the key, so
 `acme-base-os-evk` and `acme-full-evk` share one tree when only their
@@ -708,7 +711,6 @@ labels = [
 [workspace]
 root_dir = "."
 build_dir = ".gaia/build/my-build"
-out_dir = ".gaia/out/my-build"
 
 [[workspace.named_paths]]
 alias = "assets"
@@ -726,18 +728,73 @@ Fields:
   Logical repo/workspace root for path resolution.
 - `build_dir`
   Mutable build workspace.
-- `out_dir`
-  Mutable published output location.
-- `export_dir`
-  Optional default directory for `gaia run --export` in every build of the
-  workspace. A build's own `image.output.export_dir` takes precedence. See
-  [Image output](configuration-image.md#image) and [`gaia run --export`](cli.md#exporting-the-image).
+- `named_paths`
+  Aliases for directories under the root. A path value that starts with
+  `${<alias>}` (such as `${assets}/motd`) resolves under that directory.
+
+Where the build's outputs go is set in [`[outputs]`](#outputs).
 
 Named path kinds:
 - `host`
   Real host filesystem path.
 - `logical`
   Logical alias used as a semantic reference.
+
+An alias cannot be named like a token namespace (`build`, `input`,
+`provider`, `outputs`, `self`, ...), since `${<alias>}` would read as that
+token.
+
+## Outputs
+
+```toml
+[outputs]
+dir = ".gaia/out/my-build"          # the published outputs
+images_dir = "${outputs.dir}/images"
+archive_name = "${build.name}-${build.version}.img.xz"
+export_dir = "~/images"             # where `gaia run` copies the primary image
+report = true
+```
+
+- `dir`
+  Mutable published output location. `${outputs.dir}` names it in other
+  values.
+- `images_dir`
+  Where the image's files are collected. When unset, each variant of a build
+  with `[[variants]]` collects into its own directory under the default.
+- `archive_name`, `disk`
+  The image archive's name and the assembly disk a raw disk archive is built
+  from. See [Image](configuration-image.md#image).
+- `export_dir`
+  Where `gaia run` copies the primary image after a successful run. Set it in
+  a workspace layer to export every build there; a build file's own value
+  replaces it like any other key. See
+  [`gaia run --export`](cli.md#exporting-the-image).
+- `report`
+  Write the image report next to the image.
+
+## Cache
+
+```toml
+[cache]
+downloads = "/srv/buildroot-dl"     # Buildroot's BR2_DL_DIR
+sccache = true                      # Rust: compile through sccache
+shared_target_dir = true            # Rust: one cargo target dir per toolchain
+
+[cache.ccache]                      # Buildroot's compiler cache
+enabled = true
+max_size = "50G"
+
+[cache.packages]                    # Buildroot's package cache
+enabled = true
+```
+
+Everything Gaia caches between builds is set here. Each key is described with
+the provider that uses it: `downloads` and `ccache` under
+[Provider Execution Policy](#provider-execution-policy), `packages` under
+[Package cache](#package-cache), and `sccache` and `shared_target_dir` with
+the Rust provider. `[cache.ccache]` takes `enabled`, `dir` and `max_size`;
+`[cache.packages]` takes `enabled`, `level`, `system_dir` (or `dir`),
+`project_dir`, `project_packages`, `system_packages` and `max_size`.
 
 ## Clean
 
@@ -767,10 +824,10 @@ Fields:
 - `clean.profiles.<name>.build`
   Include `workspace.build_dir`.
 - `clean.profiles.<name>.out`
-  Include `workspace.out_dir`.
+  Include `outputs.dir`.
 - `clean.profiles.<name>.paths`
   Additional paths to remove. Paths use the same workspace resolution as other
-  Gaia paths, including `@alias/...`.
+  Gaia paths, including `${alias}/...`.
 
-Bare `gaia clean` removes `workspace.build_dir` and `workspace.out_dir` when no
+Bare `gaia clean` removes `workspace.build_dir` and `outputs.dir` when no
 default clean profile is configured.

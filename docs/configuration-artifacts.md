@@ -15,14 +15,14 @@ dependencies = ["acme-common"]
 install_name = "acme-api"
 install_class = "binary"
 install_dest_hint = "/usr/bin/acme-api"
-output_path = "${workspace.out_dir}/artifacts/acme-api"
+output_path = "${outputs.dir}/artifacts/acme-api"
 
 [[artifacts]]
 id = "worker-node"
 kind = "java"
 build_target = "build/libs/worker-node.jar"
 source = "workspace-root"
-output_path = "${workspace.out_dir}/artifacts/worker-node.jar"
+output_path = "${outputs.dir}/artifacts/worker-node.jar"
 
 [[artifacts]]
 id = "camera-jni"
@@ -35,28 +35,28 @@ build_env = [
 ]
 after_image_prepare = true
 source = "camera-jni-source"
-output_path = "${workspace.out_dir}/artifacts/camera-jni-linuxarm64.jar"
+output_path = "${outputs.dir}/artifacts/camera-jni-linuxarm64.jar"
 
 [[artifacts]]
 id = "frontend-package"
 kind = "node"
 package_dir = "frontend"
 source = "workspace-root"
-output_path = "${workspace.out_dir}/artifacts/frontend.tgz"
+output_path = "${outputs.dir}/artifacts/frontend.tgz"
 
 [[artifacts]]
 id = "python-wheel"
 kind = "python"
 package_dir = "sdk/python"
 source = "workspace-root"
-output_path = "${workspace.out_dir}/artifacts/sdk.whl"
+output_path = "${outputs.dir}/artifacts/sdk.whl"
 
 [[artifacts]]
 id = "acmectl"
 kind = "go"
 package = "./cmd/acmectl"
 source = "workspace-root"
-output_path = "${workspace.out_dir}/artifacts/acmectl"
+output_path = "${outputs.dir}/artifacts/acmectl"
 ```
 
 Artifact common fields:
@@ -188,7 +188,7 @@ features = ["acme-engine/plugins"]
 build_group = "acme"
 install_name = "acme-engine"
 install_dest_hint = "/usr/bin/acme-engine"
-output_path = "${workspace.out_dir}/artifacts/acme-engine"
+output_path = "${outputs.dir}/artifacts/acme-engine"
 
 [[artifacts]]
 id = "vision-plugin"
@@ -202,7 +202,7 @@ build_group = "acme"
 install_name = "libvision_plugin.so"
 install_class = "library"
 install_dest_hint = "/usr/lib/acme/plugins/libvision_plugin.so"
-output_path = "${workspace.out_dir}/artifacts/libvision_plugin.so"
+output_path = "${outputs.dir}/artifacts/libvision_plugin.so"
 
 [[install]]
 id = "install-acme-engine"
@@ -241,7 +241,7 @@ kind = "rust"
 source = "workspace"
 package = "vision"
 cargo_git_sources = { "https://example.com/org/Corelib.git" = "corelib" }
-output_path = "${workspace.out_dir}/artifacts/vision"
+output_path = "${outputs.dir}/artifacts/vision"
 ```
 
 - The key is the repository URL as `Cargo.lock` records it. It also matches
@@ -282,7 +282,7 @@ id = "acme-engine"
 kind = "rust"
 package = "acme-engine"
 source = "workspace-root"
-output_path = "${workspace.out_dir}/artifacts/acme-engine"
+output_path = "${outputs.dir}/artifacts/acme-engine"
 
 [artifacts.execution]
 backend = "docker"          # or "host"
@@ -291,7 +291,7 @@ backend = "docker"          # or "host"
 # Either reference an existing image ...
 image = "acme-cross-rust194"
 # ... or let Gaia build it from a Dockerfile (paths are workspace paths,
-# `@alias/...` works).
+# `${alias}/...` works).
 dockerfile = "docker/cross-rust/Dockerfile"
 context = "docker/cross-rust"   # optional, defaults to the Dockerfile's directory
 ```
@@ -354,7 +354,7 @@ group = "root"
 ```toml
 [[stage.files]]
 id = "motd"
-src = "@assets/etc/motd"
+src = "${assets}/etc/motd"
 dest = "/etc/motd"
 origin = "static-asset"
 
@@ -369,7 +369,7 @@ entries = [
 [[stage.services]]
 id = "acme-api"
 name = "acme-api.service"
-unit_path = "@assets/systemd/acme-api.service"
+unit_path = "${assets}/systemd/acme-api.service"
 ```
 
 Stage file origins:

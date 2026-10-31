@@ -129,7 +129,12 @@ const LITERAL_KEYS: &[&str] = &[
 /// Keys are compared in full and by their last segment, so a misspelled
 /// leaf such as `image.rootfs_pth` still finds `image.starting-point.rootfs_path`.
 pub(super) fn did_you_mean(wanted: &str) -> String {
-    did_you_mean_among(wanted, LITERAL_KEYS)
+    let keys: Vec<&str> = LITERAL_KEYS
+        .iter()
+        .copied()
+        .chain(crate::v3::OVERRIDE_KEYS.iter().map(|(v3, _)| *v3))
+        .collect();
+    did_you_mean_among(wanted, &keys)
 }
 
 /// [`did_you_mean`] over `candidates` instead of the override keys: the

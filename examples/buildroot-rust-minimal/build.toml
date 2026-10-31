@@ -1,3 +1,4 @@
+config = 3
 build_name = "buildroot-rust-minimal"
 version = "2.0.0"
 description = "Fast minimal Buildroot image with one Rust binary and one staged file."
@@ -7,7 +8,6 @@ profile = "release"
 [workspace]
 root_dir = "examples/buildroot-rust-minimal"
 build_dir = "../../.gaia/examples/buildroot-rust-minimal/build"
-out_dir = "../../.gaia/examples/buildroot-rust-minimal/out"
 
 [reporting]
 summary = true
@@ -27,9 +27,11 @@ retry_backoff_ms = 0
 retry_backoff_strategy = "fixed"
 timeout_seconds = 7200
 local_jobs = 4
-download_dir = "../../.gaia/cache/buildroot/dl"
 
-[providers.buildroot.ccache]
+[cache]
+downloads = "../../.gaia/cache/buildroot/dl"
+
+[cache.ccache]
 enabled = true
 dir = "../../.gaia/cache/buildroot/ccache"
 
@@ -63,7 +65,7 @@ profile = "${build.profile}"
 install_name = "smoke-app"
 install_class = "binary"
 install_dest_hint = "/usr/bin/smoke-app"
-output_path = "${workspace.out_dir}/artifacts/smoke-app"
+output_path = "${outputs.dir}/artifacts/smoke-app"
 
 [[install]]
 id = "install-smoke-app"
@@ -76,14 +78,14 @@ group = "root"
 
 [[stage.files]]
 id = "motd"
-src = "@assets/etc/motd"
+src = "${assets}/etc/motd"
 dest = "/etc/motd"
 origin = "static-asset"
 
 [image]
 kind = "buildroot"
 source = "buildroot-source"
-defconfig_path = "@assets/buildroot-smoke.defconfig"
+defconfig_path = "${assets}/buildroot-smoke.defconfig"
 external_tree_mode = "disabled"
 
 [image.feed]
@@ -95,10 +97,11 @@ name = "rootfs.tar"
 format = "tar"
 required = true
 
-[image.output]
-collect_dir = "${workspace.out_dir}/images"
+[outputs]
+images_dir = "${outputs.dir}/images"
 archive_name = "${build.name}-${build.version}.tar"
-emit_report = true
+report = true
+dir = "../../.gaia/examples/buildroot-rust-minimal/out"
 
 [execution]
 jobs = 0

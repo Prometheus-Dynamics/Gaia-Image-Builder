@@ -603,7 +603,7 @@ fn check_table(
 /// The field names serde's derive passes to `deserialize_struct`, or `None`
 /// for types that do not deserialize as a plain struct (flatten, custom
 /// impls).
-fn struct_fields<T: DeserializeOwned>() -> Option<&'static [&'static str]> {
+pub(crate) fn struct_fields<T: DeserializeOwned>() -> Option<&'static [&'static str]> {
     match T::deserialize(FieldNames) {
         Err(Captured(fields)) => fields,
         Ok(_) => None,

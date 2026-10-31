@@ -85,6 +85,12 @@ pub(crate) struct RawBuildConfig {
     /// The file sets nothing at all (only comments).
     #[serde(skip)]
     pub sets_nothing: bool,
+    /// The file's config version (`config = 3`, else v2).
+    #[serde(skip)]
+    pub config_version: Option<crate::v3::ConfigVersion>,
+    /// What the v3 file's tokens use that the merged build must have.
+    #[serde(skip)]
+    pub v3_uses: crate::v3::V3FileUses,
     /// Entries of this file that patch an earlier entry: they have no key
     /// that marks a full declaration (see `PatchTable::marker`). Applied by
     /// the merge, in file order, after this file's declarations.

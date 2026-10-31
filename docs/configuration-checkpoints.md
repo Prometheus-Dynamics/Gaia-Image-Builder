@@ -48,7 +48,7 @@ Important:
 
 A checkpoint with `backend = "oci"` makes an OCI registry a build cache. Build products are stored there as signed artifacts and fetched on a miss, so another machine or a clean checkout can reuse them. It serves three kinds of entry:
 
-- `package`: a Buildroot package build (the package cache's entries, see `[providers.buildroot.package_cache]`);
+- `package`: a Buildroot package build (the package cache's entries, see `[cache.packages]`);
 - `artifact`: an artifact's output (its reuse fingerprint is the key);
 - `layer`: an image layer (`[image.layers]`), keyed by the layer's input fingerprint.
 

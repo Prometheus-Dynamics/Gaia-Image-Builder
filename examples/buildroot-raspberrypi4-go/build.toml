@@ -1,3 +1,4 @@
+config = 3
 build_name = "buildroot-raspberrypi4-go"
 version = "2.0.0"
 description = "Minimal Raspberry Pi 4 image with one cross-target Go binary and one OS tweak."
@@ -7,7 +8,6 @@ profile = "release"
 [workspace]
 root_dir = "examples/buildroot-raspberrypi4-go"
 build_dir = "../../.gaia/examples/buildroot-raspberrypi4-go/build"
-out_dir = "../../.gaia/examples/buildroot-raspberrypi4-go/out"
 
 [reporting]
 summary = true
@@ -27,9 +27,11 @@ retry_backoff_ms = 0
 retry_backoff_strategy = "fixed"
 timeout_seconds = 7200
 local_jobs = 4
-download_dir = "../../.gaia/cache/buildroot/dl"
 
-[providers.buildroot.ccache]
+[cache]
+downloads = "../../.gaia/cache/buildroot/dl"
+
+[cache.ccache]
 enabled = true
 dir = "../../.gaia/cache/buildroot/ccache"
 
@@ -69,7 +71,7 @@ target = "linux/arm64"
 install_name = "pi-dummy"
 install_class = "binary"
 install_dest_hint = "/usr/bin/pi-dummy"
-output_path = "${workspace.out_dir}/artifacts/pi-dummy"
+output_path = "${outputs.dir}/artifacts/pi-dummy"
 
 [artifacts.execution]
 backend = "docker"
@@ -88,7 +90,7 @@ group = "root"
 
 [[stage.files]]
 id = "motd"
-src = "@assets/etc/motd"
+src = "${assets}/etc/motd"
 dest = "/etc/motd"
 origin = "static-asset"
 
@@ -96,7 +98,7 @@ origin = "static-asset"
 kind = "buildroot"
 source = "buildroot-source"
 defconfig_path = "assets/buildroot-raspberrypi4-smoke.defconfig"
-config_fragments = ["@assets/buildroot-board.fragment"]
+config_fragments = ["${assets}/buildroot-board.fragment"]
 config_overrides = [
   ["BR2_PACKAGE_HOST_GENIMAGE", "y"],
   ["BR2_TARGET_ROOTFS_EXT2_SIZE", "\"64M\""],
@@ -112,10 +114,11 @@ name = "sdcard.img"
 format = "raw"
 required = true
 
-[image.output]
-collect_dir = "${workspace.out_dir}/images"
+[outputs]
+images_dir = "${outputs.dir}/images"
 archive_name = "${build.name}-${build.version}.img"
-emit_report = true
+report = true
+dir = "../../.gaia/examples/buildroot-raspberrypi4-go/out"
 
 [execution]
 jobs = 0

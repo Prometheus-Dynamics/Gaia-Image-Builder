@@ -1,5 +1,7 @@
 # The raze device: a Buildroot rootfs of the shared software.
 
+config = 3
+
 [[sources]]
 id = "buildroot-source"
 kind = "git"
@@ -8,5 +10,5 @@ tag = "2025.11.3"
 refresh = "never"
 pin = "locked"
 
-[image.output]
+[outputs]
 archive_name = "${build.name}-raze-${build.version}.tar"

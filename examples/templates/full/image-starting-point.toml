@@ -1,5 +1,7 @@
 # Starting-point image template.
 
+config = 3
+
 [image]
 kind = "starting-point"
 
@@ -18,7 +20,7 @@ stage_files = ["hostname", "motd", "generated-build-info"]
 stage_env_sets = ["runtime-env", "api-env"]
 stage_services = ["acme-api", "acme-engine"]
 
-[image.output]
-collect_dir = "${workspace.out_dir}/images"
+[outputs]
+images_dir = "${outputs.dir}/images"
 archive_name = "${build.name}-${build.version}.tar"
-emit_report = true
+report = true

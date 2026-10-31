@@ -1,3 +1,4 @@
+config = 3
 build_name = "default"
 extends = "base.toml"
 imports = ["artifacts.toml", "stage.toml"]
@@ -18,10 +19,10 @@ name = "rootfs.tar"
 format = "tar"
 required = false
 
-[image.output]
-collect_dir = "${workspace.out_dir}/images"
+[outputs]
+images_dir = "${outputs.dir}/images"
 archive_name = "${build.name}-${build.version}.tar"
-emit_report = true
+report = true
 
 [[checkpoints]]
 id = "base-image"

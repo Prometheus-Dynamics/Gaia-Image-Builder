@@ -128,7 +128,10 @@ struct ConfigFiles {
 
 struct ParsedConfigFile {
     contents: String,
+    /// The file's values, in the v2 shape when the file is v3.
     value: toml::Value,
+    version: crate::v3::ConfigVersion,
+    v3_uses: crate::v3::V3FileUses,
 }
 
 impl ConfigFiles {
@@ -149,9 +152,15 @@ impl ConfigFiles {
                 "the file is empty; a config file must set something (was it truncated?)",
             ));
         }
-        let value: toml::Value = toml::from_str(&contents)
+        let mut value: toml::Value = toml::from_str(&contents)
             .map_err(|error| ConfigError::config_parse_at(path, &contents, &error))?;
-        let parsed = Rc::new(ParsedConfigFile { contents, value });
+        let (version, v3_uses) = crate::v3::read_version(path, &contents, &mut value)?;
+        let parsed = Rc::new(ParsedConfigFile {
+            contents,
+            value,
+            version,
+            v3_uses,
+        });
         self.parsed
             .borrow_mut()
             .insert(path.to_path_buf(), parsed.clone());
@@ -236,6 +245,8 @@ impl Loader<'_> {
         raw.source_path = Some(canonical_path.clone());
         raw.unknown_keys = unknown_keys;
         raw.sets_nothing = sets_nothing;
+        raw.config_version = Some(file.version);
+        raw.v3_uses = file.v3_uses.clone();
         if raw.build_name.trim().is_empty() {
             raw.build_name = infer_build_name(&canonical_path);
         }
@@ -494,7 +505,7 @@ fn validate_raw_toml_shape(path: &Path, value: &toml::Value) -> Result<(), Confi
     Ok(())
 }
 
-fn resolve_build_path(build: &str) -> Result<PathBuf, ConfigError> {
+pub(crate) fn resolve_build_path(build: &str) -> Result<PathBuf, ConfigError> {
     let input = PathBuf::from(build);
     if input.is_file() {
         return Ok(input);

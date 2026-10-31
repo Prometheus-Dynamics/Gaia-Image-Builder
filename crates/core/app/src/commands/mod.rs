@@ -9,6 +9,7 @@ mod interrupt;
 mod layer_delta;
 pub(crate) mod live_status;
 mod lock;
+mod migrate;
 mod plan;
 mod preview;
 mod progress;
@@ -210,6 +211,9 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
     if args.lock.update && args.command != AppCommand::Lock {
         usage_errors.push("--update applies to 'lock'".into());
     }
+    if args.migrate.check && args.command != AppCommand::Migrate {
+        usage_errors.push("--check applies to 'migrate'".into());
+    }
     if args.clean.all_caches && args.command != AppCommand::Clean {
         usage_errors.push("--all-caches applies to 'clean'".into());
     }
@@ -378,6 +382,11 @@ pub fn dispatch(context: &AppContext, args: AppArgs) -> CommandOutcome {
             args.json,
         ),
         AppCommand::Lock => lock_build_command(&args.build, &resolve_options(&args), &args.lock),
+        AppCommand::Migrate => {
+            let mut builds = vec![args.build.clone()];
+            builds.extend(args.migrate.more_builds.iter().cloned());
+            migrate::migrate_command(&builds, args.migrate.check)
+        }
         AppCommand::Run => run_build_command(
             context,
             &args.build,
@@ -452,6 +461,7 @@ fn help_text() -> String {
         "  gaia status <build-config> [--follow]",
         "  gaia lock [build-config]",
         "  gaia lock [build-config] --update [source-id[,source-id...]]",
+        "  gaia migrate [build-config...] [--check]",
         "  gaia run [build-config]",
         "  gaia run [build-config] --preset <name>",
         "  gaia run [build-config] --env-file <path>",
@@ -503,6 +513,10 @@ fn help_text() -> String {
         "",
         "'gaia lock' records the commit of every git source in <build>.gaia.lock",
         "next to the build file; builds then check out exactly those commits.",
+        "'gaia migrate' rewrites a build's config v2 files (the build file and the",
+        "files it extends and imports) to config v3, keeping comments, and puts them",
+        "back unless every preset and variant resolves the same; --check only fails",
+        "while a file is still v2.",
         "'clean --target caches' prunes stale shared cargo target dirs and leftover",
         "work dirs; --unused-mirrors also prunes git mirrors this build does not use,",
         "and --all-caches removes every git mirror and the shared download and tool caches.",

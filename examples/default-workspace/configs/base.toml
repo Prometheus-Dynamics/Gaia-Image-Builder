@@ -1,3 +1,4 @@
+config = 3
 version = "2.0.0"
 description = "Gaia rewrite default build for workspace-level image assembly."
 branch = "${interpolation.values.default_branch}"
@@ -97,9 +98,11 @@ retry_backoff_ms = 0
 retry_backoff_strategy = "fixed"
 timeout_seconds = 600
 local_jobs = 4
-download_dir = ".gaia/cache/buildroot/dl"
 
-[providers.buildroot.ccache]
+[cache]
+downloads = ".gaia/cache/buildroot/dl"
+
+[cache.ccache]
 enabled = true
 dir = ".gaia/cache/buildroot/ccache"
 
@@ -135,7 +138,9 @@ labels = [
 [workspace]
 root_dir = "."
 build_dir = ".gaia/examples/default-workspace/build"
-out_dir = ".gaia/examples/default-workspace/out"
+
+[outputs]
+dir = ".gaia/examples/default-workspace/out"
 
 [[workspace.named_paths]]
 alias = "assets"

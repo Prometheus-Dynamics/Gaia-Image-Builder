@@ -17,6 +17,10 @@ pub struct BuildMetadataSpec {
     /// layer that set each patched field, and the fields a kind switch
     /// replaced. Shown by `validate` and `plan`.
     pub config_notes: Vec<String>,
+    /// The build's files still written in config v2, for the note that
+    /// `gaia migrate` rewrites them. Not part of the build's identity.
+    #[serde(skip)]
+    pub config_v2_files: Vec<String>,
     /// `[expect]`: ids the build must have.
     pub expected: ExpectedItemsSpec,
 }

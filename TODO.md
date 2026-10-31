@@ -15,11 +15,9 @@ Items the user pinned for a later release are in "Pinned for later" below.
   - Why: a target anyone can build and test without a board, and the fast path every product relies on.
   - Done when: `gaia run` on the example passes `image check`, and a second run after an app-only change reuses the base and platform layers. Record both run times in the changelog.
   - Blocked by: the user's approval to download the x86_64 Buildroot sources.
-- **Config v3 and `gaia migrate`**
-  - What: one token syntax, a `[cache]` table, outputs at the top level, real enums instead of strings, and no explicit `patch = true`. v2 files keep loading, with a deprecation warning.
-  - Why: v2's inconsistencies are in every HeliOS, PV and Atlas build file.
-  - Done when: `gaia migrate` rewrites each example and HeliOS's and PV's build files to v3, and the v2 and v3 files resolve to the same spec fingerprint (a test). The docs and `docs/reference/config-keys.md` describe v3.
-  - Blocked by: nothing. Confirm the design with HeliOS before writing it.
+- **Config v3: real enums**
+  - What: read `checkpoints.backend`, `checkpoints.sign_kind`, `image.kind_layer`, `pi_model` and the transform and assembly `kind`s as enums in v3 files, so a typo is a parse error at its line that lists the allowed values (section 4 of `docs/design/config-v3.md`). The rest of v3 and `gaia migrate` landed on 2026-10-31.
+  - Blocked by: nothing.
 
 ### 2. Hardware support (G1–G9 and board bring-up)
 
@@ -107,10 +105,6 @@ Small targets ship exactly two slots (A/B) plus a data partition. Smaller is bet
   - What: move `[Unreleased]` to `[3.0.0]` and set the workspace version to `3.0.0`. The version is major because config v3 changes the build-file format.
   - Done when: `cargo package --workspace` and the gate pass at that version.
   - Blocked by: groups 1 and 2, or the user choosing to release without some of them.
-- **Release automation**
-  - What: a workflow that, on a `v*` tag, builds the release binaries and writes their checksums. Signing comes later, with the pinned signing proof.
-  - Done when: a dry run on a test tag in a fork or a draft release produces every file.
-  - Blocked by: nothing.
 - **Tag v3.0.0**
   - Blocked by: groups 1 and 2, and the user's own go-ahead in chat.
   - Done when: the tag is pushed, the GitHub release exists, and HeliOS, PV and Atlas pin `v3.0.0`.

@@ -28,6 +28,8 @@ const PAGES: &[(&str, &str)] = &[
     ),
     ("provenance", "../configuration-policy.md#provenance"),
     ("workspace", "../configuration-policy.md#workspace"),
+    ("outputs", "../configuration-policy.md#outputs"),
+    ("cache", "../configuration-policy.md#cache"),
     ("clean", "../configuration-policy.md#clean"),
     ("sources", "../configuration-sources.md#sources"),
     ("toolchains", "../configuration-sources.md#toolchains"),
@@ -99,11 +101,12 @@ pub fn config_key_reference_markdown() -> String {
          generated from the config layout Gaia validates against (`gaia config keys`\n\
          prints it); do not edit it by hand. Each table links to the page that\n\
          describes it. A key not listed here is reported as unknown when the build\n\
-         is validated.\n",
+         is validated. Keys are listed as config v3 spells them (`config = 3`).\n",
     );
-    let (tables, plain): (Vec<_>, Vec<_>) = root_fields()
+    let (tables, mut plain): (Vec<_>, Vec<_>) = root_fields()
         .into_iter()
         .partition(|field| sections.iter().any(|node| node.key == *field));
+    plain.push(crate::v3::VERSION_KEY);
     heading(&mut out, "top level", "", None);
     keys_line(&mut out, Some(plain));
     for field in tables {
@@ -112,8 +115,59 @@ pub fn config_key_reference_markdown() -> String {
             .find(|node| node.key == field)
             .expect("partitioned on it");
         section(&mut out, node.key, node.known, node.children, node.entries);
+        if field == "workspace" {
+            v3_sections(&mut out);
+        }
     }
     out
+}
+
+/// `[outputs]` and `[cache]`, which v3 reads as the v2 keys the layout
+/// lists elsewhere.
+fn v3_sections(out: &mut String) {
+    for table in ["outputs", "cache"] {
+        heading(out, &format!("[{table}]"), table, None);
+        let keys = crate::v3::MOVED_KEYS
+            .iter()
+            .filter_map(|(v3, _)| v3.strip_prefix(&format!("{table}.")))
+            .collect();
+        keys_line(out, Some(keys));
+    }
+    for (table, fields) in [
+        (
+            "cache.ccache",
+            crate::unknown_keys::struct_fields::<crate::raw::RawBuildrootCcachePolicyConfig>(),
+        ),
+        (
+            "cache.packages",
+            crate::unknown_keys::struct_fields::<crate::raw::RawBuildrootPackageCacheConfig>(),
+        ),
+    ] {
+        heading(out, &format!("[{table}]"), table, None);
+        keys_line(out, fields.map(<[&str]>::to_vec));
+    }
+}
+
+/// Whether the v2 key `key` of the table at `path` is spelled under
+/// `[outputs]` or `[cache]` in v3, or is the v2 table itself.
+fn moved_in_v3(path: &str, key: &str) -> bool {
+    let full = if path.is_empty() {
+        key.to_string()
+    } else {
+        format!("{path}.{key}")
+    };
+    if full == "workspace.export_dir" || full == "image.output" {
+        return true;
+    }
+    if path.starts_with("providers.")
+        && matches!(
+            key,
+            "ccache" | "package_cache" | "download_dir" | "sccache" | "shared_target_dir"
+        )
+    {
+        return true;
+    }
+    crate::v3::MOVED_KEYS.iter().any(|(_, v2)| *v2 == full)
 }
 
 fn section(
@@ -123,7 +177,10 @@ fn section(
     children: &[Section],
     entries: Option<FieldsFn>,
 ) {
-    let key = path.rsplit('.').next().unwrap_or(path);
+    let (parent, key) = path.rsplit_once('.').unwrap_or(("", path));
+    if moved_in_v3(parent, key) {
+        return;
+    }
     let kinds: Vec<Option<&str>> = match known {
         Known::ByKind(_) => layout::kinds_of(key).iter().map(|k| Some(*k)).collect(),
         Known::Fixed(_) => vec![None],
@@ -141,6 +198,7 @@ fn section(
                 .filter(|key| {
                     (kind.is_none() || *key != "kind")
                         && !child_keys.clone().any(|child| child == *key)
+                        && !moved_in_v3(path, key)
                 })
                 .collect::<Vec<_>>()
         });

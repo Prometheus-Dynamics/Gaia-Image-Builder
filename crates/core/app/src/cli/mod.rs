@@ -25,6 +25,7 @@ pub struct AppArgs {
     pub cache: CacheArgs,
     pub lock: LockArgs,
     pub layer: LayerArgs,
+    pub migrate: MigrateArgs,
     /// `--only` targets for run/plan: build domains or operation ids.
     pub only: Vec<String>,
     /// `--rebuild` for run/plan/preview: operations (ids, `*` globs or
@@ -110,6 +111,15 @@ pub struct LockArgs {
     pub sources: Vec<String>,
 }
 
+/// `gaia migrate <build>... [--check]`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MigrateArgs {
+    /// Build files after the first (which is `build`).
+    pub more_builds: Vec<String>,
+    /// `--check`: change nothing; fail while a file is still config v2.
+    pub check: bool,
+}
+
 /// `gaia layer delta <layers> --from <old-layers> --out <dir>`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LayerArgs {
@@ -156,6 +166,7 @@ impl AppArgs {
             Some("cancel") => Some(AppCommand::Cancel),
             Some("status") => Some(AppCommand::Status),
             Some("lock") => Some(AppCommand::Lock),
+            Some("migrate") => Some(AppCommand::Migrate),
             Some("run") => Some(AppCommand::Run),
             Some("layer") => Some(AppCommand::LayerDelta),
             Some("prefetch") => Some(AppCommand::Run),
@@ -287,6 +298,7 @@ impl AppArgs {
                 "--fail-on-clean" => parsed.fail_on_clean = true,
                 "--export" => parsed.export_dir = value("--export", &mut parsed.usage_errors),
                 "--no-export" => parsed.no_export = true,
+                "--check" => parsed.migrate.check = true,
                 "--from" => {
                     if let Some(dirs) = value("--from", &mut parsed.usage_errors) {
                         parsed.layer.from.extend(split_list(&dirs));
@@ -342,6 +354,9 @@ impl AppArgs {
                     parsed.build = positional.to_string();
                     parsed.build_explicit = true;
                 }
+                positional if parsed.command == AppCommand::Migrate => {
+                    parsed.migrate.more_builds.push(positional.to_string());
+                }
                 positional => parsed
                     .usage_errors
                     .push(format!("unexpected argument '{positional}'")),
@@ -389,6 +404,7 @@ impl Default for AppArgs {
             cache: CacheArgs::default(),
             lock: LockArgs::default(),
             layer: LayerArgs::default(),
+            migrate: MigrateArgs::default(),
             only: Vec::new(),
             rebuild: Vec::new(),
             rebuild_packages: Vec::new(),
@@ -474,6 +490,8 @@ pub enum AppCommand {
     /// Show what the running `gaia run` of a build is doing.
     Status,
     Lock,
+    /// `gaia migrate`: rewrite a build's config v2 files to v3.
+    Migrate,
     Run,
     /// What `gaia run` would do, without changing anything.
     Preview,

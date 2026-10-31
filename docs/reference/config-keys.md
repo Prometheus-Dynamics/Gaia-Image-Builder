@@ -4,13 +4,13 @@ Every table a build file can have and the keys it takes. This page is
 generated from the config layout Gaia validates against (`gaia config keys`
 prints it); do not edit it by hand. Each table links to the page that
 describes it. A key not listed here is reported as unknown when the build
-is validated.
+is validated. Keys are listed as config v3 spells them (`config = 3`).
 
 ## `top level`
 
 Described in [Configuration](../configuration.md#top-level-build-fields).
 
-Keys: `branch`, `build_name`, `description`, `display_name`, `env`, `env_files`, `extends`, `gaia_version`, `imports`, `inputs`, `labels`, `preset`, `presets`, `profile`, `target`, `variants`, `version`.
+Keys: `branch`, `build_name`, `config`, `description`, `display_name`, `env`, `env_files`, `extends`, `gaia_version`, `imports`, `inputs`, `labels`, `preset`, `presets`, `profile`, `target`, `variants`, `version`.
 
 ## `[product]`
 
@@ -22,7 +22,31 @@ Keys: `family`, `name`, `sku`.
 
 Described in [Policy, workspace and clean](../configuration-policy.md#workspace).
 
-Keys: `build_dir`, `export_dir`, `named_paths`, `out_dir`, `root_dir`.
+Keys: `build_dir`, `named_paths`, `root_dir`.
+
+## `[outputs]`
+
+Described in [Policy, workspace and clean](../configuration-policy.md#outputs).
+
+Keys: `archive_name`, `dir`, `disk`, `export_dir`, `images_dir`, `report`.
+
+## `[cache]`
+
+Described in [Policy, workspace and clean](../configuration-policy.md#cache).
+
+Keys: `ccache`, `downloads`, `packages`, `sccache`, `shared_target_dir`.
+
+## `[cache.ccache]`
+
+Described in [Policy, workspace and clean](../configuration-policy.md#cache).
+
+Keys: `dir`, `enabled`, `max_size`.
+
+## `[cache.packages]`
+
+Described in [Policy, workspace and clean](../configuration-policy.md#cache).
+
+Keys: `dir`, `enabled`, `level`, `max_size`, `project_dir`, `project_packages`, `system_dir`, `system_packages`.
 
 ## `[[sources]]` with `kind = "git"`
 
@@ -143,12 +167,6 @@ Keys: `image_partition`, `image_read_only`, `output_mode`, `rootfs_path`, `rootf
 Described in [Image](../configuration-image.md#image).
 
 Keys: none of its own.
-
-## `[image.output]`
-
-Described in [Image](../configuration-image.md#image).
-
-Keys: `archive_name`, `collect_dir`, `disk`, `emit_report`, `export_dir`.
 
 ## `[image.signing]`
 
@@ -408,7 +426,7 @@ Keys: none of its own.
 
 Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
 
-Keys: `allow_nested_build`, `batch_builds`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `sccache`, `shared_target_dir`, `strip`, `timeout_seconds`.
+Keys: `allow_nested_build`, `batch_builds`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `strip`, `timeout_seconds`.
 
 ## `[providers.git]`
 
@@ -426,193 +444,97 @@ Keys: `reuse_container`.
 
 Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
 
-Keys: `download_dir`, `erofs_workers`, `gradle_home`, `keep_ram_tree`, `kernel_modules_check`, `local_jobs`, `make_retry_attempts`, `make_timeout_seconds`, `override_check`, `parallel_packages`, `ram_budget`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `shared_output`, `shared_output_dir`, `timeout_seconds`, `work_dir`.
-
-## `[providers.archive.ccache]`
-
-Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
-
-Keys: `dir`, `enabled`, `max_size`.
-
-## `[providers.archive.package_cache]`
-
-Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
-
-Keys: `dir`, `enabled`, `level`, `max_size`, `project_dir`, `project_packages`, `system_dir`, `system_packages`.
+Keys: `erofs_workers`, `gradle_home`, `keep_ram_tree`, `kernel_modules_check`, `local_jobs`, `make_retry_attempts`, `make_timeout_seconds`, `override_check`, `parallel_packages`, `ram_budget`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `shared_output`, `shared_output_dir`, `timeout_seconds`, `work_dir`.
 
 ## `[providers.archive.host_tools]`
 
 Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
 
-Keys: `ccache`, `default`, `pkgconf`.
+Keys: `default`, `pkgconf`.
 
 ## `[providers.download]`
 
 Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
 
-Keys: `download_dir`, `erofs_workers`, `gradle_home`, `keep_ram_tree`, `kernel_modules_check`, `local_jobs`, `make_retry_attempts`, `make_timeout_seconds`, `override_check`, `parallel_packages`, `ram_budget`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `shared_output`, `shared_output_dir`, `timeout_seconds`, `work_dir`.
-
-## `[providers.download.ccache]`
-
-Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
-
-Keys: `dir`, `enabled`, `max_size`.
-
-## `[providers.download.package_cache]`
-
-Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
-
-Keys: `dir`, `enabled`, `level`, `max_size`, `project_dir`, `project_packages`, `system_dir`, `system_packages`.
+Keys: `erofs_workers`, `gradle_home`, `keep_ram_tree`, `kernel_modules_check`, `local_jobs`, `make_retry_attempts`, `make_timeout_seconds`, `override_check`, `parallel_packages`, `ram_budget`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `shared_output`, `shared_output_dir`, `timeout_seconds`, `work_dir`.
 
 ## `[providers.download.host_tools]`
 
 Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
 
-Keys: `ccache`, `default`, `pkgconf`.
+Keys: `default`, `pkgconf`.
 
 ## `[providers.go]`
 
 Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
 
-Keys: `download_dir`, `erofs_workers`, `gradle_home`, `keep_ram_tree`, `kernel_modules_check`, `local_jobs`, `make_retry_attempts`, `make_timeout_seconds`, `override_check`, `parallel_packages`, `ram_budget`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `shared_output`, `shared_output_dir`, `timeout_seconds`, `work_dir`.
-
-## `[providers.go.ccache]`
-
-Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
-
-Keys: `dir`, `enabled`, `max_size`.
-
-## `[providers.go.package_cache]`
-
-Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
-
-Keys: `dir`, `enabled`, `level`, `max_size`, `project_dir`, `project_packages`, `system_dir`, `system_packages`.
+Keys: `erofs_workers`, `gradle_home`, `keep_ram_tree`, `kernel_modules_check`, `local_jobs`, `make_retry_attempts`, `make_timeout_seconds`, `override_check`, `parallel_packages`, `ram_budget`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `shared_output`, `shared_output_dir`, `timeout_seconds`, `work_dir`.
 
 ## `[providers.go.host_tools]`
 
 Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
 
-Keys: `ccache`, `default`, `pkgconf`.
+Keys: `default`, `pkgconf`.
 
 ## `[providers.java]`
 
 Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
 
-Keys: `download_dir`, `erofs_workers`, `gradle_home`, `keep_ram_tree`, `kernel_modules_check`, `local_jobs`, `make_retry_attempts`, `make_timeout_seconds`, `override_check`, `parallel_packages`, `ram_budget`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `shared_output`, `shared_output_dir`, `timeout_seconds`, `work_dir`.
-
-## `[providers.java.ccache]`
-
-Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
-
-Keys: `dir`, `enabled`, `max_size`.
-
-## `[providers.java.package_cache]`
-
-Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
-
-Keys: `dir`, `enabled`, `level`, `max_size`, `project_dir`, `project_packages`, `system_dir`, `system_packages`.
+Keys: `erofs_workers`, `gradle_home`, `keep_ram_tree`, `kernel_modules_check`, `local_jobs`, `make_retry_attempts`, `make_timeout_seconds`, `override_check`, `parallel_packages`, `ram_budget`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `shared_output`, `shared_output_dir`, `timeout_seconds`, `work_dir`.
 
 ## `[providers.java.host_tools]`
 
 Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
 
-Keys: `ccache`, `default`, `pkgconf`.
+Keys: `default`, `pkgconf`.
 
 ## `[providers.node]`
 
 Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
 
-Keys: `download_dir`, `erofs_workers`, `gradle_home`, `keep_ram_tree`, `kernel_modules_check`, `local_jobs`, `make_retry_attempts`, `make_timeout_seconds`, `override_check`, `parallel_packages`, `ram_budget`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `shared_output`, `shared_output_dir`, `timeout_seconds`, `work_dir`.
-
-## `[providers.node.ccache]`
-
-Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
-
-Keys: `dir`, `enabled`, `max_size`.
-
-## `[providers.node.package_cache]`
-
-Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
-
-Keys: `dir`, `enabled`, `level`, `max_size`, `project_dir`, `project_packages`, `system_dir`, `system_packages`.
+Keys: `erofs_workers`, `gradle_home`, `keep_ram_tree`, `kernel_modules_check`, `local_jobs`, `make_retry_attempts`, `make_timeout_seconds`, `override_check`, `parallel_packages`, `ram_budget`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `shared_output`, `shared_output_dir`, `timeout_seconds`, `work_dir`.
 
 ## `[providers.node.host_tools]`
 
 Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
 
-Keys: `ccache`, `default`, `pkgconf`.
+Keys: `default`, `pkgconf`.
 
 ## `[providers.python]`
 
 Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
 
-Keys: `download_dir`, `erofs_workers`, `gradle_home`, `keep_ram_tree`, `kernel_modules_check`, `local_jobs`, `make_retry_attempts`, `make_timeout_seconds`, `override_check`, `parallel_packages`, `ram_budget`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `shared_output`, `shared_output_dir`, `timeout_seconds`, `work_dir`.
-
-## `[providers.python.ccache]`
-
-Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
-
-Keys: `dir`, `enabled`, `max_size`.
-
-## `[providers.python.package_cache]`
-
-Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
-
-Keys: `dir`, `enabled`, `level`, `max_size`, `project_dir`, `project_packages`, `system_dir`, `system_packages`.
+Keys: `erofs_workers`, `gradle_home`, `keep_ram_tree`, `kernel_modules_check`, `local_jobs`, `make_retry_attempts`, `make_timeout_seconds`, `override_check`, `parallel_packages`, `ram_budget`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `shared_output`, `shared_output_dir`, `timeout_seconds`, `work_dir`.
 
 ## `[providers.python.host_tools]`
 
 Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
 
-Keys: `ccache`, `default`, `pkgconf`.
+Keys: `default`, `pkgconf`.
 
 ## `[providers.buildroot]`
 
 Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
 
-Keys: `download_dir`, `erofs_workers`, `gradle_home`, `keep_ram_tree`, `kernel_modules_check`, `local_jobs`, `make_retry_attempts`, `make_timeout_seconds`, `override_check`, `parallel_packages`, `ram_budget`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `shared_output`, `shared_output_dir`, `timeout_seconds`, `work_dir`.
-
-## `[providers.buildroot.ccache]`
-
-Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
-
-Keys: `dir`, `enabled`, `max_size`.
-
-## `[providers.buildroot.package_cache]`
-
-Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
-
-Keys: `dir`, `enabled`, `level`, `max_size`, `project_dir`, `project_packages`, `system_dir`, `system_packages`.
+Keys: `erofs_workers`, `gradle_home`, `keep_ram_tree`, `kernel_modules_check`, `local_jobs`, `make_retry_attempts`, `make_timeout_seconds`, `override_check`, `parallel_packages`, `ram_budget`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `shared_output`, `shared_output_dir`, `timeout_seconds`, `work_dir`.
 
 ## `[providers.buildroot.host_tools]`
 
 Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
 
-Keys: `ccache`, `default`, `pkgconf`.
+Keys: `default`, `pkgconf`.
 
 ## `[providers.starting_point]`
 
 Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
 
-Keys: `download_dir`, `erofs_workers`, `gradle_home`, `keep_ram_tree`, `kernel_modules_check`, `local_jobs`, `make_retry_attempts`, `make_timeout_seconds`, `override_check`, `parallel_packages`, `ram_budget`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `shared_output`, `shared_output_dir`, `timeout_seconds`, `work_dir`.
-
-## `[providers.starting_point.ccache]`
-
-Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
-
-Keys: `dir`, `enabled`, `max_size`.
-
-## `[providers.starting_point.package_cache]`
-
-Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
-
-Keys: `dir`, `enabled`, `level`, `max_size`, `project_dir`, `project_packages`, `system_dir`, `system_packages`.
+Keys: `erofs_workers`, `gradle_home`, `keep_ram_tree`, `kernel_modules_check`, `local_jobs`, `make_retry_attempts`, `make_timeout_seconds`, `override_check`, `parallel_packages`, `ram_budget`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `shared_output`, `shared_output_dir`, `timeout_seconds`, `work_dir`.
 
 ## `[providers.starting_point.host_tools]`
 
 Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
 
-Keys: `ccache`, `default`, `pkgconf`.
+Keys: `default`, `pkgconf`.
 
 ## `[provenance]`
 

@@ -1,5 +1,7 @@
 # Sources, artifacts, and install mappings.
 
+config = 3
+
 [[sources]]
 id = "workspace-root"
 kind = "path"
@@ -19,7 +21,7 @@ pin = "floating"
 [[sources]]
 id = "seed-rootfs"
 kind = "archive"
-path = "@assets/rootfs/base-rootfs.tar"
+path = "${assets}/rootfs/base-rootfs.tar"
 strip_components = 0
 refresh = "never"
 pin = "locked"
@@ -44,7 +46,7 @@ profile = "${build.profile}"
 install_name = "acme-api"
 install_class = "binary"
 install_dest_hint = "/usr/bin/acme-api"
-output_path = "${workspace.out_dir}/artifacts/acme-api"
+output_path = "${outputs.dir}/artifacts/acme-api"
 
 # Rust shared object / library-ish output.
 [[artifacts]]
@@ -57,7 +59,7 @@ profile = "${build.profile}"
 install_name = "cv-plugin"
 install_class = "library"
 install_dest_hint = "/usr/lib/example/plugins/cv-plugin.so"
-output_path = "${workspace.out_dir}/artifacts/cv-plugin.so"
+output_path = "${outputs.dir}/artifacts/cv-plugin.so"
 
 # Java output points at the expected built jar path inside the source tree.
 [[artifacts]]
@@ -68,7 +70,7 @@ source = "workspace-root"
 install_name = "worker-node"
 install_class = "archive"
 install_dest_hint = "/usr/lib/example/worker-node.jar"
-output_path = "${workspace.out_dir}/artifacts/worker-node.jar"
+output_path = "${outputs.dir}/artifacts/worker-node.jar"
 
 # Node output packages a package directory with `npm pack`.
 [[artifacts]]
@@ -79,7 +81,7 @@ source = "workspace-root"
 install_name = "frontend-package"
 install_class = "archive"
 install_dest_hint = "/opt/example/frontend.tgz"
-output_path = "${workspace.out_dir}/artifacts/frontend.tgz"
+output_path = "${outputs.dir}/artifacts/frontend.tgz"
 
 # Python output builds a wheel from a package directory.
 [[artifacts]]
@@ -90,7 +92,7 @@ source = "workspace-root"
 install_name = "python-sdk"
 install_class = "archive"
 install_dest_hint = "/opt/example/python-sdk.whl"
-output_path = "${workspace.out_dir}/artifacts/python-sdk.whl"
+output_path = "${outputs.dir}/artifacts/python-sdk.whl"
 
 # Go output builds a binary from a Go package path.
 [[artifacts]]
@@ -101,7 +103,7 @@ source = "workspace-root"
 install_name = "acmectl"
 install_class = "binary"
 install_dest_hint = "/usr/bin/acmectl"
-output_path = "${workspace.out_dir}/artifacts/acmectl"
+output_path = "${outputs.dir}/artifacts/acmectl"
 
 [[install]]
 id = "install-acme-api"

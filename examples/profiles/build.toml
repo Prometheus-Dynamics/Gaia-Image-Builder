@@ -7,6 +7,7 @@
 #   gaia validate examples/profiles/build.toml                          # raze (the base target)
 #   gaia plan examples/profiles/build.toml --set build.target=systemcore
 
+config = 3
 extends = "software.toml"
 build_name = "profiles"
 version = "1.0.0"
@@ -22,7 +23,9 @@ imports = [
 [workspace]
 root_dir = "examples/profiles"
 build_dir = "../../.gaia/examples/profiles/build"
-out_dir = "../../.gaia/examples/profiles/out"
+
+[outputs]
+dir = "../../.gaia/examples/profiles/out"
 
 [[workspace.named_paths]]
 alias = "assets"

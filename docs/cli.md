@@ -108,7 +108,7 @@ its whole Buildroot make in `image:build`. Use `--rebuild image:build` directly
 there; it is enough on its own to force the make.
 
 Staged files and services are reused by the content they deliver: a unit file
-referenced through `@assets/...` is hashed by its bytes, not its timestamp, so
+referenced through `${assets}/...` is hashed by its bytes, not its timestamp, so
 editing it reruns its stage operation and the image build, and a rebuilt
 artifact with new bytes reruns the install and the image build instead of
 being cut off as unchanged.
@@ -138,7 +138,7 @@ gaia resolve examples/default-workspace/configs/default.toml --preset ci
 gaia validate examples/default-workspace/configs/default.toml --env GAIA_MODE=release
 gaia plan examples/default-workspace/configs/default.toml --set build.version=v2026.2.0
 gaia clean examples/default-workspace/configs/default.toml --target all
-gaia run examples/default-workspace/configs/default.toml --preset release --env-file secrets.env --set workspace.out_dir=.gaia/examples/default-workspace/out-release
+gaia run examples/default-workspace/configs/default.toml --preset release --env-file secrets.env --set outputs.dir=.gaia/examples/default-workspace/out-release
 ```
 
 ## Command Output
@@ -252,7 +252,7 @@ Built-in targets:
 - `--target build`
   Remove `workspace.build_dir`.
 - `--target out` or `--target outputs`
-  Remove `workspace.out_dir`.
+  Remove `outputs.dir`.
 - `--target all`
   Remove both build and output directories.
 - `--target configured`
@@ -289,12 +289,12 @@ Other options:
 - `--profile <name>`
   Apply a named `[clean.profiles.<name>]` profile.
 - `--path <path>`
-  Add an explicit workspace-relative, absolute, or `@alias/...` path.
+  Add an explicit workspace-relative, absolute, or `${alias}/...` path.
 - `--dry-run`
   Print what would be removed without deleting anything.
 
 When no clean profile, target, or explicit path is provided, Gaia removes
-`workspace.build_dir` and `workspace.out_dir`.
+`workspace.build_dir` and `outputs.dir`.
 
 ```bash
 gaia clean configs/builds/evk.toml --target caches --dry-run
@@ -396,15 +396,14 @@ fails exits `1`.
 The directory can also come from the build config, so `--export` is not needed
 on every run:
 
-- `[image.output] export_dir = "<dir>"` for one build;
-- `[workspace] export_dir = "<dir>"` for every build in the workspace, used
-  when the build sets none.
-
-Both are also `--set image.output.export_dir=<dir>` and
-`--set workspace.export_dir=<dir>`. An absolute path is used as written, `~/`
+`[outputs] export_dir = "<dir>"`, in the build file or in a workspace layer
+every build extends, or `--set outputs.export_dir=<dir>`. (Config v2 had a
+build-level `[image.output] export_dir` and a workspace-level
+`[workspace] export_dir`, the build's winning; v2 files still read them.)
+An absolute path is used as written, `~/`
 expands to the home directory, and any other relative path is taken from the
 workspace root. An empty value is an error. Precedence, highest first:
-`--export <dir>`, then the build's `export_dir`, then the workspace's.
+`--export <dir>`, then `outputs.export_dir`.
 `--export` paths are relative to the current directory. `--no-export` skips
 any configured export for that run; combining it with `--export` is a usage
 error.
@@ -475,7 +474,7 @@ picks the run back up, with the same build path and the same `--preset`,
 `--env-file`, `--env`, `--set` and `--only` arguments:
 
 ```text
-resume: gaia run configs/heli.toml --preset ci --set workspace.out_dir=/srv/out  # finished work is reused
+resume: gaia run configs/heli.toml --preset ci --set outputs.dir=/srv/out  # finished work is reused
 ```
 
 Finished work is reused by the next run, so the resume line repeats the
@@ -590,6 +589,29 @@ have, each kind of a kinded table (`[[sources]]` with `kind = "git"`, and so
 on) and the keys it takes, with a link to the page that describes it. It is
 written from the same layout as the schema. The committed copy is
 [reference/config-keys.md](reference/config-keys.md).
+
+### `migrate`
+
+`gaia migrate <build.toml> [<build.toml>...]` rewrites the build files and
+every local file they extend or import (whatever its `when`) from config v2 to
+v3: it adds `config = 3`, respells the tokens, and moves the output and cache
+keys to `[outputs]` and `[cache]`, keeping comments and the order of
+everything else. Files read from an import source's checkout are left alone;
+migrate the source's own repository.
+
+Before writing anything it resolves each build with no preset and with every
+preset its files declare, including all variants, and resolves them again
+after the rewrite. If any spec differs, or a file cannot be rewritten, every
+file is put back as it was and the error names the first differing key. A
+file already in v3 is left as it is.
+
+`--check` changes nothing: it lists the build's files with their versions and
+exits 1 while any is still v2, for CI.
+
+```bash
+gaia migrate configs/builds/evk.toml configs/builds/evk-recovery.toml
+gaia migrate --check configs/builds/evk.toml
+```
 
 ### `layer delta`
 

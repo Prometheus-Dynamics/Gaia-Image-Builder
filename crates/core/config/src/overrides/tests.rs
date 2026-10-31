@@ -189,3 +189,19 @@ fn host_tools_overrides_store_valid_policies_and_reject_bad_steps() {
             .contains_key("pkgconf")
     );
 }
+
+#[test]
+fn v3_key_spellings_are_override_keys_too() {
+    for (v3, v2) in crate::v3::OVERRIDE_KEYS {
+        let (OverrideKey::Known(v3_key), OverrideKey::Known(v2_key)) =
+            (OverrideKey::parse(v3), OverrideKey::parse(v2))
+        else {
+            panic!("{v3} and {v2} should both be known overrides");
+        };
+        assert_eq!(
+            std::mem::discriminant(&v3_key),
+            std::mem::discriminant(&v2_key),
+            "{v3}"
+        );
+    }
+}

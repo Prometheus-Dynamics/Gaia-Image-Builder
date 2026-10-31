@@ -24,7 +24,7 @@ pin = "floating"
 [[sources]]
 id = "seed-rootfs"
 kind = "archive"
-path = "@assets/rootfs/base-rootfs.tar"
+path = "${assets}/rootfs/base-rootfs.tar"
 strip_components = 0
 refresh = "never"
 pin = "locked"
@@ -130,7 +130,7 @@ still run in docker; only git runs on the host.
 - Credentials in a URL (`https://user:token@host/...`) are never written by
   Gaia. Logs, errors, `.gaia-source-state.txt`, the source marker, the
   provenance and manifest reports and `<build>.gaia.lock` show them as
-  `https://***@host/...`. Prefer a credential helper over embedding a token;
+  `https://***${host}/...`. Prefer a credential helper over embedding a token;
   a token in the URL is still stored in the mirror's `.git/config` under
   `.gaia/cache/git` (the checkout's copy is redacted).
 - The `git_backend` setting does not change source fingerprints: a build
@@ -374,29 +374,29 @@ package = "helios"
 source = "helios"
 toolchain = "systemcore"
 profile = "release"
-output_path = "${workspace.out_dir}/artifacts/helios"
+output_path = "${outputs.dir}/artifacts/helios"
 
 [image]
 kind = "none"
 
 [image.assembly]
 work_dir = "${workspace.build_dir}/assembly"
-out_dir = "${workspace.out_dir}"
+out_dir = "${outputs.dir}"
 
 [[image.assembly.trees]]
 id = "pkg-root"
-path = "$assembly.work/pkg-root"
+path = "${assembly.work}/pkg-root"
 
 [[image.assembly.files]]
 tree = "pkg-root"
-src = "${workspace.out_dir}/artifacts/helios"
+src = "${outputs.dir}/artifacts/helios"
 dest = "usr/bin/helios"
 mode = "0755"
 
 [[image.assembly.packages]]
 id = "helios"
 tree = "pkg-root"
-dest = "$assembly.out/"
+dest = "${assembly.out}/"
 allowed_prefixes = ["/usr/bin"]
 
 [image.assembly.packages.control]

@@ -2,6 +2,7 @@ mod assembly_source_tokens;
 mod compile;
 mod dynamic_inputs;
 mod env;
+mod error;
 mod gaia_version;
 mod interpolate;
 mod key_reference;
@@ -9,6 +10,7 @@ mod load;
 mod locate;
 pub mod lockfile;
 mod merge;
+mod migrate;
 mod overrides;
 mod raw;
 mod raw_assembly;
@@ -17,12 +19,16 @@ mod raw_when;
 mod schema;
 mod source_tokens;
 mod unknown_keys;
+mod v3;
 mod variants;
 
 pub(crate) use compile::compile_config;
+pub use error::ConfigError;
 pub use gaia_version::GAIA_VERSION;
 pub use key_reference::config_key_reference_markdown;
+pub use migrate::{ConfigFileVersion, MigrationReport, migrate_builds};
 pub use schema::config_schema_json;
+pub use v3::migrate::migrate_config_text;
 pub use variants::{
     VariantBuild, resolve_variant_specs, resolve_variant_specs_scoped, variant_output_collisions,
 };
@@ -35,7 +41,6 @@ use merge::merge_config;
 use overrides::{apply_cli_overrides, apply_selected_presets, collect_selected_inputs};
 
 use gaia_spec::{ImportSourceSpec, ResolvedBuildSpec};
-use std::fmt;
 use std::path::{Path, PathBuf};
 
 pub fn resolve_config(build: &str) -> ResolvedBuildSpec {
@@ -139,6 +144,9 @@ pub(crate) struct MergedBuild {
     unused_import_sources: Vec<String>,
     unknown_key_warnings: Vec<String>,
     empty_layer_warnings: Vec<String>,
+    /// The build's v2 files, and the aliases its v3 files' tokens use.
+    v2_files: Vec<String>,
+    v3_aliases: Vec<(String, String)>,
 }
 
 /// Loads and merges the build under `options`, and checks its declared
@@ -169,6 +177,7 @@ pub(crate) fn load_merged(
     );
     let unknown_key_warnings = unknown_keys::collect_unknown_key_warnings(&raw);
     let empty_layer_warnings = unknown_keys::collect_empty_layer_warnings(&raw);
+    let (v2_files, v3_aliases) = v3::layer_versions(&raw);
     let selected = apply_preset_selection(raw, build, options);
     let merged = merge_config(selected)?;
     variants::validate_declared(&merged)?;
@@ -178,6 +187,8 @@ pub(crate) fn load_merged(
         unused_import_sources,
         unknown_key_warnings,
         empty_layer_warnings,
+        v2_files,
+        v3_aliases,
     })
 }
 
@@ -217,6 +228,8 @@ pub(crate) fn resolve_merged(
     spec.metadata.config_warnings = loaded.unknown_key_warnings.clone();
     spec.metadata.empty_layers = loaded.empty_layer_warnings.clone();
     spec.metadata.config_notes = loaded.raw.config_notes.clone();
+    spec.metadata.config_v2_files = loaded.v2_files.clone();
+    v3::check_aliases(&loaded.v3_aliases, &spec.workspace)?;
     spec.selection.import_sources = loaded.import_sources.clone();
     drop_unused_import_sources(&mut spec, &loaded.unused_import_sources);
     apply_lockfile(&mut spec);
@@ -299,269 +312,6 @@ pub struct ResolveOptions {
     /// to their current commit instead of failing. Used by `gaia lock`.
     pub resolve_unpinned_import_sources: bool,
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConfigError {
-    CurrentDir {
-        message: String,
-    },
-    ConfigNotFound {
-        build: String,
-        searched: Vec<String>,
-    },
-    ConfigPath {
-        path: String,
-        message: String,
-    },
-    /// An `imports` or `extends` entry names a file that does not exist.
-    ConfigReferenceMissing {
-        referenced_by: String,
-        field: &'static str,
-        reference: String,
-        resolved: String,
-    },
-    ConfigRead {
-        path: String,
-        message: String,
-    },
-    ConfigParse {
-        path: String,
-        message: String,
-    },
-    ConfigShape {
-        path: String,
-        message: String,
-    },
-    /// A patch entry (see `raw::RawEntryPatch`) that names no earlier entry,
-    /// sets no field, or does not make a valid entry. The message names the
-    /// patch and its `<layer>:<line>`.
-    ConfigPatch {
-        message: String,
-    },
-    ConfigImportCycle {
-        cycle: Vec<String>,
-    },
-    EnvFileRead {
-        path: String,
-        message: String,
-    },
-    MissingPreset {
-        preset: String,
-    },
-    InvalidOverrideValue {
-        key: String,
-        value: String,
-        expected: &'static str,
-    },
-    /// A `--set` (or preset) key that names no setting, or an `input.<name>`
-    /// for an input the build does not declare. Such a key would otherwise
-    /// be silently ignored.
-    InvalidOverrideKey {
-        key: String,
-        message: String,
-    },
-    /// `${...}` references that lead back to a token being resolved, such as
-    /// `build.name -> build.display_name -> build.name`.
-    InterpolationCycle {
-        cycle: Vec<String>,
-    },
-    /// `sources.<id>.path` names a source that no config the build selects
-    /// declares. `scope` names what was searched, such as "the selected
-    /// config" or "any selected variant".
-    UndeclaredSourceOverride {
-        key: String,
-        source_id: String,
-        scope: String,
-        declared: Vec<String>,
-    },
-    /// The build file's `gaia_version` requirement does not match this
-    /// binary.
-    GaiaVersionUnsupported {
-        path: String,
-        required: String,
-        installed: String,
-    },
-    /// An `imports` entry with `source = "<id>"` (or an `@source:<id>`
-    /// reference) could not be resolved.
-    ImportSource {
-        source_id: String,
-        referenced_by: String,
-        message: String,
-    },
-}
-
-impl ConfigError {
-    pub(crate) fn current_dir(error: impl fmt::Display) -> Self {
-        Self::CurrentDir {
-            message: error.to_string(),
-        }
-    }
-
-    pub(crate) fn config_path(path: &Path, error: impl fmt::Display) -> Self {
-        Self::ConfigPath {
-            path: path.display().to_string(),
-            message: error.to_string(),
-        }
-    }
-
-    pub(crate) fn config_read(path: &Path, error: impl fmt::Display) -> Self {
-        Self::ConfigRead {
-            path: path.display().to_string(),
-            message: error.to_string(),
-        }
-    }
-
-    /// A parse or type error of a build file's `text`, located at toml's span
-    /// as `path:line:col`. Without a span the error names the file only.
-    pub(crate) fn config_parse_at(path: &Path, text: &str, error: &toml::de::Error) -> Self {
-        let span = error.span();
-        let message = if span.is_some() {
-            error.message().to_string()
-        } else {
-            error.to_string()
-        };
-        Self::ConfigParse {
-            path: locate::toml_error_location(path, text, span),
-            message,
-        }
-    }
-
-    pub(crate) fn config_shape(path: &Path, message: impl Into<String>) -> Self {
-        Self::ConfigShape {
-            path: path.display().to_string(),
-            message: message.into(),
-        }
-    }
-
-    pub(crate) fn env_file_read(path: &Path, error: impl fmt::Display) -> Self {
-        Self::EnvFileRead {
-            path: path.display().to_string(),
-            message: error.to_string(),
-        }
-    }
-
-    fn invalid_override_value(
-        key: impl Into<String>,
-        value: impl Into<String>,
-        expected: &'static str,
-    ) -> Self {
-        Self::InvalidOverrideValue {
-            key: key.into(),
-            value: value.into(),
-            expected,
-        }
-    }
-}
-
-impl fmt::Display for ConfigError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::CurrentDir { message } => {
-                write!(
-                    formatter,
-                    "current working directory must be readable: {message}"
-                )
-            }
-            Self::ConfigNotFound { build, searched } => write!(
-                formatter,
-                "failed to locate build config for '{build}', looked in: {}",
-                searched.join(", ")
-            ),
-            Self::ConfigPath { path, message } => {
-                write!(formatter, "failed to canonicalize '{path}': {message}")
-            }
-            Self::ConfigReferenceMissing {
-                referenced_by,
-                field,
-                reference,
-                resolved,
-            } => write!(
-                formatter,
-                "{field} '{reference}' in '{referenced_by}' does not exist (resolved to '{resolved}')"
-            ),
-            Self::ConfigRead { path, message } => {
-                write!(formatter, "failed to read build config '{path}': {message}")
-            }
-            Self::ConfigParse { path, message } => {
-                write!(
-                    formatter,
-                    "failed to parse build config '{path}': {message}"
-                )
-            }
-            Self::ConfigShape { path, message } => {
-                write!(
-                    formatter,
-                    "failed to parse build config '{path}': {message}"
-                )
-            }
-            Self::ConfigPatch { message } => write!(formatter, "{message}"),
-            Self::ConfigImportCycle { cycle } => {
-                write!(
-                    formatter,
-                    "config import cycle detected: {}",
-                    cycle.join(" -> ")
-                )
-            }
-            Self::EnvFileRead { path, message } => {
-                write!(formatter, "failed to read env file '{path}': {message}")
-            }
-            Self::MissingPreset { preset } => write!(
-                formatter,
-                "selected preset '{preset}' was not defined in the resolved config"
-            ),
-            Self::InvalidOverrideValue {
-                key,
-                value,
-                expected,
-            } => write!(
-                formatter,
-                "invalid override value for '{key}': '{value}' (expected {expected})"
-            ),
-            Self::InvalidOverrideKey { key, message } => {
-                write!(formatter, "invalid override key '{key}': {message}")
-            }
-            Self::InterpolationCycle { cycle } => {
-                write!(formatter, "interpolation cycle: {}", cycle.join(" -> "))
-            }
-            Self::UndeclaredSourceOverride {
-                key,
-                source_id,
-                scope,
-                declared,
-            } => {
-                let declared = if declared.is_empty() {
-                    "none".to_string()
-                } else {
-                    declared.join(", ")
-                };
-                write!(
-                    formatter,
-                    "override '{key}' names source '{source_id}', which is not declared by {scope} (declared sources: {declared})"
-                )
-            }
-            Self::GaiaVersionUnsupported {
-                path,
-                required,
-                installed,
-            } => write!(
-                formatter,
-                "this build requires gaia {required}, but gaia {installed} is installed \
-                 (gaia_version in '{path}'); upgrade with: {}",
-                gaia_version::UPGRADE_COMMAND
-            ),
-            Self::ImportSource {
-                source_id,
-                referenced_by,
-                message,
-            } => write!(
-                formatter,
-                "import source '{source_id}' used by '{referenced_by}': {message}"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for ConfigError {}
 
 fn apply_preset_selection(
     mut raw: raw::RawBuildConfig,

@@ -1,5 +1,7 @@
 # Buildroot image template.
 
+config = 3
+
 [image]
 kind = "buildroot"
 
@@ -7,7 +9,7 @@ kind = "buildroot"
 defconfig = "qemu_aarch64_virt_defconfig"
 
 # Optional Buildroot external tree path.
-external_tree = "@assets/buildroot"
+external_tree = "${assets}/buildroot"
 
 # auto | required | disabled
 external_tree_mode = "required"
@@ -29,26 +31,26 @@ name = "rootfs.tar"
 format = "tar"
 required = false
 
-[image.output]
-collect_dir = "${workspace.out_dir}/images"
+[outputs]
+images_dir = "${outputs.dir}/images"
 archive_name = "${build.name}-${build.version}.img.xz"
-emit_report = true
+report = true
 
 [image.assembly]
 work_dir = "${workspace.build_dir}/assembly"
-out_dir = "$provider.images"
+out_dir = "${provider.images}"
 
 [[image.assembly.trees]]
 id = "boot"
-path = "$assembly.work/boot"
+path = "${assembly.work}/boot"
 
 [[image.assembly.trees]]
 id = "initramfs"
-path = "$assembly.work/initramfs"
+path = "${assembly.work}/initramfs"
 
 [[image.assembly.files]]
 tree = "boot"
-src_glob = "$provider.images/*.dtb"
+src_glob = "${provider.images}/*.dtb"
 dest = "."
 optional = true
 
@@ -56,5 +58,5 @@ optional = true
 id = "initramfs"
 kind = "cpio-gzip"
 source_tree = "initramfs"
-output = "$assembly.tree.boot/initramfs"
+output = "${assembly.tree.boot}/initramfs"
 deterministic = true
