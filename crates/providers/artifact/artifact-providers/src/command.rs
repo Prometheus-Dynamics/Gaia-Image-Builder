@@ -418,6 +418,12 @@ fn docker_command(
         spec.mounts.push(toolchain.root.clone());
         spec.mounts.push(toolchain.sysroot.clone());
     }
+    // The build runs in its source tree, which lies outside the workspace
+    // when the build dir (where sources are materialized) or a path source
+    // does: mount it where it is.
+    if !spec.current_dir.starts_with(&spec.workspace_root) {
+        spec.mounts.push(spec.current_dir.clone());
+    }
     // Containers run with --rm, so tool caches inside the image are lost after
     // every build. Keep them in the workspace cache unless the artifact sets
     // its own location.
@@ -522,6 +528,88 @@ mod tests {
                 "{mount} is mounted: {args:?}"
             );
         }
+    }
+
+    #[test]
+    fn docker_mounts_a_source_tree_outside_the_workspace() {
+        let scratch = TempDir::new("gaia-docker-source-mount");
+        let workspace = scratch.join("ws");
+        let source = scratch.join("fast-disk/build/sources/atlas");
+        fs::create_dir_all(&workspace).expect("workspace");
+        fs::create_dir_all(&source).expect("source");
+        let mut contract = contract(1);
+        contract.workspace_root = Some(workspace.display().to_string());
+        contract.execution_backend = ArtifactExecutionBackend::Docker(ArtifactDockerExecution {
+            image: "builder:latest".into(),
+            build: None,
+        });
+        let mut command = Command::new("cargo");
+        command.current_dir(&source);
+        let args: Vec<String> = command_for_execution(&command, &contract)
+            .expect("docker command")
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let mount = format!("{0}:{0}", source.display());
+        assert!(
+            args.windows(2)
+                .any(|pair| pair[0] == "-v" && pair[1] == mount),
+            "{mount} is mounted: {args:?}"
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair[0] == "-w" && pair[1] == source.display().to_string()),
+            "{args:?}"
+        );
+    }
+
+    /// A real container reads its source tree and writes the build dir when
+    /// both lie outside the workspace, as with `--set workspace.build_dir` on
+    /// another disk. Skipped without a docker daemon or `debian:sid`.
+    #[test]
+    fn a_container_builds_from_a_build_dir_outside_the_workspace() {
+        const IMAGE: &str = "debian:sid";
+        let has_image = Command::new("docker")
+            .args(["image", "inspect", IMAGE])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+        if !has_image {
+            eprintln!("skipped: no docker daemon or no {IMAGE} image");
+            return;
+        }
+        let scratch = TempDir::new("gaia-docker-outside-build-dir");
+        let workspace = scratch.join("ws");
+        let build_dir = scratch.join("fast-disk/build");
+        let source = build_dir.join("sources/atlas");
+        fs::create_dir_all(&workspace).expect("workspace");
+        fs::create_dir_all(&source).expect("source");
+        fs::write(source.join("Cargo.toml"), "[package]\n").expect("manifest");
+        // As `gaia run` does for a build dir outside the workspace root.
+        gaia_process::register_docker_mount(&build_dir);
+        let mut contract = contract(1);
+        contract.workspace_root = Some(workspace.display().to_string());
+        contract.execution_backend = ArtifactExecutionBackend::Docker(ArtifactDockerExecution {
+            image: IMAGE.into(),
+            build: None,
+        });
+        let output = build_dir.join("artifacts/out.txt");
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg(format!(
+                "test -f Cargo.toml && mkdir -p {0} && echo built > {1}",
+                output.parent().expect("parent").display(),
+                output.display()
+            ))
+            .current_dir(&source);
+        let status = command_for_execution(&command, &contract)
+            .expect("docker command")
+            .status()
+            .expect("docker runs");
+        assert!(status.success(), "the container sees the source tree");
+        assert_eq!(fs::read_to_string(&output).expect("written"), "built\n");
     }
 
     /// A fake tool that appends one line to `calls` per run, then runs `body`.

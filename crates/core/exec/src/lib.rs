@@ -41,6 +41,32 @@ pub struct ExecutionProviders<'a> {
     pub image_catalog: &'a ImageProviderCatalog,
 }
 
+/// The build and output dirs, when they lie outside the workspace root (on
+/// a faster disk, say), are mounted into every container the run starts at
+/// their own paths: sources are materialized and outputs written there,
+/// while a container otherwise sees only the workspace. Each is created
+/// first, so docker does not create a missing one as root.
+fn mount_workspace_dirs_outside_root(spec: &ResolvedBuildSpec) {
+    for dir in workspace_dirs_outside_root(spec) {
+        match std::fs::create_dir_all(&dir) {
+            Ok(()) => gaia_process::register_docker_mount(&dir),
+            Err(error) => {
+                tracing::warn!(dir = %dir.display(), %error, "could not create a dir to mount into containers");
+            }
+        }
+    }
+}
+
+fn workspace_dirs_outside_root(spec: &ResolvedBuildSpec) -> Vec<std::path::PathBuf> {
+    let workspace = &spec.workspace;
+    let root = std::path::Path::new(&workspace.root_dir);
+    [&workspace.build_dir, &workspace.out_dir]
+        .into_iter()
+        .filter_map(|dir| gaia_spec::resolve_workspace_path(workspace, dir).ok())
+        .filter(|dir| !dir.starts_with(root))
+        .collect()
+}
+
 pub fn execute_plan(
     spec: &ResolvedBuildSpec,
     plan: &ExecutionPlan,
@@ -86,6 +112,7 @@ pub fn execute_plan_with_rebuilds(
     rebuild_packages: &[String],
 ) -> ExecutionOutcome {
     gaia_spec::install_secrets(spec);
+    mount_workspace_dirs_outside_root(spec);
     let max_parallel_jobs = resolve_parallel_jobs(spec);
     let span = tracing::info_span!(
         "execute_plan",
@@ -428,4 +455,29 @@ fn root_failure(
         }
     }
     current
+}
+
+#[cfg(test)]
+mod workspace_mount_tests {
+    use super::*;
+
+    #[test]
+    fn only_dirs_outside_the_workspace_root_are_mounted() {
+        let mut spec = ResolvedBuildSpec::new("mounts");
+        spec.workspace.root_dir = "/repo".into();
+        spec.workspace.build_dir = "build".into();
+        spec.workspace.out_dir = "/fast/out".into();
+        assert_eq!(
+            workspace_dirs_outside_root(&spec),
+            [std::path::PathBuf::from("/fast/out")]
+        );
+        spec.workspace.build_dir = "/fast/build".into();
+        assert_eq!(
+            workspace_dirs_outside_root(&spec),
+            [
+                std::path::PathBuf::from("/fast/build"),
+                std::path::PathBuf::from("/fast/out")
+            ]
+        );
+    }
 }
