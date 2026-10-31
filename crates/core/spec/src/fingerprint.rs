@@ -123,6 +123,12 @@ pub(crate) fn is_default<T: Default + PartialEq>(value: &T) -> bool {
     *value == T::default()
 }
 
+/// For fields that default to `true`, so specs written before the field
+/// existed keep their fingerprint.
+pub(crate) fn is_true(value: &bool) -> bool {
+    *value
+}
+
 /// SHA-256 hex of `text`.
 pub fn sha256_hex(text: &str) -> String {
     gaia_process::sha256_hex_bytes(text.as_bytes())

@@ -349,6 +349,8 @@ fn assembly_disk_helpers_parse_types_aliases_and_signatures() {
         size: None,
         wipe: false,
         materialize: true,
+        offset: None,
+        table: true,
         gpt: Default::default(),
     };
     let alias = gaia_spec::AssemblyDiskPartitionSpec {
@@ -360,6 +362,8 @@ fn assembly_disk_helpers_parse_types_aliases_and_signatures() {
         size: None,
         wipe: false,
         materialize: true,
+        offset: None,
+        table: true,
         gpt: Default::default(),
     };
     let linux = gaia_spec::AssemblyDiskPartitionSpec {
@@ -371,6 +375,8 @@ fn assembly_disk_helpers_parse_types_aliases_and_signatures() {
         size: None,
         wipe: false,
         materialize: true,
+        offset: None,
+        table: true,
         gpt: Default::default(),
     };
     let disk = gaia_spec::AssemblyDiskSpec {
@@ -643,6 +649,8 @@ fn assembly_disk_archives_log_a_step_time_and_sizes() {
 mod tests_binaries;
 #[path = "tests_busybox.rs"]
 mod tests_busybox;
+#[path = "tests_disk_offsets.rs"]
+mod tests_disk_offsets;
 #[path = "tests_ext4.rs"]
 mod tests_ext4;
 #[path = "tests_file_libs.rs"]

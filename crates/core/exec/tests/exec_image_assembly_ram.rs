@@ -48,6 +48,8 @@ fn spec_with_work_dir(scratch: &TempDir, work_dir: &str) -> ResolvedBuildSpec {
                 size: Some("1M".into()),
                 wipe: false,
                 materialize: true,
+                offset: None,
+                table: true,
                 gpt: Default::default(),
             }],
             gpt: Default::default(),

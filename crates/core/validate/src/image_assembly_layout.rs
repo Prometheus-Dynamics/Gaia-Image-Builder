@@ -19,9 +19,23 @@ pub(crate) fn validate_disk_layout(
     diagnostics: &mut Vec<ValidationDiagnostic>,
 ) {
     let location = || Some("image.assembly.disks.partitions".into());
-    let extended = disk.partition_table == gaia_spec::AssemblyPartitionTableSpec::Mbr
-        && disk.partitions.len() > 4;
-    for (index, partition) in disk.partitions.iter().enumerate() {
+    let gpt = disk.partition_table == gaia_spec::AssemblyPartitionTableSpec::Gpt;
+    let extended = !gpt
+        && disk
+            .partitions
+            .iter()
+            .filter(|partition| partition.table)
+            .count()
+            > 4;
+    // Index among the table partitions.
+    let mut index = 0;
+    for partition in &disk.partitions {
+        let slot = index;
+        if partition.table {
+            index += 1;
+        }
+        let logical = partition.table && extended && slot >= 3;
+        validate_partition_placement(disk, partition, gpt, logical, diagnostics);
         match partition.parsed_size() {
             Ok(Some(size)) if size.bytes() == 0 => diagnostics.push(error(
                 "assembly_partition_size_invalid",
@@ -93,14 +107,78 @@ pub(crate) fn validate_disk_layout(
                 ));
             }
         }
-        if extended && index >= 3 && partition.bootable {
+        if logical && partition.bootable {
             diagnostics.push(error(
                 "assembly_partition_bootable_logical",
                 format!(
                     "assembly disk '{}' partition '{}' is a logical partition (p{}); bootable is only allowed on primary partitions p1-p3 when a disk has more than 4 partitions",
                     disk.id,
                     partition.name,
-                    index + 2
+                    slot + 2
+                ),
+                location(),
+            ));
+        }
+    }
+}
+
+/// A partition's `offset` and `table = false`: the offset is whole sectors
+/// past the partition table, and an image outside the table sets no table
+/// fields. Overlaps depend on image sizes, so the assembly checks those.
+fn validate_partition_placement(
+    disk: &gaia_spec::AssemblyDiskSpec,
+    partition: &gaia_spec::AssemblyDiskPartitionSpec,
+    gpt: bool,
+    logical: bool,
+    diagnostics: &mut Vec<ValidationDiagnostic>,
+) {
+    let location = || Some("image.assembly.disks.partitions".into());
+    let table_bytes = if gpt { 34 * 512 } else { 512 };
+    let offset_error = |message: String| {
+        error(
+            "assembly_partition_offset_invalid",
+            format!(
+                "assembly disk '{}' partition '{}' {message}",
+                disk.id, partition.name
+            ),
+            location(),
+        )
+    };
+    match partition.parsed_offset() {
+        Ok(None) => {}
+        Ok(Some(offset)) if offset.bytes() % 512 != 0 => diagnostics.push(offset_error(format!(
+            "offset {} is not a multiple of 512 bytes",
+            offset.bytes()
+        ))),
+        Ok(Some(offset)) if offset.bytes() < table_bytes => {
+            diagnostics.push(offset_error(format!(
+                "offset {} overlaps the partition table, which takes the first {table_bytes} bytes",
+                offset.bytes()
+            )))
+        }
+        Ok(Some(_)) if logical => diagnostics.push(offset_error(
+            "is a logical partition; offset is only allowed on primary partitions and images outside the table".into(),
+        )),
+        Ok(Some(_)) => {}
+        Err(parse_error) => {
+            diagnostics.push(offset_error(format!("has invalid offset: {parse_error}")))
+        }
+    }
+    if partition.table {
+        return;
+    }
+    for (set, option) in [
+        (partition.bootable, "bootable"),
+        (partition.kind.is_some(), "type"),
+        (partition.type_alias.is_some(), "type_alias"),
+        (partition.gpt.guid.is_some(), "guid"),
+    ] {
+        if set {
+            diagnostics.push(error(
+                "assembly_partition_table_option",
+                format!(
+                    "assembly disk '{}' partition '{}' sets table = false and {option}; an image outside the partition table has no table entry",
+                    disk.id, partition.name
                 ),
                 location(),
             ));

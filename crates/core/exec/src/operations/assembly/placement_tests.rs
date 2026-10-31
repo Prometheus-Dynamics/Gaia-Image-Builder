@@ -75,6 +75,8 @@ fn ram_moves_intermediates_and_keeps_published_disks_on_disk() {
             size: None,
             wipe: false,
             materialize: true,
+            offset: None,
+            table: true,
             gpt: Default::default(),
         }],
         gpt: Default::default(),

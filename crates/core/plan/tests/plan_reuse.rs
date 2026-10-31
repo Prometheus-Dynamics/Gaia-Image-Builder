@@ -452,6 +452,8 @@ fn plan_rebuilds_assembly_when_direct_partition_image_changes() {
                 size: None,
                 wipe: false,
                 materialize: true,
+                offset: None,
+                table: true,
                 gpt: Default::default(),
             }],
             gpt: Default::default(),

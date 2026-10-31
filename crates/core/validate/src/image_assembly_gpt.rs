@@ -59,13 +59,17 @@ pub(crate) fn validate_disk_partition_table(
             diagnostics.push(unsupported(option, "mbr"));
         }
     }
-    if disk.partitions.len() > GPT_MAX_PARTITIONS {
+    let table_count = disk
+        .partitions
+        .iter()
+        .filter(|partition| partition.table)
+        .count();
+    if table_count > GPT_MAX_PARTITIONS {
         diagnostics.push(error(
             "assembly_disk_partition_count_invalid",
             format!(
-                "assembly disk '{}' has {} partitions; a GPT disk holds at most {GPT_MAX_PARTITIONS}",
+                "assembly disk '{}' has {table_count} partitions; a GPT disk holds at most {GPT_MAX_PARTITIONS}",
                 disk.id,
-                disk.partitions.len()
             ),
             location(),
         ));

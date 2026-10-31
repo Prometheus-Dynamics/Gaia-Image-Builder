@@ -215,13 +215,45 @@ mode = "0600"        # permission bits, octal; default 0600
 - `size`: partition size in bytes or with a binary `K`/`M`/`G`/`T` suffix (`"16M"`, `"2G"`). Without it the partition is exactly as large as its image (rounded up to 512-byte sectors). With it the image must fit, otherwise assembly fails before the disk is written; the space after the image is left unwritten.
 - `wipe = true`: only for empty partitions (no `image`). Writes zeros over the first 1 MiB of the partition (less if the partition is smaller) so filesystem signatures left by a previous flash do not survive when the image is written to a device. Validation rejects `wipe` together with `image`, since an image already overwrites the partition start.
 - `materialize = false`: the partition is in the table at its full `size`, but nothing is written to it (no image, no wipe). It needs `size`; validation rejects `image` or `wipe` with it (`assembly_partition_unmaterialized_image`, `assembly_partition_unmaterialized_wipe`). Pair it with `truncate = "last-data"` to leave the partition past the end of the file so it is created on first boot. Defaults to `true`.
+- `offset`: a fixed start on the disk, in bytes or with a binary suffix (`"32K"`, `"8M"`). It must be a multiple of 512 and lie past the partition table (sector 1 on MBR, sector 34 on GPT), and it is not rounded to `alignment_lba`. Not allowed on a logical partition (`assembly_partition_offset_invalid`).
+- `table = false`: the image is written at its place on the disk but the partition table has no entry for it, as for a bootloader the boot ROM reads by offset. It takes no table slot or partition number, and it rejects `bootable`, `type`, `type_alias` and `guid` (`assembly_partition_table_option`). Defaults to `true`.
 
 Layout:
-- Partitions are placed in declaration order, each starting at the next `alignment_lba` boundary (default 2048 sectors) after `first_lba` (default 2048).
+- Partitions are placed in declaration order, each starting at the next `alignment_lba` boundary (default 2048 sectors) after `first_lba` (default 2048). A partition with an `offset` starts there instead, and the next partition without one follows the furthest end so far.
+- Assembly fails when two partitions, a partition and an EBR, or a partition and the partition table share a sector.
+- Only partitions in the table count toward the 4-partition limit below and toward the partition numbers.
 - With 4 or fewer partitions all of them are primary partitions p1-p4.
 - With more than 4 partitions Gaia writes the standard sfdisk extended layout: partitions 1-3 are primary (p1-p3), MBR slot 4 becomes an extended partition (type `0x05`), and partitions 4.. become logical partitions p5, p6, ... Each logical partition has an EBR in the first sector of its aligned slot and its data starts at the next `alignment_lba` boundary. EBR entry 0 describes the logical partition relative to its EBR; entry 1 links the next EBR, relative to the extended partition start, and spans that EBR through the end of its logical partition. The extended entry spans from the first EBR to the end of the last logical partition.
 - The disk file is created at its full size with unwritten ranges left as holes, so empty and padded partitions take no space on filesystems that support sparse files.
 - Assembly state records each partition's `start_lba`, `sector_count`, image `bytes`, and for layouts with more than 4 partitions the kernel `number` and the `ebr_lba` of logical partitions; empty partitions record `empty=true` and `wipe_bytes`.
+
+##### Example: Rockchip loaders before the GPT partitions
+
+The Rockchip boot ROM reads the loader at sector 64 and U-Boot at 8 MiB, outside any partition:
+
+```toml
+[[image.assembly.disks]]
+id = "emmc"
+output = "$assembly.out/emmc.img"
+partition_table = "gpt"
+
+[[image.assembly.disks.partitions]]
+name = "idbloader"
+image = "$provider.images/idbloader.img"
+offset = "32K"
+table = false
+
+[[image.assembly.disks.partitions]]
+name = "uboot"
+image = "$provider.images/u-boot.itb"
+offset = "8M"
+table = false
+
+[[image.assembly.disks.partitions]]
+name = "rootfs-a"
+image = "$assembly.work/rootfs.verity.erofs"
+offset = "16M"
+```
 
 #### GPT disks
 

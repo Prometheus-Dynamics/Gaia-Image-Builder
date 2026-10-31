@@ -27,6 +27,8 @@ fn partition(
         size: size.map(str::to_string),
         wipe: false,
         materialize: true,
+        offset: None,
+        table: true,
         gpt: Default::default(),
     }
 }

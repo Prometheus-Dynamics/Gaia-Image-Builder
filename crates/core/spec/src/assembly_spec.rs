@@ -289,6 +289,14 @@ pub struct AssemblyDiskPartitionSpec {
     /// `false` keeps the partition in the table at its full size with
     /// nothing written: no image and no wipe. Requires `size`.
     pub materialize: bool,
+    /// Fixed start on the disk, a multiple of 512 bytes; `None` places the
+    /// partition after the previous one. Later partitions follow it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<String>,
+    /// `false` writes the image at its place on the disk without a partition
+    /// table entry, for a bootloader the boot ROM finds by offset.
+    #[serde(skip_serializing_if = "crate::fingerprint::is_true")]
+    pub table: bool,
     /// GPT only: the partition GUID. The GPT partition name is `name`.
     #[serde(skip_serializing_if = "crate::fingerprint::is_default")]
     pub gpt: crate::AssemblyGptPartitionSpec,
@@ -297,6 +305,10 @@ pub struct AssemblyDiskPartitionSpec {
 impl AssemblyDiskPartitionSpec {
     pub fn parsed_size(&self) -> Result<Option<ByteSize>, ByteSizeParseError> {
         self.size.as_deref().map(ByteSize::from_str).transpose()
+    }
+
+    pub fn parsed_offset(&self) -> Result<Option<ByteSize>, ByteSizeParseError> {
+        self.offset.as_deref().map(ByteSize::from_str).transpose()
     }
 
     pub fn partition_type(&self) -> Result<MbrPartitionType, MbrPartitionTypeParseError> {

@@ -28,6 +28,8 @@ fn partition(name: &str, alias: Option<&str>, image: Option<&str>) -> AssemblyDi
         size: None,
         wipe: false,
         materialize: true,
+        offset: None,
+        table: true,
         gpt: AssemblyGptPartitionSpec::default(),
     }
 }

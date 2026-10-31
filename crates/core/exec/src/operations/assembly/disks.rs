@@ -13,8 +13,11 @@ pub(super) struct AssemblyDiskSummary {
 pub(super) struct AssemblyDiskPartitionSummary {
     pub(super) name: String,
     /// Partition number as the kernel sees it: p1-p4 for primaries, p5.. for
-    /// logical partitions inside the extended partition.
+    /// logical partitions inside the extended partition; 0 for an image
+    /// outside the table.
     pub(super) number: u32,
+    /// `false` for an image written by offset with no table entry.
+    pub(super) in_table: bool,
     /// `None` for an empty partition.
     pub(super) image: Option<PathBuf>,
     /// The MBR type byte; 0 on a GPT disk, which uses `gpt`.
@@ -63,17 +66,25 @@ pub(super) fn execute_assembly_disk(
     })
 }
 
-/// Lays partitions out in order. On an MBR disk with more than 4 partitions
-/// the first 3 stay primary and the rest become logical partitions, each
-/// preceded by an EBR at the start of its aligned slot with the data at the
-/// next boundary. A GPT disk (`disk_guid` set) has only primaries.
+/// Lays partitions out in order. On an MBR disk with more than 4 table
+/// partitions the first 3 stay primary and the rest become logical
+/// partitions, each preceded by an EBR at the start of its aligned slot with
+/// the data at the next boundary. A GPT disk (`disk_guid` set) has only
+/// primaries. A partition with an `offset` starts there and the next one
+/// follows it; one with `table = false` takes space on the disk but no slot
+/// in the table.
 fn plan_disk_partitions(
     spec: &ResolvedBuildSpec,
     roots: &AssemblyRoots,
     disk: &gaia_spec::AssemblyDiskSpec,
     disk_guid: Option<gaia_spec::GptGuid>,
 ) -> Result<Vec<AssemblyDiskPartitionSummary>, String> {
-    let extended = disk_guid.is_none() && disk.partitions.len() > MBR_PRIMARY_SLOTS;
+    let table_count = disk
+        .partitions
+        .iter()
+        .filter(|partition| partition.table)
+        .count();
+    let extended = disk_guid.is_none() && table_count > MBR_PRIMARY_SLOTS;
     let mut planned = Vec::new();
     let alignment_lba = disk.alignment_lba.unwrap_or(2048).max(1);
     let mut next_lba = disk.first_lba.unwrap_or(2048);
@@ -87,11 +98,17 @@ fn plan_disk_partitions(
     // Packed: the EBR chain takes the first sectors of the extended
     // partition, one per logical partition; data starts after it.
     let mut packed_extended = None;
-    for (index, partition) in disk.partitions.iter().enumerate() {
-        let logical = extended && index >= MBR_EXTENDED_SLOT;
-        if packed && index == MBR_EXTENDED_SLOT {
+    // Index among the table partitions.
+    let mut index = 0;
+    for partition in &disk.partitions {
+        let slot = index;
+        if partition.table {
+            index += 1;
+        }
+        let logical = partition.table && extended && slot >= MBR_EXTENDED_SLOT;
+        if packed && partition.table && slot == MBR_EXTENDED_SLOT {
             let extended_lba = align_to(next_lba, alignment_lba);
-            let logical_count = (disk.partitions.len() - MBR_EXTENDED_SLOT) as u64;
+            let logical_count = (table_count - MBR_EXTENDED_SLOT) as u64;
             // Sector of the last EBR in the chain.
             packed_extended = Some((extended_lba, extended_lba + logical_count - 1));
             next_lba = align_to(extended_lba + logical_count, alignment_lba);
@@ -115,23 +132,31 @@ fn plan_disk_partitions(
             .transpose()?;
         let bytes = image.as_deref().map(file_len).transpose()?.unwrap_or(0);
         let sector_count = partition_sector_count(disk, partition, image.as_deref(), bytes)?;
-        let (ebr_lba, start_lba) =
-            if let (true, Some((extended_lba, last_ebr_lba))) = (logical, packed_extended) {
-                let ebr_lba = extended_lba + (index - MBR_EXTENDED_SLOT) as u64;
-                let start_lba = align_to(next_lba, alignment_lba);
-                if start_lba <= last_ebr_lba {
-                    return Err(format!(
-                        "assembly disk '{}' partition '{}' has no room after its packed EBR chain",
-                        disk.id, partition.name
-                    ));
-                }
-                (Some(ebr_lba), start_lba)
-            } else if logical {
-                let ebr_lba = align_to(next_lba, alignment_lba);
-                (Some(ebr_lba), align_to(ebr_lba + 1, alignment_lba))
-            } else {
-                (None, align_to(next_lba, alignment_lba))
-            };
+        let offset_lba = partition_offset_lba(disk, partition)?;
+        if logical && offset_lba.is_some() {
+            return Err(format!(
+                "assembly disk '{}' partition '{}' is a logical partition; offset is only allowed on primary partitions and images outside the table",
+                disk.id, partition.name
+            ));
+        }
+        let (ebr_lba, start_lba) = if let Some(offset_lba) = offset_lba {
+            (None, offset_lba)
+        } else if let (true, Some((extended_lba, last_ebr_lba))) = (logical, packed_extended) {
+            let ebr_lba = extended_lba + (slot - MBR_EXTENDED_SLOT) as u64;
+            let start_lba = align_to(next_lba, alignment_lba);
+            if start_lba <= last_ebr_lba {
+                return Err(format!(
+                    "assembly disk '{}' partition '{}' has no room after its packed EBR chain",
+                    disk.id, partition.name
+                ));
+            }
+            (Some(ebr_lba), start_lba)
+        } else if logical {
+            let ebr_lba = align_to(next_lba, alignment_lba);
+            (Some(ebr_lba), align_to(ebr_lba + 1, alignment_lba))
+        } else {
+            (None, align_to(next_lba, alignment_lba))
+        };
         let end_lba = start_lba
             .checked_add(sector_count)
             .ok_or_else(|| format!("assembly disk '{}' partition layout is too large", disk.id))?;
@@ -151,13 +176,20 @@ fn plan_disk_partitions(
         };
         planned.push(AssemblyDiskPartitionSummary {
             name: partition.name.clone(),
-            number: if logical { index + 2 } else { index + 1 } as u32,
+            number: match (partition.table, logical) {
+                (false, _) => 0,
+                (true, true) => slot as u32 + 2,
+                (true, false) => slot as u32 + 1,
+            },
+            in_table: partition.table,
             image,
             partition_type: match disk_guid {
                 Some(_) => 0,
+                None if !partition.table => 0,
                 None => partition_type_byte(partition)?,
             },
             gpt: disk_guid
+                .filter(|_| partition.table)
                 .map(|disk_guid| gpt_partition_ids(disk, disk_guid, partition))
                 .transpose()?,
             bootable: partition.bootable,
@@ -167,9 +199,76 @@ fn plan_disk_partitions(
             ebr_lba: ebr_lba.map(|lba| lba as u32),
             wipe_bytes,
         });
-        next_lba = end_lba;
+        next_lba = next_lba.max(end_lba);
     }
+    check_disk_overlaps(disk, disk_guid.is_some(), &planned)?;
     Ok(planned)
+}
+
+/// The start sector of a partition with an `offset`.
+fn partition_offset_lba(
+    disk: &gaia_spec::AssemblyDiskSpec,
+    partition: &gaia_spec::AssemblyDiskPartitionSpec,
+) -> Result<Option<u64>, String> {
+    let offset = partition.parsed_offset().map_err(|error| {
+        format!(
+            "assembly disk '{}' partition '{}' has invalid offset: {error}",
+            disk.id, partition.name
+        )
+    })?;
+    match offset {
+        Some(offset) if offset.bytes() % 512 != 0 => Err(format!(
+            "assembly disk '{}' partition '{}' offset {} is not a multiple of 512 bytes",
+            disk.id,
+            partition.name,
+            offset.bytes()
+        )),
+        offset => Ok(offset.map(|offset| offset.bytes() / 512)),
+    }
+}
+
+/// Fails when two partitions, a partition and an EBR, or a partition and the
+/// partition table share a sector. Only a partition with an `offset` can be
+/// placed into another, but the check covers every partition.
+fn check_disk_overlaps(
+    disk: &gaia_spec::AssemblyDiskSpec,
+    gpt: bool,
+    planned: &[AssemblyDiskPartitionSummary],
+) -> Result<(), String> {
+    let table = if gpt {
+        "the GPT header and entries"
+    } else {
+        "the MBR"
+    };
+    let table_end = if gpt { GPT_MIN_FIRST_LBA } else { 1 };
+    let mut extents = vec![(0, table_end, table.to_string())];
+    for partition in planned {
+        let start = partition.start_lba as u64;
+        extents.push((
+            start,
+            start + partition.sector_count as u64,
+            format!("partition '{}'", partition.name),
+        ));
+        if let Some(ebr_lba) = partition.ebr_lba {
+            let ebr_lba = ebr_lba as u64;
+            extents.push((
+                ebr_lba,
+                ebr_lba + 1,
+                format!("the EBR of partition '{}'", partition.name),
+            ));
+        }
+    }
+    extents.sort_by_key(|(start, end, _)| (*start, *end));
+    for pair in extents.windows(2) {
+        let ((_, first_end, first), (second_start, _, second)) = (&pair[0], &pair[1]);
+        if second_start < first_end {
+            return Err(format!(
+                "assembly disk '{}': {second} at sector {second_start} overlaps {first}, which ends at sector {first_end}",
+                disk.id
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Sectors for a partition: its `size` when set (the image must fit), else
@@ -292,15 +391,16 @@ fn write_disk(
         })?;
     }
 
+    let table: Vec<AssemblyDiskPartitionSummary> = partitions
+        .iter()
+        .filter(|partition| partition.in_table)
+        .cloned()
+        .collect();
     match disk_guid {
-        Some(disk_guid) => write_gpt_tables(
-            &mut output_file,
-            output,
-            disk_guid,
-            total_sectors,
-            partitions,
-        ),
-        None => write_mbr_tables(&mut output_file, output, disk, partitions),
+        Some(disk_guid) => {
+            write_gpt_tables(&mut output_file, output, disk_guid, total_sectors, &table)
+        }
+        None => write_mbr_tables(&mut output_file, output, disk, &table),
     }
 }
 
@@ -378,6 +478,7 @@ pub(super) fn record_disk_state(
         let field = |name: &str| disk_state.child_field("partition", partition_index + 1, name);
         state.insert(field("name"), &partition.name);
         match partition.gpt {
+            _ if !partition.in_table => state.insert(field("table"), false),
             Some(ids) => {
                 state.insert(field("type"), ids.type_guid.to_string());
                 state.insert(field("guid"), ids.guid.to_string());
@@ -391,7 +492,15 @@ pub(super) fn record_disk_state(
         state.insert(field("start_lba"), partition.start_lba);
         state.insert(field("sector_count"), partition.sector_count);
         state.insert(field("bytes"), partition.bytes);
-        if summary.disk_guid.is_none() && summary.partitions.len() > MBR_PRIMARY_SLOTS {
+        if summary.disk_guid.is_none()
+            && partition.in_table
+            && summary
+                .partitions
+                .iter()
+                .filter(|partition| partition.in_table)
+                .count()
+                > MBR_PRIMARY_SLOTS
+        {
             state.insert(field("number"), partition.number);
         }
         if let Some(ebr_lba) = partition.ebr_lba {

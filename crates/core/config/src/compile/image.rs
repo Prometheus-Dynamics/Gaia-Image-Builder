@@ -326,6 +326,8 @@ pub(crate) fn compile_image_assembly(
                         size: partition.size,
                         wipe: partition.wipe,
                         materialize: partition.materialize.unwrap_or(true),
+                        offset: partition.offset,
+                        table: partition.table.unwrap_or(true),
                         gpt: AssemblyGptPartitionSpec {
                             guid: partition.guid,
                         },

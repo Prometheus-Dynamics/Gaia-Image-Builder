@@ -40,6 +40,8 @@ fn partition(
         size: size.map(Into::into),
         wipe,
         materialize,
+        offset: None,
+        table: true,
         gpt: Default::default(),
     }
 }

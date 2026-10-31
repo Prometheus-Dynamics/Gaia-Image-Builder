@@ -403,3 +403,71 @@ ebr_placement = "packed""#,
     );
     assert_eq!(mbr, Vec::<&str>::new());
 }
+
+#[test]
+fn offsets_must_be_whole_sectors_past_the_table_and_outside_images_set_no_table_fields() {
+    let codes = single_disk_codes(
+        r#"partition_table = "gpt""#,
+        r#"[[image.assembly.disks.partitions]]
+name = "odd"
+size = "1M"
+offset = "1000"
+
+[[image.assembly.disks.partitions]]
+name = "in-table"
+size = "1M"
+offset = "8K"
+
+[[image.assembly.disks.partitions]]
+name = "loader"
+image = "$provider.images/idbloader.img"
+offset = "32K"
+table = false
+type_alias = "esp"
+bootable = true
+"#,
+    );
+    let offsets = codes
+        .iter()
+        .filter(|code| **code == "assembly_partition_offset_invalid")
+        .count();
+    assert_eq!(offsets, 2, "{codes:?}");
+    let table_options = codes
+        .iter()
+        .filter(|code| **code == "assembly_partition_table_option")
+        .count();
+    assert_eq!(table_options, 2, "{codes:?}");
+}
+
+#[test]
+fn an_image_outside_the_table_takes_no_mbr_slot() {
+    let five_with_loader = r#"[[image.assembly.disks.partitions]]
+name = "loader"
+image = "$provider.images/idbloader.img"
+offset = "32K"
+table = false
+
+[[image.assembly.disks.partitions]]
+name = "p1"
+size = "1M"
+
+[[image.assembly.disks.partitions]]
+name = "p2"
+size = "1M"
+
+[[image.assembly.disks.partitions]]
+name = "p3"
+size = "1M"
+
+[[image.assembly.disks.partitions]]
+name = "p4"
+size = "1M"
+bootable = true
+"#;
+    let codes = single_disk_codes(r#"partition_table = "mbr""#, five_with_loader);
+    assert!(
+        !codes.contains(&"assembly_partition_bootable_logical"),
+        "{codes:?}"
+    );
+    assert!(codes.is_empty(), "{codes:?}");
+}

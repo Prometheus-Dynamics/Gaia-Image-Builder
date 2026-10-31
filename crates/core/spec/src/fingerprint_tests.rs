@@ -186,6 +186,8 @@ fn compressed_and_gpt_options_are_encoded_only_when_set() {
         size: Some("1MiB".into()),
         wipe: false,
         materialize: true,
+        offset: None,
+        table: true,
         gpt: Default::default(),
     };
     let mut disk = AssemblyDiskSpec {

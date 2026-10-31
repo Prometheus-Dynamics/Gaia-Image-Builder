@@ -323,6 +323,9 @@ pub(crate) struct RawAssemblyDiskPartitionConfig {
     pub wipe: bool,
     /// Defaults to true; `false` leaves the partition unwritten.
     pub materialize: Option<bool>,
+    pub offset: Option<String>,
+    /// Defaults to true; `false` leaves the partition out of the table.
+    pub table: Option<bool>,
     /// GPT only: the partition GUID; unset derives it from the disk GUID
     /// and the name.
     pub guid: Option<String>,

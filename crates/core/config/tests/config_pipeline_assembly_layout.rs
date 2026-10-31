@@ -214,7 +214,7 @@ entries = [["IMAGE_SHA256", "v${build.version}:${assembly.sha256:$provider.image
 }
 
 #[test]
-fn resolves_disk_truncate_ebr_placement_and_materialize() {
+fn resolves_disk_truncate_ebr_placement_materialize_offset_and_table() {
     let path = write_temp_config(
         r#"
 build_name = "trunc"
@@ -239,6 +239,12 @@ ebr_placement = "packed"
 name = "boot"
 type_alias = "fat32-lba"
 image = "$provider.images/boot.vfat"
+
+[[image.assembly.disks.partitions]]
+name = "loader"
+image = "$provider.images/idbloader.img"
+offset = "32K"
+table = false
 
 [[image.assembly.disks.partitions]]
 name = "data"
@@ -268,7 +274,11 @@ image = "$provider.images/rootfs.ext4"
         gaia_spec::AssemblyEbrPlacementSpec::Packed
     );
     assert!(emmc.partitions[0].materialize);
-    assert!(!emmc.partitions[1].materialize);
+    assert_eq!(emmc.partitions[0].offset, None);
+    assert!(emmc.partitions[0].table);
+    assert_eq!(emmc.partitions[1].offset.as_deref(), Some("32K"));
+    assert!(!emmc.partitions[1].table);
+    assert!(!emmc.partitions[2].materialize);
     let plain = &assembly.disks[1];
     assert_eq!(plain.truncate, None);
     assert_eq!(

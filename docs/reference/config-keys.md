@@ -234,7 +234,7 @@ Keys: `alignment_lba`, `disk_guid`, `ebr_placement`, `first_lba`, `id`, `output`
 
 Described in [Image assembly](../configuration-assembly.md#image-assembly).
 
-Keys: `bootable`, `guid`, `image`, `materialize`, `name`, `size`, `type`, `type_alias`, `wipe`.
+Keys: `bootable`, `guid`, `image`, `materialize`, `name`, `offset`, `size`, `table`, `type`, `type_alias`, `wipe`.
 
 ## `[[image.assembly.archives]]`
 

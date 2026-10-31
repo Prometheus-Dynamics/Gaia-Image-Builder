@@ -50,6 +50,8 @@ fn ram_test_assembly(work_dir: &str) -> ImageAssemblySpec {
             size: size.map(str::to_string),
             wipe,
             materialize: true,
+            offset: None,
+            table: true,
             gpt: Default::default(),
         }
     };

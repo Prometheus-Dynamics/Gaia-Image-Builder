@@ -81,6 +81,8 @@ fn raw_disk(
             size: None,
             wipe: false,
             materialize: true,
+            offset: None,
+            table: true,
             gpt: Default::default(),
         }],
         gpt: Default::default(),
