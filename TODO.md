@@ -32,12 +32,13 @@ Small targets ship exactly two slots (A/B) plus a data partition. Smaller is bet
   - What: check extlinux.conf, boot.scr and FIT boot trees: the kernel arch, the DTBs they name, the initrd and the `roothash=` in the command line.
   - Why: `image check` knows only the Raspberry Pi firmware's boot config.
   - Done when: tests cover extlinux and FIT trees, both good and broken.
-  - Status: done (the U-Boot image check commit). A FIT signed with RSA is not verified; only its hashes are.
+  - Status: done in 6ab2216. A FIT signed with RSA is not verified; only its hashes are.
 - **G3: `uboot-env` transform**
   - What: a U-Boot environment image (CRC32, optional redundant copy) holding the A/B variables (`boot_slot`, `bootcount`, `bootlimit`, `altbootcmd`).
   - Why: A/B trial boots on U-Boot boards, which have no `tryboot`. Atlas's updater writes the same variables.
   - Done when: `fw_printenv` reads the image back the same in a test, where installed.
-  - Status: done (the uboot-env commit), with byte-level tests of U-Boot's `env_t` layout. u-boot-tools isn't installed here, so the `fw_printenv` read-back waits for a host or board that has it.
+  - Status: the transform is done in 56568df, with byte-level tests of U-Boot's `env_t` layout. Left: the `fw_printenv` read-back test, which does not exist yet (no test runs u-boot-tools). Write it to skip with a visible line when `fw_printenv` is missing, and install `u-boot-tools` in GitHub CI so it runs there.
+  - Blocked by: nothing for the test and the CI install. Running it on this host needs u-boot-tools, which is not installed (the user's approval to install it).
 - **G4: riscv64 polish**
   - What: GPT aliases `linux-usr-riscv64`, `linux-root-verity-riscv64` and `linux-usr-verity-riscv64`, plus the riscv64 lp64d loader paths in the runtime-library check.
   - Why: the K230D uses Raze's verity layout.
@@ -52,22 +53,29 @@ Small targets ship exactly two slots (A/B) plus a data partition. Smaller is bet
   - What: GPT aliases `linux-usr-arm`, `linux-root-verity-arm` and `linux-usr-verity-arm`; the armhf loader and its library dirs in the runtime-library check; and tests with 32-bit ARM ELF fixtures. Rust's `armv7-unknown-linux-gnueabihf` and `musleabihf` targets already map to `arm`.
   - Why: the user wants full support on Flame's Cortex-A7, the same as the other targets.
   - Done when: tests cover the aliases and an armhf closure.
-  - Status: done (the armv7 aliases commit).
+  - Status: done in 3e51c14.
 - **G8: UBI images for SPI-NAND**
   - What: a native UBI writer, with no mtd-utils download. It writes one volume per slot (EROFS with verity on ubiblock, layered as on Raze) plus a data volume. It also lays out Rockchip's SPI-NAND idblock and K230 NAND images.
   - Why: the K230D boards, Flame and the Rockchip L variants boot from SPI-NAND.
   - Done when: the image attaches with `nandsim` and `ubiattach` and its volumes match, where those tools exist; otherwise a byte-level test of the format. Atlas has the volume layout.
-  - Status: the writer is done (the UBI images commit), with byte-level read-back tests. nandsim needs root here and mtd-utils is not installed, so the first kernel attach is on a board. Not done: Rockchip's SPI-NAND idblock and the K230 NAND image layout (these need the vendor SDKs' exact formats), and telling Atlas the volume layout once a board config fixes it.
+  - Status: the writer is done in 1a81221, with byte-level read-back tests. nandsim needs root here and mtd-utils is not installed, so the first kernel attach is on a board. Not done: Rockchip's SPI-NAND idblock and the K230 NAND image layout (these need the vendor SDKs' exact formats), and telling Atlas the volume layout once a board config fixes it.
+  - Blocked by: nothing external for the formats: fetch the K230 SDK and rkbin (approved on 2026-10-30, not fetched yet) and read them from there. A kernel attach needs a board, or the user's yes to `sudo modprobe nandsim`.
+- **G10: per-board CPU profile**
+  - What: a `[cpu]` table a board layer sets (`profile = "cortex-a76"`, ...). It adds `-C target-cpu`/`-C target-feature` and the C compiler's `-mcpu` to every Rust artifact built for that architecture, and selects the CPU in Buildroot (`BR2_cortex_a76`, ...). Profiles: CM5 `cortex-a76`; RK3588S/RK3582 `cortex-a76.cortex-a55`; RK3576 `cortex-a72.cortex-a53` (the RK3576's cores are A72 and A53, not A76); RK3566 `cortex-a55`; RK3562 `cortex-a53` (its cores are A53); Flame `cortex-a7` with NEON and VFPv4; K230D `xuantie-c908` (RVV 1.0 and Zba/Zbb/Zbs; rustc has no C908 model).
+  - Why: today the aarch64 builds target generic armv8-a, so the A76's dotprod, fp16, CRC32 and crypto instructions are used only where a crate detects them at run time (requested 2026-10-31 through HeliOS).
+  - Done when: the flags reach cargo and Buildroot in tests, HeliOS's backend builds with the CM5 profile, and each board's flags and any crate that breaks are reported to HeliOS.
+  - Blocked by: nothing. The K230D's Buildroot symbols are checked only once the K230 SDK is fetched.
 - **G6: per-board size budget**
   - What: an error-level check on slot and image bytes against a per-board budget, plus a report of the smallest flash part each board could ship with.
   - Why: two slots plus data has to fit the cheapest flash. A Raze slot is about 43 MB layered today.
+  - Status: done for raw NAND in 1a81221. A UBI image's `flash_size` fails the build when the volumes do not fit, and every build reports `minimum_flash_bytes`. On disk images, an image larger than its partition already fails. Left: a whole-device budget for disk images (eMMC/SD), so a disk larger than the board's part fails with the smallest size it needs, and the smallest-flash numbers per board for the PCB session.
   - Done when: a real HeliOS build passes and an oversized one fails. The smallest-flash numbers go to the PCB session.
-  - Blocked by: a real build per board, run before the check can fail builds.
+  - Blocked by: a board config per board (G7) to take the numbers from, and a real HeliOS build run before the disk check can fail builds.
 - **G7: board examples and docs**
   - What: `examples/buildroot-k230d`, `examples/buildroot-rk3588s` and `examples/buildroot-rv1106`, plus their docs.
   - Why: each new feature shown in a full board config.
   - Done when: both examples validate and plan in the gate, and build where the sources are present.
-  - Blocked by: G1–G6, G8 and G9.
+  - Blocked by: G8's idblock and K230 NAND layouts (the examples need their boot media), and the vendor sources for the build step. G1–G5 and G9 are done.
 - **K230D BSP (HVS_U01, HVS_I02)**
   - What: Canaan's Linux-only SDK with Linux on the big C908 (CPU1, the only core with RVV), vendor U-Boot and OpenSBI, and SPI-NAND boot. Size the media memory reservation from Styx's estimate of 20–25 MB.
   - Why: the smart USB camera and the Inferno host.
@@ -124,9 +132,9 @@ The user pinned these on 2026-10-30. They are not part of 3.0.0.
   - Done when: a push and pull round trip runs against the chosen registry.
   - Blocked by: the user's decision on GHCR (yes or no) and who owns it. No real-registry push until then.
 - **`gaia run` CI on the self-hosted runner**
-  - What: the HeliOS workflow (HeliOS dev 814e4893) and the `Gaia action` workflow on a registered `gaia` runner.
+  - What: the HeliOS workflow (HeliOS dev 814e4893) on a registered `gaia` runner. Gaia's own `Gaia action` workflow already builds `imported-rootfs-minimal` green on GitHub's hosted runners (last on cd9ad15), so it needs no self-hosted runner.
   - Why: real image builds per change, not just unit tests.
-  - Done when: both workflows go green on GitHub.
+  - Done when: the HeliOS workflow goes green on GitHub.
   - Blocked by: the user registering the runner, adding the `EIDOS_READ_TOKEN` secret and setting the fork-PR policy.
 - **Atlas's signing key**
   - What: the key Atlas signs updates with, and where it lives.
