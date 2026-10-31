@@ -87,15 +87,16 @@ Small targets ship exactly two slots (A/B) plus a data partition. Smaller is bet
   - What: Canaan's Linux-only SDK with Linux on the big C908 (CPU1, the only core with RVV), vendor U-Boot and OpenSBI, and SPI-NAND boot. Size the media memory reservation from Styx's estimate of 20–25 MB.
   - Why: the smart USB camera and the Inferno host.
   - Done when: a board boots slot A, falls back from a bad slot B, and `grep isa /proc/cpuinfo` shows `v`.
-  - Blocked by: the boards (PCB) and the user's own approval of the SDK download.
+  - Blocked by: the boards (PCB). The user approved the SDK download on 2026-10-30.
 - **Rockchip BSP: RK3588S/RK3582 (HVS_MH01) and RK3576 (HVS_MM01)**
   - What: Rockchip's vendor 6.1 kernel with rkisp, rkcif, RGA, MPP (rkvenc) and RKNN, but no rkaiq and no librga.
-  - Boot chain: mainline U-Boot, TF-A, and the rkbin DDR blob, with its licence recorded.
+  - Boot chain: mainline U-Boot, TF-A, and the rkbin DDR blob.
+  - rkbin licence (checked 2026-10-30 at rkbin 3e288fe): Rockchip grants a non-exclusive licence to use, copy and distribute. It forbids decompiling or reverse engineering, and the copyright notices must stay. Ship rkbin's `LICENSE` in the image's licence directory and in each export. DDR blobs for RK3588, RK3576, RK3566 and RK3562 are in `bin/rk35`.
   - GPU: libmali with Vulkan (Daedalus).
   - eMMC (E) and SPI-NAND (L) variants.
   - Why: the CM5-format camera modules.
   - Done when: each module boots A/B from both storage variants, and Styx and Daedalus see their devices.
-  - Blocked by: the boards and the user's own approval of the BSP and rkbin downloads.
+  - Blocked by: the boards. The user approved the downloads on 2026-10-30.
 - **Mainline RK3588S track**
   - What: a second kernel option for the RK3588S.
   - Why: it is needed once rkisp2 and rkvenc are upstream.

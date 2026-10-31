@@ -112,6 +112,7 @@ impl GptPartitionType {
         ("linux-root-riscv64", "72EC70A6-CF74-40E6-BD49-4BDA08E8F224"),
         ("linux-usr-x86-64", "8484680C-9521-48C6-9C11-B0720656F69E"),
         ("linux-usr-arm64", "B0E01050-EE5F-4390-949A-9101B17104E9"),
+        ("linux-usr-riscv64", "BEAEC34B-8442-439B-A40B-984381ED097D"),
         (
             "linux-root-verity-x86-64",
             "2C7357ED-EBD2-46D9-AEC1-23D437EC2BF5",
@@ -127,6 +128,14 @@ impl GptPartitionType {
         (
             "linux-usr-verity-arm64",
             "6E11A4E7-FBCA-4DED-B9E9-E1A512BB664E",
+        ),
+        (
+            "linux-root-verity-riscv64",
+            "B6ED5582-440B-4209-B8DA-5FF7C419EA3D",
+        ),
+        (
+            "linux-usr-verity-riscv64",
+            "8F1056BE-9B05-47C4-81D6-BE53128E5B54",
         ),
     ];
 
@@ -198,5 +207,22 @@ mod tests {
             assert!(GptPartitionType::from_alias(alias).is_some(), "{alias}");
         }
         assert_eq!(GptPartitionType::from_alias("fat32-lba"), None);
+    }
+
+    /// Every alias's GUID is a type util-linux knows, where `sfdisk` is
+    /// installed: a typo in a GUID makes a partition no tool recognizes.
+    #[test]
+    fn every_alias_guid_is_one_sfdisk_lists() {
+        let Ok(output) = std::process::Command::new("sfdisk")
+            .args(["--list-types", "--label", "gpt"])
+            .output()
+        else {
+            eprintln!("skipped: sfdisk is not installed");
+            return;
+        };
+        let listed = String::from_utf8_lossy(&output.stdout).to_ascii_uppercase();
+        for (alias, guid) in GptPartitionType::ALIASES {
+            assert!(listed.contains(guid), "{alias} {guid}");
+        }
     }
 }

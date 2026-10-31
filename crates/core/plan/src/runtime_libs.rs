@@ -20,6 +20,26 @@ const MAX_SYMLINK_HOPS: usize = 40;
 const MAX_INCLUDE_DEPTH: usize = 8;
 /// The default library directories, searched after the RUNPATH entries.
 const DEFAULT_LIBRARY_DIRS: [&str; 4] = ["/lib", "/lib64", "/usr/lib", "/usr/lib64"];
+/// The ELF machine of RISC-V.
+const EM_RISCV: u16 = 0xF3;
+/// The directories glibc's riscv64 loader searches, by float ABI (`lp64d`
+/// is the hard-float one every rv64gc distribution uses). Buildroot links
+/// them to `/lib` and `/usr/lib`.
+const RISCV64_LIBRARY_DIRS: [&str; 4] = [
+    "/lib64/lp64d",
+    "/usr/lib64/lp64d",
+    "/lib64/lp64",
+    "/usr/lib64/lp64",
+];
+
+/// The loader's built-in directories for a binary of `architecture`.
+fn library_dirs((is_64bit, _, machine): (bool, bool, u16)) -> Vec<&'static str> {
+    let mut dirs = DEFAULT_LIBRARY_DIRS.to_vec();
+    if is_64bit && machine == EM_RISCV {
+        dirs.extend(RISCV64_LIBRARY_DIRS);
+    }
+    dirs
+}
 
 /// One thing to place in the target root, at its absolute target path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,7 +151,7 @@ pub fn resolve_runtime_closure(
     // keep the sysroot's links between the library directories, so a
     // library placed under /usr/lib is also where the loader looks.
     let mut entries = resolver.entries;
-    for dir in DEFAULT_LIBRARY_DIRS {
+    for dir in library_dirs(object.architecture()) {
         let link = sysroot.join(dir.trim_start_matches('/'));
         if let Ok(target) = fs::read_link(&link) {
             entries
@@ -204,8 +224,10 @@ fn missing_name(message: &str) -> &str {
 /// directories the loader searches, with its symlinks followed inside the
 /// sysroot. `None` when no directory has it.
 pub fn find_sysroot_library(sysroot: &Path, name: &str) -> Result<Option<PathBuf>, String> {
+    // Any architecture's directories: only the sysroot's own exist in it.
     let mut dirs: Vec<String> = DEFAULT_LIBRARY_DIRS
         .iter()
+        .chain(RISCV64_LIBRARY_DIRS.iter())
         .map(|dir| (*dir).to_string())
         .collect();
     for base in ["/lib", "/usr/lib"] {
@@ -280,9 +302,9 @@ struct Resolver<'a> {
 
 impl<'a> Resolver<'a> {
     fn new(sysroot: &'a Path, architecture: (bool, bool, u16)) -> Result<Self, String> {
-        let mut default_dirs: Vec<String> = DEFAULT_LIBRARY_DIRS
-            .iter()
-            .map(|dir| (*dir).to_string())
+        let mut default_dirs: Vec<String> = library_dirs(architecture)
+            .into_iter()
+            .map(str::to_string)
             .collect();
         for base in ["/lib", "/usr/lib"] {
             default_dirs.extend(multiarch_dirs(sysroot, base)?);

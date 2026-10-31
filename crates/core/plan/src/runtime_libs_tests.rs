@@ -397,3 +397,70 @@ fn is_dynamic_elf_is_true_only_for_a_file_that_needs_a_runtime() {
     assert!(!is_dynamic_elf(&truncated));
     assert!(!is_dynamic_elf(&root.join("absent")));
 }
+
+#[cfg(unix)]
+#[test]
+fn riscv64_libraries_are_found_in_the_float_abi_dirs_and_their_links_kept() {
+    let scratch = TempDir::new("gaia-plan");
+    let root = temp_root(&scratch, "riscv64");
+    let sysroot = root.join("target");
+    let binary = |needed: &'static [&'static str]| {
+        build_elf(&ElfFixture {
+            interpreter: Some("/lib/ld-linux-riscv64-lp64d.so.1"),
+            ..ElfFixture::dynamic(EM_RISCV, needed)
+        })
+    };
+    write_file(
+        &sysroot.join("bin/app"),
+        &binary(&["libc.so.6", "libz.so.1"]),
+    );
+    write_file(
+        &sysroot.join("lib/ld-linux-riscv64-lp64d.so.1"),
+        &build_elf(&ElfFixture::dynamic(EM_RISCV, &[])),
+    );
+    write_file(
+        &sysroot.join("lib/libc.so.6"),
+        &build_elf(&ElfFixture::dynamic(EM_RISCV, &[])),
+    );
+    write_file(
+        &sysroot.join("usr/lib64/lp64d/libz.so.1"),
+        &build_elf(&ElfFixture::dynamic(EM_RISCV, &[])),
+    );
+    // Buildroot's layout: the loader's lp64d dir is a link to /lib.
+    symlink("../lib", &sysroot.join("lib64/lp64d"));
+
+    let closure = resolve_runtime_closure(&sysroot.join("bin/app"), None).expect("closure");
+
+    assert_eq!(
+        summary(&closure),
+        vec![
+            "file /lib/ld-linux-riscv64-lp64d.so.1",
+            "file /lib/libc.so.6",
+            "link /lib64/lp64d -> ../lib",
+            "file /usr/lib64/lp64d/libz.so.1",
+        ]
+    );
+    assert_eq!(
+        find_sysroot_library(&sysroot, "libz.so.1").expect("lookup"),
+        Some(sysroot.join("usr/lib64/lp64d/libz.so.1"))
+    );
+}
+
+#[test]
+fn an_aarch64_binary_does_not_search_the_riscv64_dirs() {
+    let scratch = TempDir::new("gaia-plan");
+    let root = temp_root(&scratch, "riscv64-dirs-aarch64");
+    let sysroot = root.join("target");
+    write_file(
+        &sysroot.join("bin/app"),
+        &build_elf(&ElfFixture::dynamic(EM_AARCH64, &["libz.so.1"])),
+    );
+    write_file(
+        &sysroot.join("usr/lib64/lp64d/libz.so.1"),
+        &build_elf(&ElfFixture::dynamic(EM_AARCH64, &[])),
+    );
+
+    let error = resolve_runtime_closure(&sysroot.join("bin/app"), None).expect_err("not found");
+
+    assert!(error.contains("libz.so.1"), "{error}");
+}
