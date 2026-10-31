@@ -194,8 +194,10 @@ fn append_target_paths(
     Ok(())
 }
 
-/// Workspace-relative caches that `--all-caches` removes wholesale. They are
-/// shared by every build in the workspace and refill on demand.
+/// Workspace-relative caches that `--all-caches` removes wholesale, with this
+/// workspace's Docker build home under the user cache root. They are shared by
+/// every build in the workspace and refill on demand. The `.gaia/docker-*`
+/// entries are where Docker builds kept their home and caches before.
 const SHARED_CACHE_DIRS: &[&str] = &[
     gaia_source_providers::GIT_MIRROR_CACHE_DIR,
     gaia_source_providers::DOWNLOAD_CACHE_DIR,
@@ -235,12 +237,19 @@ fn cache_clean_paths(
     let cache_root = fs::canonicalize(&workspace_root).unwrap_or(workspace_root);
     let mut paths = Vec::new();
 
+    let user_cache = gaia_spec::user_cache_root();
     if clean_args.all_caches {
         paths.extend(SHARED_CACHE_DIRS.iter().map(|dir| cache_root.join(dir)));
+        // This workspace's Docker home only: the user-wide docker-cache is
+        // shared with other workspaces, like gradle-home.
+        let (docker_home, _) = gaia_artifact_providers::docker_dirs(
+            Path::new(&spec.workspace.root_dir),
+            user_cache.as_deref(),
+        );
+        paths.extend(Some(docker_home).filter(|dir| dir.exists()));
     } else if clean_args.unused_mirrors {
         paths.extend(unused_mirror_paths(spec, &cache_root));
     }
-    let user_cache = gaia_spec::user_cache_root();
     paths.extend(stale_shared_cargo_targets(user_cache.as_deref()));
 
     let sources_dir = PathBuf::from(&spec.workspace.build_dir).join("sources");

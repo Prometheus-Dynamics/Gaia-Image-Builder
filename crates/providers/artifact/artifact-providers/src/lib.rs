@@ -9,7 +9,7 @@ mod toolchain;
 pub use toolchain::{ArtifactToolchainContract, ensure_relocated};
 
 pub use command::{
-    command_for_execution, command_output_with_timeout, ensure_docker_execution_image,
+    command_for_execution, command_output_with_timeout, docker_dirs, ensure_docker_execution_image,
     run_command_with_retries,
 };
 pub use contract::{

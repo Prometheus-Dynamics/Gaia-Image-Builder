@@ -322,7 +322,7 @@ impl ErofsWorkersSpec {
 /// Docker-built Java artifacts.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub enum GradleHomeSpec {
-    /// `<workspace>/.gaia/docker-home/.gradle`, per workspace (default).
+    /// `.gradle` in the Docker build's home, per workspace (default).
     #[default]
     Workspace,
     /// `<user cache root>/gradle-home`, shared by the user's workspaces and

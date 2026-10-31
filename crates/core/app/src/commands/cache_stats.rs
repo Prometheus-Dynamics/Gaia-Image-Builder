@@ -94,8 +94,9 @@ fn cache_dirs(spec: &ResolvedBuildSpec, user_root: Option<&Path>) -> Vec<(String
         };
         dirs.push((name, dir));
     }
-    dirs.push(("docker-cache".into(), workspace.join(".gaia/docker-cache")));
-    dirs.push(("docker-home".into(), workspace.join(".gaia/docker-home")));
+    let (docker_home, docker_cache) = gaia_artifact_providers::docker_dirs(&workspace, user_root);
+    dirs.push(("docker-cache".into(), docker_cache));
+    dirs.push(("docker-home".into(), docker_home));
     if let Some(user_root) = user_root {
         let cargo = user_root.join("cargo-target");
         let mut shared = fs::read_dir(&cargo)
@@ -238,7 +239,8 @@ mod tests {
             vec![0u8; 8192],
         )
         .expect("pack");
-        fs::create_dir_all(workspace.join(".gaia/docker-home")).expect("home");
+        let (docker_home, _) = gaia_artifact_providers::docker_dirs(&workspace, Some(&user));
+        fs::create_dir_all(&docker_home).expect("home");
         fs::create_dir_all(user.join("cargo-target/abc123")).expect("cargo");
         fs::write(user.join("cargo-target/abc123/lib.rlib"), vec![0u8; 4096]).expect("rlib");
         // The same file in two caches counts once in the total.

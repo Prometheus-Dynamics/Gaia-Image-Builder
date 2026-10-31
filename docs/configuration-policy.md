@@ -666,7 +666,9 @@ Retry strategies:
 `[providers.java] gradle_home` chooses where Gradle's user home (its
 dependency and wrapper caches) lives for Java artifacts built in Docker:
 
-- `"workspace"` (default): `<workspace>/.gaia/docker-home/.gradle`, kept per
+- `"workspace"` (default): `.gradle` in the Docker build's home,
+  `<user cache root>/docker-home/<workspace key>/.gradle` (or
+  `<workspace>/.gaia/docker-home/.gradle` with no user cache root), kept per
   workspace.
 - `"user-cache"`: `<user cache root>/gradle-home`, in the per-user Gaia cache
   (`$GAIA_CACHE_DIR`, else `$XDG_CACHE_HOME/gaia`, else `~/.cache/gaia`) and
@@ -677,7 +679,7 @@ In `user-cache` mode, Docker builds also get a persistent `HOME`
 (`<user cache root>/java-home`, mounted at the same path), so the caches of
 tools the build runs under `HOME` (pnpm's store, npm, Python virtualenvs)
 survive the `--rm` container. A build whose `build_env` sets its own
-`GRADLE_USER_HOME` or `HOME` outside `.gaia/docker-home` keeps it; one that
+`GRADLE_USER_HOME` or `HOME` outside a `.gaia/docker-home` keeps it; one that
 sets none, or one inside `.gaia/docker-home`, gets the user-cache paths. Host
 builds keep their own homes. The first build in `user-cache` mode is cold:
 Gradle and the other tools download their caches again.

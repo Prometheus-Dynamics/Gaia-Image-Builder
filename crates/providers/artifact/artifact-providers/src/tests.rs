@@ -301,18 +301,16 @@ fn command_for_execution_wraps_docker_backend() {
         args.iter()
             .any(|arg| arg == &source_dir.display().to_string())
     );
-    assert!(args.iter().any(|arg| {
-        arg == &format!(
-            "HOME={}",
-            workspace_root.join(".gaia/docker-home").display()
-        )
-    }));
-    assert!(args.iter().any(|arg| {
-        arg == &format!(
-            "XDG_CACHE_HOME={}",
-            workspace_root.join(".gaia/docker-cache").display()
-        )
-    }));
+    let (docker_home, docker_cache) =
+        crate::docker_dirs(&workspace_root, gaia_spec::user_cache_root().as_deref());
+    assert!(
+        args.iter()
+            .any(|arg| arg == &format!("HOME={}", docker_home.display()))
+    );
+    assert!(
+        args.iter()
+            .any(|arg| arg == &format!("XDG_CACHE_HOME={}", docker_cache.display()))
+    );
     assert!(args.contains(&"ghcr.io/example/rust-cross:latest".to_string()));
     assert!(args.contains(&"cargo".to_string()));
     assert!(args.contains(&"build".to_string()));

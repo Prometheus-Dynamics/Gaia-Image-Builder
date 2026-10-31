@@ -382,8 +382,10 @@ fn docker_command(
             "docker execution requires a resolved workspace root",
         )
     })?;
-    let docker_home = Path::new(workspace_root).join(".gaia/docker-home");
-    let docker_cache = Path::new(workspace_root).join(".gaia/docker-cache");
+    let (docker_home, docker_cache) = docker_dirs(
+        Path::new(workspace_root),
+        gaia_spec::user_cache_root().as_deref(),
+    );
     fs::create_dir_all(&docker_home).map_err(|error| {
         ArtifactProviderError::new(
             ArtifactProviderErrorKind::RuntimeState,
@@ -410,6 +412,11 @@ fn docker_command(
     .with_extra_env("HOME", &docker_home)
     .with_extra_env("XDG_CACHE_HOME", &docker_cache)
     .with_pull_never(contract.offline);
+    for dir in [&docker_home, &docker_cache] {
+        if !dir.starts_with(workspace_root) {
+            spec.mounts.push(dir.clone());
+        }
+    }
     // A cross build's SDK is read at its own host paths (the linker, the
     // sysroot): mount its root and sysroot where they are. Only arguments are
     // scanned for paths, so an environment variable's path is not mounted by
@@ -438,6 +445,29 @@ fn docker_command(
     docker_run_command(command, &spec).map_err(|error| {
         ArtifactProviderError::new(ArtifactProviderErrorKind::PolicyBlocked, error.to_string())
     })
+}
+
+/// The `HOME` and tool cache (`CARGO_HOME`, `SCCACHE_DIR`,
+/// `XDG_CACHE_HOME`) of a Docker build: under the user cache root, so
+/// nothing is written into the workspace and every workspace shares the
+/// downloaded crates and compiler cache. `HOME` stays per workspace
+/// (`docker-home/<key of the workspace root>`). Without a user cache root,
+/// both are in the workspace's `.gaia`.
+pub fn docker_dirs(workspace_root: &Path, user_cache: Option<&Path>) -> (PathBuf, PathBuf) {
+    match user_cache {
+        Some(cache) => {
+            let mut key = gaia_spec::Fingerprint::new("docker-home");
+            key.str(&workspace_root.display().to_string());
+            (
+                cache.join("docker-home").join(key.finish().short_hex()),
+                cache.join("docker-cache"),
+            )
+        }
+        None => (
+            workspace_root.join(".gaia/docker-home"),
+            workspace_root.join(".gaia/docker-cache"),
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -610,6 +640,26 @@ mod tests {
             .expect("docker runs");
         assert!(status.success(), "the container sees the source tree");
         assert_eq!(fs::read_to_string(&output).expect("written"), "built\n");
+    }
+
+    #[test]
+    fn docker_home_and_caches_live_in_the_user_cache_outside_the_workspace() {
+        let (home, cache) = docker_dirs(Path::new("/repo"), Some(Path::new("/fast/gaia")));
+        assert!(
+            home.starts_with("/fast/gaia/docker-home"),
+            "{}",
+            home.display()
+        );
+        assert_eq!(cache, Path::new("/fast/gaia/docker-cache"));
+        let (other, _) = docker_dirs(Path::new("/other"), Some(Path::new("/fast/gaia")));
+        assert_ne!(home, other, "HOME stays per workspace");
+        assert_eq!(
+            docker_dirs(Path::new("/repo"), None),
+            (
+                PathBuf::from("/repo/.gaia/docker-home"),
+                PathBuf::from("/repo/.gaia/docker-cache")
+            )
+        );
     }
 
     /// A fake tool that appends one line to `calls` per run, then runs `body`.

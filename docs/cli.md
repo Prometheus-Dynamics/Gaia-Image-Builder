@@ -278,10 +278,13 @@ Built-in targets:
 - `--all-caches`
   Also remove the shared workspace caches wholesale: every git mirror under
   `.gaia/cache/git`, `.gaia/cache/downloads`, `.gaia/cache/buildroot/dl`,
-  `.gaia/docker-cache` (cargo registry/git and sccache for Docker artifact
-  builds), `.gaia/cache/import-sources` (git import checkouts) and
-  `.gaia/docker-home` (the tool homes of Docker builds). They refill on the
-  next build, at the cost of re-downloading.
+  `.gaia/cache/import-sources` (git import checkouts), this workspace's
+  Docker build home (`<user cache root>/docker-home/<key>`) and the
+  `.gaia/docker-cache` and `.gaia/docker-home` dirs Docker builds use when no
+  user cache root can be found (or used before they moved). The user-wide
+  `<user cache root>/docker-cache` (cargo registry/git and sccache for Docker
+  artifact builds) is shared with other workspaces and kept. They refill on
+  the next build, at the cost of re-downloading.
   Implies `--target caches`; on its own it does not clean build or output
   directories.
 
@@ -557,8 +560,8 @@ total: 17.1 GiB in 290898 files, 11 of 16 caches present (hard links counted onc
 The caches: git mirrors, downloads and import-source checkouts under
 `<workspace>/.gaia/cache`; the Buildroot download dir (configured, else under
 the user cache root, and the workspace fallback); the package cache levels;
-shared Buildroot output trees; the compiler cache; `.gaia/docker-cache` and
-`.gaia/docker-home`; and under the user cache root the shared
+shared Buildroot output trees; the compiler cache; the Docker build caches
+(`docker-cache`, `docker-home`); and under the user cache root the shared
 `cargo-target/<key>` dirs, `gradle-home` and `java-home`, and the user-wide
 Buildroot defaults (`buildroot-dl (user)`, `buildroot-packages (user)`,
 `ccache (user)`) when this build's config points elsewhere, since other builds
