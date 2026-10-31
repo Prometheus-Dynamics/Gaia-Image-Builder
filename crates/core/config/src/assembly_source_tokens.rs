@@ -89,6 +89,19 @@ pub(crate) fn visit_assembly_strings(assembly: &mut ImageAssemblySpec, visit: &m
             visit,
         );
     }
+    for ubi in &mut assembly.ubis {
+        text(&mut ubi.id, "image.assembly.ubis.id", visit);
+        path_value(&mut ubi.output, "image.assembly.ubis.output", visit);
+        for volume in &mut ubi.volumes {
+            text(&mut volume.name, "image.assembly.ubis.volumes.name", visit);
+            path(
+                &mut volume.image,
+                "image.assembly.ubis.volumes.image",
+                visit,
+            );
+            opt_text(&mut volume.size, "image.assembly.ubis.volumes.size", visit);
+        }
+    }
     for disk in &mut assembly.disks {
         text(&mut disk.id, "image.assembly.disks.id", visit);
         path_value(&mut disk.output, "image.assembly.disks.output", visit);

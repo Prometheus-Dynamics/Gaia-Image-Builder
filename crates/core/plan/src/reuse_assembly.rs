@@ -34,6 +34,12 @@ pub(crate) fn assembly_input_entries(spec: &ResolvedBuildSpec) -> Vec<(String, S
         .filesystems
         .iter()
         .filter_map(|filesystem| roots.resolve_path(spec, &filesystem.output).ok())
+        .chain(
+            assembly
+                .ubis
+                .iter()
+                .filter_map(|ubi| roots.resolve_path(spec, &ubi.output).ok()),
+        )
         .collect::<BTreeSet<_>>();
     for filesystem in &assembly.filesystems {
         let Some(template) = filesystem.publish_template() else {
@@ -309,6 +315,28 @@ pub(crate) fn assembly_input_entries(spec: &ResolvedBuildSpec) -> Vec<(String, S
                 "tool depmod".into(),
                 command_signature("depmod", ["--version"]),
             )),
+        }
+    }
+    for ubi in &assembly.ubis {
+        for volume in &ubi.volumes {
+            let Some(image) = &volume.image else {
+                continue;
+            };
+            // The volume's size, type and the geometry are in the hashed
+            // config; the image is the only input file.
+            let key = format!("ubi volume {}/{}", ubi.id, volume.name);
+            let value = match roots.resolve_path(spec, image) {
+                Ok(resolved) if generated_filesystem_outputs.contains(&resolved) => {
+                    format!("ubi-volume-generated:{}", resolved.display())
+                }
+                Ok(resolved) => format!(
+                    "ubi-volume-image:{}:{}",
+                    resolved.display(),
+                    path_state_signature(&resolved)
+                ),
+                Err(error) => format!("ubi-volume-resolution-error:{}:{error}", image.as_str()),
+            };
+            parts.push((key, value));
         }
     }
     for disk in &assembly.disks {

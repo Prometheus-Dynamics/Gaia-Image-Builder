@@ -34,6 +34,15 @@ pub(super) const ASSEMBLY_CHILDREN: &[Section] = &[
         &[],
     ),
     section(
+        "ubis",
+        struct_fields::<raw_assembly::RawAssemblyUbiConfig>,
+        &[section(
+            "volumes",
+            struct_fields::<raw_assembly::RawAssemblyUbiVolumeConfig>,
+            &[],
+        )],
+    ),
+    section(
         "disks",
         struct_fields::<raw_assembly::RawAssemblyDiskConfig>,
         &[section(

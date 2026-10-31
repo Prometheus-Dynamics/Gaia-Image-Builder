@@ -386,6 +386,14 @@ pub(crate) fn validate_image_assembly(
         }
     }
 
+    // A partition may hold any image the assembly writes: a filesystem, a
+    // transform's output (a U-Boot environment, a verity hash tree) or a UBI
+    // image.
+    let generated_images: HashSet<&gaia_spec::AssemblyPathTemplate> = filesystem_outputs
+        .iter()
+        .chain(assembly.transforms.iter().map(|transform| &transform.dest))
+        .chain(assembly.ubis.iter().map(|ubi| &ubi.output))
+        .collect();
     for disk in &assembly.disks {
         if disk.id.trim().is_empty() {
             diagnostics.push(error(
@@ -487,14 +495,14 @@ pub(crate) fn validate_image_assembly(
                     ),
                     Some("image.assembly.disks.partitions".into()),
                 ));
-            } else if !filesystem_outputs.contains(image)
+            } else if !generated_images.contains(image)
                 && !uses_supported_provider_variable(spec, image)
                 && !image.starts_with("@assets/")
             {
                 diagnostics.push(error(
                     "assembly_partition_image_unknown",
                     format!(
-                        "assembly disk '{}' partition '{}' image '{}' does not reference a generated filesystem output or supported provider root",
+                        "assembly disk '{}' partition '{}' image '{}' does not reference a generated filesystem, transform or UBI output or a supported provider root",
                         disk.id, partition.name, image
                     ),
                     Some("image.assembly.disks.partitions".into()),
@@ -534,6 +542,7 @@ pub(crate) fn validate_image_assembly(
     image_assembly_layout::validate_archives(spec, assembly, &tree_ids, diagnostics);
     crate::image_assembly_oci::validate_ocis(spec, assembly, &tree_ids, diagnostics);
     crate::image_assembly_package::validate_packages(spec, assembly, &tree_ids, diagnostics);
+    crate::image_assembly_ubi::validate_ubis(spec, assembly, &tree_ids, diagnostics);
     crate::image_assembly_checks::validate_checks(assembly, &tree_ids, diagnostics);
     image_assembly_generated::validate_binaries(spec, &tree_ids, assembly, diagnostics);
     image_assembly_generated::validate_token_reads(assembly, diagnostics);
@@ -620,6 +629,7 @@ pub(crate) fn assembly_expected_image_names(spec: &ResolvedBuildSpec) -> HashSet
         .filesystems
         .iter()
         .map(|filesystem| filesystem.output.as_str())
+        .chain(assembly.ubis.iter().map(|ubi| ubi.output.as_str()))
         .chain(assembly.disks.iter().map(|disk| disk.output.as_str()))
         .chain(
             assembly
@@ -709,7 +719,7 @@ pub(crate) fn validate_relative_dest(
     }
 }
 
-fn uses_supported_provider_variable(spec: &ResolvedBuildSpec, value: &str) -> bool {
+pub(crate) fn uses_supported_provider_variable(spec: &ResolvedBuildSpec, value: &str) -> bool {
     provider_variables(value)
         .into_iter()
         .any(|variable| provider_root_supported(spec, variable))

@@ -337,6 +337,17 @@ src = "$assembly.tree.rootfs/uboot-env.txt"
 dest = "$assembly.work/uboot.env"
 env_size = "64K"
 redundant = true
+
+[[image.assembly.disks]]
+id = "sd"
+output = "$assembly.out/sd.img"
+partition_table = "gpt"
+
+[[image.assembly.disks.partitions]]
+name = "env"
+image = "$assembly.work/uboot.env"
+offset = "4M"
+table = false
 "#,
     );
     assert_eq!(assembly_codes(&contents), Vec::<&str>::new());

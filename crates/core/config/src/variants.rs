@@ -293,6 +293,12 @@ fn output_paths(spec: &ResolvedBuildSpec) -> Vec<String> {
     if let Some(assembly) = &spec.image.assembly {
         outputs.extend(
             assembly
+                .ubis
+                .iter()
+                .map(|ubi| ubi.output.as_str().to_string()),
+        );
+        outputs.extend(
+            assembly
                 .disks
                 .iter()
                 .map(|disk| disk.output.as_str().to_string()),

@@ -298,6 +298,7 @@ pub(crate) fn compile_image_assembly(
                 reserved_percent: filesystem.reserved_percent,
             })
             .collect(),
+        ubis: raw.ubis.into_iter().map(compile_assembly_ubi).collect(),
         disks: raw
             .disks
             .into_iter()
@@ -416,6 +417,45 @@ pub(crate) fn compile_image_assembly(
         assembly_sources: Vec::new(),
     };
     Some(assembly)
+}
+
+/// An `[[image.assembly.ubis]]` entry. Volumes are dynamic unless `type`
+/// says otherwise; the validator reports bad sizes and volume sets.
+fn compile_assembly_ubi(
+    raw: crate::raw_assembly::RawAssemblyUbiConfig,
+) -> gaia_spec::AssemblyUbiSpec {
+    gaia_spec::AssemblyUbiSpec {
+        id: raw.id,
+        output: raw.output.into(),
+        peb_size: raw.peb_size,
+        min_io_size: raw.min_io_size,
+        sub_page_size: raw.sub_page_size,
+        vid_header_offset: raw.vid_header_offset,
+        image_seq: raw.image_seq,
+        flash_size: raw.flash_size,
+        bad_pebs_per_1024: raw
+            .bad_pebs_per_1024
+            .unwrap_or(gaia_spec::UBI_DEFAULT_BAD_PEBS_PER_1024),
+        volumes: raw
+            .volumes
+            .into_iter()
+            .map(|volume| gaia_spec::AssemblyUbiVolumeSpec {
+                name: volume.name,
+                id: volume.id,
+                kind: match volume.kind {
+                    Some(crate::raw_assembly::RawAssemblyUbiVolumeKind::Static) => {
+                        gaia_spec::AssemblyUbiVolumeKindSpec::Static
+                    }
+                    Some(crate::raw_assembly::RawAssemblyUbiVolumeKind::Dynamic) | None => {
+                        gaia_spec::AssemblyUbiVolumeKindSpec::Dynamic
+                    }
+                },
+                image: volume.image.map(Into::into),
+                size: volume.size,
+                autoresize: volume.autoresize,
+            })
+            .collect(),
+    }
 }
 
 fn compile_assembly_disk_truncate(raw: RawAssemblyDiskTruncate) -> AssemblyDiskTruncateSpec {

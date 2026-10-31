@@ -224,6 +224,18 @@ Described in [Image assembly](../configuration-assembly.md#image-assembly).
 
 Keys: `block_size`, `compression`, `compression_level`, `dedupe`, `deterministic`, `fat_size`, `fragments`, `free`, `id`, `journal`, `kind`, `label`, `output`, `pcluster_size`, `publish`, `reserved_percent`, `size`, `source_tree`, `uuid`, `ztailpacking`.
 
+## `[[image.assembly.ubis]]`
+
+Described in [Image assembly](../configuration-assembly.md#image-assembly).
+
+Keys: `bad_pebs_per_1024`, `flash_size`, `id`, `image_seq`, `min_io_size`, `output`, `peb_size`, `sub_page_size`, `vid_header_offset`.
+
+## `[[image.assembly.ubis.volumes]]`
+
+Described in [Image assembly](../configuration-assembly.md#image-assembly).
+
+Keys: `autoresize`, `id`, `image`, `name`, `size`, `type`.
+
 ## `[[image.assembly.disks]]`
 
 Described in [Image assembly](../configuration-assembly.md#image-assembly).

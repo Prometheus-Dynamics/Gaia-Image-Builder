@@ -119,6 +119,26 @@ pub(super) fn interpolate_image_assembly(
             filesystem
         })
         .collect();
+    assembly.ubis = assembly
+        .ubis
+        .into_iter()
+        .map(|mut ubi| {
+            let string = |value: String| resolver::interpolate_string(value, raw, env);
+            ubi.id = string(ubi.id);
+            ubi.output = string(ubi.output);
+            ubi.peb_size = string(ubi.peb_size);
+            ubi.min_io_size = string(ubi.min_io_size);
+            ubi.sub_page_size = ubi.sub_page_size.map(string);
+            ubi.vid_header_offset = ubi.vid_header_offset.map(string);
+            ubi.flash_size = ubi.flash_size.map(string);
+            for volume in &mut ubi.volumes {
+                volume.name = string(std::mem::take(&mut volume.name));
+                volume.image = volume.image.take().map(string);
+                volume.size = volume.size.take().map(string);
+            }
+            ubi
+        })
+        .collect();
     assembly.disks = assembly
         .disks
         .into_iter()

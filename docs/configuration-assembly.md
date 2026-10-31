@@ -142,8 +142,8 @@ Assembly behavior:
 - Raw disk assembly writes 1 MiB-aligned partitions sequentially, with an MBR (`partition_table = "mbr"`, the default) or a GPT (`partition_table = "gpt"`) (see [Disk partitions](#disk-partitions) and [GPT disks](#gpt-disks)).
 - MBR partition `type` accepts raw `0xNN` values; `type_alias` currently supports `fat32-lba` and `linux`. On a GPT disk `type` is a raw type GUID and `type_alias` names one (see [GPT disks](#gpt-disks)).
 - Assembly runtime state is included in provenance and manifest reports with staged file, transform, filesystem, disk, and archive output sizes and digests.
-- Assembly order follows dependencies: a step that reads a path another step writes (the same file, a file in a directory it fills, or a glob it matches) runs after it, whatever its kind or position, so for example a transform compressing a filesystem built by the same assembly sees this run's image. Trees are prepared first; steps that do not depend on each other run in the order dirs, symlinks, files, BusyBox initramfs, kernel modules, transforms, filesystems, disks, archives, OCI images. Steps that read each other's outputs in a cycle are rejected, by validation and at run time.
-- Before the steps run, outputs of transforms, filesystems, disks, archives and OCI images left from an earlier run are removed, so a step reading one before it is rebuilt fails instead of using a stale file.
+- Assembly order follows dependencies: a step that reads a path another step writes (the same file, a file in a directory it fills, or a glob it matches) runs after it, whatever its kind or position, so for example a transform compressing a filesystem built by the same assembly sees this run's image. Trees are prepared first; steps that do not depend on each other run in the order dirs, symlinks, files, BusyBox initramfs, kernel modules, transforms, filesystems, UBI images, disks, archives, OCI images. Steps that read each other's outputs in a cycle are rejected, by validation and at run time.
+- Before the steps run, outputs of transforms, filesystems, UBI images, disks, archives and OCI images left from an earlier run are removed, so a step reading one before it is rebuilt fails instead of using a stale file.
 
 #### Work directory and RAM
 
@@ -211,7 +211,7 @@ mode = "0600"        # permission bits, octal; default 0600
 - `name`: label used in state and errors; on a GPT disk also the partition name (at most 36 UTF-16 code units, unique on the disk).
 - `type` (raw `0xNN`) or `type_alias` (`fat32-lba`, `linux`); defaults to `linux` (`0x83`). On a GPT disk, a type GUID or a GPT alias (see [GPT disks](#gpt-disks)).
 - `bootable`: sets the MBR active flag (on GPT, the legacy BIOS bootable attribute, bit 2). Only allowed on primary partitions; validation rejects it on logical partitions (`assembly_partition_bootable_logical`).
-- `image`: file written at the partition start. Optional when `size` is set.
+- `image`: file written at the partition start: a filesystem, transform or UBI output of the assembly, a provider path or an `@assets/` file (`assembly_partition_image_unknown` otherwise). Optional when `size` is set.
 - `size`: partition size in bytes or with a binary `K`/`M`/`G`/`T` suffix (`"16M"`, `"2G"`). Without it the partition is exactly as large as its image (rounded up to 512-byte sectors). With it the image must fit, otherwise assembly fails before the disk is written; the space after the image is left unwritten.
 - `wipe = true`: only for empty partitions (no `image`). Writes zeros over the first 1 MiB of the partition (less if the partition is smaller) so filesystem signatures left by a previous flash do not survive when the image is written to a device. Validation rejects `wipe` together with `image`, since an image already overwrites the partition start.
 - `materialize = false`: the partition is in the table at its full `size`, but nothing is written to it (no image, no wipe). It needs `size`; validation rejects `image` or `wipe` with it (`assembly_partition_unmaterialized_image`, `assembly_partition_unmaterialized_wipe`). Pair it with `truncate = "last-data"` to leave the partition past the end of the file so it is created on first boot. Defaults to `true`.
@@ -331,6 +331,61 @@ image = "$assembly.work/uboot.env"
 offset = "4M"
 table = false
 ```
+
+#### UBI images
+
+`[[image.assembly.ubis]]` writes a UBI image for raw NAND flash (SPI-NAND
+or parallel NAND), the bytes `ubinize` writes, without mtd-utils. Each
+volume holds an image the assembly writes, such as an EROFS slot with its
+verity hash tree, or stays empty for the system to fill. A read-only slot
+is mounted through `ubiblock`, so dm-verity sits on it as on a disk
+partition. UBI images are written after the filesystems and transforms
+and before the disks, so a disk can place one at an offset next to the
+loaders (G1's `table = false`).
+
+```toml
+[[image.assembly.ubis]]
+id = "nand"
+output = "$assembly.out/nand.ubi"
+peb_size = "128K"      # the flash's eraseblock
+min_io_size = "2K"     # the flash's page
+flash_size = "128M"    # the UBI partition's whole flash device
+# sub_page_size, vid_header_offset, image_seq, bad_pebs_per_1024: below
+
+[[image.assembly.ubis.volumes]]
+name = "rootfs_a"
+image = "$assembly.work/rootfs.erofs"
+size = "40M"           # room for later, larger updates
+
+[[image.assembly.ubis.volumes]]
+name = "rootfs_b"
+size = "40M"           # empty; the updater writes it
+
+[[image.assembly.ubis.volumes]]
+name = "data"
+size = "4M"
+autoresize = true      # grows over the free flash on first attach
+```
+
+- `peb_size` and `min_io_size` (required): the flash's eraseblock and page size, byte sizes and powers of two. They must match the flash part: the kernel refuses an image whose header offsets differ from the ones it derives from the MTD device.
+- `sub_page_size` (optional): the flash's sub-page size, when it has sub-pages (`ubinize -s`). Unset means none, which is the common case for SPI-NAND. The VID header goes at the sub-page size and data at the next page after it: for a 2 KiB page, at 2 KiB and 4 KiB, so each 128 KiB PEB holds a 124 KiB LEB.
+- `vid_header_offset` (optional): sets the VID header offset directly (`ubinize -O`). Only for a kernel attached with the same offset (`ubi.mtd=<dev>,<offset>`).
+- `image_seq` (optional): the image sequence number. Unset, it is derived from the `id`, so the same config always writes the same bytes.
+- `flash_size` (optional): the size of the whole flash device the image is for. Set, the build fails when the volumes' reservations, the layout volume, UBI's two working PEBs and the bad-block reserve do not fit it. The step's message and the assembly state (`minimum_flash_bytes`) give the smallest flash the image fits, set or not.
+- `bad_pebs_per_1024` (optional, default 20): the PEBs UBI keeps for bad blocks per 1024 PEBs of the whole device, Linux's `CONFIG_MTD_UBI_BEB_LIMIT`. At most 768.
+- Each volume takes:
+  - `name` (required): 1 to 127 bytes, unique in the image.
+  - `id` (optional): the volume id; unset, its position in the list. Ids are unique and below the number of volume table records (128 for any LEB over 21.5 KiB).
+  - `type` (optional): `dynamic` (the default) or `static`. A static volume records each LEB's size and CRC, which UBI checks when the volume is opened; use it for read-once blobs such as a kernel. Slots that an updater rewrites with `ubiupdatevol` work as either.
+  - `image` (optional): the volume's contents, a filesystem or transform output, a provider path or an `@assets/` file. Unset, the volume is empty.
+  - `size` (optional): the bytes reserved for the volume, rounded up to whole LEBs and at least the image. Unset reserves the image's size. A volume needs an `image`, a `size` or `autoresize`.
+  - `autoresize = true`: UBI grows this volume over the free PEBs on first attach. At most one volume.
+
+The image holds the layout volume (two copies of the volume table, in PEBs 0 and 1) and one PEB per LEB of data, in volume order. Reserved LEBs past a volume's data, and empty volumes, take no PEBs in the image: UBI hands them out from the erased flash after it. Every erase counter is 0, as `ubinize` writes it.
+
+Flash the image with `ubiformat -f nand.ubi /dev/mtdN` (or `ubi write` from U-Boot after `ubi part`), not with `nandwrite`: a UBI PEB ends in erased pages, and programming those `0xff` pages leaves them unusable for UBI's later writes. A factory programmer must skip `0xff` pages in the same way.
+
+On the target, attach and map a slot with `ubi.mtd=<partition> ubi.block=0,rootfs_a` on the kernel command line, then put dm-verity on `/dev/ubiblock0_0`. In U-Boot, `ubi part <partition>` and `ubi read <addr> <volume>` read a volume.
 
 #### Archives
 

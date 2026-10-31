@@ -50,6 +50,7 @@ pub(super) fn run_job<'a>(
         AssemblyStep::Filesystem(index) => {
             super::steps_jobs_fs::job_filesystem(ctx, index, input.lib_checks)
         }
+        AssemblyStep::Ubi(index) => super::steps_jobs_fs::job_ubi(ctx, index),
         AssemblyStep::Disk(index) => super::steps_jobs_fs::job_disk(ctx, index, input.disk_publish),
         AssemblyStep::Archive(index) => {
             super::steps_jobs_fs::job_archive(ctx, index, input.lib_checks, &input.verity)

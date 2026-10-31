@@ -343,6 +343,35 @@ pub(super) fn job_oci<'a>(
     }))
 }
 
+pub(super) fn job_ubi<'a>(ctx: &JobCtx<'a>, index: usize) -> Result<Record<'a>, AssemblyError> {
+    let ubi = &ctx.assembly.ubis[index];
+    let span = tracing::info_span!(
+        "assembly_ubi",
+        operation_id = %ctx.operation_id.as_str(),
+        ubi_id = %ubi.id
+    );
+    let _span_guard = span.enter();
+    let summary = super::ubi::execute_assembly_ubi(ctx.spec, ctx.roots, ubi)?;
+    let message = format!(
+        "built ubi image '{}' at '{}': {} PEBs written, {} reserved; needs a flash of at least {} bytes",
+        ubi.id,
+        summary.output.display(),
+        summary.image.pebs_written,
+        summary.image.reserved_pebs(),
+        summary.minimum_flash_bytes
+    );
+    let published = under_out_dir(ctx, &summary.output);
+    Ok(Box::new(move |run: &mut StepRun<'a>| {
+        if published {
+            run.published_outputs.push(summary.output.clone());
+        }
+        run.produced.record_ubi(index, summary.bytes);
+        run.ubi_count += 1;
+        super::ubi::record_ubi_state(&mut run.state, run.ubi_count, ubi, &summary);
+        run.messages.push(message);
+    }))
+}
+
 pub(super) fn job_package<'a>(ctx: &JobCtx<'a>, index: usize) -> Result<Record<'a>, AssemblyError> {
     let package = &ctx.assembly.packages[index];
     let span = tracing::info_span!(

@@ -97,6 +97,12 @@ impl ProducedRecorder<'_> {
         self.record_produced(ProducedOutputKind::Oci, &assembly.ocis[index].dest, bytes);
     }
 
+    /// Records the UBI image at `index`, `bytes` long.
+    pub(super) fn record_ubi(&mut self, index: usize, bytes: u64) {
+        let assembly = self.assembly;
+        self.record_produced(ProducedOutputKind::Ubi, &assembly.ubis[index].output, bytes);
+    }
+
     /// Records the package at `index`, `bytes` long.
     pub(super) fn record_package(&mut self, index: usize, bytes: u64) {
         let assembly = self.assembly;

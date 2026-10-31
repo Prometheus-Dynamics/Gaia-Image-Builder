@@ -18,6 +18,9 @@ pub struct ImageAssemblySpec {
     pub files: Vec<AssemblyFileSpec>,
     pub transforms: Vec<AssemblyTransformSpec>,
     pub filesystems: Vec<AssemblyFilesystemSpec>,
+    /// `[[image.assembly.ubis]]`: UBI images, written before the disks.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ubis: Vec<crate::AssemblyUbiSpec>,
     pub disks: Vec<AssemblyDiskSpec>,
     pub archives: Vec<AssemblyArchiveSpec>,
     /// OCI images, written after the archives.
@@ -55,6 +58,7 @@ impl ImageAssemblySpec {
             && self.files.is_empty()
             && self.transforms.is_empty()
             && self.filesystems.is_empty()
+            && self.ubis.is_empty()
             && self.disks.is_empty()
             && self.archives.is_empty()
             && self.ocis.is_empty()

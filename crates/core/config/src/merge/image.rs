@@ -190,6 +190,7 @@ fn merge_image_assembly(
             filesystems: merge_by_key(base.filesystems, overlay.filesystems, |filesystem| {
                 filesystem.id.clone()
             }),
+            ubis: merge_by_key(base.ubis, overlay.ubis, |ubi| ubi.id.clone()),
             disks: merge_by_key(base.disks, overlay.disks, |disk| disk.id.clone()),
             archives: merge_by_key(base.archives, overlay.archives, |archive| {
                 archive.id.clone()

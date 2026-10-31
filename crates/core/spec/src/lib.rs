@@ -9,6 +9,7 @@ mod assembly_order;
 mod assembly_output_spec;
 mod assembly_package_spec;
 mod assembly_spec;
+mod assembly_ubi_spec;
 mod byte_size;
 mod checkpoints;
 mod clean;
@@ -87,6 +88,11 @@ pub use assembly_spec::{
     AssemblyDiskTruncateSpec, AssemblyEbrPlacementSpec, AssemblyFileSpec,
     AssemblyKernelModulesSpec, AssemblyPartitionTableSpec, AssemblyPathTemplate,
     AssemblySymlinkSpec, AssemblyTreeSpec, ImageAssemblySpec, MbrPartitionTypeParseError,
+};
+pub use assembly_ubi_spec::{
+    AssemblyUbiSpec, AssemblyUbiVolumeKindSpec, AssemblyUbiVolumeSpec,
+    UBI_DEFAULT_BAD_PEBS_PER_1024, UBI_HEADER_SIZE, UBI_MAX_VOLUMES, UBI_VOLUME_NAME_MAX,
+    UBI_VTBL_RECORD_SIZE, UbiGeometry,
 };
 pub use byte_size::ByteSize;
 pub use byte_size::ByteSizeParseError;

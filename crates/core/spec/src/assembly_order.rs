@@ -3,7 +3,7 @@
 //! directory it writes into) runs after it, whatever their kinds or
 //! declaration order. Steps that do not depend on each other keep the
 //! classic order: dirs, symlinks, files, busybox initramfs, binaries, kernel
-//! modules, transforms, filesystems, disks, archives, each in declaration
+//! modules, transforms, filesystems, UBI images, disks, archives, each in declaration
 //! order.
 
 use std::path::{Path, PathBuf};
@@ -24,6 +24,7 @@ pub enum AssemblyStep {
     KernelModules(usize),
     Transform(usize),
     Filesystem(usize),
+    Ubi(usize),
     Disk(usize),
     Archive(usize),
     Oci(usize),
@@ -64,6 +65,7 @@ impl AssemblyStep {
                 )
             }
             Self::Filesystem(index) => format!("filesystem '{}'", assembly.filesystems[index].id),
+            Self::Ubi(index) => format!("ubi image '{}'", assembly.ubis[index].id),
             Self::Disk(index) => format!("disk '{}'", assembly.disks[index].id),
             Self::Archive(index) => format!("archive '{}'", assembly.archives[index].id),
             Self::Oci(index) => format!("oci image '{}'", assembly.ocis[index].id),
@@ -78,6 +80,7 @@ impl AssemblyStep {
             self,
             Self::Transform(_)
                 | Self::Filesystem(_)
+                | Self::Ubi(_)
                 | Self::Disk(_)
                 | Self::Archive(_)
                 | Self::Oci(_)
@@ -206,6 +209,16 @@ pub fn assembly_step_paths(
             AssemblyStep::Filesystem(index),
             vec![tree(filesystem.source_tree.as_str())],
             writes,
+        );
+    }
+    for (index, ubi) in assembly.ubis.iter().enumerate() {
+        push(
+            AssemblyStep::Ubi(index),
+            ubi.volumes
+                .iter()
+                .map(|volume| volume.image.as_ref().and_then(resolve))
+                .collect(),
+            vec![resolve(&ubi.output)],
         );
     }
     for (index, disk) in assembly.disks.iter().enumerate() {

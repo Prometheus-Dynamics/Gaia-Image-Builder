@@ -671,6 +671,8 @@ mod tests_package;
 mod tests_package_device;
 #[path = "tests_schedule.rs"]
 mod tests_schedule;
+#[path = "tests_ubi.rs"]
+mod tests_ubi;
 
 #[path = "tests_compressed_fs.rs"]
 mod tests_compressed_fs;

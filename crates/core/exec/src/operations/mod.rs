@@ -109,6 +109,7 @@ pub enum ProducedOutputKind {
     Transform,
     Oci,
     Package,
+    Ubi,
 }
 
 impl ProducedOutputKind {
@@ -120,6 +121,7 @@ impl ProducedOutputKind {
             Self::Transform => "transform",
             Self::Oci => "oci",
             Self::Package => "package",
+            Self::Ubi => "ubi",
         }
     }
 
@@ -131,6 +133,7 @@ impl ProducedOutputKind {
             "transform" => Some(Self::Transform),
             "oci" => Some(Self::Oci),
             "package" => Some(Self::Package),
+            "ubi" => Some(Self::Ubi),
             _ => None,
         }
     }

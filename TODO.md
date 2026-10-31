@@ -64,7 +64,7 @@ Small targets ship exactly two slots (A/B) plus a data partition. Smaller is bet
   - What: a native UBI writer, with no mtd-utils download. It writes one volume per slot (EROFS with verity on ubiblock, layered as on Raze) plus a data volume. It also lays out Rockchip's SPI-NAND idblock and K230 NAND images.
   - Why: the K230D boards, Flame and the Rockchip L variants boot from SPI-NAND.
   - Done when: the image attaches with `nandsim` and `ubiattach` and its volumes match, where those tools exist; otherwise a byte-level test of the format. Atlas has the volume layout.
-  - Blocked by: nothing for the writer. The board run is gated on the boards.
+  - Status: the writer is done (the UBI images commit), with byte-level read-back tests. nandsim needs root here and mtd-utils is not installed, so the first kernel attach is on a board. Not done: Rockchip's SPI-NAND idblock and the K230 NAND image layout (these need the vendor SDKs' exact formats), and telling Atlas the volume layout once a board config fixes it.
 - **G6: per-board size budget**
   - What: an error-level check on slot and image bytes against a per-board budget, plus a report of the smallest flash part each board could ship with.
   - Why: two slots plus data has to fit the cheapest flash. A Raze slot is about 43 MB layered today.

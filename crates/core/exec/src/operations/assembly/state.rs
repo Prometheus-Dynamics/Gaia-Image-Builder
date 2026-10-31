@@ -132,6 +132,7 @@ fn image_assembly_output_cleanup_paths(
         .disks
         .iter()
         .map(|disk| &disk.output)
+        .chain(assembly.ubis.iter().map(|ubi| &ubi.output))
         .chain(assembly.archives.iter().map(|archive| &archive.output))
         .chain(assembly.ocis.iter().map(|oci| &oci.dest))
         .chain(assembly.packages.iter().map(|package| &package.output))

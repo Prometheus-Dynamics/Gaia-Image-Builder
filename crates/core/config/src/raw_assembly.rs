@@ -13,6 +13,8 @@ pub(crate) struct RawImageAssemblyConfig {
     pub files: Vec<RawAssemblyFileConfig>,
     pub transforms: Vec<RawAssemblyTransformConfig>,
     pub filesystems: Vec<RawAssemblyFilesystemConfig>,
+    /// `[[image.assembly.ubis]]`: UBI images for raw NAND flash.
+    pub ubis: Vec<RawAssemblyUbiConfig>,
     pub disks: Vec<RawAssemblyDiskConfig>,
     pub archives: Vec<RawAssemblyArchiveConfig>,
     /// `[[image.assembly.oci]]`: OCI images built from layers.
@@ -336,6 +338,42 @@ pub(crate) struct RawAssemblyDiskPartitionConfig {
     /// GPT only: the partition GUID; unset derives it from the disk GUID
     /// and the name.
     pub guid: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub(crate) struct RawAssemblyUbiConfig {
+    pub id: String,
+    pub output: String,
+    pub peb_size: String,
+    pub min_io_size: String,
+    pub sub_page_size: Option<String>,
+    pub vid_header_offset: Option<String>,
+    pub image_seq: Option<u32>,
+    /// The whole flash device; set, the volumes and UBI's reserves must fit.
+    pub flash_size: Option<String>,
+    /// Defaults to Linux's 20 PEBs per 1024 kept for bad blocks.
+    pub bad_pebs_per_1024: Option<u32>,
+    pub volumes: Vec<RawAssemblyUbiVolumeConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub(crate) struct RawAssemblyUbiVolumeConfig {
+    pub name: String,
+    pub id: Option<u32>,
+    #[serde(rename = "type")]
+    pub kind: Option<RawAssemblyUbiVolumeKind>,
+    pub image: Option<String>,
+    pub size: Option<String>,
+    pub autoresize: bool,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum RawAssemblyUbiVolumeKind {
+    Dynamic,
+    Static,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

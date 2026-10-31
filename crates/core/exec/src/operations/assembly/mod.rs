@@ -50,6 +50,7 @@ mod strip;
 mod tar;
 mod tools;
 mod transforms;
+mod ubi;
 mod uboot_env;
 mod verity;
 

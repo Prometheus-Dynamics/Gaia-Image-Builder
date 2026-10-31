@@ -20,6 +20,7 @@ mod image_assembly_order;
 mod image_assembly_outputs;
 mod image_assembly_package;
 mod image_assembly_strip;
+mod image_assembly_ubi;
 mod image_layers;
 mod inputs;
 mod install_stage;

@@ -77,6 +77,7 @@ pub(crate) fn image_assembly_content_signature(spec: &ResolvedBuildSpec) -> Stri
                 .iter()
                 .map(|filesystem| ("filesystem", &filesystem.output)),
         )
+        .chain(assembly.ubis.iter().map(|ubi| ("ubi", &ubi.output)))
         .chain(assembly.disks.iter().map(|disk| ("disk", &disk.output)))
         .chain(
             assembly

@@ -73,6 +73,8 @@ const ARRAYS: &[&str] = &[
     "image.assembly.files",
     "image.assembly.transforms",
     "image.assembly.filesystems",
+    "image.assembly.ubis",
+    "image.assembly.ubis.volumes",
     "image.assembly.disks",
     "image.assembly.disks.partitions",
     "image.assembly.archives",
