@@ -5,6 +5,8 @@
 //! flags the environment already gives (`RUSTFLAGS`, `CFLAGS_<target>`) are kept
 //! in front of Gaia's own.
 
+use gaia_spec::RustCpuSpec;
+
 use gaia_artifact_providers::{
     ArtifactExecutionContract, ArtifactProviderError, ArtifactProviderErrorKind,
     ArtifactToolchainContract,
@@ -89,6 +91,46 @@ pub(crate) fn env_for(
         ),
         ("PKG_CONFIG_ALLOW_CROSS".into(), "1".into()),
     ]
+}
+
+/// `env` with the board's CPU flags (`[cpu]`) added for `target`: to the
+/// rustc flags cargo reads for the target, and to the C and C++ flags the `cc`
+/// crate reads. A value `env` does not set starts from the calling
+/// environment's, as the toolchain's do; `RUSTFLAGS` is folded into the
+/// target's flags, since cargo would otherwise use it instead of them.
+pub(crate) fn with_cpu_flags(
+    mut env: Vec<(String, String)>,
+    cpu: Option<&RustCpuSpec>,
+    target: Option<&str>,
+    inherited: impl Fn(&str) -> Option<String>,
+) -> Vec<(String, String)> {
+    let (Some(cpu), Some(target)) = (cpu, target) else {
+        return env;
+    };
+    let upper = target.replace('-', "_").to_ascii_uppercase();
+    let lower = target.replace('-', "_");
+    let rustflags = cpu.rustflags.join(" ");
+    let c_flags = cpu.c_flags.join(" ");
+    for (name, extra, fallback) in [
+        (
+            format!("CARGO_TARGET_{upper}_RUSTFLAGS"),
+            &rustflags,
+            Some("RUSTFLAGS"),
+        ),
+        (format!("CFLAGS_{lower}"), &c_flags, None),
+        (format!("CXXFLAGS_{lower}"), &c_flags, None),
+    ] {
+        match env.iter_mut().find(|(key, _)| *key == name) {
+            Some((_, value)) => *value = join_flags(&[value.as_str(), extra]),
+            None => {
+                let base = inherited(&name)
+                    .or_else(|| fallback.and_then(&inherited))
+                    .unwrap_or_default();
+                env.push((name, join_flags(&[base.as_str(), extra])));
+            }
+        }
+    }
+    env
 }
 
 /// The non-empty flags joined by single spaces.

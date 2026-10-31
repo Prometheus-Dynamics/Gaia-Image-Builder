@@ -13,6 +13,7 @@ use crate::unknown_keys::{FieldsFn, Known, Section};
 const PAGES: &[(&str, &str)] = &[
     ("", "../configuration.md#top-level-build-fields"),
     ("product", "../configuration.md#product-metadata"),
+    ("cpu", "../configuration-sources.md#cpu-profiles"),
     ("expect", "../configuration.md#top-level-build-fields"),
     ("interpolation", "../configuration.md#interpolation"),
     ("secrets", "../configuration.md#secrets"),

@@ -13,6 +13,7 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig, sources: &[SourceSpec]) -
             no_default_features,
             all_features,
             build_env,
+            cpu: _,
         } => {
             let cargo_git_sources =
                 compile_cargo_git_sources(raw.cargo_git_sources.clone(), sources);
@@ -38,6 +39,7 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig, sources: &[SourceSpec]) -
                 group_packages: Vec::new(),
                 cargo_git_sources,
                 build_env,
+                cpu: None,
             })
         }
         RawArtifactDefinition::Java {

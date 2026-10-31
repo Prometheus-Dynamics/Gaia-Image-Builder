@@ -123,6 +123,72 @@ mod tests {
         assert_eq!(image[..4], crc32(&image[5..]).to_le_bytes());
     }
 
+    /// `mkenvimage` writes the same bytes, and `fw_printenv` reads the
+    /// variables back, where u-boot-tools is installed.
+    #[test]
+    fn u_boot_tools_write_the_same_image_and_read_it_back() {
+        let tool = |name: &str| std::process::Command::new(name).arg("-V").output().is_ok();
+        if !tool("mkenvimage") || !tool("fw_printenv") {
+            eprintln!("skipped: u-boot-tools (mkenvimage, fw_printenv) is not installed");
+            return;
+        }
+        let scratch = gaia_testkit::TempDir::new("gaia-uboot-env-tools");
+        let text = "# A/B\nboot_slot=a\nbootcount=0\nbootlimit=3\naltbootcmd=setenv boot_slot b; run bootcmd\n";
+        let input = scratch.join("env.txt");
+        std::fs::write(&input, text).expect("input");
+        for redundant in [false, true] {
+            let ours = uboot_env_image(text, 0x2000, redundant).expect("image");
+            let theirs = scratch.join(format!("mkenvimage-{redundant}.bin"));
+            let mut command = std::process::Command::new("mkenvimage");
+            if redundant {
+                command.arg("-r");
+            }
+            let status = command
+                .args(["-s", "0x2000", "-o"])
+                .arg(&theirs)
+                .arg(&input)
+                .status()
+                .expect("mkenvimage runs");
+            assert!(status.success());
+            assert!(
+                std::fs::read(&theirs).expect("mkenvimage output") == ours,
+                "mkenvimage (redundant = {redundant}) wrote other bytes"
+            );
+
+            // fw_printenv reads a redundant environment from two copies.
+            let image = scratch.join(format!("env-{redundant}.bin"));
+            let mut bytes = ours.clone();
+            if redundant {
+                bytes.extend_from_slice(&ours);
+            }
+            std::fs::write(&image, bytes).expect("image");
+            let mut config = format!("{} 0x0 0x2000\n", image.display());
+            if redundant {
+                config.push_str(&format!("{} 0x2000 0x2000\n", image.display()));
+            }
+            let config_path = scratch.join(format!("fw_env-{redundant}.config"));
+            std::fs::write(&config_path, config).expect("config");
+            let output = std::process::Command::new("fw_printenv")
+                .arg("-c")
+                .arg(&config_path)
+                .arg("-l")
+                .arg(scratch.path())
+                .output()
+                .expect("fw_printenv runs");
+            let printed = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                printed,
+                "boot_slot=a\nbootcount=0\nbootlimit=3\naltbootcmd=setenv boot_slot b; run bootcmd\n",
+                "redundant = {redundant}"
+            );
+        }
+    }
+
     #[test]
     fn bad_lines_duplicates_and_overflow_are_errors() {
         assert!(

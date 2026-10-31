@@ -575,6 +575,8 @@ struct CargoFeatureFlags {
     git_sources: Vec<CargoGitSourceSpec>,
     /// `build_env`: in the fingerprint, not the state fields, like the above.
     build_env: Vec<(String, String)>,
+    /// The `[cpu]` profile's flags: in the fingerprint, like the above.
+    cpu: Option<gaia_spec::RustCpuSpec>,
 }
 
 impl CargoFeatureFlags {
@@ -586,6 +588,7 @@ impl CargoFeatureFlags {
                 all_features: rust.all_features,
                 git_sources: rust.cargo_git_sources.clone(),
                 build_env: rust.build_env.clone(),
+                cpu: rust.cpu.clone(),
             },
             _ => Self::default(),
         }
@@ -671,8 +674,20 @@ fn run_cargo_build(
     let git_env =
         cargo_git::cargo_git_env(&flags.git_sources, contract, source_dir, log_sink.as_ref())?;
     let sccache = sccache_env(contract, log_sink.as_ref());
-    let toolchain_env = toolchain::cargo_env(contract)?;
+    let toolchain_env = toolchain::with_cpu_flags(
+        toolchain::cargo_env(contract)?,
+        flags.cpu.as_ref(),
+        contract.artifact_target.as_deref(),
+        |name| std::env::var(name).ok(),
+    );
     let mut command = cargo_build_command(source_dir, packages, flags, contract, &target.dir);
+    if toolchain_env
+        .iter()
+        .any(|(key, _)| key.starts_with("CARGO_TARGET_") && key.ends_with("_RUSTFLAGS"))
+    {
+        // Folded into the target's flags: cargo would use it instead of them.
+        command.env_remove("RUSTFLAGS");
+    }
     command.envs(cargo_build_env(&flags.build_env)?);
     command.envs(git_env.iter().map(|(key, value)| (key, value)));
     command.envs(sccache.iter().map(|(key, value)| (key, value)));

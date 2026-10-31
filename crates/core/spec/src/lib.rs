@@ -13,6 +13,7 @@ mod assembly_ubi_spec;
 mod byte_size;
 mod checkpoints;
 mod clean;
+mod cpu;
 mod export;
 mod file_mode;
 pub mod fingerprint;
@@ -101,6 +102,7 @@ pub use checkpoints::{
     CheckpointSpec, OciCheckpointSpec,
 };
 pub use clean::{CleanProfileSpec, CleanSpec};
+pub use cpu::{CPU_PROFILES, CpuProfile, RustCpuSpec, cpu_profile};
 pub use export::ExportSpec;
 pub use file_mode::{FileMode, FileModeParseError};
 pub use fingerprint::FingerprintDigest;

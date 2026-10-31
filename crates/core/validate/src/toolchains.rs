@@ -137,6 +137,7 @@ pub(crate) fn validate_artifact_toolchains(
     spec: &ResolvedBuildSpec,
     diagnostics: &mut Vec<ValidationDiagnostic>,
 ) {
+    validate_artifact_cpu_flags(spec, diagnostics);
     for artifact in &spec.artifacts {
         let Some(id) = &artifact.toolchain else {
             continue;
@@ -269,4 +270,35 @@ pub(crate) fn toolchain_ids(toolchains: &[ToolchainSpec]) -> HashSet<String> {
         .iter()
         .map(|toolchain| toolchain.id.clone())
         .collect()
+}
+
+/// Cargo prefers `RUSTFLAGS` over the target flags the `[cpu]` profile adds,
+/// so an artifact that gets a profile must not set it in `build_env`.
+fn validate_artifact_cpu_flags(
+    spec: &ResolvedBuildSpec,
+    diagnostics: &mut Vec<ValidationDiagnostic>,
+) {
+    for artifact in &spec.artifacts {
+        let ArtifactDefinition::Rust(rust) = &artifact.definition else {
+            continue;
+        };
+        let Some(cpu) = &rust.cpu else {
+            continue;
+        };
+        if let Some((key, _)) = rust
+            .build_env
+            .iter()
+            .find(|(key, _)| key == "RUSTFLAGS" || key == "CARGO_ENCODED_RUSTFLAGS")
+        {
+            diagnostics.push(error(
+                "artifact_cpu_rustflags",
+                format!(
+                    "artifact '{}' gets [cpu] profile '{}' and sets {key} in build_env, which would replace the profile's flags; set `cpu = false` on the artifact to build it for the generic CPU, or move the flags to the project's .cargo/config.toml",
+                    artifact.id.as_str(),
+                    cpu.profile
+                ),
+                Some(format!("artifact:{}", artifact.id.as_str())),
+            ));
+        }
+    }
 }

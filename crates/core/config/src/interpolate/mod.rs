@@ -569,6 +569,7 @@ fn interpolate_artifact(
             no_default_features,
             all_features,
             build_env,
+            cpu,
         } => RawArtifactDefinition::Rust {
             package: resolver::interpolate_string(package, raw, env),
             target_name: target_name.map(|value| resolver::interpolate_string(value, raw, env)),
@@ -580,6 +581,7 @@ fn interpolate_artifact(
             no_default_features,
             all_features,
             build_env: interpolate_env(build_env, raw, env),
+            cpu,
         },
         RawArtifactDefinition::Java {
             build_target,

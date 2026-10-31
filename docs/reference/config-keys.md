@@ -18,6 +18,12 @@ Described in [Configuration](../configuration.md#product-metadata).
 
 Keys: `family`, `name`, `sku`.
 
+## `[cpu]`
+
+Described in [Sources and toolchains](../configuration-sources.md#cpu-profiles).
+
+Keys: `buildroot`, `profile`.
+
 ## `[workspace]`
 
 Described in [Policy, workspace and clean](../configuration-policy.md#workspace).

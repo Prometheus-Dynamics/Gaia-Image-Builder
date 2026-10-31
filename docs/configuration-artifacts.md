@@ -86,8 +86,11 @@ Artifact kinds:
     to a docker build as `-e KEY` with the value kept off the command line).
     Gaia's own variables for the toolchain, sccache and offline mode win over
     these. `RUSTFLAGS` and `CARGO_ENCODED_RUSTFLAGS` are refused for an
-    artifact with a `toolchain`: cargo would let them replace the toolchain's
-    flags.
+    artifact with a `toolchain` or a `[cpu]` profile: cargo would let them
+    replace the toolchain's or the profile's flags.
+  - `cpu` (bool, default true): `false` builds the artifact for its target's
+    generic CPU whatever the build's `[cpu]` profile says (see
+    [CPU profiles](configuration-sources.md#cpu-profiles)).
 
     ```toml
     [secrets.git_token]
@@ -171,7 +174,7 @@ own output (`package`, `target_name`, `output_path`) and has its own install
 identity.
 
 Members must share `source`, `target`, `profile`, `execution`,
-`no_default_features`/`all_features` and `build_env`; validation reports the conflicting
+`no_default_features`/`all_features`, `build_env` and their `[cpu]` profile; validation reports the conflicting
 members otherwise. `build_group` on a non-rust artifact is an error. A group
 of one is allowed. Since one `--features` list serves every selected
 package, prefer `package/feature` names so each feature is enabled on the

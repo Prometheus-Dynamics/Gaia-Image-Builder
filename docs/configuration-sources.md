@@ -418,3 +418,54 @@ defaults to it). The toolchain's `page_size` makes the rust binary link for
 so nothing else is needed. Without a `page_size`, the checks default to 4 KiB,
 and a binary the SDK links with 4 KiB segments passes them. An explicit
 `min_page_size` in the device table always wins.
+
+## CPU Profiles
+
+Each board image is built on its own, so its binaries can use every
+instruction its cores have. Without a profile, Rust builds for the target's
+generic CPU (armv8-a for aarch64): the CM5's dotprod, fp16, CRC32 and crypto
+instructions are then used only where a crate detects them at run time, and
+NEON on 32-bit ARM and RVV on RISC-V not at all, since stable Rust cannot
+detect those at run time. A board layer names its CPU:
+
+```toml
+[cpu]
+profile = "cortex-a76"
+```
+
+- Every Rust artifact whose `target` (or its toolchain's `rust_target`) is
+  for the profile's architecture gets the profile's `-C target-cpu` and
+  `-C target-feature` in `CARGO_TARGET_<TRIPLE>_RUSTFLAGS`, and its C flags in
+  `CFLAGS_<target>` and `CXXFLAGS_<target>` for the `cc` crate. Cargo merges
+  that variable with the project's own `target.<triple>.rustflags` in
+  `.cargo/config.toml`, so those are kept. A `RUSTFLAGS` in the environment
+  Gaia runs in is folded in front of them, since cargo would otherwise use it
+  instead. Artifacts for another architecture (host tools) and artifacts
+  without a target are left alone; `cpu = false` on an artifact opts it out.
+- A Buildroot image gets the profile's CPU symbols before its own
+  `config_overrides`, so an override in the image still wins. Buildroot then
+  passes the matching `-mcpu` to every package. `buildroot = false` in `[cpu]`
+  leaves the Buildroot configuration alone, for a vendor defconfig that sets
+  the CPU itself.
+- A later layer replaces `profile` and `buildroot` key by key. An unknown
+  profile is an error that lists the known ones. The flags are part of each
+  artifact's fingerprint, so changing the profile rebuilds what it changes.
+
+| Profile | Boards | Rust | C (`cc` crate) | Buildroot |
+| --- | --- | --- | --- | --- |
+| `cortex-a76` | CM5 (BCM2712) | `target-cpu=cortex-a76` | `-mcpu=cortex-a76` | `BR2_cortex_a76` |
+| `cortex-a76.cortex-a55` | RK3588S, RK3582 | `target-cpu=cortex-a55` | `-mcpu=cortex-a76.cortex-a55` | `BR2_cortex_a76_a55` |
+| `cortex-a72.cortex-a53` | RK3576 | `target-cpu=cortex-a53` | `-mcpu=cortex-a72.cortex-a53` | `BR2_cortex_a72_a53` |
+| `cortex-a55` | RK3566 | `target-cpu=cortex-a55` | `-mcpu=cortex-a55` | `BR2_cortex_a55` |
+| `cortex-a53` | RK3562 | `target-cpu=cortex-a53` | `-mcpu=cortex-a53` | `BR2_cortex_a53` |
+| `cortex-a7` | Flame (RV1106) | `target-cpu=cortex-a7`, `+neon,+vfp4` | `-mcpu=cortex-a7 -mfpu=neon-vfpv4` | `BR2_cortex_a7`, `BR2_ARM_FPU_NEON_VFPV4` |
+| `xuantie-c908` | K230D | `+v,+zba,+zbb,+zbs` | `-march=rv64gcv_zba_zbb_zbs` | `BR2_riscv_custom` with I/M/A/F/D/C/V |
+
+On a big.LITTLE SoC code runs on both core types, so Rust builds for the
+little core (rustc has no tuning for the pair; the little core's ISA is the
+same or a subset), while GCC tunes for both. With rustc 1.99, `cortex-a76`
+enables aes, crc, dotprod, fp16, lse, rcpc, rdm, sha2 and ssbs over the
+generic CPU's neon; `cortex-a55` the same without ssbs; `cortex-a53` aes, crc
+and sha2. rustc has no C908 model, so the K230D profile is the base target
+with RVV 1.0 (VLEN 128) and the bit-manipulation extensions.
+

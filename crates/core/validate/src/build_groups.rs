@@ -74,6 +74,11 @@ pub(crate) fn validate_build_groups(
                     format!("{:?}", leader_rust.build_env),
                     format!("{:?}", member_rust.build_env),
                 ),
+                (
+                    "cpu",
+                    format!("{:?}", leader_rust.cpu.as_ref().map(|cpu| &cpu.profile)),
+                    format!("{:?}", member_rust.cpu.as_ref().map(|cpu| &cpu.profile)),
+                ),
             ];
             for (field, leader_value, member_value) in conflicts {
                 if leader_value != member_value {

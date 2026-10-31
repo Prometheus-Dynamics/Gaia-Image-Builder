@@ -274,6 +274,10 @@ fn merge_two(
     }
     base.labels = merge_named_paths(base.labels, overlay.labels);
     base.product = merge_product(base.product, overlay.product);
+    base.cpu = crate::raw::RawCpuConfig {
+        profile: overlay.cpu.profile.or(base.cpu.profile),
+        buildroot: overlay.cpu.buildroot.or(base.cpu.buildroot),
+    };
     base.inputs = merge_inputs(base.inputs, overlay.inputs);
     if overlay.preset.is_some() {
         base.preset = overlay.preset;

@@ -120,6 +120,11 @@ pub struct RustArtifactSpec {
     /// win over these. Every member of a build group sets the same ones.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub build_env: Vec<(String, String)>,
+    /// The flags of the build's `[cpu]` profile, when the artifact builds
+    /// for the profile's architecture. Not serialized when unset, so the
+    /// fingerprints of builds without a profile keep.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu: Option<crate::RustCpuSpec>,
 }
 
 /// One cargo git dependency the build takes from a declared git source
@@ -403,6 +408,7 @@ mod tests {
             group_packages: Vec::new(),
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
+            cpu: None,
         }
     }
 

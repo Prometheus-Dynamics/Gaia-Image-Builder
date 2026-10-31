@@ -8,7 +8,7 @@ This page covers loading, conditions, the top-level fields, interpolation and se
 
 - [Inputs, presets, variants and profiles](configuration-inputs.md): [Inputs](configuration-inputs.md#inputs), [Presets](configuration-inputs.md#presets), [Variants](configuration-inputs.md#variants), [Profiles](configuration-inputs.md#profiles)
 - [Policy, workspace and clean](configuration-policy.md): [Failure Policy](configuration-policy.md#failure-policy), [Execution Policy](configuration-policy.md#execution-policy), [Provider Execution Policy](configuration-policy.md#provider-execution-policy), [Provenance](configuration-policy.md#provenance), [Workspace](configuration-policy.md#workspace), [Clean](configuration-policy.md#clean)
-- [Sources and toolchains](configuration-sources.md): [Sources](configuration-sources.md#sources), [Toolchains](configuration-sources.md#toolchains)
+- [Sources and toolchains](configuration-sources.md): [Sources](configuration-sources.md#sources), [Toolchains](configuration-sources.md#toolchains), [CPU profiles](configuration-sources.md#cpu-profiles)
 - [Artifacts, install and stage](configuration-artifacts.md): [Artifacts](configuration-artifacts.md#artifacts), [Install](configuration-artifacts.md#install), [Stage](configuration-artifacts.md#stage)
 - [Image](configuration-image.md): [Image](configuration-image.md#image)
 - [Image assembly](configuration-assembly.md): [Image Assembly](configuration-assembly.md#image-assembly), [Assembly checks](configuration-assembly.md#assembly-checks)

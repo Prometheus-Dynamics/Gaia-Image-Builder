@@ -28,6 +28,8 @@ pub(crate) struct RawBuildConfig {
     // not a closed enum domain.
     pub labels: Vec<(String, String)>,
     pub product: RawProductConfig,
+    /// `[cpu]`: the board's CPU profile.
+    pub cpu: RawCpuConfig,
     pub inputs: BTreeMap<String, RawInputOptionConfig>,
     pub preset: Option<String>,
     pub presets: BTreeMap<String, RawPresetConfig>,
@@ -325,6 +327,15 @@ pub(crate) enum RawWorkspacePathKind {
     #[default]
     Host,
     Logical,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub(crate) struct RawCpuConfig {
+    /// A name from `gaia_spec::CPU_PROFILES`.
+    pub profile: Option<String>,
+    /// Whether a Buildroot image gets the profile's CPU symbols; default true.
+    pub buildroot: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -800,6 +811,9 @@ pub(crate) enum RawArtifactDefinition {
         all_features: bool,
         #[serde(default)]
         build_env: Vec<(String, String)>,
+        /// `false` builds for the target's generic CPU whatever `[cpu]` says.
+        #[serde(default)]
+        cpu: Option<bool>,
     },
     Java {
         build_target: String,

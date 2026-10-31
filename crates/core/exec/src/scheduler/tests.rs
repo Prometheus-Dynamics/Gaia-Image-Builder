@@ -52,6 +52,7 @@ fn rust_artifact(id: &str, source: &str, output: &str) -> ArtifactSpec {
             group_packages: Vec::new(),
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
+            cpu: None,
         }),
         Some(SourceRef::new(source)),
         ArtifactOutputSpec {

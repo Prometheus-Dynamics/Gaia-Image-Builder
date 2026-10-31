@@ -1,5 +1,6 @@
 mod artifact;
 mod checkpoint;
+mod cpu;
 mod image;
 mod policy;
 mod precedence;
@@ -408,6 +409,7 @@ pub(crate) fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
             SourceSpec::new(source.id, definition)
         })
         .collect();
+    let cpu_opt_outs = cpu::opt_outs(&raw.artifacts);
     spec.toolchains = raw.toolchains.into_iter().map(compile_toolchain).collect();
     spec.artifacts = raw
         .artifacts
@@ -623,6 +625,7 @@ pub(crate) fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
             }
         }),
     };
+    cpu::apply(&raw.cpu, &cpu_opt_outs, &mut spec);
     spec
 }
 

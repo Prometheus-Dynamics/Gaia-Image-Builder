@@ -214,6 +214,7 @@ pub(crate) fn resolve_merged(
     let interpolated = interpolate_config(with_dynamic_inputs, &env)?;
     let normalized = normalize_paths(interpolated)?;
     reject_non_rust_build_groups(&normalized)?;
+    reject_unknown_cpu_profile(&normalized)?;
     reject_non_rust_cargo_git_sources(&normalized)?;
     let mut spec = compile_config(normalized);
     if let Some(id) = &variant.id {
@@ -482,6 +483,28 @@ fn normalize_export_dir(
 
 /// `build_group` only means something to cargo; on any other artifact kind
 /// it is a mistake rather than a key to ignore.
+fn reject_unknown_cpu_profile(raw: &raw::RawBuildConfig) -> Result<(), ConfigError> {
+    let Some(profile) = raw.cpu.profile.as_deref() else {
+        return Ok(());
+    };
+    if gaia_spec::cpu_profile(profile).is_some() {
+        return Ok(());
+    }
+    let known = gaia_spec::CPU_PROFILES
+        .iter()
+        .map(|profile| format!("'{}' ({})", profile.name, profile.boards))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(ConfigError::ConfigShape {
+        path: raw
+            .source_path
+            .as_deref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<unknown>".to_string()),
+        message: format!("[cpu] profile '{profile}' is not one Gaia knows: {known}"),
+    })
+}
+
 fn reject_non_rust_build_groups(raw: &raw::RawBuildConfig) -> Result<(), ConfigError> {
     let Some(artifact) = raw.artifacts.iter().find(|artifact| {
         artifact.build_group.is_some()

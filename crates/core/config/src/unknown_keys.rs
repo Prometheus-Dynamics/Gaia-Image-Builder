@@ -328,6 +328,7 @@ const SECTIONS: &[Section] = &[
     section("workspace", struct_fields::<raw::RawWorkspaceConfig>, &[]),
     section("expect", struct_fields::<raw::RawExpectConfig>, &[]),
     section("product", struct_fields::<raw::RawProductConfig>, &[]),
+    section("cpu", struct_fields::<raw::RawCpuConfig>, &[]),
     section(
         "interpolation",
         struct_fields::<raw::RawInterpolationConfig>,

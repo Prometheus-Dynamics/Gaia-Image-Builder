@@ -21,6 +21,7 @@ fn rust_provider_fails_for_missing_source_dir_when_nested_build_enabled() {
             group_packages: Vec::new(),
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
+            cpu: None,
         }),
         None,
         ArtifactOutputSpec {
@@ -64,6 +65,7 @@ fn rust_artifact_state_persists_backend_native_fields() {
             group_packages: Vec::new(),
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
+            cpu: None,
         }),
         None,
         ArtifactOutputSpec {
@@ -117,6 +119,7 @@ fn nested_rust_build_does_not_accept_stale_existing_output() {
             group_packages: Vec::new(),
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
+            cpu: None,
         }),
         None,
         ArtifactOutputSpec {
@@ -156,6 +159,7 @@ fn rust_artifact(id: &str, package: &str, output: &Path) -> ArtifactSpec {
             group_packages: Vec::new(),
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
+            cpu: None,
         }),
         None,
         ArtifactOutputSpec {
@@ -648,5 +652,6 @@ fn strip_rewrites_the_collected_copy_with_the_host_strip_tool() {
 }
 
 mod cargo_git;
+mod cpu;
 mod groups;
 mod shared_target;

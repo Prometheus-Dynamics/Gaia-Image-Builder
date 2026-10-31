@@ -167,6 +167,7 @@ pub fn artifact_failure_spec_with_overrides(
         group_packages: Vec::new(),
         cargo_git_sources: Vec::new(),
         build_env: Vec::new(),
+        cpu: None,
     });
     spec.artifacts.push(bad_artifact);
     spec

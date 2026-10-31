@@ -37,8 +37,7 @@ Small targets ship exactly two slots (A/B) plus a data partition. Smaller is bet
   - What: a U-Boot environment image (CRC32, optional redundant copy) holding the A/B variables (`boot_slot`, `bootcount`, `bootlimit`, `altbootcmd`).
   - Why: A/B trial boots on U-Boot boards, which have no `tryboot`. Atlas's updater writes the same variables.
   - Done when: `fw_printenv` reads the image back the same in a test, where installed.
-  - Status: the transform is done in 56568df, with byte-level tests of U-Boot's `env_t` layout. Left: the `fw_printenv` read-back test, which does not exist yet (no test runs u-boot-tools). Write it to skip with a visible line when `fw_printenv` is missing, and install `u-boot-tools` in GitHub CI so it runs there.
-  - Blocked by: nothing for the test and the CI install. Running it on this host needs u-boot-tools, which is not installed (the user's approval to install it).
+  - Status: done. The transform landed in 56568df; the commit adding CPU profiles adds the test: `mkenvimage` writes byte-identical images, plain and redundant, and `fw_printenv` reads the variables back from both. It runs here (u-boot-tools 2026.04) and in GitHub CI, which now installs u-boot-tools, and skips with a visible line elsewhere.
 - **G4: riscv64 polish**
   - What: GPT aliases `linux-usr-riscv64`, `linux-root-verity-riscv64` and `linux-usr-verity-riscv64`, plus the riscv64 lp64d loader paths in the runtime-library check.
   - Why: the K230D uses Raze's verity layout.
@@ -64,7 +63,8 @@ Small targets ship exactly two slots (A/B) plus a data partition. Smaller is bet
   - What: a `[cpu]` table a board layer sets (`profile = "cortex-a76"`, ...). It adds `-C target-cpu`/`-C target-feature` and the C compiler's `-mcpu` to every Rust artifact built for that architecture, and selects the CPU in Buildroot (`BR2_cortex_a76`, ...). Profiles: CM5 `cortex-a76`; RK3588S/RK3582 `cortex-a76.cortex-a55`; RK3576 `cortex-a72.cortex-a53` (the RK3576's cores are A72 and A53, not A76); RK3566 `cortex-a55`; RK3562 `cortex-a53` (its cores are A53); Flame `cortex-a7` with NEON and VFPv4; K230D `xuantie-c908` (RVV 1.0 and Zba/Zbb/Zbs; rustc has no C908 model).
   - Why: today the aarch64 builds target generic armv8-a, so the A76's dotprod, fp16, CRC32 and crypto instructions are used only where a crate detects them at run time (requested 2026-10-31 through HeliOS).
   - Done when: the flags reach cargo and Buildroot in tests, HeliOS's backend builds with the CM5 profile, and each board's flags and any crate that breaks are reported to HeliOS.
-  - Blocked by: nothing. The K230D's Buildroot symbols are checked only once the K230 SDK is fetched.
+  - Status: written. Tests compile a dotprod-only crate for aarch64 (it fails without the profile and builds with `cortex-a76`, keeping the crate's own `--cfg`). The K230 SDK's Buildroot 2024.02.1 has `BR2_RISCV_ISA_RVV`. Left: HeliOS's backend built with the CM5 profile, and the per-board report.
+  - Blocked by: nothing.
 - **G6: per-board size budget**
   - What: an error-level check on slot and image bytes against a per-board budget, plus a report of the smallest flash part each board could ship with.
   - Why: two slots plus data has to fit the cheapest flash. A Raze slot is about 43 MB layered today.
