@@ -4,9 +4,10 @@ version = "0.1.0"
 description = "Luckfox Pico Pro (RV1106G2, 128 MB SPI-NAND): vendor kernel and U-Boot, A/B slots in UBI. Written, untested on board."
 target = "luckfox-pico-pro"
 profile = "release"
-# atlas-ubi and the boot hook that carry out the slot environments.
+# Atlas's device package: atlas-ubi and its boot hook for the slot environments,
+# and board-lite, which identifies the board to Atlas on the LAN.
 imports = [
-  { source = "atlas", path = "devices/luckfox-pico-pro/gaia/nand-slot.toml" },
+  { source = "atlas", path = "devices/luckfox-pico-pro/gaia/device.toml" },
 ]
 
 [workspace]
@@ -52,7 +53,7 @@ pin = "locked"
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "3e7cbf7cda02593dd8a1e508fdef309af5d5cfc4"
+rev = "058c53c123aa096c6c4f1a3c7b4d3ab45bbc801d"
 refresh = "never"
 pin = "locked"
 

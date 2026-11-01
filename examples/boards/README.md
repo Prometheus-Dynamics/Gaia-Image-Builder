@@ -150,10 +150,13 @@ The SDK disables the watchdog in `rv1106.dtsi`; `post-image.sh` enables it in th
 board's DTS, so `/dev/watchdog` exists. `WATCHDOG_NOWAYOUT` is off, and nothing
 starts the watchdog by default.
 
-The image imports Atlas's `devices/luckfox-pico-pro/gaia/nand-slot.toml`:
+The image imports Atlas's `devices/luckfox-pico-pro/gaia/device.toml`.
 `/usr/sbin/atlas-ubi nand-slot` carries out the steps below, and
 `/etc/init.d/S00nand-slot` runs its trial check and starts the watchdog early on a
-trial boot. It does nothing on other boots.
+trial boot. It does nothing on other boots. `/usr/sbin/board-lite` identifies the
+board to Atlas, read-only: `GET :5899/.well-known/pd-device`, and mDNS for
+`_pd-device._tcp`. Nothing on the image can start an install remotely yet: it has
+no SSH or USB console.
 
 To install to the other slot, say B while A is committed:
 
@@ -183,6 +186,11 @@ To check on a board first:
 - `/data` is formatted and mounted on the first boot.
 - A trial nobody commits resets at about 600 s plus the watchdog timeout, and a
   commit stands the watchdog down.
+- `/proc/cpuinfo` has a non-zero `Serial` (`board-lite` falls back to the device
+  tree, then the MAC).
+- `atlas ls` on a laptop on the same LAN lists the board, which also shows that
+  multicast reaches `eth0` and nothing else holds UDP 5353. `board-lite` logs
+  nothing if it can't advertise, because its init script discards its output.
 
 ## Still open
 
