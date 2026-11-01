@@ -81,6 +81,13 @@ name = "boot.ext4"
 format = "ext4"
 required = true
 
+# The USB burner (post-image.sh): collected into the image output dir,
+# beside the SD image, where k230-flash and Atlas look for it.
+[[image.expected_images]]
+name = "loader_mmc.bin"
+format = "file"
+required = true
+
 [reporting]
 summary = true
 manifest = true

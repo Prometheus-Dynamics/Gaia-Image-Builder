@@ -10,7 +10,7 @@
 # images/uboot/fn_ug_u-boot.bin (gzip U-Boot with an image header and the
 # firmware head), images/uboot/env.env and images/boot.ext4 (OpenSBI with
 # U-Boot's header, the kernel and the dtb, which the env's blinux loads
-# from partition 1).
+# from partition 1) and images/loader_mmc.bin, the USB burner.
 set -e
 dtb="${2:?usage: post-image.sh <images dir> <dtb name> <sdk root>}.dtb"
 sdk="${3:?usage: post-image.sh <images dir> <dtb name> <sdk root>}"
@@ -42,6 +42,25 @@ $firmware_gen -i u-boot-spl.bin -o fn_u-boot-spl.bin -n
 rm -f u-boot.bin.gz ug_u-boot.bin
 
 "$uboot_build/tools/mkenvimage" -s 0x10000 -o env.env "$board/default.env"
+
+# The burner the K230 boot ROM runs over USB to write the TF card (or
+# SPI-NAND): the SDK's U-Boot with its burntool defconfig, whose plain
+# u-boot.bin is the loader, per Canaan's burning guide. Built from a copy
+# of the board U-Boot tree so that build stays as Buildroot left it. It
+# links at 0x80300000 (CONFIG_SYS_TEXT_BASE), not k230-flash's default
+# 0x80360000.
+burner="$BUILD_DIR/uboot-burntool"
+rm -rf "$burner"
+cp -a "$uboot_build" "$burner"
+burner_make() {
+	make -C "$burner" ARCH=riscv \
+		CROSS_COMPILE="$HOST_DIR/bin/riscv64-unknown-linux-gnu-" \
+		HOSTCC="gcc -std=gnu17 -isystem $HOST_DIR/include" \
+		HOSTLDFLAGS="-L$HOST_DIR/lib -Wl,-rpath,$HOST_DIR/lib" "$@"
+}
+burner_make k230d_canmv_burntool_defconfig
+burner_make -j"$(nproc)" u-boot.bin
+cp "$burner/u-boot.bin" "$BINARIES_DIR/loader_mmc.bin"
 
 cd "$BINARIES_DIR"
 rm -rf boot boot.ext4

@@ -15,15 +15,25 @@ but none has booted on its board yet.
 Each sets its `[cpu]` profile (see `docs/configuration-sources.md#cpu-profiles`),
 so Rust artifacts and the Buildroot toolchain target the board's cores.
 
-## Loaders for maskrom flashing
+## Loaders for USB flashing
 
 Each build publishes the vendor loader next to its images, where
-`rkdeveloptool` and Atlas look for it:
+`rkdeveloptool`, `k230-flash` and Atlas look for it:
 
 - ROCK 5C: `rk3588_spl_loader_v1.18.113.bin` (`RK3588MINIALL.ini` of the rkbin Buildroot pins, `f43a462`)
 - ROCK 4D: `rk3576_loader_v1.13.109.bin` (rkbin `RK3576MINIALL.ini`)
 - Luckfox Pico Pro: `rv1106_download_v1.15.108.bin` (the SDK's rkbin)
-- K230D Zero: none; the K230 boots from the TF card.
+- K230D Zero: `loader_mmc.bin`, the burner: the SDK's U-Boot built with
+  `k230d_canmv_burntool_defconfig` (plain `u-boot.bin`, as Canaan's burning
+  guide describes). It links at `0x80300000`, so give `k230-flash`
+  `-la 0x80300000` rather than its default `0x80360000`.
+
+The Luckfox `idblock.img` and download loader pair: both come from the
+SDK rkbin's `RV1106MINIALL.ini` (`rv1106_download_v1.15.108.bin` and
+`rv1106_idblock_v1.15.102.img`, which `idblock.img` matches byte for byte)
+and carry the same DDR init, `ddr-v1.15-306b9977f5`. The idblock's SPL is
+the one the SDK's `make.sh --spl-new` builds from its U-Boot, as the SDK
+itself does.
 
 ## Layouts
 
@@ -96,7 +106,8 @@ Built on 2026-10-31 (Fedora 44 host, GCC 16), each run passing
   (27 modules).
 - K230D Zero: the GPT entries, the SPL, environment and U-Boot copies byte
   for byte at their offsets (`K230` firmware heads), the environment CRC,
-  `boot.ext4` contents (root-owned).
+  `boot.ext4` contents (root-owned), `loader_mmc.bin` built from the
+  burntool configuration (USB DFU for MMC and SPI-NAND).
 
 ## Still open
 
