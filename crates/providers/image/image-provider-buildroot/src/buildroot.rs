@@ -3,47 +3,6 @@ use crate::requested_rebuilds::{requested_package_rebuilds, with_requested_rebui
 use gaia_spec::Fingerprint;
 use sha2::{Digest, Sha256};
 
-pub(crate) fn resolve_buildroot_dir(
-    spec: &ResolvedBuildSpec,
-    image: &ImageSpec,
-) -> Option<PathBuf> {
-    if let Some(source_id) = buildroot_source_id(image) {
-        let candidate = buildroot_source_dir(spec, source_id);
-        if candidate.join("Makefile").is_file() {
-            return Some(candidate);
-        }
-    }
-    for key in ["GAIA_BUILDROOT_DIR", "BUILDROOT_DIR"] {
-        if let Some(candidate) = env::var_os(key).map(PathBuf::from)
-            && candidate.join("Makefile").is_file()
-        {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
-pub(crate) fn buildroot_source_id(image: &ImageSpec) -> Option<&SourceId> {
-    match &image.definition {
-        ImageDefinition::Buildroot(buildroot) => buildroot.source.as_ref(),
-        _ => None,
-    }
-}
-
-pub(crate) fn buildroot_allow_fallback(image: &ImageSpec) -> bool {
-    match &image.definition {
-        ImageDefinition::Buildroot(buildroot) => buildroot.allow_fallback,
-        _ => false,
-    }
-}
-
-pub(crate) fn buildroot_source_dir(spec: &ResolvedBuildSpec, source_id: &SourceId) -> PathBuf {
-    Path::new(&spec.workspace.root_dir)
-        .join(&spec.workspace.build_dir)
-        .join("sources")
-        .join(source_id.as_str())
-}
-
 #[derive(Clone)]
 pub(crate) struct ImageCommandContext<'a> {
     pub(crate) execution: &'a ImageExecutionContext,
