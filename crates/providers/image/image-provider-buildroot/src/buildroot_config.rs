@@ -211,11 +211,39 @@ pub(crate) fn normalize_buildroot_config_overrides(
         .map(|(key, value)| {
             if key == "BR2_GLOBAL_PATCH_DIR" {
                 (key.clone(), normalize_global_patch_dir_value(spec, value))
+            } else if let Some(paths) = named_path_value(spec, value) {
+                (key.clone(), paths)
             } else {
                 (key.clone(), value.clone())
             }
         })
         .collect()
+}
+
+/// A value naming files through a workspace alias (`${assets}/post-build.sh`,
+/// which the config resolves to `@assets/post-build.sh`), as the quoted
+/// absolute paths Buildroot needs. Several whitespace-separated entries may
+/// each use an alias; the value may be quoted already. `None` when no entry
+/// starts with an alias the workspace declares.
+fn named_path_value(spec: &ResolvedBuildSpec, value: &str) -> Option<String> {
+    let unquoted = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .unwrap_or(value);
+    let mut resolved_any = false;
+    let entries = unquoted
+        .split_whitespace()
+        .map(|entry| {
+            if entry.starts_with('@')
+                && let Ok(path) = gaia_spec::resolve_workspace_path(&spec.workspace, entry)
+            {
+                resolved_any = true;
+                return path.display().to_string();
+            }
+            entry.to_string()
+        })
+        .collect::<Vec<_>>();
+    resolved_any.then(|| format!("\"{}\"", entries.join(" ")))
 }
 
 pub(crate) fn normalize_global_patch_dir_value(spec: &ResolvedBuildSpec, value: &str) -> String {

@@ -182,6 +182,19 @@ config_overrides = [
 ]
 ```
 
+A value may also start with a workspace alias, `${assets}/post-build.sh`, for
+files beside the build config; Gaia writes it to `.config` as the quoted
+absolute path. In a space-separated list each entry may use one:
+
+```toml
+[image]
+kind = "buildroot"
+config_overrides = [
+  ["BR2_ROOTFS_POST_BUILD_SCRIPT", "${assets}/post-build.sh"],
+  ["BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES", "${assets}/linux.fragment"],
+]
+```
+
 Inside `[image.assembly]` every string takes both source tokens: tree ids
 and tree or file paths, file `src`, `dest` and `content`, `json` values (keys
 are not substituted), archive outputs and members, disk and filesystem

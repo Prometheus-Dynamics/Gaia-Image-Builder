@@ -263,3 +263,53 @@ fn substituted_source_paths_compare_against_the_final_config() {
     let mismatches = find_override_mismatches(&stale, &requested);
     assert_eq!(mismatches.len(), 2, "{mismatches:?}");
 }
+
+/// `${assets}/post-build.sh` reaches the provider as `@assets/post-build.sh`;
+/// Buildroot needs the quoted absolute path (it read the alias as an empty
+/// string and dropped the script).
+#[test]
+fn workspace_alias_paths_become_quoted_absolute_paths() {
+    let mut spec = ResolvedBuildSpec::new("alias-paths");
+    spec.workspace.root_dir = "/work/board".into();
+    spec.workspace
+        .named_paths
+        .push(gaia_spec::WorkspaceNamedPathSpec {
+            alias: "assets".into(),
+            path: "assets".into(),
+            kind: gaia_spec::WorkspacePathKindSpec::Host,
+        });
+    let requested = normalize_buildroot_config_overrides(
+        &spec,
+        &[
+            (
+                "BR2_ROOTFS_POST_BUILD_SCRIPT".to_string(),
+                "@assets/post-build.sh".to_string(),
+            ),
+            (
+                "BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES".to_string(),
+                "\"@assets/a.fragment @assets/b.fragment\"".to_string(),
+            ),
+            (
+                "BR2_ROOTFS_POST_SCRIPT_ARGS".to_string(),
+                "\"RK3588MINIALL.ini\"".to_string(),
+            ),
+        ],
+    );
+    assert_eq!(
+        requested,
+        vec![
+            (
+                "BR2_ROOTFS_POST_BUILD_SCRIPT".to_string(),
+                "\"/work/board/assets/post-build.sh\"".to_string(),
+            ),
+            (
+                "BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES".to_string(),
+                "\"/work/board/assets/a.fragment /work/board/assets/b.fragment\"".to_string(),
+            ),
+            (
+                "BR2_ROOTFS_POST_SCRIPT_ARGS".to_string(),
+                "\"RK3588MINIALL.ini\"".to_string(),
+            ),
+        ]
+    );
+}
