@@ -371,6 +371,13 @@ src = "$provider.images/env.txt"
 dest = "$assembly.work/c.env"
 env_size = "64K"
 redundant = true
+
+[[image.assembly.transforms]]
+kind = "uboot-env"
+src = "$provider.images/env.txt"
+dest = "$assembly.work/d.env"
+env_size = "64K"
+copies = 0
 "#,
     );
     assert_eq!(
@@ -380,6 +387,7 @@ redundant = true
             "assembly_uboot_env_size_invalid",
             "assembly_transform_option_unsupported",
             "assembly_transform_option_unsupported",
+            "assembly_uboot_env_copies_invalid",
         ]
     );
 }

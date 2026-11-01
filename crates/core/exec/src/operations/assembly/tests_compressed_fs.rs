@@ -451,6 +451,7 @@ fn squashfs_image_is_the_data_of_a_verity_transform() {
         long: false,
         env_size: None,
         redundant: false,
+        copies: None,
         salt: None,
         uuid: None,
     }];

@@ -1,0 +1,4 @@
+mtdparts=spi-nand0:256K(env),256K@256K(idblock),512K(uboot),6M(boot_a),6M(boot),-(ubi)
+sys_bootargs=ubi.mtd=5 ubi.block=0,rootfs_b root=/dev/ubiblock0_1 rootfstype=squashfs ro rootwait panic=5 gaia.slot=b gaia.trial=1
+gaia_trial=1
+bootcmd=if test -n "$gaia_trial"; then mtd erase spi-nand0 0 0x20000; fi; boot_fit; boot_android $devtype $devnum; if test -n "$gaia_trial"; then reset; fi

@@ -77,10 +77,21 @@ pub(crate) fn validate_transform_options(
                 )),
                 Some(Ok(_)) => {}
             }
+            if transform.copies == Some(0) {
+                diagnostics.push(error(
+                    "assembly_uboot_env_copies_invalid",
+                    format!(
+                        "assembly uboot-env transform to '{}' has copies = 0; an image holds at least one",
+                        transform.dest
+                    ),
+                    location(),
+                ));
+            }
         } else {
             for (set, option) in [
                 (transform.env_size.is_some(), "env_size"),
                 (transform.redundant, "redundant"),
+                (transform.copies.is_some(), "copies"),
             ] {
                 if set {
                     diagnostics.push(error(

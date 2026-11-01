@@ -124,6 +124,7 @@ fn verity_transform(dest: &str, hash_dest: Option<&str>) -> AssemblyTransformSpe
         long: false,
         env_size: None,
         redundant: false,
+        copies: None,
         salt: None,
         uuid: None,
     }

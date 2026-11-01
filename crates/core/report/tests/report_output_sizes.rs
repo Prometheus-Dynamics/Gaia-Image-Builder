@@ -290,6 +290,7 @@ fn spec_with_filesystem_and_transform(
             long: false,
             env_size: None,
             redundant: false,
+            copies: None,
             salt: None,
             uuid: None,
         }],

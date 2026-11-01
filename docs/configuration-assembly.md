@@ -305,6 +305,7 @@ A `uboot-env` transform writes a U-Boot environment image, the bytes `mkenvimage
 
 - `env_size` (required): the board's `CONFIG_ENV_SIZE`, a byte size such as `"64K"`. The image is exactly that long. Variables that do not fit are an error (`assembly_uboot_env_size_invalid` for a missing or too small size).
 - `redundant = true`: the layout of a redundant environment (`CONFIG_ENV_REDUNDAND`): a flags byte after the CRC, set to the active copy. Write the same image at both of the board's environment offsets.
+- `copies = 2`: the image holds that many copies one after another, each `env_size` long, for a board whose two copies sit next to each other. Rockchip's `CONFIG_ENVF` reads the second when the first fails its CRC, with no flags byte; see `examples/boards/README.md#nand-slots`.
 
 The image is a little-endian CRC32 of the data area, the flags byte when redundant, then each `name=value` and a NUL, one more NUL after the last, and `0xff` to the end. Variables keep their file order. Generate the text with a `content` file to fill in tokens. For example, an A/B environment at a Rockchip board's 4 MiB offset, outside the partition table:
 

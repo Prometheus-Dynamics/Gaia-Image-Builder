@@ -78,7 +78,8 @@ pub(super) fn write_uboot_env(
     let text = std_fs::read_to_string(&src)
         .map_err(|error| format!("failed to read '{}': {error}", src.display()))?;
     let image = uboot_env_image(&text, size, transform.redundant)
-        .map_err(|error| format!("uboot-env '{}': {error}", src.display()))?;
+        .map_err(|error| format!("uboot-env '{}': {error}", src.display()))?
+        .repeat(transform.copies.unwrap_or(1) as usize);
     let temp = temporary_assembly_output_path(&dest);
     std_fs::write(&temp, &image)
         .map_err(|error| format!("failed to write '{}': {error}", temp.display()))?;

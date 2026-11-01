@@ -44,6 +44,11 @@ pub struct AssemblyTransformSpec {
     /// (`CONFIG_ENV_REDUNDAND`), with its flags byte.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub redundant: bool,
+    /// `uboot-env` only: how many copies of the environment the image holds,
+    /// one after another (default 1), for a board that reads a second copy
+    /// when the first fails its CRC.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copies: Option<u32>,
 }
 
 impl AssemblyTransformSpec {

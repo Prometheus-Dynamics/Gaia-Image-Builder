@@ -103,20 +103,40 @@ out_dir = "${provider.images}"
 # boot.img (FIT: zImage, dtb, resource) is 4.4 MiB with the SDK's kernel
 # config, so the boot slots are 6M rather than the SDK's 4M.
 # The UBI partition holds rootfs A/B (squashfs through ubiblock) and data.
-[[image.assembly.trees]]
-id = "env"
-path = "${assembly.work}/env"
-
-[[image.assembly.files]]
-tree = "env"
-dest = "env.txt"
-content = "mtdparts=rk-nand:256K(env),256K@256K(idblock),512K(uboot),6M(boot),6M(boot_b),-(ubi)\nsys_bootargs=ubi.mtd=5 ubi.block=0,rootfs_a root=/dev/ubiblock0_0 rootfstype=squashfs ro rootwait\n"
+# The environment holds two 128K copies. U-Boot reads the first and falls back
+# to the second when the first fails its CRC, which is how a slot trial falls
+# back: see "NAND slots" in ../README.md. The slot environments are published
+# for the slot install; env.img is the factory image, slot A in both copies.
+[[image.assembly.transforms]]
+kind = "uboot-env"
+src = "${assets}/slot-env/a.txt"
+dest = "${assembly.out}/env.img"
+env_size = "128K"
+copies = 2
 
 [[image.assembly.transforms]]
 kind = "uboot-env"
-src = "${assembly.tree.env}/env.txt"
-dest = "${assembly.out}/env.img"
-env_size = "256K"
+src = "${assets}/slot-env/a.txt"
+dest = "${assembly.out}/env-a.img"
+env_size = "128K"
+
+[[image.assembly.transforms]]
+kind = "uboot-env"
+src = "${assets}/slot-env/b.txt"
+dest = "${assembly.out}/env-b.img"
+env_size = "128K"
+
+[[image.assembly.transforms]]
+kind = "uboot-env"
+src = "${assets}/slot-env/a-trial.txt"
+dest = "${assembly.out}/env-a-trial.img"
+env_size = "128K"
+
+[[image.assembly.transforms]]
+kind = "uboot-env"
+src = "${assets}/slot-env/b-trial.txt"
+dest = "${assembly.out}/env-b-trial.img"
+env_size = "128K"
 
 [[image.assembly.ubis]]
 id = "ubi"

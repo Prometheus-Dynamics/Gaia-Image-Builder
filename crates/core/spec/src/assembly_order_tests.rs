@@ -405,6 +405,7 @@ fn generated_content_runs_after_the_steps_whose_outputs_its_tokens_read() {
             long: false,
             env_size: None,
             redundant: false,
+            copies: None,
         }],
         ..ImageAssemblySpec::default()
     };

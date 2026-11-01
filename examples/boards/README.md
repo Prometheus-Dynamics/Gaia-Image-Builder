@@ -57,7 +57,7 @@ boots; `rootfs-a` (bootable, holds `/boot/extlinux/extlinux.conf`),
 
 | Offset | Size | Image |
 | --- | --- | --- |
-| 0 | 256K | `env.img` (U-Boot environment: `mtdparts`, `sys_bootargs`) |
+| 0 | 256K | `env.img` (two 128K copies of the U-Boot environment; see [NAND slots](#nand-slots)) |
 | 256K | 256K | `idblock.img` |
 | 512K | 512K | `uboot.img` |
 | 1M | 6M | `boot.img` (FIT: zImage, dtb, resource; 4.4 MiB) |
@@ -118,11 +118,59 @@ Built on 2026-10-31 (Fedora 44 host, GCC 16), each run passing
   `boot.ext4` contents (root-owned), `loader_mmc.bin` built from the
   burntool configuration (USB DFU for MMC and SPI-NAND).
 
+## NAND slots
+
+The Luckfox Pico Pro's slot lives in its environment, and the vendor U-Boot is
+not patched. Written from the SDK's U-Boot and kernel source and **untested on
+board**.
+
+The env partition holds two 128K copies. U-Boot reads the first (offset 0) and,
+when its CRC fails, the second (offset 128K). It takes `mtdparts`, `sys_bootargs`,
+`bootcmd` and `gaia_trial` from the copy it read. The build publishes the four
+possible copies, 128K each, to write unchanged:
+
+| Image | Boots | Kernel partition names | Kernel command line |
+| --- | --- | --- | --- |
+| `env-a.img` | `boot` at 1M, `rootfs_a` (`ubiblock0_0`) | mtd3 `boot`, mtd4 `boot_b` | `gaia.slot=a` |
+| `env-b.img` | `boot` at 7M, `rootfs_b` (`ubiblock0_1`) | mtd3 `boot_a`, mtd4 `boot` | `gaia.slot=b` |
+| `env-a-trial.img` | as `env-a.img`, once | as `env-a.img` | `gaia.slot=a gaia.trial=1` |
+| `env-b-trial.img` | as `env-b.img`, once | as `env-b.img` | `gaia.slot=b gaia.trial=1` |
+
+U-Boot's `boot_fit` only reads the partition named `boot`, so the slot is chosen
+by which partition has that name: the running slot's is `boot`, and the other
+is named for the slot it holds (`boot_a` or `boot_b`). `env`, `ubi` and every
+mtd number stay the same.
+
+To install to the other slot, say B while A is committed:
+
+1. Write mtd4 (`boot_b`) and volume `rootfs_b`.
+2. Erase the first block of mtd0 (`env`) and write `env-b-trial.img` at offset
+   0. The second copy still says A; a torn write fails the CRC and boots A.
+3. Reboot. U-Boot sees `gaia_trial`, erases the first copy, and boots B. Any
+   later boot reads the second copy, A, so a hang or a failed FIT falls back. A
+   failed FIT resets by itself; a hung kernel needs the watchdog, or a power
+   cycle. `panic=5` covers a panic.
+4. If B is healthy, commit: write `env-b.img` to offset 0, then to offset 128K,
+   in that order, each after erasing its block. Never erase the second copy
+   while the first is invalid, since with neither copy U-Boot has no partition
+   table. To reject B, reboot without writing anything.
+
+On a trial boot, if the first copy still has a valid CRC, U-Boot's erase failed
+and the next boot would retry the trial: erase it from Linux and report it.
+Refuse to install if `MEMGETBADBLOCK` says either env block is bad, because
+U-Boot skips a bad block and raw offsets on mtd0 would then no longer match.
+Don't use `fw_setenv`: its redundant format has a flags byte this U-Boot doesn't
+read, and it would not keep the write order above.
+
+To check on a board first: `mtd list` at the U-Boot prompt names `spi-nand0`,
+and a trial of each slot, killed in Linux, comes back on the committed slot.
+
 ## Still open
 
 - Boot each image on its board; read the RK3576 maskrom USB product id with
   `lsusb` on the ROCK 4D.
-- Slot switching: the images boot slot A; selecting B (U-Boot environment or
-  `extlinux` labels) is for the updater.
+- Slot switching on the ROCK and K230 boards: their images boot slot A;
+  selecting B (U-Boot environment or `extlinux` labels) is for the updater.
+- Luckfox NAND slots are written, untested on board; see below.
 - dm-verity on the read-only slots: the Luckfox SDK kernel has no
   `CONFIG_DM_VERITY` yet.

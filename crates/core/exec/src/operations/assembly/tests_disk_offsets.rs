@@ -266,3 +266,24 @@ fn a_uboot_env_from_generated_text_lands_at_its_offset() {
     assert!(env[5..].starts_with(b"boot_slot=a\0bootcount=0\0bootlimit=3\0\0"));
     assert_eq!(env[..4], crc32(&env[5..]).to_le_bytes());
 }
+
+#[test]
+fn a_uboot_env_with_two_copies_repeats_the_whole_environment() {
+    let scratch = TempDir::new("gaia-exec-uboot-env-copies");
+    let (src, dest) = (scratch.join("env.txt"), scratch.join("env.img"));
+    fs::write(&src, "boot_slot=a\n").expect("text");
+    let mut env = copy_transform("unused", "unused");
+    env.kind = gaia_spec::AssemblyTransformKindSpec::UbootEnv;
+    env.env_size = Some("1K".into());
+    env.copies = Some(2);
+
+    super::uboot_env::write_uboot_env(&env, src, dest.clone())
+        .map_err(|error| error.message)
+        .expect("written");
+
+    let bytes = fs::read(&dest).expect("image");
+    assert_eq!(bytes.len(), 2048);
+    assert_eq!(bytes[..1024], bytes[1024..]);
+    assert!(bytes[4..].starts_with(b"boot_slot=a\0\0"));
+    assert_eq!(bytes[..4], crc32(&bytes[4..1024]).to_le_bytes());
+}

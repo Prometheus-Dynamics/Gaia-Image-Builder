@@ -24,7 +24,8 @@ uboot="$BUILD_DIR/vendor-uboot"
 mkdir -p "$uboot"
 rsync -a --delete "$sdk/sysdrv/source/uboot/" "$uboot/"
 cd "$uboot/u-boot"
-make CROSS_COMPILE="$cross" luckfox_rv1106_uboot_defconfig rk-sfc.config
+cp "$(dirname "$(readlink -f "$0")")/uboot-slots.config" configs/gaia-slots.config
+make CROSS_COMPILE="$cross" luckfox_rv1106_uboot_defconfig rk-sfc.config gaia-slots.config
 ./make.sh --spl-new CROSS_COMPILE="$cross"
 install -m 0644 uboot.img "$BINARIES_DIR/uboot.img"
 install -m 0644 rv1106_idblock_v*.img "$BINARIES_DIR/idblock.img"

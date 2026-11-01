@@ -266,6 +266,7 @@ pub(crate) fn compile_image_assembly(
                 long: transform.long,
                 env_size: transform.env_size,
                 redundant: transform.redundant,
+                copies: transform.copies,
             })
             .collect(),
         filesystems: raw

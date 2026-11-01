@@ -146,6 +146,8 @@ pub(crate) struct RawAssemblyTransformConfig {
     pub env_size: Option<String>,
     /// `uboot-env` only: the redundant environment layout.
     pub redundant: bool,
+    /// `uboot-env` only: how many copies the image holds, one after another.
+    pub copies: Option<u32>,
 }
 
 impl Default for RawAssemblyTransformConfig {
@@ -164,6 +166,7 @@ impl Default for RawAssemblyTransformConfig {
             long: false,
             env_size: None,
             redundant: false,
+            copies: None,
         }
     }
 }

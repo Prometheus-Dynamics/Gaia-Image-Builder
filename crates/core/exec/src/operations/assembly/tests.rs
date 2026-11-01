@@ -534,6 +534,7 @@ fn copy_transform(src: &str, dest: &str) -> gaia_spec::AssemblyTransformSpec {
         long: false,
         env_size: None,
         redundant: false,
+        copies: None,
         salt: None,
         uuid: None,
     }
