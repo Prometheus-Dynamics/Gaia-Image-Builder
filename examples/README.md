@@ -69,6 +69,11 @@ Clean all runnable example artifacts with `rm -rf .gaia/examples`.
   Use it when you want a small distro-style config with multiple artifacts, runtime content, checkpoints, and a real non-`tar` output contract.
   Output: `rootfs.squashfs`
 
+- [sim-x86_64/README.md](sim-x86_64/README.md)
+  A target anyone can run without a board: an x86_64 Buildroot base (glibc, systemd, no kernel) split into layers, plus an app layer built outside Buildroot, written as an OCI image.
+  Use it for the app-layer fast path: an app-only change rebuilds the app and the OCI image in about a second and reuses Buildroot.
+  Output: `sim.oci` (an OCI image layout podman and docker load)
+
 ### Device Profiles
 
 - [profiles/build.toml](profiles/build.toml)

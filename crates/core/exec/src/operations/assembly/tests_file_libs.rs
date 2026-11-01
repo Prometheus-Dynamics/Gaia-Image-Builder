@@ -187,3 +187,63 @@ fn static_and_non_elf_files_never_warn() {
         summary.messages
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn an_app_layer_tree_above_the_image_layers_finds_their_libraries() {
+    let scratch = TempDir::new("gaia-exec-file-libs");
+    let root = scratch.join("gaia-file-libs-layers");
+    fs::create_dir_all(&root).expect("test root");
+    let tool = write_dynamic_tool(&root, "tool");
+    let tree = root.join("build/assembly/rootfs");
+    let mut spec = test_spec(&root);
+    let base = root.join("base.tar");
+    // An empty tar archive: two zero blocks.
+    fs::write(&base, [0u8; 1024]).expect("base tar");
+    let mut assembly = files_assembly(&tree, vec![file_entry(&tool, "usr/bin/tool")]);
+    assembly.ocis = vec![gaia_spec::AssemblyOciSpec {
+        id: "sim".into(),
+        dest: root.join("sim.oci").display().to_string().into(),
+        format: "oci-layout".into(),
+        layers: vec![
+            gaia_spec::AssemblyOciLayerSpec {
+                tar: Some(base.display().to_string().into()),
+                tree: None,
+            },
+            gaia_spec::AssemblyOciLayerSpec {
+                tar: None,
+                tree: Some("rootfs".into()),
+            },
+        ],
+        compression: "none".into(),
+        reference: None,
+        config: gaia_spec::AssemblyOciConfigSpec {
+            architecture: "amd64".into(),
+            os: "linux".into(),
+            ..Default::default()
+        },
+    }];
+    let target = gaia_spec::AssemblyRoots::new(&spec, &assembly)
+        .expect("roots")
+        .provider_target;
+    spec.image.assembly = Some(assembly);
+
+    // Without the image's root filesystem, the tree's own libraries are all
+    // there is: the program's interpreter and libc are missing.
+    let summary = stage(&spec);
+    assert_eq!(summary.warnings.len(), 1, "{:?}", summary.warnings);
+    assert!(
+        summary.warnings[0].contains("libc.so.6"),
+        "{:?}",
+        summary.warnings
+    );
+
+    // With them in the root filesystem the layers come from, they are found.
+    write_target_libraries(target.parent().expect("target parent"));
+    assert_eq!(
+        target.file_name().and_then(|name| name.to_str()),
+        Some("target")
+    );
+    let summary = stage(&spec);
+    assert!(summary.warnings.is_empty(), "{:?}", summary.warnings);
+}

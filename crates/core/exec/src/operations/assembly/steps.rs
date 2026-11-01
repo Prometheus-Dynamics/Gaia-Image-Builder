@@ -22,6 +22,26 @@ pub(super) struct PendingLibCheck {
     pub(super) tree_path: PathBuf,
     /// The copied file, under `tree_path`.
     pub(super) file: PathBuf,
+    /// The image root filesystem below the tree, when the tree is an OCI
+    /// layer above `tar` layers: its libraries count too.
+    pub(super) lower_root: Option<PathBuf>,
+}
+
+/// The root filesystem a tree's files also load libraries from: the image
+/// provider's target dir when the tree is an OCI layer above a `tar` layer
+/// (an app layer over the image's own layers).
+pub(super) fn lower_layer_root(
+    assembly: &ImageAssemblySpec,
+    roots: &AssemblyRoots,
+    tree: &str,
+) -> Option<PathBuf> {
+    let above_tar = assembly.ocis.iter().any(|oci| {
+        oci.layers
+            .iter()
+            .position(|layer| layer.tree.as_ref().is_some_and(|id| id.as_str() == tree))
+            .is_some_and(|index| oci.layers[..index].iter().any(|layer| layer.tar.is_some()))
+    });
+    (above_tar && roots.provider_target.is_dir()).then(|| roots.provider_target.clone())
 }
 
 /// What the steps of one assembly run produced, recorded into its state.

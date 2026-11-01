@@ -217,6 +217,7 @@ fn job_file<'a>(
             tree: file.tree.as_str().to_string(),
             tree_path: tree_path.to_path_buf(),
             file: dest.clone(),
+            lower_root: super::steps::lower_layer_root(assembly, ctx.roots, file.tree.as_str()),
         });
         let bytes = file_len(&dest)?;
         let sha256 = file_sha256(&dest)?;

@@ -409,7 +409,9 @@ pub(super) fn runtime_lib_message(check: &PendingLibCheck) -> Option<String> {
         Ok(relative) => format!("/{}", relative.display()),
         Err(_) => check.file.display().to_string(),
     };
-    match gaia_plan::missing_runtime_libraries(&check.file, &check.tree_path) {
+    let mut roots = vec![check.tree_path.as_path()];
+    roots.extend(check.lower_root.as_deref());
+    match gaia_plan::missing_runtime_libraries_in_roots(&check.file, &roots) {
         Ok(missing) if missing.is_empty() => None,
         Ok(missing) => Some(format!(
             "assembly file '{guest}' in tree '{}' is dynamically linked, but the tree lacks {}: copy it with [[image.assembly.binaries]] to bring its libraries",

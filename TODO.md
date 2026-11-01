@@ -10,11 +10,8 @@ Items the user pinned for a later release are in "Pinned for later" below.
 
 ### 1. Freeze items still open
 
-- **sim-x86_64 example and the app-layer fast path**
-  - What: an x86_64 Buildroot example built as layers. Changing only the app rebuilds only the app layer.
-  - Why: a target anyone can build and test without a board, and the fast path every product relies on.
-  - Done when: `gaia run` on the example passes `image check`, and a second run after an app-only change reuses the base and platform layers. Record both run times in the changelog.
-  - Status: the user approved the x86_64 Buildroot sources on 2026-10-31. `examples/sim-x86_64` and the fast path (an assembly that reads an artifact's output waits for that artifact; the image build does not) are being built.
+None. The last two landed on 2026-11-01: Config v3 enums (e411aef) and `examples/sim-x86_64` with the app-layer fast path.
+
 ### 2. Hardware support (G1–G9 and board bring-up)
 
 Small targets ship exactly two slots (A/B) plus a data partition. Smaller is better, because it lets the boards use cheaper flash.

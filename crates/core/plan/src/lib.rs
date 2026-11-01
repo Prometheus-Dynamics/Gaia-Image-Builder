@@ -1,3 +1,4 @@
+mod assembly_artifacts;
 mod elf;
 mod estimate;
 mod graph;
@@ -474,6 +475,13 @@ pub fn plan_build_operations(
                 ));
         if has_image_provider {
             assembly = assembly.with_dependency(OperationId::image());
+            // Artifact outputs the assembly reads itself, outside the feed.
+            for dependency in assembly_artifacts::assembly_artifact_dependencies(
+                spec,
+                spec.image.assembly.as_ref().expect("checked above"),
+            ) {
+                assembly = assembly.with_dependency(dependency);
+            }
         } else {
             // Without a provider the assembly is the build's last step: it
             // reads what the artifacts, installs and stage entries produced.

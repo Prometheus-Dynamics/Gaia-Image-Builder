@@ -91,6 +91,11 @@ pub(super) fn job_file_tree<'a>(
                 tree: file.tree.as_str().to_string(),
                 tree_path: tree_path.to_path_buf(),
                 file: dest.clone(),
+                lower_root: super::steps::lower_layer_root(
+                    ctx.assembly,
+                    ctx.roots,
+                    file.tree.as_str(),
+                ),
             })
             .collect()
     };

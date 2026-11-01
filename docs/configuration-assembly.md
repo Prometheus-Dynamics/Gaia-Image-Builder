@@ -105,7 +105,7 @@ Assembly behavior:
 - Glob staging is deterministic and currently supports simple non-recursive `*` filename patterns. A directory that matches is skipped: a `src_glob` copies its files and links (the same holds for an archive member's `src_glob`).
 - A `dest` of `.` or ending in `/` is a directory the sources are copied into; any other `dest` is the file a single source is copied to. A `src_glob` that matches several files needs a directory `dest` (otherwise every match would land on one file) and fails without one.
 - `optional = true` skips missing sources without failing the build and records the skip in runtime state.
-- A copied file that is dynamically linked (it names a program interpreter or `DT_NEEDED` libraries) is checked against its tree. Once the steps that fill the tree have run, before a filesystem or archive packs it, each interpreter and library the file needs must be in the tree, looked up as [listed binaries](#listed-binaries) look them up. A missing one is a warning, not an error: the run output and the summary name the file and the libraries (`copy it with [[image.assembly.binaries]] to bring its libraries`). A tree may be an overlay on a full rootfs, which is why it is not an error. `allow_missing_libs = true` on the entry accepts the file without the warning. The check reads only ELF headers, never the host, and a static or non-ELF file is never checked. `allow_missing_libs` is refused on `content` and `json` entries.
+- A copied file that is dynamically linked (it names a program interpreter or `DT_NEEDED` libraries) is checked against its tree. Once the steps that fill the tree have run, before a filesystem or archive packs it, each interpreter and library the file needs must be in the tree, looked up as [listed binaries](#listed-binaries) look them up. A missing one is a warning, not an error: the run output and the summary name the file and the libraries (`copy it with [[image.assembly.binaries]] to bring its libraries`). A tree may be an overlay on a full rootfs, which is why it is not an error. A tree that is an OCI layer above a `tar` layer is also checked against the image's root filesystem (see [App layer outside the image feed](#app-layer-outside-the-image-feed)). `allow_missing_libs = true` on the entry accepts the file without the warning. The check reads only ELF headers, never the host, and a static or non-ELF file is never checked. `allow_missing_libs` is refused on `content` and `json` entries.
 - `mode = "0755"` applies Unix file modes on Unix hosts.
 - `include = ["<name>", ...]` on a `src_glob` entry copies only the matches whose file name one of the names matches (simple `*` globs allowed); it is applied after `exclude`. An entry that matches no file fails the build, naming it, unless `optional = true`. It is refused on other entries. For example, twelve named overlays out of a directory of several hundred: `src_glob = "${provider.target}/boot/overlays/*.dtbo"`, `include = ["vc4-kms-v3d.dtbo", "i2c*.dtbo"]`, `dest = "overlays/"`.
 - `strip = true` on a file entry strips each copied ELF file (the `src`, or each `src_glob` match) with the strip tool described under the tree; a copied file that is not ELF is left alone. It is refused on `content` and `json` entries.
@@ -440,6 +440,33 @@ Output is deterministic: the same inputs give the same bytes and digests. A tree
 Each layer's `diff_id` is the sha256 of its uncompressed tar. Compressed blobs are cached under the build dir (`<build dir>/oci-blobs/<diff_id>.gzip` or `.zstd`), so an unchanged layer is not compressed again: an app-only change rewrites one blob, the config and the manifest. The layer tar of a `tar` layer is read each run to get its `diff_id`; a tree layer is tarred each run.
 
 State records `oci.N.id`, `format`, `compression`, `output`, `bytes`, `config_digest`, `manifest_digest` and `layer_count`, and for each layer `oci.N.layer.M.source`, `diff_id`, `blob_digest`, `blob_bytes` and `reused`. The output is an expected output of the assembly, so it is reported with its size. Reuse fingerprints cover the OCI config, the state of each `tar` layer, and the content digest of each `tree` layer.
+
+##### App layer outside the image feed
+
+An assembly that reads an artifact's output itself (a file's `src`, `src_dir` or `src_glob`, a transform's `src`, or an OCI `tar` layer inside the artifact's `output_path`) waits for that artifact. The image build waits only for installs, so an artifact that is not installed into the image (no `[[install]]` entry) can reach it through an assembly tree without going through Buildroot: a change to it rebuilds the artifact and reruns the assembly, and `image:prepare` and `image:build` are reused. With the tree as the top OCI layer over the image's own `[image.layers]` tars, an app-only change rewrites one blob. `examples/sim-x86_64` builds this way: its app is a rust artifact built with the image's own toolchain (`[[toolchains]] path = "${workspace.build_dir}/image/buildroot-output/host"`, `after_image_prepare = true`), and an app-only change takes about 1.3 s.
+
+```toml
+[[image.assembly.trees]]
+id = "app"
+path = "${assembly.work}/app"
+
+[[image.assembly.files]]
+tree = "app"
+src = "${outputs.dir}/artifacts/sim-app"   # the artifact's output_path
+dest = "usr/bin/sim-app"
+mode = "0755"
+
+[[image.assembly.oci]]
+id = "sim"
+dest = "${assembly.out}/sim.oci"
+layers = [
+  { tar = "${provider.images}/layers/base.tar" },
+  { tar = "${provider.images}/layers/platform.tar" },
+  { tree = "app" },
+]
+```
+
+A dynamically linked file in such a tree is checked against the tree and against the image's root filesystem (`${provider.target}`, where the lower layers come from), so the app's glibc in the base layer counts as present.
 
 #### Packages (ipk, deb)
 

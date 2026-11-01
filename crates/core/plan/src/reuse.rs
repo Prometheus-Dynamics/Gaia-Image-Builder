@@ -1126,7 +1126,7 @@ pub fn operation_output_signature(
     }
 }
 
-fn artifact_output_path(spec: &ResolvedBuildSpec, output_path: &str) -> PathBuf {
+pub(crate) fn artifact_output_path(spec: &ResolvedBuildSpec, output_path: &str) -> PathBuf {
     resolve_workspace_path(spec, output_path)
 }
 
