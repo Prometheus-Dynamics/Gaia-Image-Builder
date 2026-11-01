@@ -1,0 +1,6 @@
+# The environment lives in the GPT partition with U-Boot's environment type
+# GUID (the empty "uboot-env" partition), as on Buildroot's rock5b.
+CONFIG_ENV_SIZE=0x10000
+CONFIG_PARTITION_TYPE_GUID=y
+# CONFIG_ENV_IS_NOWHERE is not set
+CONFIG_ENV_IS_IN_MMC=y

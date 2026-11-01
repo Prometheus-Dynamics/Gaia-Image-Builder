@@ -1,0 +1,147 @@
+config = 3
+build_name = "rock-4d"
+version = "0.1.0"
+description = "Radxa ROCK 4D (RK3576): mainline Buildroot image, rkbin BL31, with A/B root slots. Written, untested on board."
+target = "rock-4d"
+profile = "release"
+
+[workspace]
+root_dir = "examples/boards/rock-4d"
+build_dir = "../../../.gaia/examples/rock-4d/build"
+
+[[workspace.named_paths]]
+alias = "assets"
+path = "assets"
+kind = "host"
+
+[cpu]
+profile = "cortex-a72.cortex-a53"
+
+[providers.buildroot]
+timeout_seconds = 14400
+
+[cache]
+downloads = "../../../.gaia/cache/buildroot/dl"
+
+[cache.ccache]
+enabled = true
+dir = "../../../.gaia/cache/buildroot/ccache"
+
+[[sources]]
+id = "buildroot"
+kind = "git"
+repo = "https://gitlab.com/buildroot.org/buildroot.git"
+tag = "2026.02.3"
+refresh = "never"
+pin = "locked"
+
+# Rockchip's blobs: the DDR init, BL31 and the maskrom loader's parts.
+[[sources]]
+id = "rkbin"
+kind = "git"
+repo = "https://github.com/rockchip-linux/rkbin.git"
+rev = "3e288fe814e059dd06833495f845cab04ac20a5c"
+refresh = "never"
+pin = "locked"
+
+[image]
+kind = "buildroot"
+source = "buildroot"
+defconfig_path = "${assets}/rock4d_defconfig"
+external_tree_mode = "disabled"
+config_overrides = [
+  ["BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES", "${assets}/linux.fragment"],
+  ["BR2_TARGET_UBOOT_CONFIG_FRAGMENT_FILES", "${assets}/u-boot.fragment"],
+  ["BR2_ROOTFS_POST_BUILD_SCRIPT", "${assets}/post-build.sh"],
+  ["BR2_ROOTFS_POST_IMAGE_SCRIPT", "${assets}/post-image.sh"],
+  ["BR2_ROOTFS_POST_SCRIPT_ARGS", "\"RK3576MINIALL.ini ${source.rkbin.path}\""],
+  ["BR2_TARGET_UBOOT_CUSTOM_MAKEOPTS", "\"BL31=${source.rkbin.path}/bin/rk35/rk3576_bl31_v1.25.elf ROCKCHIP_TPL=${source.rkbin.path}/bin/rk35/rk3576_ddr_lp4_2112MHz_lp5_2736MHz_v1.13.bin\""],
+]
+
+[[image.expected_images]]
+name = "u-boot-rockchip.bin"
+format = "file"
+required = true
+
+[[image.expected_images]]
+name = "rootfs.ext4"
+format = "ext4"
+required = true
+
+# The maskrom loader: collected into the image output dir, beside the
+# disk, where rkdeveloptool and Atlas look for it.
+[[image.expected_images]]
+name = "rk3576_loader_v1.13.109.bin"
+format = "file"
+required = true
+
+[reporting]
+summary = true
+manifest = true
+
+[outputs]
+dir = "../../../.gaia/examples/rock-4d/out"
+images_dir = "${outputs.dir}/images"
+archive_name = "${build.name}-${build.version}.img.xz"
+report = true
+
+[image.assembly]
+work_dir = "${workspace.build_dir}/assembly"
+out_dir = "${provider.images}"
+
+# /data, empty, labelled, mounted by the system on first boot.
+[[image.assembly.trees]]
+id = "data"
+path = "${assembly.work}/data"
+
+[[image.assembly.files]]
+tree = "data"
+content = "ROCK 4D data partition\n"
+dest = "README"
+
+[[image.assembly.filesystems]]
+id = "data"
+kind = "ext4"
+source_tree = "data"
+output = "${assembly.work}/data.ext4"
+size = "64M"
+label = "data"
+
+# SD card or eMMC: the boot ROM reads idbloader + U-Boot from sector 64;
+# U-Boot keeps its environment in the partition with its type GUID (left
+# empty, so the built-in default environment boots); slot A is the
+# bootable partition distro boot reads extlinux.conf from.
+[[image.assembly.disks]]
+id = "sdcard"
+output = "${assembly.out}/sdcard.img"
+partition_table = "gpt"
+
+[[image.assembly.disks.partitions]]
+name = "u-boot"
+image = "${provider.images}/u-boot-rockchip.bin"
+offset = "32K"
+table = false
+
+[[image.assembly.disks.partitions]]
+name = "uboot-env"
+type = "3de21764-95bd-54bd-a5c3-4abe786f38a8"
+offset = "16M"
+size = "64K"
+wipe = true
+
+[[image.assembly.disks.partitions]]
+name = "rootfs-a"
+type_alias = "linux-root-arm64"
+image = "${provider.images}/rootfs.ext4"
+size = "512M"
+bootable = true
+
+[[image.assembly.disks.partitions]]
+name = "rootfs-b"
+type_alias = "linux-root-arm64"
+size = "512M"
+wipe = true
+
+[[image.assembly.disks.partitions]]
+name = "data"
+image = "${assembly.work}/data.ext4"

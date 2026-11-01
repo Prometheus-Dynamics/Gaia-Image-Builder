@@ -1,0 +1,140 @@
+config = 3
+build_name = "luckfox-pico-pro"
+version = "0.1.0"
+description = "Luckfox Pico Pro (RV1106G2, 128 MB SPI-NAND): vendor kernel and U-Boot, A/B slots in UBI. Written, untested on board."
+target = "luckfox-pico-pro"
+profile = "release"
+
+[workspace]
+root_dir = "examples/boards/luckfox-pico-pro"
+build_dir = "../../../.gaia/examples/luckfox-pico-pro/build"
+
+[[workspace.named_paths]]
+alias = "assets"
+path = "assets"
+kind = "host"
+
+[cpu]
+profile = "cortex-a7"
+
+[providers.buildroot]
+timeout_seconds = 14400
+
+[cache]
+downloads = "../../../.gaia/cache/buildroot/dl"
+
+[cache.ccache]
+enabled = true
+dir = "../../../.gaia/cache/buildroot/ccache"
+
+[[sources]]
+id = "buildroot"
+kind = "git"
+repo = "https://gitlab.com/buildroot.org/buildroot.git"
+tag = "2026.02.3"
+refresh = "never"
+pin = "locked"
+
+# The Luckfox SDK: toolchain, vendor kernel, U-Boot and rkbin.
+[[sources]]
+id = "luckfox"
+kind = "git"
+repo = "https://github.com/LuckfoxTECH/luckfox-pico.git"
+rev = "824b817f889c2cbff1d48fcdb18ab494a68f69d1"
+refresh = "never"
+pin = "locked"
+
+[image]
+kind = "buildroot"
+source = "buildroot"
+defconfig_path = "${assets}/luckfox_pico_pro_defconfig"
+external_tree_mode = "disabled"
+override_srcdirs = [
+  ["linux", "${source.luckfox.path}/sysdrv/source/kernel"],
+]
+config_overrides = [
+  ["BR2_TOOLCHAIN_EXTERNAL_PATH", "\"${source.luckfox.path}/tools/linux/toolchain/arm-rockchip830-linux-uclibcgnueabihf\""],
+  ["BR2_ROOTFS_POST_IMAGE_SCRIPT", "${assets}/post-image.sh"],
+  ["BR2_ROOTFS_POST_SCRIPT_ARGS", "\"${source.luckfox.path} rv1106g-luckfox-pico-pro-max\""],
+]
+
+[[image.expected_images]]
+name = "rootfs.squashfs"
+format = "squashfs"
+required = true
+
+[[image.expected_images]]
+name = "boot.img"
+format = "file"
+required = true
+
+[[image.expected_images]]
+name = "uboot.img"
+format = "file"
+required = true
+
+[[image.expected_images]]
+name = "idblock.img"
+format = "file"
+required = true
+
+[[image.expected_images]]
+name = "rv1106_download_v1.15.108.bin"
+format = "file"
+required = true
+
+[reporting]
+summary = true
+manifest = true
+
+[outputs]
+dir = "../../../.gaia/examples/luckfox-pico-pro/out"
+images_dir = "${outputs.dir}/images"
+report = true
+
+[image.assembly]
+work_dir = "${workspace.build_dir}/assembly"
+out_dir = "${provider.images}"
+
+# SPI-NAND layout (128 KiB blocks, 2 KiB pages), as mtdparts in the U-Boot
+# environment the vendor U-Boot reads at offset 0:
+#   env 256K @0 | idblock 256K @256K | uboot 512K @512K | boot 6M @1M
+#   | boot_b 6M @7M | ubi (rest) @13M
+# boot.img (FIT: zImage, dtb, resource) is 4.4 MiB with the SDK's kernel
+# config, so the boot slots are 6M rather than the SDK's 4M.
+# The UBI partition holds rootfs A/B (squashfs through ubiblock) and data.
+[[image.assembly.trees]]
+id = "env"
+path = "${assembly.work}/env"
+
+[[image.assembly.files]]
+tree = "env"
+dest = "env.txt"
+content = "mtdparts=rk-nand:256K(env),256K@256K(idblock),512K(uboot),6M(boot),6M(boot_b),-(ubi)\nsys_bootargs=ubi.mtd=5 ubi.block=0,rootfs_a root=/dev/ubiblock0_0 rootfstype=squashfs ro rootwait\n"
+
+[[image.assembly.transforms]]
+kind = "uboot-env"
+src = "${assembly.tree.env}/env.txt"
+dest = "${assembly.out}/env.img"
+env_size = "256K"
+
+[[image.assembly.ubis]]
+id = "ubi"
+output = "${assembly.out}/ubi.img"
+peb_size = "128K"
+min_io_size = "2K"
+flash_size = "115M"
+
+[[image.assembly.ubis.volumes]]
+name = "rootfs_a"
+image = "${provider.images}/rootfs.squashfs"
+size = "40M"
+
+[[image.assembly.ubis.volumes]]
+name = "rootfs_b"
+size = "40M"
+
+[[image.assembly.ubis.volumes]]
+name = "data"
+size = "4M"
+autoresize = true
