@@ -47,11 +47,11 @@ otherwise. "Written" below means built and checked on the host, not booted.
   - Why: two slots plus data has to fit the cheapest flash. Raw NAND is covered: `flash_size` fails the build when the volumes do not fit, and UBI builds report `minimum_flash_bytes` (1a81221). A disk image only fails when an image is larger than its partition.
   - Done when: a current real HeliOS and PV build pass and an oversized one fails, and the numbers go to the PCB session.
   - Blocked by: nothing. The board examples supply the configs; the check has to run on real HeliOS and PV builds before it can fail a build.
-- **G10: CPU profiles on real builds**
-  - What: build HeliOS's backend with the CM5 profile, and report each board's flags and any crate that breaks to HeliOS.
-  - Why: the profiles work in tests (1966f26) and the four board examples set them, but HeliOS's `dev` has no `[cpu]` table, so its aarch64 builds still target generic armv8-a.
-  - Done when: HeliOS's backend builds with `cortex-a76`, and the report is sent.
-  - Blocked by: HeliOS adding `[cpu] profile = "cortex-a76"` to its CM5 build, or trying it with one here.
+- **G10: per-board CPU flags report**
+  - What: report each board's flags, and any crate that breaks with them, to HeliOS.
+  - Why: the request (2026-10-31, through HeliOS) asked for it, so HeliOS knows what each board's builds use. The rest is done: see "Done".
+  - Done when: the report is sent, covering the four board examples' profiles and the CM5.
+  - Blocked by: nothing.
 - **G7: board examples left**
   - What: examples for the RK3566 and RK3562, a K230 SPI-NAND layout (the Zero only has a TF slot), and running the board examples in the gate.
   - Why: each chip needs a full config to build from. The gate does not read `examples/boards/` or `examples/sim-x86_64` today, so a config change can break them unnoticed.
@@ -113,7 +113,7 @@ The user pinned these on 2026-10-30.
   - Done when: a push and pull round trip runs against GHCR.
   - Blocked by: the user, who said yes to GHCR through HeliOS on 2026-11-01. Still needed: the account or organization that owns the packages, a token with `write:packages` for the checkpoint's `token`, and the user's yes in Gaia's chat to the first real push.
 - **`gaia run` image job on the self-hosted runner**
-  - What: the image job of HeliOS's `.github/workflows/gaia-builds.yml` (814e4893). The workflow's validate jobs already pass on GitHub's hosted runners, and Gaia's own `Gaia action` workflow builds `imported-rootfs-minimal` on them (last green on 17c20df), so only HeliOS's image job needs the runner.
+  - What: the image job of HeliOS's `.github/workflows/gaia-builds.yml` (814e4893). The workflow's validate jobs already pass on GitHub's hosted runners on pushes to HeliOS's `dev`; pushes to `architecture-overhaul`, where HeliOS integrates, do not trigger them, and Gaia's own `Gaia action` workflow builds `imported-rootfs-minimal` on them (last green on 17c20df), so only HeliOS's image job needs the runner.
   - Why: real image builds per change, not just unit tests.
   - Done when: a `workflow_dispatch` run of that workflow goes green with an image. None has run yet.
   - Blocked by: the user, on `Prometheus-Dynamics/HeliOS`, which has no runners or secrets today, following HeliOS's `docs/ci/gaia-builds.md`: register a runner labelled `gaia` (admin rights, about 100 GB free), add the `EIDOS_READ_TOKEN` secret with `gh secret set EIDOS_READ_TOKEN --repo Prometheus-Dynamics/HeliOS`, and set the fork-PR policy.
@@ -138,7 +138,7 @@ Cut and staying cut: emulated QEMU boot, TUI cleanup, deb packaging niceties.
 - G5, `gaia layer delta --max-window`: 69aecf2.
 - G9, armv7 aliases and armhf closure: 3e51c14.
 - G8, the UBI writer: 1a81221. The kernel attaching the Luckfox image on nandsim: 44fc94b. Atlas read the real `ubi.img`, so it has the volume layout.
-- G10, CPU profile flags in cargo and Buildroot: 1966f26, with `cortex-a72` in a2aeb06.
+- G10, CPU profile flags in cargo and Buildroot: 1966f26, with `cortex-a72` in a2aeb06. HeliOS's Raze build uses `cortex-a76` on `architecture-overhaul` (HeliOS 48492ee5, whose commit message reports the full artifact build passing).
 - G7, the examples that exist: ROCK 5C, ROCK 4D, Luckfox Pico Pro and K230D Zero in 006284a and 3d1f249; the cast receivers in a2aeb06 and db7b92a.
 - `${source.<id>.commit_count}`: b47a9e5.
 - Luckfox NAND slots, written and untested on board: 942746b, 720c211, 17c20df.
