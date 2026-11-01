@@ -6,12 +6,19 @@ target = "cm4-cast-receiver"
 profile = "release"
 
 [workspace]
-root_dir = "examples/boards/cm4-cast-receiver"
-build_dir = "../../../.gaia/examples/cm4-cast-receiver/build"
+root_dir = "examples/boards/cast-receiver/cm4"
+build_dir = "../../../../.gaia/examples/cm4-cast-receiver/build"
+
+# This board's files, and the external tree both boards share (packages,
+# patches, rootfs overlay, kernel fragments, post-build.sh, cast.txt).
+[[workspace.named_paths]]
+alias = "board"
+path = "."
+kind = "host"
 
 [[workspace.named_paths]]
-alias = "assets"
-path = "assets"
+alias = "external"
+path = "../external"
 kind = "host"
 
 # The CM4's four Cortex-A72s (BCM2711, without the crypto extension).
@@ -26,11 +33,11 @@ timeout_seconds = 14400
 allow_remote_resolution = true
 
 [cache]
-downloads = "../../../.gaia/cache/buildroot/dl"
+downloads = "../../../../.gaia/cache/buildroot/dl"
 
 [cache.ccache]
 enabled = true
-dir = "../../../.gaia/cache/buildroot/ccache"
+dir = "../../../../.gaia/cache/buildroot/ccache"
 
 [[sources]]
 id = "buildroot"
@@ -43,15 +50,14 @@ pin = "locked"
 [image]
 kind = "buildroot"
 source = "buildroot"
-defconfig_path = "${assets}/cm4cast_defconfig"
+# The board (CPU, kernel, firmware), then the receiver. The defconfig and
+# fragment name the overlay, kernel fragments and post-build script as
+# $(BR2_EXTERNAL_CAST_PATH)/..., so Buildroot resolves them.
+defconfig_path = "${board}/defconfig"
+config_fragments = ["${external}/cast.fragment"]
 # UxPlay (not in Buildroot) and castidle, the idle screen.
-external_tree = "${assets}/external"
+external_tree = "${external}"
 external_tree_mode = "required"
-config_overrides = [
-  ["BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES", "${assets}/linux.fragment"],
-  ["BR2_ROOTFS_OVERLAY", "${assets}/rootfs-overlay"],
-  ["BR2_ROOTFS_POST_BUILD_SCRIPT", "${assets}/post-build.sh"],
-]
 
 [[image.expected_images]]
 name = "rootfs.erofs"
@@ -72,7 +78,7 @@ summary = true
 manifest = true
 
 [outputs]
-dir = "../../../.gaia/examples/cm4-cast-receiver/out"
+dir = "../../../../.gaia/examples/cm4-cast-receiver/out"
 images_dir = "${outputs.dir}/images"
 archive_name = "${build.name}-${build.version}.img.xz"
 report = true
@@ -90,17 +96,17 @@ path = "${assembly.work}/boot"
 
 [[image.assembly.files]]
 tree = "boot"
-src = "${assets}/boot/config.txt"
+src = "${board}/config.txt"
 dest = "config.txt"
 
 [[image.assembly.files]]
 tree = "boot"
-src = "${assets}/boot/cmdline.txt"
+src = "${board}/cmdline.txt"
 dest = "cmdline.txt"
 
 [[image.assembly.files]]
 tree = "boot"
-src = "${assets}/boot/cast.txt"
+src = "${external}/cast.txt"
 dest = "cast.txt"
 
 [[image.assembly.files]]

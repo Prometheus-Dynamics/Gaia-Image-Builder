@@ -12,12 +12,14 @@ but none has booted on its board yet.
 | Luckfox Pico Pro | RV1106G2 (A7) | 128 MB SPI-NAND, UBI | Luckfox SDK 5.10 kernel and U-Boot | [luckfox-pico-pro](luckfox-pico-pro/build.toml) |
 | BPI-CanMV-K230D-Zero | K230D (C908, RVV 1.0) | SD (TF only), GPT | ruyisdk 6.6 kernel, SDK U-Boot 2022.10, OpenSBI 1.4 | [k230d-zero](k230d-zero/build.toml) |
 
-An appliance image, single-slot with a read-only EROFS root, also
-written, untested on board:
+Appliance images, single-slot with a read-only EROFS root, also written,
+untested on board ([cast-receiver](cast-receiver/README.md): AirPlay + DLNA
+receiver on HDMI, Raspberry Pi 6.12 kernel, one external tree for both):
 
-| Board | SoC | Boot medium | What it is | Config |
+| Board | SoC | Boot medium | Video decode | Config |
 | --- | --- | --- | --- | --- |
-| Raspberry Pi CM4 | BCM2711 (A72) | eMMC / SD, MBR | AirPlay + DLNA cast receiver on HDMI, Raspberry Pi 6.12 kernel | [cm4-cast-receiver](cm4-cast-receiver/README.md) |
+| Raspberry Pi CM4 | BCM2711 (A72) | eMMC / SD, MBR | VideoCore H.264 (V4L2) | [cast-receiver/cm4](cast-receiver/cm4/build.toml) |
+| Raspberry Pi 5 / 500 | BCM2712 (A76) | SD, MBR | FFmpeg H.264 on the A76s | [cast-receiver/pi5](cast-receiver/pi5/build.toml) |
 
 Each sets its `[cpu]` profile (see `docs/configuration-sources.md#cpu-profiles`),
 so Rust artifacts and the Buildroot toolchain target the board's cores.

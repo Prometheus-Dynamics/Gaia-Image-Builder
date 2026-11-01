@@ -19,5 +19,6 @@ AIRPLAY_PASSWORD=
 # Extra UxPlay options, appended to the built-in ones (see `uxplay -h`).
 UXPLAY_EXTRA=
 
-# 1: a root shell on the serial console (GPIO14/15, 115200 8N1).
+# 1: a root shell on the serial console (115200 8N1; CM4: GPIO14/15,
+# Pi 5: the 3-pin debug UART).
 DEBUG_SHELL=0

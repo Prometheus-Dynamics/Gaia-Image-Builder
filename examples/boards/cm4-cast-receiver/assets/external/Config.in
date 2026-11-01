@@ -1,2 +1,0 @@
-source "$BR2_EXTERNAL_CM4_CAST_PATH/package/uxplay/Config.in"
-source "$BR2_EXTERNAL_CM4_CAST_PATH/package/castidle/Config.in"

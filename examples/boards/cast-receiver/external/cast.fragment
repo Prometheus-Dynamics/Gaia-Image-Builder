@@ -1,14 +1,5 @@
-# Raspberry Pi CM4 cast receiver. The [cpu] profile adds BR2_cortex_a72.
-BR2_aarch64=y
-BR2_TOOLCHAIN_EXTERNAL=y
-BR2_TOOLCHAIN_EXTERNAL_BOOTLIN=y
-BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_AARCH64_GLIBC_STABLE=y
-# Buildroot's Raspberry Pi kernel hash, and the external tree's package
-# patches (gmrender-resurrect).
-BR2_GLOBAL_PATCH_DIR="board/raspberrypi/patches $(BR2_EXTERNAL_CM4_CAST_PATH)/patches"
-BR2_DOWNLOAD_FORCE_CHECK_HASHES=y
-BR2_OPTIMIZE_2=y
-BR2_SHARED_LIBS=y
+# Cast receiver: everything but the board (CPU, kernel, firmware, FFmpeg
+# decoders), as a Buildroot config fragment applied after a board defconfig.
 
 # System: BusyBox init, mdev (module coldplug), read-only root, no getty
 # (cast.txt's DEBUG_SHELL=1 starts one on the serial console).
@@ -18,28 +9,8 @@ BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_MDEV=y
 # BR2_TARGET_GENERIC_REMOUNT_ROOTFS_RW is not set
 # BR2_TARGET_GENERIC_GETTY is not set
 BR2_SYSTEM_DHCP=""
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_CAST_PATH)/rootfs-overlay"
 # BR2_TARGET_ENABLE_ROOT_LOGIN is not set
-
-# Kernel: the Raspberry Pi 6.12 tree Buildroot's raspberrypi4_64_defconfig
-# pins (its hash is in board/raspberrypi/patches/linux).
-BR2_LINUX_KERNEL=y
-BR2_LINUX_KERNEL_CUSTOM_TARBALL=y
-BR2_LINUX_KERNEL_CUSTOM_TARBALL_LOCATION="$(call github,raspberrypi,linux,21b410140c47ffab5668399f6f143c7d7b935c8b)/linux-21b410140c47ffab5668399f6f143c7d7b935c8b.tar.gz"
-BR2_LINUX_KERNEL_DEFCONFIG="bcm2711"
-BR2_LINUX_KERNEL_DTS_SUPPORT=y
-BR2_LINUX_KERNEL_INTREE_DTS_NAME="broadcom/bcm2711-rpi-cm4 broadcom/bcm2711-rpi-4-b"
-BR2_LINUX_KERNEL_NEEDS_HOST_OPENSSL=y
-BR2_PACKAGE_KMOD=y
-BR2_PACKAGE_KMOD_TOOLS=y
-BR2_PACKAGE_HOST_KMOD_XZ=y
-
-# Firmware: the Pi 4 GPU firmware (start4.elf; the cut-down one has no video
-# decoder) and the overlays, copied into the boot tree by the assembly.
-BR2_PACKAGE_RPI_FIRMWARE=y
-BR2_PACKAGE_RPI_FIRMWARE_VARIANT_PI4=y
-BR2_PACKAGE_RPI_FIRMWARE_INSTALL_DTB_OVERLAYS=y
-BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI=y
-BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI_WIFI=y
 
 # Root filesystem: EROFS, lz4hc (fast to read at boot).
 BR2_TARGET_ROOTFS_EROFS=y
@@ -111,17 +82,16 @@ BR2_PACKAGE_GST1_PLUGINS_BAD_PLUGIN_CURL=y
 # BR2_PACKAGE_GST1_PLUGINS_BAD_PLUGIN_WPE is not set
 
 # Audio decoders (AirPlay AAC-ELD and ALAC; DLNA's common formats) through
-# gst-libav, with an FFmpeg cut down to them. Video decoding is the V4L2
-# hardware decoder only.
+# gst-libav, with an FFmpeg cut down to them. Each board's defconfig sets
+# BR2_PACKAGE_FFMPEG_DECODERS and _PARSERS (the CM4 decodes video in hardware; the Pi 5
+# decodes H.264 in software).
 BR2_PACKAGE_GST1_LIBAV=y
 BR2_PACKAGE_FFMPEG=y
 # BR2_PACKAGE_FFMPEG_FFMPEG is not set
 # BR2_PACKAGE_FFMPEG_FFPROBE is not set
 BR2_PACKAGE_FFMPEG_ENCODERS=""
-BR2_PACKAGE_FFMPEG_DECODERS="aac aac_latm alac mp3 mp3float flac vorbis opus ac3 eac3 pcm_s16le pcm_s24le"
 BR2_PACKAGE_FFMPEG_MUXERS=""
 BR2_PACKAGE_FFMPEG_DEMUXERS=""
-BR2_PACKAGE_FFMPEG_PARSERS="aac aac_latm mpegaudio flac vorbis opus ac3"
 BR2_PACKAGE_FFMPEG_BSFS=""
 BR2_PACKAGE_FFMPEG_PROTOCOLS=""
 BR2_PACKAGE_FFMPEG_FILTERS=""

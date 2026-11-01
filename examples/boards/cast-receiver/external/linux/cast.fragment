@@ -1,4 +1,5 @@
-# Cast receiver changes on top of bcm2711_defconfig.
+# Cast receiver changes on top of bcm2711_defconfig (CM4) or
+# bcm2712_defconfig (Pi 5); each board adds its own fragment.
 CONFIG_LOCALVERSION="-cast"
 
 # The read-only root (EROFS, lz4) is mounted by the kernel, without an initramfs.
@@ -18,9 +19,8 @@ CONFIG_FB_DEVICE=y
 # The 3D GPU is unused (no Mesa): kmssink scans decoded frames out directly.
 # CONFIG_DRM_V3D is not set
 
-# Video: the VideoCore H.264 decoder (bcm2835-codec, V4L2 stateful m2m) and
-# the HEVC block (stateless).
-CONFIG_VIDEO_CODEC_BCM2835=m
+# Video: the HEVC block (V4L2 stateless) on both boards; the CM4's
+# H.264 decoder is in cm4.fragment.
 CONFIG_VIDEO_RPI_HEVC_DEC=m
 
 # Not needed by an HDMI cast receiver.
