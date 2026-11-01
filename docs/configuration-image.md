@@ -138,6 +138,15 @@ before it is fetched, so its token is reported as unresolved: pin it with
 `${source.<id>.commit_short}` is the first 8 characters of that commit; a
 `-dirty` suffix is kept, so a short token still shows an uncommitted tree.
 
+`${source.<id>.commit_count}` is how many commits lead to that commit, which
+only grows along a branch: `2026.2.0-dev.${source.atlas.commit_count}+${source.atlas.commit_short}`
+orders dev builds of a package from another repository. A git source counts in
+its mirror under `.gaia/cache/git`, which is fetched first if it lacks the
+commit, also at `gaia validate` (never with `offline = true`, where a mirror
+without the commit leaves the token unresolved). A path or import source counts in its directory, or in
+the mirror of its `origin` when that checkout is shallow. Nothing is counted
+for a source no string names this way.
+
 Project identity: `${project.commit}` and `${project.describe}` describe the
 git repository holding the build file. `${project.commit}` is the full `HEAD`
 sha, suffixed `-dirty` when tracked files have uncommitted changes, and

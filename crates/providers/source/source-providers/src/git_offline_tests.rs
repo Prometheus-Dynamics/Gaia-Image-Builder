@@ -115,3 +115,25 @@ fn offline_floating_branch_resolves_to_the_mirror_as_it_was_fetched() {
     let checkout = materialized_dir(&spec, &source);
     assert_eq!(git(&checkout, &["rev-parse", "HEAD"]), first);
 }
+
+#[test]
+fn a_commit_count_of_a_remote_comes_from_its_mirror() {
+    let scratch = TempDir::new("gaia-offline-git-count");
+    let (upstream, first) = upstream_repo(&scratch);
+    fs::write(upstream.join("a.txt"), "two").expect("file");
+    let second = commit_all(&upstream, "two");
+    seed_mirror(&scratch, &upstream);
+    let count = |commit: &str| {
+        crate::git_commit_count(
+            scratch.path(),
+            UNREACHABLE_REMOTE,
+            commit,
+            true,
+            std::time::Duration::from_secs(30),
+        )
+    };
+    assert_eq!(count(&first), Ok(1));
+    assert_eq!(count(&second), Ok(2));
+    let missing = "0123456789abcdef0123456789abcdef01234567";
+    assert!(count(missing).is_err(), "a commit the mirror lacks");
+}

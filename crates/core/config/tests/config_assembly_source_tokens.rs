@@ -1,4 +1,4 @@
-//! `${source.<id>.commit}`, `.commit_short` and `.path` in `[image.assembly]`:
+//! `${source.<id>.commit}`, `.commit_short`, `.commit_count` and `.path` in `[image.assembly]`:
 //! tree ids, paths, file entries, JSON values and archive outputs all
 //! resolve, and an unknown source id stays unresolved.
 
@@ -154,4 +154,124 @@ fn resolving_twice_gives_the_same_assembly() {
     let first = resolve_config(path.to_str().expect("utf-8 path"));
     let second = resolve_config(path.to_str().expect("utf-8 path"));
     assert_eq!(first.image.assembly, second.image.assembly);
+}
+
+/// A repository with `commits` commits; its HEAD commit id.
+fn git_repo(dir: &std::path::Path, commits: usize) -> String {
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
+            .args(args)
+            .output()
+            .expect("git");
+        assert!(output.status.success(), "git {args:?}: {output:?}");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+    std::fs::create_dir_all(dir).unwrap();
+    git(&["init", "--quiet"]);
+    for index in 0..commits {
+        git(&[
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            &index.to_string(),
+        ]);
+    }
+    git(&["rev-parse", "HEAD"])
+}
+
+fn count_config(source: &str) -> String {
+    format!(
+        r#"
+build_name = "counted"
+version = "1.0.0"
+labels = [["version", "dev.${{source.app.commit_count}}+${{source.app.commit_short}}"]]
+
+[workspace]
+root_dir = "."
+build_dir = "build"
+out_dir = "out"
+
+[[sources]]
+id = "app"
+{source}
+
+[image]
+kind = "buildroot"
+defconfig = "dummy_defconfig"
+"#
+    )
+}
+
+fn version_label(config: &str) -> (Vec<String>, String) {
+    let path = write_temp_config(config);
+    let spec = resolve_config(path.to_str().expect("utf-8 path"));
+    let unresolved = spec
+        .policy
+        .interpolation
+        .unresolved
+        .iter()
+        .map(|entry| entry.token.clone())
+        .collect();
+    let label = spec
+        .metadata
+        .labels
+        .iter()
+        .find(|(key, _)| key == "version")
+        .map(|(_, value)| value.clone())
+        .unwrap_or_default();
+    (unresolved, label)
+}
+
+#[test]
+fn commit_count_counts_a_git_source_at_its_pinned_commit() {
+    let repo = gaia_testkit::TempDir::new("commit-count-git");
+    let commit = git_repo(repo.path(), 3);
+    let (unresolved, label) = version_label(&count_config(&format!(
+        "kind = \"git\"\nrepo = \"file://{}\"\nrev = \"{commit}\"",
+        repo.path().display()
+    )));
+    assert!(unresolved.is_empty(), "{unresolved:?}");
+    assert_eq!(label, format!("dev.3+{}", &commit[..8]));
+}
+
+#[test]
+fn commit_count_counts_a_path_source_and_a_shallow_one_in_its_origin() {
+    let upstream = gaia_testkit::TempDir::new("commit-count-upstream");
+    let commit = git_repo(upstream.path(), 4);
+    let (_, label) = version_label(&count_config(&format!(
+        "kind = \"path\"\npath = \"{}\"",
+        upstream.path().display()
+    )));
+    assert_eq!(label, format!("dev.4+{}", &commit[..8]));
+
+    let parent = gaia_testkit::TempDir::new("commit-count-shallow");
+    let shallow = parent.path().join("shallow");
+    let cloned = std::process::Command::new("git")
+        .args(["clone", "--quiet", "--depth", "1"])
+        .arg(format!("file://{}", upstream.path().display()))
+        .arg(&shallow)
+        .status()
+        .unwrap();
+    assert!(cloned.success());
+    let (unresolved, label) = version_label(&count_config(&format!(
+        "kind = \"path\"\npath = \"{}\"",
+        shallow.display()
+    )));
+    assert!(unresolved.is_empty(), "{unresolved:?}");
+    assert_eq!(label, format!("dev.4+{}", &commit[..8]));
+}
+
+#[test]
+fn commit_count_of_a_commit_nothing_holds_stays_unresolved() {
+    let repo = gaia_testkit::TempDir::new("commit-count-missing");
+    git_repo(repo.path(), 1);
+    let (_, label) = version_label(&count_config(&format!(
+        "kind = \"git\"\nrepo = \"file://{}\"\nrev = \"{COMMIT}\"",
+        repo.path().display()
+    )));
+    assert!(label.contains("${source.app.commit_count}"), "{label}");
 }

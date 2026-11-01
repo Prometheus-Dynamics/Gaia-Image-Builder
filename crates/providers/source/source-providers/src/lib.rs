@@ -173,5 +173,5 @@ pub use git_helpers::{
     GIT_MIRROR_CACHE_DIR, remote_git_mirror_dir, remote_git_mirror_dir_name,
     resolve_git_source_commit,
 };
-pub use git_import::{IMPORT_SOURCE_CACHE_DIR, ensure_git_revision_checkout};
+pub use git_import::{IMPORT_SOURCE_CACHE_DIR, ensure_git_revision_checkout, git_commit_count};
 pub(crate) use state::*;

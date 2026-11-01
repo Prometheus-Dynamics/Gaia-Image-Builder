@@ -16,6 +16,15 @@
 //! `${source.<id>.commit_short}`: the first 8 characters of that commit (a
 //! `-dirty` suffix, if any, is kept).
 //!
+//! `${source.<id>.commit_count}`: how many commits lead to that commit, which
+//! only grows along a branch, so a version can order dev builds. Counted only
+//! for a source some string names, since counting can read a long history and
+//! fill a mirror. A git source counts in its mirror under `.gaia/cache/git`,
+//! fetched if it lacks the commit (unless offline); a path or import source
+//! counts in its directory, or in the mirror of its `origin` when the checkout
+//! is shallow. With no count to be had the token stays unresolved and
+//! validation reports it.
+//!
 //! `${source.<id>.path}`: the directory holding the source's files, so a
 //! Buildroot setting can name a file inside a source (for example
 //! `BR2_ROOTFS_USERS_TABLES`). See [`gaia_spec::source_checkout_dir`]: an
@@ -40,8 +49,9 @@
 //! source's content changes even though the substituted path stays the same.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use crate::assembly_source_tokens::visit_assembly_strings;
 use gaia_spec::{
@@ -52,7 +62,11 @@ use gaia_spec::{
 const PREFIX: &str = "source.";
 const COMMIT_SUFFIX: &str = ".commit";
 const COMMIT_SHORT_SUFFIX: &str = ".commit_short";
+const COMMIT_COUNT_SUFFIX: &str = ".commit_count";
 const PATH_SUFFIX: &str = ".path";
+
+/// A first clone of a mirror for a count can take this long.
+const COUNT_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// The first 8 characters of a commit, keeping a `-dirty` suffix.
 pub(crate) fn short_commit(commit: &str) -> String {
@@ -188,6 +202,7 @@ fn source_token_id(token: &str) -> Option<&str> {
     let rest = token.strip_prefix(PREFIX)?;
     rest.strip_suffix(COMMIT_SUFFIX)
         .or_else(|| rest.strip_suffix(COMMIT_SHORT_SUFFIX))
+        .or_else(|| rest.strip_suffix(COMMIT_COUNT_SUFFIX))
         .or_else(|| rest.strip_suffix(PATH_SUFFIX))
 }
 
@@ -251,7 +266,13 @@ fn is_source_token(token: &str) -> bool {
 /// Every resolvable token, keyed without `${}` (`source.<id>.commit`).
 fn source_token_values(spec: &ResolvedBuildSpec) -> BTreeMap<String, String> {
     let mut values = BTreeMap::new();
+    let counted = sources_with_count_tokens(spec);
     for (id, commit) in source_commits(spec) {
+        if counted.contains(&id)
+            && let Some(count) = source_commit_count(spec, &id, &commit)
+        {
+            values.insert(format!("{PREFIX}{id}{COMMIT_COUNT_SUFFIX}"), count);
+        }
         values.insert(
             format!("{PREFIX}{id}{COMMIT_SHORT_SUFFIX}"),
             short_commit(&commit),
@@ -307,25 +328,71 @@ fn source_commits(spec: &ResolvedBuildSpec) -> BTreeMap<String, String> {
     commits
 }
 
+/// The ids that a `${source.<id>.commit_count}` anywhere in the spec names.
+/// The serialized spec holds every string the substitution visits.
+fn sources_with_count_tokens(spec: &ResolvedBuildSpec) -> BTreeSet<String> {
+    let text = serde_json::to_string(spec).unwrap_or_default();
+    text.split("${")
+        .skip(1)
+        .filter_map(|rest| rest.split_once('}'))
+        .filter_map(|(token, _)| {
+            token
+                .strip_prefix(PREFIX)?
+                .strip_suffix(COMMIT_COUNT_SUFFIX)
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+/// The commit count of source `id` at `commit`; see the module docs.
+fn source_commit_count(spec: &ResolvedBuildSpec, id: &str, commit: &str) -> Option<String> {
+    let commit = commit.strip_suffix("-dirty").unwrap_or(commit);
+    let root = gaia_spec::resolve_workspace_path(&spec.workspace, ".").ok()?;
+    let offline = spec.policy.execution.offline;
+    let in_mirror = |repo: &str| {
+        gaia_source_providers::git_commit_count(&root, repo, commit, offline, COUNT_TIMEOUT)
+            .inspect_err(|error| tracing::warn!(source = id, %error, "no commit count"))
+            .ok()
+            .map(|count| count.to_string())
+    };
+    let source = spec.sources.iter().find(|source| source.id.as_str() == id);
+    let dir = match source.map(|source| &source.definition) {
+        Some(SourceDefinition::Git(git)) => return in_mirror(&git.repo),
+        Some(SourceDefinition::Path(path)) => {
+            gaia_spec::resolve_workspace_path(&spec.workspace, &path.path).ok()?
+        }
+        _ => {
+            let import = spec.selection.import_sources.iter();
+            PathBuf::from(&import.into_iter().find(|import| import.id == id)?.root)
+        }
+    };
+    let git = |args: &[&str]| git_output(&dir, args);
+    if git(&["rev-parse", "--is-shallow-repository"]).as_deref() == Some("true") {
+        return in_mirror(&git(&["config", "remote.origin.url"])?);
+    }
+    git(&["rev-list", "--count", commit])
+}
+
 fn is_full_sha(rev: &str) -> bool {
     matches!(rev.len(), 40 | 64) && rev.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
+fn git_output(dir: &Path, args: &[&str]) -> Option<String> {
+    Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 fn git_head(dir: &Path) -> Option<String> {
-    let git = |args: &[&str]| {
-        Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args(args)
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-            .ok()
-            .filter(|output| output.status.success())
-            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-    };
-    let head = git(&["rev-parse", "HEAD"]).filter(|head| is_full_sha(head))?;
-    let dirty = git(&["status", "--porcelain", "--untracked-files=no"])
+    let head = git_output(dir, &["rev-parse", "HEAD"]).filter(|head| is_full_sha(head))?;
+    let dirty = git_output(dir, &["status", "--porcelain", "--untracked-files=no"])
         .is_some_and(|status| !status.is_empty());
     Some(if dirty { format!("{head}-dirty") } else { head })
 }

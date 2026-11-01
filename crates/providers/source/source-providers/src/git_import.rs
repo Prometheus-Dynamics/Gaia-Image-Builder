@@ -64,6 +64,48 @@ pub fn ensure_git_revision_checkout(
         .ok_or_else(|| format!("checkout '{}' has no readable HEAD", dest.display()))
 }
 
+/// How many commits lead to `commit` of `repo` (`git rev-list --count`),
+/// for a version that orders builds. A remote repository is counted in its
+/// mirror, which also holds the history a shallow checkout lacks; unless
+/// `offline`, a mirror missing the commit is made or fetched first.
+pub fn git_commit_count(
+    workspace_root: &Path,
+    repo: &str,
+    commit: &str,
+    offline: bool,
+    timeout: Duration,
+) -> Result<u64, String> {
+    let repo_dir = if is_local_git_repo(repo) {
+        PathBuf::from(repo.strip_prefix("file://").unwrap_or(repo))
+    } else if offline {
+        remote_git_mirror_dir(&workspace_root.join(GIT_MIRROR_CACHE_DIR), repo)
+    } else {
+        ensure_import_mirror(workspace_root, repo, commit, timeout)?
+    };
+    let label = format!("git rev-list --count {commit} in '{repo}'");
+    let label = redact_url_userinfo(&label);
+    let mut command = git_command();
+    command
+        .arg("-C")
+        .arg(&repo_dir)
+        .arg("rev-list")
+        .arg("--count")
+        .arg(commit);
+    let output = gaia_process::run_command_with_timeout(&mut command, timeout, &label, None, None)
+        .map_err(|error| redact_url_userinfo(&error.message))?
+        .output;
+    if !output.status.success() {
+        return Err(format!(
+            "{label} failed: {}",
+            redact_url_userinfo(String::from_utf8_lossy(&output.stderr).trim())
+        ));
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse()
+        .map_err(|error| format!("{label} printed no count: {error}"))
+}
+
 fn clone_and_checkout(
     clone_from: &str,
     rev: &str,
