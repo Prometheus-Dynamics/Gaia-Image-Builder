@@ -97,7 +97,7 @@ pub fn post_script_components(
         };
         let expanded = expand_external_paths(value, trees);
         let script = expanded.split_whitespace().next().unwrap_or_default();
-        let resolved = resolve_script(script, trees, buildroot_dir, &workspace.root_dir);
+        let resolved = resolve_script(script, trees, buildroot_dir, workspace);
         let (display, content) = match &resolved {
             Some(path) => (
                 display_script(path, trees, &workspace.root_dir),
@@ -124,19 +124,24 @@ pub fn expand_external_paths(value: &str, trees: &[ExternalTree]) -> String {
     })
 }
 
+/// The script a setting names: an absolute path, an `@alias` path (a
+/// `${assets}/post-image.sh` override), or a path relative to the
+/// Buildroot tree, an external tree or the workspace root.
 fn resolve_script(
     script: &str,
     trees: &[ExternalTree],
     buildroot_dir: Option<&Path>,
-    root: &str,
+    workspace: &WorkspaceSpec,
 ) -> Option<PathBuf> {
     if script.is_empty() || script.contains('$') {
         return None;
     }
     let path = Path::new(script);
-    if path.is_absolute() {
-        return path.is_file().then(|| path.to_path_buf());
+    if path.is_absolute() || script.starts_with('@') {
+        let path = resolve_tree_path(workspace, script);
+        return path.is_file().then_some(path);
     }
+    let root = workspace.root_dir.as_str();
     buildroot_dir
         .into_iter()
         .map(Path::to_path_buf)
@@ -280,5 +285,30 @@ mod tests {
             components[0].0,
             "post-fakeroot script MYBOARD:board/post-fakeroot.sh"
         );
+    }
+
+    #[test]
+    fn an_alias_script_path_is_resolved_and_its_change_counts() {
+        let scratch = TempDir::new("gaia-buildroot-scripts-alias");
+        let root = scratch.path().to_path_buf();
+        let script = root.join("assets/post-image.sh");
+        write(&script, "#!/bin/sh\necho one\n");
+        let mut ws = workspace(&root);
+        ws.named_paths.push(gaia_spec::WorkspaceNamedPathSpec {
+            alias: "assets".into(),
+            path: "assets".into(),
+            kind: gaia_spec::WorkspacePathKindSpec::Host,
+        });
+        let buildroot = BuildrootImageSpec {
+            config_overrides: vec![(
+                "BR2_ROOTFS_POST_IMAGE_SCRIPT".into(),
+                "@assets/post-image.sh".into(),
+            )],
+            ..BuildrootImageSpec::default()
+        };
+        let before = post_script_components(&ws, &buildroot, &[], None);
+        assert_eq!(before[0].0, "post-image script assets/post-image.sh");
+        write(&script, "#!/bin/sh\necho two\n");
+        assert_ne!(before, post_script_components(&ws, &buildroot, &[], None));
     }
 }
