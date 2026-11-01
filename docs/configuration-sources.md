@@ -454,6 +454,7 @@ profile = "cortex-a76"
 | Profile | Boards | Rust | C (`cc` crate) | Buildroot |
 | --- | --- | --- | --- | --- |
 | `cortex-a76` | CM5 (BCM2712) | `target-cpu=cortex-a76` | `-mcpu=cortex-a76` | `BR2_cortex_a76` |
+| `cortex-a72` | CM4, Pi 4 (BCM2711, no crypto extension) | `target-cpu=cortex-a72`, `-aes,-sha2` | `-mcpu=cortex-a72+nocrypto` | `BR2_cortex_a72` |
 | `cortex-a76.cortex-a55` | RK3588S, RK3582 | `target-cpu=cortex-a55` | `-mcpu=cortex-a76.cortex-a55` | `BR2_cortex_a76_a55` |
 | `cortex-a72.cortex-a53` | RK3576 | `target-cpu=cortex-a53` | `-mcpu=cortex-a72.cortex-a53` | `BR2_cortex_a72_a53` |
 | `cortex-a55` | RK3566 | `target-cpu=cortex-a55` | `-mcpu=cortex-a55` | `BR2_cortex_a55` |

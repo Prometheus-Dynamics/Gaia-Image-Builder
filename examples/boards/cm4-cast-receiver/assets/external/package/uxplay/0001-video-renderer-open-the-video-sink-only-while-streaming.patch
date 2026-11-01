@@ -1,0 +1,50 @@
+From: Gaia cm4-cast-receiver example
+Subject: [PATCH] video renderer: open the video sink only while streaming
+
+UxPlay builds its mirror-mode video pipelines at start-up and puts them
+in PAUSED, so kmssink opens the DRM device (and becomes its master) as
+soon as UxPlay starts, and keeps it while no client is connected. Then
+nothing else can use the display: neither an idle screen nor another
+receiver (a DLNA renderer).
+
+Leave the mirror pipelines in NULL; video_renderer_choose_codec() sets
+the one the stream needs to PLAYING when the first frame arrives, and
+video_renderer_stop() returns it to NULL when the stream ends, so the
+sink holds the display only while streaming. HLS pipelines are
+unchanged.
+
+---
+--- a/renderers/video_renderer.c	2026-09-04 09:10:54.000000000 -0700
++++ b/renderers/video_renderer.c	2026-10-31 22:56:05.670444405 -0700
+@@ -465,6 +465,13 @@
+         }
+ #endif
+         renderer_type[i]->bus = gst_element_get_bus(renderer_type[i]->pipeline);	
++        if (!hls_video) {
++            /* Leave mirror pipelines in NULL until video_renderer_choose_codec():
++             * a sink such as kmssink opens (and, for KMS, becomes master of) the
++             * display in NULL->READY, and would hold it while no client streams. */
++            logger_log(logger, LOGGER_DEBUG, "Built GStreamer video renderer %d (left in NULL)", i + 1);
++            continue;
++        }
+         gst_element_set_state (renderer_type[i]->pipeline, GST_STATE_READY);
+         GstState state;
+         GstStateChangeReturn ret = gst_element_get_state (renderer_type[i]->pipeline, &state, NULL, 100 * GST_MSECOND);
+@@ -518,13 +525,10 @@
+ 	logger_log(logger, LOGGER_DEBUG, "video renderer_start: state %s", state_name);
+         return;
+     } 
+-    /* when not hls, start both h264 and h265 pipelines; will shut down the "wrong" one when we know the codec */
+-    for (int i = 0; i < n_renderers; i++) {
+-        gst_element_set_state (renderer_type[i]->pipeline, GST_STATE_PAUSED);
+-        gst_element_get_state(renderer_type[i]->pipeline, &state, NULL, 1000 * GST_MSECOND);
+-        state_name = gst_element_state_get_name(state);
+-        logger_log(logger, LOGGER_DEBUG, "video renderer_start: renderer %d %p state %s", i, renderer_type[i], state_name);
+-    }
++    /* when not hls, the pipelines stay in NULL: video_renderer_choose_codec() sets the one
++     * the stream needs to PLAYING, so the video sink opens the display only while streaming */
++    (void) state;
++    (void) state_name;
+     renderer = NULL;
+     first_packet = true;
+ #ifdef X_DISPLAY_FIX

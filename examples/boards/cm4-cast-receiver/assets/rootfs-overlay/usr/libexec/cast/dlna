@@ -1,0 +1,12 @@
+#!/bin/sh
+# DLNA/UPnP media renderer (respawned by init). playbin picks the V4L2
+# hardware decoder for H.264 and plays to kmssink and HDMI audio.
+. /run/cast/env
+if [ "$DLNA" != 1 ]; then
+	exec sleep 2147483647
+fi
+# A stable UPnP device id per board, from its serial number.
+uuid="4cad0000-0000-4000-8000-0000$SERIAL"
+gmediarender -f "$NAME" -u "$uuid" --gstout-videosink kmssink \
+	--gstout-audiosink alsasink --gstout-audiodevice default 2>&1 | logger -t gmediarender
+sleep 2

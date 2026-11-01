@@ -49,6 +49,17 @@ pub const CPU_PROFILES: &[CpuProfile] = &[
         buildroot: &[("BR2_cortex_a76_a55", "y")],
     },
     CpuProfile {
+        name: "cortex-a72",
+        boards: "CM4, Pi 4 (BCM2711)",
+        arch: TargetArch::AArch64,
+        rust_target_cpu: Some("cortex-a72"),
+        // The BCM2711's A72s are built without the crypto extension: no
+        // AES or SHA2 instructions, whatever the core model allows.
+        rust_target_features: &["-aes", "-sha2"],
+        c_flags: &["-mcpu=cortex-a72+nocrypto"],
+        buildroot: &[("BR2_cortex_a72", "y")],
+    },
+    CpuProfile {
         name: "cortex-a72.cortex-a53",
         boards: "RK3576",
         arch: TargetArch::AArch64,

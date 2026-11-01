@@ -1,0 +1,11 @@
+#!/bin/sh
+# The idle screen (respawned by init).
+. /run/cast/env
+case "$AIRPLAY$DLNA" in
+	11) subtitle="Ready for AirPlay and DLNA" ;;
+	10) subtitle="Ready for AirPlay" ;;
+	01) subtitle="Ready for DLNA" ;;
+	*) subtitle="No receiver enabled in cast.txt" ;;
+esac
+castidle "$NAME" "$subtitle" 2>&1 | logger -t castidle
+sleep 1
