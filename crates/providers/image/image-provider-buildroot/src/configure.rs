@@ -39,7 +39,7 @@ pub(crate) fn configure_tree(
     let package_overrides =
         materialize_buildroot_package_overrides(spec, buildroot_dir, output_dir)?;
     if package_overrides.generated_external_tree.is_some() {
-        ensure_no_generated_external_name_conflict(external_tree)?;
+        ensure_no_generated_external_name_conflict(spec, external_tree)?;
     }
     messages.extend(crate::override_srcdirs::write_override_srcdirs(
         spec, image, output_dir,

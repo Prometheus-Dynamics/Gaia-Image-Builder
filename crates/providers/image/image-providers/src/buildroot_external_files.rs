@@ -49,7 +49,7 @@ pub struct ExternalFile {
 
 /// Resolves a path from a build spec: `@alias` paths through the workspace,
 /// absolute paths as they are, and relative paths from the workspace root.
-pub(crate) fn resolve_tree_path(workspace: &WorkspaceSpec, raw: &str) -> PathBuf {
+pub fn resolve_tree_path(workspace: &WorkspaceSpec, raw: &str) -> PathBuf {
     let path = Path::new(raw);
     if path.is_absolute() {
         return path.to_path_buf();

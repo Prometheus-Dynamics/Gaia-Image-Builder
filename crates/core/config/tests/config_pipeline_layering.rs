@@ -494,3 +494,45 @@ choices = ["base-os", "full"]
             .any(|source| source.id.as_str() == "full-source")
     );
 }
+
+#[test]
+fn external_tree_entries_are_made_absolute_one_by_one_and_aliases_kept() {
+    let scratch = TempDir::new("gaia-external-tree-entries");
+    let root = scratch.path();
+    let build = root.join("build.toml");
+    std::fs::write(
+        &build,
+        r#"
+config = 3
+build_name = "external-trees"
+
+[[workspace.named_paths]]
+alias = "assets"
+path = "assets"
+kind = "host"
+
+[image]
+kind = "buildroot"
+defconfig = "qemu_aarch64_virt_defconfig"
+external_tree = "${assets}/buildroot:vendor/external"
+"#,
+    )
+    .expect("build");
+
+    let spec = resolve_config(&build.display().to_string());
+    let ImageDefinition::Buildroot(buildroot) = &spec.image.definition else {
+        panic!("a Buildroot image");
+    };
+    assert_eq!(
+        buildroot.external_tree.as_deref(),
+        Some(
+            format!(
+                "@assets/buildroot:{}",
+                PathBuf::from(&spec.workspace.root_dir)
+                    .join("vendor/external")
+                    .display()
+            )
+            .as_str()
+        )
+    );
+}

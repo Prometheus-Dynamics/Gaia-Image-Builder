@@ -415,9 +415,20 @@ fn normalize_paths(mut raw: raw::RawBuildConfig) -> Result<raw::RawBuildConfig, 
             external_tree: Some(external_tree),
             ..
         } => {
-            *external_tree = absolutize(&workspace_root, external_tree)
-                .display()
-                .to_string();
+            // Each `:`-separated tree on its own; an `@alias` entry is
+            // resolved through the named paths by the provider.
+            *external_tree = external_tree
+                .split(':')
+                .map(|tree| {
+                    let tree = tree.trim();
+                    if tree.is_empty() || tree.starts_with('@') {
+                        tree.to_string()
+                    } else {
+                        absolutize(&workspace_root, tree).display().to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(":");
         }
         raw::RawImageDefinition::StartingPoint {
             source,

@@ -11,7 +11,7 @@ mod stage_content;
 pub use buildroot_external_files::{
     ExternalChanges, ExternalFile, ExternalTree, decode_external_state, encode_external_state,
     external_changes, external_package_digests, external_tree_files, external_tree_files_cached,
-    external_trees,
+    external_trees, resolve_tree_path,
 };
 pub use buildroot_scripts::{expand_external_paths, post_script_components};
 pub use content_digests::{

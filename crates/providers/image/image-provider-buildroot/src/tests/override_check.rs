@@ -313,3 +313,25 @@ fn workspace_alias_paths_become_quoted_absolute_paths() {
         ]
     );
 }
+
+#[test]
+fn external_tree_alias_entries_become_absolute_paths() {
+    let mut spec = ResolvedBuildSpec::new("alias-external");
+    spec.workspace.root_dir = "/work/board".into();
+    spec.workspace
+        .named_paths
+        .push(gaia_spec::WorkspaceNamedPathSpec {
+            alias: "assets".into(),
+            path: "assets".into(),
+            kind: gaia_spec::WorkspacePathKindSpec::Host,
+        });
+    assert_eq!(
+        crate::buildroot_external::buildroot_external_tree_value(
+            &spec,
+            Some("@assets/buildroot:vendor/external:/abs/tree"),
+            None,
+        )
+        .as_deref(),
+        Some("/work/board/assets/buildroot:/work/board/vendor/external:/abs/tree")
+    );
+}

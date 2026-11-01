@@ -148,7 +148,7 @@ pub(crate) fn buildroot_package_override_dirs(spec: &ResolvedBuildSpec) -> Vec<P
             .map(str::trim)
             .filter(|tree| !tree.is_empty())
         {
-            let tree_path = resolve_workspace_relative(workspace_root, tree);
+            let tree_path = gaia_image_providers::resolve_tree_path(&spec.workspace, tree);
             let package_dir = tree_path.join("packages");
             if package_dir.is_dir() {
                 dirs.push(package_dir);
@@ -162,15 +162,6 @@ fn configured_external_tree(spec: &ResolvedBuildSpec) -> Option<&str> {
     match &spec.image.definition {
         gaia_spec::ImageDefinition::Buildroot(buildroot) => buildroot.external_tree.as_deref(),
         _ => None,
-    }
-}
-
-fn resolve_workspace_relative(workspace_root: &Path, path: &str) -> PathBuf {
-    let raw = Path::new(path);
-    if raw.is_absolute() {
-        raw.to_path_buf()
-    } else {
-        workspace_root.join(raw)
     }
 }
 
@@ -304,14 +295,13 @@ pub(crate) fn buildroot_external_tree_value(
     if let Some(configured) = configured
         && !configured.trim().is_empty()
     {
-        let workspace_root = Path::new(&spec.workspace.root_dir);
         trees.extend(
             configured
                 .split(':')
                 .map(str::trim)
                 .filter(|tree| !tree.is_empty())
                 .map(|tree| {
-                    resolve_workspace_relative(workspace_root, tree)
+                    gaia_image_providers::resolve_tree_path(&spec.workspace, tree)
                         .display()
                         .to_string()
                 }),
@@ -324,6 +314,7 @@ pub(crate) fn buildroot_external_tree_value(
 }
 
 pub(crate) fn ensure_no_generated_external_name_conflict(
+    spec: &ResolvedBuildSpec,
     configured: Option<&str>,
 ) -> Result<(), ImageProviderError> {
     let Some(configured) = configured else {
@@ -334,7 +325,8 @@ pub(crate) fn ensure_no_generated_external_name_conflict(
         .map(str::trim)
         .filter(|tree| !tree.is_empty())
     {
-        let desc = Path::new(external_tree).join("external.desc");
+        let tree = gaia_image_providers::resolve_tree_path(&spec.workspace, external_tree);
+        let desc = tree.join("external.desc");
         let Ok(contents) = fs::read_to_string(&desc) else {
             continue;
         };
@@ -344,7 +336,7 @@ pub(crate) fn ensure_no_generated_external_name_conflict(
         {
             return Err(ImageProviderError::backend_command(format!(
                 "configured Buildroot external tree '{}' uses reserved generated external name {GENERATED_EXTERNAL_NAME}",
-                Path::new(external_tree).display()
+                tree.display()
             )));
         }
     }
