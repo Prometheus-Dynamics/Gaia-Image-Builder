@@ -4,6 +4,10 @@ version = "0.1.0"
 description = "Luckfox Pico Pro (RV1106G2, 128 MB SPI-NAND): vendor kernel and U-Boot, A/B slots in UBI. Written, untested on board."
 target = "luckfox-pico-pro"
 profile = "release"
+# atlas-ubi and the boot hook that carry out the slot environments.
+imports = [
+  { source = "atlas", path = "devices/luckfox-pico-pro/gaia/nand-slot.toml" },
+]
 
 [workspace]
 root_dir = "examples/boards/luckfox-pico-pro"
@@ -44,6 +48,14 @@ rev = "824b817f889c2cbff1d48fcdb18ab494a68f69d1"
 refresh = "never"
 pin = "locked"
 
+[[sources]]
+id = "atlas"
+kind = "git"
+repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
+rev = "3e7cbf7cda02593dd8a1e508fdef309af5d5cfc4"
+refresh = "never"
+pin = "locked"
+
 [image]
 kind = "buildroot"
 source = "buildroot"
@@ -54,6 +66,7 @@ override_srcdirs = [
 ]
 config_overrides = [
   ["BR2_TOOLCHAIN_EXTERNAL_PATH", "\"${source.luckfox.path}/tools/linux/toolchain/arm-rockchip830-linux-uclibcgnueabihf\""],
+  ["BR2_ROOTFS_OVERLAY", "${assets}/overlay"],
   ["BR2_ROOTFS_POST_IMAGE_SCRIPT", "${assets}/post-image.sh"],
   ["BR2_ROOTFS_POST_SCRIPT_ARGS", "\"${source.luckfox.path} rv1106g-luckfox-pico-pro-max\""],
 ]
@@ -158,3 +171,32 @@ size = "40M"
 name = "data"
 size = "4M"
 autoresize = true
+
+# What a slot install writes, for either slot: see "NAND slots" in ../README.md.
+[[image.assembly.archives]]
+id = "slot-bundle"
+output = "${assembly.out}/slot-bundle.tar"
+
+[[image.assembly.archives.members]]
+name = "boot.img"
+src = "${provider.images}/boot.img"
+
+[[image.assembly.archives.members]]
+name = "rootfs.squashfs"
+src = "${provider.images}/rootfs.squashfs"
+
+[[image.assembly.archives.members]]
+name = "env-a.img"
+src = "${assembly.out}/env-a.img"
+
+[[image.assembly.archives.members]]
+name = "env-b.img"
+src = "${assembly.out}/env-b.img"
+
+[[image.assembly.archives.members]]
+name = "env-a-trial.img"
+src = "${assembly.out}/env-a-trial.img"
+
+[[image.assembly.archives.members]]
+name = "env-b-trial.img"
+src = "${assembly.out}/env-b-trial.img"

@@ -13,6 +13,13 @@ cross="$sdk/tools/linux/toolchain/arm-rockchip830-linux-uclibcgnueabihf/bin/arm-
 jobs=$(nproc)
 
 kernel=$(ls -d "$BUILD_DIR"/linux-custom 2>/dev/null || ls -d "$BUILD_DIR"/linux-* | head -n 1)
+# The SDK leaves the watchdog disabled in rv1106.dtsi, and a slot trial needs
+# it for a hung kernel. The DTB in boot.img comes from this tree.
+dts_file="$kernel/arch/arm/boot/dts/$dts.dts"
+if ! grep -q '^&wdt' "$dts_file"; then
+	printf '\n&wdt {\n\tstatus = "okay";\n};\n' >>"$dts_file"
+fi
+
 # Host programs (extract-cert) use Buildroot's host OpenSSL, as in its own
 # kernel build.
 make -C "$kernel" ARCH=arm CROSS_COMPILE="$cross" MAKE_MODULES=n \

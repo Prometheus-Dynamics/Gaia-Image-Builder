@@ -141,6 +141,20 @@ by which partition has that name: the running slot's is `boot`, and the other
 is named for the slot it holds (`boot_a` or `boot_b`). `env`, `ubi` and every
 mtd number stay the same.
 
+`slot-bundle.tar` holds `boot.img`, `rootfs.squashfs` and all four environments.
+The root is read-only, and UBI volume `data` is mounted at `/data` as UBIFS, which
+the kernel formats on the first mount since the volume starts empty. It is shared
+by both slots, so a commit image kept there survives the trial's reboot.
+
+The SDK disables the watchdog in `rv1106.dtsi`; `post-image.sh` enables it in the
+board's DTS, so `/dev/watchdog` exists. `WATCHDOG_NOWAYOUT` is off, and nothing
+starts the watchdog by default.
+
+The image imports Atlas's `devices/luckfox-pico-pro/gaia/nand-slot.toml`:
+`/usr/sbin/atlas-ubi nand-slot` carries out the steps below, and
+`/etc/init.d/S00nand-slot` runs its trial check and starts the watchdog early on a
+trial boot. It does nothing on other boots.
+
 To install to the other slot, say B while A is committed:
 
 1. Write mtd4 (`boot_b`) and volume `rootfs_b`.
@@ -162,8 +176,13 @@ U-Boot skips a bad block and raw offsets on mtd0 would then no longer match.
 Don't use `fw_setenv`: its redundant format has a flags byte this U-Boot doesn't
 read, and it would not keep the write order above.
 
-To check on a board first: `mtd list` at the U-Boot prompt names `spi-nand0`,
-and a trial of each slot, killed in Linux, comes back on the committed slot.
+To check on a board first:
+
+- `mtd list` at the U-Boot prompt names `spi-nand0`.
+- A trial of each slot, killed in Linux, comes back on the committed slot.
+- `/data` is formatted and mounted on the first boot.
+- A trial nobody commits resets at about 600 s plus the watchdog timeout, and a
+  commit stands the watchdog down.
 
 ## Still open
 
