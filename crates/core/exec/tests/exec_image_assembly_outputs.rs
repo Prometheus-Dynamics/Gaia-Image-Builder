@@ -266,3 +266,35 @@ fn xz_transform_output_decompresses_to_its_source_and_is_deterministic() {
         .collect::<Vec<_>>();
     assert!(published.contains(&dest), "{published:?}");
 }
+
+/// A `copy` whose source is its destination (an expected image copied from
+/// `${provider.images}` to `${assembly.out}`, the same dir by default) is an
+/// error naming the step, and the file is kept: removing the step's stale
+/// output first used to delete its input.
+#[test]
+fn a_transform_writing_its_own_source_is_an_error_and_keeps_the_file() {
+    let scratch = TempDir::new("gaia-exec-test");
+    let mut spec = test_spec(&scratch);
+    let images = Path::new(&spec.workspace.build_dir).join("images");
+    fs::create_dir_all(&images).expect("images dir");
+    let loader = images.join("loader.bin");
+    fs::write(&loader, "loader").expect("loader");
+    spec.image.assembly = Some(ImageAssemblySpec {
+        transforms: vec![assembly_transform(
+            AssemblyTransformKindSpec::Copy,
+            loader.display(),
+            loader.display(),
+        )],
+        ..ImageAssemblySpec::default()
+    });
+
+    let outcome = run_assembly(&spec);
+
+    assert_eq!(outcome.errors.len(), 1);
+    let message = &outcome.errors[0].message;
+    assert!(
+        message.contains("reads and writes the same file") && message.contains("loader.bin"),
+        "{message}"
+    );
+    assert_eq!(fs::read_to_string(&loader).expect("loader kept"), "loader");
+}

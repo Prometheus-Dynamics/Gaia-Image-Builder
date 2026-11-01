@@ -22,11 +22,25 @@ pub(super) fn ordered_assembly_steps(
 
 /// Removes what the steps that create their outputs from scratch produced
 /// in an earlier run, so a step reading one of those paths before it is
-/// produced again fails instead of using a stale file.
+/// produced again fails instead of using a stale file. A step that writes
+/// the file it reads (a `copy` from `${provider.images}` to
+/// `${assembly.out}`, which is the same dir by default) is an error before
+/// anything is removed: removing its output would delete its input.
 pub(super) fn remove_stale_step_outputs(
+    assembly: &gaia_spec::ImageAssemblySpec,
     paths: &[gaia_spec::AssemblyStepPaths],
 ) -> Result<(), AssemblyError> {
-    for step in paths.iter().filter(|step| step.step.replaces_outputs()) {
+    let replacing = || paths.iter().filter(|step| step.step.replaces_outputs());
+    for step in replacing() {
+        if let Some(path) = step.writes.iter().find(|write| step.reads.contains(write)) {
+            return Err(AssemblyError::runtime(format!(
+                "assembly {} reads and writes the same file '{}'; write it to another path (an expected image is already in the image output dir)",
+                step.step.describe(assembly),
+                path.display()
+            )));
+        }
+    }
+    for step in replacing() {
         for output in &step.writes {
             match std_fs::symlink_metadata(output) {
                 Ok(metadata) if metadata.is_file() || metadata.file_type().is_symlink() => {

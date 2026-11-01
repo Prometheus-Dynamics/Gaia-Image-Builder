@@ -255,3 +255,47 @@ fn rebuild_packages_force_the_image_build_with_their_reason() {
         OperationReuse::Execute(reason) if reason.code != "rebuild_requested"
     ));
 }
+
+/// A required expected image gone from the collect dir (an assembly that
+/// wrote over it, or a hand cleanup) makes the image build run again, even
+/// though the marker and the archive are still there.
+#[test]
+fn a_missing_required_expected_image_rebuilds_the_image() {
+    let scratch = TempDir::new("gaia-plan-test");
+    let mut spec = test_spec(&scratch);
+    let gaia_spec::ImageDefinition::Buildroot(buildroot) = &mut spec.image.definition else {
+        panic!("the test spec builds a Buildroot image");
+    };
+    buildroot
+        .expected_images
+        .push(gaia_spec::BuildrootExpectedImageSpec {
+            name: "loader.bin".into(),
+            format: gaia_spec::BuildrootExpectedImageFormatSpec::File,
+            required: true,
+        });
+    let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
+    materialize_reusable_test_outputs(&spec);
+    let collect_dir = PathBuf::from(spec.image.output.collect_dir.clone().expect("collect"));
+    fs::write(collect_dir.join("loader.bin"), "loader").expect("loader");
+    let baseline_plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
+    let state = fully_recorded_state(&spec, &baseline_plan, &REUSABLE_IDS);
+    let plan_now = || {
+        gaia_plan::plan_build_with_reuse_state(
+            &spec,
+            &source_catalog,
+            &artifact_catalog,
+            &image_catalog,
+            Some(&state),
+        )
+    };
+    assert!(matches!(
+        reuse_of(&plan_now(), "image:build"),
+        OperationReuse::Reuse { .. }
+    ));
+
+    fs::remove_file(collect_dir.join("loader.bin")).expect("remove loader");
+    assert!(matches!(
+        reuse_of(&plan_now(), "image:build"),
+        OperationReuse::Execute(reason) if reason.code == "materialized_output_missing"
+    ));
+}

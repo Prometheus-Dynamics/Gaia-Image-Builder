@@ -177,6 +177,34 @@ impl ImageSigningKind {
 }
 
 impl ImageSpec {
+    /// The file names of what the assembly writes as images (filesystems,
+    /// UBI images, disks, archives): expected images of these names come
+    /// from the assembly, not from Buildroot's `images/`.
+    pub fn assembly_output_file_names(&self) -> std::collections::HashSet<String> {
+        let Some(assembly) = &self.assembly else {
+            return std::collections::HashSet::new();
+        };
+        assembly
+            .filesystems
+            .iter()
+            .map(|filesystem| filesystem.output.as_str())
+            .chain(assembly.ubis.iter().map(|ubi| ubi.output.as_str()))
+            .chain(assembly.disks.iter().map(|disk| disk.output.as_str()))
+            .chain(
+                assembly
+                    .archives
+                    .iter()
+                    .map(|archive| archive.output.as_str()),
+            )
+            .filter_map(|output| {
+                std::path::Path::new(output)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(str::to_string)
+            })
+            .collect()
+    }
+
     pub fn new(definition: ImageDefinition) -> Self {
         Self {
             definition,

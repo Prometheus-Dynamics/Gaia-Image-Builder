@@ -839,7 +839,23 @@ fn operation_outputs_present(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
                 (Some(dir), Some(name)) => resolve_workspace_path(spec, dir).join(name).is_file(),
                 _ => false,
             };
-            collect_exists || archive_exists
+            // A required expected image removed from the collect dir since
+            // (by hand, or by an assembly that wrote over it) is rebuilt.
+            let expected_present = match (&spec.image.definition, &spec.image.output.collect_dir) {
+                (gaia_spec::ImageDefinition::Buildroot(buildroot), Some(dir)) => {
+                    let dir = resolve_workspace_path(spec, dir);
+                    let from_assembly = spec.image.assembly_output_file_names();
+                    buildroot
+                        .expected_images
+                        .iter()
+                        .filter(|expected| {
+                            expected.required && !from_assembly.contains(&expected.name)
+                        })
+                        .all(|expected| dir.join(&expected.name).is_file())
+                }
+                _ => true,
+            };
+            (collect_exists || archive_exists) && expected_present
         }
         // The boot tree snapshot is an output too: an assembly from before it
         // existed runs once more, so image:check reads this run's boot trees.

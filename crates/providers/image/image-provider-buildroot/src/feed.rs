@@ -196,27 +196,7 @@ pub(crate) fn materialize_fallback_rootfs(
 pub(crate) fn assembly_expected_image_names(
     image: &ImageSpec,
 ) -> std::collections::HashSet<String> {
-    let Some(assembly) = &image.assembly else {
-        return std::collections::HashSet::new();
-    };
-    assembly
-        .filesystems
-        .iter()
-        .map(|filesystem| filesystem.output.as_str())
-        .chain(assembly.disks.iter().map(|disk| disk.output.as_str()))
-        .chain(
-            assembly
-                .archives
-                .iter()
-                .map(|archive| archive.output.as_str()),
-        )
-        .filter_map(|output| {
-            Path::new(output)
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(str::to_string)
-        })
-        .collect()
+    image.assembly_output_file_names()
 }
 
 fn assembly_provider_image_inputs(image: &ImageSpec) -> std::collections::BTreeSet<PathBuf> {

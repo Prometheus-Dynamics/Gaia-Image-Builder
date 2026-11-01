@@ -96,12 +96,20 @@ fn image_assembly_output_cleanup_paths(
         }
     }
     for transform in &assembly.transforms {
+        let src = transform
+            .src
+            .as_ref()
+            .and_then(|src| roots.resolve_path(spec, src).ok());
         let outputs = std::iter::once(&transform.dest).chain(transform.hash_dest.as_ref());
         for output in outputs {
             if let Ok(path) = roots.resolve_path(spec, output) {
                 paths.push(temporary_assembly_output_path(&path));
                 paths.push(temporary_assembly_backup_path(&path));
-                paths.push(path);
+                // An output that is the transform's own input (an error the
+                // run reports) is not the run's to remove.
+                if src.as_ref() != Some(&path) {
+                    paths.push(path);
+                }
             }
         }
     }

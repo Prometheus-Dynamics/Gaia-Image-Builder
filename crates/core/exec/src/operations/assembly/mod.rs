@@ -325,7 +325,7 @@ fn stage_steps(
     // image. Outputs from an earlier run are removed first: a dependency
     // Gaia cannot see fails loudly instead of reading a stale file.
     let (order, step_paths) = ordered_assembly_steps(spec, assembly, roots)?;
-    remove_stale_step_outputs(&step_paths)?;
+    remove_stale_step_outputs(assembly, &step_paths)?;
     let mut run = StepRun::new(
         spec,
         assembly,
