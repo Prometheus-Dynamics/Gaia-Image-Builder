@@ -657,6 +657,7 @@ fn interpolate_image_definition(
             legal_info,
             config_fragments,
             config_overrides,
+            override_srcdirs,
             external_tree,
             external_tree_mode,
             expected_images,
@@ -679,6 +680,15 @@ fn interpolate_image_definition(
                     (
                         resolver::interpolate_string(key, raw, env),
                         resolver::interpolate_string(value, raw, env),
+                    )
+                })
+                .collect(),
+            override_srcdirs: override_srcdirs
+                .into_iter()
+                .map(|(package, dir)| {
+                    (
+                        resolver::interpolate_string(package, raw, env),
+                        resolver::interpolate_string(dir, raw, env),
                     )
                 })
                 .collect(),

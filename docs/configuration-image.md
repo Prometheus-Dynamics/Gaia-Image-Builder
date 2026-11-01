@@ -195,6 +195,26 @@ config_overrides = [
 ]
 ```
 
+`override_srcdirs` builds Buildroot packages from a directory instead of
+their download: each `[package, dir]` pair becomes
+`<PACKAGE>_OVERRIDE_SRCDIR = <dir>` in Gaia's block of the output tree's
+`local.mk`. Use it for a vendor kernel or U-Boot that lives inside an SDK
+checkout, which Buildroot's git and tarball methods cannot fetch a
+subdirectory of. The directory resolves like other workspace paths (relative
+to the workspace root, an alias, or `${source.<id>.path}`) and must exist when
+the build starts. Buildroot copies such a tree on every build, and the
+package cache never stores it, so these packages and everything depending on
+them always build:
+
+```toml
+[image]
+kind = "buildroot"
+override_srcdirs = [
+  ["linux", "${source.sdk.path}/sysdrv/source/kernel"],
+  ["uboot", "${source.sdk.path}/sysdrv/source/uboot/u-boot"],
+]
+```
+
 Inside `[image.assembly]` every string takes both source tokens: tree ids
 and tree or file paths, file `src`, `dest` and `content`, `json` values (keys
 are not substituted), archive outputs and members, disk and filesystem

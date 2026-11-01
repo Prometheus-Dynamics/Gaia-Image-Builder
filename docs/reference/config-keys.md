@@ -160,7 +160,7 @@ Keys: `id`, `name`, `unit_path`, `when`.
 
 Described in [Image](../configuration-image.md#image).
 
-Keys: `allow_fallback`, `config_fragments`, `config_overrides`, `defconfig`, `defconfig_path`, `external_tree`, `external_tree_mode`, `legal_info`, `source`.
+Keys: `allow_fallback`, `config_fragments`, `config_overrides`, `defconfig`, `defconfig_path`, `external_tree`, `external_tree_mode`, `legal_info`, `override_srcdirs`, `source`.
 
 ## `[image]` with `kind = "starting-point"`
 

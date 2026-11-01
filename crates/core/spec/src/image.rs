@@ -236,6 +236,11 @@ pub struct BuildrootImageSpec {
     pub legal_info: bool,
     pub config_fragments: Vec<String>,
     pub config_overrides: Vec<(String, String)>,
+    /// `(package, dir)`: Buildroot builds the package from `dir`
+    /// (`<PKG>_OVERRIDE_SRCDIR`). Left out of serialized specs when empty,
+    /// so existing builds keep their reuse digests.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub override_srcdirs: Vec<(String, String)>,
     pub external_tree: Option<String>,
     pub external_tree_mode: BuildrootExternalTreeModeSpec,
     pub expected_images: Vec<BuildrootExpectedImageSpec>,
@@ -260,6 +265,7 @@ impl Default for BuildrootImageSpec {
             legal_info: false,
             config_fragments: Vec::new(),
             config_overrides: Vec::new(),
+            override_srcdirs: Vec::new(),
             external_tree: None,
             external_tree_mode: BuildrootExternalTreeModeSpec::Auto,
             expected_images: Vec::new(),

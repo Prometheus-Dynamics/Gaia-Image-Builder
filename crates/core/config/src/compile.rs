@@ -476,6 +476,7 @@ pub(crate) fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                 legal_info,
                 config_fragments,
                 config_overrides,
+                override_srcdirs,
                 external_tree,
                 external_tree_mode,
                 expected_images,
@@ -492,6 +493,7 @@ pub(crate) fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                 } else {
                     config_overrides
                 },
+                override_srcdirs,
                 external_tree,
                 external_tree_mode: compile_buildroot_external_tree_mode(external_tree_mode),
                 expected_images: expected_images

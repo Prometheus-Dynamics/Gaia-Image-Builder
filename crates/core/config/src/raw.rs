@@ -949,6 +949,10 @@ pub(crate) enum RawImageDefinition {
         config_fragments: Vec<String>,
         #[serde(default)]
         config_overrides: Vec<(String, String)>,
+        /// `[package, dir]` pairs: Buildroot builds each package from that
+        /// directory (`<PKG>_OVERRIDE_SRCDIR` in `local.mk`).
+        #[serde(default)]
+        override_srcdirs: Vec<(String, String)>,
         #[serde(default)]
         external_tree: Option<String>,
         #[serde(default)]
@@ -991,6 +995,7 @@ impl Default for RawImageDefinition {
             legal_info: false,
             config_fragments: Vec::new(),
             config_overrides: Vec::new(),
+            override_srcdirs: Vec::new(),
             external_tree: None,
             external_tree_mode: None,
             expected_images: Vec::new(),

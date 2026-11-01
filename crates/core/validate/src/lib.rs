@@ -26,6 +26,7 @@ mod inputs;
 mod install_stage;
 mod java_policy;
 mod model;
+mod override_srcdirs;
 mod providers;
 mod reporting;
 mod secrets;

@@ -438,6 +438,7 @@ pub(crate) fn collect_unresolved_tokens(raw: &RawBuildConfig) -> Vec<RawUnresolv
             defconfig_path,
             config_fragments,
             config_overrides,
+            override_srcdirs,
             external_tree,
             expected_images,
             ..
@@ -468,6 +469,13 @@ pub(crate) fn collect_unresolved_tokens(raw: &RawBuildConfig) -> Vec<RawUnresolv
                 scan_string(
                     &format!("image.buildroot.config_overrides.{index}.value"),
                     value,
+                    &mut unresolved,
+                );
+            }
+            for (index, (_, dir)) in override_srcdirs.iter().enumerate() {
+                scan_string(
+                    &format!("image.buildroot.override_srcdirs.{index}.dir"),
+                    dir,
                     &mut unresolved,
                 );
             }

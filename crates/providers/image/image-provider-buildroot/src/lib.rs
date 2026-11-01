@@ -600,6 +600,7 @@ mod layers_tar;
 mod make_progress;
 mod offline;
 mod override_check;
+mod override_srcdirs;
 mod package_cache;
 mod package_cache_files;
 mod package_cache_registry;

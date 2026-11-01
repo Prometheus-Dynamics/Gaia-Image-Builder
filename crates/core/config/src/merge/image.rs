@@ -112,6 +112,7 @@ fn kind_specific_fields(image: &RawImageConfig) -> Vec<&'static str> {
             legal_info,
             config_fragments,
             config_overrides,
+            override_srcdirs,
             external_tree,
             external_tree_mode,
             expected_images,
@@ -125,6 +126,7 @@ fn kind_specific_fields(image: &RawImageConfig) -> Vec<&'static str> {
                 (*legal_info, "legal_info"),
                 (!config_fragments.is_empty(), "config_fragments"),
                 (!config_overrides.is_empty(), "config_overrides"),
+                (!override_srcdirs.is_empty(), "override_srcdirs"),
                 (external_tree.is_some(), "external_tree"),
                 (external_tree_mode.is_some(), "external_tree_mode"),
                 (!expected_images.is_empty(), "expected_images"),
@@ -224,6 +226,7 @@ fn merge_image_definition(
                 legal_info: base_legal_info,
                 config_fragments: base_config_fragments,
                 config_overrides: base_config_overrides,
+                override_srcdirs: base_override_srcdirs,
                 external_tree: base_external_tree,
                 external_tree_mode: base_external_tree_mode,
                 expected_images: base_expected_images,
@@ -237,6 +240,7 @@ fn merge_image_definition(
                 legal_info: overlay_legal_info,
                 config_fragments: overlay_config_fragments,
                 config_overrides: overlay_config_overrides,
+                override_srcdirs: overlay_override_srcdirs,
                 external_tree: overlay_external_tree,
                 external_tree_mode: overlay_external_tree_mode,
                 expected_images: overlay_expected_images,
@@ -250,6 +254,7 @@ fn merge_image_definition(
             legal_info: base_legal_info || overlay_legal_info,
             config_fragments: merge_string_lists(base_config_fragments, overlay_config_fragments),
             config_overrides: merge_override_pairs(base_config_overrides, overlay_config_overrides),
+            override_srcdirs: merge_override_pairs(base_override_srcdirs, overlay_override_srcdirs),
             external_tree: overlay_external_tree.or(base_external_tree),
             external_tree_mode: overlay_external_tree_mode.or(base_external_tree_mode),
             expected_images: merge_expected_images(base_expected_images, overlay_expected_images),
@@ -337,6 +342,7 @@ fn merge_image_definition(
                 legal_info: false,
                 config_fragments,
                 config_overrides,
+                override_srcdirs,
                 external_tree: None,
                 external_tree_mode: None,
                 expected_images,
@@ -345,6 +351,7 @@ fn merge_image_definition(
         ) if expected_images.is_empty()
             && config_fragments.is_empty()
             && config_overrides.is_empty()
+            && override_srcdirs.is_empty()
             && rootfs.exclude_packages.is_empty() =>
         {
             base_definition
@@ -406,6 +413,7 @@ mod tests {
                     ("BR2_TARGET_ROOTFS_EXT2".into(), "n".into()),
                     ("BR2_TARGET_ROOTFS_SQUASHFS".into(), "y".into()),
                 ],
+                override_srcdirs: Vec::new(),
                 external_tree: None,
                 external_tree_mode: None,
                 expected_images: vec![RawBuildrootExpectedImageConfig {
@@ -423,6 +431,7 @@ mod tests {
                 legal_info: false,
                 config_fragments: vec!["target.fragment".into()],
                 config_overrides: vec![("BR2_ROOTFS_POST_IMAGE_SCRIPT".into(), "\"\"".into())],
+                override_srcdirs: Vec::new(),
                 external_tree: None,
                 external_tree_mode: None,
                 expected_images: vec![],

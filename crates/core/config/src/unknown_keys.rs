@@ -210,6 +210,7 @@ const BUILDROOT_IMAGE_KEYS: &[&str] = &[
     "legal_info",
     "config_fragments",
     "config_overrides",
+    "override_srcdirs",
     "external_tree",
     "external_tree_mode",
     "expected_images",

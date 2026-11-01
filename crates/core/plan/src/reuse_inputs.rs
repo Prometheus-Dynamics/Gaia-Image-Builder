@@ -298,6 +298,10 @@ fn image_inputs(spec: &ResolvedBuildSpec, include_post_image: bool, inputs: &mut
             );
             take_field(&mut rest, buildroot_definition, "config_overrides");
             inputs.map("config_overrides", &buildroot.config_overrides);
+            take_field(&mut rest, buildroot_definition, "override_srcdirs");
+            if !buildroot.override_srcdirs.is_empty() {
+                inputs.map("override_srcdirs", &buildroot.override_srcdirs);
+            }
             inputs.json(
                 "fragments",
                 take_field(&mut rest, buildroot_definition, "config_fragments"),

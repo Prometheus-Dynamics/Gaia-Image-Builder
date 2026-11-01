@@ -154,6 +154,9 @@ fn substitute_outside_assembly(spec: &mut ResolvedBuildSpec, values: &BTreeMap<S
         for (_, value) in &mut buildroot.config_overrides {
             *value = substitute(value, values, &mut BTreeSet::new());
         }
+        for (_, dir) in &mut buildroot.override_srcdirs {
+            *dir = substitute(dir, values, &mut BTreeSet::new());
+        }
     }
     let declared = spec
         .sources

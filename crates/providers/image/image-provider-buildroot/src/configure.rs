@@ -41,6 +41,9 @@ pub(crate) fn configure_tree(
     if package_overrides.generated_external_tree.is_some() {
         ensure_no_generated_external_name_conflict(external_tree)?;
     }
+    messages.extend(crate::override_srcdirs::write_override_srcdirs(
+        spec, image, output_dir,
+    )?);
     messages.push(phase_step_message("package overrides", &clock, &[]));
     // The config steps: everything after the overrides, less the commands
     // they ran (which report their own step times).
