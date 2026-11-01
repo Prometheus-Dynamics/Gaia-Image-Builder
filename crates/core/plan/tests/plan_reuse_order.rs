@@ -17,13 +17,16 @@ fn split_build_spec(scratch: &TempDir) -> gaia_spec::ResolvedBuildSpec {
         .to_string();
     fs::create_dir_all(&root_dir).expect("root dir");
     let config_path = PathBuf::from(&root_dir).join("build.toml");
+    // An absolute root: a relative one is taken from the discovered project
+    // root, which would make this test's workspace the repository itself.
     fs::write(
         &config_path,
-        r#"
+        format!(
+            r#"
 build_name = "reuse-order"
 
 [workspace]
-root_dir = "."
+root_dir = "{root_dir}"
 build_dir = "build"
 out_dir = "out"
 
@@ -43,7 +46,8 @@ output_path = "out/gaia"
 kind = "buildroot"
 source = "buildroot-source"
 defconfig = "qemu_aarch64_virt_defconfig"
-"#,
+"#
+        ),
     )
     .expect("config");
     resolve_config(config_path.to_str().expect("utf-8 config path"))
@@ -55,10 +59,10 @@ fn materialize_outputs(spec: &gaia_spec::ResolvedBuildSpec) {
     let source_dir = PathBuf::from(&spec.workspace.build_dir).join("sources/buildroot-source");
     fs::create_dir_all(&source_dir).expect("source dir");
     fs::write(source_dir.join("source.txt"), "ok").expect("source marker");
-    let artifact_output = &spec.artifacts[0].output.path;
-    fs::create_dir_all(PathBuf::from(artifact_output).parent().expect("parent"))
-        .expect("artifact output dir");
-    fs::write(artifact_output, "artifact").expect("artifact output");
+    let artifact_output =
+        PathBuf::from(&spec.workspace.root_dir).join(&spec.artifacts[0].output.path);
+    fs::create_dir_all(artifact_output.parent().expect("parent")).expect("artifact output dir");
+    fs::write(&artifact_output, "artifact").expect("artifact output");
     fs::create_dir_all(
         PathBuf::from(&spec.workspace.build_dir).join("image/buildroot-output/target"),
     )
@@ -110,14 +114,16 @@ fn dependency_reused_after_dependent_is_evaluated_does_not_cascade() {
         Some(&state),
     );
 
-    assert!(matches!(
-        reuse_of(&plan, "image:prepare"),
-        OperationReuse::Reuse { .. }
-    ));
-    assert!(matches!(
-        reuse_of(&plan, "artifact:gaia-app"),
-        OperationReuse::Reuse { .. }
-    ));
+    let prepare = reuse_of(&plan, "image:prepare");
+    assert!(
+        matches!(prepare, OperationReuse::Reuse { .. }),
+        "{prepare:?}"
+    );
+    let artifact = reuse_of(&plan, "artifact:gaia-app");
+    assert!(
+        matches!(artifact, OperationReuse::Reuse { .. }),
+        "{artifact:?}"
+    );
     let summary = gaia_plan::invalidation_summary(&plan);
     assert!(
         !summary.cascaded.contains(&"artifact:gaia-app".to_string()),
