@@ -14,11 +14,7 @@ Items the user pinned for a later release are in "Pinned for later" below.
   - What: an x86_64 Buildroot example built as layers. Changing only the app rebuilds only the app layer.
   - Why: a target anyone can build and test without a board, and the fast path every product relies on.
   - Done when: `gaia run` on the example passes `image check`, and a second run after an app-only change reuses the base and platform layers. Record both run times in the changelog.
-  - Blocked by: the user's approval to download the x86_64 Buildroot sources.
-- **Config v3: real enums**
-  - What: read `checkpoints.backend`, `checkpoints.sign_kind`, `image.kind_layer`, `pi_model` and the transform and assembly `kind`s as enums in v3 files, so a typo is a parse error at its line that lists the allowed values (section 4 of `docs/design/config-v3.md`). The rest of v3 and `gaia migrate` landed on 2026-10-31.
-  - Blocked by: nothing.
-
+  - Status: the user approved the x86_64 Buildroot sources on 2026-10-31. `examples/sim-x86_64` and the fast path (an assembly that reads an artifact's output waits for that artifact; the image build does not) are being built.
 ### 2. Hardware support (G1–G9 and board bring-up)
 
 Small targets ship exactly two slots (A/B) plus a data partition. Smaller is better, because it lets the boards use cheaper flash.
@@ -72,10 +68,10 @@ Small targets ship exactly two slots (A/B) plus a data partition. Smaller is bet
   - Done when: a real HeliOS build passes and an oversized one fails. The smallest-flash numbers go to the PCB session.
   - Blocked by: a board config per board (G7) to take the numbers from, and a real HeliOS build run before the disk check can fail builds.
 - **G7: board examples and docs**
-  - What: `examples/buildroot-k230d`, `examples/buildroot-rk3588s` and `examples/buildroot-rv1106`, plus their docs.
+  - What: board examples with their docs, each built from the vendor SDK or mainline Buildroot.
   - Why: each new feature shown in a full board config.
-  - Done when: both examples validate and plan in the gate, and build where the sources are present.
-  - Blocked by: G8's idblock and K230 NAND layouts (the examples need their boot media), and the vendor sources for the build step. G1–G5 and G9 are done.
+  - Done when: the examples validate and plan in the gate, and build where the sources are present.
+  - Status: dev-board examples in `examples/boards/` (006284a, 3d1f249): ROCK 5C (RK3588S2), ROCK 4D (RK3576), Luckfox Pico Pro (RV1106, SPI-NAND with UBI and the vendor idblock), BPI-CanMV-K230D-Zero (TF card). All build on the Fedora 44 host and pass `image check`; each publishes its USB loader beside the image (Rockchip maskrom loaders, the K230 burner). Written, untested on board. Left: RK3566 and RK3562 examples, and the K230 SPI-NAND layout (the Zero has only a TF slot).
 - **K230D BSP (HVS_U01, HVS_I02)**
   - What: Canaan's Linux-only SDK with Linux on the big C908 (CPU1, the only core with RVV), vendor U-Boot and OpenSBI, and SPI-NAND boot. Size the media memory reservation from Styx's estimate of 20–25 MB.
   - Why: the smart USB camera and the Inferno host.

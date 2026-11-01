@@ -82,11 +82,21 @@ question B).
 
 ## 4. Real enums
 
-v2 reads several choice fields as free strings and checks them afterwards
-(`checkpoints.backend`, `checkpoints.sign_kind`, `image.kind_layer`,
-`pi_model`, the transform and assembly `kind`s). v3 reads them as enums, so
-a typo is a parse error at its line, with the allowed values listed. The
-spelling of each value does not change.
+v2 reads several choice fields as free strings and checks them afterwards.
+v3 checks them as the file is read, so a typo is an error at its line that
+lists the values the field takes. The spelling of each value does not change.
+
+| Field | Values |
+| --- | --- |
+| `[[checkpoints]] backend` | `local`, `oci` |
+| `[[checkpoints]] sign_kind`, `[image.signing] kind` | `minisign`, `gpg`, `cosign-blob` |
+| `[[checkpoints]] trust` | `unsigned` |
+| `[image.checks] pi_model` | the firmware's model filters: `pi0` ... `pi500`, `cm1` ... `cm5` (any case) |
+
+The transform, filesystem, device, UBI volume, toolchain and image `kind`s
+were already enums in v2. `[[image.hardware]] kind` is a free label and a
+checkpoint's `anchor` names an entry (`stage-service:<id>`), so neither is
+an enum.
 
 ## 5. Patch entries
 

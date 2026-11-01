@@ -9,11 +9,13 @@
 //! - `[outputs]` for `workspace.out_dir`, `workspace.export_dir` and
 //!   `[image.output]`;
 //! - `[cache]` for the Buildroot ccache, package cache and download dir and
-//!   Rust's sccache and shared target dir.
+//!   Rust's sccache and shared target dir;
+//! - choice fields checked as they are read (see [`enums`]).
 //!
 //! A v2 key or token in a v3 file is an error at its line that names the v3
 //! spelling. Files without `config` are v2 and keep loading.
 
+mod enums;
 pub(crate) mod migrate;
 pub(crate) mod tokens;
 
@@ -158,6 +160,7 @@ pub(crate) fn read_version(
     }
     reject_v2_keys(table, &error)?;
     move_keys(table, &error)?;
+    enums::check(table, &error)?;
     let named_paths = get(table, "workspace.named_paths").and_then(toml::Value::as_array);
     for (index, named) in named_paths.into_iter().flatten().enumerate() {
         if let Some(alias) = named.get("alias").and_then(toml::Value::as_str)

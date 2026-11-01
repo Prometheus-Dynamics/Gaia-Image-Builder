@@ -110,3 +110,53 @@ fn v2_keys_and_tokens_in_a_v3_file_are_errors_at_their_line() {
         assert!(error.contains(expected), "{text}\n{error}");
     }
 }
+
+#[test]
+fn a_choice_field_with_an_unknown_value_is_an_error_at_its_line() {
+    let error = read(
+        r#"
+config = 3
+
+[[checkpoints]]
+id = "base"
+backend = "local"
+
+[[checkpoints]]
+id = "registry"
+backend = "oci"
+sign_kind = "minsign"
+"#,
+    )
+    .unwrap_err();
+    assert!(error.contains("build.toml:11:"), "{error}");
+    assert!(
+        error.contains("`checkpoints[1].sign_kind` is \"minsign\", which is not one of: minisign, gpg, cosign-blob"),
+        "{error}"
+    );
+
+    let error = read("config = 3\n[image.checks]\npi_model = \"pi6\"\n").unwrap_err();
+    assert!(error.contains("build.toml:3:"), "{error}");
+    assert!(error.contains("pi0, pi0w"), "{error}");
+}
+
+#[test]
+fn choice_fields_take_their_v2_spellings() {
+    let (version, _, _) = read(
+        r#"
+config = 3
+
+[image.checks]
+pi_model = "CM5"
+
+[image.signing]
+kind = "cosign-blob"
+
+[[checkpoints]]
+id = "registry"
+backend = "oci"
+trust = "unsigned"
+"#,
+    )
+    .unwrap();
+    assert_eq!(version, ConfigVersion::V3);
+}
