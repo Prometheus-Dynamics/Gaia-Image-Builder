@@ -132,7 +132,8 @@ fn sourced_paths(contents: &str) -> Vec<String> {
 /// [`post_script_components`]).
 const POST_IMAGE_LABEL: &str = "post-image script ";
 
-/// The Buildroot components of an image operation: each post script (see
+/// The Buildroot components of an image operation: the defconfig and
+/// fragment files, each post script (see
 /// [`post_script_components`]) and each file of each `BR2_EXTERNAL` tree. Empty
 /// for a non-Buildroot image or a build with no external tree or scripts.
 ///
@@ -152,8 +153,33 @@ pub(crate) fn buildroot_image_components(
         .filter(|dir| !dir.is_empty())
         .map(PathBuf::from);
     let trees = external_trees(&spec.workspace, buildroot.external_tree.as_deref());
-    let mut components =
-        post_script_components(&spec.workspace, buildroot, &trees, buildroot_dir.as_deref());
+    // The defconfig and fragment files by content: the spec names only
+    // their paths, and the provider's own config check runs only once the
+    // operation does.
+    let mut components = buildroot
+        .defconfig_path
+        .iter()
+        .map(|path| ("defconfig file".to_string(), path))
+        .chain(
+            buildroot
+                .config_fragments
+                .iter()
+                .map(|path| (format!("config fragment {path}"), path)),
+        )
+        .map(|(name, path)| {
+            let digest = gaia_spec::resolve_workspace_path(&spec.workspace, path).map_or_else(
+                |error| format!("unresolved:{error}"),
+                |file| file_digest(&file),
+            );
+            (name, digest)
+        })
+        .collect::<Vec<_>>();
+    components.extend(post_script_components(
+        &spec.workspace,
+        buildroot,
+        &trees,
+        buildroot_dir.as_deref(),
+    ));
     if !include_post_image {
         components.retain(|(name, _)| !name.starts_with(POST_IMAGE_LABEL));
     }
@@ -335,6 +361,38 @@ mod tests {
             before_build,
             operation_fingerprint(&spec, &OperationKind::BuildImage)
         );
+    }
+
+    #[test]
+    fn a_defconfig_or_fragment_edit_flips_both_image_fingerprints() {
+        let scratch = TempDir::new("gaia-plan");
+        let root = workspace_dir(&scratch, "defconfig");
+        let defconfig = root.join("board/sim_defconfig");
+        let fragment = root.join("board/extra.fragment");
+        write(&defconfig, "BR2_x86_64=y\n");
+        write(&fragment, "BR2_PACKAGE_DBUS=y\n");
+        let mut spec = ResolvedBuildSpec::new("buildroot-defconfig");
+        spec.workspace.root_dir = root.display().to_string();
+        spec.image = ImageSpec::new(ImageDefinition::Buildroot(BuildrootImageSpec {
+            defconfig_path: Some("board/sim_defconfig".into()),
+            config_fragments: vec!["board/extra.fragment".into()],
+            ..BuildrootImageSpec::default()
+        }));
+        let fingerprints = |spec: &ResolvedBuildSpec| {
+            (
+                operation_fingerprint(spec, &OperationKind::PrepareImage),
+                operation_fingerprint(spec, &OperationKind::BuildImage),
+            )
+        };
+        let before = fingerprints(&spec);
+        write(&defconfig, "BR2_x86_64=y\nBR2_PACKAGE_SYSTEMD_SYSUSERS=y\n");
+        let after_defconfig = fingerprints(&spec);
+        assert_ne!(before.0, after_defconfig.0);
+        assert_ne!(before.1, after_defconfig.1);
+        write(&fragment, "BR2_PACKAGE_DBUS=n\n");
+        let after_fragment = fingerprints(&spec);
+        assert_ne!(after_defconfig.0, after_fragment.0);
+        assert_ne!(after_defconfig.1, after_fragment.1);
     }
 
     #[test]
