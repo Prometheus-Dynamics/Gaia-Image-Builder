@@ -122,6 +122,8 @@ pub(super) fn parse_module(
             _ => {}
         }
     }
+    // `struct modversion_info`: an `unsigned long` CRC, then the name.
+    let word = elf.word_size();
     let versions = elf
         .section("__versions")
         .unwrap_or_default()
@@ -129,10 +131,15 @@ pub(super) fn parse_module(
         .0
         .iter()
         .filter_map(|entry| {
-            let crc = u64::from_le_bytes(entry[..8].try_into().ok()?);
-            let end = entry[8..].iter().position(|byte| *byte == 0).unwrap_or(56);
-            let symbol = std::str::from_utf8(&entry[8..8 + end]).ok()?;
-            Some((symbol.to_string(), crc))
+            let mut crc = [0u8; 8];
+            crc[..word].copy_from_slice(&entry[..word]);
+            let name = &entry[word..];
+            let end = name
+                .iter()
+                .position(|byte| *byte == 0)
+                .unwrap_or(name.len());
+            let symbol = std::str::from_utf8(&name[..end]).ok()?;
+            Some((symbol.to_string(), u64::from_le_bytes(crc)))
         })
         .collect();
     let mut imports = BTreeSet::new();

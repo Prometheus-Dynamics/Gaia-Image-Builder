@@ -1,5 +1,5 @@
-//! A reader for the parts of a 64-bit little-endian ELF object that a kernel
-//! module carries: its section table, the section contents by name, and
+//! A reader for the parts of a little-endian ELF object, 64-bit or 32-bit
+//! (arm32 kernels), that a kernel module carries: its section table, the section contents by name, and
 //! `.symtab`. Every read is bounds-checked, so a truncated or hostile file is
 //! an error, never a panic.
 
@@ -8,8 +8,56 @@ const ET_REL: u16 = 1;
 const SHT_SYMTAB: u32 = 2;
 const SHT_STRTAB: u32 = 3;
 const SHT_NOBITS: u32 = 8;
-const SYM_SIZE: usize = 24;
-const SECTION_HEADER_SIZE: usize = 64;
+
+/// Where the fields this reader uses sit in one ELF class.
+struct Layout {
+    /// `e_shoff`, `e_shentsize`, `e_shnum`, `e_shstrndx`.
+    shoff: usize,
+    shentsize: usize,
+    shnum: usize,
+    shstrndx: usize,
+    /// A section header's size, and its `sh_offset`, `sh_size`, `sh_link`.
+    section_header_size: usize,
+    sh_offset: usize,
+    sh_size: usize,
+    sh_link: usize,
+    /// A symbol's size, and its `st_info` and `st_shndx`.
+    sym_size: usize,
+    st_info: usize,
+    st_shndx: usize,
+    /// The width of an address, offset or size: 8 or 4.
+    word: usize,
+}
+
+const ELF64: Layout = Layout {
+    shoff: 0x28,
+    shentsize: 0x3a,
+    shnum: 0x3c,
+    shstrndx: 0x3e,
+    section_header_size: 64,
+    sh_offset: 0x18,
+    sh_size: 0x20,
+    sh_link: 0x28,
+    sym_size: 24,
+    st_info: 4,
+    st_shndx: 6,
+    word: 8,
+};
+
+const ELF32: Layout = Layout {
+    shoff: 0x20,
+    shentsize: 0x2e,
+    shnum: 0x30,
+    shstrndx: 0x32,
+    section_header_size: 40,
+    sh_offset: 0x10,
+    sh_size: 0x14,
+    sh_link: 0x18,
+    sym_size: 16,
+    st_info: 12,
+    st_shndx: 14,
+    word: 4,
+};
 
 /// The section index of an undefined symbol.
 pub(super) const SHN_UNDEF: u16 = 0;
@@ -37,29 +85,33 @@ pub(super) struct Symbol<'a> {
 
 pub(super) struct ElfObject<'a> {
     bytes: &'a [u8],
+    layout: &'static Layout,
     sections: Vec<SectionHeader<'a>>,
 }
 
 impl<'a> ElfObject<'a> {
-    /// Reads the section table of a relocatable ELF64 little-endian object.
+    /// Reads the section table of a relocatable little-endian ELF64 or
+    /// ELF32 object.
     pub(super) fn parse(bytes: &'a [u8]) -> Result<Self, String> {
         if bytes.get(0..4) != Some(ELF_MAGIC.as_slice()) {
             return Err("not an ELF file".into());
         }
-        if bytes.get(4) != Some(&2) {
-            return Err("not a 64-bit ELF file".into());
-        }
+        let layout = match bytes.get(4) {
+            Some(2) => &ELF64,
+            Some(1) => &ELF32,
+            _ => return Err("not a 32-bit or 64-bit ELF file".into()),
+        };
         if bytes.get(5) != Some(&1) {
             return Err("not a little-endian ELF file".into());
         }
         if read_u16(bytes, 16)? != ET_REL {
             return Err("not a relocatable object".into());
         }
-        let section_table = read_offset(bytes, 0x28)?;
-        let entry_size = usize::from(read_u16(bytes, 0x3a)?);
-        let count = usize::from(read_u16(bytes, 0x3c)?);
-        let names_index = usize::from(read_u16(bytes, 0x3e)?);
-        if entry_size < SECTION_HEADER_SIZE {
+        let section_table = read_word(bytes, layout.shoff, layout.word)?;
+        let entry_size = usize::from(read_u16(bytes, layout.shentsize)?);
+        let count = usize::from(read_u16(bytes, layout.shnum)?);
+        let names_index = usize::from(read_u16(bytes, layout.shstrndx)?);
+        if entry_size < layout.section_header_size {
             return Err("section header entries are too small".into());
         }
         let mut headers = Vec::with_capacity(count);
@@ -76,9 +128,9 @@ impl<'a> ElfObject<'a> {
                 SectionHeader {
                     name: "",
                     kind: read_u32(bytes, base + 4)?,
-                    offset: read_offset(bytes, base + 0x18)?,
-                    size: read_offset(bytes, base + 0x20)?,
-                    link: read_u32(bytes, base + 0x28)? as usize,
+                    offset: read_word(bytes, base + layout.sh_offset, layout.word)?,
+                    size: read_word(bytes, base + layout.sh_size, layout.word)?,
+                    link: read_u32(bytes, base + layout.sh_link)? as usize,
                 },
             ));
         }
@@ -93,7 +145,16 @@ impl<'a> ElfObject<'a> {
                 header
             })
             .collect();
-        Ok(Self { bytes, sections })
+        Ok(Self {
+            bytes,
+            layout,
+            sections,
+        })
+    }
+
+    /// The width of the object's addresses and `unsigned long`: 8 or 4.
+    pub(super) fn word_size(&self) -> usize {
+        self.layout.word
     }
 
     /// The contents of the first section called `name`. `None` when there is
@@ -123,16 +184,18 @@ impl<'a> ElfObject<'a> {
             .ok_or("symbol table has no string table")?;
         let strings = range(self.bytes, strings.offset, strings.size)?;
         let body = range(self.bytes, table.offset, table.size)?;
-        let mut symbols = Vec::with_capacity(body.len() / SYM_SIZE);
-        for entry in body.as_chunks::<SYM_SIZE>().0 {
+        let layout = self.layout;
+        let mut symbols = Vec::with_capacity(body.len() / layout.sym_size);
+        for entry in body.chunks_exact(layout.sym_size) {
             let Some(name) = cstr(strings, read_u32(entry, 0)? as usize) else {
                 continue;
             };
+            let info = entry[layout.st_info];
             symbols.push(Symbol {
                 name,
-                bind: entry[4] >> 4,
-                kind: entry[4] & 0xf,
-                shndx: read_u16(entry, 6)?,
+                bind: info >> 4,
+                kind: info & 0xf,
+                shndx: read_u16(entry, layout.st_shndx)?,
             });
         }
         Ok(symbols)
@@ -167,10 +230,10 @@ fn read_u32(bytes: &[u8], at: usize) -> Result<u32, String> {
     Ok(u32::from_le_bytes([field[0], field[1], field[2], field[3]]))
 }
 
-/// A 64-bit file offset or size, as `usize`.
-fn read_offset(bytes: &[u8], at: usize) -> Result<usize, String> {
-    let field = range(bytes, at, 8)?;
+/// A file offset or size of `word` bytes (8 or 4), as `usize`.
+fn read_word(bytes: &[u8], at: usize, word: usize) -> Result<usize, String> {
+    let field = range(bytes, at, word)?;
     let mut array = [0u8; 8];
-    array.copy_from_slice(field);
+    array[..word].copy_from_slice(field);
     usize::try_from(u64::from_le_bytes(array)).map_err(|_| "offset does not fit".to_string())
 }

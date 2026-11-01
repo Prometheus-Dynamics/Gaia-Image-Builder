@@ -4,6 +4,8 @@
 
 mod boot;
 mod elf;
+#[cfg(test)]
+mod elf32_tests;
 mod fdt;
 mod hardware;
 mod kernel;
@@ -91,7 +93,11 @@ pub(crate) fn execute(
         .kernel_image
         .as_deref()
         .map(resolve)
-        .unwrap_or_else(|| buildroot.join("images/Image"));
+        .unwrap_or_else(|| {
+            buildroot
+                .join("images")
+                .join(kernel::buildroot_kernel_image_name(&config))
+        });
     let modules_root = buildroot.join("target/lib/modules");
     let modules_dir = checks.modules_dir.as_deref().map(resolve);
     let symvers = match checks.symvers.as_deref() {
