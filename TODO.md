@@ -1,141 +1,144 @@
 # TODO
 
-## Next release (v3.0.0)
+Open work, checked against the code on 2026-11-01. Every open item says what it
+is, why, when it is done and what blocks it. Finished items are in "Done" with
+their commits.
 
-The feature list was frozen on 2026-10-27. Hardware support (group 2) is
-the last addition: nothing else joins this release. The release is Gaia
-3.0.0, tagged once this whole push is done (user decision, 2026-10-30).
-Every item says what it is, why, when it is done, and what blocks it.
-Items the user pinned for a later release are in "Pinned for later" below.
+Board work gets tested on boards before anything ships, unless the user says
+otherwise. "Written" below means built and checked on the host, not booted.
 
-### 1. Freeze items still open
+## Boards: test what is written
 
-None. The last two landed on 2026-11-01: Config v3 enums (e411aef) and `examples/sim-x86_64` with the app-layer fast path.
+- **Boot the board examples**
+  - What: boot each image in `examples/boards/` on its board: ROCK 5C, ROCK 4D, Luckfox Pico Pro, BPI-CanMV-K230D-Zero, and the CM4 and Pi 5 cast receivers. Read the RK3576 maskrom USB product id with `lsusb` on the ROCK 4D.
+  - Why: all of them build and pass `image check` on the host, but none has booted.
+  - Done when: each boots from its image, and `examples/boards/README.md` says so.
+  - Blocked by: each of those boards on a bench, with a serial console.
+- **Luckfox NAND slots on a board**
+  - What: the checks in `examples/boards/README.md#nand-slots`: `mtd list` names `spi-nand0`; a trial of each slot, killed in Linux, returns to the committed slot; `/data` formats and mounts on first boot; `/dev/watchdog` appears; an uncommitted trial resets at about 600 s plus the watchdog timeout, and a commit stands the watchdog down; `/proc/cpuinfo` has a non-zero `Serial`; `atlas ls` finds the board.
+  - Why: the slot contract (942746b), the watchdog, `/data` and slot bundle (720c211) and Atlas's device package (17c20df) were written from the SDK's source. The `spi-nand0` name is the riskiest assumption, and if it is wrong a trial cannot fall back by itself. The fix from `rk-nand` to `spi-nand0` in `mtdparts` is also unproven on a board.
+  - Done when: every check passes on a Luckfox Pico Pro.
+  - Blocked by: a Luckfox Pico Pro on a bench, with a serial console.
+- **UBI image on real SPI-NAND**
+  - What: attach the image on a board, with no VID offset given.
+  - Why: the kernel attached it on nandsim (44fc94b, kernel 7.2), but nandsim has 512-byte sub-pages and was given offset 2048. That a board needs no offset comes from reading the vendor driver.
+  - Done when: a Luckfox Pico Pro attaches `ubi.img` at boot with its three volumes.
+  - Blocked by: a Luckfox Pico Pro on a bench. Tested together with the slots above.
+- **CM5 on-device checks**
+  - What: confirm that the `ov9782` and `raze-fan` boot overlays load, once Atlas has fixed their install path (the 2026-10-23 PV camera incident). If Atlas adopts EROFS 1 MiB pclusters (LZMA level 6, 47.2 to 44.2 MB), measure boot time and first-use reads.
+  - Why: both change the boot path and cannot be checked off-device.
+  - Done when: the overlays load on a CM5, and the pcluster numbers are measured if Atlas adopts them.
+  - Blocked by: the CM5, away since 2026-10-20.
 
-### 2. Hardware support (G1–G9 and board bring-up)
+## Boards: images and support
 
-Small targets ship exactly two slots (A/B) plus a data partition. Smaller is better, because it lets the boards use cheaper flash.
-
-- **G1: bootloaders at fixed disk offsets**
-  - What: partition `offset` and `table = false`.
-  - Why: Rockchip's eMMC/SD boot ROM reads the loader at sector 64 and U-Boot at 8 MiB.
-  - Done when: the assembly tests (`tests_disk_offsets`) and validation tests pass in the gate.
-  - Status: done in 0b09e38.
-- **G2: U-Boot boot model in `image check`**
-  - What: check extlinux.conf, boot.scr and FIT boot trees: the kernel arch, the DTBs they name, the initrd and the `roothash=` in the command line.
-  - Why: `image check` knows only the Raspberry Pi firmware's boot config.
-  - Done when: tests cover extlinux and FIT trees, both good and broken.
-  - Status: done in 6ab2216. A FIT signed with RSA is not verified; only its hashes are.
-- **G3: `uboot-env` transform**
-  - What: a U-Boot environment image (CRC32, optional redundant copy) holding the A/B variables (`boot_slot`, `bootcount`, `bootlimit`, `altbootcmd`).
-  - Why: A/B trial boots on U-Boot boards, which have no `tryboot`. Atlas's updater writes the same variables.
-  - Done when: `fw_printenv` reads the image back the same in a test, where installed.
-  - Status: done. The transform landed in 56568df; the commit adding CPU profiles adds the test: `mkenvimage` writes byte-identical images, plain and redundant, and `fw_printenv` reads the variables back from both. It runs here (u-boot-tools 2026.04) and in GitHub CI, which now installs u-boot-tools, and skips with a visible line elsewhere.
-- **G4: riscv64 polish**
-  - What: GPT aliases `linux-usr-riscv64`, `linux-root-verity-riscv64` and `linux-usr-verity-riscv64`, plus the riscv64 lp64d loader paths in the runtime-library check.
-  - Why: the K230D uses Raze's verity layout.
-  - Done when: tests cover the aliases and a riscv64 closure.
-  - Status: done in 8170082.
-- **G5: `gaia layer delta --max-window`**
-  - What: bound the memory a board needs to apply an update. zstd gives a delta a window over its whole base tar, so deltas that would need more than the cap are not made, and whole layers use the capped window.
-  - Why: a board needs about window-sized RAM to apply a file. That is 115 MiB for Raze's base layer, and a K230D has 128 MB in total.
-  - Done when: a test applies a capped whole layer under `--memory`. The Raze dev.800→801 sizes with the cap are in the changelog.
-  - Status: done in 69aecf2.
-- **G9: armv7 (Flame) polish**
-  - What: GPT aliases `linux-usr-arm`, `linux-root-verity-arm` and `linux-usr-verity-arm`; the armhf loader and its library dirs in the runtime-library check; and tests with 32-bit ARM ELF fixtures. Rust's `armv7-unknown-linux-gnueabihf` and `musleabihf` targets already map to `arm`.
-  - Why: the user wants full support on Flame's Cortex-A7, the same as the other targets.
-  - Done when: tests cover the aliases and an armhf closure.
-  - Status: done in 3e51c14.
-- **G8: UBI images for SPI-NAND**
-  - What: a native UBI writer, with no mtd-utils download. It writes one volume per slot (EROFS with verity on ubiblock, layered as on Raze) plus a data volume. It also lays out Rockchip's SPI-NAND idblock and K230 NAND images.
-  - Why: the K230D boards, Flame and the Rockchip L variants boot from SPI-NAND.
-  - Done when: the image attaches with `nandsim` and `ubiattach` and its volumes match, where those tools exist; otherwise a byte-level test of the format. Atlas has the volume layout.
-  - Status: the writer is done in 1a81221, with byte-level read-back tests. The kernel's UBI driver attached the Luckfox image on nandsim on 2026-11-01 (`scripts/ubi-nandsim-check.sh`, kernel 7.2): three volumes state OK, `data` autoresized from 34 to 338 LEBs, `rootfs_a` holding the squashfs byte for byte. nandsim has 512-byte sub-pages, so the check attaches with the image's VID offset (2048); SPI-NAND has none, so a board needs no offset. Not done: Rockchip's SPI-NAND idblock and the K230 NAND image layout (these need the vendor SDKs' exact formats), and booting it. The Luckfox slot contract (two env copies, self-erasing trial) is in `examples/boards/README.md#nand-slots`, written from the SDK's source, untested on board.
-  - Blocked by: nothing external for the formats: the K230 SDK and rkbin are fetched; read them from there.
-- **G10: per-board CPU profile**
-  - What: a `[cpu]` table a board layer sets (`profile = "cortex-a76"`, ...). It adds `-C target-cpu`/`-C target-feature` and the C compiler's `-mcpu` to every Rust artifact built for that architecture, and selects the CPU in Buildroot (`BR2_cortex_a76`, ...). Profiles: CM5 `cortex-a76`; RK3588S/RK3582 `cortex-a76.cortex-a55`; RK3576 `cortex-a72.cortex-a53` (the RK3576's cores are A72 and A53, not A76); RK3566 `cortex-a55`; RK3562 `cortex-a53` (its cores are A53); Flame `cortex-a7` with NEON and VFPv4; K230D `xuantie-c908` (RVV 1.0 and Zba/Zbb/Zbs; rustc has no C908 model).
-  - Why: today the aarch64 builds target generic armv8-a, so the A76's dotprod, fp16, CRC32 and crypto instructions are used only where a crate detects them at run time (requested 2026-10-31 through HeliOS).
-  - Done when: the flags reach cargo and Buildroot in tests, HeliOS's backend builds with the CM5 profile, and each board's flags and any crate that breaks are reported to HeliOS.
-  - Status: written. Tests compile a dotprod-only crate for aarch64 (it fails without the profile and builds with `cortex-a76`, keeping the crate's own `--cfg`). The K230 SDK's Buildroot 2024.02.1 has `BR2_RISCV_ISA_RVV`. Left: HeliOS's backend built with the CM5 profile, and the per-board report.
-  - Blocked by: nothing.
+- **Remote install on the Luckfox**
+  - What: a way for Atlas to start `atlas-ubi nand-slot install` on the board. The image has no SSH, Orion or USB console, and `board-lite` is read-only.
+  - Why: without it, an update can only be started by hand on the serial console.
+  - Done when: Atlas installs and commits a slot from another machine.
+  - Blocked by: the user's security decision, which Atlas has taken to the user. Atlas then supplies the layer; a USB gadget may also need kernel or device-tree changes here.
+- **G8: NAND layouts other than the Luckfox**
+  - What: Rockchip's SPI-NAND idblock layout for the L variants, and the K230 NAND image layout. Gaia has no code for either: the Luckfox uses the idblock its vendor SDK's `make.sh` builds.
+  - Why: the K230D boards and the Rockchip L variants boot from SPI-NAND.
+  - Done when: each layout is built with byte-level tests against the vendor SDK's format, and boots on its board.
+  - Blocked by: nothing for the formats (the K230 SDK and rkbin are fetched). The board for the boot.
 - **G6: per-board size budget**
-  - What: an error-level check on slot and image bytes against a per-board budget, plus a report of the smallest flash part each board could ship with.
-  - Why: two slots plus data has to fit the cheapest flash. A Raze slot is about 43 MB layered today.
-  - Status: done for raw NAND in 1a81221. A UBI image's `flash_size` fails the build when the volumes do not fit, and every build reports `minimum_flash_bytes`. On disk images, an image larger than its partition already fails. Left: a whole-device budget for disk images (eMMC/SD), so a disk larger than the board's part fails with the smallest size it needs, and the smallest-flash numbers per board for the PCB session.
-  - Done when: a real HeliOS build passes and an oversized one fails. The smallest-flash numbers go to the PCB session.
-  - Blocked by: a board config per board (G7) to take the numbers from, and a real HeliOS build run before the disk check can fail builds.
-- **G7: board examples and docs**
-  - What: board examples with their docs, each built from the vendor SDK or mainline Buildroot.
-  - Why: each new feature shown in a full board config.
-  - Done when: the examples validate and plan in the gate, and build where the sources are present.
-  - Status: dev-board examples in `examples/boards/` (006284a, 3d1f249): ROCK 5C (RK3588S2), ROCK 4D (RK3576), Luckfox Pico Pro (RV1106, SPI-NAND with UBI and the vendor idblock), BPI-CanMV-K230D-Zero (TF card). All build on the Fedora 44 host and pass `image check`; each publishes its USB loader beside the image (Rockchip maskrom loaders, the K230 burner). Written, untested on board. Left: RK3566 and RK3562 examples, and the K230 SPI-NAND layout (the Zero has only a TF slot).
+  - What: a whole-device budget for disk images (eMMC/SD), so a disk larger than the board's part fails and names the smallest size it needs, and the smallest-flash number for each board.
+  - Why: two slots plus data has to fit the cheapest flash. Raw NAND is covered: `flash_size` fails the build when the volumes do not fit, and UBI builds report `minimum_flash_bytes` (1a81221). A disk image only fails when an image is larger than its partition.
+  - Done when: a current real HeliOS and PV build pass and an oversized one fails, and the numbers go to the PCB session.
+  - Blocked by: nothing. The board examples supply the configs; the check has to run on real HeliOS and PV builds before it can fail a build.
+- **G10: CPU profiles on real builds**
+  - What: build HeliOS's backend with the CM5 profile, and report each board's flags and any crate that breaks to HeliOS.
+  - Why: the profiles work in tests (1966f26) and the four board examples set them, but HeliOS's `dev` has no `[cpu]` table, so its aarch64 builds still target generic armv8-a.
+  - Done when: HeliOS's backend builds with `cortex-a76`, and the report is sent.
+  - Blocked by: HeliOS adding `[cpu] profile = "cortex-a76"` to its CM5 build, or trying it with one here.
+- **G7: board examples left**
+  - What: examples for the RK3566 and RK3562, a K230 SPI-NAND layout (the Zero only has a TF slot), and running the board examples in the gate.
+  - Why: each chip needs a full config to build from. The gate does not read `examples/boards/` or `examples/sim-x86_64` today, so a config change can break them unnoticed.
+  - Done when: each example builds where its sources are present, and every board example validates and plans in `scripts/ci.sh`.
+  - Blocked by: nothing.
+- **Noisy firmware warnings**
+  - What: fewer `asks for firmware` lines from `image check`, for example one summary per image with the list in the report.
+  - Why: the ROCK 5C build printed 832 such lines, which bury warnings that matter. The Luckfox prints two, for `cfg80211`'s `regulatory.db`.
+  - Done when: a ROCK 5C build prints a short summary, and the whole list is still in its report.
+  - Blocked by: nothing.
 - **K230D BSP (HVS_U01, HVS_I02)**
   - What: Canaan's Linux-only SDK with Linux on the big C908 (CPU1, the only core with RVV), vendor U-Boot and OpenSBI, and SPI-NAND boot. Size the media memory reservation from Styx's estimate of 20–25 MB.
   - Why: the smart USB camera and the Inferno host.
   - Done when: a board boots slot A, falls back from a bad slot B, and `grep isa /proc/cpuinfo` shows `v`.
-  - Blocked by: the boards (PCB). The user approved the SDK download on 2026-10-30.
+  - Blocked by: the boards (PCB).
 - **Rockchip BSP: RK3588S/RK3582 (HVS_MH01) and RK3576 (HVS_MM01)**
-  - What: Rockchip's vendor 6.1 kernel with rkisp, rkcif, RGA, MPP (rkvenc) and RKNN, but no rkaiq and no librga.
-  - Boot chain: mainline U-Boot, TF-A, and the rkbin DDR blob.
-  - rkbin licence (checked 2026-10-30 at rkbin 3e288fe): Rockchip grants a non-exclusive licence to use, copy and distribute. It forbids decompiling or reverse engineering, and the copyright notices must stay. Ship rkbin's `LICENSE` in the image's licence directory and in each export. DDR blobs for RK3588, RK3576, RK3566 and RK3562 are in `bin/rk35`.
-  - GPU: libmali with Vulkan (Daedalus).
-  - eMMC (E) and SPI-NAND (L) variants.
+  - What: Rockchip's vendor 6.1 kernel with rkisp, rkcif, RGA, MPP (rkvenc) and RKNN, but no rkaiq and no librga. Boot chain: mainline U-Boot, TF-A and the rkbin DDR blob. GPU: libmali with Vulkan (Daedalus). eMMC (E) and SPI-NAND (L) variants. The ROCK examples build a mainline kernel (6.19), so the vendor kernel is fetched but not built by any example yet.
+  - rkbin licence (checked 2026-10-30 at rkbin 3e288fe): Rockchip grants a non-exclusive licence to use, copy and distribute. It forbids decompiling or reverse engineering, and the copyright notices must stay. Ship rkbin's `LICENSE` in the image's licence directory and in each export; the ROCK examples do not do this yet. DDR blobs for RK3588, RK3576, RK3566 and RK3562 are in `bin/rk35`.
   - Why: the CM5-format camera modules.
   - Done when: each module boots A/B from both storage variants, and Styx and Daedalus see their devices.
-  - Blocked by: the boards. The user approved the downloads on 2026-10-30.
+  - Blocked by: the boards.
 - **Mainline RK3588S track**
-  - What: a second kernel option for the RK3588S.
-  - Why: it is needed once rkisp2 and rkvenc are upstream.
+  - What: a second kernel option for the RK3588S, with capture working.
+  - Why: it is needed once rkisp2 and rkvenc are upstream. The ROCK 5C example already builds mainline, without them.
   - Done when: the module boots mainline with capture working.
   - Blocked by: rkisp2 and rkvenc landing upstream, and a board.
 - **Flame BSP (RV1106G2, HVS_F02)**
-  - What: an RV1106 vendor BSP (armv7) with SPI-NAND boot. It gets the same support as the other targets: EROFS and verity slots, layers, env sets and size reporting.
+  - What: an RV1106 vendor BSP (armv7) with SPI-NAND boot and the same support as the other targets: EROFS and verity slots, layers, env sets and size reporting. The Luckfox Pico Pro example is the same chip family and builds from the RV1106 SDK, but its root is squashfs without verity: the SDK's kernel config has `CONFIG_EROFS_FS` off and no `CONFIG_DM_VERITY`.
   - Why: Flame.
-  - Done when: it boots A/B.
-  - Blocked by: the board, and the user's approval to download the RV1106 SDK (not covered by the 2026-10-30 approval).
+  - Done when: it boots A/B with EROFS and verity slots.
+  - Blocked by: the kernel options, which can be written now; the board for the boot.
 - **Low-cost tier: RK3566 and RK3562 (HVS_ML01)**
   - What: both chips (the user said "make both"). The vendor 6.1 BSP and boot chain are shared with the other Rockchip modules. RK3562 boards use 256–512 MB DDR3L, and 16-bit DDR3 boot on the RK3562 is unproven.
+  - Device tree inputs (from the PCB session; more pin changes may follow): in `HW-Helios-Platform`, the J1 GPIO map is in `projects/HVS_ML01_DEV01/README.md` ("Software / device tree: J1 GPIO map"). The CM5-header SPI0 (J1 GPIO7–11) uses the RK3562 SPI0 **M1** pin group, not M0. The DDR3L DQ swaps are in `projects/HVS_ML01_DEV01/docs/DDR-MATCHING.md` section 18. Read both again when writing the board's DTS, not this copy.
   - Why: the low-cost module tier.
   - Done when: each chip's module boots A/B from SPI-NAND and from eMMC.
-  - Device tree inputs (from the PCB session, 2026-10-31; more pin changes may follow): the HVS_ML01 J1 GPIO map is in `HW-Helios-Platform/projects/HVS_ML01_DEV01/README.md` ("Software / device tree: J1 GPIO map"). The CM5-header SPI0 (J1 GPIO7–11) uses the RK3562 SPI0 **M1** pin group, not M0. The DDR3L byte-lane DQ swaps are in `docs/DDR-MATCHING.md` §18, for the DDR init. Read both again when writing the board's DTS, not this copy.
-  - Blocked by: the boards. Downloads approved on 2026-10-30.
+  - Blocked by: the boards.
 
-### 3. Release mechanics
+## Release mechanics
 
-- **Changelog and version**
-  - What: move `[Unreleased]` to `[3.0.0]` and set the workspace version to `3.0.0`. The version is major because config v3 changes the build-file format.
-  - Done when: `cargo package --workspace` and the gate pass at that version.
-  - Blocked by: groups 1 and 2, or the user choosing to release without some of them.
-- **Tag v3.0.0**
-  - Blocked by: groups 1 and 2, and the user's own go-ahead in chat.
-  - Done when: the tag is pushed, the GitHub release exists, and HeliOS, PV and Atlas pin `v3.0.0`.
+- **Changelog, version and tag**
+  - What: move `[Unreleased]` to a version, set the workspace version (now `2.0.1-dev`), tag it, and create the GitHub release. The next one is a major version, because config v3 changes the build-file format.
+  - Why: HeliOS, PV and Atlas pin a released Gaia.
+  - Done when: `cargo package --workspace` and the gate pass at that version, the tag and release exist, and the three projects pin it.
+  - Blocked by: the user, who alone decides releases.
 
 ## Pinned for later
 
-The user pinned these on 2026-10-30. They are not part of 3.0.0.
+The user pinned these on 2026-10-30.
 
 - **Signing proof (minisign and cosign)**
   - What: sign and verify an export with real minisign and cosign in the gate.
-  - Why: today the signing paths are tested only against Gaia's own reading of the formats.
+  - Why: the signing paths are tested only against Gaia's own reading of the formats. Neither tool is installed, and neither `scripts/ci.sh` nor GitHub CI uses them.
   - Done when: `scripts/ci.sh` and GitHub CI sign and verify with both tools, and skip with a visible line when a tool is missing.
-  - Blocked by: the user's approval to install minisign and cosign.
+  - Blocked by: the user, who approved this through HeliOS on 2026-11-01. Gaia's session still needs: `sudo dnf install minisign` run by the user (0.12-3.fc44 is in the Nobara repo), and the user's yes in Gaia's chat to a source for cosign, which dnf does not have (proposed: the Sigstore release binary with its checksum verified).
 - **Registry backend**
-  - What: the registry cache pushed to a real registry.
+  - What: the registry cache pushed to a real registry. The push and pull code passes its round trip against a fake registry in `crates/core/process/src/registry/tests.rs`.
   - Why: CI and boards share built layers.
-  - Done when: a push and pull round trip runs against the chosen registry.
-  - Blocked by: the user's decision on GHCR (yes or no) and who owns it. No real-registry push until then.
-- **`gaia run` CI on the self-hosted runner**
-  - What: the HeliOS workflow (HeliOS dev 814e4893) on a registered `gaia` runner. Gaia's own `Gaia action` workflow already builds `imported-rootfs-minimal` green on GitHub's hosted runners (last on cd9ad15), so it needs no self-hosted runner.
+  - Done when: a push and pull round trip runs against GHCR.
+  - Blocked by: the user, who said yes to GHCR through HeliOS on 2026-11-01. Still needed: the account or organization that owns the packages, a token with `write:packages` for the checkpoint's `token`, and the user's yes in Gaia's chat to the first real push.
+- **`gaia run` image job on the self-hosted runner**
+  - What: the image job of HeliOS's `.github/workflows/gaia-builds.yml` (814e4893). The workflow's validate jobs already pass on GitHub's hosted runners, and Gaia's own `Gaia action` workflow builds `imported-rootfs-minimal` on them (last green on 17c20df), so only HeliOS's image job needs the runner.
   - Why: real image builds per change, not just unit tests.
-  - Done when: the HeliOS workflow goes green on GitHub.
-  - Blocked by: the user registering the runner, adding the `EIDOS_READ_TOKEN` secret and setting the fork-PR policy.
+  - Done when: a `workflow_dispatch` run of that workflow goes green with an image. None has run yet.
+  - Blocked by: the user, on `Prometheus-Dynamics/HeliOS`, which has no runners or secrets today, following HeliOS's `docs/ci/gaia-builds.md`: register a runner labelled `gaia` (admin rights, about 100 GB free), add the `EIDOS_READ_TOKEN` secret with `gh secret set EIDOS_READ_TOKEN --repo Prometheus-Dynamics/HeliOS`, and set the fork-PR policy.
 - **Atlas's signing key**
   - What: the key Atlas signs updates with, and where it lives.
   - Why: signed updates on boards.
   - Done when: Atlas verifies a Gaia-signed export on a board.
-  - Blocked by: the user, and the signing proof above.
+  - Blocked by: the user's choice of key and where it lives, the signing proof above, and a board.
 
 ## Backlog
 
-Cut from this release and staying cut: emulated QEMU boot, TUI cleanup, deb
-packaging niceties.
+Cut and staying cut: emulated QEMU boot, TUI cleanup, deb packaging niceties.
+
+## Done
+
+- Config v3 enums: e411aef.
+- `examples/sim-x86_64` and the app-layer fast path: a78b53a.
+- G1, bootloaders at fixed disk offsets: 0b09e38.
+- G2, U-Boot boot model in `image check`: 6ab2216. It checks a FIT's hashes; a FIT signed with RSA is not verified.
+- G3, `uboot-env` transform: 56568df, with the `mkenvimage` and `fw_printenv` test in 1966f26. `copies` for the Luckfox's two env copies: 942746b.
+- G4, riscv64 aliases and lp64d loader dirs: 8170082.
+- G5, `gaia layer delta --max-window`: 69aecf2.
+- G9, armv7 aliases and armhf closure: 3e51c14.
+- G8, the UBI writer: 1a81221. The kernel attaching the Luckfox image on nandsim: 44fc94b. Atlas read the real `ubi.img`, so it has the volume layout.
+- G10, CPU profile flags in cargo and Buildroot: 1966f26, with `cortex-a72` in a2aeb06.
+- G7, the examples that exist: ROCK 5C, ROCK 4D, Luckfox Pico Pro and K230D Zero in 006284a and 3d1f249; the cast receivers in a2aeb06 and db7b92a.
+- `${source.<id>.commit_count}`: b47a9e5.
+- Luckfox NAND slots, written and untested on board: 942746b, 720c211, 17c20df.
