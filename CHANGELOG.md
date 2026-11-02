@@ -6,6 +6,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- Image checks: more than five kernel modules' missing firmware files are one warning line naming the count and the checks report that lists them all, not a line each. The ROCK 5C printed 834 such lines; it now prints one.
 - Luckfox Pico Pro: the kernel has EROFS (LZ4, the 5.10 kernel's only compression) and dm-verity with `DM_INIT` built in, through `assets/linux.fragment`, for EROFS slots with verity and no initramfs. `boot.img` grows by 66 KB to 4.70 MB, inside its 6 MB partition. The slots are still squashfs without verity. Untested on board.
 - The gate validates and plans every board example (`examples/boards/`, the cast receivers included) and `examples/sim-x86_64`, so a config change can no longer break them unnoticed.
 - Fix: two config imports from the same git repository resolved at once in one process (parallel tests, or threads of a server) could fail with "unable to read tree": both cloned the repository's mirror into the same directory, and one read it half made, and both checkouts shared a staging directory named only by the process id. A mirror is now cloned beside its place and renamed in, and each staging directory has its own name.

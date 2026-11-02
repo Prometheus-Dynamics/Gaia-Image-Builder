@@ -748,5 +748,42 @@ fn warnings_reach_the_run_through_the_image_result() {
 }
 
 /// The hardware list checks, in their own file.
+fn finding(code: &'static str, module: &str, message: &str) -> Finding {
+    Finding {
+        severity: Severity::Warning,
+        code,
+        module: Some(module.into()),
+        message: message.into(),
+    }
+}
+
+#[test]
+fn many_missing_firmware_files_are_one_summary_line_naming_the_report() {
+    let mut findings = vec![finding("vermagic_mismatch", "a.ko", "a.ko vermagic")];
+    for index in 0..7 {
+        findings.push(finding(
+            "firmware_missing",
+            if index < 4 { "wifi.ko" } else { "bt.ko" },
+            &format!("fw {index}"),
+        ));
+    }
+    let refs = findings.iter().collect::<Vec<_>>();
+    let lines = super::summary_warnings(&refs, Path::new("/out/checks.json"));
+    assert_eq!(
+        lines,
+        [
+            "a.ko vermagic".to_string(),
+            "2 kernel modules ask for 7 firmware files that are not under lib/firmware, such as: fw 0; all are listed in /out/checks.json".to_string(),
+        ]
+    );
+
+    let few = &refs[..6];
+    assert_eq!(
+        super::summary_warnings(few, Path::new("/out/checks.json")).len(),
+        6,
+        "five or fewer are listed one by one"
+    );
+}
+
 #[path = "hardware_tests.rs"]
 mod hardware_tests;

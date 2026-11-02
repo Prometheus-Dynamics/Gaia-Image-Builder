@@ -239,10 +239,7 @@ pub(crate) fn execute(
         reused: false,
         reuse_details: Vec::new(),
         messages: Vec::new(),
-        warnings: warnings
-            .iter()
-            .map(|finding| finding.message.clone())
-            .collect(),
+        warnings: summary_warnings(&warnings, &report_path),
         disk_images: Vec::new(),
         notes: Vec::new(),
         state_details: Vec::new(),
@@ -255,6 +252,44 @@ pub(crate) fn execute(
         vec![report_path],
     )
     .with_image_result(image_result)
+}
+
+/// More missing firmware files than this are one summary line in the run
+/// summary instead of a line each; the check report lists them all.
+const LISTED_MISSING_FIRMWARE: usize = 5;
+
+/// The warnings for the run summary: each warning's message, except that
+/// many `firmware_missing` ones (a vendor kernel's modules can name hundreds
+/// of firmware files the image does not ship) become one line naming the
+/// count and the report.
+fn summary_warnings(warnings: &[&Finding], report_path: &Path) -> Vec<String> {
+    let missing_firmware = warnings
+        .iter()
+        .filter(|finding| finding.code == "firmware_missing")
+        .collect::<Vec<_>>();
+    if missing_firmware.len() <= LISTED_MISSING_FIRMWARE {
+        return warnings
+            .iter()
+            .map(|finding| finding.message.clone())
+            .collect();
+    }
+    let modules = missing_firmware
+        .iter()
+        .filter_map(|finding| finding.module.as_deref())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut lines = warnings
+        .iter()
+        .filter(|finding| finding.code != "firmware_missing")
+        .map(|finding| finding.message.clone())
+        .collect::<Vec<_>>();
+    lines.push(format!(
+        "{} kernel modules ask for {} firmware files that are not under lib/firmware, such as: {}; all are listed in {}",
+        modules.len(),
+        missing_firmware.len(),
+        missing_firmware[0].message,
+        report_path.display()
+    ));
+    lines
 }
 
 fn report_failure(operation_id: &OperationId, error: &str) -> OperationExecutionResult {
