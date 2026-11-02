@@ -6,6 +6,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- Luckfox Pico Pro: the kernel has EROFS (LZ4, the 5.10 kernel's only compression) and dm-verity with `DM_INIT` built in, through `assets/linux.fragment`, for EROFS slots with verity and no initramfs. `boot.img` grows by 66 KB to 4.70 MB, inside its 6 MB partition. The slots are still squashfs without verity. Untested on board.
 - The gate validates and plans every board example (`examples/boards/`, the cast receivers included) and `examples/sim-x86_64`, so a config change can no longer break them unnoticed.
 - Fix: two config imports from the same git repository resolved at once in one process (parallel tests, or threads of a server) could fail with "unable to read tree": both cloned the repository's mirror into the same directory, and one read it half made, and both checkouts shared a staging directory named only by the process id. A mirror is now cloned beside its place and renamed in, and each staging directory has its own name.
 - Luckfox Pico Pro: `slot-bundle.tar` holds what a slot install writes (`boot.img`, `rootfs.squashfs`, the four slot environments), UBI volume `data` is mounted at `/data` as UBIFS, the watchdog the SDK leaves disabled in its device tree is enabled, so `/dev/watchdog` exists for a slot trial, and the image imports Atlas's device package: `atlas-ubi nand-slot` with a boot hook that runs its trial check and watchdog, and `board-lite`, which identifies the board to Atlas on the LAN, read-only. Untested on board.

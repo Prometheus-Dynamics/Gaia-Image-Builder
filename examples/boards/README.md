@@ -199,5 +199,7 @@ To check on a board first:
 - Slot switching on the ROCK and K230 boards: their images boot slot A;
   selecting B (U-Boot environment or `extlinux` labels) is for the updater.
 - Luckfox NAND slots are written, untested on board; see below.
-- dm-verity on the read-only slots: the Luckfox SDK kernel has no
-  `CONFIG_DM_VERITY` yet.
+- dm-verity and EROFS on the Luckfox's read-only slots: its kernel now has
+  EROFS (LZ4) and dm-verity with `DM_INIT` built in (`assets/linux.fragment`),
+  but the slots are still squashfs without verity. Switching them changes the
+  slot environments' command lines and so the contract with Atlas.

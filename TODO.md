@@ -84,10 +84,10 @@ otherwise. "Written" below means built and checked on the host, not booted.
   - Done when: the module boots mainline with capture working.
   - Blocked by: rkisp2 and rkvenc landing upstream, and a board.
 - **Flame BSP (RV1106G2, HVS_F02)**
-  - What: an RV1106 vendor BSP (armv7) with SPI-NAND boot and the same support as the other targets: EROFS and verity slots, layers, env sets and size reporting. The Luckfox Pico Pro example is the same chip family and builds from the RV1106 SDK, but its root is squashfs without verity: the SDK's kernel config has `CONFIG_EROFS_FS` off and no `CONFIG_DM_VERITY`.
+  - What: an RV1106 vendor BSP (armv7) with SPI-NAND boot and the same support as the other targets: EROFS and verity slots, layers, env sets and size reporting. The Luckfox Pico Pro example is the same chip family and builds from the RV1106 SDK, but its root is squashfs without verity. Its kernel has EROFS (LZ4 only, the 5.10 kernel's limit) and dm-verity with `DM_INIT` built in since the Luckfox `linux.fragment`; the slots themselves are not switched yet.
   - Why: Flame.
   - Done when: it boots A/B with EROFS and verity slots.
-  - Blocked by: the kernel options, which can be written now; the board for the boot.
+  - Blocked by: nothing for the image: EROFS slots with verity, a `dm-mod.create=` line per slot in the slot environments, and the matching change to Atlas's slot install. The board for the boot.
 - **Low-cost tier: RK3566 and RK3562 (HVS_ML01)**
   - What: both chips (the user said "make both"). The vendor 6.1 BSP and boot chain are shared with the other Rockchip modules. RK3562 boards use 256–512 MB DDR3L, and 16-bit DDR3 boot on the RK3562 is unproven.
   - Device tree inputs (from the PCB session; more pin changes may follow): in `HW-Helios-Platform`, the J1 GPIO map is in `projects/HVS_ML01_DEV01/README.md` ("Software / device tree: J1 GPIO map"). The CM5-header SPI0 (J1 GPIO7–11) uses the RK3562 SPI0 **M1** pin group, not M0. The DDR3L DQ swaps are in `projects/HVS_ML01_DEV01/docs/DDR-MATCHING.md` section 18. Read both again when writing the board's DTS, not this copy.

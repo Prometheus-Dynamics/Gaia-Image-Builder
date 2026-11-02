@@ -1,0 +1,11 @@
+# EROFS and dm-verity for read-only slots, which the SDK's
+# luckfox_rv1106_linux defconfig leaves out. The 5.10 kernel's EROFS
+# decompresses LZ4 only. DM_INIT sets up verity from the command line
+# (dm-mod.create=), as there is no initramfs, so SHA-256 is built in.
+CONFIG_EROFS_FS=y
+CONFIG_EROFS_FS_ZIP=y
+CONFIG_MD=y
+CONFIG_BLK_DEV_DM=y
+CONFIG_DM_VERITY=y
+CONFIG_DM_INIT=y
+CONFIG_CRYPTO_SHA256=y
