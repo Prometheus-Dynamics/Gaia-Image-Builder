@@ -118,10 +118,10 @@ The user pinned these on 2026-10-30.
   - Done when: a `workflow_dispatch` run of that workflow goes green with an image. None has run yet.
   - Blocked by: the user, on `Prometheus-Dynamics/HeliOS`, which has no runners or secrets today, following HeliOS's `docs/ci/gaia-builds.md`: register a runner labelled `gaia` (admin rights, about 100 GB free), add the `EIDOS_READ_TOKEN` secret with `gh secret set EIDOS_READ_TOKEN --repo Prometheus-Dynamics/HeliOS`, and set the fork-PR policy.
 - **Atlas's signing key**
-  - What: the key Atlas signs updates with, and where it lives.
+  - What: signed images checked by Atlas on a board. The user chose (2026-11-02, through HeliOS) a dev/example key made in Atlas for now: minisign, no password, the private key at `~/.config/atlas/dev-signing/minisign.key` outside any repo and its path in `ATLAS_DEV_SIGNING_KEY`; the public key and its owner block in Atlas's `keys/trusted-keys.toml`. The board examples sign with it and build unsigned with a warning without it (`optional = true`). A production key comes later and is the user's.
   - Why: signed updates on boards.
   - Done when: Atlas verifies a Gaia-signed export on a board.
-  - Blocked by: the user's choice of key and where it lives, and a board.
+  - Blocked by: a board.
 
 ## Backlog
 

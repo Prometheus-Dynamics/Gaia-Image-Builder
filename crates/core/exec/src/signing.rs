@@ -22,12 +22,30 @@ use crate::runtime::ExecutionOutcome;
 /// glob names it.
 const ROOT_HASH_SUFFIX: &str = ".roothash";
 
+/// Why outputs were not signed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SigningError {
+    /// The key or the tool is not there: with `optional = true` the run
+    /// finishes unsigned and warns.
+    Unavailable(String),
+    /// Signing was attempted and failed, or the setting is wrong.
+    Failed(String),
+}
+
+impl std::fmt::Display for SigningError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unavailable(message) | Self::Failed(message) => formatter.write_str(message),
+        }
+    }
+}
+
 /// Signs the outputs of `published` that `signing` selects. Returns the
 /// signature files written, in the order of the outputs.
 pub(crate) fn sign_published_outputs(
     signing: &ImageSigningSpec,
     published: &[PathBuf],
-) -> Result<Vec<PathBuf>, String> {
+) -> Result<Vec<PathBuf>, SigningError> {
     sign_published_outputs_with_env(signing, published, &[])
 }
 
@@ -36,39 +54,39 @@ fn sign_published_outputs_with_env(
     signing: &ImageSigningSpec,
     published: &[PathBuf],
     env: &[(OsString, OsString)],
-) -> Result<Vec<PathBuf>, String> {
+) -> Result<Vec<PathBuf>, SigningError> {
     let kind = ImageSigningKind::parse(&signing.kind).ok_or_else(|| {
-        format!(
+        SigningError::Failed(format!(
             "[image.signing] kind '{}' is not minisign, gpg or cosign-blob",
             signing.kind
-        )
+        ))
     })?;
     let selected = select_outputs(&signing.outputs, published);
     if selected.is_empty() {
         return Ok(Vec::new());
     }
-    let key = resolve_key(&signing.key)?;
+    let key = resolve_key(&signing.key).map_err(SigningError::Unavailable)?;
     match kind {
         ImageSigningKind::Minisign | ImageSigningKind::CosignBlob => {
             if !Path::new(&key).is_file() {
-                return Err(format!(
+                return Err(SigningError::Unavailable(format!(
                     "[image.signing] key file not found; set key to the path of the {} key, or to env:VAR naming a variable that holds it",
                     kind.program()
-                ));
+                )));
             }
         }
         ImageSigningKind::Gpg => {
             if key.trim().is_empty() {
-                return Err("[image.signing] gpg key is empty; set key to a key id or env:VAR naming a variable that holds one".into());
+                return Err(SigningError::Unavailable("[image.signing] gpg key is empty; set key to a key id or env:VAR naming a variable that holds one".into()));
             }
         }
     }
     let tool = resolve_program(kind.program()).ok_or_else(|| {
-        format!(
+        SigningError::Unavailable(format!(
             "[image.signing] kind '{}' needs '{}' on PATH, which was not found",
             signing.kind,
             kind.program()
-        )
+        ))
     })?;
 
     let mut written = Vec::with_capacity(selected.len());
@@ -79,7 +97,11 @@ fn sign_published_outputs_with_env(
         let config = match kind {
             ImageSigningKind::CosignBlob => Some(
                 gaia_process::cosign::write_offline_signing_config(&signature).map_err(
-                    |error| format!("cannot write cosign's offline signing config: {error}"),
+                    |error| {
+                        SigningError::Failed(format!(
+                            "cannot write cosign's offline signing config: {error}"
+                        ))
+                    },
                 )?,
             ),
             _ => None,
@@ -88,7 +110,7 @@ fn sign_published_outputs_with_env(
         if let Some(config) = config {
             let _ = std::fs::remove_file(config);
         }
-        signed?;
+        signed.map_err(SigningError::Failed)?;
         written.push(signature);
     }
     Ok(written)
@@ -238,7 +260,9 @@ fn run_signing(command: &mut Command, kind: ImageSigningKind, file: &Path) -> Re
 
 /// Signs the outputs `outcome` published when `[image.signing]` is set. The
 /// signature files join the published outputs of the image results, so the
-/// report lists them; a failure is an error of the run.
+/// report lists them; a failure is an error of the run, except a missing key
+/// or tool under `optional = true`, which is a warning and leaves the outputs
+/// unsigned.
 pub(crate) fn sign_outcome(
     spec: &ResolvedBuildSpec,
     plan: &ExecutionPlan,
@@ -247,12 +271,20 @@ pub(crate) fn sign_outcome(
     let Some(signing) = spec.image.signing.as_ref() else {
         return;
     };
+    // This run's outputs, and what a reused assembly published before: the
+    // signing runs only after a successful run, so that record is current.
+    // Paths are compared canonical, since one may be written with `..`.
     let mut published: Vec<PathBuf> = Vec::new();
-    for result in &outcome.image_results {
-        for path in result.archive_path.iter().chain(&result.disk_images) {
-            if !published.contains(path) {
-                published.push(path.clone());
-            }
+    let recorded = crate::operations::recorded_published_outputs(spec);
+    for path in outcome
+        .image_results
+        .iter()
+        .flat_map(|result| result.archive_path.iter().chain(&result.disk_images))
+        .chain(&recorded)
+    {
+        let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+        if !published.contains(&path) {
+            published.push(path);
         }
     }
     match sign_published_outputs(signing, &published) {
@@ -261,8 +293,16 @@ pub(crate) fn sign_outcome(
                 last.disk_images.extend(signatures);
             }
         }
-        Err(message) => {
+        Err(SigningError::Unavailable(message)) if signing.optional => {
             let message = gaia_process::secrets::mask(&message).into_owned();
+            if let Some(last) = outcome.image_results.last_mut() {
+                last.warnings.push(format!(
+                    "image outputs are not signed: {message} (optional = true, so the run goes on unsigned)"
+                ));
+            }
+        }
+        Err(error) => {
+            let message = gaia_process::secrets::mask(&error.to_string()).into_owned();
             let operation_id = plan
                 .operations
                 .iter()
@@ -301,6 +341,7 @@ mod tests {
             kind: kind.into(),
             key: key.into(),
             outputs: outputs.iter().map(|pattern| (*pattern).into()).collect(),
+            optional: false,
         }
     }
 
@@ -445,7 +486,8 @@ mod tests {
         let published = vec![output];
 
         let error = sign_published_outputs(&spec("pgp", "k", &["*.img.xz"]), &published)
-            .expect_err("unknown kind");
+            .expect_err("unknown kind")
+            .to_string();
         assert!(
             error.contains("'pgp' is not minisign, gpg or cosign-blob"),
             "{error}"
@@ -457,7 +499,8 @@ mod tests {
             &published,
         )
         .expect_err("missing key");
-        assert!(error.contains(variable), "{error}");
+        assert!(matches!(error, SigningError::Unavailable(_)), "{error}");
+        assert!(error.to_string().contains(variable), "{error}");
     }
 
     #[test]
@@ -468,7 +511,8 @@ mod tests {
         let secret_path = "/no/such/dir/signing-key-0F3A.key";
         let error =
             sign_published_outputs(&spec("cosign-blob", secret_path, &["*.img.xz"]), &[output])
-                .expect_err("missing key file");
+                .expect_err("missing key file")
+                .to_string();
         assert!(error.contains("key file not found"), "{error}");
         assert!(!error.contains(secret_path), "{error}");
     }
@@ -682,5 +726,68 @@ mod secret_key_tests {
         let error = resolve_key("secret:gaia_sign_key_missing").expect_err("unset variable");
         assert!(error.contains("gaia_sign_key_missing"), "{error}");
         assert!(error.contains("GAIA_TEST_SIGN_KEY_UNSET_Z9"), "{error}");
+    }
+}
+
+#[cfg(test)]
+mod optional_tests {
+    use super::*;
+    use gaia_testkit::TempDir;
+
+    /// A run that published `output`, with `[image.signing]` naming a key in
+    /// a variable nobody sets.
+    fn run_with_missing_key(optional: bool, output: &Path) -> ExecutionOutcome {
+        let mut spec = ResolvedBuildSpec::new("signing-optional-test");
+        spec.image.signing = Some(ImageSigningSpec {
+            kind: "minisign".into(),
+            key: "env:GAIA_TEST_DEV_SIGNING_KEY_UNSET_7C1".into(),
+            outputs: vec!["*.img.xz".into()],
+            optional,
+        });
+        let plan = ExecutionPlan {
+            build_id: spec.identity.id.clone(),
+            operations: Vec::new(),
+        };
+        let mut outcome = ExecutionOutcome::default();
+        outcome
+            .image_results
+            .push(gaia_image_providers::ImageExecutionResult {
+                provider_id: "buildroot".into(),
+                collect_dir: None,
+                archive_path: Some(output.to_path_buf()),
+                emit_report: false,
+                reused: false,
+                reuse_details: Vec::new(),
+                messages: Vec::new(),
+                warnings: Vec::new(),
+                notes: Vec::new(),
+                state_details: Vec::new(),
+                disk_images: Vec::new(),
+            });
+        sign_outcome(&spec, &plan, &mut outcome);
+        outcome
+    }
+
+    #[test]
+    fn a_missing_key_warns_when_optional_and_fails_otherwise() {
+        let scratch = TempDir::new("gaia-signing-optional");
+        let output = scratch.join("rootfs.img.xz");
+        std::fs::write(&output, b"x").expect("write");
+
+        let dev = run_with_missing_key(true, &output);
+        assert!(dev.errors.is_empty(), "{:?}", dev.errors);
+        let warnings = &dev.image_results[0].warnings;
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains("not signed")
+                && warnings[0].contains("GAIA_TEST_DEV_SIGNING_KEY_UNSET_7C1"),
+            "{warnings:?}"
+        );
+        assert!(!scratch.join("rootfs.img.xz.minisig").exists());
+
+        let release = run_with_missing_key(false, &output);
+        assert_eq!(release.errors.len(), 1);
+        assert_eq!(release.errors[0].code, "image_signing_failed");
+        assert!(release.image_results[0].warnings.is_empty());
     }
 }

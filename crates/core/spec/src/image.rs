@@ -137,6 +137,10 @@ pub struct ImageSigningSpec {
     pub key: String,
     /// Glob patterns over the published output file names.
     pub outputs: Vec<String>,
+    /// A missing key or tool leaves the outputs unsigned with a warning,
+    /// instead of failing the run: for dev builds that sign when a dev key
+    /// is there.
+    pub optional: bool,
 }
 
 /// The signing tools `[image.signing] kind` names.

@@ -93,6 +93,15 @@ name = "rk3576_loader_v1.13.109.bin"
 format = "file"
 required = true
 
+# Dev signing with Atlas's dev key (minisign, no password): the path is in
+# ATLAS_DEV_SIGNING_KEY, outside any repo. Without it the image builds
+# unsigned with a warning. A release key is the user's and set elsewhere.
+[image.signing]
+kind = "minisign"
+key = "env:ATLAS_DEV_SIGNING_KEY"
+outputs = ["*.img.xz"]
+optional = true
+
 [reporting]
 summary = true
 manifest = true

@@ -1170,6 +1170,8 @@ pub(crate) struct RawImageSigningConfig {
     pub key: String,
     /// Glob patterns over the published output file names, such as `*.img.xz`.
     pub outputs: Vec<String>,
+    /// A missing key or tool warns and leaves the outputs unsigned.
+    pub optional: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

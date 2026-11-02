@@ -50,6 +50,35 @@ fn parse_produced_outputs(contents: &str) -> Vec<ProducedOutput> {
         .collect()
 }
 
+/// What the assembly of `spec` published when it last ran, from its state:
+/// the archive (`archive.path`) and each produced output in the assembly's
+/// out dir, not the intermediates in its work dir. A reused assembly writes
+/// nothing, so this is how its outputs are still signed.
+pub(crate) fn recorded_published_outputs(spec: &ResolvedBuildSpec) -> Vec<PathBuf> {
+    let Ok(contents) = std::fs::read_to_string(assembly_state_path(spec)) else {
+        return Vec::new();
+    };
+    let out_dir = spec
+        .image
+        .assembly
+        .as_ref()
+        .and_then(|assembly| AssemblyRoots::new(spec, assembly).ok())
+        .map(|roots| roots.assembly_out);
+    let fields = KeyValueState::parse(&contents).into_map();
+    let mut paths: Vec<PathBuf> = fields
+        .get("archive.path")
+        .map(PathBuf::from)
+        .into_iter()
+        .collect();
+    paths.extend(
+        parse_produced_outputs(&contents)
+            .into_iter()
+            .map(|output| output.path)
+            .filter(|path| out_dir.as_ref().is_some_and(|out| path.starts_with(out))),
+    );
+    paths
+}
+
 const PRODUCED_OUTPUT_COUNT_KEY: &str = "produced_output_count";
 
 pub(crate) fn image_assembly_cleanup_paths(spec: &ResolvedBuildSpec) -> Vec<PathBuf> {

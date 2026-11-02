@@ -161,6 +161,12 @@ pub fn recorded_assembly_outputs(spec: &gaia_spec::ResolvedBuildSpec) -> Vec<Pro
     assembly::recorded_produced_outputs(spec)
 }
 
+/// The files the assembly of `spec` published when it last ran (see
+/// `assembly::recorded_published_outputs`), for signing a reused run.
+pub(crate) fn recorded_published_outputs(spec: &gaia_spec::ResolvedBuildSpec) -> Vec<PathBuf> {
+    assembly::recorded_published_outputs(spec)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OperationExecutionResult {
     pub operation_id: OperationId,

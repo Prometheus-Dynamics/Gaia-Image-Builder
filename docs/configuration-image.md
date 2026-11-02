@@ -505,13 +505,16 @@ If omitted, the current compiler auto-feeds all entries in the corresponding dom
 kind = "gpg"                           # "minisign" | "gpg" | "cosign-blob"
 key = "env:GAIA_SIGNING_KEY"           # a key path, env:VAR naming a variable that holds it, or secret:NAME ([secrets])
 outputs = ["*.img.xz", "*.slot.tar"]   # globs over the published output file names
+optional = false                       # true: a missing key or tool warns and leaves the outputs unsigned
 ```
 
 - `minisign`: writes `<file>.minisig` with `minisign -S -s <key>`. The key must not need a password (`minisign -G -W`). Verify with `minisign -V -p <public key> -m <file>`.
 - `gpg`: writes `<file>.asc`, an armored detached signature, with `gpg --detach-sign --local-user <key>`. For gpg the key is a key id or user id, not a path.
 - `cosign-blob`: writes `<file>.sigstore.json`, a Sigstore bundle, with `cosign sign-blob --key <key> --bundle <file>.sigstore.json --signing-config <config>`. The signing config names no services, so the signature is made with the key alone: nothing goes to Sigstore's transparency log, timestamp authority or certificate authority, and nothing is fetched. It needs cosign 3 (tested with 3.1.4). Verify with `cosign verify-blob --key <public key> --bundle <file>.sigstore.json --insecure-ignore-tlog=true <file>`. The key is the one `cosign generate-key-pair` writes; cosign reads its password from `COSIGN_PASSWORD`, which must be set (empty for no password) since the tool gets no stdin.
 
-A verity root hash file (a published output named `*.roothash`) is signed whether or not `outputs` names it. The signature files join the published outputs in the report. Gaia uses the tool from `PATH` and holds no key material; it never prints the key. A `key = "secret:NAME"` names a `[secrets]` entry, read when the signing starts; the value is then the key path (minisign, cosign-blob) or key id (gpg), and it is never stored or printed (see [Secrets](configuration.md#secrets)). The validator rejects an unknown kind, an empty key or an empty `outputs` before the build. A missing tool or key fails the run at the signing step, and the message names the variable or the tool, never the key.
+A verity root hash file (a published output named `*.roothash`) is signed whether or not `outputs` names it. The signature files join the published outputs in the report. Gaia uses the tool from `PATH` and holds no key material; it never prints the key. A `key = "secret:NAME"` names a `[secrets]` entry, read when the signing starts; the value is then the key path (minisign, cosign-blob) or key id (gpg), and it is never stored or printed (see [Secrets](configuration.md#secrets)). The validator rejects an unknown kind, an empty key or an empty `outputs` before the build. A missing tool or key fails the run at the signing step, and the message names the variable or the tool, never the key. With `optional = true` it is a warning instead (`image outputs are not signed: ...`) and the run finishes with its outputs unsigned: for dev builds that sign whenever a dev key is there. A signing tool that runs and fails is an error either way.
+
+The board examples (`examples/boards/`) sign with Atlas's dev key this way: minisign, `key = "env:ATLAS_DEV_SIGNING_KEY"`, `optional = true`. The variable holds the path of the private key, kept outside any repository (Atlas's convention is `~/.config/atlas/dev-signing/minisign.key`); its public key and owner are in Atlas's `keys/trusted-keys.toml`. A release key is the user's.
 
 ### Image Layers
 

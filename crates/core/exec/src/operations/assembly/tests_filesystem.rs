@@ -197,6 +197,32 @@ fn published_filesystem_image_is_copied_to_the_image_output_dir() {
 }
 
 #[test]
+fn a_reused_assembly_still_names_what_it_published() {
+    // Signing a reused run reads the outputs back from the assembly state:
+    // the published copy, not the work-dir image it was copied from.
+    let scratch = TempDir::new("gaia-exec-test");
+    if !tool_runs("zstd") || !tool_runs("cpio") {
+        return;
+    }
+    let root = scratch.join("gaia-assembly-recorded-published");
+    fs::create_dir_all(&root).expect("test root");
+    write_assets(&root);
+    let mut spec = test_spec(&root);
+    spec.image.assembly = Some(cpio_zstd_assembly(
+        "$assembly.work",
+        "$assembly.work/initramfs.cpio.zst",
+        true,
+    ));
+    let summary =
+        stage_image_assembly_with(&spec, &OperationId::image_assembly(), None, disk_env_panic)
+            .expect("published assembly");
+    assert!(recorded_published_outputs(&spec).is_empty(), "no state yet");
+    crate::operations::helpers::write_runtime_state(assembly_state_path(&spec), &summary.state)
+        .expect("state");
+    assert_eq!(recorded_published_outputs(&spec), summary.disk_images);
+}
+
+#[test]
 fn published_filesystem_image_already_in_the_output_dir_is_not_copied_onto_itself() {
     let scratch = TempDir::new("gaia-exec-test");
     if !tool_runs("zstd") || !tool_runs("cpio") {

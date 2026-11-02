@@ -553,6 +553,7 @@ pub(crate) fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                 kind: signing.kind,
                 key: signing.key,
                 outputs: signing.outputs,
+                optional: signing.optional,
             }),
         checks: raw
             .image

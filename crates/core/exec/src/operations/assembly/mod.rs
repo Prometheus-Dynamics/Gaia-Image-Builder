@@ -78,7 +78,7 @@ use produced::ProducedRecorder;
 use state::AssemblyExecutionContext;
 pub(crate) use state::{
     assembly_state_path, image_assembly_cleanup_paths, record_produced_outputs,
-    recorded_produced_outputs,
+    recorded_produced_outputs, recorded_published_outputs,
 };
 use steps::StepRun;
 use steps_order::{ordered_assembly_steps, remove_stale_step_outputs};

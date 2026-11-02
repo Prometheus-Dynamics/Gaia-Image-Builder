@@ -178,7 +178,7 @@ Keys: none of its own.
 
 Described in [Image](../configuration-image.md#signing).
 
-Keys: `key`, `kind`, `outputs`.
+Keys: `key`, `kind`, `optional`, `outputs`.
 
 ## `[image.layers]`
 
