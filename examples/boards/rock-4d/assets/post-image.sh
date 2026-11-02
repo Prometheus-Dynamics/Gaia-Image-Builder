@@ -15,3 +15,5 @@ cp "$rkbin/RKBOOT/$ini" "$work/RKBOOT/$ini"
 (cd "$work" && "$rkbin/tools/boot_merger" "RKBOOT/$ini")
 loader=$(sed -n 's/^PATH=//p' "$rkbin/RKBOOT/$ini" | tr -d '\r')
 install -m 0644 "$work/$loader" "$BINARIES_DIR/$loader"
+# rkbin's licence beside the loader and the images that carry its blobs.
+install -m 0644 "$rkbin/LICENSE" "$BINARIES_DIR/rkbin-LICENSE.txt"

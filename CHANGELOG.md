@@ -6,6 +6,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- ROCK 5C, ROCK 4D and Luckfox Pico Pro: rkbin's licence, whose DDR init and BL31 or SPL each image carries, is in the rootfs at `/usr/share/licenses/rkbin/LICENSE` and beside the images as `rkbin-LICENSE.txt`, a required output. The Luckfox's comes from its SDK's rkbin, whose licence text differs from upstream's.
 - Image checks: more than five kernel modules' missing firmware files are one warning line naming the count and the checks report that lists them all, not a line each. The ROCK 5C printed 834 such lines; it now prints one.
 - Luckfox Pico Pro: the kernel has EROFS (LZ4, the 5.10 kernel's only compression) and dm-verity with `DM_INIT` built in, through `assets/linux.fragment`, for EROFS slots with verity and no initramfs. `boot.img` grows by 66 KB to 4.70 MB, inside its 6 MB partition. The slots are still squashfs without verity. Untested on board.
 - The gate validates and plans every board example (`examples/boards/`, the cast receivers included) and `examples/sim-x86_64`, so a config change can no longer break them unnoticed.

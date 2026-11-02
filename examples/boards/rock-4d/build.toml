@@ -59,6 +59,11 @@ config_overrides = [
 ]
 
 [[image.expected_images]]
+name = "rkbin-LICENSE.txt"
+format = "file"
+required = true
+
+[[image.expected_images]]
 name = "u-boot-rockchip.bin"
 format = "file"
 required = true

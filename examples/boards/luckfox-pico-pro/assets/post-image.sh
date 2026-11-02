@@ -39,3 +39,5 @@ install -m 0644 rv1106_idblock_v*.img "$BINARIES_DIR/idblock.img"
 for loader in rv1106_download_v*.bin; do
 	install -m 0644 "$loader" "$BINARIES_DIR/$loader"
 done
+# rkbin's licence beside the loader and idblock that carry its blobs.
+install -m 0644 "$sdk/sysdrv/source/uboot/rkbin/LICENSE" "$BINARIES_DIR/rkbin-LICENSE.txt"
