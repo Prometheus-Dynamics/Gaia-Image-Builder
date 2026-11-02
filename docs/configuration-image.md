@@ -496,6 +496,12 @@ The image feed declares which install/stage domains are part of the final image 
 
 If omitted, the current compiler auto-feeds all entries in the corresponding domain.
 
+A list that is set feeds only the ids it names, and lists from every import
+merge. An entry a layer declares without adding its id to a list that is set
+is built and staged but never reaches the rootfs, so validation warns
+(`image_feed_unfed_entry`) and names each such id and the list it is missing
+from. Add the id to that list in the layer that declares the entry.
+
 ### Signing
 
 `[image.signing]` writes a signature next to each published image output. It runs after a successful run, over the outputs the run published (reused images too), so a signature always matches its file.

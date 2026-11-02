@@ -104,6 +104,8 @@ pub(crate) fn validate_image_contract(
     validate_image_hardware(spec, diagnostics);
     if matches!(spec.image.definition, ImageDefinition::None) {
         validate_image_none(spec, diagnostics);
+    } else {
+        crate::image_feed::validate_image_feed_unfed(spec, diagnostics);
     }
     match &spec.image.definition {
         ImageDefinition::None => {}
