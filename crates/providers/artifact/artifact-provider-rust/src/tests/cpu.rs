@@ -136,3 +136,34 @@ fn cpu_flags_join_the_toolchain_and_inherited_flags() {
     assert!(toolchain::with_cpu_flags(Vec::new(), None, Some("armv7"), |_| None).is_empty());
     assert!(toolchain::with_cpu_flags(Vec::new(), cpu.as_ref(), None, |_| None).is_empty());
 }
+
+#[test]
+fn an_artifacts_own_target_flags_stay_under_the_cpu_flags() {
+    // Atlas's board-lite on the K230D: build_env asks for +crt-static, and the
+    // CPU profile used to replace it, so the binary linked dynamically.
+    let target = "riscv64gc-unknown-linux-musl";
+    let cpu = gaia_spec::cpu_profile("xuantie-c908")
+        .expect("profile")
+        .for_rust_target(target);
+    let key = "CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS";
+    let build_env = vec![(key.to_string(), "-C target-feature=+crt-static".to_string())];
+    let inherited = |name: &str| (name == key).then(|| "-C debuginfo=0".to_string());
+    let env = toolchain::with_build_env_and_cpu_flags(
+        &build_env,
+        Vec::new(),
+        cpu.as_ref(),
+        Some(target),
+        inherited,
+    );
+    let flags = &env
+        .iter()
+        .find(|(name, _)| name == key)
+        .expect("target flags")
+        .1;
+    // The artifact's value comes first and wins over the process's.
+    assert!(
+        flags.starts_with("-C target-feature=+crt-static -C target-feature=+v"),
+        "{flags}"
+    );
+    assert!(!flags.contains("debuginfo"), "{flags}");
+}

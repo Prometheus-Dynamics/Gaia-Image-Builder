@@ -133,6 +133,31 @@ pub(crate) fn with_cpu_flags(
     env
 }
 
+/// [`with_cpu_flags`] for a cargo run that also has the artifact's
+/// `build_env`: its values are the base, ahead of the process environment, so
+/// a package's own target flags (`+crt-static`, say) stay under the CPU's.
+pub(crate) fn with_build_env_and_cpu_flags(
+    build_env: &[(String, String)],
+    toolchain_env: Vec<(String, String)>,
+    cpu: Option<&RustCpuSpec>,
+    target: Option<&str>,
+    inherited: impl Fn(&str) -> Option<String>,
+) -> Vec<(String, String)> {
+    with_cpu_flags(toolchain_env, cpu, target, |name| {
+        build_env
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.clone())
+            .or_else(|| inherited(name))
+    })
+}
+
+/// Whether `env` sets a target's `CARGO_TARGET_<T>_RUSTFLAGS`.
+pub(crate) fn sets_target_rustflags(env: &[(String, String)]) -> bool {
+    env.iter()
+        .any(|(key, _)| key.starts_with("CARGO_TARGET_") && key.ends_with("_RUSTFLAGS"))
+}
+
 /// The non-empty flags joined by single spaces.
 fn join_flags(flags: &[&str]) -> String {
     flags

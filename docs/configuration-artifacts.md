@@ -85,7 +85,8 @@ Artifact kinds:
     take config tokens and `${secret:NAME}`, read when cargo starts and passed
     to a docker build as `-e KEY` with the value kept off the command line).
     Gaia's own variables for the toolchain, sccache and offline mode win over
-    these. `RUSTFLAGS` and `CARGO_ENCODED_RUSTFLAGS` are refused for an
+    these, except `CARGO_TARGET_<TRIPLE>_RUSTFLAGS`: a value here is kept, and
+    the toolchain's and the `[cpu]` profile's flags are appended to it. `RUSTFLAGS` and `CARGO_ENCODED_RUSTFLAGS` are refused for an
     artifact with a `toolchain` or a `[cpu]` profile: cargo would let them
     replace the toolchain's or the profile's flags.
   - `cpu` (bool, default true): `false` builds the artifact for its target's

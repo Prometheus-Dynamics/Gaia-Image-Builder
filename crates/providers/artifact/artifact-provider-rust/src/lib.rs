@@ -674,21 +674,20 @@ fn run_cargo_build(
     let git_env =
         cargo_git::cargo_git_env(&flags.git_sources, contract, source_dir, log_sink.as_ref())?;
     let sccache = sccache_env(contract, log_sink.as_ref());
-    let toolchain_env = toolchain::with_cpu_flags(
+    let build_env = cargo_build_env(&flags.build_env)?;
+    let toolchain_env = toolchain::with_build_env_and_cpu_flags(
+        &build_env,
         toolchain::cargo_env(contract)?,
         flags.cpu.as_ref(),
         contract.artifact_target.as_deref(),
         |name| std::env::var(name).ok(),
     );
     let mut command = cargo_build_command(source_dir, packages, flags, contract, &target.dir);
-    if toolchain_env
-        .iter()
-        .any(|(key, _)| key.starts_with("CARGO_TARGET_") && key.ends_with("_RUSTFLAGS"))
-    {
+    if toolchain::sets_target_rustflags(&toolchain_env) {
         // Folded into the target's flags: cargo would use it instead of them.
         command.env_remove("RUSTFLAGS");
     }
-    command.envs(cargo_build_env(&flags.build_env)?);
+    command.envs(build_env);
     command.envs(git_env.iter().map(|(key, value)| (key, value)));
     command.envs(sccache.iter().map(|(key, value)| (key, value)));
     command.envs(toolchain_env.iter().map(|(key, value)| (key, value)));
