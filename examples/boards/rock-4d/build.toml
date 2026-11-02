@@ -4,6 +4,11 @@ version = "0.1.0"
 description = "Radxa ROCK 4D (RK3576): mainline Buildroot image, rkbin BL31, with A/B root slots. Written, untested on board."
 target = "rock-4d"
 profile = "release"
+# Atlas's device package: board-lite, which identifies the board to Atlas on
+# the LAN, read-only.
+imports = [
+  { source = "atlas", path = "devices/radxa-rock-4d/gaia/device.toml" },
+]
 
 [workspace]
 root_dir = "examples/boards/rock-4d"
@@ -41,6 +46,14 @@ id = "rkbin"
 kind = "git"
 repo = "https://github.com/rockchip-linux/rkbin.git"
 rev = "3e288fe814e059dd06833495f845cab04ac20a5c"
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "atlas"
+kind = "git"
+repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
+rev = "d53912e6173d4883704dbd3ae69035ac19224f92"
 refresh = "never"
 pin = "locked"
 

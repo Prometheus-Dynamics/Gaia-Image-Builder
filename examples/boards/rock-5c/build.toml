@@ -4,6 +4,11 @@ version = "0.1.0"
 description = "Radxa ROCK 5C (RK3588S2): mainline Buildroot image with A/B root slots. Written, untested on board."
 target = "rock-5c"
 profile = "release"
+# Atlas's device package: board-lite, which identifies the board to Atlas on
+# the LAN, read-only.
+imports = [
+  { source = "atlas", path = "devices/radxa-rock-5c/gaia/device.toml" },
+]
 
 [workspace]
 root_dir = "examples/boards/rock-5c"
@@ -32,6 +37,14 @@ id = "buildroot"
 kind = "git"
 repo = "https://gitlab.com/buildroot.org/buildroot.git"
 tag = "2026.02.3"
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "atlas"
+kind = "git"
+repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
+rev = "d53912e6173d4883704dbd3ae69035ac19224f92"
 refresh = "never"
 pin = "locked"
 

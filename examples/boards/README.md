@@ -24,6 +24,17 @@ receiver on HDMI, Raspberry Pi 6.12 kernel, one external tree for both):
 Each sets its `[cpu]` profile (see `docs/configuration-sources.md#cpu-profiles`),
 so Rust artifacts and the Buildroot toolchain target the board's cores.
 
+## Atlas device packages
+
+Each board image imports its device package from Atlas
+(`devices/<board>/gaia/device.toml`, from a source named `atlas`), which puts
+`board-lite` at `/usr/sbin/board-lite` with `/etc/init.d/S41board-lite`: it
+identifies the board to Atlas on the LAN, read-only. It adds about 410 KB to
+the rootfs. The K230D Zero image has no network yet (no Ethernet on the
+board, and no Wi-Fi driver, firmware or `wpa_supplicant` and no USB gadget
+network function in the image), so its `board-lite` cannot be reached until
+one is added. The Luckfox package also brings its NAND slot support (below).
+
 ## Loaders for USB flashing
 
 Each build publishes the vendor loader next to its images, where
