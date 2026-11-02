@@ -70,6 +70,11 @@
 #   --hostfwd H:G   with --net user: forward host TCP port H to guest port
 #                   G (repeatable; replaces the defaults)
 #   --append ARGS   add ARGS to every boot's kernel command line
+#   --trial-append ARGS   add ARGS to tryboot boots' kernel command line
+#                   only, to fail a trial on purpose and see it roll back.
+#                   On a Raze, systemd.setenv=UPDATE_UNAME_R=trial-fault
+#                   fails Atlas's trial checks (no modules for that
+#                   release) and changes nothing else
 #   --tryboot       make the first boot a tryboot
 #   --max-boots N   stop after N boots (default: no limit)
 #   --cpu --smp --mem   guest CPU (cortex-a76), CPUs (4), memory (4G)
@@ -95,6 +100,7 @@ disk_size=""
 hostfwds=()
 net=auto
 append=""
+trial_append=""
 mac=52:54:00:77:00:02
 serial=1000000052540077
 ssh_key=""
@@ -117,6 +123,7 @@ while [[ $# -gt 0 ]]; do
 	--hostfwd) hostfwds+=("$2"); shift 2 ;;
 	--net) net="$2"; shift 2 ;;
 	--append) append+="${append:+ }$2"; shift 2 ;;
+	--trial-append) trial_append+="${trial_append:+ }$2"; shift 2 ;;
 	--mac) mac="$2"; shift 2 ;;
 	--serial) serial="$2"; shift 2 ;;
 	--ssh-key) ssh_key="$2"; shift 2 ;;
@@ -350,6 +357,7 @@ while :; do
 	fi
 	plan_boot "$this_tryboot"
 	boot_cmdline+=" net.ifnames=0 atlas.tryboot=$this_tryboot${append:+ $append}"
+	[[ $this_tryboot -eq 0 || -z $trial_append ]] || boot_cmdline+=" $trial_append"
 	[[ -z $kernel_override ]] || boot_kernel=$kernel_override
 	mapfile -t args < <(machine_args)
 	args+=(-kernel "$boot_kernel" -append "$boot_cmdline")

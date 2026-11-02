@@ -55,7 +55,14 @@ check "fixed mac" "mac=52:54:00:77:00:02" "$out"
 out=$("$runner" --state "$work/st" --net user --print "$disk")
 check "user-mode forwards" "hostfwd=tcp::15800-:5800\\,hostfwd=tcp::15899-:5899\\,hostfwd=tcp::19200-:9200\\,hostfwd=tcp::2222-:22" "$out"
 
-out=$("$runner" --state "$work/st" --tryboot --print "$disk")
+out=$("$runner" --state "$work/st" --trial-append systemd.mask=x.service --print "$disk")
+if [[ $out == *systemd.mask=x.service* ]]; then
+	echo "FAIL: --trial-append reached a default boot" >&2
+	failures=$((failures + 1))
+fi
+
+out=$("$runner" --state "$work/st" --tryboot --trial-append systemd.mask=x.service --print "$disk")
+check "trial append" "atlas.tryboot=1 systemd.mask=x.service" "$out"
 check "trial slot" "from: tryboot.txt: slots/b/kernel_2712.img, slots/b/initramfs, slots/b/cmdline.txt" "$out"
 check "tryboot flag on" "tryboot: 1" "$out"
 check "kernel_2712 preferred" "kernel 2712 b" "$(cat "$work/st/boot/kernel")"
