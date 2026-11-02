@@ -98,7 +98,10 @@ the commit with the one its last materialization recorded:
   still at <short commit>`.
 - The ref moved: the source materializes and its dependents rebuild. The new
   commit is part of the source fingerprint, so a moved ref also invalidates
-  reuse on its own.
+  reuse on its own. A source that only serves cargo (rust artifacts read it
+  through `cargo_git_sources` and none builds from its checkout) says so:
+  `only its mirror moves: cargo builds the commits Cargo.lock pins`. The head
+  is fetched into the mirror, but what cargo builds is the lock's commits.
 - The ref cannot be resolved (offline, unreachable, or the branch is missing):
   the source materializes, and the plan says why.
 

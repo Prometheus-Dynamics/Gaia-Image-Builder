@@ -11,8 +11,8 @@
 use crate::reuse::local_repo_path;
 use crate::reuse_explain::source_state;
 use gaia_spec::{
-    GitBackendSpec, GitSourceSpec, ResolvedBuildSpec, SourceDefinition, SourcePinPolicySpec,
-    SourceRefreshPolicySpec,
+    ArtifactDefinition, GitBackendSpec, GitSourceSpec, ResolvedBuildSpec, SourceDefinition,
+    SourcePinPolicySpec, SourceRefreshPolicySpec,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -200,6 +200,36 @@ fn recorded_commit(spec: &ResolvedBuildSpec, source_id: &str) -> Option<String> 
         .get("resolved_commit_sha")
         .map(|value| value.trim().to_string())
         .filter(|value| value.len() >= 7 && value.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// Whether `source_id` only serves cargo: rust artifacts read it through
+/// `cargo_git_sources` and nothing builds from its checkout. Cargo then
+/// builds the commits Cargo.lock pins from the source's mirror, so where its
+/// branch points decides nothing that is built.
+pub(crate) fn serves_cargo_only(spec: &ResolvedBuildSpec, source_id: &str) -> bool {
+    let mut via_cargo = false;
+    for artifact in &spec.artifacts {
+        let cargo = match &artifact.definition {
+            ArtifactDefinition::Rust(rust) => rust
+                .cargo_git_sources
+                .iter()
+                .any(|mapping| mapping.source.as_str() == source_id),
+            _ => false,
+        };
+        let checkout = artifact
+            .source
+            .as_ref()
+            .is_some_and(|source| source.id.as_str() == source_id);
+        let extra = artifact
+            .extra_sources
+            .iter()
+            .any(|source| source.as_str() == source_id);
+        if checkout || (extra && !cargo) {
+            return false;
+        }
+        via_cargo |= cargo;
+    }
+    via_cargo
 }
 
 /// The first seven characters of a commit, as the plan displays it.

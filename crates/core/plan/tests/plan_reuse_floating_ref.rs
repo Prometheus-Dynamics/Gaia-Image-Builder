@@ -9,8 +9,8 @@ use gaia_plan::{
     ExecutionPlan, OperationReuse, PlannedOperation, ReuseState, plan_build_with_reuse_state,
 };
 use gaia_spec::{
-    ResolvedBuildSpec, SourceDefinition, SourceId, SourcePinPolicySpec, SourceRef,
-    SourceRefreshPolicySpec,
+    ArtifactDefinition, CargoGitSourceSpec, ResolvedBuildSpec, SourceDefinition, SourceId,
+    SourcePinPolicySpec, SourceRef, SourceRefreshPolicySpec,
 };
 use gaia_testkit::TempDir;
 use std::fs;
@@ -211,6 +211,10 @@ fn moved_floating_ref_materializes_source_and_rebuilds_artifact() {
         message.contains(&format!("moved from {} to {}", &first[..7], &second[..7])),
         "message names both commits: {message}"
     );
+    assert!(
+        !message.contains("Cargo.lock"),
+        "a source the artifact builds from is not a cargo mirror: {message}"
+    );
     let (code, _) = execute_code(op(&moved, ARTIFACT)).expect("artifact executes");
     assert_eq!(code, "dependency_rebuilt");
 
@@ -219,6 +223,45 @@ fn moved_floating_ref_materializes_source_and_rebuilds_artifact() {
         op(&baseline, SOURCE).fingerprint,
         op(&after, SOURCE).fingerprint,
         "the resolved commit is part of the source fingerprint"
+    );
+}
+
+#[test]
+fn a_moved_cargo_mirror_says_cargo_builds_the_locked_commits() {
+    let scratch = TempDir::new("gaia-plan-floating-cargo-mirror");
+    let (remote, work) = init_remote(&scratch);
+    let first = push_commit(&remote, &work, "v1");
+    let mut spec = floating_spec(&scratch, &remote);
+    // gaia-app builds from its own checkout and takes corelib only as a cargo
+    // git dependency, served from corelib's mirror.
+    let app = &mut spec.artifacts[0];
+    app.source = Some(SourceRef::new("gaia-upstream"));
+    app.extra_sources = vec![SourceId::new("corelib")];
+    let ArtifactDefinition::Rust(rust) = &mut app.definition else {
+        panic!("gaia-app is a rust artifact");
+    };
+    rust.cargo_git_sources = vec![CargoGitSourceSpec {
+        url: "https://example.invalid/org/corelib.git".into(),
+        source: SourceId::new("corelib"),
+        repo: format!("file://{}", remote.display()),
+    }];
+    let baseline = plan(&spec, None);
+
+    record_materialization(&spec, &first);
+    let state = reuse_state_for_ids(&spec, &baseline, &[SOURCE]);
+    let second = push_commit(&remote, &work, "v2");
+    let moved = plan(&spec, Some(&state));
+
+    let (code, message) = execute_code(op(&moved, SOURCE)).expect("source executes");
+    assert_eq!(code, "remote_floating_source");
+    assert_eq!(
+        message,
+        format!(
+            "source 'corelib' will materialize because floating ref 'main' moved from {} to {}; \
+             only its mirror moves: cargo builds the commits Cargo.lock pins",
+            &first[..7],
+            &second[..7]
+        )
     );
 }
 

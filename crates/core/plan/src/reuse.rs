@@ -337,6 +337,16 @@ fn source_refresh_rebuild_reason(
                         crate::reuse_floating::short(&to),
                     ),
                 };
+                // A mirror that only serves cargo builds the lock's commits,
+                // whatever its branch head is.
+                let message = if crate::reuse_floating::serves_cargo_only(spec, source.id.as_str())
+                {
+                    format!(
+                        "{message}; only its mirror moves: cargo builds the commits Cargo.lock pins"
+                    )
+                } else {
+                    message
+                };
                 return Some(("remote_floating_source", message));
             }
             FloatingCheck::Unresolved { label, error } => {
