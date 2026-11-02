@@ -470,3 +470,27 @@ generic CPU's neon; `cortex-a55` the same without ssbs; `cortex-a53` aes, crc
 and sha2. rustc has no C908 model, so the K230D profile is the base target
 with RVV 1.0 (VLEN 128) and the bit-manipulation extensions.
 
+Measured on 2026-11-02 with rustc 1.99, building Atlas's `atlas-ubi` and
+`board-lite` (at Atlas 058c53c) for each profile:
+
+- Every aarch64 profile builds both crates.
+- On 32-bit ARM, `target-cpu=cortex-a7` alone selects VFPv4 without NEON, which
+  is why the profile adds `+neon`. With it, the Luckfox example's `atlas-ubi`
+  holds 283 NEON instructions and `board-lite` 157, against none without the
+  profile. `readelf -A` on such a binary still reports `VFPv3-D16`, because the
+  linker keeps the attributes of musl's startup object; count instructions
+  instead.
+- With `xuantie-c908`, `atlas-ubi` holds 269 RVV instructions and `board-lite`
+  101, against none without it. Such a binary must only run on the C908 (CPU1):
+  the K230's other core has a pre-1.0 vector unit.
+- rustc warns `unstable feature specified for -Ctarget-feature` for `neon`,
+  `vfp4` and `v` on every build for those targets. The flags take effect
+  anyway, as the counts above show.
+- Rust 1.99 objects for riscv64 do not link with the XuanTie toolchain's GNU
+  `ld` (V2.10.1, GCC 10): it rejects the newer ISA string (`Invalid or unknown z
+  ISA extension: 'zaamo'`), with or without the profile. Link through LLD
+  instead: `-C link-arg=-B<rustc sysroot>/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld -C link-arg=-fuse-ld=lld`.
+- The Rockchip profiles assume the A53 and A55 cores have the crypto extension
+  (`aes`, `sha2`); check for `aes` and `sha2` in `/proc/cpuinfo` on each board
+  before shipping, or a binary using them dies with `SIGILL`.
+

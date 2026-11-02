@@ -47,11 +47,16 @@ otherwise. "Written" below means built and checked on the host, not booted.
   - Why: two slots plus data has to fit the cheapest flash. Raw NAND is covered: `flash_size` fails the build when the volumes do not fit, and UBI builds report `minimum_flash_bytes` (1a81221). A disk image only fails when an image is larger than its partition.
   - Done when: a current real HeliOS and PV build pass and an oversized one fails, and the numbers go to the PCB session.
   - Blocked by: nothing. The board examples supply the configs; the check has to run on real HeliOS and PV builds before it can fail a build.
-- **G10: per-board CPU flags report**
-  - What: report each board's flags, and any crate that breaks with them, to HeliOS.
-  - Why: the request (2026-10-31, through HeliOS) asked for it, so HeliOS knows what each board's builds use. The rest is done: see "Done".
-  - Done when: the report is sent, covering the four board examples' profiles and the CM5.
+- **Rust on the K230D**
+  - What: link Rust artifacts for the K230D through LLD, in the K230 example or by default for the XuanTie toolchain.
+  - Why: Rust 1.99 objects for riscv64 do not link with the XuanTie V2.10.1 GNU `ld`, profile or not (`unknown z ISA extension: 'zaamo'`). LLD links them (docs/configuration-sources.md#cpu-profiles).
+  - Done when: a Rust artifact builds in the K230D example and its binary links.
   - Blocked by: nothing.
+- **CPU profile checks on boards**
+  - What: on each Rockchip board, `/proc/cpuinfo` lists `aes` and `sha2`, since the A53 and A55 profiles enable them; on the K230D, RVV binaries run only on CPU1.
+  - Why: a missing extension kills a binary with `SIGILL`. Both are assumptions from the chips' documentation, not seen on a board.
+  - Done when: checked on each board.
+  - Blocked by: the boards.
 - **G7: board examples left**
   - What: examples for the RK3566 and RK3562, a K230 SPI-NAND layout (the Zero only has a TF slot), and running the board examples in the gate.
   - Why: each chip needs a full config to build from. The gate does not read `examples/boards/` or `examples/sim-x86_64` today, so a config change can break them unnoticed.
@@ -138,7 +143,7 @@ Cut and staying cut: emulated QEMU boot, TUI cleanup, deb packaging niceties.
 - G5, `gaia layer delta --max-window`: 69aecf2.
 - G9, armv7 aliases and armhf closure: 3e51c14.
 - G8, the UBI writer: 1a81221. The kernel attaching the Luckfox image on nandsim: 44fc94b. Atlas read the real `ubi.img`, so it has the volume layout.
-- G10, CPU profile flags in cargo and Buildroot: 1966f26, with `cortex-a72` in a2aeb06. HeliOS's Raze build uses `cortex-a76` on `architecture-overhaul` (HeliOS 48492ee5, whose commit message reports the full artifact build passing).
+- G10, CPU profile flags in cargo and Buildroot: 1966f26, with `cortex-a72` in a2aeb06. Per-board report, measured with Atlas's crates for every profile: docs/configuration-sources.md#cpu-profiles. HeliOS's Raze build uses `cortex-a76` on `architecture-overhaul` (HeliOS 48492ee5, whose commit message reports the full artifact build passing).
 - G7, the examples that exist: ROCK 5C, ROCK 4D, Luckfox Pico Pro and K230D Zero in 006284a and 3d1f249; the cast receivers in a2aeb06 and db7b92a.
 - `${source.<id>.commit_count}`: b47a9e5.
 - Luckfox NAND slots, written and untested on board: 942746b, 720c211, 17c20df.
