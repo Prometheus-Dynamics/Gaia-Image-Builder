@@ -25,6 +25,15 @@ cargo clippy --workspace \
 echo "==> Checking app without default features"
 cargo check -p gaia-app --no-default-features
 
+echo "==> Signing tools (the real sign-and-verify tests skip without them)"
+for tool in minisign cosign; do
+  if command -v "$tool" >/dev/null 2>&1; then
+    echo "    $tool: $(command -v "$tool")"
+  else
+    echo "    $tool: not on PATH; its real sign-and-verify tests are SKIPPED"
+  fi
+done
+
 echo "==> Running tests"
 # nextest runs every test in parallel (~15 s here against ~60 s for cargo
 # test); cargo test stays the fallback where it is not installed.

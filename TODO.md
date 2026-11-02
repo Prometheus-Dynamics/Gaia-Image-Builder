@@ -107,11 +107,6 @@ otherwise. "Written" below means built and checked on the host, not booted.
 
 The user pinned these on 2026-10-30.
 
-- **Signing proof (minisign and cosign)**
-  - What: sign and verify an export with real minisign and cosign in the gate.
-  - Why: the signing paths are tested only against Gaia's own reading of the formats. Neither tool is installed, and neither `scripts/ci.sh` nor GitHub CI uses them.
-  - Done when: `scripts/ci.sh` and GitHub CI sign and verify with both tools, and skip with a visible line when a tool is missing.
-  - Blocked by: the user, who approved this through HeliOS on 2026-11-01. Gaia's session still needs: `sudo dnf install minisign` run by the user (0.12-3.fc44 is in the Nobara repo), and the user's yes in Gaia's chat to a source for cosign, which dnf does not have (proposed: the Sigstore release binary with its checksum verified).
 - **Registry backend**
   - What: the registry cache pushed to a real registry. The push and pull code passes its round trip against a fake registry in `crates/core/process/src/registry/tests.rs`.
   - Why: CI and boards share built layers.
@@ -126,7 +121,7 @@ The user pinned these on 2026-10-30.
   - What: the key Atlas signs updates with, and where it lives.
   - Why: signed updates on boards.
   - Done when: Atlas verifies a Gaia-signed export on a board.
-  - Blocked by: the user's choice of key and where it lives, the signing proof above, and a board.
+  - Blocked by: the user's choice of key and where it lives, and a board.
 
 ## Backlog
 
@@ -147,3 +142,4 @@ Cut and staying cut: emulated QEMU boot, TUI cleanup, deb packaging niceties.
 - G7, the gate validates and plans every board example and `examples/sim-x86_64`: `crates/core/app/tests/examples_boards.rs`. The examples that exist: ROCK 5C, ROCK 4D, Luckfox Pico Pro and K230D Zero in 006284a and 3d1f249; the cast receivers in a2aeb06 and db7b92a.
 - `${source.<id>.commit_count}`: b47a9e5.
 - Luckfox NAND slots, written and untested on board: 942746b, 720c211, 17c20df.
+- Signing proof: real minisign and cosign sign and verify image outputs and registry entries in `scripts/ci.sh` and GitHub CI, with throwaway keys. cosign 3 had refused Gaia's `--output-signature`; it now writes an offline Sigstore bundle (`<file>.sigstore.json`).

@@ -22,6 +22,8 @@ mod scratch;
 mod signing;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_real_tools;
 
 use std::collections::BTreeMap;
 use std::fmt;

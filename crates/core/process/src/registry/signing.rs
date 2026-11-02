@@ -19,6 +19,14 @@ pub(super) fn sign_bytes(target: &RegistryTarget, data: &Path) -> Result<Vec<u8>
     let tool = resolve_tool(target, kind.program())?;
     let signature = Scratch::named(with_suffix(data, ".sig"));
     let command = sign_command(kind, &tool, &key, data, signature.path());
+    let _config = match kind {
+        SignatureKind::CosignBlob => Some(Scratch::named(
+            crate::cosign::write_offline_signing_config(signature.path()).map_err(|error| {
+                RegistryError::Io(format!("cannot write cosign's signing config: {error}"))
+            })?,
+        )),
+        _ => None,
+    };
     run(command, kind.program(), data)?;
     std::fs::read(signature.path()).map_err(|error| {
         RegistryError::Io(format!("cannot read the signature the tool wrote: {error}"))
@@ -94,13 +102,14 @@ fn sign_command(
                 .arg(data);
         }
         SignatureKind::CosignBlob => {
-            command
-                .args(["sign-blob", "--yes"])
-                .arg("--key")
-                .arg(key)
-                .arg("--output-signature")
-                .arg(signature)
-                .arg(data);
+            // A Sigstore bundle, signed offline: see crate::cosign.
+            return crate::cosign::sign_blob_command(
+                tool,
+                key,
+                data,
+                signature,
+                &crate::cosign::offline_signing_config_path(signature),
+            );
         }
     }
     command
@@ -133,12 +142,7 @@ fn verify_command(
                 .arg(data);
         }
         SignatureKind::CosignBlob => {
-            command
-                .args(["verify-blob", "--key"])
-                .arg(key)
-                .arg("--signature")
-                .arg(signature)
-                .arg(data);
+            return crate::cosign::verify_blob_command(tool, key, data, signature);
         }
     }
     command

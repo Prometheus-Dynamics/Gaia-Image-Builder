@@ -3,9 +3,10 @@
 //! The signing runs after a successful run, over every published output that
 //! matches `outputs`, so an image the run reused is signed as well. Each
 //! signature is written next to its output: `<file>.minisig` (minisign),
-//! `<file>.asc` (gpg, armored and detached) or `<file>.sig` (cosign blob). The
-//! signing tools are the host's own programs; Gaia holds no key material and
-//! never prints the key.
+//! `<file>.asc` (gpg, armored and detached) or `<file>.sigstore.json` (a cosign
+//! bundle, signed offline: see `gaia_process::cosign`). The signing tools are
+//! the host's own programs; Gaia holds no key material and never prints the
+//! key.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -75,7 +76,19 @@ fn sign_published_outputs_with_env(
         let signature = signature_path(kind, &file);
         let mut command = signing_command(kind, &tool, &key, &file, &signature);
         command.envs(env.iter().map(|(name, value)| (name, value)));
-        run_signing(&mut command, kind, &file)?;
+        let config = match kind {
+            ImageSigningKind::CosignBlob => Some(
+                gaia_process::cosign::write_offline_signing_config(&signature).map_err(
+                    |error| format!("cannot write cosign's offline signing config: {error}"),
+                )?,
+            ),
+            _ => None,
+        };
+        let signed = run_signing(&mut command, kind, &file);
+        if let Some(config) = config {
+            let _ = std::fs::remove_file(config);
+        }
+        signed?;
         written.push(signature);
     }
     Ok(written)
@@ -169,13 +182,13 @@ pub(crate) fn signing_command(
                 .arg(file);
         }
         ImageSigningKind::CosignBlob => {
-            command
-                .args(["sign-blob", "--yes"])
-                .arg("--key")
-                .arg(key)
-                .arg("--output-signature")
-                .arg(signature)
-                .arg(file);
+            return gaia_process::cosign::sign_blob_command(
+                tool,
+                key,
+                file,
+                signature,
+                &gaia_process::cosign::offline_signing_config_path(signature),
+            );
         }
     }
     command
@@ -350,7 +363,7 @@ mod tests {
         );
         assert_eq!(
             signature_path(ImageSigningKind::CosignBlob, file),
-            PathBuf::from("/out/rootfs.img.xz.sig")
+            PathBuf::from("/out/rootfs.img.xz.sigstore.json")
         );
     }
 
@@ -406,7 +419,7 @@ mod tests {
             Path::new("/usr/bin/cosign"),
             "/keys/cosign.key",
             file,
-            Path::new("/out/app.slot.tar.sig"),
+            Path::new("/out/app.slot.tar.sigstore.json"),
         );
         assert_eq!(
             args(&cosign),
@@ -415,8 +428,10 @@ mod tests {
                 "--yes",
                 "--key",
                 "/keys/cosign.key",
-                "--output-signature",
-                "/out/app.slot.tar.sig",
+                "--bundle",
+                "/out/app.slot.tar.sigstore.json",
+                "--signing-config",
+                "/out/app.slot.tar.sigstore.json.signing-config.json",
                 "/out/app.slot.tar",
             ]
         );
@@ -523,6 +538,113 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&verified.stderr)
         );
+    }
+
+    /// Signs `rootfs.img.xz` in `scratch` through Gaia with `key`, checks the
+    /// signature file is the kind's, and returns the output and signature.
+    fn sign_one(
+        kind: &str,
+        key: &Path,
+        scratch: &TempDir,
+        env: &[(OsString, OsString)],
+    ) -> (PathBuf, PathBuf) {
+        let output = scratch.join("rootfs.img.xz");
+        fs::write(&output, b"image bytes").expect("write");
+        let written = sign_published_outputs_with_env(
+            &spec(kind, &key.display().to_string(), &["*.img.xz"]),
+            std::slice::from_ref(&output),
+            env,
+        )
+        .expect("sign");
+        let kind = ImageSigningKind::parse(kind).expect("kind");
+        let signature = signature_path(kind, &output);
+        assert_eq!(written, vec![signature.clone()]);
+        (output, signature)
+    }
+
+    /// Runs a real tool and says whether it exited 0.
+    fn succeeds(command: &mut Command) -> bool {
+        let output = command.stdin(Stdio::null()).output().expect("run tool");
+        if !output.status.success() {
+            eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+        }
+        output.status.success()
+    }
+
+    #[test]
+    fn minisign_signs_and_minisign_verifies() {
+        let Some(minisign) = resolve_program("minisign") else {
+            eprintln!("skipped: no minisign on PATH");
+            return;
+        };
+        let scratch = TempDir::new("minisign");
+        let (public, secret) = (scratch.join("test.pub"), scratch.join("test.key"));
+        // -W: a throwaway key with no password, so signing needs no stdin.
+        assert!(succeeds(
+            Command::new(&minisign)
+                .args(["-G", "-W", "-p"])
+                .arg(&public)
+                .arg("-s")
+                .arg(&secret)
+        ));
+        let (output, signature) = sign_one("minisign", &secret, &scratch, &[]);
+        let verify = |file: &Path| {
+            succeeds(
+                Command::new(&minisign)
+                    .arg("-V")
+                    .arg("-p")
+                    .arg(&public)
+                    .arg("-m")
+                    .arg(file)
+                    .arg("-x")
+                    .arg(&signature),
+            )
+        };
+        assert!(verify(&output));
+        fs::write(&output, b"image bytes, changed").expect("tamper");
+        assert!(!verify(&output), "a changed file must not verify");
+    }
+
+    #[test]
+    fn cosign_signs_offline_and_cosign_verifies() {
+        let Some(cosign) = resolve_program("cosign") else {
+            eprintln!("skipped: no cosign on PATH");
+            return;
+        };
+        let scratch = TempDir::new("cosign");
+        // A throwaway key pair, cosign.key and cosign.pub, with an empty password.
+        let password = [(OsString::from("COSIGN_PASSWORD"), OsString::new())];
+        assert!(succeeds(
+            Command::new(&cosign)
+                .arg("generate-key-pair")
+                .current_dir(scratch.path())
+                .envs(password.iter().map(|(name, value)| (name, value)))
+        ));
+        let (output, bundle) = sign_one(
+            "cosign-blob",
+            &scratch.join("cosign.key"),
+            &scratch,
+            &password,
+        );
+        assert!(
+            !gaia_process::cosign::offline_signing_config_path(&bundle).exists(),
+            "the signing config is removed"
+        );
+        let bundle_text = fs::read_to_string(&bundle).expect("bundle");
+        assert!(bundle_text.contains("messageSignature"), "{bundle_text}");
+        assert!(
+            !bundle_text.contains("tlogEntries\":[{"),
+            "nothing was logged: {bundle_text}"
+        );
+        let public = scratch.join("cosign.pub").display().to_string();
+        let verify = |file: &Path| {
+            succeeds(&mut gaia_process::cosign::verify_blob_command(
+                &cosign, &public, file, &bundle,
+            ))
+        };
+        assert!(verify(&output));
+        fs::write(&output, b"image bytes, changed").expect("tamper");
+        assert!(!verify(&output), "a changed file must not verify");
     }
 }
 

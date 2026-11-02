@@ -171,7 +171,7 @@ impl ImageSigningKind {
         match self {
             Self::Minisign => ".minisig",
             Self::Gpg => ".asc",
-            Self::CosignBlob => ".sig",
+            Self::CosignBlob => ".sigstore.json",
         }
     }
 }
