@@ -195,6 +195,12 @@ pub enum AssemblyVerityField {
     DataBlockSize,
     /// The hash block size in bytes.
     HashBlockSize,
+    /// The data's length in 512-byte sectors: a dm-verity table's length,
+    /// as `dm-mod.create=` and `dmsetup` take it.
+    DataSectors,
+    /// The first hash block of the tree, in hash blocks from the start of the
+    /// hash device, past the superblock: a dm-verity table's `hash_start`.
+    HashStartBlock,
 }
 
 impl AssemblyVerityField {
@@ -203,13 +209,15 @@ impl AssemblyVerityField {
         !matches!(self, Self::RootHash | Self::Salt)
     }
 
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 8] = [
         Self::RootHash,
         Self::Salt,
         Self::HashOffset,
         Self::DataBlocks,
         Self::DataBlockSize,
         Self::HashBlockSize,
+        Self::DataSectors,
+        Self::HashStartBlock,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -220,6 +228,8 @@ impl AssemblyVerityField {
             Self::DataBlocks => "data_blocks",
             Self::DataBlockSize => "data_block_size",
             Self::HashBlockSize => "hash_block_size",
+            Self::DataSectors => "data_sectors",
+            Self::HashStartBlock => "hash_start_block",
         }
     }
 

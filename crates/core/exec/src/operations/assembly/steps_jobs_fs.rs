@@ -121,6 +121,11 @@ fn job_verity<'a>(ctx: &JobCtx<'a>, index: usize) -> Result<Record<'a>, Assembly
         state.insert(verity_key.field("data_blocks"), output.data_blocks);
         state.insert(verity_key.field("data_block_size"), output.data_block_size);
         state.insert(verity_key.field("hash_block_size"), output.hash_block_size);
+        state.insert(verity_key.field("data_sectors"), output.data_sectors());
+        state.insert(
+            verity_key.field("hash_start_block"),
+            output.hash_start_block(),
+        );
         run.messages.push(format!(
             "built assembly verity tree for '{}' (root hash {})",
             output.data.display(),

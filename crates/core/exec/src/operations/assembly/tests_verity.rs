@@ -189,6 +189,11 @@ fn verity_tree_is_appended_after_the_padded_data_and_matches_the_reference() {
         padded.to_string()
     );
     assert_eq!(state_value(&first, "verity.1.data_blocks"), "4");
+    assert_eq!(state_value(&first, "verity.1.data_sectors"), "32");
+    assert_eq!(
+        state_value(&first, "verity.1.hash_start_block"),
+        (padded / HASH_BLOCK + 1).to_string()
+    );
     assert_eq!(
         state_value(&first, "verity.1.data_block_size"),
         BLOCK.to_string()
@@ -251,6 +256,39 @@ fn verity_tree_in_its_own_file_leaves_the_data_padded_and_alone() {
         .output()
         .expect("veritysetup verify");
     assert!(check.status.success(), "{check:?}");
+}
+
+#[test]
+fn dm_table_fields_come_from_the_layout() {
+    // A kernel dm-verity table (dm-mod.create=, dmsetup) takes the length in
+    // 512-byte sectors and the first hash block past the superblock.
+    let output = super::verity::VerityOutput {
+        src: "data".into(),
+        data: "data.erofs".into(),
+        hash: "data.erofs".into(),
+        bytes: 0,
+        sha256: String::new(),
+        root_hash: "ab".into(),
+        salt: "cd".into(),
+        uuid: String::new(),
+        hash_offset: 3 * 1024 * 1024,
+        data_blocks: 768,
+        data_block_size: 4096,
+        hash_block_size: 4096,
+        tool_path: String::new(),
+        tool_version: None,
+    };
+    use gaia_spec::AssemblyVerityField as Field;
+    assert_eq!(output.field(Field::DataSectors), "6144");
+    assert_eq!(output.field(Field::HashStartBlock), "769");
+    let separate = super::verity::VerityOutput {
+        hash_offset: 0,
+        data_block_size: 1024,
+        hash_block_size: 512,
+        ..output
+    };
+    assert_eq!(separate.field(Field::DataSectors), "1536");
+    assert_eq!(separate.field(Field::HashStartBlock), "1");
 }
 
 #[test]

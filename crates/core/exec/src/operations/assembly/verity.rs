@@ -66,7 +66,20 @@ impl VerityOutput {
             Field::DataBlocks => self.data_blocks.to_string(),
             Field::DataBlockSize => self.data_block_size.to_string(),
             Field::HashBlockSize => self.hash_block_size.to_string(),
+            Field::DataSectors => self.data_sectors().to_string(),
+            Field::HashStartBlock => self.hash_start_block().to_string(),
         }
+    }
+
+    /// The data's length in 512-byte sectors, a dm-verity table's length.
+    pub(super) fn data_sectors(&self) -> u64 {
+        self.data_blocks * u64::from(self.data_block_size) / 512
+    }
+
+    /// The tree's first hash block on the hash device, past the superblock
+    /// (one hash block at `hash_offset`): the table's `hash_start`.
+    pub(super) fn hash_start_block(&self) -> u64 {
+        self.hash_offset / u64::from(self.hash_block_size) + 1
     }
 }
 

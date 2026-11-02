@@ -6,6 +6,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- Verity tokens have two more fields, `data_sectors` (the data's length in 512-byte sectors) and `hash_start_block` (the tree's first hash block past the superblock), so a kernel dm-verity table for `dm-mod.create=` or `dmsetup` can be written from a build's tokens with no initramfs, for example in a U-Boot environment.
 - Fix: a Rust artifact's own `build_env` target flags were dropped when a `[cpu]` profile applied: Gaia set `CARGO_TARGET_<T>_RUSTFLAGS` from the process environment and the CPU flags only, replacing the artifact's value. Atlas's `board-lite` asks for `+crt-static` on `riscv64gc-unknown-linux-musl` and linked dynamically against a libc that isn't there. The artifact's value is now the base, ahead of the process's, and the CPU's flags are appended to it.
 - ROCK 5C, ROCK 4D and K230D Zero import Atlas's device packages (Atlas d53912e), so `board-lite` is at `/usr/sbin/board-lite` with its init script: about 410 KB more rootfs. The Luckfox Pico Pro moves to the same Atlas rev; its package is unchanged. The K230D image has no network to reach `board-lite` on yet.
 - ROCK 5C, ROCK 4D and Luckfox Pico Pro: rkbin's licence, whose DDR init and BL31 or SPL each image carries, is in the rootfs at `/usr/share/licenses/rkbin/LICENSE` and beside the images as `rkbin-LICENSE.txt`, a required output. The Luckfox's comes from its SDK's rkbin, whose licence text differs from upstream's.
