@@ -8,6 +8,8 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 runner="$root_dir/scripts/qemu-rpi-slots.sh"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
+# No default SSH key from the caller's home.
+export HOME="$work"
 
 disk="$work/disk.img"
 truncate -s 40M "$disk"
@@ -75,6 +77,15 @@ out=$("$runner" --state "$work/st" --fresh --print "$disk")
 check "tryboot.req" "from: tryboot.txt: slots/b/" "$out"
 check "atlas.tryboot" "atlas.tryboot=1" "$out"
 mdel -i "$fat" ::tryboot.req
+
+# An SSH key lands on a new copy's FAT, and only on a new copy.
+printf 'ssh-ed25519 AAAAtest qemu\n' > "$work/key.pub"
+"$runner" --state "$work/st" --fresh --ssh-key "$work/key.pub" --print "$disk" > /dev/null 2>&1
+check "ssh key" "ssh-ed25519 AAAAtest qemu" "$(mtype -i "$work/st/disk.img@@1M" ::board/authorized_keys)"
+if mtype -i "$fat" ::board/authorized_keys > /dev/null 2>&1; then
+	echo "FAIL: the key was written into the image" >&2
+	failures=$((failures + 1))
+fi
 
 # A [tryboot] section and an include that opens a section carry on as text.
 put config.txt 'include extra.txt\nos_prefix=slots/wrong/\n[all]\ninitramfs initramfs\n[tryboot]\nos_prefix=slots/b/\n'

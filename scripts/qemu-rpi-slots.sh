@@ -53,6 +53,9 @@
 #
 # The image is never written: its contents are copied (sparse) to
 # <state>/disk.img once, and the guest writes that copy. --fresh copies again.
+# A new copy gets an SSH public key as board/authorized_keys on its FAT,
+# which a Raze's board-ssh-keys installs for root at boot: --ssh-key, by
+# default ~/.ssh/id_ed25519.pub when it exists (--ssh-key none: no key).
 #
 # Options:
 #   --state DIR     work directory (default: ./qemu-<image name>)
@@ -63,6 +66,7 @@
 #   --net MODE      auto, tap, netns or user (see above)
 #   --mac MAC       the guest NIC's MAC
 #   --serial HEX    the board serial number in the device tree
+#   --ssh-key FILE  the public key for board/authorized_keys, or none
 #   --hostfwd H:G   with --net user: forward host TCP port H to guest port
 #                   G (repeatable; replaces the defaults)
 #   --append ARGS   add ARGS to every boot's kernel command line
@@ -93,6 +97,8 @@ net=auto
 append=""
 mac=52:54:00:77:00:02
 serial=1000000052540077
+ssh_key=""
+[[ ! -r $HOME/.ssh/id_ed25519.pub ]] || ssh_key=$HOME/.ssh/id_ed25519.pub
 tryboot=0
 max_boots=0
 cpu=cortex-a76
@@ -113,6 +119,7 @@ while [[ $# -gt 0 ]]; do
 	--append) append+="${append:+ }$2"; shift 2 ;;
 	--mac) mac="$2"; shift 2 ;;
 	--serial) serial="$2"; shift 2 ;;
+	--ssh-key) ssh_key="$2"; shift 2 ;;
 	--tryboot) tryboot=1; shift ;;
 	--max-boots) max_boots="$2"; shift 2 ;;
 	--cpu) cpu="$2"; shift 2 ;;
@@ -142,7 +149,7 @@ tap | netns | user) ;;
 *) echo "--net is auto, tap, netns or user, not $net" >&2; exit 2 ;;
 esac
 
-for tool in mtype mcopy mdel sfdisk fdtput; do
+for tool in mtype mcopy mdel mmd sfdisk fdtput; do
 	command -v "$tool" > /dev/null || { echo "missing $tool (mtools, util-linux, dtc)" >&2; exit 2; }
 done
 qemu=${QEMU:-qemu-system-aarch64}
@@ -188,9 +195,13 @@ if [[ $net == netns && $print_only -eq 0 ]]; then
 	echo $$ > "$state/netns.pid"
 	echo "== guest network: 10.77.0.50 (host side 10.77.0.1) in a namespace; reach it with" >&2
 	echo "   nsenter -t \$(cat $state/netns.pid) -U -n <command>" >&2
+	echo "   (ssh there needs -F /dev/null: the host's root-owned ssh_config.d is unmapped," >&2
+	echo "   e.g. nsenter -t \$(cat $state/netns.pid) -U -n ssh -F /dev/null root@10.77.0.50)" >&2
 fi
 
+new_copy=0
 if [[ $fresh -eq 1 || ! -e $disk ]]; then
+	new_copy=1
 	rm -f "$disk" "$state/tryboot-next"
 	case "$image" in
 	*.xz) xz -dc "$image" | cp --sparse=always /dev/stdin "$disk" ;;
@@ -318,6 +329,13 @@ make_dtb() {
 
 fat="$disk@@$(fat_offset)"
 [[ $fat != "$disk@@" ]] || { echo "$image has no FAT boot partition" >&2; exit 1; }
+
+if [[ $new_copy -eq 1 && -n $ssh_key && $ssh_key != none ]]; then
+	[[ -r $ssh_key ]] || { echo "cannot read --ssh-key $ssh_key" >&2; exit 2; }
+	fat_has board || mmd -i "$fat" ::board
+	mcopy -o -i "$fat" "$ssh_key" ::board/authorized_keys
+	echo "== root's SSH key on the guest: $ssh_key (board/authorized_keys)" >&2
+fi
 
 boots=0
 while :; do
