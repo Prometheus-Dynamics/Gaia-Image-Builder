@@ -18,7 +18,9 @@
 #   the OS's network configuration matches (enp0s2 otherwise);
 # - /chosen/bootloader/tryboot in the device tree, 1 on a tryboot and 0
 #   otherwise, as the firmware sets it, and atlas.tryboot=0|1 on the
-#   command line for a slot-init that has no device tree to read.
+#   command line for a slot-init that has no device tree to read;
+# - /serial-number in the device tree (--serial, default 1000000052540077),
+#   as a Pi's firmware sets it, so the board keeps one identity across runs.
 # dtoverlay= and dtparam= are not applied: the device tree is the virt
 # machine's, so Pi hardware (RP1, CSI, PIO, the fan) is absent.
 #
@@ -38,7 +40,9 @@
 # - netns: no root needed. A user and network namespace holds its own qtap0
 #   at 10.77.0.1/24 and a dnsmasq handing the guest 10.77.0.50. Run tools
 #   against the guest inside it, as printed at start:
-#     nsenter -t "$(cat <state>/netns.pid)" -U -n --preserve-credentials CMD
+#     nsenter -t "$(cat <state>/netns.pid)" -U -n CMD
+#   (as the namespace's root, which is the caller on the host, so ssh's
+#   ownership checks on ~/.ssh pass)
 #   The guest has no route out of the namespace;
 # - user: QEMU's user-mode network with --hostfwd forwards (default host
 #   15800, 15899, 19200 and 2222 to the guest's 5800, 5899, 9200 and 22);
@@ -58,6 +62,7 @@
 #   --disk-size N   grow the disk copy to N (truncate syntax, e.g. 16G)
 #   --net MODE      auto, tap, netns or user (see above)
 #   --mac MAC       the guest NIC's MAC
+#   --serial HEX    the board serial number in the device tree
 #   --hostfwd H:G   with --net user: forward host TCP port H to guest port
 #                   G (repeatable; replaces the defaults)
 #   --append ARGS   add ARGS to every boot's kernel command line
@@ -87,6 +92,7 @@ hostfwds=()
 net=auto
 append=""
 mac=52:54:00:77:00:02
+serial=1000000052540077
 tryboot=0
 max_boots=0
 cpu=cortex-a76
@@ -106,6 +112,7 @@ while [[ $# -gt 0 ]]; do
 	--net) net="$2"; shift 2 ;;
 	--append) append+="${append:+ }$2"; shift 2 ;;
 	--mac) mac="$2"; shift 2 ;;
+	--serial) serial="$2"; shift 2 ;;
 	--tryboot) tryboot=1; shift ;;
 	--max-boots) max_boots="$2"; shift 2 ;;
 	--cpu) cpu="$2"; shift 2 ;;
@@ -180,7 +187,7 @@ if [[ $net == netns && $print_only -eq 0 ]]; then
 	trap 'kill "$dnsmasq_pid" 2> /dev/null || true' EXIT
 	echo $$ > "$state/netns.pid"
 	echo "== guest network: 10.77.0.50 (host side 10.77.0.1) in a namespace; reach it with" >&2
-	echo "   nsenter -t \$(cat $state/netns.pid) -U -n --preserve-credentials <command>" >&2
+	echo "   nsenter -t \$(cat $state/netns.pid) -U -n <command>" >&2
 fi
 
 if [[ $fresh -eq 1 || ! -e $disk ]]; then
@@ -299,12 +306,14 @@ machine_args() {
 		-device virtio-rng-pci -device i6300esb
 }
 
-# The virt machine's device tree with /chosen/bootloader/tryboot set to $1.
+# The virt machine's device tree with /chosen/bootloader/tryboot set to $1
+# and the board's serial number.
 make_dtb() {
 	local args
 	mapfile -t args < <(machine_args)
 	"$qemu" "${args[@]}" -machine "dumpdtb=$state/virt.dtb" > /dev/null
 	fdtput -p -t x "$state/virt.dtb" /chosen/bootloader tryboot "$1"
+	fdtput -t s "$state/virt.dtb" / serial-number "$serial"
 }
 
 fat="$disk@@$(fat_offset)"
