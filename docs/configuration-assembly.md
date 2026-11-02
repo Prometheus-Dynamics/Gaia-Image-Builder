@@ -658,7 +658,7 @@ The tree uses sha256 and the default superblock. The layout is recorded for the 
 
 To open the tree, the hash device is `dest` when appended or `hash_dest` otherwise, and the root hash and hash offset are the recorded values: `veritysetup open <dest> <name> <hash device> <root_hash> --hash-offset=<hash_offset>`. The superblock records the block sizes, salt and UUID. Two runs over the same `src` give byte-identical output and the same root hash. The reproducibility rests on the salt and UUID being derived from the data, not on a random salt.
 
-A kernel table opens the same tree without an initramfs, through `dm-mod.create=` (`CONFIG_DM_INIT`) or `dmsetup create`: `0 <data_sectors> verity 1 <data device> <hash device> <data_block_size> <hash_block_size> <data_blocks> <hash_start_block> sha256 <root_hash> <salt>`.
+A kernel table opens the same tree without an initramfs, through `dm-mod.create=` (`CONFIG_DM_INIT`) or `dmsetup create`: `0 <data_sectors> verity 1 <data device> <hash device> <data_block_size> <hash_block_size> <data_blocks> <hash_start_block> sha256 <root_hash> <salt>`. The Luckfox Pico Pro example (`examples/boards/luckfox-pico-pro`) writes it into each slot's U-Boot environment.
 
 **`ext4`** (a filesystem) packs `source_tree` into an ext4 image with `mkfs.ext4 -d`, resolved like `veritysetup` (`mkfs.ext4` and `debugfs` from provider host tools, then `PATH`). Options, for `kind = "ext4"` only:
 - `size` (required): a byte size with a binary suffix, or `"auto"`. The size must be a multiple of 4 KiB. Auto sizing counts each file and directory in whole 4 KiB blocks, the inode tables (two inodes per entry plus 64, 256 bytes each), 8 MiB of fixed overhead and the journal, plus a margin of 5% (at least 4 MiB), rounded up to a whole MiB.

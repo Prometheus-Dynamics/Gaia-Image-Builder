@@ -28,7 +28,7 @@ otherwise. "Written" below means built and checked on the host, not booted.
   - What: confirm that the `ov9782` and `raze-fan` boot overlays load, once Atlas has fixed their install path (the 2026-10-23 PV camera incident). If Atlas adopts EROFS 1 MiB pclusters (LZMA level 6, 47.2 to 44.2 MB), measure boot time and first-use reads.
   - Why: both change the boot path and cannot be checked off-device.
   - Done when: the overlays load on a CM5, and the pcluster numbers are measured if Atlas adopts them.
-  - Blocked by: the CM5, away since 2026-10-20.
+  - Blocked by: a Raze slot from the HeliOS coordinator (Raze #1 is a CM5, on the bench behind the SystemCore).
 
 ## Boards: images and support
 
@@ -84,10 +84,10 @@ otherwise. "Written" below means built and checked on the host, not booted.
   - Done when: the module boots mainline with capture working.
   - Blocked by: rkisp2 and rkvenc landing upstream, and a board.
 - **Flame BSP (RV1106G2, HVS_F02)**
-  - What: an RV1106 vendor BSP (armv7) with SPI-NAND boot and the same support as the other targets: EROFS and verity slots, layers, env sets and size reporting. The Luckfox Pico Pro example is the same chip family and builds from the RV1106 SDK, but its root is squashfs without verity. Its kernel has EROFS (LZ4 only, the 5.10 kernel's limit) and dm-verity with `DM_INIT` built in since the Luckfox `linux.fragment`; the slots themselves are not switched yet.
+  - What: an RV1106 vendor BSP (armv7) with SPI-NAND boot and the same support as the other targets: EROFS and verity slots, layers, env sets and size reporting. The Luckfox Pico Pro example is the same chip family and builds from the RV1106 SDK, and its slots are now EROFS with dm-verity opened by `dm-mod.create=` with no initramfs (Atlas 1cd650e reads the new bundle), written and untested on board.
   - Why: Flame.
   - Done when: it boots A/B with EROFS and verity slots.
-  - Blocked by: nothing for the image: EROFS slots with verity, a `dm-mod.create=` line per slot in the slot environments, and the matching change to Atlas's slot install. The board for the boot.
+  - Blocked by: the board for the boot, and a Flame board config built from the Luckfox's.
 - **Low-cost tier: RK3566 and RK3562 (HVS_ML01)**
   - What: both chips (the user said "make both"). The vendor 6.1 BSP and boot chain are shared with the other Rockchip modules. RK3562 boards use 256–512 MB DDR3L, and 16-bit DDR3 boot on the RK3562 is unproven.
   - Device tree inputs (from the PCB session; more pin changes may follow): in `HW-Helios-Platform`, the J1 GPIO map is in `projects/HVS_ML01_DEV01/README.md` ("Software / device tree: J1 GPIO map"). The CM5-header SPI0 (J1 GPIO7–11) uses the RK3562 SPI0 **M1** pin group, not M0. The DDR3L DQ swaps are in `projects/HVS_ML01_DEV01/docs/DDR-MATCHING.md` section 18. Read both again when writing the board's DTS, not this copy.

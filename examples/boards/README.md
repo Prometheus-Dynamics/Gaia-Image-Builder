@@ -73,7 +73,7 @@ boots; `rootfs-a` (bootable, holds `/boot/extlinux/extlinux.conf`),
 | 512K | 512K | `uboot.img` |
 | 1M | 6M | `boot.img` (FIT: zImage, dtb, resource; 4.4 MiB) |
 | 7M | 6M | `boot_b` (empty) |
-| 13M | rest | `ubi.img`: `rootfs_a` (squashfs, via `ubiblock`), `rootfs_b`, `data` (autoresize) |
+| 13M | rest | `ubi.img`: `rootfs_a` (EROFS with its dm-verity tree, via `ubiblock`), `rootfs_b`, `data` (autoresize) |
 
 Flash `ubi.img` with `ubiformat`, not as raw pages (see
 `docs/configuration-assembly.md#ubi-images`).
@@ -121,7 +121,7 @@ Built on 2026-10-31 (Fedora 44 host, GCC 16), each run passing
   32 KiB (`RKNS` header), `extlinux.conf` with the kernel and dtb in
   `rootfs-a`, the loader's `LDR` header.
 - Luckfox Pico Pro: `ubi.img` read back (layout volume, `rootfs_a` holding
-  the squashfs, `data` autoresize), `env.img` CRC and `mtdparts`, the
+  the EROFS and its tree, `data` autoresize), `env.img` CRC and `mtdparts`, the
   `boot.img` FIT hashes; the kernel module check on the 5.10 `zImage`
   (27 modules).
 - K230D Zero: the GPT entries, the SPL, environment and U-Boot copies byte
@@ -147,12 +147,27 @@ possible copies, 128K each, to write unchanged:
 | `env-a-trial.img` | as `env-a.img`, once | as `env-a.img` | `gaia.slot=a gaia.trial=1` |
 | `env-b-trial.img` | as `env-b.img`, once | as `env-b.img` | `gaia.slot=b gaia.trial=1` |
 
+Each root is read-only: EROFS (LZ4HC, 4K blocks), zero-padded to whole blocks,
+with its dm-verity tree (sha256, 4K hash blocks) appended in the same volume.
+The kernel opens it itself, with no initramfs: each environment's command line
+has `dm-mod.create="vroot,,,ro,0 <sectors> verity 1 <dev> <dev> 4096 4096
+<data blocks> <hash start> sha256 <root hash> <salt>" root=/dev/dm-0
+rootfstype=erofs`, where `<dev>` is the slot's `ubiblock` and the numbers are
+the build's verity tokens (`data_sectors`, `hash_start_block`; see
+`docs/configuration-assembly.md#dm-verity-and-ext4`). So an environment image
+belongs to the root image of the same build: install them from one
+`slot-bundle.tar`. A root that fails verification reads as I/O errors; on a
+trial it never commits, and the next boot falls back. The build is
+reproducible (`BR2_REPRODUCIBLE`): the same tree gives the same root hash.
+
 U-Boot's `boot_fit` only reads the partition named `boot`, so the slot is chosen
 by which partition has that name: the running slot's is `boot`, and the other
 is named for the slot it holds (`boot_a` or `boot_b`). `env`, `ubi` and every
 mtd number stay the same.
 
-`slot-bundle.tar` holds `boot.img`, `rootfs.squashfs` and all four environments.
+`slot-bundle.tar` holds `boot.img`, `rootfs.erofs` (the root with its tree) and all four
+environments. Atlas's `atlas-ubi` reads `rootfs.erofs`, and `rootfs.squashfs` from
+older bundles.
 The root is read-only, and UBI volume `data` is mounted at `/data` as UBIFS, which
 the kernel formats on the first mount since the volume starts empty. It is shared
 by both slots, so a commit image kept there survives the trial's reboot.
@@ -194,6 +209,9 @@ To check on a board first:
 
 - `mtd list` at the U-Boot prompt names `spi-nand0`.
 - A trial of each slot, killed in Linux, comes back on the committed slot.
+- `dmsetup table` shows `vroot` as verity over the slot's `ubiblock`, and `/`
+  is mounted from `/dev/dm-0` as EROFS. A root with one byte flipped in its
+  data gives I/O errors and its trial falls back.
 - `/data` is formatted and mounted on the first boot.
 - A trial nobody commits resets at about 600 s plus the watchdog timeout, and a
   commit stands the watchdog down.
@@ -209,8 +227,5 @@ To check on a board first:
   `lsusb` on the ROCK 4D.
 - Slot switching on the ROCK and K230 boards: their images boot slot A;
   selecting B (U-Boot environment or `extlinux` labels) is for the updater.
-- Luckfox NAND slots are written, untested on board; see below.
-- dm-verity and EROFS on the Luckfox's read-only slots: its kernel now has
-  EROFS (LZ4) and dm-verity with `DM_INIT` built in (`assets/linux.fragment`),
-  but the slots are still squashfs without verity. Switching them changes the
-  slot environments' command lines and so the contract with Atlas.
+- Luckfox NAND slots, EROFS and dm-verity included, are written, untested on
+  board; see below.

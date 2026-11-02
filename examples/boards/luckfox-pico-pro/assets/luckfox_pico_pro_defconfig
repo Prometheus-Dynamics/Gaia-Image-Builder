@@ -33,5 +33,12 @@ BR2_LINUX_KERNEL_ZIMAGE=y
 BR2_LINUX_KERNEL_NEEDS_HOST_OPENSSL=y
 BR2_LINUX_KERNEL_DTS_SUPPORT=y
 BR2_LINUX_KERNEL_INTREE_DTS_NAME="rv1106g-luckfox-pico-pro-max"
-BR2_TARGET_ROOTFS_SQUASHFS=y
-BR2_TARGET_ROOTFS_SQUASHFS4_XZ=y
+# The slot root: EROFS with LZ4HC, which the 5.10 kernel's LZ4 decoder reads
+# (assets/linux.fragment). Gaia appends its dm-verity tree with veritysetup
+# from host-cryptsetup. Reproducible, so the EROFS has a fixed time and a zero
+# UUID: the same tree gives the same root hash in the slot environments.
+BR2_REPRODUCIBLE=y
+BR2_TARGET_ROOTFS_EROFS=y
+BR2_TARGET_ROOTFS_EROFS_LZ4HC=y
+BR2_TARGET_ROOTFS_EROFS_LZ4HC_LEVEL=12
+BR2_PACKAGE_HOST_CRYPTSETUP=y
