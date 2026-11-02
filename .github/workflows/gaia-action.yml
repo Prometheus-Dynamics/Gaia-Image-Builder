@@ -5,6 +5,7 @@ name: Gaia action
 on:
   push:
     branches:
+      - dev
       - main
   pull_request:
 
