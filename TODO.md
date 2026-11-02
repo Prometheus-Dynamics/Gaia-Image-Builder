@@ -58,9 +58,9 @@ otherwise. "Written" below means built and checked on the host, not booted.
   - Done when: checked on each board.
   - Blocked by: the boards.
 - **G7: board examples left**
-  - What: examples for the RK3566 and RK3562, a K230 SPI-NAND layout (the Zero only has a TF slot), and running the board examples in the gate.
-  - Why: each chip needs a full config to build from. The gate does not read `examples/boards/` or `examples/sim-x86_64` today, so a config change can break them unnoticed.
-  - Done when: each example builds where its sources are present, and every board example validates and plans in `scripts/ci.sh`.
+  - What: examples for the RK3566 and RK3562, and a K230 SPI-NAND layout (the Zero only has a TF slot).
+  - Why: each chip needs a full config to build from.
+  - Done when: each example builds where its sources are present, and is added to `crates/core/app/tests/examples_boards.rs`.
   - Blocked by: nothing.
 - **Noisy firmware warnings**
   - What: fewer `asks for firmware` lines from `image check`, for example one summary per image with the list in the report.
@@ -144,6 +144,6 @@ Cut and staying cut: emulated QEMU boot, TUI cleanup, deb packaging niceties.
 - G9, armv7 aliases and armhf closure: 3e51c14.
 - G8, the UBI writer: 1a81221. The kernel attaching the Luckfox image on nandsim: 44fc94b. Atlas read the real `ubi.img`, so it has the volume layout.
 - G10, CPU profile flags in cargo and Buildroot: 1966f26, with `cortex-a72` in a2aeb06. Per-board report, measured with Atlas's crates for every profile: docs/configuration-sources.md#cpu-profiles. HeliOS's Raze build uses `cortex-a76` on `architecture-overhaul` (HeliOS 48492ee5, whose commit message reports the full artifact build passing).
-- G7, the examples that exist: ROCK 5C, ROCK 4D, Luckfox Pico Pro and K230D Zero in 006284a and 3d1f249; the cast receivers in a2aeb06 and db7b92a.
+- G7, the gate validates and plans every board example and `examples/sim-x86_64`: `crates/core/app/tests/examples_boards.rs`. The examples that exist: ROCK 5C, ROCK 4D, Luckfox Pico Pro and K230D Zero in 006284a and 3d1f249; the cast receivers in a2aeb06 and db7b92a.
 - `${source.<id>.commit_count}`: b47a9e5.
 - Luckfox NAND slots, written and untested on board: 942746b, 720c211, 17c20df.

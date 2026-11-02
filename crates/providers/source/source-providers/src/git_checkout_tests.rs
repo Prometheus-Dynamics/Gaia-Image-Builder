@@ -463,3 +463,37 @@ fn remote_checkouts_share_their_mirror_and_fetch_only_what_they_need() {
         "two"
     );
 }
+
+#[test]
+fn threads_checking_out_the_same_import_each_get_the_commit() {
+    let scratch = TempDir::new("gaia-import-threads");
+    let repo = scratch.join("repo");
+    init_repo(&repo);
+    std::fs::write(repo.join("a.txt"), "one").expect("file");
+    let head = commit_all(&repo, "one");
+    let dest = scratch.join("checkout");
+    let url = format!("file://{}", repo.display());
+    let results = std::thread::scope(|scope| {
+        let handles = (0..4)
+            .map(|_| {
+                scope.spawn(|| {
+                    crate::ensure_git_revision_checkout(
+                        scratch.path(),
+                        &url,
+                        &head,
+                        &dest,
+                        std::time::Duration::from_secs(60),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().expect("thread"))
+            .collect::<Vec<_>>()
+    });
+    for result in results {
+        assert_eq!(result.as_deref(), Ok(head.as_str()));
+    }
+    assert_eq!(std::fs::read_to_string(dest.join("a.txt")).unwrap(), "one");
+}

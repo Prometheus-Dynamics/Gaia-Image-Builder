@@ -42,7 +42,7 @@ pub fn ensure_git_revision_checkout(
         dest.file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default(),
-        std::process::id()
+        unique_suffix()
     ));
     let _ = fs::remove_dir_all(&staging);
     let result = clone_and_checkout(&clone_from, rev, &staging, timeout);
@@ -164,15 +164,44 @@ fn ensure_import_mirror(
         fs::create_dir_all(parent)
             .map_err(|error| format!("failed to create '{}': {error}", parent.display()))?;
     }
+    // Cloned beside the mirror and renamed into place, so a concurrent
+    // resolve (another thread or process) never reads a half-made mirror.
+    let staging = mirror.with_extension(format!("git.tmp-{}", unique_suffix()));
+    let _ = fs::remove_dir_all(&staging);
     let mut clone = git_command();
     clone
         .arg("clone")
         .arg("--quiet")
         .arg("--mirror")
         .arg(repo)
-        .arg(&mirror);
-    run_git(clone, timeout, &format!("git clone --mirror '{repo}'"))?;
+        .arg(&staging);
+    if let Err(error) = run_git(clone, timeout, &format!("git clone --mirror '{repo}'")) {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(error);
+    }
+    if fs::rename(&staging, &mirror).is_err() {
+        // Another resolve finished the same mirror first.
+        let _ = fs::remove_dir_all(&staging);
+        if !mirror.join("HEAD").is_file() {
+            return Err(format!(
+                "failed to move the mirror into '{}'",
+                mirror.display()
+            ));
+        }
+    }
     Ok(mirror)
+}
+
+/// A name part no other staging dir has: the process id and a counter, since
+/// threads of one process (parallel tests, a server) resolve concurrently.
+fn unique_suffix() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    format!(
+        "{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 fn run_git(mut command: Command, timeout: Duration, label: &str) -> Result<(), String> {
