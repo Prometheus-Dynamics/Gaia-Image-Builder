@@ -43,9 +43,10 @@ jobs:
         with:
           tool: nextest
 
-      # mkenvimage and fw_printenv check the uboot-env transform's images.
-      - name: Install u-boot-tools and minisign
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends u-boot-tools minisign
+      # mkenvimage and fw_printenv check the uboot-env transform's images;
+      # mtools, dosfstools and fdtput test scripts/qemu-rpi-slots.sh.
+      - name: Install u-boot-tools, minisign and the QEMU runner's tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends u-boot-tools minisign mtools dosfstools device-tree-compiler
 
       # Sigstore's release binary, pinned by version and sha256. The signing
       # tests sign offline and never contact Sigstore.
@@ -56,6 +57,9 @@ jobs:
           sudo install -m 0755 "$RUNNER_TEMP/cosign" /usr/local/bin/cosign
           minisign -v
           cosign version | grep GitVersion
+
+      - name: Test the QEMU runner's firmware emulation
+        run: scripts/qemu-rpi-slots-test.sh
 
       - name: Run workspace tests
         run: cargo nextest run --workspace --all-features --profile ci

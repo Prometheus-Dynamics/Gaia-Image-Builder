@@ -30,6 +30,14 @@ otherwise. "Written" below means built and checked on the host, not booted.
   - Done when: the overlays load on a CM5, and the pcluster numbers are measured if Atlas adopts them.
   - Blocked by: a Raze slot from the HeliOS coordinator (Raze #1 is a CM5, on the bench behind the SystemCore).
 
+## Boards: emulated
+
+- **Raze OS in QEMU**
+  - What: boot a Raze dynamic-slots image in `qemu-system-aarch64 -M virt` on the build host, so HeliOS's whole stack runs without a board: systemd, Orion, lemnosd and Styx in their sim modes, the slots writer's stage, apply, trial and rollback. The user un-cut this on 2026-11-02 (through HeliOS) while the SystemCore and Raze #1 are down. `scripts/qemu-rpi-slots.sh` does the Pi firmware's part and the network (a rootless namespace with DHCP at 10.77.0.50 by default). On 2026-11-02 HeliOS's board image ef4f1f2f, booted with a Raze kernel carrying the qemu fragment, reached `running` with no failed unit but the USB gadget; SSH, helios-api, the board agent and Orion answered on 10.77.0.50; a `reboot "0 tryboot"` booted tryboot.txt and slot-init started the slot as a trial.
+  - Why: the boards are away for hours; HeliOS's smoke test (update refusal, stored-graph refresh, Orion persistence, the UI) needs a running OS.
+  - Done when: a Raze image built with the qemu fragment by Buildroot (its own kernel, so no `--kernel`) boots the same way, with Styx and lemnosd in sim mode, and a staged slot confirms or rolls back.
+  - Blocked by: Atlas, for `BR2_RAZE_KERNEL_QEMU` (the fragment appended after `raze.config` and `raze-trim.config`); HeliOS, for its qemu layer (`input.machine = "qemu"`, the sim settings). A kernel built outside Buildroot must use the board's exact `.config` and Bootlin toolchain: with Fedora's GCC 16 or a re-derived config the board's modules refuse to load (MODVERSIONS CRCs on the block layer).
+
 ## Boards: images and support
 
 - **Remote install on the Luckfox**
@@ -125,7 +133,7 @@ The user pinned these on 2026-10-30.
 
 ## Backlog
 
-Cut and staying cut: emulated QEMU boot, TUI cleanup, deb packaging niceties.
+Cut and staying cut: TUI cleanup, deb packaging niceties.
 
 ## Done
 

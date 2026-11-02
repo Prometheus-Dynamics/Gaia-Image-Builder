@@ -34,6 +34,9 @@ for tool in minisign cosign; do
   fi
 done
 
+echo "==> Testing the QEMU runner's firmware emulation"
+"$root_dir/scripts/qemu-rpi-slots-test.sh"
+
 echo "==> Running tests"
 # nextest runs every test in parallel (~15 s here against ~60 s for cargo
 # test); cargo test stays the fallback where it is not installed.
