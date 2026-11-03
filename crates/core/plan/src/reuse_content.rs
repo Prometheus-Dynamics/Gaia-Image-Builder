@@ -164,8 +164,13 @@ fn manifest_dir<'a>(path: &'a Path, collect_dir: &'a Path) -> &'a Path {
 /// digest recorded in the manifest under `manifest` is used when the file's
 /// size and mtime still match it; the file is only read otherwise.
 fn cached_content_signature(manifest: &Path, path: &Path) -> String {
+    memoized_content_signature(Some(manifest), path)
+}
+
+/// [`cached_content_signature`], with or without a manifest to consult.
+fn memoized_content_signature(manifest: Option<&Path>, path: &Path) -> String {
     let Ok(metadata) = fs::metadata(path) else {
-        return content_state_signature(path);
+        return hashed_content_signature(path);
     };
     let Some(mtime) = metadata
         .modified()
@@ -173,16 +178,17 @@ fn cached_content_signature(manifest: &Path, path: &Path) -> String {
         .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
         .map(|duration| duration.as_nanos())
     else {
-        return content_state_signature(path);
+        return hashed_content_signature(path);
     };
     let key = (path.to_path_buf(), metadata.len(), mtime);
     let cache = DIGEST_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Some(digest) = cache.lock().ok().and_then(|map| map.get(&key).cloned()) {
         return digest;
     }
-    let digest = recorded_sha256(manifest, path)
+    let digest = manifest
+        .and_then(|manifest| recorded_sha256(manifest, path))
         .map(|hex| format!("sha256:{hex}"))
-        .unwrap_or_else(|| content_state_signature(path));
+        .unwrap_or_else(|| hashed_content_signature(path));
     if let Ok(mut map) = cache.lock() {
         if map.len() >= MAX_CACHED_DIGESTS {
             map.clear();
@@ -249,14 +255,27 @@ fn mode_signature(_path: &Path) -> String {
 }
 
 /// SHA-256 of a file's bytes, or the digest of a directory tree's files.
+/// The content of a file (memoized for the process, see
+/// [`cached_content_signature`]) or a directory tree. An install's content is
+/// its artifact's bytes and every stage item depends on every install, so
+/// without the memo one plan read each artifact once per consumer, twice
+/// (the reuse decision and its details): 16 GB of SHA-256, 9 s, for a
+/// HeliOS Raze build with nothing to do.
 pub(crate) fn content_path_signature(path: &Path) -> String {
-    #[cfg(test)]
-    crate::reuse::CONTENT_HASHES.with(|count| count.set(count.get() + 1));
     if path.is_dir() {
+        #[cfg(test)]
+        crate::reuse::CONTENT_HASHES.with(|count| count.set(count.get() + 1));
         tree_digest_signature(path)
     } else {
-        content_state_signature(path)
+        memoized_content_signature(None, path)
     }
+}
+
+/// `content_state_signature`, counted in tests.
+fn hashed_content_signature(path: &Path) -> String {
+    #[cfg(test)]
+    crate::reuse::CONTENT_HASHES.with(|count| count.set(count.get() + 1));
+    content_state_signature(path)
 }
 
 #[cfg(test)]
