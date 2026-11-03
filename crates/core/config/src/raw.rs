@@ -1045,6 +1045,8 @@ pub(crate) struct RawBuildrootExpectedImageConfig {
 pub(crate) struct RawBuildrootRootfsConfig {
     /// Buildroot packages whose files are left out of the root filesystem.
     pub exclude_packages: Vec<String>,
+    /// Remove in-tree modules that an `updates/` module shadows.
+    pub drop_shadowed_modules: Option<bool>,
     /// Rootfs overlay directories, appended to `BR2_ROOTFS_OVERLAY`.
     pub overlays: Vec<String>,
 }

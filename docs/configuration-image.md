@@ -332,6 +332,26 @@ out of its root filesystem, without a second tree. `image:build` removes the
 files of the listed packages from `target/` before the image's post-build
 scripts and before the filesystem images, so `rootfs.*` does not contain them.
 
+#### Shadowed kernel modules
+
+```toml
+[image.rootfs]
+drop_shadowed_modules = true   # default false
+```
+
+An out-of-tree module installed under `lib/modules/<release>/updates/`
+replaces an in-tree module of the same name: modprobe loads the `updates/`
+copy (depmod's search order), so the in-tree `.ko` under `kernel/` is never
+loaded. With `drop_shadowed_modules`, `image:build` removes each such in-tree
+module (names compared as modprobe does, `-` and `_` the same) from `target/`
+in target-finalize, after `exclude_packages`, and runs depmod again. An image
+that leaves out the package with the `updates/` module therefore keeps the
+in-tree one. The run summary names the modules dropped and their size. Like
+`exclude_packages` it needs per-package directories and no shared output. The
+image check's `module_duplicate` warning names this key when an `updates/`
+module shadows in-tree copies. Layered configs: the last layer that sets it
+wins.
+
 #### Rootfs overlays
 
 ```toml

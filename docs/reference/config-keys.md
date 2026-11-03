@@ -366,7 +366,7 @@ Keys: `kind`, `major`, `minor`, `mode`, `path`, `tree`.
 
 Described in [Image](../configuration-image.md#image).
 
-Keys: `exclude_packages`, `overlays`.
+Keys: `drop_shadowed_modules`, `exclude_packages`, `overlays`.
 
 ## `[[image.expected_images]]`
 

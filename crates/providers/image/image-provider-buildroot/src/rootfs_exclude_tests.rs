@@ -24,7 +24,7 @@ fn names(list: &[&str]) -> Vec<String> {
 }
 
 fn stage(root: &Path, excluded: &[&str]) -> StagedRootfsExclude {
-    stage_rootfs_exclude(root, &names(excluded))
+    stage_rootfs_exclude(root, &names(excluded), false)
         .expect("stage")
         .expect("an exclusion is staged")
 }
@@ -450,4 +450,94 @@ fn excluding_a_kernel_module_reruns_depmod_for_its_kernel() {
         .expect("sh runs the script");
     assert!(status.success());
     assert!(!calls.exists(), "no depmod without a removed module");
+}
+
+/// `drop_shadowed_modules`: an in-tree module that an `updates/` module of
+/// the same modprobe name shadows is removed (merged /usr, `-` and `_` the
+/// same), after the exclusion: a left-out package's `updates/` module shadows
+/// nothing, so its in-tree module stays.
+#[cfg(unix)]
+#[test]
+fn drop_shadowed_modules_removes_in_tree_modules_an_updates_module_shadows() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root_scratch = scratch("shadowed");
+    let root = root_scratch.path();
+    let release = "usr/lib/modules/7.2.9-v8-16k";
+    put(
+        root,
+        "build/packages-file-list.txt",
+        format!(
+            "styx-ov9282,./{release}/updates/ov9282.ko\n\
+             styx-cfe,./{release}/updates/rp1_cfe_downstream.ko\n\
+             styx-pispbe,./{release}/updates/pisp-be.ko\n\
+             linux,./{release}/kernel/drivers/media/i2c/ov9282.ko\n\
+             linux,./{release}/kernel/drivers/media/rp1_cfe/rp1-cfe-downstream.ko.xz\n\
+             linux,./{release}/kernel/drivers/media/pisp_be/pisp-be.ko\n\
+             linux,./{release}/kernel/drivers/media/i2c/imx219.ko\n"
+        )
+        .as_bytes(),
+    );
+    for rel in [
+        "updates/ov9282.ko",
+        "updates/rp1_cfe_downstream.ko",
+        "updates/pisp-be.ko",
+        "kernel/drivers/media/i2c/ov9282.ko",
+        "kernel/drivers/media/rp1_cfe/rp1-cfe-downstream.ko.xz",
+        "kernel/drivers/media/pisp_be/pisp-be.ko",
+        "kernel/drivers/media/i2c/imx219.ko",
+    ] {
+        put(root, &format!("target/{release}/{rel}"), b"module");
+        put(root, &format!("per-package/x/target/{release}/{rel}"), b"");
+    }
+    put(
+        root,
+        &format!("per-package/linux/target/{release}/kernel/drivers/media/i2c/ov9282.ko"),
+        &[0u8; 2048],
+    );
+    std::os::unix::fs::symlink("usr/lib", root.join("target/lib")).expect("lib link");
+    let host = root.join("host");
+    put(&host, "sbin/depmod", b"#!/bin/sh\nexit 0\n");
+    fs::set_permissions(host.join("sbin/depmod"), fs::Permissions::from_mode(0o755))
+        .expect("executable depmod");
+
+    let staged = stage_rootfs_exclude(root, &names(&["styx-pispbe"]), true)
+        .expect("stage")
+        .expect("staged");
+    let status = Command::new("sh")
+        .arg(&staged.script)
+        .arg(root.join("target"))
+        .env("HOST_DIR", &host)
+        .status()
+        .expect("sh runs the script");
+    assert!(status.success());
+    let summary = staged.verify().expect("the removal verifies");
+
+    let modules = root.join("target").join(release);
+    assert!(!modules.join("kernel/drivers/media/i2c/ov9282.ko").exists());
+    assert!(!modules.join("kernel/drivers/media/rp1_cfe").exists());
+    assert!(modules.join("updates/ov9282.ko").is_file());
+    assert!(
+        modules
+            .join("kernel/drivers/media/pisp_be/pisp-be.ko")
+            .is_file(),
+        "its updates/ module is left out, so the in-tree one stays"
+    );
+    assert!(modules.join("kernel/drivers/media/i2c/imx219.ko").is_file());
+    assert_eq!(summary.files, 1);
+    assert_eq!(summary.shadowed.len(), 2);
+    assert_eq!(summary.shadowed_bytes, 2048);
+    assert_eq!(
+        summary.shadowed_message().as_deref(),
+        Some(
+            "rootfs: dropped 2 in-tree module(s) that updates/ modules shadow (ov9282.ko, rp1-cfe-downstream.ko.xz): 2.0 KiB"
+        )
+    );
+
+    // Off, nothing is staged for an image with no exclusion.
+    assert!(
+        stage_rootfs_exclude(root, &[], false)
+            .expect("stage")
+            .is_none()
+    );
 }

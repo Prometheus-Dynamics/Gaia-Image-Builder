@@ -463,7 +463,12 @@ fn run_buildroot_steps(
     if let Some(exclude) = options.rootfs_exclude {
         match exclude.verify() {
             Ok(summary) => {
-                messages.push(format!("{SUMMARY_NOTE_PREFIX}{}", summary.message()));
+                if !summary.names.is_empty() {
+                    messages.push(format!("{SUMMARY_NOTE_PREFIX}{}", summary.message()));
+                }
+                if let Some(shadowed) = summary.shadowed_message() {
+                    messages.push(format!("{SUMMARY_NOTE_PREFIX}{shadowed}"));
+                }
                 if let Some(shared) = summary.shared_message() {
                     messages.push(format!("{SUMMARY_NOTE_PREFIX}{shared}"));
                 }

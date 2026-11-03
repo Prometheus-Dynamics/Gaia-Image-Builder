@@ -668,6 +668,14 @@ pub(crate) fn preview_buildroot(
             lines: rootfs_lines,
         });
     }
+    if rootfs_drop_shadowed_modules(image) {
+        preview.sections.push(PreviewSection {
+            title: "rootfs modules".into(),
+            lines: vec![
+                "drops each in-tree module that an updates/ module of the same name shadows".into(),
+            ],
+        });
+    }
     preview.sections.push(PreviewSection {
         title: "package cache".into(),
         lines: cache_lines,

@@ -364,11 +364,20 @@ fn check_duplicates(
             .map(|copy| copy.rel_path.as_str())
             .filter(|rel| *rel != winner.rel)
             .collect();
+        // An out-of-tree override of an in-tree module: the build can drop
+        // the in-tree copy.
+        let hint = if winner.rel.starts_with("updates/")
+            && shadowed.iter().all(|rel| rel.starts_with("kernel/"))
+        {
+            "; [image.rootfs] drop_shadowed_modules = true leaves the in-tree copy out"
+        } else {
+            ""
+        };
         out.warning(
             "module_duplicate",
             Some(winner.rel.as_str()),
             format!(
-                "module {name} ships {} times: modprobe loads {} ({reason}); shadowed: {}",
+                "module {name} ships {} times: modprobe loads {} ({reason}); shadowed: {}{hint}",
                 copies.len(),
                 winner.rel,
                 shadowed.join(", ")

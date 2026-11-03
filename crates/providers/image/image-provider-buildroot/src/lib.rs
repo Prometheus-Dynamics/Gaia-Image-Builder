@@ -156,9 +156,11 @@ impl ImageProvider for BuildrootImageProvider {
                 log_sink: log_sink.clone(),
                 cancel_check: cancel_check.clone(),
             };
-            if policy.shared_output && !rootfs_exclude_names(image).is_empty() {
+            if policy.shared_output
+                && (!rootfs_exclude_names(image).is_empty() || rootfs_drop_shadowed_modules(image))
+            {
                 return Err(ImageProviderError::backend_command(
-                    "image.rootfs.exclude_packages cannot be used with shared Buildroot output (policy.providers.buildroot.shared_output): the tree is shared by every image",
+                    "image.rootfs.exclude_packages and drop_shadowed_modules cannot be used with shared Buildroot output (policy.providers.buildroot.shared_output): the tree is shared by every image",
                 ));
             }
             if policy.shared_output {

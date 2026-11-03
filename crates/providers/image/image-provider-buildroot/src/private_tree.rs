@@ -66,12 +66,18 @@ pub(super) fn build_with_private_output(
 ) -> Result<Vec<String>, ImageProviderError> {
     let target_dir = output_dir.join("target");
     let rootfs_names = rootfs_exclude_names(image);
-    if !rootfs_names.is_empty() && !command.policy.parallel_packages {
+    if (!rootfs_names.is_empty() || rootfs_drop_shadowed_modules(image))
+        && !command.policy.parallel_packages
+    {
         return Err(ImageProviderError::backend_command(
-            "image.rootfs.exclude_packages needs per-package directories (policy.providers.buildroot.parallel_packages): without them Buildroot copies the excluded files back into target/ on every finalize",
+            "image.rootfs.exclude_packages and drop_shadowed_modules need per-package directories (policy.providers.buildroot.parallel_packages): without them Buildroot copies the excluded files back into target/ on every finalize",
         ));
     }
-    let rootfs_exclude = stage_rootfs_exclude(output_dir, &rootfs_names)?;
+    let rootfs_exclude = stage_rootfs_exclude(
+        output_dir,
+        &rootfs_names,
+        rootfs_drop_shadowed_modules(image),
+    )?;
     let clock = gaia_process::ActiveClock::start();
     let staged_feed = stage_image_feed_for_make(spec, image, output_dir)?;
     let staging_step = phase_step_message("image feed staging", &clock, &[]);

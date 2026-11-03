@@ -284,6 +284,11 @@ pub struct BuildrootImageSpec {
     /// Buildroot packages whose files are left out of `target/` before the
     /// filesystem images are made (`[image.rootfs] exclude_packages`).
     pub rootfs_exclude_packages: Vec<String>,
+    /// Remove an in-tree module that an `updates/` module of the same name
+    /// shadows (`[image.rootfs] drop_shadowed_modules`). Left out when off, so
+    /// existing builds keep their reuse digests.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rootfs_drop_shadowed_modules: bool,
 }
 
 impl BuildrootImageSpec {
@@ -307,6 +312,7 @@ impl Default for BuildrootImageSpec {
             external_tree_mode: BuildrootExternalTreeModeSpec::Auto,
             expected_images: Vec::new(),
             rootfs_exclude_packages: Vec::new(),
+            rootfs_drop_shadowed_modules: false,
         }
     }
 }

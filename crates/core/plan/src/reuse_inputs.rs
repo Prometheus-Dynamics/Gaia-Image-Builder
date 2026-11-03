@@ -276,6 +276,11 @@ fn image_inputs(spec: &ResolvedBuildSpec, include_post_image: bool, inputs: &mut
     let feed = take_field(&mut rest, "", "feed");
     let output = take_field(&mut rest, "", "output");
     let rootfs_exclude = take_field(&mut rest, buildroot_definition, "rootfs_exclude_packages");
+    let drop_shadowed = take_field(
+        &mut rest,
+        buildroot_definition,
+        "rootfs_drop_shadowed_modules",
+    );
     if include_post_image {
         inputs.json("feed", feed);
         inputs.json("output", output);
@@ -284,6 +289,9 @@ fn image_inputs(spec: &ResolvedBuildSpec, include_post_image: bool, inputs: &mut
             .is_some_and(|packages| !packages.is_empty())
         {
             inputs.json("rootfs exclude packages", rootfs_exclude);
+        }
+        if drop_shadowed.as_bool() == Some(true) {
+            inputs.json("rootfs drop shadowed modules", drop_shadowed);
         }
     }
     match &image.definition {
