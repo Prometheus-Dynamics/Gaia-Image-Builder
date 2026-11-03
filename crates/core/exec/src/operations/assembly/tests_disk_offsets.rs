@@ -312,7 +312,7 @@ fn a_disk_counts_its_zero_runs_as_holes() {
     file.write_all(&[1u8; 4096]).expect("data");
     drop(file);
     let data = super::disks::allocated_bytes(&path);
-    assert!(data >= 4096 && data < MIB, "{data}");
+    assert!((4096..MIB).contains(&data), "{data}");
 }
 
 #[test]
