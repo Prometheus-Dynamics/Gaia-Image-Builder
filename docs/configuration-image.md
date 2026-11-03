@@ -591,6 +591,8 @@ pi_model = "cm5"                         # optional: evaluate the boot config's 
 optional_firmware = ["rtl_nic/rtl8157-1.fw"]  # optional: firmware a module lists but works without (`*` wildcards)
 ```
 
+Across layers the table merges key by key: a later layer's key replaces the earlier one, and `optional_firmware` lists add up, so a device layer's firmware list survives an OS layer's own `[image.checks]`.
+
 Paths are as written: a relative one resolves against the workspace root. The three paths are overrides for a build that keeps its kernel elsewhere; an override that names no file or directory is an error, while a default that is missing is a warning.
 
 The kernel module checks run on every shipped `.ko` (64-bit or 32-bit ELF), `.ko.xz`, `.ko.zst` or `.ko.gz` (compressed modules are decompressed with `xz`, `zstd` or `gzip` from `PATH`). The kernel release is read from the shipped kernel image's `Linux version <release>` banner, gunzipped first when the image is gzip, and read from the gzip, xz or zstd payload of a self-decompressing image (an arm `zImage`) whose banner is compressed, so a kernel and modules from different builds are caught. The default kernel image is the one the Buildroot config's kernel format makes, named as Buildroot names it (`Image`, `zImage`, `uImage`, `Image.gz`, `vmlinux`, a custom target's name, ...). When the Buildroot config has no `BR2_LINUX_KERNEL=y` (and no override is set) the check is reported as skipped.

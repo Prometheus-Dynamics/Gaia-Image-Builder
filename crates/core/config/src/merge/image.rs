@@ -1,6 +1,6 @@
 use crate::raw::{
-    RawBuildrootRootfsConfig, RawImageConfig, RawImageDefinition, RawImageFeedConfig,
-    RawImageOutputConfig, RawStartingPointPackagesConfig,
+    RawBuildrootRootfsConfig, RawImageChecksConfig, RawImageConfig, RawImageDefinition,
+    RawImageFeedConfig, RawImageOutputConfig, RawStartingPointPackagesConfig,
 };
 use crate::raw_assembly::RawImageAssemblyConfig;
 
@@ -49,13 +49,34 @@ pub(super) fn merge_image(
         assembly: merge_image_assembly(base.assembly, overlay.assembly),
         signing: overlay.signing.or(base.signing),
         layers: overlay.layers.or(base.layers),
-        checks: overlay.checks.or(base.checks),
+        checks: merge_checks(base.checks, overlay.checks),
         // Kept in order; a duplicate id is a validation error, not a merge.
         hardware: [base.hardware, overlay.hardware].concat(),
         kind_given: base.kind_given || overlay.kind_given,
         kind_layer: overlay.kind_layer.or(base.kind_layer),
     };
     (merged, Vec::new())
+}
+
+/// `[image.checks]`, key by key: a later layer's value wins, and
+/// `optional_firmware` lists add up, so an OS's checks keep the firmware a
+/// device layer declared optional.
+fn merge_checks(
+    base: Option<RawImageChecksConfig>,
+    overlay: Option<RawImageChecksConfig>,
+) -> Option<RawImageChecksConfig> {
+    let (base, overlay) = match (base, overlay) {
+        (Some(base), Some(overlay)) => (base, overlay),
+        (base, overlay) => return overlay.or(base),
+    };
+    Some(RawImageChecksConfig {
+        kernel_modules: overlay.kernel_modules.or(base.kernel_modules),
+        modules_dir: overlay.modules_dir.or(base.modules_dir),
+        symvers: overlay.symvers.or(base.symvers),
+        kernel_image: overlay.kernel_image.or(base.kernel_image),
+        pi_model: overlay.pi_model.or(base.pi_model),
+        optional_firmware: merge_string_lists(base.optional_firmware, overlay.optional_firmware),
+    })
 }
 
 fn merge_output(base: RawImageOutputConfig, overlay: RawImageOutputConfig) -> RawImageOutputConfig {
@@ -472,5 +493,32 @@ mod tests {
             }
             other => panic!("expected buildroot image, got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod checks_tests {
+    use super::*;
+
+    #[test]
+    fn a_later_checks_table_keeps_the_earlier_optional_firmware_and_unset_keys() {
+        let device = RawImageChecksConfig {
+            pi_model: Some("cm5".into()),
+            optional_firmware: vec!["rtl_nic/rtl8157-1.fw".into()],
+            ..RawImageChecksConfig::default()
+        };
+        let os = RawImageChecksConfig {
+            kernel_modules: Some(true),
+            optional_firmware: vec!["brcm/*".into(), "rtl_nic/rtl8157-1.fw".into()],
+            ..RawImageChecksConfig::default()
+        };
+        let merged = merge_checks(Some(device), Some(os)).expect("checks");
+        assert_eq!(merged.pi_model.as_deref(), Some("cm5"));
+        assert_eq!(merged.kernel_modules, Some(true));
+        assert_eq!(
+            merged.optional_firmware,
+            vec!["rtl_nic/rtl8157-1.fw".to_string(), "brcm/*".to_string()]
+        );
+        assert_eq!(merge_checks(None, None), None);
     }
 }
