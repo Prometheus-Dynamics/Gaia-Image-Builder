@@ -6,6 +6,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- Raze OS in QEMU, done: HeliOS's Raze image built with `--machine qemu` (its own kernel with Atlas's `BR2_RAZE_KERNEL_QEMU` fragment, Styx and lemnosd in sim mode) boots under `scripts/qemu-rpi-slots.sh` to `running`. Its simulated camera feeds the default AprilTag pipeline (356 ticks, 0 failed, under TCG). Atlas's slot round trip passes on HeliOS 2c57cc34: a trial confirmed, an explicit `update.rollback`, and a trial failed with `--trial-append` that rolled back on its own.
 - `scripts/qemu-rpi-slots.sh --trial-append ARGS` adds kernel arguments to tryboot boots only, to fail a slot trial on purpose and watch it roll back. On a Raze, `systemd.setenv=UPDATE_UNAME_R=trial-fault` fails Atlas's trial checks and changes nothing else.
 - A floating git source that only serves cargo (named in `cargo_git_sources`, with no artifact building from its checkout) adds `only its mirror moves: cargo builds the commits Cargo.lock pins` to its "floating ref moved" rebuild reason. HeliOS's Eidos mirror logged a move of `dev` that looked like a change to the Eidos build, though cargo built the lock's commit.
 - Validation warns (`image_feed_unfed_entry`) about install and stage entries an explicit `[image.feed]` list leaves out. A list that is set feeds only the ids it names, so an entry a later layer declared without adding it to the list was staged and silently left out of the rootfs. HeliOS's QEMU layer lost its six simulator files this way.
