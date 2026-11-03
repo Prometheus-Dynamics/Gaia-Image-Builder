@@ -6,6 +6,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- The zeros report leaves out the `free` that a disk's auto-sized filesystems ask for. The shrunk Raze slots disk (144 MiB, 61 MiB of data, a boot FAT kept 64 MiB free for more slots) was reported for its intended room.
 - A Buildroot image that installs artifacts builds its packages (`image:prepare`) while the artifacts build, instead of after them. A cold HeliOS Raze build ran its 10-minute Buildroot make only after 17 minutes of cargo (28m31s in all).
 - `[[toolchains]]` take `linker = "lld"`: rust artifacts link with Rust's LLD through the SDK's compiler, for an SDK whose GNU `ld` is older than rustc's objects. The XuanTie V2.10.1 SDK of the K230D rejects Rust 1.99's riscv64 objects (`Invalid or unknown z ISA extension: 'zaamo'`); with `"lld"` a riscv64 glibc binary built against that SDK's sysroot links (a Gaia run, both ways).
 - Assembly disks take a device budget: `device_size` (the capacity of the smallest part the board ships with: `"14910M"` for a common 16 GB eMMC) and `device_reserve` (what the board adds on it later). The run fails when the full layout plus the reserve does not fit, naming what it needs and the smallest device it fits, and otherwise reports what is left.

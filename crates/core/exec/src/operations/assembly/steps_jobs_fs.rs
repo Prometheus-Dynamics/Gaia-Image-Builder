@@ -234,7 +234,12 @@ pub(super) fn job_disk<'a>(
         summary.output = target;
     }
     tracing::Span::current().record("output_path", summary.output.display().to_string());
-    let zeros_warning = disk_zeros_warning(&disk.id, summary.bytes, summary.data_bytes);
+    let zeros_warning = disk_zeros_warning(
+        &disk.id,
+        summary.bytes,
+        summary.data_bytes,
+        disk_declared_free(ctx.assembly, disk),
+    );
     let budget = disk_budget_message(disk, summary.layout_bytes);
     Ok(Box::new(move |run: &mut StepRun<'a>| {
         run.disk_count += 1;

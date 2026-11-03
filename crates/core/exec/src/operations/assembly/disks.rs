@@ -90,10 +90,18 @@ const DISK_ZEROS_REPORTED_BYTES: u64 = 64 * MIB;
 
 /// The warning for a disk that is mostly zeros: free space shipped in
 /// fixed-size partitions and filesystems, which every flash writes and
-/// verifies. `None` while the zeros are under 64 MiB or under half the disk.
-pub(super) fn disk_zeros_warning(id: &str, bytes: u64, data_bytes: u64) -> Option<String> {
+/// verifies. The `free` its auto-sized filesystems ask for is room kept on
+/// purpose (a boot FAT's room for more slots) and is not counted. `None`
+/// while the other zeros are under 64 MiB or under half the disk.
+pub(super) fn disk_zeros_warning(
+    id: &str,
+    bytes: u64,
+    data_bytes: u64,
+    declared_free: u64,
+) -> Option<String> {
     let zeros = bytes.saturating_sub(data_bytes);
-    if zeros < DISK_ZEROS_REPORTED_BYTES || zeros * 2 < bytes {
+    let unasked = zeros.saturating_sub(declared_free);
+    if unasked < DISK_ZEROS_REPORTED_BYTES || unasked * 2 < bytes {
         return None;
     }
     Some(format!(
@@ -102,6 +110,27 @@ pub(super) fn disk_zeros_warning(id: &str, bytes: u64, data_bytes: u64) -> Optio
         data_bytes.div_ceil(MIB),
         zeros / MIB
     ))
+}
+
+/// The `free` the disk's auto-sized filesystems ask for: those whose output
+/// is a partition's image.
+pub(super) fn disk_declared_free(
+    assembly: &gaia_spec::ImageAssemblySpec,
+    disk: &gaia_spec::AssemblyDiskSpec,
+) -> u64 {
+    disk.partitions
+        .iter()
+        .filter_map(|partition| partition.image.as_ref())
+        .filter_map(|image| {
+            assembly
+                .filesystems
+                .iter()
+                .find(|filesystem| filesystem.output.as_str() == image.as_str())
+        })
+        .filter(|filesystem| filesystem.size.as_deref() == Some("auto"))
+        .filter_map(|filesystem| filesystem.parsed_free().ok().flatten())
+        .map(|free| free.bytes())
+        .sum()
 }
 
 /// Lays partitions out in order. On an MBR disk with more than 4 table

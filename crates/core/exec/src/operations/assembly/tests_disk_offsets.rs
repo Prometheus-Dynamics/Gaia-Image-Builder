@@ -292,15 +292,22 @@ fn a_uboot_env_with_two_copies_repeats_the_whole_environment() {
 #[test]
 fn a_disk_of_mostly_zeros_is_reported_with_its_data() {
     // The Raze slots disk: 1,419 MiB, 145 MiB of data.
-    let message = disk_zeros_warning("slots-sdcard", 1419 * MIB, 145 * MIB).expect("warning");
+    let message = disk_zeros_warning("slots-sdcard", 1419 * MIB, 145 * MIB, 0).expect("warning");
     assert!(
         message.contains("'slots-sdcard' is 1419 MiB with 145 MiB of data"),
         "{message}"
     );
     assert!(message.contains("writes 1274 MiB of zeros"), "{message}");
     // Under 64 MiB of zeros, or under half the disk, is not reported.
-    assert_eq!(disk_zeros_warning("small", 100 * MIB, 40 * MIB), None);
-    assert_eq!(disk_zeros_warning("full", 1000 * MIB, 600 * MIB), None);
+    assert_eq!(disk_zeros_warning("small", 100 * MIB, 40 * MIB, 0), None);
+    assert_eq!(disk_zeros_warning("full", 1000 * MIB, 600 * MIB, 0), None);
+    // The shrunk Raze slots disk: 144 MiB, 61 MiB of data, a boot FAT with
+    // `free = "64M"` and /data with `free = "8M"` asked for.
+    assert_eq!(
+        disk_zeros_warning("slots-sdcard", 144 * MIB, 61 * MIB, 72 * MIB),
+        None
+    );
+    assert!(disk_zeros_warning("slots-sdcard", 144 * MIB, 61 * MIB, 0).is_some());
 }
 
 #[test]
