@@ -76,6 +76,12 @@ outputs, except uncompressed raw disks other than the primary, which the
 primary archive already holds; compress such a disk with an `xz` transform to
 export it.
 
+A `.img.xz` archive of a disk that an `xz` transform with no `level` already
+compressed (the same flags, so the same bytes) is that transform's output:
+Gaia moves it to the archive name instead of compressing the disk again, and
+publishes only the archive. This lets a build keep its own `archive_name` for
+a disk that an imported layer compresses under another name.
+
 Buildroot fields:
 - `defconfig`
 - `external_tree`: one or more `BR2_EXTERNAL` trees, `:`-separated as

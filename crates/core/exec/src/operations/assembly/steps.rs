@@ -84,6 +84,8 @@ pub(super) struct StepRun<'a> {
     /// The transform, verity and archive outputs written under the image
     /// output dir (`$assembly.out`): final outputs of the run.
     pub(super) published_outputs: Vec<PathBuf>,
+    /// The default-level xz transforms, for a raw disk archive to reuse.
+    pub(super) compressed_disks: Vec<super::archive_reuse::CompressedDisk>,
     /// The assembly outputs this run wrote, with their sizes as written.
     pub(super) produced: ProducedRecorder<'a>,
     /// Copied dynamically linked files whose runtime libraries are checked
@@ -133,6 +135,7 @@ impl<'a> StepRun<'a> {
             disk_ids: Vec::new(),
             disk_publish: Vec::new(),
             published_outputs: Vec::new(),
+            compressed_disks: Vec::new(),
             produced: ProducedRecorder::new(spec, assembly, roots),
             pending_lib_checks: Vec::new(),
             warnings: Vec::new(),

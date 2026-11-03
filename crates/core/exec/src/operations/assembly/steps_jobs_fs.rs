@@ -57,6 +57,13 @@ pub(super) fn job_transform<'a>(
         if published {
             run.published_outputs.push(summary.dest.clone());
         }
+        if super::archive_reuse::is_archive_xz(transform) {
+            run.compressed_disks
+                .push(super::archive_reuse::CompressedDisk {
+                    src: summary.src.clone(),
+                    dest: summary.dest.clone(),
+                });
+        }
         run.produced.record_transform(index, summary.bytes);
         run.transform_count += 1;
         let key = AssemblyStateKey::new("transform", run.transform_count);

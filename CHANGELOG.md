@@ -6,6 +6,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- A `.img.xz` raw disk archive whose disk an `xz` transform (default level, so the archive's own flags) already compressed takes that transform's output instead of compressing the disk again, and the run publishes the one file. photon-image-modifier's Raze image is Atlas's slots disk, which the slots fragment compresses under the slot id; with the build's own `archive_name` it got two identical 136 MB files and a second xz pass.
 - The zeros report leaves out the `free` that a disk's auto-sized filesystems ask for. The shrunk Raze slots disk (144 MiB, 61 MiB of data, a boot FAT kept 64 MiB free for more slots) was reported for its intended room.
 - A Buildroot image that installs artifacts builds its packages (`image:prepare`) while the artifacts build, instead of after them. A cold HeliOS Raze build ran its 10-minute Buildroot make only after 17 minutes of cargo (28m31s in all).
 - `[[toolchains]]` take `linker = "lld"`: rust artifacts link with Rust's LLD through the SDK's compiler, for an SDK whose GNU `ld` is older than rustc's objects. The XuanTie V2.10.1 SDK of the K230D rejects Rust 1.99's riscv64 objects (`Invalid or unknown z ISA extension: 'zaamo'`); with `"lld"` a riscv64 glibc binary built against that SDK's sysroot links (a Gaia run, both ways).

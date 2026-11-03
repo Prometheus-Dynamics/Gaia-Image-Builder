@@ -13,6 +13,7 @@ use std::time::Duration;
 use super::helpers::{process_output_retention, runtime_state_dir};
 
 mod archive_log;
+mod archive_reuse;
 mod archives;
 mod binaries;
 mod boot_snapshot;
@@ -358,7 +359,8 @@ fn stage_steps(
         disk_published,
         disk_ids,
         filesystem_published,
-        published_outputs,
+        mut published_outputs,
+        compressed_disks,
         warnings,
         produced,
         ..
@@ -372,9 +374,20 @@ fn stage_steps(
         .cloned()
         .zip(disk_outputs.iter().cloned())
         .collect::<Vec<_>>();
-    if let Some(summary) =
-        archive_assembly_disk_output(spec, &built_disks, cancel_check.clone(), &mut messages)?
-    {
+    let reused = archive_reuse::reuse_compressed_disk(
+        spec,
+        &built_disks,
+        &compressed_disks,
+        &mut published_outputs,
+        &mut messages,
+    )?;
+    let archived = match reused {
+        Some(summary) => Some(summary),
+        None => {
+            archive_assembly_disk_output(spec, &built_disks, cancel_check.clone(), &mut messages)?
+        }
+    };
+    if let Some(summary) = archived {
         state.insert("archive.path", summary.output.display().to_string());
         state.insert("archive.source", summary.source.display().to_string());
         state.insert("archive.bytes", summary.bytes);
