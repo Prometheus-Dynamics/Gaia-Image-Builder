@@ -91,6 +91,11 @@ impl Fixture {
         )
         .expect("makefile");
         let mut spec = ResolvedBuildSpec::new("buildroot-preview");
+        // A built spec's command timeout is 0, which the Buildroot commands
+        // clamp to 1 s: `make show-info` then times out on a loaded machine
+        // and the preview falls back to a full clean. Use a config's default.
+        spec.policy.providers.buildroot.timeout_seconds =
+            gaia_spec::DEFAULT_BUILDROOT_PROVIDER_TIMEOUT_SECONDS;
         spec.workspace.root_dir = root.display().to_string();
         spec.workspace.build_dir = "build".to_string();
         Self {
