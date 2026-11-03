@@ -577,10 +577,14 @@ fn concurrent_heavy_builds_split_the_cpu_budget() {
     let cores = thread::available_parallelism()
         .map(usize::from)
         .unwrap_or(1);
-    let expected = Some((cores / 2).max(1));
+    // The first to start gets half the cores, rounded down; the second gets
+    // the rest, one more on an odd count (15 under `taskset -c 17-31`).
+    let first = (cores / 2).max(1);
+    let second = cores.saturating_sub(first).max(1);
     let journal = journal.lock().expect("journal");
-    assert_eq!(journal.budgets["left"], expected);
-    assert_eq!(journal.budgets["right"], expected);
+    let mut budgets = [journal.budgets["left"], journal.budgets["right"]];
+    budgets.sort();
+    assert_eq!(budgets, [Some(first), Some(second)]);
 }
 
 #[test]
