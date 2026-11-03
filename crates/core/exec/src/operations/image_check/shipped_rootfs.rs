@@ -26,7 +26,7 @@ pub(super) fn shipped_image(spec: &ResolvedBuildSpec) -> Option<(String, Format)
         .iter()
         .filter(|image| image.required)
         .find(|image| readable(&image.format))
-        .map(|image| (image.name.clone(), image.format.clone()))
+        .map(|image| (image.name.clone(), image.format))
 }
 
 fn readable(format: &Format) -> bool {
