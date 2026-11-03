@@ -480,32 +480,7 @@ fn image_assembly_fingerprint_tracks_direct_partition_images() {
     fs::create_dir_all(partition_image.parent().expect("asset parent")).expect("assets dir");
     fs::write(&partition_image, "one").expect("partition image");
     spec.image.assembly = Some(ImageAssemblySpec {
-        disks: vec![AssemblyDiskSpec {
-            id: "sdcard".into(),
-            output: "$assembly.out/sdcard.img".into(),
-            partition_table: AssemblyPartitionTableSpec::Mbr,
-            signature: None,
-            signature_text: None,
-            first_lba: None,
-            alignment_lba: None,
-            truncate: None,
-            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
-            budget: Default::default(),
-            partitions: vec![AssemblyDiskPartitionSpec {
-                name: "rootfs".into(),
-                kind: None,
-                type_alias: Some("linux".into()),
-                bootable: false,
-                image: Some("@assets/rootfs.img".into()),
-                size: None,
-                wipe: false,
-                materialize: true,
-                offset: None,
-                table: true,
-                gpt: Default::default(),
-            }],
-            gpt: Default::default(),
-        }],
+        disks: vec![rootfs_sdcard("@assets/rootfs.img")],
         ..ImageAssemblySpec::default()
     });
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
@@ -543,32 +518,7 @@ fn image_assembly_fingerprint_tracks_provider_root_partition_images() {
     let partition_image = collect_dir.join("provider-rootfs.img");
     fs::write(&partition_image, "one").expect("provider partition image");
     spec.image.assembly = Some(ImageAssemblySpec {
-        disks: vec![AssemblyDiskSpec {
-            id: "sdcard".into(),
-            output: "$assembly.out/sdcard.img".into(),
-            partition_table: AssemblyPartitionTableSpec::Mbr,
-            signature: None,
-            signature_text: None,
-            first_lba: None,
-            alignment_lba: None,
-            truncate: None,
-            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
-            budget: Default::default(),
-            partitions: vec![AssemblyDiskPartitionSpec {
-                name: "rootfs".into(),
-                kind: None,
-                type_alias: Some("linux".into()),
-                bootable: false,
-                image: Some("$provider.images/provider-rootfs.img".into()),
-                size: None,
-                wipe: false,
-                materialize: true,
-                offset: None,
-                table: true,
-                gpt: Default::default(),
-            }],
-            gpt: Default::default(),
-        }],
+        disks: vec![rootfs_sdcard("$provider.images/provider-rootfs.img")],
         ..ImageAssemblySpec::default()
     });
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
@@ -602,32 +552,7 @@ fn image_assembly_fingerprint_tracks_missing_partition_image_becoming_present() 
     let partition_image = gaia_spec::resolve_workspace_path(&spec.workspace, "@assets/rootfs.img")
         .expect("asset path");
     spec.image.assembly = Some(ImageAssemblySpec {
-        disks: vec![AssemblyDiskSpec {
-            id: "sdcard".into(),
-            output: "$assembly.out/sdcard.img".into(),
-            partition_table: AssemblyPartitionTableSpec::Mbr,
-            signature: None,
-            signature_text: None,
-            first_lba: None,
-            alignment_lba: None,
-            truncate: None,
-            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
-            budget: Default::default(),
-            partitions: vec![AssemblyDiskPartitionSpec {
-                name: "rootfs".into(),
-                kind: None,
-                type_alias: Some("linux".into()),
-                bootable: false,
-                image: Some("@assets/rootfs.img".into()),
-                size: None,
-                wipe: false,
-                materialize: true,
-                offset: None,
-                table: true,
-                gpt: Default::default(),
-            }],
-            gpt: Default::default(),
-        }],
+        disks: vec![rootfs_sdcard("@assets/rootfs.img")],
         ..ImageAssemblySpec::default()
     });
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
@@ -687,32 +612,7 @@ fn image_assembly_fingerprint_does_not_hash_generated_filesystem_partition_outpu
             fat_size: None,
             reserved_percent: None,
         }],
-        disks: vec![AssemblyDiskSpec {
-            id: "sdcard".into(),
-            output: "$assembly.out/sdcard.img".into(),
-            partition_table: AssemblyPartitionTableSpec::Mbr,
-            signature: None,
-            signature_text: None,
-            first_lba: None,
-            alignment_lba: None,
-            truncate: None,
-            ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
-            budget: Default::default(),
-            partitions: vec![AssemblyDiskPartitionSpec {
-                name: "rootfs".into(),
-                kind: None,
-                type_alias: Some("linux".into()),
-                bootable: false,
-                image: Some("$assembly.out/rootfs.cpio".into()),
-                size: None,
-                wipe: false,
-                materialize: true,
-                offset: None,
-                table: true,
-                gpt: Default::default(),
-            }],
-            gpt: Default::default(),
-        }],
+        disks: vec![rootfs_sdcard("$assembly.out/rootfs.cpio")],
         ..ImageAssemblySpec::default()
     });
     let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
@@ -800,4 +700,34 @@ fn required_operation_depends_on_best_effort_is_a_plan_error() {
             .iter()
             .any(|diagnostic| { diagnostic.code == "required_depends_on_best_effort" })
     );
+}
+
+/// An MBR disk with one Linux partition holding `image`.
+fn rootfs_sdcard(image: &str) -> AssemblyDiskSpec {
+    AssemblyDiskSpec {
+        id: "sdcard".into(),
+        output: "$assembly.out/sdcard.img".into(),
+        partition_table: AssemblyPartitionTableSpec::Mbr,
+        signature: None,
+        signature_text: None,
+        first_lba: None,
+        alignment_lba: None,
+        truncate: None,
+        ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
+        budget: Default::default(),
+        partitions: vec![AssemblyDiskPartitionSpec {
+            name: "rootfs".into(),
+            kind: None,
+            type_alias: Some("linux".into()),
+            bootable: false,
+            image: Some(image.into()),
+            size: None,
+            wipe: false,
+            materialize: true,
+            offset: None,
+            table: true,
+            gpt: Default::default(),
+        }],
+        gpt: Default::default(),
+    }
 }
