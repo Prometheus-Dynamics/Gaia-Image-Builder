@@ -82,7 +82,7 @@ Keys: `id`, `output_path`, `pin`, `refresh`, `sha256`, `url`.
 
 Described in [Sources and toolchains](../configuration-sources.md#toolchains).
 
-Keys: `id`, `kind`, `page_size`, `path`, `prefix`, `relocate`, `rust_target`, `source`, `sysroot`, `sysroot_source`, `triple`.
+Keys: `id`, `kind`, `linker`, `page_size`, `path`, `prefix`, `relocate`, `rust_target`, `source`, `sysroot`, `sysroot_source`, `triple`.
 
 ## `[[artifacts]]` with `kind = "rust"`
 

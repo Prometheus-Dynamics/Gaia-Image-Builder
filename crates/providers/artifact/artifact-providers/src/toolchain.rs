@@ -23,6 +23,8 @@ pub struct ArtifactToolchainContract {
     pub rust_target: Option<String>,
     /// The device page size, when declared: Rust artifacts link with it.
     pub page_size: Option<u64>,
+    /// Rust artifacts link through Rust's LLD instead of the SDK's `ld`.
+    pub lld: bool,
     pub relocate: bool,
 }
 
@@ -36,6 +38,7 @@ impl ArtifactToolchainContract {
             triple: resolved.triple.clone(),
             rust_target: resolved.rust_target.clone(),
             page_size: resolved.page_size,
+            lld: resolved.linker == gaia_spec::ToolchainLinkerSpec::Lld,
             relocate,
         }
     }
@@ -118,6 +121,7 @@ mod tests {
             triple: "aarch64-buildroot-linux-gnu".into(),
             rust_target: None,
             page_size: None,
+            lld: false,
             relocate,
         }
     }

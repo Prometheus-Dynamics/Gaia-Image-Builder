@@ -80,6 +80,7 @@ through HeliOS). The other boards follow it, so their items stay below.
   - What: link Rust artifacts for the K230D through LLD, in the K230 example or by default for the XuanTie toolchain.
   - Why: Rust 1.99 objects for riscv64 do not link with the XuanTie V2.10.1 GNU `ld`, profile or not (`unknown z ISA extension: 'zaamo'`). LLD links them (docs/configuration-sources.md#cpu-profiles).
   - Done when: a Rust artifact builds in the K230D example and its binary links.
+  - Status: `linker = "lld"` on a `[[toolchains]]` SDK links glibc binaries through the XuanTie SDK (a Gaia run against V2.10.1: `gnu` fails on `zaamo`, `lld` links). Atlas's `board-lite` already links its static musl build with `rust-lld`. Left: a glibc Rust artifact in the K230D example itself, with the XuanTie SDK as a toolchain.
   - Blocked by: nothing.
 - **CPU profile checks on boards**
   - What: on each Rockchip board, `/proc/cpuinfo` lists `aes` and `sha2`, since the A53 and A55 profiles enable them; on the K230D, RVV binaries run only on CPU1.

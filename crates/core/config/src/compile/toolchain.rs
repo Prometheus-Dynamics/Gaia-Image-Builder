@@ -1,5 +1,5 @@
-use crate::raw::{RawToolchainConfig, RawToolchainKind};
-use gaia_spec::{ArtifactSpec, SourceId, ToolchainKindSpec, ToolchainSpec};
+use crate::raw::{RawToolchainConfig, RawToolchainKind, RawToolchainLinker};
+use gaia_spec::{ArtifactSpec, SourceId, ToolchainKindSpec, ToolchainLinkerSpec, ToolchainSpec};
 
 /// A `[[toolchains]]` entry as compiled. Missing or conflicting fields are
 /// left for the validator to report.
@@ -18,6 +18,10 @@ pub(crate) fn compile_toolchain(raw: RawToolchainConfig) -> ToolchainSpec {
         sysroot_source: raw.sysroot_source.map(SourceId::new),
         rust_target: raw.rust_target,
         page_size: raw.page_size,
+        linker: match raw.linker {
+            None | Some(RawToolchainLinker::Gnu) => ToolchainLinkerSpec::Gnu,
+            Some(RawToolchainLinker::Lld) => ToolchainLinkerSpec::Lld,
+        },
     }
 }
 

@@ -269,6 +269,15 @@ rust_target = "aarch64-unknown-linux-gnu"
   segments by default, so a device with larger pages needs this. The flag is
   part of the toolchain's identity, so changing `page_size` rebuilds the
   artifacts.
+- `linker`: `"gnu"` (the default) links rust artifacts with the SDK's own `ld`;
+  `"lld"` with Rust's LLD (`rust-lld`), still driven by the SDK's compiler for
+  its startup files and libraries (`-C link-arg=-B<rustc sysroot>/lib/rustlib/<host>/bin/gcc-ld -C link-arg=-fuse-ld=lld`).
+  For an SDK whose `ld` is older than the objects rustc writes: XuanTie's
+  V2.10.1 (GCC 10) rejects Rust 1.99's riscv64 objects (`Invalid or unknown z
+  ISA extension: 'zaamo'`) and links them with `"lld"`. The `gcc-ld` directory
+  is that of the rustc building the artifact (its `rust-toolchain.toml`
+  included), which needs the `rust-lld` component (rustup's default profile
+  has it). Part of the toolchain's identity when set to `"lld"`.
 
 A rust artifact names its toolchain with `toolchain = "<id>"`. Only rust
 artifacts take one, and each needs a target (its own `target`, or the
@@ -492,7 +501,7 @@ Measured on 2026-11-02 with rustc 1.99, building Atlas's `atlas-ubi` and
 - Rust 1.99 objects for riscv64 do not link with the XuanTie toolchain's GNU
   `ld` (V2.10.1, GCC 10): it rejects the newer ISA string (`Invalid or unknown z
   ISA extension: 'zaamo'`), with or without the profile. Link through LLD
-  instead: `-C link-arg=-B<rustc sysroot>/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld -C link-arg=-fuse-ld=lld`.
+  instead: `linker = "lld"` on the toolchain (see `[[toolchains]]`).
 - The Rockchip profiles assume the A53 and A55 cores have the crypto extension
   (`aes`, `sha2`); check for `aes` and `sha2` in `/proc/cpuinfo` on each board
   before shipping, or a binary using them dies with `SIGILL`.

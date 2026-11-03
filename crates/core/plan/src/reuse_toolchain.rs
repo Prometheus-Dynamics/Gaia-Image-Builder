@@ -375,6 +375,7 @@ mod tests {
             sysroot_source: None,
             rust_target: Some("aarch64-unknown-linux-gnu".into()),
             page_size: Some(16384),
+            linker: Default::default(),
         });
         let identity = toolchain_identity(&spec, "sdk");
         assert!(identity.contains("prefix=aarch64-linux-"), "{identity}");

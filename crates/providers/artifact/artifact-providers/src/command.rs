@@ -536,6 +536,7 @@ mod tests {
             triple: "aarch64-buildroot-linux-gnu".into(),
             rust_target: Some("aarch64-unknown-linux-gnu".into()),
             page_size: None,
+            lld: false,
             relocate: false,
         });
         // The compiler is named by its path, so the command carries the SDK in

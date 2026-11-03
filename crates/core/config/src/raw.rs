@@ -689,12 +689,23 @@ pub(crate) struct RawToolchainConfig {
     /// this toolchain default their `min_page_size` to it.
     #[serde(default)]
     pub page_size: Option<u64>,
+    /// The linker Rust artifacts link through: the SDK's `gnu` ld (the
+    /// default) or Rust's `lld`.
+    #[serde(default)]
+    pub linker: Option<RawToolchainLinker>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum RawToolchainKind {
     BuildrootSdk,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum RawToolchainLinker {
+    Gnu,
+    Lld,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]

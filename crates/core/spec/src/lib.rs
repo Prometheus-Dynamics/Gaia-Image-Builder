@@ -161,8 +161,8 @@ pub use state::{IMAGE_ASSEMBLY_STATE_FILE_NAME, IMAGE_ASSEMBLY_STATE_KIND, KeyVa
 pub use suggest::{did_you_mean_hint, edit_distance};
 pub use target_arch::{TargetArch, target_arch};
 pub use toolchain::{
-    ResolvedToolchain, ToolchainKindSpec, ToolchainSpec, default_toolchain_prefix,
-    resolve_toolchain,
+    ResolvedToolchain, ToolchainKindSpec, ToolchainLinkerSpec, ToolchainSpec,
+    default_toolchain_prefix, resolve_toolchain,
 };
 pub use user_cache::{
     USER_BUILDROOT_CCACHE_DIR, USER_BUILDROOT_PACKAGE_CACHE_DIR, user_cache_root,

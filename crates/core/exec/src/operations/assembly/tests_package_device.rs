@@ -277,6 +277,7 @@ fn a_toolchain_names_the_sysroot_it_checks_against() {
         sysroot_source: None,
         rust_target: None,
         page_size: None,
+        linker: Default::default(),
     });
     let by_toolchain = AssemblyPackageDeviceSpec {
         toolchain: Some("sdk".into()),
@@ -303,6 +304,7 @@ fn spec_with_sdk(root: &Path, page_size: Option<u64>) -> ResolvedBuildSpec {
         sysroot_source: None,
         rust_target: None,
         page_size,
+        linker: Default::default(),
     });
     spec
 }

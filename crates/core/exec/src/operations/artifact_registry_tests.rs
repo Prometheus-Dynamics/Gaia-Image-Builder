@@ -305,6 +305,7 @@ fn the_key_follows_the_toolchain_an_artifact_builds_with() {
         sysroot_source: None,
         rust_target: Some("aarch64-unknown-linux-gnu".into()),
         page_size: None,
+        linker: Default::default(),
     });
     spec.artifacts[0].toolchain = Some("sdk".into());
     let with_sdk = artifact_key(&spec);

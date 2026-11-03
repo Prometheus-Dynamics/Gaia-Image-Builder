@@ -42,6 +42,31 @@ pub struct ToolchainSpec {
     /// unset, so toolchains without one keep their identities.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page_size: Option<u64>,
+    /// The linker the SDK's compiler drives for Rust artifacts. Not
+    /// serialized when it is the SDK's own, so those keep their identities.
+    #[serde(skip_serializing_if = "crate::fingerprint::is_default")]
+    pub linker: ToolchainLinkerSpec,
+}
+
+/// Which linker a Rust artifact's link goes through.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub enum ToolchainLinkerSpec {
+    /// The SDK's own `ld`, as its compiler picks it.
+    #[default]
+    Gnu,
+    /// Rust's own LLD (`rust-lld`), through the SDK's compiler driver
+    /// (`-fuse-ld=lld`): for an SDK whose GNU `ld` is older than the objects
+    /// rustc writes, such as XuanTie's for riscv64.
+    Lld,
+}
+
+impl ToolchainLinkerSpec {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Gnu => "gnu",
+            Self::Lld => "lld",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -69,6 +94,7 @@ pub struct ResolvedToolchain {
     pub triple: String,
     pub rust_target: Option<String>,
     pub page_size: Option<u64>,
+    pub linker: ToolchainLinkerSpec,
 }
 
 impl ResolvedToolchain {
@@ -127,6 +153,7 @@ pub fn resolve_toolchain(spec: &ResolvedBuildSpec, id: &str) -> Result<ResolvedT
         triple: toolchain.triple.clone(),
         rust_target: toolchain.rust_target.clone(),
         page_size: toolchain.page_size,
+        linker: toolchain.linker,
     })
 }
 

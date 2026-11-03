@@ -677,7 +677,7 @@ fn run_cargo_build(
     let build_env = cargo_build_env(&flags.build_env)?;
     let toolchain_env = toolchain::with_build_env_and_cpu_flags(
         &build_env,
-        toolchain::cargo_env(contract)?,
+        toolchain::cargo_env(contract, Path::new(source_dir))?,
         flags.cpu.as_ref(),
         contract.artifact_target.as_deref(),
         |name| std::env::var(name).ok(),

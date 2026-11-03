@@ -6,6 +6,8 @@
 //! in front of Gaia's own.
 
 use gaia_spec::RustCpuSpec;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use gaia_artifact_providers::{
     ArtifactExecutionContract, ArtifactProviderError, ArtifactProviderErrorKind,
@@ -16,6 +18,7 @@ use gaia_artifact_providers::{
 /// nothing for a host build.
 pub(crate) fn cargo_env(
     contract: &ArtifactExecutionContract,
+    source_dir: &Path,
 ) -> Result<Vec<(String, String)>, ArtifactProviderError> {
     let Some(toolchain) = &contract.toolchain else {
         return Ok(Vec::new());
@@ -29,14 +32,66 @@ pub(crate) fn cargo_env(
             ),
         )
     })?;
-    Ok(env_for(toolchain, target, |name| std::env::var(name).ok()))
+    let gcc_ld = if toolchain.lld {
+        Some(rust_gcc_ld_dir(source_dir).map_err(|message| {
+            ArtifactProviderError::new(
+                ArtifactProviderErrorKind::PolicyBlocked,
+                format!("toolchain '{}' links with lld: {message}", toolchain.id),
+            )
+        })?)
+    } else {
+        None
+    };
+    Ok(env_for(toolchain, target, gcc_ld.as_deref(), |name| {
+        std::env::var(name).ok()
+    }))
+}
+
+/// The directory of Rust's `gcc-ld` wrappers (`ld.lld` running `rust-lld`)
+/// of the rustc that builds in `source_dir`, which may pin its own toolchain.
+fn rust_gcc_ld_dir(source_dir: &Path) -> Result<PathBuf, String> {
+    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
+    let run = |args: &[&str]| -> Result<String, String> {
+        let output = Command::new(&rustc)
+            .args(args)
+            .current_dir(source_dir)
+            .output()
+            .map_err(|error| format!("cannot run '{rustc}': {error}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "'{rustc} {}' failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    };
+    let sysroot = run(&["--print", "sysroot"])?;
+    let version = run(&["-vV"])?;
+    let host = version
+        .lines()
+        .find_map(|line| line.strip_prefix("host: "))
+        .ok_or_else(|| format!("'{rustc} -vV' names no host"))?;
+    let dir = Path::new(sysroot.trim())
+        .join("lib/rustlib")
+        .join(host.trim())
+        .join("bin/gcc-ld");
+    if !dir.join("ld.lld").is_file() {
+        return Err(format!(
+            "'{}' has no ld.lld: the rust toolchain needs its rust-lld (rustup's default profile has it)",
+            dir.display()
+        ));
+    }
+    Ok(dir)
 }
 
 /// The environment for `target`, with `inherited` the values the calling
-/// environment already has (looked up by name).
+/// environment already has (looked up by name) and `gcc_ld` Rust's `gcc-ld`
+/// directory for a toolchain that links with lld.
 pub(crate) fn env_for(
     toolchain: &ArtifactToolchainContract,
     target: &str,
+    gcc_ld: Option<&Path>,
     inherited: impl Fn(&str) -> Option<String>,
 ) -> Vec<(String, String)> {
     // Cargo's per-target variables spell the triple in upper case, the `cc`
@@ -62,6 +117,12 @@ pub(crate) fn env_for(
     if let Some(page_link) = &page_link {
         flags.push("-C");
         flags.push(page_link.as_str());
+    }
+    // The SDK's compiler still drives the link (its crt files and libraries),
+    // with Rust's LLD in place of its `ld`.
+    let lld_dir = gcc_ld.map(|dir| format!("link-arg=-B{}", dir.display()));
+    if let Some(lld_dir) = &lld_dir {
+        flags.extend(["-C", lld_dir.as_str(), "-C", "link-arg=-fuse-ld=lld"]);
     }
     let rustflags = join_flags(&flags);
     let cflags = join_flags(&[
@@ -171,7 +232,6 @@ fn join_flags(flags: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     fn toolchain() -> ArtifactToolchainContract {
         ArtifactToolchainContract {
@@ -182,6 +242,7 @@ mod tests {
             triple: "aarch64-buildroot-linux-gnu".into(),
             rust_target: Some("aarch64-unknown-linux-gnu".into()),
             page_size: None,
+            lld: false,
             relocate: false,
         }
     }
@@ -190,7 +251,7 @@ mod tests {
     fn a_declared_page_size_links_with_max_page_size_after_the_sysroot_flag() {
         let mut sdk = toolchain();
         sdk.page_size = Some(16384);
-        let env = env_for(&sdk, "aarch64-unknown-linux-gnu", |name| match name {
+        let env = env_for(&sdk, "aarch64-unknown-linux-gnu", None, |name| match name {
             "RUSTFLAGS" => Some("-C target-cpu=cortex-a53".into()),
             _ => None,
         });
@@ -202,11 +263,40 @@ mod tests {
 
     #[test]
     fn without_a_page_size_the_link_flags_are_the_sysroot_flag_alone() {
-        let env = env_for(&toolchain(), "aarch64-unknown-linux-gnu", |_| None);
+        let env = env_for(&toolchain(), "aarch64-unknown-linux-gnu", None, |_| None);
         assert!(
             !value(&env, "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS")
                 .contains("max-page-size")
         );
+    }
+
+    #[test]
+    fn an_lld_toolchain_links_through_rusts_lld_after_the_sysroot_flag() {
+        let mut sdk = toolchain();
+        sdk.lld = true;
+        let env = env_for(
+            &sdk,
+            "aarch64-unknown-linux-gnu",
+            Some(Path::new(
+                "/rust/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld",
+            )),
+            |_| None,
+        );
+        assert_eq!(
+            value(&env, "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS"),
+            "-C link-arg=--sysroot=/sdk/aarch64-buildroot-linux-gnu/sysroot -C link-arg=-B/rust/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld -C link-arg=-fuse-ld=lld"
+        );
+        // The SDK's compiler stays the linker driver.
+        assert_eq!(
+            value(&env, "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER"),
+            "/sdk/bin/aarch64-buildroot-linux-gnu-gcc"
+        );
+    }
+
+    #[test]
+    fn the_gcc_ld_dir_is_the_building_rustcs() {
+        let dir = rust_gcc_ld_dir(Path::new(".")).expect("gcc-ld");
+        assert!(dir.join("ld.lld").is_file(), "{}", dir.display());
     }
 
     fn value<'a>(env: &'a [(String, String)], name: &str) -> &'a str {
@@ -218,7 +308,7 @@ mod tests {
 
     #[test]
     fn the_linker_and_compilers_come_from_the_sdk_prefix() {
-        let env = env_for(&toolchain(), "aarch64-unknown-linux-gnu", |_| None);
+        let env = env_for(&toolchain(), "aarch64-unknown-linux-gnu", None, |_| None);
         assert_eq!(
             value(&env, "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER"),
             "/sdk/bin/aarch64-buildroot-linux-gnu-gcc"
@@ -239,7 +329,7 @@ mod tests {
 
     #[test]
     fn the_sysroot_reaches_every_compile_and_link() {
-        let env = env_for(&toolchain(), "aarch64-unknown-linux-gnu", |_| None);
+        let env = env_for(&toolchain(), "aarch64-unknown-linux-gnu", None, |_| None);
         let sysroot = "--sysroot=/sdk/aarch64-buildroot-linux-gnu/sysroot";
         assert_eq!(
             value(&env, "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS"),
@@ -263,6 +353,7 @@ mod tests {
         let env = env_for(
             &toolchain(),
             "aarch64-unknown-linux-gnu",
+            None,
             |name| match name {
                 "RUSTFLAGS" => Some("-C target-cpu=cortex-a53".into()),
                 _ => None,
@@ -279,6 +370,7 @@ mod tests {
         let env = env_for(
             &toolchain(),
             "aarch64-unknown-linux-gnu",
+            None,
             |name| match name {
                 "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS" => Some("-C opt-level=2".into()),
                 "RUSTFLAGS" => Some("-C debuginfo=0".into()),
