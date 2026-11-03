@@ -474,19 +474,15 @@ fn validate_checks_every_variant() {
         other => panic!("expected a validation, got {other:?}"),
     }
 
-    // v2 publishing the default variant's archive name collides.
-    let colliding = fs::read_to_string(&scenario.build)
+    // v2 naming the default variant's archive is fine: each variant collects
+    // into its own directory.
+    let same_name = fs::read_to_string(&scenario.build)
         .expect("build file")
         .replace("\"variant-e2e-v2.tar\"", "\"variant-e2e-1.0.0.tar\"");
-    fs::write(&scenario.build, colliding).expect("colliding build file");
+    fs::write(&scenario.build, same_name).expect("same-name build file");
     match validate(&[]) {
         CommandOutcome::Validated { validation, .. } => {
-            let errors = validation.errors.join("\n");
-            assert!(
-                errors
-                    .contains("variants 'default' and 'v2' would publish to the same image output"),
-                "{errors}"
-            );
+            assert!(validation.errors.is_empty(), "{:?}", validation.errors);
         }
         other => panic!("expected a validation, got {other:?}"),
     }
