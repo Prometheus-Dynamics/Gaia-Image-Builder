@@ -70,7 +70,7 @@ Keys: `id`, `identity_ignore`, `path`, `pin`, `refresh`.
 
 Described in [Sources and toolchains](../configuration-sources.md#sources).
 
-Keys: `allow_absolute_symlinks`, `id`, `path`, `pin`, `refresh`, `sha256`, `strip_components`, `url`.
+Keys: `allow_absolute_symlinks`, `extract_to`, `id`, `members`, `path`, `pin`, `refresh`, `sha256`, `strip_components`, `url`.
 
 ## `[[sources]]` with `kind = "download"`
 

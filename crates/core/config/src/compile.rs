@@ -359,6 +359,8 @@ pub(crate) fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                     sha256,
                     strip_components,
                     allow_absolute_symlinks,
+                    members,
+                    extract_to,
                     refresh,
                     pin,
                 } => {
@@ -375,6 +377,8 @@ pub(crate) fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                         sha256,
                         strip_components,
                         allow_absolute_symlinks,
+                        members,
+                        extract_to,
                         refresh_policy: compile_source_refresh_policy(
                             refresh,
                             SourceRefreshPolicySpec::Auto,

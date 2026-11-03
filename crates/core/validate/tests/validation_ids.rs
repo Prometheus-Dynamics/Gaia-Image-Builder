@@ -108,6 +108,8 @@ fn workspace_paths_cannot_escape_workspace_or_alias_roots() {
             sha256: None,
             strip_components: 0,
             allow_absolute_symlinks: false,
+            members: Vec::new(),
+            extract_to: None,
             refresh_policy: gaia_spec::SourceRefreshPolicySpec::Never,
             pin_policy: gaia_spec::SourcePinPolicySpec::Locked,
         }),

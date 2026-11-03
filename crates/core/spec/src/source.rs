@@ -143,6 +143,17 @@ pub struct ArchiveSourceSpec {
     /// false, so existing archive sources keep their fingerprints.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub allow_absolute_symlinks: bool,
+    /// GNU tar wildcards over the archive's member paths (before
+    /// `strip_components`): only the matching members are extracted. Empty
+    /// extracts everything. Not serialized when empty, so existing archive
+    /// sources keep their fingerprints.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<String>,
+    /// A relative directory of the source tree the archive is extracted
+    /// into (`rootfs/usr/lib/firmware`), so the tree can serve as a rootfs
+    /// overlay. Unset extracts at the top. Not serialized when unset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extract_to: Option<String>,
     pub refresh_policy: SourceRefreshPolicySpec,
     pub pin_policy: SourcePinPolicySpec,
 }

@@ -284,6 +284,8 @@ fn archive_provider_errors_for_missing_archive() {
             sha256: None,
             strip_components: 0,
             allow_absolute_symlinks: false,
+            members: Vec::new(),
+            extract_to: None,
             refresh_policy: SourceRefreshPolicySpec::Auto,
             pin_policy: SourcePinPolicySpec::Floating,
         }),

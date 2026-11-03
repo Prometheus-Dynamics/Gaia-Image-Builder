@@ -201,6 +201,7 @@ fn append_target_paths(
 const SHARED_CACHE_DIRS: &[&str] = &[
     gaia_source_providers::GIT_MIRROR_CACHE_DIR,
     gaia_source_providers::DOWNLOAD_CACHE_DIR,
+    gaia_source_providers::EXTRACT_CACHE_DIR,
     ".gaia/cache/buildroot/dl",
     ".gaia/docker-cache",
     ".gaia/cache/import-sources",

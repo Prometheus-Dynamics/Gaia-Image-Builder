@@ -447,6 +447,8 @@ fn interpolate_source(
             sha256,
             strip_components,
             allow_absolute_symlinks,
+            members,
+            extract_to,
             refresh,
             pin,
         } => RawSourceDefinition::Archive {
@@ -455,6 +457,11 @@ fn interpolate_source(
             sha256: sha256.map(|value| resolver::interpolate_string(value, raw, env)),
             strip_components,
             allow_absolute_symlinks,
+            members: members
+                .into_iter()
+                .map(|value| resolver::interpolate_string(value, raw, env))
+                .collect(),
+            extract_to: extract_to.map(|value| resolver::interpolate_string(value, raw, env)),
             refresh,
             pin,
         },

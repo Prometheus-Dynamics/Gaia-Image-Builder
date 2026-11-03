@@ -70,9 +70,11 @@ pub(crate) fn validate_sources(
                 }
             }
             SourceDefinition::Archive(archive) if archive.is_url() => {
+                validate_extract_to(source.id.as_str(), archive, diagnostics);
                 validate_archive_url(source.id.as_str(), archive, diagnostics);
             }
             SourceDefinition::Archive(archive) => {
+                validate_extract_to(source.id.as_str(), archive, diagnostics);
                 if archive.sha256.is_some() {
                     diagnostics.push(error(
                         "archive_sha256_without_url",
@@ -124,6 +126,31 @@ pub(crate) fn validate_sources(
     validate_git_source_refs(spec, diagnostics);
     validate_git_lockfile(spec, diagnostics);
     source_ids
+}
+
+/// `extract_to` stays inside the source tree: a relative path with no `..`.
+fn validate_extract_to(
+    id: &str,
+    archive: &gaia_spec::ArchiveSourceSpec,
+    diagnostics: &mut Vec<ValidationDiagnostic>,
+) {
+    let Some(dir) = archive.extract_to.as_deref() else {
+        return;
+    };
+    let path = std::path::Path::new(dir);
+    let inside = !dir.trim().is_empty()
+        && path
+            .components()
+            .all(|component| matches!(component, std::path::Component::Normal(_)));
+    if !inside {
+        diagnostics.push(error(
+            "archive_extract_to_invalid",
+            format!(
+                "archive source '{id}' has extract_to '{dir}'; it must be a relative directory inside the source tree, without '..'"
+            ),
+            Some(format!("source:{id}")),
+        ));
+    }
 }
 
 /// An archive source that is downloaded: `url` with its `sha256`, and no

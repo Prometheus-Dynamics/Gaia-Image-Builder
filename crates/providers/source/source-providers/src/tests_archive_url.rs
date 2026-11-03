@@ -59,6 +59,8 @@ fn url_source(url: &Path, sha: &str, strip_components: u32) -> SourceSpec {
             sha256: Some(sha.to_string()),
             strip_components,
             allow_absolute_symlinks: false,
+            members: Vec::new(),
+            extract_to: None,
             refresh_policy: SourceRefreshPolicySpec::Auto,
             pin_policy: SourcePinPolicySpec::Locked,
         }),
@@ -160,5 +162,60 @@ fn offline_a_url_archive_comes_only_from_the_cache() {
     assert_eq!(
         fs::read_to_string(materialized_dir(&spec, &source).join("hello.txt")).unwrap(),
         "hello from the archive"
+    );
+}
+
+#[test]
+fn members_extract_only_their_files_once_per_workspace() {
+    let scratch = TempDir::new("gaia-archive-url-members");
+    let workspace = scratch.join("ws");
+    fs::create_dir_all(&workspace).expect("workspace");
+    let served = scratch.join("served");
+    fs::create_dir_all(served.join("payload/top/rtl_nic")).expect("payload");
+    fs::write(served.join("payload/top/rtl_nic/rtl8153a-2.fw"), "fw a").expect("fw");
+    fs::write(served.join("payload/top/rtl_nic/rtl8156b-2.fw"), "fw b").expect("fw");
+    fs::write(served.join("payload/top/other.bin"), "other").expect("other");
+    let (archive, sha) = make_archive(&served);
+    let mut source = url_source(&archive, &sha, 1);
+    if let SourceDefinition::Archive(spec) = &mut source.definition {
+        spec.members = vec!["*/rtl_nic/rtl815*".into()];
+    }
+
+    // The first build dir extracts; the second copies the cached tree.
+    let mut spec = spec_in(&workspace);
+    let first = ArchiveSourceProvider
+        .execute_source(&spec, &source, None, None)
+        .expect("the members extract");
+    assert!(first[0].contains("extracted into"), "{first:?}");
+    // The second build dir puts the tree under extract_to, from the cache.
+    spec.workspace.build_dir = workspace.join("build-clean").display().to_string();
+    if let SourceDefinition::Archive(spec) = &mut source.definition {
+        spec.extract_to = Some("rootfs/lib/firmware".into());
+    }
+    let second = ArchiveSourceProvider
+        .execute_source(&spec, &source, None, None)
+        .expect("the cached tree restores");
+    assert!(
+        second[0].contains("restored from the extract cache"),
+        "{second:?}"
+    );
+    let dir = materialized_dir(&spec, &source).join("rootfs/lib/firmware");
+    assert_eq!(
+        fs::read_to_string(dir.join("rtl_nic/rtl8156b-2.fw")).unwrap(),
+        "fw b"
+    );
+    assert!(dir.join("rtl_nic/rtl8153a-2.fw").is_file());
+    assert!(!dir.join("other.bin").exists(), "only the members");
+    assert!(!dir.join("hello.txt").exists(), "only the members");
+
+    // A pattern that matches nothing fails the extract.
+    if let SourceDefinition::Archive(spec) = &mut source.definition {
+        spec.members = vec!["*/rtl_nic/rtl8159*".into()];
+    }
+    spec.workspace.build_dir = workspace.join("build-missing").display().to_string();
+    assert!(
+        ArchiveSourceProvider
+            .execute_source(&spec, &source, None, None)
+            .is_err()
     );
 }

@@ -408,6 +408,8 @@ mod tests {
                 sha256: Some(sha.clone()),
                 strip_components: 0,
                 allow_absolute_symlinks: false,
+                members: Vec::new(),
+                extract_to: None,
                 refresh_policy: gaia_spec::SourceRefreshPolicySpec::Never,
                 pin_policy: gaia_spec::SourcePinPolicySpec::Locked,
             }),

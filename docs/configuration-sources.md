@@ -75,6 +75,30 @@ sha256 = "<64 hex digits of the archive>"
 strip_components = 0
 ```
 
+`members` extracts only the archive members that match its GNU tar
+wildcards (`*` matches across `/`), written as the paths in the archive,
+before `strip_components`; a pattern that matches nothing fails the extract.
+`extract_to` extracts into that relative directory of the source tree
+instead of its top, for a tree that serves as a rootfs overlay. A `url`
+archive's extracted tree is kept in the workspace's extract cache,
+`<workspace>/.gaia/cache/extracted/<key>`, keyed by its `sha256`,
+`strip_components`, `members` and `allow_absolute_symlinks`: the source
+materializes again, in this or another build dir, by copying that tree
+instead of decompressing the archive.
+
+```toml
+# r8152's seven firmware files from linux-firmware (650 MB), as a rootfs
+# overlay: BR2_ROOTFS_OVERLAY = "${source.linux-firmware.path}/rootfs".
+[[sources]]
+id = "linux-firmware"
+kind = "archive"
+url = "https://cdn.kernel.org/pub/linux/kernel/firmware/linux-firmware-20260810.tar.xz"
+sha256 = "ac17c34fe73756926a961fbafadf8d8f07a3bd2dd2f4ea31a0fb5d50c714a49a"
+strip_components = 1
+extract_to = "rootfs/usr/lib/firmware"
+members = ["linux-firmware-20260810/rtl_nic/rtl815*"]
+```
+
 Policies:
 - `refresh = "auto" | "always" | "never"`
 - `pin = "floating" | "locked"`
@@ -221,7 +245,7 @@ the same cache, under the same name. Re-materializing the source copies
 the cached file instead of downloading it again. Downloads without a
 `sha256` are always fetched. The file is hashed once per download, both to
 verify it and to record `output_sha256` in the source state. Remove the cache
-with `gaia clean <build> --all-caches`.
+(and the extract cache) with `gaia clean <build> --all-caches`.
 
 ## Toolchains
 

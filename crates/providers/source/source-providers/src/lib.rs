@@ -145,6 +145,7 @@ pub(crate) struct ArchiveSourceProvider;
 pub(crate) struct DownloadSourceProvider;
 
 mod archive;
+mod archive_cache;
 mod command;
 mod digest;
 mod download;
@@ -164,6 +165,7 @@ mod tests;
 #[cfg(test)]
 mod tests_archive_url;
 
+pub use archive_cache::EXTRACT_CACHE_DIR;
 pub(crate) use command::*;
 pub(crate) use digest::*;
 pub use digest::{path_source_content_fingerprint, path_source_fingerprint};

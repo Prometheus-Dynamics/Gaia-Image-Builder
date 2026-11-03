@@ -638,6 +638,12 @@ pub(crate) enum RawSourceDefinition {
         /// Accept symlinks with an absolute target (a rootfs or sysroot).
         #[serde(default)]
         allow_absolute_symlinks: bool,
+        /// Extract only the members matching these tar wildcards.
+        #[serde(default)]
+        members: Vec<String>,
+        /// Extract into this directory of the source tree.
+        #[serde(default)]
+        extract_to: Option<String>,
         #[serde(default)]
         refresh: Option<RawSourceRefreshPolicy>,
         #[serde(default)]

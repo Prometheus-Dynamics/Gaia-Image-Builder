@@ -136,6 +136,8 @@ const ARCHIVE_SOURCE_KEYS: &[&str] = &[
     "sha256",
     "strip_components",
     "allow_absolute_symlinks",
+    "members",
+    "extract_to",
     "refresh",
     "pin",
 ];
