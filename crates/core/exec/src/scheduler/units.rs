@@ -146,6 +146,7 @@ pub(crate) fn unit_job_budget(
     budget_from_free_cores(
         available_cores(),
         inputs.ledger.held_cores(),
+        inputs.ledger.heavy_units(),
         1 + waiting_heavy,
     )
 }
@@ -159,21 +160,29 @@ pub(crate) fn available_cores() -> usize {
 
 /// Job budget for a unit that is about to start: the cores the running heavy
 /// units do not hold, split across this unit and the heavy units expected to
-/// run beside it. Tools read their job count once, when they start, so a
-/// running unit keeps its budget; a unit that finishes returns its cores,
-/// and the units that start after it are sized from the larger free pool.
+/// run beside it, and never less than an even share of the machine among all
+/// of them. Tools read their job count once, when they start, so a running
+/// unit keeps its budget; a unit that finishes returns its cores, and the
+/// units that start after it are sized from the larger free pool. Without
+/// the even share, a unit that started while another held every core kept
+/// one job after that one finished: a cold HeliOS Raze build ran its
+/// Buildroot make with `-j1` for 35 minutes, beside a cargo batch that had
+/// started a moment later, also with one job.
 /// `None` when the unit runs alone with no core held, so its tools keep their
 /// defaults.
 pub(crate) fn budget_from_free_cores(
     cores: usize,
     held_cores: usize,
+    heavy_units: usize,
     concurrent: usize,
 ) -> Option<usize> {
     if concurrent <= 1 && held_cores == 0 {
         return None;
     }
-    let free = cores.saturating_sub(held_cores);
-    Some((free / concurrent.max(1)).max(1))
+    let concurrent = concurrent.max(1);
+    let free = cores.saturating_sub(held_cores) / concurrent;
+    let even = cores / (heavy_units + concurrent);
+    Some(free.max(even).max(1))
 }
 
 #[cfg(test)]
@@ -182,27 +191,36 @@ mod tests {
 
     #[test]
     fn a_unit_alone_on_an_idle_machine_keeps_the_tool_defaults() {
-        assert_eq!(budget_from_free_cores(8, 0, 1), None);
+        assert_eq!(budget_from_free_cores(8, 0, 0, 1), None);
     }
 
     #[test]
     fn idle_cores_are_split_across_the_units_that_start_together() {
-        assert_eq!(budget_from_free_cores(8, 0, 2), Some(4));
-        assert_eq!(budget_from_free_cores(8, 0, 3), Some(2));
+        assert_eq!(budget_from_free_cores(8, 0, 0, 2), Some(4));
+        assert_eq!(budget_from_free_cores(8, 0, 0, 3), Some(2));
     }
 
     #[test]
     fn a_new_unit_is_sized_from_the_cores_running_units_do_not_hold() {
         // One running unit holds 4 of 8 cores: the new one gets the rest.
-        assert_eq!(budget_from_free_cores(8, 4, 1), Some(4));
-        // Two running units hold 6: what is left is shared by the new unit
-        // and one that may start beside it.
-        assert_eq!(budget_from_free_cores(8, 6, 2), Some(1));
+        assert_eq!(budget_from_free_cores(8, 4, 1, 1), Some(4));
+        // Two running units hold 6: the 2 left would be shared by the new
+        // unit and one that may start beside it, but each gets an even share
+        // of the machine among the four.
+        assert_eq!(budget_from_free_cores(8, 6, 2, 2), Some(2));
+    }
+
+    #[test]
+    fn units_starting_beside_one_that_holds_every_core_get_an_even_share() {
+        // A cold HeliOS Raze build: a cargo batch left to its defaults holds
+        // all 30 cores when the Buildroot make and the next batch start.
+        assert_eq!(budget_from_free_cores(30, 30, 1, 2), Some(10));
+        assert_eq!(budget_from_free_cores(8, 8, 1, 1), Some(4));
     }
 
     #[test]
     fn a_unit_always_gets_at_least_one_job() {
-        assert_eq!(budget_from_free_cores(8, 8, 1), Some(1));
-        assert_eq!(budget_from_free_cores(2, 5, 4), Some(1));
+        assert_eq!(budget_from_free_cores(2, 5, 4, 4), Some(1));
+        assert_eq!(budget_from_free_cores(1, 1, 1, 1), Some(1));
     }
 }

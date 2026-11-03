@@ -640,3 +640,42 @@ fn scheduler_blocks_parallel_checkpoints_with_same_id() {
 
     assert_second_operation_blocked(&spec, &plan);
 }
+
+#[test]
+fn an_image_build_after_the_prepare_step_does_not_rebuild_the_named_packages_again() {
+    let prepare = parallel_operation(
+        OperationId::image_prepare(),
+        OperationKind::PrepareImage,
+        OperationParallelismDomain::Images,
+    );
+    let build = parallel_operation(
+        OperationId::image(),
+        OperationKind::BuildImage,
+        OperationParallelismDomain::Images,
+    );
+    let build_id = ResolvedBuildSpec::new("rebuild-package-test").identity.id;
+    let plan = |operations| ExecutionPlan {
+        build_id: build_id.clone(),
+        operations,
+    };
+    let unit = [(1, build.clone())];
+    // The prepare step dircleans and builds the packages: the build does not.
+    assert!(builds_after_prepare(
+        &plan(vec![prepare.clone(), build.clone()]),
+        &unit
+    ));
+    // A reused prepare step (`--only image:build`) or none: the build does.
+    let reused = prepare.clone().with_reuse(OperationReuse::Reuse {
+        source: "test".into(),
+    });
+    assert!(!builds_after_prepare(
+        &plan(vec![reused, build.clone()]),
+        &unit
+    ));
+    assert!(!builds_after_prepare(&plan(vec![build.clone()]), &unit));
+    // The prepare step itself is passed the packages.
+    assert!(!builds_after_prepare(
+        &plan(vec![prepare.clone(), build]),
+        &[(0, prepare)]
+    ));
+}

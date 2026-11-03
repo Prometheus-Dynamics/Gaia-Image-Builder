@@ -6,8 +6,8 @@ use std::thread;
 use std::time::Duration;
 
 use gaia_plan::{
-    ExecutionPlan, OperationId, OperationParallelismDomain, OperationParallelismMode,
-    OperationReuse, PlannedOperation,
+    ExecutionPlan, OperationId, OperationKind, OperationParallelismDomain,
+    OperationParallelismMode, OperationReuse, PlannedOperation,
 };
 use gaia_process::ProcessCancelCheck;
 use gaia_spec::{ArtifactDefinition, ResolvedBuildSpec};
@@ -102,6 +102,8 @@ pub(crate) struct RunningLedger {
     /// Cores given to the running heavy units (every core when a unit was
     /// left to its tools' default).
     held_cores: usize,
+    /// Running heavy units (the ones holding cores).
+    heavy_units: usize,
 }
 
 impl RunningLedger {
@@ -111,6 +113,10 @@ impl RunningLedger {
 
     pub(crate) fn held_cores(&self) -> usize {
         self.held_cores
+    }
+
+    pub(crate) fn heavy_units(&self) -> usize {
+        self.heavy_units
     }
 
     fn holds(&self, key: &ParallelResourceKey) -> bool {
@@ -150,12 +156,19 @@ impl RunningLedger {
         }
     }
 
+    /// A heavy unit holds at least one core; a light one holds none.
     pub(crate) fn hold_cores(&mut self, cores: usize) {
         self.held_cores += cores;
+        if cores > 0 {
+            self.heavy_units += 1;
+        }
     }
 
     pub(crate) fn release_cores(&mut self, cores: usize) {
         self.held_cores = self.held_cores.saturating_sub(cores);
+        if cores > 0 {
+            self.heavy_units = self.heavy_units.saturating_sub(1);
+        }
     }
 }
 
@@ -297,7 +310,11 @@ pub(crate) fn schedule_ready_operations<'scope, 'env>(
             event_sender: context.event_sender.clone(),
             cancel_check: Some(context.cancel_check.clone()),
             job_budget,
-            rebuild_packages: context.rebuild_packages.to_vec(),
+            rebuild_packages: if builds_after_prepare(context.plan, &unit) {
+                Vec::new()
+            } else {
+                context.rebuild_packages.to_vec()
+            },
         };
         scope.spawn(move || {
             // Operation time excludes time the build spent paused.
@@ -681,3 +698,15 @@ mod units;
 
 #[cfg(test)]
 mod tests;
+
+/// Whether `unit` is an image build after the plan's prepare step, which
+/// already dircleaned and built the `--rebuild-package` packages: the build
+/// passing them on rebuilt them a second time.
+fn builds_after_prepare(plan: &ExecutionPlan, unit: &[(usize, PlannedOperation)]) -> bool {
+    unit.iter()
+        .any(|(_, operation)| matches!(operation.kind, OperationKind::BuildImage))
+        && plan.operations.iter().any(|operation| {
+            matches!(operation.kind, OperationKind::PrepareImage)
+                && operation.reuse.should_execute()
+        })
+}
