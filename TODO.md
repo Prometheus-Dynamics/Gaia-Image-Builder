@@ -94,7 +94,7 @@ through HeliOS). The other boards follow it, so their items stay below.
   - Done when: a ROCK 5C build prints a short summary, and the whole list is still in its report.
   - Blocked by: nothing.
 - **K230D BSP (HVS_U01, HVS_I02)**
-  - What: Canaan's Linux-only SDK with Linux on the big C908 (CPU1, the only core with RVV), vendor U-Boot and OpenSBI, and SPI-NAND boot. Size the media memory reservation from Styx's estimate of 20–25 MB.
+  - What: Canaan's Linux-only SDK with Linux on the big C908 (CPU1, the only core with RVV), vendor U-Boot and OpenSBI, and SPI-NAND boot. The media memory is sized on the K230D Zero (2026-11-02): a 16 MiB CMA area shared by VGLite, MMZ and the CMA dma-heap, for Styx's rings, Eidos's pyramid and VGLite (10.9 MiB); the BSP boards take the same budget.
   - Why: the smart USB camera and the Inferno host.
   - Done when: a board boots slot A, falls back from a bad slot B, and `grep isa /proc/cpuinfo` shows `v`.
   - Blocked by: the boards (PCB).
