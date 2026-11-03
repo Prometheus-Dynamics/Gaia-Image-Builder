@@ -235,9 +235,15 @@ Frames that VGLite reads in place come from the CMA dma-heap,
 dmabuf map keeps only the last scatter-list entry. VGLite's own buffers and
 the heap share the default CMA area. `assets/linux.fragment` sizes it at
 8 MiB with `CONFIG_CMA_SIZE_MBYTES` (the k230 defconfig made it 50% of RAM,
-64 MiB of the 128). That holds four NV12 frames of the sensor (1280x720 or
-1280x800), VGLite's 256 KiB of command buffers and about 2 MiB of slack. A
-`cma=<size>M` kernel argument overrides it at boot. The system heap is
+64 MiB of the 128). Eidos's pyramid on VGLite runs on L8 (VGLite takes no
+NV12): four 1280x800 L0 frames in the heap (3.9 MiB), Eidos's double-buffered
+L1 to L3 levels (0.65 MiB), VGLite's command buffers (0.3 MiB) and one staged
+L8 blit from a non-contiguous source (1.25 MiB) come to about 6.1 MiB. A
+staged blit takes a CMA staging buffer for its source and one for its
+target, so an RGBA 1280x720 one alone needs about 7 MiB; raise the size for
+that. The image has no camera capture driver yet; a raw ring allocated by
+one with vb2-dma-contig would come from this area too (2 MiB per 1280x800
+RAW10 buffer). A `cma=<size>M` kernel argument overrides the size at boot. The system heap is
 built too, and `/dev/mmz` is not, since nothing on the image uses it.
 Written, untested on board.
 
