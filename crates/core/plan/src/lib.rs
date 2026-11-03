@@ -390,15 +390,20 @@ pub fn plan_build_operations(
     image_prepare_dependencies.dedup_by(|left, right| left.as_str() == right.as_str());
     image_finalize_dependencies.sort_by(|left, right| left.as_str().cmp(right.as_str()));
     image_finalize_dependencies.dedup_by(|left, right| left.as_str() == right.as_str());
-    // Prepare runs the same full Buildroot make as Build. It only earns its
-    // cost when an artifact must build against the prepared sysroot before
-    // the final image; otherwise Build alone does the work once. A build with
+    // Prepare runs the same full Buildroot make as Build, without the
+    // artifacts. It earns its cost when an artifact must build against the
+    // prepared sysroot before the final image, and when the image installs
+    // artifacts: the packages then build while the artifacts do, instead of
+    // after them (a cold HeliOS Raze build waited 17 minutes on cargo before
+    // its 10-minute Buildroot make started), for one more target-finalize when
+    // both run. Otherwise Build alone does the work once. A build with
     // variants always prepares: the Buildroot base is then one operation all
     // variants share, whichever of them build against it.
     // A prefetch (`gaia prefetch`) plans the base alone: its download step is
     // the prepare operation.
     let prepare_needed = !spec.selection.variants.is_empty()
         || spec.policy.execution.prefetch
+        || !spec.install.entries.is_empty()
         || spec
             .artifacts
             .iter()

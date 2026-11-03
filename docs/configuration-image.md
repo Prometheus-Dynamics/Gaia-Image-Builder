@@ -280,6 +280,13 @@ Expected image formats:
   produce under a name without a format suffix.
 
 Buildroot run notes:
+- `image:prepare` builds the packages without the artifacts, so they build
+  while the artifacts do. It is planned when the image installs artifacts
+  (`[[install]]`), when an artifact builds after it (`after_image_prepare`),
+  and for builds with variants (the base they share). `image:build` then
+  applies the image feed and finalizes: one more `target-finalize` when both
+  run, against a Buildroot make that no longer waits for the slowest artifact.
+  Without installs, `image:build` alone does the work once.
 - Config steps are reused. The build operation repeats the prepare operation's
   defconfig, fragments, `config_overrides` and cache settings only when their
   inputs changed: the defconfig and fragment files, the overrides, the cache
