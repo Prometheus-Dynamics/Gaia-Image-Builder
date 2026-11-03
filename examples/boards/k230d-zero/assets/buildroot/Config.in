@@ -1,0 +1,1 @@
+source "$BR2_EXTERNAL_K230D_ZERO_PATH/package/k230-vglite/Config.in"

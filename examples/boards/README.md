@@ -221,6 +221,26 @@ To check on a board first:
   multicast reaches `eth0` and nothing else holds UDP 5353. `board-lite` logs
   nothing if it can't advertise, because its init script discards its output.
 
+## K230D Zero: VGLite and contiguous memory
+
+The image has the VGLite GPU's library, `/usr/lib/libvg_lite.so` (72 KB,
+stripped), for Daedalus's VGLite route. It is built by this tree's
+`k230-vglite` package from the SDK's `package/vg_lite` sources. The SDK's own
+`BR2_PACKAGE_VG_LITE` lists libdrm as a dependency, and Buildroot 2024.02
+then builds and installs libdrm whether or not it is enabled; the library
+links only libm.
+
+Frames that VGLite reads in place come from the CMA dma-heap,
+`/dev/dma_heap/linux,cma`, whose dmabufs are one contiguous block: VGLite's
+dmabuf map keeps only the last scatter-list entry. VGLite's own buffers and
+the heap share the default CMA area. `assets/linux.fragment` sizes it at
+8 MiB with `CONFIG_CMA_SIZE_MBYTES` (the k230 defconfig made it 50% of RAM,
+64 MiB of the 128). That holds four NV12 frames of the sensor (1280x720 or
+1280x800), VGLite's 256 KiB of command buffers and about 2 MiB of slack. A
+`cma=<size>M` kernel argument overrides it at boot. The system heap is
+built too, and `/dev/mmz` is not, since nothing on the image uses it.
+Written, untested on board.
+
 ## Still open
 
 - Boot each image on its board; read the RK3576 maskrom USB product id with

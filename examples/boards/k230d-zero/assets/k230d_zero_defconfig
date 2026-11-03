@@ -38,6 +38,9 @@ BR2_LINUX_KERNEL_INSTALL_TARGET=y
 BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="board/canaan/k230-soc/busybox.fragment"
 BR2_PACKAGE_E2FSPROGS=y
 BR2_PACKAGE_E2FSPROGS_RESIZE2FS=y
+# The VGLite GPU's library (/dev/vg_lite) for Daedalus's VGLite route, from
+# this tree's k230-vglite package: the SDK's vg_lite without libdrm.
+BR2_PACKAGE_K230_VGLITE=y
 BR2_PACKAGE_LIBGPIOD=y
 BR2_PACKAGE_LIBGPIOD_TOOLS=y
 BR2_TARGET_ROOTFS_EXT2=y

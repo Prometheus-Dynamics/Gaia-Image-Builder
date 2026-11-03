@@ -3,3 +3,5 @@
 # HOST_CFLAGS is expanded only when a recipe runs, so every host package
 # gets it.
 HOST_CFLAGS += -std=gnu17
+
+include $(sort $(wildcard $(BR2_EXTERNAL_K230D_ZERO_PATH)/package/*/*.mk))

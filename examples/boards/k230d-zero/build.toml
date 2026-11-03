@@ -82,6 +82,8 @@ config_overrides = [
   # the SDK root passed in (the Buildroot tree is <sdk>/output/buildroot-*).
   ["BR2_ROOTFS_POST_IMAGE_SCRIPT", "${assets}/post-image.sh"],
   ["BR2_ROOTFS_POST_SCRIPT_ARGS", "\"bananapi-canmv-k230d-zero ${source.buildroot.path}/../..\""],
+  # The CMA size (8 MiB, not half the RAM), the CMA and system dma-heaps, no MMZ.
+  ["BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES", "${assets}/linux.fragment"],
 ]
 
 [[image.expected_images]]

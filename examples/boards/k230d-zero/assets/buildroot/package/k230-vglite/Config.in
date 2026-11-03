@@ -1,0 +1,9 @@
+config BR2_PACKAGE_K230_VGLITE
+	bool "k230-vglite"
+	help
+	  libvg_lite.so, the user-space library of the K230's VGLite
+	  2.5D GPU (/dev/vg_lite), built from the SDK's package/vg_lite
+	  sources without its demos. The SDK's BR2_PACKAGE_VG_LITE
+	  lists libdrm as a dependency, which Buildroot then builds and
+	  installs whether or not it is enabled; the library itself
+	  links only libm.
