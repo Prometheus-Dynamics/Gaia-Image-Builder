@@ -345,6 +345,12 @@ Supported interpolation targets include:
 - `${workspace.root_dir}`
 - `${workspace.build_dir}`
 - `${outputs.dir}`
+- `${project.root_dir}`: the workspace root as an absolute path
+- `${project.build_dir}`, `${project.out_dir}`: the build and output
+  directories as absolute paths (the directory itself when it is absolute,
+  otherwise under `${project.root_dir}`); use these instead of
+  `${project.root_dir}/${workspace.build_dir}`, which breaks when the build
+  directory is set to an absolute path
 - `${workspace.paths.<alias>}`
 - `${env:NAME}`
 - `${preset.name}`

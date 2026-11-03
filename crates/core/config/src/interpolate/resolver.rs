@@ -205,6 +205,8 @@ fn resolve_token(token: &str, raw: &RawBuildConfig, env: &ResolvedEnvironment) -
         "config.root_dir" => config_root_dir(raw),
         "execution.root_dir" => execution_root_dir(),
         "project.root_dir" => project_root_dir(raw, env),
+        "project.build_dir" => project_dir(raw, env, &raw.workspace.build_dir),
+        "project.out_dir" => project_dir(raw, env, &raw.workspace.out_dir),
         "build.date" => super::build_date::resolve(&config_root_dir(raw))
             .unwrap_or_else(|| format!("${{{token}}}")),
         "project.commit" | "project.commit_short" | "project.commit_count" | "project.describe" => {
@@ -282,6 +284,16 @@ fn project_root_dir(raw: &RawBuildConfig, env: &ResolvedEnvironment) -> String {
         .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let workspace_root = interpolate_string(raw.workspace.root_dir.clone(), raw, env);
     normalize_path(&absolutize(&build_root, &workspace_root))
+        .display()
+        .to_string()
+}
+
+/// A workspace directory as an absolute path: `dir` itself when it is
+/// absolute, otherwise under `${project.root_dir}`. Joining the two tokens
+/// by hand doubles an absolute `dir`.
+fn project_dir(raw: &RawBuildConfig, env: &ResolvedEnvironment, dir: &str) -> String {
+    let dir = interpolate_string(dir.to_string(), raw, env);
+    normalize_path(&absolutize(Path::new(&project_root_dir(raw, env)), &dir))
         .display()
         .to_string()
 }

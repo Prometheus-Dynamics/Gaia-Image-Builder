@@ -87,6 +87,68 @@ work_dir = "${workspace.build_dir}/assembly"
 }
 
 #[test]
+fn project_dir_tokens_are_absolute_whether_the_dir_is_relative_or_absolute() {
+    let scratch = TempDir::new("gaia-project-dir-tokens");
+    let project_root = scratch.join("project");
+    let config_path = project_root.join("gaia/configs/builds/dirs.toml");
+    let absolute_build = scratch.join("elsewhere/build");
+    std::fs::create_dir_all(&project_root).expect("project root should be created");
+    std::fs::write(project_root.join("Cargo.toml"), "[workspace]\n")
+        .expect("project marker should be written");
+    write_temp_config_at(
+        &config_path,
+        &format!(
+            r#"
+build_name = "dirs"
+version = "2.0.0"
+
+[workspace]
+root_dir = "."
+build_dir = "{}"
+out_dir = "gaia/output/${{build.name}}"
+
+[image]
+kind = "buildroot"
+allow_fallback = true
+
+[[image.expected_images]]
+name = "sdcard.img"
+format = "raw"
+required = true
+
+[image.output]
+collect_dir = "${{project.out_dir}}/images"
+archive_name = "${{project.build_dir}}/host.tar"
+"#,
+            absolute_build.display()
+        ),
+    );
+
+    let spec = resolve_config(&config_path.display().to_string());
+
+    assert_eq!(
+        spec.image.output.archive_name.as_deref(),
+        Some(
+            absolute_build
+                .join("host.tar")
+                .display()
+                .to_string()
+                .as_str()
+        )
+    );
+    assert_eq!(
+        spec.image.output.collect_dir.as_deref(),
+        Some(
+            project_root
+                .join("gaia/output/dirs/images")
+                .display()
+                .to_string()
+                .as_str()
+        )
+    );
+}
+
+#[test]
 fn reporting_post_build_hook_compiles_and_interpolates() {
     let path = write_temp_config(
         r#"
