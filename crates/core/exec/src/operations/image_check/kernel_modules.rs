@@ -37,6 +37,9 @@ pub(super) struct Inputs<'a> {
     pub firmware_dir: Option<&'a Path>,
     /// `[image.checks] optional_firmware`: names not reported when absent.
     pub optional_firmware: &'a [String],
+    /// `[image.rootfs] drop_shadowed_modules`: an in-tree copy that an
+    /// `updates/` module shadows was left out of `target/`.
+    pub drop_shadowed: bool,
     /// Whether the module checks run (`[image.checks] kernel_modules`). The
     /// hardware list runs either way.
     pub module_checks: bool,
@@ -150,7 +153,7 @@ pub(super) fn check(inputs: &Inputs<'_>) -> Outcome {
     let winners = modprobe_winners(&files, &dir);
     if inputs.module_checks {
         let shipped: HashSet<&str> = parsed.iter().map(|module| module.name.as_str()).collect();
-        check_duplicates(&parsed, &winners, &mut out);
+        check_duplicates(&parsed, &winners, inputs.drop_shadowed, &mut out);
         check_vermagic(&parsed, &release, &mut out);
         check_depends(&parsed, &shipped, &builtin, &mut out);
         check_firmware(
@@ -338,6 +341,7 @@ fn search_rank(rel: &str) -> u8 {
 fn check_duplicates(
     modules: &[KernelModule],
     winners: &BTreeMap<String, Winner>,
+    drop_shadowed: bool,
     out: &mut Outcome,
 ) {
     let mut by_name: BTreeMap<&str, Vec<&KernelModule>> = BTreeMap::new();
@@ -366,12 +370,14 @@ fn check_duplicates(
             .collect();
         // An out-of-tree override of an in-tree module: the build can drop
         // the in-tree copy.
-        let hint = if winner.rel.starts_with("updates/")
-            && shadowed.iter().all(|rel| rel.starts_with("kernel/"))
+        let hint = if !(winner.rel.starts_with("updates/")
+            && shadowed.iter().all(|rel| rel.starts_with("kernel/")))
         {
-            "; [image.rootfs] drop_shadowed_modules = true leaves the in-tree copy out"
-        } else {
             ""
+        } else if drop_shadowed {
+            "; drop_shadowed_modules left it out of target/, so a later step (a post-image script) put it back in the shipped rootfs"
+        } else {
+            "; [image.rootfs] drop_shadowed_modules = true leaves the in-tree copy out"
         };
         out.warning(
             "module_duplicate",

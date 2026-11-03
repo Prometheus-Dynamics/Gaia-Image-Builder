@@ -304,6 +304,7 @@ fn check_with(tree: &Tree, modules_dir: Option<&Path>, symvers: bool) -> Outcome
         symvers_set: false,
         firmware_dir: Some(&firmware),
         optional_firmware: &[],
+        drop_shadowed: false,
         module_checks: true,
         hardware: hardware::Sources {
             build: "image-check-test",
@@ -506,6 +507,10 @@ fn a_module_shipped_twice_warns_and_names_the_one_modprobe_loads() {
     assert!(message.contains("updates/good.ko"), "{message}");
     assert!(message.contains("modules.dep"), "{message}");
     assert!(message.contains("kernel/drivers/good.ko"), "{message}");
+    assert!(
+        message.contains("drop_shadowed_modules = true"),
+        "an updates/ override names the key: {message}"
+    );
 }
 
 #[test]
@@ -647,6 +652,7 @@ fn the_real_buildroot_output_checks_in_well_under_a_second() {
         symvers_set: false,
         firmware_dir: Some(&firmware),
         optional_firmware: &[],
+        drop_shadowed: false,
         module_checks: true,
         hardware: hardware::Sources {
             build: "raze",

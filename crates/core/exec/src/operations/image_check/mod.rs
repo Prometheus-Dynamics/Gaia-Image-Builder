@@ -11,6 +11,7 @@ mod hardware;
 mod kernel;
 mod kernel_modules;
 mod module;
+mod shipped_rootfs;
 #[cfg(test)]
 mod test_dtb;
 #[cfg(test)]
@@ -98,13 +99,35 @@ pub(crate) fn execute(
                 .join("images")
                 .join(kernel::buildroot_kernel_image_name(&config))
         });
-    let modules_root = buildroot.join("target/lib/modules");
+    // The modules and firmware the shipped rootfs image holds, else target/'s.
+    let extract_dir = buildroot.join(shipped_rootfs::EXTRACT_DIR);
+    let _ = std::fs::remove_dir_all(&extract_dir);
+    let mut rootfs_notes: Vec<String> = Vec::new();
+    let (mut modules_root, mut firmware_dir, mut rootfs_source) = (
+        buildroot.join("target/lib/modules"),
+        buildroot.join("target/lib/firmware"),
+        "target".to_string(),
+    );
+    if checks.modules_dir.is_none()
+        && let Some((name, format)) = shipped_rootfs::shipped_image(spec)
+    {
+        let image = buildroot.join("images").join(&name);
+        match shipped_rootfs::extract(&image, &format, &buildroot.join("host"), &extract_dir) {
+            Ok(trees) => {
+                modules_root = trees.modules_root;
+                firmware_dir = trees.firmware_dir;
+                rootfs_source = format!("images/{name}");
+            }
+            Err(message) => rootfs_notes.push(format!(
+                "the kernel module checks read target/: the shipped rootfs could not be read ({message})"
+            )),
+        }
+    }
     let modules_dir = checks.modules_dir.as_deref().map(resolve);
     let symvers = match checks.symvers.as_deref() {
         Some(raw) => Some(resolve(raw)),
         None => find_symvers(&buildroot.join("build")),
     };
-    let firmware_dir = buildroot.join("target/lib/firmware");
     let images_dir = buildroot.join("images");
     let rootfs = buildroot.join("target");
     // An assembly's trees hold the boot files the board boots (their overlays,
@@ -151,6 +174,11 @@ pub(crate) fn execute(
         symvers_set: checks.symvers.is_some(),
         firmware_dir: Some(&firmware_dir),
         optional_firmware: &checks.optional_firmware,
+        drop_shadowed: matches!(
+            &spec.image.definition,
+            gaia_spec::ImageDefinition::Buildroot(buildroot_spec)
+                if buildroot_spec.rootfs_drop_shadowed_modules
+        ),
         module_checks: checks.kernel_modules != Some(false),
         hardware: hardware::Sources {
             build: spec.identity.id.as_str(),
@@ -162,6 +190,10 @@ pub(crate) fn execute(
             pi_model: checks.pi_model.as_deref(),
         },
     });
+    let _ = std::fs::remove_dir_all(&extract_dir);
+    for note in rootfs_notes {
+        outcome.warning("rootfs_image_unread", None, note);
+    }
     let mut boot_trees = vec![
         (images_dir.clone(), "images".to_string()),
         (rootfs.clone(), "target".to_string()),
@@ -184,7 +216,7 @@ pub(crate) fn execute(
     } else {
         "failed"
     };
-    let report = report_json(
+    let mut report = report_json(
         spec,
         status,
         Some((&outcome, &kernel_image, symvers.as_deref())),
@@ -192,6 +224,8 @@ pub(crate) fn execute(
         &warnings,
         &buildroot,
     );
+    // What the module and firmware checks read: `images/<name>` or `target`.
+    report["kernel_modules"]["rootfs"] = serde_json::Value::String(rootfs_source);
     if let Err(error) = write_report(&report_path, &report) {
         return report_failure(operation_id, &error);
     }

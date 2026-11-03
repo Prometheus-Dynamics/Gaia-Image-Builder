@@ -433,6 +433,7 @@ fn check_with_sources(
         symvers_set: false,
         firmware_dir: Some(&firmware),
         optional_firmware: &[],
+        drop_shadowed: false,
         module_checks: true,
         hardware: hardware::Sources {
             build: "image-check-test",
@@ -567,6 +568,7 @@ fn the_real_raze_output_checks_atlas_hardware_list() {
         symvers_set: false,
         firmware_dir: Some(&firmware),
         optional_firmware: &[],
+        drop_shadowed: false,
         module_checks: true,
         hardware: hardware::Sources {
             build: "raze",
