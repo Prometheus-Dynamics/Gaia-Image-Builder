@@ -3,14 +3,17 @@
 # area, which the k230 defconfig makes 50% of RAM (64 MiB of 128).
 #
 # CONFIG_CMA_SIZE_MBYTES is the knob, and a `cma=<size>M` kernel argument
-# overrides it at boot. 8 MiB holds four NV12 frames of the K230D Zero's
-# sensor (1280x720: 1.32 MiB each, 5.3 MiB; 1280x800: 5.9 MiB), VGLite's two
-# 128 KiB command buffers and its tessellation buffer, and about 2 MiB for
-# VGLite staging buffers and other drivers' coherent allocations. Pages in
-# the area that no one has allocated still serve Linux's movable memory.
+# overrides it at boot. Styx's K230D soft ISP takes its raw ring (2 x
+# 1280x800 RAW10, 3.9 MiB) and its output ring (6 x 1280x800 L8, 5.9 MiB)
+# from the CMA heap; Eidos's pyramid levels (0.65 MiB) and VGLite's own
+# buffers (0.3 MiB) add to that: 10.9 MiB. The area hands out frame-sized
+# blocks at 1 MiB alignment, so 12 MiB would leave about 0.7 MiB, and Styx
+# falls back to plain memory (every VGLite blit staged) when it runs out.
+# 16 MiB keeps a margin. Pages in the area that no one has allocated still
+# serve Linux's movable memory.
 CONFIG_CMA_SIZE_SEL_MBYTES=y
 # CONFIG_CMA_SIZE_SEL_PERCENTAGE is not set
-CONFIG_CMA_SIZE_MBYTES=8
+CONFIG_CMA_SIZE_MBYTES=16
 # Contiguous dmabufs (a single scatter-list entry, which VGLite's dmabuf map
 # needs) at /dev/dma_heap/linux,cma, and the system heap, as on the Rockchip
 # boards.

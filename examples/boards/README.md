@@ -234,17 +234,19 @@ Frames that VGLite reads in place come from the CMA dma-heap,
 `/dev/dma_heap/linux,cma`, whose dmabufs are one contiguous block: VGLite's
 dmabuf map keeps only the last scatter-list entry. VGLite's own buffers and
 the heap share the default CMA area. `assets/linux.fragment` sizes it at
-8 MiB with `CONFIG_CMA_SIZE_MBYTES` (the k230 defconfig made it 50% of RAM,
-64 MiB of the 128). Eidos's pyramid on VGLite runs on L8 (VGLite takes no
-NV12): four 1280x800 L0 frames in the heap (3.9 MiB), Eidos's double-buffered
-L1 to L3 levels (0.65 MiB), VGLite's command buffers (0.3 MiB) and one staged
-L8 blit from a non-contiguous source (1.25 MiB) come to about 6.1 MiB. A
-staged blit takes a CMA staging buffer for its source and one for its
-target, so an RGBA 1280x720 one alone needs about 7 MiB; raise the size for
-that. The image has no camera capture driver yet; a raw ring allocated by
-one with vb2-dma-contig would come from this area too (2 MiB per 1280x800
-RAW10 buffer). A `cma=<size>M` kernel argument overrides the size at boot. The system heap is
-built too, and `/dev/mmz` is not, since nothing on the image uses it.
+16 MiB with `CONFIG_CMA_SIZE_MBYTES` (the k230 defconfig made it 50% of RAM,
+64 MiB of the 128). Styx's K230D soft ISP takes its raw ring (2 x 1280x800
+RAW10, 3.9 MiB) and its output ring (6 x 1280x800 L8, 5.9 MiB) from the
+heap, and Eidos reads the output frames in place; Eidos's L1 to L3 levels
+(0.65 MiB) and VGLite's command buffers (0.3 MiB) bring it to 10.9 MiB. The
+area hands out frame-sized blocks at 1 MiB alignment, and when it runs out
+Styx falls back to plain memory and every VGLite blit is staged (a source
+and a target staging buffer, about 7 MiB for an RGBA 1280x720 blit), so the
+size keeps a margin over the 12 MiB minimum. An NV12 output ring needs about
+6 MiB more. The image has no camera capture driver yet (the SDK's vvcam is
+not built), so the raw ring is for when one lands. A `cma=<size>M` kernel
+argument overrides the size at boot. The system heap is built too, and
+`/dev/mmz` is not, since nothing on the image uses it.
 Written, untested on board.
 
 ## Still open
