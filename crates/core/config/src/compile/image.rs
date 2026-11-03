@@ -194,6 +194,38 @@ pub(crate) fn force_rootfs_tar_override(
     overrides
 }
 
+/// Appends `[image.rootfs] overlays` to the `BR2_ROOTFS_OVERLAY` override
+/// (Buildroot's space-separated list), so each layer adds its directories
+/// where a `config_overrides` entry would replace the earlier layer's.
+pub(crate) fn append_rootfs_overlays(
+    mut overrides: Vec<(String, String)>,
+    overlays: &[String],
+) -> Vec<(String, String)> {
+    const KEY: &str = "BR2_ROOTFS_OVERLAY";
+    if overlays.is_empty() {
+        return overrides;
+    }
+    let existing = overrides
+        .iter()
+        .position(|(key, _)| key == KEY)
+        .map(|index| overrides.remove(index).1);
+    let mut dirs: Vec<String> = existing
+        .as_deref()
+        .map(|value| value.trim().trim_matches('"'))
+        .unwrap_or_default()
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    for overlay in overlays {
+        let overlay = overlay.trim();
+        if !overlay.is_empty() && !dirs.iter().any(|dir| dir == overlay) {
+            dirs.push(overlay.to_string());
+        }
+    }
+    overrides.push((KEY.into(), format!("\"{}\"", dirs.join(" "))));
+    overrides
+}
+
 pub(crate) fn compile_image_assembly(
     raw: Option<RawImageAssemblyConfig>,
 ) -> Option<ImageAssemblySpec> {

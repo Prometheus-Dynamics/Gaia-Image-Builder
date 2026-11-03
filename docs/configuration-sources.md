@@ -88,7 +88,7 @@ instead of decompressing the archive.
 
 ```toml
 # r8152's seven firmware files from linux-firmware (650 MB), as a rootfs
-# overlay: BR2_ROOTFS_OVERLAY = "${source.linux-firmware.path}/rootfs".
+# overlay: [image.rootfs] overlays = ["${source.linux-firmware.path}/rootfs"].
 [[sources]]
 id = "linux-firmware"
 kind = "archive"

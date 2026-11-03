@@ -34,6 +34,7 @@ const LITERAL_KEYS: &[&str] = &[
     "image.buildroot.source",
     "image.buildroot.external_tree_mode",
     "image.rootfs.exclude_packages",
+    "image.rootfs.overlays",
     "image.starting-point.rootfs_path",
     "image.starting-point.source",
     "image.starting-point.source_path",

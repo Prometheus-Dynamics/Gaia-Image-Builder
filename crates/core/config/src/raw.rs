@@ -1045,6 +1045,8 @@ pub(crate) struct RawBuildrootExpectedImageConfig {
 pub(crate) struct RawBuildrootRootfsConfig {
     /// Buildroot packages whose files are left out of the root filesystem.
     pub exclude_packages: Vec<String>,
+    /// Rootfs overlay directories, appended to `BR2_ROOTFS_OVERLAY`.
+    pub overlays: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

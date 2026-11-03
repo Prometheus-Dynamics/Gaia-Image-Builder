@@ -11,9 +11,10 @@ mod when;
 use artifact::{compile_artifact, complete_build_groups};
 use checkpoint::{compile_checkpoint, compile_stage_content_origin};
 use image::{
-    compile_buildroot_expected_image_format, compile_buildroot_external_tree_mode,
-    compile_image_assembly, compile_image_feed, compile_image_layers,
-    compile_rootfs_validation_mode, compile_starting_point_output_mode, force_rootfs_tar_override,
+    append_rootfs_overlays, compile_buildroot_expected_image_format,
+    compile_buildroot_external_tree_mode, compile_image_assembly, compile_image_feed,
+    compile_image_layers, compile_rootfs_validation_mode, compile_starting_point_output_mode,
+    force_rootfs_tar_override,
 };
 use policy::{
     compile_backoff_strategy, compile_command_policy, compile_docker_execution, compile_input_kind,
@@ -492,10 +493,13 @@ pub(crate) fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                 allow_fallback,
                 legal_info,
                 config_fragments,
-                config_overrides: if layers.is_some() {
-                    force_rootfs_tar_override(config_overrides)
-                } else {
-                    config_overrides
+                config_overrides: {
+                    let overrides = append_rootfs_overlays(config_overrides, &rootfs.overlays);
+                    if layers.is_some() {
+                        force_rootfs_tar_override(overrides)
+                    } else {
+                        overrides
+                    }
                 },
                 override_srcdirs,
                 external_tree,

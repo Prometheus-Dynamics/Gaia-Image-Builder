@@ -155,6 +155,7 @@ fn kind_specific_fields(image: &RawImageConfig) -> Vec<&'static str> {
                     !rootfs.exclude_packages.is_empty(),
                     "rootfs.exclude_packages",
                 ),
+                (!rootfs.overlays.is_empty(), "rootfs.overlays"),
             ];
             fields.extend(set.iter().filter(|(on, _)| *on).map(|(_, name)| *name));
         }
@@ -287,6 +288,7 @@ fn merge_image_definition(
                     .into_iter()
                     .chain(overlay_rootfs.exclude_packages)
                     .collect(),
+                overlays: merge_string_lists(base_rootfs.overlays, overlay_rootfs.overlays),
             },
         },
         (
@@ -373,7 +375,8 @@ fn merge_image_definition(
             && config_fragments.is_empty()
             && config_overrides.is_empty()
             && override_srcdirs.is_empty()
-            && rootfs.exclude_packages.is_empty() =>
+            && rootfs.exclude_packages.is_empty()
+            && rootfs.overlays.is_empty() =>
         {
             base_definition
         }

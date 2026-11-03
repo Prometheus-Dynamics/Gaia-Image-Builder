@@ -6,6 +6,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- `[image.rootfs] overlays`: rootfs overlay directories appended to `BR2_ROOTFS_OVERLAY`, concatenated across layers. A device layer (Atlas's Raze firmware overlay) and an OS layer can each add an overlay; as `config_overrides` entries the later one replaced the earlier.
 - `[image.checks]` merges key by key across layers, and `optional_firmware` lists add up, so a device layer's checks (Atlas's Raze firmware list) survive an OS layer's own `[image.checks]`; the table used to be replaced whole.
 - Archive sources take `members` (extract only the matching members) and `extract_to` (a directory of the source tree to extract into), and a `url` archive's extracted tree is cached per workspace, keyed by its sha256 and extract options, so a source that materializes again copies it instead of decompressing the archive. photon-image-modifier's Raze ships r8152's seven Realtek firmware files this way, as a rootfs overlay, where Buildroot's linux-firmware package extracted the 650 MB tarball on every clean build (29 s with the download cached).
 - `[image.checks] optional_firmware`: firmware names (with `*` wildcards) a kernel module lists but works without; an image without them is not warned about (`firmware_missing`). The Raze kernel's r8152 lists nine Realtek USB Ethernet firmware files, two of which (`rtl8157-1.fw`, `rtl8159-1.fw`) no linux-firmware release ships, so photon-image-modifier's Raze run always ended with a warning.

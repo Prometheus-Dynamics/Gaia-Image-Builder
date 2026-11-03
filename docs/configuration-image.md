@@ -332,6 +332,22 @@ out of its root filesystem, without a second tree. `image:build` removes the
 files of the listed packages from `target/` before the image's post-build
 scripts and before the filesystem images, so `rootfs.*` does not contain them.
 
+#### Rootfs overlays
+
+```toml
+[image.rootfs]
+overlays = ["${source.linux-firmware.path}/rootfs"]   # directories copied over target/
+```
+
+`overlays` are appended to `BR2_ROOTFS_OVERLAY`, after the directories of a
+`BR2_ROOTFS_OVERLAY` entry in `config_overrides` (a directory already listed
+is not added twice). Layered configs concatenate their lists, so a device
+layer and an OS layer each add their own overlay, where two
+`config_overrides` entries would leave only the later one. A defconfig's own
+`BR2_ROOTFS_OVERLAY` is replaced, as by any override: list its directory here
+too. A directory may not contain spaces (Buildroot splits the list on them).
+`--set image.rootfs.overlays=a,b` sets the list.
+
 #### Package sizes and legal info
 
 Every Buildroot image build writes `<build>.package-sizes.json` into the collect

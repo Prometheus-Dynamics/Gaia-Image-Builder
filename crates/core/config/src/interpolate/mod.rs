@@ -671,7 +671,14 @@ fn interpolate_image_definition(
             rootfs,
         } => RawImageDefinition::Buildroot {
             source: source.map(|value| resolver::interpolate_string(value, raw, env)),
-            rootfs,
+            rootfs: crate::raw::RawBuildrootRootfsConfig {
+                overlays: rootfs
+                    .overlays
+                    .into_iter()
+                    .map(|value| resolver::interpolate_string(value, raw, env))
+                    .collect(),
+                ..rootfs
+            },
             defconfig: defconfig.map(|value| resolver::interpolate_string(value, raw, env)),
             defconfig_path: defconfig_path
                 .map(|value| resolver::interpolate_string(value, raw, env)),

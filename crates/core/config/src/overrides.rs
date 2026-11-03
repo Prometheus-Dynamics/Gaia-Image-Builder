@@ -253,6 +253,11 @@ fn apply_known_override(
                 rootfs.exclude_packages = split_csv(value);
             }
         }
+        KnownOverrideKey::ImageRootfsOverlays => {
+            if let raw::RawImageDefinition::Buildroot { rootfs, .. } = &mut raw.image.definition {
+                rootfs.overlays = split_csv(value);
+            }
+        }
         KnownOverrideKey::ImageBuildrootExternalTreeMode => {
             if let raw::RawImageDefinition::Buildroot {
                 external_tree_mode, ..

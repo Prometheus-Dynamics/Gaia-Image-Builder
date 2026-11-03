@@ -28,6 +28,7 @@ pub(super) enum KnownOverrideKey {
     ImageBuildrootSource,
     ImageBuildrootExternalTreeMode,
     ImageRootfsExcludePackages,
+    ImageRootfsOverlays,
     ImageStartingPointRootfsPath,
     ImageStartingPointSource,
     ImageStartingPointSourcePath,
@@ -172,6 +173,7 @@ impl<'a> OverrideKey<'a> {
             "image.rootfs.exclude_packages" => {
                 Self::Known(KnownOverrideKey::ImageRootfsExcludePackages)
             }
+            "image.rootfs.overlays" => Self::Known(KnownOverrideKey::ImageRootfsOverlays),
             "image.starting-point.rootfs_path" => {
                 Self::Known(KnownOverrideKey::ImageStartingPointRootfsPath)
             }
