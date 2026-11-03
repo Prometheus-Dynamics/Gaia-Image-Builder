@@ -1,11 +1,37 @@
 # TODO
 
-Open work, checked against the code on 2026-11-01. Every open item says what it
+Open work, checked against the code on 2026-11-02. Every open item says what it
 is, why, when it is done and what blocks it. Finished items are in "Done" with
 their commits.
 
 Board work gets tested on boards before anything ships, unless the user says
 otherwise. "Written" below means built and checked on the host, not booted.
+
+## Alpha (Raze)
+
+The next release is an alpha for the Raze (CM5) only (the user, 2026-11-02,
+through HeliOS). The other boards follow it, so their items stay below.
+
+- **CM5 on-device checks**
+  - What: confirm that the `ov9782` and `raze-fan` boot overlays load, once Atlas has fixed their install path (the 2026-10-23 PV camera incident). If Atlas adopts EROFS 1 MiB pclusters (LZMA level 6, 47.2 to 44.2 MB), measure boot time and first-use reads.
+  - Why: both change the boot path and cannot be checked off-device.
+  - Done when: the overlays load on a CM5, and the pcluster numbers are measured if Atlas adopts them.
+  - Blocked by: a Raze slot from the HeliOS coordinator (Raze #1 is a CM5, on the bench behind the SystemCore).
+- **Raze image size budget**
+  - What: G6's whole-device budget for the Raze first: two slots and `/data` on the CM5's eMMC, a build that fails when they do not fit and names the smallest eMMC it needs, and the number for the PCB session.
+  - Why: the alpha ships on the Raze. Its `.img.xz` grows a few KB a build (51.40 MB at ef4f1f2f) and nothing fails it while it still fits.
+  - Done when: a current HeliOS Raze build passes and an oversized one fails.
+  - Blocked by: the eMMC size of the alpha's CM5 from HeliOS. Run on a real Raze build before it can fail one.
+- **Raze build time**
+  - What: how long `tools/build-os.sh raze full` takes on the build host, warm and cold, and the step that dominates it; then bring it under a target agreed with HeliOS. In the qemu builds of 2026-11-02 the `helios-api` cargo build held the run at step 17 of 210 for about 15 minutes.
+  - Why: every Raze change waits on this build, and the gate has to fit it.
+  - Done when: the times are measured and the build meets the target.
+  - Blocked by: the target, from HeliOS.
+- **Raze build warnings**
+  - What: the warnings every Raze build prints: `ov9282`, `pisp_be` and `rp1_cfe_downstream` shipped twice (the `updates/` copy shadows the kernel's), nine firmware files for `r8152` missing, and ccache allowed 50 GiB on a disk with 14 GiB free.
+  - Why: a clean Raze build makes a new warning stand out.
+  - Done when: a Raze build prints none of them, each fixed where it belongs (HeliOS for the modules and firmware, the build host for ccache).
+  - Blocked by: HeliOS, for the modules and firmware.
 
 ## Boards: test what is written
 
@@ -24,11 +50,6 @@ otherwise. "Written" below means built and checked on the host, not booted.
   - Why: the kernel attached it on nandsim (44fc94b, kernel 7.2), but nandsim has 512-byte sub-pages and was given offset 2048. That a board needs no offset comes from reading the vendor driver.
   - Done when: a Luckfox Pico Pro attaches `ubi.img` at boot with its three volumes.
   - Blocked by: a Luckfox Pico Pro on a bench. Tested together with the slots above.
-- **CM5 on-device checks**
-  - What: confirm that the `ov9782` and `raze-fan` boot overlays load, once Atlas has fixed their install path (the 2026-10-23 PV camera incident). If Atlas adopts EROFS 1 MiB pclusters (LZMA level 6, 47.2 to 44.2 MB), measure boot time and first-use reads.
-  - Why: both change the boot path and cannot be checked off-device.
-  - Done when: the overlays load on a CM5, and the pcluster numbers are measured if Atlas adopts them.
-  - Blocked by: a Raze slot from the HeliOS coordinator (Raze #1 is a CM5, on the bench behind the SystemCore).
 
 ## Boards: images and support
 
@@ -45,8 +66,8 @@ otherwise. "Written" below means built and checked on the host, not booted.
 - **G6: per-board size budget**
   - What: a whole-device budget for disk images (eMMC/SD), so a disk larger than the board's part fails and names the smallest size it needs, and the smallest-flash number for each board.
   - Why: two slots plus data has to fit the cheapest flash. Raw NAND is covered: `flash_size` fails the build when the volumes do not fit, and UBI builds report `minimum_flash_bytes` (1a81221). A disk image only fails when an image is larger than its partition.
-  - Done when: a current real HeliOS and PV build pass and an oversized one fails, and the numbers go to the PCB session.
-  - Blocked by: nothing. The board examples supply the configs; the check has to run on real HeliOS and PV builds before it can fail a build.
+  - Done when: the board examples and a current PV build pass and an oversized one fails, and the numbers go to the PCB session. The Raze's budget comes first, under Alpha.
+  - Blocked by: nothing. The board examples supply the configs; the check has to run on real builds before it can fail a build.
 - **Rust on the K230D**
   - What: link Rust artifacts for the K230D through LLD, in the K230 example or by default for the XuanTie toolchain.
   - Why: Rust 1.99 objects for riscv64 do not link with the XuanTie V2.10.1 GNU `ld`, profile or not (`unknown z ISA extension: 'zaamo'`). LLD links them (docs/configuration-sources.md#cpu-profiles).
