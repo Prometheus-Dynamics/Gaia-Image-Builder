@@ -37,6 +37,7 @@ fn spec_with_disk(scratch: &TempDir, rootfs_bytes: usize) -> (ResolvedBuildSpec,
             alignment_lba: None,
             truncate: None,
             ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
+            budget: Default::default(),
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "rootfs".into(),
                 kind: Some("0x83".into()),

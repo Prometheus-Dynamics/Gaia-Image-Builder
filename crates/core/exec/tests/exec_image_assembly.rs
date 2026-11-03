@@ -475,6 +475,7 @@ fn image_assembly_disk_failure_cleans_generated_filesystem_output() {
             alignment_lba: None,
             truncate: None,
             ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
+            budget: Default::default(),
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "missing".into(),
                 kind: None,
@@ -549,6 +550,7 @@ fn image_assembly_disk_write_failure_cleans_temp_and_final_outputs() {
             alignment_lba: None,
             truncate: None,
             ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
+            budget: Default::default(),
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "rootfs".into(),
                 kind: None,

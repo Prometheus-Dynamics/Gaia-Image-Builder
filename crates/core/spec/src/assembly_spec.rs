@@ -230,7 +230,36 @@ pub struct AssemblyDiskSpec {
     /// GPT only: the disk GUID.
     #[serde(skip_serializing_if = "crate::fingerprint::is_default")]
     pub gpt: crate::AssemblyGptDiskSpec,
+    /// The device the disk is flashed to: the smallest part it must fit.
+    #[serde(skip_serializing_if = "crate::fingerprint::is_default")]
+    pub budget: AssemblyDiskBudgetSpec,
     pub partitions: Vec<AssemblyDiskPartitionSpec>,
+}
+
+/// A disk's whole-device budget: its full layout plus `device_reserve` (what
+/// the board adds on it later, a second slot say) must fit `device_size`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct AssemblyDiskBudgetSpec {
+    /// The smallest flash part the board supports (`device_size = "16G"`).
+    pub device_size: Option<String>,
+    /// Room the board needs beyond the disk's layout (`device_reserve`).
+    pub device_reserve: Option<String>,
+}
+
+impl AssemblyDiskBudgetSpec {
+    pub fn parsed_device_size(&self) -> Result<Option<ByteSize>, ByteSizeParseError> {
+        self.device_size
+            .as_deref()
+            .map(ByteSize::from_str)
+            .transpose()
+    }
+
+    pub fn parsed_device_reserve(&self) -> Result<Option<ByteSize>, ByteSizeParseError> {
+        self.device_reserve
+            .as_deref()
+            .map(ByteSize::from_str)
+            .transpose()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]

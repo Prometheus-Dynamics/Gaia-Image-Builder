@@ -89,6 +89,7 @@ fn spec_with_archive(scratch: &TempDir, name: &str) -> (ResolvedBuildSpec, PathB
             alignment_lba: None,
             truncate: None,
             ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
+            budget: Default::default(),
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "spare".into(),
                 kind: None,

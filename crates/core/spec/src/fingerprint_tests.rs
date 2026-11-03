@@ -201,6 +201,7 @@ fn compressed_and_gpt_options_are_encoded_only_when_set() {
         truncate: None,
         ebr_placement: AssemblyEbrPlacementSpec::Default,
         gpt: Default::default(),
+        budget: Default::default(),
         partitions: vec![partition],
     };
     let plain = canonical_json(&disk);

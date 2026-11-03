@@ -109,6 +109,7 @@ fn executes_image_assembly_vfat_filesystem_with_provider_mtools() {
             alignment_lba: None,
             truncate: None,
             ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
+            budget: Default::default(),
             partitions: vec![
                 AssemblyDiskPartitionSpec {
                     name: "boot".into(),
@@ -229,6 +230,7 @@ fn archives_single_disk(scratch: &TempDir, archive_name: &str, decompressor: &st
             alignment_lba: None,
             truncate: None,
             ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
+            budget: Default::default(),
             partitions: vec![
                 AssemblyDiskPartitionSpec {
                     name: "boot".into(),
@@ -430,6 +432,7 @@ fn executes_image_assembly_mbr_disk() {
             alignment_lba: None,
             truncate: None,
             ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
+            budget: Default::default(),
             partitions: vec![
                 AssemblyDiskPartitionSpec {
                     name: "boot".into(),
@@ -549,6 +552,7 @@ fn executes_image_assembly_mbr_disk_with_explicit_lba_layout() {
             alignment_lba: Some(1),
             truncate: None,
             ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
+            budget: Default::default(),
             partitions: vec![
                 AssemblyDiskPartitionSpec {
                     name: "boot".into(),
@@ -642,6 +646,7 @@ fn image_assembly_mbr_rejects_bootable_logical_partition_before_writing_disk() {
             alignment_lba: None,
             truncate: None,
             ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
+            budget: Default::default(),
             partitions: (0..5)
                 .map(|index| AssemblyDiskPartitionSpec {
                     name: format!("part{index}"),

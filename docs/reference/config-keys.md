@@ -264,7 +264,7 @@ Keys: `autoresize`, `id`, `image`, `name`, `size`, `type`.
 
 Described in [Image assembly](../configuration-assembly.md#image-assembly).
 
-Keys: `alignment_lba`, `disk_guid`, `ebr_placement`, `first_lba`, `id`, `output`, `partition_table`, `signature`, `signature_text`, `truncate`.
+Keys: `alignment_lba`, `device_reserve`, `device_size`, `disk_guid`, `ebr_placement`, `first_lba`, `id`, `output`, `partition_table`, `signature`, `signature_text`, `truncate`.
 
 ## `[[image.assembly.disks.partitions]]`
 

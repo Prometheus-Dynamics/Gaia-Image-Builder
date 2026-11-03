@@ -14,11 +14,49 @@ const GZIP_LEVELS: std::ops::RangeInclusive<u32> = 1..=9;
 const ZSTD_LEVELS: std::ops::RangeInclusive<u32> = 1..=19;
 const XZ_LEVELS: std::ops::RangeInclusive<u32> = 0..=9;
 
+fn validate_disk_budget(
+    disk: &gaia_spec::AssemblyDiskSpec,
+    diagnostics: &mut Vec<ValidationDiagnostic>,
+) {
+    let invalid = |key: &str, parse_error: String| {
+        error(
+            "assembly_disk_budget_invalid",
+            format!(
+                "assembly disk '{}' has invalid {key}: {parse_error}",
+                disk.id
+            ),
+            Some(format!("image.assembly.disks.{key}")),
+        )
+    };
+    match disk.budget.parsed_device_size() {
+        Ok(Some(size)) if size.bytes() == 0 => diagnostics.push(invalid(
+            "device_size",
+            "it must be greater than zero".into(),
+        )),
+        Ok(_) => {}
+        Err(parse_error) => diagnostics.push(invalid("device_size", parse_error.to_string())),
+    }
+    if let Err(parse_error) = disk.budget.parsed_device_reserve() {
+        diagnostics.push(invalid("device_reserve", parse_error.to_string()));
+    }
+    if disk.budget.device_reserve.is_some() && disk.budget.device_size.is_none() {
+        diagnostics.push(error(
+            "assembly_disk_budget_invalid",
+            format!(
+                "assembly disk '{}' sets device_reserve without device_size: the reserve is room on the device",
+                disk.id
+            ),
+            Some("image.assembly.disks.device_reserve".into()),
+        ));
+    }
+}
+
 pub(crate) fn validate_disk_layout(
     disk: &gaia_spec::AssemblyDiskSpec,
     diagnostics: &mut Vec<ValidationDiagnostic>,
 ) {
     let location = || Some("image.assembly.disks.partitions".into());
+    validate_disk_budget(disk, diagnostics);
     let gpt = disk.partition_table == gaia_spec::AssemblyPartitionTableSpec::Gpt;
     let extended = !gpt
         && disk

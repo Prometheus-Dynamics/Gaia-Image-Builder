@@ -39,6 +39,7 @@ fn spec_with_work_dir(scratch: &TempDir, work_dir: &str) -> ResolvedBuildSpec {
             alignment_lba: None,
             truncate: None,
             ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
+            budget: Default::default(),
             partitions: vec![AssemblyDiskPartitionSpec {
                 name: "boot".into(),
                 kind: Some("0x83".into()),

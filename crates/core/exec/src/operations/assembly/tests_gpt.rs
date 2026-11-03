@@ -58,6 +58,7 @@ fn gpt_disk() -> AssemblyDiskSpec {
         truncate: None,
         ebr_placement: AssemblyEbrPlacementSpec::Default,
         gpt: Default::default(),
+        budget: Default::default(),
         partitions: vec![esp, root, data, raw],
     }
 }

@@ -66,6 +66,7 @@ fn ram_moves_intermediates_and_keeps_published_disks_on_disk() {
         alignment_lba: None,
         truncate: None,
         ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
+        budget: Default::default(),
         partitions: vec![gaia_spec::AssemblyDiskPartitionSpec {
             name: "boot".into(),
             kind: None,
@@ -470,6 +471,7 @@ fn a_raw_disk_under_the_work_dir_is_still_published_to_its_path() {
         alignment_lba: None,
         truncate: None,
         ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
+        budget: Default::default(),
         partitions: Vec::new(),
         gpt: Default::default(),
     });

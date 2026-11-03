@@ -85,8 +85,8 @@ pub use assembly_package_spec::{
 pub(crate) use assembly_spec::AssemblyPathTemplateContext;
 pub use assembly_spec::{
     AssemblyBinarySpec, AssemblyBusyboxInitramfsSpec, AssemblyCheckSpec, AssemblyDeviceKindSpec,
-    AssemblyDeviceSpec, AssemblyDirSpec, AssemblyDiskPartitionSpec, AssemblyDiskSpec,
-    AssemblyDiskTruncateSpec, AssemblyEbrPlacementSpec, AssemblyFileSpec,
+    AssemblyDeviceSpec, AssemblyDirSpec, AssemblyDiskBudgetSpec, AssemblyDiskPartitionSpec,
+    AssemblyDiskSpec, AssemblyDiskTruncateSpec, AssemblyEbrPlacementSpec, AssemblyFileSpec,
     AssemblyKernelModulesSpec, AssemblyPartitionTableSpec, AssemblyPathTemplate,
     AssemblySymlinkSpec, AssemblyTreeSpec, ImageAssemblySpec, MbrPartitionTypeParseError,
 };

@@ -44,6 +44,7 @@ fn disk(output: &Path, partitions: Vec<AssemblyDiskPartitionSpec>) -> AssemblyDi
         alignment_lba: None,
         truncate: None,
         ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
+        budget: Default::default(),
         partitions,
         gpt: Default::default(),
     }

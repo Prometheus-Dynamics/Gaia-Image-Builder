@@ -3,6 +3,11 @@ use super::*;
 pub(super) struct AssemblyDiskSummary {
     pub(super) output: PathBuf,
     pub(super) bytes: u64,
+    /// Bytes the disk file holds data in: zero runs are holes (see
+    /// `write_disk`), so this is what a flash writes beyond zeros.
+    pub(super) data_bytes: u64,
+    /// The full layout, before any truncation: what the device must hold.
+    pub(super) layout_bytes: u64,
     pub(super) sha256: String,
     /// GPT only: the disk GUID.
     pub(super) disk_guid: Option<gaia_spec::GptGuid>,
@@ -54,16 +59,49 @@ pub(super) fn execute_assembly_disk(
         })?;
     }
     let partitions = plan_disk_partitions(spec, roots, disk, disk_guid)?;
+    let layout_bytes = disk_layout_bytes(disk, disk_guid, &partitions)?;
+    check_disk_budget(disk, layout_bytes)?;
     let temp = temporary_assembly_output_path(&output);
-    write_disk(&temp, disk, disk_guid, &partitions)?;
+    write_disk(&temp, disk, disk_guid, layout_bytes, &partitions)?;
     let sha256 = publish_assembly_output(&temp, &output)?;
+    let bytes = file_len(&output)?;
     Ok(AssemblyDiskSummary {
-        bytes: file_len(&output)?,
+        bytes,
+        data_bytes: allocated_bytes(&output).min(bytes),
+        layout_bytes,
         sha256,
         output,
         disk_guid,
         partitions,
     })
+}
+
+/// Bytes a file has blocks for. A disk is written with its zero runs left
+/// as holes, so this is its data.
+pub(super) fn allocated_bytes(path: &Path) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    std_fs::metadata(path)
+        .map(|metadata| metadata.blocks() * 512)
+        .unwrap_or(0)
+}
+
+/// Zeros a disk may carry before it is reported: a flash writes them all.
+const DISK_ZEROS_REPORTED_BYTES: u64 = 64 * MIB;
+
+/// The warning for a disk that is mostly zeros: free space shipped in
+/// fixed-size partitions and filesystems, which every flash writes and
+/// verifies. `None` while the zeros are under 64 MiB or under half the disk.
+pub(super) fn disk_zeros_warning(id: &str, bytes: u64, data_bytes: u64) -> Option<String> {
+    let zeros = bytes.saturating_sub(data_bytes);
+    if zeros < DISK_ZEROS_REPORTED_BYTES || zeros * 2 < bytes {
+        return None;
+    }
+    Some(format!(
+        "assembly disk '{id}' is {} MiB with {} MiB of data: a flash writes {} MiB of zeros; size its filesystems and partitions to their content (size = \"auto\" with a small free) and grow them on the board",
+        bytes / MIB,
+        data_bytes.div_ceil(MIB),
+        zeros / MIB
+    ))
 }
 
 /// Lays partitions out in order. On an MBR disk with more than 4 table
@@ -307,12 +345,13 @@ fn partition_sector_count(
     }
 }
 
-fn write_disk(
-    output: &Path,
+/// Bytes of the disk's full layout: its last partition's end, past the GPT
+/// backup header on a GPT disk.
+fn disk_layout_bytes(
     disk: &gaia_spec::AssemblyDiskSpec,
     disk_guid: Option<gaia_spec::GptGuid>,
     partitions: &[AssemblyDiskPartitionSummary],
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let last_end = partitions
         .iter()
         .map(|partition| partition.start_lba as u64 + partition.sector_count as u64)
@@ -328,9 +367,77 @@ fn write_disk(
             disk.id
         ));
     }
-    let total_bytes = total_sectors
+    total_sectors
         .checked_mul(512)
-        .ok_or_else(|| format!("assembly disk '{}' is too large", disk.id))?;
+        .ok_or_else(|| format!("assembly disk '{}' is too large", disk.id))
+}
+
+/// Fails a disk whose layout plus `device_reserve` does not fit
+/// `device_size`, naming the smallest device it fits.
+pub(super) fn check_disk_budget(
+    disk: &gaia_spec::AssemblyDiskSpec,
+    layout_bytes: u64,
+) -> Result<(), String> {
+    let invalid = |key: &str, error: gaia_spec::ByteSizeParseError| {
+        format!("assembly disk '{}' has invalid {key}: {error}", disk.id)
+    };
+    let Some(device) = disk
+        .budget
+        .parsed_device_size()
+        .map_err(|error| invalid("device_size", error))?
+    else {
+        return Ok(());
+    };
+    let reserve = disk
+        .budget
+        .parsed_device_reserve()
+        .map_err(|error| invalid("device_reserve", error))?
+        .map_or(0, |reserve| reserve.bytes());
+    let needed = layout_bytes.saturating_add(reserve);
+    if needed <= device.bytes() {
+        return Ok(());
+    }
+    Err(format!(
+        "assembly disk '{}' needs {} MiB ({} MiB of layout + {} MiB device_reserve) but device_size is {} MiB: it fits a {} GiB device or larger; shrink its partitions or its reserve",
+        disk.id,
+        needed.div_ceil(MIB),
+        layout_bytes.div_ceil(MIB),
+        reserve.div_ceil(MIB),
+        device.bytes() / MIB,
+        needed.div_ceil(1024 * MIB).next_power_of_two(),
+    ))
+}
+
+/// What a disk's budget leaves free, for the report; `None` without one.
+pub(super) fn disk_budget_message(
+    disk: &gaia_spec::AssemblyDiskSpec,
+    layout_bytes: u64,
+) -> Option<String> {
+    let device = disk.budget.parsed_device_size().ok()??.bytes();
+    let reserve = disk
+        .budget
+        .parsed_device_reserve()
+        .ok()
+        .flatten()
+        .map_or(0, |reserve| reserve.bytes());
+    Some(format!(
+        "assembly disk '{}' fits its {} MiB device: {} MiB of layout + {} MiB reserve, {} MiB to spare",
+        disk.id,
+        device / MIB,
+        layout_bytes.div_ceil(MIB),
+        reserve.div_ceil(MIB),
+        device.saturating_sub(layout_bytes + reserve) / MIB,
+    ))
+}
+
+fn write_disk(
+    output: &Path,
+    disk: &gaia_spec::AssemblyDiskSpec,
+    disk_guid: Option<gaia_spec::GptGuid>,
+    total_bytes: u64,
+    partitions: &[AssemblyDiskPartitionSummary],
+) -> Result<(), String> {
+    let total_sectors = total_bytes / 512;
     let file_bytes = match disk.truncate {
         None => total_bytes,
         Some(gaia_spec::AssemblyDiskTruncateSpec::LastData) => {

@@ -234,8 +234,18 @@ pub(super) fn job_disk<'a>(
         summary.output = target;
     }
     tracing::Span::current().record("output_path", summary.output.display().to_string());
+    let zeros_warning = disk_zeros_warning(&disk.id, summary.bytes, summary.data_bytes);
+    let budget = disk_budget_message(disk, summary.layout_bytes);
     Ok(Box::new(move |run: &mut StepRun<'a>| {
         run.disk_count += 1;
+        if let Some(message) = budget {
+            run.state
+                .insert(format!("disk.{}.budget", run.disk_count), &message);
+            run.messages.push(message);
+        }
+        if let Some(message) = zeros_warning {
+            run.record_warning(&format!("disk.{}.zeros_warning", run.disk_count), message);
+        }
         run.produced.record_disk(index, summary.bytes);
         run.disk_outputs.push(source);
         run.disk_ids.push(disk.id.clone());

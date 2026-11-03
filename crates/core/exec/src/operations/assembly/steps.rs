@@ -149,6 +149,14 @@ impl<'a> StepRun<'a> {
         self.warnings.push(message);
     }
 
+    /// Records a warning about an output under `key` in the state, the
+    /// messages and the warnings of the run.
+    pub(super) fn record_warning(&mut self, key: &str, message: String) {
+        self.state.insert(key.to_string(), &message);
+        self.messages.push(format!("warning: {message}"));
+        self.warnings.push(message);
+    }
+
     /// Takes the pending checks of `trees`, the trees a filesystem or archive
     /// is about to pack, in the order they were recorded.
     pub(super) fn take_lib_checks(&mut self, trees: &[&str]) -> Vec<PendingLibCheck> {

@@ -72,6 +72,7 @@ fn raw_disk(
         alignment_lba: None,
         truncate: None,
         ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
+        budget: Default::default(),
         partitions: vec![AssemblyDiskPartitionSpec {
             name: "rootfs".into(),
             kind: Some("0x83".into()),

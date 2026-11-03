@@ -205,6 +205,7 @@ fn a_ubi_image_sits_next_to_the_loader_on_a_raw_flash_disk() {
                 truncate: None,
                 ebr_placement: AssemblyEbrPlacementSpec::Default,
                 gpt: Default::default(),
+                budget: Default::default(),
                 partitions: vec![
                     raw("idbloader", "@assets/idbloader.img", "32K"),
                     raw("ubi", "$assembly.work/nand.ubi", "4M"),

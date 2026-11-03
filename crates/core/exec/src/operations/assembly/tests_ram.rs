@@ -97,6 +97,7 @@ fn ram_test_assembly(work_dir: &str) -> ImageAssemblySpec {
             alignment_lba: None,
             truncate: None,
             ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
+            budget: Default::default(),
             partitions: vec![
                 partition("boot", Some("$provider.images/boot.cpio"), None, false),
                 partition("copy", Some("$assembly.work/part-copy.bin"), None, false),

@@ -6,8 +6,8 @@ use crate::raw_assembly::{
 };
 use gaia_spec::{
     AssemblyArchiveMemberSpec, AssemblyArchiveSpec, AssemblyBinarySpec, AssemblyCompressedFsSpec,
-    AssemblyGptDiskSpec, AssemblyGptPartitionSpec, AssemblyJsonValue, AssemblyOciConfigSpec,
-    AssemblyOciLayerSpec, AssemblyOciSpec,
+    AssemblyDiskBudgetSpec, AssemblyGptDiskSpec, AssemblyGptPartitionSpec, AssemblyJsonValue,
+    AssemblyOciConfigSpec, AssemblyOciLayerSpec, AssemblyOciSpec,
 };
 
 pub(crate) fn compile_image_feed(raw: &RawBuildConfig) -> ImageFeedSpec {
@@ -317,6 +317,10 @@ pub(crate) fn compile_image_assembly(
                         AssemblyEbrPlacementSpec::Default
                     }
                     Some(RawAssemblyEbrPlacement::Packed) => AssemblyEbrPlacementSpec::Packed,
+                },
+                budget: AssemblyDiskBudgetSpec {
+                    device_size: disk.device_size,
+                    device_reserve: disk.device_reserve,
                 },
                 partitions: disk
                     .partitions

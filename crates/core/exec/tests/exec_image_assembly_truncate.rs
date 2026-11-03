@@ -62,6 +62,7 @@ fn mbr_disk(
         alignment_lba: None,
         truncate,
         ebr_placement,
+        budget: Default::default(),
         partitions,
         gpt: Default::default(),
     }

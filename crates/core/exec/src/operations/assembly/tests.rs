@@ -389,6 +389,7 @@ fn assembly_disk_helpers_parse_types_aliases_and_signatures() {
         alignment_lba: None,
         truncate: None,
         ebr_placement: gaia_spec::AssemblyEbrPlacementSpec::Default,
+        budget: Default::default(),
         partitions: Vec::new(),
         gpt: Default::default(),
     };

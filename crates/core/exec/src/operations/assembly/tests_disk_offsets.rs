@@ -55,6 +55,7 @@ fn disk(
         truncate: None,
         ebr_placement: AssemblyEbrPlacementSpec::Default,
         gpt: Default::default(),
+        budget: Default::default(),
         partitions,
     }
 }
@@ -286,4 +287,77 @@ fn a_uboot_env_with_two_copies_repeats_the_whole_environment() {
     assert_eq!(bytes[..1024], bytes[1024..]);
     assert!(bytes[4..].starts_with(b"boot_slot=a\0\0"));
     assert_eq!(bytes[..4], crc32(&bytes[4..1024]).to_le_bytes());
+}
+
+#[test]
+fn a_disk_of_mostly_zeros_is_reported_with_its_data() {
+    // The Raze slots disk: 1,419 MiB, 145 MiB of data.
+    let message = disk_zeros_warning("slots-sdcard", 1419 * MIB, 145 * MIB).expect("warning");
+    assert!(
+        message.contains("'slots-sdcard' is 1419 MiB with 145 MiB of data"),
+        "{message}"
+    );
+    assert!(message.contains("writes 1274 MiB of zeros"), "{message}");
+    // Under 64 MiB of zeros, or under half the disk, is not reported.
+    assert_eq!(disk_zeros_warning("small", 100 * MIB, 40 * MIB), None);
+    assert_eq!(disk_zeros_warning("full", 1000 * MIB, 600 * MIB), None);
+}
+
+#[test]
+fn a_disk_counts_its_zero_runs_as_holes() {
+    let scratch = TempDir::new("gaia-exec-disk-holes");
+    let path = scratch.join("disk.img");
+    let mut file = fs::File::create(&path).expect("disk");
+    file.set_len(256 * MIB).expect("sized");
+    file.write_all(&[1u8; 4096]).expect("data");
+    drop(file);
+    let data = super::disks::allocated_bytes(&path);
+    assert!(data >= 4096 && data < MIB, "{data}");
+}
+
+#[test]
+fn a_disk_past_its_device_budget_fails_naming_the_device_it_fits() {
+    let scratch = TempDir::new("gaia-exec-disk-budget");
+    write_assets(scratch.path());
+    let mut sized = partition("data", None);
+    sized.size = Some("12M".into());
+    let mut over = disk(AssemblyPartitionTableSpec::Mbr, vec![sized.clone()]);
+    over.budget = gaia_spec::AssemblyDiskBudgetSpec {
+        device_size: Some("16M".into()),
+        device_reserve: Some("8M".into()),
+    };
+    let error = assemble(scratch.path(), over).expect_err("over budget");
+    assert!(
+        error.contains(
+            "needs 21 MiB (13 MiB of layout + 8 MiB device_reserve) but device_size is 16 MiB"
+        ),
+        "{error}"
+    );
+    assert!(error.contains("fits a 1 GiB device or larger"), "{error}");
+
+    let mut fits = disk(AssemblyPartitionTableSpec::Mbr, vec![sized]);
+    fits.budget = gaia_spec::AssemblyDiskBudgetSpec {
+        device_size: Some("64M".into()),
+        device_reserve: Some("8M".into()),
+    };
+    assemble(scratch.path(), fits).expect("within budget");
+}
+
+#[test]
+fn a_disk_budget_reports_what_it_leaves() {
+    let mut budgeted = disk(AssemblyPartitionTableSpec::Mbr, Vec::new());
+    assert_eq!(
+        super::disks::disk_budget_message(&budgeted, 100 * MIB),
+        None
+    );
+    budgeted.budget.device_size = Some("16G".into());
+    budgeted.budget.device_reserve = Some("2G".into());
+    let message = super::disks::disk_budget_message(&budgeted, 1419 * MIB).expect("message");
+    assert_eq!(
+        message,
+        "assembly disk 'disk' fits its 16384 MiB device: 1419 MiB of layout + 2048 MiB reserve, 12917 MiB to spare"
+    );
+    // A 16 GB part over budget names the next size up.
+    let error = super::disks::check_disk_budget(&budgeted, 15 * 1024 * MIB).expect_err("over");
+    assert!(error.contains("fits a 32 GiB device or larger"), "{error}");
 }

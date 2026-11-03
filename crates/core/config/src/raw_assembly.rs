@@ -281,6 +281,8 @@ pub(crate) struct RawAssemblyDiskConfig {
     pub ebr_placement: Option<RawAssemblyEbrPlacement>,
     /// GPT only: the disk GUID; unset derives it from the id.
     pub disk_guid: Option<String>,
+    pub device_size: Option<String>,
+    pub device_reserve: Option<String>,
     pub partitions: Vec<RawAssemblyDiskPartitionConfig>,
 }
 
@@ -297,6 +299,8 @@ impl Default for RawAssemblyDiskConfig {
             truncate: None,
             ebr_placement: None,
             disk_guid: None,
+            device_size: None,
+            device_reserve: None,
             partitions: Vec::new(),
         }
     }
