@@ -18,20 +18,25 @@ through HeliOS). The other boards follow it, so their items stay below.
   - Done when: the overlays load on a CM5, and the pcluster numbers are measured if Atlas adopts them.
   - Blocked by: a Raze slot from the HeliOS coordinator (Raze #1 is a CM5, on the bench behind the SystemCore).
 - **Raze image size budget**
-  - What: G6's whole-device budget for the Raze first: two slots and `/data` on the CM5's eMMC, a build that fails when they do not fit and names the smallest eMMC it needs, and the number for the PCB session.
+  - What: G6's whole-device budget for the Raze first: two slots and `/data` on the CM5's eMMC, a build that fails when they do not fit and names the smallest eMMC it needs, and the number for the PCB session. Budget against a 16 GB eMMC, the smallest CM5 eMMC the Raze supports (the alpha's CM5s have 32 GB, 29.1 GiB usable), and name it in the failure.
   - Why: the alpha ships on the Raze. Its `.img.xz` grows a few KB a build (51.40 MB at ef4f1f2f) and nothing fails it while it still fits.
   - Done when: a current HeliOS Raze build passes and an oversized one fails.
-  - Blocked by: the eMMC size of the alpha's CM5 from HeliOS. Run on a real Raze build before it can fail one.
+  - Blocked by: nothing. Run on a real Raze build before it can fail one.
+- **Images sized to their content**
+  - What: Gaia's assembly writes disk images whose raw size is about their content; free space is made on the board at first boot, not shipped as zeros. Generic for every board and recipe (HeliOS, PV, the examples). The Raze slots image is 1,364 MiB raw for about 60 MB of data (a 1 GiB, mostly empty boot FAT and an ext4 `/data` with 256 MiB free), so every flash writes and verifies about 1.3 GB of zeros (245 s on the SystemCore). ext4 grows online; the boot FAT, which the firmware reads and where slot kernels accumulate, needs a design: a small FAT the slots writer grows, or the FAT placed so the data partition grows instead (with Atlas if it touches slot-init or the slots writer). `.img.xz` stays the only output (no `.bmap`), no byte inside an EROFS/verity slot changes, and a first boot cut mid-grow still boots.
+  - Why: flash time and image size on every board, the Raze first.
+  - Done when: the Raze HeliOS and PV images report raw and xz sizes before and after, and a flash of e5226d57 through the SystemCore is timed (Atlas runs it on HeliOS's go).
+  - Blocked by: nothing; after the PV 2026 images and the fa01beb0 Raze build.
 - **Raze build time**
-  - What: how long `tools/build-os.sh raze full` takes on the build host, warm and cold, and the step that dominates it; then bring it under a target agreed with HeliOS. In the qemu builds of 2026-11-02 the `helios-api` cargo build held the run at step 17 of 210 for about 15 minutes.
+  - What: how long `tools/build-os.sh raze full` takes on the build host, warm and cold, and the step that dominates it; then bring it under HeliOS's targets: warm (one HeliOS crate changed) under 5 minutes, cold under 20. In the qemu builds of 2026-11-02 the `helios-api` cargo build held the run at step 17 of 210 for about 15 minutes (fat LTO, or a warm target dir not reused?). Gaia's own 10-minute gate is a separate item.
   - Why: every Raze change waits on this build, and the gate has to fit it.
-  - Done when: the times are measured and the build meets the target.
-  - Blocked by: the target, from HeliOS.
+  - Done when: the times are measured and the build meets both targets.
+  - Blocked by: nothing.
 - **Raze build warnings**
-  - What: the warnings every Raze build prints: `ov9282`, `pisp_be` and `rp1_cfe_downstream` shipped twice (the `updates/` copy shadows the kernel's), nine firmware files for `r8152` missing, and ccache allowed 50 GiB on a disk with 14 GiB free.
+  - What: the ccache warning every Raze build prints: ccache allowed 50 GiB on a disk with 14 GiB free. (The duplicate `ov9282`, `pisp_be` and `rp1_cfe_downstream` modules and the missing `r8152` firmware are HeliOS's, in its `raze.toml`.)
   - Why: a clean Raze build makes a new warning stand out.
-  - Done when: a Raze build prints none of them, each fixed where it belongs (HeliOS for the modules and firmware, the build host for ccache).
-  - Blocked by: HeliOS, for the modules and firmware.
+  - Done when: a Raze build prints no ccache warning.
+  - Blocked by: nothing.
 
 ## Boards: test what is written
 
