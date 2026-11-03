@@ -343,9 +343,18 @@ fn scope_variant(spec: &mut ResolvedBuildSpec, shared: &BTreeSet<String>) {
             artifact.output.path = variant_output_path(&artifact.output.path, &variant);
         }
     }
-    if spec.image.output.collect_dir.is_none() {
-        let base = gaia_spec::default_image_collect_dir(&spec.workspace);
-        spec.image.output.collect_dir = Some(format!("{}/{variant}", base.trim_end_matches('/')));
+    // Every variant writes the same file names (sdcard.img, boot.vfat), so
+    // each one collects and exports its images into its own directory.
+    let collect_dir = spec
+        .image
+        .output
+        .collect_dir
+        .clone()
+        .unwrap_or_else(|| gaia_spec::default_image_collect_dir(&spec.workspace));
+    spec.image.output.collect_dir =
+        Some(format!("{}/{variant}", collect_dir.trim_end_matches('/')));
+    if let Some(dir) = spec.export.configured_dir() {
+        spec.export.image_dir = Some(format!("{}/{variant}", dir.trim_end_matches('/')));
     }
 }
 

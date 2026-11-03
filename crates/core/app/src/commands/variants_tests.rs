@@ -258,6 +258,25 @@ fn variant_outputs_move_into_the_variant_directory() {
 }
 
 #[test]
+fn each_variant_collects_and_exports_into_its_own_directory() {
+    let mut spec = ResolvedBuildSpec::new("rel");
+    spec.export.workspace_dir = Some("/exports/".into());
+    spec.image.output.collect_dir = Some("out/images".into());
+    spec.selection.variant = Some("rel2026".into());
+    scope_variant(&mut spec, &BTreeSet::new());
+    assert_eq!(spec.export.configured_dir(), Some("/exports/rel2026"));
+    assert_eq!(
+        spec.image.output.collect_dir.as_deref(),
+        Some("out/images/rel2026")
+    );
+
+    let mut unset = ResolvedBuildSpec::new("rel");
+    unset.selection.variant = Some("rel2026".into());
+    scope_variant(&mut unset, &BTreeSet::new());
+    assert_eq!(unset.export.configured_dir(), None);
+}
+
+#[test]
 fn selection_names_declared_variants_only() {
     let specs = ["default", "rel2026", "rel2027"]
         .iter()

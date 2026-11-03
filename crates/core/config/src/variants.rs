@@ -268,11 +268,14 @@ pub fn resolve_variant_specs_scoped(
 /// name the same path would write the same file.
 ///
 /// The paths are what the spec names: `collect_dir/archive_name` for a raw
-/// disk image, the `output` template of each assembly disk, archive and
-/// filesystem, and `export_dir/<file name>` for each of them when exports go
-/// to a configured directory. An image with no `archive_name` is written
-/// under a name the provider derives from the display name and version, so
-/// that name stands in for it.
+/// disk image, the `output` of each assembly disk, archive and filesystem,
+/// and `export_dir/<file name>` for each of them when exports go to a
+/// configured directory. An image with no `archive_name` is written under a
+/// name the provider derives from the display name and version, so that name
+/// stands in for it. `$provider.images` and `$assembly.out` are the variant's
+/// own `collect_dir` (and assembly `out_dir`); an output in `$assembly.work`
+/// is left out, since that directory is scratch each variant's assembly
+/// fills in turn and publishes from.
 fn output_paths(spec: &ResolvedBuildSpec) -> Vec<String> {
     let collect_dir = spec
         .image
@@ -291,41 +294,37 @@ fn output_paths(spec: &ResolvedBuildSpec) -> Vec<String> {
         )),
     }
     if let Some(assembly) = &spec.image.assembly {
+        let out_dir = assembly
+            .out_dir
+            .as_ref()
+            .map(|dir| with_provider_images(dir.as_str(), collect_dir))
+            .unwrap_or_else(|| collect_dir.to_string());
+        let templates = assembly
+            .ubis
+            .iter()
+            .map(|ubi| ubi.output.as_str())
+            .chain(assembly.disks.iter().map(|disk| disk.output.as_str()))
+            .chain(
+                assembly
+                    .archives
+                    .iter()
+                    .map(|archive| archive.output.as_str()),
+            )
+            .chain(assembly.ocis.iter().map(|oci| oci.dest.as_str()))
+            .chain(
+                assembly
+                    .packages
+                    .iter()
+                    .map(|package| package.dest.as_str()),
+            )
+            .chain(
+                assembly
+                    .filesystems
+                    .iter()
+                    .map(|filesystem| filesystem.output.as_str()),
+            );
         outputs.extend(
-            assembly
-                .ubis
-                .iter()
-                .map(|ubi| ubi.output.as_str().to_string()),
-        );
-        outputs.extend(
-            assembly
-                .disks
-                .iter()
-                .map(|disk| disk.output.as_str().to_string()),
-        );
-        outputs.extend(
-            assembly
-                .archives
-                .iter()
-                .map(|archive| archive.output.as_str().to_string()),
-        );
-        outputs.extend(
-            assembly
-                .ocis
-                .iter()
-                .map(|oci| oci.dest.as_str().to_string()),
-        );
-        outputs.extend(
-            assembly
-                .packages
-                .iter()
-                .map(|package| package.dest.as_str().to_string()),
-        );
-        outputs.extend(
-            assembly
-                .filesystems
-                .iter()
-                .map(|filesystem| filesystem.output.as_str().to_string()),
+            templates.filter_map(|template| assembly_output_path(template, collect_dir, &out_dir)),
         );
     }
     if let Some(export_dir) = spec.export.configured_dir() {
@@ -340,6 +339,31 @@ fn output_paths(spec: &ResolvedBuildSpec) -> Vec<String> {
     outputs.sort();
     outputs.dedup();
     outputs
+}
+
+const PROVIDER_IMAGES: &str = "$provider.images";
+const ASSEMBLY_OUT: &str = "$assembly.out";
+const ASSEMBLY_WORK: &str = "$assembly.work";
+
+/// `template` with a leading `$provider.images` replaced by `collect_dir`.
+fn with_provider_images(template: &str, collect_dir: &str) -> String {
+    match template.strip_prefix(PROVIDER_IMAGES) {
+        Some(rest) => format!("{collect_dir}{rest}"),
+        None => template.to_string(),
+    }
+}
+
+/// Where an assembly output `template` lands for a variant whose images go
+/// to `collect_dir` and whose assembly publishes to `out_dir`; `None` for the
+/// scratch `$assembly.work`.
+fn assembly_output_path(template: &str, collect_dir: &str, out_dir: &str) -> Option<String> {
+    if template.starts_with(ASSEMBLY_WORK) {
+        return None;
+    }
+    Some(match template.strip_prefix(ASSEMBLY_OUT) {
+        Some(rest) => format!("{out_dir}{rest}"),
+        None => with_provider_images(template, collect_dir),
+    })
 }
 
 /// Messages for every pair of variants that would write the same output
@@ -567,6 +591,21 @@ overrides = [["build.description", "from variant"]]
         let messages = variant_output_collisions(&[first, second]);
         assert_eq!(messages.len(), 1, "{messages:?}");
         assert!(messages[0].contains("/exports/disk.img"), "{messages:?}");
+    }
+
+    #[test]
+    fn assembly_outputs_are_each_variants_own_and_its_work_dir_is_scratch() {
+        let path = |template| assembly_output_path(template, "/out/images/a", "/out/images/a/x");
+        assert_eq!(
+            path("$provider.images/sdcard.img").as_deref(),
+            Some("/out/images/a/sdcard.img")
+        );
+        assert_eq!(
+            path("$assembly.out/flasher.tar").as_deref(),
+            Some("/out/images/a/x/flasher.tar")
+        );
+        assert_eq!(path("/fixed/disk.img").as_deref(), Some("/fixed/disk.img"));
+        assert_eq!(path("$assembly.work/slots/data.ext4"), None);
     }
 
     #[test]

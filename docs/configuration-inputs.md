@@ -252,8 +252,10 @@ What the variants share:
   run per variant; artifacts built from the other sources stay shared.
 - Everything else runs per variant. Each variant gets its own artifact
   outputs (`variants/<id>/` next to the configured path), its own install and
-  stage records, its own image build, its own default image collect dir
-  (`<out>/images/buildroot/<id>`) and its own reports (`<build>@<id>.*`).
+  stage records, its own image build, its own image collect dir (`<id>/`
+  under the configured or default one, which is also its
+  `$provider.images`), its own export dir (`<export_dir>/<id>/`) and its own
+  reports (`<build>@<id>.*`).
 
 Limits:
 - A source that the Buildroot base (`image:prepare`) or the image reads must
@@ -266,9 +268,13 @@ Limits:
   reused.
 - Variants that would write the same output file are an error. The paths
   compared are `images_dir/archive_name` of the raw disk image, the `output`
-  of each assembly disk, archive and filesystem, and `export_dir/<file name>`
-  when exports go to a configured directory. An image with no `archive_name`
-  is named from its display name and version. The error names the path and
+  of each assembly disk, archive and filesystem (with `$provider.images` and
+  `$assembly.out` the variant's own; `$assembly.work` is scratch each
+  variant's assembly fills in turn, and is not compared), and
+  `export_dir/<file name>`. An image with no `archive_name` is named from its
+  display name and version. Since each variant collects and exports into its
+  own directory, only an output at a fixed path can collide. The error names
+  the path and
   the variants. Give each variant its own `input` that changes the image name
   or version, or its own `outputs.archive_name`.
 - Variants run one after another in one process. A failing variant stops the
