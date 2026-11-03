@@ -73,8 +73,10 @@ fn an_image_that_installs_artifacts_prepares_its_packages_beside_them() {
     let prepare = depends_on(&plan, "image:prepare");
     assert!(prepare.contains(&"source:buildroot-source".to_string()));
     assert!(
-        !prepare.iter().any(|dependency| dependency.starts_with("install:")
-            || dependency.starts_with("artifact:")),
+        !prepare
+            .iter()
+            .any(|dependency| dependency.starts_with("install:")
+                || dependency.starts_with("artifact:")),
         "prepare waits for no artifact: {prepare:?}"
     );
     let build = depends_on(&plan, "image:build");
