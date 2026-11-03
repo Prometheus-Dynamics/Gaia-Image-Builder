@@ -40,6 +40,7 @@ pub(crate) fn validate_sources(
                         Some(format!("source:{}", source.id.as_str())),
                     ));
                 }
+                validate_git_selectors(source.id.as_str(), git, diagnostics);
                 if selector_count > 1 {
                     diagnostics.push(error(
                         "git_selector_conflict",
@@ -291,4 +292,54 @@ fn validate_git_lockfile(spec: &ResolvedBuildSpec, diagnostics: &mut Vec<Validat
             ));
         }
     }
+}
+
+/// An empty branch, tag or rev selects nothing (`rev = ""` passed validation),
+/// and a rev pins a commit only
+/// as its full object name: git resolves an abbreviated one against whatever
+/// the clone holds, so it can name another commit later.
+fn validate_git_selectors(
+    id: &str,
+    git: &gaia_spec::GitSourceSpec,
+    diagnostics: &mut Vec<ValidationDiagnostic>,
+) {
+    for (key, value) in [
+        ("branch", &git.branch),
+        ("tag", &git.tag),
+        ("rev", &git.rev),
+    ] {
+        if value
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            diagnostics.push(error(
+                "git_selector_empty",
+                format!("git source '{id}' has an empty {key}"),
+                Some(format!("source:{id}")),
+            ));
+        }
+    }
+    let Some(rev) = git
+        .rev
+        .as_deref()
+        .map(str::trim)
+        .filter(|rev| !rev.is_empty())
+    else {
+        return;
+    };
+    if git.pin_policy == gaia_spec::SourcePinPolicySpec::Locked && !is_full_object_name(rev) {
+        diagnostics.push(error(
+            "git_rev_not_full_sha",
+            format!(
+                "git source '{id}' pins rev '{rev}', which is not a full commit sha (40 hex \
+                 digits, or 64 in a SHA-256 repository); an abbreviated or symbolic rev can \
+                 resolve to another commit"
+            ),
+            Some(format!("source:{id}")),
+        ));
+    }
+}
+
+fn is_full_object_name(rev: &str) -> bool {
+    matches!(rev.len(), 40 | 64) && rev.bytes().all(|byte| byte.is_ascii_hexdigit())
 }

@@ -136,6 +136,13 @@ when it names a `tag` or `rev`, pins with `pin = "locked"` or a lockfile, uses
 (which always materializes). A build upgraded to this version materializes each
 such source once, because its fingerprint now includes the commit.
 
+A git source names at most one of `branch`, `tag` and `rev`, and none of them
+empty (`git_selector_empty`; `rev = ""` used to pass validation). A `rev` pins only as a full commit sha (40 hex digits, 64 in a SHA-256
+repository): an abbreviated sha, a branch name or `HEAD~1` with the source
+locked (the default with a `rev`) fails `gaia validate` (`git_rev_not_full_sha`),
+since git can resolve it to another commit later. With `pin = "floating"` any
+rev git understands is accepted.
+
 #### Git source credentials
 
 Git sources run their git commands (mirror clone and fetch, `ls-remote`,

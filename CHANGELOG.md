@@ -6,6 +6,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- `gaia validate` fails a git source with an empty `branch`, `tag` or `rev` (`git_selector_empty`), and a locked `rev` that is not a full commit sha (`git_rev_not_full_sha`). photon-image-modifier's `build-raze-release.toml` had `rev = ""`, which validated.
 - A CPU-heavy operation that starts while others hold the cores gets at least an even share of the machine (cores over the running and starting heavy units) as its job budget, instead of what the others left, at least one. Budgets are fixed at start, so a cold HeliOS Raze build ran its Buildroot make with `-j1` to the end (35 minutes), long after the cargo batch that had taken the cores at the same moment had finished.
 - `--rebuild-package` dircleans and builds the named packages in the prepare step only; the image build after it did both again.
 - A run hashes each file whose content decides reuse once (memoized by path, size and mtime), not once per operation that depends on it. Every stage item depends on every install's artifact, so a HeliOS Raze run with nothing to rebuild hashed its 13 artifacts (57 MB) for each of 145 stage items, twice: 9.5 s of SHA-256. That run now takes 1.3 s instead of 12.6.
