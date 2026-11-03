@@ -527,6 +527,7 @@ fn drop_shadowed_modules_removes_in_tree_modules_an_updates_module_shadows() {
     assert_eq!(summary.files, 1);
     assert_eq!(summary.shadowed.len(), 2);
     assert_eq!(summary.shadowed_bytes, 2048);
+    // In path order: the script sorts what it finds.
     assert_eq!(
         summary.shadowed_message().as_deref(),
         Some(

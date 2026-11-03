@@ -102,7 +102,7 @@ if [ "$drop_shadowed" = 1 ]; then
         for release in "$target/$modules"/*; do
             [ -d "$release/updates" ] && [ -d "$release/kernel" ] || continue
             find "$release/updates" "$release/kernel" -type f \( -name '*.ko' -o -name '*.ko.xz' \
-                -o -name '*.ko.zst' -o -name '*.ko.gz' \) | awk -v prefix="$target/" -v list="$list" '
+                -o -name '*.ko.zst' -o -name '*.ko.gz' \) | LC_ALL=C sort | awk -v prefix="$target/" -v list="$list" '
               BEGIN {
                 while ((getline line < list) > 0) {
                   pos = index(line, ","); if (pos == 0) continue
