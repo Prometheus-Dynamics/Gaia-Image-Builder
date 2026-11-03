@@ -121,6 +121,11 @@ pub struct ImageChecksSpec {
     /// for, such as `cm5`. Unset, every model section applies.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pi_model: Option<String>,
+    /// Firmware names (under `lib/firmware`, `*` wildcards) a module lists
+    /// but works without, so an image that leaves them out is not reported
+    /// for them (`firmware_missing`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub optional_firmware: Vec<String>,
 }
 
 impl ImageChecksSpec {

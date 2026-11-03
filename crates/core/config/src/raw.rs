@@ -1155,6 +1155,8 @@ pub(crate) struct RawImageChecksConfig {
     pub kernel_image: Option<String>,
     /// The Raspberry Pi model whose `[model]` sections of the boot config apply.
     pub pi_model: Option<String>,
+    /// Firmware a module lists but works without: not reported when absent.
+    pub optional_firmware: Vec<String>,
 }
 
 /// `[[image.hardware]]`: one device the image must support (see `Image checks`

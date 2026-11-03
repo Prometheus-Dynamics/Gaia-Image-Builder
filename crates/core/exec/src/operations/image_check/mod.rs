@@ -150,6 +150,7 @@ pub(crate) fn execute(
         symvers: symvers.as_deref(),
         symvers_set: checks.symvers.is_some(),
         firmware_dir: Some(&firmware_dir),
+        optional_firmware: &checks.optional_firmware,
         module_checks: checks.kernel_modules != Some(false),
         hardware: hardware::Sources {
             build: spec.identity.id.as_str(),

@@ -303,6 +303,7 @@ fn check_with(tree: &Tree, modules_dir: Option<&Path>, symvers: bool) -> Outcome
         symvers: symvers.then_some(symvers_path.as_path()),
         symvers_set: false,
         firmware_dir: Some(&firmware),
+        optional_firmware: &[],
         module_checks: true,
         hardware: hardware::Sources {
             build: "image-check-test",
@@ -645,6 +646,7 @@ fn the_real_buildroot_output_checks_in_well_under_a_second() {
         symvers: symvers.as_deref(),
         symvers_set: false,
         firmware_dir: Some(&firmware),
+        optional_firmware: &[],
         module_checks: true,
         hardware: hardware::Sources {
             build: "raze",

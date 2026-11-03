@@ -564,6 +564,7 @@ pub(crate) fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                 symvers: checks.symvers,
                 kernel_image: checks.kernel_image,
                 pi_model: checks.pi_model,
+                optional_firmware: checks.optional_firmware,
             })
             .unwrap_or_default(),
         assembly: compile_image_assembly(raw.image.assembly),

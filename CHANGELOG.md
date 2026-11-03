@@ -6,6 +6,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ## [Unreleased]
 
+- `[image.checks] optional_firmware`: firmware names (with `*` wildcards) a kernel module lists but works without; an image without them is not warned about (`firmware_missing`). The Raze kernel's r8152 lists nine Realtek USB Ethernet firmware files, two of which (`rtl8157-1.fw`, `rtl8159-1.fw`) no linux-firmware release ships, so photon-image-modifier's Raze run always ended with a warning.
 - A `.img.xz` raw disk archive whose disk an `xz` transform (default level, so the archive's own flags) already compressed takes that transform's output instead of compressing the disk again, and the run publishes the one file. photon-image-modifier's Raze image is Atlas's slots disk, which the slots fragment compresses under the slot id; with the build's own `archive_name` it got two identical 136 MB files and a second xz pass.
 - The zeros report leaves out the `free` that a disk's auto-sized filesystems ask for. The shrunk Raze slots disk (144 MiB, 61 MiB of data, a boot FAT kept 64 MiB free for more slots) was reported for its intended room.
 - A Buildroot image that installs artifacts builds its packages (`image:prepare`) while the artifacts build, instead of after them. A cold HeliOS Raze build ran its 10-minute Buildroot make only after 17 minutes of cargo (28m31s in all).

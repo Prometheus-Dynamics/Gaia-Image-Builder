@@ -35,6 +35,8 @@ pub(super) struct Inputs<'a> {
     pub symvers_set: bool,
     /// `target/lib/firmware`, for the `firmware=` entries.
     pub firmware_dir: Option<&'a Path>,
+    /// `[image.checks] optional_firmware`: names not reported when absent.
+    pub optional_firmware: &'a [String],
     /// Whether the module checks run (`[image.checks] kernel_modules`). The
     /// hardware list runs either way.
     pub module_checks: bool,
@@ -151,7 +153,12 @@ pub(super) fn check(inputs: &Inputs<'_>) -> Outcome {
         check_duplicates(&parsed, &winners, &mut out);
         check_vermagic(&parsed, &release, &mut out);
         check_depends(&parsed, &shipped, &builtin, &mut out);
-        check_firmware(&parsed, inputs.firmware_dir, &mut out);
+        check_firmware(
+            &parsed,
+            inputs.firmware_dir,
+            inputs.optional_firmware,
+            &mut out,
+        );
 
         let symvers = read_symvers(inputs, &mut out);
         if let Some(symvers) = &symvers {
@@ -443,12 +450,23 @@ fn check_depends(
     }
 }
 
-fn check_firmware(modules: &[KernelModule], firmware_dir: Option<&Path>, out: &mut Outcome) {
+fn check_firmware(
+    modules: &[KernelModule],
+    firmware_dir: Option<&Path>,
+    optional: &[String],
+    out: &mut Outcome,
+) {
     let Some(firmware_dir) = firmware_dir else {
         return;
     };
     for module in modules {
         for firmware in &module.firmware {
+            if optional
+                .iter()
+                .any(|pattern| gaia_spec::wildcard_match(pattern, firmware))
+            {
+                continue;
+            }
             let present = [String::new(), ".xz".into(), ".zst".into(), ".gz".into()]
                 .iter()
                 .any(|suffix| firmware_dir.join(format!("{firmware}{suffix}")).is_file());
@@ -565,5 +583,46 @@ fn check_crcs(module: &KernelModule, symvers: &Symvers, out: &mut Outcome) {
                 ),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_firmware_is_not_reported_when_absent() {
+        let scratch = gaia_testkit::TempDir::new("gaia-exec-test");
+        let firmware_dir = scratch.join("lib/firmware");
+        std::fs::create_dir_all(firmware_dir.join("rtl_nic")).expect("firmware dir");
+        std::fs::write(firmware_dir.join("rtl_nic/rtl8153a-2.fw"), "fw").expect("firmware");
+        let module = KernelModule {
+            rel_path: "kernel/drivers/net/usb/r8152.ko".into(),
+            firmware: vec![
+                "rtl_nic/rtl8153a-2.fw".into(),
+                "rtl_nic/rtl8157-1.fw".into(),
+                "rtl_nic/rtl8159-1.fw".into(),
+                "rtl_nic/rtl8156b-2.fw".into(),
+            ],
+            ..KernelModule::default()
+        };
+        let mut out = Outcome::default();
+        let optional = [
+            "rtl_nic/rtl8157-1.fw".to_string(),
+            "rtl_nic/rtl8159-*".to_string(),
+        ];
+        check_firmware(
+            std::slice::from_ref(&module),
+            Some(&firmware_dir),
+            &optional,
+            &mut out,
+        );
+        let messages: Vec<&str> = out
+            .findings
+            .iter()
+            .map(|finding| finding.message.as_str())
+            .collect();
+        assert_eq!(messages.len(), 1, "{messages:?}");
+        assert!(messages[0].contains("rtl8156b-2.fw"), "{messages:?}");
     }
 }

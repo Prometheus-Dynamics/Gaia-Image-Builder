@@ -9,7 +9,7 @@ use std::process::{Command, Stdio};
 /// `struct modversion_info` on 64-bit: a CRC word, then a 56-byte name.
 const MODVERSION_SIZE: usize = 64;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct KernelModule {
     /// The path under the modules directory, such as `updates/ov9282.ko`.
     pub rel_path: String,

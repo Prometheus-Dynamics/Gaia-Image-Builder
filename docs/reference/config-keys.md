@@ -192,7 +192,7 @@ Each `[image.layers.<name>]` takes: `erofs_options`, `installs`, `packages`, `pa
 
 Described in [Image](../configuration-image.md#image-checks).
 
-Keys: `kernel_image`, `kernel_modules`, `modules_dir`, `pi_model`, `symvers`.
+Keys: `kernel_image`, `kernel_modules`, `modules_dir`, `optional_firmware`, `pi_model`, `symvers`.
 
 ## `[[image.hardware]]`
 
