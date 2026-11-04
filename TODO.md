@@ -1,6 +1,6 @@
 # TODO
 
-Open work, checked against the code on 2026-11-02. Every open item says what it
+Open work, checked against the code on 2026-11-03. Every open item says what it
 is, why, when it is done and what blocks it. Finished items are in "Done" with
 their commits.
 
@@ -32,7 +32,7 @@ through HeliOS). The other boards follow it, so their items stay below.
   - What: how long `tools/build-os.sh raze full` takes on the build host, warm and cold, and the step that dominates it; then bring it under HeliOS's targets: warm (one HeliOS crate changed) under 5 minutes, cold under 20. In the qemu builds of 2026-11-02 the `helios-api` cargo build held the run at step 17 of 210 for about 15 minutes (fat LTO, or a warm target dir not reused?). Gaia's own 10-minute gate is a separate item.
   - Why: every Raze change waits on this build, and the gate has to fit it.
   - Done when: the times are measured and the build meets both targets.
-  - Status: warm, after touching helios-api: 5m23s (helios-api 2m46s, image:build 1m56s, assembly 28s). 1m18s of image:build is `mkfs.erofs`, single-threaded because of `-Ededupe`; without it 10.5 s instead of 79.6 s for +188 KiB, which puts the warm build near 4m15s. HeliOS dropped dedupe (a55e07b4). Cold: 28m31s, Buildroot's 10-minute make waiting on 17 minutes of cargo; with `image:prepare` planned beside the artifacts, 19m16s cold and 4m01s warm after a helios-api change (prepare reused), both at 469cb6f3.
+  - Status: Measured 2026-11-03, static with fat LTO: cold 547 s (`image:prepare` 8m14s), warm no-op 1.3 s. The warm figure for one changed crate is still the old 5m23s (helios-api 2m46s), so that target is unconfirmed. Shared mode changes the link step, so both get measured again once it lands.
   - Blocked by: nothing.
 - **Raze build warnings**
   - What: the ccache warning every Raze build prints: ccache allowed 50 GiB on a disk with 14 GiB free. (The duplicate `ov9282`, `pisp_be` and `rp1_cfe_downstream` modules and the missing `r8152` firmware are HeliOS's, in its `raze.toml`.)
@@ -124,6 +124,19 @@ through HeliOS). The other boards follow it, so their items stay below.
   - Why: the low-cost module tier.
   - Done when: each chip's module boots A/B from SPI-NAND and from eMMC.
   - Blocked by: the boards.
+
+## Decided, starts when the user says
+
+The user decided these on 2026-11-03, through HeliOS. Nothing here starts until the user says so. The Raze #2 shared-library A/B with LTO informs how shared gets built, not whether.
+
+- Link mode per product: static and shared, with a core, surface and wrapper for each dependency.
+- One combined build across workspaces, with one feature set per image. Rust shared libraries only link when every crate has the same hash, so the products have to build together.
+- A check that a process does not hold the same crate both statically and through a shared library.
+- Shipping libstd properly. The A/B used a rootfs overlay.
+- Two-pass trim: build, read what each library's users import, relink exporting only that. The A/B does this by hand, and cargo does not relink when the export list changes.
+- Packaging the Lemnos kernel module into slots. The module lives in Lemnos, with drivers in Rust in userspace.
+- Module sources moving from Styx to Lemnos.
+- Cold-build chain A/B, when host load allows. After cargo finishes, `image:prepare` is bound by host-python3, cython, linux and mesa3d. A higher `-j` can only help the 80 of 413 s make sits at its 7-package cap.
 
 ## Release mechanics
 
