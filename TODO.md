@@ -24,10 +24,10 @@ through HeliOS). The other boards follow it, so their items stay below.
   - Status: the check is in Gaia (66d5f79, `device_size` and `device_reserve` on a disk), run both ways on a real Raze assembly: within budget it reports what is left, over it fails with "needs N MiB ... it fits a G GiB device or larger".
   - Blocked by: Atlas setting `device_size = "14910M"` (a 16 GB eMMC's capacity) and the reserve for the second slot on the slots disk in `devices/raze/gaia/slots.toml`.
 - **Images sized to their content**
-  - What: Gaia's assembly writes disk images whose raw size is about their content; free space is made on the board at first boot, not shipped as zeros. Generic for every board and recipe (HeliOS, PV, the examples). The Raze slots image is 1,364 MiB raw for about 60 MB of data (a 1 GiB, mostly empty boot FAT and an ext4 `/data` with 256 MiB free), so every flash writes and verifies about 1.3 GB of zeros (245 s on the SystemCore). ext4 grows online; the boot FAT, which the firmware reads and where slot kernels accumulate, needs a design: a small FAT the slots writer grows, or the FAT placed so the data partition grows instead (with Atlas if it touches slot-init or the slots writer). `.img.xz` stays the only output (no `.bmap`), no byte inside an EROFS/verity slot changes, and a first boot cut mid-grow still boots.
-  - Why: flash time and image size on every board, the Raze first.
-  - Done when: the Raze HeliOS and PV images report raw and xz sizes before and after, and a flash of e5226d57 through the SystemCore is timed (Atlas runs it on HeliOS's go).
-  - Blocked by: nothing; after the PV 2026 images and the fa01beb0 Raze build.
+  - What: flashing writes only data. Measured 2026-11-06 on HeliOS dd2ab41d: the Raze slots disk is already 140 MiB raw (a 79 MiB boot FAT with 64 MiB free for slot kernels, and a 60 MiB `/data` that Atlas's board-data-setup grows to the device on first boot). 83 of the 140 MiB are all-zero blocks, mostly the FAT's intended room.
+  - Why: flash time on every board, the Raze first.
+  - Done when: Atlas's flasher daemon skips zero runs (discarding them only where the device reads discarded blocks back as zeros, writing them otherwise), and a Raze flash through the SystemCore is timed before and after.
+  - Blocked by: Atlas, under HeliOS's go. Nothing left on Gaia's side unless Atlas lowers the FAT's `free`.
 - **Raze build time**
   - What: how long `tools/build-os.sh raze full` takes on the build host, warm and cold, and the step that dominates it; then bring it under HeliOS's targets: warm (one HeliOS crate changed) under 5 minutes, cold under 20. In the qemu builds of 2026-11-02 the `helios-api` cargo build held the run at step 17 of 210 for about 15 minutes (fat LTO, or a warm target dir not reused?). Gaia's own 10-minute gate is a separate item.
   - Why: every Raze change waits on this build, and the gate has to fit it.

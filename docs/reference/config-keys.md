@@ -136,7 +136,7 @@ Keys: `exports`, `plugin_dirs`, `plugin_exports`, `shared_feature`, `state_crate
 
 Described in [Artifacts, install and stage](../configuration-artifacts.md#artifacts).
 
-Keys: `max`, `min`, `symbol`.
+Keys: `max`, `min`, `surface_max`, `surface_min`, `symbol`.
 
 ## `[[install]]`
 

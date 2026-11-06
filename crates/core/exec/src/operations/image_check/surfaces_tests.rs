@@ -265,6 +265,57 @@ fn plugins_are_checked_against_the_surface_that_opens_them() {
     assert!(findings(&outcome, Severity::Warning).is_empty());
 }
 
+/// A range read from the surface: a surface without the constant is an
+/// error once, and its plugins' versions are not checked.
+#[test]
+fn a_surface_without_its_range_constants_is_an_error() {
+    let scratch = TempDir::new("gaia-image-check-surface-range");
+    let root = scratch.path();
+    put(
+        root,
+        "/usr/lib/libsurface.so",
+        &object(None, &[], &["surface_open"], &[]),
+    );
+    for name in ["a.so", "b.so"] {
+        put(
+            root,
+            &format!("/usr/lib/plugins/{name}"),
+            &object(None, &[], &["plugin_descriptor"], &[]),
+        );
+    }
+    let mut outcome = Outcome::default();
+    check(
+        &[InstalledSurface {
+            artifact: "libsurface".into(),
+            guest: "/usr/lib/libsurface.so".into(),
+            plugin_dirs: vec!["/usr/lib/plugins".into()],
+            plugin_exports: Vec::new(),
+            plugin_version: Some(gaia_spec::SurfacePluginVersionSpec {
+                symbol: "plugin_version".into(),
+                min: Some(2),
+                max: None,
+                surface_min: Some("surface_abi_min".into()),
+                surface_max: Some("surface_abi_max".into()),
+            }),
+        }],
+        root,
+        &mut outcome,
+    );
+    assert_eq!(
+        findings(&outcome, Severity::Error),
+        [(
+            "surface_plugin_range_unreadable",
+            Some("/usr/lib/libsurface.so".into())
+        )]
+    );
+    // The fixed min wins: only the max is asked of the surface.
+    assert!(
+        outcome.findings[0].message.contains("surface_abi_max"),
+        "{}",
+        outcome.findings[0].message
+    );
+}
+
 #[test]
 fn an_image_without_surfaces_reads_nothing() {
     let scratch = TempDir::new("gaia-image-check-no-surfaces");

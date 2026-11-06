@@ -171,12 +171,22 @@ pub struct RustSurfaceSpec {
 
 /// A plugin's ABI version: the exported `u32` constant that holds it
 /// (Daedalus's `daedalus_plugin_stable_version`) and the accepted range,
-/// both ends included. A plugin without the symbol is not checked.
+/// both ends included. Each end is a fixed number, or the name of a `u32`
+/// constant the surface library itself exports
+/// (`daedalus_surface_stable_abi_min`/`_max`), so the range follows the
+/// surface the image ships; a fixed end wins. A plugin without the symbol
+/// is not checked.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SurfacePluginVersionSpec {
     pub symbol: String,
-    pub min: u32,
-    pub max: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub surface_min: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub surface_max: Option<String>,
 }
 
 impl RustSurfaceSpec {

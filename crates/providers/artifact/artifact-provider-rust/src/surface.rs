@@ -68,16 +68,21 @@ pub(crate) fn validate(artifact: &ArtifactSpec, issues: &mut Vec<ArtifactProvide
             message: "surface plugin_exports and plugin_version need plugin_dirs: the directories of the plugins they hold".into(),
         });
     }
-    if let Some(version) = &surface.plugin_version
-        && (version.symbol.trim().is_empty() || version.min > version.max)
-    {
-        issues.push(ArtifactProviderValidationIssue {
-            code: "rust_surface_plugin_version_invalid",
-            message: format!(
-                "surface plugin_version needs a symbol and min <= max (min {}, max {})",
-                version.min, version.max
-            ),
-        });
+    if let Some(version) = &surface.plugin_version {
+        let named = |end: &Option<String>| end.as_ref().is_some_and(|name| !name.trim().is_empty());
+        let invalid = version.symbol.trim().is_empty()
+            || (version.min.is_none() && !named(&version.surface_min))
+            || (version.max.is_none() && !named(&version.surface_max))
+            || version
+                .min
+                .zip(version.max)
+                .is_some_and(|(min, max)| min > max);
+        if invalid {
+            issues.push(ArtifactProviderValidationIssue {
+                code: "rust_surface_plugin_version_invalid",
+                message: "surface plugin_version needs a symbol, each end as min/max or the surface's surface_min/surface_max constant, and min <= max".into(),
+            });
+        }
     }
 }
 

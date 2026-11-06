@@ -342,8 +342,29 @@ reads each plugin's ABI version from the exported `u32` constant `symbol`
 (4 bytes in the file, in its byte order) and fails one outside `min..=max`
 (`surface_plugin_version_unsupported`), or one whose symbol is not such a
 constant (`surface_plugin_version_unreadable`). A plugin without the symbol,
-built before it existed, is left to the surface's loader. `max` is the
-surface's current ABI version and moves with it.
+built before it existed, is left to the surface's loader.
+
+Each end can instead come from the surface library itself, so the range
+always matches the code that opens the plugins and no config moves with
+each ABI bump:
+
+```toml
+[[artifacts]]
+id = "daedalus-surface-range"
+kind = "rust"
+source = "helios"
+package = "helios-daedalus-image"
+target_name = "libdaedalus.so"
+output_path = "${outputs.dir}/artifacts/libdaedalus.so"
+surface = { exports = "surfaces/daedalus.exports", plugin_dirs = ["/usr/lib/helios/plugins"], plugin_version = { symbol = "daedalus_plugin_stable_version", surface_min = "daedalus_surface_stable_abi_min", surface_max = "daedalus_surface_stable_abi_max" } }
+```
+
+`surface_min` and `surface_max` name `u32` constants the installed surface
+library exports (Daedalus's `daedalus_surface_stable_abi_min`/`_max`, from
+the daedalus-surface rlib). A fixed `min` or `max` wins over its constant.
+A surface that does not export a named constant is an error
+(`surface_plugin_range_unreadable`), and its plugins' versions are not
+checked.
 
 `plugin_exports` and `plugin_version` need `plugin_dirs`
 (`rust_surface_plugin_exports_without_dirs`); `plugin_version` needs a

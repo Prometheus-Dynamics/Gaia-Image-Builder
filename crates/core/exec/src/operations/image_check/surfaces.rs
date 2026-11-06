@@ -189,6 +189,9 @@ struct Loaded {
     exports: BTreeSet<String>,
     /// Its own `DT_NEEDED`: loaded before any plugin it opens.
     needed: Vec<String>,
+    /// The plugin ABI range it opens, when `plugin_version` is set and both
+    /// ends could be read.
+    plugin_range: Option<(u32, u32)>,
 }
 
 /// Checks every ELF file of `rootfs` that needs one of `surfaces`. Returns
@@ -201,10 +204,14 @@ pub(super) fn check(surfaces: &[InstalledSurface], rootfs: &Path, outcome: &mut 
         let parsed = read.and_then(|bytes| {
             let object = parse_elf(&bytes)?;
             let symbols = dynamic_symbols(&bytes)?;
-            Ok((object, symbols))
+            Ok((object, symbols, bytes))
         });
         match parsed {
-            Ok((object, symbols)) => {
+            Ok((object, symbols, bytes)) => {
+                let plugin_range = surface
+                    .plugin_version
+                    .as_ref()
+                    .and_then(|version| plugin_range(surface, version, &bytes, outcome));
                 let mut names = BTreeSet::new();
                 if let Some(name) = Path::new(&surface.guest).file_name() {
                     names.insert(name.to_string_lossy().into_owned());
@@ -215,6 +222,7 @@ pub(super) fn check(surfaces: &[InstalledSurface], rootfs: &Path, outcome: &mut 
                     names,
                     exports: symbols.exports,
                     needed: object.needed,
+                    plugin_range,
                 });
             }
             Err(message) => outcome.error(
@@ -430,6 +438,40 @@ fn plugin_entry_points(
     }
 }
 
+/// The range a surface opens: each end fixed, or read from the constant
+/// the surface library exports. A missing or unreadable constant is an
+/// error, once per surface, and its plugins' versions go unchecked.
+fn plugin_range(
+    surface: &InstalledSurface,
+    version: &gaia_spec::SurfacePluginVersionSpec,
+    bytes: &[u8],
+    outcome: &mut Outcome,
+) -> Option<(u32, u32)> {
+    let mut end = |fixed: Option<u32>, symbol: &Option<String>| -> Option<u32> {
+        if fixed.is_some() {
+            return fixed;
+        }
+        let symbol = symbol.as_ref()?;
+        let problem = match exported_u32(bytes, symbol) {
+            Ok(Some(value)) => return Some(value),
+            Ok(None) => "it does not export it".to_string(),
+            Err(message) => message,
+        };
+        outcome.error(
+            "surface_plugin_range_unreadable",
+            Some(&surface.guest),
+            format!(
+                "surface {} ('{}') gives no plugin ABI bound {symbol}: {problem}; it was built before the surface exported its range, or plugin_version names another constant",
+                surface.guest, surface.artifact
+            ),
+        );
+        None
+    };
+    let min = end(version.min, &version.surface_min);
+    let max = end(version.max, &version.surface_max);
+    min.zip(max)
+}
+
 /// A plugin's ABI version outside the range its surface opens. A plugin
 /// without the symbol (built before it existed) is left to the loader.
 fn plugin_version(guest: &str, bytes: &[u8], uses: &[&Loaded], outcome: &mut Outcome) {
@@ -437,7 +479,9 @@ fn plugin_version(guest: &str, bytes: &[u8], uses: &[&Loaded], outcome: &mut Out
         .iter()
         .filter(|surface| in_plugin_dir(guest, &surface.surface.plugin_dirs))
     {
-        let Some(range) = &surface.surface.plugin_version else {
+        let (Some(range), Some((min, max))) =
+            (&surface.surface.plugin_version, surface.plugin_range)
+        else {
             continue;
         };
         let opened_by = format!(
@@ -446,13 +490,13 @@ fn plugin_version(guest: &str, bytes: &[u8], uses: &[&Loaded], outcome: &mut Out
         );
         match exported_u32(bytes, &range.symbol) {
             Ok(None) => {}
-            Ok(Some(version)) if (range.min..=range.max).contains(&version) => {}
+            Ok(Some(version)) if (min..=max).contains(&version) => {}
             Ok(Some(version)) => outcome.error(
                 "surface_plugin_version_unsupported",
                 Some(guest),
                 format!(
                     "plugin {guest} has {} {version}, outside the {}..={} that {opened_by} opens; rebuild it against a supported ABI",
-                    range.symbol, range.min, range.max
+                    range.symbol, min, max
                 ),
             ),
             Err(message) => outcome.error(

@@ -63,6 +63,8 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig, sources: &[SourceSpec]) -
                                 symbol: version.symbol,
                                 min: version.min,
                                 max: version.max,
+                                surface_min: version.surface_min,
+                                surface_max: version.surface_max,
                             }
                         }),
                     })
