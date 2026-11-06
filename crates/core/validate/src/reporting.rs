@@ -26,7 +26,11 @@ pub(crate) fn validate_config_warnings(
     diagnostics: &mut Vec<ValidationDiagnostic>,
 ) {
     for message in &spec.metadata.config_warnings {
-        diagnostics.push(error("config_unknown_key", message.clone(), None));
+        diagnostics.push(error(
+            "config_unknown_key",
+            format!("{message} {}", newer_gaia_hint()),
+            None,
+        ));
     }
     for message in &spec.metadata.empty_layers {
         diagnostics.push(warning("config_layer_empty", message.clone(), None));
@@ -66,4 +70,13 @@ pub(crate) fn validate_config_warnings(
             Some("expect".into()),
         ));
     }
+}
+
+/// An unknown key is most often a setting of a newer Gaia than the one
+/// running: say which one runs, and how a build file asks for a newer one.
+fn newer_gaia_hint() -> String {
+    format!(
+        "(this is gaia {}; if the key comes from a newer Gaia, set gaia_version = \">=<that version>\" in the file so an older one says so first)",
+        env!("CARGO_PKG_VERSION")
+    )
 }

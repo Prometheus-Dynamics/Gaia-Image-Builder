@@ -226,9 +226,11 @@ Meaning:
   TOML of every loaded file (including `extends` and imports) before any
   other parsing or validation, so an older binary fails with
   `this build requires gaia >=2.1.0, but gaia 2.0.0 is installed; upgrade with: cargo install ...`
-  instead of misreading the file. The version only changes at releases;
-  builds from `main` between releases report the last release. To require a
-  setting added since then, use it: unknown keys fail validation.
+  instead of misreading the file. Between releases the dev builds move the
+  patch number (`2.0.2-dev`), which matches as `2.0.2`: a file using keys
+  added since the binaries people have installed sets the floor to the
+  current dev version (`gaia_version = ">=2.0.2"`). Without it an older
+  binary still fails, on the unknown keys, and names its own version.
 - `build_name`
   Stable canonical identity used for report file naming and persisted state names.
 - `display_name`

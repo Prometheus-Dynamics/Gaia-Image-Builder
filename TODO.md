@@ -146,7 +146,7 @@ The user decided these on 2026-11-03, through HeliOS. Nothing here starts until 
 ## Release mechanics
 
 - **Changelog, version and tag**
-  - What: move `[Unreleased]` to a version, set the workspace version (now `2.0.1-dev`), tag it, and create the GitHub release. The next one is a major version, because config v3 changes the build-file format.
+  - What: move `[Unreleased]` to a version, set the workspace version (now `2.0.2-dev`), tag it, and create the GitHub release. The next one is a major version, because config v3 changes the build-file format.
   - Why: HeliOS, PV and Atlas pin a released Gaia.
   - Done when: `cargo package --workspace` and the gate pass at that version, the tag and release exist, and the three projects pin it.
   - Blocked by: the user, who alone decides releases.

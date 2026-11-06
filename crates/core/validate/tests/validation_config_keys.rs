@@ -82,6 +82,13 @@ shared_outptu = true
     assert_eq!(unknown.len(), 2, "{unknown:?}");
     assert!(unknown[0].starts_with("unknown key 'build_command' in '"));
     assert!(unknown[1].starts_with("unknown key 'providers.buildroot.shared_outptu' in '"));
+    let running = format!("this is gaia {}", env!("CARGO_PKG_VERSION"));
+    assert!(
+        unknown
+            .iter()
+            .all(|message| message.contains(&running) && message.contains("gaia_version")),
+        "{unknown:?}"
+    );
     assert!(
         report
             .errors
