@@ -30,9 +30,7 @@ fn surface_artifact(workspace: &Path) -> ArtifactSpec {
     let mut artifact = rust_artifact("surface", "surface", &workspace.join("out/libsurface.so"));
     if let ArtifactDefinition::Rust(rust) = &mut artifact.definition {
         rust.target_name = Some("libsurface.so".into());
-        rust.surface = Some(gaia_spec::RustSurfaceSpec {
-            exports: "surface.exports".into(),
-        });
+        rust.surface = Some(Box::new(gaia_spec::RustSurfaceSpec::new("surface.exports")));
     }
     artifact
 }
@@ -83,9 +81,9 @@ fn a_surface_needs_one_library_file() {
     assert!(RustProvider.validate_artifact(&artifact).is_empty());
     if let ArtifactDefinition::Rust(rust) = &mut artifact.definition {
         rust.variant = ArtifactVariantSpec::Directory;
-        rust.surface = Some(gaia_spec::RustSurfaceSpec {
-            exports: " ".into(),
-        });
+        let mut surface = gaia_spec::RustSurfaceSpec::new(" ");
+        surface.shared_feature = Some(String::new());
+        rust.surface = Some(Box::new(surface));
     }
     let codes = RustProvider
         .validate_artifact(&artifact)
@@ -94,6 +92,53 @@ fn a_surface_needs_one_library_file() {
         .collect::<Vec<_>>();
     assert_eq!(
         codes,
-        ["rust_surface_not_a_library", "rust_surface_exports_empty"]
+        [
+            "rust_surface_not_a_library",
+            "rust_surface_exports_empty",
+            "rust_surface_name_empty"
+        ]
     );
+}
+
+/// With a surface in the build, each cargo build records the crates it
+/// linked and their features, for the image checks.
+#[test]
+fn a_build_records_its_crates_and_their_features() {
+    let scratch = TempDir::new("gaia-rust-crates-record");
+    let root = scratch.path().to_path_buf();
+    let write = |path: &str, contents: &str| {
+        let path = root.join(path);
+        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        fs::write(path, contents).expect("write");
+    };
+    write(
+        "Cargo.toml",
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nstate-crate = { path = \"state\", features = [\"shared\"] }\n\n[workspace]\n",
+    );
+    write(
+        "src/main.rs",
+        "fn main() { println!(\"{}\", state_crate::value()); }\n",
+    );
+    write(
+        "state/Cargo.toml",
+        "[package]\nname = \"state-crate\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[features]\nshared = []\n",
+    );
+    write("state/src/lib.rs", "pub fn value() -> u32 { 7 }\n");
+    let artifact = rust_artifact("app", "app", &root.join("out/app"));
+    let mut contract = nested_contract(&artifact, &root);
+    contract.rust_record_crates = true;
+    RustProvider
+        .execute_artifact(&artifact, &contract, None, None)
+        .expect("the program builds");
+
+    let record = fs::read_to_string(gaia_spec::rust_crates_record_path(&root.join("out/app")))
+        .expect("the crates are recorded");
+    let record: serde_json::Value = serde_json::from_str(&record).expect("JSON");
+    assert_eq!(record["package"], "app");
+    let crates = record["crates"].as_array().expect("crates");
+    let state = crates
+        .iter()
+        .find(|entry| entry["name"] == "state-crate")
+        .expect("the dependency is recorded");
+    assert_eq!(state["features"], serde_json::json!(["shared"]));
 }

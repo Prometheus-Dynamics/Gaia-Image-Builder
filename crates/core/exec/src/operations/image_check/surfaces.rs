@@ -15,7 +15,7 @@
 use super::kernel_modules::Outcome;
 use gaia_artifact_providers::dynamic_symbols;
 use gaia_plan::{find_sysroot_library, parse_elf};
-use gaia_spec::{ArtifactDefinition, ResolvedBuildSpec};
+use gaia_spec::{ArtifactDefinition, ArtifactSpec, ResolvedBuildSpec};
 use std::collections::{BTreeSet, VecDeque};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -35,7 +35,26 @@ pub(super) struct InstalledSurface {
 /// artifact with a declared surface. An install whose file is not in the
 /// root filesystem (it went to another tree) is skipped.
 pub(super) fn installed_surfaces(spec: &ResolvedBuildSpec, rootfs: &Path) -> Vec<InstalledSurface> {
-    let mut surfaces = Vec::new();
+    installed_rust(spec, rootfs)
+        .into_iter()
+        .filter(|(artifact, _)| {
+            matches!(&artifact.definition, ArtifactDefinition::Rust(rust) if rust.surface.is_some())
+        })
+        .map(|(artifact, guest)| InstalledSurface {
+            artifact: artifact.id.as_str().to_string(),
+            guest,
+        })
+        .collect()
+}
+
+/// Each install of a Rust artifact into `rootfs`, with its path in the
+/// image; an install whose file is not there (it went to another tree) is
+/// left out.
+pub(super) fn installed_rust<'a>(
+    spec: &'a ResolvedBuildSpec,
+    rootfs: &Path,
+) -> Vec<(&'a ArtifactSpec, String)> {
+    let mut installed = Vec::new();
     for entry in &spec.install.entries {
         let Some(artifact) = spec
             .artifacts
@@ -44,10 +63,7 @@ pub(super) fn installed_surfaces(spec: &ResolvedBuildSpec, rootfs: &Path) -> Vec
         else {
             continue;
         };
-        let ArtifactDefinition::Rust(rust) = &artifact.definition else {
-            continue;
-        };
-        if rust.surface.is_none() {
+        if !matches!(artifact.definition, ArtifactDefinition::Rust(_)) {
             continue;
         }
         let mut guest = format!("/{}", entry.dest.trim_start_matches('/'));
@@ -57,13 +73,38 @@ pub(super) fn installed_surfaces(spec: &ResolvedBuildSpec, rootfs: &Path) -> Vec
             guest = format!("{}/{}", guest.trim_end_matches('/'), name.to_string_lossy());
         }
         if rootfs.join(guest.trim_start_matches('/')).is_file() {
-            surfaces.push(InstalledSurface {
-                artifact: artifact.id.as_str().to_string(),
-                guest,
-            });
+            installed.push((artifact, guest));
         }
     }
-    surfaces
+    installed
+}
+
+/// The names of every library `needed` brings in, breadth first, found
+/// where the loader looks by default; and the names that were not found.
+pub(super) fn needed_closure(
+    rootfs: &Path,
+    needed: &[String],
+) -> (BTreeSet<String>, BTreeSet<String>) {
+    let mut seen = BTreeSet::new();
+    let mut unresolved = BTreeSet::new();
+    let mut queue = needed.iter().cloned().collect::<VecDeque<_>>();
+    while let Some(name) = queue.pop_front() {
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        let object = find_sysroot_library(rootfs, &name)
+            .ok()
+            .flatten()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| parse_elf(&bytes).ok());
+        match object {
+            Some(object) => queue.extend(object.needed),
+            None => {
+                unresolved.insert(name);
+            }
+        }
+    }
+    (seen, unresolved)
 }
 
 struct Loaded {

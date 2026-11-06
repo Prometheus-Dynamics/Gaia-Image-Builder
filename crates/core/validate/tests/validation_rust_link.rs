@@ -153,9 +153,7 @@ surface = { exports = "${input.surface_list}", export = "typo" }
     let spec = resolve("rust-surface", body);
     assert_eq!(
         rust(&spec, "libsurface").surface,
-        Some(gaia_spec::RustSurfaceSpec {
-            exports: "surface.exports".into()
-        })
+        Some(Box::new(gaia_spec::RustSurfaceSpec::new("surface.exports")))
     );
     assert!(
         spec.metadata

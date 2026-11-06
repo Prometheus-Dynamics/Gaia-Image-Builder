@@ -54,6 +54,10 @@ pub struct ArtifactExecutionContract {
     /// Rust only: `[providers.rust] strip`. The collected output is stripped;
     /// cargo's own file is not touched. Part of recorded state.
     pub rust_strip: bool,
+    /// Rust only: the build declares a surface, so each cargo build records
+    /// its resolved crate graph for the image checks
+    /// (`gaia_spec::rust_crates_record_path`). Not part of recorded state.
+    pub rust_record_crates: bool,
     /// `[execution] offline`: no network. Rust passes `CARGO_NET_OFFLINE=true`
     /// so cargo uses only what is already fetched. Not part of recorded state.
     pub offline: bool,
@@ -120,6 +124,7 @@ impl ArtifactExecutionContract {
             rust_shared_target_dir: false,
             rust_sccache: false,
             rust_strip: false,
+            rust_record_crates: false,
             offline: false,
         }
     }
@@ -138,6 +143,12 @@ impl ArtifactExecutionContract {
         self.rust_shared_target_dir = spec.policy.providers.rust.shared_target_dir;
         self.rust_sccache = spec.policy.providers.rust.sccache;
         self.rust_strip = spec.policy.providers.rust.strip;
+        self.rust_record_crates = spec.artifacts.iter().any(|artifact| {
+            matches!(
+                &artifact.definition,
+                gaia_spec::ArtifactDefinition::Rust(rust) if rust.surface.is_some()
+            )
+        });
         self.offline = spec.policy.execution.offline;
         let workspace_root = resolve_workspace_root(spec);
         self.workspace_root = Some(workspace_root.clone());

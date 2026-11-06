@@ -784,6 +784,10 @@ pub(crate) struct RawArtifactConfig {
 pub(crate) struct RawRustSurfaceConfig {
     /// The declared exports list, relative to the artifact's source.
     pub exports: String,
+    /// Crates holding the surface's process-wide state; default its package.
+    pub state_crates: Vec<String>,
+    /// The package feature that makes its Rust wrapper call the library.
+    pub shared_feature: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]

@@ -131,7 +131,7 @@ pub struct RustArtifactSpec {
     pub link: RustLinkSpec,
     /// The C ABI a `cdylib` declares it exports; checked after the build.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub surface: Option<RustSurfaceSpec>,
+    pub surface: Option<Box<RustSurfaceSpec>>,
 }
 
 /// A shared library's declared surface: the symbols it exports and nothing
@@ -142,6 +142,44 @@ pub struct RustSurfaceSpec {
     /// The list, relative to the artifact's source: one symbol per line
     /// (`#` starts a comment), or a linker version script's `global:` names.
     pub exports: String,
+    /// The crates holding the surface's process-wide state (its handle
+    /// tables). A program that links one of them statically must not also
+    /// load the surface library: handles from one copy are unknown to the
+    /// other. Empty means the artifact's own package.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub state_crates: Vec<String>,
+    /// The feature with which the surface package's Rust wrapper calls the
+    /// installed library instead of linking the surface in (Lemnos's
+    /// `shared`): a program with it on holds no copy of the state.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shared_feature: Option<String>,
+}
+
+impl RustSurfaceSpec {
+    pub fn new(exports: impl Into<String>) -> Self {
+        Self {
+            exports: exports.into(),
+            state_crates: Vec::new(),
+            shared_feature: None,
+        }
+    }
+}
+
+/// Where a Rust artifact's resolved crate graph is recorded, next to its
+/// output (`<dir>/.gaia/<file name>.crates.json`): written when the build
+/// declares a surface, read by the image checks.
+pub fn rust_crates_record_path(output_path: &std::path::Path) -> std::path::PathBuf {
+    output_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join(".gaia")
+        .join(format!(
+            "{}.crates.json",
+            output_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("artifact")
+        ))
 }
 
 /// How a Rust artifact links the Rust crates it uses, the standard library

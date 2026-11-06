@@ -15,6 +15,9 @@ mod rust_std;
 #[cfg(test)]
 mod rust_std_tests;
 mod shipped_rootfs;
+mod surface_state;
+#[cfg(test)]
+mod surface_state_tests;
 mod surfaces;
 #[cfg(test)]
 mod surfaces_tests;
@@ -212,6 +215,7 @@ pub(crate) fn execute(
         &rootfs,
         &mut outcome,
     );
+    surface_state::check(spec, &rootfs, &mut outcome);
     let std_copies = rust_std::copies(&rootfs);
 
     let errors: Vec<&Finding> = outcome
@@ -292,6 +296,7 @@ fn surfaces_only(
         rootfs,
         &mut outcome,
     );
+    surface_state::check(spec, rootfs, &mut outcome);
     let std_copies = rust_std::copies(rootfs);
     let (errors, warnings): (Vec<&Finding>, Vec<&Finding>) = outcome
         .findings

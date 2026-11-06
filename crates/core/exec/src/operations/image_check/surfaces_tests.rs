@@ -53,7 +53,7 @@ fn with_dynsym(mut elf: Vec<u8>, exports: &[&str], imports: &[(&str, bool)]) -> 
     elf
 }
 
-fn object(
+pub(super) fn object(
     interpreter: Option<&str>,
     needed: &[&str],
     exports: &[&str],
@@ -64,7 +64,7 @@ fn object(
     with_dynsym(build_elf(&fixture), exports, imports)
 }
 
-fn put(root: &Path, guest: &str, bytes: &[u8]) {
+pub(super) fn put(root: &Path, guest: &str, bytes: &[u8]) {
     let path = root.join(guest.trim_start_matches('/'));
     std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
     std::fs::write(path, bytes).expect("write");
@@ -222,9 +222,7 @@ fn a_starting_point_image_has_its_surface_consumers_checked() {
             build_env: Vec::new(),
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
-            surface: Some(RustSurfaceSpec {
-                exports: "capi.exports".into(),
-            }),
+            surface: Some(Box::new(RustSurfaceSpec::new("capi.exports"))),
         }),
         None,
         ArtifactOutputSpec {

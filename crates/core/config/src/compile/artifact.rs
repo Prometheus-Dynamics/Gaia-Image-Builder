@@ -51,8 +51,12 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig, sources: &[SourceSpec]) -
                 } else {
                     gaia_spec::RustLinkSpec::Static
                 },
-                surface: surface.map(|surface| gaia_spec::RustSurfaceSpec {
-                    exports: surface.exports,
+                surface: surface.map(|surface| {
+                    Box::new(gaia_spec::RustSurfaceSpec {
+                        exports: surface.exports,
+                        state_crates: surface.state_crates,
+                        shared_feature: surface.shared_feature,
+                    })
                 }),
             })
         }

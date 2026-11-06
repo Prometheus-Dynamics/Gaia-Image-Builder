@@ -68,9 +68,7 @@ fn install_a_surface(spec: &mut ResolvedBuildSpec) {
         if let gaia_spec::ArtifactDefinition::Rust(rust) = &mut artifact.definition
             && installed.contains(&artifact.id)
         {
-            rust.surface = Some(gaia_spec::RustSurfaceSpec {
-                exports: "surface.map".into(),
-            });
+            rust.surface = Some(Box::new(gaia_spec::RustSurfaceSpec::new("surface.map")));
             declared += 1;
         }
     }

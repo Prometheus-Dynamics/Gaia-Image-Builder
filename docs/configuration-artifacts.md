@@ -309,6 +309,37 @@ its `<collect_dir>/rootfs`): a build that installs a surface plans
 `image:check` even with `[image.checks] kernel_modules = false`. The report
 (`<out>/<build>.checks.json`) counts the consumers in `surface_consumers`.
 
+A surface's process-wide state (its handle tables) may be in a program
+once: a program links it in, or loads the library, not both. Handles from
+one copy are unknown to the other.
+
+```toml
+[[artifacts]]
+id = "lemnos-capi"
+kind = "rust"
+source = "lemnos"
+package = "lemnos-capi"
+target_name = "liblemnos_capi.so"
+output_path = "${outputs.dir}/artifacts/liblemnos_capi.so"
+surface = { exports = "crates/lemnos-capi/lemnos.exports", shared_feature = "shared" }
+```
+
+- `state_crates`: the crates that hold the state, default the artifact's
+  own package.
+- `shared_feature`: the package's feature with which its Rust wrapper calls
+  the installed library instead of linking the surface in (Lemnos's
+  `shared`). A program that has the package with this feature on holds no
+  copy of it; another state crate counts whatever its features.
+
+With a surface in the build, every cargo build records its crate graph
+(`cargo tree -e normal`, in the artifact's backend: each crate and the
+features cargo resolved) next to its output, in
+`.gaia/<file>.crates.json`. The image checks then fail a program whose
+record has a state crate and whose `DT_NEEDED` closure loads the surface
+(`surface_state_twice`, naming the crates and the feature to turn on). A
+program without a record (built before the build declared a surface) is a
+`surface_crates_unrecorded` warning; `--rebuild artifact:<id>` records it.
+
 #### Private cargo git dependencies
 
 A rust artifact whose workspace depends on a private git repository (`git =

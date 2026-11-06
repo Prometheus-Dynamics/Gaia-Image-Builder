@@ -46,7 +46,7 @@ pub use artifact::{
     ArtifactSpec, ArtifactVariantSpec, BuildModeSpec, CargoGitSourceSpec,
     DockerArtifactExecutionSpec, GoArtifactSpec, JavaArtifactSpec, NodeArtifactSpec,
     PythonArtifactSpec, RUST_STD_PACKAGE, RustArtifactSpec, RustLinkSpec, RustSurfaceSpec,
-    cargo_git_url_key,
+    cargo_git_url_key, rust_crates_record_path,
 };
 pub use assembly::{
     AssemblyRoots, AssemblyWorkDirKeyword, IMAGE_CHECKS_REPORT_SCHEMA, assembly_work_dir_keyword,

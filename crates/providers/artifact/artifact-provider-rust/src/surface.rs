@@ -36,6 +36,19 @@ pub(crate) fn validate(artifact: &ArtifactSpec, issues: &mut Vec<ArtifactProvide
             message: "surface exports must name the file that lists the exports".into(),
         });
     }
+    if surface
+        .state_crates
+        .iter()
+        .chain(&surface.shared_feature)
+        .any(|name| name.trim().is_empty())
+    {
+        issues.push(ArtifactProviderValidationIssue {
+            code: "rust_surface_name_empty",
+            message:
+                "surface state_crates and shared_feature name crates and a feature; one is empty"
+                    .into(),
+        });
+    }
 }
 
 /// Checks the built library against its declared surface. `None` when the

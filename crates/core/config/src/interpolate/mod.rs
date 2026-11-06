@@ -594,6 +594,8 @@ fn interpolate_artifact(
             link: link.map(|value| resolver::interpolate_string(value, raw, env)),
             surface: surface.map(|surface| crate::raw::RawRustSurfaceConfig {
                 exports: resolver::interpolate_string(surface.exports, raw, env),
+                state_crates: surface.state_crates,
+                shared_feature: surface.shared_feature,
             }),
         },
         RawArtifactDefinition::Java {

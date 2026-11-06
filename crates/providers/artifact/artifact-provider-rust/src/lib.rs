@@ -16,6 +16,7 @@ use std::process::Command;
 mod build_env;
 mod cargo_errors;
 mod cargo_git;
+mod crates;
 mod feature_flags;
 mod std_library;
 mod surface;
@@ -353,6 +354,7 @@ impl RustProvider {
         mut messages: Vec<String>,
     ) -> Result<Vec<String>, ArtifactProviderError> {
         messages.extend(surface::check(artifact, contract)?);
+        crates::record_after_build(artifact, contract, package, build_mode)?;
         write_artifact_marker(
             contract,
             self.id(),
