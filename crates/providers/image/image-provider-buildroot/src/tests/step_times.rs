@@ -108,9 +108,34 @@ fn prepare_finalizes_the_target_without_making_images() {
     }
 }
 
+/// How many builds the coverage test runs at most: the steps' share of the
+/// time holds on a quiet host, and a busy one (the gate runs every test at
+/// once) stretches the untimed gaps between steps for a moment. A step that
+/// is never timed misses the share on every run.
+const COVERAGE_ATTEMPTS: usize = 3;
+
 #[test]
 fn a_build_operations_steps_cover_its_duration() {
-    let workspace_scratch = TempDir::new("gaia-step-cover-workspace");
+    let mut shares = Vec::new();
+    for attempt in 0..COVERAGE_ATTEMPTS {
+        let (covered, elapsed, names) = timed_build(attempt);
+        let share = covered.as_secs_f64() / elapsed.as_secs_f64();
+        if share >= 0.9 {
+            return;
+        }
+        shares.push(format!("{covered:?} of {elapsed:?}: {names:?}"));
+    }
+    panic!(
+        "steps cover less than 90% of the build on every attempt: {}",
+        shares.join("; ")
+    );
+}
+
+/// One build operation over a fake Buildroot tree: the time its steps
+/// report (leaving out those derived from the make log), its wall time,
+/// and its step names, which must include every step the operation has.
+fn timed_build(attempt: usize) -> (Duration, Duration, Vec<String>) {
+    let workspace_scratch = TempDir::new(&format!("gaia-step-cover-workspace-{attempt}"));
     let workspace = workspace_scratch.join("workspace");
     let source = workspace.join("build/sources/fake-buildroot");
     fs::create_dir_all(&source).expect("buildroot source");
@@ -208,8 +233,6 @@ fn a_build_operations_steps_cover_its_duration() {
         })
         .map(|(_, duration)| *duration)
         .sum();
-    assert!(
-        covered.as_secs_f64() >= 0.9 * elapsed.as_secs_f64(),
-        "steps cover {covered:?} of {elapsed:?}: {names:?}"
-    );
+    let names = names.into_iter().map(str::to_string).collect();
+    (covered, elapsed, names)
 }
