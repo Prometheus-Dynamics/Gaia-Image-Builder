@@ -608,6 +608,7 @@ mod package_cache;
 mod package_cache_files;
 mod package_cache_registry;
 mod package_graph;
+mod package_graph_key;
 mod package_keys;
 mod prefetch;
 use prefetch::prefetch_buildroot_sources;

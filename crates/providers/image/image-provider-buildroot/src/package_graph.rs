@@ -130,16 +130,25 @@ impl PackageGraph {
 pub(crate) struct QueriedPackageGraph {
     pub graph: PackageGraph,
     raw: String,
+    /// What show-info read (`package_graph_key`), recorded with the graph.
+    key: String,
 }
 
 impl QueriedPackageGraph {
     pub(crate) fn record(&self, output_dir: &Path) -> Result<(), ImageProviderError> {
-        fs::write(output_dir.join(PACKAGE_GRAPH_STATE), &self.raw).map_err(|error| {
-            ImageProviderError::backend_command(format!(
-                "failed to record Buildroot package graph in '{}': {error}",
-                output_dir.display()
-            ))
-        })
+        fs::write(output_dir.join(PACKAGE_GRAPH_STATE), &self.raw)
+            .and_then(|()| {
+                fs::write(
+                    output_dir.join(crate::package_graph_key::PACKAGE_GRAPH_KEY),
+                    &self.key,
+                )
+            })
+            .map_err(|error| {
+                ImageProviderError::backend_command(format!(
+                    "failed to record Buildroot package graph in '{}': {error}",
+                    output_dir.display()
+                ))
+            })
     }
 }
 
@@ -150,6 +159,16 @@ pub(crate) fn query_package_graph(
     br2_external: Option<&str>,
     command_context: &ImageCommandContext<'_>,
 ) -> Result<Option<QueriedPackageGraph>, ImageProviderError> {
+    // The recorded graph, while nothing show-info reads has changed.
+    let key = crate::package_graph_key::package_graph_key(buildroot_dir, output_dir, br2_external);
+    let recorded_key =
+        fs::read_to_string(output_dir.join(crate::package_graph_key::PACKAGE_GRAPH_KEY));
+    if recorded_key.is_ok_and(|recorded| recorded == key)
+        && let Ok(raw) = fs::read_to_string(output_dir.join(PACKAGE_GRAPH_STATE))
+        && let Some(graph) = PackageGraph::parse(&raw)
+    {
+        return Ok(Some(QueriedPackageGraph { graph, raw, key }));
+    }
     let mut command = Command::new("make");
     command
         .arg("-s")
@@ -183,7 +202,7 @@ pub(crate) fn query_package_graph(
     let _ = fs::remove_file(&output_path);
     match output {
         Ok(output) if output.status.success() => {
-            Ok(PackageGraph::parse(&raw).map(|graph| QueriedPackageGraph { graph, raw }))
+            Ok(PackageGraph::parse(&raw).map(|graph| QueriedPackageGraph { graph, raw, key }))
         }
         Ok(_) => Ok(None),
         Err(error) if error.kind == ImageProviderErrorKind::Cancelled => Err(error),
