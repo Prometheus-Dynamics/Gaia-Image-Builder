@@ -116,7 +116,7 @@ pub fn docker_run_command(
         .arg("--init")
         .arg("--cidfile")
         .arg(new_container_id_file())
-        .args(crate::cpuset::docker_cpuset_args());
+        .args(crate::host_limits::docker_limit_args());
     if spec.map_workspace_user {
         wrapped.args(docker_workspace_user_args(&spec.workspace_root));
     }

@@ -112,11 +112,6 @@ through HeliOS). The other boards follow it, so their items stay below.
   - Why: the low-cost module tier.
   - Done when: each chip's module boots A/B from SPI-NAND and from eMMC.
   - Blocked by: the boards.
-- **Raze Mesa footprint**
-  - What: HeliOS uses only V3DV Vulkan (through wgpu and `ash`); nothing in the Raze rootfs links EGL, GLES or gbm. Atlas's `devices/raze/gaia/gpu.toml` adds Gallium V3D/VC4, EGL, GLES and GBM: libgallium 18.1 MB and the GL libraries, about 18.5 MB raw and 3 MB of the 51.76 MB `.img.xz` (measured 2026-11-03 on dev.909). `vulkaninfo` is another 0.9 MB raw.
-  - Why: the lean-install rule.
-  - Done when: a HeliOS Raze build with Vulkan only (Mesa and libdrm set in the Vulkan layer) boots and runs its pipeline, and its sizes are reported. PhotonVision keeps the GL path, which its libcamera GL driver uses.
-  - Blocked by: the user's go; the layer is Atlas's.
 
 ## Decided, starts when the user says
 
@@ -164,6 +159,8 @@ The user pinned these on 2026-10-30.
 Cut and staying cut: TUI cleanup, deb packaging niceties.
 
 ## Done
+
+- Raze Mesa footprint: HeliOS's Raze build takes Atlas's Vulkan-only GPU layer (HeliOS 599c63cd, Atlas c1f7803), 3.1 MB less `.img.xz`.
 
 - Raze build warnings: a full Raze build on 2026-11-06 printed none (the ccache warning went with the cache's move to the SSD).
 - Noisy firmware warnings: many missing firmware files are one warning line, the list in the report: 96f0042.
