@@ -58,6 +58,13 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig, sources: &[SourceSpec]) -
                         shared_feature: surface.shared_feature,
                         plugin_dirs: surface.plugin_dirs,
                         plugin_exports: surface.plugin_exports,
+                        plugin_version: surface.plugin_version.map(|version| {
+                            gaia_spec::SurfacePluginVersionSpec {
+                                symbol: version.symbol,
+                                min: version.min,
+                                max: version.max,
+                            }
+                        }),
                     })
                 }),
             })

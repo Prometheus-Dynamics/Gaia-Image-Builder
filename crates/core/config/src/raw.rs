@@ -792,6 +792,17 @@ pub(crate) struct RawRustSurfaceConfig {
     pub plugin_dirs: Vec<String>,
     /// Symbols each plugin there must export.
     pub plugin_exports: Vec<String>,
+    /// A plugin's ABI version: an exported `u32` and the accepted range.
+    pub plugin_version: Option<RawSurfacePluginVersionConfig>,
+}
+
+/// `plugin_version = { symbol = "...", min = 2, max = 4 }` on a surface.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default)]
+pub(crate) struct RawSurfacePluginVersionConfig {
+    pub symbol: String,
+    pub min: u32,
+    pub max: u32,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]

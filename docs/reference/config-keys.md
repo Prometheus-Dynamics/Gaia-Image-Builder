@@ -132,6 +132,12 @@ Described in [Artifacts, install and stage](../configuration-artifacts.md#artifa
 
 Keys: `exports`, `plugin_dirs`, `plugin_exports`, `shared_feature`, `state_crates`.
 
+## `[artifacts.surface.plugin_version]`
+
+Described in [Artifacts, install and stage](../configuration-artifacts.md#artifacts).
+
+Keys: `max`, `min`, `symbol`.
+
 ## `[[install]]`
 
 Described in [Artifacts, install and stage](../configuration-artifacts.md#install).

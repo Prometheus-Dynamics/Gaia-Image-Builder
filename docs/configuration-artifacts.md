@@ -335,10 +335,19 @@ library. A directory must be absolute and not `/`
 ABI's entry points, by which the surface opens it. A plugin without one
 (built for a static host's Rust ABI only, say) is an error
 (`surface_plugin_export_missing`). A stable-ABI plugin imports nothing from
-the surface; that is fine. What the entry points return (Daedalus's stable
-ABI version) is the surface's to check when it opens the plugin.
-`plugin_exports` needs `plugin_dirs`
-(`rust_surface_plugin_exports_without_dirs`).
+the surface; that is fine.
+
+`plugin_version = { symbol = "daedalus_plugin_stable_version", min = 2, max = 4 }`
+reads each plugin's ABI version from the exported `u32` constant `symbol`
+(4 bytes in the file, in its byte order) and fails one outside `min..=max`
+(`surface_plugin_version_unsupported`), or one whose symbol is not such a
+constant (`surface_plugin_version_unreadable`). A plugin without the symbol,
+built before it existed, is left to the surface's loader. `max` is the
+surface's current ABI version and moves with it.
+
+`plugin_exports` and `plugin_version` need `plugin_dirs`
+(`rust_surface_plugin_exports_without_dirs`); `plugin_version` needs a
+symbol and `min <= max` (`rust_surface_plugin_version_invalid`).
 
 A surface's process-wide state (its handle tables) may be in a program
 once: a program links it in, or loads the library, not both. Handles from

@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 
 const ELF_MAGIC: &[u8; 4] = b"\x7fELF";
 const SHT_DYNSYM: u32 = 11;
+const SHT_NOBITS: u32 = 8;
 const SHN_UNDEF: u16 = 0;
 const SHN_ABS: u16 = 0xfff1;
 const STB_GLOBAL: u8 = 1;
@@ -39,6 +40,126 @@ pub struct DynamicSymbols {
 /// Reads the dynamic symbols of an ELF object, 32-bit or 64-bit, either byte
 /// order. An object without a `.dynsym` (a static program) has none.
 pub fn dynamic_symbols(bytes: &[u8]) -> Result<DynamicSymbols, String> {
+    let mut symbols = DynamicSymbols::default();
+    for symbol in entries(bytes)? {
+        if !matches!(symbol.bind, STB_GLOBAL | STB_WEAK | STB_GNU_UNIQUE)
+            || matches!(symbol.kind, STT_SECTION | STT_FILE)
+            || symbol.name.is_empty()
+        {
+            continue;
+        }
+        if symbol.shndx == SHN_UNDEF {
+            symbols.imports.push(DynamicImport {
+                name: symbol.name,
+                weak: symbol.bind == STB_WEAK,
+            });
+        } else if symbol.shndx != SHN_ABS && !matches!(symbol.visibility, STV_HIDDEN | STV_INTERNAL)
+        {
+            symbols.exports.insert(symbol.name);
+        }
+    }
+    symbols.imports.sort();
+    symbols.imports.dedup();
+    Ok(symbols)
+}
+
+/// The value of an exported 4-byte constant (a `u32` in `.rodata`), read
+/// from the file in its byte order: `None` when the object does not
+/// export `name`. A symbol of another size, or one without file contents
+/// (`.bss`), is an error.
+pub fn exported_u32(bytes: &[u8], name: &str) -> Result<Option<u32>, String> {
+    let Some(symbol) = entries(bytes)?.into_iter().find(|symbol| {
+        symbol.name == name
+            && matches!(symbol.bind, STB_GLOBAL | STB_WEAK | STB_GNU_UNIQUE)
+            && !matches!(symbol.shndx, SHN_UNDEF | SHN_ABS)
+    }) else {
+        return Ok(None);
+    };
+    if symbol.size != 4 {
+        return Err(format!(
+            "{name} is {} bytes, not a 4-byte value",
+            symbol.size
+        ));
+    }
+    let (read, sections) = section_table(bytes)?;
+    let section = sections
+        .get(usize::from(symbol.shndx))
+        .ok_or_else(|| format!("{name} is in no section of the file"))?;
+    if section.kind == SHT_NOBITS {
+        return Err(format!("{name} has no contents in the file (.bss)"));
+    }
+    let offset = symbol
+        .value
+        .checked_sub(section.addr)
+        .filter(|offset| offset.checked_add(4).is_some_and(|end| end <= section.size))
+        .and_then(|offset| offset.checked_add(section.offset))
+        .ok_or_else(|| format!("{name} lies outside its section"))?;
+    read.u32(offset).map(Some)
+}
+
+struct Symbol {
+    name: String,
+    bind: u8,
+    kind: u8,
+    visibility: u8,
+    shndx: u16,
+    value: usize,
+    size: usize,
+}
+
+/// Every `.dynsym` entry but the null one; none without a `.dynsym`.
+fn entries(bytes: &[u8]) -> Result<Vec<Symbol>, String> {
+    let (read, sections) = section_table(bytes)?;
+    let Some(table) = sections.iter().find(|section| section.kind == SHT_DYNSYM) else {
+        return Ok(Vec::new());
+    };
+    let strings = sections
+        .get(table.link)
+        .ok_or("ELF .dynsym names no string table")?;
+    let strings = range(bytes, strings.offset, strings.size)?;
+    let body = range(bytes, table.offset, table.size)?;
+    let wide = read.wide;
+    let entry_size = if wide { 24 } else { 16 };
+    let mut symbols = Vec::new();
+    // Entry 0 is the null symbol.
+    for entry in body.chunks_exact(entry_size).skip(1) {
+        let entry_read = Reader {
+            bytes: entry,
+            wide,
+            little: read.little,
+        };
+        let (info, other, shndx, value, size) = if wide {
+            (
+                entry[4],
+                entry[5],
+                entry_read.u16(6)?,
+                entry_read.word(8)?,
+                entry_read.word(16)?,
+            )
+        } else {
+            (
+                entry[12],
+                entry[13],
+                entry_read.u16(14)?,
+                entry_read.word(4)?,
+                entry_read.word(8)?,
+            )
+        };
+        symbols.push(Symbol {
+            name: name_at(strings, entry_read.u32(0)? as usize)?,
+            bind: info >> 4,
+            kind: info & 0xf,
+            visibility: other & 0x3,
+            shndx,
+            value,
+            size,
+        });
+    }
+    Ok(symbols)
+}
+
+/// The section headers, read from the section table (`strip` keeps it).
+fn section_table(bytes: &[u8]) -> Result<(Reader<'_>, Vec<Section>), String> {
     if bytes.get(..4) != Some(ELF_MAGIC.as_slice()) {
         return Err("not an ELF file".into());
     }
@@ -64,19 +185,21 @@ pub fn dynamic_symbols(bytes: &[u8]) -> Result<DynamicSymbols, String> {
     };
     let shentsize = usize::from(shentsize);
     if shoff == 0 || shnum == 0 {
-        return Ok(DynamicSymbols::default());
+        return Ok((read, Vec::new()));
     }
     if shentsize < if wide { 64 } else { 40 } {
         return Err("ELF section headers are too small".into());
     }
-    let header = |index: usize| -> Result<Section, String> {
+    let mut sections = Vec::with_capacity(usize::from(shnum));
+    for index in 0..usize::from(shnum) {
         let base = index
             .checked_mul(shentsize)
             .and_then(|offset| offset.checked_add(shoff))
             .ok_or("ELF section table out of range")?;
-        Ok(if wide {
+        sections.push(if wide {
             Section {
                 kind: read.u32(base + 4)?,
+                addr: read.word(base + 0x10)?,
                 offset: read.word(base + 0x18)?,
                 size: read.word(base + 0x20)?,
                 link: read.u32(base + 0x28)? as usize,
@@ -84,70 +207,19 @@ pub fn dynamic_symbols(bytes: &[u8]) -> Result<DynamicSymbols, String> {
         } else {
             Section {
                 kind: read.u32(base + 4)?,
+                addr: read.word(base + 0x0c)?,
                 offset: read.word(base + 0x10)?,
                 size: read.word(base + 0x14)?,
                 link: read.u32(base + 0x18)? as usize,
             }
-        })
-    };
-    let mut table = None;
-    for index in 0..usize::from(shnum) {
-        let section = header(index)?;
-        if section.kind == SHT_DYNSYM {
-            table = Some(section);
-            break;
-        }
+        });
     }
-    let Some(table) = table else {
-        return Ok(DynamicSymbols::default());
-    };
-    if table.link >= usize::from(shnum) {
-        return Err("ELF .dynsym names no string table".into());
-    }
-    let strings = header(table.link)?;
-    let strings = range(bytes, strings.offset, strings.size)?;
-    let body = range(bytes, table.offset, table.size)?;
-    let entry_size = if wide { 24 } else { 16 };
-    let mut symbols = DynamicSymbols::default();
-    // Entry 0 is the null symbol.
-    for entry in body.chunks_exact(entry_size).skip(1) {
-        let entry_read = Reader {
-            bytes: entry,
-            wide,
-            little,
-        };
-        let name_offset = entry_read.u32(0)? as usize;
-        let (info, other, shndx) = if wide {
-            (entry[4], entry[5], entry_read.u16(6)?)
-        } else {
-            (entry[12], entry[13], entry_read.u16(14)?)
-        };
-        let (bind, kind, visibility) = (info >> 4, info & 0xf, other & 0x3);
-        if !matches!(bind, STB_GLOBAL | STB_WEAK | STB_GNU_UNIQUE)
-            || matches!(kind, STT_SECTION | STT_FILE)
-        {
-            continue;
-        }
-        let name = name_at(strings, name_offset)?;
-        if name.is_empty() {
-            continue;
-        }
-        if shndx == SHN_UNDEF {
-            symbols.imports.push(DynamicImport {
-                name,
-                weak: bind == STB_WEAK,
-            });
-        } else if shndx != SHN_ABS && !matches!(visibility, STV_HIDDEN | STV_INTERNAL) {
-            symbols.exports.insert(name);
-        }
-    }
-    symbols.imports.sort();
-    symbols.imports.dedup();
-    Ok(symbols)
+    Ok((read, sections))
 }
 
 struct Section {
     kind: u32,
+    addr: usize,
     offset: usize,
     size: usize,
     link: usize,
@@ -223,6 +295,25 @@ mod tests {
     /// A minimal ELF64 (or ELF32) object with a `.dynsym` of `symbols`
     /// (name, info, other, shndx) and its string table.
     fn object(wide: bool, little: bool, symbols: &[(&str, u8, u8, u16)]) -> Vec<u8> {
+        let symbols = symbols
+            .iter()
+            .map(|&(name, info, other, shndx)| (name, info, other, shndx, 0, 0))
+            .collect::<Vec<_>>();
+        object_with(wide, little, &symbols, RODATA_ADDR, &[])
+    }
+
+    /// Where the fixture's `.rodata` (section 3) is loaded.
+    const RODATA_ADDR: usize = 0x4000;
+
+    /// `object`, with each symbol's value and size, and a `.rodata` section
+    /// (index 3) of `rodata` loaded at `rodata_addr`.
+    fn object_with(
+        wide: bool,
+        little: bool,
+        symbols: &[(&str, u8, u8, u16, usize, usize)],
+        rodata_addr: usize,
+        rodata: &[u8],
+    ) -> Vec<u8> {
         let mut strings = vec![0u8];
         let mut entries = vec![0u8; if wide { 24 } else { 16 }];
         let put16 = |out: &mut Vec<u8>, value: u16| {
@@ -251,7 +342,7 @@ mod tests {
                 put32(out, value as u32);
             }
         };
-        for (name, info, other, shndx) in symbols {
+        for (name, info, other, shndx, value, size) in symbols {
             let offset = strings.len() as u32;
             strings.extend(name.as_bytes());
             strings.push(0);
@@ -259,9 +350,11 @@ mod tests {
             if wide {
                 entries.extend([*info, *other]);
                 put16(&mut entries, *shndx);
-                entries.extend([0u8; 16]);
+                put_word(&mut entries, *value);
+                put_word(&mut entries, *size);
             } else {
-                entries.extend([0u8; 8]);
+                put_word(&mut entries, *value);
+                put_word(&mut entries, *size);
                 entries.extend([*info, *other]);
                 put16(&mut entries, *shndx);
             }
@@ -270,7 +363,8 @@ mod tests {
         let section_size = if wide { 64 } else { 40 };
         let entries_at = header_size;
         let strings_at = entries_at + entries.len();
-        let table_at = strings_at + strings.len();
+        let rodata_at = strings_at + strings.len();
+        let table_at = rodata_at + rodata.len();
         let mut out = vec![0x7f, b'E', b'L', b'F', if wide { 2 } else { 1 }];
         out.push(if little { 1 } else { 2 });
         out.resize(16, 0);
@@ -280,28 +374,31 @@ mod tests {
         put_word(&mut out, table_at);
         out.resize(if wide { 0x3a } else { 0x2e }, 0);
         put16(&mut out, section_size as u16);
-        put16(&mut out, 3);
+        put16(&mut out, 4);
         out.resize(header_size, 0);
         out.extend(&entries);
         out.extend(&strings);
+        out.extend(rodata);
         // Sections: null, .dynsym (link 2), .dynstr.
-        let mut section = |kind: u32, offset: usize, size: usize, link: u32| {
+        let mut section = |kind: u32, addr: usize, offset: usize, size: usize, link: u32| {
             let start = out.len();
             put32(&mut out, 0);
             put32(&mut out, kind);
             if wide {
-                out.extend([0u8; 16]);
-            } else {
                 out.extend([0u8; 8]);
+            } else {
+                out.extend([0u8; 4]);
             }
+            put_word(&mut out, addr);
             put_word(&mut out, offset);
             put_word(&mut out, size);
             put32(&mut out, link);
             out.resize(start + section_size, 0);
         };
-        section(0, 0, 0, 0);
-        section(SHT_DYNSYM, entries_at, entries.len(), 2);
-        section(3, strings_at, strings.len(), 0);
+        section(0, 0, 0, 0, 0);
+        section(SHT_DYNSYM, 0, entries_at, entries.len(), 2);
+        section(3, 0, strings_at, strings.len(), 0);
+        section(1, rodata_addr, rodata_at, rodata.len(), 0);
         out
     }
 
@@ -365,5 +462,36 @@ mod tests {
         bytes[0x3c] = 0;
         bytes[0x3d] = 0;
         assert_eq!(dynamic_symbols(&bytes), Ok(DynamicSymbols::default()));
+    }
+
+    #[test]
+    fn an_exported_constant_is_read_in_every_class_and_byte_order() {
+        const GLOBAL_OBJECT: u8 = (STB_GLOBAL << 4) | 1;
+        for (wide, little) in [(true, true), (true, false), (false, true), (false, false)] {
+            let mut rodata = vec![0xaa; 4];
+            rodata.extend(if little {
+                4u32.to_le_bytes()
+            } else {
+                4u32.to_be_bytes()
+            });
+            let at = RODATA_ADDR + 4;
+            let bytes = object_with(
+                wide,
+                little,
+                &[
+                    ("plugin_version", GLOBAL_OBJECT, 0, 3, at, 4),
+                    ("plugin_wide", GLOBAL_OBJECT, 0, 3, at, 8),
+                    ("plugin_past", GLOBAL_OBJECT, 0, 3, at + 2, 4),
+                    ("plugin_import", GLOBAL_OBJECT, 0, SHN_UNDEF, 0, 0),
+                ],
+                RODATA_ADDR,
+                &rodata,
+            );
+            assert_eq!(exported_u32(&bytes, "plugin_version"), Ok(Some(4)));
+            assert_eq!(exported_u32(&bytes, "plugin_import"), Ok(None));
+            assert_eq!(exported_u32(&bytes, "absent"), Ok(None));
+            assert!(exported_u32(&bytes, "plugin_wide").is_err());
+            assert!(exported_u32(&bytes, "plugin_past").is_err());
+        }
     }
 }

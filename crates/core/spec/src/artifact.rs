@@ -163,6 +163,20 @@ pub struct RustSurfaceSpec {
     /// points (Daedalus's `daedalus_plugin_descriptor`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub plugin_exports: Vec<String>,
+    /// The ABI version each plugin there exports as a `u32` constant, and
+    /// the range the surface opens.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plugin_version: Option<SurfacePluginVersionSpec>,
+}
+
+/// A plugin's ABI version: the exported `u32` constant that holds it
+/// (Daedalus's `daedalus_plugin_stable_version`) and the accepted range,
+/// both ends included. A plugin without the symbol is not checked.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SurfacePluginVersionSpec {
+    pub symbol: String,
+    pub min: u32,
+    pub max: u32,
 }
 
 impl RustSurfaceSpec {
@@ -173,6 +187,7 @@ impl RustSurfaceSpec {
             shared_feature: None,
             plugin_dirs: Vec::new(),
             plugin_exports: Vec::new(),
+            plugin_version: None,
         }
     }
 }

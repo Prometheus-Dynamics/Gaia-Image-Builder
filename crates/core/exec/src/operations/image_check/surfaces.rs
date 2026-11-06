@@ -21,7 +21,7 @@
 //! plugin ABI's entry points), or the surface cannot open it.
 
 use super::kernel_modules::Outcome;
-use gaia_artifact_providers::dynamic_symbols;
+use gaia_artifact_providers::{dynamic_symbols, exported_u32};
 use gaia_plan::{find_sysroot_library, parse_elf};
 use gaia_spec::{ArtifactDefinition, ArtifactSpec, ResolvedBuildSpec};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -41,6 +41,8 @@ pub(super) struct InstalledSurface {
     pub plugin_dirs: Vec<String>,
     /// What each plugin there must export.
     pub plugin_exports: Vec<String>,
+    /// The plugin ABI version's symbol and accepted range.
+    pub plugin_version: Option<gaia_spec::SurfacePluginVersionSpec>,
 }
 
 /// The surfaces the build installs into `rootfs`: each install of a Rust
@@ -59,6 +61,7 @@ pub(super) fn installed_surfaces(spec: &ResolvedBuildSpec, rootfs: &Path) -> Vec
                 guest,
                 plugin_dirs: surface.plugin_dirs.clone(),
                 plugin_exports: surface.plugin_exports.clone(),
+                plugin_version: surface.plugin_version.clone(),
             })
         })
         .collect()
@@ -305,6 +308,7 @@ fn check_consumer(
     };
     if plugin {
         plugin_entry_points(guest, &symbols.exports, uses, outcome);
+        plugin_version(guest, bytes, uses, outcome);
     }
     let imports = symbols.imports;
     let mut available = BTreeSet::new();
@@ -422,6 +426,40 @@ fn plugin_entry_points(
                     surface.surface.artifact
                 ),
             );
+        }
+    }
+}
+
+/// A plugin's ABI version outside the range its surface opens. A plugin
+/// without the symbol (built before it existed) is left to the loader.
+fn plugin_version(guest: &str, bytes: &[u8], uses: &[&Loaded], outcome: &mut Outcome) {
+    for surface in uses
+        .iter()
+        .filter(|surface| in_plugin_dir(guest, &surface.surface.plugin_dirs))
+    {
+        let Some(range) = &surface.surface.plugin_version else {
+            continue;
+        };
+        let opened_by = format!(
+            "surface {} ('{}')",
+            surface.surface.guest, surface.surface.artifact
+        );
+        match exported_u32(bytes, &range.symbol) {
+            Ok(None) => {}
+            Ok(Some(version)) if (range.min..=range.max).contains(&version) => {}
+            Ok(Some(version)) => outcome.error(
+                "surface_plugin_version_unsupported",
+                Some(guest),
+                format!(
+                    "plugin {guest} has {} {version}, outside the {}..={} that {opened_by} opens; rebuild it against a supported ABI",
+                    range.symbol, range.min, range.max
+                ),
+            ),
+            Err(message) => outcome.error(
+                "surface_plugin_version_unreadable",
+                Some(guest),
+                format!("plugin {guest}'s {} cannot be read: {message}", range.symbol),
+            ),
         }
     }
 }

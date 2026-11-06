@@ -60,10 +60,23 @@ pub(crate) fn validate(artifact: &ArtifactSpec, issues: &mut Vec<ArtifactProvide
             message: "surface plugin_dirs are absolute directories in the image, not '/'".into(),
         });
     }
-    if !surface.plugin_exports.is_empty() && surface.plugin_dirs.is_empty() {
+    if (!surface.plugin_exports.is_empty() || surface.plugin_version.is_some())
+        && surface.plugin_dirs.is_empty()
+    {
         issues.push(ArtifactProviderValidationIssue {
             code: "rust_surface_plugin_exports_without_dirs",
-            message: "surface plugin_exports needs plugin_dirs: the directories whose plugins must export them".into(),
+            message: "surface plugin_exports and plugin_version need plugin_dirs: the directories of the plugins they hold".into(),
+        });
+    }
+    if let Some(version) = &surface.plugin_version
+        && (version.symbol.trim().is_empty() || version.min > version.max)
+    {
+        issues.push(ArtifactProviderValidationIssue {
+            code: "rust_surface_plugin_version_invalid",
+            message: format!(
+                "surface plugin_version needs a symbol and min <= max (min {}, max {})",
+                version.min, version.max
+            ),
         });
     }
 }

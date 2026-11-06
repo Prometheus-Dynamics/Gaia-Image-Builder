@@ -152,6 +152,7 @@ fn consumers_import_only_what_the_surface_and_their_libraries_export() {
             guest: "/usr/lib/libsurface.so".into(),
             plugin_dirs: Vec::new(),
             plugin_exports: Vec::new(),
+            plugin_version: None,
         }],
         root,
         &mut outcome,
@@ -242,6 +243,7 @@ fn plugins_are_checked_against_the_surface_that_opens_them() {
             guest: "/usr/lib/libsurface.so".into(),
             plugin_dirs: vec!["/usr/lib/plugins/".into()],
             plugin_exports: vec!["plugin_descriptor".into()],
+            plugin_version: None,
         }],
         root,
         &mut outcome,
@@ -370,6 +372,7 @@ fn a_real_root_filesystem() {
             plugin_exports: std::env::var("GAIA_SURFACE_PLUGIN_EXPORTS")
                 .map(|names| names.split(',').map(str::to_string).collect())
                 .unwrap_or_default(),
+            plugin_version: None,
         }],
         Path::new(&root),
         &mut outcome,

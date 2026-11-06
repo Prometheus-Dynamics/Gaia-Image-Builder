@@ -293,7 +293,15 @@ const ARTIFACT_CHILDREN: &[Section] = &[
             &[],
         )],
     ),
-    section("surface", struct_fields::<raw::RawRustSurfaceConfig>, &[]),
+    section(
+        "surface",
+        struct_fields::<raw::RawRustSurfaceConfig>,
+        &[section(
+            "plugin_version",
+            struct_fields::<raw::RawSurfacePluginVersionConfig>,
+            &[],
+        )],
+    ),
 ];
 
 const IMAGE_CHILDREN: &[Section] = &[

@@ -7,7 +7,7 @@ mod outputs;
 mod tests;
 mod toolchain;
 
-pub use elf_symbols::{DynamicImport, DynamicSymbols, dynamic_symbols};
+pub use elf_symbols::{DynamicImport, DynamicSymbols, dynamic_symbols, exported_u32};
 pub use toolchain::{ArtifactToolchainContract, ensure_relocated};
 
 pub use command::{
