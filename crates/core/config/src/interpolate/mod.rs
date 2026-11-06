@@ -596,6 +596,11 @@ fn interpolate_artifact(
                 exports: resolver::interpolate_string(surface.exports, raw, env),
                 state_crates: surface.state_crates,
                 shared_feature: surface.shared_feature,
+                plugin_dirs: surface
+                    .plugin_dirs
+                    .into_iter()
+                    .map(|dir| resolver::interpolate_string(dir, raw, env))
+                    .collect(),
             }),
         },
         RawArtifactDefinition::Java {

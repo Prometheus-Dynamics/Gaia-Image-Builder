@@ -150,6 +150,7 @@ fn consumers_import_only_what_the_surface_and_their_libraries_export() {
         &[InstalledSurface {
             artifact: "libsurface".into(),
             guest: "/usr/lib/libsurface.so".into(),
+            plugin_dirs: Vec::new(),
         }],
         root,
         &mut outcome,
@@ -182,6 +183,76 @@ fn consumers_import_only_what_the_surface_and_their_libraries_export() {
             ),
         ]
     );
+}
+
+/// Plugins under the surface's `plugin_dirs` are its consumers, whether or
+/// not they need it by name, and their leftover imports are an error.
+#[test]
+fn plugins_are_checked_against_the_surface_that_opens_them() {
+    let scratch = TempDir::new("gaia-image-check-surface-plugins");
+    let root = scratch.path();
+    put(
+        root,
+        "/usr/lib/libsurface.so",
+        &object(None, &["libc.so.6"], &["surface_open"], &[]),
+    );
+    put(
+        root,
+        "/usr/lib/libc.so.6",
+        &object(None, &[], &["malloc"], &[]),
+    );
+    put(
+        root,
+        "/usr/bin/host",
+        &object(
+            Some("/lib64/ld-linux-x86-64.so.2"),
+            &["libsurface.so"],
+            &[],
+            &[("surface_open", false)],
+        ),
+    );
+    // malloc comes from the surface's own libc.
+    put(
+        root,
+        "/usr/lib/plugins/nested/good.so",
+        &object(
+            None,
+            &[],
+            &[],
+            &[("surface_open", false), ("malloc", false)],
+        ),
+    );
+    put(
+        root,
+        "/usr/lib/plugins/stale.so",
+        &object(None, &[], &[], &[("surface_gone", false)]),
+    );
+    // Not under the directory, only next to it by name.
+    put(
+        root,
+        "/usr/lib/plugins-old/other.so",
+        &object(None, &[], &[], &[("nowhere", false)]),
+    );
+
+    let mut outcome = Outcome::default();
+    let consumers = check(
+        &[InstalledSurface {
+            artifact: "libsurface".into(),
+            guest: "/usr/lib/libsurface.so".into(),
+            plugin_dirs: vec!["/usr/lib/plugins/".into()],
+        }],
+        root,
+        &mut outcome,
+    );
+    assert_eq!(consumers, 3);
+    assert_eq!(
+        findings(&outcome, Severity::Error),
+        [(
+            "surface_import_undeclared",
+            Some("/usr/lib/plugins/stale.so".into())
+        )]
+    );
+    assert!(findings(&outcome, Severity::Warning).is_empty());
 }
 
 #[test]
@@ -285,6 +356,9 @@ fn a_real_root_filesystem() {
         &[InstalledSurface {
             artifact: "real".into(),
             guest,
+            plugin_dirs: std::env::var("GAIA_SURFACE_PLUGIN_DIRS")
+                .map(|dirs| dirs.split(':').map(str::to_string).collect())
+                .unwrap_or_default(),
         }],
         Path::new(&root),
         &mut outcome,

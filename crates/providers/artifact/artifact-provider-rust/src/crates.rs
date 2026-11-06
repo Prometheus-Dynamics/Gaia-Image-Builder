@@ -19,7 +19,7 @@ use gaia_artifact_providers::{
 use crate::feature_flags::CargoFeatureFlags;
 
 /// The record's format: bumped when its shape changes.
-const RECORD_SCHEMA: u32 = 1;
+const RECORD_SCHEMA: u32 = 2;
 
 /// After a cargo build, when the build declares a surface: the record.
 pub(crate) fn record_after_build(
@@ -72,7 +72,12 @@ fn record(
         "package": package,
         "crates": crates
             .iter()
-            .map(|(name, features)| serde_json::json!({"name": name, "features": features}))
+            .map(|entry| serde_json::json!({
+                "name": entry.name,
+                "version": entry.version,
+                "source": entry.source,
+                "features": entry.features,
+            }))
             .collect::<Vec<_>>(),
     });
     let path = gaia_spec::rust_crates_record_path(std::path::Path::new(&contract.output.path));
@@ -110,34 +115,61 @@ fn tree_command(
     command
 }
 
-/// `name vX.Y.Z (path)|feature,feature` lines, a crate repeated where it
-/// is reached again (`(*)`): each crate once, with its features.
-pub(crate) fn parse_tree(text: &str) -> Vec<(String, Vec<String>)> {
-    let mut crates = std::collections::BTreeMap::<String, Vec<String>>::new();
+/// One crate of the graph: a name at a version from a source (a path or a
+/// git URL with its commit; empty for a registry), and its features.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CrateUse {
+    pub name: String,
+    pub version: String,
+    pub source: String,
+    pub features: Vec<String>,
+}
+
+/// `name vX.Y.Z (source)|feature,feature` lines, a crate repeated where it
+/// is reached again (`(*)`): each name, version and source once.
+pub(crate) fn parse_tree(text: &str) -> Vec<CrateUse> {
+    let mut crates = std::collections::BTreeMap::<(String, String, String), Vec<String>>::new();
     for line in text.lines() {
         let line = line.trim();
         let Some((package, features)) = line.split_once('|') else {
             continue;
         };
-        let Some(name) = package.split_whitespace().next() else {
+        let mut words = package.splitn(3, ' ');
+        let (Some(name), Some(version)) = (words.next(), words.next()) else {
             continue;
         };
+        let source = words
+            .next()
+            .map(|rest| rest.trim().trim_start_matches('(').trim_end_matches(')'))
+            .unwrap_or_default();
+        let key = (
+            name.to_string(),
+            version.trim_start_matches('v').to_string(),
+            source.to_string(),
+        );
+        let entry = crates.entry(key).or_default();
         let features = features
             .trim()
             .trim_end_matches("(*)")
             .split(',')
             .map(str::trim)
-            .filter(|feature| !feature.is_empty())
-            .map(str::to_string);
-        let entry = crates.entry(name.to_string()).or_default();
+            .filter(|feature| !feature.is_empty());
         for feature in features {
-            if !entry.contains(&feature) {
-                entry.push(feature);
+            if !entry.iter().any(|known| known == feature) {
+                entry.push(feature.to_string());
             }
         }
         entry.sort();
     }
-    crates.into_iter().collect()
+    crates
+        .into_iter()
+        .map(|((name, version, source), features)| CrateUse {
+            name,
+            version,
+            source,
+            features,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -145,25 +177,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn each_crate_is_read_once_with_its_features() {
+    fn each_crate_is_read_once_per_version_and_source_with_its_features() {
         let text = "app v0.1.0 (/src/app)|\n\
             lemnos-capi v2.0.1 (/src/lemnos/crates/lemnos-capi)|default,shared\n\
             lemnos-abi v2.0.1 (/src/lemnos/crates/lemnos-abi)|std\n\
             serde v1.0.228|default,std\n\
-            lemnos-abi v2.0.1 (/src/lemnos/crates/lemnos-abi)|std (*)\n";
+            lemnos-abi v2.0.1 (/src/lemnos/crates/lemnos-abi)|std (*)\n\
+            lemnos-abi v2.0.0 (https://github.com/o/lemnos.git?branch=dev#086d6ce)|std\n";
+        let crates = parse_tree(text);
+        let row = |entry: &CrateUse| {
+            format!(
+                "{} {} [{}] {}",
+                entry.name,
+                entry.version,
+                entry.source,
+                entry.features.join(",")
+            )
+        };
         assert_eq!(
-            parse_tree(text),
-            vec![
-                ("app".to_string(), vec![]),
-                ("lemnos-abi".to_string(), vec!["std".to_string()]),
-                (
-                    "lemnos-capi".to_string(),
-                    vec!["default".to_string(), "shared".to_string()]
-                ),
-                (
-                    "serde".to_string(),
-                    vec!["default".to_string(), "std".to_string()]
-                ),
+            crates.iter().map(row).collect::<Vec<_>>(),
+            [
+                "app 0.1.0 [/src/app] ",
+                "lemnos-abi 2.0.0 [https://github.com/o/lemnos.git?branch=dev#086d6ce] std",
+                "lemnos-abi 2.0.1 [/src/lemnos/crates/lemnos-abi] std",
+                "lemnos-capi 2.0.1 [/src/lemnos/crates/lemnos-capi] default,shared",
+                "serde 1.0.228 [] default,std",
             ]
         );
     }

@@ -130,7 +130,7 @@ Keys: `context`, `dockerfile`, `image`.
 
 Described in [Artifacts, install and stage](../configuration-artifacts.md#artifacts).
 
-Keys: `exports`, `shared_feature`, `state_crates`.
+Keys: `exports`, `plugin_dirs`, `shared_feature`, `state_crates`.
 
 ## `[[install]]`
 
@@ -199,6 +199,12 @@ Each `[image.layers.<name>]` takes: `erofs_options`, `installs`, `packages`, `pa
 Described in [Image](../configuration-image.md#image-checks).
 
 Keys: `kernel_image`, `kernel_modules`, `modules_dir`, `optional_firmware`, `pi_model`, `symvers`.
+
+## `[image.checks.crate_splits]`
+
+Described in [Image](../configuration-image.md#image-checks).
+
+Keys: `crate`, `reason`.
 
 ## `[[image.hardware]]`
 

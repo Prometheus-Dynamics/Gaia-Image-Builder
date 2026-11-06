@@ -9,7 +9,9 @@
 //! (`library/std/src/`) and does not need a shared `libstd-*.so`: an object
 //! linked with `-C prefer-dynamic` holds some of them too, from the generic
 //! std code compiled into it. The shared `libstd-*.so` is one copy itself.
-//! Libraries a program opens at run time (`dlopen`, plugins) are not seen.
+//! Libraries a program opens at run time (`dlopen`) are not seen, except
+//! the plugins of a surface's `plugin_dirs`, counted in each program that
+//! loads the surface.
 
 use gaia_plan::{find_sysroot_library, parse_elf};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -66,8 +68,9 @@ struct Object {
     copy: bool,
 }
 
-/// Every program of `rootfs` and its copies of std.
-pub(super) fn copies(rootfs: &Path) -> StdCopies {
+/// Every program of `rootfs` and its copies of std. `plugins` maps a
+/// library's name (file name or `DT_SONAME`) to the plugins it opens.
+pub(super) fn copies(rootfs: &Path, plugins: &BTreeMap<String, Vec<String>>) -> StdCopies {
     let mut files = Vec::new();
     super::surfaces::walk(rootfs, &mut files);
     let mut objects: BTreeMap<PathBuf, Option<Object>> = BTreeMap::new();
@@ -113,6 +116,18 @@ pub(super) fn copies(rootfs: &Path) -> StdCopies {
                     copies.insert(guest(rootfs, &library));
                 }
                 queue.extend(loaded.needed.iter().cloned());
+            }
+            for plugin in plugins.get(&name).into_iter().flatten() {
+                let path = rootfs.join(plugin.trim_start_matches('/'));
+                let opened = objects
+                    .entry(path.clone())
+                    .or_insert_with(|| read_object(&path));
+                if let Some(opened) = opened {
+                    if opened.copy {
+                        copies.insert(plugin.clone());
+                    }
+                    queue.extend(opened.needed.iter().cloned());
+                }
             }
         }
         if copies.is_empty() {

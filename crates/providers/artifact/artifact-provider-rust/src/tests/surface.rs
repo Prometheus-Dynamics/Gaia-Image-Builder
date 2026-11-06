@@ -142,3 +142,26 @@ fn a_build_records_its_crates_and_their_features() {
         .expect("the dependency is recorded");
     assert_eq!(state["features"], serde_json::json!(["shared"]));
 }
+
+#[test]
+fn surface_plugin_dirs_are_absolute_directories() {
+    let scratch = TempDir::new("gaia-rust-surface-plugin-dirs");
+    let mut artifact = surface_artifact(scratch.path());
+    if let ArtifactDefinition::Rust(rust) = &mut artifact.definition {
+        let mut surface = gaia_spec::RustSurfaceSpec::new("surface.exports");
+        surface.plugin_dirs = vec!["/usr/lib/helios/plugins".into()];
+        rust.surface = Some(Box::new(surface));
+    }
+    assert!(RustProvider.validate_artifact(&artifact).is_empty());
+    for dir in ["usr/lib/plugins", "/", ""] {
+        if let ArtifactDefinition::Rust(rust) = &mut artifact.definition {
+            rust.surface.as_mut().expect("surface").plugin_dirs = vec![dir.into()];
+        }
+        let codes = RustProvider
+            .validate_artifact(&artifact)
+            .into_iter()
+            .map(|issue| issue.code)
+            .collect::<Vec<_>>();
+        assert_eq!(codes, ["rust_surface_plugin_dir_invalid"], "{dir:?}");
+    }
+}

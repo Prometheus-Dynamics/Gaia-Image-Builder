@@ -49,6 +49,16 @@ pub(crate) fn validate(artifact: &ArtifactSpec, issues: &mut Vec<ArtifactProvide
                     .into(),
         });
     }
+    if surface
+        .plugin_dirs
+        .iter()
+        .any(|dir| !dir.starts_with('/') || dir.trim_matches('/').is_empty())
+    {
+        issues.push(ArtifactProviderValidationIssue {
+            code: "rust_surface_plugin_dir_invalid",
+            message: "surface plugin_dirs are absolute directories in the image, not '/'".into(),
+        });
+    }
 }
 
 /// Checks the built library against its declared surface. `None` when the

@@ -153,6 +153,12 @@ pub struct RustSurfaceSpec {
     /// `shared`): a program with it on holds no copy of the state.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shared_feature: Option<String>,
+    /// Directories in the image (`/usr/lib/helios/plugins`) of plugins the
+    /// surface opens at run time (`dlopen`): each ELF file under them is a
+    /// consumer of the surface, and runs in the process of each program
+    /// that loads it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub plugin_dirs: Vec<String>,
 }
 
 impl RustSurfaceSpec {
@@ -161,6 +167,7 @@ impl RustSurfaceSpec {
             exports: exports.into(),
             state_crates: Vec::new(),
             shared_feature: None,
+            plugin_dirs: Vec::new(),
         }
     }
 }

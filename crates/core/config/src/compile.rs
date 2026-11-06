@@ -574,6 +574,14 @@ pub(crate) fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                 kernel_image: checks.kernel_image,
                 pi_model: checks.pi_model,
                 optional_firmware: checks.optional_firmware,
+                crate_splits: checks
+                    .crate_splits
+                    .into_iter()
+                    .map(|split| gaia_spec::CrateSplitSpec {
+                        crate_name: split.crate_name,
+                        reason: split.reason,
+                    })
+                    .collect(),
             })
             .unwrap_or_default(),
         assembly: compile_image_assembly(raw.image.assembly),

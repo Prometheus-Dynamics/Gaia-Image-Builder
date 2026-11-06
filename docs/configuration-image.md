@@ -617,7 +617,9 @@ services = ["helios-*"]     # stage service ids: the unit file
 
 `image:check` reads the built image and the kernel tree of the Buildroot output, and fails the run on an error. A starting-point image has only its surface consumers checked, when the build installs a declared surface (see the artifacts' declared surfaces). It runs after the image build (after the assembly, when there is one), only reads, and is reused while the build it reads is unchanged and its report has the current schema (a Gaia that adds a check runs them once more).
 
-Every run also reports, without failing, the copies of the Rust standard library each program runs with (`rust_std` in the report): its own and those of the libraries it loads through `DT_NEEDED`. An object holds its own copy when it contains std's panic locations (`library/std/src/`) and does not need a shared `libstd-*.so`; that library is one copy itself. A program with more than one, such as a statically linked Rust program that also loads a `cdylib` surface built from Rust, is listed under `rust_std.duplicated` and named in a run summary note: each copy is a few hundred KB of text (245 KB of `lemnos-capi`'s 326 KB), and a sign that a core crate may be in the process twice. Libraries opened at run time (`dlopen`, plugins) are not seen.
+Every run also reports, without failing, the copies of the Rust standard library each program runs with (`rust_std` in the report): its own and those of the libraries it loads through `DT_NEEDED`. An object holds its own copy when it contains std's panic locations (`library/std/src/`) and does not need a shared `libstd-*.so`; that library is one copy itself. A program with more than one, such as a statically linked Rust program that also loads a `cdylib` surface built from Rust, is listed under `rust_std.duplicated` and named in a run summary note: each copy is a few hundred KB of text (245 KB of `lemnos-capi`'s 326 KB), and a sign that a core crate may be in the process twice. Libraries opened at run time (`dlopen`, plugins) are not seen, except plugins under a surface's `plugin_dirs`, counted in each process that loads that surface.
+
+One version of each own crate: with a declared surface in the build, each Rust artifact records its crate graph (see the artifacts' declared surfaces), and `image:check` fails a crate from a path or a git source that the installed artifacts resolved to more than one version or source, within one artifact or across them (`crate_version_split`, naming each version, source and artifact). Registry crates are left out: two semver-incompatible versions of a generic crate are cargo's normal business. A split the image has to carry for now is allowed by `[[image.checks.crate_splits]]`, one entry per crate, each with a `reason` (both required). An artifact without a record is not checked; the "not both" check warns about it.
 
 ```toml
 [image.checks]
@@ -627,9 +629,13 @@ symvers = "build/image/buildroot-output/build/linux-custom/Module.symvers"  # de
 kernel_image = "build/image/buildroot-output/images/Image"  # default: the kernel image the config builds (images/Image, zImage, ...)
 pi_model = "cm5"                         # optional: evaluate the boot config's [model] sections for this board
 optional_firmware = ["rtl_nic/rtl8157-1.fw"]  # optional: firmware a module lists but works without (`*` wildcards)
+
+[[image.checks.crate_splits]]            # optional: an own crate this image may hold at two versions or sources
+crate = "daedalus-accel"
+reason = "Eidos's lock pins its own accel until Daedalus 0.3"
 ```
 
-Across layers the table merges key by key: a later layer's key replaces the earlier one, and `optional_firmware` lists add up, so a device layer's firmware list survives an OS layer's own `[image.checks]`.
+Across layers the table merges key by key: a later layer's key replaces the earlier one, `optional_firmware` lists add up, and `crate_splits` add up by crate (a later layer's reason wins), so a device layer's firmware list survives an OS layer's own `[image.checks]`.
 
 The module and firmware checks read the root filesystem the build ships: the first required `[[image.expected_images]]` entry in a format Gaia reads (`erofs`, `ext2`/`ext3`/`ext4`, `squashfs`, `tar`). Its `lib/modules` and `lib/firmware` (`usr/lib/...` with a merged /usr) are extracted with the Buildroot host tools (`fsck.erofs`, `debugfs`, `unsquashfs`) or the ones on `PATH`, so a post-image script that rebuilds the image cannot ship modules or firmware the check did not see. Without such an entry, or with `modules_dir` set, they read Buildroot's `target/`; an image that cannot be read is a `rootfs_image_unread` warning and `target/` is read instead. The report's `kernel_modules.rootfs` names what was read (`images/rootfs.erofs` or `target`).
 

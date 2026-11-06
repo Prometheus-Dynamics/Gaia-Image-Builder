@@ -309,6 +309,28 @@ its `<collect_dir>/rootfs`): a build that installs a surface plans
 `image:check` even with `[image.checks] kernel_modules = false`. The report
 (`<out>/<build>.checks.json`) counts the consumers in `surface_consumers`.
 
+Plugins a surface opens at run time (`dlopen`) need it by no name, so the
+surface names their directories in the image:
+
+```toml
+[[artifacts]]
+id = "daedalus-surface"
+kind = "rust"
+source = "helios"
+package = "helios-daedalus-image"
+target_name = "libdaedalus.so"
+output_path = "${outputs.dir}/artifacts/libdaedalus.so"
+surface = { exports = "surfaces/daedalus.exports", plugin_dirs = ["/usr/lib/helios/plugins"] }
+```
+
+Each ELF file under them is a consumer of that surface. Its imports are
+compared with the surface's exports, the surface's own libraries' and its
+own, and a leftover is an error (`surface_import_undeclared`): nothing else
+in the process defines it. A plugin counts in each program that loads the
+surface, for "not both" below and for the copies of the Rust standard
+library. A directory must be absolute and not `/`
+(`rust_surface_plugin_dir_invalid`).
+
 A surface's process-wide state (its handle tables) may be in a program
 once: a program links it in, or loads the library, not both. Handles from
 one copy are unknown to the other.
@@ -339,6 +361,13 @@ record has a state crate and whose `DT_NEEDED` closure loads the surface
 (`surface_state_twice`, naming the crates and the feature to turn on). A
 program without a record (built before the build declared a surface) is a
 `surface_crates_unrecorded` warning; `--rebuild artifact:<id>` records it.
+
+The record also names each crate's version and source, and `image:check`
+fails a crate from a path or a git source that the image's artifacts
+resolved to more than one version or source (`crate_version_split`): two
+checkouts of one dependency in one image. Registry crates are left out. A
+split the image carries for now is listed, with its reason, in
+`[[image.checks.crate_splits]]` (see the image checks).
 
 #### Choosing the link per image and per dependency
 

@@ -10,12 +10,13 @@
 //! time (`dlopen`, plugins) are not seen. Crate names compare with `-` and
 //! `_` as one, as cargo's do.
 
+use super::crate_records::{read_record, record_path, same_crate};
 use super::kernel_modules::Outcome;
-use super::surfaces::{installed_rust, needed_closure};
+use super::surfaces::{in_plugin_dir, installed_rust, needed_closure};
 use gaia_plan::parse_elf;
 use gaia_spec::{ArtifactDefinition, ArtifactSpec, ResolvedBuildSpec, RustSurfaceSpec};
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 struct Surface<'a> {
     artifact: &'a ArtifactSpec,
@@ -73,7 +74,10 @@ pub(super) fn check(spec: &ResolvedBuildSpec, rootfs: &Path, outcome: &mut Outco
         let (loads, _) = needed_closure(rootfs, &object.needed);
         let loaded = surfaces
             .iter()
-            .filter(|surface| surface.names.iter().any(|name| loads.contains(name)))
+            .filter(|surface| {
+                in_plugin_dir(guest, &surface.spec.plugin_dirs)
+                    || surface.names.iter().any(|name| loads.contains(name))
+            })
             .collect::<Vec<_>>();
         if loaded.is_empty() {
             continue;
@@ -97,16 +101,18 @@ pub(super) fn check(spec: &ResolvedBuildSpec, rootfs: &Path, outcome: &mut Outco
             let state = state_crates(surface);
             let linked = crates
                 .iter()
-                .filter(|(name, features)| {
-                    state.iter().any(|crate_name| same_crate(crate_name, name))
-                        && !(same_crate(name, surface.package)
+                .filter(|entry| {
+                    state
+                        .iter()
+                        .any(|crate_name| same_crate(crate_name, &entry.name))
+                        && !(same_crate(&entry.name, surface.package)
                             && surface
                                 .spec
                                 .shared_feature
                                 .as_ref()
-                                .is_some_and(|feature| features.contains(feature)))
+                                .is_some_and(|feature| entry.features.contains(feature)))
                 })
-                .map(|(name, _)| name.as_str())
+                .map(|entry| entry.name.as_str())
                 .collect::<Vec<_>>();
             if linked.is_empty() {
                 continue;
@@ -122,18 +128,19 @@ pub(super) fn check(spec: &ResolvedBuildSpec, rootfs: &Path, outcome: &mut Outco
                 "surface_state_twice",
                 Some(guest),
                 format!(
-                    "{guest} links {} statically and loads surface {} ('{}'): the surface's state is in the process twice, and a handle from one copy is unknown to the other; {remedy}",
+                    "{guest} links {} statically and {} surface {} ('{}'): the surface's state is in the process twice, and a handle from one copy is unknown to the other; {remedy}",
                     linked.join(", "),
+                    if in_plugin_dir(guest, &surface.spec.plugin_dirs) {
+                        "is a plugin opened by"
+                    } else {
+                        "loads"
+                    },
                     surface.guest,
                     surface.artifact.id.as_str()
                 ),
             );
         }
     }
-}
-
-fn same_crate(a: &str, b: &str) -> bool {
-    a.replace('_', "-") == b.replace('_', "-")
 }
 
 fn state_crates<'a>(surface: &'a Surface<'a>) -> Vec<&'a str> {
@@ -147,33 +154,4 @@ fn state_crates<'a>(surface: &'a Surface<'a>) -> Vec<&'a str> {
             .map(String::as_str)
             .collect()
     }
-}
-
-fn record_path(spec: &ResolvedBuildSpec, artifact: &ArtifactSpec) -> PathBuf {
-    let output = gaia_spec::resolve_workspace_path(&spec.workspace, &artifact.output.path)
-        .unwrap_or_else(|_| PathBuf::from(&artifact.output.path));
-    gaia_spec::rust_crates_record_path(&output)
-}
-
-/// The crates and their features, from the record; `None` when it is
-/// missing or not one Gaia reads.
-fn read_record(path: &Path) -> Option<Vec<(String, Vec<String>)>> {
-    let text = std::fs::read_to_string(path).ok()?;
-    let record: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let crates = record.get("crates")?.as_array()?;
-    Some(
-        crates
-            .iter()
-            .filter_map(|entry| {
-                let name = entry.get("name")?.as_str()?.to_string();
-                let features = entry
-                    .get("features")?
-                    .as_array()?
-                    .iter()
-                    .filter_map(|feature| feature.as_str().map(str::to_string))
-                    .collect();
-                Some((name, features))
-            })
-            .collect(),
-    )
 }

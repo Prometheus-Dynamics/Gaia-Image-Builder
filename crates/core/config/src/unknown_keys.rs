@@ -300,7 +300,15 @@ const IMAGE_CHILDREN: &[Section] = &[
     section("output", struct_fields::<raw::RawImageOutputConfig>, &[]),
     section("signing", struct_fields::<raw::RawImageSigningConfig>, &[]),
     named_tables("layers", image_layers_fields, image_layer_fields, &[]),
-    section("checks", struct_fields::<raw::RawImageChecksConfig>, &[]),
+    section(
+        "checks",
+        struct_fields::<raw::RawImageChecksConfig>,
+        &[section(
+            "crate_splits",
+            struct_fields::<raw::RawCrateSplitConfig>,
+            &[],
+        )],
+    ),
     section(
         "hardware",
         struct_fields::<raw::RawImageHardwareConfig>,

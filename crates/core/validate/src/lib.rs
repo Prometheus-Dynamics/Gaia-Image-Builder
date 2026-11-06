@@ -21,6 +21,7 @@ mod image_assembly_outputs;
 mod image_assembly_package;
 mod image_assembly_strip;
 mod image_assembly_ubi;
+mod image_crate_splits;
 mod image_feed;
 mod image_layers;
 mod inputs;

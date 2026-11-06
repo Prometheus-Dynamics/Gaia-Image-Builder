@@ -11,12 +11,18 @@
 //! consumer cannot be checked and is a warning. A library consumer's
 //! leftover imports may come from the program that loads it, so they are a
 //! warning too; a program's are an error.
+//!
+//! A plugin under one of a surface's `plugin_dirs` is opened at run time by
+//! a process that loads the surface, so it is a consumer of that surface
+//! whether or not it needs it by name. Its imports are compared with the
+//! surface's, the surface's own libraries' and its own libraries' exports,
+//! and leftovers are an error: nothing else is there to define them.
 
 use super::kernel_modules::Outcome;
 use gaia_artifact_providers::dynamic_symbols;
 use gaia_plan::{find_sysroot_library, parse_elf};
 use gaia_spec::{ArtifactDefinition, ArtifactSpec, ResolvedBuildSpec};
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -29,6 +35,8 @@ pub(super) struct InstalledSurface {
     pub artifact: String,
     /// Its path in the image, such as `/usr/lib/libacme_surface.so`.
     pub guest: String,
+    /// The surface's `plugin_dirs`.
+    pub plugin_dirs: Vec<String>,
 }
 
 /// The surfaces the build installs into `rootfs`: each install of a Rust
@@ -37,12 +45,15 @@ pub(super) struct InstalledSurface {
 pub(super) fn installed_surfaces(spec: &ResolvedBuildSpec, rootfs: &Path) -> Vec<InstalledSurface> {
     installed_rust(spec, rootfs)
         .into_iter()
-        .filter(|(artifact, _)| {
-            matches!(&artifact.definition, ArtifactDefinition::Rust(rust) if rust.surface.is_some())
-        })
-        .map(|(artifact, guest)| InstalledSurface {
-            artifact: artifact.id.as_str().to_string(),
-            guest,
+        .filter_map(|(artifact, guest)| {
+            let ArtifactDefinition::Rust(rust) = &artifact.definition else {
+                return None;
+            };
+            Some(InstalledSurface {
+                artifact: artifact.id.as_str().to_string(),
+                guest,
+                plugin_dirs: rust.surface.as_ref()?.plugin_dirs.clone(),
+            })
         })
         .collect()
 }
@@ -79,6 +90,61 @@ pub(super) fn installed_rust<'a>(
     installed
 }
 
+/// Whether the image path `guest` lies under one of `dirs`.
+pub(super) fn in_plugin_dir(guest: &str, dirs: &[String]) -> bool {
+    dirs.iter().any(|dir| {
+        guest
+            .strip_prefix(dir.trim_end_matches('/'))
+            .is_some_and(|rest| rest.starts_with('/'))
+    })
+}
+
+/// The ELF files under `dirs` in `rootfs`, as image paths.
+pub(super) fn plugin_files(rootfs: &Path, dirs: &[String]) -> Vec<String> {
+    let mut files = Vec::new();
+    for dir in dirs {
+        walk(&rootfs.join(dir.trim_start_matches('/')), &mut files);
+    }
+    let mut guests = files
+        .iter()
+        .map(|path| format!("/{}", path.strip_prefix(rootfs).unwrap_or(path).display()))
+        .collect::<Vec<_>>();
+    guests.sort();
+    guests.dedup();
+    guests
+}
+
+/// For the std report: each surface's names (file name, `DT_SONAME`) and
+/// the plugins under its `plugin_dirs`.
+pub(super) fn plugins_by_name(
+    surfaces: &[InstalledSurface],
+    rootfs: &Path,
+) -> BTreeMap<String, Vec<String>> {
+    let mut plugins = BTreeMap::new();
+    for surface in surfaces
+        .iter()
+        .filter(|surface| !surface.plugin_dirs.is_empty())
+    {
+        let files = plugin_files(rootfs, &surface.plugin_dirs);
+        let mut names = Vec::new();
+        if let Some(name) = Path::new(&surface.guest).file_name() {
+            names.push(name.to_string_lossy().into_owned());
+        }
+        let soname = std::fs::read(rootfs.join(surface.guest.trim_start_matches('/')))
+            .ok()
+            .and_then(|bytes| parse_elf(&bytes).ok())
+            .and_then(|object| object.soname);
+        names.extend(soname);
+        for name in names {
+            plugins
+                .entry(name)
+                .or_insert_with(Vec::new)
+                .extend(files.iter().cloned());
+        }
+    }
+    plugins
+}
+
 /// The names of every library `needed` brings in, breadth first, found
 /// where the loader looks by default; and the names that were not found.
 pub(super) fn needed_closure(
@@ -112,6 +178,8 @@ struct Loaded {
     /// The names a consumer needs it by: its file name and its `DT_SONAME`.
     names: BTreeSet<String>,
     exports: BTreeSet<String>,
+    /// Its own `DT_NEEDED`: loaded before any plugin it opens.
+    needed: Vec<String>,
 }
 
 /// Checks every ELF file of `rootfs` that needs one of `surfaces`. Returns
@@ -137,6 +205,7 @@ pub(super) fn check(surfaces: &[InstalledSurface], rootfs: &Path, outcome: &mut 
                     surface: surface.clone(),
                     names,
                     exports: symbols.exports,
+                    needed: object.needed,
                 });
             }
             Err(message) => outcome.error(
@@ -166,33 +235,55 @@ pub(super) fn check(surfaces: &[InstalledSurface], rootfs: &Path, outcome: &mut 
         let Ok(object) = parse_elf(&bytes) else {
             continue;
         };
+        let plugin = loaded
+            .iter()
+            .any(|surface| in_plugin_dir(&guest, &surface.surface.plugin_dirs));
         let uses = loaded
             .iter()
             .filter(|surface| {
-                object
-                    .needed
-                    .iter()
-                    .any(|name| surface.names.contains(name))
+                in_plugin_dir(&guest, &surface.surface.plugin_dirs)
+                    || object
+                        .needed
+                        .iter()
+                        .any(|name| surface.names.contains(name))
             })
             .collect::<Vec<_>>();
         if uses.is_empty() {
             continue;
         }
         consumers += 1;
-        check_consumer(&guest, &bytes, &object, &uses, &loaded, rootfs, outcome);
+        let consumer = Consumer {
+            guest: &guest,
+            bytes: &bytes,
+            object: &object,
+            plugin,
+        };
+        check_consumer(&consumer, &uses, &loaded, rootfs, outcome);
     }
     consumers
 }
 
+struct Consumer<'a> {
+    guest: &'a str,
+    bytes: &'a [u8],
+    object: &'a gaia_plan::ElfObject,
+    /// Under a surface's `plugin_dirs`: opened by the surface's process.
+    plugin: bool,
+}
+
 fn check_consumer(
-    guest: &str,
-    bytes: &[u8],
-    object: &gaia_plan::ElfObject,
+    consumer: &Consumer<'_>,
     uses: &[&Loaded],
     loaded: &[Loaded],
     rootfs: &Path,
     outcome: &mut Outcome,
 ) {
+    let Consumer {
+        guest,
+        bytes,
+        object,
+        plugin,
+    } = *consumer;
     let imports = match dynamic_symbols(bytes) {
         Ok(symbols) => symbols.imports,
         Err(message) => {
@@ -214,6 +305,12 @@ fn check_consumer(
     let mut unresolved = BTreeSet::new();
     let mut seen = BTreeSet::new();
     let mut queue = object.needed.iter().cloned().collect::<VecDeque<_>>();
+    if plugin {
+        // The surface's own libraries are in the process before it.
+        for surface in uses {
+            queue.extend(surface.needed.iter().cloned());
+        }
+    }
     while let Some(name) = queue.pop_front() {
         if !seen.insert(name.clone()) {
             continue;
@@ -272,7 +369,7 @@ fn check_consumer(
         missing.len(),
         named(&missing)
     );
-    if object.interpreter.is_some() {
+    if object.interpreter.is_some() || plugin {
         outcome.error("surface_import_undeclared", Some(guest), message);
     } else {
         // A library: the program that loads it may define them.

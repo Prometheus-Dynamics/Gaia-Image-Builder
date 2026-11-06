@@ -61,7 +61,7 @@ fn a_program_and_a_rust_library_it_loads_each_carry_std() {
     bytes[16..18].copy_from_slice(&2u16.to_le_bytes());
     std::fs::write(&path, bytes).expect("write");
 
-    let found = copies(root);
+    let found = copies(root, &Default::default());
 
     assert_eq!(found.rust_programs, 4);
     assert_eq!(
@@ -83,7 +83,7 @@ fn a_program_and_a_rust_library_it_loads_each_carry_std() {
 fn without_rust_there_is_nothing_to_report() {
     let scratch = TempDir::new("gaia-image-check-rust-std-none");
     put(scratch.path(), "/usr/bin/plain", true, &[], false);
-    let found = copies(scratch.path());
+    let found = copies(scratch.path(), &Default::default());
     assert_eq!(found.rust_programs, 0);
     assert!(found.summary().is_none());
 }
@@ -94,7 +94,7 @@ fn without_rust_there_is_nothing_to_report() {
 fn a_real_root_filesystem() {
     let root = std::env::var("GAIA_STD_ROOTFS").expect("GAIA_STD_ROOTFS");
     let started = std::time::Instant::now();
-    let found = copies(Path::new(&root));
+    let found = copies(Path::new(&root), &Default::default());
     println!(
         "{} Rust program(s) in {:?}",
         found.rust_programs,
@@ -103,4 +103,32 @@ fn a_real_root_filesystem() {
     for process in &found.duplicated {
         println!("{} {:?}", process.program, process.copies);
     }
+}
+
+/// A plugin the surface opens runs in each program that loads the surface.
+#[test]
+fn a_surface_plugin_counts_in_the_programs_that_load_the_surface() {
+    let scratch = TempDir::new("gaia-image-check-rust-std-plugins");
+    let root = scratch.path();
+    put(root, "/usr/lib/libsurface.so.1", false, &[], false);
+    put(root, "/usr/lib/plugins/eidos.so", false, &[], true);
+    put(root, "/usr/bin/host", true, &["libsurface.so.1"], true);
+    put(root, "/usr/bin/other", true, &[], true);
+    let plugins = [(
+        "libsurface.so.1".to_string(),
+        vec!["/usr/lib/plugins/eidos.so".to_string()],
+    )]
+    .into_iter()
+    .collect();
+
+    let found = copies(root, &plugins);
+
+    assert_eq!(found.rust_programs, 2);
+    assert_eq!(
+        found.duplicated,
+        vec![Duplicated {
+            program: "/usr/bin/host".into(),
+            copies: vec!["/usr/bin/host".into(), "/usr/lib/plugins/eidos.so".into()],
+        }]
+    );
 }

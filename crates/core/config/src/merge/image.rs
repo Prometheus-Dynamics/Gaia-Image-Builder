@@ -60,7 +60,8 @@ pub(super) fn merge_image(
 
 /// `[image.checks]`, key by key: a later layer's value wins, and
 /// `optional_firmware` lists add up, so an OS's checks keep the firmware a
-/// device layer declared optional.
+/// device layer declared optional. `crate_splits` add up by crate, a later
+/// layer's entry replacing an earlier one's reason.
 fn merge_checks(
     base: Option<RawImageChecksConfig>,
     overlay: Option<RawImageChecksConfig>,
@@ -76,6 +77,9 @@ fn merge_checks(
         kernel_image: overlay.kernel_image.or(base.kernel_image),
         pi_model: overlay.pi_model.or(base.pi_model),
         optional_firmware: merge_string_lists(base.optional_firmware, overlay.optional_firmware),
+        crate_splits: merge_by_key(base.crate_splits, overlay.crate_splits, |split| {
+            split.crate_name.clone()
+        }),
     })
 }
 
@@ -531,5 +535,30 @@ mod checks_tests {
             vec!["rtl_nic/rtl8157-1.fw".to_string(), "brcm/*".to_string()]
         );
         assert_eq!(merge_checks(None, None), None);
+    }
+
+    #[test]
+    fn crate_splits_add_up_by_crate_and_a_later_reason_wins() {
+        use crate::raw::RawCrateSplitConfig;
+        let split = |name: &str, reason: &str| RawCrateSplitConfig {
+            crate_name: name.into(),
+            reason: reason.into(),
+        };
+        let device = RawImageChecksConfig {
+            crate_splits: vec![split("daedalus-accel", "Eidos's lock"), split("a", "x")],
+            ..RawImageChecksConfig::default()
+        };
+        let os = RawImageChecksConfig {
+            crate_splits: vec![split("a", "y")],
+            ..RawImageChecksConfig::default()
+        };
+        let merged = merge_checks(Some(device), Some(os)).expect("checks");
+        let mut splits = merged
+            .crate_splits
+            .iter()
+            .map(|split| (split.crate_name.as_str(), split.reason.as_str()))
+            .collect::<Vec<_>>();
+        splits.sort();
+        assert_eq!(splits, [("a", "y"), ("daedalus-accel", "Eidos's lock")]);
     }
 }

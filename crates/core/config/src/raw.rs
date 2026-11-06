@@ -788,6 +788,8 @@ pub(crate) struct RawRustSurfaceConfig {
     pub state_crates: Vec<String>,
     /// The package feature that makes its Rust wrapper call the library.
     pub shared_feature: Option<String>,
+    /// Guest directories of plugins the surface opens at run time.
+    pub plugin_dirs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -1187,6 +1189,18 @@ pub(crate) struct RawImageChecksConfig {
     pub pi_model: Option<String>,
     /// Firmware a module lists but works without: not reported when absent.
     pub optional_firmware: Vec<String>,
+    /// Crates allowed at more than one version or source in the image.
+    pub crate_splits: Vec<RawCrateSplitConfig>,
+}
+
+/// `[[image.checks.crate_splits]]`: a crate the image may hold at more than
+/// one version or source, and why.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub(crate) struct RawCrateSplitConfig {
+    #[serde(rename = "crate")]
+    pub crate_name: String,
+    pub reason: String,
 }
 
 /// `[[image.hardware]]`: one device the image must support (see `Image checks`

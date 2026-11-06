@@ -3,6 +3,9 @@
 //! and fails the run on an error. Warnings reach the run summary.
 
 mod boot;
+mod crate_records;
+#[cfg(test)]
+mod crate_records_tests;
 mod elf;
 #[cfg(test)]
 mod elf32_tests;
@@ -210,13 +213,11 @@ pub(crate) fn execute(
     ];
     boot_trees.extend(labeled_trees);
     uboot::check(spec.identity.id.as_str(), &boot_trees, arch, &mut outcome);
-    let surface_consumers = surfaces::check(
-        &surfaces::installed_surfaces(spec, &rootfs),
-        &rootfs,
-        &mut outcome,
-    );
+    let installed = surfaces::installed_surfaces(spec, &rootfs);
+    let surface_consumers = surfaces::check(&installed, &rootfs, &mut outcome);
     surface_state::check(spec, &rootfs, &mut outcome);
-    let std_copies = rust_std::copies(&rootfs);
+    crate_records::check_splits(spec, &rootfs, &mut outcome);
+    let std_copies = rust_std::copies(&rootfs, &surfaces::plugins_by_name(&installed, &rootfs));
 
     let errors: Vec<&Finding> = outcome
         .findings
@@ -291,13 +292,11 @@ fn surfaces_only(
 ) -> OperationExecutionResult {
     let report_path = gaia_spec::image_checks_report_path(spec);
     let mut outcome = kernel_modules::Outcome::default();
-    let consumers = surfaces::check(
-        &surfaces::installed_surfaces(spec, rootfs),
-        rootfs,
-        &mut outcome,
-    );
+    let installed = surfaces::installed_surfaces(spec, rootfs);
+    let consumers = surfaces::check(&installed, rootfs, &mut outcome);
     surface_state::check(spec, rootfs, &mut outcome);
-    let std_copies = rust_std::copies(rootfs);
+    crate_records::check_splits(spec, rootfs, &mut outcome);
+    let std_copies = rust_std::copies(rootfs, &surfaces::plugins_by_name(&installed, rootfs));
     let (errors, warnings): (Vec<&Finding>, Vec<&Finding>) = outcome
         .findings
         .iter()

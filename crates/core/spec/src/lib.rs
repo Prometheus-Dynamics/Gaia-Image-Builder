@@ -114,10 +114,11 @@ pub use ids::{
 };
 pub use image::{
     BuildrootExpectedImageFormatSpec, BuildrootExpectedImageSpec, BuildrootExternalTreeModeSpec,
-    BuildrootImageSpec, DEFAULT_LAYER_EROFS_OPTIONS, ImageChecksSpec, ImageDefinition,
-    ImageFeedSpec, ImageHardwareSpec, ImageLayerSpec, ImageLayersSpec, ImageOutputSpec,
-    ImageProviderKind, ImageSigningKind, ImageSigningSpec, ImageSpec, StartingPointImageSpec,
-    StartingPointOutputModeSpec, StartingPointPackagesSpec, StartingPointRootfsValidationModeSpec,
+    BuildrootImageSpec, CrateSplitSpec, DEFAULT_LAYER_EROFS_OPTIONS, ImageChecksSpec,
+    ImageDefinition, ImageFeedSpec, ImageHardwareSpec, ImageLayerSpec, ImageLayersSpec,
+    ImageOutputSpec, ImageProviderKind, ImageSigningKind, ImageSigningSpec, ImageSpec,
+    StartingPointImageSpec, StartingPointOutputModeSpec, StartingPointPackagesSpec,
+    StartingPointRootfsValidationModeSpec,
 };
 pub use inputs::{InputKindSpec, InputOptionSpec, InputSpec};
 pub use install::InstallEntrySpec;

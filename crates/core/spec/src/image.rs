@@ -126,6 +126,18 @@ pub struct ImageChecksSpec {
     /// for them (`firmware_missing`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub optional_firmware: Vec<String>,
+    /// Crates the image may hold at more than one version or source
+    /// (`crate_version_split`), each with the reason it is allowed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub crate_splits: Vec<CrateSplitSpec>,
+}
+
+/// A crate allowed at more than one version or source in one image.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct CrateSplitSpec {
+    #[serde(rename = "crate")]
+    pub crate_name: String,
+    pub reason: String,
 }
 
 impl ImageChecksSpec {

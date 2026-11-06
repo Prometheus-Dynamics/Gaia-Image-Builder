@@ -10,9 +10,9 @@ use gaia_spec::{
 use gaia_testkit::TempDir;
 use std::path::Path;
 
-const INTERPRETER: Option<&str> = Some("/lib64/ld-linux-x86-64.so.2");
+pub(super) const INTERPRETER: Option<&str> = Some("/lib64/ld-linux-x86-64.so.2");
 
-fn rust(
+pub(super) fn rust(
     id: &str,
     package: &str,
     output: &Path,
@@ -57,7 +57,10 @@ fn record(output: &Path, crates: &[(&str, &[&str])]) {
     .expect("record");
 }
 
-fn findings(outcome: &Outcome, severity: Severity) -> Vec<(&'static str, Option<String>)> {
+pub(super) fn findings(
+    outcome: &Outcome,
+    severity: Severity,
+) -> Vec<(&'static str, Option<String>)> {
     outcome
         .findings
         .iter()
@@ -199,5 +202,70 @@ fn a_declared_state_crate_other_than_the_package_counts_whatever_its_features() 
     assert_eq!(
         findings(&outcome, Severity::Error),
         vec![("surface_state_twice", Some("/usr/bin/app".into()))]
+    );
+}
+
+/// A Rust plugin under the surface's `plugin_dirs` runs in the surface's
+/// process, so linking the state in is "both" even without `DT_NEEDED`.
+#[test]
+fn a_plugin_linking_the_surface_state_is_an_error() {
+    let scratch = TempDir::new("gaia-image-check-surface-state-plugins");
+    let root = scratch.join("rootfs");
+    let out = scratch.join("out");
+    let mut spec = ResolvedBuildSpec::new("surface-state-plugins");
+    let mut surface = RustSurfaceSpec::new("x.exports");
+    surface.plugin_dirs = vec!["/usr/lib/helios/plugins".into()];
+    spec.artifacts.push(rust(
+        "surface",
+        "daedalus-capi",
+        &out.join("libdaedalus.so"),
+        Some(Box::new(surface)),
+    ));
+    spec.install.entries.push(InstallEntrySpec::new(
+        "i-surface",
+        "surface",
+        "/usr/lib/libdaedalus.so",
+    ));
+    put(
+        &root,
+        "/usr/lib/libdaedalus.so",
+        &object(None, &[], &["daedalus_open"], &[]),
+    );
+    for id in ["eidos-plugin", "styx-plugin"] {
+        let output = out.join(format!("lib{id}.so"));
+        spec.artifacts.push(rust(id, id, &output, None));
+        spec.install.entries.push(InstallEntrySpec::new(
+            format!("i-{id}"),
+            id,
+            format!("/usr/lib/helios/plugins/lib{id}.so"),
+        ));
+        put(
+            &root,
+            &format!("/usr/lib/helios/plugins/lib{id}.so"),
+            &object(None, &[], &[], &[]),
+        );
+        let crates: Vec<(&str, &[&str])> = if id == "eidos-plugin" {
+            vec![(id, &[]), ("daedalus-capi", &["default"])]
+        } else {
+            vec![(id, &[])]
+        };
+        record(&output, &crates);
+    }
+
+    let mut outcome = Outcome::default();
+    check(&spec, &root, &mut outcome);
+    assert_eq!(
+        findings(&outcome, Severity::Error),
+        vec![(
+            "surface_state_twice",
+            Some("/usr/lib/helios/plugins/libeidos-plugin.so".into())
+        )]
+    );
+    assert!(
+        outcome.findings[0]
+            .message
+            .contains("is a plugin opened by surface /usr/lib/libdaedalus.so"),
+        "{}",
+        outcome.findings[0].message
     );
 }
