@@ -340,6 +340,66 @@ record has a state crate and whose `DT_NEEDED` closure loads the surface
 program without a record (built before the build declared a surface) is a
 `surface_crates_unrecorded` warning; `--rebuild artifact:<id>` records it.
 
+#### Choosing the link per image and per dependency
+
+Whether a product links a dependency in or loads its surface library is a
+choice per image, and per dependency within it. It needs no key of its
+own: an input per dependency, the product's entries in a base layer, and a
+layer per dependency that the input selects. The static image builds the
+dependency's crates into each program; the shared one turns on the
+product's feature that makes the dependency's wrapper call the library
+(for Lemnos, a product feature that turns on `lemnos-capi/shared`), and
+builds and installs the surface.
+
+```toml
+# build.toml
+imports = [
+  "product.toml",
+  { path = "lemnos-shared.toml", when = { input = { lemnos_link = "shared" } } },
+]
+
+[inputs.lemnos_link]
+description = "Lemnos in each program, or its surface library"
+kind = "enum"
+default = "static"
+choices = ["static", "shared"]
+```
+
+```toml
+# lemnos-shared.toml
+[[artifacts]]                    # a patch: the product's own entry
+id = "helios-engine"
+features = ["lemnos-shared"]     # the product's feature: lemnos-capi/shared
+
+[[artifacts]]
+id = "lemnos-capi"
+kind = "rust"
+source = "lemnos"
+package = "lemnos-capi"
+target_name = "liblemnos_capi.so"
+output_path = "${outputs.dir}/artifacts/liblemnos_capi.so"
+surface = { exports = "crates/lemnos-capi/lemnos.exports", shared_feature = "shared" }
+
+[[install]]
+id = "install-lemnos-capi"
+artifact = "lemnos-capi"
+dest = "/usr/lib/liblemnos_capi.so.1"   # the SONAME programs need it by
+```
+
+`gaia validate --set input.lemnos_link=shared` notes the patch
+(`features set by lemnos-shared.toml`). The product's entries go in a base
+layer (`product.toml`, or an `extends` base), because a layer cannot patch
+an entry the entrypoint declares. A patch's `features` replaces the
+product's list, so it repeats the features the product already sets. When
+the image lists its feed (`[image.feed] install_entries`), the layer adds
+its install there too; the layers' lists add up. A second dependency has
+its own input and layer, so an image can link one in and load the other.
+The image checks then hold the result to its surfaces: the exports, the
+consumers, and a program that ended up with both.
+
+`link = "shared"` (above) is a different thing: the standard library and
+Rust `dylib`s, an experiment.
+
 #### Private cargo git dependencies
 
 A rust artifact whose workspace depends on a private git repository (`git =
