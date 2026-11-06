@@ -790,6 +790,8 @@ pub(crate) struct RawRustSurfaceConfig {
     pub shared_feature: Option<String>,
     /// Guest directories of plugins the surface opens at run time.
     pub plugin_dirs: Vec<String>,
+    /// Symbols each plugin there must export.
+    pub plugin_exports: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]

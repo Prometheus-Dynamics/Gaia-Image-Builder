@@ -320,7 +320,7 @@ source = "helios"
 package = "helios-daedalus-image"
 target_name = "libdaedalus.so"
 output_path = "${outputs.dir}/artifacts/libdaedalus.so"
-surface = { exports = "surfaces/daedalus.exports", plugin_dirs = ["/usr/lib/helios/plugins"] }
+surface = { exports = "surfaces/daedalus.exports", plugin_dirs = ["/usr/lib/helios/plugins"], plugin_exports = ["daedalus_plugin_descriptor", "daedalus_plugin_stable_extension"] }
 ```
 
 Each ELF file under them is a consumer of that surface. Its imports are
@@ -330,6 +330,15 @@ in the process defines it. A plugin counts in each program that loads the
 surface, for "not both" below and for the copies of the Rust standard
 library. A directory must be absolute and not `/`
 (`rust_surface_plugin_dir_invalid`).
+
+`plugin_exports` names what every plugin there must export: the plugin
+ABI's entry points, by which the surface opens it. A plugin without one
+(built for a static host's Rust ABI only, say) is an error
+(`surface_plugin_export_missing`). A stable-ABI plugin imports nothing from
+the surface; that is fine. What the entry points return (Daedalus's stable
+ABI version) is the surface's to check when it opens the plugin.
+`plugin_exports` needs `plugin_dirs`
+(`rust_surface_plugin_exports_without_dirs`).
 
 A surface's process-wide state (its handle tables) may be in a program
 once: a program links it in, or loads the library, not both. Handles from

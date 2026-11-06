@@ -130,7 +130,7 @@ Keys: `context`, `dockerfile`, `image`.
 
 Described in [Artifacts, install and stage](../configuration-artifacts.md#artifacts).
 
-Keys: `exports`, `plugin_dirs`, `shared_feature`, `state_crates`.
+Keys: `exports`, `plugin_dirs`, `plugin_exports`, `shared_feature`, `state_crates`.
 
 ## `[[install]]`
 

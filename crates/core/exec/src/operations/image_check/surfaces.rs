@@ -16,7 +16,9 @@
 //! a process that loads the surface, so it is a consumer of that surface
 //! whether or not it needs it by name. Its imports are compared with the
 //! surface's, the surface's own libraries' and its own libraries' exports,
-//! and leftovers are an error: nothing else is there to define them.
+//! and leftovers are an error: nothing else is there to define them. A
+//! plugin must also export each of the surface's `plugin_exports` (the
+//! plugin ABI's entry points), or the surface cannot open it.
 
 use super::kernel_modules::Outcome;
 use gaia_artifact_providers::dynamic_symbols;
@@ -37,6 +39,8 @@ pub(super) struct InstalledSurface {
     pub guest: String,
     /// The surface's `plugin_dirs`.
     pub plugin_dirs: Vec<String>,
+    /// What each plugin there must export.
+    pub plugin_exports: Vec<String>,
 }
 
 /// The surfaces the build installs into `rootfs`: each install of a Rust
@@ -49,10 +53,12 @@ pub(super) fn installed_surfaces(spec: &ResolvedBuildSpec, rootfs: &Path) -> Vec
             let ArtifactDefinition::Rust(rust) = &artifact.definition else {
                 return None;
             };
+            let surface = rust.surface.as_ref()?;
             Some(InstalledSurface {
                 artifact: artifact.id.as_str().to_string(),
                 guest,
-                plugin_dirs: rust.surface.as_ref()?.plugin_dirs.clone(),
+                plugin_dirs: surface.plugin_dirs.clone(),
+                plugin_exports: surface.plugin_exports.clone(),
             })
         })
         .collect()
@@ -284,8 +290,8 @@ fn check_consumer(
         object,
         plugin,
     } = *consumer;
-    let imports = match dynamic_symbols(bytes) {
-        Ok(symbols) => symbols.imports,
+    let symbols = match dynamic_symbols(bytes) {
+        Ok(symbols) => symbols,
         Err(message) => {
             outcome.error(
                 "surface_consumer_unreadable",
@@ -297,6 +303,10 @@ fn check_consumer(
             return;
         }
     };
+    if plugin {
+        plugin_entry_points(guest, &symbols.exports, uses, outcome);
+    }
+    let imports = symbols.imports;
     let mut available = BTreeSet::new();
     for surface in uses {
         available.extend(surface.exports.iter().cloned());
@@ -365,15 +375,54 @@ fn check_consumer(
         return;
     }
     let message = format!(
-        "{guest} imports {} symbol(s) that neither surface {surfaces} nor its other libraries export: {}; it was linked against another build of the surface",
+        "{guest} imports {} symbol(s) that neither surface {surfaces} nor its other libraries export: {}; {}",
         missing.len(),
-        named(&missing)
+        named(&missing),
+        if plugin {
+            "the plugin was built for another build of the surface, or needs a library the image does not ship"
+        } else {
+            "it was linked against another build of the surface"
+        }
     );
     if object.interpreter.is_some() || plugin {
         outcome.error("surface_import_undeclared", Some(guest), message);
     } else {
         // A library: the program that loads it may define them.
         outcome.warning("surface_import_undeclared", Some(guest), message);
+    }
+}
+
+/// A plugin without one of its surface's `plugin_exports` cannot be opened
+/// through the surface (a plugin built for a static host only, say).
+fn plugin_entry_points(
+    guest: &str,
+    exports: &BTreeSet<String>,
+    uses: &[&Loaded],
+    outcome: &mut Outcome,
+) {
+    for surface in uses
+        .iter()
+        .filter(|surface| in_plugin_dir(guest, &surface.surface.plugin_dirs))
+    {
+        let missing = surface
+            .surface
+            .plugin_exports
+            .iter()
+            .filter(|name| !exports.contains(*name))
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            outcome.error(
+                "surface_plugin_export_missing",
+                Some(guest),
+                format!(
+                    "plugin {guest} does not export {} that surface {} ('{}') opens its plugins by; it cannot be loaded through the surface",
+                    named(&missing),
+                    surface.surface.guest,
+                    surface.surface.artifact
+                ),
+            );
+        }
     }
 }
 

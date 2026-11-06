@@ -159,6 +159,10 @@ pub struct RustSurfaceSpec {
     /// that loads it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub plugin_dirs: Vec<String>,
+    /// The symbols each plugin there must export: the plugin ABI's entry
+    /// points (Daedalus's `daedalus_plugin_descriptor`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub plugin_exports: Vec<String>,
 }
 
 impl RustSurfaceSpec {
@@ -168,6 +172,7 @@ impl RustSurfaceSpec {
             state_crates: Vec::new(),
             shared_feature: None,
             plugin_dirs: Vec::new(),
+            plugin_exports: Vec::new(),
         }
     }
 }

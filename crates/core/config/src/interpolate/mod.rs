@@ -601,6 +601,7 @@ fn interpolate_artifact(
                     .into_iter()
                     .map(|dir| resolver::interpolate_string(dir, raw, env))
                     .collect(),
+                plugin_exports: surface.plugin_exports,
             }),
         },
         RawArtifactDefinition::Java {

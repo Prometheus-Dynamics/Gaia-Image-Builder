@@ -57,6 +57,7 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig, sources: &[SourceSpec]) -
                         state_crates: surface.state_crates,
                         shared_feature: surface.shared_feature,
                         plugin_dirs: surface.plugin_dirs,
+                        plugin_exports: surface.plugin_exports,
                     })
                 }),
             })

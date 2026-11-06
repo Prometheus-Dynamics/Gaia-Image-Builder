@@ -151,6 +151,7 @@ fn consumers_import_only_what_the_surface_and_their_libraries_export() {
             artifact: "libsurface".into(),
             guest: "/usr/lib/libsurface.so".into(),
             plugin_dirs: Vec::new(),
+            plugin_exports: Vec::new(),
         }],
         root,
         &mut outcome,
@@ -218,7 +219,7 @@ fn plugins_are_checked_against_the_surface_that_opens_them() {
         &object(
             None,
             &[],
-            &[],
+            &["plugin_descriptor"],
             &[("surface_open", false), ("malloc", false)],
         ),
     );
@@ -240,6 +241,7 @@ fn plugins_are_checked_against_the_surface_that_opens_them() {
             artifact: "libsurface".into(),
             guest: "/usr/lib/libsurface.so".into(),
             plugin_dirs: vec!["/usr/lib/plugins/".into()],
+            plugin_exports: vec!["plugin_descriptor".into()],
         }],
         root,
         &mut outcome,
@@ -247,10 +249,16 @@ fn plugins_are_checked_against_the_surface_that_opens_them() {
     assert_eq!(consumers, 3);
     assert_eq!(
         findings(&outcome, Severity::Error),
-        [(
-            "surface_import_undeclared",
-            Some("/usr/lib/plugins/stale.so".into())
-        )]
+        [
+            (
+                "surface_plugin_export_missing",
+                Some("/usr/lib/plugins/stale.so".into())
+            ),
+            (
+                "surface_import_undeclared",
+                Some("/usr/lib/plugins/stale.so".into())
+            )
+        ]
     );
     assert!(findings(&outcome, Severity::Warning).is_empty());
 }
@@ -358,6 +366,9 @@ fn a_real_root_filesystem() {
             guest,
             plugin_dirs: std::env::var("GAIA_SURFACE_PLUGIN_DIRS")
                 .map(|dirs| dirs.split(':').map(str::to_string).collect())
+                .unwrap_or_default(),
+            plugin_exports: std::env::var("GAIA_SURFACE_PLUGIN_EXPORTS")
+                .map(|names| names.split(',').map(str::to_string).collect())
                 .unwrap_or_default(),
         }],
         Path::new(&root),

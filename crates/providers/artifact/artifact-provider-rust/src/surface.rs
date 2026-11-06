@@ -40,12 +40,13 @@ pub(crate) fn validate(artifact: &ArtifactSpec, issues: &mut Vec<ArtifactProvide
         .state_crates
         .iter()
         .chain(&surface.shared_feature)
+        .chain(&surface.plugin_exports)
         .any(|name| name.trim().is_empty())
     {
         issues.push(ArtifactProviderValidationIssue {
             code: "rust_surface_name_empty",
             message:
-                "surface state_crates and shared_feature name crates and a feature; one is empty"
+                "surface state_crates, shared_feature and plugin_exports name crates, a feature and symbols; one is empty"
                     .into(),
         });
     }
@@ -57,6 +58,12 @@ pub(crate) fn validate(artifact: &ArtifactSpec, issues: &mut Vec<ArtifactProvide
         issues.push(ArtifactProviderValidationIssue {
             code: "rust_surface_plugin_dir_invalid",
             message: "surface plugin_dirs are absolute directories in the image, not '/'".into(),
+        });
+    }
+    if !surface.plugin_exports.is_empty() && surface.plugin_dirs.is_empty() {
+        issues.push(ArtifactProviderValidationIssue {
+            code: "rust_surface_plugin_exports_without_dirs",
+            message: "surface plugin_exports needs plugin_dirs: the directories whose plugins must export them".into(),
         });
     }
 }

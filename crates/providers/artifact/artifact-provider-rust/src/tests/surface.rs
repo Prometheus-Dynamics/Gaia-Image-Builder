@@ -165,3 +165,20 @@ fn surface_plugin_dirs_are_absolute_directories() {
         assert_eq!(codes, ["rust_surface_plugin_dir_invalid"], "{dir:?}");
     }
 }
+
+#[test]
+fn surface_plugin_exports_need_plugin_dirs() {
+    let scratch = TempDir::new("gaia-rust-surface-plugin-exports");
+    let mut artifact = surface_artifact(scratch.path());
+    if let ArtifactDefinition::Rust(rust) = &mut artifact.definition {
+        let mut surface = gaia_spec::RustSurfaceSpec::new("surface.exports");
+        surface.plugin_exports = vec!["daedalus_plugin_descriptor".into()];
+        rust.surface = Some(Box::new(surface));
+    }
+    let codes = RustProvider
+        .validate_artifact(&artifact)
+        .into_iter()
+        .map(|issue| issue.code)
+        .collect::<Vec<_>>();
+    assert_eq!(codes, ["rust_surface_plugin_exports_without_dirs"]);
+}
