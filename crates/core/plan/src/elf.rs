@@ -14,6 +14,7 @@ const PT_INTERP: u32 = 3;
 const DT_NULL: u64 = 0;
 const DT_NEEDED: u64 = 1;
 const DT_STRTAB: u64 = 5;
+const DT_SONAME: u64 = 14;
 const DT_RPATH: u64 = 15;
 const DT_RUNPATH: u64 = 29;
 const DT_VERDEF: u64 = 0x6fff_fffc;
@@ -42,6 +43,8 @@ pub struct ElfObject {
     pub interpreter: Option<String>,
     /// `DT_NEEDED` names, in file order.
     pub needed: Vec<String>,
+    /// `DT_SONAME`: the name a library is needed by, when it sets one.
+    pub soname: Option<String>,
     /// `DT_RUNPATH` entries, or `DT_RPATH` when there is no RUNPATH: the
     /// directories this object's own dependencies are searched in first.
     pub search_paths: Vec<String>,
@@ -190,6 +193,7 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfObject, String> {
     }
 
     let mut needed_offsets = Vec::new();
+    let mut soname_offset = None;
     let mut rpath_offset = None;
     let mut runpath_offset = None;
     let mut strtab_vaddr = None;
@@ -211,6 +215,7 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfObject, String> {
             match tag {
                 DT_NULL => break,
                 DT_NEEDED => needed_offsets.push(value),
+                DT_SONAME => soname_offset = Some(value),
                 DT_RPATH => rpath_offset = Some(value),
                 DT_RUNPATH => runpath_offset = Some(value),
                 DT_STRTAB => strtab_vaddr = Some(value),
@@ -241,6 +246,7 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfObject, String> {
         Ok((needed, search_paths))
     };
 
+    let mut soname = None;
     let (needed, search_paths, version_needs, version_defs) = match strtab_vaddr {
         Some(vaddr) => {
             let offset = vaddr_to_offset(&loads, vaddr)?;
@@ -250,6 +256,9 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfObject, String> {
                 .get(usize::try_from(offset).map_err(|_| "ELF offset out of range")?..)
                 .ok_or_else(|| "truncated ELF file".to_string())?;
             let (needed, search_paths) = needed_and_paths(table)?;
+            soname = soname_offset
+                .map(|offset| string_at(table, offset).and_then(text))
+                .transpose()?;
             let version_needs = read_version_needs(bytes, layout, &loads, table, verneed)?;
             let version_defs = read_version_defs(bytes, layout, &loads, table, verdef)?;
             (needed, search_paths, version_needs, version_defs)
@@ -264,6 +273,7 @@ pub fn parse_elf(bytes: &[u8]) -> Result<ElfObject, String> {
         machine,
         interpreter,
         needed,
+        soname,
         search_paths,
         load_alignments: loads.iter().map(|segment| segment.align).collect(),
         version_needs,

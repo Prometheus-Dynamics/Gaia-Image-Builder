@@ -15,6 +15,7 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig, sources: &[SourceSpec]) -
             build_env,
             cpu: _,
             link,
+            surface,
         } => {
             let cargo_git_sources =
                 compile_cargo_git_sources(raw.cargo_git_sources.clone(), sources);
@@ -50,6 +51,9 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig, sources: &[SourceSpec]) -
                 } else {
                     gaia_spec::RustLinkSpec::Static
                 },
+                surface: surface.map(|surface| gaia_spec::RustSurfaceSpec {
+                    exports: surface.exports,
+                }),
             })
         }
         RawArtifactDefinition::Java {

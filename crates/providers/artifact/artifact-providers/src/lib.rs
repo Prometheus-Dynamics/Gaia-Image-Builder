@@ -1,11 +1,13 @@
 mod command;
 mod contract;
 mod digest;
+mod elf_symbols;
 mod outputs;
 #[cfg(test)]
 mod tests;
 mod toolchain;
 
+pub use elf_symbols::{DynamicImport, DynamicSymbols, dynamic_symbols};
 pub use toolchain::{ArtifactToolchainContract, ensure_relocated};
 
 pub use command::{

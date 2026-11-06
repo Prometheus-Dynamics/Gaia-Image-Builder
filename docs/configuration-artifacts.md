@@ -268,6 +268,44 @@ artifact = "rust-std"
 dest = "/usr/lib"
 ```
 
+#### Declared surfaces
+
+A `cdylib` that other programs link against (a product's surface library,
+called through a versioned C ABI) can declare what it exports. After the
+build, its dynamic exports must be exactly the declared names: an undeclared
+export (a Rust function that leaked) or a declared one that is missing fails
+the artifact, naming them. The library's build decides what it exports (rustc
+exports a `cdylib`'s `#[no_mangle] extern "C"` items; a version script can
+narrow it further); Gaia only checks the result.
+
+```toml
+[[artifacts]]
+id = "libsurface"
+kind = "rust"
+source = "acme"
+package = "acme-surface"
+target_name = "libacme_surface.so"
+output_path = "${outputs.dir}/artifacts/libacme_surface.so"
+surface = { exports = "surface/acme_surface.map" }
+```
+
+`exports` is relative to the artifact's source and may come from an input.
+It is either one symbol per line (`#` starts a comment) or the library's own
+linker version script, whose `global:` names are the surface (version node
+names are not symbols). Wildcards are refused: a surface names each symbol.
+Absolute symbols (the version nodes) and rustc's `rust_metadata_*` are not
+part of the comparison. The artifact must be one library file, not
+`emit_directory` or `package = "std"` (`rust_surface_not_a_library`).
+
+The image checks then read the root filesystem: every program or library
+there that needs an installed surface library (by file name or `SONAME`) may
+import only what the surface, and the other libraries it loads, export. A
+program that imports more was linked against another build of the surface
+(`surface_import_undeclared`, an error). For a library it is a warning, since
+the program loading it may define the rest; a consumer whose other libraries
+are not in the image is not checked (`surface_consumer_unchecked`). This runs
+with or without a kernel in the build.
+
 #### Private cargo git dependencies
 
 A rust artifact whose workspace depends on a private git repository (`git =

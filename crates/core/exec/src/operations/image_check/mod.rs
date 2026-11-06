@@ -12,6 +12,9 @@ mod kernel;
 mod kernel_modules;
 mod module;
 mod shipped_rootfs;
+mod surfaces;
+#[cfg(test)]
+mod surfaces_tests;
 #[cfg(test)]
 mod test_dtb;
 #[cfg(test)]
@@ -76,12 +79,45 @@ pub(crate) fn execute(
                 ),
             );
         }
+        // Surface consumers need no kernel: they are checked on their own.
+        let mut surface_outcome = kernel_modules::Outcome::default();
+        let rootfs = buildroot.join("target");
+        surfaces::check(
+            &surfaces::installed_surfaces(spec, &rootfs),
+            &rootfs,
+            &mut surface_outcome,
+        );
+        let surface_errors = surface_outcome
+            .findings
+            .iter()
+            .filter(|finding| finding.severity == Severity::Error)
+            .map(|finding| finding.message.as_str())
+            .collect::<Vec<_>>();
+        if !surface_errors.is_empty() {
+            return failure_with_kind(
+                operation_id.clone(),
+                "image_check_failed",
+                ExecutionErrorKind::ImageCheck,
+                format!(
+                    "image checks failed with {} error(s): {}",
+                    surface_errors.len(),
+                    surface_errors.join("; ")
+                ),
+            );
+        }
         let message = "image checks skipped: the Buildroot config builds no kernel (BR2_LINUX_KERNEL is not y)";
         let report = report_json(spec, "skipped", None, &[], &[], &buildroot);
         return match write_report(&report_path, &report) {
             Ok(()) => success_from_messages(
                 operation_id.clone(),
-                vec![message.to_string()],
+                std::iter::once(message.to_string())
+                    .chain(
+                        surface_outcome
+                            .findings
+                            .iter()
+                            .map(|finding| finding.message.clone()),
+                    )
+                    .collect(),
                 message.to_string(),
                 RollbackDomain::Images,
                 vec![report_path],
@@ -200,6 +236,11 @@ pub(crate) fn execute(
     ];
     boot_trees.extend(labeled_trees);
     uboot::check(spec.identity.id.as_str(), &boot_trees, arch, &mut outcome);
+    let surface_consumers = surfaces::check(
+        &surfaces::installed_surfaces(spec, &rootfs),
+        &rootfs,
+        &mut outcome,
+    );
 
     let errors: Vec<&Finding> = outcome
         .findings
@@ -262,6 +303,11 @@ pub(crate) fn execute(
         summary.push_str(&format!(
             "; {} hardware entries checked",
             spec.image.hardware.len()
+        ));
+    }
+    if surface_consumers > 0 {
+        summary.push_str(&format!(
+            "; {surface_consumers} surface consumer(s) checked"
         ));
     }
     // The warnings reach the run summary through the image result, which

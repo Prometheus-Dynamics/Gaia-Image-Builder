@@ -247,8 +247,16 @@ pub(crate) fn collect_unresolved_tokens(raw: &RawBuildConfig) -> Vec<RawUnresolv
                 features,
                 build_env,
                 link,
+                surface,
                 ..
             } => {
+                if let Some(surface) = surface {
+                    scan_string(
+                        &format!("artifacts.{}.rust.surface.exports", artifact.id),
+                        &surface.exports,
+                        &mut unresolved,
+                    );
+                }
                 if let Some(link) = link {
                     scan_string(
                         &format!("artifacts.{}.rust.link", artifact.id),

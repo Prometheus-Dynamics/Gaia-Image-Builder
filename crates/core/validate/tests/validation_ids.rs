@@ -33,6 +33,7 @@ fn empty_public_ids_are_validation_errors() {
             build_env: Vec::new(),
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
+            surface: None,
         }),
         None,
         ArtifactOutputSpec {

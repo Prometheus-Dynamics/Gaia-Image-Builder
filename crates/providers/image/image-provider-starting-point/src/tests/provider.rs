@@ -86,6 +86,7 @@ fn starting_point_tar_rootfs_accepts_image_feed_overlay() {
             build_env: Vec::new(),
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
+            surface: None,
         }),
         Some(SourceRef::new("base-rootfs")),
         ArtifactOutputSpec {

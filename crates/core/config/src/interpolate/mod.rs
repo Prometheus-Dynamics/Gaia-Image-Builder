@@ -578,6 +578,7 @@ fn interpolate_artifact(
             build_env,
             cpu,
             link,
+            surface,
         } => RawArtifactDefinition::Rust {
             package: resolver::interpolate_string(package, raw, env),
             target_name: target_name.map(|value| resolver::interpolate_string(value, raw, env)),
@@ -591,6 +592,9 @@ fn interpolate_artifact(
             build_env: interpolate_env(build_env, raw, env),
             cpu,
             link: link.map(|value| resolver::interpolate_string(value, raw, env)),
+            surface: surface.map(|surface| crate::raw::RawRustSurfaceConfig {
+                exports: resolver::interpolate_string(surface.exports, raw, env),
+            }),
         },
         RawArtifactDefinition::Java {
             build_target,

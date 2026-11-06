@@ -183,6 +183,7 @@ const RUST_ARTIFACT_KEYS: &[&str] = &[
     "all_features",
     "build_env",
     "link",
+    "surface",
 ];
 const JAVA_ARTIFACT_KEYS: &[&str] = &["build_target", "build_args", "build_command", "build_env"];
 const PACKAGE_DIR_ARTIFACT_KEYS: &[&str] = &["package_dir"];
@@ -282,15 +283,18 @@ fn image_layer_fields() -> Option<&'static [&'static str]> {
     ])
 }
 
-const ARTIFACT_CHILDREN: &[Section] = &[section(
-    "execution",
-    struct_fields::<raw::RawArtifactExecutionConfig>,
-    &[section(
-        "docker",
-        struct_fields::<raw::RawArtifactDockerExecutionConfig>,
-        &[],
-    )],
-)];
+const ARTIFACT_CHILDREN: &[Section] = &[
+    section(
+        "execution",
+        struct_fields::<raw::RawArtifactExecutionConfig>,
+        &[section(
+            "docker",
+            struct_fields::<raw::RawArtifactDockerExecutionConfig>,
+            &[],
+        )],
+    ),
+    section("surface", struct_fields::<raw::RawRustSurfaceConfig>, &[]),
+];
 
 const IMAGE_CHILDREN: &[Section] = &[
     section("output", struct_fields::<raw::RawImageOutputConfig>, &[]),

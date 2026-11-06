@@ -23,6 +23,7 @@ fn rust_provider_fails_for_missing_source_dir_when_nested_build_enabled() {
             build_env: Vec::new(),
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
+            surface: None,
         }),
         None,
         ArtifactOutputSpec {
@@ -68,6 +69,7 @@ fn rust_artifact_state_persists_backend_native_fields() {
             build_env: Vec::new(),
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
+            surface: None,
         }),
         None,
         ArtifactOutputSpec {
@@ -123,6 +125,7 @@ fn nested_rust_build_does_not_accept_stale_existing_output() {
             build_env: Vec::new(),
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
+            surface: None,
         }),
         None,
         ArtifactOutputSpec {
@@ -164,6 +167,7 @@ fn rust_artifact(id: &str, package: &str, output: &Path) -> ArtifactSpec {
             build_env: Vec::new(),
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
+            surface: None,
         }),
         None,
         ArtifactOutputSpec {
@@ -659,3 +663,4 @@ mod cargo_git;
 mod cpu;
 mod groups;
 mod shared_target;
+mod surface;

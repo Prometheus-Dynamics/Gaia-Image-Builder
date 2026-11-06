@@ -778,6 +778,14 @@ pub(crate) struct RawArtifactConfig {
     pub definition: RawArtifactDefinition,
 }
 
+/// `surface = { exports = "<file>" }` on a Rust artifact.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default)]
+pub(crate) struct RawRustSurfaceConfig {
+    /// The declared exports list, relative to the artifact's source.
+    pub exports: String,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub(crate) struct RawArtifactExecutionConfig {
@@ -836,6 +844,9 @@ pub(crate) enum RawArtifactDefinition {
         /// `static` or `shared`; a string, so an input can choose it.
         #[serde(default)]
         link: Option<String>,
+        /// A `cdylib`'s declared exports, checked after the build.
+        #[serde(default)]
+        surface: Option<RawRustSurfaceConfig>,
     },
     Java {
         build_target: String,

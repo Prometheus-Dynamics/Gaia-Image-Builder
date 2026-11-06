@@ -225,6 +225,7 @@ mod tests {
                 build_env: Vec::new(),
                 cpu: None,
                 link: gaia_spec::RustLinkSpec::Static,
+                surface: None,
             }),
             None,
             gaia_spec::ArtifactOutputSpec {

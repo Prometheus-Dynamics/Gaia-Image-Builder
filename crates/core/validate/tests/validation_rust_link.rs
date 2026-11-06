@@ -134,3 +134,35 @@ fn an_unknown_link_mode_is_a_config_error() {
     let error = try_resolve_config(&build).expect_err("an unknown link mode");
     assert!(error.to_string().contains(r#"link = "dynamic""#), "{error}");
 }
+
+#[test]
+fn a_declared_surface_reaches_the_spec_and_its_keys_are_checked() {
+    let body = r#"
+[inputs.surface_list]
+type = "string"
+default = "surface.exports"
+
+[[artifacts]]
+id = "libsurface"
+kind = "rust"
+package = "surface"
+target_name = "libsurface.so"
+output_path = "out/libsurface.so"
+surface = { exports = "${input.surface_list}", export = "typo" }
+"#;
+    let spec = resolve("rust-surface", body);
+    assert_eq!(
+        rust(&spec, "libsurface").surface,
+        Some(gaia_spec::RustSurfaceSpec {
+            exports: "surface.exports".into()
+        })
+    );
+    assert!(
+        spec.metadata
+            .config_warnings
+            .iter()
+            .any(|warning| warning.contains("artifacts[0].surface.export'")),
+        "{:?}",
+        spec.metadata.config_warnings
+    );
+}

@@ -126,6 +126,12 @@ Described in [Artifacts, install and stage](../configuration-artifacts.md#artifa
 
 Keys: `context`, `dockerfile`, `image`.
 
+## `[artifacts.surface]`
+
+Described in [Artifacts, install and stage](../configuration-artifacts.md#artifacts).
+
+Keys: `exports`.
+
 ## `[[install]]`
 
 Described in [Artifacts, install and stage](../configuration-artifacts.md#install).

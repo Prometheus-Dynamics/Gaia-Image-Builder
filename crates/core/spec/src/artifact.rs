@@ -129,6 +129,19 @@ pub struct RustArtifactSpec {
     /// fingerprints of builds that never set it keep.
     #[serde(skip_serializing_if = "RustLinkSpec::is_static")]
     pub link: RustLinkSpec,
+    /// The C ABI a `cdylib` declares it exports; checked after the build.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub surface: Option<RustSurfaceSpec>,
+}
+
+/// A shared library's declared surface: the symbols it exports and nothing
+/// else. The library's own build keeps everything else local (a version
+/// script); Gaia only checks the built file against the list.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RustSurfaceSpec {
+    /// The list, relative to the artifact's source: one symbol per line
+    /// (`#` starts a comment), or a linker version script's `global:` names.
+    pub exports: String,
 }
 
 /// How a Rust artifact links the Rust crates it uses, the standard library
@@ -446,6 +459,7 @@ mod tests {
             build_env: Vec::new(),
             cpu: None,
             link: RustLinkSpec::Static,
+            surface: None,
         }
     }
 

@@ -169,6 +169,7 @@ pub fn artifact_failure_spec_with_overrides(
         build_env: Vec::new(),
         cpu: None,
         link: gaia_spec::RustLinkSpec::Static,
+        surface: None,
     });
     spec.artifacts.push(bad_artifact);
     spec

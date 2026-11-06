@@ -18,6 +18,7 @@ mod cargo_errors;
 mod cargo_git;
 mod feature_flags;
 mod std_library;
+mod surface;
 mod toolchain;
 mod tools;
 
@@ -73,6 +74,7 @@ impl ArtifactProvider for RustProvider {
                 });
             }
         }
+        surface::validate(artifact, &mut issues);
         issues
     }
 
@@ -350,6 +352,7 @@ impl RustProvider {
         build_mode: &str,
         mut messages: Vec<String>,
     ) -> Result<Vec<String>, ArtifactProviderError> {
+        messages.extend(surface::check(artifact, contract)?);
         write_artifact_marker(
             contract,
             self.id(),
