@@ -155,6 +155,7 @@ fn start_reused_container(
         .arg("-d")
         .arg("--rm")
         .arg("--init")
+        .args(crate::cpuset::docker_cpuset_args())
         .args(user);
     if spec.pull_never {
         run.arg("--pull=never");

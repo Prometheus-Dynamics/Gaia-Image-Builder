@@ -24,6 +24,7 @@ const EXIT_POLL_TICK: Duration = Duration::from_millis(1);
 
 mod build_progress;
 pub mod cosign;
+mod cpuset;
 mod digest;
 mod disk;
 mod docker;
