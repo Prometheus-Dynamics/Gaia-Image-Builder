@@ -520,12 +520,21 @@ pub fn plan_build_operations(
     }
 
     // The image checks read what the build and the assembly produced, so they
-    // come after the last of them. Buildroot images only; the kernel checks
-    // skip themselves when the Buildroot config builds no kernel. The hardware
-    // list runs here too, even with the kernel module checks turned off.
-    if spec.image.provider_kind() == gaia_spec::ImageProviderKind::Buildroot
-        && (spec.image.checks.kernel_modules != Some(false) || !spec.image.hardware.is_empty())
-    {
+    // come after the last of them. The kernel checks are Buildroot's and skip
+    // themselves when its config builds no kernel; the hardware list runs
+    // even with the kernel module checks turned off. An installed surface
+    // library has its consumers checked in a starting-point image too.
+    let installs_surface = installs_surface(spec);
+    let checks_image = match spec.image.provider_kind() {
+        gaia_spec::ImageProviderKind::Buildroot => {
+            spec.image.checks.kernel_modules != Some(false)
+                || !spec.image.hardware.is_empty()
+                || installs_surface
+        }
+        gaia_spec::ImageProviderKind::StartingPoint => installs_surface,
+        gaia_spec::ImageProviderKind::None => false,
+    };
+    if checks_image {
         operations.push(
             PlannedOperation::new(OperationId::image_check(), OperationKind::CheckImage)
                 .with_dependency(if has_image_assembly {
@@ -667,4 +676,17 @@ fn names_path(value: &str, dir: &str) -> bool {
                 .next()
                 .is_none_or(|next| next == '/' || next == '"' || next.is_whitespace())
         })
+}
+
+/// Whether the build installs a Rust artifact that declares a surface.
+fn installs_surface(spec: &ResolvedBuildSpec) -> bool {
+    spec.install.entries.iter().any(|entry| {
+        spec.artifacts.iter().any(|artifact| {
+            artifact.id == entry.artifact.id
+                && matches!(
+                    &artifact.definition,
+                    gaia_spec::ArtifactDefinition::Rust(rust) if rust.surface.is_some()
+                )
+        })
+    })
 }

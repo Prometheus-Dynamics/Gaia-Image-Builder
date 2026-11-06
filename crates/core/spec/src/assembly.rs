@@ -196,6 +196,27 @@ pub fn boot_tree_snapshot_dir(spec: &ResolvedBuildSpec) -> PathBuf {
     build_dir.join("image-check").join("boot-trees")
 }
 
+/// The root filesystem tree the image provider leaves behind: Buildroot's
+/// `target/`, otherwise `<collect_dir>/rootfs` (a starting-point image's
+/// mutable copy). The assembly reads it as `${provider.target}`.
+pub fn provider_rootfs_dir(spec: &ResolvedBuildSpec) -> PathBuf {
+    if spec.image.provider_kind() == crate::ImageProviderKind::Buildroot {
+        let output =
+            buildroot_output_dir(spec).unwrap_or_else(|_| PathBuf::from("buildroot-output"));
+        return output.join("target");
+    }
+    let default_collect_dir = crate::default_image_collect_dir(&spec.workspace);
+    let collect_dir = spec
+        .image
+        .output
+        .collect_dir
+        .as_deref()
+        .unwrap_or(&default_collect_dir);
+    resolve_workspace_path_or_absolute(spec, collect_dir)
+        .unwrap_or_else(|_| PathBuf::from(collect_dir))
+        .join("rootfs")
+}
+
 pub fn image_checks_report_path(spec: &ResolvedBuildSpec) -> PathBuf {
     let out_dir = resolve_workspace_path(&spec.workspace, &spec.workspace.out_dir)
         .unwrap_or_else(|_| PathBuf::from(&spec.workspace.out_dir));
@@ -438,6 +459,7 @@ mod tests {
             roots.provider_staging.as_deref(),
             Some(Path::new("/workspace/build/image/buildroot-output/staging"))
         );
+        assert_eq!(provider_rootfs_dir(&spec), roots.provider_target);
         assert_eq!(
             roots.tree_path("boot").expect("tree"),
             Path::new("/workspace/out/images/work/boot")
@@ -457,6 +479,7 @@ mod tests {
             roots.provider_target,
             PathBuf::from("/workspace/out/images/rootfs")
         );
+        assert_eq!(provider_rootfs_dir(&spec), roots.provider_target);
         assert!(roots.provider_host.is_none());
         assert!(roots.provider_staging.is_none());
     }

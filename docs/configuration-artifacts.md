@@ -304,7 +304,10 @@ program that imports more was linked against another build of the surface
 (`surface_import_undeclared`, an error). For a library it is a warning, since
 the program loading it may define the rest; a consumer whose other libraries
 are not in the image is not checked (`surface_consumer_unchecked`). This runs
-with or without a kernel in the build.
+with or without a kernel in the build, and for a starting-point image too (on
+its `<collect_dir>/rootfs`): a build that installs a surface plans
+`image:check` even with `[image.checks] kernel_modules = false`. The report
+(`<out>/<build>.checks.json`) counts the consumers in `surface_consumers`.
 
 #### Private cargo git dependencies
 

@@ -1,6 +1,8 @@
 //! `image:check` in the plan: planned after the build (or the assembly) for a
-//! Buildroot image, left out when `[image.checks] kernel_modules = false`, and
-//! reused only while its report and the build it reads are unchanged.
+//! Buildroot image, left out when `[image.checks] kernel_modules = false`
+//! unless an installed surface library needs its consumers checked (which a
+//! starting-point image plans it for too), and reused only while its report
+//! and the build it reads are unchanged.
 pub mod support;
 
 use gaia_plan::{
@@ -51,6 +53,50 @@ fn kernel_modules_false_leaves_the_checks_out_of_the_plan() {
     let mut spec = test_spec(&scratch);
     spec.image.checks.kernel_modules = Some(false);
     assert!(check_of(&planned(&spec)).is_none());
+}
+
+/// Gives every installed Rust artifact a declared surface.
+fn install_a_surface(spec: &mut ResolvedBuildSpec) {
+    let installed = spec
+        .install
+        .entries
+        .iter()
+        .map(|entry| entry.artifact.id.clone())
+        .collect::<Vec<_>>();
+    let mut declared = 0;
+    for artifact in &mut spec.artifacts {
+        if let gaia_spec::ArtifactDefinition::Rust(rust) = &mut artifact.definition
+            && installed.contains(&artifact.id)
+        {
+            rust.surface = Some(gaia_spec::RustSurfaceSpec {
+                exports: "surface.map".into(),
+            });
+            declared += 1;
+        }
+    }
+    assert!(declared > 0, "the test config installs a Rust artifact");
+}
+
+#[test]
+fn an_installed_surface_plans_the_checks_with_the_kernel_checks_off() {
+    let scratch = TempDir::new("plan-image-check-surface");
+    let mut spec = test_spec(&scratch);
+    spec.image.checks.kernel_modules = Some(false);
+    install_a_surface(&mut spec);
+    assert!(check_of(&planned(&spec)).is_some());
+}
+
+#[test]
+fn a_starting_point_image_plans_the_checks_only_for_an_installed_surface() {
+    let scratch = TempDir::new("plan-image-check-starting-point");
+    let mut spec = test_spec(&scratch);
+    spec.image.definition = gaia_spec::ImageDefinition::StartingPoint(Default::default());
+    spec.image.assembly = None;
+    assert!(check_of(&planned(&spec)).is_none());
+    install_a_surface(&mut spec);
+    let plan = planned(&spec);
+    let check = check_of(&plan).expect("image:check is planned");
+    assert_eq!(check.depends_on, vec![OperationId::image()]);
 }
 
 /// The build and its check, and nothing else: enough to see the check's own

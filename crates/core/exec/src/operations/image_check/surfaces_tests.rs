@@ -192,6 +192,88 @@ fn an_image_without_surfaces_reads_nothing() {
     assert!(outcome.findings.is_empty());
 }
 
+/// A starting-point image: the operation checks the consumers in the
+/// provider's `<collect_dir>/rootfs`, and fails on a stale one.
+#[test]
+fn a_starting_point_image_has_its_surface_consumers_checked() {
+    use gaia_spec::{
+        ArtifactDefinition, ArtifactOutputSpec, ArtifactSpec, ArtifactVariantSpec, ImageDefinition,
+        InstallEntrySpec, ResolvedBuildSpec, RustArtifactSpec, RustSurfaceSpec,
+    };
+    let scratch = TempDir::new("gaia-image-check-starting-point");
+    let mut spec = ResolvedBuildSpec::new("surface-starting-point");
+    spec.workspace.root_dir = scratch.path().display().to_string();
+    spec.workspace.build_dir = scratch.join("build").display().to_string();
+    spec.workspace.out_dir = scratch.join("out").display().to_string();
+    spec.image.definition = ImageDefinition::StartingPoint(Default::default());
+    spec.image.output.collect_dir = Some(scratch.join("out/images").display().to_string());
+    spec.artifacts.push(ArtifactSpec::new(
+        "capi",
+        ArtifactDefinition::Rust(RustArtifactSpec {
+            package: "capi".into(),
+            target_name: None,
+            variant: ArtifactVariantSpec::File,
+            features: Vec::new(),
+            no_default_features: false,
+            all_features: false,
+            build_group: None,
+            group_packages: Vec::new(),
+            cargo_git_sources: Vec::new(),
+            build_env: Vec::new(),
+            cpu: None,
+            link: gaia_spec::RustLinkSpec::Static,
+            surface: Some(RustSurfaceSpec {
+                exports: "capi.exports".into(),
+            }),
+        }),
+        None,
+        ArtifactOutputSpec {
+            path: "out/artifacts/libcapi.so".into(),
+        },
+    ));
+    spec.install
+        .entries
+        .push(InstallEntrySpec::new("install-capi", "capi", "/usr/lib"));
+    let root = scratch.join("out/images/rootfs");
+    let interpreter = Some("/lib64/ld-linux-x86-64.so.2");
+    put(
+        &root,
+        "/usr/lib/libcapi.so",
+        &object(None, &[], &["capi_open"], &[]),
+    );
+    put(
+        &root,
+        "/usr/bin/client",
+        &object(interpreter, &["libcapi.so"], &[], &[("capi_open", false)]),
+    );
+    let run = || super::execute(&spec, &gaia_plan::OperationId::image_check());
+    let report = || -> serde_json::Value {
+        let text = std::fs::read_to_string(gaia_spec::image_checks_report_path(&spec))
+            .expect("the report is written");
+        serde_json::from_str(&text).expect("the report is JSON")
+    };
+
+    let passed = run();
+    assert!(passed.error.is_none(), "{:?}", passed.error);
+    assert_eq!(report()["status"], "passed");
+    assert_eq!(report()["surface_consumers"], 1);
+
+    put(
+        &root,
+        "/usr/bin/stale",
+        &object(interpreter, &["libcapi.so"], &[], &[("capi_reset", false)]),
+    );
+    let failed = run();
+    let error = failed.error.expect("a stale consumer fails the check");
+    assert!(
+        error.message.contains("/usr/bin/stale"),
+        "{}",
+        error.message
+    );
+    assert_eq!(report()["status"], "failed");
+    assert_eq!(report()["errors"][0]["code"], "surface_import_undeclared");
+}
+
 /// A real root filesystem: `GAIA_SURFACE_ROOTFS` and the surface's path in
 /// it, `GAIA_SURFACE_GUEST`. Prints what the check finds.
 #[test]

@@ -615,7 +615,7 @@ services = ["helios-*"]     # stage service ids: the unit file
 
 ### Image checks
 
-`image:check` reads the built image and the kernel tree of the Buildroot output, and fails the run on an error. It runs after the image build (after the assembly, when there is one), only reads, and is reused while the build it reads is unchanged.
+`image:check` reads the built image and the kernel tree of the Buildroot output, and fails the run on an error. A starting-point image has only its surface consumers checked, when the build installs a declared surface (see the artifacts' declared surfaces). It runs after the image build (after the assembly, when there is one), only reads, and is reused while the build it reads is unchanged.
 
 ```toml
 [image.checks]
