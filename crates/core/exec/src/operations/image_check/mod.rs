@@ -11,6 +11,9 @@ mod hardware;
 mod kernel;
 mod kernel_modules;
 mod module;
+mod rust_std;
+#[cfg(test)]
+mod rust_std_tests;
 mod shipped_rootfs;
 mod surfaces;
 #[cfg(test)]
@@ -28,8 +31,6 @@ use gaia_spec::{ResolvedBuildSpec, RollbackDomain};
 use kernel_modules::{Finding, Inputs, Severity};
 use std::path::{Path, PathBuf};
 
-/// The report's schema version, bumped when its shape changes.
-const REPORT_SCHEMA: u32 = 1;
 /// How many errors the failure message names before it counts the rest.
 const NAMED_ERRORS: usize = 5;
 
@@ -211,6 +212,7 @@ pub(crate) fn execute(
         &rootfs,
         &mut outcome,
     );
+    let std_copies = rust_std::copies(&rootfs);
 
     let errors: Vec<&Finding> = outcome
         .findings
@@ -238,6 +240,7 @@ pub(crate) fn execute(
     // What the module and firmware checks read: `images/<name>` or `target`.
     report["kernel_modules"]["rootfs"] = serde_json::Value::String(rootfs_source);
     report["surface_consumers"] = surface_consumers.into();
+    report["rust_std"] = std_copies.json();
     if let Err(error) = write_report(&report_path, &report) {
         return report_failure(operation_id, &error);
     }
@@ -261,7 +264,16 @@ pub(crate) fn execute(
             "; {surface_consumers} surface consumer(s) checked"
         ));
     }
-    checks_passed(spec, operation_id, summary, &warnings, report_path, true)
+    let notes = std_copies.summary().into_iter().collect();
+    checks_passed(
+        spec,
+        operation_id,
+        summary,
+        &warnings,
+        notes,
+        report_path,
+        true,
+    )
 }
 
 /// The surface consumers alone, for an image with no kernel to check: a
@@ -280,6 +292,7 @@ fn surfaces_only(
         rootfs,
         &mut outcome,
     );
+    let std_copies = rust_std::copies(rootfs);
     let (errors, warnings): (Vec<&Finding>, Vec<&Finding>) = outcome
         .findings
         .iter()
@@ -291,6 +304,7 @@ fn surfaces_only(
     };
     let mut report = report_json(spec, status, None, &errors, &warnings, rootfs);
     report["surface_consumers"] = consumers.into();
+    report["rust_std"] = std_copies.json();
     if let Err(error) = write_report(&report_path, &report) {
         return report_failure(operation_id, &error);
     }
@@ -303,14 +317,16 @@ fn surfaces_only(
         Some(message) => message.to_string(),
         None => format!("image checks passed: {checked}"),
     };
-    // Without warnings there is nothing for the run summary: no image result,
-    // so the manifest lists the image build's outputs alone.
-    let with_result = !warnings.is_empty();
+    // Without warnings or notes there is nothing for the run summary: no
+    // image result, so the manifest lists the image build's outputs alone.
+    let notes: Vec<String> = std_copies.summary().into_iter().collect();
+    let with_result = !warnings.is_empty() || !notes.is_empty();
     checks_passed(
         spec,
         operation_id,
         summary,
         &warnings,
+        notes,
         report_path,
         with_result,
     )
@@ -349,6 +365,7 @@ fn checks_passed(
     operation_id: &OperationId,
     summary: String,
     warnings: &[&Finding],
+    notes: Vec<String>,
     report_path: PathBuf,
     with_result: bool,
 ) -> OperationExecutionResult {
@@ -374,7 +391,7 @@ fn checks_passed(
         messages: Vec::new(),
         warnings: summary_warnings(warnings, &report_path),
         disk_images: Vec::new(),
-        notes: Vec::new(),
+        notes,
         state_details: Vec::new(),
     };
     passed.with_image_result(image_result)
@@ -483,7 +500,7 @@ fn report_json(
         })
     };
     serde_json::json!({
-        "schema": REPORT_SCHEMA,
+        "schema": gaia_spec::IMAGE_CHECKS_REPORT_SCHEMA,
         "build": spec.identity.id.as_str(),
         "status": status,
         "hardware_entries": spec.image.hardware.len(),

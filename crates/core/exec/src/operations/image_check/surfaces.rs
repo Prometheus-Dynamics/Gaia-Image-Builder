@@ -254,7 +254,7 @@ fn named(names: &[&str]) -> String {
 
 /// Every regular file under `dir` that starts with the ELF magic, sorted;
 /// symbolic links are not followed.
-fn walk(dir: &Path, files: &mut Vec<PathBuf>) {
+pub(super) fn walk(dir: &Path, files: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };

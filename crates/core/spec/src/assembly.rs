@@ -217,6 +217,20 @@ pub fn provider_rootfs_dir(spec: &ResolvedBuildSpec) -> PathBuf {
         .join("rootfs")
 }
 
+/// The shape of the image checks report, bumped when it changes or a check
+/// is added: a report of another schema is not reused, so an upgraded Gaia
+/// runs its checks once more. 2: `surface_consumers` and `rust_std`.
+pub const IMAGE_CHECKS_REPORT_SCHEMA: u32 = 2;
+
+/// Whether the image checks report at `path` was written with this schema.
+pub fn image_checks_report_current(path: &Path) -> bool {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|report| report.get("schema").and_then(serde_json::Value::as_u64))
+        == Some(u64::from(IMAGE_CHECKS_REPORT_SCHEMA))
+}
+
 pub fn image_checks_report_path(spec: &ResolvedBuildSpec) -> PathBuf {
     let out_dir = resolve_workspace_path(&spec.workspace, &spec.workspace.out_dir)
         .unwrap_or_else(|_| PathBuf::from(&spec.workspace.out_dir));

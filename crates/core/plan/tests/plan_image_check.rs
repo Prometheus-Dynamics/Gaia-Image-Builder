@@ -151,7 +151,11 @@ fn the_checks_are_reused_while_their_report_and_the_build_are_unchanged() {
     fs::write(collect.join("image-provider.txt"), "built\n").expect("provider marker");
     let report = gaia_spec::image_checks_report_path(&spec);
     fs::create_dir_all(report.parent().expect("out dir")).expect("out dir");
-    fs::write(&report, "{\"status\": \"passed\"}\n").expect("report");
+    let current = format!(
+        "{{\"schema\": {}, \"status\": \"passed\"}}\n",
+        gaia_spec::IMAGE_CHECKS_REPORT_SCHEMA
+    );
+    fs::write(&report, &current).expect("report");
 
     let state = completed_state(&spec, &build_and_check(&spec));
     let reuse = decide_reuse(
@@ -168,7 +172,11 @@ fn the_checks_are_reused_while_their_report_and_the_build_are_unchanged() {
     );
 
     // A changed report (the check ran again with other results) runs it again.
-    fs::write(&report, "{\"status\": \"failed\"}\n").expect("changed report");
+    let changed_report = format!(
+        "{{\"schema\": {}, \"status\": \"failed\"}}\n",
+        gaia_spec::IMAGE_CHECKS_REPORT_SCHEMA
+    );
+    fs::write(&report, &changed_report).expect("changed report");
     let changed = decide_reuse(
         build_and_check(&spec),
         &spec,
@@ -181,4 +189,32 @@ fn the_checks_are_reused_while_their_report_and_the_build_are_unchanged() {
         }
         other => panic!("expected the check to run again, got {other:?}"),
     }
+}
+
+#[test]
+fn a_report_of_an_older_schema_runs_the_checks_again() {
+    let scratch = TempDir::new("plan-image-check-schema");
+    let mut spec = test_spec(&scratch);
+    let collect = scratch.join("out/images");
+    spec.image.output.collect_dir = Some(collect.display().to_string());
+    fs::create_dir_all(&collect).expect("collect dir");
+    fs::write(collect.join("image-provider.txt"), "built\n").expect("provider marker");
+    let report = gaia_spec::image_checks_report_path(&spec);
+    fs::create_dir_all(report.parent().expect("out dir")).expect("out dir");
+    fs::write(&report, "{\"schema\": 1, \"status\": \"passed\"}\n").expect("report");
+
+    let state = completed_state(&spec, &build_and_check(&spec));
+    let reuse = decide_reuse(
+        build_and_check(&spec),
+        &spec,
+        Some(&state),
+        &RebuildRequest::default(),
+    );
+    assert!(
+        matches!(
+            check_of(&reuse).expect("planned").reuse,
+            OperationReuse::Execute(_)
+        ),
+        "an older report is not reused"
+    );
 }

@@ -615,7 +615,9 @@ services = ["helios-*"]     # stage service ids: the unit file
 
 ### Image checks
 
-`image:check` reads the built image and the kernel tree of the Buildroot output, and fails the run on an error. A starting-point image has only its surface consumers checked, when the build installs a declared surface (see the artifacts' declared surfaces). It runs after the image build (after the assembly, when there is one), only reads, and is reused while the build it reads is unchanged.
+`image:check` reads the built image and the kernel tree of the Buildroot output, and fails the run on an error. A starting-point image has only its surface consumers checked, when the build installs a declared surface (see the artifacts' declared surfaces). It runs after the image build (after the assembly, when there is one), only reads, and is reused while the build it reads is unchanged and its report has the current schema (a Gaia that adds a check runs them once more).
+
+Every run also reports, without failing, the copies of the Rust standard library each program runs with (`rust_std` in the report): its own and those of the libraries it loads through `DT_NEEDED`. An object holds its own copy when it contains std's panic locations (`library/std/src/`) and does not need a shared `libstd-*.so`; that library is one copy itself. A program with more than one, such as a statically linked Rust program that also loads a `cdylib` surface built from Rust, is listed under `rust_std.duplicated` and named in a run summary note: each copy is a few hundred KB of text (245 KB of `lemnos-capi`'s 326 KB), and a sign that a core crate may be in the process twice. Libraries opened at run time (`dlopen`, plugins) are not seen.
 
 ```toml
 [image.checks]

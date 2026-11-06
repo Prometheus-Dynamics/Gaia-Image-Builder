@@ -872,7 +872,10 @@ fn operation_outputs_present(spec: &ResolvedBuildSpec, kind: &OperationKind) -> 
         OperationKind::AssembleImage => {
             assembly_state_path(spec).is_file() && gaia_spec::boot_tree_snapshot_dir(spec).is_dir()
         }
-        OperationKind::CheckImage => gaia_spec::image_checks_report_path(spec).is_file(),
+        // A report of an older schema is from a Gaia with other checks.
+        OperationKind::CheckImage => {
+            gaia_spec::image_checks_report_current(&gaia_spec::image_checks_report_path(spec))
+        }
     }
 }
 

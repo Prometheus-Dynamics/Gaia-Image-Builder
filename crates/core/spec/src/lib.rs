@@ -49,9 +49,9 @@ pub use artifact::{
     cargo_git_url_key,
 };
 pub use assembly::{
-    AssemblyRoots, AssemblyWorkDirKeyword, assembly_work_dir_keyword, boot_tree_snapshot_dir,
-    buildroot_output_dir, exclude_names, expand_simple_glob, image_checks_report_path,
-    provider_rootfs_dir, wildcard_match,
+    AssemblyRoots, AssemblyWorkDirKeyword, IMAGE_CHECKS_REPORT_SCHEMA, assembly_work_dir_keyword,
+    boot_tree_snapshot_dir, buildroot_output_dir, exclude_names, expand_simple_glob,
+    image_checks_report_current, image_checks_report_path, provider_rootfs_dir, wildcard_match,
 };
 pub use assembly_archive_spec::{
     AssemblyArchiveMemberSourceSpec, AssemblyArchiveMemberSpec, AssemblyArchiveSpec,
