@@ -40,6 +40,7 @@ fn default_artifact_execution_fails_instead_of_materializing_placeholder() {
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
             cpu: None,
+            link: gaia_spec::RustLinkSpec::Static,
         }),
         None,
         ArtifactOutputSpec {
@@ -396,6 +397,7 @@ fn artifact_execution_backend_prefers_explicit_setting_over_global_default() {
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
             cpu: None,
+            link: gaia_spec::RustLinkSpec::Static,
         }),
         None,
         ArtifactOutputSpec {
@@ -456,6 +458,7 @@ fn artifact_contract_rejects_empty_inherited_docker_image() {
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
             cpu: None,
+            link: gaia_spec::RustLinkSpec::Static,
         }),
         None,
         ArtifactOutputSpec {
@@ -511,6 +514,7 @@ fn dockerfile_artifact() -> ArtifactSpec {
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
             cpu: None,
+            link: gaia_spec::RustLinkSpec::Static,
         }),
         None,
         ArtifactOutputSpec {

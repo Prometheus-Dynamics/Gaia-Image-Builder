@@ -34,6 +34,7 @@ fn apply_image_feed_to_rootfs_writes_install_file_env_and_service_content() {
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
             cpu: None,
+            link: gaia_spec::RustLinkSpec::Static,
         }),
         None,
         gaia_spec::ArtifactOutputSpec {
@@ -196,6 +197,7 @@ fn final_tar_image_contains_install_stage_env_and_service_content() {
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
             cpu: None,
+            link: gaia_spec::RustLinkSpec::Static,
         }),
         None,
         gaia_spec::ArtifactOutputSpec {
@@ -337,6 +339,7 @@ fn apply_image_feed_to_rootfs_rejects_wrong_target_artifact_binary() {
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
             cpu: None,
+            link: gaia_spec::RustLinkSpec::Static,
         }),
         None,
         gaia_spec::ArtifactOutputSpec {

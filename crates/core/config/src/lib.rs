@@ -216,6 +216,7 @@ pub(crate) fn resolve_merged(
     reject_non_rust_build_groups(&normalized)?;
     reject_unknown_cpu_profile(&normalized)?;
     reject_non_rust_cargo_git_sources(&normalized)?;
+    reject_unknown_rust_link(&normalized)?;
     let mut spec = compile_config(normalized);
     if let Some(id) = &variant.id {
         for source in spec
@@ -531,6 +532,33 @@ fn reject_non_rust_build_groups(raw: &raw::RawBuildConfig) -> Result<(), ConfigE
             .unwrap_or_else(|| "<unknown>".to_string()),
         message: format!(
             "artifact '{}' sets build_group, which is only supported for kind = \"rust\" artifacts",
+            artifact.id
+        ),
+    })
+}
+
+/// A Rust artifact's `link` is `static` or `shared` once inputs are resolved.
+fn reject_unknown_rust_link(raw: &raw::RawBuildConfig) -> Result<(), ConfigError> {
+    let Some((artifact, link)) =
+        raw.artifacts
+            .iter()
+            .find_map(|artifact| match &artifact.definition {
+                raw::RawArtifactDefinition::Rust {
+                    link: Some(link), ..
+                } if link != "static" && link != "shared" => Some((artifact, link)),
+                _ => None,
+            })
+    else {
+        return Ok(());
+    };
+    Err(ConfigError::ConfigShape {
+        path: raw
+            .source_path
+            .as_deref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<unknown>".to_string()),
+        message: format!(
+            "artifact '{}' sets link = \"{link}\"; it is \"static\" or \"shared\"",
             artifact.id
         ),
     })

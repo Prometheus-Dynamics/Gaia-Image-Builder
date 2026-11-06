@@ -197,6 +197,7 @@ impl Harness {
                     cargo_git_sources: Vec::new(),
                     build_env: Vec::new(),
                     cpu: None,
+                    link: gaia_spec::RustLinkSpec::Static,
                 }),
                 None,
                 ArtifactOutputSpec {

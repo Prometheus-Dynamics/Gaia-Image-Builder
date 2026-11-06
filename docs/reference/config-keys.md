@@ -88,7 +88,7 @@ Keys: `id`, `kind`, `linker`, `page_size`, `path`, `prefix`, `relocate`, `rust_t
 
 Described in [Artifacts, install and stage](../configuration-artifacts.md#artifacts).
 
-Keys: `after_image_prepare`, `all_features`, `build_env`, `build_group`, `cargo_git_sources`, `dependencies`, `emit_directory`, `features`, `id`, `install_class`, `install_dest_hint`, `install_name`, `no_default_features`, `output_path`, `package`, `profile`, `source`, `sources`, `target`, `target_name`, `toolchain`, `when`.
+Keys: `after_image_prepare`, `all_features`, `build_env`, `build_group`, `cargo_git_sources`, `dependencies`, `emit_directory`, `features`, `id`, `install_class`, `install_dest_hint`, `install_name`, `link`, `no_default_features`, `output_path`, `package`, `profile`, `source`, `sources`, `target`, `target_name`, `toolchain`, `when`.
 
 ## `[[artifacts]]` with `kind = "java"`
 

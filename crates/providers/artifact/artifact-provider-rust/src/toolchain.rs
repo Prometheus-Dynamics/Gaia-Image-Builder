@@ -5,7 +5,7 @@
 //! flags the environment already gives (`RUSTFLAGS`, `CFLAGS_<target>`) are kept
 //! in front of Gaia's own.
 
-use gaia_spec::RustCpuSpec;
+use gaia_spec::{RustCpuSpec, RustLinkSpec};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -213,6 +213,42 @@ pub(crate) fn with_build_env_and_cpu_flags(
     })
 }
 
+/// `env` with `-C prefer-dynamic` added to the rustc flags cargo reads for
+/// `target` (or to `RUSTFLAGS` for a host build) when the artifact links
+/// shared. A value `env` does not set starts from `inherited`'s, as
+/// [`with_cpu_flags`] does.
+pub(crate) fn with_link_flags(
+    mut env: Vec<(String, String)>,
+    link: RustLinkSpec,
+    target: Option<&str>,
+    inherited: impl Fn(&str) -> Option<String>,
+) -> Vec<(String, String)> {
+    if link.is_static() {
+        return env;
+    }
+    let (name, fallback) = match target {
+        Some(target) => (
+            format!(
+                "CARGO_TARGET_{}_RUSTFLAGS",
+                target.replace('-', "_").to_ascii_uppercase()
+            ),
+            Some("RUSTFLAGS"),
+        ),
+        None => ("RUSTFLAGS".to_string(), None),
+    };
+    let extra = "-C prefer-dynamic";
+    match env.iter_mut().find(|(key, _)| *key == name) {
+        Some((_, value)) => *value = join_flags(&[value.as_str(), extra]),
+        None => {
+            let base = inherited(&name)
+                .or_else(|| fallback.and_then(&inherited))
+                .unwrap_or_default();
+            env.push((name, join_flags(&[base.as_str(), extra])));
+        }
+    }
+    env
+}
+
 /// Whether `env` sets a target's `CARGO_TARGET_<T>_RUSTFLAGS`.
 pub(crate) fn sets_target_rustflags(env: &[(String, String)]) -> bool {
     env.iter()
@@ -290,6 +326,33 @@ mod tests {
         assert_eq!(
             value(&env, "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER"),
             "/sdk/bin/aarch64-buildroot-linux-gnu-gcc"
+        );
+    }
+
+    #[test]
+    fn a_shared_link_adds_prefer_dynamic_to_the_targets_flags_only() {
+        let target = "aarch64-unknown-linux-gnu";
+        let name = "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS";
+        let env = with_link_flags(
+            Vec::new(),
+            RustLinkSpec::Shared,
+            Some(target),
+            |var| match var {
+                "RUSTFLAGS" => Some("-C opt-level=2".into()),
+                _ => None,
+            },
+        );
+        assert_eq!(value(&env, name), "-C opt-level=2 -C prefer-dynamic");
+        let cpu = vec![(name.to_string(), "-C target-cpu=cortex-a76".to_string())];
+        let env = with_link_flags(cpu, RustLinkSpec::Shared, Some(target), |_| None);
+        assert_eq!(
+            value(&env, name),
+            "-C target-cpu=cortex-a76 -C prefer-dynamic"
+        );
+        let host = with_link_flags(Vec::new(), RustLinkSpec::Shared, None, |_| None);
+        assert_eq!(value(&host, "RUSTFLAGS"), "-C prefer-dynamic");
+        assert!(
+            with_link_flags(Vec::new(), RustLinkSpec::Static, Some(target), |_| None).is_empty()
         );
     }
 

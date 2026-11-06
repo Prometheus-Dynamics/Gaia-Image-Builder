@@ -224,6 +224,50 @@ mode = 420
 Both artifacts build with `cargo build -p acme-engine -p vision-plugin
 --features acme-engine/plugins,vision-plugin/simd --release`.
 
+#### Shared Rust libraries (experiment)
+
+This is for measuring, not for products. Calls across a Rust `dylib` stay out
+of reach of LTO: in HeliOS's A/B on a CM5 (2026-11-04) a per-frame graph ran
+26% slower per tick than the fully static build. Products share a dependency
+as a `cdylib` with a small C ABI instead, the dependency's core linked into it
+with LTO.
+
+`link = "shared"` on a rust artifact links the standard library, and the
+crates a Rust `dylib` of the same build provides, dynamically: Gaia adds
+`-C prefer-dynamic` to the rustc flags cargo reads for the artifact's target
+(`CARGO_TARGET_<TRIPLE>_RUSTFLAGS`, or `RUSTFLAGS` for a host build), after the
+project's own and the `[cpu]` profile's. `link = "static"` is the default. The
+value can come from an input, so one build file makes either kind of image:
+`link = "${input.link_mode}"`. Every member of a build group that builds crates
+must link the same way (`rust_build_group_link_mismatch`). Rustc refuses LTO
+with `prefer-dynamic`, so a shared build's cargo profile sets `lto = false`.
+
+The artifacts then need the toolchain's `libstd-<hash>.so` at run time. An
+artifact with `package = "std"` is that library: no cargo package (cargo
+refuses `std` as a package name), but a directory holding the target's
+`libstd-*.so`, read from the rustc that builds the source (its
+`rust-toolchain.toml`, in the artifact's `execution` backend), so the hash is
+the one the other artifacts linked against. In a build group it is compared
+with the other members only on `source`, `target`, `profile` and `execution`,
+and it needs a member with `link = "shared"` (`rust_std_without_shared_link`).
+Install it at the library directory; the directory's files are added to it.
+
+```toml
+[[artifacts]]
+id = "rust-std"
+kind = "rust"
+source = "acme"
+package = "std"
+profile = "release"
+build_group = "acme"
+output_path = "${outputs.dir}/artifacts/rust-std"
+
+[[install]]
+id = "install-rust-std"
+artifact = "rust-std"
+dest = "/usr/lib"
+```
+
 #### Private cargo git dependencies
 
 A rust artifact whose workspace depends on a private git repository (`git =

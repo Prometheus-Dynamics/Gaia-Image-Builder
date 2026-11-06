@@ -168,6 +168,7 @@ pub fn artifact_failure_spec_with_overrides(
         cargo_git_sources: Vec::new(),
         build_env: Vec::new(),
         cpu: None,
+        link: gaia_spec::RustLinkSpec::Static,
     });
     spec.artifacts.push(bad_artifact);
     spec

@@ -14,6 +14,7 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig, sources: &[SourceSpec]) -
             all_features,
             build_env,
             cpu: _,
+            link,
         } => {
             let cargo_git_sources =
                 compile_cargo_git_sources(raw.cargo_git_sources.clone(), sources);
@@ -24,10 +25,13 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig, sources: &[SourceSpec]) -
                 cargo_git_sources.iter().map(|source| source.source.clone()),
                 raw.source.as_deref(),
             );
+            let std_library = package == gaia_spec::RUST_STD_PACKAGE;
             ArtifactDefinition::Rust(RustArtifactSpec {
                 package,
                 target_name,
-                variant: if emit_directory {
+                // The standard library is a directory: the file name carries
+                // the toolchain's hash.
+                variant: if emit_directory || std_library {
                     ArtifactVariantSpec::Directory
                 } else {
                     ArtifactVariantSpec::File
@@ -40,6 +44,12 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig, sources: &[SourceSpec]) -
                 cargo_git_sources,
                 build_env,
                 cpu: None,
+                // Any other value was refused before compiling.
+                link: if link.as_deref() == Some("shared") {
+                    gaia_spec::RustLinkSpec::Shared
+                } else {
+                    gaia_spec::RustLinkSpec::Static
+                },
             })
         }
         RawArtifactDefinition::Java {
@@ -153,7 +163,9 @@ pub(crate) fn complete_build_groups(artifacts: &mut [ArtifactSpec]) {
             && let Some(group) = &rust.build_group
         {
             let (packages, features) = groups.entry(group.clone()).or_default();
-            packages.insert(rust.package.clone());
+            if !rust.is_std_library() {
+                packages.insert(rust.package.clone());
+            }
             features.extend(rust.features.iter().cloned());
         }
     }

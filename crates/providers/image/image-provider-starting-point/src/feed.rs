@@ -50,7 +50,7 @@ pub(crate) fn apply_image_feed_to_rootfs(
             ));
         }
         let dest = rootfs_path(rootfs_dir, &install.dest);
-        copy_into_rootfs(&src, &dest)?;
+        copy_install_output(&src, &dest)?;
         #[cfg(unix)]
         if let Some(mode) = install.mode {
             fs::set_permissions(&dest, fs::Permissions::from_mode(mode)).map_err(|error| {
@@ -209,4 +209,35 @@ pub(crate) fn copy_into_rootfs(src: &Path, dest: &Path) -> Result<(), ImageProvi
         })?;
         Ok(())
     }
+}
+
+/// Copies an install's artifact output to `dest`. A directory output adds its
+/// entries to `dest` and leaves out the artifact's own `.gaia` record (its
+/// marker and state), which belongs to the build, not the image.
+fn copy_install_output(src: &Path, dest: &Path) -> Result<(), ImageProviderError> {
+    if !src.is_dir() {
+        return copy_into_rootfs(src, dest);
+    }
+    fs::create_dir_all(dest).map_err(|error| {
+        ImageProviderError::new(
+            ImageProviderErrorKind::RuntimeState,
+            format!("failed to create install dir '{}': {error}", dest.display()),
+        )
+    })?;
+    let mut entries = fs::read_dir(src)
+        .and_then(|entries| entries.collect::<Result<Vec<_>, _>>())
+        .map_err(|error| {
+            ImageProviderError::new(
+                ImageProviderErrorKind::RuntimeState,
+                format!("failed to read install output '{}': {error}", src.display()),
+            )
+        })?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        if entry.file_name() == ".gaia" {
+            continue;
+        }
+        copy_into_rootfs(&entry.path(), &dest.join(entry.file_name()))?;
+    }
+    Ok(())
 }

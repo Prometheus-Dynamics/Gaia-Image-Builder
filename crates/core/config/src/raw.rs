@@ -831,6 +831,11 @@ pub(crate) enum RawArtifactDefinition {
         /// `false` builds for the target's generic CPU whatever `[cpu]` says.
         #[serde(default)]
         cpu: Option<bool>,
+        /// `shared` links the standard library and the build's Rust `dylib`s
+        /// dynamically.
+        /// `static` or `shared`; a string, so an input can choose it.
+        #[serde(default)]
+        link: Option<String>,
     },
     Java {
         build_target: String,

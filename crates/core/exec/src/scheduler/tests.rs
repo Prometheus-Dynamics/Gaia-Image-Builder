@@ -53,6 +53,7 @@ fn rust_artifact(id: &str, source: &str, output: &str) -> ArtifactSpec {
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
             cpu: None,
+            link: gaia_spec::RustLinkSpec::Static,
         }),
         Some(SourceRef::new(source)),
         ArtifactOutputSpec {

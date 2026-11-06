@@ -152,6 +152,7 @@ fn app_contract(
             cargo_git_sources: sources,
             build_env: Vec::new(),
             cpu: None,
+            link: gaia_spec::RustLinkSpec::Static,
         }),
         None,
         ArtifactOutputSpec {

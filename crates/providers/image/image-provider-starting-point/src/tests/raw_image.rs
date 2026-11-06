@@ -77,6 +77,7 @@ fn starting_point_raw_image_rejects_read_only_overlay_before_root_check() {
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
             cpu: None,
+            link: gaia_spec::RustLinkSpec::Static,
         }),
         None,
         ArtifactOutputSpec {

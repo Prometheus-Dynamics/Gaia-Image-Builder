@@ -3,7 +3,9 @@
 
 use std::collections::BTreeMap;
 
-use gaia_spec::{ArtifactDefinition, ArtifactSpec, ResolvedBuildSpec, RustArtifactSpec};
+use gaia_spec::{
+    ArtifactDefinition, ArtifactSpec, ResolvedBuildSpec, RustArtifactSpec, RustLinkSpec,
+};
 
 use crate::ValidationDiagnostic;
 use crate::diagnostics::error;
@@ -33,7 +35,11 @@ pub(crate) fn validate_build_groups(
         }
         groups.entry(group).or_default().push((artifact, rust));
     }
-    for (group, members) in groups {
+    for (group, mut members) in groups {
+        validate_group_link(group, &members, diagnostics);
+        // A crate-building member leads, so the standard library is compared
+        // only on what its own build uses: source, target, profile, backend.
+        members.sort_by_key(|(_, rust)| rust.is_std_library());
         let Some(((leader, leader_rust), rest)) = members.split_first() else {
             continue;
         };
@@ -80,7 +86,12 @@ pub(crate) fn validate_build_groups(
                     format!("{:?}", member_rust.cpu.as_ref().map(|cpu| &cpu.profile)),
                 ),
             ];
-            for (field, leader_value, member_value) in conflicts {
+            let compared = if member_rust.is_std_library() || leader_rust.is_std_library() {
+                4
+            } else {
+                conflicts.len()
+            };
+            for (field, leader_value, member_value) in conflicts.into_iter().take(compared) {
                 if leader_value != member_value {
                     diagnostics.push(error(
                         "rust_build_group_conflict",
@@ -95,6 +106,52 @@ pub(crate) fn validate_build_groups(
                     ));
                 }
             }
+        }
+    }
+}
+
+/// Every crate-building member links the same way, since one cargo run builds
+/// them all; the standard library (`package = "std"`) only belongs in a group
+/// that links it dynamically.
+fn validate_group_link(
+    group: &str,
+    members: &[(&ArtifactSpec, &RustArtifactSpec)],
+    diagnostics: &mut Vec<ValidationDiagnostic>,
+) {
+    let (std_libraries, crates): (Vec<_>, Vec<_>) =
+        members.iter().partition(|(_, rust)| rust.is_std_library());
+    if let Some(((leader, leader_rust), rest)) = crates.split_first() {
+        for (member, member_rust) in rest {
+            if member_rust.link != leader_rust.link {
+                diagnostics.push(error(
+                    "rust_build_group_link_mismatch",
+                    format!(
+                        "rust build group '{group}': artifacts '{}' and '{}' must share link to \
+                         build in one cargo invocation ({:?} vs {:?})",
+                        leader.id.as_str(),
+                        member.id.as_str(),
+                        leader_rust.link,
+                        member_rust.link
+                    ),
+                    Some(format!("artifact:{}", member.id.as_str())),
+                ));
+            }
+        }
+    }
+    let shared = crates
+        .iter()
+        .any(|(_, rust)| rust.link == RustLinkSpec::Shared);
+    if !shared {
+        for (artifact, _) in std_libraries {
+            diagnostics.push(error(
+                "rust_std_without_shared_link",
+                format!(
+                    "rust build group '{group}': artifact '{}' ships the standard library, \
+                     but no artifact of the group sets link = \"shared\", so nothing links it",
+                    artifact.id.as_str()
+                ),
+                Some(format!("artifact:{}", artifact.id.as_str())),
+            ));
         }
     }
 }

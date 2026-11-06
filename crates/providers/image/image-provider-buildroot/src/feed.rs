@@ -277,7 +277,7 @@ pub(crate) fn apply_image_feed_to_rootfs(
         }
         verify_install_artifact_target(artifact, &src)?;
         let dest = rootfs_path(rootfs_dir, &install.dest);
-        copy_path(&src, &dest)?;
+        copy_install_output(&src, &dest)?;
         #[cfg(unix)]
         if let Some(mode) = install.mode {
             let permissions = fs::Permissions::from_mode(mode);
@@ -1047,4 +1047,65 @@ pub(crate) fn build_image_feed_signature(
     }
 
     Ok(signature)
+}
+
+/// Copies an install's artifact output to `dest`. A directory output adds its
+/// entries to `dest` and leaves out the artifact's own `.gaia` record (its
+/// marker and state), which belongs to the build, not the image.
+fn copy_install_output(src: &Path, dest: &Path) -> Result<(), ImageProviderError> {
+    if !src.is_dir() {
+        return copy_path(src, dest);
+    }
+    fs::create_dir_all(dest).map_err(|error| {
+        ImageProviderError::new(
+            ImageProviderErrorKind::RuntimeState,
+            format!("failed to create install dir '{}': {error}", dest.display()),
+        )
+    })?;
+    let mut entries = fs::read_dir(src)
+        .and_then(|entries| entries.collect::<Result<Vec<_>, _>>())
+        .map_err(|error| {
+            ImageProviderError::new(
+                ImageProviderErrorKind::RuntimeState,
+                format!("failed to read install output '{}': {error}", src.display()),
+            )
+        })?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        if entry.file_name() == ".gaia" {
+            continue;
+        }
+        copy_path(&entry.path(), &dest.join(entry.file_name()))?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod install_output_tests {
+    use super::copy_install_output;
+    use std::fs;
+
+    #[test]
+    fn a_directory_output_adds_its_files_but_not_its_gaia_record() {
+        let temp = gaia_testkit::TempDir::new("gaia-install-dir-output");
+        let src = temp.join("rust-std");
+        fs::create_dir_all(src.join(".gaia")).expect("record dir");
+        fs::write(src.join(".gaia/artifact.gaia-state.txt"), "state").expect("state");
+        fs::write(src.join("libstd-abc.so"), "lib").expect("lib");
+        let dest = temp.join("rootfs/usr/lib");
+        fs::create_dir_all(&dest).expect("lib dir");
+        fs::write(dest.join("libc.so.6"), "libc").expect("existing");
+
+        copy_install_output(&src, &dest).expect("install");
+
+        assert_eq!(
+            fs::read_to_string(dest.join("libstd-abc.so")).expect("lib"),
+            "lib"
+        );
+        assert_eq!(
+            fs::read_to_string(dest.join("libc.so.6")).expect("kept"),
+            "libc"
+        );
+        assert!(!dest.join(".gaia").exists());
+    }
 }

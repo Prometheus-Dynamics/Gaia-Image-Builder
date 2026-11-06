@@ -125,7 +125,35 @@ pub struct RustArtifactSpec {
     /// fingerprints of builds without a profile keep.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cpu: Option<crate::RustCpuSpec>,
+    /// How the artifact links Rust crates. Not serialized when static, so the
+    /// fingerprints of builds that never set it keep.
+    #[serde(skip_serializing_if = "RustLinkSpec::is_static")]
+    pub link: RustLinkSpec,
 }
+
+/// How a Rust artifact links the Rust crates it uses, the standard library
+/// included.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RustLinkSpec {
+    /// Every crate is linked into the artifact (rustc's default).
+    #[default]
+    Static,
+    /// Crates a Rust `dylib` of the build provides, and the standard library,
+    /// are linked dynamically (`-C prefer-dynamic`).
+    Shared,
+}
+
+impl RustLinkSpec {
+    pub fn is_static(&self) -> bool {
+        *self == Self::Static
+    }
+}
+
+/// The `package` that names the toolchain's standard library rather than a
+/// cargo package (cargo rejects `std` as a package name): the artifact is a
+/// directory holding the target's `libstd-<hash>.so`.
+pub const RUST_STD_PACKAGE: &str = "std";
 
 /// One cargo git dependency the build takes from a declared git source
 /// instead of the network: the repository URL as Cargo.lock records it, and
@@ -156,10 +184,18 @@ pub fn cargo_git_url_key(url: &str) -> String {
 }
 
 impl RustArtifactSpec {
+    /// Whether the artifact is the toolchain's standard library
+    /// ([`RUST_STD_PACKAGE`]), which no cargo invocation builds.
+    pub fn is_std_library(&self) -> bool {
+        self.package == RUST_STD_PACKAGE
+    }
+
     /// Packages one cargo invocation for this artifact selects: the whole
     /// build group, or just the artifact's own package.
     pub fn cargo_packages(&self) -> Vec<String> {
-        if self.group_packages.is_empty() {
+        if self.is_std_library() {
+            Vec::new()
+        } else if self.group_packages.is_empty() {
             vec![self.package.clone()]
         } else {
             self.group_packages.clone()
@@ -409,6 +445,7 @@ mod tests {
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
             cpu: None,
+            link: RustLinkSpec::Static,
         }
     }
 

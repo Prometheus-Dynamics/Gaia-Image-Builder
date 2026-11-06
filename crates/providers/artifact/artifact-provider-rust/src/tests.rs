@@ -22,6 +22,7 @@ fn rust_provider_fails_for_missing_source_dir_when_nested_build_enabled() {
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
             cpu: None,
+            link: gaia_spec::RustLinkSpec::Static,
         }),
         None,
         ArtifactOutputSpec {
@@ -66,6 +67,7 @@ fn rust_artifact_state_persists_backend_native_fields() {
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
             cpu: None,
+            link: gaia_spec::RustLinkSpec::Static,
         }),
         None,
         ArtifactOutputSpec {
@@ -120,6 +122,7 @@ fn nested_rust_build_does_not_accept_stale_existing_output() {
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
             cpu: None,
+            link: gaia_spec::RustLinkSpec::Static,
         }),
         None,
         ArtifactOutputSpec {
@@ -160,6 +163,7 @@ fn rust_artifact(id: &str, package: &str, output: &Path) -> ArtifactSpec {
             cargo_git_sources: Vec::new(),
             build_env: Vec::new(),
             cpu: None,
+            link: gaia_spec::RustLinkSpec::Static,
         }),
         None,
         ArtifactOutputSpec {

@@ -6,9 +6,7 @@ use gaia_artifact_providers::{
     render_artifact_backend_state, run_command_with_retries, write_artifact_marker,
 };
 use gaia_process::register_docker_mount;
-use gaia_spec::{
-    ArtifactDefinition, ArtifactSpec, BuildModeSpec, CargoGitSourceSpec, ResolvedBuildSpec,
-};
+use gaia_spec::{ArtifactDefinition, ArtifactSpec, BuildModeSpec, ResolvedBuildSpec};
 use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -18,11 +16,14 @@ use std::process::Command;
 mod build_env;
 mod cargo_errors;
 mod cargo_git;
+mod feature_flags;
+mod std_library;
 mod toolchain;
 mod tools;
 
 use build_env::{cargo_build_env, offline_cargo_env};
 use cargo_errors::cargo_failing_packages;
+use feature_flags::CargoFeatureFlags;
 
 use tools::{host_toolchain_identity, sccache_env, strip_collected_output, toolchain_version};
 
@@ -86,7 +87,11 @@ impl ArtifactProvider for RustProvider {
         let source_dir = contract.source_dir.as_deref().unwrap_or(".");
         let output_path = artifact_output_path(contract, source_dir);
 
-        let (build_mode, messages) = if contract.allow_nested_build {
+        let (build_mode, messages) = if is_std_library(artifact) && contract.allow_nested_build {
+            let target = cargo_target_for(source_dir, contract);
+            std_library::collect(source_dir, contract, &target.dir, log_sink, cancel_check)?;
+            ("toolchain", Vec::new())
+        } else if contract.allow_nested_build {
             let target = cargo_target_for(source_dir, contract);
             run_cargo_build(
                 source_dir,
@@ -218,19 +223,47 @@ impl ArtifactProvider for RustProvider {
             }
         }
         let target = cargo_target_for(source_dir, leader.contract);
-        match run_cargo_build(
-            source_dir,
-            &packages,
-            &CargoFeatureFlags::of(leader.artifact),
-            leader.contract,
-            &target,
-            leader.log_sink.clone(),
-            cancel_check.clone(),
-        ) {
+        // Flags come from a crate-building member: the standard library's
+        // own carry no features or link mode.
+        let flags_from = items
+            .iter()
+            .find(|item| !is_std_library(item.artifact))
+            .unwrap_or(leader);
+        let built = if packages.is_empty() {
+            Ok(())
+        } else {
+            run_cargo_build(
+                source_dir,
+                &packages,
+                &CargoFeatureFlags::of(flags_from.artifact),
+                leader.contract,
+                &target,
+                leader.log_sink.clone(),
+                cancel_check.clone(),
+            )
+        };
+        match built {
             Ok(()) => items
                 .iter()
                 .zip(resolved)
                 .map(|(item, (package, target_name))| {
+                    if is_std_library(item.artifact) {
+                        std_library::collect(
+                            source_dir,
+                            item.contract,
+                            &target.dir,
+                            item.log_sink.clone(),
+                            cancel_check.clone(),
+                        )?;
+                        return self.finish_artifact(
+                            item.artifact,
+                            item.contract,
+                            &package,
+                            &target_name,
+                            "toolchain",
+                            Vec::new(),
+                        );
+                    }
                     collect_cargo_output(
                         leader.contract.source_dir.as_deref().unwrap_or("."),
                         &target.dir,
@@ -367,6 +400,11 @@ fn package_and_target(
             artifact.id.as_str().to_string(),
         ),
     }
+}
+
+/// Whether `artifact` is the toolchain's standard library (`package = "std"`).
+fn is_std_library(artifact: &ArtifactSpec) -> bool {
+    matches!(&artifact.definition, ArtifactDefinition::Rust(rust) if rust.is_std_library())
 }
 
 /// Packages one cargo invocation for `artifact` selects: every package of
@@ -563,66 +601,6 @@ fn prepare_cargo_target(target: &CargoTarget) -> Result<(), ArtifactProviderErro
     Ok(())
 }
 
-/// Cargo feature selection of a rust artifact, and the git sources its cargo
-/// git dependencies come from.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct CargoFeatureFlags {
-    features: Vec<String>,
-    no_default_features: bool,
-    all_features: bool,
-    /// `cargo_git_sources`: prepared on the host before cargo runs. Not in
-    /// the state fields: the artifact's fingerprint covers them.
-    git_sources: Vec<CargoGitSourceSpec>,
-    /// `build_env`: in the fingerprint, not the state fields, like the above.
-    build_env: Vec<(String, String)>,
-    /// The `[cpu]` profile's flags: in the fingerprint, like the above.
-    cpu: Option<gaia_spec::RustCpuSpec>,
-}
-
-impl CargoFeatureFlags {
-    fn of(artifact: &ArtifactSpec) -> Self {
-        match &artifact.definition {
-            ArtifactDefinition::Rust(rust) => Self {
-                features: rust.features.clone(),
-                no_default_features: rust.no_default_features,
-                all_features: rust.all_features,
-                git_sources: rust.cargo_git_sources.clone(),
-                build_env: rust.build_env.clone(),
-                cpu: rust.cpu.clone(),
-            },
-            _ => Self::default(),
-        }
-    }
-
-    fn apply(&self, command: &mut Command) {
-        if self.all_features {
-            command.arg("--all-features");
-        }
-        if self.no_default_features {
-            command.arg("--no-default-features");
-        }
-        if !self.features.is_empty() {
-            command.arg("--features").arg(self.features.join(","));
-        }
-    }
-
-    /// State fields, only for non-default selections so existing artifact
-    /// state (and therefore reuse) is unchanged for artifacts without flags.
-    fn state_fields(&self) -> Vec<(String, String)> {
-        let mut fields = Vec::new();
-        if !self.features.is_empty() {
-            fields.push(("features".to_string(), self.features.join(",")));
-        }
-        if self.no_default_features {
-            fields.push(("no_default_features".to_string(), "true".to_string()));
-        }
-        if self.all_features {
-            fields.push(("all_features".to_string(), "true".to_string()));
-        }
-        fields
-    }
-}
-
 fn cargo_build_command(
     source_dir: &str,
     packages: &[String],
@@ -681,6 +659,18 @@ fn run_cargo_build(
         flags.cpu.as_ref(),
         contract.artifact_target.as_deref(),
         |name| std::env::var(name).ok(),
+    );
+    let toolchain_env = toolchain::with_link_flags(
+        toolchain_env,
+        flags.link,
+        contract.artifact_target.as_deref(),
+        |name| {
+            build_env
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.clone())
+                .or_else(|| std::env::var(name).ok())
+        },
     );
     let mut command = cargo_build_command(source_dir, packages, flags, contract, &target.dir);
     if toolchain::sets_target_rustflags(&toolchain_env) {

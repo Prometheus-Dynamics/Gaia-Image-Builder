@@ -182,6 +182,7 @@ const RUST_ARTIFACT_KEYS: &[&str] = &[
     "no_default_features",
     "all_features",
     "build_env",
+    "link",
 ];
 const JAVA_ARTIFACT_KEYS: &[&str] = &["build_target", "build_args", "build_command", "build_env"];
 const PACKAGE_DIR_ARTIFACT_KEYS: &[&str] = &["package_dir"];
