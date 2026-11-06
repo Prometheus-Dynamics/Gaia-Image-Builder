@@ -1,6 +1,6 @@
 # TODO
 
-Open work, checked against the code on 2026-11-03. Every open item says what it
+Open work, checked against the code on 2026-11-06. Every open item says what it
 is, why, when it is done and what blocks it. Finished items are in "Done" with
 their commits.
 
@@ -32,16 +32,8 @@ through HeliOS). The other boards follow it, so their items stay below.
   - What: how long `tools/build-os.sh raze full` takes on the build host, warm and cold, and the step that dominates it; then bring it under HeliOS's targets: warm (one HeliOS crate changed) under 5 minutes, cold under 20. In the qemu builds of 2026-11-02 the `helios-api` cargo build held the run at step 17 of 210 for about 15 minutes (fat LTO, or a warm target dir not reused?). Gaia's own 10-minute gate is a separate item.
   - Why: every Raze change waits on this build, and the gate has to fit it.
   - Done when: the times are measured and the build meets both targets.
-  - Status: Measured 2026-11-03, static with fat LTO: cold 547 s (`image:prepare` 8m14s), warm no-op 1.3 s. The warm figure for one changed crate is still the old 5m23s (helios-api 2m46s), so that target is unconfirmed. Shared mode changes the link step, so both get measured again once it lands.
+  - Status: Measured 2026-11-03, static with fat LTO: cold 547 s (`image:prepare` 8m14s), warm no-op 1.3 s. On 2026-11-06 (HeliOS dd2ab41d, host load about 90) a no-op run took 3 s (205 of 207 reused). The warm figure for one changed crate is still the old 5m23s (helios-api 2m46s), so that target is unconfirmed. Shared mode changes the link step, so both get measured again once it lands.
   - Blocked by: nothing.
-- **Raze build warnings**
-  - What: the ccache warning every Raze build prints: ccache allowed 50 GiB on a disk with 14 GiB free. (The duplicate `ov9282`, `pisp_be` and `rp1_cfe_downstream` modules and the missing `r8152` firmware are HeliOS's, in its `raze.toml`.)
-  - Why: a clean Raze build makes a new warning stand out.
-  - Done when: a Raze build prints no ccache warning.
-  - Status: the Gaia user cache (ccache in it) moved to the SSD (`~/.cache/gaia` links to `/mnt/ssd-samsung/gaia/cache`, 900 GB free); the next Raze build confirms it.
-  - Blocked by: nothing.
-
-## Boards: test what is written
 
 - **Boot the board examples**
   - What: boot each image in `examples/boards/` on its board: ROCK 5C, ROCK 4D, Luckfox Pico Pro, BPI-CanMV-K230D-Zero, and the CM4 and Pi 5 cast receivers. Read the RK3576 maskrom USB product id with `lsusb` on the ROCK 4D.
@@ -92,11 +84,7 @@ through HeliOS). The other boards follow it, so their items stay below.
   - Why: each chip needs a full config to build from.
   - Done when: each example builds where its sources are present, and is added to `crates/core/app/tests/examples_boards.rs`.
   - Blocked by: nothing.
-- **Noisy firmware warnings**
-  - What: fewer `asks for firmware` lines from `image check`, for example one summary per image with the list in the report.
-  - Why: the ROCK 5C build printed 832 such lines, which bury warnings that matter. The Luckfox prints two, for `cfg80211`'s `regulatory.db`.
-  - Done when: a ROCK 5C build prints a short summary, and the whole list is still in its report.
-  - Blocked by: nothing.
+
 - **K230D BSP (HVS_U01, HVS_I02)**
   - What: Canaan's Linux-only SDK with Linux on the big C908 (CPU1, the only core with RVV), vendor U-Boot and OpenSBI, and SPI-NAND boot. The media memory is sized on the K230D Zero (2026-11-02): a 16 MiB CMA area shared by VGLite, MMZ and the CMA dma-heap, for Styx's rings, Eidos's pyramid and VGLite (10.9 MiB); the BSP boards take the same budget.
   - Why: the smart USB camera and the Inferno host.
@@ -104,7 +92,7 @@ through HeliOS). The other boards follow it, so their items stay below.
   - Blocked by: the boards (PCB).
 - **Rockchip BSP: RK3588S/RK3582 (HVS_MH01) and RK3576 (HVS_MM01)**
   - What: Rockchip's vendor 6.1 kernel with rkisp, rkcif, RGA, MPP (rkvenc) and RKNN, but no rkaiq and no librga. Boot chain: mainline U-Boot, TF-A and the rkbin DDR blob. GPU: libmali with Vulkan (Daedalus). eMMC (E) and SPI-NAND (L) variants. The ROCK examples build a mainline kernel (6.19), so the vendor kernel is fetched but not built by any example yet.
-  - rkbin licence (checked 2026-10-30 at rkbin 3e288fe): Rockchip grants a non-exclusive licence to use, copy and distribute. It forbids decompiling or reverse engineering, and the copyright notices must stay. Ship rkbin's `LICENSE` in the image's licence directory and in each export; the ROCK examples do not do this yet. DDR blobs for RK3588, RK3576, RK3566 and RK3562 are in `bin/rk35`.
+  - rkbin licence (checked 2026-10-30 at rkbin 3e288fe): Rockchip grants a non-exclusive licence to use, copy and distribute. It forbids decompiling or reverse engineering, and the copyright notices must stay. The ROCK 5C, ROCK 4D and Luckfox images ship rkbin's `LICENSE` (d160d7d). DDR blobs for RK3588, RK3576, RK3566 and RK3562 are in `bin/rk35`.
   - Why: the CM5-format camera modules.
   - Done when: each module boots A/B from both storage variants, and Styx and Daedalus see their devices.
   - Blocked by: the boards.
@@ -134,10 +122,10 @@ through HeliOS). The other boards follow it, so their items stay below.
 
 The user decided these on 2026-11-03, through HeliOS. Nothing here starts until the user says so. The Raze #2 shared-library A/B with LTO informs how shared gets built, not whether.
 
-- Link mode per product: static and shared, with a core, surface and wrapper for each dependency.
-- One combined build across workspaces, with one feature set per image. Rust shared libraries only link when every crate has the same hash, so the products have to build together.
-- A check that a process does not hold the same crate both statically and through a shared library.
-- Shipping libstd properly. The A/B used a rootfs overlay.
+- Link mode per product: static and shared, with a core, surface and wrapper for each dependency. Gaia's side is in: declared surfaces (1873431), their consumers (717dbe9), and the per-image choice as layers (docs, 22dba15).
+- One combined build across workspaces, with one feature set per image. Designed in docs/design/combined-surface-build.md (9b8a91b): one surface crate per surface in the product's workspace, registered through Daedalus's `export_surface!`. Gaia checks one version of each own crate per image (dce1b0b) and the plugins a surface opens (dce1b0b, 1e7d2c7, 77f38d4). Left: HeliOS's surface crate and its config.
+- A check that a process does not hold the same crate both statically and through a shared library: "not both" (bf45532), and the copies of std per program (dba9515).
+- Shipping libstd properly: `package = "std"` as an artifact (7e090ec).
 - Two-pass trim: build, read what each library's users import, relink exporting only that. The A/B does this by hand, and cargo does not relink when the export list changes.
 - Packaging the Lemnos kernel module into slots. The module lives in Lemnos, with drivers in Rust in userspace.
 - Module sources moving from Styx to Lemnos.
@@ -176,6 +164,10 @@ The user pinned these on 2026-10-30.
 Cut and staying cut: TUI cleanup, deb packaging niceties.
 
 ## Done
+
+- Raze build warnings: a full Raze build on 2026-11-06 printed none (the ccache warning went with the cache's move to the SSD).
+- Noisy firmware warnings: many missing firmware files are one warning line, the list in the report: 96f0042.
+- Docker containers keep Gaia's CPU affinity (`taskset` reaches the builds): 8c229a1.
 
 - Config v3 enums: e411aef.
 - `examples/sim-x86_64` and the app-layer fast path: a78b53a.
