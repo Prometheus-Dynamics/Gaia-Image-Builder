@@ -23,6 +23,9 @@ pub(crate) fn spec_for(build_dir: &Path) -> ResolvedBuildSpec {
         clean_policy: CleanPolicy::None,
         named_paths: Vec::new(),
     };
+    // The default spec's timeout is 0, run as 1 s: a local clone missed it on
+    // a loaded host (the gate at load 166).
+    spec.policy.providers.git.timeout_seconds = 60;
     spec
 }
 

@@ -21,6 +21,9 @@ fn docker_spec(build_dir: &Path) -> ResolvedBuildSpec {
     });
     spec.policy.providers.git.allow_remote_resolution = true;
     spec.policy.providers.git.retry_attempts = 1;
+    // The default spec's timeout is 0, run as 1 s: a local clone missed it on
+    // a loaded host (the gate at load 166).
+    spec.policy.providers.git.timeout_seconds = 60;
     spec
 }
 
