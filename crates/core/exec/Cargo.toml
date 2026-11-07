@@ -9,7 +9,7 @@ rust-version.workspace = true
 description = "Execution runtime for planned Gaia operations."
 
 [dependencies]
-gaia-formats.workspace = true
+gaia-formats = { workspace = true, features = ["builder", "io", "derive"] }
 gaia-plan.workspace = true
 gaia-artifact-providers.workspace = true
 gaia-image-providers.workspace = true

@@ -11,7 +11,7 @@
 //!   keeps (`get_bad_peb_limit`), and the order Gaia lays an image out in.
 //! - [`verity`]: the veritysetup (cryptsetup) version 1 superblock, the
 //!   appended-tree layout, and Gaia's derivation of the default salt and
-//!   UUID from the data's sha256 ([`verity::Derived`]).
+//!   UUID from the data's sha256 (`verity::Derived`).
 //!
 //! The kernel and cryptsetup define the first two; Gaia defines its layout
 //! and its derivation, and changing either changes every image's bytes or
@@ -26,7 +26,18 @@
 //! format, a default or a derivation here needs a CHANGELOG line saying
 //! what changes on the media, so Atlas can follow it.
 //!
-//! The crate depends on `std` and `sha2` only.
+//! # Features
+//!
+//! The default build is the format types, their encode/decode and
+//! validation, the CRCs, geometry, reserves and the verity superblock and
+//! layout, on `std` alone, with no dependencies. Opt in to the rest:
+//!
+//! - `builder`: `ubi::encode_peb` and `ubi::encode_volume_table`, laying
+//!   out a UBI image;
+//! - `io`: `ubi::read_image` and friends, reading an image from a
+//!   `Read + Seek`;
+//! - `derive`: `verity::Derived` and `verity::derived_uuid`, Gaia's
+//!   default salt and UUID, the only part that needs `sha2`.
 
 pub mod crc;
 pub mod ubi;

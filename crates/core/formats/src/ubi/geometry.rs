@@ -6,7 +6,7 @@ use std::fmt;
 
 /// The header and data offsets of every PEB of an image. The kernel derives
 /// them from the MTD device and refuses an image whose offsets differ.
-/// [`crate::ubi::read_image`] reads them from the EC headers.
+/// `ubi::read_image` (feature `io`) reads them from the EC headers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PebLayout {
     pub peb_size: u32,

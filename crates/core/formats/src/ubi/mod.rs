@@ -13,13 +13,17 @@
 
 mod geometry;
 mod headers;
+#[cfg(feature = "io")]
 mod image;
+#[cfg(feature = "builder")]
 mod peb;
 mod reserve;
 
 pub use geometry::{Geometry, GeometryError, PebLayout};
 pub use headers::{EcHeader, HeaderError, MAX_ERASE_COUNTER, VidHeader, VtblRecord};
+#[cfg(feature = "io")]
 pub use image::{Image, ImageError, Volume, find_peb_size, programmed_len, read_image};
+#[cfg(feature = "builder")]
 pub use peb::{encode_peb, encode_volume_table};
 pub use reserve::{bad_peb_reserve, minimum_device_pebs, reserved_pebs};
 

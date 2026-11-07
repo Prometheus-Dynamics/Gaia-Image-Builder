@@ -23,6 +23,7 @@
 //!
 //! The tree's first hash block follows the superblock, one hash block on.
 
+#[cfg(feature = "derive")]
 use sha2::{Digest, Sha256};
 use std::fmt;
 
@@ -42,6 +43,7 @@ pub const MAX_SALT_SIZE: usize = 256;
 pub const DEFAULT_DATA_BLOCK_SIZE: u32 = 4096;
 pub const DEFAULT_HASH_BLOCK_SIZE: u32 = 4096;
 /// What Gaia hashes ahead of the data's sha256 for the default UUID.
+#[cfg(feature = "derive")]
 pub const UUID_DOMAIN: &[u8] = b"gaia dm-verity uuid\n";
 
 const ALGORITHM_FIELD: usize = 32;
@@ -286,6 +288,7 @@ pub fn check(superblock: &Superblock, recorded: &Recorded) -> Vec<Mismatch> {
     mismatches
 }
 
+#[cfg(feature = "derive")]
 /// Gaia's default salt and UUID for a data image, derived from its sha256
 /// so the same data gives the same tree and root hash:
 ///
@@ -300,6 +303,7 @@ pub struct Derived {
     pub uuid: String,
 }
 
+#[cfg(feature = "derive")]
 impl Derived {
     /// From the data's sha256 as hex (case does not matter).
     pub fn from_sha256_hex(sha256_hex: &str) -> Self {
@@ -316,6 +320,7 @@ impl Derived {
     }
 }
 
+#[cfg(feature = "derive")]
 /// A UUID (version 4 layout) derived from `parts`: the first 16 bytes of
 /// their sha256, with the version and variant bits set. Gaia also derives
 /// ext4 and EROFS UUIDs this way, with their own domains.
@@ -403,6 +408,14 @@ mod tests {
 
     #[test]
     fn uuids_parse_and_format() {
+        let uuid = "0123abcd-4567-4abc-8def-0123456789ab";
+        assert_eq!(format_uuid(&parse_uuid(uuid).unwrap()), uuid);
+        assert_eq!(parse_uuid("not-a-uuid"), None);
+    }
+
+    #[cfg(feature = "derive")]
+    #[test]
+    fn derived_uuids_are_version_4() {
         let uuid = derived_uuid(&[b"domain", b"data"]);
         assert_eq!(uuid, derived_uuid(&[b"domain", b"data"]));
         assert_ne!(uuid, derived_uuid(&[b"domain", b"other"]));
