@@ -922,8 +922,17 @@ pub fn operation_content_signature(
             operation_output_signature(spec, kind)
         }
         // Dependents consume a git source's checked-out tree, not its commit,
-        // so a rev bump with identical files does not invalidate them.
+        // so a rev bump with identical files does not invalidate them. A
+        // source that only serves cargo (`cargo_git_sources`) gives them
+        // nothing of its tree: cargo builds the commits the workspace's
+        // Cargo.lock pins from its mirror, and that lock is the workspace
+        // source's content. Its branch moving then leaves them reusable
+        // (a moved Eidos `dev` reran HeliOS's whole cargo build, 12 minutes,
+        // for identical binaries).
         OperationKind::MaterializeSource { source_id } => {
+            if crate::reuse_floating::serves_cargo_only(spec, source_id.as_str()) {
+                return Some(format!("cargo-mirror:{}", source_id.as_str()));
+            }
             source_tree_content_signature(spec, source_id.as_str())
                 .or_else(|| operation_output_signature(spec, kind))
         }

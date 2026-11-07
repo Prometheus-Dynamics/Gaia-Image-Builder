@@ -6,7 +6,8 @@
 pub mod support;
 
 use gaia_plan::{
-    ExecutionPlan, OperationReuse, PlannedOperation, ReuseState, plan_build_with_reuse_state,
+    ExecutionPlan, OperationReuse, PlannedOperation, ReuseState, operation_input_signature,
+    plan_build_with_reuse_state,
 };
 use gaia_spec::{
     ArtifactDefinition, CargoGitSourceSpec, ResolvedBuildSpec, SourceDefinition, SourceId,
@@ -262,6 +263,19 @@ fn a_moved_cargo_mirror_says_cargo_builds_the_locked_commits() {
             &first[..7],
             &second[..7]
         )
+    );
+
+    // The artifact is offered its early cutoff, and the source's new tree
+    // leaves its input unchanged: cargo builds what Cargo.lock pins.
+    let before = operation_input_signature(&spec, &moved, op(&moved, ARTIFACT));
+    record_materialization(&spec, &second);
+    let dir = PathBuf::from(&spec.workspace.build_dir).join("sources/corelib");
+    fs::write(dir.join("source.txt"), "v2").expect("corelib content");
+    let after = plan(&spec, Some(&state));
+    assert_eq!(
+        operation_input_signature(&spec, &after, op(&after, ARTIFACT)),
+        before,
+        "a cargo mirror's new head does not change what the artifact consumes"
     );
 }
 
