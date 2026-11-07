@@ -14,6 +14,8 @@ const EXAMPLES: &[&str] = &[
     "boards/rock-4d",
     "boards/k230d-zero",
     "boards/luckfox-pico-pro",
+    "boards/zero-3w",
+    "boards/aio-3562jq",
     "boards/cast-receiver/cm4",
     "boards/cast-receiver/pi5",
     "sim-x86_64",
