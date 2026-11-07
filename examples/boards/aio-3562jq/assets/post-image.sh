@@ -13,7 +13,8 @@ src="${3:?usage: post-image.sh <images dir> <rkbin> <firefly u-boot>}"
 work="$BUILD_DIR/vendor-uboot"
 mkdir -p "$work"
 rsync -a --delete "$src/" "$work/u-boot/"
-ln -sfn "$rkbin" "$work/rkbin"
+# A copy: boot_merger writes its outputs (and idblock.img) into rkbin.
+rsync -a --delete "$rkbin/" "$work/rkbin/"
 cd "$work/u-boot"
 # make.sh: Buildroot's job count, python3 (decode_bl31.py is python3-clean;
 # the SDK assumes python2), and GCC 14 warnings that this 2017 tree turns
@@ -21,13 +22,17 @@ cd "$work/u-boot"
 sed -i "s/^JOB=.*/JOB=${BR2_JLEVEL:-$(nproc)}/; s/which python2/which python3/; s/PYTHON=python2/PYTHON=python3/" make.sh
 sed -i 's|^\t${srctree}/arch/arm/mach-rockchip/decode_bl31.py|\tpython3 ${srctree}/arch/arm/mach-rockchip/decode_bl31.py|' arch/arm/mach-rockchip/fit_nodes.sh
 PATH="$HOST_DIR/bin:$PATH" KCFLAGS="-Wno-error" ./make.sh rk3562 CROSS_COMPILE=aarch64-buildroot-linux-gnu-
-ini="$rkbin/RKBOOT/RK3562MINIALL.ini"
-ddr="$rkbin/$(sed -n 's/^FlashData=//p' "$ini" | tr -d '\r')"
-spl="$rkbin/$(sed -n 's/^FlashBoot=//p' "$ini" | tr -d '\r')"
+ini="$work/rkbin/RKBOOT/RK3562MINIALL.ini"
+ddr="$work/rkbin/$(sed -n 's/^FlashData=//p' "$ini" | tr -d '\r')"
+spl="$work/rkbin/$(sed -n 's/^FlashBoot=//p' "$ini" | tr -d '\r')"
 ./tools/mkimage -n rk3562 -T rksd -d "$ddr:$spl" idblock.bin
 install -m 0644 uboot.img "$BINARIES_DIR/uboot.img"
 install -m 0644 idblock.bin "$BINARIES_DIR/idblock.bin"
 for loader in rk3562_loader_v*.bin; do
 	install -m 0644 "$loader" "$BINARIES_DIR/$loader"
 done
+# boot_merger's own idblock (NEWIDB in the ini), from the loader's parts.
+if [ -f "$work/rkbin/idblock.img" ]; then
+	install -m 0644 "$work/rkbin/idblock.img" "$BINARIES_DIR/idblock.img"
+fi
 install -m 0644 "$rkbin/LICENSE" "$BINARIES_DIR/rkbin-LICENSE.txt"

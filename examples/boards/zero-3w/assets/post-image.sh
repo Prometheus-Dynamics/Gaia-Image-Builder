@@ -15,5 +15,12 @@ cp "$rkbin/RKBOOT/$ini" "$work/RKBOOT/$ini"
 (cd "$work" && "$rkbin/tools/boot_merger" "RKBOOT/$ini")
 loader=$(sed -n 's/^PATH=//p' "$rkbin/RKBOOT/$ini" | tr -d '\r')
 install -m 0644 "$work/$loader" "$BINARIES_DIR/$loader"
+# NEWIDB=true inis also make an idblock (IDB_PATH=, else idblock.img): the
+# loader's DDR init + SPL laid out for the boot media, kept beside it.
+idb=$(sed -n 's/^IDB_PATH=//p' "$rkbin/RKBOOT/$ini" | tr -d '\r')
+idb="${idb:-idblock.img}"
+if [ -f "$work/$idb" ]; then
+    install -m 0644 "$work/$idb" "$BINARIES_DIR/$idb"
+fi
 # rkbin's licence beside the loader and the images that carry its blobs.
 install -m 0644 "$rkbin/LICENSE" "$BINARIES_DIR/rkbin-LICENSE.txt"
