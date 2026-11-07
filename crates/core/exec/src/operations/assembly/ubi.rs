@@ -1,50 +1,33 @@
-//! UBI images, the bytes `ubinize` writes and the kernel's UBI attaches
-//! (`drivers/mtd/ubi/ubi-media.h`). Each physical eraseblock (PEB) starts
-//! with an erase-counter header; each one holding data has a volume-ID
-//! header at `vid_header_offset` and the logical eraseblock (LEB) at
-//! `data_offset`. PEBs 0 and 1 hold the layout volume: two copies of the
-//! volume table. Every header field is big-endian, and every CRC is the
-//! kernel's `crc32_le(UBI_CRC32_INIT, ...)`: the standard CRC32 without its
-//! final inversion.
+//! UBI images, the bytes `ubinize` writes and the kernel's UBI attaches.
+//! The format (headers, CRCs, geometry, reserves) is `gaia_formats::ubi`,
+//! the contract shared with Atlas; this is Gaia's layout of an image: the
+//! layout volume in PEBs 0 and 1, then each volume's data LEBs.
 
 use super::*;
+use gaia_formats::ubi::{
+    EcHeader, LAYOUT_VOLUME_COMPAT, LAYOUT_VOLUME_ID, LAYOUT_VOLUME_LEBS, VidHeader, VolumeKind,
+    VtblRecord, encode_peb, encode_volume_table,
+};
+pub(super) use gaia_formats::ubi::{bad_peb_reserve, minimum_device_pebs};
 use gaia_spec::{AssemblyUbiSpec, AssemblyUbiVolumeKindSpec as UbiVolumeKind, UbiGeometry};
 use std::io::{BufReader, BufWriter, Read, Write};
 
-const EC_MAGIC: u32 = 0x5542_4923; // "UBI#"
-const VID_MAGIC: u32 = 0x5542_4921; // "UBI!"
-const VERSION: u8 = 1;
-const HEADER_SIZE: u32 = gaia_spec::UBI_HEADER_SIZE;
-/// The bytes of a header its CRC covers: all but the CRC itself.
-const HEADER_CRC_SIZE: usize = 60;
-const VTBL_RECORD_SIZE: usize = gaia_spec::UBI_VTBL_RECORD_SIZE as usize;
-const VTBL_RECORD_CRC_SIZE: usize = VTBL_RECORD_SIZE - 4;
-const LAYOUT_VOLUME_ID: u32 = 0x7fff_efff;
-const LAYOUT_VOLUME_LEBS: u32 = 2;
-/// `UBI_COMPAT_REJECT`: an older UBI that does not know the layout volume
-/// refuses the image.
-const LAYOUT_VOLUME_COMPAT: u8 = 5;
-const VTBL_AUTORESIZE: u8 = 0x01;
-/// The PEBs UBI keeps for itself beyond the layout volume: one for wear
-/// levelling (`WL_RESERVED_PEBS`) and one for atomic LEB changes
-/// (`EBA_RESERVED_PEBS`).
-const RUNTIME_RESERVED_PEBS: u64 = 2;
-const ERASED: u8 = 0xff;
+#[cfg(test)]
+use gaia_formats::ubi::{
+    EC_MAGIC, VID_MAGIC, VTBL_AUTORESIZE, VTBL_RECORD_CRC_SIZE, VTBL_RECORD_SIZE,
+};
 
 pub(super) fn ubi_crc(bytes: &[u8]) -> u32 {
-    !crc32(bytes)
+    gaia_formats::crc::ubi_crc(bytes)
 }
 
-fn kind_code(kind: UbiVolumeKind) -> u8 {
+fn volume_kind(kind: UbiVolumeKind) -> VolumeKind {
     match kind {
-        UbiVolumeKind::Dynamic => 1,
-        UbiVolumeKind::Static => 2,
+        UbiVolumeKind::Dynamic => VolumeKind::Dynamic,
+        UbiVolumeKind::Static => VolumeKind::Static,
     }
 }
 
-/// The flash geometry an image is written for. The kernel refuses an image
-/// whose header offsets differ from the ones it derives from the MTD
-/// device, so these must match the flash part.
 /// One volume to write. `size` reserves LEBs past the data, for a slot that
 /// a later, larger update must fit in; it is rounded up to whole LEBs.
 pub(super) struct UbiVolume<'a> {
@@ -75,113 +58,8 @@ impl UbiImageSummary {
     /// The PEBs the attached image needs before bad-block reserves: the
     /// layout volume, UBI's own reserves and every volume's reservation.
     pub(super) fn reserved_pebs(&self) -> u64 {
-        u64::from(LAYOUT_VOLUME_LEBS)
-            + RUNTIME_RESERVED_PEBS
-            + self
-                .volumes
-                .iter()
-                .map(|volume| u64::from(volume.reserved_lebs))
-                .sum::<u64>()
+        gaia_formats::ubi::reserved_pebs(self.volumes.iter().map(|volume| volume.reserved_lebs))
     }
-}
-
-/// The bad-block reserve UBI keeps on a device of `device_pebs` PEBs
-/// (`get_bad_peb_limit`): `per_1024` per 1024 PEBs, rounded up.
-pub(super) fn bad_peb_reserve(device_pebs: u64, per_1024: u64) -> u64 {
-    let limit = device_pebs * per_1024 / 1024;
-    if limit * 1024 / per_1024.max(1) < device_pebs {
-        limit + 1
-    } else {
-        limit
-    }
-}
-
-/// The fewest PEBs a flash device needs to attach an image that reserves
-/// `reserved_pebs`, counting the bad-block reserve that grows with it.
-pub(super) fn minimum_device_pebs(reserved_pebs: u64, per_1024: u64) -> u64 {
-    let mut pebs = reserved_pebs;
-    while pebs < reserved_pebs + bad_peb_reserve(pebs, per_1024) {
-        pebs += 1;
-    }
-    pebs
-}
-
-fn ec_header(geometry: &UbiGeometry, image_seq: u32) -> [u8; HEADER_SIZE as usize] {
-    let mut header = [0u8; HEADER_SIZE as usize];
-    header[0..4].copy_from_slice(&EC_MAGIC.to_be_bytes());
-    header[4] = VERSION;
-    // The erase counter (8..16) starts at 0, as ubinize's default.
-    header[16..20].copy_from_slice(&geometry.vid_header_offset.to_be_bytes());
-    header[20..24].copy_from_slice(&geometry.data_offset.to_be_bytes());
-    header[24..28].copy_from_slice(&image_seq.to_be_bytes());
-    let crc = ubi_crc(&header[..HEADER_CRC_SIZE]);
-    header[60..64].copy_from_slice(&crc.to_be_bytes());
-    header
-}
-
-struct VidHeader {
-    kind: UbiVolumeKind,
-    compat: u8,
-    volume_id: u32,
-    lnum: u32,
-    /// Static volumes only: the bytes in this LEB, the volume's LEB count
-    /// and the CRC of this LEB's bytes.
-    data_size: u32,
-    used_ebs: u32,
-    data_crc: u32,
-}
-
-fn vid_header(fields: &VidHeader) -> [u8; HEADER_SIZE as usize] {
-    let mut header = [0u8; HEADER_SIZE as usize];
-    header[0..4].copy_from_slice(&VID_MAGIC.to_be_bytes());
-    header[4] = VERSION;
-    header[5] = kind_code(fields.kind);
-    header[7] = fields.compat;
-    header[8..12].copy_from_slice(&fields.volume_id.to_be_bytes());
-    header[12..16].copy_from_slice(&fields.lnum.to_be_bytes());
-    header[20..24].copy_from_slice(&fields.data_size.to_be_bytes());
-    header[24..28].copy_from_slice(&fields.used_ebs.to_be_bytes());
-    // data_pad (28..32) is 0: every volume has alignment 1.
-    header[32..36].copy_from_slice(&fields.data_crc.to_be_bytes());
-    // The sequence number (40..48) is 0, as ubinize writes it: the kernel
-    // numbers writes from the highest it finds.
-    let crc = ubi_crc(&header[..HEADER_CRC_SIZE]);
-    header[60..64].copy_from_slice(&crc.to_be_bytes());
-    header
-}
-
-fn vtbl_record(
-    record: &mut [u8],
-    reserved_lebs: u32,
-    kind: UbiVolumeKind,
-    name: &str,
-    autoresize: bool,
-) {
-    record[0..4].copy_from_slice(&reserved_lebs.to_be_bytes());
-    record[4..8].copy_from_slice(&1u32.to_be_bytes());
-    record[12] = kind_code(kind);
-    record[14..16].copy_from_slice(&(name.len() as u16).to_be_bytes());
-    record[16..16 + name.len()].copy_from_slice(name.as_bytes());
-    record[144] = if autoresize { VTBL_AUTORESIZE } else { 0 };
-}
-
-fn seal_vtbl_records(table: &mut [u8]) {
-    for record in table.as_chunks_mut::<VTBL_RECORD_SIZE>().0 {
-        let crc = ubi_crc(&record[..VTBL_RECORD_CRC_SIZE]);
-        record[VTBL_RECORD_CRC_SIZE..].copy_from_slice(&crc.to_be_bytes());
-    }
-}
-
-/// One whole PEB: the EC header, the VID header and the LEB's bytes, with
-/// erased (0xff) bytes between them and after the data.
-fn peb(geometry: &UbiGeometry, image_seq: u32, vid: &VidHeader, data: &[u8]) -> Vec<u8> {
-    let mut peb = vec![ERASED; geometry.peb_size as usize];
-    peb[..HEADER_SIZE as usize].copy_from_slice(&ec_header(geometry, image_seq));
-    let vid_at = geometry.vid_header_offset as usize;
-    peb[vid_at..vid_at + HEADER_SIZE as usize].copy_from_slice(&vid_header(vid));
-    let data_at = geometry.data_offset as usize;
-    peb[data_at..data_at + data.len()].copy_from_slice(data);
-    peb
 }
 
 /// Writes the UBI image of `volumes` to `out`: the layout volume in PEBs 0
@@ -195,16 +73,21 @@ pub(super) fn write_ubi_image(
     volumes: &mut [UbiVolume<'_>],
     out: &mut dyn Write,
 ) -> Result<UbiImageSummary, String> {
+    let layout = geometry.layout();
     let leb = u64::from(geometry.leb_size());
-    let mut table = vec![0u8; geometry.vtbl_records() as usize * VTBL_RECORD_SIZE];
+    let mut records = Vec::new();
     let mut summaries = Vec::new();
     for volume in volumes.iter() {
         let data_bytes = volume.data.as_ref().map_or(0, |(_, bytes)| *bytes);
         let used = data_bytes.div_ceil(leb);
+        // At least one LEB: the kernel refuses a volume table record that
+        // names a volume but reserves nothing (an autoresize volume with no
+        // size, or an empty image).
         let reserved = volume
             .size
             .map_or(used, |size| size.div_ceil(leb))
-            .max(used);
+            .max(used)
+            .max(1);
         if volume.size.is_some_and(|size| size < data_bytes) {
             return Err(format!(
                 "volume '{}' holds {data_bytes} bytes, more than its size of {} bytes",
@@ -216,14 +99,15 @@ pub(super) fn write_ubi_image(
             u32::try_from(used).map_err(|_| format!("volume '{}' is too large", volume.name))?;
         let reserved_lebs = u32::try_from(reserved)
             .map_err(|_| format!("volume '{}' is too large", volume.name))?;
-        let at = volume.id as usize * VTBL_RECORD_SIZE;
-        vtbl_record(
-            &mut table[at..at + VTBL_RECORD_SIZE],
-            reserved_lebs,
-            volume.kind,
-            volume.name,
-            volume.autoresize,
-        );
+        records.push((
+            volume.id,
+            VtblRecord::new(
+                reserved_lebs,
+                volume_kind(volume.kind),
+                volume.name,
+                volume.autoresize,
+            ),
+        ));
         summaries.push(UbiVolumeSummary {
             id: volume.id,
             name: volume.name.to_string(),
@@ -232,23 +116,24 @@ pub(super) fn write_ubi_image(
             reserved_lebs,
         });
     }
-    seal_vtbl_records(&mut table);
+    let table = encode_volume_table(&layout, &records).map_err(|error| error.to_string())?;
 
+    let ec = EcHeader {
+        erase_counter: 0,
+        vid_header_offset: geometry.vid_header_offset,
+        data_offset: geometry.data_offset,
+        image_seq,
+    };
     let write = |out: &mut dyn Write, bytes: &[u8]| {
         out.write_all(bytes)
             .map_err(|error| format!("failed to write the UBI image: {error}"))
     };
     for lnum in 0..LAYOUT_VOLUME_LEBS {
         let vid = VidHeader {
-            kind: UbiVolumeKind::Dynamic,
             compat: LAYOUT_VOLUME_COMPAT,
-            volume_id: LAYOUT_VOLUME_ID,
-            lnum,
-            data_size: 0,
-            used_ebs: 0,
-            data_crc: 0,
+            ..VidHeader::new(VolumeKind::Dynamic, LAYOUT_VOLUME_ID, lnum)
         };
-        write(out, &peb(geometry, image_seq, &vid, &table))?;
+        write(out, &encode_peb(&layout, &ec, &vid, &table))?;
     }
     let mut pebs_written = u64::from(LAYOUT_VOLUME_LEBS);
     let mut buffer = vec![0u8; leb as usize];
@@ -267,27 +152,17 @@ pub(super) fn write_ubi_image(
             })?;
             left -= take as u64;
             let data = &buffer[..take];
-            let vid = match volume.kind {
-                UbiVolumeKind::Dynamic => VidHeader {
-                    kind: volume.kind,
-                    compat: 0,
-                    volume_id: volume.id,
-                    lnum,
-                    data_size: 0,
-                    used_ebs: 0,
-                    data_crc: 0,
-                },
-                UbiVolumeKind::Static => VidHeader {
-                    kind: volume.kind,
-                    compat: 0,
-                    volume_id: volume.id,
-                    lnum,
+            let kind = volume_kind(volume.kind);
+            let vid = match kind {
+                VolumeKind::Dynamic => VidHeader::new(kind, volume.id, lnum),
+                VolumeKind::Static => VidHeader {
                     data_size: take as u32,
                     used_ebs: summary.used_lebs,
                     data_crc: ubi_crc(data),
+                    ..VidHeader::new(kind, volume.id, lnum)
                 },
             };
-            write(out, &peb(geometry, image_seq, &vid, data))?;
+            write(out, &encode_peb(&layout, &ec, &vid, data))?;
             pebs_written += 1;
         }
     }
@@ -597,6 +472,46 @@ mod tests {
             assert_eq!(be32(vid, 24), 3);
             assert_eq!(be32(vid, 32), ubi_crc(&peb[1024..1024 + size]));
         }
+    }
+
+    #[test]
+    fn the_image_reads_back_with_the_format_crate_and_every_record_reserves() {
+        let geometry = spi_nand();
+        let mut kernel: &[u8] = &[7; 300];
+        let mut volumes = [
+            UbiVolume {
+                id: 0,
+                name: "kernel",
+                kind: UbiVolumeKind::Static,
+                size: None,
+                autoresize: false,
+                data: Some((&mut kernel, 300)),
+            },
+            // No size: the record still reserves a LEB, which the kernel
+            // needs of a record that names a volume.
+            UbiVolume {
+                id: 1,
+                name: "data",
+                kind: UbiVolumeKind::Dynamic,
+                size: None,
+                autoresize: true,
+                data: None,
+            },
+        ];
+        let mut bytes = Vec::new();
+        let summary = write_ubi_image(&geometry, SEQ, &mut volumes, &mut bytes).expect("image");
+        let image =
+            gaia_formats::ubi::read_image(&mut std::io::Cursor::new(&bytes), geometry.peb_size)
+                .expect("read back");
+        assert_eq!(image.layout, geometry.layout());
+        assert_eq!(image.image_seq, SEQ);
+        assert_eq!(image.reserved_pebs(), summary.reserved_pebs());
+        let data = image.volume("data").expect("data");
+        assert_eq!((data.reserved_lebs, data.autoresize), (1, true));
+        assert_eq!(
+            image.volume("kernel").expect("kernel").static_bytes,
+            Some(300)
+        );
     }
 
     #[test]

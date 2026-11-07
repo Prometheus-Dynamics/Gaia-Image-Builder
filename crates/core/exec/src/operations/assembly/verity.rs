@@ -73,26 +73,26 @@ impl VerityOutput {
 
     /// The data's length in 512-byte sectors, a dm-verity table's length.
     pub(super) fn data_sectors(&self) -> u64 {
-        self.data_blocks * u64::from(self.data_block_size) / 512
+        gaia_formats::verity::data_sectors(self.data_blocks, self.data_block_size)
     }
 
     /// The tree's first hash block on the hash device, past the superblock
     /// (one hash block at `hash_offset`): the table's `hash_start`.
     pub(super) fn hash_start_block(&self) -> u64 {
-        self.hash_offset / u64::from(self.hash_block_size) + 1
+        gaia_formats::verity::hash_start_block(self.hash_offset, self.hash_block_size)
     }
 }
 
 /// The data length rounded up to whole data blocks; `veritysetup` covers
 /// exactly these bytes, so the image is zero-padded to them.
 pub(super) fn verity_padded_len(len: u64, data_block_size: u64) -> u64 {
-    len.div_ceil(data_block_size) * data_block_size
+    gaia_formats::verity::padded_len(len, data_block_size)
 }
 
 /// Where the appended tree's superblock goes: the first hash-block boundary
 /// at or after the padded data.
 pub(super) fn verity_hash_offset(padded_len: u64, hash_block_size: u64) -> u64 {
-    padded_len.div_ceil(hash_block_size) * hash_block_size
+    gaia_formats::verity::appended_hash_offset(padded_len, hash_block_size)
 }
 
 pub(super) fn execute_assembly_verity(
@@ -128,14 +128,14 @@ pub(super) fn execute_assembly_verity(
     if data_len == 0 {
         return Err(format!("assembly verity source '{}' is empty", src.display()).into());
     }
-    let source_sha256 = file_sha256(&src)?;
+    let derived = gaia_formats::verity::Derived::from_sha256_hex(&file_sha256(&src)?);
     let salt = match &transform.salt {
         Some(salt) => salt.to_ascii_lowercase(),
-        None => source_sha256.clone(),
+        None => derived.salt,
     };
     let uuid = match &transform.uuid {
         Some(uuid) => uuid.to_ascii_lowercase(),
-        None => derived_uuid(&[b"gaia dm-verity uuid\n", source_sha256.as_bytes()]),
+        None => derived.uuid,
     };
     let padded_len = verity_padded_len(data_len, u64::from(data_block_size));
     let data_blocks = padded_len / u64::from(data_block_size);
@@ -286,27 +286,8 @@ fn is_hex_of_len(value: &str, len: usize) -> bool {
 }
 
 /// A UUID (version 4 layout) derived from `parts`: the first 16 bytes of
-/// their sha256.
-pub(super) fn derived_uuid(parts: &[&[u8]]) -> String {
-    let mut hasher = Sha256::new();
-    for part in parts {
-        hasher.update(part);
-    }
-    let digest = hasher.finalize();
-    let mut bytes = [0u8; 16];
-    bytes.copy_from_slice(&digest[..16]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
-    format!(
-        "{}-{}-{}-{}-{}",
-        &hex[0..8],
-        &hex[8..12],
-        &hex[12..16],
-        &hex[16..20],
-        &hex[20..32]
-    )
-}
+/// their sha256. Also the ext4 and EROFS UUIDs, with their own domains.
+pub(super) use gaia_formats::verity::derived_uuid;
 
 #[cfg(test)]
 mod tests {

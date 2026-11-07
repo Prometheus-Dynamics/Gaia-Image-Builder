@@ -45,6 +45,9 @@ This is the rebuilt documentation set for the current typed Gaia system.
 - [reporting-and-state.md](reporting-and-state.md)
   Machine-readable output files, provider state files, runtime state files, and reuse-state behavior.
 
+- [formats.md](formats.md)
+  The on-media formats Gaia writes and Atlas reads (`gaia-formats`): UBI images, the dm-verity superblock, and Gaia's salt and UUID derivation.
+
 - [migration-from-legacy.md](migration-from-legacy.md)
   How to translate old Gaia trees that still think in `buildroot` / `program` / `stage` module buckets.
 

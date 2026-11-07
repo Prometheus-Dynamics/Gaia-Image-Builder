@@ -1,0 +1,18 @@
+[package]
+name = "gaia-formats"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "On-media formats Gaia writes and Atlas reads: UBI images and dm-verity superblocks."
+
+[lib]
+name = "gaia_formats"
+
+[dependencies]
+sha2.workspace = true
+
+[lints]
+workspace = true

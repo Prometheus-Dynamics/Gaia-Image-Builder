@@ -200,6 +200,24 @@ fn verity_tree_is_appended_after_the_padded_data_and_matches_the_reference() {
     );
     assert!(bytes.len() > padded, "the tree is appended");
 
+    // The superblock veritysetup wrote holds what Gaia recorded, as Atlas's
+    // slot-init reads it (gaia-formats).
+    let superblock =
+        gaia_formats::verity::Superblock::decode(&bytes[padded..]).expect("verity superblock");
+    let recorded = gaia_formats::verity::Recorded {
+        salt: salt_hex.clone(),
+        uuid: state_value(&first, "verity.1.uuid"),
+        data_blocks: 4,
+        data_block_size: BLOCK as u32,
+        hash_block_size: HASH_BLOCK as u32,
+    };
+    assert_eq!(gaia_formats::verity::check(&superblock, &recorded), []);
+    assert_eq!(
+        gaia_formats::verity::Derived::from_data(&data_bytes()).uuid,
+        recorded.uuid,
+        "the default UUID is gaia-formats' derivation"
+    );
+
     let check = Command::new(&veritysetup)
         .arg("verify")
         .arg(&image)

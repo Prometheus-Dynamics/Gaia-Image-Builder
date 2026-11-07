@@ -591,6 +591,7 @@ dependencies = [
  "gaia-artifact-providers",
  "gaia-config",
  "gaia-default-providers",
+ "gaia-formats",
  "gaia-image-providers",
  "gaia-plan",
  "gaia-process",
@@ -601,6 +602,13 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "tracing",
+]
+
+[[package]]
+name = "gaia-formats"
+version = "2.0.3-dev"
+dependencies = [
+ "sha2 0.11.0",
 ]
 
 [[package]]
@@ -705,6 +713,7 @@ dependencies = [
 name = "gaia-spec"
 version = "2.0.3-dev"
 dependencies = [
+ "gaia-formats",
  "gaia-process",
  "serde",
  "serde_json",

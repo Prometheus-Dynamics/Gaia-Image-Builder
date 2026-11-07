@@ -4,6 +4,7 @@ members = [
   "crates/core/app",
   "crates/core/config",
   "crates/core/process",
+  "crates/core/formats",
   "crates/core/spec",
   "crates/core/validate",
   "crates/core/plan",
@@ -39,6 +40,7 @@ gaia = { path = "crates/core/gaia", version = "2.0.3-dev" }
 gaia-app = { path = "crates/core/app", version = "2.0.3-dev" }
 gaia-config = { path = "crates/core/config", version = "2.0.3-dev" }
 gaia-process = { path = "crates/core/process", version = "2.0.3-dev" }
+gaia-formats = { path = "crates/core/formats", version = "2.0.3-dev" }
 gaia-spec = { path = "crates/core/spec", version = "2.0.3-dev" }
 gaia-validate = { path = "crates/core/validate", version = "2.0.3-dev" }
 gaia-plan = { path = "crates/core/plan", version = "2.0.3-dev" }
