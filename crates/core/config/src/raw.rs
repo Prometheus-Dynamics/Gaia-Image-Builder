@@ -1098,6 +1098,8 @@ pub(crate) struct RawBuildrootRootfsConfig {
     pub drop_shadowed_modules: Option<bool>,
     /// Rootfs overlay directories, appended to `BR2_ROOTFS_OVERLAY`.
     pub overlays: Vec<String>,
+    /// `BR2_EXTERNAL` trees added after `external_tree`, one per entry.
+    pub external_trees: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

@@ -160,6 +160,7 @@ fn kind_specific_fields(image: &RawImageConfig) -> Vec<&'static str> {
                     "rootfs.exclude_packages",
                 ),
                 (!rootfs.overlays.is_empty(), "rootfs.overlays"),
+                (!rootfs.external_trees.is_empty(), "rootfs.external_trees"),
                 (
                     rootfs.drop_shadowed_modules.is_some(),
                     "rootfs.drop_shadowed_modules",
@@ -300,6 +301,10 @@ fn merge_image_definition(
                     .drop_shadowed_modules
                     .or(base_rootfs.drop_shadowed_modules),
                 overlays: merge_string_lists(base_rootfs.overlays, overlay_rootfs.overlays),
+                external_trees: merge_string_lists(
+                    base_rootfs.external_trees,
+                    overlay_rootfs.external_trees,
+                ),
             },
         },
         (
@@ -388,6 +393,7 @@ fn merge_image_definition(
             && override_srcdirs.is_empty()
             && rootfs.exclude_packages.is_empty()
             && rootfs.overlays.is_empty()
+            && rootfs.external_trees.is_empty()
             && rootfs.drop_shadowed_modules.is_none() =>
         {
             base_definition

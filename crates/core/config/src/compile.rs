@@ -14,7 +14,7 @@ use image::{
     append_rootfs_overlays, compile_buildroot_expected_image_format,
     compile_buildroot_external_tree_mode, compile_image_assembly, compile_image_feed,
     compile_image_layers, compile_rootfs_validation_mode, compile_starting_point_output_mode,
-    force_rootfs_tar_override,
+    force_rootfs_tar_override, join_external_trees,
 };
 use policy::{
     compile_backoff_strategy, compile_command_policy, compile_docker_execution, compile_input_kind,
@@ -502,7 +502,7 @@ pub(crate) fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                     }
                 },
                 override_srcdirs,
-                external_tree,
+                external_tree: join_external_trees(external_tree, &rootfs.external_trees),
                 external_tree_mode: compile_buildroot_external_tree_mode(external_tree_mode),
                 expected_images: expected_images
                     .into_iter()

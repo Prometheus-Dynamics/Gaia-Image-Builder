@@ -91,8 +91,9 @@ Buildroot fields:
   workspace root. Every tree needs its own `external.desc` with a unique
   `name`. Gaia's generated package-override tree (`GAIA_GENERATED`) is
   appended automatically, so do not reuse that name. A later layer's
-  `external_tree` replaces an earlier one rather than appending, so a layer
-  that adds a tree must list the full combination.
+  `external_tree` replaces an earlier one rather than appending. A layer
+  that only adds a tree uses `[image.rootfs] external_trees` (see
+  [Added external trees](#added-external-trees)).
 - `external_tree_mode = "auto" | "required" | "disabled"`
 - `expected_images[]`
 - `allow_fallback = true`: when no Buildroot tree is available to build in,
@@ -367,6 +368,22 @@ layer and an OS layer each add their own overlay, where two
 `BR2_ROOTFS_OVERLAY` is replaced, as by any override: list its directory here
 too. A directory may not contain spaces (Buildroot splits the list on them).
 `--set image.rootfs.overlays=a,b` sets the list.
+
+#### Added external trees
+
+```toml
+[image.rootfs]
+external_trees = ["${self}/buildroot-external"]   # Lemnos's kernel module packages
+```
+
+`external_trees` are appended to `external_tree` (Buildroot's
+`:`-separated `BR2_EXTERNAL`), each tree once. Layered configs concatenate
+their lists. A layer that brings its own packages (Lemnos's kernel modules
+for the image's kernel) adds its tree without listing the trees of the
+device and OS layers before it. A layer's `external_tree`, in contrast,
+replaces the earlier one. Each tree needs its own `external.desc` with a
+unique `name`. Its packages are enabled as usual, through `config_overrides`
+(`BR2_PACKAGE_<NAME>=y`).
 
 #### Package sizes and legal info
 

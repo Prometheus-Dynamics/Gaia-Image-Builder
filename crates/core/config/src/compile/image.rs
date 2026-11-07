@@ -194,6 +194,25 @@ pub(crate) fn force_rootfs_tar_override(
     overrides
 }
 
+/// `external_tree` with `[image.rootfs] external_trees` appended (Buildroot's
+/// `:`-separated list), each tree once: a layer adds its tree (Lemnos's kernel
+/// module packages) without repeating the trees of the layers before it.
+pub(crate) fn join_external_trees(base: Option<String>, more: &[String]) -> Option<String> {
+    let mut joined = base.filter(|base| !base.trim().is_empty());
+    for tree in more
+        .iter()
+        .map(|tree| tree.trim())
+        .filter(|tree| !tree.is_empty())
+    {
+        joined = Some(match joined {
+            Some(list) if list.split(':').any(|known| known == tree) => list,
+            Some(list) => format!("{list}:{tree}"),
+            None => tree.to_string(),
+        });
+    }
+    joined
+}
+
 /// Appends `[image.rootfs] overlays` to the `BR2_ROOTFS_OVERLAY` override
 /// (Buildroot's space-separated list), so each layer adds its directories
 /// where a `config_overrides` entry would replace the earlier layer's.
@@ -698,5 +717,24 @@ fn compile_assembly_json(raw: RawAssemblyJsonValue) -> AssemblyJsonValue {
                 .map(|(key, value)| (key, compile_assembly_json(value)))
                 .collect(),
         ),
+    }
+}
+
+#[cfg(test)]
+mod external_tree_tests {
+    use super::join_external_trees;
+
+    #[test]
+    fn layers_add_their_trees_after_the_external_tree() {
+        assert_eq!(
+            join_external_trees(Some("a:b".into()), &[]),
+            Some("a:b".into())
+        );
+        assert_eq!(
+            join_external_trees(Some("a:b".into()), &["c".into(), "b".into(), "c".into()]),
+            Some("a:b:c".into())
+        );
+        assert_eq!(join_external_trees(None, &["c".into()]), Some("c".into()));
+        assert_eq!(join_external_trees(None, &[]), None);
     }
 }
