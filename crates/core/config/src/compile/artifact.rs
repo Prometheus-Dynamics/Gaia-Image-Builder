@@ -98,6 +98,17 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig, sources: &[SourceSpec]) -
             ArtifactDefinition::Python(PythonArtifactSpec { package_dir })
         }
         RawArtifactDefinition::Go { package } => ArtifactDefinition::Go(GoArtifactSpec { package }),
+        RawArtifactDefinition::Command {
+            command,
+            build_env,
+            collect,
+            collect_exclude,
+        } => ArtifactDefinition::Command(gaia_spec::CommandArtifactSpec {
+            command,
+            build_env,
+            collect,
+            collect_exclude,
+        }),
     };
     ArtifactSpec {
         id: raw.id.into(),

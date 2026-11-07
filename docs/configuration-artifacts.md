@@ -148,6 +148,13 @@ Artifact kinds:
   - `package_dir`
 - `go`
   - `package`
+- `command`
+  - `command`
+  - `build_env`
+  - `collect`
+  - `collect_exclude`
+
+  See [Command artifacts](#command-artifacts).
 
 `sources = ["corelib"]` names sources the artifact reads besides its own
 `source`. The artifact depends on each of them, so when one re-materializes
@@ -577,6 +584,58 @@ output_path = "${outputs.dir}/artifacts/vision"
   is mapped too.
 
 Java artifacts run Maven or Gradle automatically when `build_command` is omitted. Use `build_args` to replace the default Maven/Gradle arguments while keeping tool detection, or use `build_command` for a source-local command such as a wrapper script. `build_env` adds environment variables for either mode. `after_image_prepare = true` schedules the artifact after Buildroot prepare, which is useful when the artifact needs the generated Buildroot sysroot before the final image feed is assembled.
+
+### Command artifacts
+
+`kind = "command"` runs any host program as a build step: a web UI bundler, a
+scene baker, a code generator. The program runs in the artifact's source
+directory with `build_env` set and `GAIA_ARTIFACT_OUTPUT` holding the absolute
+output path.
+
+```toml
+[[artifacts]]
+id = "helios-ui"
+kind = "command"
+source = "helios"
+command = ["sh", "-c", "cd ui && bun install --frozen-lockfile && bun run build"]
+build_env = [["NODE_ENV", "production"]]
+collect = "ui/dist"
+collect_exclude = ["mock"]
+output_path = "${outputs.dir}/artifacts/helios-ui"
+
+[[artifacts]]
+id = "sim-scene"
+kind = "command"
+source = "helios"
+command = ["tools/bake-scene.sh", "--out", "${workspace.build_dir}/scene.tmp"]
+output_path = "${outputs.dir}/artifacts/sim-scene.bin"
+```
+
+- `command` is the argv (no shell unless you run one). Config tokens are
+  rendered, and a `${source.<id>.path}` in it, in `collect` or in a
+  `build_env` value adds that source to the artifact like Java's build fields.
+- `collect` is a path relative to the source directory, a file or a
+  directory, that Gaia copies to `output_path` after the command exits.
+  `collect_exclude` lists paths relative to `collect` left out of a
+  directory copy (`"mock"`, `"assets/dev"`); it needs `collect`.
+- Without `collect`, the command writes `$GAIA_ARTIFACT_OUTPUT` itself (a file
+  or a directory).
+- Gaia removes the old output before the command runs. If no output exists
+  after it, the artifact fails with an error that names it. A command that
+  exits non-zero fails the artifact.
+- The output's kind follows what was produced. A directory output keeps its
+  marker and state in its own `.gaia`, and installs like any directory
+  artifact (`emit_directory`): its entries, without `.gaia`, are added to the
+  destination.
+- It runs on the host only. A build-wide docker execution image does not
+  apply to it, and `[artifacts.execution] backend = "docker"` on it is a
+  validation error (`command_artifact_docker_unsupported`).
+- Its reuse identity is its definition (`command`, `build_env`, `collect`,
+  `collect_exclude`) and its sources' content. Gaia does not run the program
+  to ask its version: a tool upgrade the source does not record (a new `bun`
+  on the host) does not rebuild it; change the command or rebuild it with
+  `--rebuild artifact:<id>`.
+- `[providers.command]` sets its timeout and retries (default timeout 1800 s).
 
 ### Artifact Execution
 

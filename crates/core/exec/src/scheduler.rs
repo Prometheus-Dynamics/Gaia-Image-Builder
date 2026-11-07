@@ -546,7 +546,8 @@ fn operation_parallel_resource_keys(
             match &artifact.definition {
                 ArtifactDefinition::Rust(_)
                 | ArtifactDefinition::Go(_)
-                | ArtifactDefinition::Java(_) => {
+                | ArtifactDefinition::Java(_)
+                | ArtifactDefinition::Command(_) => {
                     keys.push(ParallelResourceKey::ArtifactBuildInput {
                         provider: artifact.provider_kind().as_str(),
                         package_root: ResourcePath::package_root(&source_dir, None),

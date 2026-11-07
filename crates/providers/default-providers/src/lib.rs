@@ -1,3 +1,4 @@
+use gaia_artifact_provider_command::CommandProvider;
 use gaia_artifact_provider_go::GoProvider;
 use gaia_artifact_provider_java::JavaProvider;
 use gaia_artifact_provider_node::NodeProvider;
@@ -52,6 +53,7 @@ pub(crate) fn default_artifact_provider_catalog() -> ArtifactProviderCatalog {
     catalog.register(Box::new(NodeProvider));
     catalog.register(Box::new(PythonProvider));
     catalog.register(Box::new(GoProvider));
+    catalog.register(Box::new(CommandProvider));
     catalog
 }
 
@@ -94,6 +96,7 @@ mod tests {
             ArtifactProviderKind::Node,
             ArtifactProviderKind::Python,
             ArtifactProviderKind::Go,
+            ArtifactProviderKind::Command,
         ] {
             assert!(catalogs.artifact.find_for_kind(kind).is_some());
         }

@@ -14,6 +14,7 @@ members = [
   "crates/providers/default-providers",
   "crates/providers/artifact/artifact-providers",
   "crates/providers/artifact/artifact-provider-rust",
+  "crates/providers/artifact/artifact-provider-command",
   "crates/providers/artifact/artifact-provider-java",
   "crates/providers/artifact/artifact-provider-node",
   "crates/providers/artifact/artifact-provider-python",
@@ -50,6 +51,7 @@ gaia-default-providers = { path = "crates/providers/default-providers", version 
 gaia-artifact-providers = { path = "crates/providers/artifact/artifact-providers", version = "2.0.3-dev" }
 gaia-image-providers = { path = "crates/providers/image/image-providers", version = "2.0.3-dev" }
 gaia-artifact-provider-rust = { path = "crates/providers/artifact/artifact-provider-rust", version = "2.0.3-dev" }
+gaia-artifact-provider-command = { path = "crates/providers/artifact/artifact-provider-command", version = "2.0.3-dev" }
 gaia-artifact-provider-java = { path = "crates/providers/artifact/artifact-provider-java", version = "2.0.3-dev" }
 gaia-artifact-provider-node = { path = "crates/providers/artifact/artifact-provider-node", version = "2.0.3-dev" }
 gaia-artifact-provider-python = { path = "crates/providers/artifact/artifact-provider-python", version = "2.0.3-dev" }

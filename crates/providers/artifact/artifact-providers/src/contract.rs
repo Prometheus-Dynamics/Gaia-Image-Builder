@@ -158,11 +158,16 @@ impl ArtifactExecutionContract {
                 .display()
                 .to_string();
         }
-        self.execution_backend = execution_backend_for_spec(
-            spec,
-            &self.execution_backend,
-            self.execution_backend_explicit,
-        );
+        // A command artifact runs on the host: the build-wide docker policy
+        // does not move it into a container (validation refuses an explicit
+        // docker execution).
+        if self.provider != ArtifactProviderKind::Command || self.execution_backend_explicit {
+            self.execution_backend = execution_backend_for_spec(
+                spec,
+                &self.execution_backend,
+                self.execution_backend_explicit,
+            );
+        }
         if let ArtifactExecutionBackend::Docker(docker) = &mut self.execution_backend {
             docker.resolve_build(spec);
         }

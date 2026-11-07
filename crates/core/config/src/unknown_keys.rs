@@ -189,6 +189,7 @@ const RUST_ARTIFACT_KEYS: &[&str] = &[
 const JAVA_ARTIFACT_KEYS: &[&str] = &["build_target", "build_args", "build_command", "build_env"];
 const PACKAGE_DIR_ARTIFACT_KEYS: &[&str] = &["package_dir"];
 const GO_ARTIFACT_KEYS: &[&str] = &["package"];
+const COMMAND_ARTIFACT_KEYS: &[&str] = &["command", "build_env", "collect", "collect_exclude"];
 
 fn artifact_fields(kind: Option<&str>) -> Option<Vec<&'static str>> {
     let own = match kind? {
@@ -196,6 +197,7 @@ fn artifact_fields(kind: Option<&str>) -> Option<Vec<&'static str>> {
         "java" => JAVA_ARTIFACT_KEYS,
         "node" | "python" => PACKAGE_DIR_ARTIFACT_KEYS,
         "go" => GO_ARTIFACT_KEYS,
+        "command" => COMMAND_ARTIFACT_KEYS,
         _ => return None,
     };
     Some(ARTIFACT_COMMON_KEYS.iter().chain(own).copied().collect())
@@ -426,6 +428,11 @@ const SECTIONS: &[Section] = &[
             ),
             section(
                 "python",
+                struct_fields::<raw::RawCommandProviderPolicyConfig>,
+                COMMAND_PROVIDER_CHILDREN,
+            ),
+            section(
+                "command",
                 struct_fields::<raw::RawCommandProviderPolicyConfig>,
                 COMMAND_PROVIDER_CHILDREN,
             ),
@@ -745,7 +752,7 @@ pub(crate) mod layout {
     pub(crate) fn kinds_of(key: &str) -> &'static [&'static str] {
         match key {
             "sources" => &["git", "path", "archive", "download"],
-            "artifacts" => &["rust", "java", "node", "python", "go"],
+            "artifacts" => &["rust", "java", "node", "python", "go", "command"],
             "image" => &["buildroot", "starting-point", "none"],
             _ => &[],
         }

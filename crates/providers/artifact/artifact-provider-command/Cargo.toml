@@ -1,0 +1,20 @@
+[package]
+name = "gaia-artifact-provider-command"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Host command artifact provider for Gaia: runs a program and collects its output."
+
+[dependencies]
+gaia-artifact-providers.workspace = true
+gaia-process.workspace = true
+gaia-spec.workspace = true
+
+[dev-dependencies]
+gaia-testkit.workspace = true
+
+[lints]
+workspace = true

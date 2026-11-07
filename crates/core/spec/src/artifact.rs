@@ -77,6 +77,7 @@ pub enum ArtifactDefinition {
     Node(NodeArtifactSpec),
     Python(PythonArtifactSpec),
     Go(GoArtifactSpec),
+    Command(CommandArtifactSpec),
 }
 
 impl ArtifactDefinition {
@@ -87,6 +88,7 @@ impl ArtifactDefinition {
             Self::Node(_) => ArtifactProviderKind::Node,
             Self::Python(_) => ArtifactProviderKind::Python,
             Self::Go(_) => ArtifactProviderKind::Go,
+            Self::Command(_) => ArtifactProviderKind::Command,
         }
     }
 }
@@ -340,6 +342,21 @@ pub struct GoArtifactSpec {
     pub package: String,
 }
 
+/// A host command run in its source's directory (`kind = "command"`).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct CommandArtifactSpec {
+    /// The program and its arguments.
+    pub command: Vec<String>,
+    /// Environment set for the command, in order.
+    pub build_env: Vec<(String, String)>,
+    /// A path relative to the source directory copied to the output after
+    /// the command; without it the command writes `GAIA_ARTIFACT_OUTPUT`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collect: Option<String>,
+    /// Paths relative to `collect` left out of the copy.
+    pub collect_exclude: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum ArtifactVariantSpec {
     File,
@@ -441,6 +458,7 @@ pub enum ArtifactProviderKind {
     Node,
     Python,
     Go,
+    Command,
 }
 
 impl ArtifactProviderKind {
@@ -451,6 +469,7 @@ impl ArtifactProviderKind {
             Self::Node => "node",
             Self::Python => "python",
             Self::Go => "go",
+            Self::Command => "command",
         }
     }
 }
@@ -471,6 +490,7 @@ impl std::str::FromStr for ArtifactProviderKind {
             "node" => Ok(Self::Node),
             "python" => Ok(Self::Python),
             "go" => Ok(Self::Go),
+            "command" => Ok(Self::Command),
             other => Err(format!("unknown artifact provider kind `{other}`")),
         }
     }

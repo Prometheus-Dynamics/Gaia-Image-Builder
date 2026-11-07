@@ -446,6 +446,43 @@ fn artifact_execution_backend_prefers_explicit_setting_over_global_default() {
 }
 
 #[test]
+fn a_command_artifact_stays_on_the_host_under_the_build_wide_docker_policy() {
+    let mut spec = ResolvedBuildSpec::new("command-host");
+    spec.workspace.root_dir = std::env::temp_dir()
+        .join("gaia-command-host")
+        .display()
+        .to_string();
+    spec.policy.execution.docker = Some(DockerExecutionSpec {
+        image: "docker.io/library/rust:1.90".to_string(),
+        reuse_container: false,
+    });
+    let artifact = ArtifactSpec::new(
+        "ui",
+        ArtifactDefinition::Command(gaia_spec::CommandArtifactSpec {
+            command: vec!["make".to_string()],
+            build_env: Vec::new(),
+            collect: None,
+            collect_exclude: Vec::new(),
+        }),
+        None,
+        ArtifactOutputSpec {
+            path: "out/ui".to_string(),
+        },
+    );
+    let contract = ArtifactExecutionContract::from_spec(
+        &artifact,
+        None,
+        false,
+        ArtifactExecutionContract::default_command_policy(),
+        gaia_spec::OutputRetentionPolicySpec::default(),
+    )
+    .try_with_build_context(&spec)
+    .expect("build context");
+
+    assert_eq!(contract.execution_backend, ArtifactExecutionBackend::Host);
+}
+
+#[test]
 fn artifact_contract_rejects_empty_inherited_docker_image() {
     let mut spec = gaia_spec::ResolvedBuildSpec::new("artifact-contract");
     spec.policy.execution.docker = Some(DockerExecutionSpec {

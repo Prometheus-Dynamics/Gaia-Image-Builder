@@ -205,6 +205,9 @@ pub(crate) fn validate_artifacts(
                     ));
                 }
             }
+            ArtifactDefinition::Command(command) => {
+                crate::command_artifacts::validate_command_artifact(artifact, command, diagnostics);
+            }
         }
         if let Some(BuildModeSpec::Custom(mode)) = &artifact.build_mode
             && mode.trim().is_empty()

@@ -353,6 +353,12 @@ pub(crate) fn collect_unresolved_tokens(raw: &RawBuildConfig) -> Vec<RawUnresolv
                     &mut unresolved,
                 );
             }
+            definition @ RawArtifactDefinition::Command { .. } => {
+                for (location, value) in super::command_definition::fields(&artifact.id, definition)
+                {
+                    scan_string(&location, &value, &mut unresolved);
+                }
+            }
         }
     }
 

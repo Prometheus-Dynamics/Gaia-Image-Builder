@@ -517,6 +517,7 @@ fn merge_provider_policies(
         java: merge_command_policy(base.java, overlay.java),
         node: merge_command_policy(base.node, overlay.node),
         python: merge_command_policy(base.python, overlay.python),
+        command: merge_command_policy(base.command, overlay.command),
         buildroot: merge_command_policy(base.buildroot, overlay.buildroot),
         starting_point: merge_command_policy(base.starting_point, overlay.starting_point),
     }

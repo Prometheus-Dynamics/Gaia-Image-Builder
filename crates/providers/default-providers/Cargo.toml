@@ -10,6 +10,7 @@ description = "Default provider catalog composition for Gaia."
 
 [dependencies]
 gaia-artifact-provider-go.workspace = true
+gaia-artifact-provider-command.workspace = true
 gaia-artifact-provider-java.workspace = true
 gaia-artifact-provider-node.workspace = true
 gaia-artifact-provider-python.workspace = true

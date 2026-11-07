@@ -114,6 +114,12 @@ Described in [Artifacts, install and stage](../configuration-artifacts.md#artifa
 
 Keys: `after_image_prepare`, `build_group`, `cargo_git_sources`, `dependencies`, `id`, `install_class`, `install_dest_hint`, `install_name`, `output_path`, `package`, `profile`, `source`, `sources`, `target`, `toolchain`, `when`.
 
+## `[[artifacts]]` with `kind = "command"`
+
+Described in [Artifacts, install and stage](../configuration-artifacts.md#artifacts).
+
+Keys: `after_image_prepare`, `build_env`, `build_group`, `cargo_git_sources`, `collect`, `collect_exclude`, `command`, `dependencies`, `id`, `install_class`, `install_dest_hint`, `install_name`, `output_path`, `profile`, `source`, `sources`, `target`, `toolchain`, `when`.
+
 ## `[artifacts.execution]`
 
 Described in [Artifacts, install and stage](../configuration-artifacts.md#artifacts).
@@ -543,6 +549,18 @@ Described in [Policy, workspace and clean](../configuration-policy.md#provider-e
 Keys: `erofs_workers`, `gradle_home`, `keep_ram_tree`, `kernel_modules_check`, `local_jobs`, `make_retry_attempts`, `make_timeout_seconds`, `override_check`, `parallel_packages`, `ram_budget`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `shared_output`, `shared_output_dir`, `timeout_seconds`, `work_dir`.
 
 ## `[providers.python.host_tools]`
+
+Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
+
+Keys: `default`, `pkgconf`.
+
+## `[providers.command]`
+
+Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
+
+Keys: `erofs_workers`, `gradle_home`, `keep_ram_tree`, `kernel_modules_check`, `local_jobs`, `make_retry_attempts`, `make_timeout_seconds`, `override_check`, `parallel_packages`, `ram_budget`, `retry_attempts`, `retry_backoff_ms`, `retry_backoff_strategy`, `shared_output`, `shared_output_dir`, `timeout_seconds`, `work_dir`.
+
+## `[providers.command.host_tools]`
 
 Described in [Policy, workspace and clean](../configuration-policy.md#provider-execution-policy).
 

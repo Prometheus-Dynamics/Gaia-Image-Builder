@@ -3,6 +3,7 @@ mod build_groups;
 mod buildroot_policy;
 mod cargo_git_sources;
 mod checkpoints;
+mod command_artifacts;
 mod core;
 mod diagnostics;
 mod image;

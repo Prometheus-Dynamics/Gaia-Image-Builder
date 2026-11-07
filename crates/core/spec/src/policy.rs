@@ -11,6 +11,9 @@ pub const DEFAULT_GO_PROVIDER_TIMEOUT_SECONDS: u64 = 300;
 pub const DEFAULT_JAVA_PROVIDER_TIMEOUT_SECONDS: u64 = 300;
 pub const DEFAULT_NODE_PROVIDER_TIMEOUT_SECONDS: u64 = 300;
 pub const DEFAULT_PYTHON_PROVIDER_TIMEOUT_SECONDS: u64 = 300;
+/// `kind = "command"` artifacts run arbitrary tools (a web build, a host
+/// cargo build): a wider default than the language providers.
+pub const DEFAULT_COMMAND_PROVIDER_TIMEOUT_SECONDS: u64 = 1800;
 pub const DEFAULT_BUILDROOT_PROVIDER_TIMEOUT_SECONDS: u64 = 900;
 pub const DEFAULT_STARTING_POINT_PROVIDER_TIMEOUT_SECONDS: u64 = 120;
 
@@ -108,6 +111,7 @@ pub struct ProviderExecutionPolicySpec {
     pub java: CommandProviderPolicySpec,
     pub node: CommandProviderPolicySpec,
     pub python: CommandProviderPolicySpec,
+    pub command: CommandProviderPolicySpec,
     pub buildroot: CommandProviderPolicySpec,
     pub starting_point: CommandProviderPolicySpec,
 }
@@ -123,6 +127,7 @@ impl ProviderExecutionPolicySpec {
             ArtifactProviderKind::Java => ResolvedCommandPolicySpec::from(&self.java),
             ArtifactProviderKind::Node => ResolvedCommandPolicySpec::from(&self.node),
             ArtifactProviderKind::Python => ResolvedCommandPolicySpec::from(&self.python),
+            ArtifactProviderKind::Command => ResolvedCommandPolicySpec::from(&self.command),
         }
     }
 

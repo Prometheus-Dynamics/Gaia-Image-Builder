@@ -89,6 +89,11 @@ pub(crate) fn artifact_toolchain<'a>(
         .docker
         .as_ref()
         .map(|docker| docker.image.as_str());
+    // A command artifact always runs on the host (validation refuses an
+    // explicit docker execution), whatever the build-wide docker policy.
+    if matches!(artifact.definition, ArtifactDefinition::Command(_)) {
+        return ArtifactToolchain::Host;
+    }
     match &artifact.execution {
         Some(ArtifactExecutionSpec::Host) => ArtifactToolchain::Host,
         Some(ArtifactExecutionSpec::Docker(docker)) if docker.dockerfile.is_some() => {
@@ -146,6 +151,9 @@ fn host_tool_signature(artifact: &ArtifactSpec) -> String {
             command_signature("mvn", ["-version"]),
             command_signature("gradle", ["--version"])
         ),
+        // Any program: its argv is in the definition, and Gaia does not run
+        // an unknown tool to ask its version.
+        ArtifactDefinition::Command(_) => "command-host".to_string(),
     }
 }
 

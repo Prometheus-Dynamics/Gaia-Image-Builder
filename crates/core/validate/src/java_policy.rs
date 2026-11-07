@@ -21,12 +21,13 @@ pub(crate) fn validate_java_policy(
     // provider tables share the same struct, so the key is accepted there
     // and would do nothing; say so.
     let providers = &spec.policy.providers;
-    let others: [(&str, &CommandProviderPolicySpec); 7] = [
+    let others: [(&str, &CommandProviderPolicySpec); 8] = [
         ("archive", &providers.archive),
         ("download", &providers.download),
         ("go", &providers.go),
         ("node", &providers.node),
         ("python", &providers.python),
+        ("command", &providers.command),
         ("buildroot", &providers.buildroot),
         ("starting_point", &providers.starting_point),
     ];

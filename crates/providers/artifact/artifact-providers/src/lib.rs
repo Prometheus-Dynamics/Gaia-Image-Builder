@@ -18,7 +18,7 @@ pub use contract::{
     ArtifactDockerExecution, ArtifactDockerImageBuild, ArtifactExecutionBackend,
     ArtifactExecutionContract,
 };
-pub(crate) use contract::{ArtifactOutputContract, ArtifactOutputKind};
+pub use contract::{ArtifactOutputContract, ArtifactOutputKind};
 pub use digest::{
     ArtifactBackendState, command_version_line, dir_digest, file_sha256_or_placeholder, path_bytes,
     produced_filename, render_artifact_backend_state,

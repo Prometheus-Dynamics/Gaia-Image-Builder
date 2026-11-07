@@ -3,6 +3,7 @@ mod assembly_archives;
 mod assembly_oci;
 mod assembly_package;
 mod build_date;
+mod command_definition;
 mod export;
 mod project_git;
 mod resolver;
@@ -598,6 +599,9 @@ fn interpolate_artifact(
         RawArtifactDefinition::Go { package } => RawArtifactDefinition::Go {
             package: resolver::interpolate_string(package, raw, env),
         },
+        definition @ RawArtifactDefinition::Command { .. } => {
+            command_definition::interpolate(definition, raw, env)
+        }
     };
     artifact
 }

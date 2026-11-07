@@ -376,3 +376,46 @@ fn components_are_the_fingerprint_inputs_plus_dependencies() {
         .collect::<Vec<_>>();
     assert_eq!(differing, ["build_env", "build_env[GRADLE_OPTS]"]);
 }
+
+/// A command artifact's argv, environment and collect paths are its
+/// identity: changing any of them rebuilds it.
+#[test]
+fn each_command_artifact_field_changes_its_fingerprint() {
+    fn command_spec() -> ResolvedBuildSpec {
+        let mut spec = spec();
+        spec.artifacts[0].definition =
+            ArtifactDefinition::Command(gaia_spec::CommandArtifactSpec {
+                command: vec!["bun".into(), "run".into(), "build".into()],
+                build_env: vec![("NODE_ENV".into(), "production".into())],
+                collect: Some("ui/dist".into()),
+                collect_exclude: vec!["mock".into()],
+            });
+        spec
+    }
+    let kind = OperationKind::BuildArtifact {
+        artifact_id: "app".into(),
+    };
+    let base = command_spec();
+    let mut seen = BTreeSet::from([operation_fingerprint(&base, &kind)]);
+    let edits: Vec<Edit<gaia_spec::CommandArtifactSpec>> = vec![
+        ("command", |command| {
+            command.command[2] = "build:prod".into()
+        }),
+        ("build_env", |command| {
+            command.build_env[0].1 = "development".into()
+        }),
+        ("collect", |command| command.collect = Some("ui/out".into())),
+        ("collect_exclude", |command| command.collect_exclude.clear()),
+    ];
+    for (name, edit) in edits {
+        let mut spec = base.clone();
+        let ArtifactDefinition::Command(command) = &mut spec.artifacts[0].definition else {
+            unreachable!("a command artifact");
+        };
+        edit(command);
+        assert!(
+            seen.insert(operation_fingerprint(&spec, &kind)),
+            "changing {name} did not change the fingerprint of {kind:?}"
+        );
+    }
+}

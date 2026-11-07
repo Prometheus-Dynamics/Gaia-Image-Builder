@@ -480,6 +480,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gaia-artifact-provider-command"
+version = "2.0.3-dev"
+dependencies = [
+ "gaia-artifact-providers",
+ "gaia-process",
+ "gaia-spec",
+ "gaia-testkit",
+]
+
+[[package]]
 name = "gaia-artifact-provider-go"
 version = "2.0.3-dev"
 dependencies = [
@@ -560,6 +570,7 @@ dependencies = [
 name = "gaia-default-providers"
 version = "2.0.3-dev"
 dependencies = [
+ "gaia-artifact-provider-command",
  "gaia-artifact-provider-go",
  "gaia-artifact-provider-java",
  "gaia-artifact-provider-node",

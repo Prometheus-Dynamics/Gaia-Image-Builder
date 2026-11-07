@@ -103,6 +103,9 @@ Rust, Git and Java have extra specialized fields:
 - Git: `allow_remote_resolution`
 - Java: `gradle_home` (see [Java and Gradle](#java-and-gradle))
 
+`[providers.command]` covers `kind = "command"` artifacts (default
+`timeout_seconds` 1800; see [Command artifacts](configuration-artifacts.md#command-artifacts)).
+
 `allow_nested_build` (default `false`) is what lets Gaia run cargo for a rust
 artifact. Without it a rust artifact is built only when its output file already
 exists (that file is used as it is); otherwise the build fails with an error

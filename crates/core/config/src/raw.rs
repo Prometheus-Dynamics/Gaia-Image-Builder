@@ -443,6 +443,7 @@ pub(crate) struct RawProviderPoliciesConfig {
     pub java: RawCommandProviderPolicyConfig,
     pub node: RawCommandProviderPolicyConfig,
     pub python: RawCommandProviderPolicyConfig,
+    pub command: RawCommandProviderPolicyConfig,
     pub buildroot: RawCommandProviderPolicyConfig,
     pub starting_point: RawCommandProviderPolicyConfig,
 }
@@ -898,6 +899,16 @@ pub(crate) enum RawArtifactDefinition {
     },
     Go {
         package: String,
+    },
+    /// A host command run in the source's directory.
+    Command {
+        command: Vec<String>,
+        #[serde(default)]
+        build_env: Vec<(String, String)>,
+        #[serde(default)]
+        collect: Option<String>,
+        #[serde(default)]
+        collect_exclude: Vec<String>,
     },
 }
 
