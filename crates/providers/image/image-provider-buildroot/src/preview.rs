@@ -668,6 +668,15 @@ pub(crate) fn preview_buildroot(
             lines: rootfs_lines,
         });
     }
+    if rootfs_drop_dbus_daemon(image) {
+        preview.sections.push(PreviewSection {
+            title: "rootfs D-Bus".into(),
+            lines: vec![
+                "drops the D-Bus daemon, its units and the bus policies; libdbus-1 stays".into(),
+                "a unit left that is Type=dbus or requires dbus.socket refuses the image".into(),
+            ],
+        });
+    }
     if rootfs_drop_shadowed_modules(image) {
         preview.sections.push(PreviewSection {
             title: "rootfs modules".into(),

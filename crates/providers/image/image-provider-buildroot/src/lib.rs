@@ -157,10 +157,10 @@ impl ImageProvider for BuildrootImageProvider {
                 cancel_check: cancel_check.clone(),
             };
             if policy.shared_output
-                && (!rootfs_exclude_names(image).is_empty() || rootfs_drop_shadowed_modules(image))
+                && (!rootfs_exclude_names(image).is_empty() || RootfsDrops::of(image).any())
             {
                 return Err(ImageProviderError::backend_command(
-                    "image.rootfs.exclude_packages and drop_shadowed_modules cannot be used with shared Buildroot output (policy.providers.buildroot.shared_output): the tree is shared by every image",
+                    "image.rootfs.exclude_packages, drop_shadowed_modules and drop_dbus_daemon cannot be used with shared Buildroot output (policy.providers.buildroot.shared_output): the tree is shared by every image",
                 ));
             }
             if policy.shared_output {
@@ -621,6 +621,7 @@ mod requested_rebuilds;
 mod rootfs_exclude;
 mod rootfs_exclude_elf;
 mod rootfs_inputs;
+mod rootfs_no_dbus;
 mod shared;
 mod source_date;
 mod squashfs;
@@ -672,6 +673,7 @@ pub(crate) use ram_tree::*;
 pub(crate) use rebuild_inputs::*;
 pub(crate) use rootfs_exclude::*;
 pub(crate) use rootfs_inputs::*;
+pub(crate) use rootfs_no_dbus::*;
 pub(crate) use shared::*;
 pub(crate) use source_date::*;
 pub(crate) use squashfs::*;

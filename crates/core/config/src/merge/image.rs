@@ -169,6 +169,7 @@ fn kind_specific_fields(image: &RawImageConfig) -> Vec<&'static str> {
                     rootfs.drop_shadowed_modules.is_some(),
                     "rootfs.drop_shadowed_modules",
                 ),
+                (rootfs.drop_dbus_daemon.is_some(), "rootfs.drop_dbus_daemon"),
             ];
             fields.extend(set.iter().filter(|(on, _)| *on).map(|(_, name)| *name));
         }
@@ -304,6 +305,9 @@ fn merge_image_definition(
                 drop_shadowed_modules: overlay_rootfs
                     .drop_shadowed_modules
                     .or(base_rootfs.drop_shadowed_modules),
+                drop_dbus_daemon: overlay_rootfs
+                    .drop_dbus_daemon
+                    .or(base_rootfs.drop_dbus_daemon),
                 overlays: merge_string_lists(base_rootfs.overlays, overlay_rootfs.overlays),
                 external_trees: merge_string_lists(
                     base_rootfs.external_trees,
@@ -405,7 +409,8 @@ fn merge_image_definition(
             && rootfs.overlays.is_empty()
             && rootfs.external_trees.is_empty()
             && rootfs.out_of_tree_modules.is_empty()
-            && rootfs.drop_shadowed_modules.is_none() =>
+            && rootfs.drop_shadowed_modules.is_none()
+            && rootfs.drop_dbus_daemon.is_none() =>
         {
             base_definition
         }

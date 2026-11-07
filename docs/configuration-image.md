@@ -353,6 +353,32 @@ image check's `module_duplicate` warning names this key when an `updates/`
 module shadows in-tree copies. Layered configs: the last layer that sets it
 wins.
 
+#### No D-Bus daemon
+
+```toml
+[image.rootfs]
+drop_dbus_daemon = true   # default false
+```
+
+Buildroot's systemd selects `dbus`, and packages built next to it (dnsmasq,
+for one) link libdbus-1 whenever it is configured, so `exclude_packages =
+["dbus"]` is refused on most images. An image that runs nothing on the system
+bus can still leave the daemon out: `image:build` removes the files of the
+`dbus` package except the library (`usr/lib/libdbus-1.so.*`), every bus policy
+and activation file under `usr/share/dbus-1/` and `etc/dbus-1/` (whichever
+package installed it), and the `dbus.service`/`dbus.socket` links a preset made
+under `etc/systemd/`, in target-finalize after `exclude_packages`. A path a
+kept package also lists stays. Programs that use the bus when it is there
+(systemd's networkd, resolved, timesyncd) run without it.
+
+After the make, a unit left in `target/` that is `Type=dbus`, or that names
+`dbus.socket` or `dbus.service` in `Requires=`, `BindsTo=` or `Requisite=`,
+refuses the image, since it would never start: avahi-daemon is one, so an
+image with avahi leaves avahi out (`exclude_packages = ["avahi"]`) or keeps
+the daemon. The run summary gives the files and bytes dropped. Like
+`exclude_packages` it needs per-package directories and no shared output.
+Layered configs: the last layer that sets it wins.
+
 #### Rootfs overlays
 
 ```toml

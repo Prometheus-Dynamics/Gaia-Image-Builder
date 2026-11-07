@@ -396,7 +396,7 @@ Keys: `kind`, `major`, `minor`, `mode`, `path`, `tree`.
 
 Described in [Image](../configuration-image.md#image).
 
-Keys: `drop_shadowed_modules`, `exclude_packages`, `external_trees`, `overlays`.
+Keys: `drop_dbus_daemon`, `drop_shadowed_modules`, `exclude_packages`, `external_trees`, `overlays`.
 
 ## `[image.rootfs.out_of_tree_modules]`
 

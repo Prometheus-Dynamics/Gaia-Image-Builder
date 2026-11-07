@@ -1107,6 +1107,8 @@ pub(crate) struct RawBuildrootRootfsConfig {
     pub exclude_packages: Vec<String>,
     /// Remove in-tree modules that an `updates/` module shadows.
     pub drop_shadowed_modules: Option<bool>,
+    /// Leave the D-Bus daemon out (libdbus-1 stays).
+    pub drop_dbus_daemon: Option<bool>,
     /// Rootfs overlay directories, appended to `BR2_ROOTFS_OVERLAY`.
     pub overlays: Vec<String>,
     /// `BR2_EXTERNAL` trees added after `external_tree`, one per entry.

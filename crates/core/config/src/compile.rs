@@ -521,6 +521,7 @@ pub(crate) fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                     .collect(),
                 rootfs_exclude_packages: rootfs.exclude_packages,
                 rootfs_drop_shadowed_modules: rootfs.drop_shadowed_modules.unwrap_or(false),
+                rootfs_drop_dbus_daemon: rootfs.drop_dbus_daemon.unwrap_or(false),
                 rootfs_out_of_tree_modules: out_of_tree_module_specs(&rootfs.out_of_tree_modules),
             }),
             RawImageDefinition::StartingPoint {

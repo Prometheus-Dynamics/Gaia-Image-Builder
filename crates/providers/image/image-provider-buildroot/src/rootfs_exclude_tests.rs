@@ -24,7 +24,7 @@ fn names(list: &[&str]) -> Vec<String> {
 }
 
 fn stage(root: &Path, excluded: &[&str]) -> StagedRootfsExclude {
-    stage_rootfs_exclude(root, &names(excluded), false)
+    stage_rootfs_exclude(root, &names(excluded), RootfsDrops::default())
         .expect("stage")
         .expect("an exclusion is staged")
 }
@@ -501,9 +501,16 @@ fn drop_shadowed_modules_removes_in_tree_modules_an_updates_module_shadows() {
     fs::set_permissions(host.join("sbin/depmod"), fs::Permissions::from_mode(0o755))
         .expect("executable depmod");
 
-    let staged = stage_rootfs_exclude(root, &names(&["styx-pispbe"]), true)
-        .expect("stage")
-        .expect("staged");
+    let staged = stage_rootfs_exclude(
+        root,
+        &names(&["styx-pispbe"]),
+        RootfsDrops {
+            shadowed_modules: true,
+            dbus_daemon: false,
+        },
+    )
+    .expect("stage")
+    .expect("staged");
     let status = Command::new("sh")
         .arg(&staged.script)
         .arg(root.join("target"))
@@ -537,7 +544,7 @@ fn drop_shadowed_modules_removes_in_tree_modules_an_updates_module_shadows() {
 
     // Off, nothing is staged for an image with no exclusion.
     assert!(
-        stage_rootfs_exclude(root, &[], false)
+        stage_rootfs_exclude(root, &[], RootfsDrops::default())
             .expect("stage")
             .is_none()
     );

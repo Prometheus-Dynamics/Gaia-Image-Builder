@@ -281,6 +281,7 @@ fn image_inputs(spec: &ResolvedBuildSpec, include_post_image: bool, inputs: &mut
         buildroot_definition,
         "rootfs_drop_shadowed_modules",
     );
+    let drop_dbus = take_field(&mut rest, buildroot_definition, "rootfs_drop_dbus_daemon");
     if include_post_image {
         inputs.json("feed", feed);
         inputs.json("output", output);
@@ -292,6 +293,9 @@ fn image_inputs(spec: &ResolvedBuildSpec, include_post_image: bool, inputs: &mut
         }
         if drop_shadowed.as_bool() == Some(true) {
             inputs.json("rootfs drop shadowed modules", drop_shadowed);
+        }
+        if drop_dbus.as_bool() == Some(true) {
+            inputs.json("rootfs drop dbus daemon", drop_dbus);
         }
     }
     match &image.definition {

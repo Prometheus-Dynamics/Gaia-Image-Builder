@@ -301,6 +301,11 @@ pub struct BuildrootImageSpec {
     /// existing builds keep their reuse digests.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub rootfs_drop_shadowed_modules: bool,
+    /// Leave the D-Bus daemon, its units and the bus policies out of
+    /// `target/`, keeping libdbus-1 (`[image.rootfs] drop_dbus_daemon`). Left
+    /// out when off, so existing builds keep their reuse digests.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rootfs_drop_dbus_daemon: bool,
     /// Kbuild modules built against the image's kernel as Buildroot
     /// kernel-module packages (`[[image.rootfs.out_of_tree_modules]]`). Left
     /// out when empty, so existing builds keep their reuse digests.
@@ -354,6 +359,7 @@ impl Default for BuildrootImageSpec {
             expected_images: Vec::new(),
             rootfs_exclude_packages: Vec::new(),
             rootfs_drop_shadowed_modules: false,
+            rootfs_drop_dbus_daemon: false,
             rootfs_out_of_tree_modules: Vec::new(),
         }
     }

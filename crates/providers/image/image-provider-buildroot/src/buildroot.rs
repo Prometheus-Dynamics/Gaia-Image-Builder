@@ -371,6 +371,9 @@ fn run_buildroot_steps(
             options.post_build_script,
         ));
     }
+    if let Some(exclude) = options.rootfs_exclude {
+        command.args(exclude.make_overrides());
+    }
     // With per-package directories, build only up to target-finalize first:
     // the filesystem images and post-image step run afterwards, and only
     // when what they read changed (see rootfs_inputs).
@@ -469,6 +472,9 @@ fn run_buildroot_steps(
                 }
                 if let Some(shadowed) = summary.shadowed_message() {
                     messages.push(format!("{SUMMARY_NOTE_PREFIX}{shadowed}"));
+                }
+                if let Some(no_dbus) = summary.no_dbus_message() {
+                    messages.push(format!("{SUMMARY_NOTE_PREFIX}{no_dbus}"));
                 }
                 if let Some(shared) = summary.shared_message() {
                     messages.push(format!("{SUMMARY_NOTE_PREFIX}{shared}"));
