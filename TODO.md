@@ -23,16 +23,11 @@ through HeliOS). The other boards follow it, so their items stay below.
   - Done when: a current HeliOS Raze build passes and an oversized one fails.
   - Status: the check is in Gaia (66d5f79, `device_size` and `device_reserve` on a disk), run both ways on a real Raze assembly: within budget it reports what is left, over it fails with "needs N MiB ... it fits a G GiB device or larger".
   - Blocked by: Atlas setting `device_size = "14910M"` (a 16 GB eMMC's capacity) and the reserve for the second slot on the slots disk in `devices/raze/gaia/slots.toml`.
-- **Images sized to their content**
-  - What: flashing writes only data. Measured 2026-11-06 on HeliOS dd2ab41d: the Raze slots disk is already 140 MiB raw (a 79 MiB boot FAT with 64 MiB free for slot kernels, and a 60 MiB `/data` that Atlas's board-data-setup grows to the device on first boot). 83 of the 140 MiB are all-zero blocks, mostly the FAT's intended room.
-  - Why: flash time on every board, the Raze first.
-  - Done when: Atlas's flasher daemon skips zero runs (discarding them only where the device reads discarded blocks back as zeros, writing them otherwise), and a Raze flash through the SystemCore is timed before and after.
-  - Blocked by: Atlas, under HeliOS's go. Nothing left on Gaia's side unless Atlas lowers the FAT's `free`.
 - **Raze build time**
   - What: how long `tools/build-os.sh raze full` takes on the build host, warm and cold, and the step that dominates it; then bring it under HeliOS's targets: warm (one HeliOS crate changed) under 5 minutes, cold under 20. In the qemu builds of 2026-11-02 the `helios-api` cargo build held the run at step 17 of 210 for about 15 minutes (fat LTO, or a warm target dir not reused?). Gaia's own 10-minute gate is a separate item.
   - Why: every Raze change waits on this build, and the gate has to fit it.
   - Done when: the times are measured and the build meets both targets.
-  - Status: Measured 2026-11-03, static with fat LTO: cold 547 s (`image:prepare` 8m14s), warm no-op 1.3 s. On 2026-11-06 (HeliOS dd2ab41d, host load about 90) a no-op run took 3 s (205 of 207 reused). The warm figure for one changed crate is still the old 5m23s (helios-api 2m46s), so that target is unconfirmed. Shared mode changes the link step, so both get measured again once it lands.
+  - Status: Measured 2026-11-03, static with fat LTO: cold 547 s (`image:prepare` 8m14s), warm no-op 1.3 s. On 2026-11-06 (HeliOS dd2ab41d), a no-op run took 3 s. One changed crate took 444 s at host load 130 (helios-api 4m31s, `image:build` 1m59s once `show-info` was cached, 0e3d55d), still over the 5-minute target. Shared mode changes the link step, so both get measured again in the leap's size and time report.
   - Blocked by: nothing.
 
 - **Boot the board examples**
@@ -113,18 +108,32 @@ through HeliOS). The other boards follow it, so their items stay below.
   - Done when: each chip's module boots A/B from SPI-NAND and from eMMC.
   - Blocked by: the boards.
 
-## Decided, starts when the user says
+## Architecture leap (go, 2026-11-06)
 
-The user decided these on 2026-11-03, through HeliOS. Nothing here starts until the user says so. The Raze #2 shared-library A/B with LTO informs how shared gets built, not whether.
+The user's go, through HeliOS. Every shared library comes in two forms: a static one, and a shared one with a Rust core, a small versioned C surface and a static Rust client wrapper, never both in one process. Static fat LTO stays the default; shared mode is for consumers outside the image. Gaia's part:
 
-- Link mode per product: static and shared, with a core, surface and wrapper for each dependency. Gaia's side is in: declared surfaces (1873431), their consumers (717dbe9), and the per-image choice as layers (docs, 22dba15).
-- One combined build across workspaces, with one feature set per image. Designed in docs/design/combined-surface-build.md (9b8a91b): one surface crate per surface in the product's workspace, registered through Daedalus's `export_surface!`. Gaia checks one version of each own crate per image (dce1b0b) and the plugins a surface opens (dce1b0b, 1e7d2c7, 77f38d4). Left: HeliOS's surface crate and its config.
-- A check that a process does not hold the same crate both statically and through a shared library: "not both" (bf45532), and the copies of std per program (dba9515).
-- Shipping libstd properly: `package = "std"` as an artifact (7e090ec).
-- Two-pass trim: build, read what each library's users import, relink exporting only that. Gaia's side is in: `trim = { users = [...] }` (recorded link replayed, no second cargo build). Left: HeliOS's config naming its libraries' users, and a Raze build that measures it.
-- Packaging the Lemnos kernel module into slots. The module lives in Lemnos, with drivers in Rust in userspace.
-- Module sources moving from Styx to Lemnos.
-- Cold-build chain A/B, when host load allows. After cargo finishes, `image:prepare` is bound by host-python3, cython, linux and mesa3d. A higher `-j` can only help the 80 of 413 s make sits at its 7-package cap.
+- **Link modes**
+  - What: static by default, shared chosen per image (layers), for every dependency with a surface.
+  - Status: `link = "shared"`, `package = "std"` (7e090ec), the per-image choice as layers (22dba15), and the trim, which relinks a shared library exporting only what its users import (`trim = { users = [...] }`, 38aebbd).
+  - Trim measured on 2026-11-06, on the HeliOS shared stack (scratch d69c5870 configs, Raze): the four libraries went from 46.8 to 21.7 MB, and the whole stack is 38.9 MB plus a 1.2 MB libstd, against 45.4 MB static. Exports per library: Daedalus 31506 → 1568, Styx 23200 → 1014, Eidos 8891 → 38, Lemnos 1815 → 244. That matches the hand-made A/B to within 8 bytes per library. The relinks add about 4 minutes to the 14.5-minute cargo build (linker-plugin LTO).
+  - Done when: a HeliOS Raze build makes both forms from one build file.
+- **Surface and ABI checks for every dependency's C surface**
+  - What: what was done for Daedalus (a02eda4): declared exports, consumers' imports, plugin directories and exports, ABI range constants, one version per crate, and "not both".
+  - Status: checks in (1873431, 717dbe9, bf45532, dce1b0b, 1e7d2c7, 77f38d4, f6a87ff), exercised on Daedalus only.
+  - Done when: each dependency's surface (Lemnos, Styx, Eidos, Daedalus) is declared in HeliOS's config and its checks pass on a real build.
+- **Lemnos kernel module in the images**
+  - What: the module Lemnos builds, installed into each image's slots for its kernel, with `vermagic` matching the image's kernel.
+  - Done when: a Raze image ships it and `image:check` passes.
+- **Size report for both modes**
+  - What: per-artifact and whole-image sizes, static and shared (with the trim), from one HeliOS commit.
+  - Done when: the table goes to HeliOS.
+- **Combined build across workspaces**
+  - What: one feature set per image, designed in docs/design/combined-surface-build.md (9b8a91b). Gaia's checks are in. Left: HeliOS's surface crate and its config.
+
+Closed on 2026-11-06:
+- Cold-build chain A/B: dropped. The host has not been quiet for four days, and a higher `make -j` can only speed up the 80 of 413 s that make sits at its 7-package cap.
+- Module sources moving from Styx to Lemnos: not Gaia's work. Gaia only installs what Lemnos builds.
+- Images sized to their content: nothing left on Gaia's side. The Raze slots disk is 140 MiB raw; skipping zero runs when flashing is Atlas's flasher work.
 
 ## Release mechanics
 
