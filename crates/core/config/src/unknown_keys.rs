@@ -315,11 +315,18 @@ const IMAGE_CHILDREN: &[Section] = &[
     section(
         "checks",
         struct_fields::<raw::RawImageChecksConfig>,
-        &[section(
-            "crate_splits",
-            struct_fields::<raw::RawCrateSplitConfig>,
-            &[],
-        )],
+        &[
+            section(
+                "crate_splits",
+                struct_fields::<raw::RawCrateSplitConfig>,
+                &[],
+            ),
+            section(
+                "unit_restarts",
+                struct_fields::<raw::RawUnitRestartConfig>,
+                &[],
+            ),
+        ],
     ),
     section(
         "hardware",

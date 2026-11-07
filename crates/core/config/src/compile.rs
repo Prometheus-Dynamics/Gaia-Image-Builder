@@ -591,6 +591,14 @@ pub(crate) fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                         reason: split.reason,
                     })
                     .collect(),
+                unit_restarts: checks
+                    .unit_restarts
+                    .into_iter()
+                    .map(|allow| gaia_spec::UnitRestartSpec {
+                        unit: allow.unit,
+                        reason: allow.reason,
+                    })
+                    .collect(),
             })
             .unwrap_or_default(),
         assembly: compile_image_assembly(raw.image.assembly),

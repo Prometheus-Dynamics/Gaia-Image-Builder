@@ -29,6 +29,9 @@ mod test_dtb;
 #[cfg(test)]
 mod tests;
 mod uboot;
+mod unit_restarts;
+#[cfg(test)]
+mod unit_restarts_tests;
 
 use super::helpers::{failure_with_kind, success_from_messages};
 use super::{ExecutionErrorKind, OperationExecutionResult};
@@ -217,6 +220,7 @@ pub(crate) fn execute(
     let surface_consumers = surfaces::check(&installed, &rootfs, &mut outcome);
     surface_state::check(spec, &rootfs, &mut outcome);
     crate_records::check_splits(spec, &rootfs, &mut outcome);
+    unit_restarts::check(spec, &rootfs, &mut outcome);
     let std_copies = rust_std::copies(&rootfs, &surfaces::plugins_by_name(&installed, &rootfs));
 
     let errors: Vec<&Finding> = outcome
@@ -296,6 +300,7 @@ fn surfaces_only(
     let consumers = surfaces::check(&installed, rootfs, &mut outcome);
     surface_state::check(spec, rootfs, &mut outcome);
     crate_records::check_splits(spec, rootfs, &mut outcome);
+    unit_restarts::check(spec, rootfs, &mut outcome);
     let std_copies = rust_std::copies(rootfs, &surfaces::plugins_by_name(&installed, rootfs));
     let (errors, warnings): (Vec<&Finding>, Vec<&Finding>) = outcome
         .findings

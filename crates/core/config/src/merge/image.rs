@@ -80,6 +80,9 @@ fn merge_checks(
         crate_splits: merge_by_key(base.crate_splits, overlay.crate_splits, |split| {
             split.crate_name.clone()
         }),
+        unit_restarts: merge_by_key(base.unit_restarts, overlay.unit_restarts, |allow| {
+            allow.unit.clone()
+        }),
     })
 }
 

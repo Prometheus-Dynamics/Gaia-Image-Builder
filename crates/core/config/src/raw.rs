@@ -1244,6 +1244,17 @@ pub(crate) struct RawImageChecksConfig {
     pub optional_firmware: Vec<String>,
     /// Crates allowed at more than one version or source in the image.
     pub crate_splits: Vec<RawCrateSplitConfig>,
+    /// Services allowed past the restart policy checks.
+    pub unit_restarts: Vec<RawUnitRestartConfig>,
+}
+
+/// `[[image.checks.unit_restarts]]`: a service unit the restart checks leave
+/// alone, and why.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub(crate) struct RawUnitRestartConfig {
+    pub unit: String,
+    pub reason: String,
 }
 
 /// `[[image.checks.crate_splits]]`: a crate the image may hold at more than

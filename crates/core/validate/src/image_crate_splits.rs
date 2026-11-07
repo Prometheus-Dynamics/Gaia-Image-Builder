@@ -1,5 +1,5 @@
-//! `[[image.checks.crate_splits]]`: each allowed split names one crate and
-//! says why it is allowed.
+//! `[[image.checks.crate_splits]]` and `[[image.checks.unit_restarts]]`:
+//! each entry names what it allows and says why.
 
 use gaia_spec::ResolvedBuildSpec;
 
@@ -24,6 +24,31 @@ pub(crate) fn validate_crate_splits(
                 format!(
                     "image.checks.crate_splits entry '{}' gives no reason: say why the image may hold it twice",
                     split.crate_name
+                ),
+                path,
+            ));
+        }
+    }
+}
+
+pub(crate) fn validate_unit_restarts(
+    spec: &ResolvedBuildSpec,
+    diagnostics: &mut Vec<ValidationDiagnostic>,
+) {
+    for allow in &spec.image.checks.unit_restarts {
+        let path = Some("image.checks.unit_restarts".to_string());
+        if allow.unit.trim().is_empty() {
+            diagnostics.push(error(
+                "image_unit_restart_unit_missing",
+                "an image.checks.unit_restarts entry names no unit".into(),
+                path,
+            ));
+        } else if allow.reason.trim().is_empty() {
+            diagnostics.push(error(
+                "image_unit_restart_reason_missing",
+                format!(
+                    "image.checks.unit_restarts entry '{}' gives no reason: say why it may stop restarting or restart slowly",
+                    allow.unit
                 ),
                 path,
             ));

@@ -130,6 +130,17 @@ pub struct ImageChecksSpec {
     /// (`crate_version_split`), each with the reason it is allowed.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub crate_splits: Vec<CrateSplitSpec>,
+    /// Service units the restart checks leave alone (`unit_start_limit`,
+    /// `unit_restart_slow`, `unit_no_restart`), each with its reason.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unit_restarts: Vec<UnitRestartSpec>,
+}
+
+/// A service unit allowed past the restart checks, and why.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct UnitRestartSpec {
+    pub unit: String,
+    pub reason: String,
 }
 
 /// A crate allowed at more than one version or source in one image.

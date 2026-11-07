@@ -695,6 +695,14 @@ Every run also reports, without failing, the copies of the Rust standard library
 
 One version of each own crate: with a declared surface in the build, each Rust artifact records its crate graph (see the artifacts' declared surfaces), and `image:check` fails a crate from a path or a git source that the installed artifacts resolved to more than one version or source, within one artifact or across them (`crate_version_split`, naming each version, source and artifact). Registry crates are left out: two semver-incompatible versions of a generic crate are cargo's normal business. A split the image has to carry for now is allowed by `[[image.checks.crate_splits]]`, one entry per crate, each with a `reason` (both required). An artifact without a record is not checked; the "not both" check warns about it.
 
+Restart policy (warnings, not errors): a service that crashes should be restarted, never given up on, with at most 10 s between tries; switching one off is a deliberate setting. For each service unit in the root filesystem, its `<unit>.d/*.conf` drop-ins applied, `image:check` warns about:
+
+- `unit_start_limit`: `Restart=` is set but the unit keeps systemd's start limit (5 starts in 10 s by default; past it the unit stays off until someone starts it). `StartLimitIntervalSec=0` in the unit, a drop-in, or the manager's `DefaultStartLimitIntervalSec=0` (`etc/systemd/system.conf` and its `.d`) turns it off;
+- `unit_restart_slow`: `RestartSec=` is over 10 s;
+- `unit_no_restart`: an enabled (linked from a `*.wants` or `*.requires` directory) `Type=` simple, exec, notify or notify-reload service has no `Restart=`, or `Restart=no`.
+
+Units the Buildroot `systemd` package installs and masked units are left out. A unit that stops or waits on purpose is allowed by `[[image.checks.unit_restarts]]` with the unit's name and a `reason` (both required); entries add up by unit across layers.
+
 ```toml
 [image.checks]
 kernel_modules = true                    # default for Buildroot images; false turns the module checks off
@@ -707,6 +715,10 @@ optional_firmware = ["rtl_nic/rtl8157-1.fw"]  # optional: firmware a module list
 [[image.checks.crate_splits]]            # optional: an own crate this image may hold at two versions or sources
 crate = "daedalus-accel"
 reason = "Eidos's lock pins its own accel until Daedalus 0.3"
+
+[[image.checks.unit_restarts]]           # optional: a service the restart policy warnings leave alone
+unit = "board-usb-gadget.service"
+reason = "rebinds the gadget; a tighter loop races the UDC"
 ```
 
 Across layers the table merges key by key: a later layer's key replaces the earlier one, `optional_firmware` lists add up, and `crate_splits` add up by crate (a later layer's reason wins), so a device layer's firmware list survives an OS layer's own `[image.checks]`.

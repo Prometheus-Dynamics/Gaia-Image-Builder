@@ -224,6 +224,12 @@ Described in [Image](../configuration-image.md#image-checks).
 
 Keys: `crate`, `reason`.
 
+## `[image.checks.unit_restarts]`
+
+Described in [Image](../configuration-image.md#image-checks).
+
+Keys: `reason`, `unit`.
+
 ## `[[image.hardware]]`
 
 Described in [Image](../configuration-image.md#image-checks).

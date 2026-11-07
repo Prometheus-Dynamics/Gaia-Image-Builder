@@ -118,7 +118,7 @@ pub use image::{
     ImageDefinition, ImageFeedSpec, ImageHardwareSpec, ImageLayerSpec, ImageLayersSpec,
     ImageOutputSpec, ImageProviderKind, ImageSigningKind, ImageSigningSpec, ImageSpec,
     OutOfTreeModuleSpec, StartingPointImageSpec, StartingPointOutputModeSpec,
-    StartingPointPackagesSpec, StartingPointRootfsValidationModeSpec,
+    StartingPointPackagesSpec, StartingPointRootfsValidationModeSpec, UnitRestartSpec,
 };
 pub use inputs::{InputKindSpec, InputOptionSpec, InputSpec};
 pub use install::InstallEntrySpec;

@@ -104,6 +104,7 @@ pub(crate) fn validate_image_contract(
     validate_image_layers(spec, diagnostics);
     validate_image_hardware(spec, diagnostics);
     crate::image_crate_splits::validate_crate_splits(spec, diagnostics);
+    crate::image_crate_splits::validate_unit_restarts(spec, diagnostics);
     if matches!(spec.image.definition, ImageDefinition::None) {
         validate_image_none(spec, diagnostics);
     } else {
