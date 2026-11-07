@@ -26,7 +26,8 @@ pub(crate) fn materialize_buildroot_package_overrides(
 ) -> Result<MaterializedBuildrootPackageOverrides, ImageProviderError> {
     let package_override_dirs = buildroot_package_override_dirs(spec);
     let erofs_lines = erofs_make_lines(spec);
-    if package_override_dirs.is_empty() && erofs_lines.is_none() {
+    let modules = !crate::out_of_tree_modules::out_of_tree_modules(spec).is_empty();
+    if package_override_dirs.is_empty() && erofs_lines.is_none() && !modules {
         return Ok(MaterializedBuildrootPackageOverrides {
             generated_external_tree: None,
             replacement_count: 0,
@@ -101,6 +102,10 @@ pub(crate) fn materialize_buildroot_package_overrides(
             }
         }
     }
+    package_names.extend(crate::out_of_tree_modules::write_module_packages(
+        spec,
+        &external_package_dir,
+    )?);
     package_names.sort();
     replacement_names.sort();
 
@@ -178,10 +183,11 @@ fn package_override_dirs_digest(dirs: &[PathBuf]) -> String {
 const EROFS_MULTITHREADING_DIGEST: &str = "erofs-multithreading:v1";
 
 /// The Gaia-written settings that change a package's build, by package name
-/// and a digest of them (for package keys and the rebuild record). Empty when
-/// none apply.
+/// and a digest of them (for package keys and the rebuild record): the
+/// erofs multithreading, and each out-of-tree module's directory by
+/// content. Empty when none apply.
 pub(crate) fn generated_package_digests(spec: &ResolvedBuildSpec) -> BTreeMap<String, String> {
-    let mut digests = BTreeMap::new();
+    let mut digests = crate::out_of_tree_modules::module_package_digests(spec);
     if erofs_workers_setting(spec) != gaia_spec::ErofsWorkersSpec::Off {
         digests.insert(
             "host-erofs-utils".to_string(),

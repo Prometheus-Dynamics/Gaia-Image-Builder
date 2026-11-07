@@ -1100,6 +1100,17 @@ pub(crate) struct RawBuildrootRootfsConfig {
     pub overlays: Vec<String>,
     /// `BR2_EXTERNAL` trees added after `external_tree`, one per entry.
     pub external_trees: Vec<String>,
+    /// Kbuild modules built against the image's kernel (`[[image.rootfs.out_of_tree_modules]]`).
+    pub out_of_tree_modules: Vec<RawOutOfTreeModule>,
+}
+
+/// One `[[image.rootfs.out_of_tree_modules]]` entry: a Kbuild module
+/// directory Gaia builds as a Buildroot kernel-module package.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub(crate) struct RawOutOfTreeModule {
+    pub name: String,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

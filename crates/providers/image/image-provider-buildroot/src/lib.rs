@@ -602,6 +602,7 @@ mod layers_erofs;
 mod layers_tar;
 mod make_progress;
 mod offline;
+mod out_of_tree_modules;
 mod override_check;
 mod override_srcdirs;
 mod package_cache;

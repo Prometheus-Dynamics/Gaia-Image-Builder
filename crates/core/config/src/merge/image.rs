@@ -162,6 +162,10 @@ fn kind_specific_fields(image: &RawImageConfig) -> Vec<&'static str> {
                 (!rootfs.overlays.is_empty(), "rootfs.overlays"),
                 (!rootfs.external_trees.is_empty(), "rootfs.external_trees"),
                 (
+                    !rootfs.out_of_tree_modules.is_empty(),
+                    "rootfs.out_of_tree_modules",
+                ),
+                (
                     rootfs.drop_shadowed_modules.is_some(),
                     "rootfs.drop_shadowed_modules",
                 ),
@@ -305,6 +309,12 @@ fn merge_image_definition(
                     base_rootfs.external_trees,
                     overlay_rootfs.external_trees,
                 ),
+                // Concatenated; a later layer's module of the same name
+                // replaces the earlier one.
+                out_of_tree_modules: merge_out_of_tree_modules(
+                    base_rootfs.out_of_tree_modules,
+                    overlay_rootfs.out_of_tree_modules,
+                ),
             },
         },
         (
@@ -394,6 +404,7 @@ fn merge_image_definition(
             && rootfs.exclude_packages.is_empty()
             && rootfs.overlays.is_empty()
             && rootfs.external_trees.is_empty()
+            && rootfs.out_of_tree_modules.is_empty()
             && rootfs.drop_shadowed_modules.is_none() =>
         {
             base_definition
@@ -432,6 +443,22 @@ fn merge_image_definition(
             overlay_definition => overlay_definition,
         },
     }
+}
+
+/// `base` then `overlay`, an overlay module replacing a base module of the
+/// same name in place.
+fn merge_out_of_tree_modules(
+    base: Vec<crate::raw::RawOutOfTreeModule>,
+    overlay: Vec<crate::raw::RawOutOfTreeModule>,
+) -> Vec<crate::raw::RawOutOfTreeModule> {
+    let mut merged = base;
+    for module in overlay {
+        match merged.iter_mut().find(|known| known.name == module.name) {
+            Some(known) => *known = module,
+            None => merged.push(module),
+        }
+    }
+    merged
 }
 
 #[cfg(test)]

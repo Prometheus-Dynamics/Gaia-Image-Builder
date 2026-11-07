@@ -333,7 +333,7 @@ const IMAGE_CHILDREN: &[Section] = &[
     section(
         "rootfs",
         struct_fields::<raw::RawBuildrootRootfsConfig>,
-        &[],
+        ROOTFS_CHILDREN,
     ),
     section(
         "expected_images",
@@ -346,6 +346,12 @@ const IMAGE_CHILDREN: &[Section] = &[
         &[],
     ),
 ];
+
+const ROOTFS_CHILDREN: &[Section] = &[section(
+    "out_of_tree_modules",
+    struct_fields::<raw::RawOutOfTreeModule>,
+    &[],
+)];
 
 const SECTIONS: &[Section] = &[
     by_kind("image", image_fields, IMAGE_CHILDREN),

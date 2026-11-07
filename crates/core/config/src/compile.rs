@@ -14,7 +14,8 @@ use image::{
     append_rootfs_overlays, compile_buildroot_expected_image_format,
     compile_buildroot_external_tree_mode, compile_image_assembly, compile_image_feed,
     compile_image_layers, compile_rootfs_validation_mode, compile_starting_point_output_mode,
-    force_rootfs_tar_override, join_external_trees,
+    enable_out_of_tree_modules, force_rootfs_tar_override, join_external_trees,
+    out_of_tree_module_specs,
 };
 use policy::{
     compile_backoff_strategy, compile_command_policy, compile_docker_execution, compile_input_kind,
@@ -495,6 +496,8 @@ pub(crate) fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                 config_fragments,
                 config_overrides: {
                     let overrides = append_rootfs_overlays(config_overrides, &rootfs.overlays);
+                    let overrides =
+                        enable_out_of_tree_modules(overrides, &rootfs.out_of_tree_modules);
                     if layers.is_some() {
                         force_rootfs_tar_override(overrides)
                     } else {
@@ -514,6 +517,7 @@ pub(crate) fn compile_config(mut raw: RawBuildConfig) -> ResolvedBuildSpec {
                     .collect(),
                 rootfs_exclude_packages: rootfs.exclude_packages,
                 rootfs_drop_shadowed_modules: rootfs.drop_shadowed_modules.unwrap_or(false),
+                rootfs_out_of_tree_modules: out_of_tree_module_specs(&rootfs.out_of_tree_modules),
             }),
             RawImageDefinition::StartingPoint {
                 source,

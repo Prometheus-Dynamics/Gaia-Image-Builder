@@ -7,7 +7,8 @@
 //! Each named component is one input that can explain a rebuild.
 
 use gaia_image_providers::{
-    external_tree_files, external_trees, post_script_components, sha256_hex,
+    ExternalTree, external_tree_files, external_trees, post_script_components, resolve_tree_path,
+    sha256_hex,
 };
 use gaia_process::hex;
 use gaia_spec::{ArtifactDefinition, ArtifactSpec, ImageDefinition, ResolvedBuildSpec};
@@ -187,6 +188,21 @@ pub(crate) fn buildroot_image_components(
         external_tree_files(&trees)
             .into_iter()
             .map(|(key, file)| (format!("external file {key}"), file.digest)),
+    );
+    // Out-of-tree kernel modules by content: Gaia writes their packages, so
+    // their directories are in no external tree.
+    let modules = buildroot
+        .rootfs_out_of_tree_modules
+        .iter()
+        .map(|module| ExternalTree {
+            name: module.package(),
+            dir: resolve_tree_path(&spec.workspace, &module.path),
+        })
+        .collect::<Vec<_>>();
+    components.extend(
+        external_tree_files(&modules)
+            .into_iter()
+            .map(|(key, file)| (format!("out-of-tree module file {key}"), file.digest)),
     );
     components
 }
@@ -393,6 +409,41 @@ mod tests {
         let after_fragment = fingerprints(&spec);
         assert_ne!(after_defconfig.0, after_fragment.0);
         assert_ne!(after_defconfig.1, after_fragment.1);
+    }
+
+    #[test]
+    fn an_out_of_tree_module_edit_flips_both_image_fingerprints() {
+        let scratch = TempDir::new("gaia-plan");
+        let root = workspace_dir(&scratch, "kmod");
+        let source = root.join("lemnos/kernel-modules/lemnos/lemnos_core.c");
+        write(&source, "int one;\n");
+        let mut spec = ResolvedBuildSpec::new("buildroot-kmod");
+        spec.workspace.root_dir = root.display().to_string();
+        spec.image = ImageSpec::new(ImageDefinition::Buildroot(BuildrootImageSpec {
+            rootfs_out_of_tree_modules: vec![gaia_spec::OutOfTreeModuleSpec {
+                name: "lemnos".into(),
+                path: "lemnos/kernel-modules/lemnos".into(),
+            }],
+            ..BuildrootImageSpec::default()
+        }));
+        let fingerprints = |spec: &ResolvedBuildSpec| {
+            (
+                operation_fingerprint(spec, &OperationKind::PrepareImage),
+                operation_fingerprint(spec, &OperationKind::BuildImage),
+            )
+        };
+        let components = buildroot_image_components(&spec, true);
+        assert!(
+            components.iter().any(|(name, _)| {
+                name == "out-of-tree module file gaia-kmod-lemnos:lemnos_core.c"
+            }),
+            "{components:?}"
+        );
+        let before = fingerprints(&spec);
+        write(&source, "int two;\n");
+        let after = fingerprints(&spec);
+        assert_ne!(before.0, after.0);
+        assert_ne!(before.1, after.1);
     }
 
     #[test]

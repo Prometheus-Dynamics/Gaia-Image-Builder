@@ -373,17 +373,46 @@ too. A directory may not contain spaces (Buildroot splits the list on them).
 
 ```toml
 [image.rootfs]
-external_trees = ["${self}/buildroot-external"]   # Lemnos's kernel module packages
+external_trees = ["${self}/buildroot-external"]   # a layer's own packages
 ```
 
 `external_trees` are appended to `external_tree` (Buildroot's
 `:`-separated `BR2_EXTERNAL`), each tree once. Layered configs concatenate
-their lists. A layer that brings its own packages (Lemnos's kernel modules
-for the image's kernel) adds its tree without listing the trees of the
+their lists. A layer that brings its own packages adds its tree without listing the trees of the
 device and OS layers before it. A layer's `external_tree`, in contrast,
 replaces the earlier one. Each tree needs its own `external.desc` with a
 unique `name`. Its packages are enabled as usual, through `config_overrides`
 (`BR2_PACKAGE_<NAME>=y`).
+
+#### Out-of-tree kernel modules
+
+```toml
+[[image.rootfs.out_of_tree_modules]]
+name = "lemnos"                                      # package gaia-kmod-lemnos
+path = "${source.lemnos.path}/kernel-modules/lemnos" # its Kbuild directory
+```
+
+Each entry is a Kbuild module directory (a `Kbuild` or `Makefile` for
+`make M=<dir>`) that the image builds against its own kernel. Gaia writes the
+Buildroot package `gaia-kmod-<name>` into its generated external tree, using
+Buildroot's `kernel-module` infrastructure with the directory as a local
+site, and turns on `BR2_PACKAGE_GAIA_KMOD_<NAME>` (a `config_overrides` entry
+for that option wins, so a layer can turn a module off). The module is built
+with the kernel's tree, config, `Module.symvers` and compiler, so its
+`vermagic` matches the kernel, and `modules_install` puts it under
+`lib/modules/<release>/updates/`, where the image checks read it like any
+other module (with `drop_shadowed_modules`, an in-tree module of the same
+name is left out). Buildroot's infrastructure also turns off
+`CONFIG_TRIM_UNUSED_KSYMS`, so the kernel keeps the symbols the module uses.
+
+The directory's content is part of the package's cache key and of the image
+operations' inputs: an edited module rebuilds that package and the image,
+nothing else. `path` resolves like an external tree (relative to the
+workspace root, an alias or a `${source.<id>.path}` token). Layered configs
+concatenate their lists; a later layer's entry with the same `name` replaces
+the earlier one. A name is lowercase letters, digits, `-` and `_`
+(`buildroot_out_of_tree_module_invalid`), and a directory with neither a
+`Kbuild` nor a `Makefile` fails the build before Buildroot runs.
 
 #### Package sizes and legal info
 

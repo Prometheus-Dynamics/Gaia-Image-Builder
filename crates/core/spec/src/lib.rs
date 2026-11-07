@@ -117,8 +117,8 @@ pub use image::{
     BuildrootImageSpec, CrateSplitSpec, DEFAULT_LAYER_EROFS_OPTIONS, ImageChecksSpec,
     ImageDefinition, ImageFeedSpec, ImageHardwareSpec, ImageLayerSpec, ImageLayersSpec,
     ImageOutputSpec, ImageProviderKind, ImageSigningKind, ImageSigningSpec, ImageSpec,
-    StartingPointImageSpec, StartingPointOutputModeSpec, StartingPointPackagesSpec,
-    StartingPointRootfsValidationModeSpec,
+    OutOfTreeModuleSpec, StartingPointImageSpec, StartingPointOutputModeSpec,
+    StartingPointPackagesSpec, StartingPointRootfsValidationModeSpec,
 };
 pub use inputs::{InputKindSpec, InputOptionSpec, InputSpec};
 pub use install::InstallEntrySpec;

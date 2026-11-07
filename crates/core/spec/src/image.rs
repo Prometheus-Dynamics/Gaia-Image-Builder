@@ -301,6 +301,35 @@ pub struct BuildrootImageSpec {
     /// existing builds keep their reuse digests.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub rootfs_drop_shadowed_modules: bool,
+    /// Kbuild modules built against the image's kernel as Buildroot
+    /// kernel-module packages (`[[image.rootfs.out_of_tree_modules]]`). Left
+    /// out when empty, so existing builds keep their reuse digests.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rootfs_out_of_tree_modules: Vec<OutOfTreeModuleSpec>,
+}
+
+/// An out-of-tree kernel module: Gaia writes the Buildroot package
+/// `gaia-kmod-<name>` building the Kbuild directory `path` (a workspace
+/// path) with the image's kernel, and enables it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct OutOfTreeModuleSpec {
+    pub name: String,
+    pub path: String,
+}
+
+impl OutOfTreeModuleSpec {
+    /// The Buildroot package Gaia writes for the module.
+    pub fn package(&self) -> String {
+        format!("gaia-kmod-{}", self.name)
+    }
+
+    /// Its `BR2_PACKAGE_*` option.
+    pub fn option(&self) -> String {
+        format!(
+            "BR2_PACKAGE_{}",
+            self.package().replace(['-', '.'], "_").to_ascii_uppercase()
+        )
+    }
 }
 
 impl BuildrootImageSpec {
@@ -325,6 +354,7 @@ impl Default for BuildrootImageSpec {
             expected_images: Vec::new(),
             rootfs_exclude_packages: Vec::new(),
             rootfs_drop_shadowed_modules: false,
+            rootfs_out_of_tree_modules: Vec::new(),
         }
     }
 }

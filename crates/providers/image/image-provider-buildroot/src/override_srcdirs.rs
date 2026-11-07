@@ -38,6 +38,8 @@ pub(crate) fn write_override_srcdirs(
                 ),
             ));
         }
+        // Only `local.mk` names it, so a container would not mount it.
+        gaia_process::register_read_only_docker_mount(&resolved);
         block.push_str(&format!(
             "{}_OVERRIDE_SRCDIR = {}\n",
             upper_name(package),

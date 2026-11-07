@@ -664,6 +664,14 @@ fn interpolate_image_definition(
                     .into_iter()
                     .map(|value| resolver::interpolate_string(value, raw, env))
                     .collect(),
+                out_of_tree_modules: rootfs
+                    .out_of_tree_modules
+                    .into_iter()
+                    .map(|module| crate::raw::RawOutOfTreeModule {
+                        path: resolver::interpolate_string(module.path, raw, env),
+                        ..module
+                    })
+                    .collect(),
                 ..rootfs
             },
             defconfig: defconfig.map(|value| resolver::interpolate_string(value, raw, env)),

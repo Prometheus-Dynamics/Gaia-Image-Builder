@@ -245,6 +245,35 @@ pub(crate) fn append_rootfs_overlays(
     overrides
 }
 
+/// `[[image.rootfs.out_of_tree_modules]]` as specs; entries with no name are
+/// left to validation.
+pub(crate) fn out_of_tree_module_specs(
+    modules: &[crate::raw::RawOutOfTreeModule],
+) -> Vec<gaia_spec::OutOfTreeModuleSpec> {
+    modules
+        .iter()
+        .map(|module| gaia_spec::OutOfTreeModuleSpec {
+            name: module.name.trim().to_string(),
+            path: module.path.trim().to_string(),
+        })
+        .collect()
+}
+
+/// Turns on the package Gaia writes for each out-of-tree module, unless a
+/// `config_overrides` entry already sets its option.
+pub(crate) fn enable_out_of_tree_modules(
+    mut overrides: Vec<(String, String)>,
+    modules: &[crate::raw::RawOutOfTreeModule],
+) -> Vec<(String, String)> {
+    for module in out_of_tree_module_specs(modules) {
+        let option = module.option();
+        if !overrides.iter().any(|(key, _)| *key == option) {
+            overrides.push((option, "y".into()));
+        }
+    }
+    overrides
+}
+
 pub(crate) fn compile_image_assembly(
     raw: Option<RawImageAssemblyConfig>,
 ) -> Option<ImageAssemblySpec> {

@@ -11,6 +11,7 @@ use crate::ValidationDiagnostic;
 use crate::diagnostics::{error, warning};
 use crate::image_assembly::{assembly_expected_image_names, validate_image_assembly};
 use crate::image_layers::validate_image_layers;
+use crate::out_of_tree_modules::validate_out_of_tree_modules;
 use crate::override_srcdirs::validate_override_srcdirs;
 use crate::workspace::resolve_workspace_path;
 
@@ -287,6 +288,7 @@ pub(crate) fn validate_image_contract(
                 }
             }
             validate_override_srcdirs(&buildroot.override_srcdirs, diagnostics);
+            validate_out_of_tree_modules(&buildroot.rootfs_out_of_tree_modules, diagnostics);
             let mut expected_image_names = HashSet::new();
             for expected_image in &buildroot.expected_images {
                 if expected_image.name.trim().is_empty() {

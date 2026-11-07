@@ -392,6 +392,12 @@ Described in [Image](../configuration-image.md#image).
 
 Keys: `drop_shadowed_modules`, `exclude_packages`, `external_trees`, `overlays`.
 
+## `[image.rootfs.out_of_tree_modules]`
+
+Described in [Image](../configuration-image.md#image).
+
+Keys: `name`, `path`.
+
 ## `[[image.expected_images]]`
 
 Described in [Image](../configuration-image.md#image).
