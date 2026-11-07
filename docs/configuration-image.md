@@ -408,7 +408,9 @@ name is left out). Buildroot's infrastructure also turns off
 The directory's content is part of the package's cache key and of the image
 operations' inputs: an edited module rebuilds that package and the image,
 nothing else. `path` resolves like an external tree (relative to the
-workspace root, an alias or a `${source.<id>.path}` token). Layered configs
+workspace root, an alias or a `${source.<id>.path}` token). A source the path
+names this way is materialized before `image:prepare`, and an unknown source
+id is reported by validation. Layered configs
 concatenate their lists; a later layer's entry with the same `name` replaces
 the earlier one. A name is lowercase letters, digits, `-` and `_`
 (`buildroot_out_of_tree_module_invalid`), and a directory with neither a

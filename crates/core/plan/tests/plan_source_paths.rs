@@ -1,5 +1,5 @@
-//! `${source.<id>.path}` in Buildroot `config_overrides` makes the image
-//! wait for that source.
+//! `${source.<id>.path}` in Buildroot `config_overrides` or an out-of-tree
+//! module's path makes the image wait for that source.
 
 pub mod support;
 
@@ -106,5 +106,113 @@ config_overrides = [
             !depends_on("source:worker"),
             "a source whose directory is only a prefix of another's is not named: {id}"
         );
+    }
+}
+
+#[test]
+fn image_depends_on_the_source_an_out_of_tree_module_names() {
+    let scratch = TempDir::new("gaia-plan-test");
+    let root_dir = scratch
+        .join("gaia-plan-module-source")
+        .display()
+        .to_string();
+    fs::create_dir_all(&root_dir).expect("root dir");
+    let config_path = PathBuf::from(&root_dir).join("build.toml");
+    fs::write(
+        &config_path,
+        r#"
+build_name = "module-source"
+
+[workspace]
+root_dir = "@WORKSPACE@"
+build_dir = "build"
+out_dir = "out"
+
+[[sources]]
+id = "buildroot-source"
+kind = "path"
+path = "."
+
+[[sources]]
+id = "lemnos"
+kind = "git"
+repo = "https://example.invalid/lemnos.git"
+
+[[sources]]
+id = "other"
+kind = "git"
+repo = "https://example.invalid/other.git"
+
+[[artifacts]]
+id = "gaia-app"
+kind = "rust"
+package = "gaia"
+after_image_prepare = true
+output_path = "out/gaia"
+
+[image]
+kind = "buildroot"
+source = "buildroot-source"
+defconfig = "qemu_aarch64_virt_defconfig"
+
+[[image.rootfs.out_of_tree_modules]]
+name = "lemnos"
+path = "${source.lemnos.path}/kernel-modules/lemnos"
+
+[[image.rootfs.out_of_tree_modules]]
+name = "unknown"
+path = "${source.nope.path}/kmod"
+"#
+        .replace("@WORKSPACE@", &root_dir),
+    )
+    .expect("config");
+
+    let spec = resolve_config(config_path.to_str().expect("utf-8 config path"));
+    let ImageDefinition::Buildroot(buildroot) = &spec.image.definition else {
+        panic!("buildroot image");
+    };
+    let paths: Vec<&str> = buildroot
+        .rootfs_out_of_tree_modules
+        .iter()
+        .map(|module| module.path.as_str())
+        .collect();
+    let checkout = PathBuf::from(&spec.workspace.build_dir).join("sources/lemnos");
+    assert_eq!(
+        paths,
+        vec![
+            format!("{}/kernel-modules/lemnos", checkout.display()).as_str(),
+            "${source.nope.path}/kmod",
+        ]
+    );
+    let unresolved: Vec<(&str, &str)> = spec
+        .policy
+        .interpolation
+        .unresolved
+        .iter()
+        .map(|unresolved| (unresolved.location.as_str(), unresolved.token.as_str()))
+        .collect();
+    assert_eq!(
+        unresolved,
+        vec![(
+            "image.rootfs.out_of_tree_modules.unknown.path",
+            "source.nope.path"
+        )]
+    );
+    let (source_catalog, artifact_catalog, image_catalog) = provider_catalogs();
+    let plan = plan_build(&spec, &source_catalog, &artifact_catalog, &image_catalog);
+    for id in ["image:prepare", "image:build"] {
+        let operation = plan
+            .operations
+            .iter()
+            .find(|operation| operation.id.as_str() == id)
+            .expect("image operation");
+        let depends_on = |source: &str| {
+            operation
+                .depends_on
+                .iter()
+                .any(|dependency| dependency.as_str() == source)
+        };
+        assert!(depends_on("source:lemnos"), "{id}");
+        assert!(!depends_on("source:other"), "{id}");
     }
 }

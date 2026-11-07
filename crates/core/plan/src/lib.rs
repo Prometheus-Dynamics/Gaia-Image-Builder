@@ -371,9 +371,20 @@ pub fn plan_build_operations(
                 image_prepare_dependencies.push(OperationId::source(source_id));
                 image_finalize_dependencies.push(OperationId::source(source_id));
             }
-            // A `config_overrides` value naming a file inside a source (via
-            // `${source.<id>.path}`) needs that source materialized first.
-            for source in sources_named_by_overrides(spec, &buildroot.config_overrides) {
+            // A `config_overrides` value naming a file inside a source, or an
+            // out-of-tree module in one (via `${source.<id>.path}`), needs
+            // that source materialized first.
+            let named = buildroot
+                .config_overrides
+                .iter()
+                .map(|(_, value)| value.as_str())
+                .chain(
+                    buildroot
+                        .rootfs_out_of_tree_modules
+                        .iter()
+                        .map(|module| module.path.as_str()),
+                );
+            for source in sources_named_by_paths(spec, named) {
                 image_prepare_dependencies.push(OperationId::source(&source.id));
                 image_finalize_dependencies.push(OperationId::source(&source.id));
             }
@@ -648,20 +659,22 @@ pub fn decide_reuse(
 }
 
 /// Sources whose checkout directory (see [`gaia_spec::source_checkout_dir`])
-/// appears in a Buildroot `config_overrides` value, as a whole path or a
-/// prefix of one. Derived from the values instead of a spec field, so images
-/// that do not use `${source.<id>.path}` keep their fingerprints.
-fn sources_named_by_overrides<'spec>(
+/// appears in one of `values` (Buildroot `config_overrides` values and
+/// out-of-tree module paths), as a whole path or a prefix of one. Derived
+/// from the values instead of a spec field, so images that do not use
+/// `${source.<id>.path}` keep their fingerprints.
+fn sources_named_by_paths<'spec, 'value>(
     spec: &'spec ResolvedBuildSpec,
-    overrides: &[(String, String)],
+    values: impl Iterator<Item = &'value str>,
 ) -> Vec<&'spec gaia_spec::SourceSpec> {
+    let values: Vec<&str> = values.collect();
     spec.sources
         .iter()
         .filter(|source| {
             let dir = gaia_spec::source_checkout_dir(spec, source)
                 .display()
                 .to_string();
-            overrides.iter().any(|(_, value)| names_path(value, &dir))
+            values.iter().any(|value| names_path(value, &dir))
         })
         .collect()
 }

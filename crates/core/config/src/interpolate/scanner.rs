@@ -457,6 +457,7 @@ pub(crate) fn collect_unresolved_tokens(raw: &RawBuildConfig) -> Vec<RawUnresolv
             override_srcdirs,
             external_tree,
             expected_images,
+            rootfs,
             ..
         } => {
             scan_optional(
@@ -492,6 +493,13 @@ pub(crate) fn collect_unresolved_tokens(raw: &RawBuildConfig) -> Vec<RawUnresolv
                 scan_string(
                     &format!("image.buildroot.override_srcdirs.{index}.dir"),
                     dir,
+                    &mut unresolved,
+                );
+            }
+            for module in &rootfs.out_of_tree_modules {
+                scan_string(
+                    &format!("image.rootfs.out_of_tree_modules.{}.path", module.name),
+                    &module.path,
                     &mut unresolved,
                 );
             }

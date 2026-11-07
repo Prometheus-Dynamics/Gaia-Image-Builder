@@ -33,7 +33,8 @@
 //! makes the image depend on a source whose directory an override names.
 //!
 //! Both tokens are substituted in stage env set values, build labels,
-//! Buildroot `config_overrides` values, every string of `[image.assembly]`
+//! Buildroot `config_overrides` values, `override_srcdirs` directories and
+//! `rootfs.out_of_tree_modules` paths, every string of `[image.assembly]`
 //! (paths, tree ids, entries, JSON values, outputs: see
 //! [`crate::assembly_source_tokens`]) and Java artifacts' build target,
 //! arguments, command and environment. A `${source.<id>...}` token left in
@@ -170,6 +171,9 @@ fn substitute_outside_assembly(spec: &mut ResolvedBuildSpec, values: &BTreeMap<S
         }
         for (_, dir) in &mut buildroot.override_srcdirs {
             *dir = substitute(dir, values, &mut BTreeSet::new());
+        }
+        for module in &mut buildroot.rootfs_out_of_tree_modules {
+            module.path = substitute(&module.path, values, &mut BTreeSet::new());
         }
     }
     let declared = spec
