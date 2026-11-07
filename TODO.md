@@ -121,12 +121,6 @@ The user's go, through HeliOS. Every shared library comes in two forms: a static
   - What: what was done for Daedalus (a02eda4): declared exports, consumers' imports, plugin directories and exports, ABI range constants, one version per crate, and "not both".
   - Status: checks in (1873431, 717dbe9, bf45532, dce1b0b, 1e7d2c7, 77f38d4, f6a87ff), exercised on Daedalus only.
   - Done when: each dependency's surface (Lemnos, Styx, Eidos, Daedalus) is declared in HeliOS's config and its checks pass on a real build.
-- **Lemnos kernel module in the images**
-  - What: the module Lemnos builds, installed into each image's slots for its kernel, with `vermagic` matching the image's kernel.
-  - Done when: a Raze image ships it and `image:check` passes.
-- **Size report for both modes**
-  - What: per-artifact and whole-image sizes, static and shared (with the trim), from one HeliOS commit.
-  - Done when: the table goes to HeliOS.
 - **Combined build across workspaces**
   - What: one feature set per image, designed in docs/design/combined-surface-build.md (9b8a91b). Gaia's checks are in. Left: HeliOS's surface crate and its config.
 
@@ -168,6 +162,9 @@ The user pinned these on 2026-10-30.
 Cut and staying cut: TUI cleanup, deb packaging niceties.
 
 ## Done
+
+- Lemnos kernel module in the images: `[[image.rootfs.out_of_tree_modules]]` (c7f0a7f), `${source.<id>.path}` module paths (a0eeac9), version 2.0.3-dev for the floor (baf90c6). A HeliOS 50e9456c Raze image shipped `updates/lemnos.ko` (57,488 B stripped, about 15 KB xz, `vermagic` matching 7.2.9-v8-16k) and `image:check` passed.
+- Size report for both modes, HeliOS 50e9456c Raze full, sent to HeliOS on 2026-11-07: static 48,769,176 B `.img.xz` (rootfs.erofs 41,345,024 B); shared with the trim 46,548,440 B (39,124,992 B), 2.2 MB smaller. Next to the board A/B (shared: +26% mirror tick p50, about +2 MB memory), static stays the default.
 
 - Raze Mesa footprint: HeliOS's Raze build takes Atlas's Vulkan-only GPU layer (HeliOS 599c63cd, Atlas c1f7803), 3.1 MB less `.img.xz`.
 
