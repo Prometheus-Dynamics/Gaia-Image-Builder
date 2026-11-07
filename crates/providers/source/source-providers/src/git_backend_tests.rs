@@ -8,8 +8,15 @@ use gaia_testkit::TempDir;
 /// A build whose execution backend is docker, as in `[policy.execution]`.
 fn docker_spec(build_dir: &Path) -> ResolvedBuildSpec {
     let mut spec = ResolvedBuildSpec::new("test");
+    // The scratch dir, not ".": the remote mirror cache goes under the
+    // root, and a killed clone left a half mirror in the crate dir that the
+    // next run refreshed instead of cloning.
     spec.workspace = WorkspaceSpec {
-        root_dir: ".".into(),
+        root_dir: build_dir
+            .parent()
+            .expect("scratch dir")
+            .display()
+            .to_string(),
         build_dir: build_dir.display().to_string(),
         out_dir: build_dir.join("out").display().to_string(),
         clean_policy: CleanPolicy::None,
