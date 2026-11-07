@@ -28,9 +28,80 @@ pub(crate) const PPD_COPY_REFLINK: &str = "\t\t$(foreach pkg,$(1),\\\n\t\t\tcp -
 /// a package builds, so package cache keys hash this: a Gaia version
 /// patching Buildroot differently must not invalidate every cached package.
 pub(crate) fn without_gaia_patches(contents: &str) -> String {
-    contents
-        .replace(PPD_COPY_REFLINK, PPD_COPY_UPSTREAM)
-        .replace(HOST_FINALIZE_SKIP, HOST_FINALIZE_UPSTREAM)
+    PARSE_PATCHES.iter().fold(
+        contents
+            .replace(PPD_COPY_REFLINK, PPD_COPY_UPSTREAM)
+            .replace(HOST_FINALIZE_SKIP, HOST_FINALIZE_UPSTREAM),
+        |contents, patch| contents.replace(patch.gaia, patch.upstream),
+    )
+}
+
+/// Upstream text that starts a `$(shell)` while Buildroot's Makefiles are
+/// read, each with Gaia's replacement, which gives the same values without
+/// one. GNU make 4.4 builds the environment of every `$(shell)` from all of
+/// its variables (tens of thousands once every package's `.mk` is read),
+/// and a `$(shell)` in a recursive, exported variable runs again for each
+/// such environment. These two were 98 of the 148 shells, and about 3 of
+/// 11.5 CPU seconds, of reading a HeliOS tree's Makefiles, which every
+/// `make` does.
+pub(crate) const PARSE_PATCHES: &[ParsePatch] = &[
+    // `which perl`, once per environment make builds (59 times while the
+    // Makefiles are read). The path cannot change during a make.
+    ParsePatch {
+        file: "package/Makefile.in",
+        upstream: "export PERL=$(shell which perl)\n",
+        gaia: "export PERL:=$(shell which perl)\n",
+    },
+    // A luarocks package's directory: its version without the rockspec
+    // revision (`-1`), stripped by `sed` (40 shells) where make can do it:
+    // the one `-<digit>` suffix a version ends with, or the version as is.
+    ParsePatch {
+        file: "package/pkg-luarocks.mk",
+        upstream: "    $(2)_SUBDIR ?= $$($(3)_NAME_UPSTREAM)-$$(shell echo \"$$($(3)_VERSION)\" | sed -e \"s/-[0-9]$$$$//\")\n",
+        gaia: "    $(2)_SUBDIR ?= $$($(3)_NAME_UPSTREAM)-$$(firstword $$(foreach d,0 1 2 3 4 5 6 7 8 9,$$(filter-out $$($(3)_VERSION),$$(patsubst %-$$(d),%,$$($(3)_VERSION)))) $$($(3)_VERSION))\n",
+    },
+];
+
+/// One of [`PARSE_PATCHES`].
+pub(crate) struct ParsePatch {
+    pub(crate) file: &'static str,
+    pub(crate) upstream: &'static str,
+    pub(crate) gaia: &'static str,
+}
+
+/// Applies [`PARSE_PATCHES`] to each file that holds its upstream text once.
+/// Returns what was done, and a message per file left as is.
+pub(crate) fn apply_parse_patches(buildroot_dir: &Path) -> Result<Vec<String>, ImageProviderError> {
+    let mut messages = Vec::new();
+    let mut applied = 0;
+    for patch in PARSE_PATCHES {
+        let path = buildroot_dir.join(patch.file);
+        let Ok(contents) = fs::read_to_string(&path) else {
+            continue;
+        };
+        if !contents.contains(patch.gaia) {
+            if contents.matches(patch.upstream).count() != 1 {
+                messages.push(format!(
+                    "buildroot {} left as is: it differs from the upstream text Gaia patches",
+                    patch.file
+                ));
+                continue;
+            }
+            fs::write(&path, contents.replace(patch.upstream, patch.gaia)).map_err(|error| {
+                ImageProviderError::backend_command(format!(
+                    "failed to patch '{}': {error}",
+                    path.display()
+                ))
+            })?;
+        }
+        applied += 1;
+    }
+    if applied > 0 {
+        messages.push(format!(
+            "buildroot makefiles: {applied} parse-time shell calls replaced"
+        ));
+    }
+    Ok(messages)
 }
 
 /// The rsync of `host-finalize` in the top-level `Makefile`, as upstream has
@@ -146,7 +217,11 @@ pub(crate) fn apply_reflink_finalize(
 /// source holds them. For a mirror kept without a copy when this run applies
 /// no patches.
 pub(crate) fn revert_gaia_patches(buildroot_dir: &Path) -> Result<(), ImageProviderError> {
-    for relative in ["Makefile", "package/pkg-utils.mk"] {
+    let parse_patched = PARSE_PATCHES.iter().map(|patch| patch.file);
+    for relative in ["Makefile", "package/pkg-utils.mk"]
+        .into_iter()
+        .chain(parse_patched)
+    {
         let path = buildroot_dir.join(relative);
         let Ok(contents) = fs::read_to_string(&path) else {
             continue;
@@ -278,5 +353,96 @@ mod tests {
             fs::read_to_string(buildroot.join("Makefile")).expect("read"),
             "host-finalize: other\n"
         );
+    }
+
+    #[test]
+    fn parse_patches_apply_once_and_revert_to_upstream() {
+        let buildroot_scratch = TempDir::new("gaia-buildroot-patch-parse");
+        let buildroot = buildroot_scratch.join("buildroot");
+        fs::create_dir_all(buildroot.join("package")).expect("package dir");
+        let upstream = |patch: &ParsePatch| format!("# before\n{}# after\n", patch.upstream);
+        for patch in PARSE_PATCHES {
+            fs::write(buildroot.join(patch.file), upstream(patch)).expect("makefile");
+        }
+
+        let messages = apply_parse_patches(&buildroot).expect("patch");
+        assert_eq!(
+            messages,
+            ["buildroot makefiles: 2 parse-time shell calls replaced"]
+        );
+        for patch in PARSE_PATCHES {
+            let patched = fs::read_to_string(buildroot.join(patch.file)).expect("read");
+            assert!(patched.contains(patch.gaia), "{}", patch.file);
+            assert!(!patched.contains(patch.upstream), "{}", patch.file);
+            // What the cache keys hash is the upstream text again.
+            assert_eq!(without_gaia_patches(&patched), upstream(patch));
+        }
+        // Applying them again changes nothing.
+        let patched =
+            |patch: &ParsePatch| fs::read_to_string(buildroot.join(patch.file)).expect("read");
+        let before = PARSE_PATCHES.iter().map(patched).collect::<Vec<_>>();
+        apply_parse_patches(&buildroot).expect("again");
+        assert_eq!(
+            PARSE_PATCHES.iter().map(patched).collect::<Vec<_>>(),
+            before
+        );
+
+        revert_gaia_patches(&buildroot).expect("revert");
+        for patch in PARSE_PATCHES {
+            assert_eq!(patched(patch), upstream(patch));
+        }
+
+        // Text that is not upstream's is left alone, with a message.
+        fs::write(
+            buildroot.join("package/Makefile.in"),
+            "export PERL=/usr/bin/perl\n",
+        )
+        .expect("other");
+        let messages = apply_parse_patches(&buildroot).expect("unknown text");
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("package/Makefile.in left as is"))
+        );
+        assert_eq!(
+            fs::read_to_string(buildroot.join("package/Makefile.in")).expect("read"),
+            "export PERL=/usr/bin/perl\n"
+        );
+    }
+
+    /// The luarocks replacement strips what upstream's `sed` strips: one
+    /// trailing `-<digit>`, and nothing from a version without one. Checked
+    /// with the make on this host, when it has one.
+    #[test]
+    fn luarocks_subdir_matches_upstream_sed() {
+        let Ok(probe) = Command::new("make").arg("--version").output() else {
+            return;
+        };
+        if !probe.status.success() {
+            return;
+        }
+        let scratch = TempDir::new("gaia-buildroot-patch-luarocks");
+        let patch = &PARSE_PATCHES[1];
+        let define = |line: &str| {
+            format!(
+                "define inner\n{line}endef\n$(eval $(call inner,x,X_,X))\nall: ; @echo '$(X__SUBDIR)'\n"
+            )
+        };
+        for version in [
+            "0.3.0-1", "2.11-1", "0.5-0", "1.0-12", "1.0", "1-2-3", "0.9.2-1",
+        ] {
+            let run = |text: &str| {
+                fs::write(scratch.join("Makefile"), define(text)).expect("makefile");
+                let output = Command::new("make")
+                    .args(["-s", "-C"])
+                    .arg(scratch.path())
+                    .arg(format!("X_VERSION={version}"))
+                    .arg("X_NAME_UPSTREAM=x")
+                    .output()
+                    .expect("make");
+                String::from_utf8_lossy(&output.stdout).into_owned()
+            };
+            assert_eq!(run(patch.gaia), run(patch.upstream), "version {version}");
+        }
     }
 }

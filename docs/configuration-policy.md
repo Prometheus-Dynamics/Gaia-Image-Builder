@@ -275,7 +275,13 @@ when that cannot be created.
   images and post-image script only when that digest differs from the one
   recorded with the current images, or an expected image is missing. A
   rebuild where nothing those read changed skips EROFS, ext4, squashfs and
-  genimage entirely.
+  genimage entirely. Gaia also replaces two `$(shell)` calls Buildroot makes
+  while reading its Makefiles (`PERL` in `package/Makefile.in`, which GNU
+  make 4.4 re-runs for every shell it starts, and the version `sed` in
+  `package/pkg-luarocks.mk`) with ones that give the same values, which
+  takes about a quarter off the CPU time of reading them in every `make`.
+  Only the exact upstream text is changed; the upstreamable patch is in
+  `contrib/buildroot/`.
 - Turning `cache.ccache.enabled` or `parallel_packages` on or off changes the
   toolchain wrapper or the tree layout, so the next build cleans the output
   tree once.

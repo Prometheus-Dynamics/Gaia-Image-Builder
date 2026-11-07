@@ -95,6 +95,7 @@ fn run_buildroot_steps(
         let clock = gaia_process::ActiveClock::start();
         messages.extend(apply_host_finalize_skip(buildroot_dir)?);
         messages.push(phase_step_message("host finalize patch", &clock, &[]));
+        messages.extend(apply_parse_patches(buildroot_dir)?);
     }
     let configured = configure_tree(
         spec,
