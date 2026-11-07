@@ -373,6 +373,12 @@ pub fn assembly_filesystem(
 
 pub struct SleepPathSourceProvider;
 
+/// The `SleepPathSourceProvider` sources running now, and the most that ran
+/// at once: whether the executor overlapped them, without timing the run.
+pub static SLEEP_IN_FLIGHT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+pub static SLEEP_MAX_IN_FLIGHT: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
 impl SourceProvider for SleepPathSourceProvider {
     fn id(&self) -> &'static str {
         "source.path.sleep"
@@ -391,7 +397,11 @@ impl SourceProvider for SleepPathSourceProvider {
     ) -> Result<Vec<String>, gaia_source_providers::SourceProviderError> {
         let _ = log_sink;
         let _ = cancel_check;
+        use std::sync::atomic::Ordering;
+        let now = SLEEP_IN_FLIGHT.fetch_add(1, Ordering::SeqCst) + 1;
+        SLEEP_MAX_IN_FLIGHT.fetch_max(now, Ordering::SeqCst);
         thread::sleep(Duration::from_millis(300));
+        SLEEP_IN_FLIGHT.fetch_sub(1, Ordering::SeqCst);
         let source_dir = Path::new(&spec.workspace.build_dir)
             .join("sources")
             .join(source.id.as_str());

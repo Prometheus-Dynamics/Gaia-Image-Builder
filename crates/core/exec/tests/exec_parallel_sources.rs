@@ -11,7 +11,9 @@ use gaia_source_providers::SourceProviderCatalog;
 use gaia_testkit::TempDir;
 use std::fs;
 use std::time::{Duration, Instant};
-use support::{FailThenCancelAwarePathSourceProvider, SleepPathSourceProvider};
+use support::{
+    FailThenCancelAwarePathSourceProvider, SLEEP_MAX_IN_FLIGHT, SleepPathSourceProvider,
+};
 
 #[test]
 fn parallelizable_source_operations_execute_concurrently() {
@@ -89,7 +91,6 @@ fn parallelizable_source_operations_execute_concurrently() {
     let artifact_catalog = ArtifactProviderCatalog::new();
     let image_catalog = ImageProviderCatalog::new();
 
-    let started = Instant::now();
     let outcome = execute_plan(
         &spec,
         &plan,
@@ -99,11 +100,14 @@ fn parallelizable_source_operations_execute_concurrently() {
             image_catalog: &image_catalog,
         },
     );
-    let elapsed = started.elapsed();
-
     assert!(outcome.errors.is_empty());
     assert_eq!(outcome.completed_operations, 3);
-    assert!(elapsed < Duration::from_millis(525), "elapsed: {elapsed:?}");
+    // Both sources were in flight at once: counted, not timed, so a loaded
+    // host cannot fail it (the 525 ms bound did at load 135).
+    assert_eq!(
+        SLEEP_MAX_IN_FLIGHT.load(std::sync::atomic::Ordering::SeqCst),
+        2
+    );
 }
 
 #[test]
