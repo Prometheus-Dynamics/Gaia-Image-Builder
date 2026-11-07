@@ -23,12 +23,6 @@ through HeliOS). The other boards follow it, so their items stay below.
   - Done when: a current HeliOS Raze build passes and an oversized one fails.
   - Status: the check is in Gaia (66d5f79, `device_size` and `device_reserve` on a disk), run both ways on a real Raze assembly: within budget it reports what is left, over it fails with "needs N MiB ... it fits a G GiB device or larger".
   - Blocked by: Atlas setting `device_size = "14910M"` (a 16 GB eMMC's capacity) and the reserve for the second slot on the slots disk in `devices/raze/gaia/slots.toml`.
-- **Raze build time**
-  - What: how long `tools/build-os.sh raze full` takes on the build host, warm and cold, and the step that dominates it; then bring it under HeliOS's targets: warm (one HeliOS crate changed) under 5 minutes, cold under 20. In the qemu builds of 2026-11-02 the `helios-api` cargo build held the run at step 17 of 210 for about 15 minutes (fat LTO, or a warm target dir not reused?). Gaia's own 10-minute gate is a separate item.
-  - Why: every Raze change waits on this build, and the gate has to fit it.
-  - Done when: the times are measured and the build meets both targets.
-  - Status: Measured 2026-11-03, static with fat LTO: cold 547 s (`image:prepare` 8m14s), warm no-op 1.3 s. On 2026-11-06 (HeliOS dd2ab41d), a no-op run took 3 s. One changed crate took 444 s at host load 130 (helios-api 4m31s, `image:build` 1m59s once `show-info` was cached, 0e3d55d), still over the 5-minute target. Shared mode changes the link step, so both get measured again in the leap's size and time report.
-  - Blocked by: nothing.
 
 - **Boot the board examples**
   - What: boot each image in `examples/boards/` on its board: ROCK 5C, ROCK 4D, Luckfox Pico Pro, BPI-CanMV-K230D-Zero, and the CM4 and Pi 5 cast receivers. Read the RK3576 maskrom USB product id with `lsusb` on the ROCK 4D.
@@ -163,6 +157,7 @@ Cut and staying cut: TUI cleanup, deb packaging niceties.
 
 ## Done
 
+- Raze build time, under both of HeliOS's targets (2026-11-07, CPUs 6-31, -j13): one changed HeliOS crate on a warm build 3m58s at 50e9456c (backend cargo group 162 s with fat LTO, `image:build` 53 s, assembly 12 s), target 5 minutes; cargo cold with Buildroot warm 17m11s at HeliOS 7dc8031f (the backend cargo group 10m53s on the critical path, no straggler once helios-peripherals was gone), target 20. A moved Eidos `dev` no longer reruns cargo (7371f2a). Not timed: a build with Buildroot cold too, at current HeliOS on a quiet host.
 - Lemnos kernel module in the images: `[[image.rootfs.out_of_tree_modules]]` (c7f0a7f), `${source.<id>.path}` module paths (a0eeac9), version 2.0.3-dev for the floor (baf90c6). A HeliOS 50e9456c Raze image shipped `updates/lemnos.ko` (57,488 B stripped, about 15 KB xz, `vermagic` matching 7.2.9-v8-16k) and `image:check` passed.
 - Size report for both modes, HeliOS 50e9456c Raze full, sent to HeliOS on 2026-11-07: static 48,769,176 B `.img.xz` (rootfs.erofs 41,345,024 B); shared with the trim 46,548,440 B (39,124,992 B), 2.2 MB smaller. Next to the board A/B (shared: +26% mirror tick p50, about +2 MB memory), static stays the default.
 
