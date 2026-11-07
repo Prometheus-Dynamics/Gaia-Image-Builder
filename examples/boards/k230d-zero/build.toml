@@ -81,6 +81,9 @@ config_overrides = [
   # and makes its own SD image; this one makes only the boot files, with
   # the SDK root passed in (the Buildroot tree is <sdk>/output/buildroot-*).
   ["BR2_ROOTFS_POST_IMAGE_SCRIPT", "${assets}/post-image.sh"],
+  # The SDK's post-build (run by this one), then the USB gadget network and
+  # an SSH key.
+  ["BR2_ROOTFS_POST_BUILD_SCRIPT", "${assets}/post-build.sh"],
   ["BR2_ROOTFS_POST_SCRIPT_ARGS", "\"bananapi-canmv-k230d-zero ${source.buildroot.path}/../..\""],
   # The CMA size (16 MiB, not half the RAM), the CMA and system dma-heaps, no MMZ.
   ["BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES", "${assets}/linux.fragment"],

@@ -66,6 +66,12 @@ cd "$BINARIES_DIR"
 rm -rf boot boot.ext4
 mkdir boot
 cp Image "$dtb" boot/
+# The USB-C port (usb0, dwc2 dual-role with no ID pin wired to it) as a USB
+# device, for the gadget network.
+"$HOST_DIR/bin/dtc" -q -I dtb -O dts -o boot/k.dts "boot/$dtb"
+sed -i 's/\(usb@91500000 {\)/\1\n\t\t\tdr_mode = "peripheral";/' boot/k.dts
+"$HOST_DIR/bin/dtc" -q -I dts -O dtb -o "boot/$dtb" boot/k.dts
+rm boot/k.dts
 ln -s "$dtb" boot/k.dtb
 "$mkimage" -A riscv -O linux -T kernel -C none -a 0 -e 0 -n linux \
 	-d fw_jump.bin boot/fw_jump_add_uboot_head.bin

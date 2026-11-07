@@ -1,0 +1,2 @@
+# Filesystems the slot roots may use.
+CONFIG_EROFS_FS=y
