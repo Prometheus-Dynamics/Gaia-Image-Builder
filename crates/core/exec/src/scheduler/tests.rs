@@ -55,6 +55,7 @@ fn rust_artifact(id: &str, source: &str, output: &str) -> ArtifactSpec {
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
             surface: None,
+            trim: None,
         }),
         Some(SourceRef::new(source)),
         ArtifactOutputSpec {

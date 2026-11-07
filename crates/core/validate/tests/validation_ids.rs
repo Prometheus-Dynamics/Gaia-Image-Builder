@@ -34,6 +34,7 @@ fn empty_public_ids_are_validation_errors() {
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
             surface: None,
+            trim: None,
         }),
         None,
         ArtifactOutputSpec {

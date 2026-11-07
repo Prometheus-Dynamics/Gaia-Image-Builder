@@ -16,6 +16,7 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig, sources: &[SourceSpec]) -
             cpu: _,
             link,
             surface,
+            trim,
         } => {
             let cargo_git_sources =
                 compile_cargo_git_sources(raw.cargo_git_sources.clone(), sources);
@@ -67,6 +68,14 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig, sources: &[SourceSpec]) -
                                 surface_max: version.surface_max,
                             }
                         }),
+                    })
+                }),
+                // The recorded links are the group's; see complete_build_groups.
+                trim: trim.map(|trim| {
+                    Box::new(gaia_spec::RustTrimSpec {
+                        users: trim.users,
+                        user_files: Vec::new(),
+                        recorded: Vec::new(),
                     })
                 }),
             })
@@ -175,8 +184,13 @@ fn compile_cargo_git_sources(
 /// sorted packages of all members and the sorted union of their features.
 /// Each member keeps its own `package` and `target_name` for collecting its
 /// output.
+///
+/// A group with a trimmed library records the links of each one (by file
+/// name), so every member carries the same `trim.recorded` and the group's
+/// one cargo build goes through the same linker wrapper.
 pub(crate) fn complete_build_groups(artifacts: &mut [ArtifactSpec]) {
     let mut groups = BTreeMap::<String, (BTreeSet<String>, BTreeSet<String>)>::new();
+    let mut recorded = BTreeMap::<String, BTreeSet<String>>::new();
     for artifact in artifacts.iter() {
         if let ArtifactDefinition::Rust(rust) = &artifact.definition
             && let Some(group) = &rust.build_group
@@ -186,6 +200,16 @@ pub(crate) fn complete_build_groups(artifacts: &mut [ArtifactSpec]) {
                 packages.insert(rust.package.clone());
             }
             features.extend(rust.features.iter().cloned());
+            if rust
+                .trim
+                .as_ref()
+                .is_some_and(|trim| !trim.users.is_empty())
+            {
+                recorded
+                    .entry(group.clone())
+                    .or_default()
+                    .insert(cargo_file_name(rust, &artifact.output.path));
+            }
         }
     }
     for artifact in artifacts.iter_mut() {
@@ -197,8 +221,49 @@ pub(crate) fn complete_build_groups(artifacts: &mut [ArtifactSpec]) {
         {
             rust.group_packages = packages.iter().cloned().collect();
             rust.features = features.iter().cloned().collect();
+            if let Some(names) = rust
+                .build_group
+                .as_ref()
+                .and_then(|group| recorded.get(group))
+            {
+                let trim = rust.trim.get_or_insert_with(Default::default);
+                trim.recorded = names.iter().cloned().collect();
+            }
         }
     }
+    // Each trimmed library reads its users' imports from their cargo files.
+    let files = artifacts
+        .iter()
+        .filter_map(|artifact| match &artifact.definition {
+            ArtifactDefinition::Rust(rust) => Some((
+                artifact.id.as_str().to_string(),
+                cargo_file_name(rust, &artifact.output.path),
+            )),
+            _ => None,
+        })
+        .collect::<BTreeMap<_, _>>();
+    for artifact in artifacts.iter_mut() {
+        if let ArtifactDefinition::Rust(rust) = &mut artifact.definition
+            && let Some(trim) = rust.trim.as_mut()
+        {
+            trim.user_files = trim
+                .users
+                .iter()
+                .map(|user| files.get(user).cloned().unwrap_or_default())
+                .collect();
+        }
+    }
+}
+
+/// The file a rust artifact's cargo build writes: its `target_name`, or the
+/// file name of its output path.
+fn cargo_file_name(rust: &RustArtifactSpec, output_path: &str) -> String {
+    rust.target_name.clone().unwrap_or_else(|| {
+        std::path::Path::new(output_path)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    })
 }
 
 pub(crate) fn compile_artifact_execution(

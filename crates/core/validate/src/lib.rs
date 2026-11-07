@@ -31,6 +31,7 @@ mod model;
 mod override_srcdirs;
 mod providers;
 mod reporting;
+mod rust_trim;
 mod secrets;
 mod sources;
 mod toolchains;

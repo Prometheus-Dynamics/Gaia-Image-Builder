@@ -1,4 +1,5 @@
 use super::*;
+use gaia_artifact_providers::ArtifactExecutionBackend;
 use gaia_spec::{ArtifactOutputSpec, ArtifactVariantSpec, RustArtifactSpec};
 use gaia_testkit::TempDir;
 use std::fs;
@@ -24,6 +25,7 @@ fn rust_provider_fails_for_missing_source_dir_when_nested_build_enabled() {
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
             surface: None,
+            trim: None,
         }),
         None,
         ArtifactOutputSpec {
@@ -70,6 +72,7 @@ fn rust_artifact_state_persists_backend_native_fields() {
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
             surface: None,
+            trim: None,
         }),
         None,
         ArtifactOutputSpec {
@@ -126,6 +129,7 @@ fn nested_rust_build_does_not_accept_stale_existing_output() {
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
             surface: None,
+            trim: None,
         }),
         None,
         ArtifactOutputSpec {
@@ -168,6 +172,7 @@ fn rust_artifact(id: &str, package: &str, output: &Path) -> ArtifactSpec {
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
             surface: None,
+            trim: None,
         }),
         None,
         ArtifactOutputSpec {
@@ -664,3 +669,4 @@ mod cpu;
 mod groups;
 mod shared_target;
 mod surface;
+mod trim;

@@ -126,6 +126,12 @@ Described in [Artifacts, install and stage](../configuration-artifacts.md#artifa
 
 Keys: `context`, `dockerfile`, `image`.
 
+## `[artifacts.trim]`
+
+Described in [Artifacts, install and stage](../configuration-artifacts.md#artifacts).
+
+Keys: `users`.
+
 ## `[artifacts.surface]`
 
 Described in [Artifacts, install and stage](../configuration-artifacts.md#artifacts).

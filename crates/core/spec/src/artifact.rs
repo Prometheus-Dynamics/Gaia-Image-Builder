@@ -132,6 +132,32 @@ pub struct RustArtifactSpec {
     /// The C ABI a `cdylib` declares it exports; checked after the build.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub surface: Option<Box<RustSurfaceSpec>>,
+    /// The library links of the artifact's build group that Gaia records
+    /// and, for the library that trims, relinks. Every member of the group
+    /// carries it, so the group's one cargo build is the same for each.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trim: Option<Box<RustTrimSpec>>,
+}
+
+/// A shared library relinked to export only what its users import. Cargo
+/// links it as usual through a wrapper that records the link; Gaia then
+/// replays that link with rustc's version script cut down to the names the
+/// users import, and `--gc-sections`, so the code only the dropped exports
+/// reached goes too.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct RustTrimSpec {
+    /// The artifacts of the build group whose imports the library keeps;
+    /// empty on a member that is not itself trimmed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub users: Vec<String>,
+    /// The file each user's cargo build writes (`helios-api`,
+    /// `libplugin.so`), in the order of `users`: Gaia reads their imports
+    /// there, whether or not they are rebuilt with the library.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub user_files: Vec<String>,
+    /// The file names (`libfoo.so`) of the group's trimmed libraries, whose
+    /// links the wrapper records. Sorted.
+    pub recorded: Vec<String>,
 }
 
 /// A shared library's declared surface: the symbols it exports and nothing
@@ -535,6 +561,7 @@ mod tests {
             cpu: None,
             link: RustLinkSpec::Static,
             surface: None,
+            trim: None,
         }
     }
 

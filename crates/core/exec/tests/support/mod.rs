@@ -170,6 +170,7 @@ pub fn artifact_failure_spec_with_overrides(
         cpu: None,
         link: gaia_spec::RustLinkSpec::Static,
         surface: None,
+        trim: None,
     });
     spec.artifacts.push(bad_artifact);
     spec

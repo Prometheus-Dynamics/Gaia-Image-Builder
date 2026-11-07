@@ -42,6 +42,7 @@ fn default_artifact_execution_fails_instead_of_materializing_placeholder() {
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
             surface: None,
+            trim: None,
         }),
         None,
         ArtifactOutputSpec {
@@ -404,6 +405,7 @@ fn artifact_execution_backend_prefers_explicit_setting_over_global_default() {
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
             surface: None,
+            trim: None,
         }),
         None,
         ArtifactOutputSpec {
@@ -466,6 +468,7 @@ fn artifact_contract_rejects_empty_inherited_docker_image() {
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
             surface: None,
+            trim: None,
         }),
         None,
         ArtifactOutputSpec {
@@ -523,6 +526,7 @@ fn dockerfile_artifact() -> ArtifactSpec {
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
             surface: None,
+            trim: None,
         }),
         None,
         ArtifactOutputSpec {

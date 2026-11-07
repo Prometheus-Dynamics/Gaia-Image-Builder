@@ -199,6 +199,7 @@ impl Harness {
                     cpu: None,
                     link: gaia_spec::RustLinkSpec::Static,
                     surface: None,
+                    trim: None,
                 }),
                 None,
                 ArtifactOutputSpec {

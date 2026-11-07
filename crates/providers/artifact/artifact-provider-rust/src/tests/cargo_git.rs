@@ -154,6 +154,7 @@ fn app_contract(
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
             surface: None,
+            trim: None,
         }),
         None,
         ArtifactOutputSpec {

@@ -184,6 +184,7 @@ const RUST_ARTIFACT_KEYS: &[&str] = &[
     "build_env",
     "link",
     "surface",
+    "trim",
 ];
 const JAVA_ARTIFACT_KEYS: &[&str] = &["build_target", "build_args", "build_command", "build_env"];
 const PACKAGE_DIR_ARTIFACT_KEYS: &[&str] = &["package_dir"];
@@ -293,6 +294,7 @@ const ARTIFACT_CHILDREN: &[Section] = &[
             &[],
         )],
     ),
+    section("trim", struct_fields::<raw::RawRustTrimConfig>, &[]),
     section(
         "surface",
         struct_fields::<raw::RawRustSurfaceConfig>,

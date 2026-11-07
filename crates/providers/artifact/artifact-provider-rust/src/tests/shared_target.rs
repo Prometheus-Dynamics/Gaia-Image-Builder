@@ -64,6 +64,7 @@ fn per_source_target_dir_stays_the_default() {
         Some(&scratch.join("gaia-rust-target-default-cache")),
         &source.display().to_string(),
         &contract,
+        false,
     );
 
     assert_eq!(target.dir, source.join(".gaia/cargo-target"));
@@ -116,7 +117,12 @@ fn shared_target_dir_lives_under_the_user_cache_and_claims_its_packages() {
     let artifact = rust_artifact("solo", "solo", &workspace.join("out/solo"));
     let contract = shared_contract(&artifact, workspace);
 
-    let target = cargo_target_for_in(Some(&root), &workspace.display().to_string(), &contract);
+    let target = cargo_target_for_in(
+        Some(&root),
+        &workspace.display().to_string(),
+        &contract,
+        false,
+    );
 
     assert!(target.shared, "{:?}", target.note);
     assert_eq!(
@@ -138,7 +144,7 @@ fn shared_target_dir_needs_a_user_cache() {
     let artifact = rust_artifact("solo", "solo", &workspace.join("out/solo"));
     let contract = shared_contract(&artifact, workspace);
 
-    let target = cargo_target_for_in(None, &workspace.display().to_string(), &contract);
+    let target = cargo_target_for_in(None, &workspace.display().to_string(), &contract, false);
 
     assert!(!target.shared);
     assert_eq!(target.dir, workspace.join(".gaia/cargo-target"));
@@ -165,7 +171,12 @@ fn shared_target_dir_is_mounted_into_docker_containers() {
         image: "gaia-rust:test".into(),
         build: None,
     });
-    let target = cargo_target_for_in(Some(&root), &workspace.display().to_string(), &contract);
+    let target = cargo_target_for_in(
+        Some(&root),
+        &workspace.display().to_string(),
+        &contract,
+        false,
+    );
     assert!(target.shared, "{:?}", target.note);
     prepare_cargo_target(&target).expect("shared dir prepared");
     let command = cargo_build_command(
@@ -238,10 +249,18 @@ fn distinct_packages_share_one_target_dir_and_each_gets_its_own_output() {
         second,
     );
 
-    let alpha_target =
-        cargo_target_for_in(Some(&root), &first.display().to_string(), &alpha_contract);
-    let beta_target =
-        cargo_target_for_in(Some(&root), &second.display().to_string(), &beta_contract);
+    let alpha_target = cargo_target_for_in(
+        Some(&root),
+        &first.display().to_string(),
+        &alpha_contract,
+        false,
+    );
+    let beta_target = cargo_target_for_in(
+        Some(&root),
+        &second.display().to_string(),
+        &beta_contract,
+        false,
+    );
 
     assert!(alpha_target.shared && beta_target.shared);
     assert_eq!(alpha_target.dir, beta_target.dir);
@@ -288,16 +307,24 @@ fn same_named_package_from_another_directory_never_reuses_the_first_build() {
         second,
     );
 
-    let first_target =
-        cargo_target_for_in(Some(&root), &first.display().to_string(), &first_contract);
+    let first_target = cargo_target_for_in(
+        Some(&root),
+        &first.display().to_string(),
+        &first_contract,
+        false,
+    );
     assert!(first_target.shared, "{:?}", first_target.note);
     assert_eq!(
         build_into(first, "app", &first_contract, &first_target),
         "first"
     );
 
-    let second_target =
-        cargo_target_for_in(Some(&root), &second.display().to_string(), &second_contract);
+    let second_target = cargo_target_for_in(
+        Some(&root),
+        &second.display().to_string(),
+        &second_contract,
+        false,
+    );
     assert!(!second_target.shared);
     assert_eq!(second_target.dir, second.join(".gaia/cargo-target"));
     assert!(

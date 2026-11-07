@@ -355,6 +355,7 @@ fn a_starting_point_image_has_its_surface_consumers_checked() {
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
             surface: Some(Box::new(RustSurfaceSpec::new("capi.exports"))),
+            trim: None,
         }),
         None,
         ArtifactOutputSpec {

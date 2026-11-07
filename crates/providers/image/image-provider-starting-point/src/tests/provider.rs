@@ -87,6 +87,7 @@ fn starting_point_tar_rootfs_accepts_image_feed_overlay() {
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
             surface: None,
+            trim: None,
         }),
         Some(SourceRef::new("base-rootfs")),
         ArtifactOutputSpec {

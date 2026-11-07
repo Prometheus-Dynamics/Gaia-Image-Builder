@@ -17,6 +17,7 @@ fn artifact(target: &str) -> gaia_spec::ArtifactSpec {
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
             surface: None,
+            trim: None,
         }),
         None,
         gaia_spec::ArtifactOutputSpec {

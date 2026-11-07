@@ -34,6 +34,7 @@ pub(super) fn rust(
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
             surface,
+            trim: None,
         }),
         None,
         ArtifactOutputSpec {

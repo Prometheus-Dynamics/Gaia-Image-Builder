@@ -1,23 +1,22 @@
 use gaia_artifact_providers::{
-    ArtifactBackendState, ArtifactBatchItem, ArtifactExecutionBackend, ArtifactExecutionContract,
-    ArtifactProvider, ArtifactProviderError, ArtifactProviderErrorKind,
-    ArtifactProviderValidationIssue, ProcessCancelCheck, ProcessLogLine, ProcessLogSink,
-    ProcessLogStream, artifact_output_path, copy_artifact_file_to_output,
-    render_artifact_backend_state, run_command_with_retries, write_artifact_marker,
+    ArtifactBackendState, ArtifactBatchItem, ArtifactExecutionContract, ArtifactProvider,
+    ArtifactProviderError, ArtifactProviderErrorKind, ArtifactProviderValidationIssue,
+    ProcessCancelCheck, ProcessLogLine, ProcessLogSink, ProcessLogStream, artifact_output_path,
+    copy_artifact_file_to_output, render_artifact_backend_state, run_command_with_retries,
+    write_artifact_marker,
 };
-use gaia_process::register_docker_mount;
 use gaia_spec::{ArtifactDefinition, ArtifactSpec, BuildModeSpec, ResolvedBuildSpec};
-use sha2::{Digest, Sha256};
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod build_env;
 mod cargo_errors;
 mod cargo_git;
+mod cargo_target;
 mod crates;
 mod feature_flags;
+mod link_record;
+mod link_trim;
 mod std_library;
 mod surface;
 mod toolchain;
@@ -25,6 +24,7 @@ mod tools;
 
 use build_env::{cargo_build_env, offline_cargo_env};
 use cargo_errors::cargo_failing_packages;
+use cargo_target::*;
 use feature_flags::CargoFeatureFlags;
 
 use tools::{host_toolchain_identity, sccache_env, strip_collected_output, toolchain_version};
@@ -90,22 +90,32 @@ impl ArtifactProvider for RustProvider {
         let source_dir = contract.source_dir.as_deref().unwrap_or(".");
         let output_path = artifact_output_path(contract, source_dir);
 
+        let flags = CargoFeatureFlags::of(artifact);
+        let records_links = !flags.recorded.is_empty();
+        let mut built_in = None;
         let (build_mode, messages) = if is_std_library(artifact) && contract.allow_nested_build {
-            let target = cargo_target_for(source_dir, contract);
-            std_library::collect(source_dir, contract, &target.dir, log_sink, cancel_check)?;
+            let target = cargo_target_for(source_dir, contract, records_links);
+            std_library::collect(
+                source_dir,
+                contract,
+                &target.dir,
+                log_sink,
+                cancel_check.clone(),
+            )?;
             ("toolchain", Vec::new())
         } else if contract.allow_nested_build {
-            let target = cargo_target_for(source_dir, contract);
+            let target = cargo_target_for(source_dir, contract, records_links);
             run_cargo_build(
                 source_dir,
                 &cargo_packages(artifact, &package),
-                &CargoFeatureFlags::of(artifact),
+                &flags,
                 contract,
                 &target,
                 log_sink,
-                cancel_check,
+                cancel_check.clone(),
             )?;
             collect_cargo_output(source_dir, &target.dir, &package, contract, &target_name)?;
+            built_in = Some(target.dir);
             ("cargo", Vec::new())
         } else if output_path.is_file() {
             ("existing-output", Vec::new())
@@ -124,10 +134,10 @@ impl ArtifactProvider for RustProvider {
         self.finish_artifact(
             artifact,
             contract,
-            &package,
-            &target_name,
+            (&package, &target_name),
             build_mode,
             messages,
+            built_in.as_deref().map(|dir| (dir, cancel_check)),
         )
     }
 
@@ -225,20 +235,21 @@ impl ArtifactProvider for RustProvider {
                 });
             }
         }
-        let target = cargo_target_for(source_dir, leader.contract);
         // Flags come from a crate-building member: the standard library's
         // own carry no features or link mode.
         let flags_from = items
             .iter()
             .find(|item| !is_std_library(item.artifact))
             .unwrap_or(leader);
+        let flags = CargoFeatureFlags::of(flags_from.artifact);
+        let target = cargo_target_for(source_dir, leader.contract, !flags.recorded.is_empty());
         let built = if packages.is_empty() {
             Ok(())
         } else {
             run_cargo_build(
                 source_dir,
                 &packages,
-                &CargoFeatureFlags::of(flags_from.artifact),
+                &flags,
                 leader.contract,
                 &target,
                 leader.log_sink.clone(),
@@ -261,10 +272,10 @@ impl ArtifactProvider for RustProvider {
                         return self.finish_artifact(
                             item.artifact,
                             item.contract,
-                            &package,
-                            &target_name,
+                            (&package, &target_name),
                             "toolchain",
                             Vec::new(),
+                            None,
                         );
                     }
                     collect_cargo_output(
@@ -277,10 +288,10 @@ impl ArtifactProvider for RustProvider {
                     self.finish_artifact(
                         item.artifact,
                         item.contract,
-                        &package,
-                        &target_name,
+                        (&package, &target_name),
                         "cargo",
                         vec![note.clone()],
+                        Some((&target.dir, cancel_check.clone())),
                     )
                 })
                 .collect(),
@@ -348,12 +359,23 @@ impl RustProvider {
         &self,
         artifact: &ArtifactSpec,
         contract: &ArtifactExecutionContract,
-        package: &str,
-        target_name: &str,
+        (package, target_name): (&str, &str),
         build_mode: &str,
         mut messages: Vec<String>,
+        built_in: Option<(&Path, Option<ProcessCancelCheck>)>,
     ) -> Result<Vec<String>, ArtifactProviderError> {
         messages.extend(surface::check(artifact, contract)?);
+        // The surface is checked as cargo linked it; the trim keeps a part.
+        if let Some((target_dir, cancel_check)) = built_in {
+            let profile_dir = link_trim::profile_dir(target_dir, contract);
+            messages.extend(link_trim::trim(
+                artifact,
+                contract,
+                target_dir,
+                &profile_dir,
+                cancel_check,
+            )?);
+        }
         crates::record_after_build(artifact, contract, package, build_mode)?;
         write_artifact_marker(
             contract,
@@ -419,191 +441,6 @@ fn cargo_packages(artifact: &ArtifactSpec, package: &str) -> Vec<String> {
         ArtifactDefinition::Rust(rust) => rust.cargo_packages(),
         _ => vec![package.to_string()],
     }
-}
-
-/// A source's own cargo target dir, `<source>/.gaia/cargo-target`.
-fn cargo_target_dir(source_dir: &str) -> PathBuf {
-    PathBuf::from(source_dir).join(".gaia").join("cargo-target")
-}
-
-/// Directory inside a shared target dir that records which directory each
-/// local package was first built from.
-const SHARED_OWNERS_DIR: &str = "gaia-owners";
-
-/// Where one cargo invocation writes.
-struct CargoTarget {
-    dir: PathBuf,
-    /// Whether `dir` is shared with other sources: it is created up front and
-    /// registered as a docker mount.
-    shared: bool,
-    /// Logged before the build: the shared dir in use, or why the source
-    /// keeps its own dir although a shared one was asked for.
-    note: Option<String>,
-}
-
-fn cargo_target_for(source_dir: &str, contract: &ArtifactExecutionContract) -> CargoTarget {
-    cargo_target_for_in(
-        gaia_spec::user_cache_root().as_deref(),
-        source_dir,
-        contract,
-    )
-}
-
-/// Chooses the target dir of a build of `source_dir`. With
-/// `shared_target_dir` it is `<cache_root>/cargo-target/<key>`, shared by
-/// every source built with the same toolchain, target, profile and backend.
-/// Cargo identifies a package by name and version, so a source whose local
-/// packages an earlier source in that dir built from another directory keeps
-/// its own dir instead of reusing those outputs.
-fn cargo_target_for_in(
-    cache_root: Option<&Path>,
-    source_dir: &str,
-    contract: &ArtifactExecutionContract,
-) -> CargoTarget {
-    let own = cargo_target_dir(source_dir);
-    if !contract.rust_shared_target_dir {
-        return CargoTarget {
-            dir: own,
-            shared: false,
-            note: None,
-        };
-    }
-    let Some(root) = cache_root else {
-        return CargoTarget {
-            dir: own,
-            shared: false,
-            note: Some(
-                "shared cargo target dir needs a user cache directory (GAIA_CACHE_DIR, XDG_CACHE_HOME or HOME); using the source's own"
-                    .into(),
-            ),
-        };
-    };
-    let dir = root.join("cargo-target").join(shared_target_key(contract));
-    match claim_local_packages(source_dir, &dir) {
-        Ok(None) => CargoTarget {
-            note: Some(format!(
-                "cargo target dir shared with other sources: {}",
-                dir.display()
-            )),
-            dir,
-            shared: true,
-        },
-        Ok(Some(conflict)) => CargoTarget {
-            dir: own,
-            shared: false,
-            note: Some(format!(
-                "{conflict}; using the source's own cargo target dir"
-            )),
-        },
-        Err(reason) => CargoTarget {
-            dir: own,
-            shared: false,
-            note: Some(format!("shared cargo target dir not used: {reason}")),
-        },
-    }
-}
-
-/// Name of a shared target dir: a hash of the toolchain (the host rustc and
-/// cargo, or the docker image), target triple, profile and execution backend.
-/// Cargo already keys its outputs by rustc and target, so the key only keeps
-/// unrelated builds in separate dirs.
-fn shared_target_key(contract: &ArtifactExecutionContract) -> String {
-    let (backend, toolchain) = match &contract.execution_backend {
-        ArtifactExecutionBackend::Host => ("host", host_toolchain_identity()),
-        ArtifactExecutionBackend::Docker(docker) => ("docker", format!("image={}", docker.image)),
-    };
-    let identity = format!(
-        "backend={backend}\ntoolchain={toolchain}\ntarget={}\nprofile={}\n",
-        contract.artifact_target.as_deref().unwrap_or("host"),
-        cargo_profile_dir(contract),
-    );
-    let digest = Sha256::digest(identity.as_bytes());
-    digest
-        .iter()
-        .take(12)
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
-/// Claims the local packages of `source_dir` (workspace and path packages;
-/// registry and git packages are immutable and shared freely) for
-/// `shared_dir`. Returns the first package claimed by another directory, or
-/// `Err` when the packages cannot be listed or claimed.
-fn claim_local_packages(source_dir: &str, shared_dir: &Path) -> Result<Option<String>, String> {
-    let output = Command::new("cargo")
-        .args(["metadata", "--format-version", "1"])
-        .current_dir(source_dir)
-        .output()
-        .map_err(|error| format!("cargo metadata did not start: {error}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "cargo metadata failed: {}",
-            stderr.lines().next().unwrap_or("no output")
-        ));
-    }
-    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|error| format!("cargo metadata output is not JSON: {error}"))?;
-    let owners = shared_dir.join(SHARED_OWNERS_DIR);
-    fs::create_dir_all(&owners)
-        .map_err(|error| format!("failed to create '{}': {error}", owners.display()))?;
-    for package in metadata["packages"].as_array().into_iter().flatten() {
-        if !package["source"].is_null() {
-            continue;
-        }
-        let (Some(name), Some(version), Some(manifest)) = (
-            package["name"].as_str(),
-            package["version"].as_str(),
-            package["manifest_path"].as_str(),
-        ) else {
-            continue;
-        };
-        let Some(dir) = Path::new(manifest).parent() else {
-            continue;
-        };
-        let dir = fs::canonicalize(dir)
-            .unwrap_or_else(|_| dir.to_path_buf())
-            .display()
-            .to_string();
-        let claim = owners.join(format!("{name}-{version}"));
-        match OpenOptions::new().write(true).create_new(true).open(&claim) {
-            Ok(mut file) => file
-                .write_all(dir.as_bytes())
-                .map_err(|error| format!("failed to write '{}': {error}", claim.display()))?,
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                let owner = fs::read_to_string(&claim)
-                    .map_err(|error| format!("failed to read '{}': {error}", claim.display()))?;
-                if owner != dir {
-                    return Ok(Some(format!(
-                        "package '{name}' {version} is built from '{owner}' in the shared target dir"
-                    )));
-                }
-            }
-            Err(error) => {
-                return Err(format!("failed to claim '{}': {error}", claim.display()));
-            }
-        }
-    }
-    Ok(None)
-}
-
-/// Creates a shared target dir and registers it as a docker mount, so
-/// containers see it at its own path. Per-source dirs need nothing.
-fn prepare_cargo_target(target: &CargoTarget) -> Result<(), ArtifactProviderError> {
-    if !target.shared {
-        return Ok(());
-    }
-    fs::create_dir_all(&target.dir).map_err(|error| {
-        ArtifactProviderError::new(
-            ArtifactProviderErrorKind::RuntimeState,
-            format!(
-                "failed to create shared cargo target dir '{}': {error}",
-                target.dir.display()
-            ),
-        )
-    })?;
-    register_docker_mount(&target.dir);
-    Ok(())
 }
 
 fn cargo_build_command(
@@ -677,6 +514,24 @@ fn run_cargo_build(
                 .or_else(|| std::env::var(name).ok())
         },
     );
+    let recording = if flags.recorded.is_empty() {
+        Vec::new()
+    } else {
+        // The variables cargo sees, the later winning: build_env, then the
+        // toolchain's.
+        let cargo_env = toolchain_env
+            .iter()
+            .chain(&build_env)
+            .cloned()
+            .collect::<Vec<_>>();
+        link_record::recording_env(
+            &target.dir,
+            contract,
+            source_dir,
+            &cargo_env,
+            &flags.recorded,
+        )?
+    };
     let mut command = cargo_build_command(source_dir, packages, flags, contract, &target.dir);
     if toolchain::sets_target_rustflags(&toolchain_env) {
         // Folded into the target's flags: cargo would use it instead of them.
@@ -686,6 +541,7 @@ fn run_cargo_build(
     command.envs(git_env.iter().map(|(key, value)| (key, value)));
     command.envs(sccache.iter().map(|(key, value)| (key, value)));
     command.envs(toolchain_env.iter().map(|(key, value)| (key, value)));
+    command.envs(recording);
     command.envs(offline_cargo_env(contract.offline));
     let label = match packages {
         [package] => format!("cargo build for package '{package}'"),
@@ -728,7 +584,7 @@ fn collect_cargo_output(
     Ok(())
 }
 
-fn cargo_profile_dir(contract: &ArtifactExecutionContract) -> &str {
+pub(crate) fn cargo_profile_dir(contract: &ArtifactExecutionContract) -> &str {
     match contract.build_mode.as_ref() {
         Some(BuildModeSpec::Release) => "release",
         Some(BuildModeSpec::Debug) | None => "debug",
@@ -739,7 +595,7 @@ fn cargo_profile_dir(contract: &ArtifactExecutionContract) -> &str {
     }
 }
 
-fn cargo_output_dir(target_dir: &Path, artifact_target: Option<&str>) -> PathBuf {
+pub(crate) fn cargo_output_dir(target_dir: &Path, artifact_target: Option<&str>) -> PathBuf {
     match artifact_target {
         Some(target) => target_dir.join(target),
         None => target_dir.to_path_buf(),

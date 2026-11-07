@@ -121,7 +121,7 @@ The user decided these on 2026-11-03, through HeliOS. Nothing here starts until 
 - One combined build across workspaces, with one feature set per image. Designed in docs/design/combined-surface-build.md (9b8a91b): one surface crate per surface in the product's workspace, registered through Daedalus's `export_surface!`. Gaia checks one version of each own crate per image (dce1b0b) and the plugins a surface opens (dce1b0b, 1e7d2c7, 77f38d4). Left: HeliOS's surface crate and its config.
 - A check that a process does not hold the same crate both statically and through a shared library: "not both" (bf45532), and the copies of std per program (dba9515).
 - Shipping libstd properly: `package = "std"` as an artifact (7e090ec).
-- Two-pass trim: build, read what each library's users import, relink exporting only that. The A/B does this by hand, and cargo does not relink when the export list changes.
+- Two-pass trim: build, read what each library's users import, relink exporting only that. Gaia's side is in: `trim = { users = [...] }` (recorded link replayed, no second cargo build). Left: HeliOS's config naming its libraries' users, and a Raze build that measures it.
 - Packaging the Lemnos kernel module into slots. The module lives in Lemnos, with drivers in Rust in userspace.
 - Module sources moving from Styx to Lemnos.
 - Cold-build chain A/B, when host load allows. After cargo finishes, `image:prepare` is bound by host-python3, cython, linux and mesa3d. A higher `-j` can only help the 80 of 413 s make sits at its 7-package cap.

@@ -6,6 +6,7 @@ mod build_date;
 mod export;
 mod project_git;
 mod resolver;
+mod rust_definition;
 mod scanner;
 
 use crate::ConfigError;
@@ -568,40 +569,9 @@ fn interpolate_artifact(
         .collect();
     artifact.output_path = resolver::interpolate_string(artifact.output_path, raw, env);
     artifact.definition = match artifact.definition {
-        RawArtifactDefinition::Rust {
-            package,
-            target_name,
-            emit_directory,
-            features,
-            no_default_features,
-            all_features,
-            build_env,
-            cpu,
-            link,
-            surface,
-        } => RawArtifactDefinition::Rust {
-            package: resolver::interpolate_string(package, raw, env),
-            target_name: target_name.map(|value| resolver::interpolate_string(value, raw, env)),
-            emit_directory,
-            features: features
-                .into_iter()
-                .map(|value| resolver::interpolate_string(value, raw, env))
-                .collect(),
-            no_default_features,
-            all_features,
-            build_env: interpolate_env(build_env, raw, env),
-            cpu,
-            link: link.map(|value| resolver::interpolate_string(value, raw, env)),
-            surface: surface.map(|surface| crate::raw::RawRustSurfaceConfig {
-                exports: resolver::interpolate_string(surface.exports, raw, env),
-                plugin_dirs: surface
-                    .plugin_dirs
-                    .into_iter()
-                    .map(|dir| resolver::interpolate_string(dir, raw, env))
-                    .collect(),
-                ..surface
-            }),
-        },
+        definition @ RawArtifactDefinition::Rust { .. } => {
+            rust_definition::interpolate(definition, raw, env)
+        }
         RawArtifactDefinition::Java {
             build_target,
             build_args,

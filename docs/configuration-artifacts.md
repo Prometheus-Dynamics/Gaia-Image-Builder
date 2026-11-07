@@ -113,6 +113,7 @@ Artifact kinds:
   - `toolchain` (string; the `[[toolchains]]` id to cross-compile with; see
     [Toolchains](configuration-sources.md#toolchains))
   - `build_group` (string; see [Rust build groups](#rust-build-groups))
+  - `trim` (table; see [Trimmed shared libraries](#trimmed-shared-libraries))
   - `cargo_git_sources` (table: repository URL as Cargo.lock records it →
     the id of a declared `kind = "git"` source; see
     [Private cargo git dependencies](#private-cargo-git-dependencies))
@@ -267,6 +268,64 @@ id = "install-rust-std"
 artifact = "rust-std"
 dest = "/usr/lib"
 ```
+
+#### Trimmed shared libraries
+
+A shared library usually exports far more than its programs import. HeliOS
+measured 4.9% of libdaedalus's exports and 4.3% of libstyx's in use. Rustc
+exports every public item of a `dylib` (and every `#[no_mangle]` item of a
+`cdylib`), and a second version script cannot narrow that: the linker joins
+the scripts' global names. `trim` relinks the library exporting only what its
+users import:
+
+```toml
+[[artifacts]]
+id = "libcore"
+kind = "rust"
+source = "acme"
+package = "acme-core"              # [lib] crate-type = ["dylib"]
+target_name = "libacme_core.so"
+build_group = "acme"
+link = "shared"
+output_path = "${outputs.dir}/artifacts/libacme_core.so"
+trim = { users = ["acme-engine", "vision-plugin"] }
+```
+
+`users` are the artifacts whose imports the library keeps: other
+crate-building members of its `build_group`
+(`rust_trim_user_not_in_group`). The group is built by one cargo
+invocation, so their files are there when the library is relinked. The
+library must be one `.so` file (`rust_trim_not_a_library`), and it needs a
+group (`rust_trim_without_build_group`). The users can be any ELF files the
+group builds: programs, `cdylib` plugins, or other trimmed libraries.
+
+How it works:
+
+- Every member of the group links through a wrapper Gaia writes:
+  `<target dir>/gaia-link/bin/<linker>`. The wrapper carries the original
+  linker's file name, because rustc picks the link style from that name. It
+  runs the linker the build would have used, in this order: a toolchain's,
+  `CARGO_TARGET_<TRIPLE>_LINKER`, the nearest cargo config's
+  `target.<triple>.linker`, then `cc`.
+- For a trimmed library, the wrapper also keeps the link's arguments and
+  copies of what rustc deletes after the link. That is rustc's temporary
+  directory, holding its version script, and the crate's object files. It
+  keeps them in `gaia-link/<library>/`.
+- After the build, Gaia reads the users' dynamic imports. It cuts rustc's
+  version script down to the names among them that the library defines, plus
+  `rust_metadata_*`, which crates that build against a `dylib` read. It then
+  replays the link with `-Wl,--gc-sections`, so the code that only the
+  dropped exports reached goes too. A name a user imports that the relinked
+  library lacks fails the artifact.
+- The relinked file is the artifact's output, stripped as usual. A declared
+  `surface` is checked against the full link first.
+- Cargo rebuilds every crate when the linker changes. A group that records
+  links therefore builds in its own target dir: `.gaia/cargo-target-linked`,
+  or the shared dir's key plus `-linked`. Its first build is a cold one.
+
+The image checks then read the trimmed library like any other: a program in
+the root filesystem that imports a name it no longer exports is a leftover
+import of that surface.
 
 #### Declared surfaces
 

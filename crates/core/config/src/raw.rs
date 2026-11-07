@@ -778,6 +778,14 @@ pub(crate) struct RawArtifactConfig {
     pub definition: RawArtifactDefinition,
 }
 
+/// `trim = { users = ["<artifact>", ...] }` on a Rust library artifact.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default)]
+pub(crate) struct RawRustTrimConfig {
+    /// Artifacts of the library's build group whose imports it keeps.
+    pub users: Vec<String>,
+}
+
 /// `surface = { exports = "<file>" }` on a Rust artifact.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
@@ -869,6 +877,9 @@ pub(crate) enum RawArtifactDefinition {
         /// A `cdylib`'s declared exports, checked after the build.
         #[serde(default)]
         surface: Option<RawRustSurfaceConfig>,
+        /// A shared library relinked to export only what its users import.
+        #[serde(default)]
+        trim: Option<RawRustTrimConfig>,
     },
     Java {
         build_target: String,
