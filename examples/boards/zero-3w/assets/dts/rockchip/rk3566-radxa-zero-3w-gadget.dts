@@ -1,8 +1,0 @@
-// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
-// The ZERO 3W with its USB 2.0 OTG port (usb_host0_xhci) as a USB device,
-// for the gadget network. Written, untested on board.
-#include "rk3566-radxa-zero-3w.dts"
-
-&usb_host0_xhci {
-	dr_mode = "peripheral";
-};

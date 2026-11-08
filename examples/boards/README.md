@@ -7,30 +7,50 @@ but none has booted on its board yet.
 
 | Board | SoC | Boot medium | Kernel, U-Boot | Config |
 | --- | --- | --- | --- | --- |
-| Radxa ROCK 5C | RK3588S2 (A76+A55) | SD / eMMC, GPT | mainline Linux 6.19, U-Boot 2026.01, TF-A 2.12 | [rock-5c](rock-5c/build.toml) |
+| Radxa ROCK 5C | RK3588S2 (A76+A55) | SD / eMMC, GPT | mainline Linux 7.3.3, U-Boot 2026.10, TF-A 2.15.0 | [rock-5c](rock-5c/build.toml) |
 | Radxa ROCK 4D | RK3576 (A72+A53) | SD / eMMC, GPT | mainline Linux 6.19, U-Boot 2026.01, rkbin BL31 | [rock-4d](rock-4d/build.toml) |
 | Luckfox Pico Pro | RV1106G2 (A7) | 128 MB SPI-NAND, UBI | Luckfox SDK 5.10 kernel and U-Boot | [luckfox-pico-pro](luckfox-pico-pro/build.toml) |
 | BPI-CanMV-K230D-Zero | K230D (C908, RVV 1.0) | SD (TF only), GPT | ruyisdk 6.6 kernel, SDK U-Boot 2022.10, OpenSBI 1.4 | [k230d-zero](k230d-zero/build.toml) |
-| Radxa ZERO 3W | RK3566 (A55) | SD / eMMC, GPT | mainline Linux 6.19, U-Boot 2026.01, TF-A 2.12 | [zero-3w](zero-3w/build.toml) |
-| Firefly AIO-3562JQ | RK3562 (A53) | SD / eMMC, GPT | Firefly 5.10 kernel and U-Boot, rkbin BL31 and OP-TEE | [aio-3562jq](aio-3562jq/build.toml) |
+| Radxa ZERO 3E | RK3566 (A55) | SD, GPT | mainline Linux 7.3.3, U-Boot 2026.10, TF-A 2.15.0 | [zero-3e](zero-3e/build.toml) |
+| CanMV K230D AI-CAM | K230D (C908, RVV 1.0) | SD, GPT | mainline Linux 7.3.3, SDK U-Boot 2022.10, OpenSBI 1.4 | [k230d-ai-cam](k230d-ai-cam/build.toml) |
+
+The ROCK 5C and ZERO 3E share one RK35xx base, [rk35xx/base.toml](rk35xx/base.toml)
+with `rk35xx/assets/`: the Buildroot defconfig (kernel, U-Boot and TF-A
+versions, rootfs, SSH), the post-build and post-image scripts, the kernel
+and U-Boot fragments and the GPT layout. Each board's `build.toml`
+`extends` it and sets only what differs: CPU, device tree, U-Boot
+defconfig, TF-A platform, DDR blob and its own kernel options. The K230D
+boards share [k230d-zero/base.toml](k230d-zero/base.toml); the AI-CAM's only
+differences are its kernel, its device tree and the fitted lens, an input
+(`--set input.lens=72` or `140`) written to `/etc/camera-lens`.
+
+Configs for boards whose SoC is not in mainline, **not buildable yet**, kept
+so the differences are written down:
+
+| Board | SoC | Config | What is missing |
+| --- | --- | --- | --- |
+| Radxa Cubie A7A, A7S, A7Z | Allwinner A733 | [a733](a733/base.toml), [a7a](cubie-a7a/build.toml), [a7s](cubie-a7s/build.toml), [a7z](cubie-a7z/build.toml) | All of the SoC in Linux 7.3.3 (no dts, clocks or pinctrl), U-Boot v2026.10 and TF-A v2.15.0; a closed DRAM init blob with no redistribution grant |
+| Luckfox Aura | RV1126B | [luckfox-aura](luckfox-aura/build.toml) | Linux 7.3.3 has clock and reset drivers only (no dts, no pinctrl); nothing in U-Boot v2026.10 or TF-A v2.15.0 |
+
+Their device tree, U-Boot and TF-A names are the ones the upstream trees'
+conventions give; the build stops at the first that does not exist.
 
 ## Bring-up: console, network, SSH
 
 Every board has a serial console (the Rockchip boards at 1500000 baud: ttyS2
-on the mainline kernels, ttyFIQ0 on the vendor ones) and `dropbear` for SSH.
+on the mainline kernels, ttyFIQ0 on the Luckfox SDK's) and `dropbear` for SSH.
 The images set no root password, so SSH needs a key: put an
 `authorized_keys` file in the board's `assets/` (it is git-ignored) and the
 post-build script installs it as `/root/.ssh/authorized_keys`. The Luckfox
 root is read-only, so its dropbear host keys are made again on each boot.
 
-Network: Ethernet with DHCP on `eth0` where the board has a port (ROCK 5C,
-ROCK 4D, Luckfox, AIO-3562JQ). The ZERO 3W and K230D Zero have none: their
-USB device port (the ZERO 3W's OTG Type-C, the K230D's USB-C) runs a USB
-gadget network (`g_ether`, CDC ECM and RNDIS), `usb0` at `10.55.0.1/24`,
-with `udhcpd` giving the host `10.55.0.2`. The device tree puts that port in
-peripheral mode (the ZERO 3W's `assets/dts`, the K230D's `post-image.sh`).
-The ZERO 3W also takes DHCP on a USB Ethernet adapter (RTL8152/8153,
-AX88179, CDC) on its host port. Its Wi-Fi has no mainline driver.
+Network: Ethernet with DHCP on `eth0` on every board with a port (ROCK 5C,
+ROCK 4D, Luckfox, ZERO 3E). The ZERO 3E and the K230D boards also run a USB
+gadget network on their USB device port (the ZERO 3E's OTG Type-C, the
+K230D's USB-C): `g_ether`, CDC ECM and RNDIS, `usb0` at `10.55.0.1/24`, with
+`udhcpd` giving the host `10.55.0.2`. The device tree puts that port in
+peripheral mode (the ZERO 3E's `assets/dts`, the K230D's `post-image.sh`).
+On the K230D boards, which have no Ethernet, it is the only network.
 
 Appliance images, single-slot with a read-only EROFS root, also written,
 untested on board ([cast-receiver](cast-receiver/README.md): AirPlay + DLNA
@@ -63,8 +83,7 @@ Each build publishes the vendor loader next to its images, where
 - ROCK 5C: `rk3588_spl_loader_v1.18.113.bin` (`RK3588MINIALL.ini` of the rkbin Buildroot pins, `f43a462`)
 - ROCK 4D: `rk3576_loader_v1.13.109.bin` (rkbin `RK3576MINIALL.ini`)
 - Luckfox Pico Pro: `rv1106_download_v1.15.108.bin` (the SDK's rkbin)
-- ZERO 3W: `rk356x_spl_loader_v1.23.114.bin` (`RK3566MINIALL.ini` of the rkbin Buildroot pins, `f43a462`)
-- AIO-3562JQ: `rk3562_loader_v1.10.108.bin` (rkbin `3e288fe`, `RK3562MINIALL.ini`)
+- ZERO 3E: `rk356x_spl_loader_v1.23.114.bin` (`RK3566MINIALL.ini` of the rkbin Buildroot pins, `f43a462`)
 - K230D Zero: `loader_mmc.bin`, the burner: the SDK's U-Boot built with
   `k230d_canmv_burntool_defconfig` (plain `u-boot.bin`, as Canaan's burning
   guide describes). It links at `0x80300000`, so give `k230-flash`
@@ -79,19 +98,11 @@ itself does.
 
 ## Layouts
 
-**ROCK 5C, ROCK 4D and ZERO 3W** (GPT, SD or eMMC): `u-boot-rockchip.bin` (idbloader
+**ROCK 5C, ROCK 4D and ZERO 3E** (GPT, SD or eMMC): `u-boot-rockchip.bin` (idbloader
 and U-Boot) at 32 KiB outside the table; an empty `uboot-env` partition at
 16 MiB with U-Boot's environment type GUID, so the built-in environment
 boots; `rootfs-a` (bootable, holds `/boot/extlinux/extlinux.conf`),
 `rootfs-b` (empty), `data`.
-
-**AIO-3562JQ** (GPT, SD or eMMC), Rockchip's vendor layout: `idblock.bin`
-(rkbin's DDR init and SPL, `mkimage -T rksd`) at 32 KiB outside the table;
-the `uboot` partition at 8 MiB with `uboot.img` (a FIT of the vendor U-Boot,
-rkbin's BL31 and OP-TEE), where the SPL looks for it; `rootfs-a` (bootable,
-holds `/boot/extlinux/extlinux.conf`, which the vendor U-Boot's distro boot
-reads), `rootfs-b` (empty), `data`. The vendor U-Boot keeps no environment
-on disk.
 
 **Luckfox Pico Pro** (SPI-NAND, 128 KiB blocks, 2 KiB pages), the
 `mtdparts` in `env.img`:
@@ -120,26 +131,19 @@ dtb's `bootargs` mount `mmcblk0p2`.
 
 ## Sources
 
-- ROCK 5C and 4D: Buildroot 2026.02.3. The ROCK 4D also pins rkbin at
-  `3e288fe`, for BL31 and the DDR init, which Buildroot's mainline TF-A
-  2.12 lacks for the RK3576.
-- ZERO 3W: Buildroot 2026.02.3 (mainline U-Boot `radxa-zero-3-rk3566`,
-  TF-A's `rk3568` platform, rkbin's `rk3566_ddr_1056MHz_v1.23.bin`).
-- AIO-3562JQ: Buildroot 2026.02.3 with Firefly's kernel (5.10.160) and
-  U-Boot from `gitlab.com/firefly-linux` (branch `rk3562/firefly`, pinned
-  by commit) and rkbin `3e288fe`. Mainline Linux has only an RK3562 base
-  device tree and mainline U-Boot no RK3562 support, so this board uses the
-  vendor trees. The kernel is GitLab's archive of the pinned commit, a
-  Buildroot custom tarball (not `override_srcdirs`, which skips patches,
-  nor a Buildroot git download, which fetches the whole history), with
-  `linux-no-gcc-wrapper.patch`: the tree's `scripts/gcc-wrapper.py` fails
-  the build on any warning not on its list, and GCC 14 warns where the
-  GCC 10 it was made for did not. `post-image.sh`
-  builds U-Boot with its `make.sh` and Buildroot's GCC 14, with three
-  changes in its copy: `-Wno-error` (GCC 14 warnings this 2017-based tree
-  makes errors), python3 for `decode_bl31.py` (the SDK assumes python2,
-  which current hosts lack; the script is python3-clean), and Buildroot's
-  job count.
+- ROCK 5C and ZERO 3E: Buildroot 2026.02.3 with Linux 7.3.3 (the latest
+  stable, kernel.org, 2026-11-06), U-Boot v2026.10 (the tag's GitHub
+  archive) and TF-A v2.15.0, as custom versions in the RK35xx base; their
+  sha256 are in `rk35xx_defconfig`, since Buildroot checks no hash for
+  custom versions. The blobs left are rkbin's DDR init (the TPL:
+  `rk3588_ddr_lp4_2112MHz_lp5_2400MHz_v1.18.bin` on the ROCK 5C,
+  `rk3566_ddr_1056MHz_v1.23.bin` on the ZERO 3E) and the maskrom loaders'
+  `usbplug` from the same `*MINIALL.ini`; BL31 and U-Boot's SPL are built
+  from source. U-Boot `rock-5c-rk3588s` and `radxa-zero-3-rk3566` (its
+  `OF_LIST` has the 3E), TF-A `rk3588` and `rk3568`.
+- ROCK 4D: Buildroot 2026.02.3, which also pins rkbin at `3e288fe`, for
+  BL31 and the DDR init, which Buildroot's mainline TF-A 2.12 lacks for the
+  RK3576.
 - Luckfox Pico Pro: Buildroot 2026.02.3 with the Luckfox SDK
   (`LuckfoxTECH/luckfox-pico` at `824b817`): its uClibc toolchain, its
   kernel through `override_srcdirs`, its U-Boot built by the post-image
@@ -159,12 +163,31 @@ dtb's `bootargs` mount `mmcblk0p2`.
   host tools as C17 (`assets/buildroot/external.mk`) and drops wget's
   `--passive-ftp`.
 
+- K230D AI-CAM: the K230D Zero's SDK tree, toolchain and boot chain
+  (mainline U-Boot has no K230 SPL or MMC driver), with mainline Linux
+  7.3.3 from the `defconfig`, cut down in `assets/linux.fragment`. Mainline's
+  `k230.dtsi` stops at the UARTs, so `assets/dts/k230d-ai-cam.dts` adds the SD
+  and USB controllers for the mainline drivers, with the SDK's addresses and
+  interrupts and no pinctrl states (U-Boot sets the pins, as on the SDK's
+  kernel). The kernel is an unpacked tree (`override_srcdirs`), since the
+  SDK's Buildroot applies its own Linux patches to a downloaded kernel.
+
 ## What was checked
 
-Built on 2026-10-31 (Fedora 44 host, GCC 16), each run passing
-`image:check`:
+Built on 2026-11-08 (Fedora 44 host, GCC 16), each run passing
+`image:check` and signed with the dev key:
 
-- ROCK 5C and 4D: the GPT entries, `u-boot-rockchip.bin` byte for byte at
+- ROCK 5C and ZERO 3E (Linux 7.3.3): the GPT entries, `u-boot-rockchip.bin`
+  byte for byte at 32 KiB, `extlinux.conf` with the kernel and dtb in
+  `rootfs-a`.
+- K230D AI-CAM (Linux 7.3.3, lens 72): the GPT entries, the SPL and U-Boot
+  copies byte for byte at their offsets, `boot.ext4` contents, and the
+  kernel `Image` under the 32 MiB that U-Boot's load addresses leave
+  (29.7 MB).
+
+Built on 2026-10-31, each run passing `image:check`:
+
+- ROCK 4D: the GPT entries, `u-boot-rockchip.bin` byte for byte at
   32 KiB (`RKNS` header), `extlinux.conf` with the kernel and dtb in
   `rootfs-a`, the loader's `LDR` header.
 - Luckfox Pico Pro: `ubi.img` read back (layout volume, `rootfs_a` holding
@@ -299,12 +322,10 @@ Written, untested on board.
 ## Still open
 
 - Boot each image on its board; read the maskrom USB product ids of the
-  RK3576, RK3566 and RK3562 with `lsusb` on the ROCK 4D, ZERO 3W and
-  AIO-3562JQ.
-- The USB gadget network (ZERO 3W, K230D Zero) and the AIO-3562JQ's vendor
-  U-Boot finding `uboot.img` and the extlinux slot are written, untested on
+  RK3576 and RK3566 with `lsusb` on the ROCK 4D and ZERO 3E.
+- The USB gadget network (ZERO 3E, K230D Zero, AI-CAM) is written, untested on
   board.
-- The ZERO 3W and AIO-3562JQ have no Atlas device package yet, so no
+- The ZERO 3E and K230D AI-CAM have no Atlas device package yet, so no
   `board-lite`.
 - Slot switching on the ROCK and K230 boards: their images boot slot A;
   selecting B (U-Boot environment or `extlinux` labels) is for the updater.

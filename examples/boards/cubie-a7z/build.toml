@@ -1,0 +1,22 @@
+config = 3
+extends = "../a733/base.toml"
+build_name = "cubie-a7z"
+description = "Radxa Cubie A7Z (Allwinner A733) on the A733 base. NOT BUILDABLE YET: see ../a733/base.toml."
+target = "cubie-a7z"
+
+[workspace]
+root_dir = "examples/boards/cubie-a7z"
+build_dir = "../../../.gaia/examples/cubie-a7z/build"
+
+# The A7Z has no Ethernet port (Wi-Fi, USB): its network waits on the
+# A733's USB device support, as a USB gadget like the ZERO 3E's.
+[image]
+config_overrides = [
+  ["BR2_TARGET_GENERIC_HOSTNAME", "\"cubie-a7z\""],
+  ["BR2_LINUX_KERNEL_INTREE_DTS_NAME", "\"allwinner/sun60i-a733-cubie-a7z\""],
+  ["BR2_TARGET_UBOOT_BOARD_DEFCONFIG", "\"radxa-cubie-a7z\""],
+  ["BR2_ROOTFS_POST_SCRIPT_ARGS", "\"- allwinner/sun60i-a733-cubie-a7z ttyS0,115200\""],
+]
+
+[outputs]
+dir = "../../../.gaia/examples/cubie-a7z/out"

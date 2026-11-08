@@ -1,0 +1,3 @@
+# U-Boot v2026.10, the tag's GitHub archive (BR2_GLOBAL_PATCH_DIR hash file:
+# Buildroot checks a custom U-Boot tarball's hash and has none of its own).
+sha256  f943a88389c8fd70a6b0d061a88267465e143c7ca6ea2b75837ab20f5b60c739  v2026.10.tar.gz
