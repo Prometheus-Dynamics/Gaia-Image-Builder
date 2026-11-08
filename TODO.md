@@ -19,7 +19,7 @@ through HeliOS). The other boards follow it, so their items stay below.
   - Blocked by: a Raze slot from the HeliOS coordinator (Raze #1 is a CM5, on the bench behind the SystemCore).
 - **Raze image size budget**
   - What: G6's whole-device budget for the Raze first: two slots and `/data` on the CM5's eMMC, a build that fails when they do not fit and names the smallest eMMC it needs, and the number for the PCB session. Budget against a 16 GB eMMC, the smallest CM5 eMMC the Raze supports (the alpha's CM5s have 32 GB, 29.1 GiB usable), and name it in the failure.
-  - Why: the alpha ships on the Raze. Its `.img.xz` grows a few KB a build (51.40 MB at ef4f1f2f) and nothing fails it while it still fits.
+  - Why: the alpha ships on the Raze. Its `.img.xz` grows a few KB a build (51.40 MB at HeliOS ef4f1f2f) and nothing fails it while it still fits.
   - Done when: a current HeliOS Raze build passes and an oversized one fails.
   - Status: the check is in Gaia (66d5f79, `device_size` and `device_reserve` on a disk), run both ways on a real Raze assembly: within budget it reports what is left, over it fails with "needs N MiB ... it fits a G GiB device or larger".
   - Blocked by: Atlas setting `device_size = "14910M"` (a 16 GB eMMC's capacity) and the reserve for the second slot on the slots disk in `devices/raze/gaia/slots.toml`.
@@ -108,13 +108,14 @@ The user's go, through HeliOS. Every shared library comes in two forms: a static
 
 - **Link modes**
   - What: static by default, shared chosen per image (layers), for every dependency with a surface.
-  - Status: `link = "shared"`, `package = "std"` (7e090ec), the per-image choice as layers (22dba15), and the trim, which relinks a shared library exporting only what its users import (`trim = { users = [...] }`, 38aebbd).
-  - Trim measured on 2026-11-06, on the HeliOS shared stack (scratch d69c5870 configs, Raze): the four libraries went from 46.8 to 21.7 MB, and the whole stack is 38.9 MB plus a 1.2 MB libstd, against 45.4 MB static. Exports per library: Daedalus 31506 → 1568, Styx 23200 → 1014, Eidos 8891 → 38, Lemnos 1815 → 244. That matches the hand-made A/B to within 8 bytes per library. The relinks add about 4 minutes to the 14.5-minute cargo build (linker-plugin LTO).
+  - Status: `link = "shared"`, `package = "std"` (7e090ec), the per-image choice with no new key (an input selects a layer that patches the product's features and adds the surface artifact and its install; the pattern is docs-only, 22dba15, resolved both ways with the Lemnos app), and the trim, which relinks a shared library exporting only what its users import (`trim = { users = [...] }`, 38aebbd).
+  - Trim measured on 2026-11-06, on the HeliOS shared stack (HeliOS scratch d69c5870 configs, Raze): the four libraries went from 46.8 to 21.7 MB, and the whole stack is 38.9 MB plus a 1.2 MB libstd, against 45.4 MB static. Exports per library: Daedalus 31506 → 1568, Styx 23200 → 1014, Eidos 8891 → 38, Lemnos 1815 → 244. That matches the hand-made A/B to within 8 bytes per library. The relinks add about 4 minutes to the 14.5-minute cargo build.
+  - Not in Gaia: LTO for a shared library. Rustc refuses LTO with `prefer-dynamic`, so a shared build's profile sets `lto = false`; the A/B's cross-language `-C linker-plugin-lto` was set by hand. Left: a per-artifact setting for it (config, spec, the rust provider and the trim relink).
   - Done when: a HeliOS Raze build makes both forms from one build file.
 - **Surface and ABI checks for every dependency's C surface**
-  - What: what was done for Daedalus (a02eda4): declared exports, consumers' imports, plugin directories and exports, ABI range constants, one version per crate, and "not both".
-  - Status: checks in (1873431, 717dbe9, bf45532, dce1b0b, 1e7d2c7, 77f38d4, f6a87ff), exercised on Daedalus only.
-  - Done when: each dependency's surface (Lemnos, Styx, Eidos, Daedalus) is declared in HeliOS's config and its checks pass on a real build.
+  - What: what was done for Daedalus (Daedalus a02eda4): declared exports, consumers' imports, plugin directories and exports, ABI range constants, one version per crate, and "not both".
+  - Status: checks in (1873431, 717dbe9, bf45532, dce1b0b, 1e7d2c7, 77f38d4, f6a87ff), exercised on Daedalus only; not yet run against Lemnos's or Orion's C surfaces.
+  - Done when: each dependency's surface (Lemnos, Orion, Styx, Eidos, Daedalus) is declared in HeliOS's config and its checks pass on a real build.
 - **Combined build across workspaces**
   - What: one feature set per image, designed in docs/design/combined-surface-build.md (9b8a91b). Gaia's checks are in. Left: HeliOS's surface crate and its config.
 
@@ -141,7 +142,7 @@ The user pinned these on 2026-10-30.
   - Done when: a push and pull round trip runs against GHCR.
   - Blocked by: the user, who said yes to GHCR through HeliOS on 2026-11-01. Still needed: the account or organization that owns the packages, a token with `write:packages` for the checkpoint's `token`, and the user's yes in Gaia's chat to the first real push.
 - **`gaia run` image job on the self-hosted runner**
-  - What: the image job of HeliOS's `.github/workflows/gaia-builds.yml` (814e4893). The workflow's validate jobs already pass on GitHub's hosted runners on pushes to HeliOS's `dev`; pushes to `architecture-overhaul`, where HeliOS integrates, do not trigger them, and Gaia's own `Gaia action` workflow builds `imported-rootfs-minimal` on them (last green on 17c20df), so only HeliOS's image job needs the runner.
+  - What: the image job of HeliOS's `.github/workflows/gaia-builds.yml` (HeliOS 814e4893). The workflow's validate jobs already pass on GitHub's hosted runners on pushes to HeliOS's `dev`; pushes to `architecture-overhaul`, where HeliOS integrates, do not trigger them, and Gaia's own `Gaia action` workflow builds `imported-rootfs-minimal` on them (last green on 17c20df), so only HeliOS's image job needs the runner.
   - Why: real image builds per change, not just unit tests.
   - Done when: a `workflow_dispatch` run of that workflow goes green with an image. None has run yet.
   - Blocked by: the user, on `Prometheus-Dynamics/HeliOS`, which has no runners or secrets today, following HeliOS's `docs/ci/gaia-builds.md`: register a runner labelled `gaia` (admin rights, about 100 GB free), add the `EIDOS_READ_TOKEN` secret with `gh secret set EIDOS_READ_TOKEN --repo Prometheus-Dynamics/HeliOS`, and set the fork-PR policy.
@@ -157,7 +158,7 @@ Cut and staying cut: TUI cleanup, deb packaging niceties.
 
 ## Done
 
-- Raze build time, under both of HeliOS's targets (2026-11-07, CPUs 6-31, -j13): one changed HeliOS crate on a warm build 3m58s at 50e9456c (backend cargo group 162 s with fat LTO, `image:build` 53 s, assembly 12 s), target 5 minutes; cargo cold with Buildroot warm 17m11s at HeliOS 7dc8031f (the backend cargo group 10m53s on the critical path, no straggler once helios-peripherals was gone), target 20. A moved Eidos `dev` no longer reruns cargo (7371f2a). Not timed: a build with Buildroot cold too, at current HeliOS on a quiet host.
+- Raze build time, under both of HeliOS's targets (2026-11-07, CPUs 6-31, -j13): one changed HeliOS crate on a warm build 3m58s at HeliOS 50e9456c (backend cargo group 162 s with fat LTO, `image:build` 53 s, assembly 12 s), target 5 minutes; cargo cold with Buildroot warm 17m11s at HeliOS 7dc8031f (the backend cargo group 10m53s on the critical path, no straggler once helios-peripherals was gone), target 20. A moved Eidos `dev` no longer reruns cargo (7371f2a). Not timed: a build with Buildroot cold too, at current HeliOS on a quiet host.
 - Lemnos kernel module in the images: `[[image.rootfs.out_of_tree_modules]]` (c7f0a7f), `${source.<id>.path}` module paths (a0eeac9), version 2.0.3-dev for the floor (baf90c6). A HeliOS 50e9456c Raze image shipped `updates/lemnos.ko` (57,488 B stripped, about 15 KB xz, `vermagic` matching 7.2.9-v8-16k) and `image:check` passed.
 - Size report for both modes, HeliOS 50e9456c Raze full, sent to HeliOS on 2026-11-07: static 48,769,176 B `.img.xz` (rootfs.erofs 41,345,024 B); shared with the trim 46,548,440 B (39,124,992 B), 2.2 MB smaller. Next to the board A/B (shared: +26% mirror tick p50, about +2 MB memory), static stays the default.
 
@@ -170,8 +171,9 @@ Cut and staying cut: TUI cleanup, deb packaging niceties.
 - Config v3 enums: e411aef.
 - `examples/sim-x86_64` and the app-layer fast path: a78b53a.
 - G1, bootloaders at fixed disk offsets: 0b09e38.
-- G2, U-Boot boot model in `image check`: 6ab2216. It checks a FIT's hashes; a FIT signed with RSA is not verified.
+- G2, U-Boot boot model in `image check`: 6ab2216. It checks a FIT's hashes; a FIT's RSA signature is not verified (not in scope until FIT signing is).
 - G3, `uboot-env` transform: 56568df, with the `mkenvimage` and `fw_printenv` test in 1966f26. `copies` for the Luckfox's two env copies: 942746b.
+- Packages: ipk (`[[image.assembly.packages]]`, deterministic, read back before publishing) and deb (`format = "deb"`); ipk-only builds with `[image] kind = "none"`; device sysroot checks (`[image.assembly.packages.device]`). Used by HeliOS for its SystemCore ipk.
 - G4, riscv64 aliases and lp64d loader dirs: 8170082.
 - G5, `gaia layer delta --max-window`: 69aecf2.
 - G9, armv7 aliases and armhf closure: 3e51c14.
