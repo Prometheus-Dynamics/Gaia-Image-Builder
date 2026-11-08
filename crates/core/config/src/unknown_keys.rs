@@ -183,6 +183,7 @@ const RUST_ARTIFACT_KEYS: &[&str] = &[
     "all_features",
     "build_env",
     "link",
+    "lto",
     "surface",
     "trim",
 ];

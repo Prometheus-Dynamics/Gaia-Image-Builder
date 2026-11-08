@@ -19,6 +19,8 @@ pub(crate) struct CargoFeatureFlags {
     pub(crate) cpu: Option<gaia_spec::RustCpuSpec>,
     /// `link`: shared adds `-C prefer-dynamic` to the target's rustc flags.
     pub(crate) link: gaia_spec::RustLinkSpec,
+    /// `lto`: linker adds `-C linker-plugin-lto` and links with rust-lld.
+    pub(crate) lto: gaia_spec::RustLtoSpec,
     /// The group's trimmed libraries: their links go through Gaia's wrapper
     /// (`link_record`). In the fingerprint, like the above.
     pub(crate) recorded: Vec<String>,
@@ -35,6 +37,7 @@ impl CargoFeatureFlags {
                 build_env: rust.build_env.clone(),
                 cpu: rust.cpu.clone(),
                 link: rust.link,
+                lto: rust.lto,
                 recorded: rust
                     .trim
                     .as_ref()
@@ -72,6 +75,9 @@ impl CargoFeatureFlags {
         }
         if !self.link.is_static() {
             fields.push(("link".to_string(), "shared".to_string()));
+        }
+        if !self.lto.is_profile() {
+            fields.push(("lto".to_string(), "linker".to_string()));
         }
         fields
     }

@@ -875,9 +875,12 @@ pub(crate) enum RawArtifactDefinition {
         /// `static` or `shared`; a string, so an input can choose it.
         #[serde(default)]
         link: Option<String>,
+        /// `profile` or `linker`; a string, so an input can choose it.
+        #[serde(default)]
+        lto: Option<String>,
         /// A `cdylib`'s declared exports, checked after the build.
         #[serde(default)]
-        surface: Option<RawRustSurfaceConfig>,
+        surface: Option<Box<RawRustSurfaceConfig>>,
         /// A shared library relinked to export only what its users import.
         #[serde(default)]
         trim: Option<RawRustTrimConfig>,

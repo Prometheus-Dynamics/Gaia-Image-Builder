@@ -56,7 +56,40 @@ fn member(
 
 #[test]
 fn a_trimmed_library_exports_only_what_its_users_import() {
-    let scratch = library_and_user_workspace("gaia-rust-trim");
+    drop(trimmed_group(
+        "gaia-rust-trim",
+        gaia_spec::RustLtoSpec::Profile,
+    ));
+}
+
+#[test]
+fn linker_lto_builds_bitcode_that_rust_lld_links_and_the_trim_relinks() {
+    let scratch = trimmed_group("gaia-rust-trim-lto", gaia_spec::RustLtoSpec::Linker);
+    let target = scratch.path().join(".gaia/cargo-target-linked");
+    // Rustc wrote LLVM bitcode, not machine code, for the crates' objects.
+    let objects = fs::read_dir(target.join("gaia-link/libcore.so/objects"))
+        .expect("recorded objects")
+        .map(|entry| fs::read(entry.expect("entry").path()).expect("object"))
+        .collect::<Vec<_>>();
+    assert!(!objects.is_empty());
+    assert!(
+        objects
+            .iter()
+            .all(|object| object.starts_with(b"BC\xC0\xDE")),
+        "bitcode objects"
+    );
+    let comment = |path: &Path| {
+        let bytes = fs::read(path).expect("read");
+        bytes.windows(11).any(|window| window == b"Linker: LLD")
+    };
+    assert!(comment(&target.join("debug/libcore.so")), "linked by lld");
+    assert!(comment(&target.join("debug/app")), "linked by lld");
+}
+
+/// Builds the trimmed `core` and its user `app` as one group, with `lto`,
+/// and checks the trim.
+fn trimmed_group(prefix: &str, lto: gaia_spec::RustLtoSpec) -> TempDir {
+    let scratch = library_and_user_workspace(prefix);
     let workspace = scratch.path();
     let recorded = vec!["libcore.so".to_string()];
     let core = member(
@@ -78,6 +111,12 @@ fn a_trimmed_library_exports_only_what_its_users_import() {
             ..Default::default()
         },
     );
+    let (mut core, mut app) = (core, app);
+    for artifact in [&mut core, &mut app] {
+        if let ArtifactDefinition::Rust(rust) = &mut artifact.definition {
+            rust.lto = lto;
+        }
+    }
     let core_contract = nested_contract(&core, workspace);
     let app_contract = nested_contract(&app, workspace);
     let results = RustProvider.execute_artifact_batch(
@@ -123,4 +162,5 @@ fn a_trimmed_library_exports_only_what_its_users_import() {
     assert!(trimmed.contains("core_used"), "{trimmed:?}");
     assert!(!trimmed.contains("core_unused"), "{trimmed:?}");
     assert!(trimmed.len() < full.len());
+    scratch
 }

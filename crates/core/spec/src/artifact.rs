@@ -131,6 +131,10 @@ pub struct RustArtifactSpec {
     /// fingerprints of builds that never set it keep.
     #[serde(skip_serializing_if = "RustLinkSpec::is_static")]
     pub link: RustLinkSpec,
+    /// Who does link-time optimization. Not serialized when the cargo
+    /// profile decides, so the fingerprints of builds that never set it keep.
+    #[serde(skip_serializing_if = "RustLtoSpec::is_profile")]
+    pub lto: RustLtoSpec,
     /// The C ABI a `cdylib` declares it exports; checked after the build.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub surface: Option<Box<RustSurfaceSpec>>,
@@ -263,6 +267,25 @@ pub enum RustLinkSpec {
 impl RustLinkSpec {
     pub fn is_static(&self) -> bool {
         *self == Self::Static
+    }
+}
+
+/// Who optimizes a Rust artifact across crates at link time.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RustLtoSpec {
+    /// The cargo profile's `lto` setting.
+    #[default]
+    Profile,
+    /// rustc emits LLVM bitcode (`-C linker-plugin-lto`) and rust-lld
+    /// optimizes each link; the profile's own LTO is off. Rustc refuses its
+    /// LTO with `-C prefer-dynamic`, so this is the LTO of a shared build.
+    Linker,
+}
+
+impl RustLtoSpec {
+    pub fn is_profile(&self) -> bool {
+        *self == Self::Profile
     }
 }
 
@@ -580,6 +603,7 @@ mod tests {
             build_env: Vec::new(),
             cpu: None,
             link: RustLinkSpec::Static,
+            lto: RustLtoSpec::Profile,
             surface: None,
             trim: None,
         }

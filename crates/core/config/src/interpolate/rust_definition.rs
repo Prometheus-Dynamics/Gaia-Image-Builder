@@ -4,7 +4,7 @@ use crate::env::ResolvedEnvironment;
 use crate::raw::{RawArtifactDefinition, RawBuildConfig};
 
 /// `definition` (a Rust one) with `${...}` resolved in its package, target
-/// name, features, cargo environment, link mode, surface list and plugin
+/// name, features, cargo environment, link and LTO modes, surface list and plugin
 /// directories, and in the users of its trim.
 pub(super) fn interpolate(
     mut definition: RawArtifactDefinition,
@@ -18,6 +18,7 @@ pub(super) fn interpolate(
         features,
         build_env,
         link,
+        lto,
         surface,
         trim,
         ..
@@ -28,6 +29,7 @@ pub(super) fn interpolate(
         *features = std::mem::take(features).into_iter().map(text).collect();
         *build_env = interpolate_env(std::mem::take(build_env), raw, env);
         *link = link.take().map(text);
+        *lto = lto.take().map(text);
         if let Some(surface) = surface {
             surface.exports = text(std::mem::take(&mut surface.exports));
             surface.plugin_dirs = std::mem::take(&mut surface.plugin_dirs)

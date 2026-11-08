@@ -248,7 +248,38 @@ project's own and the `[cpu]` profile's. `link = "static"` is the default. The
 value can come from an input, so one build file makes either kind of image:
 `link = "${input.link_mode}"`. Every member of a build group that builds crates
 must link the same way (`rust_build_group_link_mismatch`). Rustc refuses LTO
-with `prefer-dynamic`, so a shared build's cargo profile sets `lto = false`.
+with `prefer-dynamic`; `lto = "linker"` gives a shared build its LTO back.
+
+`lto = "linker"` hands link-time optimization from rustc to the linker.
+Gaia adds `-C linker-plugin-lto` to the artifact's rustc flags, so rustc
+writes LLVM bitcode instead of machine code, and links through rust-lld
+(`-C link-arg=-B<gcc-ld> -C link-arg=-fuse-ld=lld`; only an LLVM linker
+reads the bitcode). The `gcc-ld` directory is the one of the rustc that
+builds the source, asked in the artifact's execution backend, so its LLVM is
+the one that wrote the bitcode. The cargo profile's own `lto` is turned off
+(`CARGO_PROFILE_<PROFILE>_LTO=off`). Each link (a library and the crates
+linked into it, a program and its own) is then optimized as one module;
+calls into another shared library stay calls. `trim` replays the recorded
+link, so a trimmed library is optimized again with its cut export list. The
+default, `lto = "profile"`, leaves LTO to the cargo profile. Every member of
+a build group sets the same `lto` (`rust_build_group_lto_mismatch`), and the
+value can come from an input like `link`'s:
+
+```toml
+[[artifacts]]
+id = "libcore"
+kind = "rust"
+source = "acme"
+package = "acme-core"
+build_group = "acme"
+link = "${input.link_mode}"        # "shared"
+lto = "${input.lto_mode}"          # "linker" with shared, "profile" with static
+```
+
+The linker driver must honour `-fuse-ld=lld` with a `-B` directory: gcc and
+clang do, unless gcc was built with a fixed linker (`--with-ld`, as Fedora's
+cross compilers are); Debian's `gcc-aarch64-linux-gnu` does. HeliOS's
+2026-11-04 Raze A/B built its shared stack this way by hand.
 
 The artifacts then need the toolchain's `libstd-<hash>.so` at run time. An
 artifact with `package = "std"` is that library: no cargo package (cargo

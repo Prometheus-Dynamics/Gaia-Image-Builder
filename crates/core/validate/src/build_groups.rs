@@ -110,9 +110,9 @@ pub(crate) fn validate_build_groups(
     }
 }
 
-/// Every crate-building member links the same way, since one cargo run builds
-/// them all; the standard library (`package = "std"`) only belongs in a group
-/// that links it dynamically.
+/// Every crate-building member links the same way, with the same LTO, since
+/// one cargo run builds them all; the standard library (`package = "std"`)
+/// only belongs in a group that links it dynamically.
 fn validate_group_link(
     group: &str,
     members: &[(&ArtifactSpec, &RustArtifactSpec)],
@@ -132,6 +132,20 @@ fn validate_group_link(
                         member.id.as_str(),
                         leader_rust.link,
                         member_rust.link
+                    ),
+                    Some(format!("artifact:{}", member.id.as_str())),
+                ));
+            }
+            if member_rust.lto != leader_rust.lto {
+                diagnostics.push(error(
+                    "rust_build_group_lto_mismatch",
+                    format!(
+                        "rust build group '{group}': artifacts '{}' and '{}' must share lto to \
+                         build in one cargo invocation ({:?} vs {:?})",
+                        leader.id.as_str(),
+                        member.id.as_str(),
+                        leader_rust.lto,
+                        member_rust.lto
                     ),
                     Some(format!("artifact:{}", member.id.as_str())),
                 ));

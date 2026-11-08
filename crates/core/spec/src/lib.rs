@@ -45,8 +45,9 @@ pub use artifact::{
     ArtifactInstallIdentitySpec, ArtifactOutputSpec, ArtifactProviderKind, ArtifactRef,
     ArtifactSpec, ArtifactVariantSpec, BuildModeSpec, CargoGitSourceSpec, CommandArtifactSpec,
     DockerArtifactExecutionSpec, GoArtifactSpec, JavaArtifactSpec, NodeArtifactSpec,
-    PythonArtifactSpec, RUST_STD_PACKAGE, RustArtifactSpec, RustLinkSpec, RustSurfaceSpec,
-    RustTrimSpec, SurfacePluginVersionSpec, cargo_git_url_key, rust_crates_record_path,
+    PythonArtifactSpec, RUST_STD_PACKAGE, RustArtifactSpec, RustLinkSpec, RustLtoSpec,
+    RustSurfaceSpec, RustTrimSpec, SurfacePluginVersionSpec, cargo_git_url_key,
+    rust_crates_record_path,
 };
 pub use assembly::{
     AssemblyRoots, AssemblyWorkDirKeyword, IMAGE_CHECKS_REPORT_SCHEMA, assembly_work_dir_keyword,

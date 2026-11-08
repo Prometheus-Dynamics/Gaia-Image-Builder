@@ -247,6 +247,7 @@ pub(crate) fn collect_unresolved_tokens(raw: &RawBuildConfig) -> Vec<RawUnresolv
                 features,
                 build_env,
                 link,
+                lto,
                 surface,
                 ..
             } => {
@@ -261,6 +262,13 @@ pub(crate) fn collect_unresolved_tokens(raw: &RawBuildConfig) -> Vec<RawUnresolv
                     scan_string(
                         &format!("artifacts.{}.rust.link", artifact.id),
                         link,
+                        &mut unresolved,
+                    );
+                }
+                if let Some(lto) = lto {
+                    scan_string(
+                        &format!("artifacts.{}.rust.lto", artifact.id),
+                        lto,
                         &mut unresolved,
                     );
                 }

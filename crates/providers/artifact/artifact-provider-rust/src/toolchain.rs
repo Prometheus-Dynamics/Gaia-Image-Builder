@@ -218,7 +218,7 @@ pub(crate) fn with_build_env_and_cpu_flags(
 /// shared. A value `env` does not set starts from `inherited`'s, as
 /// [`with_cpu_flags`] does.
 pub(crate) fn with_link_flags(
-    mut env: Vec<(String, String)>,
+    env: Vec<(String, String)>,
     link: RustLinkSpec,
     target: Option<&str>,
     inherited: impl Fn(&str) -> Option<String>,
@@ -226,6 +226,18 @@ pub(crate) fn with_link_flags(
     if link.is_static() {
         return env;
     }
+    with_target_flags(env, "-C prefer-dynamic", target, inherited)
+}
+
+/// `env` with `extra` added to the rustc flags cargo reads for `target` (or
+/// to `RUSTFLAGS` for a host build). A value `env` does not set starts from
+/// `inherited`'s, the target's or else `RUSTFLAGS`.
+pub(crate) fn with_target_flags(
+    mut env: Vec<(String, String)>,
+    extra: &str,
+    target: Option<&str>,
+    inherited: impl Fn(&str) -> Option<String>,
+) -> Vec<(String, String)> {
     let (name, fallback) = match target {
         Some(target) => (
             format!(
@@ -236,7 +248,6 @@ pub(crate) fn with_link_flags(
         ),
         None => ("RUSTFLAGS".to_string(), None),
     };
-    let extra = "-C prefer-dynamic";
     match env.iter_mut().find(|(key, _)| *key == name) {
         Some((_, value)) => *value = join_flags(&[value.as_str(), extra]),
         None => {

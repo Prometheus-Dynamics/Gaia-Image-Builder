@@ -537,15 +537,24 @@ fn reject_non_rust_build_groups(raw: &raw::RawBuildConfig) -> Result<(), ConfigE
     })
 }
 
-/// A Rust artifact's `link` is `static` or `shared` once inputs are resolved.
+/// A Rust artifact's `link` is `static` or `shared`, and its `lto`
+/// `profile` or `linker`, once inputs are resolved.
 fn reject_unknown_rust_link(raw: &raw::RawBuildConfig) -> Result<(), ConfigError> {
-    let Some((artifact, link)) =
+    let Some((artifact, message)) =
         raw.artifacts
             .iter()
             .find_map(|artifact| match &artifact.definition {
-                raw::RawArtifactDefinition::Rust {
-                    link: Some(link), ..
-                } if link != "static" && link != "shared" => Some((artifact, link)),
+                raw::RawArtifactDefinition::Rust { link, lto, .. } => {
+                    let link = link
+                        .as_deref()
+                        .filter(|link| *link != "static" && *link != "shared")
+                        .map(|link| format!("link = \"{link}\"; it is \"static\" or \"shared\""));
+                    let lto = lto
+                        .as_deref()
+                        .filter(|lto| *lto != "profile" && *lto != "linker")
+                        .map(|lto| format!("lto = \"{lto}\"; it is \"profile\" or \"linker\""));
+                    link.or(lto).map(|message| (artifact, message))
+                }
                 _ => None,
             })
     else {
@@ -557,10 +566,7 @@ fn reject_unknown_rust_link(raw: &raw::RawBuildConfig) -> Result<(), ConfigError
             .as_deref()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "<unknown>".to_string()),
-        message: format!(
-            "artifact '{}' sets link = \"{link}\"; it is \"static\" or \"shared\"",
-            artifact.id
-        ),
+        message: format!("artifact '{}' sets {message}", artifact.id),
     })
 }
 

@@ -15,6 +15,7 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig, sources: &[SourceSpec]) -
             build_env,
             cpu: _,
             link,
+            lto,
             surface,
             trim,
         } => {
@@ -52,7 +53,13 @@ pub(crate) fn compile_artifact(raw: RawArtifactConfig, sources: &[SourceSpec]) -
                 } else {
                     gaia_spec::RustLinkSpec::Static
                 },
+                lto: if lto.as_deref() == Some("linker") {
+                    gaia_spec::RustLtoSpec::Linker
+                } else {
+                    gaia_spec::RustLtoSpec::Profile
+                },
                 surface: surface.map(|surface| {
+                    let surface = *surface;
                     Box::new(gaia_spec::RustSurfaceSpec {
                         exports: surface.exports,
                         state_crates: surface.state_crates,

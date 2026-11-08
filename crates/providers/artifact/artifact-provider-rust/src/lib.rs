@@ -17,6 +17,7 @@ mod crates;
 mod feature_flags;
 mod link_record;
 mod link_trim;
+mod lto;
 mod std_library;
 mod surface;
 mod toolchain;
@@ -514,6 +515,25 @@ fn run_cargo_build(
                 .or_else(|| std::env::var(name).ok())
         },
     );
+    let toolchain_env = if flags.lto.is_profile() {
+        toolchain_env
+    } else {
+        let gcc_ld = lto::gcc_ld_dir(contract, source_dir)?;
+        lto::with_lto_flags(
+            toolchain_env,
+            flags.lto,
+            contract.artifact_target.as_deref(),
+            contract.build_mode.as_ref(),
+            &gcc_ld,
+            |name| {
+                build_env
+                    .iter()
+                    .find(|(key, _)| key == name)
+                    .map(|(_, value)| value.clone())
+                    .or_else(|| std::env::var(name).ok())
+            },
+        )
+    };
     let recording = if flags.recorded.is_empty() {
         Vec::new()
     } else {

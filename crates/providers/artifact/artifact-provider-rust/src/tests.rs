@@ -24,6 +24,7 @@ fn rust_provider_fails_for_missing_source_dir_when_nested_build_enabled() {
             build_env: Vec::new(),
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
+            lto: gaia_spec::RustLtoSpec::Profile,
             surface: None,
             trim: None,
         }),
@@ -71,6 +72,7 @@ fn rust_artifact_state_persists_backend_native_fields() {
             build_env: Vec::new(),
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
+            lto: gaia_spec::RustLtoSpec::Profile,
             surface: None,
             trim: None,
         }),
@@ -128,6 +130,7 @@ fn nested_rust_build_does_not_accept_stale_existing_output() {
             build_env: Vec::new(),
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
+            lto: gaia_spec::RustLtoSpec::Profile,
             surface: None,
             trim: None,
         }),
@@ -171,6 +174,7 @@ fn rust_artifact(id: &str, package: &str, output: &Path) -> ArtifactSpec {
             build_env: Vec::new(),
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
+            lto: gaia_spec::RustLtoSpec::Profile,
             surface: None,
             trim: None,
         }),
@@ -662,6 +666,14 @@ fn strip_rewrites_the_collected_copy_with_the_host_strip_tool() {
             assert_eq!(fs::metadata(&copy).expect("copy").len(), before);
         }
     }
+}
+
+#[test]
+fn the_lto_gcc_ld_dir_is_the_building_rustcs() {
+    let artifact = rust_artifact("app", "app", Path::new("app.bin"));
+    let contract = nested_contract(&artifact, Path::new("."));
+    let dir = crate::lto::gcc_ld_dir(&contract, ".").expect("gcc-ld");
+    assert!(Path::new(&dir).join("ld.lld").is_file(), "{dir}");
 }
 
 mod cargo_git;

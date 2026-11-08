@@ -354,6 +354,7 @@ fn a_starting_point_image_has_its_surface_consumers_checked() {
             build_env: Vec::new(),
             cpu: None,
             link: gaia_spec::RustLinkSpec::Static,
+            lto: gaia_spec::RustLtoSpec::Profile,
             surface: Some(Box::new(RustSurfaceSpec::new("capi.exports"))),
             trim: None,
         }),

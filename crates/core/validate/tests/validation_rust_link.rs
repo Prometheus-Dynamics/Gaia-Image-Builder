@@ -1,11 +1,14 @@
-//! A rust artifact's `link`: `shared` reaches the spec, an input can choose
-//! it, a build group links one way, and the standard library (`package =
-//! "std"`) is a directory that only a shared group ships.
+//! A rust artifact's `link` and `lto`: `shared` and `linker` reach the spec,
+//! an input can choose them, a build group links one way with one LTO, and
+//! the standard library (`package = "std"`) is a directory that only a
+//! shared group ships.
 
 pub mod support;
 
 use gaia_config::try_resolve_config;
-use gaia_spec::{ArtifactDefinition, ArtifactVariantSpec, ResolvedBuildSpec, RustLinkSpec};
+use gaia_spec::{
+    ArtifactDefinition, ArtifactVariantSpec, ResolvedBuildSpec, RustLinkSpec, RustLtoSpec,
+};
 use gaia_validate::validate_spec;
 use std::fs;
 
@@ -133,6 +136,59 @@ fn an_unknown_link_mode_is_a_config_error() {
     let (_root, build) = build_file("rust-link-unknown", &body);
     let error = try_resolve_config(&build).expect_err("an unknown link mode");
     assert!(error.to_string().contains(r#"link = "dynamic""#), "{error}");
+}
+
+#[test]
+fn linker_lto_reaches_the_spec_and_a_group_shares_it() {
+    let lto = |body: &str| {
+        body.replace(
+            r#"build_group = "backend"
+"#,
+            r#"build_group = "backend"
+lto = "${input.lto_mode}"
+"#,
+        )
+    };
+    let inputs = r#"
+[inputs.lto_mode]
+type = "string"
+default = "linker"
+"#;
+    let body = format!("{inputs}{}", lto(SHARED_GROUP));
+    let spec = resolve("rust-lto-linker", &body);
+    assert_eq!(rust(&spec, "engine").lto, RustLtoSpec::Linker);
+    assert_eq!(rust(&spec, "libcore").lto, RustLtoSpec::Linker);
+    assert!(
+        !codes(&spec).iter().any(|code| code.starts_with("rust_")),
+        "{:?}",
+        codes(&spec)
+    );
+    // Unset, the cargo profile decides.
+    let spec = resolve("rust-lto-unset", SHARED_GROUP);
+    assert_eq!(rust(&spec, "engine").lto, RustLtoSpec::Profile);
+
+    let mixed = SHARED_GROUP.replacen(
+        r#"link = "shared"
+"#,
+        r#"link = "shared"
+lto = "linker"
+"#,
+        1,
+    );
+    let spec = resolve("rust-lto-mismatch", &mixed);
+    assert!(codes(&spec).contains(&"rust_build_group_lto_mismatch"));
+
+    let unknown = SHARED_GROUP.replacen(
+        r#"link = "shared"
+"#,
+        r#"link = "shared"
+lto = "thin"
+"#,
+        1,
+    );
+    let (_root, build) = build_file("rust-lto-unknown", &unknown);
+    let error = try_resolve_config(&build).expect_err("an unknown lto");
+    assert!(error.to_string().contains(r#"lto = "thin""#), "{error}");
 }
 
 #[test]
