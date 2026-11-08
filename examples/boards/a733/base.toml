@@ -1,23 +1,80 @@
-# What every Radxa Cubie on the Allwinner A733 shares, on the same mainline
-# Buildroot base as the RK35xx boards with the Rockchip parts swapped for
-# Allwinner's. NOT BUILDABLE YET: nothing of the A733 is in Linux 7.3.3,
-# U-Boot v2026.10 or TF-A v2.15.0, and its DRAM init is a closed blob with no
-# redistribution grant. Each board's build.toml names itself and its dts.
+# What every Radxa Cubie on the Allwinner A733 shares, on the same A/B layout
+# as the RK35xx boards with the Rockchip parts swapped for Allwinner's. Linux
+# 7.3.3 with DockSeed/a7s-linux-mainline's series, Radxa's U-Boot tree and
+# TF-A master with DockSeed/a733-bootchain's patches (assets/a733_defconfig):
+# no released tree has the A733 yet. The series and the boot chain support
+# and are tested on the Cubie A7S only. Written, untested on board.
+#
+# The SPL carries awbin/a733/ddr.bin from radxa-pkg/u-boot-dlan17, closed DRAM
+# init with no redistribution grant: u-boot-sunxi-with-spl.bin and any image
+# built with it must not be published. Each board's build.toml names itself
+# and its dts.
 config = 3
 extends = "../rk35xx/base.toml"
+
+[[workspace.named_paths]]
+alias = "a733"
+path = "../a733/assets"
+kind = "host"
+
+[[workspace.named_paths]]
+alias = "a7s-linux-tree"
+path = "${source.a7s-linux}"
+kind = "host"
+
+[[workspace.named_paths]]
+alias = "bootchain-tree"
+path = "${source.a733-bootchain}"
+kind = "host"
+
+[[workspace.named_paths]]
+alias = "dram-tree"
+path = "${source.a733-dram}"
+kind = "host"
+
+[[sources]]
+id = "a7s-linux"
+kind = "git"
+repo = "https://github.com/DockSeed/a7s-linux-mainline.git"
+rev = "fe0a8ed3a426c09efa8d92c14c9d9ab3769d5256"
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "a733-bootchain"
+kind = "git"
+repo = "https://github.com/DockSeed/a733-bootchain.git"
+rev = "b6f6872be2505e1f4d4dfcea7bee5b423a3efcb3"
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "a733-dram"
+kind = "git"
+repo = "https://github.com/radxa-pkg/u-boot-dlan17.git"
+rev = "b1cec0a90c795f65b82cee7098489e0bdf550b74"
+refresh = "never"
+pin = "locked"
 
 [cpu]
 profile = "cortex-a76.cortex-a55"
 
-# The TF-A platform and U-Boot defconfig do not exist upstream yet; these
-# names follow the trees' conventions, and the build stops at them.
 [image]
+defconfig_path = "${a733}/a733_defconfig"
 config_overrides = [
   ["BR2_cortex_a76_a55", "y"],
-  ["BR2_PACKAGE_ROCKCHIP_RKBIN", "n"],
-  ["BR2_TARGET_UBOOT_NEEDS_ROCKCHIP_RKBIN", "n"],
-  ["BR2_TARGET_ARM_TRUSTED_FIRMWARE_PLATFORM", "\"sun60i_a733\""],
-  ["BR2_ROOTFS_POST_IMAGE_SCRIPT", "\"\""],
+  ["BR2_LINUX_KERNEL_PATCH", "${a7s-linux-tree}/patches"],
+  ["BR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE", "${a7s-linux-tree}/config/a7s_defconfig"],
+  ["BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES", "${a733}/linux.fragment"],
+  ["BR2_TARGET_UBOOT_PATCH", "${bootchain-tree}/patches/u-boot"],
+  ["BR2_TARGET_UBOOT_CONFIG_FRAGMENT_FILES", "${a733}/u-boot.fragment"],
+  # U-Boot's SUNXI_LIBDRAM make variable names the DRAM blob. Buildroot copies
+  # its custom "DTS" files into the tree before the build, which is the one
+  # way to hand U-Boot a file from a Gaia source.
+  ["BR2_TARGET_UBOOT_CUSTOM_DTS_PATH", "${dram-tree}/awbin/a733/ddr.bin"],
+  ["BR2_TARGET_UBOOT_CUSTOM_MAKEOPTS", "\"SUNXI_LIBDRAM=$(@D)/arch/arm/dts/ddr.bin\""],
+  ["BR2_ROOTFS_POST_IMAGE_SCRIPT", "${a733}/post-image.sh"],
+  ["BR2_GLOBAL_PATCH_DIR", "${a733}/global"],
 ]
 
 [[image.expected_images]]
@@ -36,8 +93,9 @@ format = "file"
 required = true
 
 # The boot ROM reads the SPL and U-Boot at 128 KiB (as DockSeed/a733-bootchain
-# tested on the A7S's SD card). A disk replaces the base's whole, so the
-# partitions after U-Boot repeat it.
+# tested on the A7S's SD card); the first partition starts at 16 MiB. A disk
+# replaces the base's whole, so the partitions after U-Boot repeat it. No
+# U-Boot environment partition: this tree keeps the built-in environment.
 [[image.assembly.disks]]
 id = "sdcard"
 output = "${assembly.out}/sdcard.img"
@@ -50,16 +108,10 @@ offset = "128K"
 table = false
 
 [[image.assembly.disks.partitions]]
-name = "uboot-env"
-type = "3de21764-95bd-54bd-a5c3-4abe786f38a8"
-offset = "16M"
-size = "64K"
-wipe = true
-
-[[image.assembly.disks.partitions]]
 name = "rootfs-a"
 type_alias = "linux-root-arm64"
 image = "${provider.images}/rootfs.ext4"
+offset = "16M"
 size = "512M"
 bootable = true
 

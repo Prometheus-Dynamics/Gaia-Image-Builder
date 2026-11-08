@@ -1,7 +1,7 @@
 config = 3
 extends = "../a733/base.toml"
 build_name = "cubie-a7z"
-description = "Radxa Cubie A7Z (Allwinner A733) on the A733 base. NOT BUILDABLE YET: see ../a733/base.toml."
+description = "Radxa Cubie A7Z (Allwinner A733) on the A733 base. NOT BUILDABLE YET: the A733 kernel series has no device tree for it, Radxa's U-Boot tree no defconfig."
 target = "cubie-a7z"
 
 [workspace]

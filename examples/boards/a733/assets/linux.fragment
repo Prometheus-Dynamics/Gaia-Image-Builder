@@ -1,0 +1,10 @@
+# Built in, on top of the series' a7s_defconfig (modules there):
+# - The watchdog: U-Boot starts it and hands it to Linux running, so the
+#   driver must take it over before the 16 s run out, with no module load in
+#   the way.
+# - The GMAC, for DHCP on eth0 without an initramfs.
+CONFIG_SUNXI_WATCHDOG=y
+CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED=y
+CONFIG_STMMAC_ETH=y
+CONFIG_STMMAC_PLATFORM=y
+CONFIG_DWMAC_SUN55I=y

@@ -29,11 +29,19 @@ so the differences are written down:
 
 | Board | SoC | Config | What is missing |
 | --- | --- | --- | --- |
-| Radxa Cubie A7A, A7S, A7Z | Allwinner A733 | [a733](a733/base.toml), [a7a](cubie-a7a/build.toml), [a7s](cubie-a7s/build.toml), [a7z](cubie-a7z/build.toml) | All of the SoC in Linux 7.3.3 (no dts, clocks or pinctrl), U-Boot v2026.10 and TF-A v2.15.0; a closed DRAM init blob with no redistribution grant |
+| Radxa Cubie A7A, A7Z | Allwinner A733 | [a733](a733/base.toml), [a7a](cubie-a7a/build.toml), [a7z](cubie-a7z/build.toml) | A device tree: the A733 series used for the A7S has none for them. The A7Z also has no U-Boot defconfig in Radxa's tree. |
 | Luckfox Aura | RV1126B | [luckfox-aura](luckfox-aura/build.toml) | Linux 7.3.3 has clock and reset drivers only (no dts, no pinctrl); nothing in U-Boot v2026.10 or TF-A v2.15.0 |
 
 Their device tree, U-Boot and TF-A names are the ones the upstream trees'
 conventions give; the build stops at the first that does not exist.
+
+The Radxa Cubie A7S ([a7s](cubie-a7s/build.toml), on [a733](a733/base.toml))
+builds on Linux 7.3.3 with DockSeed's [a7s-linux-mainline](https://github.com/DockSeed/a7s-linux-mainline)
+series (no released Linux has the A733), Radxa's U-Boot tree and TF-A master
+with [a733-bootchain](https://github.com/DockSeed/a733-bootchain)'s patches.
+Its SPL carries the closed DRAM init `awbin/a733/ddr.bin`, which has no
+redistribution grant: **do not publish `u-boot-sunxi-with-spl.bin` or an image
+built with it.** Built 2026-11-08 and passing `image:check`; not booted.
 
 ## Bring-up: console, network, SSH
 

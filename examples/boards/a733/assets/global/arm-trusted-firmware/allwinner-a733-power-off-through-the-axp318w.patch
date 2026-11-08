@@ -1,0 +1,230 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: DockSeed <dockseed@proton.me>
+Date: Tue, 13 Oct 2026 17:38:40 +0200
+Subject: [PATCH] feat(allwinner): A733: power off through the AXP318W
+
+PSCI SYSTEM_OFF did not power the board off: sunxi_power_down() was
+empty, so only the cores went off and the AXP318W stayed on. Linux booted
+through UEFI powers off exactly that way (efi_power_off, ResetSystem,
+PSCI SYSTEM_OFF), and the board stayed at about 5 W.
+
+Take the PMIC from the device tree U-Boot passes (x-powers,axp318w) and,
+on SYSTEM_OFF, set bit 7 of its shutdown control register 0x55 over
+S_TWI0, as Linux's axp20x driver does, after setting the bus up again,
+which Linux has used. S_TWI0 is on PL0/PL1 (function 2), its gate
+and reset are bits 0 and 16 of S_TWI_BGR (S_PRCM 0x19c), the pull register
+PL_PUL0 is at 0x24, and the drive fields are 4 bits wide and keep their
+default. APBS1 runs from the 24 MHz oscillator, the clock the mentor I2C
+driver assumes.
+
+axp_read(), axp_write() and the I2C setup are taken from TF-A's
+plat/allwinner/sun50i_h616/sunxi_power.c; its copyright lines are added
+to the header of sun60i_a733/sunxi_power.c.
+
+Assisted-by: Claude
+---
+ plat/allwinner/common/sunxi_common.c     | 27 +++++--
+ plat/allwinner/sun60i_a733/platform.mk   |  4 +
+ plat/allwinner/sun60i_a733/sunxi_power.c | 96 +++++++++++++++++++++++-
+ 3 files changed, 121 insertions(+), 6 deletions(-)
+
+diff --git a/plat/allwinner/common/sunxi_common.c b/plat/allwinner/common/sunxi_common.c
+index 1ed25535e..cfc08089b 100644
+--- a/plat/allwinner/common/sunxi_common.c
++++ b/plat/allwinner/common/sunxi_common.c
+@@ -111,6 +111,7 @@ int sunxi_init_platform_r_twi(uint16_t socid, bool use_rsb)
+ 	uint32_t pin_func = 0x77;
+ 	uint32_t device_bit;
+ 	unsigned int reset_offset = 0xb0;
++	unsigned int pull_offset = 0x1c;
+ 
+ 	switch (socid) {
+ 	case SUNXI_SOC_H5:
+@@ -137,26 +138,42 @@ int sunxi_init_platform_r_twi(uint16_t socid, bool use_rsb)
+ 		pin_func = use_rsb ? 0x22 : 0x33;
+ 		device_bit = use_rsb ? BIT(3) : BIT(6);
+ 		break;
++	case SUNXI_SOC_A733:
++		/* S_TWI0 on PL0/PL1 (function 2), S_TWI_BGR 0x19c, PL_PUL0 0x24 */
++		if (use_rsb) {
++			return -ENODEV;
++		}
++		pin_func = 0x22;
++		device_bit = BIT(16);
++		reset_offset = 0x19c;
++		pull_offset = 0x24;
++		break;
+ 	default:
+ 		INFO("R_I2C/RSB on Allwinner 0x%x SoC not supported\n", socid);
+ 		return -ENODEV;
+ 	}
+ 
+ 	/* un-gate R_PIO clock */
+-	if (socid != SUNXI_SOC_H6 && socid != SUNXI_SOC_H616)
++	if (socid != SUNXI_SOC_H6 && socid != SUNXI_SOC_H616 &&
++	    socid != SUNXI_SOC_A733)
+ 		mmio_setbits_32(SUNXI_R_PRCM_BASE + 0x28, BIT(0));
+ 
+ 	/* switch pins PL0 and PL1 to the desired function */
+ 	mmio_clrsetbits_32(SUNXI_R_PIO_BASE + 0x00, 0xffU, pin_func);
+ 
+-	/* level 2 drive strength */
+-	mmio_clrsetbits_32(SUNXI_R_PIO_BASE + 0x14, 0x0fU, 0xaU);
++	/*
++	 * level 2 drive strength; the A733's drive fields are 4 bits wide and
++	 * keep their default, as Linux leaves them
++	 */
++	if (socid != SUNXI_SOC_A733)
++		mmio_clrsetbits_32(SUNXI_R_PIO_BASE + 0x14, 0x0fU, 0xaU);
+ 
+ 	/* set both pins to pull-up */
+-	mmio_clrsetbits_32(SUNXI_R_PIO_BASE + 0x1c, 0x0fU, 0x5U);
++	mmio_clrsetbits_32(SUNXI_R_PIO_BASE + pull_offset, 0x0fU, 0x5U);
+ 
+ 	/* un-gate clock */
+-	if (socid != SUNXI_SOC_H6 && socid != SUNXI_SOC_H616)
++	if (socid != SUNXI_SOC_H6 && socid != SUNXI_SOC_H616 &&
++	    socid != SUNXI_SOC_A733)
+ 		mmio_setbits_32(SUNXI_R_PRCM_BASE + 0x28, device_bit);
+ 	else
+ 		mmio_setbits_32(SUNXI_R_PRCM_BASE + reset_offset, BIT(0));
+diff --git a/plat/allwinner/sun60i_a733/platform.mk b/plat/allwinner/sun60i_a733/platform.mk
+index 02d859b18..20c154b40 100644
+--- a/plat/allwinner/sun60i_a733/platform.mk
++++ b/plat/allwinner/sun60i_a733/platform.mk
+@@ -69,6 +69,10 @@ include plat/allwinner/common/allwinner-common.mk
+ BL31_SOURCES		+=	lib/cpus/${ARCH}/cortex_a55.S		\
+ 				lib/cpus/${ARCH}/cortex_a76.S
+ 
++# Power-off through the AXP318W on S_TWI0 (sunxi_power.c).
++BL31_SOURCES		+=	common/fdt_wrappers.c			\
++				drivers/mentor/i2c/mi2cv.c
++
+ # CPU_BACK_PLL enabled once at cold boot, at its reset rate, as the CPU
+ # clusters' parking target during a PLL relock (sunxi_cpu_back_pll.c).
+ BL31_SOURCES		+=	${AW_PLAT}/${PLAT}/sunxi_cpu_back_pll.c
+diff --git a/plat/allwinner/sun60i_a733/sunxi_power.c b/plat/allwinner/sun60i_a733/sunxi_power.c
+index f7755a746..4675f436d 100644
+--- a/plat/allwinner/sun60i_a733/sunxi_power.c
++++ b/plat/allwinner/sun60i_a733/sunxi_power.c
+@@ -1,22 +1,116 @@
+ /*
++ * Copyright (c) 2017-2025, Arm Limited. All rights reserved.
++ * Copyright (c) 2018, Icenowy Zheng <icenowy@aosc.io>
++ *
+  * SPDX-License-Identifier: BSD-3-Clause
+  */
+ 
++#include <errno.h>
++
+ #include <platform_def.h>
+ 
+ #include <arch_helpers.h>
++#include <common/debug.h>
++#include <common/fdt_wrappers.h>
++#include <drivers/allwinner/axp.h>
++#include <drivers/mentor/mi2cv.h>
++#include <libfdt.h>
+ 
+-#include <sunxi_mmap.h>
+ #include <sunxi_cpucfg.h>
++#include <sunxi_def.h>
++#include <sunxi_mmap.h>
+ #include <sunxi_private.h>
+ 
++/*
++ * The AXP318W on S_TWI0. BL31 sets up no regulator; it switches the PMIC
++ * off on PSCI SYSTEM_OFF, which is how Linux powers the board off when it
++ * runs under UEFI: shutdown control register 0x55, bit 7, as Linux's axp20x
++ * driver sets it.
++ */
++#define AXP318_SHUTDOWN_CTRL	0x55
++#define AXP318_POWER_OFF	BIT(7)
++
++static uint16_t pmic_bus_addr;	/* 0: no PMIC known */
++
++int axp_read(uint8_t reg)
++{
++	uint8_t val = 0;
++	int ret;
++
++	ret = i2c_write(pmic_bus_addr, 0, 0, &reg, 1);
++	if (ret == 0) {
++		ret = i2c_read(pmic_bus_addr, 0, 0, &val, 1);
++	}
++	if (ret) {
++		ERROR("PMIC: Cannot read PMIC register %02x\n", reg);
++		return ret;
++	}
++
++	return val;
++}
++
++int axp_write(uint8_t reg, uint8_t val)
++{
++	int ret;
++
++	ret = i2c_write(pmic_bus_addr, reg, 1, &val, 1);
++	if (ret) {
++		ERROR("PMIC: Cannot write PMIC register %02x\n", reg);
++	}
++
++	return ret;
++}
++
++static int pmic_bus_init(void)
++{
++	int ret;
++
++	ret = sunxi_init_platform_r_twi(SUNXI_SOC_A733, false);
++	if (ret) {
++		return ret;
++	}
++	i2c_init((void *)SUNXI_R_I2C_BASE);
++
++	return 0;
++}
++
+ int sunxi_pmic_setup(uint16_t socid, const void *fdt)
+ {
++	uint32_t reg;
++	int node;
++
++	if (fdt == NULL) {
++		INFO("No DTB, skipping PMIC detection\n");
++		return -ENOENT;
++	}
++
++	node = fdt_node_offset_by_compatible(fdt, 0, "x-powers,axp318w");
++	if (node < 0) {
++		INFO("PMIC: no AXP318W in DT, SYSTEM_OFF cannot power off\n");
++		return -ENODEV;
++	}
++	if (fdt_read_uint32(fdt, node, "reg", &reg)) {
++		ERROR("PMIC: AXP318W node without reg property\n");
++		return -EINVAL;
++	}
++	pmic_bus_addr = reg;
++	INFO("PMIC: AXP318W at I2C address 0x%x\n", reg);
++
+ 	return 0;
+ }
+ 
+ void sunxi_power_down(void)
+ {
++	if (pmic_bus_addr == 0U) {
++		return;
++	}
++
++	/* Re-initialise after Linux has used the bus. */
++	if (pmic_bus_init() != 0) {
++		return;
++	}
++
++	axp_setbits(AXP318_SHUTDOWN_CTRL, AXP318_POWER_OFF);
+ }
+ 
+ void sunxi_cpu_power_off_self(void)
+-- 
+2.56.0
+
