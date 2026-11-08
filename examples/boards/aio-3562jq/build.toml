@@ -46,16 +46,8 @@ rev = "3e288fe814e059dd06833495f845cab04ac20a5c"
 refresh = "never"
 pin = "locked"
 
-# Firefly's vendor kernel (5.10.160) and U-Boot for the RK3562, from
-# Firefly's own repositories (GPL-2.0).
-[[sources]]
-id = "firefly-kernel"
-kind = "git"
-repo = "https://gitlab.com/firefly-linux/kernel.git"
-rev = "4f6ee8c16948e893527a395b6fd6b3e67297e7e0"
-refresh = "never"
-pin = "locked"
-
+# Firefly's vendor U-Boot for the RK3562 (GPL-2.0); its kernel (5.10.160)
+# is a Buildroot custom tarball, in the defconfig.
 [[sources]]
 id = "firefly-u-boot"
 kind = "git"
@@ -70,8 +62,6 @@ source = "buildroot"
 defconfig_path = "${assets}/aio3562jq_defconfig"
 external_tree_mode = "disabled"
 config_overrides = [
-  ["BR2_LINUX_KERNEL_CUSTOM_REPO_URL", "\"${source.firefly-kernel.path}\""],
-  ["BR2_LINUX_KERNEL_CUSTOM_REPO_VERSION", "\"4f6ee8c16948e893527a395b6fd6b3e67297e7e0\""],
   ["BR2_LINUX_KERNEL_PATCH", "${assets}/linux-no-gcc-wrapper.patch"],
   ["BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES", "${assets}/linux.fragment"],
   ["BR2_ROOTFS_POST_BUILD_SCRIPT", "${assets}/post-build.sh"],

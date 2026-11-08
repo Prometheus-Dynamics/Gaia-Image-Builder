@@ -14,10 +14,12 @@ BR2_TARGET_GENERIC_GETTY_PORT="ttyFIQ0"
 BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_MDEV=y
 BR2_SYSTEM_DHCP="eth0"
 BR2_LINUX_KERNEL=y
-# Firefly's 5.10.160 tree, cloned from the Gaia source (build.toml sets the
-# URL and commit) so Buildroot applies the patch below; override_srcdirs
-# skips patches.
-BR2_LINUX_KERNEL_CUSTOM_GIT=y
+# Firefly's 5.10.160 tree (branch rk3562/firefly) as GitLab's archive of
+# the pinned commit, so Buildroot applies the patch build.toml names
+# (override_srcdirs skips patches, and Buildroot's git download needs the
+# full history).
+BR2_LINUX_KERNEL_CUSTOM_TARBALL=y
+BR2_LINUX_KERNEL_CUSTOM_TARBALL_LOCATION="https://gitlab.com/firefly-linux/kernel/-/archive/4f6ee8c16948e893527a395b6fd6b3e67297e7e0/kernel-4f6ee8c16948e893527a395b6fd6b3e67297e7e0.tar.gz"
 BR2_LINUX_KERNEL_DEFCONFIG="firefly_linux"
 BR2_LINUX_KERNEL_DTS_SUPPORT=y
 BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip/rk3562-firefly-aio-3562jq"
