@@ -266,7 +266,8 @@ fn substituted_source_paths_compare_against_the_final_config() {
 
 /// `${assets}/post-build.sh` reaches the provider as `@assets/post-build.sh`;
 /// Buildroot needs the quoted absolute path (it read the alias as an empty
-/// string and dropped the script).
+/// string and dropped the script). `BR2_GLOBAL_PATCH_DIR` too: it had
+/// its own normalization, which missed aliases.
 #[test]
 fn workspace_alias_paths_become_quoted_absolute_paths() {
     let mut spec = ResolvedBuildSpec::new("alias-paths");
@@ -293,6 +294,10 @@ fn workspace_alias_paths_become_quoted_absolute_paths() {
                 "BR2_ROOTFS_POST_SCRIPT_ARGS".to_string(),
                 "\"RK3588MINIALL.ini\"".to_string(),
             ),
+            (
+                "BR2_GLOBAL_PATCH_DIR".to_string(),
+                "@assets/hashes".to_string(),
+            ),
         ],
     );
     assert_eq!(
@@ -309,6 +314,10 @@ fn workspace_alias_paths_become_quoted_absolute_paths() {
             (
                 "BR2_ROOTFS_POST_SCRIPT_ARGS".to_string(),
                 "\"RK3588MINIALL.ini\"".to_string(),
+            ),
+            (
+                "BR2_GLOBAL_PATCH_DIR".to_string(),
+                "\"/work/board/assets/hashes\"".to_string(),
             ),
         ]
     );

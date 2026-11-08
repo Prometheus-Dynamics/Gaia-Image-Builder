@@ -210,7 +210,8 @@ pub(crate) fn normalize_buildroot_config_overrides(
         .iter()
         .map(|(key, value)| {
             if key == "BR2_GLOBAL_PATCH_DIR" {
-                (key.clone(), normalize_global_patch_dir_value(spec, value))
+                let value = named_path_value(spec, value).unwrap_or_else(|| value.clone());
+                (key.clone(), normalize_global_patch_dir_value(spec, &value))
             } else if let Some(paths) = named_path_value(spec, value) {
                 (key.clone(), paths)
             } else {
