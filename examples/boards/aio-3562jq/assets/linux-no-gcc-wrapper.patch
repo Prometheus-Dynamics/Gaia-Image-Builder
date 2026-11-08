@@ -1,0 +1,18 @@
+--- a/Makefile
++++ b/Makefile
+@@ -480,13 +480,8 @@
+ XZ		= xz
+ ZSTD		= zstd
+ 
+-# Use the wrapper for the compiler. This wrapper scans for new
+-# warnings and causes the build to stop upon encountering them.
+-ifeq ($(CC),$(CROSS_COMPILE)gcc)
+-ifneq ($(wildcard $(srctree)/scripts/gcc-wrapper.py),)
+-CC		= $(abspath $(srctree)/scripts/gcc-wrapper.py) $(CROSS_COMPILE)gcc
+-endif
+-endif
++# No gcc-wrapper.py: it fails the build on any warning not on its list,
++# and GCC 14 warns where the GCC 10 the list was made for did not.
+ 
+ PAHOLE_FLAGS	= $(shell PAHOLE=$(PAHOLE) $(srctree)/scripts/pahole-flags.sh)
+ 

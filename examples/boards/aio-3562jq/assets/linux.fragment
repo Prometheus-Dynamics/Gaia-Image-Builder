@@ -1,2 +1,6 @@
 # Filesystems the slot roots may use.
 CONFIG_EROFS_FS=y
+# The 5.10 vendor tree defaults WERROR=y; GCC 14 (Buildroot 2026.02) warns
+# where the GCC 10 it was written for did not (dangling-pointer in
+# kernel/locking/semaphore.c, for one).
+# CONFIG_WERROR is not set

@@ -129,7 +129,11 @@ dtb's `bootargs` mount `mmcblk0p2`.
   U-Boot from `gitlab.com/firefly-linux` (branch `rk3562/firefly`, pinned
   by commit) and rkbin `3e288fe`. Mainline Linux has only an RK3562 base
   device tree and mainline U-Boot no RK3562 support, so this board uses the
-  vendor trees. The kernel goes through `override_srcdirs`; `post-image.sh`
+  vendor trees. Buildroot clones the kernel from the Gaia source (not
+  `override_srcdirs`, which skips patches) and applies
+  `linux-no-gcc-wrapper.patch`: the tree's `scripts/gcc-wrapper.py` fails
+  the build on any warning not on its list, and GCC 14 warns where the
+  GCC 10 it was made for did not. `post-image.sh`
   builds U-Boot with its `make.sh` and Buildroot's GCC 14, with three
   changes in its copy: `-Wno-error` (GCC 14 warnings this 2017-based tree
   makes errors), python3 for `decode_bl31.py` (the SDK assumes python2,

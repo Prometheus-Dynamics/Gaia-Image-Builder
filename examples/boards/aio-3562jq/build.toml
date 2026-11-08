@@ -69,10 +69,10 @@ kind = "buildroot"
 source = "buildroot"
 defconfig_path = "${assets}/aio3562jq_defconfig"
 external_tree_mode = "disabled"
-override_srcdirs = [
-  ["linux", "${source.firefly-kernel.path}"],
-]
 config_overrides = [
+  ["BR2_LINUX_KERNEL_CUSTOM_REPO_URL", "\"${source.firefly-kernel.path}\""],
+  ["BR2_LINUX_KERNEL_CUSTOM_REPO_VERSION", "\"4f6ee8c16948e893527a395b6fd6b3e67297e7e0\""],
+  ["BR2_LINUX_KERNEL_PATCH", "${assets}/linux-no-gcc-wrapper.patch"],
   ["BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES", "${assets}/linux.fragment"],
   ["BR2_ROOTFS_POST_BUILD_SCRIPT", "${assets}/post-build.sh"],
   ["BR2_ROOTFS_POST_IMAGE_SCRIPT", "${assets}/post-image.sh"],
