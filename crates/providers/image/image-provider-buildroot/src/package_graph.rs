@@ -123,6 +123,23 @@ impl PackageGraph {
             .filter(|(_, package)| package.kind != "rootfs")
             .map(|(name, _)| name.as_str())
     }
+
+    /// `names` and every package that depends on one of them, recursively.
+    pub(crate) fn with_dependents(&self, names: &BTreeSet<String>) -> BTreeSet<String> {
+        let mut all = names.clone();
+        let mut queue = names.iter().cloned().collect::<Vec<_>>();
+        while let Some(name) = queue.pop() {
+            let Some(package) = self.get(&name) else {
+                continue;
+            };
+            for dependent in &package.reverse_dependencies {
+                if self.contains(dependent) && all.insert(dependent.clone()) {
+                    queue.push(dependent.clone());
+                }
+            }
+        }
+        all
+    }
 }
 
 /// The current config's package graph and the raw `show-info` output to

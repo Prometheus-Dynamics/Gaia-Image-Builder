@@ -117,8 +117,10 @@ being cut off as unchanged.
 are uninstalled and their build directories removed before `make`, they are
 not restored from the package cache in that run, and the cache entry is stored
 again from the new build. It also makes `image:prepare` and `image:build`
-execute. `gaia preview` lists the packages it would clean. Only the named
-packages are cleaned, not the packages that depend on them.
+execute. `gaia preview` lists the packages it would clean. With
+`parallel_packages`, the packages that depend on the named ones are cleaned
+too, because their per-package directories hold copies of them. Otherwise only
+the named packages are cleaned.
 
 ```bash
 # rebuild the jar and everything that consumes it

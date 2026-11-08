@@ -487,7 +487,12 @@ was last built from, and rebuilds as little as keeps it correct:
 - A package no longer enabled is uninstalled, and the packages that depended
   on it are rebuilt.
 - A built package that gained or lost a dependency (for example kmod once xz
-  is enabled) is rebuilt.
+  is enabled) is rebuilt. With `parallel_packages`, so is every package that
+  depends on it, recursively.
+- With `parallel_packages`, virtual packages (`udev`, `openssl`) are rebuilt
+  like any other: each package's per-package directory holds a copy of its
+  dependencies, and a copy left behind would replace the rebuilt package's
+  files in `target/`.
 - A setting that belongs to no package (an external tree's own option, for
   example) is looked up in what reads it:
   - Buildroot's infrastructure (`Makefile`, `package/Makefile.in`,

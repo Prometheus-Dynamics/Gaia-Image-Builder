@@ -173,8 +173,92 @@ fn new_packages_build_without_a_clean() {
     }
 }
 
+/// `systemd` gains `libseccomp`. `udev` is virtual and has a copy of systemd
+/// in its per-package directory, as has `util-linux`, and both sort after
+/// `systemd`, so their copies would replace the rebuilt files in `target/`.
+fn systemd_gains_a_dependency(per_package: bool) -> PackageRebuild {
+    let base: &[(&str, &[&str])] = &[
+        ("toolchain", &[]),
+        ("udev", &["systemd"]),
+        ("util-linux", &["udev"]),
+        ("e2fsprogs", &["util-linux"]),
+        ("zlib", &["toolchain"]),
+    ];
+    let mut before = base.to_vec();
+    before.push(("systemd", &["toolchain"]));
+    let mut after = base.to_vec();
+    after.push(("libseccomp", &["toolchain"]));
+    after.push(("systemd", &["toolchain", "libseccomp"]));
+    let mut before = graph(&before);
+    let mut after = graph(&after);
+    for graph in [&mut before, &mut after] {
+        graph.packages.get_mut("udev").expect("udev").is_virtual = true;
+    }
+    let changes = [change("BR2_PACKAGE_LIBSECCOMP", None, Some("y"))];
+    let plan = plan_clean(CleanInputs {
+        config_changes: &changes,
+        override_changes: &BTreeSet::new(),
+        previous: Some(&before),
+        current: &after,
+        symbol_use: &|key| test_symbol_use(key),
+        per_package,
+    });
+    let CleanPlan::Packages(rebuild) = plan else {
+        panic!("expected a package rebuild, got {plan:?}");
+    };
+    rebuild
+}
+
 #[test]
-fn packages_that_gain_a_new_dependency_rebuild_alone() {
+fn with_per_package_a_gained_dependency_rebuilds_every_copy_of_the_package() {
+    let rebuild = systemd_gains_a_dependency(true);
+    assert_eq!(
+        rebuild.rebuild.iter().collect::<Vec<_>>(),
+        ["e2fsprogs", "systemd", "udev", "util-linux"]
+    );
+    assert_eq!(
+        rebuild.reasons,
+        [
+            "systemd: dependencies +libseccomp",
+            "dependent packages: e2fsprogs, udev, util-linux",
+        ]
+    );
+}
+
+#[test]
+fn with_one_shared_target_a_gained_dependency_rebuilds_the_package_alone() {
+    assert_eq!(
+        systemd_gains_a_dependency(false)
+            .rebuild
+            .iter()
+            .collect::<Vec<_>>(),
+        ["systemd"]
+    );
+}
+
+#[test]
+fn with_per_package_a_changed_package_rebuilds_its_virtual_package() {
+    let packages: &[(&str, &[&str])] = &[("libopenssl", &[]), ("openssl", &["libopenssl"])];
+    let before = graph(packages);
+    let mut after = before.clone();
+    after
+        .packages
+        .get_mut("openssl")
+        .expect("openssl")
+        .is_virtual = true;
+    after
+        .packages
+        .get_mut("libopenssl")
+        .expect("libopenssl")
+        .version = Some("2".to_string());
+    assert_eq!(
+        rebuilds(plan(&[], &[], Some(&before), &after)),
+        ["libopenssl", "openssl"]
+    );
+}
+
+#[test]
+fn a_dependency_gained_by_a_package_nothing_depends_on_rebuilds_it_alone() {
     let before = graph(BASE);
     let mut after = BASE.to_vec();
     after.push(("xz", &["toolchain"]));

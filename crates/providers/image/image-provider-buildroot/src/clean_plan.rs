@@ -11,7 +11,13 @@
 //! - A package that is no longer built is uninstalled, and what depended on
 //!   it is rebuilt.
 //! - A built package that gained or lost a dependency (an optional feature
-//!   now found, such as kmod with xz) is rebuilt alone.
+//!   now found, such as kmod with xz) is rebuilt: alone without per-package
+//!   directories, with everything that depends on it with them.
+//! - With per-package directories, virtual packages (`udev`, `openssl`) are
+//!   rebuilt like any other. Each package's directory holds a copy of its
+//!   dependencies, and `target/` takes a file from the last package in
+//!   alphabetical order that has it, so a copy left behind in a dependent
+//!   replaces the rebuilt package's file in the image.
 //! - Toolchain, architecture, libc and other system-wide settings, and
 //!   anything that cannot be attributed to a package, still clean the whole
 //!   tree.
@@ -324,6 +330,7 @@ pub(crate) fn plan_clean(inputs: CleanInputs<'_>) -> CleanPlan {
     let mut queue = changed
         .keys()
         .chain(removed.keys())
+        .chain(gained.keys().filter(|_| per_package))
         .cloned()
         .collect::<Vec<_>>();
     while let Some(name) = queue.pop() {
@@ -336,7 +343,7 @@ pub(crate) fn plan_clean(inputs: CleanInputs<'_>) -> CleanPlan {
     let builds = |name: &str| {
         current
             .get(name)
-            .is_some_and(|package| !package.is_virtual && !added.contains(name))
+            .is_some_and(|package| (per_package || !package.is_virtual) && !added.contains(name))
     };
     let rebuild = changed
         .keys()

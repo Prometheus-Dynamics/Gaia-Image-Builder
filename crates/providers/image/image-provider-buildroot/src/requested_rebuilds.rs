@@ -5,8 +5,11 @@
 //! builds them and the package cache stores the new build.
 use super::*;
 
-/// The packages named by `--rebuild-package`, checked against `graph`. A name
-/// the build does not have is an error listing close names.
+/// The packages named by `--rebuild-package`, checked against `graph`, and
+/// with per-package directories what depends on them: those hold copies of
+/// the named package that would otherwise end up in the image (see
+/// [`crate::clean_plan`]). A name the build does not have is an error listing
+/// close names.
 pub(crate) fn requested_package_rebuilds(
     policy: &ImageExecutionPolicy,
     graph: Option<&PackageGraph>,
@@ -30,7 +33,11 @@ pub(crate) fn requested_package_rebuilds(
         .filter(|name| !graph.contains(name.as_str()))
         .collect::<Vec<_>>();
     if unknown.is_empty() {
-        return Ok(requested);
+        return Ok(if policy.parallel_packages {
+            graph.with_dependents(&requested)
+        } else {
+            requested
+        });
     }
     let known = graph.package_names().collect::<Vec<_>>();
     let hints = unknown
@@ -162,6 +169,27 @@ mod tests {
         assert_eq!(
             with_requested_rebuilds(CleanPlan::Nothing, &BTreeSet::new()),
             CleanPlan::Nothing
+        );
+    }
+
+    #[test]
+    fn with_per_package_a_requested_package_brings_its_dependents() {
+        let mut graph = cache_graph();
+        graph
+            .packages
+            .get_mut("base")
+            .expect("base")
+            .reverse_dependencies
+            .insert("app".to_string());
+        let mut parallel = policy(&["base"]);
+        parallel.parallel_packages = true;
+        assert_eq!(
+            requested_package_rebuilds(&parallel, Some(&graph)).expect("known"),
+            names(&["app", "base"])
+        );
+        assert_eq!(
+            requested_package_rebuilds(&policy(&["base"]), Some(&graph)).expect("known"),
+            names(&["base"])
         );
     }
 
