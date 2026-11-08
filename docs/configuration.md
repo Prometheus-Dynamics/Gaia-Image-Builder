@@ -28,7 +28,10 @@ What v3 changes:
 - Every token is `${...}`. v2's `@self`, `@source:<id>`, `@<alias>`,
   `$provider.<name>` and `$assembly.<name>` are `${self}`, `${source.<id>}`,
   `${<alias>}`, `${provider.<name>}` and `${assembly.<name>}`. A v2 spelling
-  in a v3 file is an error.
+  in a v3 file is an error. A path token starts its value or an entry of a
+  `:` list; in `config_overrides` values it may also start an entry of a
+  space-separated list (`"${family}/a.fragment ${assets}/b.fragment"`), as
+  Buildroot's fragment and script lists are.
 - A token whose namespace Gaia does not know, or an alias no
   `[[workspace.named_paths]]` entry declares, is an error at its line instead
   of a validation warning. The alias names `build`, `workspace`, `env`,

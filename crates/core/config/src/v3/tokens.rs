@@ -11,7 +11,9 @@
 //!
 //! Everything else in `${...}` is spelled the same in both. The path tokens
 //! that were `@...` in v2 must start the value, or an entry of a
-//! `:`-separated list, as they had to in v2.
+//! `:`-separated list, as they had to in v2; in a Buildroot
+//! `config_overrides` value, also an entry of a space-separated list, which
+//! the provider resolves entry by entry.
 
 /// What reading a v3 string found besides its v2 text: the named-path
 /// aliases it used, checked once every layer is merged.
@@ -52,7 +54,15 @@ pub(crate) fn alias_is_reserved(alias: &str) -> bool {
 /// unknown namespace, or a path token that does not start its value.
 pub(crate) fn v3_string_to_v2(text: &str, found: &mut V3Tokens) -> Result<String, String> {
     reject_v2_tokens(text)?;
-    translate(text, 0, found)
+    translate(text, 0, false, found)
+}
+
+/// [`v3_string_to_v2`] for a Buildroot `config_overrides` value, whose path
+/// tokens may also start an entry of a space-separated list
+/// (`${family}/a.fragment ${assets}/b.fragment`).
+pub(crate) fn v3_override_to_v2(text: &str, found: &mut V3Tokens) -> Result<String, String> {
+    reject_v2_tokens(text)?;
+    translate(text, 0, true, found)
 }
 
 /// The v2 spellings a v3 file may not use.
@@ -121,16 +131,27 @@ fn is_identifier(text: &str) -> bool {
             .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
 }
 
-/// Whether byte `offset` of `text` starts the value or an entry of a list.
-fn starts_entry(text: &str, offset: usize) -> bool {
-    offset == 0 || text[..offset].ends_with(':')
+/// Whether byte `offset` of `text` starts the value or an entry of a list:
+/// `:`-separated, or space-separated with `spaces`.
+fn starts_entry(text: &str, offset: usize, spaces: bool) -> bool {
+    let before = &text[..offset];
+    offset == 0
+        || before.ends_with(':')
+        || (spaces
+            && before
+                .ends_with(|character: char| character.is_ascii_whitespace() || character == '"'))
 }
 
 /// Translates `text`, which sits at `base` in its value (non-zero only
 /// inside another token), token by token; nested tokens are translated
 /// first, so `${assembly.sha256:${assembly.work}/x}` keeps its outer token
 /// with a v2 path inside.
-fn translate(text: &str, base: usize, found: &mut V3Tokens) -> Result<String, String> {
+fn translate(
+    text: &str,
+    base: usize,
+    spaces: bool,
+    found: &mut V3Tokens,
+) -> Result<String, String> {
     let mut output = String::with_capacity(text.len());
     let mut rest = text;
     let mut consumed = 0;
@@ -141,8 +162,8 @@ fn translate(text: &str, base: usize, found: &mut V3Tokens) -> Result<String, St
         };
         let inner = &rest[start + 2..start + length - 1];
         let after = &rest[start + length..];
-        let at_entry_start = base == 0 && starts_entry(text, consumed + start);
-        let inner = translate(inner, base + 1, found)?;
+        let at_entry_start = base == 0 && starts_entry(text, consumed + start, spaces);
+        let inner = translate(inner, base + 1, spaces, found)?;
         output.push_str(&translate_token(&inner, after, at_entry_start, found)?);
         consumed += start + length;
         rest = after;
@@ -317,11 +338,27 @@ mod tests {
             ("${inputs.board}", "is written `${input.board}`"),
             ("${bulid.name}", "`bulid` is not a token namespace"),
             ("a-${assets}/x", "must start the value"),
+            ("a ${assets}/x", "must start the value"),
             ("${provider.images}x", "must be followed by `/`"),
             ("${build.name", "has no closing"),
         ] {
             let error = v2(text).expect_err(text);
             assert!(error.contains(expected), "{text}: {error}");
         }
+    }
+
+    #[test]
+    fn override_values_take_path_tokens_in_space_separated_lists() {
+        let mut found = V3Tokens::default();
+        assert_eq!(
+            v3_override_to_v2("${family}/a.fragment ${assets}/b.fragment", &mut found).unwrap(),
+            "@family/a.fragment @assets/b.fragment"
+        );
+        assert_eq!(found.aliases, ["family", "assets"]);
+        assert_eq!(
+            v3_override_to_v2("\"${assets}/a ${source.bsp}/b\"", &mut V3Tokens::default()).unwrap(),
+            "\"@assets/a @source:bsp/b\""
+        );
+        assert!(v3_override_to_v2("a-${assets}/x", &mut V3Tokens::default()).is_err());
     }
 }

@@ -301,7 +301,14 @@ fn translate_strings(
         toml::Value::String(string) => {
             let mut found = tokens::V3Tokens::default();
             let at = || locate(locations, key, path, text);
-            match tokens::v3_string_to_v2(string, &mut found) {
+            // A Buildroot override's value may be a space-separated list of
+            // paths, each starting with its own token.
+            let translated = if key.ends_with("config_overrides") {
+                tokens::v3_override_to_v2(string, &mut found)
+            } else {
+                tokens::v3_string_to_v2(string, &mut found)
+            };
+            match translated {
                 Ok(translated) => *string = translated,
                 Err(message) => {
                     return Err(ConfigError::config_shape(
