@@ -151,6 +151,61 @@ pub(super) fn tools_available() -> bool {
     })
 }
 
+/// `app`'s copy of `base`'s library replaced by `contents` (no longer a hard
+/// link), the tree stored, and what a restore into another tree gives `app`.
+fn restored_library_after_a_changed_copy(
+    name: &str,
+    list: Option<&str>,
+    contents: &[u8],
+) -> Vec<u8> {
+    let root_scratch = TempDir::new(name);
+    let root = root_scratch.join("root");
+    let cache = test_cache(&root, &[]);
+    let first = root.join("first");
+    built_tree(&first, b"app binary");
+    let copy = first.join("per-package/app/target/usr/lib/libbase.so");
+    fs::remove_file(&copy).expect("unlink");
+    write(&copy, contents);
+    if let Some(list) = list {
+        write(&first.join("build/app-1/.files-list.txt"), list.as_bytes());
+    }
+    let graph = cache_graph();
+    let keys = BTreeMap::from([
+        ("base".to_string(), Some("k-base".to_string())),
+        ("app".to_string(), Some("k-app".to_string())),
+    ]);
+    let (stored, skipped) = cache.store(&first, &graph, &keys, &[]);
+    assert_eq!(stored, ["app", "base"], "{skipped:?}");
+    let second = root.join("second");
+    fs::create_dir_all(&second).expect("second");
+    assert_eq!(cache.restore(&second, &graph, &keys), ["app", "base"]);
+    fs::read(second.join("per-package/app/target/usr/lib/libbase.so")).expect("restored")
+}
+
+#[test]
+fn an_old_copy_of_a_dependencys_file_is_not_stored_as_the_packages_own() {
+    if tools_available() {
+        assert_eq!(
+            restored_library_after_a_changed_copy("old-copy", None, b"old base"),
+            b"base"
+        );
+    }
+}
+
+#[test]
+fn a_dependencys_file_the_package_installed_over_is_stored() {
+    if tools_available() {
+        assert_eq!(
+            restored_library_after_a_changed_copy(
+                "installed-over",
+                Some("app,./usr/bin/app\napp,./usr/lib/libbase.so\n"),
+                b"app's base"
+            ),
+            b"app's base"
+        );
+    }
+}
+
 #[test]
 fn packages_round_trip_into_another_tree() {
     if !tools_available() {

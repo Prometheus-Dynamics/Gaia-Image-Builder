@@ -13,6 +13,18 @@ pub(crate) fn record_package_key(stamp_dir: &Path, key: &str) {
     let _ = fs::write(stamp_dir.join(PACKAGE_KEY_FILE), key);
 }
 
+/// The target paths a package's build directory lists as installed by it,
+/// or `None` without a list.
+pub(crate) fn listed_target_files(stamp_dir: &Path) -> Option<BTreeSet<String>> {
+    let list = fs::read_to_string(stamp_dir.join(".files-list.txt")).ok()?;
+    Some(
+        list.lines()
+            .filter_map(|line| line.split_once(','))
+            .map(|(_, path)| path.trim_start_matches("./").to_string())
+            .collect(),
+    )
+}
+
 /// Makes the stamps of every built package whose inputs are unchanged (its
 /// recorded key is its current key) newer than anything they depend on,
 /// keeping their order. A key covers the content of everything a package's

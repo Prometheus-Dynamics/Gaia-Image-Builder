@@ -580,26 +580,55 @@ impl PackageCache {
         // dependencies' files the same way). This includes what it
         // installs outside its install steps, such as an external
         // toolchain extracted into the host directory.
+        //
+        // A target file a dependency also has, but not as this hard link and
+        // not in this package's file list, is an old copy of that dependency,
+        // rebuilt since. Storing it would bring the old file back under the
+        // key of the new build. (In `host` such a file can be this package's:
+        // Buildroot rewrites paths in copied text files there.)
+        let listed = listed_target_files(&output_dir.join(stamp_dir));
+        let mut left_behind = 0usize;
         let mut own = Vec::new();
         for tree in ["host", "target"] {
             let root = format!("{per_package}/{tree}");
             walk_files(output_dir, &root, &mut |member, metadata| {
                 let relative = &member[root.len() + 1..];
                 let inode = (metadata.dev(), metadata.ino());
-                let from_dependency = dependencies.iter().any(|dependency| {
-                    fs::symlink_metadata(
-                        output_dir
-                            .join("per-package")
-                            .join(dependency)
-                            .join(tree)
-                            .join(relative),
-                    )
-                    .is_ok_and(|other| (other.dev(), other.ino()) == inode)
-                });
-                if !from_dependency {
-                    own.push((member, metadata.is_file(), metadata.len()));
+                let copies = dependencies
+                    .iter()
+                    .filter_map(|dependency| {
+                        fs::symlink_metadata(
+                            output_dir
+                                .join("per-package")
+                                .join(dependency)
+                                .join(tree)
+                                .join(relative),
+                        )
+                        .ok()
+                    })
+                    .collect::<Vec<_>>();
+                if copies
+                    .iter()
+                    .any(|other| (other.dev(), other.ino()) == inode)
+                {
+                    return;
                 }
+                if tree == "target"
+                    && metadata.is_file()
+                    && !copies.is_empty()
+                    && listed.as_ref().is_some_and(|list| !list.contains(relative))
+                {
+                    left_behind += 1;
+                    return;
+                }
+                own.push((member, metadata.is_file(), metadata.len()));
             });
+        }
+        if left_behind > 0 {
+            tracing::warn!(
+                provider_domain = "image.buildroot",
+                "package cache: {name} holds {left_behind} old file(s) of its dependencies, left out of its entry"
+            );
         }
         if let Ok(images) =
             fs::read_to_string(output_dir.join(stamp_dir).join(".files-list-images.txt"))
