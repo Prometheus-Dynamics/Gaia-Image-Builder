@@ -1,0 +1,27 @@
+[package]
+name = "gaia-initramfs"
+description = "Node: a stored tree as a reproducible newc cpio archive, the kernel's initramfs format, with owners and modes from the tree's entries"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+daedalus = { workspace = true }
+daedalus-cpu-author = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+daedalus-registry = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+gaia-step = { path = "../../core/step" }
+gaia-tree = { path = "../tree" }
+gaia-types = { path = "../../core/types" }
+
+[dev-dependencies]
+flate2 = "1"
+gaia-compress = { path = "../compress" }
+gaia-store = { path = "../../core/store" }
+tempfile = "3"
+
+[lints]
+workspace = true
