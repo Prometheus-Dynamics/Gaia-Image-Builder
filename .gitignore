@@ -1,0 +1,11 @@
+# Ignored until H3, so parallel PRs cannot conflict on it.
+Cargo.lock
+target/
+# Gaia's own content store and work directories, wherever a run puts them.
+.gaia/
+**/__pycache__/
+*.py[cod]
+.DS_Store
+.idea/
+.vscode/
+.claude/
