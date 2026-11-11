@@ -1,0 +1,19 @@
+[package]
+name = "gaia-store"
+description = "Gaia's content store: files and trees by digest, and step entries"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11.0"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
