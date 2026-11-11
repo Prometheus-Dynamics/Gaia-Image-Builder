@@ -11,7 +11,9 @@
 //!   replaces those three files.
 //! - **`gaia.tree.services`**: a component's enabled units as the links
 //!   `systemctl enable` makes, read from each unit's `[Install]` section.
-//! - **`gaia.tree.merge`**: layers into one tree, in order. Two layers
+//! - **`gaia.tree.merge`**: layers into one tree, in order. The node takes
+//!   them as a fan-in (`layers0`, `layers1`, ...), one edge per layer;
+//!   [`merge_layers`] takes a slice. Two layers
 //!   claiming one path is an error naming both, unless the later one says it
 //!   replaces that path (and only one may). A directory may be shared when
 //!   both give it the same mode and owner. Every path of the result has an
@@ -28,7 +30,7 @@ mod services;
 mod walk;
 
 pub use accounts::tree_accounts;
-pub use merge::tree_merge;
+pub use merge::{merge_layers, tree_merge};
 pub use place::tree_place;
 pub use services::tree_services;
 
