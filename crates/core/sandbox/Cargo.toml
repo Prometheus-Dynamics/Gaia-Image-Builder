@@ -1,0 +1,19 @@
+[package]
+name = "gaia-sandbox"
+description = "Running a step's tool inside a pinned root filesystem: rootless, inputs read-only, only the output writable, no network unless declared"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+gaia-step = { path = "../step" }
+
+[dev-dependencies]
+gaia-store = { path = "../store" }
+tempfile = "3"
+
+[lints]
+workspace = true
