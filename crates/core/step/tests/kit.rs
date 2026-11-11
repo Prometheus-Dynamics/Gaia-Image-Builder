@@ -49,6 +49,28 @@ fn a_second_run_with_the_same_key_does_not_run_the_body() {
         .expect("present");
     assert!(!present.made);
     assert!(make(b"v1").made);
+
+    // Every look-up-or-make is in the step record, in order.
+    let records = gaia_step::step_records(&gaia_step::logs_dir(&store));
+    let seen: Vec<_> = records
+        .iter()
+        .map(|record| (record.made, record.key == key(b"v1")))
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            (true, true),
+            (false, true),
+            (true, false),
+            (true, true),
+            (false, true),
+            (true, true)
+        ]
+    );
+    assert!(records.iter().all(|record| record.step == "test.make"
+        && record.pid == std::process::id()
+        && record.start_ns <= record.end_ns));
+    assert_eq!(records[1].outputs, first.outputs);
 }
 
 #[test]

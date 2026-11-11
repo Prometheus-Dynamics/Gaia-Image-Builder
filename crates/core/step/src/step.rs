@@ -72,6 +72,7 @@ impl<'a> Step<'a> {
         F: FnOnce(&mut Work<'_>) -> Result<(), StepError>,
     {
         let store_error = StepError::store(self.name);
+        let start_ns = crate::now_ns();
         let found = self
             .store
             .lookup(&self.key, self.check)
@@ -82,10 +83,7 @@ impl<'a> Step<'a> {
                     .iter()
                     .all(|(name, _)| entry.outputs.contains_key(*name));
             if same_outputs {
-                return Ok(Made {
-                    outputs: entry.outputs,
-                    made: false,
-                });
+                return self.recorded(start_ns, entry.outputs, false);
             }
         }
         let scratch = self.store.scratch().map_err(&store_error)?;
@@ -100,9 +98,30 @@ impl<'a> Step<'a> {
         let entry = scratch
             .commit_step(&self.key, outputs)
             .map_err(&store_error)?;
+        self.recorded(start_ns, entry.outputs, true)
+    }
+
+    /// Adds this look-up-or-make to the step record and returns it.
+    fn recorded(
+        &self,
+        start_ns: u128,
+        outputs: BTreeMap<String, ObjectRef>,
+        made: bool,
+    ) -> Result<Made, StepError> {
+        let record = crate::StepRecord {
+            start_ns,
+            end_ns: crate::now_ns(),
+            pid: std::process::id(),
+            made,
+            step: self.name.to_string(),
+            key: self.key,
+            outputs,
+        };
+        crate::log::record_step(&self.logs, &record)
+            .map_err(|error| StepError::body(self.name, format!("step record: {error}")))?;
         Ok(Made {
-            outputs: entry.outputs,
-            made: true,
+            outputs: record.outputs,
+            made,
         })
     }
 }

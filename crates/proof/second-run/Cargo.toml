@@ -1,0 +1,20 @@
+[package]
+name = "gaia-second-run"
+description = "Proof: the A2 graph run again in a new process makes nothing that is already in the store"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+gaia-proof = { path = "../proof" }
+
+[dev-dependencies]
+gaia-step = { path = "../../core/step" }
+gaia-store = { path = "../../core/store" }
+tempfile = "3"
+
+[lints]
+workspace = true
