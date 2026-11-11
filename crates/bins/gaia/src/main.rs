@@ -3,6 +3,8 @@
 //! - `gaia plan <product.toml>`: the graph and the plan, run nothing.
 //! - `gaia build <product.toml>`: run the graph; each image output is
 //!   printed with where it sits in the store, and the run is recorded.
+//! - `gaia lock <product.toml>`: resolve the sources and write the lock
+//!   (`gaia_lock_cmd`).
 //! - `gaia clean`: remove from the store what the latest runs don't use.
 //! - `gaia show <image>.<output>`: what an output of the latest run holds,
 //!   and the steps it came from.
@@ -58,6 +60,9 @@ fn main() -> ExitCode {
         args::Command::Build(options) => build::build(&options),
         args::Command::Clean(options) => clean::clean(&options),
         args::Command::Show(options) => show::show(&options),
+        args::Command::Lock(words) => {
+            gaia_lock_cmd::command::run(&words).map_err(|(code, message)| Stop { code, message })
+        }
     });
     match result {
         Ok(()) => ExitCode::SUCCESS,
