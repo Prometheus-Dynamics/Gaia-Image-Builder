@@ -11,7 +11,7 @@ fn write_out(text: &'static str) -> impl FnOnce(&mut gaia_step::Work<'_>) -> Res
 #[test]
 fn a_second_run_with_the_same_key_does_not_run_the_body() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = Store::open(dir.path()).expect("store");
+    let store = Store::open(dir.path().join("store")).expect("store");
     let cx = Ctx::new();
     let ran = Cell::new(0);
     let key = |input: &[u8]| {
@@ -54,7 +54,7 @@ fn a_second_run_with_the_same_key_does_not_run_the_body() {
 #[test]
 fn a_failed_body_leaves_nothing() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = Store::open(dir.path()).expect("store");
+    let store = Store::open(dir.path().join("store")).expect("store");
     let cx = Ctx::new();
     let key = KeyBuilder::new("test.fail", 1).finish();
     let error = Step::new(&store, &cx, "test.fail", key)
@@ -67,7 +67,9 @@ fn a_failed_body_leaves_nothing() {
     assert!(store.entry(&key).expect("entry").is_none());
     for sub in ["objects/file", "scratch"] {
         assert_eq!(
-            std::fs::read_dir(dir.path().join(sub)).expect("ls").count(),
+            std::fs::read_dir(store.root().join(sub))
+                .expect("ls")
+                .count(),
             0
         );
     }
@@ -111,7 +113,7 @@ fn keys_cover_every_part_and_ignore_order() {
 #[test]
 fn a_tool_sees_only_the_environment_it_is_given() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = Store::open(dir.path()).expect("store");
+    let store = Store::open(dir.path().join("store")).expect("store");
     let cx = Ctx::new();
     let key = KeyBuilder::new("test.env", 1).finish();
     let mut seen = Vec::new();
@@ -128,7 +130,7 @@ fn a_tool_sees_only_the_environment_it_is_given() {
 #[test]
 fn a_missing_program_and_a_signal_are_faults() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = Store::open(dir.path()).expect("store");
+    let store = Store::open(dir.path().join("store")).expect("store");
     let cx = Ctx::new();
     let run = |tool: Tool| {
         Step::new(&store, &cx, "test.tool", KeyBuilder::new("x", 1).finish())
@@ -147,7 +149,7 @@ fn a_missing_program_and_a_signal_are_faults() {
 #[test]
 fn a_failed_tool_keeps_its_whole_output_in_a_run_log() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = Store::open(dir.path()).expect("store");
+    let store = Store::open(dir.path().join("store")).expect("store");
     let cx = Ctx::new();
     let error = Step::new(&store, &cx, "test.tool", KeyBuilder::new("x", 1).finish())
         .look_up_or_make(&[("out", Path::new("out"))], |work| {
@@ -168,7 +170,7 @@ fn a_failed_tool_keeps_its_whole_output_in_a_run_log() {
     );
     let log = error.log().expect("a run log");
     assert!(
-        log.starts_with(dir.path().with_file_name("logs").join("test.tool")),
+        log.starts_with(dir.path().join("logs").join("test.tool")),
         "{log:?}"
     );
     assert_eq!(

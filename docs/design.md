@@ -158,3 +158,4 @@ Marked here, not requested from those repos.
 | X3 | Orion I4 ships systemd units only, no Gaia files (Lemnos `next` already has none) | G1 only |
 | X4 | Orion recovery build (G6, done on Orion `next`) is what the Raze recovery image packs | G1 only |
 | X5 | Daedalus `next` stays buildable at the locked commit | everything; locked by commit |
+| X6 | Daedalus: per-step Recovery (Retry{max}, SkipTick) settable from a loaded graph; today LoadedHost::load sets Recovery::Fail for every step | retries in builds; A2's retry proof |

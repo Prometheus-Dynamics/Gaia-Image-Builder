@@ -204,3 +204,124 @@ fn a_step_that_fails_twice_on_a_loaded_host() {
     );
     assert_eq!(faults, [(1, "flaky: not yet".to_string())]);
 }
+
+mod sh {
+    use daedalus::prelude::*;
+    use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store, Tool};
+    use std::path::Path;
+
+    /// Runs a shell script through the step kit.
+    #[node(id = "test.sh", inputs(store, script), outputs(out))]
+    pub fn sh(store: &str, script: &str, cx: &Ctx) -> Result<String, StepError> {
+        const NAME: &str = "test.sh";
+        let store = Store::open(store).map_err(StepError::store(NAME))?;
+        let key = KeyBuilder::new(NAME, 1).config("script", script).finish();
+        let made = Step::new(&store, cx, NAME, key).look_up_or_make(
+            &[("out", Path::new("out"))],
+            |work| {
+                let out = work.dir().join("out");
+                work.run(
+                    &Tool::new("/bin/sh")
+                        .arg("-c")
+                        .arg(format!("{script}; touch \"$OUT\""))
+                        .env("PATH", "/usr/bin:/bin")
+                        .env("OUT", out),
+                )?;
+                Ok(())
+            },
+        )?;
+        Ok(made.outputs["out"].to_string())
+    }
+}
+
+/// A long step on one lane and a failing step on another, under fail-fast.
+fn slow_and_failing(store: &Path) -> daedalus::prelude::LoadedHost {
+    use daedalus::prelude::*;
+    let store = format!("{:?}", store.display().to_string());
+    let node = |label: &str, script: &str| {
+        format!(
+            r#"{{"id": "test.sh", "label": "{label}", "metadata": {{"daedalus.node.fusion": {{"type": "bool", "value": false}}}}, "consts": {{"store": {{"type": "str", "value": {store}}}, "script": {{"type": "str", "value": "{script}"}}}}}}"#
+        )
+    };
+    let text = format!(
+        r#"{{"format": "daedalus.graph", "schema_version": 1, "graph": {{
+        "nodes": [{{"id": "host", "kind": "host_bridge", "port_types": {{"slow": "string", "fail": "string"}}}}, {}, {}],
+        "edges": [{{"from": {{"node": 1, "port": "out"}}, "to": {{"node": 0, "port": "slow"}}}},
+                  {{"from": {{"node": 2, "port": "out"}}, "to": {{"node": 0, "port": "fail"}}}}]}}}}"#,
+        node("slow", "sleep 3"),
+        node("fail", "sleep 0.3; exit 3"),
+    );
+    let graph = GraphDoc::parse(&text).expect("parses").graph;
+    let mut registry = Registry::new();
+    registry.register_all(&[&sh::SH_NODE]).expect("registers");
+    let planned = plan(
+        &graph,
+        &registry,
+        &[&daedalus_cpu::CpuBackend],
+        &Config::default(),
+    )
+    .expect("plans");
+    LoadedHost::load(planned, LoadOptions::default()).expect("loads")
+}
+
+/// Fail-fast does not tell steps already running on other lanes to stop:
+/// the cancel word stays clear, so the step kit lets the long tool finish.
+/// The kit does watch the word at that point: set from outside once the
+/// failure is seen, the long tool stops within the kit's poll.
+#[test]
+fn fail_fast_lets_a_running_step_finish_but_the_cancel_word_stops_it() {
+    use std::time::{Duration, Instant};
+    let spans_of = |root: &Path| {
+        let spans = timeline(&root.join("logs"));
+        let status = |tail: &str| {
+            spans
+                .iter()
+                .find(|span| span.tool.contains(tail))
+                .map(|span| span.status.clone())
+        };
+        (status("sleep 3;"), status("exit 3;"), show(&spans))
+    };
+
+    // Fail-fast alone.
+    let root = tempfile::tempdir().expect("tempdir");
+    let mut loaded = slow_and_failing(&root.path().join("store"));
+    let start = Instant::now();
+    let stopped = run(&mut loaded, 2, true).expect_err("the run stops");
+    let took = start.elapsed();
+    let (slow, fail, shown) = spans_of(root.path());
+    println!("fail-fast: {stopped:?} after {took:?}\n{shown}");
+    assert!(matches!(stopped, Stopped::Run(RunError::Fault { .. })));
+    assert_eq!(fail.as_deref(), Some("exit 3"));
+    // The long step ran to its end: nothing told it to stop.
+    assert_eq!(slow.as_deref(), Some("ok"), "{shown}");
+    assert!(took >= Duration::from_secs(3));
+
+    // The same, with the cancel word set once the failing run has ended.
+    let root = tempfile::tempdir().expect("tempdir");
+    let mut loaded = slow_and_failing(&root.path().join("store"));
+    let cancel = loaded.cancel_handle();
+    let watcher = {
+        let root = root.path().to_path_buf();
+        std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(30);
+            loop {
+                let (_, fail, _) = spans_of(&root);
+                if fail.as_deref() == Some("exit 3") {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "the failing run never ended");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            cancel.cancel();
+            Instant::now()
+        })
+    };
+    let stopped = run(&mut loaded, 2, true).expect_err("the run stops");
+    let returned = Instant::now();
+    let cancelled = watcher.join().expect("watcher");
+    let (slow, _, shown) = spans_of(root.path());
+    let after = returned.duration_since(cancelled);
+    println!("with the cancel word: {stopped:?}, returned {after:?} after the cancel\n{shown}");
+    assert_eq!(slow.as_deref(), Some("cancelled"), "{shown}");
+    assert!(after < Duration::from_secs(1));
+}
