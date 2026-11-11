@@ -44,12 +44,14 @@ Four parts. Only the first two are Gaia code.
 - **Board file.** What the hardware is and what it needs to boot: SoC and CPU,
   bootloader and its blobs (with digests), kernel source and config fragments,
   device tree and overlays, firmware files, partition needs, how it is flashed.
-  Today this sits in Atlas `devices/<board>/` (manifest, `gaia/*.toml`,
-  `fetch.lock`, overlays, udev rules) and in Gaia `examples/boards/<board>/`.
+  Today Raze's sits in Atlas `devices/raze/` and is out of date for the Raze OS
+  as it is meant to be now; it is read for facts, never ported (G1).
 - **Component file.** One piece of software and what it installs: where its
   source is, which builder makes it, the files it puts in the image, the
   service it enables, the users and groups it needs. A library ships nothing
-  Gaia-specific; its component file lives with whoever puts it in an image.
+  Gaia-specific (no Gaia files in Lemnos or Orion); its component file lives
+  with whoever owns the build config. For the Raze OS that is Atlas: board,
+  components and product together.
 - **Product file.** Which components go on which boards, which recipe lays out
   the image, and the size budget. It lives in the product's repo.
 - **The lock.** Every source resolved to a commit or digest, written by
@@ -70,39 +72,28 @@ Read in Daedalus `next`. Gaia does not rebuild any of this.
 | Steps in other processes | process backend, supervised workers |
 | Groups and control flow | node groups, if / for-each / until regions |
 | Validity before running | the planner |
-| Skip unchanged work | reuse, see below |
 
-## Reuse across runs
+## Reuse: Gaia is stateless
 
-Daedalus reuse today keys a step on per-slot version counters, keeps outputs
-as in-memory handles, and clears on reload. That fits a graph that runs every
-frame and does not fit a build, where the next run is a new process.
+Gaia keeps no state between runs and needs nothing from Daedalus for reuse.
+Give it inputs; it looks at what is already in the content store and makes only
+what is missing.
 
-Gaia does not build its own reuse. The change belongs in Daedalus, where it
-serves both kinds of host (outside block X1):
+- **Every step has a key**: a hash of its node kind, node version, config and
+  its inputs' digests. Source steps take their digest from content (a commit, a
+  tree digest, a locked download digest), so keys chain from the sources down.
+- **Look up or make.** The step kit (A1) asks the store for the key. When the
+  entry exists and every artifact it names is present with its digest, the step
+  returns those references without running its body. Otherwise it runs, and
+  the store records the entry only after the outputs are committed.
+- **The store is the whole cache** (B1): content by digest, plus step key ->
+  output references. Delete any of it and the next run remakes exactly that.
+  There are no run records, no "last build" state, no Gaia reuse engine.
+- Daedalus's own in-memory reuse is not used. Daedalus plans, runs, retries,
+  stops and reports; checking what already exists is the nodes' job.
 
-- **A key per value, not a counter.** A reusable step's key is a hash of its
-  node kind, node version, config and its inputs' keys. Host inputs take their
-  key from the host. Keys chain, so they are the same in the next process.
-- **A store behind reuse.** A small trait, `get(key)` and `put(key, outputs)`.
-  The default store is in memory and holds handles: today's behaviour, and
-  reload no longer clears it, because an unchanged node has an unchanged key.
-  A file store, for outputs that have a value encoding, is optional.
-- **The host decides a hit is still good.** The host's store can refuse a hit,
-  for example when the files an output names are gone.
-
-Gaia's side: a step's outputs are small references (`Artifact`: kind, digest,
-path in Gaia's content store), so the file store holds a few hundred bytes per
-step. Gaia's store answers a hit only when the referenced files exist with
-their digests. Source nodes key their output on content (a commit, a file
-digest), so editing one file reruns exactly the steps downstream of it.
-
-HeliOS's side, for comparison: keys from frame sequence numbers cost one small
-hash per opted-in step, never a hash of pixels; a graph edit reruns only the
-changed nodes instead of everything; expensive start-up results (lookup
-tables, compiled pipelines) can survive a restart through the file store.
-
-Until X1 lands, every Gaia run runs every step. That is correct, only slower.
+Editing one file in a source changes that tree's digest, so exactly the steps
+downstream of it make anything.
 
 ## Types at the boundary
 
@@ -147,8 +138,8 @@ a `.bin` or `.uf2`.
 ## Order of work
 
 - **A. Proof.** Three real steps as nodes, run by Daedalus in parallel, a
-  forced failure that stops the build, a flaky step that retries. The second
-  run skipping everything waits on X1.
+  forced failure that stops the build, a flaky step that retries, and a second
+  run that makes nothing.
 - **B. Model.** Content store, port types, the lock, descriptions.
 - **C. Sources and builders.**
 - **D. OS providers**, Buildroot first.
@@ -163,8 +154,7 @@ Marked here, not requested from those repos.
 
 | Id | Item | Stops |
 |---|---|---|
-| X1 | Daedalus keyed reuse and a reuse store (above) | A3 only; every run is full until then |
-| X2 | Where board files live (Atlas `devices/` today) | G1 only; dev-board files go in Gaia `examples/boards` |
-| X3 | Orion I4 plans Gaia fragments in `dev`'s format; it should ship systemd units only, and the component file lives with the product | G1 only |
+| X2 | Atlas owns the Raze build config and adopts G1's files in place of `devices/raze/` and HeliOS `gaia/configs/` | nothing in Gaia; only the hand-over after G1 |
+| X3 | Orion I4 ships systemd units only, no Gaia files (Lemnos `next` already has none) | G1 only |
 | X4 | Orion recovery build (G6, done on Orion `next`) is what the Raze recovery image packs | G1 only |
 | X5 | Daedalus `next` stays buildable at the locked commit | everything; locked by commit |

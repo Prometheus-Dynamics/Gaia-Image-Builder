@@ -9,7 +9,7 @@ Three real steps as Daedalus nodes, in parallel, with a forced failure and a ret
 
 - [ ] [A1](docs/prs/A1.md) The step kit (wave 1; needs nothing)
 - [ ] [A2](docs/prs/A2.md) Proof: fetch, build, pack (wave 2; needs A1, B1)
-- [ ] [A3](docs/prs/A3.md) Proof: the second run skips (wave 3; needs A2, X1)
+- [ ] [A3](docs/prs/A3.md) Proof: the second run skips (wave 3; needs A2)
 
 ## B. Model
 
@@ -80,7 +80,7 @@ Recipes as data, descriptions to a GraphDocument, and the `gaia` command.
 
 Every board `dev` builds, rebuilt from descriptions and compared file by file with `dev`'s image.
 
-- [ ] [G1](docs/prs/G1.md) Raze (wave 8; needs F5, F6, D3, E12, X2, X3, X4; board run)
+- [ ] [G1](docs/prs/G1.md) Raze (wave 8; needs F5, F6, D3, E12, X3, X4; board run)
 - [ ] [G2](docs/prs/G2.md) RK35xx family and ZERO 3E (wave 8; needs F5, F6, E12; board run)
 - [ ] [G3](docs/prs/G3.md) ROCK 5C and ROCK 4D (wave 9; needs G2; board run)
 - [ ] [G4](docs/prs/G4.md) Cubie A7A, A7S and A7Z (wave 8; needs F5, F6, E12; board run)
