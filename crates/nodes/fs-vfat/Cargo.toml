@@ -1,0 +1,24 @@
+[package]
+name = "gaia-fs-vfat"
+description = "Node: a tree as a reproducible FAT image for boot partitions, copied in with mtools"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+daedalus = { workspace = true }
+daedalus-cpu-author = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+daedalus-registry = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+gaia-step = { path = "../../core/step" }
+gaia-store = { path = "../../core/store" }
+gaia-types = { path = "../../core/types" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
