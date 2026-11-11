@@ -1,0 +1,19 @@
+[package]
+name = "gaia-lock"
+description = "Gaia's lock: every source, image and download resolved to a commit or digest"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+gaia-store = { path = "../store" }
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
