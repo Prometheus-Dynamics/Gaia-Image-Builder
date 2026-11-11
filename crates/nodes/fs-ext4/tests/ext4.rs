@@ -23,8 +23,9 @@ fn available() -> bool {
         .all(|p| !tool(p).is_empty());
     if !ok {
         assert!(
-            std::env::var_os("GAIA_REQUIRE_SANDBOX").is_none(),
-            "GAIA_REQUIRE_SANDBOX is set, and e2fsprogs is missing"
+            std::env::var_os("GAIA_REQUIRE_SANDBOX").is_none()
+                && std::env::var_os("GAIA_REQUIRE_TOOLS").is_none(),
+            "GAIA_REQUIRE_SANDBOX or GAIA_REQUIRE_TOOLS is set, and e2fsprogs is missing"
         );
         println!("SKIPPED: e2fsprogs (mke2fs, debugfs, e2fsck) is not installed");
     }
