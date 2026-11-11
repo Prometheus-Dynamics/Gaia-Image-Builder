@@ -1,0 +1,14 @@
+# usb0 at 10.55.0.1/24 on a USB gadget port, and a DHCP server that gives
+# the host 10.55.0.2. Untested on board.
+version = 1
+name = "usb-gadget-network"
+
+[[install]]
+from = { file = "files/usb0" }
+to = "/etc/network/interfaces.d/usb0"
+mode = "0644"
+
+[[install]]
+from = { file = "files/udhcpd.usb0.conf" }
+to = "/etc/udhcpd.usb0.conf"
+mode = "0644"

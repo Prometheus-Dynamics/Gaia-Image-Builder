@@ -1,0 +1,16 @@
+# A demo product: the ZERO 3E with a USB gadget network.
+version = 1
+name = "zero-3e-demo"
+
+[components]
+usb-gadget-network = "../../components/usb-gadget-network/component.toml"
+
+[[images]]
+name = "zero-3e-demo"
+board = "../../boards/zero-3e/board.toml"
+components = ["usb-gadget-network"]
+recipe = "ab-rootfs"
+budget = "1G"
+
+[images.settings]
+hostname = "zero3e"

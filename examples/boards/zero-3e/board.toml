@@ -1,0 +1,28 @@
+# Radxa ZERO 3E (RK3566) on the RK35xx family: gigabit Ethernet, and the OTG
+# port in peripheral mode for a USB gadget network (assets/dts). Untested on
+# board.
+version = 1
+extends = "../rk35xx/family.toml"
+name = "zero-3e"
+description = "Radxa ZERO 3E (RK3566)"
+
+[target]
+cpu = "cortex-a55"
+
+[kernel]
+device_tree = "rockchip/rk3566-radxa-zero-3e"
+device_tree_dir = "assets/dts"
+fragments = ["../rk35xx/assets/linux.fragment", "assets/linux.fragment"]
+
+[bootloader]
+defconfig = "radxa-zero-3-rk3566"
+
+[bootloader.blobs]
+tpl = { source = "rkbin", path = "bin/rk35/rk3566_ddr_1056MHz_v1.23.bin" }
+
+[bootloader.trusted_firmware]
+platform = "rk3568"
+
+# The maskrom loader is rkbin's boot_merger output for this ini.
+[flash.files]
+loader_ini = { source = "rkbin", path = "RKBOOT/RK3566MINIALL.ini" }

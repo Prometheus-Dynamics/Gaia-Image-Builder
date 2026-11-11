@@ -1,0 +1,56 @@
+# Rockchip RK35xx family: mainline Linux, U-Boot and TF-A, rkbin's DDR init
+# and maskrom loader, written to an SD card or eMMC. A board file extends
+# this and keeps only what differs: its CPU, device tree, U-Boot defconfig,
+# TF-A platform, DDR blob and loader. Untested on board.
+version = 1
+
+[target]
+arch = "aarch64"
+os = "linux"
+
+[sources.linux]
+git = "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
+ref = "v7.3.3"
+
+[sources.u-boot]
+git = "https://github.com/u-boot/u-boot.git"
+ref = "v2026.10"
+
+[sources.tf-a]
+git = "https://github.com/ARM-software/arm-trusted-firmware.git"
+ref = "v2.15.0"
+
+[sources.rkbin]
+git = "https://github.com/rockchip-linux/rkbin.git"
+ref = "master"
+
+[kernel]
+source = "linux"
+defconfig = "defconfig"
+fragments = ["assets/linux.fragment"]
+
+[bootloader]
+source = "u-boot"
+fragments = ["assets/u-boot.fragment"]
+
+[bootloader.trusted_firmware]
+source = "tf-a"
+
+# The boot ROM reads idbloader and U-Boot from sector 64, outside the
+# partition table. U-Boot keeps its environment in the partition with this
+# type GUID, left empty so the built-in environment boots.
+[[partitions]]
+name = "u-boot"
+role = "bootloader"
+offset = "32K"
+in_table = false
+
+[[partitions]]
+name = "uboot-env"
+role = "raw"
+type = "3de21764-95bd-54bd-a5c3-4abe786f38a8"
+offset = "16M"
+size = "64K"
+
+[flash]
+methods = ["sd-card", "maskrom"]
