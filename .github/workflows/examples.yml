@@ -33,14 +33,16 @@ jobs:
       - id: find
         run: |
           set -euo pipefail
-          products=$(find examples/products -name product.toml | sort | jq -R -s -c 'split("\n") | map(select(length > 0))')
-          echo "products=$products" >> "$GITHUB_OUTPUT"
-          for product in $(echo "$products" | jq -r '.[]'); do
-            dir=$(dirname "$product")
-            if [[ ! -f "$dir/gaia.lock" ]]; then
+          planned=()
+          for product in $(find examples/products -name product.toml | sort); do
+            if [[ -f "$(dirname "$product")/gaia.lock" ]]; then
+              planned+=("$product")
+            else
               echo "::warning file=$product::no gaia.lock next to this product; it is not planned until gaia lock writes one"
             fi
           done
+          printf '%s\n' "${planned[@]}" | jq -R -s -c 'split("\n") | map(select(length > 0))' > products.json
+          echo "products=$(cat products.json)" >> "$GITHUB_OUTPUT"
 
   plan:
     needs: list
@@ -53,7 +55,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Plan ${{ matrix.product }}
-        if: hashFiles(format('{0}/gaia.lock', dirname(matrix.product))) != ''
         uses: ./
         with:
           product: ${{ matrix.product }}
