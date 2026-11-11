@@ -1,0 +1,125 @@
+# Gaia as a GitHub Action: installs the gaia command, restores the content
+# store, runs `gaia plan` or `gaia build` on one product and keeps the store.
+#
+#   - uses: actions/checkout@v5
+#   - uses: Prometheus-Dynamics/Gaia-Image-Builder@next
+#     with:
+#       product: examples/products/zero-3e-demo/product.toml
+#       command: plan
+#
+# See docs/ci.md for runners, caching and secrets.
+name: Gaia
+description: Install gaia, restore its content store, plan or build a product and keep the store.
+branding:
+  icon: package
+  color: blue
+
+inputs:
+  product:
+    description: The product file (product.toml), relative to working-directory.
+    required: true
+  command:
+    description: The gaia command to run, plan or build.
+    default: build
+  args:
+    description: Extra arguments for the command, split on spaces, such as `--jobs 4` or `--recipes dir`.
+    default: ""
+  working-directory:
+    description: The directory gaia runs in.
+    default: .
+  gaia-ref:
+    description: >-
+      A git ref of Gaia to install instead of this action's own copy (for
+      example a tag). Empty builds the copy the action was checked out at.
+    default: ""
+  store:
+    description: The content store directory, absolute or relative to working-directory.
+    default: ~/.cache/gaia/store
+  cache:
+    description: >-
+      Restore and save the content store with actions/cache. Turn off on
+      self-hosted runners, whose store stays on disk.
+    default: "true"
+  cache-key:
+    description: An extra part of the cache key, to keep a separate store per build.
+    default: ""
+
+outputs:
+  store:
+    description: The absolute content store directory.
+    value: ${{ steps.paths.outputs.store }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve paths
+      id: paths
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STORE: ${{ inputs.store }}
+        ACTION_PATH: ${{ github.action_path }}
+        GAIA_REF: ${{ inputs.gaia-ref }}
+      run: |
+        set -euo pipefail
+        store="${STORE/#\~/$HOME}"
+        echo "store=$(realpath -m "$store")" >> "$GITHUB_OUTPUT"
+        # The binary cache key: the ref asked for, or the content of this
+        # action's own copy. The repository keeps no Cargo.lock (it is
+        # ignored), so the manifests and sources stand for the build.
+        if [[ -n "$GAIA_REF" ]]; then
+          key="ref-$GAIA_REF"
+        else
+          key="src-$(cd "$ACTION_PATH" && find Cargo.toml rust-toolchain.toml crates -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)"
+        fi
+        echo "gaia-key=$key" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the gaia binary
+      id: gaia-bin
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/bin/gaia
+        key: gaia-bin-${{ runner.os }}-${{ runner.arch }}-${{ steps.paths.outputs.gaia-key }}
+
+    - name: Install gaia
+      if: steps.gaia-bin.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        GAIA_REF: ${{ inputs.gaia-ref }}
+      run: |
+        set -euo pipefail
+        if [[ -n "$GAIA_REF" ]]; then
+          cargo install --git https://github.com/Prometheus-Dynamics/Gaia-Image-Builder --rev "$GAIA_REF" gaia
+        else
+          (cd "$ACTION_PATH" && rustup show active-toolchain >/dev/null && cargo install --path crates/bins/gaia)
+        fi
+
+    - name: Restore the content store
+      if: inputs.cache == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.paths.outputs.store }}
+        key: gaia-store-${{ runner.os }}-${{ inputs.cache-key }}-${{ hashFiles(format('{0}/{1}', inputs.working-directory, inputs.product)) }}-${{ github.run_id }}
+        restore-keys: |
+          gaia-store-${{ runner.os }}-${{ inputs.cache-key }}-${{ hashFiles(format('{0}/{1}', inputs.working-directory, inputs.product)) }}-
+          gaia-store-${{ runner.os }}-${{ inputs.cache-key }}-
+
+    - name: gaia ${{ inputs.command }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GAIA_COMMAND: ${{ inputs.command }}
+        GAIA_PRODUCT: ${{ inputs.product }}
+        GAIA_ARGS: ${{ inputs.args }}
+        GAIA_STORE: ${{ steps.paths.outputs.store }}
+      run: |
+        set -euo pipefail
+        export PATH="$HOME/.cargo/bin:$PATH"
+        gaia --version
+        read -r -a extra <<< "$GAIA_ARGS"
+        case "$GAIA_COMMAND" in
+          plan|build) ;;
+          *) echo "::error::command must be plan or build, not '$GAIA_COMMAND'"; exit 2 ;;
+        esac
+        gaia "$GAIA_COMMAND" "$GAIA_PRODUCT" --store "$GAIA_STORE" "${extra[@]}"

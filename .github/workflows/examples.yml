@@ -1,0 +1,61 @@
+name: Examples
+
+# Plans every example product on each push and pull request into next. Plans
+# only: no image is built here. A product with no committed gaia.lock cannot
+# be planned (the lock is written by `gaia lock`, not yet in the command), so
+# it gets a warning instead of a plan.
+
+on:
+  push:
+    branches:
+      - next
+    paths:
+      - "examples/**"
+      - "crates/**"
+      - "action.yml"
+      - ".github/workflows/examples.yml"
+  pull_request:
+    branches:
+      - next
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  list:
+    runs-on: ubuntu-latest
+    outputs:
+      products: ${{ steps.find.outputs.products }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: find
+        run: |
+          set -euo pipefail
+          products=$(find examples/products -name product.toml | sort | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "products=$products" >> "$GITHUB_OUTPUT"
+          for product in $(echo "$products" | jq -r '.[]'); do
+            dir=$(dirname "$product")
+            if [[ ! -f "$dir/gaia.lock" ]]; then
+              echo "::warning file=$product::no gaia.lock next to this product; it is not planned until gaia lock writes one"
+            fi
+          done
+
+  plan:
+    needs: list
+    if: needs.list.outputs.products != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        product: ${{ fromJSON(needs.list.outputs.products) }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Plan ${{ matrix.product }}
+        if: hashFiles(format('{0}/gaia.lock', dirname(matrix.product))) != ''
+        uses: ./
+        with:
+          product: ${{ matrix.product }}
+          command: plan
+          cache-key: plan
