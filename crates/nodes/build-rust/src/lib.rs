@@ -29,8 +29,9 @@ const NAME: &str = "gaia.build.rust";
 const RECIPE_VERSION: u32 = 1;
 
 /// Builds `package` from `source` for `triple` (tuned for `cpu`, when not
-/// empty), with `features`, using the toolchain at `toolchain` and the
-/// crates in `vendor`.
+/// empty), with `features` (names separated by spaces or commas, as cargo
+/// takes them; text, since a graph sets it as a constant), using the
+/// toolchain at `toolchain` and the crates in `vendor`.
 #[node(
     id = "gaia.build.rust",
     inputs(store, toolchain, source, vendor, package, features, triple, cpu),
@@ -43,7 +44,7 @@ pub fn build_rust(
     source: Tree,
     vendor: Tree,
     package: &str,
-    features: Vec<String>,
+    features: &str,
     triple: &str,
     cpu: &str,
     cx: &Ctx,
@@ -73,7 +74,10 @@ pub fn build_rust(
             .map_err(|e| StepError::body(NAME, format!("{program} {arg}: {e}")))
             .map(|o| o.stdout)
     };
-    let mut features = features;
+    let mut features: Vec<&str> = features
+        .split([' ', ','])
+        .filter(|f| !f.is_empty())
+        .collect();
     features.sort();
     features.dedup();
     let key = KeyBuilder::new(NAME, RECIPE_VERSION)
