@@ -25,4 +25,12 @@ jobs:
       # rust-toolchain.toml selects the toolchain and its components.
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # The sandbox tests need bubblewrap and unprivileged user namespaces,
+      # and must run here rather than skip.
+      - run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: ./scripts/gate.sh
+        env:
+          GAIA_REQUIRE_SANDBOX: "1"
