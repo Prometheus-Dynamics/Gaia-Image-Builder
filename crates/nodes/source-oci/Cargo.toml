@@ -1,0 +1,30 @@
+[package]
+name = "gaia-source-oci"
+description = "Node: a container image pulled by digest, as its root filesystem tree and its config"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+daedalus = { workspace = true }
+daedalus-cpu-author = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+daedalus-registry = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+flate2 = "1"
+gaia-step = { path = "../../core/step" }
+gaia-store = { path = "../../core/store" }
+gaia-types = { path = "../../core/types" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tar = "0.4"
+zstd = "0.13"
+
+[dev-dependencies]
+sha2 = "0.11.0"
+tempfile = "3"
+
+[lints]
+workspace = true
