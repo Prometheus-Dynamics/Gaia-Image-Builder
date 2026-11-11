@@ -1,1 +1,0 @@
-print("polyglot python app")

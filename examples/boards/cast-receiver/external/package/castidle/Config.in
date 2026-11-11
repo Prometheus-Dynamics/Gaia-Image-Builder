@@ -1,7 +1,0 @@
-config BR2_PACKAGE_CASTIDLE
-	bool "castidle"
-	depends on BR2_LINUX_KERNEL # the font comes from the kernel tree
-	help
-	  The cast receiver's idle screen: the receiver's name and IP
-	  addresses on the KMS driver's fbdev emulation (/dev/fb0),
-	  black while a receiver holds the display.

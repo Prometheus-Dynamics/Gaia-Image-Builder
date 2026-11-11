@@ -1,3 +1,0 @@
-# Not used here, and its PKCS#11 signing needs a GnuTLS built with p11-kit,
-# which Buildroot's host-gnutls is not.
-# CONFIG_TOOLS_MKEFICAPSULE is not set

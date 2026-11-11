@@ -1,3 +1,0 @@
-# Pi 5 (BCM2712): no H.264 block (H.264 is decoded in software). RP1 drives
-# Ethernet; the debug UART (ttyAMA10) is the serial console.
-CONFIG_MACB=y

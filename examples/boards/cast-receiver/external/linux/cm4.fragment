@@ -1,3 +1,0 @@
-# CM4 (BCM2711): the VideoCore H.264 decoder (bcm2835-codec, a V4L2
-# stateful m2m device), reached through VCHIQ.
-CONFIG_VIDEO_CODEC_BCM2835=m

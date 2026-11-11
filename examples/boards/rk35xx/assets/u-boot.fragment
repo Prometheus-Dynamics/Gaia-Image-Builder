@@ -1,9 +1,0 @@
-# The environment lives in the GPT partition with U-Boot's environment type
-# GUID (the empty "uboot-env" partition), as on Buildroot's rock5b.
-CONFIG_ENV_SIZE=0x10000
-CONFIG_PARTITION_TYPE_GUID=y
-# CONFIG_ENV_IS_NOWHERE is not set
-CONFIG_ENV_IS_IN_MMC=y
-# Not used here, and from v2026.10 its PKCS#11 signing needs a GnuTLS built
-# with p11-kit, which Buildroot's host-gnutls is not.
-# CONFIG_TOOLS_MKEFICAPSULE is not set

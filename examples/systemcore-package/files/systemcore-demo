@@ -1,3 +1,0 @@
-#!/bin/sh
-# Prints a line and exits; the demo service runs it.
-echo "systemcore-demo: running"

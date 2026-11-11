@@ -1,3 +1,0 @@
-# udhcpd for the USB gadget network (the host gets 10.55.0.2).
-CONFIG_UDHCPD=y
-CONFIG_DHCPD_LEASES_FILE="/tmp/udhcpd.leases"

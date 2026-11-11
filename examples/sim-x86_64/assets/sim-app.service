@@ -1,8 +1,0 @@
-[Unit]
-Description=Example app (app layer)
-
-[Service]
-ExecStart=/usr/bin/sim-app
-
-[Install]
-WantedBy=multi-user.target

@@ -1,7 +1,0 @@
-#!/bin/sh
-# A root shell on the serial console when cast.txt sets DEBUG_SHELL=1.
-. /run/cast/env
-if [ "$DEBUG_SHELL" != 1 ]; then
-	exec sleep 2147483647
-fi
-exec setsid cttyhack /bin/sh -l

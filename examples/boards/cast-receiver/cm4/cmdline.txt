@@ -1,1 +1,0 @@
-root=PARTUUID=ca570001-02 rootfstype=erofs ro rootwait console=serial0,115200 quiet loglevel=3 video=HDMI-A-1:1920x1080@60 vt.global_cursor_default=0

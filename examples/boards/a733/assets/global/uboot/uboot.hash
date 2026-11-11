@@ -1,4 +1,0 @@
-# Radxa's U-Boot tree (v2026.07 plus 73 commits, branch u-boot-dlan17) at the
-# commit DockSeed/a733-bootchain pins, the commit's GitHub archive
-# (BR2_GLOBAL_PATCH_DIR hash file: Buildroot has no hash of its own for it).
-sha256  f5464b3dba5d51cbeb78e53d50626f96d33e261a3663830cd62036789d098423  9da4b3e82d641296f5b19d5e78eaad0d3cf56eec.tar.gz
