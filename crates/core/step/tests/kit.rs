@@ -11,7 +11,7 @@ fn write_out(text: &'static str) -> impl FnOnce(&mut gaia_step::Work<'_>) -> Res
 #[test]
 fn a_second_run_with_the_same_key_does_not_run_the_body() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = Store::open(dir.path()).expect("store");
+    let store = Store::open(dir.path().join("store")).expect("store");
     let cx = Ctx::new();
     let ran = Cell::new(0);
     let key = |input: &[u8]| {
@@ -54,7 +54,7 @@ fn a_second_run_with_the_same_key_does_not_run_the_body() {
 #[test]
 fn a_failed_body_leaves_nothing() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = Store::open(dir.path()).expect("store");
+    let store = Store::open(dir.path().join("store")).expect("store");
     let cx = Ctx::new();
     let key = KeyBuilder::new("test.fail", 1).finish();
     let error = Step::new(&store, &cx, "test.fail", key)
@@ -67,7 +67,9 @@ fn a_failed_body_leaves_nothing() {
     assert!(store.entry(&key).expect("entry").is_none());
     for sub in ["objects/file", "scratch"] {
         assert_eq!(
-            std::fs::read_dir(dir.path().join(sub)).expect("ls").count(),
+            std::fs::read_dir(store.root().join(sub))
+                .expect("ls")
+                .count(),
             0
         );
     }
@@ -111,7 +113,7 @@ fn keys_cover_every_part_and_ignore_order() {
 #[test]
 fn a_tool_sees_only_the_environment_it_is_given() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = Store::open(dir.path()).expect("store");
+    let store = Store::open(dir.path().join("store")).expect("store");
     let cx = Ctx::new();
     let key = KeyBuilder::new("test.env", 1).finish();
     let mut seen = Vec::new();
@@ -128,7 +130,7 @@ fn a_tool_sees_only_the_environment_it_is_given() {
 #[test]
 fn a_missing_program_and_a_signal_are_faults() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = Store::open(dir.path()).expect("store");
+    let store = Store::open(dir.path().join("store")).expect("store");
     let cx = Ctx::new();
     let run = |tool: Tool| {
         Step::new(&store, &cx, "test.tool", KeyBuilder::new("x", 1).finish())
@@ -139,15 +141,15 @@ fn a_missing_program_and_a_signal_are_faults() {
             .expect_err("fails")
     };
     let missing = run(Tool::new("/nonexistent/tool"));
-    assert!(matches!(missing.kind, ErrorKind::Spawn(_)), "{missing}");
+    assert!(matches!(missing.kind(), ErrorKind::Spawn(_)), "{missing}");
     let killed = run(Tool::new("/bin/sh").arg("-c").arg("kill -TERM $$"));
-    assert_eq!(killed.kind, ErrorKind::Signal(15), "{killed}");
+    assert_eq!(killed.kind(), &ErrorKind::Signal(15), "{killed}");
 }
 
 #[test]
-fn a_failed_tool_error_holds_the_whole_stderr_tail() {
+fn a_failed_tool_keeps_its_whole_output_in_a_run_log() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = Store::open(dir.path()).expect("store");
+    let store = Store::open(dir.path().join("store")).expect("store");
     let cx = Ctx::new();
     let error = Step::new(&store, &cx, "test.tool", KeyBuilder::new("x", 1).finish())
         .look_up_or_make(&[("out", Path::new("out"))], |work| {
@@ -157,11 +159,44 @@ fn a_failed_tool_error_holds_the_whole_stderr_tail() {
             Ok(())
         })
         .expect_err("fails");
-    assert_eq!(error.kind, ErrorKind::Exit(3));
-    assert_eq!(error.stderr_tail, ["checking things", "cannot find libfoo"]);
+    assert_eq!(error.kind(), &ErrorKind::Exit(3));
+    assert_eq!(
+        error.stderr_tail(),
+        ["checking things", "cannot find libfoo"]
+    );
+    assert_eq!(
+        daedalus_cpu_author::FixedError::reason(&error),
+        "test.tool: exited 3"
+    );
+    let log = error.log().expect("a run log");
+    assert!(
+        log.starts_with(dir.path().join("logs").join("test.tool")),
+        "{log:?}"
+    );
     assert_eq!(
         error.to_string(),
-        "test.tool: exited 3: cannot find libfoo\nstderr, last lines:\n  checking things\n  cannot find libfoo"
+        format!(
+            "test.tool: exited 3\nlog: {}\nstderr, last lines:\n  checking things\n  cannot find libfoo",
+            log.display()
+        )
     );
+    // The log has everything, in order, and outlives the failed step's
+    // scratch.
+    let text = std::fs::read_to_string(log).expect("log");
+    let body: Vec<&str> = text.lines().filter(|line| !line.starts_with('#')).collect();
+    assert_eq!(
+        body,
+        [
+            "out| out",
+            "err| checking things",
+            "err| cannot find libfoo"
+        ]
+    );
+    assert!(
+        text.starts_with("# step test.tool\n# key sha256:"),
+        "{text}"
+    );
+    assert!(text.contains("\n# tool /bin/sh -c echo out;"), "{text}");
+    assert!(text.trim_end().ends_with(" exit 3"), "{text}");
     assert_eq!(daedalus_cpu_author::FixedError::code(&error), 3);
 }

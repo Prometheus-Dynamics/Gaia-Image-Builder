@@ -13,7 +13,9 @@
 //! 3. **Tools.** [`Work::run`] runs one tool process ([`Tool`]) with a fixed
 //!    argument list and environment, streams its output into bounded tails,
 //!    kills its whole process group when the run is cancelled, and turns a
-//!    failed exit into a [`StepError`] that names the step.
+//!    failed exit into a [`StepError`] that names the step. Each run's whole
+//!    output goes to a run log file next to the store ([`logs_dir`]), which
+//!    a failed step keeps.
 //!
 //! What a step does not do: retry, time out, schedule or keep records.
 //! Retries and stopping are Daedalus step policy; the store is the only state.
@@ -34,6 +36,7 @@
 
 mod error;
 mod key;
+mod log;
 mod step;
 mod tool;
 
@@ -41,5 +44,6 @@ pub use daedalus_cpu_author::Ctx;
 pub use error::{ErrorKind, StepError, code};
 pub use gaia_store::{Check, Digest, ObjectRef, StepKey, Store};
 pub use key::KeyBuilder;
+pub use log::{logs_dir, now_ns};
 pub use step::{Made, Step, Work};
 pub use tool::{Stream, Tool, ToolOutput};

@@ -3,18 +3,22 @@
 use daedalus_cpu_author::FixedError;
 use std::fmt;
 
-/// A step's failure. It names the step and holds what the tool printed last
-/// on stderr. Daedalus keeps the first 64 bytes of [`FixedError::reason`] in
-/// its fault record, so the reason starts with the step's name; [`Display`]
-/// gives everything.
+/// A step's failure. Its reason is short and fixed in form,
+/// `<step>: exited 3` or `<step>: cancelled`, since Daedalus keeps the first
+/// 64 bytes of [`FixedError::reason`] in its fault record. What the tool
+/// printed is in its run log ([`StepError::log`]) and, last lines only, in
+/// [`StepError::stderr_tail`]; [`Display`] gives all three.
 ///
 /// [`Display`]: fmt::Display
 #[derive(Debug)]
-pub struct StepError {
-    pub step: String,
-    pub kind: ErrorKind,
-    /// The tool's last stderr lines, oldest first, when a tool failed.
-    pub stderr_tail: Vec<String>,
+pub struct StepError(Box<Inner>);
+
+#[derive(Debug)]
+struct Inner {
+    step: String,
+    kind: ErrorKind,
+    stderr_tail: Vec<String>,
+    log: Option<std::path::PathBuf>,
     reason: String,
 }
 
@@ -54,16 +58,38 @@ impl StepError {
             ErrorKind::Store(why) => format!("store: {why}"),
             ErrorKind::Body(why) => why.clone(),
         };
-        let reason = match stderr_tail.last() {
-            Some(line) => format!("{step}: {what}: {line}"),
-            None => format!("{step}: {what}"),
-        };
-        Self {
+        Self(Box::new(Inner {
             step: step.to_string(),
             kind,
             stderr_tail,
-            reason,
-        }
+            log: None,
+            reason: format!("{step}: {what}"),
+        }))
+    }
+
+    /// The step's name.
+    pub fn step(&self) -> &str {
+        &self.0.step
+    }
+
+    pub fn kind(&self) -> &ErrorKind {
+        &self.0.kind
+    }
+
+    /// The tool's last stderr lines, oldest first, when a tool failed.
+    pub fn stderr_tail(&self) -> &[String] {
+        &self.0.stderr_tail
+    }
+
+    /// The run log of the tool that failed, with everything it printed.
+    pub fn log(&self) -> Option<&std::path::Path> {
+        self.0.log.as_deref()
+    }
+
+    /// The same error, pointing at the run log that holds the tool's output.
+    pub fn with_log(mut self, log: std::path::PathBuf) -> Self {
+        self.0.log = Some(log);
+        self
     }
 
     /// A failure of the step's own code, not of a tool.
@@ -79,7 +105,7 @@ impl StepError {
 
 impl FixedError for StepError {
     fn code(&self) -> u32 {
-        match &self.kind {
+        match &self.0.kind {
             ErrorKind::Exit(status) => u32::try_from(*status).unwrap_or(1),
             ErrorKind::Signal(signal) => code::SIGNAL_BASE + signal.unsigned_abs(),
             ErrorKind::Cancelled => code::CANCELLED,
@@ -90,16 +116,19 @@ impl FixedError for StepError {
     }
 
     fn reason(&self) -> &str {
-        &self.reason
+        &self.0.reason
     }
 }
 
 impl fmt::Display for StepError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.reason)?;
-        if self.stderr_tail.len() > 1 {
+        f.write_str(&self.0.reason)?;
+        if let Some(log) = &self.0.log {
+            write!(f, "\nlog: {}", log.display())?;
+        }
+        if !self.0.stderr_tail.is_empty() {
             f.write_str("\nstderr, last lines:")?;
-            for line in &self.stderr_tail {
+            for line in &self.0.stderr_tail {
                 write!(f, "\n  {line}")?;
             }
         }

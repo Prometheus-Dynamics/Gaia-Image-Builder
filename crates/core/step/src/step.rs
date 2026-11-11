@@ -3,7 +3,7 @@
 use crate::{Ctx, StepError, Tool, ToolOutput, tool};
 use gaia_store::{Check, ObjectRef, StepKey, Store};
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// One run of one step: where its outputs go, how it is cancelled, and its
 /// key.
@@ -13,6 +13,7 @@ pub struct Step<'a> {
     name: &'a str,
     key: StepKey,
     check: Check,
+    logs: PathBuf,
 }
 
 /// What [`Step::look_up_or_make`] gives back.
@@ -44,7 +45,14 @@ impl<'a> Step<'a> {
             name,
             key,
             check: Check::Digest,
+            logs: crate::logs_dir(store),
         }
+    }
+
+    /// Where this step's run logs go, when not [`crate::logs_dir`].
+    pub fn logs(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.logs = dir.into();
+        self
     }
 
     /// How an entry's outputs are checked before they are used. The default,
@@ -85,6 +93,8 @@ impl<'a> Step<'a> {
             dir: scratch.path(),
             cx: self.cx,
             name: self.name,
+            key: self.key,
+            logs: &self.logs,
         };
         body(&mut work)?;
         let entry = scratch
@@ -103,6 +113,8 @@ pub struct Work<'a> {
     dir: &'a Path,
     cx: &'a Ctx,
     name: &'a str,
+    key: StepKey,
+    logs: &'a Path,
 }
 
 impl std::fmt::Debug for Work<'_> {
@@ -137,8 +149,10 @@ impl Work<'_> {
 
     /// Runs `tool` to the end. It starts in the output directory unless it
     /// names another, sees only the environment it lists, and is killed
-    /// with its whole process group when the run is cancelled.
+    /// with its whole process group when the run is cancelled. Everything
+    /// it prints goes to a run log of its own ([`ToolOutput::log`],
+    /// [`StepError::log`]).
     pub fn run(&mut self, tool: &Tool) -> Result<ToolOutput, StepError> {
-        tool::run(tool, self.cx, self.name, self.dir)
+        tool::run(tool, self.cx, self.name, self.dir, self.logs, &self.key)
     }
 }
