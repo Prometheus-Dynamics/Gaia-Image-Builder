@@ -14,6 +14,7 @@
 //! tags), a download to the digest of its bytes, an image tag to its
 //! manifest digest, asked anonymously.
 
+pub mod command;
 mod resolve;
 
 pub use resolve::{Tools, relative, resolve};
