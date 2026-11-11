@@ -3,7 +3,7 @@
 use gaia_step::Ctx;
 use gaia_store::{Store, tree_digest};
 use gaia_tree::{
-    Account, AccountGroup, Layer, Owned, Placement, owned_digest, tree_accounts, tree_merge,
+    Account, AccountGroup, Layer, Owned, Placement, merge_layers, owned_digest, tree_accounts,
     tree_place, tree_services,
 };
 use gaia_types::{FileEntry, Tree};
@@ -96,7 +96,7 @@ fn a_conflict_names_both_components() {
         &[("dist/server", "b")],
         &[("dist/server", "/usr/bin/server", None, 0)],
     );
-    let error = tree_merge(&f.store, vec![base(&f), a, b], &Ctx::new()).expect_err("conflict");
+    let error = merge_layers(&f.store, &[base(&f), a, b], &Ctx::new()).expect_err("conflict");
     println!("{error}");
     let text = error.to_string();
     assert!(text.contains("/usr/bin/server"), "{text}");
@@ -112,7 +112,7 @@ fn a_file_over_a_base_file_is_a_conflict_unless_replaced() {
         &[("sh", "new")],
         &[("sh", "/usr/bin/sh", None, 0)],
     );
-    let error = tree_merge(&f.store, vec![base(&f), a.clone()], &Ctx::new()).expect_err("conflict");
+    let error = merge_layers(&f.store, &[base(&f), a.clone()], &Ctx::new()).expect_err("conflict");
     println!("{error}");
     assert!(error.to_string().contains("os and shell"));
     let replacing = Layer {
@@ -120,13 +120,13 @@ fn a_file_over_a_base_file_is_a_conflict_unless_replaced() {
         ..a
     };
     let (tree, _) =
-        tree_merge(&f.store, vec![base(&f), replacing.clone()], &Ctx::new()).expect("replaces");
+        merge_layers(&f.store, &[base(&f), replacing.clone()], &Ctx::new()).expect("replaces");
     let store = Store::open(&f.store).expect("store");
     let sh = tree.object.path_in(&store).expect("in").join("usr/bin/sh");
     assert_eq!(std::fs::read_to_string(sh).expect("read"), "new");
     let mut second = replacing.clone();
     second.owner = "busybox".into();
-    let error = tree_merge(&f.store, vec![base(&f), replacing, second], &Ctx::new())
+    let error = merge_layers(&f.store, &[base(&f), replacing, second], &Ctx::new())
         .expect_err("two replace");
     println!("{error}");
     assert!(
@@ -152,7 +152,7 @@ fn a_shared_directory_needs_the_same_mode_and_owner() {
         &[("d/y", "y")],
         &[("d", "/srv/data", Some(0o755), 0)],
     );
-    let error = tree_merge(&f.store, vec![a.clone(), b], &Ctx::new()).expect_err("conflict");
+    let error = merge_layers(&f.store, &[a.clone(), b], &Ctx::new()).expect_err("conflict");
     println!("{error}");
     assert!(
         error
@@ -165,7 +165,7 @@ fn a_shared_directory_needs_the_same_mode_and_owner() {
         &[("d/z", "z")],
         &[("d", "/srv/data", Some(0o750), 1000)],
     );
-    let (tree, _) = tree_merge(&f.store, vec![a, c], &Ctx::new()).expect("merges");
+    let (tree, _) = merge_layers(&f.store, &[a, c], &Ctx::new()).expect("merges");
     let data = tree
         .entries
         .iter()
@@ -188,9 +188,9 @@ fn owners_and_modes_survive_into_the_tree_digest() {
             ),
         ]
     };
-    let (plain, owners) = tree_merge(&f.store, layers(0o755, 0), &Ctx::new()).expect("merges");
-    let (setuid, _) = tree_merge(&f.store, layers(0o4755, 0), &Ctx::new()).expect("merges");
-    let (owned, _) = tree_merge(&f.store, layers(0o755, 1000), &Ctx::new()).expect("merges");
+    let (plain, owners) = merge_layers(&f.store, &layers(0o755, 0), &Ctx::new()).expect("merges");
+    let (setuid, _) = merge_layers(&f.store, &layers(0o4755, 0), &Ctx::new()).expect("merges");
+    let (owned, _) = merge_layers(&f.store, &layers(0o755, 1000), &Ctx::new()).expect("merges");
     let store = Store::open(&f.store).expect("store");
 
     // Every path has an entry and an owner.
@@ -267,7 +267,7 @@ fn owners_and_modes_survive_into_the_tree_digest() {
             &[("bin/tool", "/usr/bin/tool", Some(0o755), 1000)],
         ),
     ];
-    let (other, _) = tree_merge(&g.store, again, &Ctx::new()).expect("merges");
+    let (other, _) = merge_layers(&g.store, &again, &Ctx::new()).expect("merges");
     assert_eq!(owned_digest(&other), owned_digest(&owned));
 }
 
@@ -349,7 +349,7 @@ fn accounts_and_services_are_generated_from_descriptions() {
     )
     .expect("services");
     let (tree, _) =
-        tree_merge(&f.store, vec![os, camera, services, accounts], &Ctx::new()).expect("merges");
+        merge_layers(&f.store, &[os, camera, services, accounts], &Ctx::new()).expect("merges");
     let store = Store::open(&f.store).expect("store");
     let dir = tree.object.path_in(&store).expect("in");
     let read = |p: &str| std::fs::read_to_string(dir.join(p)).expect(p);

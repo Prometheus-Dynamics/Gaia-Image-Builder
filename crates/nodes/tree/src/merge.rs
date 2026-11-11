@@ -3,6 +3,7 @@
 use crate::walk::{Found, Node, copy, inside, list, make_dirs, set_mode};
 use crate::{Layer, Owned, entries_text, tree_input};
 use daedalus::prelude::*;
+use daedalus_cpu_author::FanIn;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store};
 use gaia_types::{Artifact, ArtifactKind, FileEntry, Tree};
 use std::collections::{BTreeMap, BTreeSet};
@@ -23,12 +24,23 @@ struct Claim {
     replaced_by: Option<String>,
 }
 
-/// The merged tree, and `owners.json`: every path with its mode, owner ids
-/// and the layers that claim it.
+/// The node: any number of layers, on ports `layers0`, `layers1` and so
+/// on, merged in port order.
 #[node(id = "gaia.tree.merge", inputs(store, layers), outputs(tree, owners))]
 pub fn tree_merge(
     store: &str,
-    layers: Vec<Layer>,
+    layers: FanIn<'_, Layer>,
+    cx: &Ctx,
+) -> Result<(Tree, Artifact), StepError> {
+    let layers: Vec<Layer> = layers.iter().map(|layer| (*layer).clone()).collect();
+    merge_layers(store, &layers, cx)
+}
+
+/// The merged tree, and `owners.json`: every path with its mode, owner ids
+/// and the layers that claim it.
+pub fn merge_layers(
+    store: &str,
+    layers: &[Layer],
     cx: &Ctx,
 ) -> Result<(Tree, Artifact), StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
@@ -46,7 +58,7 @@ pub fn tree_merge(
             ("owners", Path::new("owners.json")),
         ],
         |work| {
-            let claims = claim(&store, &layers)?;
+            let claims = claim(&store, layers)?;
             let out = work.dir().join("tree");
             write(&out, &claims).map_err(|e| StepError::body(NAME, e))?;
             let owned: Vec<Owned> = claims
