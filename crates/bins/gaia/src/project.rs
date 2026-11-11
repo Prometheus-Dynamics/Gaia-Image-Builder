@@ -159,6 +159,7 @@ pub fn registry() -> Registry {
         &gaia_build_python::NODES,
         &gaia_os_none::NODES,
         &gaia_os_import::NODES,
+        &gaia_os_buildroot::NODES,
         &gaia_tree::NODES,
         &gaia_compress::NODES,
         &gaia_fs_ext4::NODES,

@@ -34,6 +34,7 @@ gaia-initramfs = { path = "../../nodes/initramfs" }
 gaia-lock = { path = "../../core/lock" }
 gaia-lock-cmd = { path = "../gaia-lock" }
 gaia-os-import = { path = "../../nodes/os-import" }
+gaia-os-buildroot = { path = "../../nodes/os-buildroot" }
 gaia-os-none = { path = "../../nodes/os-none" }
 gaia-package = { path = "../../nodes/package" }
 gaia-recipe = { path = "../../core/recipe" }
