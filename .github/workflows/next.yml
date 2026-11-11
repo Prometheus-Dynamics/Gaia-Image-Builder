@@ -26,11 +26,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # The sandbox tests need bubblewrap and unprivileged user namespaces,
-      # and the filesystem and initramfs tests their tools; all must run
-      # here rather than skip.
+      # and the filesystem, initramfs, strip and verity tests their tools; all
+      # must run here rather than skip.
       - run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q bubblewrap e2fsprogs erofs-utils mtools dosfstools cpio
+          sudo apt-get -o Acquire::Retries=5 update -q
+          sudo apt-get -o Acquire::Retries=5 install -y -q bubblewrap e2fsprogs erofs-utils mtools dosfstools cpio qemu-user-static cryptsetup-bin
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: ./scripts/gate.sh
         env:
