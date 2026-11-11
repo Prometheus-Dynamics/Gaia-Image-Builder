@@ -30,7 +30,7 @@ jobs:
       # must run here rather than skip.
       - run: |
           sudo apt-get -o Acquire::Retries=5 update -q
-          sudo apt-get -o Acquire::Retries=5 install -y -q bubblewrap e2fsprogs erofs-utils mtools dosfstools cpio qemu-user-static cryptsetup-bin
+          sudo apt-get -o Acquire::Retries=5 install -y -q bubblewrap e2fsprogs erofs-utils mtools dosfstools cpio qemu-user cryptsetup-bin
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: ./scripts/gate.sh
         env:
