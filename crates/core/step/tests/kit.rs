@@ -139,13 +139,13 @@ fn a_missing_program_and_a_signal_are_faults() {
             .expect_err("fails")
     };
     let missing = run(Tool::new("/nonexistent/tool"));
-    assert!(matches!(missing.kind, ErrorKind::Spawn(_)), "{missing}");
+    assert!(matches!(missing.kind(), ErrorKind::Spawn(_)), "{missing}");
     let killed = run(Tool::new("/bin/sh").arg("-c").arg("kill -TERM $$"));
-    assert_eq!(killed.kind, ErrorKind::Signal(15), "{killed}");
+    assert_eq!(killed.kind(), &ErrorKind::Signal(15), "{killed}");
 }
 
 #[test]
-fn a_failed_tool_error_holds_the_whole_stderr_tail() {
+fn a_failed_tool_keeps_its_whole_output_in_a_run_log() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = Store::open(dir.path()).expect("store");
     let cx = Ctx::new();
@@ -157,11 +157,44 @@ fn a_failed_tool_error_holds_the_whole_stderr_tail() {
             Ok(())
         })
         .expect_err("fails");
-    assert_eq!(error.kind, ErrorKind::Exit(3));
-    assert_eq!(error.stderr_tail, ["checking things", "cannot find libfoo"]);
+    assert_eq!(error.kind(), &ErrorKind::Exit(3));
+    assert_eq!(
+        error.stderr_tail(),
+        ["checking things", "cannot find libfoo"]
+    );
+    assert_eq!(
+        daedalus_cpu_author::FixedError::reason(&error),
+        "test.tool: exited 3"
+    );
+    let log = error.log().expect("a run log");
+    assert!(
+        log.starts_with(dir.path().with_file_name("logs").join("test.tool")),
+        "{log:?}"
+    );
     assert_eq!(
         error.to_string(),
-        "test.tool: exited 3: cannot find libfoo\nstderr, last lines:\n  checking things\n  cannot find libfoo"
+        format!(
+            "test.tool: exited 3\nlog: {}\nstderr, last lines:\n  checking things\n  cannot find libfoo",
+            log.display()
+        )
     );
+    // The log has everything, in order, and outlives the failed step's
+    // scratch.
+    let text = std::fs::read_to_string(log).expect("log");
+    let body: Vec<&str> = text.lines().filter(|line| !line.starts_with('#')).collect();
+    assert_eq!(
+        body,
+        [
+            "out| out",
+            "err| checking things",
+            "err| cannot find libfoo"
+        ]
+    );
+    assert!(
+        text.starts_with("# step test.tool\n# key sha256:"),
+        "{text}"
+    );
+    assert!(text.contains("\n# tool /bin/sh -c echo out;"), "{text}");
+    assert!(text.trim_end().ends_with(" exit 3"), "{text}");
     assert_eq!(daedalus_cpu_author::FixedError::code(&error), 3);
 }

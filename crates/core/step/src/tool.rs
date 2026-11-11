@@ -1,7 +1,9 @@
 //! Running one tool process.
 
 use crate::error::ErrorKind;
+use crate::log::RunLog;
 use crate::{Ctx, StepError};
+use gaia_store::StepKey;
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::fmt;
@@ -88,14 +90,37 @@ impl Tool {
     }
 }
 
-/// What a tool that exited 0 printed last.
+/// What a tool that exited 0 printed last, and its run log.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ToolOutput {
     pub stdout_tail: Vec<String>,
     pub stderr_tail: Vec<String>,
+    pub log: PathBuf,
 }
 
-pub(crate) fn run(tool: &Tool, cx: &Ctx, step: &str, dir: &Path) -> Result<ToolOutput, StepError> {
+impl Tool {
+    /// The program and its arguments, as one line for the run log.
+    fn command_line(&self) -> String {
+        std::iter::once(self.program.as_os_str())
+            .chain(self.args.iter().map(OsString::as_os_str))
+            .map(|part| part.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+pub(crate) fn run(
+    tool: &Tool,
+    cx: &Ctx,
+    step: &str,
+    dir: &Path,
+    logs: &Path,
+    key: &StepKey,
+) -> Result<ToolOutput, StepError> {
+    let log = RunLog::create(logs, step, key, &tool.command_line()).map_err(|error| {
+        let why = format!("cannot write a run log in {}: {error}", logs.display());
+        StepError::new(step, ErrorKind::Body(why), Vec::new())
+    })?;
     let mut command = Command::new(&tool.program);
     command
         .args(&tool.args)
@@ -109,7 +134,8 @@ pub(crate) fn run(tool: &Tool, cx: &Ctx, step: &str, dir: &Path) -> Result<ToolO
         .process_group(0);
     let mut child = command.spawn().map_err(|error| {
         let why = format!("{}: {error}", tool.program.display());
-        StepError::new(step, ErrorKind::Spawn(why), Vec::new())
+        log.end(&format!("could not start: {why}"));
+        StepError::new(step, ErrorKind::Spawn(why), Vec::new()).with_log(log.path.clone())
     })?;
     let group = child.id();
     let stdout = child.stdout.take();
@@ -117,8 +143,9 @@ pub(crate) fn run(tool: &Tool, cx: &Ctx, step: &str, dir: &Path) -> Result<ToolO
     let sink = tool.on_line.as_deref();
 
     std::thread::scope(|scope| {
-        let out = scope.spawn(move || tail(stdout, Stream::Stdout, sink));
-        let err = scope.spawn(move || tail(stderr, Stream::Stderr, sink));
+        let log = &log;
+        let out = scope.spawn(move || tail(stdout, Stream::Stdout, sink, log));
+        let err = scope.spawn(move || tail(stderr, Stream::Stderr, sink, log));
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break Some(status),
@@ -136,9 +163,11 @@ pub(crate) fn run(tool: &Tool, cx: &Ctx, step: &str, dir: &Path) -> Result<ToolO
         let kind = match status {
             None => ErrorKind::Cancelled,
             Some(status) if status.success() => {
+                log.end("ok");
                 return Ok(ToolOutput {
                     stdout_tail,
                     stderr_tail,
+                    log: log.path.clone(),
                 });
             }
             Some(status) => match (status.code(), status.signal()) {
@@ -147,7 +176,15 @@ pub(crate) fn run(tool: &Tool, cx: &Ctx, step: &str, dir: &Path) -> Result<ToolO
                 (None, None) => ErrorKind::Exit(-1),
             },
         };
-        Err(StepError::new(step, kind, stderr_tail))
+        log.end(
+            match &kind {
+                ErrorKind::Exit(code) => format!("exit {code}"),
+                ErrorKind::Signal(signal) => format!("signal {signal}"),
+                _ => "cancelled".to_string(),
+            }
+            .as_str(),
+        );
+        Err(StepError::new(step, kind, stderr_tail).with_log(log.path.clone()))
     })
 }
 
@@ -161,9 +198,15 @@ fn kill_group(group: u32) {
     let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
 }
 
-/// Reads a stream to its end, handing each line to `sink` and keeping the
-/// last [`TAIL_LINES`].
-fn tail(stream: Option<impl Read>, which: Stream, sink: Option<&LineFn>) -> Vec<String> {
+/// Reads a stream to its end, writing every line whole to the run log,
+/// handing it to `sink`, and keeping the last [`TAIL_LINES`] (each cut to
+/// 1 KiB).
+fn tail(
+    stream: Option<impl Read>,
+    which: Stream,
+    sink: Option<&LineFn>,
+    log: &RunLog,
+) -> Vec<String> {
     let Some(stream) = stream else {
         return Vec::new();
     };
@@ -183,6 +226,13 @@ fn tail(stream: Option<impl Read>, which: Stream, sink: Option<&LineFn>) -> Vec<
             buffer.pop();
         }
         let mut line = String::from_utf8_lossy(&buffer).into_owned();
+        log.line(
+            match which {
+                Stream::Stdout => "out",
+                Stream::Stderr => "err",
+            },
+            &line,
+        );
         if line.len() > LINE_BYTES {
             let mut end = LINE_BYTES;
             while !line.is_char_boundary(end) {

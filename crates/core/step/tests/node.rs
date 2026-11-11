@@ -104,7 +104,7 @@ fn a_tool_that_prints_and_exits_0_makes_its_output() {
 }
 
 #[test]
-fn a_tool_that_exits_3_is_a_fault_naming_the_step_with_the_stderr_tail() {
+fn a_tool_that_exits_3_is_a_fault_naming_the_step_with_its_output_in_a_run_log() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store_root = dir.path().join("store");
     let mut host = load(
@@ -119,7 +119,19 @@ fn a_tool_that_exits_3_is_a_fault_naming_the_step_with_the_stderr_tail() {
     let (node, consecutive, reason) = &faults[0];
     assert_eq!(node.as_deref(), Some("test.tool#0"));
     assert_eq!(*consecutive, 1);
-    assert_eq!(reason, "test.tool: exited 3: cannot find libfoo");
+    assert_eq!(reason, "test.tool: exited 3");
+
+    // The run log, next to the store, holds what the tool printed.
+    let logs = std::fs::read_dir(dir.path().join("logs/test.tool"))
+        .expect("logs")
+        .map(|entry| std::fs::read_to_string(entry.expect("entry").path()).expect("log"))
+        .collect::<Vec<_>>();
+    assert_eq!(logs.len(), 1);
+    assert!(
+        logs[0].contains("err| cannot find libfoo\n# end "),
+        "{}",
+        logs[0]
+    );
 
     // Nothing was committed: no entry, no object, no scratch.
     for sub in ["entries", "objects/file", "objects/tree", "scratch"] {
