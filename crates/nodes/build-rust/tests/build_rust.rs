@@ -100,7 +100,7 @@ fn build(
         stored_tree(&store, &src),
         stored_tree(&store, &vendor),
         "app",
-        features.iter().map(|f| f.to_string()).collect(),
+        &features.join(","),
         triple,
         cpu,
         &Ctx::new(),
