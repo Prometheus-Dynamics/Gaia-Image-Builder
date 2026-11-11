@@ -204,7 +204,7 @@ fn the_table_matches_the_superblock_on_the_device() {
     let line = |label: &str| {
         text.lines()
             .find_map(|l| l.split_once(':').filter(|(k, _)| k.trim() == label))
-            .map(|(_, v)| v.trim().to_string())
+            .map(|(_, v)| v.split_whitespace().next().unwrap_or_default().to_string())
             .unwrap_or_default()
     };
     assert_eq!(line("Salt"), built.field("salt"));
