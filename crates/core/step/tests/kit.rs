@@ -202,17 +202,25 @@ fn a_failed_tool_keeps_its_whole_output_in_a_run_log() {
             log.display()
         )
     );
-    // The log has everything, in order, and outlives the failed step's
-    // scratch.
+    // The log has everything, each stream in order, and outlives the
+    // failed step's scratch. stdout and stderr are read on two threads, so
+    // how their lines interleave is not fixed.
     let text = std::fs::read_to_string(log).expect("log");
-    let body: Vec<&str> = text.lines().filter(|line| !line.starts_with('#')).collect();
+    let stream = |prefix: &str| -> Vec<String> {
+        text.lines()
+            .filter(|line| line.starts_with(prefix))
+            .map(str::to_string)
+            .collect()
+    };
+    assert_eq!(stream("out| "), ["out| out"]);
     assert_eq!(
-        body,
-        [
-            "out| out",
-            "err| checking things",
-            "err| cannot find libfoo"
-        ]
+        stream("err| "),
+        ["err| checking things", "err| cannot find libfoo"]
+    );
+    assert_eq!(
+        text.lines().filter(|line| !line.starts_with('#')).count(),
+        3,
+        "{text}"
     );
     assert!(
         text.starts_with("# step test.tool\n# key sha256:"),
