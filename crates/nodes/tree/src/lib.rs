@@ -1,0 +1,147 @@
+//! File trees for an image: each component's files placed with their modes
+//! and owners, the files generated from descriptions, and all of it merged
+//! with an owner named for every path.
+//!
+//! - **`gaia.tree.place`**: a component's install entries, taken from a
+//!   tree (its build output or its files) and placed at their paths in the
+//!   image with their modes and owners. Gives the component's [`Layer`].
+//! - **`gaia.tree.accounts`**: the users and groups components need, added
+//!   to the base's `/etc/passwd`, `/etc/group` and `/etc/shadow`. Ids not
+//!   given are the lowest free from 1000, in name order. Gives a layer that
+//!   replaces those three files.
+//! - **`gaia.tree.services`**: a component's enabled units as the links
+//!   `systemctl enable` makes, read from each unit's `[Install]` section.
+//! - **`gaia.tree.merge`**: layers into one tree, in order. Two layers
+//!   claiming one path is an error naming both, unless the later one says it
+//!   replaces that path (and only one may). A directory may be shared when
+//!   both give it the same mode and owner. Every path of the result has an
+//!   entry: its mode, its owner ids, and the layers that own it.
+//!
+//! The store keeps modes but never owners, so a tree's owners are in
+//! [`Tree::entries`]. [`owned_digest`] is the digest of a tree with its
+//! entries: what a later step keys on so an owner change reaches it.
+
+mod accounts;
+mod merge;
+mod place;
+mod services;
+mod walk;
+
+pub use accounts::tree_accounts;
+pub use merge::tree_merge;
+pub use place::tree_place;
+pub use services::tree_services;
+
+use daedalus::prelude::*;
+use gaia_store::Digest;
+use gaia_types::Tree;
+use serde::{Deserialize, Serialize};
+
+/// One owner's part of an image: a tree and who it belongs to.
+#[derive(Clone, Debug, PartialEq, Eq, Type, Serialize, Deserialize)]
+#[type_key("gaia:layer")]
+pub struct Layer {
+    /// Who claims its paths: a component's name, or the OS provider's.
+    pub owner: String,
+    pub tree: Tree,
+    /// Paths an earlier layer has that this one replaces rather than
+    /// conflicts with.
+    pub replaces: Vec<String>,
+}
+
+/// One install entry: a path in the source tree, where it goes, and its
+/// mode and owner ids.
+#[derive(Clone, Debug, PartialEq, Eq, Type, Serialize, Deserialize)]
+#[type_key("gaia:placement")]
+pub struct Placement {
+    pub from: String,
+    /// An absolute path in the image.
+    pub to: String,
+    /// When not set, the stored mode.
+    pub mode: Option<u32>,
+    pub uid: u32,
+    pub gid: u32,
+}
+
+/// A user a component needs.
+#[derive(Clone, Debug, PartialEq, Eq, Type, Serialize, Deserialize)]
+#[type_key("gaia:account")]
+pub struct Account {
+    /// The component that needs it.
+    pub owner: String,
+    pub name: String,
+    pub uid: Option<u32>,
+    /// Its primary group: one of its own name when not set.
+    pub group: Option<String>,
+    pub groups: Vec<String>,
+    /// `/` when not set.
+    pub home: Option<String>,
+    /// `/bin/false` when not set.
+    pub shell: Option<String>,
+}
+
+/// A group a component needs.
+#[derive(Clone, Debug, PartialEq, Eq, Type, Serialize, Deserialize)]
+#[type_key("gaia:account-group")]
+pub struct AccountGroup {
+    pub owner: String,
+    pub name: String,
+    pub gid: Option<u32>,
+}
+
+/// One path of a merged tree, as `owners.json` lists it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Owned {
+    pub path: String,
+    pub mode: u32,
+    pub uid: u32,
+    pub gid: u32,
+    /// The layers that claim it: one, or several for a shared directory.
+    pub owners: Vec<String>,
+}
+
+/// The digest of `tree` with its entries: changes when a file, a mode or
+/// an owner does.
+pub fn owned_digest(tree: &Tree) -> Option<Digest> {
+    let object = tree.object.object_ref()?.digest;
+    let mut entries = tree.entries.clone();
+    entries.sort();
+    let mut bytes = object.to_string().into_bytes();
+    for entry in &entries {
+        bytes.extend_from_slice(
+            format!(
+                "\n{} {:o} {} {}",
+                entry.path, entry.mode, entry.uid, entry.gid
+            )
+            .as_bytes(),
+        );
+    }
+    Some(Digest::of_bytes(&bytes))
+}
+
+/// The nodes, for a registry.
+pub const NODES: [&NodeRecord; 4] = [
+    &place::TREE_PLACE_NODE,
+    &accounts::TREE_ACCOUNTS_NODE,
+    &services::TREE_SERVICES_NODE,
+    &merge::TREE_MERGE_NODE,
+];
+
+/// A tree's digest, for a key.
+pub(crate) fn tree_input(tree: &Tree, name: &str) -> Result<Digest, gaia_step::StepError> {
+    tree.object
+        .object_ref()
+        .map(|object| object.digest)
+        .ok_or_else(|| gaia_step::StepError::body(name, "a tree that is not in the store"))
+}
+
+/// A tree's entries, for a key.
+pub(crate) fn entries_text(tree: &Tree) -> String {
+    let mut entries = tree.entries.clone();
+    entries.sort();
+    entries
+        .iter()
+        .map(|e| format!("{} {:o} {} {}", e.path, e.mode, e.uid, e.gid))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
