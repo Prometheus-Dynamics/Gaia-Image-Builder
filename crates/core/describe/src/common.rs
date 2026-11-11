@@ -1,0 +1,283 @@
+//! What the three formats share: sources, file references, paths and sizes.
+
+use crate::Error;
+use gaia_lock::Want;
+use gaia_types::Size;
+use serde::de::{self, Deserializer};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::path::{Component, Path, PathBuf};
+
+/// A path written in a description: relative to the file it is written in.
+/// Once read it holds that file's directory joined with what was written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RelPath(pub PathBuf);
+
+impl<'de> Deserialize<'de> for RelPath {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        let path = Path::new(&text);
+        if text.is_empty() {
+            return Err(de::Error::custom("an empty path"));
+        }
+        if path.is_absolute() {
+            return Err(de::Error::custom(format!(
+                "`{text}` is absolute; write it relative to this file"
+            )));
+        }
+        Ok(Self(path.to_path_buf()))
+    }
+}
+
+impl RelPath {
+    /// Joins it to `dir`, the directory of the file it is written in, and
+    /// drops `.` and `name/..` pairs.
+    pub(crate) fn resolve(&mut self, dir: &Path) {
+        self.0 = normalize(&dir.join(&self.0));
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+pub(crate) fn normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir
+                if matches!(out.components().next_back(), Some(Component::Normal(_))) =>
+            {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// A size: a whole number of bytes, or text with a binary unit: `64K`,
+/// `16M`, `1G`, `2T` (`KiB` and `MiB` read the same).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct SizeText(pub Size);
+
+impl<'de> Deserialize<'de> for SizeText {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Raw {
+            Bytes(u64),
+            Text(String),
+        }
+        match Raw::deserialize(deserializer)? {
+            Raw::Bytes(bytes) => Ok(Self(Size(bytes))),
+            Raw::Text(text) => parse_size(&text)
+                .map(|size| Self(Size(size)))
+                .ok_or_else(|| {
+                    de::Error::custom(format!(
+                        "`{text}` is not a size; write bytes, or a number with K, M, G or T"
+                    ))
+                }),
+        }
+    }
+}
+
+fn parse_size(text: &str) -> Option<u64> {
+    let text = text.trim();
+    let split = text
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(text.len());
+    let (number, unit) = text.split_at(split);
+    let number: u64 = number.parse().ok()?;
+    let shift = match unit.trim() {
+        "" | "B" => 0,
+        "K" | "KiB" => 10,
+        "M" | "MiB" => 20,
+        "G" | "GiB" => 30,
+        "T" | "TiB" => 40,
+        _ => return None,
+    };
+    number.checked_mul(1 << shift)
+}
+
+/// A file mode, written as octal text: `"0755"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Mode(pub u32);
+
+impl<'de> Deserialize<'de> for Mode {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        u32::from_str_radix(&text, 8)
+            .ok()
+            .filter(|mode| *mode <= 0o7777)
+            .map(Self)
+            .ok_or_else(|| {
+                de::Error::custom(format!("`{text}` is not an octal mode like \"0644\""))
+            })
+    }
+}
+
+/// Where a source comes from. The lock pins it: a git source to a commit, a
+/// download to its digest, an image to its manifest digest, a directory to
+/// its tree digest.
+///
+/// Written as exactly one of `git` (with `ref`), `download`, `image` or
+/// `path`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "SourceText")]
+pub enum Source {
+    Git { url: String, reference: String },
+    Download { url: String },
+    Image { reference: String },
+    Path { path: RelPath },
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SourceText {
+    git: Option<String>,
+    #[serde(rename = "ref")]
+    reference: Option<String>,
+    download: Option<String>,
+    image: Option<String>,
+    path: Option<RelPath>,
+}
+
+impl TryFrom<SourceText> for Source {
+    type Error = String;
+
+    fn try_from(text: SourceText) -> Result<Self, String> {
+        let has_ref = text.reference.is_some();
+        let source = match (text.git, text.download, text.image, text.path) {
+            (Some(url), None, None, None) => Self::Git {
+                url,
+                reference: text
+                    .reference
+                    .ok_or("a git source needs `ref`: the tag or branch")?,
+            },
+            (None, Some(url), None, None) => Self::Download { url },
+            (None, None, Some(reference), None) => Self::Image { reference },
+            (None, None, None, Some(path)) => Self::Path { path },
+            (None, None, None, None) => {
+                return Err("say where it comes from: `git`, `download`, `image` or `path`".into());
+            }
+            _ => return Err("only one of `git`, `download`, `image` and `path`".into()),
+        };
+        if has_ref && !matches!(source, Self::Git { .. }) {
+            return Err("only a git source has a `ref`".into());
+        }
+        Ok(source)
+    }
+}
+
+impl Source {
+    /// What the lock must hold for it.
+    pub fn want(&self) -> Want {
+        match self {
+            Self::Git { url, reference } => Want::Git {
+                url: url.clone(),
+                reference: reference.clone(),
+            },
+            Self::Download { url } => Want::Download { url: url.clone() },
+            Self::Image { reference } => Want::Image {
+                reference: reference.clone(),
+            },
+            Self::Path { path } => Want::Tree {
+                path: path.0.display().to_string(),
+            },
+        }
+    }
+
+    pub(crate) fn resolve(&mut self, dir: &Path) {
+        if let Self::Path { path } = self {
+            path.resolve(dir);
+        }
+    }
+}
+
+/// Resolves the paths of a file's `[sources]`.
+pub(crate) fn resolve_sources(sources: &mut BTreeMap<String, Source>, dir: &Path) {
+    for source in sources.values_mut() {
+        source.resolve(dir);
+    }
+}
+
+/// A file a step takes in: a path inside a source,
+/// `{ source = "rkbin", path = "bin/rk35/ddr.bin" }`, or a file beside the
+/// description, `{ file = "assets/boot.cmd" }`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "FileRefText")]
+pub enum FileRef {
+    InSource { source: String, path: String },
+    Local { file: RelPath },
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileRefText {
+    source: Option<String>,
+    path: Option<String>,
+    file: Option<RelPath>,
+}
+
+impl TryFrom<FileRefText> for FileRef {
+    type Error = String;
+
+    fn try_from(text: FileRefText) -> Result<Self, String> {
+        match (text.source, text.path, text.file) {
+            (Some(source), Some(path), None) => Ok(Self::InSource { source, path }),
+            (None, None, Some(file)) => Ok(Self::Local { file }),
+            (Some(_), None, None) => Err("`source` needs a `path` inside it".into()),
+            _ => Err("either `source` and `path`, or `file`".into()),
+        }
+    }
+}
+
+impl FileRef {
+    pub(crate) fn resolve(&mut self, dir: &Path) {
+        if let Self::Local { file } = self {
+            file.resolve(dir);
+        }
+    }
+
+    pub fn source(&self) -> Option<&str> {
+        match self {
+            Self::InSource { source, .. } => Some(source),
+            Self::Local { .. } => None,
+        }
+    }
+}
+
+/// Checks that `name`, used at `key` in `file`, is one of `sources`.
+pub(crate) fn check_source<'a>(
+    file: &Path,
+    key: &str,
+    name: &str,
+    sources: impl Iterator<Item = &'a String>,
+) -> Result<(), Error> {
+    let known: Vec<String> = sources.cloned().collect();
+    if known.iter().any(|known| known == name) {
+        return Ok(());
+    }
+    let mut message = format!("no source named `{name}`");
+    match crate::read::closest(name, &known) {
+        Some(near) => message.push_str(&format!("; did you mean `{near}`?")),
+        None if known.is_empty() => message.push_str("; there are no sources"),
+        None => message.push_str(&format!("; the sources are {}", known.join(", "))),
+    }
+    Err(Error::new(file, key, message))
+}
+
+/// Checks that `local`, written at `key` in `file`, is there.
+pub(crate) fn check_exists(file: &Path, key: &str, local: &Path) -> Result<(), Error> {
+    if local.exists() {
+        Ok(())
+    } else {
+        Err(Error::new(
+            file,
+            key,
+            format!("{} is not there", local.display()),
+        ))
+    }
+}
