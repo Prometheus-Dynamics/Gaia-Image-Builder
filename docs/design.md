@@ -159,3 +159,5 @@ Marked here, not requested from those repos.
 | X4 | Orion recovery build (G6, done on Orion `next`) is what the Raze recovery image packs | G1 only |
 | X5 | Daedalus `next` stays buildable at the locked commit | everything; locked by commit |
 | X6 | Daedalus: per-step Recovery (Retry{max}, SkipTick) settable from a loaded graph; today LoadedHost::load sets Recovery::Fail for every step | retries in builds; A2's retry proof |
+| X7 | Daedalus: the CPU backend decodes list and struct literals as constants (`FromLiteral` for `Vec<T>`, `Option<T>` and `#[derive(Type)]` structs from `Literal::List`/`Struct`); today only scalars (literal.rs; setup.rs:132). HeliOS graphs edited in a UI need the same | list and struct node inputs set from descriptions: tree.place placements, tree.accounts users/groups, tree.services units, verify's trusted keys, os.none's target, build.command's inputs/outputs; build.rust `features` goes back from text to a list |
+| X8 | Daedalus: group expansion copies node metadata (such as `daedalus.node.fusion`) to the group's stages | recipes as real groups; until then F2 lays a recipe out inline, its stages labelled `<image>::<stage>` |

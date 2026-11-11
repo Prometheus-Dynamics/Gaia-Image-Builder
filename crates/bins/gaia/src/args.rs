@@ -11,6 +11,7 @@ gaia: build images from product descriptions
 usage:
   gaia plan  <product.toml> [project flags] [--json]
   gaia build <product.toml> [project flags] [--jobs N]
+  gaia lock  <product.toml> [--update SOURCE]... [--check]  (see gaia lock --help)
   gaia clean [--store DIR] [--keep N] [--dry-run]
   gaia show  <image>.<output> [--store DIR]
 
@@ -37,6 +38,8 @@ pub enum Command {
     Build(Project),
     Clean(Clean),
     Show(Show),
+    /// `gaia lock`: the words after `lock`.
+    Lock(Vec<String>),
 }
 
 /// What `plan` and `build` read.
@@ -112,6 +115,7 @@ pub fn parse(words: &[String]) -> Result<Command, Stop> {
                 Command::Plan(project)
             }
         }
+        "lock" => return Ok(Command::Lock(rest.to_vec())),
         "clean" => {
             let mut clean = Clean::default();
             let mut none = None;
