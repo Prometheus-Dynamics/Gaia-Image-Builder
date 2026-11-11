@@ -28,7 +28,10 @@ jobs:
       # The sandbox tests need bubblewrap and unprivileged user namespaces,
       # and the filesystem, initramfs, strip and verity tests their tools; all
       # must run here rather than skip.
+      # The runner's resolver often fails on security.ubuntu.com; the
+      # archive mirror carries the security pocket too.
       - run: |
+          sudo sed -i 's|https\?://security\.ubuntu\.com|http://azure.archive.ubuntu.com|g' /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
           sudo apt-get -o Acquire::Retries=5 update -q
           sudo apt-get -o Acquire::Retries=5 install -y -q bubblewrap e2fsprogs erofs-utils mtools dosfstools cpio qemu-user cryptsetup-bin
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
