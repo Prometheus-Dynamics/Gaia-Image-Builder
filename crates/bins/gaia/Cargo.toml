@@ -1,0 +1,49 @@
+[package]
+name = "gaia"
+description = "The gaia command: plan, build, clean and show images described as products"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "gaia"
+path = "src/main.rs"
+
+[dependencies]
+ctrlc = "3"
+daedalus = { workspace = true }
+daedalus-cpu = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+gaia-build-command = { path = "../../nodes/build-command" }
+gaia-build-go = { path = "../../nodes/build-go" }
+gaia-build-java = { path = "../../nodes/build-java" }
+gaia-build-node = { path = "../../nodes/build-node" }
+gaia-build-python = { path = "../../nodes/build-python" }
+gaia-build-rust = { path = "../../nodes/build-rust" }
+gaia-compress = { path = "../../nodes/compress" }
+gaia-describe = { path = "../../core/describe" }
+gaia-fs-erofs = { path = "../../nodes/fs-erofs" }
+gaia-fs-ext4 = { path = "../../nodes/fs-ext4" }
+gaia-graph = { path = "../../core/graph" }
+gaia-lock = { path = "../../core/lock" }
+gaia-os-import = { path = "../../nodes/os-import" }
+gaia-os-none = { path = "../../nodes/os-none" }
+gaia-recipe = { path = "../../core/recipe" }
+gaia-sign = { path = "../../nodes/sign" }
+gaia-source-files = { path = "../../nodes/source-files" }
+gaia-source-git = { path = "../../nodes/source-git" }
+gaia-source-oci = { path = "../../nodes/source-oci" }
+gaia-step = { path = "../../core/step" }
+gaia-store = { path = "../../core/store" }
+gaia-tree = { path = "../../nodes/tree" }
+gaia-types = { path = "../../core/types" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
