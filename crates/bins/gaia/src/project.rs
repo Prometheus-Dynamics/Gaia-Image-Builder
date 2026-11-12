@@ -173,6 +173,7 @@ pub fn registry() -> Registry {
         &gaia_disk::NODES,
         &gaia_package::NODES,
         &gaia_check::NODES,
+        &gaia_size::NODES,
         &gaia_report::NODES,
     ];
     for nodes in all {
