@@ -18,14 +18,23 @@
 //! | `gaia:account` | [`Account`]: a user a component needs |
 //! | `gaia:account-group` | [`AccountGroup`]: a group a component needs |
 //! | `gaia:package-control` | [`Control`]: what a package says about itself |
+//! | `gaia:disk-layout` | [`DiskLayout`]: a disk's table and the board's partitions |
+//! | `gaia:disk-table` | [`DiskTable`]: a partition table's scheme and bounds |
+//! | `gaia:disk-partition` | [`DiskPartition`]: one partition of a disk |
+//! | `gaia:raw-blob` | [`RawBlob`]: bytes written at a fixed offset |
 //!
 //! Kinds are open ([`ArtifactKind`], [`ImageKind`], [`PartitionRole`],
 //! [`Arch`], [`Os`]): a known name, or `Other` with any name, so a `.uf2` or
 //! `.ipk` output needs no type change.
 //!
+//! Artifacts, images and trees fan out: each has a copy conversion
+//! ([`NODES`]) the planner inserts where several nodes take one by value.
+//!
 //! Every type is `serde` serializable: that is its value form for reports
 //! and for anything stored. An open kind serializes as its plain name.
 
+mod copies;
+mod disk;
 mod image;
 mod kind;
 mod layer;
@@ -33,14 +42,22 @@ mod object;
 mod package;
 mod target;
 
+pub use disk::{DiskLayout, DiskPartition, DiskTable, RawBlob, TableScheme};
 pub use image::{Image, ImageKind, Partition, PartitionRole, Size};
 pub use layer::{Account, AccountGroup, Layer, Owned, Placement, owned_digest};
 pub use object::{Artifact, ArtifactKind, FileEntry, ObjectKind, StoreRef, Tree};
 pub use package::Control;
 pub use target::{Arch, Os, Target};
 
+/// The copy conversions of the port types (see `copies`), for a registry.
+pub const NODES: [&daedalus::prelude::NodeRecord; 3] = [
+    &copies::COPY_ARTIFACT_NODE,
+    &copies::COPY_IMAGE_NODE,
+    &copies::COPY_TREE_NODE,
+];
+
 /// Every type's key, port types first, then the kinds and enums inside them.
-pub const KEYS: [&str; 19] = [
+pub const KEYS: [&str; 24] = [
     "gaia:object",
     "gaia:artifact",
     "gaia:tree",
@@ -54,10 +71,15 @@ pub const KEYS: [&str; 19] = [
     "gaia:account",
     "gaia:account-group",
     "gaia:package-control",
+    "gaia:disk-layout",
+    "gaia:disk-table",
+    "gaia:disk-partition",
+    "gaia:raw-blob",
     "gaia:object-kind",
     "gaia:artifact-kind",
     "gaia:image-kind",
     "gaia:partition-role",
+    "gaia:table-scheme",
     "gaia:arch",
     "gaia:os",
 ];

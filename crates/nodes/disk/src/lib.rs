@@ -32,8 +32,10 @@ pub use env::{UBOOT_ENV_NODE, uboot_env, uboot_env_artifact, uboot_env_image};
 pub use layout::{BlobInput, Layout, PartitionInput, Placed, layout};
 
 use daedalus::prelude::*;
+use daedalus_cpu_author::FanIn;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store};
 use gaia_store::Digest;
+pub use gaia_types::{DiskLayout, DiskPartition, DiskTable, RawBlob, TableScheme};
 use gaia_types::{Image, ImageKind, ObjectKind, Partition, PartitionRole, Size, StoreRef};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
@@ -46,57 +48,6 @@ const DISK_GUID_DOMAIN: &str = "gaia gpt disk guid\n";
 const PARTITION_GUID_DOMAIN: &str = "gaia gpt partition guid\n";
 const MBR_SIGNATURE_DOMAIN: &str = "gaia mbr disk signature\n";
 
-/// The partition table's scheme.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Type, Serialize, Deserialize)]
-#[type_key("gaia:table-scheme")]
-#[serde(rename_all = "lowercase")]
-pub enum TableScheme {
-    Gpt,
-    Mbr,
-}
-
-/// The partition table of a disk.
-#[derive(Clone, Debug, PartialEq, Eq, Type, Serialize, Deserialize)]
-#[type_key("gaia:disk-table")]
-pub struct DiskTable {
-    pub scheme: TableScheme,
-    /// The first byte a partition may use. Unset: 1 MiB.
-    pub first: Option<Size>,
-    /// Partitions start on multiples of this. Unset: 1 MiB.
-    pub alignment: Option<Size>,
-    /// The disk's size. Unset: as large as its partitions, and for GPT its
-    /// backup table.
-    pub size: Option<Size>,
-}
-
-/// One partition of a disk.
-#[derive(Clone, Debug, PartialEq, Eq, Type, Serialize, Deserialize)]
-#[type_key("gaia:disk-partition")]
-pub struct DiskPartition {
-    pub name: String,
-    pub role: PartitionRole,
-    /// GPT: a type GUID. MBR: a type byte in hex, such as `0x83`.
-    pub table_type: String,
-    /// The MBR active flag; on GPT, the legacy BIOS bootable attribute.
-    pub bootable: bool,
-    /// Unset: the next boundary after the partition before it.
-    pub offset: Option<Size>,
-    /// Unset: the content's size, rounded up to a sector.
-    pub size: Option<Size>,
-    /// The file written at the partition's start; unset leaves it zero.
-    pub content: Option<StoreRef>,
-}
-
-/// A raw blob (a bootloader, say) written at a fixed offset.
-#[derive(Clone, Debug, PartialEq, Eq, Type, Serialize, Deserialize)]
-#[type_key("gaia:raw-blob")]
-pub struct RawBlob {
-    pub name: String,
-    /// Bytes from the disk's start.
-    pub offset: Size,
-    pub content: StoreRef,
-}
-
 /// One U-Boot environment variable.
 #[derive(Clone, Debug, PartialEq, Eq, Type, Serialize, Deserialize)]
 #[type_key("gaia:uboot-var")]
@@ -105,21 +56,55 @@ pub struct UbootVar {
     pub value: String,
 }
 
-/// The disk image of `partitions` and `blobs` on `table`: the node.
+/// The disk image of `layout` (the table and the board's partitions), then
+/// the partitions fed in, in port order: the node.
+///
+/// No raw blobs yet: a CPU node takes one fan-in, and the partitions have
+/// it. Blobs need their own node (see `docs/prs/F7.md`).
 #[node(
     id = "gaia.disk",
-    inputs(store, id, table, partitions, blobs),
+    inputs(store, id, layout, partitions),
     outputs(image)
 )]
 pub fn disk(
     store: &str,
     id: &str,
-    table: DiskTable,
-    partitions: Vec<DiskPartition>,
-    blobs: Vec<RawBlob>,
+    layout: &DiskLayout,
+    partitions: FanIn<'_, DiskPartition>,
     cx: &Ctx,
 ) -> Result<Image, StepError> {
-    disk_image(store, id, &table, &partitions, &blobs, cx)
+    let mut all = layout.partitions.clone();
+    all.extend(partitions.iter().map(|p| (*p).clone()));
+    disk_image(store, id, &layout.table, &all, &[], cx)
+}
+
+/// One partition of a disk, holding the image `content` when there is one:
+/// the node. `role` is a partition role's name; `offset` and `size` of 0
+/// leave the place and size to the layout (the next boundary, the content's
+/// size).
+#[node(
+    id = "gaia.disk.partition",
+    inputs(name, role, table_type, bootable, offset, size, content),
+    outputs(partition)
+)]
+pub fn disk_partition(
+    name: &str,
+    role: &str,
+    table_type: &str,
+    bootable: bool,
+    offset: u64,
+    size: u64,
+    content: Option<&Image>,
+) -> DiskPartition {
+    DiskPartition {
+        name: name.to_string(),
+        role: PartitionRole::parse(role),
+        table_type: table_type.to_string(),
+        bootable,
+        offset: (offset != 0).then_some(Size(offset)),
+        size: (size != 0).then_some(Size(size)),
+        content: content.map(|image| image.object.clone()),
+    }
 }
 
 /// A content in the store: its path, its length and its digest.
@@ -362,4 +347,4 @@ fn copy_at(dest: &mut File, source: &Path, offset: u64) -> Result<(), String> {
 }
 
 /// The nodes, for a registry.
-pub const NODES: [&NodeRecord; 2] = [&DISK_NODE, &UBOOT_ENV_NODE];
+pub const NODES: [&NodeRecord; 3] = [&DISK_NODE, &DISK_PARTITION_NODE, &UBOOT_ENV_NODE];
