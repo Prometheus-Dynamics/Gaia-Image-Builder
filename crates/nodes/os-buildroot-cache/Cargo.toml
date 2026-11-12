@@ -1,0 +1,28 @@
+[package]
+name = "gaia-os-buildroot-cache"
+description = "Node: the caches around a Buildroot build: a download directory filled from the lock, a ccache directory shared between products, the config options that force a clean build, and recovery from an interrupted make"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+daedalus = { workspace = true }
+daedalus-cpu-author = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+daedalus-registry = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+gaia-lock = { path = "../../core/lock" }
+gaia-os-buildroot = { path = "../os-buildroot" }
+gaia-step = { path = "../../core/step" }
+gaia-store = { path = "../../core/store" }
+gaia-types = { path = "../../core/types" }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+gaia-source-files = { path = "../source-files" }
+tempfile = "3"
+
+[lints]
+workspace = true
