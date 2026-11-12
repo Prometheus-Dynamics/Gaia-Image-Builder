@@ -16,12 +16,12 @@ daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", 
 gaia-lock = { path = "../../core/lock" }
 gaia-step = { path = "../../core/step" }
 gaia-store = { path = "../../core/store" }
-gaia-tree = { path = "../tree" }
 gaia-types = { path = "../../core/types" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [dev-dependencies]
+gaia-tree = { path = "../tree" }
 gaia-build-rust = { path = "../build-rust" }
 gaia-compress = { path = "../compress" }
 gaia-source-files = { path = "../source-files" }

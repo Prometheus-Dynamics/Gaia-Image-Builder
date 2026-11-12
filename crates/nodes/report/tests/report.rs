@@ -5,7 +5,7 @@ use gaia_lock::{Entry, Lock};
 use gaia_report::{Report, mask_url, render_text, report_layers};
 use gaia_step::Ctx;
 use gaia_store::Store;
-use gaia_tree::Layer;
+use gaia_types::Layer;
 use gaia_types::{Artifact, ArtifactKind, Tree};
 use std::path::{Path, PathBuf};
 

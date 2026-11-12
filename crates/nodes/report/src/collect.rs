@@ -5,7 +5,7 @@ use crate::masking::mask_url;
 use crate::model::{ComponentRecord, FileRecord, SourceRecord};
 use gaia_lock::{Entry, Lock};
 use gaia_store::Store;
-use gaia_tree::Layer;
+use gaia_types::Layer;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;

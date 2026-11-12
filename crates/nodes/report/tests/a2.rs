@@ -19,7 +19,8 @@ use gaia_report::{Report, render_text, report_layers};
 use gaia_source_files::source_path;
 use gaia_source_git::source as source_git;
 use gaia_step::{Ctx, Store};
-use gaia_tree::{Layer, merge_layers};
+use gaia_tree::merge_layers;
+use gaia_types::Layer;
 use gaia_types::{Artifact, Tree};
 use std::path::Path;
 

@@ -35,7 +35,7 @@ use daedalus_cpu_author::FanIn;
 use gaia_lock::Lock;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store};
 use gaia_store::{Kind, ObjectRef};
-use gaia_tree::Layer;
+use gaia_types::Layer;
 use gaia_types::{Artifact, ArtifactKind};
 use std::path::Path;
 
