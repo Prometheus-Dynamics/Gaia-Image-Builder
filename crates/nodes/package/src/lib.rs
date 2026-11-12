@@ -22,6 +22,14 @@ mod control;
 
 pub use control::Control;
 
+/// The libraries this node links, by the version Cargo resolved. Its step key
+/// names them, and `tests/libs.rs` checks each version against Cargo.lock.
+pub const LIBS: &[(&str, &str)] = &[
+    ("flate2", "1.1.11"),
+    ("miniz_oxide", "0.9.1"),
+    ("tar", "0.4.46"),
+];
+
 use archive::{control_tar, finish_gz, gz_file, tree_tar, write_ar};
 use daedalus::prelude::*;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store};
@@ -113,6 +121,7 @@ fn package(
     let key = KeyBuilder::new(name, 1)
         .config("control", serde_json::to_vec(control).map_err(|e| err(&e))?)
         .input("tree", owned)
+        .libs(LIBS)
         .finish();
     let made = Step::new(&store, cx, name, key).look_up_or_make(
         &[("package", Path::new(format.file()))],
@@ -201,6 +210,7 @@ pub fn oci(
             serde_json::to_vec(&entrypoint).map_err(|e| err(&e))?,
         )
         .input("tree", owned)
+        .libs(LIBS)
         .finish();
     let made = Step::new(&store, cx, OCI, key).look_up_or_make(
         &[("archive", Path::new("image.tar"))],

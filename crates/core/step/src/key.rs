@@ -43,6 +43,20 @@ impl KeyBuilder {
         self
     }
 
+    /// A format or encoder library the node links, by the version Cargo
+    /// resolved for it. A new version changes the key, so a stateless cache
+    /// never returns an output this code would not make. A test checks the
+    /// version against Cargo.lock (see [`crate::cargo_lock`]).
+    pub fn lib(self, name: &str, version: &str) -> Self {
+        self.config(&format!("lib {name}"), version)
+    }
+
+    /// Every library in `libs`, as [`KeyBuilder::lib`].
+    pub fn libs(self, libs: &[(&str, &str)]) -> Self {
+        libs.iter()
+            .fold(self, |key, (name, version)| key.lib(name, version))
+    }
+
     pub fn finish(mut self) -> StepKey {
         self.config.sort();
         self.inputs.sort();

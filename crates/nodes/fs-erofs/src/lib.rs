@@ -13,6 +13,10 @@
 //! `mkfs.erofs` is pinned by path; its version is in the key, with the
 //! tree's `owned_digest`, so an owner change remakes the image.
 
+/// The libraries this node links, by the version Cargo resolved. Its step key
+/// names them, and `tests/libs.rs` checks each version against Cargo.lock.
+pub const LIBS: &[(&str, &str)] = &[("tar", "0.4.46")];
+
 use daedalus::prelude::*;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store, Tool};
 use gaia_store::Digest;
@@ -65,6 +69,7 @@ pub fn fs_erofs(
         .config("compression", compression)
         .config("level", level.to_string())
         .input("tree", owned)
+        .libs(crate::LIBS)
         .finish();
     let made = Step::new(&store, cx, NAME, key).look_up_or_make(
         &[("image", Path::new("image.erofs"))],

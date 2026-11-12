@@ -18,6 +18,14 @@
 
 pub mod minisign;
 
+/// The libraries this node links, by the version Cargo resolved. Its step key
+/// names them, and `tests/libs.rs` checks each version against Cargo.lock.
+pub const LIBS: &[(&str, &str)] = &[
+    ("ed25519-dalek", "2.2.0"),
+    ("blake2", "0.10.6"),
+    ("base64", "0.22.1"),
+];
+
 use daedalus::prelude::*;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store};
 use gaia_types::{Artifact, ArtifactKind};
@@ -53,6 +61,7 @@ pub fn sign(
         .config("public key", public.to_line())
         .config("comment", &comment)
         .input("artifact", object.digest)
+        .libs(LIBS)
         .finish();
     let made = Step::new(&store, cx, SIGN, key).look_up_or_make(
         &[("signature", Path::new("signature.minisig"))],

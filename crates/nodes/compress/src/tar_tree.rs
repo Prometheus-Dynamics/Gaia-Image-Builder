@@ -20,7 +20,9 @@ pub fn tar_tree(store: &str, tree: Tree, cx: &Ctx) -> Result<Artifact, StepError
         .object_ref()
         .ok_or_else(|| StepError::body(NAME, "the tree is not in the store"))?;
     let root = store.path(&object);
-    let mut key = KeyBuilder::new(NAME, 1).input("tree", object.digest);
+    let mut key = KeyBuilder::new(NAME, 1)
+        .input("tree", object.digest)
+        .libs(crate::libs::TAR);
     let mut entries: BTreeMap<&str, &FileEntry> = BTreeMap::new();
     for entry in &tree.entries {
         let path = entry.path.trim_start_matches('/').trim_end_matches('/');
