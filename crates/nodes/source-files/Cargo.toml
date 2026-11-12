@@ -17,7 +17,7 @@ flate2 = "=1.1.11"
 gaia-step = { path = "../../core/step" }
 gaia-store = { path = "../../core/store" }
 gaia-types = { path = "../../core/types" }
-lzma-sys = "=0.1.20"
+lzma-sys = { version = "=0.1.20", features = ["static"] }
 miniz_oxide = "=0.9.1"
 tar = "=0.4.46"
 xz2 = "=0.1.7"

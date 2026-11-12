@@ -27,7 +27,9 @@ use daedalus::prelude::NodeRecord;
 /// Cargo.toml pins, and `tests/libs.rs` checks it against the pin. libzstd
 /// is keyed on the version the library reports (see [`libs::libzstd`]).
 pub mod libs {
-    /// `gaia.compress.xz`: the xz encoder and its C library, pinned.
+    /// `gaia.compress.xz`: the xz encoder and its C library, pinned. lzma-sys
+    /// builds with `static`, so liblzma is the source it bundles (xz 5.2),
+    /// never the system library, and the pin covers it.
     pub const XZ: &[(&str, &str)] = &[("xz2", "0.1.7"), ("lzma-sys", "0.1.20")];
     /// `gaia.compress.zstd`: libzstd, as the linked library reports its version.
     pub fn libzstd() -> [(&'static str, &'static str); 1] {
