@@ -1,35 +1,145 @@
-//! A library jar and an app using it, each built twice in two stores: the
-//! same bytes, and the app runs from the output tree.
+//! A library jar and an app using it, each built twice in two fresh
+//! stores: the same bytes, and the app runs from the output tree.
+//!
+//! The root is `debian:trixie-slim` and the JDK is the one in
+//! `eclipse-temurin:25-jdk` (`/opt/java/openjdk`), both pinned by their
+//! index digests and pulled by the OCI source node (this needs the
+//! network). Where bubblewrap or user namespaces are missing the tests say
+//! SKIPPED, unless `GAIA_REQUIRE_SANDBOX=1`, when they fail. Where a pull
+//! is missing they say SKIPPED, unless `GAIA_REQUIRE_TOOLS=1`, when they
+//! fail.
 
 use gaia_build_java::build_java;
-use gaia_step::Ctx;
+use gaia_step::{Ctx, logs_dir};
 use gaia_store::{Store, file_digest};
 use gaia_types::Tree;
 use std::path::{Path, PathBuf};
 
+const JDK_IMAGE: &str = "docker.io/library/eclipse-temurin:25-jdk";
+const JDK_DIGEST: &str = "sha256:1a3ebcfa0e69c6f33e2e8a560dd875b2278bac11b36eab21a252580fc8a325b0";
+
+const BWRAP: &str = "/usr/bin/bwrap";
+const CURL: &str = "/usr/bin/curl";
+/// The root: the index of `debian:trixie-slim`, pinned, for linux/amd64.
+const IMAGE: &str = "docker.io/library/debian:trixie-slim";
+const IMAGE_DIGEST: &str =
+    "sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2";
+
+fn required(var: &str) -> bool {
+    std::env::var_os(var).is_some()
+}
+
+/// Whether bubblewrap runs here. Missing, it is a skip unless required.
+fn sandbox_here() -> bool {
+    let ok = Path::new(BWRAP).exists()
+        && std::process::Command::new(BWRAP)
+            .args(["--unshare-all", "--ro-bind", "/", "/", "true"])
+            .status()
+            .is_ok_and(|s| s.success());
+    if !ok {
+        assert!(
+            !required("GAIA_REQUIRE_SANDBOX"),
+            "GAIA_REQUIRE_SANDBOX is set, and no sandbox runs here"
+        );
+        println!("SKIPPED: no bubblewrap with user namespaces here");
+    }
+    ok
+}
+
+/// `image`, pulled into `store` by digest: its root directory. Missing the
+/// network, a skip unless required.
+fn pull(store: &Path, image: &str, digest: &str) -> Option<PathBuf> {
+    let store_text = store.display().to_string();
+    match gaia_source_oci::source(
+        &store_text,
+        CURL,
+        image,
+        digest,
+        "linux/amd64",
+        "",
+        &Ctx::new(),
+    ) {
+        Ok((tree, _)) => {
+            let handle = Store::open(store).expect("store");
+            Some(tree.object.path_in(&handle).expect("in the store"))
+        }
+        Err(error) => {
+            assert!(
+                !required("GAIA_REQUIRE_TOOLS"),
+                "GAIA_REQUIRE_TOOLS is set, and {image} did not pull: {error}"
+            );
+            println!("SKIPPED: {image} did not pull: {error}");
+            None
+        }
+    }
+}
+
+/// The root image and the toolchain image, pulled once into a store of
+/// their own; each build copies the root into its fresh store.
+struct Images {
+    _cache: tempfile::TempDir,
+    root: PathBuf,
+    toolchain: PathBuf,
+}
+
+/// The images, or `None` (a skip) where the sandbox does not run or they
+/// do not pull. The toolchain is the directory `within` the toolchain
+/// image.
+fn images(toolchain_image: &str, toolchain_digest: &str, within: &str) -> Option<Images> {
+    if !sandbox_here() {
+        return None;
+    }
+    let cache = tempfile::tempdir().expect("tempdir");
+    let store = cache.path().join("store");
+    let root = pull(&store, IMAGE, IMAGE_DIGEST)?;
+    let toolchain = pull(&store, toolchain_image, toolchain_digest)?.join(within);
+    assert!(toolchain.is_dir(), "{toolchain_image} has no {within}");
+    Some(Images {
+        _cache: cache,
+        root,
+        toolchain,
+    })
+}
+
+/// The command lines of every tool run whose logs are under `logs`.
+fn tools_run(logs: &Path) -> Vec<String> {
+    let mut tools = Vec::new();
+    for dir in std::fs::read_dir(logs).expect("logs") {
+        let dir = dir.expect("entry").path();
+        if !dir.is_dir() {
+            continue;
+        }
+        for log in std::fs::read_dir(dir).expect("step logs") {
+            let text = std::fs::read_to_string(log.expect("log").path()).expect("read");
+            tools.extend(
+                text.lines()
+                    .filter_map(|l| l.strip_prefix("# tool ").map(String::from)),
+            );
+        }
+    }
+    tools
+}
+
+/// Every tool ran under bubblewrap, and one of them ran `wanted`.
+fn all_sandboxed(logs: &Path, wanted: &str) {
+    let tools = tools_run(logs);
+    println!("run log tools:");
+    for tool in &tools {
+        println!("  {}", tool.chars().take(200).collect::<String>());
+    }
+    assert!(
+        tools.iter().all(|t| t.starts_with(BWRAP)),
+        "a tool ran outside the sandbox: {tools:?}"
+    );
+    assert!(
+        tools.iter().any(|t| t.contains(wanted)),
+        "no {wanted} in the run logs: {tools:?}"
+    );
+}
+
 fn write(path: &Path, text: &str) {
     std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
     std::fs::write(path, text).expect("write");
-}
-
-/// The JDK whose `javac` is on `PATH`, or `JAVA_HOME`'s.
-fn jdk() -> Option<PathBuf> {
-    if let Some(home) = std::env::var_os("JAVA_HOME").map(PathBuf::from)
-        && home.join("bin/javac").is_file()
-        && home.join("bin/jar").is_file()
-    {
-        return Some(home);
-    }
-    let path = std::env::var_os("PATH")?;
-    let javac = std::env::split_paths(&path)
-        .map(|d| d.join("javac"))
-        .find(|p| p.is_file())?;
-    let home = std::fs::canonicalize(javac)
-        .ok()?
-        .parent()?
-        .parent()?
-        .to_path_buf();
-    home.join("bin/jar").is_file().then_some(home)
 }
 
 fn stored(store: &Path, dir: &Path) -> Tree {
@@ -43,7 +153,7 @@ fn stored(store: &Path, dir: &Path) -> Tree {
 
 /// Builds the library, then the app against it, in a fresh store under
 /// `root`. Gives each built jar's digest and size, and the app's tree.
-fn build(jdk: &Path, root: &Path) -> (Vec<(String, u64, String)>, PathBuf) {
+fn build(images: &Images, root: &Path) -> (Vec<(String, u64, String)>, PathBuf) {
     let store = root.join("store");
     let s = store.display().to_string();
     let lib_src = root.join("greet");
@@ -61,9 +171,11 @@ fn build(jdk: &Path, root: &Path) -> (Vec<(String, u64, String)>, PathBuf) {
         "package dev.gaia.app;\n\nimport dev.gaia.greet.Greet;\n\npublic final class Main {\n    public static void main(String[] args) { System.out.println(Greet.hello(\"image\")); }\n}\n",
     );
     let ctx = Ctx::new();
-    let j = jdk.display().to_string();
+    let j = images.toolchain.display().to_string();
     let (_, greet) = build_java(
         &s,
+        BWRAP,
+        stored(&store, &images.root),
         &j,
         stored(&store, &lib_src),
         stored(&store, &root.join("none")),
@@ -84,6 +196,8 @@ fn build(jdk: &Path, root: &Path) -> (Vec<(String, u64, String)>, PathBuf) {
     .expect("copy");
     let (tree, app) = build_java(
         &s,
+        BWRAP,
+        stored(&store, &images.root),
         &j,
         stored(&store, &app_src),
         stored(&store, &libs),
@@ -108,21 +222,23 @@ fn build(jdk: &Path, root: &Path) -> (Vec<(String, u64, String)>, PathBuf) {
 
 #[test]
 fn a_small_project_builds_offline_twice_to_the_same_digest() {
-    let Some(jdk) = jdk() else {
-        println!("SKIPPED: no JDK (javac and jar) here");
+    let Some(images) = images(JDK_IMAGE, JDK_DIGEST, "opt/java/openjdk") else {
         return;
     };
+    let jdk = &images.toolchain;
     let (a, b) = (
         tempfile::tempdir().expect("tempdir"),
         tempfile::tempdir().expect("tempdir"),
     );
-    let (first, tree) = build(&jdk, a.path());
-    let (second, _) = build(&jdk, b.path());
-    println!("JDK {}", jdk.display());
+    let (first, tree) = build(&images, a.path());
+    let (second, _) = build(&images, b.path());
+    println!("JDK {JDK_IMAGE} (sandboxed, root {IMAGE_DIGEST})");
     for (name, size, digest) in &first {
         println!("  {name:<10} {size:>6} bytes  {digest}");
     }
     assert_eq!(first, second, "two stores, the same bytes");
+    let store = Store::open(a.path().join("store")).expect("store");
+    all_sandboxed(&logs_dir(&store), "/toolchain/bin/javac");
 
     // The output tree runs: the app jar and its dependency side by side.
     let mut listed: Vec<String> = std::fs::read_dir(tree.join("lib"))
@@ -156,8 +272,7 @@ fn a_small_project_builds_offline_twice_to_the_same_digest() {
 
 #[test]
 fn a_missing_class_is_a_compile_error_with_its_output() {
-    let Some(jdk) = jdk() else {
-        println!("SKIPPED: no JDK (javac and jar) here");
+    let Some(images) = images(JDK_IMAGE, JDK_DIGEST, "opt/java/openjdk") else {
         return;
     };
     let root = tempfile::tempdir().expect("tempdir");
@@ -169,7 +284,9 @@ fn a_missing_class_is_a_compile_error_with_its_output() {
     );
     let error = build_java(
         &store.display().to_string(),
-        &jdk.display().to_string(),
+        BWRAP,
+        stored(&store, &images.root),
+        &images.toolchain.display().to_string(),
         stored(&store, &src),
         stored(&store, &root.path().join("none")),
         "main",

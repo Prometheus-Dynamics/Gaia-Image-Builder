@@ -1,8 +1,17 @@
-//! `gaia.build.node`: a Node.js package built into a bundle.
+//! `gaia.build.node`: a Node.js package built into a bundle, in a pinned
+//! glibc image, through bubblewrap.
 //!
+//! - **Sandboxed:** `npm` runs by [`gaia_sandbox`], with the image's root
+//!   filesystem (`root`, a pulled image tree) as the root. Nothing of the
+//!   host is there but what is bound: the Node.js install at `/toolchain`
+//!   (read-only) and the step's directory at `/build`, the only writable
+//!   path. The source and the npm cache are copied there first, since npm
+//!   writes into both. The network is off.
 //! - **Pinned Node.js:** the install at the path given (`bin/node`,
-//!   `bin/npm`); `node --version` and `npm --version` are in the key. npm
-//!   runs with a cleared environment, its own `HOME` and cache.
+//!   `bin/npm`), a self-contained one such as an upstream release;
+//!   `node --version` and `npm --version`, run in the same sandbox, are in
+//!   the key. npm runs with only the environment set here, its own `HOME`
+//!   and cache.
 //! - **Offline, from the lock:** `npm ci --offline` installs exactly what
 //!   `package-lock.json` names, from the `cache` tree: an npm cache
 //!   (`npm cache add` of each locked tarball) that a source node fills from
@@ -19,23 +28,38 @@
 //! artifact.
 
 use daedalus::prelude::*;
-use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store, Tool};
+use gaia_sandbox::Sandbox;
+use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store};
 use gaia_types::{Artifact, ArtifactKind, Tree};
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const NAME: &str = "gaia.build.node";
-const RECIPE_VERSION: u32 = 1;
+/// The probe that reads a tool's version inside the sandbox.
+const PROBE: &str = "gaia.build.node.version";
+/// Changes when how the build is run changes.
+const RECIPE_VERSION: u32 = 2;
+
+/// Where the sandbox binds the toolchain and the writable step directory.
+const TOOLCHAIN: &str = "/toolchain";
+const BUILD: &str = "/build";
+const PATH_IN_SANDBOX: &str = "/toolchain/bin:/usr/bin:/bin";
 
 /// Installs `source`'s locked dependencies from `cache` with the Node.js at
-/// `node`, runs its `script` (none when empty) and prunes dev dependencies.
+/// `node` (a directory on this host, bound read-only), runs its `script`
+/// (none when empty) and prunes dev dependencies, in the image `root` (a
+/// stored root filesystem tree). `bwrap` is the bubblewrap program that
+/// runs every tool.
 #[node(
     id = "gaia.build.node",
-    inputs(store, node, source, cache, script),
+    inputs(store, bwrap, root, node, source, cache, script),
     outputs(bundle, package)
 )]
+#[allow(clippy::too_many_arguments)]
 pub fn build_node(
     store: &str,
+    bwrap: &str,
+    root: Tree,
     node: &str,
     source: Tree,
     cache: Tree,
@@ -43,37 +67,65 @@ pub fn build_node(
     cx: &Ctx,
 ) -> Result<(Tree, Artifact), StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
-    let node = Path::new(node);
+    let fail = |message: String| StepError::body(NAME, message);
     let dir_of = |tree: &Tree, what: &str| {
         let object = tree
             .object
             .object_ref()
-            .ok_or_else(|| StepError::body(NAME, format!("the {what} is not in the store")))?;
+            .ok_or_else(|| fail(format!("the {what} is not in the store")))?;
         Ok::<_, StepError>((object.digest, store.path(&object)))
     };
+    let (root_digest, root_dir) = dir_of(&root, "image")?;
     let (source_digest, source_dir) = dir_of(&source, "source")?;
     let (cache_digest, cache_dir) = dir_of(&cache, "npm cache tree")?;
     if !source_dir.join("package-lock.json").is_file() {
-        return Err(StepError::body(
-            NAME,
-            "the source has no package-lock.json; the install is locked",
+        return Err(fail(
+            "the source has no package-lock.json; the install is locked".into(),
         ));
     }
-    let version = |program: &str| {
-        std::process::Command::new(node.join("bin").join(program))
-            .arg("--version")
-            .env_clear()
-            .env("PATH", node.join("bin"))
-            .output()
-            .map_err(|e| StepError::body(NAME, format!("{program} --version: {e}")))
-            .map(|o| o.stdout)
+    // What every tool of this build sees: the image and Node.js. The
+    // writable step directory is added for each step.
+    let base = Sandbox::new(bwrap, root_dir)
+        .input(PathBuf::from(node), TOOLCHAIN)
+        .env("PATH", PATH_IN_SANDBOX);
+    let version = |program: &str| -> Result<String, StepError> {
+        let key = base
+            .key(KeyBuilder::new(PROBE, 1).config("program", program))
+            .finish();
+        let made = Step::new(&store, cx, PROBE, key).look_up_or_make(
+            &[("version", Path::new("version"))],
+            |work| {
+                let tool = base
+                    .clone()
+                    .output(work.dir(), BUILD)
+                    .tool("/bin/sh")
+                    .map_err(|e| fail(format!("the sandbox: {e}")))?
+                    .args(["-c", "exec \"$0\" --version >/build/version 2>&1"])
+                    .arg(format!("{TOOLCHAIN}/bin/{program}"));
+                work.run(&tool).map(|_| ())
+            },
+        )?;
+        std::fs::read_to_string(store.path(&made.outputs["version"]))
+            .map_err(|e| fail(format!("{program} --version: {e}")))
     };
-    let key = KeyBuilder::new(NAME, RECIPE_VERSION)
-        .config("node", version("node")?)
-        .config("npm", version("npm")?)
-        .config("script", script)
-        .input("source", source_digest)
-        .input("cache", cache_digest)
+    let (node_version, npm_version) = (version("node")?, version("npm")?);
+    let sandbox = base
+        .env("HOME", format!("{BUILD}/home"))
+        .env("SOURCE_DATE_EPOCH", "0")
+        .env("TZ", "UTC")
+        .env("LC_ALL", "C")
+        .env("NODE_ENV", "production")
+        .cwd(format!("{BUILD}/bundle"));
+    let key = sandbox
+        .key(
+            KeyBuilder::new(NAME, RECIPE_VERSION)
+                .config("node", node_version)
+                .config("npm", npm_version)
+                .config("script", script)
+                .input("image", root_digest)
+                .input("source", source_digest)
+                .input("cache", cache_digest),
+        )
         .finish();
     let made = Step::new(&store, cx, NAME, key).look_up_or_make(
         &[
@@ -81,54 +133,48 @@ pub fn build_node(
             ("package", Path::new("package.tgz")),
         ],
         |work| {
-            let fail = |e: std::io::Error| StepError::body(NAME, e);
-            let app = work.dir().join("bundle");
-            let npm_cache = work.dir().join("cache");
-            let home = work.dir().join("home");
-            let packed = work.dir().join("packed");
-            copy_writable(&source_dir, &app).map_err(fail)?;
-            copy_writable(&cache_dir, &npm_cache).map_err(fail)?;
-            for dir in [&home, &packed] {
-                std::fs::create_dir_all(dir).map_err(fail)?;
+            let io = |e: std::io::Error| fail(e.to_string());
+            let build = work.dir().to_path_buf();
+            let packed = build.join("packed");
+            copy_writable(&source_dir, &build.join("bundle")).map_err(io)?;
+            copy_writable(&cache_dir, &build.join("cache")).map_err(io)?;
+            for dir in [&build.join("home"), &packed] {
+                std::fs::create_dir_all(dir).map_err(io)?;
             }
+            let sandbox = sandbox.clone().output(&build, BUILD);
             let npm = |args: &[&str]| {
-                Tool::new(node.join("bin/npm"))
-                    .args(args)
-                    .args([
-                        "--offline",
-                        "--no-audit",
-                        "--no-fund",
-                        "--no-update-notifier",
-                    ])
-                    .arg("--cache")
-                    .arg(&npm_cache)
-                    .env(
-                        "PATH",
-                        format!("{}:/usr/bin:/bin", node.join("bin").display()),
-                    )
-                    .env("HOME", &home)
-                    .env("SOURCE_DATE_EPOCH", "0")
-                    .env("TZ", "UTC")
-                    .env("LC_ALL", "C")
-                    .env("NODE_ENV", "production")
-                    .cwd(&app)
+                Ok::<_, StepError>(
+                    sandbox
+                        .tool(&format!("{TOOLCHAIN}/bin/npm"))
+                        .map_err(|e| fail(format!("the sandbox: {e}")))?
+                        .args(args)
+                        .args([
+                            "--offline",
+                            "--no-audit",
+                            "--no-fund",
+                            "--no-update-notifier",
+                        ])
+                        .arg("--cache")
+                        .arg(format!("{BUILD}/cache")),
+                )
             };
-            work.run(&npm(&["ci", "--ignore-scripts", "--include=dev"]))?;
+            work.run(&npm(&["ci", "--ignore-scripts", "--include=dev"])?)?;
             if !script.is_empty() {
-                work.run(&npm(&["run", script]))?;
+                work.run(&npm(&["run", script])?)?;
             }
-            work.run(&npm(&["prune", "--omit=dev", "--ignore-scripts"]))?;
-            let mut pack = npm(&["pack", "--ignore-scripts"]);
-            pack = pack.arg("--pack-destination").arg(&packed);
+            work.run(&npm(&["prune", "--omit=dev", "--ignore-scripts"])?)?;
+            let pack = npm(&["pack", "--ignore-scripts"])?
+                .arg("--pack-destination")
+                .arg(format!("{BUILD}/packed"));
             work.run(&pack)?;
             let mut tarballs: Vec<_> = std::fs::read_dir(&packed)
-                .map_err(fail)?
+                .map_err(io)?
                 .filter_map(|e| e.ok().map(|e| e.path()))
                 .collect();
             if tarballs.len() != 1 {
-                return Err(StepError::body(NAME, "npm pack made no single tarball"));
+                return Err(fail("npm pack made no single tarball".into()));
             }
-            std::fs::rename(tarballs.remove(0), work.dir().join("package.tgz")).map_err(fail)
+            std::fs::rename(tarballs.remove(0), build.join("package.tgz")).map_err(io)
         },
     )?;
     Ok((
