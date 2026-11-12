@@ -1,11 +1,11 @@
 //! `gaia.tree.merge`: layers into one tree, every path owned.
 
 use crate::walk::{Found, Node, copy, inside, list, make_dirs, set_mode};
-use crate::{Layer, Owned, entries_text, tree_input};
+use crate::{entries_text, tree_input};
 use daedalus::prelude::*;
 use daedalus_cpu_author::FanIn;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store};
-use gaia_types::{Artifact, ArtifactKind, FileEntry, Tree};
+use gaia_types::{Artifact, ArtifactKind, FileEntry, Layer, Owned, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 

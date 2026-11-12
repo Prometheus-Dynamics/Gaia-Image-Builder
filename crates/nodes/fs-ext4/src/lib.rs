@@ -17,7 +17,7 @@
 use daedalus::prelude::*;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store, Stream, Tool};
 use gaia_store::Digest;
-use gaia_tree::owned_digest;
+use gaia_types::owned_digest;
 use gaia_types::{FileEntry, Image, ImageKind, Size, Tree};
 use std::collections::BTreeMap;
 use std::os::unix::fs::MetadataExt;

@@ -1,11 +1,10 @@
 //! `gaia.tree.services`: enabled units as the links `systemctl enable`
 //! makes.
 
-use crate::Layer;
 use crate::walk::make_dirs;
 use daedalus::prelude::*;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store};
-use gaia_types::Tree;
+use gaia_types::{Layer, Tree};
 use std::path::Path;
 
 const NAME: &str = "gaia.tree.services";
