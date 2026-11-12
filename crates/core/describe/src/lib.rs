@@ -26,7 +26,7 @@ mod product;
 mod read;
 
 pub use board::{Board, Bootloader, Firmware, Flash, Kernel, PartitionNeed, TrustedFirmware};
-pub use common::{FileRef, Mode, RelPath, SizeText, Source};
+pub use common::{FileRef, ImagePlatform, Mode, RelPath, SizeText, Source};
 pub use component::{Build, Component, Group, Install, InstallFrom, Package, Service, User};
 pub use error::Error;
 pub use product::{ImageSpec, Loaded, Product};
