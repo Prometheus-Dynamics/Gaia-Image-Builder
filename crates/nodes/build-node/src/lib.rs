@@ -24,7 +24,7 @@
 //! artifact.
 
 use daedalus::prelude::*;
-use gaia_step::{Ctx, Digest, KeyBuilder, Step, StepError, Store, Tool};
+use gaia_step::{Ctx, Digest, KeyBuilder, Step, StepError, Store, Tool, once_per_process};
 use gaia_types::{Artifact, ArtifactKind, Tree};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -69,13 +69,16 @@ pub fn build_node(
         .map_err(|e| StepError::body(NAME, format!("package-lock.json: {e}")))
         .and_then(|bytes| locked(&bytes).map_err(|e| StepError::body(NAME, e)))?;
     let version = |program: &str| {
-        std::process::Command::new(node.join("bin").join(program))
-            .arg("--version")
-            .env_clear()
-            .env("PATH", node.join("bin"))
-            .output()
-            .map_err(|e| StepError::body(NAME, format!("{program} --version: {e}")))
-            .map(|o| o.stdout)
+        let path = node.join("bin").join(program);
+        once_per_process(&path, || {
+            std::process::Command::new(&path)
+                .arg("--version")
+                .env_clear()
+                .env("PATH", node.join("bin"))
+                .output()
+                .map(|o| o.stdout)
+        })
+        .map_err(|e| StepError::body(NAME, format!("{program} --version: {e}")))
     };
     let key = KeyBuilder::new(NAME, RECIPE_VERSION)
         .config("node", version("node")?)

@@ -1,8 +1,7 @@
-//! The libraries this node names in its step key are the ones Cargo.lock
-//! resolves. A new version fails here until the key names it.
+//! The libraries this node names in its step key are the ones its Cargo.toml
+//! pins. A new version fails here until the pin and the key both move.
 
 #[test]
-fn the_key_names_the_resolved_libraries() {
-    gaia_step::cargo_lock::check_libs(env!("CARGO_MANIFEST_DIR"), gaia_sign::LIBS)
-        .expect("Cargo.lock");
+fn the_key_names_the_pinned_libraries() {
+    gaia_step::pins::check_pins(env!("CARGO_MANIFEST_DIR"), gaia_sign::LIBS).expect("Cargo.toml");
 }

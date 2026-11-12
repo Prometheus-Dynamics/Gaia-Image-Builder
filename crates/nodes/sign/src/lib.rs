@@ -18,8 +18,8 @@
 
 pub mod minisign;
 
-/// The libraries this node links, by the version Cargo resolved. Its step key
-/// names them, and `tests/libs.rs` checks each version against Cargo.lock.
+/// The libraries this node links, pinned in its Cargo.toml. Its step key names
+/// them, and `tests/libs.rs` checks each version against the pin.
 pub const LIBS: &[(&str, &str)] = &[
     ("ed25519-dalek", "2.2.0"),
     ("blake2", "0.10.6"),

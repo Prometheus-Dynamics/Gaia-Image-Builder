@@ -19,7 +19,7 @@
 //! the key.
 
 use daedalus::prelude::*;
-use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store, Tool, Work};
+use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store, Tool, Work, once_per_process};
 use gaia_store::Digest;
 use gaia_types::{Image, ImageKind, Size, Tree};
 use std::path::{Path, PathBuf};
@@ -83,12 +83,14 @@ pub fn fs_vfat(
         )));
     }
     let version = |program: &str| {
-        std::process::Command::new(program)
-            .arg("--version")
-            .env_clear()
-            .output()
-            .map_err(|e| fail(format!("{program} --version: {e}")))
-            .map(|o| [o.stdout, o.stderr].concat())
+        once_per_process(Path::new(program), || {
+            let out = std::process::Command::new(program)
+                .arg("--version")
+                .env_clear()
+                .output()?;
+            Ok([out.stdout, out.stderr].concat())
+        })
+        .map_err(|e| fail(format!("{program} --version: {e}")))
     };
     let key = KeyBuilder::new(NAME, 1)
         .config("mformat", version(mformat)?)

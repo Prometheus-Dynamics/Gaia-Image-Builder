@@ -16,7 +16,7 @@ daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", 
 gaia-step = { path = "../../core/step" }
 gaia-store = { path = "../../core/store" }
 gaia-types = { path = "../../core/types" }
-tar = "0.4"
+tar = "=0.4.46"
 
 [dev-dependencies]
 tempfile = "3"
