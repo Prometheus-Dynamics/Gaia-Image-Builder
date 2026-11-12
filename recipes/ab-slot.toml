@@ -1,0 +1,38 @@
+# A root slot: the built tree as an EROFS image, with dm-verity appended.
+# Both slots of an A/B pair take this image; the device names where it is
+# written. Untested on board.
+version = 1
+name = "ab-slot"
+description = "A root slot: EROFS with a dm-verity tree appended."
+
+[stages]
+erofs = "gaia.fs.erofs"
+verity = "gaia.verity"
+
+[[connects]]
+from = "erofs.image"
+to = "verity.image"
+
+[inputs]
+build = ["erofs.tree"]
+
+[outputs]
+slot = "verity.image"
+table = "verity.table"
+
+[parameters.compression]
+type = "string"
+default = "zstd"
+description = "EROFS compression: none, lz4, lz4hc, lzma, deflate or zstd."
+sets = ["erofs.compression"]
+
+[parameters.level]
+type = "int"
+default = 0
+description = "The compressor's level; 0 is its default."
+sets = ["erofs.level"]
+
+[parameters.device]
+type = "string"
+description = "The device the slot is written to. The verity tree is on it too."
+sets = ["verity.device"]

@@ -1,0 +1,24 @@
+# A rust component with a git source, a vendored path and a build root: what the recipes'
+# `build` input takes in the planning test. Its lock pins both sources.
+version = 1
+name = "test-tree"
+
+[sources.src]
+git = "https://github.com/vasilakisfil/hello.service"
+ref = "master"
+
+[sources.vendor]
+path = "vendor"
+
+[sources.root]
+image = "docker.io/library/debian:trixie-slim"
+
+[build]
+builder = "rust"
+source = "src"
+
+[build.settings]
+package = "hello-world"
+features = ""
+triple = "x86_64-unknown-linux-musl"
+cpu = ""
