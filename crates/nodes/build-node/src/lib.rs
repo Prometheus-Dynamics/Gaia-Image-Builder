@@ -9,6 +9,11 @@
 //!   the lock. A source without `package-lock.json` is refused. Dependency
 //!   install scripts do not run (`--ignore-scripts`), so a dependency that
 //!   needs a native build is not supported here.
+//! - **Keyed on the lock, not the cache:** the key holds each
+//!   `package-lock.json` entry's path, version, `resolved` and `integrity`,
+//!   which `npm ci` checks every tarball against. The cache tree's own
+//!   digest is not in the key: npm writes times into its index, so two
+//!   caches holding the same tarballs differ byte for byte.
 //! - **The build:** the package's own script (`npm run <script>`), when
 //!   one is named, then `npm prune --omit=dev`.
 //! - **Reproducible:** `SOURCE_DATE_EPOCH` is 0; the store keeps content
@@ -19,13 +24,13 @@
 //! artifact.
 
 use daedalus::prelude::*;
-use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store, Tool};
+use gaia_step::{Ctx, Digest, KeyBuilder, Step, StepError, Store, Tool};
 use gaia_types::{Artifact, ArtifactKind, Tree};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 const NAME: &str = "gaia.build.node";
-const RECIPE_VERSION: u32 = 1;
+const RECIPE_VERSION: u32 = 2;
 
 /// Installs `source`'s locked dependencies from `cache` with the Node.js at
 /// `node`, runs its `script` (none when empty) and prunes dev dependencies.
@@ -52,13 +57,17 @@ pub fn build_node(
         Ok::<_, StepError>((object.digest, store.path(&object)))
     };
     let (source_digest, source_dir) = dir_of(&source, "source")?;
-    let (cache_digest, cache_dir) = dir_of(&cache, "npm cache tree")?;
-    if !source_dir.join("package-lock.json").is_file() {
+    let (_, cache_dir) = dir_of(&cache, "npm cache tree")?;
+    let lock = source_dir.join("package-lock.json");
+    if !lock.is_file() {
         return Err(StepError::body(
             NAME,
             "the source has no package-lock.json; the install is locked",
         ));
     }
+    let locked = std::fs::read(&lock)
+        .map_err(|e| StepError::body(NAME, format!("package-lock.json: {e}")))
+        .and_then(|bytes| locked(&bytes).map_err(|e| StepError::body(NAME, e)))?;
     let version = |program: &str| {
         std::process::Command::new(node.join("bin").join(program))
             .arg("--version")
@@ -73,7 +82,7 @@ pub fn build_node(
         .config("npm", version("npm")?)
         .config("script", script)
         .input("source", source_digest)
-        .input("cache", cache_digest)
+        .input("locked", Digest::of_bytes(locked.as_bytes()))
         .finish();
     let made = Step::new(&store, cx, NAME, key).look_up_or_make(
         &[
@@ -143,6 +152,51 @@ pub fn build_node(
     ))
 }
 
+/// What `package-lock.json` pins, one line per package in path order:
+/// `path`, `version`, `resolved`, `integrity` and `link`, tab-separated, a
+/// missing field empty. The root package (`""`) is left out; the source's
+/// digest covers it. Lock files without `packages` (lockfileVersion 1) are
+/// refused.
+fn locked(bytes: &[u8]) -> Result<String, String> {
+    let lock: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|e| format!("package-lock.json: {e}"))?;
+    let packages = lock.get("packages").and_then(|p| p.as_object()).ok_or(
+        "package-lock.json has no `packages` (lockfileVersion 1); lock with npm 7 or later",
+    )?;
+    let mut paths: Vec<&String> = packages.keys().filter(|p| !p.is_empty()).collect();
+    paths.sort();
+    let mut out = String::new();
+    for path in paths {
+        let entry = &packages[path.as_str()];
+        let field = |name: &str| match entry.get(name) {
+            Some(serde_json::Value::String(text)) => text.clone(),
+            Some(serde_json::Value::Bool(flag)) => flag.to_string(),
+            _ => String::new(),
+        };
+        for text in [
+            path.as_str(),
+            &field("version"),
+            &field("resolved"),
+            &field("integrity"),
+            &field("link"),
+        ] {
+            if text.contains(['\t', '\n']) {
+                return Err(format!(
+                    "package-lock.json: {path:?} has a tab or newline in a field"
+                ));
+            }
+        }
+        out.push_str(&format!(
+            "{path}\t{}\t{}\t{}\t{}\n",
+            field("version"),
+            field("resolved"),
+            field("integrity"),
+            field("link")
+        ));
+    }
+    Ok(out)
+}
+
 /// Copies `from` to `to` (which must not exist), every file and directory
 /// writable by its owner, symlinks as links.
 fn copy_writable(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -167,3 +221,37 @@ fn copy_writable(from: &Path, to: &Path) -> std::io::Result<()> {
 
 /// The node, for a registry.
 pub const NODES: [&NodeRecord; 1] = [&BUILD_NODE_NODE];
+
+#[cfg(test)]
+mod tests {
+    use super::locked;
+
+    const LOCK: &str = r#"{"lockfileVersion":3,"packages":{
+        "":{"name":"app","version":"1.0.0"},
+        "node_modules/b":{"version":"2.0.0","resolved":"https://r/b-2.0.0.tgz","integrity":"sha512-B"},
+        "node_modules/a":{"version":"1.0.0","resolved":"https://r/a-1.0.0.tgz","integrity":"sha512-A"},
+        "node_modules/l":{"resolved":"../l","link":true}}}"#;
+
+    #[test]
+    fn the_lock_key_is_every_locked_package_in_path_order() {
+        let text = locked(LOCK.as_bytes()).expect("parses");
+        assert_eq!(
+            text,
+            "node_modules/a\t1.0.0\thttps://r/a-1.0.0.tgz\tsha512-A\t\n\
+             node_modules/b\t2.0.0\thttps://r/b-2.0.0.tgz\tsha512-B\t\n\
+             node_modules/l\t\t../l\t\ttrue\n"
+        );
+        // Another tarball for the same version is another key.
+        let other = LOCK.replace("sha512-A", "sha512-X");
+        assert_ne!(locked(other.as_bytes()).expect("parses"), text);
+        // The root's own fields are the source's, not the lock key's.
+        let root = LOCK.replace(r#""version":"1.0.0"}"#, r#""version":"9.9.9"}"#);
+        assert_eq!(locked(root.as_bytes()).expect("parses"), text);
+    }
+
+    #[test]
+    fn a_lock_without_packages_is_refused() {
+        let error = locked(br#"{"lockfileVersion":1,"dependencies":{}}"#).expect_err("v1");
+        assert!(error.contains("lockfileVersion 1"), "{error}");
+    }
+}

@@ -43,8 +43,7 @@ fn run(home: &Path, args: &[&str], cwd: &Path, scratch: &Path) -> String {
     String::from_utf8(out.stdout).expect("utf8")
 }
 
-/// The app's source and an npm cache holding its one dependency, as a
-/// source node would give them from the lock.
+/// The app's source, locked, and its one dependency's tarball.
 fn inputs(home: &Path, dir: &Path) -> (PathBuf, PathBuf) {
     let tiny = dir.join("tiny");
     write(
@@ -76,20 +75,6 @@ fn inputs(home: &Path, dir: &Path) -> (PathBuf, PathBuf) {
         dir,
         dir,
     );
-    let cache = dir.join("cache");
-    run(
-        home,
-        &[
-            "npm",
-            "cache",
-            "add",
-            tgz.to_str().expect("utf8"),
-            "--cache",
-            cache.to_str().expect("utf8"),
-        ],
-        dir,
-        dir,
-    );
     let app = dir.join("app");
     write(
         &app.join("package.json"),
@@ -105,7 +90,28 @@ fn inputs(home: &Path, dir: &Path) -> (PathBuf, PathBuf) {
             r#"{{"name":"app","version":"1.0.0","lockfileVersion":3,"requires":true,"packages":{{"":{{"name":"app","version":"1.0.0","dependencies":{{"@gaia-test/tiny":"1.0.0"}},"bin":{{"app":"dist/app.js"}}}},"node_modules/@gaia-test/tiny":{{"version":"1.0.0","resolved":"https://registry.npmjs.org/@gaia-test/tiny/-/tiny-1.0.0.tgz","integrity":"{integrity}"}}}}}}"#
         ),
     );
-    (app, cache)
+    (app, tgz)
+}
+
+/// A fresh npm cache in `dir` holding `tgz`, as a source node would fill
+/// it from the lock.
+fn cache(home: &Path, tgz: &Path, dir: &Path) -> PathBuf {
+    std::fs::create_dir_all(dir).expect("mkdir");
+    let cache = dir.join("cache");
+    run(
+        home,
+        &[
+            "npm",
+            "cache",
+            "add",
+            tgz.to_str().expect("utf8"),
+            "--cache",
+            cache.to_str().expect("utf8"),
+        ],
+        dir,
+        dir,
+    );
+    cache
 }
 
 fn stored(store: &Path, dir: &Path) -> Tree {
@@ -127,11 +133,15 @@ fn a_small_app_builds_offline_twice_to_the_same_digest() {
         return;
     };
     let shared = tempfile::tempdir().expect("tempdir");
-    let (app, cache) = inputs(&home, shared.path());
+    let (app, tgz) = inputs(&home, shared.path());
     let mut results = Vec::new();
+    let (mut caches, mut keys) = (Vec::new(), Vec::new());
     for _ in 0..2 {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = dir.path().join("store");
+        // Each run fills its own cache, as two fresh hosts would.
+        let cache = cache(&home, &tgz, &dir.path().join("fill"));
+        caches.push(tree_digest(&cache).expect("digest").to_string());
         let (bundle, package) = build_node(
             &store.display().to_string(),
             &home.display().to_string(),
@@ -142,6 +152,16 @@ fn a_small_app_builds_offline_twice_to_the_same_digest() {
         )
         .expect("builds");
         let handle = Store::open(&store).expect("store");
+        let records = gaia_step::step_records(&gaia_step::logs_dir(&handle));
+        keys.push(
+            records
+                .iter()
+                .find(|record| record.step == "gaia.build.node")
+                .expect("a step record")
+                .key
+                .0
+                .to_string(),
+        );
         let bundle_dir = bundle.object.path_in(&handle).expect("in");
         let tgz = package.object.path_in(&handle).expect("in");
         let out = Command::new(home.join("bin/node"))
@@ -167,6 +187,18 @@ fn a_small_app_builds_offline_twice_to_the_same_digest() {
     }
     println!("package  {package} ({size} bytes)");
     println!("runs: {ran}");
+    println!("caches   {} / {}", caches[0], caches[1]);
+    println!("keys     {} / {}", keys[0], keys[1]);
+    // The two caches differ (npm writes times into its index), and the key
+    // and the output do not follow them.
+    assert_ne!(
+        caches[0], caches[1],
+        "the two caches are byte for byte the same"
+    );
+    assert_eq!(
+        keys[0], keys[1],
+        "two caches of the same tarballs, two keys"
+    );
     assert_eq!(
         results[0], results[1],
         "two stores, the same bundle and package"
