@@ -197,33 +197,42 @@ pub(crate) fn wire(
     for (i, image) in loaded.product.images.iter().enumerate() {
         let board = &loaded.boards[image.board.path()];
         let mut builds = Vec::new();
+        let mut data = Vec::new();
         let mut members = Vec::new();
-        for name in &image.components {
-            let component = loaded.components.get(name).ok_or_else(|| {
-                Error::at(
-                    &product_file,
-                    format!("images[{i}].components"),
-                    format!("no component {name}"),
-                )
-            })?;
-            members.push(component);
-            if component.build.is_none() {
-                continue;
-            }
-            let node = match built.get(name) {
-                Some(&node) => node,
-                None => {
-                    let node = component_build(&mut g, component, lock, builders, board)?;
-                    built.insert(name.clone(), node);
-                    node
+        for (list, names, into) in [
+            ("components", &image.components, &mut builds),
+            ("data", &image.data, &mut data),
+        ] {
+            for name in names {
+                let component = loaded.components.get(name).ok_or_else(|| {
+                    Error::at(
+                        &product_file,
+                        format!("images[{i}].{list}"),
+                        format!("no component {name}"),
+                    )
+                })?;
+                if list == "components" {
+                    members.push(component);
                 }
-            };
-            builds.push((name.clone(), node));
+                if component.build.is_none() {
+                    continue;
+                }
+                let node = match built.get(name) {
+                    Some(&node) => node,
+                    None => {
+                        let node = component_build(&mut g, component, lock, builders, board)?;
+                        built.insert(name.clone(), node);
+                        node
+                    }
+                };
+                into.push((name.clone(), node));
+            }
         }
         let image_in = ImageIn {
             index: i,
             image,
             builds: &builds,
+            data: &data,
             members: &members,
             lock,
             board,
@@ -399,6 +408,8 @@ struct ImageIn<'a> {
     image: &'a ImageSpec,
     /// Its built components and their build nodes.
     builds: &'a [(String, u32)],
+    /// Its built data components and their build nodes.
+    data: &'a [(String, u32)],
     /// Every component it names.
     members: &'a [&'a Component],
     lock: &'a Lock,
@@ -457,6 +468,22 @@ fn image_recipe(
                         "recipe {} takes one built component as `build`; this image has {}",
                         recipe.name,
                         builds.len()
+                    ),
+                ));
+            };
+            let out = g.first_output(*node).unwrap_or("tree");
+            for p in ports {
+                g.edge((*node, out), (stages[&p.stage], &p.port));
+            }
+        } else if input == "data" {
+            let [(_, node)] = at.data else {
+                return Err(Error::at(
+                    product_file,
+                    format!("images[{i}].data"),
+                    format!(
+                        "recipe {} takes one built component as `data`; this image has {}",
+                        recipe.name,
+                        at.data.len()
                     ),
                 ));
             };

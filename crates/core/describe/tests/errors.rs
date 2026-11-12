@@ -314,3 +314,19 @@ fn a_package_without_a_description_names_package_description() {
     println!("{error}");
     assert_names(&error, &path, "package.description", "needs a description");
 }
+
+#[test]
+fn an_unknown_data_component_names_images_data() {
+    let dir = files(&[(
+        "p.toml",
+        "version = 1\nname = \"p\"\n[components]\nstate = \"c.toml\"\n[[images]]\nname = \"i\"\nboard = \"b.toml\"\ndata = [\"stat\"]\nrecipe = \"r\"\n",
+    )]);
+    let error = Product::read(dir.path().join("p.toml")).expect_err("refused");
+    println!("{error}");
+    assert_names(
+        &error,
+        &dir.path().join("p.toml"),
+        "images[0].data[0]",
+        "did you mean `state`?",
+    );
+}
