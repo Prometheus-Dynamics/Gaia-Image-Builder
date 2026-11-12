@@ -166,6 +166,9 @@ impl Graph<'_> {
     }
 }
 
+/// The wired graph body, the origin of each node, and the host inputs `gaia build` feeds.
+pub(crate) type Wired = (GraphBody, Vec<crate::Origin>, BTreeMap<String, HostInput>);
+
 pub(crate) fn wire(
     loaded: &Loaded,
     lock: &Lock,
@@ -173,7 +176,7 @@ pub(crate) fn wire(
     registry: &Registry,
     setup: &Setup,
     builders: &Builders,
-) -> Result<(GraphBody, Vec<crate::Origin>, BTreeMap<String, HostInput>), Error> {
+) -> Result<Wired, Error> {
     let product_file = loaded.product.file.clone();
     let mut host = NodeDoc::new("host");
     host.kind = NodeKindDoc::HostBridge;
