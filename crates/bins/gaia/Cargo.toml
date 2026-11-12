@@ -40,6 +40,7 @@ gaia-os-none = { path = "../../nodes/os-none" }
 gaia-package = { path = "../../nodes/package" }
 gaia-progress = { path = "../gaia-progress" }
 gaia-recipe = { path = "../../core/recipe" }
+gaia-report = { path = "../../nodes/report" }
 gaia-sign = { path = "../../nodes/sign" }
 gaia-size = { path = "../../nodes/size" }
 gaia-source-files = { path = "../../nodes/source-files" }
