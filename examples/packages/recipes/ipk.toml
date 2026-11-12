@@ -1,0 +1,14 @@
+# A package for another device's installer: the component's files, its
+# [package] as the control data.
+version = 1
+name = "ipk"
+
+[stages]
+pkg = "gaia.package.ipk"
+
+[inputs]
+source = ["pkg.tree"]
+control = ["pkg.control"]
+
+[outputs]
+ipk = "pkg.package"

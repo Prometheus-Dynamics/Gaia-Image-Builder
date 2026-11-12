@@ -1,6 +1,6 @@
 //! Laying the descriptions out as nodes and edges.
 
-use crate::{Builders, Error, FUSION, STEP, Setup};
+use crate::{Builders, Error, FUSION, HostInput, STEP, Setup};
 use daedalus::layers::graph::{
     EdgeDoc, EdgePolicyDoc, GraphBody, Lit, NodeDoc, NodeKindDoc, PortRefDoc,
 };
@@ -166,6 +166,9 @@ impl Graph<'_> {
     }
 }
 
+/// The wired graph body, the origin of each node, and the host inputs `gaia build` feeds.
+pub(crate) type Wired = (GraphBody, Vec<crate::Origin>, BTreeMap<String, HostInput>);
+
 pub(crate) fn wire(
     loaded: &Loaded,
     lock: &Lock,
@@ -173,7 +176,7 @@ pub(crate) fn wire(
     registry: &Registry,
     setup: &Setup,
     builders: &Builders,
-) -> Result<(GraphBody, Vec<crate::Origin>), Error> {
+) -> Result<Wired, Error> {
     let product_file = loaded.product.file.clone();
     let mut host = NodeDoc::new("host");
     host.kind = NodeKindDoc::HostBridge;
@@ -190,9 +193,11 @@ pub(crate) fn wire(
     // Each built component once, by the product's name for it.
     let mut built: BTreeMap<String, u32> = BTreeMap::new();
     let mut host_ports: BTreeMap<String, String> = BTreeMap::new();
+    let mut inputs: BTreeMap<String, HostInput> = BTreeMap::new();
     for (i, image) in loaded.product.images.iter().enumerate() {
         let board = &loaded.boards[image.board.path()];
         let mut builds = Vec::new();
+        let mut members = Vec::new();
         for name in &image.components {
             let component = loaded.components.get(name).ok_or_else(|| {
                 Error::at(
@@ -201,6 +206,7 @@ pub(crate) fn wire(
                     format!("no component {name}"),
                 )
             })?;
+            members.push(component);
             if component.build.is_none() {
                 continue;
             }
@@ -214,15 +220,16 @@ pub(crate) fn wire(
             };
             builds.push((name.clone(), node));
         }
-        image_recipe(
-            &mut g,
-            i,
+        let image_in = ImageIn {
+            index: i,
             image,
-            &builds,
-            recipes,
-            &product_file,
-            &mut host_ports,
-        )?;
+            builds: &builds,
+            members: &members,
+            lock,
+            board,
+            product_file: &product_file,
+        };
+        image_recipe(&mut g, &image_in, recipes, &mut host_ports, &mut inputs)?;
     }
     g.fill(setup)?;
     g.nodes[0].port_types = host_ports;
@@ -233,6 +240,7 @@ pub(crate) fn wire(
             groups: Vec::new(),
         },
         g.origins,
+        inputs,
     ))
 }
 
@@ -380,16 +388,28 @@ fn source_node(
     Ok(node)
 }
 
+/// One image and what its recipe's inputs come from.
+struct ImageIn<'a> {
+    index: usize,
+    image: &'a ImageSpec,
+    /// Its built components and their build nodes.
+    builds: &'a [(String, u32)],
+    /// Every component it names.
+    members: &'a [&'a Component],
+    lock: &'a Lock,
+    board: &'a gaia_describe::Board,
+    product_file: &'a Path,
+}
+
 /// The image's recipe, inline, its outputs to the host.
 fn image_recipe(
     g: &mut Graph<'_>,
-    i: usize,
-    image: &ImageSpec,
-    builds: &[(String, u32)],
+    at: &ImageIn<'_>,
     recipes: &Recipes,
-    product_file: &Path,
     host_ports: &mut BTreeMap<String, String>,
+    inputs: &mut BTreeMap<String, HostInput>,
 ) -> Result<(), Error> {
+    let (i, image, builds, product_file) = (at.index, at.image, at.builds, at.product_file);
     let recipe = recipes
         .get(&image.recipe, product_file)
         .map_err(|e| Error::at(product_file, format!("images[{i}].recipe"), e.message))?;
@@ -439,6 +459,21 @@ fn image_recipe(
             for p in ports {
                 g.edge((*node, out), (stages[&p.stage], &p.port));
             }
+        } else if input == "source" {
+            let from = image_source(g, at, &recipe.name)?;
+            let out = g.first_output(from).unwrap_or("tree");
+            for p in ports {
+                g.edge((from, out), (stages[&p.stage], &p.port));
+            }
+        } else if input == "control" {
+            let control = image_control(at, &recipe.name)?;
+            let port = format!("{}.control", image.name);
+            let value = HostInput::Control(control);
+            host_ports.insert(port.clone(), value.type_key().to_string());
+            inputs.insert(port.clone(), value);
+            for p in ports {
+                g.edge((0, &port), (stages[&p.stage], &p.port));
+            }
         }
         // Any other input is filled like a stage's own: store or a tool.
     }
@@ -467,6 +502,69 @@ fn image_recipe(
         g.edge((node, &at.port), (0, &port));
     }
     Ok(())
+}
+
+/// The one source of the image's one component, as a source node.
+fn image_source(g: &mut Graph<'_>, at: &ImageIn<'_>, recipe: &str) -> Result<u32, Error> {
+    let key = format!("images[{}].components", at.index);
+    let [component] = at.members else {
+        return Err(Error::at(
+            at.product_file,
+            key,
+            format!(
+                "recipe {recipe} takes one component's source as `source`; this image has {} components",
+                at.members.len()
+            ),
+        ));
+    };
+    let mut sources = component.sources.iter();
+    let (Some((name, source)), None) = (sources.next(), sources.next()) else {
+        return Err(Error::at(
+            &component.file,
+            "sources",
+            format!(
+                "recipe {recipe} takes the component's one source as `source`; it has {}",
+                component.sources.len()
+            ),
+        ));
+    };
+    source_node(g, component, name, source, at.lock, at.board)
+}
+
+/// The control data from the `[package]` table of the image's one component
+/// that has one.
+fn image_control(at: &ImageIn<'_>, recipe: &str) -> Result<gaia_types::Control, Error> {
+    let packaged: Vec<&&Component> = at.members.iter().filter(|c| c.package.is_some()).collect();
+    let [component] = packaged.as_slice() else {
+        return Err(Error::at(
+            at.product_file,
+            format!("images[{}].components", at.index),
+            format!(
+                "recipe {recipe} takes `control` from one component's [package]; this image has {} with one",
+                packaged.len()
+            ),
+        ));
+    };
+    let package = component.package.as_ref().expect("filtered");
+    let control = gaia_types::Control {
+        package: package
+            .name
+            .clone()
+            .unwrap_or_else(|| component.name.clone()),
+        version: package.version.clone(),
+        architecture: package.architecture.clone(),
+        maintainer: package.maintainer.clone(),
+        description: package
+            .description
+            .clone()
+            .or_else(|| component.description.clone())
+            .unwrap_or_default(),
+        depends: package.depends.clone(),
+    };
+    control
+        .check()
+        .map_err(|e| Error::at(&component.file, "package", e))?;
+    Ok(control)
 }
 
 /// A constant, said with its type.
