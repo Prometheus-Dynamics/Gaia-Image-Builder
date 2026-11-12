@@ -41,6 +41,7 @@ gaia-package = { path = "../../nodes/package" }
 gaia-progress = { path = "../gaia-progress" }
 gaia-recipe = { path = "../../core/recipe" }
 gaia-sign = { path = "../../nodes/sign" }
+gaia-size = { path = "../../nodes/size" }
 gaia-source-files = { path = "../../nodes/source-files" }
 gaia-source-git = { path = "../../nodes/source-git" }
 gaia-source-oci = { path = "../../nodes/source-oci" }
