@@ -11,7 +11,7 @@ const GIT: &str = "gaia.proof.git";
 const CARGO: &str = "gaia.proof.cargo";
 const PACK: &str = "gaia.proof.pack";
 /// How long a build waits for another chain to start before it fails.
-const RENDEZVOUS: Duration = Duration::from_secs(30);
+const RENDEZVOUS: Duration = Duration::from_secs(300);
 
 fn open(store: &str, step: &'static str) -> Result<Store, StepError> {
     Store::open(store).map_err(StepError::store(step))
