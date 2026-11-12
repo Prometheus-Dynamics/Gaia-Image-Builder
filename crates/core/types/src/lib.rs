@@ -13,6 +13,10 @@
 //! | `gaia:partition` | [`Partition`]: one partition of an image |
 //! | `gaia:target` | [`Target`]: architecture, CPU and OS |
 //! | `gaia:size` | [`Size`]: a size in bytes |
+//! | `gaia:layer` | [`Layer`]: one owner's tree in an image |
+//! | `gaia:placement` | [`Placement`]: one install entry of a component |
+//! | `gaia:account` | [`Account`]: a user a component needs |
+//! | `gaia:account-group` | [`AccountGroup`]: a group a component needs |
 //!
 //! Kinds are open ([`ArtifactKind`], [`ImageKind`], [`PartitionRole`],
 //! [`Arch`], [`Os`]): a known name, or `Other` with any name, so a `.uf2` or
@@ -23,15 +27,17 @@
 
 mod image;
 mod kind;
+mod layer;
 mod object;
 mod target;
 
 pub use image::{Image, ImageKind, Partition, PartitionRole, Size};
+pub use layer::{Account, AccountGroup, Layer, Owned, Placement, owned_digest};
 pub use object::{Artifact, ArtifactKind, FileEntry, ObjectKind, StoreRef, Tree};
 pub use target::{Arch, Os, Target};
 
 /// Every type's key, port types first, then the kinds and enums inside them.
-pub const KEYS: [&str; 14] = [
+pub const KEYS: [&str; 18] = [
     "gaia:object",
     "gaia:artifact",
     "gaia:tree",
@@ -40,6 +46,10 @@ pub const KEYS: [&str; 14] = [
     "gaia:partition",
     "gaia:target",
     "gaia:size",
+    "gaia:layer",
+    "gaia:placement",
+    "gaia:account",
+    "gaia:account-group",
     "gaia:object-kind",
     "gaia:artifact-kind",
     "gaia:image-kind",
