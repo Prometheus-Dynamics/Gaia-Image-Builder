@@ -69,7 +69,17 @@ fn build(
     host: &BuildrootHost,
 ) -> Run {
     let store_path = store_dir.display().to_string();
-    let (rootfs, kernel, device_trees, modules, bootloader, images, config) = os_buildroot(
+    let (
+        rootfs,
+        kernel,
+        device_trees,
+        modules,
+        bootloader,
+        images,
+        config,
+        _kernel_build,
+        _toolchain,
+    ) = os_buildroot(
         &store_path,
         source.clone(),
         fragments,

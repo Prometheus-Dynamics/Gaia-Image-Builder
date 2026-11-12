@@ -98,6 +98,144 @@ pub fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
     fs::set_permissions(to, fs::metadata(from)?.permissions())
 }
 
+/// The kernel build directory Buildroot made in `build` (`linux-<version>`):
+/// the one with a `.config` and a `Module.symvers`. `None` when the build has
+/// no kernel.
+pub fn kernel_build_source(build: &Path) -> io::Result<Option<std::path::PathBuf>> {
+    if !build.is_dir() {
+        return Ok(None);
+    }
+    let mut found = Vec::new();
+    for entry in fs::read_dir(build)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let path = entry.path();
+        if name.starts_with("linux-")
+            && path.join(".config").is_file()
+            && path.join("Module.symvers").is_file()
+        {
+            found.push(path);
+        }
+    }
+    found.sort();
+    match found.len() {
+        0 => Ok(None),
+        1 => Ok(found.pop()),
+        _ => Err(io::Error::other(format!(
+            "more than one kernel build directory in {}",
+            build.display()
+        ))),
+    }
+}
+
+/// Copies a kernel build tree to `to`, keeping what an external module build
+/// needs after `modules_prepare` and dropping what it does not: object and
+/// dependency files, boot images, `vmlinux`, `System.map` and the
+/// documentation. The source of the subsystems a module does not build
+/// (drivers, filesystems, networking and so on) is dropped, as the distribution
+/// `kernel-devel` packages do; their `Makefile`, `Kbuild` and `Kconfig` files
+/// stay so the tree still reads as a kernel. Empty directories are not kept.
+pub fn copy_kernel_build(from: &Path, to: &Path) -> io::Result<()> {
+    fs::create_dir_all(to)?;
+    copy_kept(from, to, "")
+}
+
+fn copy_kept(from: &Path, to: &Path, rel: &str) -> io::Result<()> {
+    let dir = if rel.is_empty() {
+        from.to_path_buf()
+    } else {
+        from.join(rel)
+    };
+    let mut entries = fs::read_dir(&dir)?.collect::<io::Result<Vec<_>>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let child = if rel.is_empty() {
+            name.clone()
+        } else {
+            format!("{rel}/{name}")
+        };
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            let dest = to.join(&child);
+            // A directory is made only when something in it is kept.
+            if !prunes_dir(&child) {
+                fs::create_dir(&dest)?;
+                copy_kept(from, to, &child)?;
+                if fs::read_dir(&dest)?.next().is_none() {
+                    fs::remove_dir(&dest)?;
+                }
+            }
+        } else if keep_file(&child, &name) {
+            let src = from.join(&child);
+            let dest = to.join(&child);
+            if kind.is_symlink() {
+                std::os::unix::fs::symlink(fs::read_link(&src)?, &dest)?;
+            } else {
+                fs::copy(&src, &dest)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Directories no kernel build tree keeps: boot images and documentation.
+fn prunes_dir(rel: &str) -> bool {
+    let parts: Vec<&str> = rel.split('/').collect();
+    parts[0] == "Documentation" || (parts[0] == "arch" && parts.get(2) == Some(&"boot"))
+}
+
+/// The files a kernel build tree keeps, by path (`rel`) and name.
+fn keep_file(rel: &str, name: &str) -> bool {
+    if is_object_leftover(name) {
+        return false;
+    }
+    let parts: Vec<&str> = rel.split('/').collect();
+    if parts[0] == "Documentation" {
+        return build_file(name);
+    }
+    if parts[0] == "tools" && parts.get(1) != Some(&"objtool") {
+        return build_file(name);
+    }
+    if parts[0] == "arch" && parts.get(2) == Some(&"boot") {
+        return false;
+    }
+    const WHOLE: [&str; 5] = ["include", "scripts", "kernel", "lib", "tools/objtool"];
+    if WHOLE
+        .iter()
+        .any(|root| rel == *root || rel.starts_with(&format!("{root}/")))
+    {
+        return true;
+    }
+    if parts[0] == "arch" && matches!(parts.get(2), Some(&"include" | &"kernel" | &"tools")) {
+        return true;
+    }
+    build_file(name)
+}
+
+/// A file a build leaves behind, not one a module build reads.
+fn is_object_leftover(name: &str) -> bool {
+    const SUFFIXES: [&str; 10] = [
+        ".o", ".a", ".ko", ".mod", ".mod.c", ".cmd", ".d", ".so", ".s", ".dwo",
+    ];
+    name.starts_with(".tmp")
+        || name.starts_with("vmlinux")
+        || name == "System.map"
+        || SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
+}
+
+/// The build files of a kernel tree: makefiles, Kconfig, the config and the
+/// module symbols and indexes.
+fn build_file(name: &str) -> bool {
+    name.starts_with("Makefile")
+        || name.starts_with("Kbuild")
+        || name.starts_with("Kconfig")
+        || name.starts_with("localversion")
+        || name.starts_with("modules.")
+        || matches!(name, ".config" | ".version" | "Module.symvers")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,6 +279,80 @@ mod tests {
         sort_images(&dir.path().join("nothing"), &out).expect("sort");
         assert!(out.join("kernel").is_dir());
         assert!(out.join("images").is_dir());
+    }
+
+    #[test]
+    fn a_kernel_build_keeps_what_a_module_build_reads() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let from = dir.path().join("linux-1");
+        let write = |rel: &str| {
+            fs::create_dir_all(from.join(rel).parent().expect("parent")).expect("mkdir");
+            fs::write(from.join(rel), rel).expect("write");
+        };
+        for kept in [
+            ".config",
+            "Makefile",
+            "Module.symvers",
+            "modules.order",
+            "include/generated/utsrelease.h",
+            "scripts/basic/fixdep",
+            "arch/arm64/include/asm/x.h",
+            "arch/arm64/kernel/asm-offsets.c",
+            "arch/arm64/Makefile",
+            "drivers/net/Makefile",
+            "drivers/net/Kconfig",
+            "tools/objtool/objtool",
+        ] {
+            write(kept);
+        }
+        for dropped in [
+            "vmlinux",
+            "System.map",
+            "built-in.a",
+            "kernel/sched/core.o",
+            "kernel/sched/.core.o.cmd",
+            "drivers/net/driver.c",
+            "drivers/net/driver.o",
+            "arch/arm64/boot/Image",
+            "arch/arm64/kernel/asm-offsets.s",
+            "Documentation/admin-guide/index.rst",
+            "tools/perf/perf.c",
+        ] {
+            write(dropped);
+        }
+        let to = dir.path().join("kernel-build");
+        copy_kernel_build(&from, &to).expect("copy");
+        for kept in [
+            "include/generated/utsrelease.h",
+            "drivers/net/Makefile",
+            "tools/objtool/objtool",
+            "arch/arm64/kernel/asm-offsets.c",
+        ] {
+            assert!(to.join(kept).is_file(), "{kept} is kept");
+        }
+        for dropped in [
+            "vmlinux",
+            "built-in.a",
+            "kernel/sched",
+            "drivers/net/driver.c",
+            "arch/arm64/boot",
+            "Documentation",
+            "tools/perf",
+        ] {
+            assert!(!to.join(dropped).exists(), "{dropped} is dropped");
+        }
+    }
+
+    #[test]
+    fn the_kernel_build_is_the_one_with_a_config_and_symbols() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(dir.path().join("linux-headers-6")).expect("headers");
+        assert_eq!(kernel_build_source(dir.path()).expect("scan"), None);
+        let linux = dir.path().join("linux-6.18.7");
+        fs::create_dir_all(&linux).expect("linux");
+        fs::write(linux.join(".config"), "").expect("config");
+        fs::write(linux.join("Module.symvers"), "").expect("symvers");
+        assert_eq!(kernel_build_source(dir.path()).expect("scan"), Some(linux));
     }
 
     #[test]

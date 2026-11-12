@@ -19,6 +19,7 @@ gaia-types = { path = "../../core/types" }
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
+gaia-os-buildroot = { path = "../os-buildroot" }
 tempfile = "3"
 
 [lints]
