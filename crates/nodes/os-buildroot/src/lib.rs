@@ -12,6 +12,14 @@
 //!   its `images/` directory, sorted by name (see `out`).
 //! - **modules**: the kernel modules inside the target (`lib/modules`).
 //! - **config**: the resolved `.config`, as `buildroot.config`.
+//! - **kernel-build**: when the build has a kernel, the tree an external module
+//!   build needs after `modules_prepare` (see `out::copy_kernel_build`). Empty
+//!   otherwise.
+//! - **toolchain**: when the build has a kernel, Buildroot's host directory: the
+//!   cross compiler, its sysroot and the host tools. Empty otherwise.
+//!
+//! Outputs are added, never changed: a build with no kernel makes the same
+//! files and the same key, and two empty trees more.
 //!
 //! The key holds the source's digest, each external tree's digest, the
 //! fragments' text and the make program. The download cache, job count and
@@ -41,8 +49,9 @@ const KEY_VERSION: u32 = 1;
 /// The environment every make runs with. Nothing else is inherited.
 const PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 
-/// The step's outputs, by name and by path inside its directory.
-const OUTPUTS: [(&str, &str); 7] = [
+/// The step's outputs, by name and by path inside its directory. The last two
+/// are empty when the build has no kernel.
+const OUTPUTS: [(&str, &str); 9] = [
     ("rootfs", "rootfs"),
     ("kernel", "kernel"),
     ("device-trees", "device-trees"),
@@ -50,6 +59,8 @@ const OUTPUTS: [(&str, &str); 7] = [
     ("bootloader", "bootloader"),
     ("images", "images"),
     ("config", "config/buildroot.config"),
+    ("kernel-build", "kernel-build"),
+    ("toolchain", "toolchain"),
 ];
 
 /// A block of Buildroot config from a description: `BR2_...=value` and
@@ -87,7 +98,17 @@ pub struct BuildrootHost {
 #[node(
     id = "gaia.os.buildroot",
     inputs(store, source, fragments, external, host),
-    outputs(rootfs, kernel, device_trees, modules, bootloader, images, config)
+    outputs(
+        rootfs,
+        kernel,
+        device_trees,
+        modules,
+        bootloader,
+        images,
+        config,
+        kernel_build,
+        toolchain
+    )
 )]
 pub fn os_buildroot(
     store: &str,
@@ -105,6 +126,8 @@ pub fn os_buildroot(
         Artifact,
         Artifact,
         Artifact,
+        Tree,
+        Tree,
     ),
     StepError,
 > {
@@ -136,6 +159,10 @@ pub fn os_buildroot(
         kind,
         object: made.outputs[name].into(),
     };
+    let tree = |name: &str| Tree {
+        object: made.outputs[name].into(),
+        entries: Vec::new(),
+    };
     Ok((
         Tree {
             object: made.outputs["rootfs"].into(),
@@ -147,6 +174,8 @@ pub fn os_buildroot(
         artifact("bootloader", ArtifactKind::parse("bootloader")),
         artifact("images", ArtifactKind::parse("image")),
         artifact("config", ArtifactKind::Config),
+        tree("kernel-build"),
+        tree("toolchain"),
     ))
 }
 
@@ -240,6 +269,20 @@ fn build(
     out::sort_images(&out.join("images"), &dir).map_err(io_fail("the images"))?;
     fs::create_dir(dir.join("config")).map_err(io_fail("the config directory"))?;
     fs::copy(&config, dir.join("config/buildroot.config")).map_err(io_fail("the config"))?;
+    match out::kernel_build_source(&out.join("build")).map_err(io_fail("the kernel build"))? {
+        Some(source) => {
+            out::copy_kernel_build(&source, &dir.join("kernel-build"))
+                .map_err(io_fail("the kernel build tree"))?;
+            // Buildroot's host directory holds the cross compiler it built or
+            // installed, with its sysroot. Nothing in it names the output path.
+            fs::rename(out.join("host"), dir.join("toolchain"))
+                .map_err(io_fail("the toolchain"))?;
+        }
+        None => {
+            fs::create_dir(dir.join("kernel-build")).map_err(io_fail("the kernel build"))?;
+            fs::create_dir(dir.join("toolchain")).map_err(io_fail("the toolchain"))?;
+        }
+    }
     Ok(())
 }
 
