@@ -4,7 +4,7 @@
 use daedalus::prelude::*;
 use gaia_describe::SizeText;
 use gaia_step::{Ctx, StepError, Store};
-use gaia_tree::Owned;
+use gaia_types::Owned;
 use gaia_types::{Artifact, Image, Tree};
 use serde::Deserialize;
 use std::collections::BTreeMap;
