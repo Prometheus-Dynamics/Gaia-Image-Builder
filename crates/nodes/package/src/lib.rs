@@ -18,9 +18,8 @@
 //! content store.
 
 mod archive;
-mod control;
 
-pub use control::Control;
+pub use gaia_types::Control;
 
 /// The libraries this node links, pinned in its Cargo.toml. Its step key names
 /// them, and `tests/libs.rs` checks each version against the pin.

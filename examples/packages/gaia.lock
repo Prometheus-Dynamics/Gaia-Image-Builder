@@ -1,0 +1,7 @@
+# Written by `gaia lock`. Do not edit.
+version = 1
+
+[source."robot-status.files"]
+kind = "tree"
+path = "components/robot-status/files"
+digest = "sha256:424c26ceee90d057cd2707650b4ef1ec1149f67ea222f76e74360451645361d9"

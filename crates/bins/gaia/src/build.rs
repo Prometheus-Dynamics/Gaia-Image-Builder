@@ -22,6 +22,16 @@ pub fn build(options: &args::Project) -> Result<(), Stop> {
     let store = Store::open(&project.setup.store).map_err(Stop::usage)?;
     let mut loaded = LoadedHost::load(planned, LoadOptions::default()).map_err(Stop::usage)?;
 
+    // Values a graph constant can't carry yet (X7), fed before the run.
+    for (port, input) in &project.built.inputs {
+        let fed = match input {
+            gaia_graph::HostInput::Control(control) => {
+                loaded.host().feed_typed(port, Arc::new(control.clone()))
+            }
+        };
+        fed.map_err(|e| Stop::usage(format!("feeding {port}: {e}")))?;
+    }
+
     let cancel = loaded.cancel_handle();
     ctrlc::set_handler(move || {
         if INTERRUPTS.fetch_add(1, Ordering::SeqCst) > 0 {
@@ -113,7 +123,8 @@ pub fn build(options: &args::Project) -> Result<(), Stop> {
 
     let mut outputs = BTreeMap::new();
     if stop.is_none() {
-        let ports = project.built.doc.graph.nodes[0].port_types.clone();
+        let mut ports = project.built.doc.graph.nodes[0].port_types.clone();
+        ports.retain(|port, _| !project.built.inputs.contains_key(port));
         for (port, ty) in ports {
             let object = take(&mut loaded, &port, &ty)?;
             let from = upstream(&project, &port);
