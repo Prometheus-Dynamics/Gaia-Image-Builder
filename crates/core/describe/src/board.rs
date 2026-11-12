@@ -32,6 +32,8 @@ pub struct Board {
     /// Partitions the board needs whatever the layout: the bootloader's raw
     /// area, its environment.
     pub partitions: Vec<PartitionNeed>,
+    /// The disk image's partition table, for a board written as one disk.
+    pub disk: Option<Disk>,
     pub flash: Option<Flash>,
 }
 
@@ -85,6 +87,28 @@ pub struct Firmware {
     pub mode: Option<Mode>,
 }
 
+/// The partition table of the board's disk image.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Disk {
+    /// `gpt` or `mbr`.
+    pub scheme: Option<Scheme>,
+    /// The first byte a partition may use. Unset: 1 MiB.
+    pub first: Option<SizeText>,
+    /// Partitions start on multiples of this. Unset: 1 MiB.
+    pub alignment: Option<SizeText>,
+    /// The disk's size. Unset: as large as its partitions.
+    pub size: Option<SizeText>,
+}
+
+/// A partition table's scheme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Scheme {
+    Gpt,
+    Mbr,
+}
+
 /// A partition the board needs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -133,6 +157,7 @@ struct BoardFile {
     bootloader: Option<Bootloader>,
     firmware: Option<Vec<Firmware>>,
     partitions: Option<Vec<PartitionNeed>>,
+    disk: Option<Disk>,
     flash: Option<Flash>,
 }
 
@@ -199,6 +224,12 @@ impl Board {
             bootloader: merged.bootloader,
             firmware: merged.firmware.unwrap_or_default(),
             partitions: merged.partitions.unwrap_or_default(),
+            disk: match merged.disk {
+                Some(disk) if disk.scheme.is_none() => {
+                    return Err(Error::new(path, "disk.scheme", "missing: `gpt` or `mbr`"));
+                }
+                disk => disk,
+            },
             flash: merged.flash,
         })
     }
@@ -382,6 +413,15 @@ fn merge(board: BoardFile, family: BoardFile) -> BoardFile {
         },
         firmware: board.firmware.or(family.firmware),
         partitions: board.partitions.or(family.partitions),
+        disk: match (board.disk, family.disk) {
+            (Some(b), Some(f)) => Some(Disk {
+                scheme: b.scheme.or(f.scheme),
+                first: b.first.or(f.first),
+                alignment: b.alignment.or(f.alignment),
+                size: b.size.or(f.size),
+            }),
+            (b, f) => b.or(f),
+        },
         flash: match (board.flash, family.flash) {
             (Some(b), Some(f)) => Some(Flash {
                 methods: b.methods.or(f.methods),

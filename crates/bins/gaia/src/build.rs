@@ -28,6 +28,9 @@ pub fn build(options: &args::Project) -> Result<(), Stop> {
             gaia_graph::HostInput::Control(control) => {
                 loaded.host().feed_typed(port, Arc::new(control.clone()))
             }
+            gaia_graph::HostInput::Disk(layout) => {
+                loaded.host().feed_typed(port, Arc::new(layout.clone()))
+            }
         };
         fed.map_err(|e| Stop::usage(format!("feeding {port}: {e}")))?;
     }

@@ -37,10 +37,15 @@ fn keys_and_structures_are_recorded() {
         row::<Account>(),
         row::<AccountGroup>(),
         row::<Control>(),
+        row::<DiskLayout>(),
+        row::<DiskTable>(),
+        row::<DiskPartition>(),
+        row::<RawBlob>(),
         row::<ObjectKind>(),
         row::<ArtifactKind>(),
         row::<ImageKind>(),
         row::<PartitionRole>(),
+        row::<TableScheme>(),
         row::<Arch>(),
         row::<Os>(),
     ];
@@ -71,10 +76,15 @@ const RECORDED: &str = "
     gaia:account db1105887abe30dc
     gaia:account-group cfc99d936f919de5
     gaia:package-control 19dc0ba00ed8499e
+    gaia:disk-layout aece9583c0839b54
+    gaia:disk-table bdf819301870eb86
+    gaia:disk-partition a9f281ead6a6e53c
+    gaia:raw-blob a34597c3a0a074cb
     gaia:object-kind 8ea567075e428736
     gaia:artifact-kind 1ce777e4bb50c505
     gaia:image-kind a54f2ea6cb3fe288
     gaia:partition-role 99251c19cf0fd1aa
+    gaia:table-scheme 1cd54b978d3a0915
     gaia:arch 324560ad7bc366a7
     gaia:os 24c133b1c2ecf3b9
 ";

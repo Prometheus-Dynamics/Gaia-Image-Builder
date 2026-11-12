@@ -87,6 +87,7 @@ impl Project {
                 "host_inputs": self.built.inputs.iter().map(|(port, input)| {
                     let value = match input {
                         gaia_graph::HostInput::Control(c) => serde_json::to_value(c),
+                        gaia_graph::HostInput::Disk(d) => serde_json::to_value(d),
                     };
                     value.map(|value| serde_json::json!({
                         "port": port,

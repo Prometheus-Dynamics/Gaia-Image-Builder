@@ -1,0 +1,12 @@
+version = 1
+name = "state"
+[sources.src]
+path = "src"
+[sources.wheels]
+path = "wheels"
+[build]
+builder = "python"
+source = "src"
+[build.settings]
+platform = ""
+interpreter = "/usr/bin/python3"
