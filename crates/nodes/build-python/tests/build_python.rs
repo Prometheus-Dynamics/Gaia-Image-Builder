@@ -13,6 +13,9 @@ use std::path::Path;
 use std::process::Command;
 
 const PYTHON: &str = "/usr/bin/python3";
+/// The target's interpreter, not the build host's, so the shebang rewrite
+/// changes the scripts' bytes and their RECORD rows must follow.
+const TARGET: &str = "/opt/target/bin/python3";
 
 /// Whether the interpreter can build a wheel offline: pip, and setuptools
 /// new enough to build wheels without the `wheel` package.
@@ -93,7 +96,7 @@ fn build(root: &Path) -> (String, String, u64, std::path::PathBuf) {
         stored(&store, &src),
         stored(&store, &deps),
         "",
-        "/usr/bin/python3",
+        TARGET,
         &Ctx::new(),
     )
     .expect("builds");
@@ -140,7 +143,7 @@ fn a_small_package_builds_offline_twice_to_the_same_digest() {
     assert!(listed.iter().any(|p| p == "site/tinydep/__init__.py"));
     assert!(!listed.iter().any(|p| p.ends_with(".pyc")), "no bytecode");
     let script = std::fs::read_to_string(first.3.join("site/bin/hello")).expect("script");
-    assert!(script.starts_with("#!/usr/bin/python3\n"), "{script}");
+    assert!(script.starts_with(&format!("#!{TARGET}\n")), "{script}");
 
     // The installed tree runs.
     let out = Command::new(PYTHON)
