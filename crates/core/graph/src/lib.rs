@@ -16,7 +16,11 @@
 //! - **Images:** the image's recipe (F1), with the image's settings as its
 //!   parameters, laid out inline: each stage a node labelled
 //!   `<image>::<stage>`. The recipe input `build` takes the image's built
-//!   component. Each recipe output goes to the host as `<image>.<output>`.
+//!   component, and `source` the one source of the image's one component.
+//!   The recipe input `control` takes a host input, `<image>.control`: the
+//!   [`Control`](gaia_types::Control) made from the `[package]` table of the
+//!   image's one component that has one ([`HostInput`]). Each recipe output
+//!   goes to the host as `<image>.<output>`.
 //! - **Everywhere:** an input named `store` gets the store, and one named
 //!   like a [`Setup`] tool gets that tool's path. Every node has
 //!   `daedalus.node.fusion: false`, so fail-fast and cancel stop between
@@ -75,6 +79,43 @@ pub struct Built {
     pub doc: GraphDoc,
     /// By node index.
     pub origins: Vec<Origin>,
+    /// The values the host feeds before the run, by host input port.
+    pub inputs: BTreeMap<String, HostInput>,
+}
+
+/// A structured value from the descriptions that the host feeds into the
+/// graph, because a graph constant cannot be a struct yet (outside block
+/// X7 in `docs/design.md`). Interim: when X7 lands each becomes a constant
+/// in the graph, so a saved graph document is complete on its own.
+///
+/// The node that takes it keys on the whole value, so a changed field is a
+/// new step.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HostInput {
+    /// A package's control data, from a component's `[package]` table.
+    Control(gaia_types::Control),
+}
+
+impl HostInput {
+    /// The Daedalus type key of the value.
+    pub fn type_key(&self) -> &'static str {
+        match self {
+            Self::Control(_) => "gaia:package-control",
+        }
+    }
+
+    /// The value in one line, for `gaia plan`.
+    pub fn summary(&self) -> String {
+        match self {
+            Self::Control(c) => {
+                let mut line = format!("{} {} {}", c.package, c.version, c.architecture);
+                if !c.depends.is_empty() {
+                    line.push_str(&format!(", depends {}", c.depends.join(", ")));
+                }
+                line
+            }
+        }
+    }
 }
 
 /// Builds the graph for `loaded`, pinned by `lock`, with `recipes`, from
@@ -87,7 +128,7 @@ pub fn build(
     setup: &Setup,
     builders: &Builders,
 ) -> Result<Built, Error> {
-    let (body, origins) = wire::wire(loaded, lock, recipes, registry, setup, builders)?;
+    let (body, origins, inputs) = wire::wire(loaded, lock, recipes, registry, setup, builders)?;
     let mut ids: Vec<String> = body
         .nodes
         .iter()
@@ -101,7 +142,11 @@ pub fn build(
         .into_iter()
         .map(|id| Requirement { id, version: None })
         .collect();
-    Ok(Built { doc, origins })
+    Ok(Built {
+        doc,
+        origins,
+        inputs,
+    })
 }
 
 impl Built {

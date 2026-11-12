@@ -36,6 +36,7 @@ fn keys_and_structures_are_recorded() {
         row::<Placement>(),
         row::<Account>(),
         row::<AccountGroup>(),
+        row::<Control>(),
         row::<ObjectKind>(),
         row::<ArtifactKind>(),
         row::<ImageKind>(),
@@ -69,6 +70,7 @@ const RECORDED: &str = "
     gaia:placement b31304eccf6cdec8
     gaia:account db1105887abe30dc
     gaia:account-group cfc99d936f919de5
+    gaia:package-control 19dc0ba00ed8499e
     gaia:object-kind 8ea567075e428736
     gaia:artifact-kind 1ce777e4bb50c505
     gaia:image-kind a54f2ea6cb3fe288

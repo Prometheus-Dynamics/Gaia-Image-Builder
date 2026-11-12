@@ -117,3 +117,73 @@ fn lock_check_names_what_the_lock_lacks() {
     let out = gaia(dir.path(), &["lock", "product.toml", "--update", "nope"]);
     assert_eq!(out.status.code(), Some(2));
 }
+
+/// Copies `from` into `to`, keeping modes.
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).expect("mkdir");
+    for entry in std::fs::read_dir(from).expect("read_dir") {
+        let entry = entry.expect("entry");
+        let (src, dst) = (entry.path(), to.join(entry.file_name()));
+        if entry.file_type().expect("type").is_dir() {
+            copy_dir(&src, &dst);
+        } else {
+            std::fs::copy(&src, &dst).expect("copy");
+        }
+    }
+}
+
+/// The `key` line `gaia show` prints for an output.
+fn shown_key(dir: &Path, output: &str) -> String {
+    let out = gaia(dir, &["show", output]);
+    assert!(out.status.success());
+    String::from_utf8(out.stdout)
+        .expect("utf-8")
+        .lines()
+        .find_map(|line| line.split_once(", key ").map(|(_, key)| key.to_string()))
+        .expect("a step key")
+}
+
+#[test]
+fn a_package_is_built_from_component_files_with_its_control_fed() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../examples/packages");
+    copy_dir(&examples, dir.path());
+    let _ = std::fs::remove_file(dir.path().join("gaia.lock"));
+    assert!(gaia(dir.path(), &["lock", "product.toml"]).status.success());
+
+    // The control data is a host input, and the plan shows it.
+    let out = gaia(dir.path(), &["plan", "product.toml"]);
+    let text = String::from_utf8(out.stdout).expect("utf-8");
+    for want in [
+        "host.robot-status.control -> robot-status::pkg.control",
+        "robot-status.control  gaia:package-control  robot-status 1.2.0 aarch64, depends busybox",
+        "robot-status.ipk  gaia:artifact",
+    ] {
+        assert!(text.contains(want), "no `{want}` in:\n{text}");
+    }
+    let out = gaia(dir.path(), &["plan", "product.toml", "--json"]);
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+    assert_eq!(json["host_inputs"][0]["port"], "robot-status.control");
+    assert_eq!(json["host_inputs"][0]["value"]["version"], "1.2.0");
+
+    assert!(
+        gaia(dir.path(), &["build", "product.toml"])
+            .status
+            .success()
+    );
+    let first = shown_key(dir.path(), "robot-status.ipk");
+
+    // Another version is another step: the fed value is in the key.
+    let component = dir.path().join("components/robot-status/component.toml");
+    let text = std::fs::read_to_string(&component).expect("read");
+    std::fs::write(&component, text.replace("1.2.0", "1.2.1")).expect("write");
+    let out = gaia(dir.path(), &["build", "product.toml"]);
+    assert!(out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("made")
+            || String::from_utf8_lossy(&out.stdout).contains("made"),
+        "the package was made again"
+    );
+    let second = shown_key(dir.path(), "robot-status.ipk");
+    assert_ne!(first, second, "a changed [package] kept the key");
+}
