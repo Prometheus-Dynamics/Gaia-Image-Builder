@@ -1,28 +1,33 @@
-//! The libraries the compress nodes name in their keys are the ones
-//! Cargo.lock resolves.
+//! The libraries the compress nodes name in their keys: the pinned ones are
+//! the versions Cargo.toml pins, and libzstd is the version the linked
+//! library reports.
 
 use gaia_compress::libs;
+use gaia_step::pins::check_pins;
 
-fn check(set: &[(&str, &str)]) {
-    gaia_step::cargo_lock::check_libs(env!("CARGO_MANIFEST_DIR"), set).expect("Cargo.lock");
+#[test]
+fn xz_names_the_pinned_encoder() {
+    check_pins(env!("CARGO_MANIFEST_DIR"), libs::XZ).expect("Cargo.toml");
 }
 
 #[test]
-fn xz_names_the_resolved_encoder() {
-    check(libs::XZ);
+fn gzip_names_the_pinned_encoder() {
+    check_pins(env!("CARGO_MANIFEST_DIR"), libs::GZIP).expect("Cargo.toml");
 }
 
 #[test]
-fn zstd_names_the_resolved_encoder() {
-    check(libs::ZSTD);
+fn tar_names_the_pinned_writer() {
+    check_pins(env!("CARGO_MANIFEST_DIR"), libs::TAR).expect("Cargo.toml");
 }
 
 #[test]
-fn gzip_names_the_resolved_encoder() {
-    check(libs::GZIP);
-}
-
-#[test]
-fn tar_names_the_resolved_writer() {
-    check(libs::TAR);
+fn zstd_names_the_version_libzstd_reports() {
+    let number = zstd::zstd_safe::version_number();
+    let text = format!(
+        "{}.{}.{}",
+        number / 10_000,
+        number / 100 % 100,
+        number % 100
+    );
+    assert_eq!(libs::libzstd(), [("libzstd", text.as_str())]);
 }

@@ -33,20 +33,24 @@ mod out;
 
 pub use out::{Owners, Special};
 
-/// The libraries this node links, by the version Cargo resolved. Its step key
-/// names them, and `tests/libs.rs` checks each version against Cargo.lock.
+/// The libraries this node links, pinned in its Cargo.toml. Its step key names
+/// them, and `tests/libs.rs` checks each version against the pin. libzstd is
+/// keyed on the version the library reports (see [`runtime_libs`]).
 pub const LIBS: &[(&str, &str)] = &[
     ("tar", "0.4.46"),
     ("flate2", "1.1.11"),
     ("miniz_oxide", "0.9.1"),
     ("xz2", "0.1.7"),
     ("lzma-sys", "0.1.20"),
-    ("zstd", "0.13.4"),
-    ("zstd-safe", "7.4.0"),
-    ("zstd-sys", "2.1.2+zstd.1.5.7"),
     ("ext4-view", "1.0.0"),
     ("fatfs", "0.3.6"),
 ];
+
+/// libzstd, as the linked library reports its version (zstd-safe reads it at
+/// run time). The step key names it with [`LIBS`].
+pub fn runtime_libs() -> [(&'static str, &'static str); 1] {
+    [("libzstd", zstd::zstd_safe::version_string())]
+}
 
 use daedalus::prelude::*;
 use disk::{Fs, Part, Slice};
@@ -83,6 +87,7 @@ pub fn os_import(
         .config("boot", boot_part)
         .input("image", object.digest)
         .libs(LIBS)
+        .libs(&runtime_libs())
         .finish();
     let made = Step::new(&store, cx, NAME, key).look_up_or_make(
         &[

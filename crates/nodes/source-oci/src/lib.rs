@@ -26,16 +26,19 @@ mod registry;
 
 pub use reference::Reference;
 
-/// The libraries this node links, by the version Cargo resolved. Its step key
-/// names them, and `tests/libs.rs` checks each version against Cargo.lock.
+/// The libraries this node links, pinned in its Cargo.toml. Its step key names
+/// them, and `tests/libs.rs` checks each version against the pin.
 pub const LIBS: &[(&str, &str)] = &[
     ("flate2", "1.1.11"),
     ("miniz_oxide", "0.9.1"),
     ("tar", "0.4.46"),
-    ("zstd", "0.13.4"),
-    ("zstd-safe", "7.4.0"),
-    ("zstd-sys", "2.1.2+zstd.1.5.7"),
 ];
+
+/// libzstd, as the linked library reports its version (zstd-safe reads it at
+/// run time). The step key names it with [`LIBS`].
+pub fn runtime_libs() -> [(&'static str, &'static str); 1] {
+    [("libzstd", zstd::zstd_safe::version_string())]
+}
 
 use daedalus::prelude::*;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store, Work};
@@ -109,6 +112,7 @@ pub fn source(
         .config("platform", platform.trim())
         .input("manifest", want)
         .libs(LIBS)
+        .libs(&runtime_libs())
         .finish();
     let outputs = [
         ("rootfs", Path::new("rootfs")),

@@ -21,8 +21,8 @@ mod archive;
 
 pub use gaia_types::Control;
 
-/// The libraries this node links, by the version Cargo resolved. Its step key
-/// names them, and `tests/libs.rs` checks each version against Cargo.lock.
+/// The libraries this node links, pinned in its Cargo.toml. Its step key names
+/// them, and `tests/libs.rs` checks each version against the pin.
 pub const LIBS: &[(&str, &str)] = &[
     ("flate2", "1.1.11"),
     ("miniz_oxide", "0.9.1"),

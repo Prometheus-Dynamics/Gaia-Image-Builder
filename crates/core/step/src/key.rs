@@ -43,10 +43,10 @@ impl KeyBuilder {
         self
     }
 
-    /// A format or encoder library the node links, by the version Cargo
-    /// resolved for it. A new version changes the key, so a stateless cache
-    /// never returns an output this code would not make. A test checks the
-    /// version against Cargo.lock (see [`crate::cargo_lock`]).
+    /// A format or encoder library the node links, by its version: the one
+    /// its Cargo.toml pins (see [`crate::pins`]), or the one the library reports
+    /// at run time. A new version changes the key, so a stateless cache never
+    /// returns an output this code would not make.
     pub fn lib(self, name: &str, version: &str) -> Self {
         self.config(&format!("lib {name}"), version)
     }

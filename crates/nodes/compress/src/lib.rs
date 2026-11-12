@@ -22,21 +22,22 @@ pub use tar_tree::tar_tree;
 
 use daedalus::prelude::NodeRecord;
 
-/// The libraries each node links, by the version Cargo resolved. A node's
-/// step key names its set (see `gaia_step::KeyBuilder::lib`), and
-/// `tests/libs.rs` checks each version against Cargo.lock.
+/// The libraries each node links, for its step key (see
+/// `gaia_step::KeyBuilder::lib`). A pinned library's version is the one its
+/// Cargo.toml pins, and `tests/libs.rs` checks it against the pin. libzstd
+/// is keyed on the version the library reports (see [`libs::libzstd`]).
 pub mod libs {
-    /// `gaia.compress.xz`: the xz encoder and its C library.
+    /// `gaia.compress.xz`: the xz encoder and its C library, pinned. lzma-sys
+    /// builds with `static`, so liblzma is the source it bundles (xz 5.2),
+    /// never the system library, and the pin covers it.
     pub const XZ: &[(&str, &str)] = &[("xz2", "0.1.7"), ("lzma-sys", "0.1.20")];
-    /// `gaia.compress.zstd`: the zstd encoder and its C library.
-    pub const ZSTD: &[(&str, &str)] = &[
-        ("zstd", "0.13.4"),
-        ("zstd-safe", "7.4.0"),
-        ("zstd-sys", "2.1.2+zstd.1.5.7"),
-    ];
-    /// `gaia.compress.gzip`: the deflate encoder.
+    /// `gaia.compress.zstd`: libzstd, as the linked library reports its version.
+    pub fn libzstd() -> [(&'static str, &'static str); 1] {
+        [("libzstd", zstd::zstd_safe::version_string())]
+    }
+    /// `gaia.compress.gzip`: the deflate encoder, pinned.
     pub const GZIP: &[(&str, &str)] = &[("flate2", "1.1.11"), ("miniz_oxide", "0.9.1")];
-    /// `gaia.compress.tar`: the tar writer.
+    /// `gaia.compress.tar`: the tar writer, pinned.
     pub const TAR: &[(&str, &str)] = &[("tar", "0.4.46")];
 }
 

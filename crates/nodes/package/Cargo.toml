@@ -13,13 +13,14 @@ daedalus = { workspace = true }
 daedalus-cpu-author = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
 daedalus-registry = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
 daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
-flate2 = "1"
+flate2 = "=1.1.11"
 gaia-step = { path = "../../core/step" }
 gaia-store = { path = "../../core/store" }
 gaia-types = { path = "../../core/types" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tar = "0.4"
+miniz_oxide = "=0.9.1"
+tar = "=0.4.46"
 
 [dev-dependencies]
 tempfile = "3"

@@ -36,6 +36,7 @@ pub fn source_archive(
         .config("strip", strip.to_string())
         .input("archive", object.digest)
         .libs(crate::LIBS)
+        .libs(&crate::runtime_libs())
         .finish();
     let made = Step::new(&store, cx, NAME, key).look_up_or_make(
         &[("tree", Path::new("tree"))],

@@ -24,11 +24,11 @@ impl Format {
         }
     }
 
-    fn libs(self) -> &'static [(&'static str, &'static str)] {
+    fn libs(self) -> Vec<(&'static str, &'static str)> {
         match self {
-            Self::Xz => crate::libs::XZ,
-            Self::Zstd => crate::libs::ZSTD,
-            Self::Gzip => crate::libs::GZIP,
+            Self::Xz => crate::libs::XZ.to_vec(),
+            Self::Zstd => crate::libs::libzstd().to_vec(),
+            Self::Gzip => crate::libs::GZIP.to_vec(),
         }
     }
 
@@ -124,7 +124,7 @@ fn compress(
         .ok_or_else(|| StepError::body(name, "the artifact is not in the store"))?;
     let input = store.path(&object);
     // The thread count is not in the key: the output does not depend on it.
-    let key = codec_key(name, level, object.digest, format.libs());
+    let key = codec_key(name, level, object.digest, &format.libs());
     let made = Step::new(&store, cx, name, key).look_up_or_make(
         &[("compressed", Path::new("compressed"))],
         |work| {

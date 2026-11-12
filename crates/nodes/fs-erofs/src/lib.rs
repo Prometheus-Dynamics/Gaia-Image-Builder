@@ -13,12 +13,12 @@
 //! `mkfs.erofs` is pinned by path; its version is in the key, with the
 //! tree's `owned_digest`, so an owner change remakes the image.
 
-/// The libraries this node links, by the version Cargo resolved. Its step key
-/// names them, and `tests/libs.rs` checks each version against Cargo.lock.
+/// The libraries this node links, pinned in its Cargo.toml. Its step key names
+/// them, and `tests/libs.rs` checks each version against the pin.
 pub const LIBS: &[(&str, &str)] = &[("tar", "0.4.46")];
 
 use daedalus::prelude::*;
-use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store, Tool};
+use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store, Tool, once_per_process};
 use gaia_store::Digest;
 use gaia_types::owned_digest;
 use gaia_types::{FileEntry, Image, ImageKind, Size, Tree};
@@ -58,12 +58,14 @@ pub fn fs_erofs(
         .object
         .path_in(&store)
         .ok_or_else(|| fail("a tree that is not in the store".into()))?;
-    let version = std::process::Command::new(mkfs_erofs)
-        .arg("--version")
-        .env_clear()
-        .output()
-        .map_err(|e| fail(format!("{mkfs_erofs} --version: {e}")))?;
-    let version = [version.stdout, version.stderr].concat();
+    let version = once_per_process(Path::new(mkfs_erofs), || {
+        let out = std::process::Command::new(mkfs_erofs)
+            .arg("--version")
+            .env_clear()
+            .output()?;
+        Ok([out.stdout, out.stderr].concat())
+    })
+    .map_err(|e| fail(format!("{mkfs_erofs} --version: {e}")))?;
     let key = KeyBuilder::new(NAME, 1)
         .config("mkfs.erofs", &version)
         .config("compression", compression)
