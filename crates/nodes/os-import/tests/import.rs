@@ -21,6 +21,10 @@ fn tools() -> Option<[PathBuf; 3]> {
     match (find("mkfs.ext4"), find("debugfs"), find("sfdisk")) {
         (Some(a), Some(b), Some(c)) => Some([a, b, c]),
         missing => {
+            assert!(
+                std::env::var_os("GAIA_REQUIRE_TOOLS").is_none(),
+                "GAIA_REQUIRE_TOOLS is set, and mkfs.ext4, debugfs or sfdisk is missing"
+            );
             let msg = format!("SKIPPED: mkfs.ext4, debugfs or sfdisk missing: {missing:?}");
             assert!(
                 std::env::var("GAIA_REQUIRE_SANDBOX").as_deref() != Ok("1"),

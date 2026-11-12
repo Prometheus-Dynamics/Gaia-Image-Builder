@@ -109,6 +109,10 @@ fn build(jdk: &Path, root: &Path) -> (Vec<(String, u64, String)>, PathBuf) {
 #[test]
 fn a_small_project_builds_offline_twice_to_the_same_digest() {
     let Some(jdk) = jdk() else {
+        assert!(
+            std::env::var_os("GAIA_REQUIRE_TOOLS").is_none(),
+            "GAIA_REQUIRE_TOOLS is set, and no JDK (javac and jar) is here"
+        );
         println!("SKIPPED: no JDK (javac and jar) here");
         return;
     };
@@ -157,6 +161,10 @@ fn a_small_project_builds_offline_twice_to_the_same_digest() {
 #[test]
 fn a_missing_class_is_a_compile_error_with_its_output() {
     let Some(jdk) = jdk() else {
+        assert!(
+            std::env::var_os("GAIA_REQUIRE_TOOLS").is_none(),
+            "GAIA_REQUIRE_TOOLS is set, and no JDK (javac and jar) is here"
+        );
         println!("SKIPPED: no JDK (javac and jar) here");
         return;
     };

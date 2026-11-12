@@ -35,12 +35,32 @@ pub struct Recipe {
     pub consts: BTreeMap<String, toml::Value>,
 }
 
-/// An edge between two stages.
+/// An edge between two stages, or, with a list of sources, one edge from
+/// each into a fan-in port: `to = "merge.layers"` takes them on `layers0`,
+/// `layers1` and so on, in list order.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Connect {
-    pub from: String,
+    pub from: Sources,
     pub to: String,
+}
+
+/// One stage port, or a list of them for a fan-in.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Sources {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl Sources {
+    /// The `stage.port` texts, in order.
+    pub fn ports(&self) -> &[String] {
+        match self {
+            Self::One(one) => std::slice::from_ref(one),
+            Self::Many(many) => many,
+        }
+    }
 }
 
 /// A value the recipe takes.
@@ -116,7 +136,15 @@ impl Recipe {
         }
         let port = |key: String, text: &str| self.port(&key, text).map(drop);
         for (i, c) in self.connects.iter().enumerate() {
-            port(format!("connects[{i}].from"), &c.from)?;
+            if c.from.ports().is_empty() {
+                return Err(self.error(
+                    format!("connects[{i}].from"),
+                    "an empty list; name the stage ports that feed the fan-in",
+                ));
+            }
+            for from in c.from.ports() {
+                port(format!("connects[{i}].from"), from)?;
+            }
             port(format!("connects[{i}].to"), &c.to)?;
         }
         for (name, targets) in &self.inputs {
@@ -216,17 +244,23 @@ pub(crate) fn group(recipe: &Recipe, values: &toml::Table, from: &Path) -> Resul
             });
         }
     }
-    let connects = recipe
-        .connects
-        .iter()
-        .enumerate()
-        .map(|(i, c)| {
-            Ok((
-                recipe.port(&format!("connects[{i}].from"), &c.from)?,
-                recipe.port(&format!("connects[{i}].to"), &c.to)?,
-            ))
-        })
-        .collect::<Result<_, Error>>()?;
+    let mut connects = Vec::new();
+    for (i, c) in recipe.connects.iter().enumerate() {
+        let to = recipe.port(&format!("connects[{i}].to"), &c.to)?;
+        let fan_in = matches!(c.from, Sources::Many(_));
+        for (n, from) in c.from.ports().iter().enumerate() {
+            let from = recipe.port(&format!("connects[{i}].from"), from)?;
+            let to = if fan_in {
+                StagePortDoc {
+                    stage: to.stage.clone(),
+                    port: format!("{}{n}", to.port),
+                }
+            } else {
+                to.clone()
+            };
+            connects.push((from, to));
+        }
+    }
     let inputs = recipe
         .inputs
         .iter()

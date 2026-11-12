@@ -119,6 +119,10 @@ fn stored(store: &Path, dir: &Path) -> Tree {
 #[test]
 fn a_small_app_builds_offline_twice_to_the_same_digest() {
     let Some(home) = node_home() else {
+        assert!(
+            std::env::var_os("GAIA_REQUIRE_TOOLS").is_none(),
+            "GAIA_REQUIRE_TOOLS is set, and node and npm are missing"
+        );
         println!("SKIPPED: no node and npm here");
         return;
     };
@@ -202,6 +206,10 @@ fn list(root: &Path, dir: &Path, out: &mut Vec<String>) {
 #[test]
 fn a_dependency_missing_from_the_cache_fails_offline() {
     let Some(home) = node_home() else {
+        assert!(
+            std::env::var_os("GAIA_REQUIRE_TOOLS").is_none(),
+            "GAIA_REQUIRE_TOOLS is set, and node and npm are missing"
+        );
         println!("SKIPPED: no node and npm here");
         return;
     };
