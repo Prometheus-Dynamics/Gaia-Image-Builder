@@ -6,6 +6,7 @@ use crate::record::{self, Origin, Output, Run};
 use crate::{CANCELLED, FAILED, Stop, args};
 use daedalus::prelude::{LoadOptions, LoadedHost};
 use daedalus::runner::{FailurePolicy, Lanes, Pool, RunError};
+use gaia_progress::{Reader, Watch};
 use gaia_step::{logs_dir, now_ns, step_records};
 use gaia_store::{ObjectRef, Store};
 use gaia_types::{Artifact, Tree};
@@ -37,6 +38,12 @@ pub fn build(options: &args::Project) -> Result<(), Stop> {
             .unwrap_or(1)
     });
     let start_ns = now_ns();
+    let watch = Watch::start(gaia_progress::Options::for_stderr(
+        logs_dir(&store),
+        std::process::id(),
+        start_ns,
+        project.built.doc.graph.nodes.len().saturating_sub(1),
+    ));
     let result = {
         let runner = loaded.host().runner();
         runner.set_failure_policy(FailurePolicy::DEFAULT.with_fail_fast(true));
@@ -46,6 +53,7 @@ pub fn build(options: &args::Project) -> Result<(), Stop> {
         }
     };
     let end_ns = now_ns();
+    watch.finish();
 
     let pid = std::process::id();
     let steps: Vec<record::Step> = step_records(&logs_dir(&store))
@@ -59,14 +67,6 @@ pub fn build(options: &args::Project) -> Result<(), Stop> {
             outputs: r.outputs,
         })
         .collect();
-    for step in &steps {
-        println!(
-            "{:5} {:>8} ms  {}",
-            if step.made { "made" } else { "hit" },
-            step.ms,
-            step.step
-        );
-    }
 
     let (outcome, stop) = match result {
         Ok(()) => ("done", None),
@@ -85,14 +85,22 @@ pub fn build(options: &args::Project) -> Result<(), Stop> {
             )
         }
         Err(e) => {
-            let mut message = format!("the build failed: {e:?}");
+            let mut message = String::new();
             for fault in loaded.fault_reports() {
                 let at = fault
                     .at
                     .map(str::to_string)
                     .unwrap_or_else(|| fault.covers.join(" + "));
-                message.push_str(&format!("\n  {at}: {}", fault.reason()));
+                let reason = fault.reason();
+                let log = gaia_progress::reason_step(reason).and_then(|step| {
+                    Reader::new(logs_dir(&store), std::process::id(), start_ns).failed_log(step)
+                });
+                message.push_str(&gaia_progress::failure(&at, reason, log.as_deref()));
             }
+            if message.is_empty() {
+                message = format!("the build failed: {e:?}");
+            }
+            let message = message.trim_end().to_string();
             (
                 "failed",
                 Some(Stop {

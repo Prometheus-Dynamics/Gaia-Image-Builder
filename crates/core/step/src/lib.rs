@@ -47,6 +47,6 @@ pub use daedalus_cpu_author::Ctx;
 pub use error::{ErrorKind, StepError, code};
 pub use gaia_store::{Check, Digest, ObjectRef, StepKey, Store};
 pub use key::KeyBuilder;
-pub use log::{StepRecord, logs_dir, now_ns, step_records};
+pub use log::{StepRecord, logs_dir, now_ns, step_records, step_records_from};
 pub use step::{Made, Step, Work};
 pub use tool::{Stream, Tool, ToolOutput};
