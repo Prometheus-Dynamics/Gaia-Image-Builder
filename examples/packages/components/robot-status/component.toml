@@ -1,0 +1,17 @@
+version = 1
+name = "robot-status"
+description = "Prints the robot's status at login"
+
+[sources.files]
+path = "files"
+
+[package]
+version = "1.2.0"
+architecture = "aarch64"
+maintainer = "Gaia examples <examples@invalid>"
+description = """
+Prints the robot's status at login
+A small shell script and its configuration, packaged from the files
+this component ships.
+"""
+depends = ["busybox"]

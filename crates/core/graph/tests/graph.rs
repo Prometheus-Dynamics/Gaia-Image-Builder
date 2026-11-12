@@ -34,6 +34,7 @@ ref = "master"
 path = "vendor"
 [sources.root]
 image = "{IMAGE}"
+platform = "host"
 [build]
 builder = "rust"
 source = "src"
@@ -214,6 +215,22 @@ fn the_a2_product_is_one_planned_graph() {
         assert_eq!(
             node.metadata.get(STEP),
             node.label.clone().map(Lit::Str).as_ref()
+        );
+    }
+    // A builder's root is pulled for the machine running the build, also on
+    // the aarch64 board.
+    let host = match std::env::consts::ARCH {
+        "x86_64" => "linux/amd64",
+        "aarch64" => "linux/arm64",
+        other => panic!("no platform for {other}"),
+    };
+    for root in [3, 8] {
+        let node = &built.doc.graph.nodes[root];
+        assert_eq!(
+            node.consts.get("platform"),
+            Some(&Lit::Str(host.into())),
+            "{:?}",
+            node.label
         );
     }
     let git = &built.doc.graph.nodes[2];

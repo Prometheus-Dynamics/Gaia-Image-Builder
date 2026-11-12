@@ -302,3 +302,15 @@ fn product_errors_name_file_and_key() {
     assert_eq!(error.file, dir.path().join("gone.toml"));
     assert!(error.message.contains("cannot read"), "{error}");
 }
+
+#[test]
+fn a_package_without_a_description_names_package_description() {
+    let dir = files(&[(
+        "c/component.toml",
+        "version = 1\nname = \"c\"\n[package]\nversion = \"1\"\narchitecture = \"all\"\nmaintainer = \"m\"\n",
+    )]);
+    let path = dir.path().join("c/component.toml");
+    let error = Component::read(&path).expect_err("an error");
+    println!("{error}");
+    assert_names(&error, &path, "package.description", "needs a description");
+}

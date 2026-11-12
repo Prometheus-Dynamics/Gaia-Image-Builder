@@ -84,6 +84,16 @@ impl Project {
                     &self.built.doc.to_json().map_err(Stop::usage)?
                 ).map_err(Stop::usage)?,
                 "plan": explain,
+                "host_inputs": self.built.inputs.iter().map(|(port, input)| {
+                    let value = match input {
+                        gaia_graph::HostInput::Control(c) => serde_json::to_value(c),
+                    };
+                    value.map(|value| serde_json::json!({
+                        "port": port,
+                        "type": input.type_key(),
+                        "value": value,
+                    }))
+                }).collect::<Result<Vec<_>, _>>().map_err(Stop::usage)?,
             });
             println!(
                 "{}",
@@ -135,9 +145,19 @@ impl Project {
                 .collect();
             println!("  {:>3}  {}", n + 1, covers.join(" + "));
         }
+        if !self.built.inputs.is_empty() {
+            // Fed by `gaia build` before the run; graph constants once
+            // Daedalus has struct constants (X7).
+            println!("\nhost inputs:");
+            for (port, input) in &self.built.inputs {
+                println!("  {port}  {}  {}", input.type_key(), input.summary());
+            }
+        }
         println!("\noutputs:");
         for (port, ty) in &graph.nodes[0].port_types {
-            println!("  {port}  {ty}");
+            if !self.built.inputs.contains_key(port) {
+                println!("  {port}  {ty}");
+            }
         }
         Ok(())
     }
