@@ -1,0 +1,13 @@
+# A product whose output is an .ipk for a SystemCore-style device's
+# installer, built from one component's files.
+version = 1
+name = "robot-status"
+
+[components]
+robot-status = "components/robot-status/component.toml"
+
+[[images]]
+name = "robot-status"
+board = "boards/systemcore/board.toml"
+components = ["robot-status"]
+recipe = "ipk"

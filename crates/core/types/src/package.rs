@@ -1,5 +1,6 @@
-//! The control data a package carries: the component description's fields,
-//! checked, and the control file text opkg and dpkg read.
+//! The control data a package carries: the component description's
+//! `[package]` fields, checked, and the control file text opkg and dpkg
+//! read.
 
 use daedalus::prelude::Type;
 use serde::{Deserialize, Serialize};

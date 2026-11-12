@@ -1,0 +1,4 @@
+#!/bin/sh
+# Prints the robot's status, from /etc/robot-status.conf.
+. /etc/robot-status.conf
+echo "robot ${ROBOT_NAME}: $(cut -d' ' -f1 /proc/uptime)s up"
