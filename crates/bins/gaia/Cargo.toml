@@ -36,6 +36,7 @@ gaia-lock = { path = "../../core/lock" }
 gaia-lock-cmd = { path = "../gaia-lock" }
 gaia-os-import = { path = "../../nodes/os-import" }
 gaia-os-buildroot = { path = "../../nodes/os-buildroot" }
+gaia-kernel-module = { path = "../../nodes/kernel-module" }
 gaia-os-buildroot-cache = { path = "../../nodes/os-buildroot-cache" }
 gaia-os-none = { path = "../../nodes/os-none" }
 gaia-package = { path = "../../nodes/package" }

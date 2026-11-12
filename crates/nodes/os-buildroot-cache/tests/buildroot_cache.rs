@@ -168,15 +168,16 @@ fn offline_build() {
         jobs: jobs(),
         download_dir: dl.display().to_string(),
     };
-    let (rootfs, _kernel, _dt, _modules, _bootloader, images, config) = os_buildroot(
-        &store_dir.display().to_string(),
-        source,
-        fragments,
-        Vec::new(),
-        host,
-        &Ctx::new(),
-    )
-    .expect("the offline Buildroot build");
+    let (rootfs, _kernel, _dt, _modules, _bootloader, images, config, _kernel_build, _toolchain) =
+        os_buildroot(
+            &store_dir.display().to_string(),
+            source,
+            fragments,
+            Vec::new(),
+            host,
+            &Ctx::new(),
+        )
+        .expect("the offline Buildroot build");
     let made = step_records(&logs_dir(&store))
         .into_iter()
         .rev()
