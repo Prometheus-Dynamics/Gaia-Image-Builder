@@ -130,6 +130,10 @@ fn build(
 fn twice(triple: &str, cpu: &str) {
     let toolchain = toolchain();
     if !has_target(&toolchain, triple) {
+        assert!(
+            std::env::var_os("GAIA_REQUIRE_TOOLS").is_none(),
+            "GAIA_REQUIRE_TOOLS is set, and the toolchain has no std for a target the test builds"
+        );
         println!(
             "SKIPPED: the toolchain at {} has no std for {triple}",
             toolchain.display()

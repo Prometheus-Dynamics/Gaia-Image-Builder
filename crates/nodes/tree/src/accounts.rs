@@ -2,10 +2,9 @@
 //! base's account files.
 
 use crate::walk::make_dirs;
-use crate::{Account, AccountGroup, Layer};
 use daedalus::prelude::*;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store};
-use gaia_types::{FileEntry, Tree};
+use gaia_types::{Account, AccountGroup, FileEntry, Layer, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 

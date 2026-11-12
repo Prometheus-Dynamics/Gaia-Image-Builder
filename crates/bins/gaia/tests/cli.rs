@@ -102,3 +102,17 @@ fn wrong_input_exits_2_naming_the_file() {
     let out = gaia(dir.path(), &["clean", "--dry-run"]);
     assert!(out.status.success());
 }
+
+#[test]
+fn lock_check_names_what_the_lock_lacks() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    product(dir.path());
+    // The fixture's lock pins the git source only; the vendor directory is
+    // a source too.
+    let out = gaia(dir.path(), &["lock", "product.toml", "--check"]);
+    assert_eq!(out.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(text.contains("not in the lock: hello.vendor"), "{text}");
+    let out = gaia(dir.path(), &["lock", "product.toml", "--update", "nope"]);
+    assert_eq!(out.status.code(), Some(2));
+}

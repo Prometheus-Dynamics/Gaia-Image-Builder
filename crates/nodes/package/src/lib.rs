@@ -26,7 +26,7 @@ use archive::{control_tar, finish_gz, gz_file, tree_tar, write_ar};
 use daedalus::prelude::*;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store};
 use gaia_store::{Digest, file_digest};
-use gaia_tree::owned_digest;
+use gaia_types::owned_digest;
 use gaia_types::{Artifact, ArtifactKind, Tree};
 use serde_json::json;
 use std::fs::File;

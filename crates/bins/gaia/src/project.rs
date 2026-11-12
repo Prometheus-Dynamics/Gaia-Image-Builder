@@ -143,7 +143,8 @@ impl Project {
     }
 }
 
-/// Every node Gaia has.
+/// Every node Gaia has. A crate under `crates/nodes` missing here fails
+/// the `every_node_crate_is_registered` test.
 pub fn registry() -> Registry {
     let mut registry = Registry::new();
     let all: &[&[_]] = &[
@@ -158,11 +159,20 @@ pub fn registry() -> Registry {
         &gaia_build_python::NODES,
         &gaia_os_none::NODES,
         &gaia_os_import::NODES,
+        &gaia_os_buildroot::NODES,
         &gaia_tree::NODES,
         &gaia_compress::NODES,
         &gaia_fs_ext4::NODES,
         &gaia_fs_erofs::NODES,
         &gaia_sign::NODES,
+        &gaia_fs_vfat::NODES,
+        &gaia_fs_ubi::NODES,
+        &gaia_initramfs::NODES,
+        &gaia_strip::NODES,
+        &gaia_verity::NODES,
+        &gaia_disk::NODES,
+        &gaia_package::NODES,
+        &gaia_check::NODES,
     ];
     for nodes in all {
         registry
@@ -232,4 +242,38 @@ fn on_path(program: &str) -> Option<PathBuf> {
     std::env::split_paths(&std::env::var_os("PATH")?)
         .map(|dir| dir.join(program))
         .find(|path| path.is_file())
+}
+
+#[cfg(test)]
+mod tests {
+    /// Every crate in `crates/nodes` is a dependency here, so its nodes can
+    /// be in [`super::registry`].
+    #[test]
+    fn every_node_crate_is_registered() {
+        let here = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let manifest = std::fs::read_to_string(here.join("Cargo.toml")).expect("manifest");
+        let source = std::fs::read_to_string(here.join("src/project.rs")).expect("source");
+        let mut missing = Vec::new();
+        for entry in std::fs::read_dir(here.join("../../nodes")).expect("nodes") {
+            let dir = entry.expect("entry").path();
+            let Ok(text) = std::fs::read_to_string(dir.join("Cargo.toml")) else {
+                continue;
+            };
+            let name = text
+                .lines()
+                .find_map(|l| l.strip_prefix("name = \""))
+                .and_then(|l| l.strip_suffix('"'))
+                .expect("a package name");
+            let module = name.replace('-', "_");
+            if !manifest.contains(&format!("\n{name} = "))
+                || !source.contains(&format!("&{module}::NODES"))
+            {
+                missing.push(name.to_string());
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "not registered in the gaia command: {missing:?}"
+        );
+    }
 }
