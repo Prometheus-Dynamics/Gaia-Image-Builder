@@ -18,6 +18,11 @@ fn write(path: &Path, text: &str) {
     std::fs::write(path, text).expect("write");
 }
 
+/// The image a builder runs in: debian:trixie-slim, pinned by its index digest.
+const IMAGE: &str = "docker.io/library/debian:trixie-slim";
+const IMAGE_DIGEST: &str =
+    "sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2";
+
 fn component(triple: &str, cpu: &str, name: &str) -> String {
     format!(
         r#"version = 1
@@ -27,6 +32,8 @@ git = "{URL}"
 ref = "master"
 [sources.vendor]
 path = "vendor"
+[sources.root]
+image = "{IMAGE}"
 [build]
 builder = "rust"
 source = "src"
@@ -96,6 +103,13 @@ fn lock() -> Lock {
                 commit: COMMIT.into(),
             },
         );
+        lock.entries.insert(
+            format!("{name}.root"),
+            Entry::Image {
+                reference: IMAGE.into(),
+                digest: IMAGE_DIGEST.into(),
+            },
+        );
     }
     lock
 }
@@ -112,16 +126,22 @@ fn registry() -> Registry {
     registry
         .register_all(&gaia_compress::NODES)
         .expect("compress");
+    registry.register_all(&gaia_source_oci::NODES).expect("oci");
     registry
 }
 
 fn setup() -> Setup {
     Setup {
         store: PathBuf::from("/var/lib/gaia/store"),
-        tools: [("git", "/usr/bin/git"), ("toolchain", "/opt/rust/1.99.0")]
-            .into_iter()
-            .map(|(a, b)| (a.to_string(), b.to_string()))
-            .collect(),
+        tools: [
+            ("git", "/usr/bin/git"),
+            ("curl", "/usr/bin/curl"),
+            ("bwrap", "/usr/bin/bwrap"),
+            ("toolchain", "/opt/rust/1.99.0"),
+        ]
+        .into_iter()
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect(),
     }
 }
 
@@ -157,6 +177,7 @@ fn the_a2_product_is_one_planned_graph() {
             "gaia.build.rust",
             "gaia.compress.tar",
             "gaia.source.git",
+            "gaia.source.oci",
             "gaia.source.path"
         ]
     );
@@ -173,10 +194,12 @@ fn the_a2_product_is_one_planned_graph() {
             "host",
             "hello-a.build",
             "hello-a.src",
+            "hello-a.root",
             "hello-a.vendor",
             "a::tar",
             "hello-b.build",
             "hello-b.src",
+            "hello-b.root",
             "hello-b.vendor",
             "b::tar"
         ]
@@ -200,7 +223,7 @@ fn the_a2_product_is_one_planned_graph() {
     let planned = built.plan(&registry).expect("plans");
     let explain = explain_plan(&planned);
     println!("{}", serde_json::to_string_pretty(&explain).expect("json"));
-    assert_eq!(explain.nodes.len(), 9);
+    assert_eq!(explain.nodes.len(), 11);
 }
 
 #[test]
