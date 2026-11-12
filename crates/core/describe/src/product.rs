@@ -36,6 +36,10 @@ pub struct ImageSpec {
     /// Names from `[components]`.
     #[serde(default)]
     pub components: Vec<String>,
+    /// Names from `[components]` whose built trees fill the image's data
+    /// partition: a recipe's `data` input.
+    #[serde(default)]
+    pub data: Vec<String>,
     /// The recipe that lays out the image.
     pub recipe: String,
     /// The most the image may be.
@@ -77,7 +81,10 @@ impl Product {
                     format!("`{}` names another image too", image.name),
                 ));
             }
-            for (at, name) in image.components.iter().enumerate() {
+            let lists = [("components", &image.components), ("data", &image.data)];
+            for (list, at, name) in lists.iter().flat_map(|(list, names)| {
+                names.iter().enumerate().map(move |(at, n)| (*list, at, n))
+            }) {
                 if !known.contains(name) {
                     let mut message = format!("no component named `{name}` in [components]");
                     if let Some(near) = read::closest(name, &known) {
@@ -85,7 +92,7 @@ impl Product {
                     }
                     return Err(Error::new(
                         path,
-                        format!("images[{index}].components[{at}]"),
+                        format!("images[{index}].{list}[{at}]"),
                         message,
                     ));
                 }

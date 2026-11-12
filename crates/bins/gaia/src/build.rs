@@ -9,7 +9,7 @@ use daedalus::runner::{FailurePolicy, Lanes, Pool, RunError};
 use gaia_progress::{Reader, Watch};
 use gaia_step::{logs_dir, now_ns, step_records};
 use gaia_store::{ObjectRef, Store};
-use gaia_types::{Artifact, Tree};
+use gaia_types::{Artifact, Image, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -163,6 +163,14 @@ fn take(loaded: &mut LoadedHost, port: &str, ty: &str) -> Result<ObjectRef, Stop
                 .ok_or_else(missing)?
                 .object
         }
+        "gaia:image" => {
+            loaded
+                .host()
+                .take::<Image>(port)
+                .map_err(Stop::usage)?
+                .ok_or_else(missing)?
+                .object
+        }
         "gaia:tree" => {
             loaded
                 .host()
@@ -173,7 +181,7 @@ fn take(loaded: &mut LoadedHost, port: &str, ty: &str) -> Result<ObjectRef, Stop
         }
         other => {
             return Err(Stop::usage(format!(
-                "output `{port}` is a {other}; gaia keeps artifacts and trees"
+                "output `{port}` is a {other}; gaia keeps artifacts, images and trees"
             )));
         }
     };

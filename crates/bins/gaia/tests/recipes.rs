@@ -21,6 +21,8 @@ const TOOLS: &[(&str, &str)] = &[
     ("toolchain", "/opt/toolchain"),
     ("mkfs_erofs", "/opt/tools/mkfs.erofs"),
     ("veritysetup", "/opt/tools/veritysetup"),
+    ("mke2fs", "/opt/tools/mke2fs"),
+    ("debugfs", "/opt/tools/debugfs"),
     ("git", "/usr/bin/git"),
     ("curl", "/usr/bin/curl"),
     ("bwrap", "/usr/bin/bwrap"),
@@ -66,6 +68,12 @@ fn product(dir: &Path, examples: &Path, name: &str, recipe: &gaia_recipe::Recipe
         ),
     )
     .expect("lock");
+    // A recipe that takes `data` gets the test component as its data too.
+    let data = if recipe.inputs.contains_key("data") {
+        "data = [\"test-tree\"]\n"
+    } else {
+        ""
+    };
     let mut settings = String::new();
     for (key, param) in &recipe.parameters {
         if param.default.is_none() {
@@ -75,7 +83,7 @@ fn product(dir: &Path, examples: &Path, name: &str, recipe: &gaia_recipe::Recipe
     std::fs::write(
         dir.join("product.toml"),
         format!(
-            "version = 1\nname = \"{name}\"\n[components]\ntest-tree = \"components/test-tree/component.toml\"\n\n[[images]]\nname = \"img\"\nboard = \"boards/generic-test/board.toml\"\ncomponents = [\"test-tree\"]\nrecipe = \"{name}\"\n\n[images.settings]\n{settings}"
+            "version = 1\nname = \"{name}\"\n[components]\ntest-tree = \"components/test-tree/component.toml\"\n\n[[images]]\nname = \"img\"\nboard = \"boards/generic-test/board.toml\"\ncomponents = [\"test-tree\"]\n{data}recipe = \"{name}\"\n\n[images.settings]\n{settings}"
         ),
     )
     .expect("product");
@@ -126,4 +134,35 @@ fn every_recipe_plans_for_the_generic_test_board() {
         assert!(text.contains("\nplan: "), "recipe {name}: no plan:\n{text}");
         assert!(!dir.path().join("store").exists(), "plan touched the store");
     }
+}
+
+#[test]
+fn a_data_recipe_without_a_data_component_names_images_data() {
+    let repo = repo();
+    let recipes_dir = repo.join("recipes");
+    let recipes = Recipes::load_dir(&recipes_dir).expect("the recipes load");
+    let recipe = &recipes.by_name["data-ext4"];
+    let dir = tempfile::tempdir().expect("tempdir");
+    product(dir.path(), &repo.join("examples"), "data-ext4", recipe);
+    let text = std::fs::read_to_string(dir.path().join("product.toml")).expect("product");
+    std::fs::write(
+        dir.path().join("product.toml"),
+        text.replace("data = [\"test-tree\"]\n", ""),
+    )
+    .expect("product");
+    let out = Command::new(env!("CARGO_BIN_EXE_gaia"))
+        .args(["plan", "product.toml", "--recipes"])
+        .arg(&recipes_dir)
+        .current_dir(dir.path())
+        .env("GAIA_STORE", dir.path().join("store"))
+        .output()
+        .expect("gaia runs");
+    let error = String::from_utf8_lossy(&out.stderr);
+    println!("{error}");
+    assert!(!out.status.success());
+    assert!(
+        error.contains("images[0].data")
+            && error.contains("takes one built component as `data`; this image has 0"),
+        "{error}"
+    );
 }
