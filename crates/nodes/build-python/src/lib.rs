@@ -15,19 +15,25 @@
 //!   no bytecode is written (`--no-compile`), the project is built from a
 //!   copy at a fixed place in the step's directory, and installed scripts
 //!   start `#!<interpreter>`, the target's Python, not the build host's.
+//! - **Consistent records:** rewriting a script changes its bytes, so each
+//!   installed `.dist-info/RECORD` gets the new hash and size of every file
+//!   it lists. The rows are otherwise kept as pip wrote them.
 //!
 //! The outputs are a tree with `wheels/<the built wheel>` and `site/` (the
 //! installed packages and `bin/` scripts, as `pip install --target` lays
 //! them out), and the built wheel as an artifact.
 
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use daedalus::prelude::*;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store, Tool};
 use gaia_types::{Artifact, ArtifactKind, Tree};
 use std::path::{Path, PathBuf};
 
 const NAME: &str = "gaia.build.python";
-/// Changes when how the build is run changes.
-const RECIPE_VERSION: u32 = 1;
+/// Changes when how the build is run changes. 2: RECORD follows the
+/// rewritten scripts.
+const RECIPE_VERSION: u32 = 2;
 /// 1980-01-01, the earliest time a zip holds.
 const EPOCH: &str = "315532800";
 
@@ -158,6 +164,7 @@ pub fn build_python(
             }
             work.run(&install.arg(&project))?;
             reshebang(&site.join("bin"), interpreter).map_err(fail)?;
+            rerecord(&site).map_err(fail)?;
             for d in [&src, &tmp, &dir.join("home")] {
                 std::fs::remove_dir_all(d).map_err(fail)?;
             }
@@ -213,6 +220,80 @@ fn reshebang(bin: &Path, interpreter: &str) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Gives each `.dist-info/RECORD` directly under `site` the hash and size
+/// of every file it lists, as the files are now. A row with no hash (the
+/// RECORD's own row) is kept as it is.
+fn rerecord(site: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(site)? {
+        let info = entry?.path();
+        if !info.is_dir() || !info.extension().is_some_and(|x| x == "dist-info") {
+            continue;
+        }
+        let record = info.join("RECORD");
+        let text = std::fs::read_to_string(&record)?;
+        let mut out = String::with_capacity(text.len());
+        for line in text.lines().filter(|l| !l.is_empty()) {
+            let (path, rest) = split_record_row(line).ok_or_else(|| {
+                std::io::Error::other(format!("{}: bad row {line:?}", record.display()))
+            })?;
+            if rest.split(',').next().unwrap_or_default().is_empty() {
+                out.push_str(line);
+            } else {
+                let file = record_file(site, &path);
+                let digest = gaia_store::file_digest(&file)
+                    .map_err(|e| std::io::Error::other(e.to_string()))?;
+                let size = std::fs::metadata(&file)?.len();
+                out.push_str(&format!(
+                    "{},sha256={},{size}",
+                    quote_record_path(&path),
+                    URL_SAFE_NO_PAD.encode(digest.as_bytes())
+                ));
+            }
+            out.push('\n');
+        }
+        std::fs::write(&record, out)?;
+    }
+    Ok(())
+}
+
+/// The file a RECORD row names, under `site`. pip writes a target's scripts
+/// as paths that climb out of it (`../../bin/x`), and the file is `bin/x`
+/// under `site`, so the leading `../` are dropped.
+fn record_file(site: &Path, path: &str) -> PathBuf {
+    site.join(path.trim_start_matches("../"))
+}
+
+/// The path and the rest of a RECORD row (`hash,size`), read as CSV: a path
+/// with a comma or a quote is quoted, and a quote inside it is doubled.
+fn split_record_row(line: &str) -> Option<(String, &str)> {
+    let Some(quoted) = line.strip_prefix('"') else {
+        let (path, rest) = line.split_once(',')?;
+        return Some((path.to_string(), rest));
+    };
+    let mut path = String::new();
+    let mut chars = quoted.char_indices().peekable();
+    while let Some((at, c)) = chars.next() {
+        if c != '"' {
+            path.push(c);
+        } else if matches!(chars.peek(), Some((_, '"'))) {
+            path.push('"');
+            chars.next();
+        } else {
+            return Some((path, quoted.get(at + 1..)?.strip_prefix(',')?));
+        }
+    }
+    None
+}
+
+/// A path as a RECORD row writes it: quoted if it needs quotes.
+fn quote_record_path(path: &str) -> String {
+    if path.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", path.replace('"', "\"\""))
+    } else {
+        path.to_string()
+    }
 }
 
 /// Copies a directory: files with their modes, symlinks as links.

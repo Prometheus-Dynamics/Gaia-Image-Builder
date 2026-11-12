@@ -1,5 +1,9 @@
 //! A small project with a console script and a dependency from a wheel,
-//! built twice in two stores: the same digests.
+//! built twice in two stores: the same digests. The installed RECORDs match
+//! their files, and `pip check` passes on the installed tree.
+//!
+//! Without Python and pip the tests say SKIPPED, unless `GAIA_REQUIRE_TOOLS=1`,
+//! when they fail.
 
 use gaia_build_python::build_python;
 use gaia_step::Ctx;
@@ -19,6 +23,10 @@ fn available() -> bool {
             .status()
             .is_ok_and(|s| s.success());
     if !ok {
+        assert!(
+            std::env::var_os("GAIA_REQUIRE_TOOLS").is_none(),
+            "GAIA_REQUIRE_TOOLS is set, and {PYTHON} has no pip with setuptools >= 70.1"
+        );
         println!("SKIPPED: {PYTHON} has no pip with setuptools >= 70.1");
     }
     ok
@@ -144,6 +152,78 @@ fn a_small_package_builds_offline_twice_to_the_same_digest() {
     let text = String::from_utf8_lossy(&out.stdout);
     println!("runs: {}", text.trim());
     assert_eq!(text.trim(), "hello 42");
+}
+
+/// Every RECORD row that has a hash names a file whose sha256 (urlsafe
+/// base64, no padding) and size are the ones RECORD gives. Python's own
+/// hashlib checks them, not the code under test.
+#[test]
+fn installed_records_match_their_files() {
+    if !available() {
+        return;
+    }
+    let root = tempfile::tempdir().expect("tempdir");
+    let (_, _, _, out) = build(root.path());
+    let site = out.join("site");
+
+    let check = r#"
+import base64, csv, glob, hashlib, os, sys
+site = sys.argv[1]
+bad, checked = [], []
+for info in sorted(glob.glob(os.path.join(site, '*.dist-info'))):
+    with open(os.path.join(info, 'RECORD'), newline='') as f:
+        for path, digest, size in csv.reader(f):
+            if not digest:
+                continue
+            # pip writes a target's scripts as '../../bin/x'; the file is bin/x.
+            rel = path
+            while rel.startswith('../'):
+                rel = rel[3:]
+            data = open(os.path.join(site, rel), 'rb').read()
+            want = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b'=').decode()
+            checked.append(path)
+            if digest != 'sha256=' + want or int(size) != len(data):
+                bad.append(path)
+for path in checked:
+    print('checked', path)
+for path in bad:
+    print('stale', path)
+sys.exit(1 if bad or not checked else 0)
+"#;
+    let run = Command::new(PYTHON)
+        .arg("-c")
+        .arg(check)
+        .arg(&site)
+        .output()
+        .expect("python");
+    let text = String::from_utf8_lossy(&run.stdout);
+    print!("{text}");
+    assert!(run.status.success(), "RECORD does not match the files");
+    assert!(text.contains("bin/hello"), "the script is checked: {text}");
+
+    // A fresh venv (its own pip, no system packages) with the installed tree
+    // on its path: pip check finds nothing broken in the tree.
+    let venv = root.path().join("venv");
+    let made = Command::new(PYTHON)
+        .args(["-m", "venv"])
+        .arg(&venv)
+        .output()
+        .expect("venv");
+    assert!(made.status.success(), "venv: {made:?}");
+    let pip = Command::new(venv.join("bin/python"))
+        .args(["-m", "pip", "check"])
+        .env("PYTHONPATH", &site)
+        .env("PYTHONDONTWRITEBYTECODE", "1")
+        .env("PIP_NO_INPUT", "1")
+        .env("PIP_NO_CACHE_DIR", "1")
+        .env("PIP_CONFIG_FILE", "/dev/null")
+        .env("PIP_DISABLE_PIP_VERSION_CHECK", "1")
+        .output()
+        .expect("pip");
+    let report = String::from_utf8_lossy(&pip.stdout);
+    print!("pip check: {report}");
+    assert!(pip.status.success(), "pip check failed: {report}");
+    assert!(report.contains("No broken requirements found"), "{report}");
 }
 
 fn list(root: &Path, dir: &Path, out: &mut Vec<String>) {
