@@ -13,11 +13,13 @@ daedalus = { workspace = true }
 daedalus-cpu-author = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
 daedalus-registry = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
 daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+gaia-sandbox = { path = "../../core/sandbox" }
 gaia-step = { path = "../../core/step" }
 gaia-store = { path = "../../core/store" }
 gaia-types = { path = "../../core/types" }
 
 [dev-dependencies]
+gaia-source-oci = { path = "../source-oci" }
 tempfile = "3"
 
 [lints]
