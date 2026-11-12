@@ -83,7 +83,7 @@ pub struct KernelModuleHost {
 /// Builds the modules `names` from `module`, against the kernel build tree
 /// `kernel-build` and the `toolchain` it was built with, and places them in a
 /// copy of the image's `kernel-modules` with depmod's index. See the module docs.
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 #[node(
     id = "gaia.kernel-module",
     inputs(store, module, kernel_build, toolchain, kernel_modules, names, host),
