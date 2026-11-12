@@ -52,6 +52,19 @@ fn a_second_run_with_the_same_key_does_not_run_the_body() {
 
     // Every look-up-or-make is in the step record, in order.
     let records = gaia_step::step_records(&gaia_step::logs_dir(&store));
+
+    // Read from an offset, the same records come back, a few at a time.
+    let logs = gaia_step::logs_dir(&store);
+    let (head, offset) = gaia_step::step_records_from(&logs, 0);
+    assert_eq!(head, records);
+    assert_eq!(
+        gaia_step::step_records_from(&logs, offset),
+        (Vec::new(), offset)
+    );
+    make(b"v2");
+    let (tail, next) = gaia_step::step_records_from(&logs, offset);
+    assert_eq!(tail.len(), 1);
+    assert!(next > offset);
     let seen: Vec<_> = records
         .iter()
         .map(|record| (record.made, record.key == key(b"v1")))

@@ -190,6 +190,29 @@ pub(crate) fn record_step(logs: &Path, record: &StepRecord) -> io::Result<()> {
     file.write_all(record.line().as_bytes())
 }
 
+/// The step records written at or after byte `offset` of the step record in
+/// `logs`, and the offset to read from next time. Only whole lines are read,
+/// so a line still being written is left for the next call.
+pub fn step_records_from(logs: &Path, offset: u64) -> (Vec<StepRecord>, u64) {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = File::open(logs.join(STEPS)) else {
+        return (Vec::new(), offset);
+    };
+    let mut bytes = Vec::new();
+    if file.seek(SeekFrom::Start(offset)).is_err() || file.read_to_end(&mut bytes).is_err() {
+        return (Vec::new(), offset);
+    }
+    let whole = bytes
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(0, |at| at + 1);
+    let records = String::from_utf8_lossy(&bytes[..whole])
+        .lines()
+        .filter_map(StepRecord::parse)
+        .collect();
+    (records, offset + whole as u64)
+}
+
 /// Every step record in `logs`, in the order written. Lines that don't parse
 /// are skipped.
 pub fn step_records(logs: &Path) -> Vec<StepRecord> {
