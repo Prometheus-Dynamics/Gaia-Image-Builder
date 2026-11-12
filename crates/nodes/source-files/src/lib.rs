@@ -24,6 +24,19 @@ pub use archive::source_archive;
 pub use download::{partial_dir, source_download};
 pub use path::source_path;
 
+/// The libraries this node links, by the version Cargo resolved. Its step key
+/// names them, and `tests/libs.rs` checks each version against Cargo.lock.
+pub const LIBS: &[(&str, &str)] = &[
+    ("flate2", "1.1.11"),
+    ("miniz_oxide", "0.9.1"),
+    ("tar", "0.4.46"),
+    ("xz2", "0.1.7"),
+    ("lzma-sys", "0.1.20"),
+    ("zstd", "0.13.4"),
+    ("zstd-safe", "7.4.0"),
+    ("zstd-sys", "2.1.2+zstd.1.5.7"),
+];
+
 use daedalus::prelude::NodeRecord;
 
 /// The nodes, for a registry.

@@ -2,6 +2,7 @@
 
 use daedalus::prelude::*;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store};
+use gaia_store::Digest;
 use gaia_types::{Artifact, ArtifactKind};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
@@ -20,6 +21,14 @@ impl Format {
             Self::Xz => "gaia.compress.xz",
             Self::Zstd => "gaia.compress.zstd",
             Self::Gzip => "gaia.compress.gzip",
+        }
+    }
+
+    fn libs(self) -> &'static [(&'static str, &'static str)] {
+        match self {
+            Self::Xz => crate::libs::XZ,
+            Self::Zstd => crate::libs::ZSTD,
+            Self::Gzip => crate::libs::GZIP,
         }
     }
 
@@ -115,10 +124,7 @@ fn compress(
         .ok_or_else(|| StepError::body(name, "the artifact is not in the store"))?;
     let input = store.path(&object);
     // The thread count is not in the key: the output does not depend on it.
-    let key = KeyBuilder::new(name, 1)
-        .config("level", level.to_string())
-        .input("input", object.digest)
-        .finish();
+    let key = codec_key(name, level, object.digest, format.libs());
     let made = Step::new(&store, cx, name, key).look_up_or_make(
         &[("compressed", Path::new("compressed"))],
         |work| {
@@ -131,6 +137,17 @@ fn compress(
         kind: ArtifactKind::parse(&format!("{}+{}", artifact.kind, format.suffix())),
         object: made.outputs["compressed"].into(),
     })
+}
+
+/// The key of one compression: its name, level, input and the libraries
+/// that encode it. The thread count is not in it: the output does not
+/// depend on it.
+fn codec_key(name: &str, level: i64, input: Digest, libs: &[(&str, &str)]) -> gaia_store::StepKey {
+    KeyBuilder::new(name, 1)
+        .config("level", level.to_string())
+        .input("input", input)
+        .libs(libs)
+        .finish()
 }
 
 fn encode(
@@ -173,5 +190,26 @@ fn encode(
             std::io::copy(&mut reader, &mut encoder)?;
             encoder.finish()?.flush()
         }
+    }
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::codec_key;
+    use gaia_store::Digest;
+
+    #[test]
+    fn a_library_version_changes_the_key() {
+        let input = Digest::of_bytes(b"an artifact");
+        let key = |xz2: &str| {
+            codec_key(
+                "gaia.compress.xz",
+                6,
+                input,
+                &[("xz2", xz2), ("lzma-sys", "0.1.20")],
+            )
+        };
+        assert_eq!(key("0.1.7"), key("0.1.7"));
+        assert_ne!(key("0.1.7"), key("0.1.8"));
     }
 }

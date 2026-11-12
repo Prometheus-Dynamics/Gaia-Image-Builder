@@ -37,6 +37,7 @@
 //! }
 //! ```
 
+pub mod cargo_lock;
 mod error;
 mod key;
 mod log;
