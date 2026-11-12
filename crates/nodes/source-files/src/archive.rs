@@ -35,6 +35,7 @@ pub fn source_archive(
     let key = KeyBuilder::new(NAME, 1)
         .config("strip", strip.to_string())
         .input("archive", object.digest)
+        .libs(crate::LIBS)
         .finish();
     let made = Step::new(&store, cx, NAME, key).look_up_or_make(
         &[("tree", Path::new("tree"))],

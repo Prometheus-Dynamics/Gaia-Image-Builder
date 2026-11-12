@@ -26,6 +26,17 @@ mod registry;
 
 pub use reference::Reference;
 
+/// The libraries this node links, by the version Cargo resolved. Its step key
+/// names them, and `tests/libs.rs` checks each version against Cargo.lock.
+pub const LIBS: &[(&str, &str)] = &[
+    ("flate2", "1.1.11"),
+    ("miniz_oxide", "0.9.1"),
+    ("tar", "0.4.46"),
+    ("zstd", "0.13.4"),
+    ("zstd-safe", "7.4.0"),
+    ("zstd-sys", "2.1.2+zstd.1.5.7"),
+];
+
 use daedalus::prelude::*;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store, Work};
 use gaia_store::{Digest, file_digest};
@@ -97,6 +108,7 @@ pub fn source(
     let key = KeyBuilder::new(NAME, 1)
         .config("platform", platform.trim())
         .input("manifest", want)
+        .libs(LIBS)
         .finish();
     let outputs = [
         ("rootfs", Path::new("rootfs")),
