@@ -41,6 +41,10 @@ fn keys_and_structures_are_recorded() {
         row::<DiskTable>(),
         row::<DiskPartition>(),
         row::<RawBlob>(),
+        row::<OsConfig>(),
+        row::<ConfigFragment>(),
+        row::<BuildrootHost>(),
+        row::<SourceOverride>(),
         row::<ObjectKind>(),
         row::<ArtifactKind>(),
         row::<ImageKind>(),
@@ -80,6 +84,10 @@ const RECORDED: &str = "
     gaia:disk-table bdf819301870eb86
     gaia:disk-partition a9f281ead6a6e53c
     gaia:raw-blob a34597c3a0a074cb
+    gaia:os-config ccd0f4212d2312c5
+    gaia:buildroot-fragment 2847827726c91ae9
+    gaia:buildroot-host 236dfb6e85f8d0d4
+    gaia:source-override d72cbdcff1dd0ea1
     gaia:object-kind 8ea567075e428736
     gaia:artifact-kind 1ce777e4bb50c505
     gaia:image-kind a54f2ea6cb3fe288

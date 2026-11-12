@@ -22,6 +22,10 @@
 //! | `gaia:disk-table` | [`DiskTable`]: a partition table's scheme and bounds |
 //! | `gaia:disk-partition` | [`DiskPartition`]: one partition of a disk |
 //! | `gaia:raw-blob` | [`RawBlob`]: bytes written at a fixed offset |
+//! | `gaia:os-config` | [`OsConfig`]: an OS build's fragments, input trees and overrides |
+//! | `gaia:buildroot-fragment` | [`ConfigFragment`]: a block of Buildroot config |
+//! | `gaia:buildroot-host` | [`BuildrootHost`]: make, CPUs, jobs and the download cache |
+//! | `gaia:source-override` | [`SourceOverride`]: a package built from an input tree |
 //!
 //! Kinds are open ([`ArtifactKind`], [`ImageKind`], [`PartitionRole`],
 //! [`Arch`], [`Os`]): a known name, or `Other` with any name, so a `.uf2` or
@@ -39,6 +43,7 @@ mod image;
 mod kind;
 mod layer;
 mod object;
+mod os;
 mod package;
 mod target;
 
@@ -46,6 +51,7 @@ pub use disk::{DiskLayout, DiskPartition, DiskTable, RawBlob, TableScheme};
 pub use image::{Image, ImageKind, Partition, PartitionRole, Size};
 pub use layer::{Account, AccountGroup, Layer, Owned, Placement, owned_digest};
 pub use object::{Artifact, ArtifactKind, FileEntry, ObjectKind, StoreRef, Tree};
+pub use os::{BuildrootHost, ConfigFragment, OsConfig, SourceOverride};
 pub use package::Control;
 pub use target::{Arch, Os, Target};
 
@@ -57,7 +63,7 @@ pub const NODES: [&daedalus::prelude::NodeRecord; 3] = [
 ];
 
 /// Every type's key, port types first, then the kinds and enums inside them.
-pub const KEYS: [&str; 24] = [
+pub const KEYS: [&str; 28] = [
     "gaia:object",
     "gaia:artifact",
     "gaia:tree",
@@ -75,6 +81,10 @@ pub const KEYS: [&str; 24] = [
     "gaia:disk-table",
     "gaia:disk-partition",
     "gaia:raw-blob",
+    "gaia:os-config",
+    "gaia:buildroot-fragment",
+    "gaia:buildroot-host",
+    "gaia:source-override",
     "gaia:object-kind",
     "gaia:artifact-kind",
     "gaia:image-kind",

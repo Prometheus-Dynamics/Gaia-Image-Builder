@@ -45,9 +45,12 @@ impl Project {
         } else {
             gaia_recipe::Recipes::default()
         };
+        let store = absolute(&store_dir(options.store.as_deref())?);
+        let tools = tools(&options.tools);
         let setup = Setup {
-            store: absolute(&store_dir(options.store.as_deref())?),
-            tools: tools(&options.tools),
+            buildroot: buildroot_host(&store, &tools),
+            store,
+            tools,
         };
         let registry = registry();
         let built = gaia_graph::build(&loaded, &lock, &recipes, &registry, &setup, &builders())
@@ -88,6 +91,9 @@ impl Project {
                     let value = match input {
                         gaia_graph::HostInput::Control(c) => serde_json::to_value(c),
                         gaia_graph::HostInput::Disk(d) => serde_json::to_value(d),
+                        gaia_graph::HostInput::Os(c) => serde_json::to_value(c),
+                        gaia_graph::HostInput::Buildroot(h) => serde_json::to_value(h),
+                        gaia_graph::HostInput::Placements(p) => serde_json::to_value(p),
                     };
                     value.map(|value| serde_json::json!({
                         "port": port,
@@ -157,6 +163,15 @@ impl Project {
             println!("\nhost inputs:");
             for (port, input) in &self.built.inputs {
                 println!("  {port}  {}  {}", input.type_key(), input.summary());
+                // An OS config's fragments in full: what the OS step keys on.
+                if let gaia_graph::HostInput::Os(config) = input {
+                    for fragment in &config.fragments {
+                        println!("    [{}]", fragment.name);
+                        for line in fragment.text.lines().filter(|l| !l.trim().is_empty()) {
+                            println!("      {line}");
+                        }
+                    }
+                }
             }
         }
         println!("\noutputs:");
@@ -266,6 +281,41 @@ fn tools(given: &BTreeMap<String, String>) -> BTreeMap<String, String> {
         }
     }
     tools
+}
+
+/// The host side of a Buildroot run: make and taskset from the tools or
+/// PATH, the CPU list from `GAIA_CPUS` (none: no pin), the jobs from
+/// `GAIA_JOBS` (none: every CPU), and the download cache from
+/// `GAIA_BUILDROOT_DL` (none: `buildroot-downloads` beside the store's
+/// objects). None without make.
+fn buildroot_host(
+    store: &Path,
+    tools: &BTreeMap<String, String>,
+) -> Option<gaia_types::BuildrootHost> {
+    let found = |name: &str| {
+        tools
+            .get(name)
+            .cloned()
+            .or_else(|| on_path(name).map(|p| p.display().to_string()))
+    };
+    let make = found("make")?;
+    let jobs = std::env::var("GAIA_JOBS")
+        .ok()
+        .and_then(|j| j.parse().ok())
+        .filter(|&j: &u32| j > 0)
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism().map_or(1, |n| n.get() as u32)
+        });
+    let download_dir = std::env::var("GAIA_BUILDROOT_DL")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| store.join("buildroot-downloads"));
+    Some(gaia_types::BuildrootHost {
+        make,
+        taskset: found("taskset").unwrap_or_default(),
+        cpus: std::env::var("GAIA_CPUS").unwrap_or_default(),
+        jobs,
+        download_dir: absolute(&download_dir).display().to_string(),
+    })
 }
 
 fn on_path(program: &str) -> Option<PathBuf> {

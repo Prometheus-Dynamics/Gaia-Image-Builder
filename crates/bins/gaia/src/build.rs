@@ -31,6 +31,15 @@ pub fn build(options: &args::Project) -> Result<(), Stop> {
             gaia_graph::HostInput::Disk(layout) => {
                 loaded.host().feed_typed(port, Arc::new(layout.clone()))
             }
+            gaia_graph::HostInput::Os(config) => {
+                loaded.host().feed_typed(port, Arc::new(config.clone()))
+            }
+            gaia_graph::HostInput::Buildroot(host) => {
+                loaded.host().feed_typed(port, Arc::new(host.clone()))
+            }
+            gaia_graph::HostInput::Placements(placements) => {
+                loaded.host().feed_typed(port, Arc::new(placements.clone()))
+            }
         };
         fed.map_err(|e| Stop::usage(format!("feeding {port}: {e}")))?;
     }
