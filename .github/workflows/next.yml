@@ -26,11 +26,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # The sandbox tests need bubblewrap and unprivileged user namespaces,
-      # and must run here rather than skip.
+      # and the filesystem, initramfs, strip and verity tests their tools; all
+      # must run here rather than skip.
       - run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q bubblewrap
+          sudo apt-get -o Acquire::Retries=5 update -q
+          sudo apt-get -o Acquire::Retries=5 install -y -q bubblewrap e2fsprogs erofs-utils mtools dosfstools cpio qemu-user cryptsetup-bin python3-pip python3-setuptools
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # The builders' tests: musl std for build-rust's cross builds; the
+      # system python with setuptools >= 70.1 for build-python.
+      - run: |
+          rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+          python3 -c "import setuptools, sys; v = tuple(int(x) for x in setuptools.__version__.split('.')[:2]); print('setuptools', setuptools.__version__); sys.exit(0 if v >= (70, 1) else 1)"
+          java -version && go version && node --version && npm --version
       - run: ./scripts/gate.sh
         env:
           GAIA_REQUIRE_SANDBOX: "1"
+          GAIA_REQUIRE_TOOLS: "1"

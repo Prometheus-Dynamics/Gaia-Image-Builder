@@ -22,6 +22,7 @@ gaia-build-java = { path = "../../nodes/build-java" }
 gaia-build-node = { path = "../../nodes/build-node" }
 gaia-build-python = { path = "../../nodes/build-python" }
 gaia-build-rust = { path = "../../nodes/build-rust" }
+gaia-check = { path = "../../nodes/check" }
 gaia-compress = { path = "../../nodes/compress" }
 gaia-describe = { path = "../../core/describe" }
 gaia-disk = { path = "../../nodes/disk" }
