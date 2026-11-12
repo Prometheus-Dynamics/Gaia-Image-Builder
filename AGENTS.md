@@ -46,7 +46,7 @@ The work is a pre-planned list of PRs into `next`.
 - Port types are structured `TypeExpr`s with pinned keys. Nothing at a port is opaque.
 - No shell hooks as a build mechanism. A command step is a node with declared inputs and outputs.
 - Outputs are reproducible: fixed timestamps, sorted archives, no host paths inside outputs.
-- A node that links a format or encoder library puts that library's resolved version in its step key; a test fails when Cargo's resolved version changes.
+- A node that links a format or encoder library puts that library's version in its step key: pinned `=x.y.z`, or the runtime-reported version; a test checks the key equals it.
 - Failure rule: never give up, backoff capped at 5 to 10 s, no default auto-off, an easy manual off,
   auto-off only as a configured policy. Retries are a step policy, never a loop inside a node.
 - Lean is the default. A trade-off is a plain knob, not a mode or a profile.
