@@ -1,10 +1,10 @@
 //! `gaia.tree.place`: install entries placed with their modes and owners.
 
 use crate::walk::{copy, inside, make_dirs, set_mode};
-use crate::{Layer, Placement, entries_text, tree_input};
+use crate::{entries_text, tree_input};
 use daedalus::prelude::*;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store};
-use gaia_types::{FileEntry, Tree};
+use gaia_types::{FileEntry, Layer, Placement, Tree};
 use std::collections::BTreeSet;
 use std::path::Path;
 

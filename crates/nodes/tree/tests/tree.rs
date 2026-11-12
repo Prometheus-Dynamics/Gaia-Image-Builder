@@ -2,11 +2,8 @@
 
 use gaia_step::Ctx;
 use gaia_store::{Store, tree_digest};
-use gaia_tree::{
-    Account, AccountGroup, Layer, Owned, Placement, merge_layers, owned_digest, tree_accounts,
-    tree_place, tree_services,
-};
-use gaia_types::{FileEntry, Tree};
+use gaia_tree::{merge_layers, tree_accounts, tree_place, tree_services};
+use gaia_types::{Account, AccountGroup, FileEntry, Layer, Owned, Placement, Tree, owned_digest};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 

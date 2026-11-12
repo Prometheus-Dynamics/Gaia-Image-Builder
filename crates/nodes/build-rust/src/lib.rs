@@ -32,6 +32,9 @@ const RECIPE_VERSION: u32 = 1;
 /// empty), with `features` (names separated by spaces or commas, as cargo
 /// takes them; text, since a graph sets it as a constant), using the
 /// toolchain at `toolchain` and the crates in `vendor`.
+///
+/// `features` goes back to a list (`Vec<String>`) when Daedalus decodes list
+/// constants (outside block X7, `docs/design.md`).
 #[node(
     id = "gaia.build.rust",
     inputs(store, toolchain, source, vendor, package, features, triple, cpu),

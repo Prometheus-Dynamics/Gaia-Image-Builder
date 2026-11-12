@@ -18,6 +18,12 @@
 //! from = "rootfs.rootfs"
 //! to = "pack.input"
 //!
+//! # A list of sources feeds a fan-in port in order: `merge.layers0`,
+//! # `merge.layers1`, ...
+//! # [[connects]]
+//! # from = ["os.layer", "app.layer"]
+//! # to = "merge.layers"
+//!
 //! [inputs]
 //! store = ["rootfs.store", "pack.store"]
 //!
@@ -37,7 +43,7 @@ mod file;
 mod param;
 
 pub use error::Error;
-pub use file::{Connect, Parameter, Recipe, Recipes};
+pub use file::{Connect, Parameter, Recipe, Recipes, Sources};
 pub use param::ParamType;
 
 use daedalus::layers::graph::GroupDoc;
