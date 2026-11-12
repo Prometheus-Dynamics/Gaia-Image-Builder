@@ -172,6 +172,7 @@ pub fn registry() -> Registry {
         &gaia_verity::NODES,
         &gaia_disk::NODES,
         &gaia_package::NODES,
+        &gaia_check::NODES,
     ];
     for nodes in all {
         registry
