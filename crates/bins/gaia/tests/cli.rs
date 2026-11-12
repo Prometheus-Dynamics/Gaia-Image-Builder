@@ -20,7 +20,7 @@ fn product(dir: &Path) {
     write(
         &dir.join("components/hello/component.toml"),
         &format!(
-            "version = 1\nname = \"hello\"\n[sources.src]\ngit = \"{URL}\"\nref = \"master\"\n[sources.vendor]\npath = \"vendor\"\n[build]\nbuilder = \"rust\"\nsource = \"src\"\n[build.settings]\npackage = \"hello-world\"\nfeatures = \"\"\ntriple = \"x86_64-unknown-linux-musl\"\ncpu = \"\"\n"
+            "version = 1\nname = \"hello\"\n[sources.src]\ngit = \"{URL}\"\nref = \"master\"\n[sources.vendor]\npath = \"vendor\"\n[sources.root]\nimage = \"docker.io/library/debian:trixie-slim\"\n[build]\nbuilder = \"rust\"\nsource = \"src\"\n[build.settings]\npackage = \"hello-world\"\nfeatures = \"\"\ntriple = \"x86_64-unknown-linux-musl\"\ncpu = \"\"\n"
         ),
     );
     std::fs::create_dir_all(dir.join("components/hello/vendor")).expect("mkdir");
@@ -35,7 +35,7 @@ fn product(dir: &Path) {
     write(
         &dir.join("gaia.lock"),
         &format!(
-            "version = 1\n\n[source.\"hello.src\"]\nkind = \"git\"\nurl = \"{URL}\"\nref = \"master\"\ncommit = \"{COMMIT}\"\n"
+            "version = 1\n\n[source.\"hello.src\"]\nkind = \"git\"\nurl = \"{URL}\"\nref = \"master\"\ncommit = \"{COMMIT}\"\n[source.\"hello.root\"]\nkind = \"image\"\nreference = \"docker.io/library/debian:trixie-slim\"\ndigest = \"sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2\"\n"
         ),
     );
 }
@@ -66,10 +66,11 @@ fn plan_prints_the_graph_and_runs_nothing() {
     let text = String::from_utf8(out.stdout).expect("utf-8");
     for want in [
         "tool    toolchain = /opt/rust",
-        "graph: 4 nodes, 4 edges",
+        "graph: 5 nodes, 5 edges",
         "hello.src.tree -> hello.build.source",
+        "hello.root.rootfs -> hello.build.root",
         "a::tar.archive -> host.a.tar",
-        "plan: 4 steps",
+        "plan: 5 steps",
         "a.tar  gaia:artifact",
     ] {
         assert!(text.contains(want), "no `{want}` in:\n{text}");
@@ -80,7 +81,7 @@ fn plan_prints_the_graph_and_runs_nothing() {
     assert!(out.status.success());
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
     assert_eq!(json["graph"]["format"], "daedalus.graph");
-    assert_eq!(json["plan"]["units"].as_array().map(Vec::len), Some(4));
+    assert_eq!(json["plan"]["units"].as_array().map(Vec::len), Some(5));
 }
 
 #[test]

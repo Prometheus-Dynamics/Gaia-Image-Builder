@@ -23,6 +23,7 @@ gaia-build-rust = { path = "../../nodes/build-rust" }
 gaia-source-files = { path = "../../nodes/source-files" }
 gaia-compress = { path = "../../nodes/compress" }
 gaia-source-git = { path = "../../nodes/source-git" }
+gaia-source-oci = { path = "../../nodes/source-oci" }
 tempfile = "3"
 
 [lints]
