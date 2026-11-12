@@ -24,12 +24,19 @@ gaia-build-python = { path = "../../nodes/build-python" }
 gaia-build-rust = { path = "../../nodes/build-rust" }
 gaia-compress = { path = "../../nodes/compress" }
 gaia-describe = { path = "../../core/describe" }
+gaia-disk = { path = "../../nodes/disk" }
 gaia-fs-erofs = { path = "../../nodes/fs-erofs" }
 gaia-fs-ext4 = { path = "../../nodes/fs-ext4" }
+gaia-fs-ubi = { path = "../../nodes/fs-ubi" }
+gaia-fs-vfat = { path = "../../nodes/fs-vfat" }
 gaia-graph = { path = "../../core/graph" }
+gaia-initramfs = { path = "../../nodes/initramfs" }
 gaia-lock = { path = "../../core/lock" }
+gaia-lock-cmd = { path = "../gaia-lock" }
 gaia-os-import = { path = "../../nodes/os-import" }
+gaia-os-buildroot = { path = "../../nodes/os-buildroot" }
 gaia-os-none = { path = "../../nodes/os-none" }
+gaia-package = { path = "../../nodes/package" }
 gaia-progress = { path = "../gaia-progress" }
 gaia-recipe = { path = "../../core/recipe" }
 gaia-sign = { path = "../../nodes/sign" }
@@ -38,8 +45,10 @@ gaia-source-git = { path = "../../nodes/source-git" }
 gaia-source-oci = { path = "../../nodes/source-oci" }
 gaia-step = { path = "../../core/step" }
 gaia-store = { path = "../../core/store" }
+gaia-strip = { path = "../../nodes/strip" }
 gaia-tree = { path = "../../nodes/tree" }
 gaia-types = { path = "../../core/types" }
+gaia-verity = { path = "../../nodes/verity" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
