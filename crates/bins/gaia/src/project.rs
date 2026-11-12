@@ -139,7 +139,12 @@ impl Project {
                     if (node as usize) < graph.nodes.len() {
                         self.label(node as usize)
                     } else {
-                        "?"
+                        // A node the planner inserted (a copy, say): its id.
+                        explain
+                            .nodes
+                            .iter()
+                            .find(|n| n.node == node)
+                            .map_or("?", |n| n.id.as_str())
                     }
                 })
                 .collect();
@@ -168,6 +173,7 @@ impl Project {
 pub fn registry() -> Registry {
     let mut registry = Registry::new();
     let all: &[&[_]] = &[
+        &gaia_types::NODES,
         &gaia_source_git::NODES,
         &gaia_source_files::NODES,
         &gaia_source_oci::NODES,
