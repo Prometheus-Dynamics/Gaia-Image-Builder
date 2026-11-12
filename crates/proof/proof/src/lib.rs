@@ -50,8 +50,16 @@ pub struct Chain {
 
 /// The graph for `chains`, as a Daedalus graph document.
 pub fn graph(setup: &Setup, chains: &[Chain]) -> String {
+    graph_with_events(setup, chains, None)
+}
+
+/// [`graph`], with each cargo step also writing its `start` and `end`
+/// lines to the shared log at `events`, and waiting for another chain's
+/// `start` before it builds. Test-only: the lines are not part of any key.
+pub fn graph_with_events(setup: &Setup, chains: &[Chain], events: Option<&Path>) -> String {
     let text = |value: &str| format!(r#"{{"type": "str", "value": {}}}"#, json(value));
     let store = text(&setup.store.display().to_string());
+    let events = text(&events.map_or(String::new(), |path| path.display().to_string()));
     // Each build step is a Daedalus step of its own, so a fault names it,
     // and fail-fast stops at its boundary. Without this the CPU backend
     // merges a chain into one step.
@@ -69,10 +77,11 @@ pub fn graph(setup: &Setup, chains: &[Chain]) -> String {
             text(&chain.commit),
         ));
         nodes.push(format!(
-            r#"{{"id": "gaia.proof.cargo", "label": "{label}.cargo", {own_step}, "consts": {{"store": {store}, "toolchain": {}, "profile": {}, "bin": {}}}}}"#,
+            r#"{{"id": "gaia.proof.cargo", "label": "{label}.cargo", {own_step}, "consts": {{"store": {store}, "toolchain": {}, "profile": {}, "bin": {}, "events": {events}, "chain": {}}}}}"#,
             text(&setup.toolchain.display().to_string()),
             text(&chain.profile),
             text(&chain.bin),
+            text(label),
         ));
         nodes.push(format!(
             r#"{{"id": "gaia.proof.pack", "label": "{label}.pack", {own_step}, "consts": {{"store": {store}, "path": {}}}}}"#,
