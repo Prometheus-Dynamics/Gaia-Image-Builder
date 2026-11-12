@@ -87,6 +87,7 @@ impl Project {
                 "host_inputs": self.built.inputs.iter().map(|(port, input)| {
                     let value = match input {
                         gaia_graph::HostInput::Control(c) => serde_json::to_value(c),
+                        gaia_graph::HostInput::Disk(d) => serde_json::to_value(d),
                     };
                     value.map(|value| serde_json::json!({
                         "port": port,
@@ -139,7 +140,12 @@ impl Project {
                     if (node as usize) < graph.nodes.len() {
                         self.label(node as usize)
                     } else {
-                        "?"
+                        // A node the planner inserted (a copy, say): its id.
+                        explain
+                            .nodes
+                            .iter()
+                            .find(|n| n.node == node)
+                            .map_or("?", |n| n.id.as_str())
                     }
                 })
                 .collect();
@@ -168,6 +174,7 @@ impl Project {
 pub fn registry() -> Registry {
     let mut registry = Registry::new();
     let all: &[&[_]] = &[
+        &gaia_types::NODES,
         &gaia_source_git::NODES,
         &gaia_source_files::NODES,
         &gaia_source_oci::NODES,
@@ -181,6 +188,7 @@ pub fn registry() -> Registry {
         &gaia_os_import::NODES,
         &gaia_os_buildroot::NODES,
         &gaia_kernel_module::NODES,
+        &gaia_os_buildroot_cache::NODES,
         &gaia_tree::NODES,
         &gaia_compress::NODES,
         &gaia_fs_ext4::NODES,

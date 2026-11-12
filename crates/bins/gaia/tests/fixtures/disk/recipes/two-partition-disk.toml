@@ -1,0 +1,77 @@
+# Test only: the built tree and the data tree as ext4, as two partitions
+# after the board's own, in one disk.
+version = 1
+name = "two-partition-disk"
+
+[stages]
+root = "gaia.fs.ext4"
+data = "gaia.fs.ext4"
+rootp = "gaia.disk.partition"
+datap = "gaia.disk.partition"
+disk = "gaia.disk"
+
+[[connects]]
+from = "root.image"
+to = "rootp.content"
+
+[[connects]]
+from = "data.image"
+to = "datap.content"
+
+[[connects]]
+from = ["rootp.partition", "datap.partition"]
+to = "disk.partitions"
+
+[inputs]
+build = ["root.tree"]
+data = ["data.tree"]
+disk = ["disk.layout"]
+
+[outputs]
+disk = "disk.image"
+
+[parameters.id]
+type = "string"
+default = "test-disk"
+sets = ["disk.id"]
+
+# 0: sized from the content (ext4) and placed at the next boundary (partitions).
+[parameters.auto]
+type = "int"
+default = 0
+sets = ["root.size", "data.size", "rootp.offset", "datap.offset", "rootp.size", "datap.size"]
+
+[parameters.margin]
+type = "int"
+default = 1048576
+sets = ["root.margin", "data.margin"]
+
+[parameters.journal]
+type = "bool"
+default = false
+sets = ["root.journal", "data.journal"]
+
+[parameters.root_bootable]
+type = "bool"
+default = true
+sets = ["rootp.bootable"]
+
+[parameters.data_bootable]
+type = "bool"
+default = false
+sets = ["datap.bootable"]
+
+[parameters.root_name]
+type = "string"
+default = "rootfs"
+sets = ["root.label", "rootp.name", "rootp.role"]
+
+[parameters.data_name]
+type = "string"
+default = "data"
+sets = ["data.label", "datap.name", "datap.role"]
+
+[parameters.linux_type]
+type = "string"
+default = "0fc63daf-8483-4772-8e79-3d69d8477de4"
+sets = ["rootp.table_type", "datap.table_type"]

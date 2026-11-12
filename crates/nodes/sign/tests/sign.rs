@@ -291,3 +291,53 @@ fn every_file(dir: &Path, out: &mut Vec<PathBuf>) {
         }
     }
 }
+
+/// Files minisign 0.12 made: a throwaway unencrypted key (`-G -W`, which
+/// writes no checksum), its public key, and its signature over a message.
+mod minisign_012 {
+    use gaia_sign::minisign::{PublicKey, SecretKey, verify};
+
+    const KEY: &str = include_str!("fixtures/minisign-0.12.key");
+    const PUBLIC: &str = include_str!("fixtures/minisign-0.12.pub");
+    const MESSAGE: &[u8] = include_bytes!("fixtures/message.txt");
+    const SIGNATURE: &str = include_str!("fixtures/message.txt.minisig");
+
+    #[test]
+    fn its_unencrypted_key_signs_and_its_signature_verifies() {
+        let public = PublicKey::parse(PUBLIC).expect("public key");
+        let secret = SecretKey::parse(KEY).expect("a minisign 0.12 key parses");
+        assert_eq!(secret.public().id_hex(), public.id_hex());
+        let trusted = [public];
+        let ours = secret.sign(MESSAGE, "gaia");
+        let (by, comment) = verify(MESSAGE, &ours, &trusted).expect("ours verifies");
+        assert_eq!(
+            (by.id_hex(), comment.as_str()),
+            (trusted[0].id_hex(), "gaia")
+        );
+        let (_, comment) = verify(MESSAGE, SIGNATURE, &trusted).expect("minisign's verifies");
+        assert_eq!(comment, "minisign 0.12 fixture");
+    }
+
+    #[test]
+    fn a_wrong_checksum_or_a_wrong_half_is_refused() {
+        use base64::Engine;
+        use base64::engine::general_purpose::STANDARD;
+        let line = KEY.lines().nth(1).expect("key line");
+        let bytes = STANDARD.decode(line).expect("base64");
+        let with = |at: usize| {
+            let mut b = bytes.clone();
+            b[at] ^= 1;
+            KEY.replace(line, &STANDARD.encode(&b))
+        };
+        // A checksum that is set must match.
+        let Err(error) = SecretKey::parse(&with(157)) else {
+            panic!("byte 157 changed, and the key still parsed")
+        };
+        assert!(error.contains("checksum does not match"), "{error}");
+        // With no checksum, a changed public half no longer matches the seed.
+        let Err(error) = SecretKey::parse(&with(100)) else {
+            panic!("byte 100 changed, and the key still parsed")
+        };
+        assert!(error.contains("halves do not match"), "{error}");
+    }
+}

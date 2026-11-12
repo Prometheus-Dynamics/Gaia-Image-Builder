@@ -1,0 +1,19 @@
+version = 1
+name = "disk-test"
+description = "A test board written as one GPT disk, with an environment partition of its own."
+
+[target]
+arch = "x86_64"
+os = "linux"
+
+[disk]
+scheme = "gpt"
+first = "1M"
+alignment = "1M"
+
+[[partitions]]
+name = "env"
+role = "raw"
+type = "3de21764-95bd-54bd-a5c3-4abe786f38a8"
+offset = "1M"
+size = "64K"

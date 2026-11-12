@@ -1,0 +1,12 @@
+# Written by `gaia lock`. Do not edit.
+version = 1
+
+[source."state.src"]
+kind = "tree"
+path = "components/state/src"
+digest = "sha256:95f05077b067b0a9a9aebf09021a7b1505142d9126bcb2fa19ff1df7ca9516a9"
+
+[source."state.wheels"]
+kind = "tree"
+path = "components/state/wheels"
+digest = "sha256:6169370a1724b3d010e9d87a53eee3e3ac290ac142cbfe7b5aaf2bb9988eb273"

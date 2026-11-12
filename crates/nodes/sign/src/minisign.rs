@@ -91,11 +91,18 @@ impl SecretKey {
             return Err("a password-protected secret key; make one with `minisign -G -W`".into());
         }
         let keynum = &bytes[54..158];
-        let mut hasher = blake2::Blake2b::<blake2::digest::consts::U32>::new();
-        hasher.update(LEGACY);
-        hasher.update(&keynum[..72]);
-        if hasher.finalize().as_slice() != &keynum[72..104] {
-            return Err("a secret key whose checksum does not match".into());
+        // minisign 0.12 writes no checksum for an unencrypted key (all
+        // zero) and does not check one; older versions write one. A key
+        // without one is still checked below: its public half must be the
+        // one its seed derives.
+        let checksum = &keynum[72..104];
+        if checksum.iter().any(|&b| b != 0) {
+            let mut hasher = blake2::Blake2b::<blake2::digest::consts::U32>::new();
+            hasher.update(LEGACY);
+            hasher.update(&keynum[..72]);
+            if hasher.finalize().as_slice() != checksum {
+                return Err("a secret key whose checksum does not match".into());
+            }
         }
         let id: [u8; 8] = keynum[..8].try_into().map_err(|_| "a short key id")?;
         let pair: Zeroizing<[u8; 64]> =

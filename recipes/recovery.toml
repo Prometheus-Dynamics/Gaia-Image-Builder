@@ -1,0 +1,47 @@
+# A recovery image: the built tree as a zstd-compressed initramfs, for a
+# bootloader to load, and its minisign signature. Untested on board.
+version = 1
+name = "recovery"
+description = "A recovery initramfs: the tree as a zstd-compressed newc archive, signed."
+
+[stages]
+initramfs = "gaia.initramfs"
+compress = "gaia.compress.zstd"
+sign = "gaia.sign"
+
+[[connects]]
+from = "initramfs.archive"
+to = "compress.artifact"
+
+[[connects]]
+from = "compress.compressed"
+to = "sign.artifact"
+
+[inputs]
+build = ["initramfs.tree"]
+
+[outputs]
+recovery = "compress.compressed"
+signature = "sign.signature"
+
+[parameters.level]
+type = "int"
+default = 19
+description = "zstd level, 1 to 22."
+sets = ["compress.level"]
+
+[parameters.threads]
+type = "int"
+default = 1
+description = "zstd threads (at least 1)."
+sets = ["compress.threads"]
+
+[parameters.public_key]
+type = "string"
+description = "The minisign public key that signs the recovery image."
+sets = ["sign.public_key"]
+
+[parameters.key_env]
+type = "string"
+description = "The environment variable holding the secret key file's path."
+sets = ["sign.key_env"]

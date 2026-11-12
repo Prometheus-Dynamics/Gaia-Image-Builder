@@ -197,33 +197,42 @@ pub(crate) fn wire(
     for (i, image) in loaded.product.images.iter().enumerate() {
         let board = &loaded.boards[image.board.path()];
         let mut builds = Vec::new();
+        let mut data = Vec::new();
         let mut members = Vec::new();
-        for name in &image.components {
-            let component = loaded.components.get(name).ok_or_else(|| {
-                Error::at(
-                    &product_file,
-                    format!("images[{i}].components"),
-                    format!("no component {name}"),
-                )
-            })?;
-            members.push(component);
-            if component.build.is_none() {
-                continue;
-            }
-            let node = match built.get(name) {
-                Some(&node) => node,
-                None => {
-                    let node = component_build(&mut g, component, lock, builders, board)?;
-                    built.insert(name.clone(), node);
-                    node
+        for (list, names, into) in [
+            ("components", &image.components, &mut builds),
+            ("data", &image.data, &mut data),
+        ] {
+            for name in names {
+                let component = loaded.components.get(name).ok_or_else(|| {
+                    Error::at(
+                        &product_file,
+                        format!("images[{i}].{list}"),
+                        format!("no component {name}"),
+                    )
+                })?;
+                if list == "components" {
+                    members.push(component);
                 }
-            };
-            builds.push((name.clone(), node));
+                if component.build.is_none() {
+                    continue;
+                }
+                let node = match built.get(name) {
+                    Some(&node) => node,
+                    None => {
+                        let node = component_build(&mut g, component, lock, builders, board)?;
+                        built.insert(name.clone(), node);
+                        node
+                    }
+                };
+                into.push((name.clone(), node));
+            }
         }
         let image_in = ImageIn {
             index: i,
             image,
             builds: &builds,
+            data: &data,
             members: &members,
             lock,
             board,
@@ -399,6 +408,8 @@ struct ImageIn<'a> {
     image: &'a ImageSpec,
     /// Its built components and their build nodes.
     builds: &'a [(String, u32)],
+    /// Its built data components and their build nodes.
+    data: &'a [(String, u32)],
     /// Every component it names.
     members: &'a [&'a Component],
     lock: &'a Lock,
@@ -464,11 +475,36 @@ fn image_recipe(
             for p in ports {
                 g.edge((*node, out), (stages[&p.stage], &p.port));
             }
+        } else if input == "data" {
+            let [(_, node)] = at.data else {
+                return Err(Error::at(
+                    product_file,
+                    format!("images[{i}].data"),
+                    format!(
+                        "recipe {} takes one built component as `data`; this image has {}",
+                        recipe.name,
+                        at.data.len()
+                    ),
+                ));
+            };
+            let out = g.first_output(*node).unwrap_or("tree");
+            for p in ports {
+                g.edge((*node, out), (stages[&p.stage], &p.port));
+            }
         } else if input == "source" {
             let from = image_source(g, at, &recipe.name)?;
             let out = g.first_output(from).unwrap_or("tree");
             for p in ports {
                 g.edge((from, out), (stages[&p.stage], &p.port));
+            }
+        } else if input == "disk" {
+            let layout = image_disk(at, &recipe.name)?;
+            let port = format!("{}.disk-layout", image.name);
+            let value = HostInput::Disk(layout);
+            host_ports.insert(port.clone(), value.type_key().to_string());
+            inputs.insert(port.clone(), value);
+            for p in ports {
+                g.edge((0, &port), (stages[&p.stage], &p.port));
             }
         } else if input == "control" {
             let control = image_control(at, &recipe.name)?;
@@ -503,6 +539,13 @@ fn image_recipe(
             }
         };
         let port = format!("{}.{output}", image.name);
+        if host_ports.contains_key(&port) {
+            return Err(Error::at(
+                &recipe.file,
+                format!("outputs.{output}"),
+                format!("the host port {port} is taken by another input or output"),
+            ));
+        }
         host_ports.insert(port.clone(), ty);
         g.edge((node, &at.port), (0, &port));
     }
@@ -570,6 +613,52 @@ fn image_control(at: &ImageIn<'_>, recipe: &str) -> Result<gaia_types::Control, 
         .check()
         .map_err(|e| Error::at(&component.file, "package", e))?;
     Ok(control)
+}
+
+/// The disk layout from the image's board: its `[disk]` table and the
+/// partitions it needs in the table. A partition outside the table (a raw
+/// bootloader area) needs content, so it is not part of the layout.
+fn image_disk(at: &ImageIn<'_>, recipe: &str) -> Result<gaia_types::DiskLayout, Error> {
+    let board = at.board;
+    let disk = board.disk.as_ref().ok_or_else(|| {
+        Error::at(
+            &board.file,
+            "disk",
+            format!("recipe {recipe} lays out a disk; the board has no [disk] table"),
+        )
+    })?;
+    let table = gaia_types::DiskTable {
+        scheme: match disk.scheme.expect("checked when the board is read") {
+            gaia_describe::Scheme::Gpt => gaia_types::TableScheme::Gpt,
+            gaia_describe::Scheme::Mbr => gaia_types::TableScheme::Mbr,
+        },
+        first: disk.first.map(|s| s.0),
+        alignment: disk.alignment.map(|s| s.0),
+        size: disk.size.map(|s| s.0),
+    };
+    let mut partitions = Vec::new();
+    for (i, need) in board.partitions.iter().enumerate() {
+        if !need.in_table {
+            continue;
+        }
+        let table_type = need.table_type.clone().ok_or_else(|| {
+            Error::at(
+                &board.file,
+                format!("partitions[{i}].type"),
+                "a partition in the table needs its type: a GPT type GUID or an MBR type byte",
+            )
+        })?;
+        partitions.push(gaia_types::DiskPartition {
+            name: need.name.clone(),
+            role: need.role.clone(),
+            table_type,
+            bootable: false,
+            offset: need.offset.map(|s| s.0),
+            size: need.size.map(|s| s.0),
+            content: None,
+        });
+    }
+    Ok(gaia_types::DiskLayout { table, partitions })
 }
 
 /// A constant, said with its type.

@@ -1,0 +1,38 @@
+# A data partition: the image's data components' built tree as ext4, for
+# state that outlives slot updates. Untested on board.
+version = 1
+name = "data-ext4"
+description = "A data partition: the data tree as an ext4 image."
+
+[stages]
+fs = "gaia.fs.ext4"
+
+[inputs]
+data = ["fs.tree"]
+
+[outputs]
+data = "fs.image"
+
+[parameters.label]
+type = "string"
+default = "data"
+description = "The filesystem label."
+sets = ["fs.label"]
+
+[parameters.size]
+type = "int"
+default = 0
+description = "The image size in bytes; 0 sizes it to the tree plus the margin."
+sets = ["fs.size"]
+
+[parameters.margin]
+type = "int"
+default = 16777216
+description = "Free bytes left over the tree when the size is 0."
+sets = ["fs.margin"]
+
+[parameters.journal]
+type = "bool"
+default = true
+description = "Whether the filesystem has a journal."
+sets = ["fs.journal"]

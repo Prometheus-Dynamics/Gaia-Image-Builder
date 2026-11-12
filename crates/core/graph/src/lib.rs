@@ -19,7 +19,8 @@
 //!   component, and `source` the one source of the image's one component.
 //!   The recipe input `control` takes a host input, `<image>.control`: the
 //!   [`Control`](gaia_types::Control) made from the `[package]` table of the
-//!   image's one component that has one ([`HostInput`]). Each recipe output
+//!   image's one component that has one, and `disk` the board's disk
+//!   layout ([`HostInput`]). Each recipe output
 //!   goes to the host as `<image>.<output>`.
 //! - **Everywhere:** an input named `store` gets the store, and one named
 //!   like a [`Setup`] tool gets that tool's path. Every node has
@@ -94,6 +95,9 @@ pub struct Built {
 pub enum HostInput {
     /// A package's control data, from a component's `[package]` table.
     Control(gaia_types::Control),
+    /// A disk's table and the board's own partitions, from the board's
+    /// `[disk]` table and `[[partitions]]`.
+    Disk(gaia_types::DiskLayout),
 }
 
 impl HostInput {
@@ -101,6 +105,7 @@ impl HostInput {
     pub fn type_key(&self) -> &'static str {
         match self {
             Self::Control(_) => "gaia:package-control",
+            Self::Disk(_) => "gaia:disk-layout",
         }
     }
 
@@ -111,6 +116,27 @@ impl HostInput {
                 let mut line = format!("{} {} {}", c.package, c.version, c.architecture);
                 if !c.depends.is_empty() {
                     line.push_str(&format!(", depends {}", c.depends.join(", ")));
+                }
+                line
+            }
+            Self::Disk(d) => {
+                let scheme = match d.table.scheme {
+                    gaia_types::TableScheme::Gpt => "gpt",
+                    gaia_types::TableScheme::Mbr => "mbr",
+                };
+                let mut line = scheme.to_string();
+                for (what, size) in [
+                    ("first", d.table.first),
+                    ("alignment", d.table.alignment),
+                    ("size", d.table.size),
+                ] {
+                    if let Some(size) = size {
+                        line.push_str(&format!(", {what} {}", size.0));
+                    }
+                }
+                let names: Vec<&str> = d.partitions.iter().map(|p| p.name.as_str()).collect();
+                if !names.is_empty() {
+                    line.push_str(&format!(", board partitions {}", names.join(" ")));
                 }
                 line
             }

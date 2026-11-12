@@ -25,7 +25,9 @@ mod error;
 mod product;
 mod read;
 
-pub use board::{Board, Bootloader, Firmware, Flash, Kernel, PartitionNeed, TrustedFirmware};
+pub use board::{
+    Board, Bootloader, Disk, Firmware, Flash, Kernel, PartitionNeed, Scheme, TrustedFirmware,
+};
 pub use common::{FileRef, ImagePlatform, Mode, RelPath, SizeText, Source};
 pub use component::{Build, Component, Group, Install, InstallFrom, Package, Service, User};
 pub use error::Error;

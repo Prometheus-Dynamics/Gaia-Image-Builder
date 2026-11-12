@@ -1,0 +1,11 @@
+version = 1
+name = "disk-test"
+[components]
+state = "components/state/component.toml"
+
+[[images]]
+name = "img"
+board = "boards/disk-test/board.toml"
+components = ["state"]
+data = ["state"]
+recipe = "two-partition-disk"
