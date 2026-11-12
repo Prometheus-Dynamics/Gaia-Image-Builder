@@ -18,9 +18,8 @@
 //! content store.
 
 mod archive;
-mod control;
 
-pub use control::Control;
+pub use gaia_types::Control;
 
 /// The libraries this node links, by the version Cargo resolved. Its step key
 /// names them, and `tests/libs.rs` checks each version against Cargo.lock.

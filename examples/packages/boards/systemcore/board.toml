@@ -1,0 +1,9 @@
+# A SystemCore-style robot controller: an aarch64 Linux device whose
+# software is installed from .ipk packages. Only the target matters here.
+version = 1
+name = "systemcore"
+description = "SystemCore-style robot controller (aarch64, opkg)"
+
+[target]
+arch = "aarch64"
+os = "linux"

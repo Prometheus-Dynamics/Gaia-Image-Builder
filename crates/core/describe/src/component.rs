@@ -31,6 +31,27 @@ pub struct Component {
     pub users: Vec<User>,
     #[serde(default)]
     pub groups: Vec<Group>,
+    /// What the component says about itself as a package for another
+    /// system's installer (`.ipk`, `.deb`).
+    pub package: Option<Package>,
+}
+
+/// A component as a package: the control data opkg and dpkg read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Package {
+    /// The package name; the component's name when not set.
+    pub name: Option<String>,
+    pub version: String,
+    /// The installer's name for the architecture (`aarch64`, `arm64`, `all`).
+    pub architecture: String,
+    pub maintainer: String,
+    /// The synopsis, then further lines; the component's description when
+    /// not set.
+    pub description: Option<String>,
+    /// Other packages it needs, each one name or `name (constraint)`.
+    #[serde(default)]
+    pub depends: Vec<String>,
 }
 
 /// How the component is built.
@@ -159,6 +180,16 @@ impl Component {
                     "a path in the image is absolute",
                 ));
             }
+        }
+        if let Some(package) = &component.package
+            && package.description.is_none()
+            && component.description.is_none()
+        {
+            return Err(Error::new(
+                path,
+                "package.description",
+                "a package needs a description; set it here or the component's",
+            ));
         }
         Ok(component)
     }
