@@ -6,7 +6,7 @@ use daedalus::layers::graph::{
 };
 use daedalus::prelude::Registry;
 use daedalus_registry::TypeRef;
-use gaia_describe::{Component, ImageSpec, Loaded, Source};
+use gaia_describe::{Component, ImagePlatform, ImageSpec, Loaded, Source};
 use gaia_lock::{Entry, Lock};
 use gaia_recipe::Recipes;
 use std::collections::{BTreeMap, BTreeSet};
@@ -351,7 +351,7 @@ fn source_node(
             g.set(node, "kind", s("archive"));
             node
         }
-        Source::Image { .. } => {
+        Source::Image { platform, .. } => {
             let Entry::Image { reference, digest } = pinned()? else {
                 return Err(Error::at(
                     file,
@@ -360,9 +360,14 @@ fn source_node(
                 ));
             };
             let node = g.add("gaia.source.oci", label, file, &key)?;
-            let arch = match board.target.arch.as_str() {
+            let arch = match platform {
+                ImagePlatform::Target => board.target.arch.as_str(),
+                ImagePlatform::Host => std::env::consts::ARCH,
+            };
+            let arch = match arch {
                 "aarch64" => "arm64",
                 "x86_64" => "amd64",
+                "riscv64" => "riscv64",
                 other => other,
             };
             g.set(node, "reference", s(reference));

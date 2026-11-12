@@ -122,15 +122,36 @@ impl<'de> Deserialize<'de> for Mode {
 /// download to its digest, an image to its manifest digest, a directory to
 /// its tree digest.
 ///
-/// Written as exactly one of `git` (with `ref`), `download`, `image` or
-/// `path`.
+/// Written as exactly one of `git` (with `ref`), `download`, `image` (with an
+/// optional `platform`) or `path`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "SourceText")]
 pub enum Source {
-    Git { url: String, reference: String },
-    Download { url: String },
-    Image { reference: String },
-    Path { path: RelPath },
+    Git {
+        url: String,
+        reference: String,
+    },
+    Download {
+        url: String,
+    },
+    Image {
+        reference: String,
+        platform: ImagePlatform,
+    },
+    Path {
+        path: RelPath,
+    },
+}
+
+/// Which machine an image source is pulled for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ImagePlatform {
+    /// The board's target: an image whose files go onto the board.
+    #[default]
+    Target,
+    /// The machine running the build: a root a builder runs its tools in.
+    Host,
 }
 
 #[derive(Deserialize)]
@@ -141,6 +162,7 @@ struct SourceText {
     reference: Option<String>,
     download: Option<String>,
     image: Option<String>,
+    platform: Option<ImagePlatform>,
     path: Option<RelPath>,
 }
 
@@ -149,6 +171,7 @@ impl TryFrom<SourceText> for Source {
 
     fn try_from(text: SourceText) -> Result<Self, String> {
         let has_ref = text.reference.is_some();
+        let has_platform = text.platform.is_some();
         let source = match (text.git, text.download, text.image, text.path) {
             (Some(url), None, None, None) => Self::Git {
                 url,
@@ -157,7 +180,10 @@ impl TryFrom<SourceText> for Source {
                     .ok_or("a git source needs `ref`: the tag or branch")?,
             },
             (None, Some(url), None, None) => Self::Download { url },
-            (None, None, Some(reference), None) => Self::Image { reference },
+            (None, None, Some(reference), None) => Self::Image {
+                reference,
+                platform: text.platform.unwrap_or_default(),
+            },
             (None, None, None, Some(path)) => Self::Path { path },
             (None, None, None, None) => {
                 return Err("say where it comes from: `git`, `download`, `image` or `path`".into());
@@ -166,6 +192,9 @@ impl TryFrom<SourceText> for Source {
         };
         if has_ref && !matches!(source, Self::Git { .. }) {
             return Err("only a git source has a `ref`".into());
+        }
+        if has_platform && !matches!(source, Self::Image { .. }) {
+            return Err("only an image source has a `platform`".into());
         }
         Ok(source)
     }
@@ -180,7 +209,7 @@ impl Source {
                 reference: reference.clone(),
             },
             Self::Download { url } => Want::Download { url: url.clone() },
-            Self::Image { reference } => Want::Image {
+            Self::Image { reference, .. } => Want::Image {
                 reference: reference.clone(),
             },
             Self::Path { path } => Want::Tree {
@@ -279,5 +308,42 @@ pub(crate) fn check_exists(file: &Path, key: &str, local: &Path) -> Result<(), E
             key,
             format!("{} is not there", local.display()),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ImagePlatform, Source};
+
+    fn source(text: &str) -> Result<Source, toml::de::Error> {
+        toml::from_str(text)
+    }
+
+    #[test]
+    fn an_image_is_for_the_target_unless_it_says_host() {
+        let image = |platform| Source::Image {
+            reference: "r".into(),
+            platform,
+        };
+        assert_eq!(
+            source("image = \"r\"").expect("parses"),
+            image(ImagePlatform::Target)
+        );
+        assert_eq!(
+            source("image = \"r\"\nplatform = \"target\"").expect("parses"),
+            image(ImagePlatform::Target)
+        );
+        assert_eq!(
+            source("image = \"r\"\nplatform = \"host\"").expect("parses"),
+            image(ImagePlatform::Host)
+        );
+        let other = source("image = \"r\"\nplatform = \"arm64\"").expect_err("refused");
+        assert!(other.to_string().contains("platform"), "{other}");
+        let git = source("git = \"u\"\nref = \"main\"\nplatform = \"host\"").expect_err("refused");
+        assert!(
+            git.to_string()
+                .contains("only an image source has a `platform`"),
+            "{git}"
+        );
     }
 }
