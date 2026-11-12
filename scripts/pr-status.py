@@ -12,7 +12,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 REPO = "Prometheus-Dynamics/Gaia-Image-Builder"
 # Outside blocks (docs/design.md) that have landed. Edited only by the coordinator.
-OUTSIDE_DONE = set()
+OUTSIDE_DONE = {"X3", "X4"}
 
 
 def sort_key(pr_id):
