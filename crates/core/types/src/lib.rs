@@ -23,9 +23,13 @@
 //! [`Arch`], [`Os`]): a known name, or `Other` with any name, so a `.uf2` or
 //! `.ipk` output needs no type change.
 //!
+//! Artifacts, images and trees fan out: each has a copy conversion
+//! ([`NODES`]) the planner inserts where several nodes take one by value.
+//!
 //! Every type is `serde` serializable: that is its value form for reports
 //! and for anything stored. An open kind serializes as its plain name.
 
+mod copies;
 mod image;
 mod kind;
 mod layer;
@@ -38,6 +42,13 @@ pub use layer::{Account, AccountGroup, Layer, Owned, Placement, owned_digest};
 pub use object::{Artifact, ArtifactKind, FileEntry, ObjectKind, StoreRef, Tree};
 pub use package::Control;
 pub use target::{Arch, Os, Target};
+
+/// The copy conversions of the port types (see `copies`), for a registry.
+pub const NODES: [&daedalus::prelude::NodeRecord; 3] = [
+    &copies::COPY_ARTIFACT_NODE,
+    &copies::COPY_IMAGE_NODE,
+    &copies::COPY_TREE_NODE,
+];
 
 /// Every type's key, port types first, then the kinds and enums inside them.
 pub const KEYS: [&str; 19] = [
