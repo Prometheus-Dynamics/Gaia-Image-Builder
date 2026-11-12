@@ -2,7 +2,9 @@
 //! does with a step that fails twice.
 
 use daedalus::runner::{Recovery, RunError};
-use gaia_proof::{Chain, Setup, Stopped, digest_of, graph, load, run, show, take_tar, timeline};
+use gaia_proof::{
+    Chain, Setup, Stopped, digest_of, graph, graph_with_events, load, run, show, take_tar, timeline,
+};
 use std::path::{Path, PathBuf};
 
 const URL: &str = "https://github.com/vasilakisfil/hello.service";
@@ -40,11 +42,19 @@ fn chains() -> Vec<Chain> {
 }
 
 /// Runs both chains in a fresh store; returns the two tar digests and the
-/// timeline.
+/// timeline. The cargo steps log `start`/`end` to a shared event log, and
+/// the run asserts on its order: each chain started before the other ended.
 fn run_once(root: &Path) -> (String, String, String) {
     let setup = setup(root);
-    let mut loaded = load(&graph(&setup, &chains())).expect("loads");
-    run(&mut loaded, 4, true).expect("the run succeeds");
+    let events = root.join("events");
+    let mut loaded = load(&graph_with_events(&setup, &chains(), Some(&events))).expect("loads");
+    if let Err(stopped) = run(&mut loaded, 4, true) {
+        let reasons: Vec<_> = loaded
+            .fault_reports()
+            .map(|report| report.reason().to_string())
+            .collect();
+        panic!("the run failed: {stopped:?}; faults: {reasons:?}");
+    }
     assert_eq!(loaded.fault_reports().count(), 0);
     let a = take_tar(&mut loaded, "a").expect("chain a's tar");
     let b = take_tar(&mut loaded, "b").expect("chain b's tar");
@@ -54,8 +64,24 @@ fn run_once(root: &Path) -> (String, String, String) {
         .filter(|span| span.step == "gaia.proof.cargo")
         .collect();
     assert_eq!(builds.len(), 2, "{}", show(&spans));
-    let overlap = builds[0].start_ns < builds[1].end_ns && builds[1].start_ns < builds[0].end_ns;
-    assert!(overlap, "the two builds did not overlap:\n{}", show(&spans));
+    let log = std::fs::read_to_string(&events).expect("the event log");
+    let lines: Vec<&str> = log.lines().collect();
+    let at = |line: &str| {
+        lines
+            .iter()
+            .position(|found| *found == line)
+            .unwrap_or_else(|| panic!("no `{line}` in the event log:\n{log}"))
+    };
+    let (start_a, end_a, start_b, end_b) = (at("start a"), at("end a"), at("start b"), at("end b"));
+    assert!(start_a < end_a && start_b < end_b, "{log}");
+    assert!(
+        start_b < end_a,
+        "chain b started after chain a ended:\n{log}"
+    );
+    assert!(
+        start_a < end_b,
+        "chain a started after chain b ended:\n{log}"
+    );
     (
         digest_of(&a).expect("digest").to_string(),
         digest_of(&b).expect("digest").to_string(),
