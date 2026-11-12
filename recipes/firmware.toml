@@ -1,0 +1,31 @@
+# Firmware only: the built tree as a sorted tar, zstd-compressed. No OS, no
+# filesystem; the output is the files themselves.
+version = 1
+name = "firmware"
+description = "The built tree as a sorted tar, zstd-compressed."
+
+[stages]
+tar = "gaia.compress.tar"
+compress = "gaia.compress.zstd"
+
+[[connects]]
+from = "tar.archive"
+to = "compress.artifact"
+
+[inputs]
+build = ["tar.tree"]
+
+[outputs]
+firmware = "compress.compressed"
+
+[parameters.level]
+type = "int"
+default = 19
+description = "zstd level, 1 to 22."
+sets = ["compress.level"]
+
+[parameters.threads]
+type = "int"
+default = 1
+description = "zstd threads (at least 1)."
+sets = ["compress.threads"]

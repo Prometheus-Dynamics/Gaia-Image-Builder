@@ -1,0 +1,13 @@
+# The built tree as a newc initramfs, for a boot that unpacks it into RAM.
+version = 1
+name = "initramfs-boot"
+description = "The built tree as a newc initramfs archive."
+
+[stages]
+initramfs = "gaia.initramfs"
+
+[inputs]
+build = ["initramfs.tree"]
+
+[outputs]
+initramfs = "initramfs.archive"

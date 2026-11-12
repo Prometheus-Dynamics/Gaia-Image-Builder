@@ -1,0 +1,9 @@
+# A generic test board: x86_64 Linux, for planning the recipes against a
+# real target shape. It is not a device; nothing here is built for hardware.
+version = 1
+name = "generic-test"
+description = "Generic x86_64 Linux test board, for planning recipes"
+
+[target]
+arch = "x86_64"
+os = "linux"

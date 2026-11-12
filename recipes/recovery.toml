@@ -1,0 +1,35 @@
+# A recovery image: the built tree as a zstd-compressed initramfs, for a
+# bootloader to load. Untested on board.
+#
+# Not signed here: a signature needs the compressed artifact at two
+# consumers (the output and `gaia.sign`), and the planner has no copy for
+# `gaia:artifact` (see the PR's notes).
+version = 1
+name = "recovery"
+description = "A recovery initramfs: the tree as a zstd-compressed newc archive."
+
+[stages]
+initramfs = "gaia.initramfs"
+compress = "gaia.compress.zstd"
+
+[[connects]]
+from = "initramfs.archive"
+to = "compress.artifact"
+
+[inputs]
+build = ["initramfs.tree"]
+
+[outputs]
+recovery = "compress.compressed"
+
+[parameters.level]
+type = "int"
+default = 19
+description = "zstd level, 1 to 22."
+sets = ["compress.level"]
+
+[parameters.threads]
+type = "int"
+default = 1
+description = "zstd threads (at least 1)."
+sets = ["compress.threads"]
