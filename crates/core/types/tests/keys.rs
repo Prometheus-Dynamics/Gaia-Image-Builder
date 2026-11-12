@@ -32,6 +32,10 @@ fn keys_and_structures_are_recorded() {
         row::<Partition>(),
         row::<Target>(),
         row::<Size>(),
+        row::<Layer>(),
+        row::<Placement>(),
+        row::<Account>(),
+        row::<AccountGroup>(),
         row::<ObjectKind>(),
         row::<ArtifactKind>(),
         row::<ImageKind>(),
@@ -61,6 +65,10 @@ const RECORDED: &str = "
     gaia:partition 5221ef72e84bd693
     gaia:target 6193f2e1b43ec840
     gaia:size 67ebbd370daa02ba
+    gaia:layer 06bab8ddb968a9a7
+    gaia:placement b31304eccf6cdec8
+    gaia:account db1105887abe30dc
+    gaia:account-group cfc99d936f919de5
     gaia:object-kind 8ea567075e428736
     gaia:artifact-kind 1ce777e4bb50c505
     gaia:image-kind a54f2ea6cb3fe288

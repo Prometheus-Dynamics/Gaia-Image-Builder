@@ -15,7 +15,6 @@ daedalus-registry = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git
 daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
 gaia-step = { path = "../../core/step" }
 gaia-store = { path = "../../core/store" }
-gaia-tree = { path = "../tree" }
 gaia-types = { path = "../../core/types" }
 tar = "0.4"
 

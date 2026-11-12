@@ -19,6 +19,10 @@ fn available() -> bool {
             .status()
             .is_ok_and(|s| s.success());
     if !ok {
+        assert!(
+            std::env::var_os("GAIA_REQUIRE_TOOLS").is_none(),
+            "GAIA_REQUIRE_TOOLS is set, and python has no pip with setuptools >= 70.1"
+        );
         println!("SKIPPED: {PYTHON} has no pip with setuptools >= 70.1");
     }
     ok

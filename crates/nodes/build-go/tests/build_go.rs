@@ -18,6 +18,10 @@ fn goroot() -> Option<PathBuf> {
     if root.join("bin/go").is_file() {
         Some(root)
     } else {
+        assert!(
+            std::env::var_os("GAIA_REQUIRE_TOOLS").is_none(),
+            "GAIA_REQUIRE_TOOLS is set, and no Go toolchain is here"
+        );
         println!("SKIPPED: no Go toolchain here");
         None
     }

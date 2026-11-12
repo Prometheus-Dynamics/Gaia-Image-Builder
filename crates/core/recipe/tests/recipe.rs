@@ -250,3 +250,84 @@ fn a_bad_recipe_file_names_the_file_and_key() {
         error.contains("b.toml") && error.contains("also the name of") && error.contains("a.toml")
     );
 }
+
+#[node(id = "test.sum", inputs(items), outputs(total))]
+fn sum(items: daedalus_cpu_author::FanIn<'_, i64>) -> i64 {
+    items.iter().map(|item| *item).sum()
+}
+
+#[test]
+fn a_list_of_sources_feeds_a_fan_in_port_in_order() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = write(
+        dir.path(),
+        "fan.toml",
+        r#"
+version = 1
+name = "fan"
+
+[stages]
+a = "test.scale"
+b = "test.scale"
+c = "test.scale"
+sum = "test.sum"
+
+[[connects]]
+from = ["b.y", "a.y", "c.y"]
+to = "sum.items"
+
+[outputs]
+total = "sum.total"
+
+[consts]
+"a.x" = 1
+"a.factor" = 1
+"b.x" = 2
+"b.factor" = 1
+"c.x" = 3
+"c.factor" = 1
+"#,
+    );
+    let recipe = Recipe::read(&path).expect("reads");
+    let group = recipe
+        .group(&toml::Table::new(), &dir.path().join("product.toml"))
+        .expect("group");
+    assert_eq!(
+        group.connects,
+        vec![
+            (port("b", "y"), port("sum", "items0")),
+            (port("a", "y"), port("sum", "items1")),
+            (port("c", "y"), port("sum", "items2")),
+        ]
+    );
+
+    // Daedalus takes the numbered ports as the fan-in.
+    let mut registry = Registry::new();
+    registry
+        .register_all(&[&SCALE_NODE, &SUM_NODE])
+        .expect("registers");
+    let mut node = NodeDoc::new("fan");
+    node.kind = NodeKindDoc::Group;
+    let body = GraphBody {
+        nodes: vec![node],
+        edges: Vec::new(),
+        groups: vec![group],
+    };
+    let graph = solve(&body, &registry, &Config::default()).expect("solves");
+    assert_eq!(graph.nodes.len(), 4);
+
+    // An empty list is an error naming the key.
+    std::fs::write(
+        &path,
+        std::fs::read_to_string(&path)
+            .expect("read")
+            .replace(r#"["b.y", "a.y", "c.y"]"#, "[]"),
+    )
+    .expect("write");
+    let e = Recipe::read(&path).expect_err("empty").to_string();
+    println!("{e}");
+    assert!(
+        e.contains("connects[0].from") && e.contains("an empty list"),
+        "{e}"
+    );
+}
