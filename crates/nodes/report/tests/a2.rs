@@ -18,6 +18,7 @@ use gaia_lock::{Entry, Lock};
 use gaia_report::{Report, render_text, report_layers};
 use gaia_source_files::source_path;
 use gaia_source_git::source as source_git;
+use gaia_source_oci::source as source_oci;
 use gaia_step::{Ctx, Store};
 use gaia_tree::merge_layers;
 use gaia_types::Layer;
@@ -26,6 +27,10 @@ use std::path::Path;
 
 const URL: &str = "https://github.com/vasilakisfil/hello.service";
 const COMMIT: &str = "3b9ee52ca0dbddcb64eb835e847f2059a8008ac5";
+/// The image a builder runs in, pinned by its index digest.
+const IMAGE: &str = "docker.io/library/debian:trixie-slim";
+const IMAGE_DIGEST: &str =
+    "sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2";
 
 /// One component built from the pinned commit for its target.
 fn component(
@@ -42,8 +47,27 @@ fn component(
     let git = which_git();
     let src: Tree = source_git(store, &git, URL, COMMIT, &ctx).expect("source");
     let vendor: Tree = source_path(store, &vendor.display().to_string(), &ctx).expect("vendor");
+    // The builder's root is pulled for the machine running the build: the
+    // tools run here and only the target is cross-compiled.
+    let platform = match std::env::consts::ARCH {
+        "x86_64" => "linux/amd64",
+        "aarch64" => "linux/arm64",
+        other => panic!("no image platform for host arch {other}"),
+    };
+    let (root, _) = source_oci(
+        store,
+        "/usr/bin/curl",
+        IMAGE,
+        IMAGE_DIGEST,
+        platform,
+        "",
+        &ctx,
+    )
+    .expect("root image");
     let (tree, _) = build_rust(
         store,
+        "/usr/bin/bwrap",
+        root,
         toolchain,
         src,
         vendor,
@@ -105,6 +129,13 @@ fn lock() -> String {
                 url: URL.into(),
                 reference: "master".into(),
                 commit: COMMIT.into(),
+            },
+        );
+        lock.insert(
+            &format!("{name}.root"),
+            Entry::Image {
+                reference: IMAGE.into(),
+                digest: IMAGE_DIGEST.into(),
             },
         );
     }

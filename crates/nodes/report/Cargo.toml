@@ -26,6 +26,7 @@ gaia-build-rust = { path = "../build-rust" }
 gaia-compress = { path = "../compress" }
 gaia-source-files = { path = "../source-files" }
 gaia-source-git = { path = "../source-git" }
+gaia-source-oci = { path = "../source-oci" }
 tempfile = "3"
 
 [lints]
