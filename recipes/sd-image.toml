@@ -50,7 +50,11 @@ from = ["rootp.partition", "datap.partition"]
 to = "disk.partitions"
 
 [inputs]
-build = ["root.tree", "erofs.tree"]
+# The root partition is what the bootloader reads, so it has the kernel under
+# /boot. The slot is not booted from in this form, so it takes the tree
+# without those files; with no OS, `system` is the same tree as `build`.
+build = ["root.tree"]
+system = ["erofs.tree"]
 data = ["slot.tree"]
 disk = ["disk.layout"]
 blobs = ["disk.blobs"]

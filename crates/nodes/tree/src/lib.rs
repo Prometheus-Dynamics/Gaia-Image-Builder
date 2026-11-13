@@ -30,6 +30,7 @@ mod layer;
 mod merge;
 mod place;
 mod services;
+mod under;
 mod walk;
 
 pub use accounts::tree_accounts;
@@ -38,13 +39,15 @@ pub use layer::tree_layer;
 pub use merge::{merge_layers, tree_merge};
 pub use place::tree_place;
 pub use services::tree_services;
+pub use under::tree_under;
 
 use daedalus::prelude::*;
 use gaia_store::Digest;
 use gaia_types::Tree;
 
 /// The nodes, for a registry.
-pub const NODES: [&NodeRecord; 6] = [
+pub const NODES: [&NodeRecord; 7] = [
+    &under::TREE_UNDER_NODE,
     &place::TREE_PLACE_NODE,
     &file::TREE_FILE_NODE,
     &layer::TREE_LAYER_NODE,

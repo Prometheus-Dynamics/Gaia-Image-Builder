@@ -48,6 +48,39 @@ pub fn bucket(name: &str, is_file: bool) -> Bucket {
     }
 }
 
+/// The `.config` of `package`'s build directory (`build/<package>-<version>`),
+/// when there is one. A directory of another package whose name starts the
+/// same way (`linux-headers`, `linux-firmware`) is not it: the build
+/// directory is the one with a `.config` and a `Makefile` or `Kbuild`.
+pub fn package_config(build: &Path, package: &str) -> io::Result<Option<std::path::PathBuf>> {
+    if !build.is_dir() {
+        return Ok(None);
+    }
+    let prefix = format!("{package}-");
+    let mut found: Vec<std::path::PathBuf> = Vec::new();
+    for entry in fs::read_dir(build)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let Some(rest) = name.strip_prefix(&prefix) else {
+            continue;
+        };
+        // `linux-headers-6.1`, `linux-firmware-...`: another package.
+        if rest.starts_with(|c: char| c.is_ascii_alphabetic())
+            && !rest.starts_with("custom")
+            && !rest.starts_with('v')
+        {
+            continue;
+        }
+        let config = entry.path().join(".config");
+        if config.is_file() {
+            found.push(config);
+        }
+    }
+    found.sort();
+    Ok(found.into_iter().next())
+}
+
 /// Moves each entry of `images` into `out/<bucket>/`, creating the four
 /// bucket directories even when they stay empty.
 pub fn sort_images(images: &Path, out: &Path) -> io::Result<()> {

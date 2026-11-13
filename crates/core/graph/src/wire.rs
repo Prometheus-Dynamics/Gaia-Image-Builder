@@ -267,6 +267,9 @@ pub(crate) fn wire(
                     loaded,
                     lock,
                     setup,
+                    wants_system: recipes
+                        .get(&image.recipe, &product_file)
+                        .is_ok_and(|recipe| recipe.inputs.contains_key("system")),
                 },
                 &mut os_inputs,
                 &mut host_ports,
@@ -575,8 +578,8 @@ struct ImageIn<'a> {
     lock: &'a Lock,
     board: &'a gaia_describe::Board,
     product_file: &'a Path,
-    /// Its OS step and its merged root filesystem, when it has an OS.
-    os: Option<(u32, u32)>,
+    /// Its OS's steps and its merged root filesystem, when it has an OS.
+    os: Option<OsNodes>,
 }
 
 /// The image's recipe, inline, its outputs to the host.
@@ -622,13 +625,22 @@ fn image_recipe(
     }
     for (input, ports) in &group.inputs {
         if input == "build"
-            && let Some((_, rootfs)) = at.os
+            && let Some(os) = at.os
         {
             for p in ports {
-                g.edge((rootfs, "tree"), (stages[&p.stage], &p.port));
+                g.edge((os.merged, "tree"), (stages[&p.stage], &p.port));
             }
-        } else if let Some(port) = os_output(input) {
-            let Some((os, _)) = at.os else {
+        } else if input == "system"
+            && let Some(os) = at.os
+        {
+            for p in ports {
+                g.edge((os.system, "tree"), (stages[&p.stage], &p.port));
+            }
+        } else if matches!(
+            input.as_str(),
+            "kernel" | "device-trees" | "bootloader" | "os"
+        ) {
+            let Some((os, port)) = at.os.and_then(|os| os.output(input)) else {
                 return Err(Error::at(
                     product_file,
                     format!("images[{i}]"),
@@ -641,7 +653,8 @@ fn image_recipe(
             for p in ports {
                 g.edge((os, port), (stages[&p.stage], &p.port));
             }
-        } else if input == "build" {
+        } else if input == "build" || input == "system" {
+            // With no OS there is nothing under /boot to leave out: the same tree.
             let [(_, node)] = builds else {
                 return Err(Error::at(
                     product_file,
@@ -792,7 +805,7 @@ fn image_blobs(g: &mut Graph<'_>, at: &ImageIn<'_>, recipe: &str) -> Result<u32,
         let (false, Some(content)) = (need.in_table, &need.content) else {
             continue;
         };
-        let Some((os, _)) = at.os else {
+        let Some((os, _)) = at.os.and_then(|os| os.output("bootloader")) else {
             return Err(Error::at(
                 at.product_file,
                 format!("images[{}]", at.index),
@@ -907,16 +920,33 @@ fn image_disk(at: &ImageIn<'_>, recipe: &str) -> Result<gaia_types::DiskLayout, 
     Ok(gaia_types::DiskLayout { table, partitions })
 }
 
-/// The OS step's output a recipe input of this name takes: Buildroot's
-/// `images/` sorted by what each file is, and `os` for the rest of them.
-fn os_output(input: &str) -> Option<&'static str> {
-    Some(match input {
-        "kernel" => "kernel",
-        "device-trees" => "device_trees",
-        "bootloader" => "bootloader",
-        "os" => "images",
-        _ => return None,
-    })
+/// An image's OS as nodes: the root filesystem's build, the kernel's and
+/// the bootloader's when the board has them, and the merged root filesystem.
+#[derive(Clone, Copy)]
+struct OsNodes {
+    rootfs: u32,
+    kernel: Option<u32>,
+    bootloader: Option<u32>,
+    merged: u32,
+    /// The root filesystem without the kernel's image and device trees
+    /// under /boot: what a slot holds, whose kernel is read from elsewhere.
+    /// The same node as `merged` when nothing is under /boot.
+    system: u32,
+}
+
+impl OsNodes {
+    /// The step and its output port a recipe input of this name takes. A
+    /// board with no kernel or bootloader build has those files, if any,
+    /// from the one build.
+    fn output(&self, input: &str) -> Option<(u32, &'static str)> {
+        Some(match input {
+            "kernel" => (self.kernel.unwrap_or(self.rootfs), "kernel"),
+            "device-trees" => (self.kernel.unwrap_or(self.rootfs), "device_trees"),
+            "bootloader" => (self.bootloader.unwrap_or(self.rootfs), "bootloader"),
+            "os" => (self.rootfs, "images"),
+            _ => return None,
+        })
+    }
 }
 
 /// One image's OS and what it is built with.
@@ -930,6 +960,8 @@ struct OsIn<'a> {
     loaded: &'a Loaded,
     lock: &'a Lock,
     setup: &'a Setup,
+    /// Whether the image's recipe takes `system`.
+    wants_system: bool,
 }
 
 /// The image's OS step, its input trees and host inputs, and the image's
@@ -941,12 +973,13 @@ fn image_os(
     os_inputs: &mut BTreeMap<String, u32>,
     host_ports: &mut BTreeMap<String, String>,
     inputs: &mut BTreeMap<String, HostInput>,
-) -> Result<(u32, u32), Error> {
+) -> Result<OsNodes, Error> {
     let product = &at.loaded.product;
     let file = &product.file;
     let i = at.index;
     let key = format!("images[{i}].os");
     let plan = os::plan(at.board, i, at.spec, file, at.lock)?;
+    let parts = os::split(&plan, at.board);
     let source = product.sources.get(&at.spec.source).ok_or_else(|| {
         Error::at(
             file,
@@ -971,68 +1004,6 @@ fn image_os(
             node
         }
     };
-    let os = g.add(
-        "gaia.os.buildroot",
-        format!("{}.os", at.image.name),
-        file,
-        &key,
-    )?;
-    let out = g.first_output(from).unwrap_or("tree");
-    g.edge((from, out), (os, "source"));
-    for (k, (name, input)) in plan.inputs.iter().enumerate() {
-        let (once, node) = match input {
-            InputFrom::Source {
-                file: described,
-                name: source_name,
-                source,
-            } => {
-                let once = format!("source:{name}");
-                match os_inputs.get(&once) {
-                    Some(&node) => (once, node),
-                    None => {
-                        let node = source_node(
-                            g,
-                            described,
-                            source_name,
-                            name,
-                            source,
-                            at.lock,
-                            at.board,
-                        )?;
-                        (once, node)
-                    }
-                }
-            }
-            InputFrom::Dir(dir) => {
-                let once = format!("dir:{}", dir.display());
-                match os_inputs.get(&once) {
-                    Some(&node) => (once, node),
-                    None => {
-                        let node = g.add(
-                            "gaia.source.path",
-                            format!("{}.os.{name}", at.image.name),
-                            file,
-                            &key,
-                        )?;
-                        g.set(node, "path", Lit::Str(dir.display().to_string()));
-                        (once, node)
-                    }
-                }
-            }
-        };
-        os_inputs.insert(once, node);
-        let out = g.first_output(node).unwrap_or("tree");
-        g.edge((node, out), (os, &format!("inputs{k}")));
-    }
-    let port = format!("{}.os", at.image.name);
-    host_input(
-        g,
-        host_ports,
-        inputs,
-        &port,
-        HostInput::Os(plan.config),
-        (os, "os"),
-    )?;
     let buildroot = at.setup.buildroot.clone().ok_or_else(|| {
         Error::at(
             file,
@@ -1040,14 +1011,126 @@ fn image_os(
             "the image has an OS, and the host gives no Buildroot setup (make, jobs, download directory)",
         )
     })?;
-    host_input(
+    // One build per part: `<image>.os` is the root filesystem's,
+    // `<image>.kernel` and `<image>.bootloader` the board's.
+    let mut step = |g: &mut Graph<'_>,
+                    what: &str,
+                    port: String,
+                    plan: os::OsPlan,
+                    host_ports: &mut BTreeMap<String, String>,
+                    inputs: &mut BTreeMap<String, HostInput>|
+     -> Result<u32, Error> {
+        let os = g.add(
+            "gaia.os.buildroot",
+            format!("{}.{what}", at.image.name),
+            file,
+            &key,
+        )?;
+        let out = g.first_output(from).unwrap_or("tree");
+        g.edge((from, out), (os, "source"));
+        for (k, (name, input)) in plan.inputs.iter().enumerate() {
+            let (once, node) = match input {
+                InputFrom::Source {
+                    file: described,
+                    name: source_name,
+                    source,
+                } => {
+                    let once = format!("source:{name}");
+                    match os_inputs.get(&once) {
+                        Some(&node) => (once, node),
+                        None => {
+                            let node = source_node(
+                                g,
+                                described,
+                                source_name,
+                                name,
+                                source,
+                                at.lock,
+                                at.board,
+                            )?;
+                            (once, node)
+                        }
+                    }
+                }
+                InputFrom::Dir(dir) => {
+                    let once = format!("dir:{}", dir.display());
+                    match os_inputs.get(&once) {
+                        Some(&node) => (once, node),
+                        None => {
+                            let node = g.add(
+                                "gaia.source.path",
+                                format!("{}.os.{name}", at.image.name),
+                                file,
+                                &key,
+                            )?;
+                            g.set(node, "path", Lit::Str(dir.display().to_string()));
+                            (once, node)
+                        }
+                    }
+                }
+            };
+            os_inputs.insert(once, node);
+            let out = g.first_output(node).unwrap_or("tree");
+            g.edge((node, out), (os, &format!("inputs{k}")));
+        }
+        host_input(
+            g,
+            host_ports,
+            inputs,
+            &port,
+            HostInput::Os(plan.config),
+            (os, "os"),
+        )?;
+        host_input(
+            g,
+            host_ports,
+            inputs,
+            "buildroot-host",
+            HostInput::Buildroot(buildroot.clone()),
+            (os, "host"),
+        )?;
+        Ok(os)
+    };
+    let name = &at.image.name;
+    // Whether the kernel's image and device trees go in the root filesystem
+    // under /boot: the image's fragment says so, in Buildroot's own words.
+    let boot_in_rootfs = parts.kernel.as_ref().is_some_and(|kernel| {
+        kernel.config.fragments.iter().any(|f| {
+            f.text
+                .lines()
+                .any(|line| line.trim() == "BR2_LINUX_KERNEL_INSTALL_TARGET=y")
+        })
+    });
+    let os = step(
         g,
+        "os",
+        format!("{name}.os"),
+        parts.rootfs,
         host_ports,
         inputs,
-        "buildroot-host",
-        HostInput::Buildroot(buildroot),
-        (os, "host"),
     )?;
+    let kernel = match parts.kernel {
+        Some(plan) => Some(step(
+            g,
+            "kernel",
+            format!("{name}.os.kernel"),
+            plan,
+            host_ports,
+            inputs,
+        )?),
+        None => None,
+    };
+    let bootloader = match parts.bootloader {
+        Some(plan) => Some(step(
+            g,
+            "bootloader",
+            format!("{name}.os.bootloader"),
+            plan,
+            host_ports,
+            inputs,
+        )?),
+        None => None,
+    };
 
     // The root filesystem: the OS's tree, then the components' layers.
     let layer = g.add(
@@ -1059,6 +1142,30 @@ fn image_os(
     g.set(layer, "owner", Lit::Str("os".into()));
     g.edge((os, "rootfs"), (layer, "tree"));
     let mut layers = vec![layer];
+    // The kernel's image and device trees under /boot, kept apart: `build`
+    // has them, `system` does not.
+    let mut boot_layers: Vec<u32> = Vec::new();
+    // What the kernel's build made that the root filesystem carries: its
+    // modules, and its image and device trees when the image wants them.
+    if let Some(kernel) = kernel {
+        let under = |g: &mut Graph<'_>, what: &str, port: &str, prefix: &str| {
+            let node = g.add(
+                "gaia.tree.under",
+                format!("{name}.kernel.{what}"),
+                file,
+                &key,
+            )?;
+            g.set(node, "owner", Lit::Str("os".into()));
+            g.set(node, "prefix", Lit::Str(prefix.into()));
+            g.edge((kernel, port), (node, "from"));
+            Ok::<u32, Error>(node)
+        };
+        layers.push(under(g, "modules", "modules", "/lib/modules")?);
+        if boot_in_rootfs {
+            boot_layers.push(under(g, "image", "kernel", "/boot")?);
+            boot_layers.push(under(g, "device-trees", "device_trees", "/boot")?);
+        }
+    }
     for component in at.members {
         let build = at
             .builds
@@ -1075,10 +1182,32 @@ fn image_os(
         file,
         &key,
     )?;
-    for (k, layer) in layers.into_iter().enumerate() {
-        g.edge((layer, "layer"), (merge, &format!("layers{k}")));
+    for (k, layer) in layers.iter().chain(&boot_layers).enumerate() {
+        g.edge((*layer, "layer"), (merge, &format!("layers{k}")));
     }
-    Ok((os, merge))
+    // A second tree without /boot's kernel files, only when the recipe asks
+    // for `system` and there is something to leave out.
+    let system = if at.wants_system && !boot_layers.is_empty() {
+        let node = g.add(
+            "gaia.tree.merge",
+            format!("{}.system", at.image.name),
+            file,
+            &key,
+        )?;
+        for (k, layer) in layers.iter().enumerate() {
+            g.edge((*layer, "layer"), (node, &format!("layers{k}")));
+        }
+        node
+    } else {
+        merge
+    };
+    Ok(OsNodes {
+        rootfs: os,
+        kernel,
+        bootloader,
+        merged: merge,
+        system,
+    })
 }
 
 /// A host input on `port`, fed to `to`. One port the images share (the
