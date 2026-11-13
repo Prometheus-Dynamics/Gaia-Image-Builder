@@ -69,6 +69,17 @@ fn key_env(text: String) -> impl Fn(&str) -> Option<String> {
     move |name| (name == KEY_VAR).then(|| text.clone())
 }
 
+/// With `GAIA_FLASH_DUMP` naming a directory, the output `path` and its raw
+/// image are copied there as `name` and `name.raw`, for another reader (the
+/// board side's decoder) to be run over them.
+fn dump(name: &str, path: &Path, raw: &[u8]) {
+    if let Some(dir) = std::env::var_os("GAIA_FLASH_DUMP") {
+        let dir = PathBuf::from(dir);
+        std::fs::copy(path, dir.join(name)).expect("dump");
+        std::fs::write(dir.join(format!("{name}.raw")), raw).expect("dump");
+    }
+}
+
 fn output(store_root: &Path, artifact: &Artifact) -> PathBuf {
     let store = Store::open(store_root).expect("store");
     artifact.object.path_in(&store).expect("in the store")
@@ -123,6 +134,7 @@ fn unsigned_output_is_the_raw_image_and_reads_back_8_mib() {
         .expect("flash");
     assert_eq!(artifact.kind.to_string(), "disk+xz");
     let path = output(Path::new(&store), &artifact);
+    dump("unsigned.img.xz", &path, &raw);
     assert_eq!(decode_first_stream(&path), raw);
     assert_eq!(decode_all(&path), raw, "unsigned: one stream only");
     assert_eq!(dictionary::read_back(&path), Ok(EIGHT_MIB));
@@ -157,6 +169,7 @@ fn signed_output_is_two_streams_and_the_record_verifies() {
     .expect("flash");
     let path = output(Path::new(&store), &artifact);
 
+    dump("signed.img.xz", &path, &raw);
     assert_eq!(decode_first_stream(&path), raw, "stream 1 is the image");
     let all = decode_all(&path);
     assert_eq!(
