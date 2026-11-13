@@ -284,6 +284,7 @@ pub(crate) fn group(recipe: &Recipe, values: &toml::Table, from: &Path) -> Resul
         inputs,
         outputs,
         consts,
+        metadata: Default::default(),
     })
 }
 

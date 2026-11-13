@@ -14,8 +14,8 @@ homepage = "https://github.com/Prometheus-Dynamics/Gaia-Image-Builder"
 
 [workspace.dependencies]
 # Daedalus `next`, locked by commit. Moving the lock is its own PR.
-daedalus = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def", features = ["std", "threads"] }
-daedalus-backend-process = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+daedalus = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "90ec12e0648df3d6d69d4992cae6ec8895daa651", features = ["std", "threads"] }
+daedalus-backend-process = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "90ec12e0648df3d6d69d4992cae6ec8895daa651" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -10,8 +10,8 @@ publish = false
 
 [dependencies]
 daedalus = { workspace = true }
-daedalus-cpu = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
-daedalus-registry = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+daedalus-cpu = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "90ec12e0648df3d6d69d4992cae6ec8895daa651" }
+daedalus-registry = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "90ec12e0648df3d6d69d4992cae6ec8895daa651" }
 gaia-describe = { path = "../describe" }
 gaia-lock = { path = "../lock" }
 gaia-recipe = { path = "../recipe" }
