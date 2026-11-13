@@ -355,7 +355,7 @@ fn component_build(
         let known: Vec<&str> = builders.0.keys().map(String::as_str).collect();
         Error::at(
             file,
-            &format!("{word}.builder"),
+            format!("{word}.builder"),
             format!(
                 "no builder {}; the builders are {}",
                 build.builder,
