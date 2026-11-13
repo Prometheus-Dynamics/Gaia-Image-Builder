@@ -18,7 +18,20 @@
 # 32 digits with its leading zeros. With no id, or a serial of another
 # shape, no address is set (the kernel picks random ones) and the script
 # says which was missing.
+#
+# The gadget's identity is its own, and never a managed gadget's. Windows
+# reads a device's Microsoft OS descriptors once per idVendor, idProduct and
+# bcdDevice and keeps the answer. This gadget has none, so a PC that met a
+# board under a managed gadget's three values would remember "no WinUSB" for
+# the product itself. A managed gadget (Lemnos's daemon builds it) is
+# 1d6b:0104 with a bcdDevice from 0x0100 to 0x0aff. This one is 1d6b:0103
+# (the Linux Foundation's NCM gadget) with a bcdDevice from 0x0b00 up, set
+# here and never left to the kernel, whose default is its own version.
+# An image has one or the other, not both.
 G=/sys/kernel/config/usb_gadget/net
+ID_VENDOR=0x1d6b
+ID_PRODUCT=0x0103
+BCD_DEVICE=0x0b00
 
 family() {
 	[ -r /etc/usb-gadget.family ] && head -n 1 /etc/usb-gadget.family
@@ -44,6 +57,10 @@ addresses() {
 }
 
 case "$1" in
+identity)
+	# For a check on a build machine: the three values it presents.
+	echo "$ID_VENDOR $ID_PRODUCT $BCD_DEVICE"
+	;;
 addresses)
 	# For a check on a build machine: the addresses of the family and
 	# serial given, or nothing for a serial that does not fit.
@@ -55,8 +72,9 @@ start)
 	udc=$(ls /sys/class/udc | head -n 1)
 	[ -n "$udc" ] || { echo "usb0: no USB device controller"; exit 1; }
 	mkdir -p "$G/strings/0x409" "$G/configs/c.1/strings/0x409" "$G/functions/ncm.usb0" || exit 1
-	echo 0x1d6b > "$G/idVendor"
-	echo 0x0104 > "$G/idProduct"
+	echo "$ID_VENDOR" > "$G/idVendor"
+	echo "$ID_PRODUCT" > "$G/idProduct"
+	echo "$BCD_DEVICE" > "$G/bcdDevice"
 	id=$(family)
 	serial=$(serial "$(tr -d '\000' < /proc/device-tree/serial-number 2>/dev/null)")
 	if [ -z "$id" ]; then
@@ -86,7 +104,7 @@ restart)
 	"$0" start
 	;;
 *)
-	echo "usage: $0 {start|stop|restart|addresses <family> <serial>}"
+	echo "usage: $0 {start|stop|restart|identity|addresses <family> <serial>}"
 	exit 1
 	;;
 esac

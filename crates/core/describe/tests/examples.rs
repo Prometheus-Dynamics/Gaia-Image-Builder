@@ -178,3 +178,44 @@ fn the_gadget_networks_addresses_follow_the_identity_rule() {
         "the script makes the gadget; a built-in one would bind first with random addresses"
     );
 }
+
+/// The bring-up gadget never presents a managed gadget's identity: Windows
+/// keeps what it learned about a device per vendor, product and revision.
+/// The managed values are Lemnos's (its daemon's gadget at W4): 1d6b:0104,
+/// revisions 0x0100 to 0x0aff.
+#[test]
+fn the_gadget_networks_identity_is_not_a_managed_gadgets() {
+    let script = examples().join("components/usb-gadget-network/files/S41usb0");
+    let out = std::process::Command::new("/bin/sh")
+        .arg(&script)
+        .arg("identity")
+        .output()
+        .expect("sh");
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    let values: Vec<u32> = text
+        .split_whitespace()
+        .map(|word| u32::from_str_radix(word.trim_start_matches("0x"), 16).expect("hex"))
+        .collect();
+    assert_eq!(
+        values,
+        [0x1d6b, 0x0103, 0x0b00],
+        "vendor, product, revision"
+    );
+    let managed = |vendor: u32, product: u32, revision: u32| {
+        vendor == 0x1d6b && product == 0x0104 && (0x0100..=0x0aff).contains(&revision)
+    };
+    assert!(!managed(values[0], values[1], values[2]));
+    // Each alone keeps it apart: another product, and a revision outside
+    // the managed range even if the product were the same.
+    assert!(!(0x0100..=0x0aff).contains(&values[2]));
+    // The script writes all three before it binds, the revision included.
+    let source = std::fs::read_to_string(&script).expect("read");
+    for line in [
+        "echo \"$ID_VENDOR\" > \"$G/idVendor\"",
+        "echo \"$ID_PRODUCT\" > \"$G/idProduct\"",
+        "echo \"$BCD_DEVICE\" > \"$G/bcdDevice\"",
+    ] {
+        assert!(source.contains(line), "the script has no line {line:?}");
+    }
+}

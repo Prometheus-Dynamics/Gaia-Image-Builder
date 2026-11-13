@@ -4,6 +4,10 @@
 # board's id and serial number, so they are the same on every boot. The id
 # is the image's to install, as the one line of /etc/usb-gadget.family;
 # without it the addresses are random, as the script says at boot.
+#
+# For bring-up images only, and never beside a gadget a daemon manages: it
+# presents 1d6b:0103 with bcdDevice 0x0b00, apart from a managed gadget's
+# 1d6b:0104 and 0x0100 to 0x0aff, for the reason its script gives.
 # Untested on board.
 version = 1
 name = "usb-gadget-network"
