@@ -508,19 +508,19 @@ fn image_recipe(
             for p in ports {
                 g.edge((rootfs, "tree"), (stages[&p.stage], &p.port));
             }
-        } else if input == "os" {
+        } else if let Some(port) = os_output(input) {
             let Some((os, _)) = at.os else {
                 return Err(Error::at(
                     product_file,
                     format!("images[{i}]"),
                     format!(
-                        "recipe {} takes the OS's boot files as `os`; this image has no `os`",
+                        "recipe {} takes the OS's boot files as `{input}`; this image has no `os`",
                         recipe.name
                     ),
                 ));
             };
             for p in ports {
-                g.edge((os, "images"), (stages[&p.stage], &p.port));
+                g.edge((os, port), (stages[&p.stage], &p.port));
             }
         } else if input == "build" {
             let [(_, node)] = builds else {
@@ -722,6 +722,18 @@ fn image_disk(at: &ImageIn<'_>, recipe: &str) -> Result<gaia_types::DiskLayout, 
         });
     }
     Ok(gaia_types::DiskLayout { table, partitions })
+}
+
+/// The OS step's output a recipe input of this name takes: Buildroot's
+/// `images/` sorted by what each file is, and `os` for the rest of them.
+fn os_output(input: &str) -> Option<&'static str> {
+    Some(match input {
+        "kernel" => "kernel",
+        "device-trees" => "device_trees",
+        "bootloader" => "bootloader",
+        "os" => "images",
+        _ => return None,
+    })
 }
 
 /// One image's OS and what it is built with.

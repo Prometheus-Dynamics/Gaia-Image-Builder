@@ -90,7 +90,7 @@ fn the_plan_lists_the_config_the_board_gives() {
         "BR2_LINUX_KERNEL_INTREE_DTS_NAME=\"rockchip/rk3566-radxa-zero-3e\"",
         "BR2_LINUX_KERNEL_CUSTOM_DTS_DIR=\"@files.2@\"",
         "BR2_TARGET_UBOOT_BOARD_DEFCONFIG=\"radxa-zero-3-rk3566\"",
-        "BR2_TARGET_UBOOT_CUSTOM_MAKEOPTS=\"ROCKCHIP_TPL=@zero-3e.rkbin@/bin/rk35/rk3566_ddr_1056MHz_v1.23.bin\"",
+        "BR2_TARGET_UBOOT_CUSTOM_MAKEOPTS=\"ROCKCHIP_TPL=@zero-3e.rkbin@/bin/rk35/rk3566_ddr_1056MHz_v1.26.bin\"",
         "BR2_TARGET_ARM_TRUSTED_FIRMWARE_PLATFORM=\"rk3568\"",
         "built from LINUX=zero-3e.linux UBOOT=zero-3e.u-boot ARM_TRUSTED_FIRMWARE=zero-3e.tf-a",
         // The image's own fragment, last.
@@ -185,6 +185,27 @@ fn an_unlocked_board_source_says_to_lock() {
     );
 }
 
+/// A recipe that signs the OS's bootloader files: the `bootloader` input
+/// is the OS step's `bootloader` output.
+#[test]
+fn a_recipe_input_takes_the_os_boot_files_by_what_they_are() {
+    let dir = project();
+    edit(
+        &dir.path().join("recipes/slot.toml"),
+        "[inputs]\n",
+        "[inputs]\nbootloader = [\"verity.veritysetup\"]\n",
+    );
+    // The types differ (an artifact into a string), so the planner refuses
+    // it, naming the edge: the input reached the OS step's output.
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("`gaia.os.buildroot`.bootloader -> `gaia.verity`.veritysetup"),
+        "{err}"
+    );
+}
+
 #[test]
 fn a_recipe_that_takes_os_needs_an_image_with_one() {
     let dir = project();
@@ -197,10 +218,13 @@ fn a_recipe_that_takes_os_needs_an_image_with_one() {
     edit(
         &dir.path().join("recipes/slot.toml"),
         "build = [\"erofs.tree\"]",
-        "os = [\"erofs.tree\"]",
+        "bootloader = [\"erofs.tree\"]",
     );
     let out = plan(dir.path(), &[]);
     assert_eq!(out.status.code(), Some(2));
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("this image has no `os`"), "{err}");
+    assert!(
+        err.contains("boot files as `bootloader`; this image has no `os`"),
+        "{err}"
+    );
 }

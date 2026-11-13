@@ -29,8 +29,9 @@
 //!   config names are its fan-in inputs. The recipe input `build` is then
 //!   `<image>.rootfs`: the OS's tree, then each component's layer (its
 //!   install entries placed, `gaia.tree.place`, or its whole build output),
-//!   merged by `gaia.tree.merge`. The recipe input `os` is the OS's boot
-//!   files (Buildroot's `images/`).
+//!   merged by `gaia.tree.merge`. The OS's boot files (Buildroot's
+//!   `images/`) are four recipe inputs, by what each file is: `kernel`,
+//!   `device-trees`, `bootloader`, and `os` for the rest.
 //! - **Everywhere:** an input named `store` gets the store, and one named
 //!   like a [`Setup`] tool gets that tool's path. Every node has
 //!   `daedalus.node.fusion: false`, so fail-fast and cancel stop between
