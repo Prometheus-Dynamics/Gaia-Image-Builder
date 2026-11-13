@@ -109,7 +109,7 @@ fn the_plan_lists_the_config_the_board_gives() {
         // The image's own fragment, last.
         "[image.0.os.fragment]",
         "BR2_TARGET_GENERIC_HOSTNAME=\"zero3e\"",
-        "/etc/network/interfaces.d/usb0 /etc/udhcpd.usb0.conf",
+        "/etc/init.d/S41usb0 /etc/udhcpd.usb0.conf",
     ] {
         assert!(text.contains(line), "the plan has no line {line:?}");
     }

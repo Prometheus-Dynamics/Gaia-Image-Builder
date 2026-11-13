@@ -4,9 +4,9 @@ version = 1
 name = "usb-gadget-network"
 
 [[install]]
-from = { file = "files/usb0" }
-to = "/etc/network/interfaces.d/usb0"
-mode = "0644"
+from = { file = "files/S41usb0" }
+to = "/etc/init.d/S41usb0"
+mode = "0755"
 
 [[install]]
 from = { file = "files/udhcpd.usb0.conf" }
