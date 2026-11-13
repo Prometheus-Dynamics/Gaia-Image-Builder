@@ -545,3 +545,91 @@ fn a_path_the_tree_has_or_one_outside_it_is_refused() {
         .expect_err("outside");
     println!("{error}");
 }
+
+/// An OS layer whose `/root` is root's alone, as an OS's own tables say.
+fn os_with_private_root(f: &Fixture) -> Layer {
+    let mut tree = stored(
+        f,
+        "os-root",
+        &[("root/.profile", "x\n"), ("etc/hostname", "h\n")],
+    );
+    tree.entries = vec![FileEntry {
+        path: "root".into(),
+        mode: 0o700,
+        uid: 0,
+        gid: 0,
+    }];
+    Layer {
+        owner: "os".into(),
+        tree,
+        replaces: Vec::new(),
+    }
+}
+
+fn mode_of(entries: &[FileEntry], path: &str) -> Option<u32> {
+    entries.iter().find(|e| e.path == path).map(|e| e.mode)
+}
+
+#[test]
+fn a_chosen_directory_mode_stands_over_a_layer_that_only_puts_files_under_it() {
+    let f = fixture();
+    let key = || {
+        place(
+            &f,
+            "ssh-key",
+            &[("authorized_keys", "ssh-ed25519 AAAA\n")],
+            &[(
+                "authorized_keys",
+                "/root/.ssh/authorized_keys",
+                Some(0o600),
+                0,
+            )],
+        )
+    };
+    // The component's layer has /root only as the parent of its file. In
+    // either order, the OS's 0700 is what the merged tree has.
+    for layers in [
+        vec![os_with_private_root(&f), key()],
+        vec![key(), os_with_private_root(&f)],
+    ] {
+        let (tree, _) = merge_layers(&f.store, &layers, &Ctx::new()).expect("merges");
+        assert_eq!(
+            mode_of(&tree.entries, "root"),
+            Some(0o700),
+            "{:?}",
+            tree.entries
+        );
+        assert_eq!(
+            mode_of(&tree.entries, "root/.ssh/authorized_keys"),
+            Some(0o600)
+        );
+        let store = Store::open(&f.store).expect("store");
+        let dir = tree.object.path_in(&store).expect("stored");
+        assert!(dir.join("root/.profile").is_file() && dir.join("root/.ssh").is_dir());
+    }
+}
+
+#[test]
+fn two_layers_that_each_choose_a_directorys_mode_still_conflict() {
+    let f = fixture();
+    let mut other = stored(&f, "other", &[("root/notes", "n\n")]);
+    other.entries = vec![FileEntry {
+        path: "root".into(),
+        mode: 0o750,
+        uid: 0,
+        gid: 0,
+    }];
+    let other = Layer {
+        owner: "tools".into(),
+        tree: other,
+        replaces: Vec::new(),
+    };
+    let error = merge_layers(&f.store, &[os_with_private_root(&f), other], &Ctx::new())
+        .expect_err("two choices");
+    let text = error.to_string();
+    println!("{text}");
+    assert!(
+        text.contains("/root: 700 0:0 in os, 750 0:0 in tools"),
+        "{text}"
+    );
+}

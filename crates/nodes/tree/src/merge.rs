@@ -22,7 +22,14 @@ struct Claim {
     from: PathBuf,
     /// The layer that replaced it, once one has.
     replaced_by: Option<String>,
+    /// For a directory: whether a layer chose its mode and owner (an entry
+    /// for it, or a stored mode that is not the plain 0755). A directory a
+    /// layer has only because a file is under it is not chosen.
+    chosen: bool,
 }
+
+/// The mode a directory has when nothing chose one.
+const PLAIN_DIR: u32 = 0o755;
 
 /// The node: any number of layers, on ports `layers0`, `layers1` and so
 /// on, merged in port order.
@@ -139,11 +146,13 @@ fn claim(store: &Store, layers: &[Layer]) -> Result<BTreeMap<String, Claim>, Ste
             }
         }
         for (path, Found { node, mode }) in found {
+            let chosen = set.contains_key(path.as_str()) || mode != PLAIN_DIR;
             let (mode, uid, gid) = match set.get(path.as_str()) {
                 Some(entry) => (entry.mode & 0o7777, entry.uid, entry.gid),
                 None => (mode, 0, 0),
             };
             let new = Claim {
+                chosen,
                 node,
                 mode,
                 uid,
@@ -159,6 +168,20 @@ fn claim(store: &Store, layers: &[Layer]) -> Result<BTreeMap<String, Claim>, Ste
             let same = (old.mode, old.uid, old.gid) == (new.mode, new.uid, new.gid);
             if old.node == Node::Dir && new.node == Node::Dir && same {
                 old.owners.push(owner.clone());
+                old.chosen |= new.chosen;
+                continue;
+            }
+            // A directory one layer chose a mode and owner for, and another
+            // has only as the parent of its files: the choice stands. Two
+            // different choices are still a conflict.
+            if old.node == Node::Dir && new.node == Node::Dir && old.chosen != new.chosen {
+                let mut owners = std::mem::take(&mut old.owners);
+                owners.push(owner.clone());
+                if new.chosen {
+                    *old = Claim { owners, ..new };
+                } else {
+                    old.owners = owners;
+                }
                 continue;
             }
             if replaces.contains(&path) {
