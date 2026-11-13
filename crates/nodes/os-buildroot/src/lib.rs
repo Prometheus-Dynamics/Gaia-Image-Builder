@@ -54,6 +54,8 @@ use std::sync::{Arc, Mutex};
 
 const NAME: &str = "gaia.os.buildroot";
 /// 2: the root filesystem's owners and modes, from Buildroot's own tar.
+/// (The check that every config line was taken changes no output, so no
+/// new version.)
 const KEY_VERSION: u32 = 2;
 /// The environment every make runs with. Nothing else is inherited.
 const PATH: &str = "/usr/local/bin:/usr/bin:/bin";
@@ -300,6 +302,17 @@ fn build(
     let merged = config::merge(&base, &fragments).map_err(fail)?;
     fs::write(&config, merged).map_err(io_fail("the merged config"))?;
     work.run(&make_tool(host, src, &out, vars, &["olddefconfig"]))?;
+    // What Buildroot resolved must be what was asked for.
+    let resolved = fs::read_to_string(&config).map_err(io_fail("the resolved config"))?;
+    let not_taken = config::not_taken(&resolved, &fragments);
+    if !not_taken.is_empty() {
+        return Err(fail(format!(
+            "Buildroot did not take {} config line{} as written:\n  {}",
+            not_taken.len(),
+            if not_taken.len() == 1 { "" } else { "s" },
+            not_taken.join("\n  ")
+        )));
+    }
 
     let shown = Arc::new(Mutex::new(String::new()));
     let sink = shown.clone();

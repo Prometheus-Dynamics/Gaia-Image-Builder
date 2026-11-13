@@ -196,6 +196,31 @@ fn a_board_change_changes_the_config() {
 }
 
 #[test]
+fn a_big_little_pair_is_buildroots_option_and_the_little_core_for_rust() {
+    let dir = project();
+    edit(
+        &dir.path().join("examples/boards/zero-3e/board.toml"),
+        "cpu = \"cortex-a55\"",
+        "cpu = \"cortex-a76.cortex-a55\"",
+    );
+    let out = plan(dir.path(), &["--json"]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("BR2_cortex_a76_a55=y"),
+        "Buildroot's name for the pair"
+    );
+    assert!(!text.contains("BR2_cortex_a76_cortex_a55"));
+    let both: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+    let nodes = both["graph"]["graph"]["nodes"].as_array().expect("nodes");
+    let build = nodes
+        .iter()
+        .find(|n| n["label"] == "hello-rust.build")
+        .expect("the build");
+    assert_eq!(build["consts"]["cpu"]["value"], "cortex-a55");
+}
+
+#[test]
 fn a_blob_name_that_is_no_make_variable_is_an_error_at_its_key() {
     let dir = project();
     edit(
