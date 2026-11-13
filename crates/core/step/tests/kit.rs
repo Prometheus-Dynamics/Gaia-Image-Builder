@@ -243,3 +243,34 @@ fn a_failed_tool_keeps_its_whole_output_in_a_run_log() {
     assert!(text.trim_end().ends_with(" exit 3"), "{text}");
     assert_eq!(daedalus_cpu_author::FixedError::code(&error), 3);
 }
+
+/// A body's own failure can be longer than the 64 bytes a fault record
+/// keeps of its reason, so the whole message goes to a run log the failure
+/// names: a check that lists what it found does not lose the list.
+#[test]
+fn a_bodys_own_failure_is_whole_in_a_run_log() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("store")).expect("store");
+    let cx = Ctx::new();
+    let key = KeyBuilder::new("test.check", 1).finish();
+    let message = "the config did not take 2 lines as written:\n  a.fragment: `CONFIG_A=y` became `CONFIG_A=m`\n  b.fragment: `CONFIG_B=y` was dropped";
+    let error = Step::new(&store, &cx, "test.check", key)
+        .look_up_or_make(&[("out", Path::new("out"))], |_| {
+            Err(StepError::body("test.check", message))
+        })
+        .expect_err("the body fails");
+    assert!(matches!(error.kind(), ErrorKind::Body(_)));
+    let log = error.log().expect("the failure names a log");
+    let text = std::fs::read_to_string(log).expect("read the log");
+    println!("{text}");
+    for line in message.lines() {
+        assert!(
+            text.contains(&format!("err| {line}")),
+            "the log has {line:?}"
+        );
+    }
+    assert!(
+        text.lines().last().is_some_and(|l| l.ends_with(" failed")),
+        "the log ends as failed, so it is the one a failed build shows"
+    );
+}
