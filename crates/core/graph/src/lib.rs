@@ -25,7 +25,7 @@
 //! - **OS:** an image with `os` gets a `gaia.os.buildroot` step,
 //!   `<image>.os`, built from the product's source with a config the board
 //!   gives by rule and the image's own fragments (see `os`). It is fed on
-//!   `<image>.os-config` and the shared `buildroot-host`; the trees the
+//!   `<image>.os` and the shared `buildroot-host`; the trees the
 //!   config names are its fan-in inputs. The recipe input `build` is then
 //!   `<image>.rootfs`: the OS's tree, then each component's layer (its
 //!   install entries placed, `gaia.tree.place`, or its whole build output),
@@ -116,7 +116,7 @@ pub enum HostInput {
     /// The host side of every Buildroot run, from [`Setup`].
     Buildroot(gaia_types::BuildrootHost),
     /// A component's install entries from one tree.
-    Placements(Vec<gaia_types::Placement>),
+    Placements(gaia_types::Placements),
 }
 
 impl HostInput {
@@ -127,7 +127,7 @@ impl HostInput {
             Self::Disk(_) => "gaia:disk-layout",
             Self::Os(_) => "gaia:os-config",
             Self::Buildroot(_) => "gaia:buildroot-host",
-            Self::Placements(_) => "list<gaia:placement>",
+            Self::Placements(_) => "gaia:placements",
         }
     }
 
@@ -187,7 +187,7 @@ impl HostInput {
                 line
             }
             Self::Placements(p) => {
-                let to: Vec<&str> = p.iter().map(|p| p.to.as_str()).collect();
+                let to: Vec<&str> = p.entries.iter().map(|p| p.to.as_str()).collect();
                 to.join(" ")
             }
         }

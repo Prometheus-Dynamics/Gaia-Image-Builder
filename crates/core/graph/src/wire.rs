@@ -1,11 +1,11 @@
 //! Laying the descriptions out as nodes and edges.
 
+use crate::os::{self, InputFrom};
 use crate::{Builders, Error, FUSION, HostInput, STEP, Setup};
 use daedalus::layers::graph::{
     EdgeDoc, EdgePolicyDoc, GraphBody, Lit, NodeDoc, NodeKindDoc, PortRefDoc,
 };
 use daedalus::prelude::Registry;
-use crate::os::{self, InputFrom};
 use daedalus_registry::TypeRef;
 use gaia_describe::{
     Component, FileRef, ImagePlatform, ImageSpec, InstallFrom, Loaded, OsSpec, Source,
@@ -829,8 +829,15 @@ fn image_os(
         let out = g.first_output(node).unwrap_or("tree");
         g.edge((node, out), (os, &format!("inputs{k}")));
     }
-    let port = format!("{}.os-config", at.image.name);
-    host_input(g, host_ports, inputs, &port, HostInput::Os(plan.config), (os, "config"))?;
+    let port = format!("{}.os", at.image.name);
+    host_input(
+        g,
+        host_ports,
+        inputs,
+        &port,
+        HostInput::Os(plan.config),
+        (os, "os"),
+    )?;
     let buildroot = at.setup.buildroot.clone().ok_or_else(|| {
         Error::at(
             file,
@@ -970,13 +977,16 @@ fn component_layers(
                 }),
             }
         };
-        groups.entry(group).or_default().push(gaia_types::Placement {
-            from,
-            to: install.to.clone(),
-            mode: install.mode.map(|m| m.0),
-            uid: id(&install.owner, "owner")?,
-            gid: id(&install.group, "group")?,
-        });
+        groups
+            .entry(group)
+            .or_default()
+            .push(gaia_types::Placement {
+                from,
+                to: install.to.clone(),
+                mode: install.mode.map(|m| m.0),
+                uid: id(&install.owner, "owner")?,
+                gid: id(&install.group, "group")?,
+            });
     }
     let mut layers = Vec::new();
     for (k, (group, placements)) in groups.into_iter().enumerate() {
@@ -1020,7 +1030,9 @@ fn component_layers(
             host_ports,
             inputs,
             &port,
-            HostInput::Placements(placements),
+            HostInput::Placements(gaia_types::Placements {
+                entries: placements,
+            }),
             (place, "placements"),
         )?;
         layers.push(place);

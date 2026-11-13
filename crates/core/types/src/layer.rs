@@ -32,6 +32,14 @@ pub struct Placement {
     pub gid: u32,
 }
 
+/// A component's install entries from one tree, as one value: a host can
+/// feed a keyed struct where a list of structs does not match the port.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Type, Serialize, Deserialize)]
+#[type_key("gaia:placements")]
+pub struct Placements {
+    pub entries: Vec<Placement>,
+}
+
 /// A user a component needs.
 #[derive(Clone, Debug, PartialEq, Eq, Type, Serialize, Deserialize)]
 #[type_key("gaia:account")]

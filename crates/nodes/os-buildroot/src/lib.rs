@@ -1,6 +1,6 @@
 //! `gaia.os.buildroot`: a root filesystem and boot files built by Buildroot.
 //!
-//! Inputs: the Buildroot source (a stored tree); the config
+//! Inputs: the Buildroot source (a stored tree); `os`, the config
 //! ([`OsConfig`]): fragments, text from descriptions applied in order over
 //! Buildroot's own `allnoconfig`, the names of the input trees, packages
 //! built from one of them (`<PACKAGE>_OVERRIDE_SRCDIR`) and those given as
@@ -41,8 +41,8 @@ mod out;
 mod progress;
 
 use daedalus::prelude::*;
-use gaia_step::{Ctx, Digest, KeyBuilder, Step, StepError, Store, Stream, Tool, Work};
 use daedalus_cpu_author::FanIn;
+use gaia_step::{Ctx, Digest, KeyBuilder, Step, StepError, Store, Stream, Tool, Work};
 use gaia_types::{Artifact, ArtifactKind, Tree};
 use std::collections::BTreeSet;
 use std::fs;
@@ -91,7 +91,7 @@ pub type Outputs = (
 #[allow(clippy::type_complexity)]
 #[node(
     id = "gaia.os.buildroot",
-    inputs(store, source, config, inputs, host),
+    inputs(store, source, os, inputs, host),
     outputs(
         rootfs,
         kernel,
@@ -107,7 +107,7 @@ pub type Outputs = (
 pub fn os_buildroot(
     store: &str,
     source: Tree,
-    config: &OsConfig,
+    os: &OsConfig,
     inputs: FanIn<'_, Tree>,
     host: &BuildrootHost,
     cx: &Ctx,
@@ -126,7 +126,7 @@ pub fn os_buildroot(
     StepError,
 > {
     let inputs: Vec<Tree> = inputs.iter().map(|tree| (*tree).clone()).collect();
-    build_os(store, source, config, &inputs, host, cx)
+    build_os(store, source, os, &inputs, host, cx)
 }
 
 /// The node's body, with the input trees as a slice.
@@ -198,9 +198,8 @@ pub fn build_os(
         .iter()
         .map(|(name, path)| (*name, Path::new(*path)))
         .collect();
-    let made = Step::new(&store, cx, NAME, key.finish()).look_up_or_make(&outputs, |work| {
-        build(work, &src, &vars, &fragments, host)
-    })?;
+    let made = Step::new(&store, cx, NAME, key.finish())
+        .look_up_or_make(&outputs, |work| build(work, &src, &vars, &fragments, host))?;
     let artifact = |name: &str, kind: ArtifactKind| Artifact {
         kind,
         object: made.outputs[name].into(),
@@ -288,16 +287,15 @@ fn build(
 
     let shown = Arc::new(Mutex::new(String::new()));
     let sink = shown.clone();
-    let order = make_tool(host, src, &out, vars, &["show-build-order"]).on_line(
-        move |stream, line| {
+    let order =
+        make_tool(host, src, &out, vars, &["show-build-order"]).on_line(move |stream, line| {
             if stream == Stream::Stdout
                 && let Ok(mut text) = sink.lock()
             {
                 text.push_str(line);
                 text.push('\n');
             }
-        },
-    );
+        });
     work.run(&order)?;
     let listed = shown.lock().map(|text| text.clone()).unwrap_or_default();
     let targets = progress::target_packages(&listed);

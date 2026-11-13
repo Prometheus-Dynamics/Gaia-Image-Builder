@@ -150,6 +150,10 @@ mod tests {
     fn an_external_of_no_input_is_an_error() {
         let mut c = config();
         c.externals = vec!["nothing".into()];
-        assert!(c.check().expect_err("external").contains("an external tree"));
+        assert!(
+            c.check()
+                .expect_err("external")
+                .contains("an external tree")
+        );
     }
 }

@@ -34,6 +34,7 @@ fn keys_and_structures_are_recorded() {
         row::<Size>(),
         row::<Layer>(),
         row::<Placement>(),
+        row::<Placements>(),
         row::<Account>(),
         row::<AccountGroup>(),
         row::<Control>(),
@@ -77,6 +78,7 @@ const RECORDED: &str = "
     gaia:size 67ebbd370daa02ba
     gaia:layer 06bab8ddb968a9a7
     gaia:placement b31304eccf6cdec8
+    gaia:placements effc4d640743443c
     gaia:account db1105887abe30dc
     gaia:account-group cfc99d936f919de5
     gaia:package-control 19dc0ba00ed8499e

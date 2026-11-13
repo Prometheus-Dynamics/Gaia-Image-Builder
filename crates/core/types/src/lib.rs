@@ -15,6 +15,7 @@
 //! | `gaia:size` | [`Size`]: a size in bytes |
 //! | `gaia:layer` | [`Layer`]: one owner's tree in an image |
 //! | `gaia:placement` | [`Placement`]: one install entry of a component |
+//! | `gaia:placements` | [`Placements`]: a component's install entries from one tree |
 //! | `gaia:account` | [`Account`]: a user a component needs |
 //! | `gaia:account-group` | [`AccountGroup`]: a group a component needs |
 //! | `gaia:package-control` | [`Control`]: what a package says about itself |
@@ -49,7 +50,7 @@ mod target;
 
 pub use disk::{DiskLayout, DiskPartition, DiskTable, RawBlob, TableScheme};
 pub use image::{Image, ImageKind, Partition, PartitionRole, Size};
-pub use layer::{Account, AccountGroup, Layer, Owned, Placement, owned_digest};
+pub use layer::{Account, AccountGroup, Layer, Owned, Placement, Placements, owned_digest};
 pub use object::{Artifact, ArtifactKind, FileEntry, ObjectKind, StoreRef, Tree};
 pub use os::{BuildrootHost, ConfigFragment, OsConfig, SourceOverride};
 pub use package::Control;
@@ -63,7 +64,7 @@ pub const NODES: [&daedalus::prelude::NodeRecord; 3] = [
 ];
 
 /// Every type's key, port types first, then the kinds and enums inside them.
-pub const KEYS: [&str; 28] = [
+pub const KEYS: [&str; 29] = [
     "gaia:object",
     "gaia:artifact",
     "gaia:tree",
@@ -74,6 +75,7 @@ pub const KEYS: [&str; 28] = [
     "gaia:size",
     "gaia:layer",
     "gaia:placement",
+    "gaia:placements",
     "gaia:account",
     "gaia:account-group",
     "gaia:package-control",

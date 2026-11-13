@@ -16,6 +16,7 @@ const PATH_TOOLS: &[(&str, &str)] = &[
     ("bwrap", "bwrap"),
     ("mke2fs", "mke2fs"),
     ("mkfs_erofs", "mkfs.erofs"),
+    ("veritysetup", "veritysetup"),
 ];
 
 pub struct Project {
@@ -304,9 +305,7 @@ fn buildroot_host(
         .ok()
         .and_then(|j| j.parse().ok())
         .filter(|&j: &u32| j > 0)
-        .unwrap_or_else(|| {
-            std::thread::available_parallelism().map_or(1, |n| n.get() as u32)
-        });
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get() as u32));
     let download_dir = std::env::var("GAIA_BUILDROOT_DL")
         .map(PathBuf::from)
         .unwrap_or_else(|_| store.join("buildroot-downloads"));

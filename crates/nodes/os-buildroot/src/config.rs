@@ -156,8 +156,14 @@ mod tests {
     #[test]
     fn an_input_name_becomes_its_path() {
         let inputs = vec![
-            ("zero.linux".to_string(), std::path::PathBuf::from("/s/objects/aa")),
-            ("files.0".to_string(), std::path::PathBuf::from("/s/objects/bb")),
+            (
+                "zero.linux".to_string(),
+                std::path::PathBuf::from("/s/objects/aa"),
+            ),
+            (
+                "files.0".to_string(),
+                std::path::PathBuf::from("/s/objects/bb"),
+            ),
         ];
         let text = "BR2_X=\"@files.0@/a.fragment @files.0@/b\"\nBR2_Y=\"me@host\"\n";
         assert_eq!(

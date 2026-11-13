@@ -305,7 +305,10 @@ fn target(board: &Board) -> Result<String, Error> {
     let mut lines: Vec<String> = arch.into_iter().map(str::to_string).collect();
     if let Some(cpu) = &board.target.cpu {
         let symbol = cpu.replace(['-', '.'], "_");
-        if !symbol.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+        if !symbol
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
             return Err(Error::at(
                 &board.file,
                 "target.cpu",
@@ -324,9 +327,10 @@ fn board_source_input(
     name: &str,
     key: &str,
 ) -> Result<String, Error> {
-    let source = board.sources.get(name).ok_or_else(|| {
-        Error::at(&board.file, key, format!("no source named `{name}`"))
-    })?;
+    let source = board
+        .sources
+        .get(name)
+        .ok_or_else(|| Error::at(&board.file, key, format!("no source named `{name}`")))?;
     Ok(plan.input(
         format!("{}.{name}", board.name),
         InputFrom::Source {
