@@ -603,6 +603,7 @@ dependencies = [
  "gaia-compress",
  "gaia-describe",
  "gaia-disk",
+ "gaia-flash-image",
  "gaia-fs-erofs",
  "gaia-fs-ext4",
  "gaia-fs-ubi",
@@ -786,6 +787,28 @@ dependencies = [
  "gaia-types",
  "serde",
  "tempfile",
+]
+
+[[package]]
+name = "gaia-flash-image"
+version = "2.0.6-dev"
+dependencies = [
+ "base64",
+ "blake2",
+ "daedalus",
+ "daedalus-cpu-author",
+ "daedalus-registry",
+ "daedalus-types",
+ "ed25519-dalek",
+ "gaia-sign",
+ "gaia-step",
+ "gaia-store",
+ "gaia-types",
+ "lzma-sys",
+ "sha2 0.11.1",
+ "tempfile",
+ "xz2",
+ "zeroize",
 ]
 
 [[package]]

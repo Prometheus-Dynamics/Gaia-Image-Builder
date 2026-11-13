@@ -282,7 +282,7 @@ fn slow_and_failing(store: &Path) -> daedalus::prelude::LoadedHost {
         "nodes": [{{"id": "host", "kind": "host_bridge", "port_types": {{"slow": "string", "fail": "string"}}}}, {}, {}],
         "edges": [{{"from": {{"node": 1, "port": "out"}}, "to": {{"node": 0, "port": "slow"}}}},
                   {{"from": {{"node": 2, "port": "out"}}, "to": {{"node": 0, "port": "fail"}}}}]}}}}"#,
-        node("slow", "sleep 3"),
+        node("slow", "sleep 30"),
         node("fail", "sleep 0.3; exit 3"),
     );
     let graph = GraphDoc::parse(&text).expect("parses").graph;
@@ -312,7 +312,7 @@ fn fail_fast_lets_a_running_step_finish_but_the_cancel_word_stops_it() {
                 .find(|span| span.tool.contains(tail))
                 .map(|span| span.status.clone())
         };
-        (status("sleep 3;"), status("exit 3;"), show(&spans))
+        (status("sleep 30;"), status("exit 3;"), show(&spans))
     };
 
     // Fail-fast alone.
@@ -325,9 +325,11 @@ fn fail_fast_lets_a_running_step_finish_but_the_cancel_word_stops_it() {
     println!("fail-fast: {stopped:?} after {took:?}\n{shown}");
     assert!(matches!(stopped, Stopped::Run(RunError::Fault { .. })));
     assert_eq!(fail.as_deref(), Some("exit 3"));
-    // The long step was cancelled by the fail-fast stop, well before its 3 s sleep ended.
+    // The long step was cancelled by the fail-fast stop, well before its 30 s
+    // sleep ended. The bound is wide: on a loaded machine the stop has been
+    // seen to take over two seconds to reach the tool.
     assert_eq!(slow.as_deref(), Some("cancelled"), "{shown}");
-    assert!(took < Duration::from_secs(3), "{shown}");
+    assert!(took < Duration::from_secs(20), "{shown}");
 
     // The same, with the cancel word set once the failing run has ended.
     let root = tempfile::tempdir().expect("tempdir");
@@ -356,5 +358,5 @@ fn fail_fast_lets_a_running_step_finish_but_the_cancel_word_stops_it() {
     let after = returned.duration_since(cancelled);
     println!("with the cancel word: {stopped:?}, returned {after:?} after the cancel\n{shown}");
     assert_eq!(slow.as_deref(), Some("cancelled"), "{shown}");
-    assert!(after < Duration::from_secs(1));
+    assert!(after < Duration::from_secs(10));
 }

@@ -36,12 +36,14 @@ pub(crate) fn process_alive(pid: u32) -> bool {
 
 /// Moves `from` to `to` with one rename. When `to` is already there (the
 /// same content, committed by another step or process), `from` is removed.
-pub(crate) fn place(from: &Path, to: &Path) -> Result<()> {
+/// True when `from` itself became `to`: the content just hashed is the
+/// content now in the store.
+pub(crate) fn place(from: &Path, to: &Path) -> Result<bool> {
     if let Some(parent) = to.parent() {
         fs::create_dir_all(parent).map_err(|e| Error::io("create", parent, e))?;
     }
     if fs::symlink_metadata(to).is_ok() {
-        return remove_tree(from);
+        return remove_tree(from).map(|()| false);
     }
     let renamed = fs::rename(from, to).or_else(|error| {
         // Moving a directory to another parent rewrites its `..`, which
@@ -58,9 +60,9 @@ pub(crate) fn place(from: &Path, to: &Path) -> Result<()> {
             if let Some(parent) = to.parent() {
                 sync_dir(parent);
             }
-            Ok(())
+            Ok(true)
         }
-        Err(_) if fs::symlink_metadata(to).is_ok() => remove_tree(from),
+        Err(_) if fs::symlink_metadata(to).is_ok() => remove_tree(from).map(|()| false),
         Err(e) => Err(Error::io("move into the store", from, e)),
     }
 }
