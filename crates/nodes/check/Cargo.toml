@@ -10,9 +10,9 @@ publish = false
 
 [dependencies]
 daedalus = { workspace = true }
-daedalus-cpu-author = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "831aecbe91d7fa8c5d5c65101ffb7e5309154039" }
-daedalus-registry = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "831aecbe91d7fa8c5d5c65101ffb7e5309154039" }
-daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "831aecbe91d7fa8c5d5c65101ffb7e5309154039" }
+daedalus-cpu-author = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "b3916178f255ab9f55d230dff1395c08b3bca2c9" }
+daedalus-registry = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "b3916178f255ab9f55d230dff1395c08b3bca2c9" }
+daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "b3916178f255ab9f55d230dff1395c08b3bca2c9" }
 gaia-step = { path = "../../core/step" }
 gaia-types = { path = "../../core/types" }
 serde = { version = "1", features = ["derive"] }

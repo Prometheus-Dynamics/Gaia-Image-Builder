@@ -270,7 +270,7 @@ fn a_line_sink_has_a_long_line_whole() {
     assert_eq!(tail[0].len(), 1024);
 }
 
-/// A body's own failure can be longer than the 64 bytes a fault record
+/// A body's own failure can be longer than the 120 bytes a fault record
 /// keeps of its reason, so the whole message goes to a run log the failure
 /// names: a check that lists what it found does not lose the list.
 #[test]
@@ -299,4 +299,27 @@ fn a_bodys_own_failure_is_whole_in_a_run_log() {
         text.lines().last().is_some_and(|l| l.ends_with(" failed")),
         "the log ends as failed, so it is the one a failed build shows"
     );
+}
+
+/// One line that fits a fault record's reason needs no log; one byte more
+/// and it has one.
+#[test]
+fn a_bodys_failure_gets_a_log_only_when_the_reason_cannot_hold_it() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("store")).expect("store");
+    let cx = Ctx::new();
+    let fail_with = |len: usize| {
+        let key = KeyBuilder::new("t", 1)
+            .config("len", len.to_string())
+            .finish();
+        // The reason is `t: <message>`.
+        let message = "x".repeat(len - "t: ".len());
+        Step::new(&store, &cx, "t", key)
+            .look_up_or_make(&[("out", Path::new("out"))], |_| {
+                Err(StepError::body("t", &message))
+            })
+            .expect_err("the body fails")
+    };
+    assert!(fail_with(120).log().is_none(), "120 bytes fit");
+    assert!(fail_with(121).log().is_some(), "121 do not");
 }

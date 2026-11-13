@@ -5,7 +5,7 @@ use std::fmt;
 
 /// A step's failure. Its reason is short and fixed in form,
 /// `<step>: exited 3` or `<step>: cancelled`, since Daedalus keeps the first
-/// 64 bytes of [`FixedError::reason`] in its fault record. What the tool
+/// 120 bytes of [`FixedError::reason`] in its fault record, and says when it cut one. What the tool
 /// printed is in its run log ([`StepError::log`]) and, last lines only, in
 /// [`StepError::stderr_tail`]; [`Display`] gives all three.
 ///
