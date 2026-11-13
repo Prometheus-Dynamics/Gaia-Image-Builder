@@ -200,6 +200,18 @@ pub(crate) fn wire(
     // OS input trees, once each: a locked source by its lock name, a
     // directory by its path.
     let mut os_inputs: BTreeMap<String, u32> = BTreeMap::new();
+    // The boards each component is built for: a component on several gets a
+    // step per board, named for it.
+    let mut boards_of: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for image in &loaded.product.images {
+        let board = &loaded.boards[image.board.path()];
+        for name in image.components.iter().chain(&image.data) {
+            boards_of
+                .entry(name.as_str())
+                .or_default()
+                .insert(board.name.as_str());
+        }
+    }
     for (i, image) in loaded.product.images.iter().enumerate() {
         let board = &loaded.boards[image.board.path()];
         let mut builds = Vec::new();
@@ -223,11 +235,15 @@ pub(crate) fn wire(
                 if component.build.is_none() {
                     continue;
                 }
-                let node = match built.get(name) {
+                // Once per board: a build takes its target from the board.
+                let once = format!("{name}\n{}", board.name);
+                let node = match built.get(&once) {
                     Some(&node) => node,
                     None => {
-                        let node = component_build(&mut g, component, lock, builders, board)?;
-                        built.insert(name.clone(), node);
+                        let several = boards_of.get(name.as_str()).is_some_and(|b| b.len() > 1);
+                        let node =
+                            component_build(&mut g, component, lock, builders, board, several)?;
+                        built.insert(once, node);
                         node
                     }
                 };
@@ -287,9 +303,18 @@ fn component_build(
     lock: &Lock,
     builders: &Builders,
     board: &gaia_describe::Board,
+    several_boards: bool,
 ) -> Result<u32, Error> {
     let file = &component.file;
     let build = component.build.as_ref().expect("a build");
+    // A step of a component built for several boards says which it is for.
+    let step = |what: &str| {
+        if several_boards {
+            format!("{}.{what}@{}", component.name, board.name)
+        } else {
+            format!("{}.{what}", component.name)
+        }
+    };
     let id = builders.0.get(&build.builder).ok_or_else(|| {
         let known: Vec<&str> = builders.0.keys().map(String::as_str).collect();
         Error::at(
@@ -302,12 +327,7 @@ fn component_build(
             ),
         )
     })?;
-    let node = g.add(
-        id,
-        format!("{}.build", component.name),
-        file,
-        "build.builder",
-    )?;
+    let node = g.add(id, step("build"), file, "build.builder")?;
     for (key, value) in &build.settings {
         if !g.has_input(node, key) {
             let ports: Vec<&str> = g.inputs(node).iter().map(|p| p.name).collect();
@@ -332,6 +352,7 @@ fn component_build(
             wanted.push((name.clone(), name.clone()));
         }
     }
+    let mut built_from = None;
     for (source_name, port) in wanted {
         let source = component
             .sources
@@ -340,8 +361,63 @@ fn component_build(
         let from = component_source(g, component, &source_name, source, lock, board)?;
         let out = g.first_output(from).unwrap_or("tree");
         g.edge((from, out), (node, &port));
+        if port == "source" {
+            built_from = Some((from, out));
+        }
+    }
+    // The target, from the board, for a builder that takes one and a
+    // component that does not set its own.
+    if g.has_input(node, "triple") && !g.filled[node as usize].contains("triple") {
+        let triple = target_triple(&board.target).ok_or_else(|| {
+            Error::at(
+                &board.file,
+                "target.arch",
+                format!(
+                    "no target triple is known for {}; set `triple` in {}'s build settings",
+                    board.target.arch.as_str(),
+                    component.name
+                ),
+            )
+        })?;
+        g.set(node, "triple", Lit::Str(triple.into()));
+    }
+    if g.has_input(node, "cpu")
+        && !g.filled[node as usize].contains("cpu")
+        && let Some(cpu) = &board.target.cpu
+    {
+        g.set(node, "cpu", Lit::Str(cpu.clone()));
+    }
+    // The dependencies, fetched by the builder's own vendor step from what
+    // the source's lock file names, when the component gives no `vendor`.
+    let vendor = format!("{id}.vendor");
+    if g.has_input(node, "vendor")
+        && !g.filled[node as usize].contains("vendor")
+        && g.registry.entry(&vendor).is_some()
+        && let Some((from, out)) = built_from
+    {
+        let fetch = g.add(&vendor, step("vendor"), file, "build.builder")?;
+        g.edge((from, out), (fetch, "source"));
+        let fetched = g.first_output(fetch).unwrap_or("vendor");
+        g.edge((fetch, fetched), (node, "vendor"));
     }
     Ok(node)
+}
+
+/// The Rust target triple for a board's Linux target: static musl, so a
+/// binary needs nothing of the image's C library. None for a target with no
+/// such triple; the component then names its own.
+fn target_triple(target: &gaia_types::Target) -> Option<&'static str> {
+    use gaia_types::{Arch, Os};
+    if target.os != Os::Linux {
+        return None;
+    }
+    Some(match target.arch {
+        Arch::AArch64 => "aarch64-unknown-linux-musl",
+        Arch::X86_64 => "x86_64-unknown-linux-musl",
+        Arch::Arm => "armv7-unknown-linux-musleabihf",
+        Arch::RiscV64 => "riscv64gc-unknown-linux-musl",
+        _ => return None,
+    })
 }
 
 /// A component's source as a node.

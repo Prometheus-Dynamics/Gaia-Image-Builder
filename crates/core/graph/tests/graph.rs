@@ -289,11 +289,11 @@ fn errors_name_the_description() {
     );
 
     // An input nothing gives.
-    let e = try_with(&base.replace("cpu = \"cortex-a55\"\n", ""), lock());
+    let e = try_with(&base.replace("package = \"hello-world\"\n", ""), lock());
     println!("{}", shown(&e));
     assert!(
         e.contains(
-            "hello-b/component.toml: step hello-b.build (gaia.build.rust) needs its input `cpu`"
+            "hello-b/component.toml: step hello-b.build (gaia.build.rust) needs its input `package`"
         ),
         "{e}"
     );

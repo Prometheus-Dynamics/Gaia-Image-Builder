@@ -25,6 +25,10 @@
 //! and static libraries (`lib/<name>`), as one tree for placing and as
 //! artifacts.
 
+mod vendor;
+
+pub use vendor::vendor;
+
 use daedalus::prelude::*;
 use gaia_sandbox::Sandbox;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store};
@@ -36,7 +40,8 @@ const NAME: &str = "gaia.build.rust";
 /// The probe that reads a tool's version inside the sandbox.
 const PROBE: &str = "gaia.build.rust.version";
 /// Changes when how the build is run changes.
-const RECIPE_VERSION: u32 = 2;
+/// 3: a profile, and the target's own flags added to the source's.
+const RECIPE_VERSION: u32 = 3;
 
 /// Where the sandbox binds each input and the writable step directory.
 const TOOLCHAIN: &str = "/toolchain";
@@ -57,7 +62,7 @@ const PATH_IN_SANDBOX: &str = "/toolchain/bin:/usr/bin:/bin";
 #[node(
     id = "gaia.build.rust",
     inputs(
-        store, bwrap, root, toolchain, source, vendor, package, features, triple, cpu
+        store, bwrap, root, toolchain, source, vendor, package, features, profile, triple, cpu
     ),
     outputs(tree, artifacts)
 )]
@@ -70,9 +75,10 @@ pub fn build_rust(
     source: Tree,
     vendor: Tree,
     package: &str,
-    features: &str,
+    features: Option<&String>,
+    profile: Option<&String>,
     triple: &str,
-    cpu: &str,
+    cpu: Option<&String>,
     cx: &Ctx,
 ) -> Result<(Tree, Vec<Artifact>), StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
@@ -124,7 +130,21 @@ pub fn build_rust(
     };
     let rustc = probe("rustc", "-vV")?;
     let cargo = probe("cargo", "-V")?;
+    let cpu = cpu.map(String::as_str).unwrap_or_default();
+    // Cargo's name for the profile, and its directory under `target/`.
+    let profile = match profile.map(String::as_str).unwrap_or_default() {
+        "" | "release" => "release",
+        other => other,
+    };
+    if !profile
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return Err(fail(format!("`{profile}` is not a cargo profile name")));
+    }
     let mut features: Vec<&str> = features
+        .map(String::as_str)
+        .unwrap_or_default()
         .split([' ', ','])
         .filter(|f| !f.is_empty())
         .collect();
@@ -138,21 +158,32 @@ pub fn build_rust(
     if lld {
         flags.push("-Clink-arg=--icf=all".into());
     }
+    // The target's own variables: cargo joins a list from the environment
+    // to the one in the source's `.cargo/config.toml`, where `RUSTFLAGS`
+    // would replace it. So the source's flags for its target stay.
+    let target_var = |what: &str| {
+        format!(
+            "CARGO_TARGET_{}_{what}",
+            triple.to_ascii_uppercase().replace(['-', '.'], "_")
+        )
+    };
     let mut sandbox = base
         .env("PATH", PATH_IN_SANDBOX)
         .env("CARGO_HOME", format!("{BUILD}/cargo-home"))
-        .env("CARGO_ENCODED_RUSTFLAGS", flags.join("\u{1f}"))
-        .env("CARGO_PROFILE_RELEASE_STRIP", "symbols")
+        .env(target_var("RUSTFLAGS"), flags.join(" "))
+        .env(
+            format!(
+                "CARGO_PROFILE_{}_STRIP",
+                profile.to_ascii_uppercase().replace('-', "_")
+            ),
+            "symbols",
+        )
         .env("CARGO_INCREMENTAL", "0")
         .env("CARGO_TERM_COLOR", "never")
         .env("SOURCE_DATE_EPOCH", "0")
         .cwd(SOURCE);
     if lld {
-        let var = format!(
-            "CARGO_TARGET_{}_LINKER",
-            triple.to_ascii_uppercase().replace(['-', '.'], "_")
-        );
-        sandbox = sandbox.env(var, "rust-lld");
+        sandbox = sandbox.env(target_var("LINKER"), "rust-lld");
     }
     let key = sandbox
         .key(
@@ -160,6 +191,7 @@ pub fn build_rust(
                 .config("rustc", rustc)
                 .config("cargo", cargo)
                 .config("package", package)
+                .config("profile", profile)
                 .config("features", features.join(","))
                 .config("triple", triple)
                 .config("cpu", cpu)
@@ -187,7 +219,8 @@ pub fn build_rust(
                 .map_err(|e| fail(format!("the sandbox: {e}")))?
                 .args([
                     "build",
-                    "--release",
+                    "--profile",
+                    profile,
                     "--locked",
                     "--offline",
                     "--package",
@@ -202,7 +235,7 @@ pub fn build_rust(
                 tool = tool.args(["--features", &features.join(",")]);
             }
             work.run(&tool)?;
-            collect(&target.join(triple).join("release"), &out)
+            collect(&target.join(triple).join(profile), &out)
         })?;
     let out = made.outputs["out"];
     let out_dir = store.path(&out);
@@ -239,9 +272,14 @@ pub fn build_rust(
     ))
 }
 
-/// Cargo's config: crates.io from the vendored tree, when it has crates.
-/// The tree is read here and named by its path inside the sandbox.
+/// Cargo's config: the vendored tree's own source replacement (crates.io
+/// and git dependencies) when `gaia.build.rust.vendor` made it; for a tree
+/// made by hand, crates.io from it when it has crates. The tree is read
+/// here and named by its path inside the sandbox.
 fn vendor_config(vendor: &Path) -> String {
+    if let Some(config) = vendor::config_in(vendor, VENDOR) {
+        return config;
+    }
     let has_crates = std::fs::read_dir(vendor).is_ok_and(|mut d| d.next().is_some());
     if !has_crates {
         return String::new();
@@ -282,4 +320,4 @@ fn collect(profile: &Path, out: &Path) -> Result<(), StepError> {
 }
 
 /// The node, for a registry.
-pub const NODES: [&NodeRecord; 1] = [&BUILD_RUST_NODE];
+pub const NODES: [&NodeRecord; 2] = [&BUILD_RUST_NODE, &vendor::VENDOR_NODE];
