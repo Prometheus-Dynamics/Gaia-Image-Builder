@@ -38,10 +38,7 @@ impl Project {
             .unwrap_or_else(|| dir.join("gaia.lock"));
         let lock = gaia_lock::Lock::read(&lock_path)
             .map_err(|e| Stop::usage(format!("{}: {e}", lock_path.display())))?;
-        let recipes_dir = options
-            .recipes
-            .clone()
-            .unwrap_or_else(|| dir.join("recipes"));
+        let recipes_dir = recipes_dir(product, options.recipes.as_deref());
         let recipes = if recipes_dir.is_dir() || options.recipes.is_some() {
             gaia_recipe::Recipes::load_dir(&recipes_dir).map_err(Stop::usage)?
         } else {
@@ -228,6 +225,72 @@ pub fn registry() -> Registry {
             .expect("Gaia's nodes have distinct ids");
     }
     registry
+}
+
+/// The recipes directory: the flag, else `recipes/` next to the product.
+pub fn recipes_dir(product: &Path, flag: Option<&Path>) -> PathBuf {
+    match flag {
+        Some(dir) => dir.to_path_buf(),
+        None => product.parent().unwrap_or(Path::new(".")).join("recipes"),
+    }
+}
+
+/// `gaia validate` of a product: every image's recipe is one the recipes
+/// directory holds. Only the names are checked: no settings, no plan. With
+/// no `--recipes` and no `recipes/` next to the product, nothing is checked.
+pub fn check_recipe_names(product: &Path, flag: Option<&Path>) -> Result<(), Stop> {
+    let dir = recipes_dir(product, flag);
+    if flag.is_none() && !dir.is_dir() {
+        return Ok(());
+    }
+    let recipes = gaia_recipe::Recipes::load_dir(&dir).map_err(Stop::usage)?;
+    let loaded = gaia_describe::Product::read(product).map_err(Stop::usage)?;
+    let known: Vec<String> = recipes.by_name.keys().cloned().collect();
+    for (index, image) in loaded.images.iter().enumerate() {
+        if recipes.by_name.contains_key(&image.recipe) {
+            continue;
+        }
+        let mut message = format!("no recipe named `{}`", image.recipe);
+        match closest(&image.recipe, &known) {
+            Some(near) => message.push_str(&format!("; did you mean `{near}`?")),
+            None if known.is_empty() => message.push_str("; there are no recipes"),
+            None => message.push_str(&format!("; the recipes are {}", known.join(", "))),
+        }
+        return Err(Stop::usage(format!(
+            "{}: images[{index}].recipe: {message}",
+            product.display()
+        )));
+    }
+    Ok(())
+}
+
+/// The known name nearest `name`, as `gaia_describe` picks it: within a
+/// third of its length, at least two edits.
+fn closest<'a>(name: &str, known: &'a [String]) -> Option<&'a str> {
+    known
+        .iter()
+        .map(|candidate| (distance(name, candidate), candidate))
+        .filter(|(distance, candidate)| *distance <= (candidate.len() / 3).max(2))
+        .min_by_key(|(distance, _)| *distance)
+        .map(|(_, candidate)| candidate.as_str())
+}
+
+/// Edit distance, by characters.
+fn distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut previous = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let here = row[j + 1];
+            row[j + 1] = (row[j] + 1)
+                .min(here + 1)
+                .min(previous + usize::from(ca != *cb));
+            previous = here;
+        }
+    }
+    row[b.len()]
 }
 
 /// Every builder name a component may give.
