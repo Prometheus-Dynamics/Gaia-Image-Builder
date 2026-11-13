@@ -183,23 +183,21 @@ fn a_cancelled_tool_loses_its_whole_process_group() {
     let group = rustix::process::Pid::from_raw(pids[1]).expect("pid");
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        // Gone, not even a zombie: no /proc entry for either.
+        // Gone, not even a zombie: no /proc entry for either, and no
+        // process left in the group. Both are waited for: on a loaded
+        // machine the group has outlived the two entries for a moment.
         let gone = pids
             .iter()
             .all(|pid| !Path::new(&format!("/proc/{pid}")).exists());
-        if gone {
+        if gone && rustix::process::test_kill_process_group(group).is_err() {
             break;
         }
         assert!(
             Instant::now() < deadline,
-            "a process of the group is left: {pids:?}"
+            "a process of the group is left (entries gone: {gone}): {pids:?}"
         );
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert!(
-        rustix::process::test_kill_process_group(group).is_err(),
-        "the process group still exists"
-    );
     let faults = faults(&mut host);
     println!("cancel: fault record {faults:?}");
     assert_eq!(faults.len(), 1);

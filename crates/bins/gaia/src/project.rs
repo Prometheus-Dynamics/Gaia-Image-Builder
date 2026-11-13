@@ -206,6 +206,7 @@ pub fn registry() -> Registry {
         &gaia_os_buildroot_cache::NODES,
         &gaia_tree::NODES,
         &gaia_compress::NODES,
+        &gaia_flash_image::NODES,
         &gaia_fs_ext4::NODES,
         &gaia_fs_erofs::NODES,
         &gaia_sign::NODES,
