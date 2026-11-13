@@ -502,6 +502,22 @@ fn source_node(
                     format!("the lock has {lock_name} as another kind"),
                 ));
             };
+            // The lock's reference may carry the digest the description
+            // wrote (`repo:tag@sha256:...`); the node takes the reference
+            // and the digest apart.
+            let (bare, named) = match reference.split_once('@') {
+                Some((bare, named)) => (bare, Some(named)),
+                None => (reference.as_str(), None),
+            };
+            if named.is_some_and(|named| named != digest) {
+                return Err(Error::at(
+                    file,
+                    key,
+                    format!(
+                        "{lock_name}: the lock's digest {digest} is not the one {reference} names"
+                    ),
+                ));
+            }
             let node = g.add("gaia.source.oci", label, file, &key)?;
             let arch = match platform {
                 ImagePlatform::Target => board.target.arch.as_str(),
@@ -513,7 +529,7 @@ fn source_node(
                 "riscv64" => "riscv64",
                 other => other,
             };
-            g.set(node, "reference", s(reference));
+            g.set(node, "reference", s(bare));
             g.set(node, "digest", s(digest));
             g.set(node, "platform", s(&format!("linux/{arch}")));
             g.set(node, "credentials", s(""));

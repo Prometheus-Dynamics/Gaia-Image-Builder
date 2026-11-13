@@ -239,3 +239,247 @@ fn a_changed_file_in_a_tree_beside_the_product_changes_its_digest() {
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(lines[0].contains("c.files"), "{lines:?}");
 }
+
+/// A git repository with one commit at `main`, in `root`; its head.
+fn repo_at(root: &Path) -> (PathBuf, String) {
+    let repo = root.join("repo");
+    std::fs::create_dir_all(&repo).expect("mkdir");
+    git(&repo, &["init", "-q", "-b", "main"]);
+    let head = commit(&repo, "one");
+    (repo, head)
+}
+
+/// A product whose one component has `sources` (TOML lines), under `dir`.
+fn product(dir: &Path, sources: &str) -> Options {
+    write(
+        &dir.join("p/components/c/component.toml"),
+        &format!("version = 1\nname = \"c\"\n{sources}"),
+    );
+    write(
+        &dir.join("p/product.toml"),
+        "version = 1\nname = \"p\"\n[components]\nc = \"components/c/component.toml\"\n[[images]]\nname = \"i\"\nboard = \"boards/b/board.toml\"\ncomponents = [\"c\"]\nrecipe = \"r\"\n",
+    );
+    write(
+        &dir.join("p/boards/b/board.toml"),
+        "version = 1\nname = \"b\"\n[target]\narch = \"x86_64\"\nos = \"linux\"\n",
+    );
+    std::fs::create_dir_all(dir.join("scratch")).expect("mkdir");
+    Options {
+        product: dir.join("p/product.toml"),
+        lock: None,
+        update: Vec::new(),
+        tools: Tools {
+            git: "git".into(),
+            curl: "curl".into(),
+        },
+        scratch: dir.join("scratch"),
+    }
+}
+
+/// A program that does not exist: any request made through it fails.
+const NO_TOOL: &str = "/nonexistent/gaia-test-tool";
+
+/// A sha256 digest of the right form, for an image that names it.
+const DIGEST: &str = "sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2";
+const OTHER_DIGEST: &str =
+    "sha256:0000000000000000000000000000000000000000000000000000000000000001";
+const IMAGE: &str = "docker.io/library/debian:trixie-slim";
+
+#[test]
+fn a_git_ref_that_is_a_full_commit_locks_without_git() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (repo, head) = repo_at(dir.path());
+    let url = format!("file://{}", repo.display());
+    let upper = head.to_ascii_uppercase();
+    let mut options = product(
+        dir.path(),
+        &format!(
+            "[sources.full]\ngit = \"{url}\"\nref = \"{head}\"\n[sources.upper]\ngit = \"{url}\"\nref = \"{upper}\"\n"
+        ),
+    );
+    options.tools.git = NO_TOOL.into();
+    let (new, changes) = lock(&options).expect("locks with no git");
+    assert_eq!(new.get("c.full").map(Entry::resolved), Some(head.as_str()));
+    assert_eq!(new.get("c.upper").map(Entry::resolved), Some(head.as_str()));
+    assert_eq!(changes.len(), 2, "{changes:?}");
+}
+
+#[test]
+fn a_locked_git_source_needs_no_repository() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (repo, head) = repo_at(dir.path());
+    let options = product(
+        dir.path(),
+        &format!(
+            "[sources.main]\ngit = \"file://{}\"\nref = \"main\"\n",
+            repo.display()
+        ),
+    );
+    assert_eq!(run(&options).len(), 1);
+    // The repository is gone: a lock of the unchanged product asks for nothing.
+    std::fs::rename(&repo, dir.path().join("moved")).expect("rename");
+    let (new, changes) = lock(&options).expect("locks without the repository");
+    assert!(changes.is_empty(), "{changes:?}");
+    assert_eq!(new.get("c.main").map(Entry::resolved), Some(head.as_str()));
+    // And with no git program at all.
+    let mut no_git = options.clone();
+    no_git.tools.git = NO_TOOL.into();
+    assert!(lock(&no_git).expect("locks").1.is_empty());
+}
+
+#[test]
+fn a_locked_download_needs_no_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let blob = dir.path().join("blob.bin");
+    write(&blob, "bytes\n");
+    let options = product(
+        dir.path(),
+        &format!("[sources.blob]\ndownload = \"file://{}\"\n", blob.display()),
+    );
+    assert_eq!(run(&options).len(), 1);
+    std::fs::remove_file(&blob).expect("remove");
+    let mut no_curl = options.clone();
+    no_curl.tools.curl = NO_TOOL.into();
+    let (_, changes) = lock(&no_curl).expect("locks without the file or curl");
+    assert!(changes.is_empty(), "{changes:?}");
+}
+
+#[test]
+fn an_image_written_with_its_digest_locks_without_a_registry() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let options = product(
+        dir.path(),
+        &format!("[sources.root]\nimage = \"{IMAGE}@{DIGEST}\"\n"),
+    );
+    let mut no_curl = options.clone();
+    no_curl.tools.curl = NO_TOOL.into();
+    let (new, changes) = lock(&no_curl).expect("locks with no registry");
+    assert_eq!(changes.len(), 1, "{changes:?}");
+    assert_eq!(
+        new.get("c.root"),
+        Some(&Entry::Image {
+            reference: format!("{IMAGE}@{DIGEST}"),
+            digest: DIGEST.into(),
+        })
+    );
+    run(&no_curl);
+    assert!(lock(&no_curl).expect("again").1.is_empty());
+}
+
+#[test]
+fn an_image_without_a_digest_not_yet_locked_names_the_digest_form() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let options = product(
+        dir.path(),
+        &format!("[sources.root]\nimage = \"{IMAGE}\"\n"),
+    );
+    let mut no_curl = options.clone();
+    no_curl.tools.curl = NO_TOOL.into();
+    let e = lock(&no_curl).expect_err("fails");
+    println!("{e}");
+    assert!(e.starts_with("c.root: "), "{e}");
+    assert!(
+        e.contains(&format!("image = \"{IMAGE}@sha256:<64 hex digits>\""))
+            && e.contains("avoids this request"),
+        "{e}"
+    );
+}
+
+#[test]
+fn an_image_without_a_digest_that_is_locked_is_not_asked_again() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let options = product(
+        dir.path(),
+        &format!("[sources.root]\nimage = \"{IMAGE}\"\n"),
+    );
+    write(
+        &lock_path(&options),
+        &format!(
+            "# Written by `gaia lock`. Do not edit.\nversion = 1\n\n[source.\"c.root\"]\nkind = \"image\"\nreference = \"{IMAGE}\"\ndigest = \"{DIGEST}\"\n"
+        ),
+    );
+    let mut no_curl = options.clone();
+    no_curl.tools.curl = NO_TOOL.into();
+    let (_, changes) = lock(&no_curl).expect("locks with no registry");
+    assert!(changes.is_empty(), "{changes:?}");
+    // `--update` asks again, and that needs the registry.
+    no_curl.update = vec!["c.root".into()];
+    let e = lock(&no_curl).expect_err("asks");
+    assert!(e.contains("c.root: "), "{e}");
+}
+
+#[test]
+fn a_changed_written_digest_is_locked_to_the_one_written() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let options = product(
+        dir.path(),
+        &format!("[sources.root]\nimage = \"{IMAGE}@{DIGEST}\"\n"),
+    );
+    write(
+        &lock_path(&options),
+        &format!(
+            "version = 1\n\n[source.\"c.root\"]\nkind = \"image\"\nreference = \"{IMAGE}@{OTHER_DIGEST}\"\ndigest = \"{OTHER_DIGEST}\"\n"
+        ),
+    );
+    let mut no_curl = options.clone();
+    no_curl.tools.curl = NO_TOOL.into();
+    let lines = run(&no_curl);
+    assert_eq!(
+        lines,
+        [format!("~ c.root  {OTHER_DIGEST} -> {DIGEST}")],
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn check_asks_for_nothing_and_says_what_is_missing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (repo, _) = repo_at(dir.path());
+    let blob = dir.path().join("blob.bin");
+    write(&blob, "bytes\n");
+    let options = product(
+        dir.path(),
+        &format!(
+            "[sources.main]\ngit = \"file://{}\"\nref = \"main\"\n[sources.blob]\ndownload = \"file://{}\"\n[sources.root]\nimage = \"{IMAGE}@{DIGEST}\"\n",
+            repo.display(),
+            blob.display()
+        ),
+    );
+    run(&options);
+    // The repository and the file are gone, and no tool works.
+    std::fs::remove_dir_all(&repo).expect("remove");
+    std::fs::remove_file(&blob).expect("remove");
+    let lock_file = lock_path(&options).display().to_string();
+    let check = |extra: &[&str]| {
+        let mut words: Vec<String> = vec![
+            options.product.display().to_string(),
+            "--lock".into(),
+            lock_file.clone(),
+            "--check".into(),
+            "--tool".into(),
+            format!("git={NO_TOOL}"),
+            "--tool".into(),
+            format!("curl={NO_TOOL}"),
+        ];
+        words.extend(extra.iter().map(|w| w.to_string()));
+        gaia_lock_cmd::command::run(&words)
+    };
+    check(&[]).expect("a complete lock checks with no tool");
+
+    // A source the lock lacks fails, by name, and says to run `gaia lock`.
+    write(
+        &options
+            .product
+            .parent()
+            .expect("dir")
+            .join("components/c/component.toml"),
+        &format!(
+            "version = 1\nname = \"c\"\n[sources.main]\ngit = \"file://{}\"\nref = \"main\"\n[sources.blob]\ndownload = \"file://{}\"\n[sources.root]\nimage = \"{IMAGE}@{DIGEST}\"\n[sources.extra]\nimage = \"{IMAGE}@{OTHER_DIGEST}\"\n",
+            repo.display(),
+            blob.display()
+        ),
+    );
+    let (code, message) = check(&[]).expect_err("missing");
+    assert_eq!(code, 1);
+    assert!(message.contains("not in the lock: c.extra"), "{message}");
+}

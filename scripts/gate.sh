@@ -14,10 +14,22 @@ step() {
 }
 
 # The workspace glob matches nothing until the first crate lands.
+# The committed Cargo.lock is what is built and tested. A manifest change
+# without its lock change stops here.
+lock() {
+  if ! cargo metadata --locked --format-version 1 > /dev/null; then
+    echo "Cargo.lock does not match the manifests." >&2
+    echo "Run: cargo metadata --format-version 1 > /dev/null   (it updates only what the manifests changed)" >&2
+    echo "Then commit Cargo.lock with your change." >&2
+    return 1
+  fi
+}
+
 if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
+  step lock lock
   step format cargo fmt --all --check
-  step clippy cargo clippy --workspace --all-targets --all-features -- -D warnings
-  step tests cargo test --workspace --all-features
+  step clippy cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+  step tests cargo test --locked --workspace --all-features
 else
   echo "no crates yet"
 fi

@@ -171,7 +171,9 @@ impl Subdir {
 /// Written as exactly one of `git` (with `ref`, and an optional `subdir`
 /// naming a directory of the checkout to use instead of its root),
 /// `download`, `image` (with an optional `platform`) or `path`. The lock pins
-/// the repository's commit; `subdir` is not in the lock.
+/// the repository's commit; `subdir` is not in the lock. An `image` may name
+/// its digest as `reference@sha256:<64 hex>`, which the lock then records
+/// without asking the registry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "SourceText")]
 pub enum Source {
@@ -210,10 +212,33 @@ struct SourceText {
     #[serde(rename = "ref")]
     reference: Option<String>,
     download: Option<String>,
+    #[serde(default, deserialize_with = "image_text")]
     image: Option<String>,
     platform: Option<ImagePlatform>,
     path: Option<RelPath>,
     subdir: Option<Subdir>,
+}
+
+/// An image written as `reference`, or `reference@sha256:<64 lowercase hex>`
+/// to name its manifest digest. Anything after `@` must be that digest, so
+/// a malformed one is refused at `sources.<name>.image`.
+fn image_text<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    let Some(text) = Option::<String>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    if let Some((_, digest)) = text.split_once('@') {
+        let hex = digest.strip_prefix("sha256:").unwrap_or_default();
+        let valid = hex.len() == 64
+            && hex
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        if !valid {
+            return Err(de::Error::custom(format!(
+                "`{digest}` is not a digest; write `@sha256:` and 64 lowercase hex digits, or leave the `@` part out"
+            )));
+        }
+    }
+    Ok(Some(text))
 }
 
 impl TryFrom<SourceText> for Source {
