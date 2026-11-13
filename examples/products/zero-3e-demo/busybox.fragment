@@ -1,0 +1,4 @@
+# udhcpd, for the USB gadget network: the host gets 10.55.0.2. BusyBox's
+# default config leaves the applet out, and the usb0 script starts it.
+CONFIG_UDHCPD=y
+CONFIG_DHCPD_LEASES_FILE="/tmp/udhcpd.leases"
