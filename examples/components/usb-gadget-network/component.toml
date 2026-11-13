@@ -1,7 +1,10 @@
 # A USB network gadget (CDC NCM, made through configfs: the kernel needs
 # CONFIG_USB_CONFIGFS_NCM=y) with usb0 at 10.55.0.1/24, and a DHCP server
 # that gives the host 10.55.0.2. Its Ethernet addresses are derived from the
-# board's serial number, so they are the same on every boot. Untested on board.
+# board's id and serial number, so they are the same on every boot. The id
+# is the image's to install, as the one line of /etc/usb-gadget.family;
+# without it the addresses are random, as the script says at boot.
+# Untested on board.
 version = 1
 name = "usb-gadget-network"
 

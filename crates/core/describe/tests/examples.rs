@@ -137,17 +137,40 @@ fn the_demo_product_loads_its_board_and_component() {
 #[test]
 fn the_gadget_networks_addresses_follow_the_identity_rule() {
     let script = examples().join("components/usb-gadget-network/files/S41usb0");
-    let out = std::process::Command::new("/bin/sh")
-        .arg(&script)
-        .args(["addresses", "lemnos-test:0123456789abcdef"])
-        .output()
-        .expect("sh");
-    assert!(out.status.success());
+    let addresses = |family: &str, serial: &str| {
+        let out = std::process::Command::new("/bin/sh")
+            .arg(&script)
+            .args(["addresses", family, serial])
+            .output()
+            .expect("sh");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    // Host, then device.
     assert_eq!(
-        String::from_utf8_lossy(&out.stdout).trim(),
-        "aa:22:75:11:2a:72 aa:22:75:11:2a:73",
-        "host then device"
+        addresses("lemnos-test", "0123456789abcdef"),
+        "aa:22:75:11:2a:72 aa:22:75:11:2a:73"
     );
+    // Leading zeros are kept.
+    assert_eq!(
+        addresses("alpha", "00000001"),
+        "b2:b5:ba:4c:1e:30 b2:b5:ba:4c:1e:31"
+    );
+    // The serial is hashed in lowercase.
+    assert_eq!(
+        addresses("lemnos-test", "0123456789ABCDEF"),
+        "aa:22:75:11:2a:72 aa:22:75:11:2a:73"
+    );
+    // A serial of another shape, or no family, gives no address at all.
+    for (family, serial) in [
+        ("alpha", "0000001"),
+        ("alpha", "0x00000001"),
+        ("alpha", "0000000g"),
+        ("alpha", "000000000000000000000000000000001"),
+        ("alpha", ""),
+        ("", "00000001"),
+    ] {
+        assert_eq!(addresses(family, serial), "", "{family:?} {serial:?}");
+    }
     let fragment = std::fs::read_to_string(examples().join("boards/zero-3e/assets/linux.fragment"))
         .expect("read");
     assert!(

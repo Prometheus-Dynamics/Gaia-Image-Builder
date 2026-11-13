@@ -11,18 +11,26 @@
 # made locally administered and unicast; the host's address has the last
 # bit clear, the device's has it set.
 #
-# family: /etc/usb-gadget.family if the image has one, else the last entry
-# of the device tree's `compatible` (the SoC). serial: the device tree's
-# serial-number. Without a serial the kernel picks random addresses, and the
-# script says so.
+# family: the board's id as its Lemnos board file states it (`[board] id`),
+# which the image installs as the one line of /etc/usb-gadget.family. It is
+# never guessed: an address from a guess would change the day the real id
+# arrives. serial: the device tree's serial-number, as lowercase hex of 8 to
+# 32 digits with its leading zeros. With no id, or a serial of another
+# shape, no address is set (the kernel picks random ones) and the script
+# says which was missing.
 G=/sys/kernel/config/usb_gadget/net
 
 family() {
-	if [ -r /etc/usb-gadget.family ]; then
-		head -n 1 /etc/usb-gadget.family
-	else
-		tr '\000' '\n' < /proc/device-tree/compatible | tail -n 1
-	fi
+	[ -r /etc/usb-gadget.family ] && head -n 1 /etc/usb-gadget.family
+}
+
+# The serial in $1 as the rule hashes it, or nothing if it does not fit.
+serial() {
+	s=$(printf '%s' "$1" | tr 'A-F' 'a-f')
+	case "$s" in
+	*[!0-9a-f]* | "") return ;;
+	esac
+	[ ${#s} -ge 8 ] && [ ${#s} -le 32 ] && printf '%s' "$s"
 }
 
 # The two addresses for "<family>:<serial>" in $1: "host dev".
@@ -37,8 +45,10 @@ addresses() {
 
 case "$1" in
 addresses)
-	# For a check on a build machine: the addresses of the identity given.
-	addresses "$2"
+	# For a check on a build machine: the addresses of the family and
+	# serial given, or nothing for a serial that does not fit.
+	s=$(serial "$3")
+	[ -n "$2" ] && [ -n "$s" ] && addresses "$2:$s"
 	;;
 start)
 	mountpoint -q /sys/kernel/config || mount -t configfs none /sys/kernel/config || exit 1
@@ -47,14 +57,17 @@ start)
 	mkdir -p "$G/strings/0x409" "$G/configs/c.1/strings/0x409" "$G/functions/ncm.usb0" || exit 1
 	echo 0x1d6b > "$G/idVendor"
 	echo 0x0104 > "$G/idProduct"
-	serial=$(tr -d '\000' < /proc/device-tree/serial-number 2>/dev/null)
-	if [ -n "$serial" ]; then
-		set -- $(addresses "$(family):$serial")
+	id=$(family)
+	serial=$(serial "$(tr -d '\000' < /proc/device-tree/serial-number 2>/dev/null)")
+	if [ -z "$id" ]; then
+		echo "usb0: no board id in /etc/usb-gadget.family; the addresses are random"
+	elif [ -z "$serial" ]; then
+		echo "usb0: the device tree's serial-number is not 8 to 32 hex digits; the addresses are random"
+	else
+		set -- $(addresses "$id:$serial")
 		echo "$1" > "$G/functions/ncm.usb0/host_addr"
 		echo "$2" > "$G/functions/ncm.usb0/dev_addr"
 		echo "$serial" > "$G/strings/0x409/serialnumber"
-	else
-		echo "usb0: the device tree has no serial-number; the addresses are random"
 	fi
 	echo "USB network" > "$G/strings/0x409/product"
 	echo "NCM" > "$G/configs/c.1/strings/0x409/configuration"
@@ -73,7 +86,7 @@ restart)
 	"$0" start
 	;;
 *)
-	echo "usage: $0 {start|stop|restart|addresses <family>:<serial>}"
+	echo "usage: $0 {start|stop|restart|addresses <family> <serial>}"
 	exit 1
 	;;
 esac
