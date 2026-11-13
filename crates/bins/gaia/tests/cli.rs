@@ -187,3 +187,67 @@ fn a_package_is_built_from_component_files_with_its_control_fed() {
     let second = shown_key(dir.path(), "robot-status.ipk");
     assert_ne!(first, second, "a changed [package] kept the key");
 }
+
+/// The commit part of a `gaia <version> (<commit>)` line, or `None` when the
+/// line is not that shape: a 40-hex commit with an optional `-dirty`, or
+/// `unknown`.
+fn version_commit(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix("gaia ")?;
+    let (version, rest) = rest.split_once(" (")?;
+    if version.is_empty() || version.contains(char::is_whitespace) {
+        return None;
+    }
+    let commit = rest.strip_suffix(')')?;
+    if commit == "unknown" {
+        return Some(commit);
+    }
+    let hex = commit.strip_suffix("-dirty").unwrap_or(commit);
+    let hex_ok = hex.len() == 40
+        && hex
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    hex_ok.then_some(commit)
+}
+
+#[test]
+fn version_prints_one_line_with_the_build_commit() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let prefix = format!("gaia {} (", env!("CARGO_PKG_VERSION"));
+    for flag in ["--version", "-V"] {
+        let out = gaia(dir.path(), &[flag]);
+        assert!(out.status.success());
+        let text = String::from_utf8(out.stdout).expect("utf-8");
+        assert_eq!(text.lines().count(), 1, "not one line: {text:?}");
+        let line = text.strip_suffix('\n').expect("ends with a newline");
+        assert!(line.starts_with(&prefix), "no `{prefix}` in {line:?}");
+        assert!(version_commit(line).is_some(), "bad version line: {line:?}");
+    }
+}
+
+#[test]
+fn version_commit_is_the_head_the_binary_was_built_from() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let head = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(manifest)
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string());
+    let Some(head) = head else {
+        println!(
+            "git is not available in {}; commit not compared",
+            manifest.display()
+        );
+        return;
+    };
+    let out = Command::new(env!("CARGO_BIN_EXE_gaia"))
+        .arg("--version")
+        .output()
+        .expect("runs");
+    let text = String::from_utf8(out.stdout).expect("utf-8");
+    let line = text.strip_suffix('\n').expect("ends with a newline");
+    let commit = version_commit(line).expect("version line");
+    let commit = commit.strip_suffix("-dirty").unwrap_or(commit);
+    assert_eq!(commit, head, "built from another commit: {line}");
+}
