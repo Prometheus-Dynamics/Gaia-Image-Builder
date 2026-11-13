@@ -87,10 +87,45 @@ fn remote() -> Remote {
 }
 
 fn checkout(store: &Path, url: &str, commit: &str) -> Result<(Digest, PathBuf), StepError> {
-    let tree = source(&store.display().to_string(), GIT, url, commit, &Ctx::new())?;
+    checkout_in(store, url, commit, None)
+}
+
+fn checkout_in(
+    store: &Path,
+    url: &str,
+    commit: &str,
+    subdir: Option<&String>,
+) -> Result<(Digest, PathBuf), StepError> {
+    let tree = source(
+        &store.display().to_string(),
+        GIT,
+        url,
+        commit,
+        subdir,
+        &Ctx::new(),
+    )?;
     let object = tree.object.object_ref().expect("a tree object");
     let store = Store::open(store).expect("store");
     Ok((object.digest, store.path(&object)))
+}
+
+/// A bare repository with a directory `a/b` holding `file`, and a file `top`.
+fn nested_remote() -> (tempfile::TempDir, String, String) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let work = dir.path().join("work");
+    std::fs::create_dir_all(work.join("a/b")).expect("mkdir");
+    git(&work, &["init", "--quiet", "--initial-branch", "main"]);
+    std::fs::write(work.join("a/b/file"), "inside\n").expect("write");
+    std::fs::write(work.join("top"), "top\n").expect("write");
+    git(&work, &["add", "--all"]);
+    git(&work, &["commit", "--quiet", "--message", "nested"]);
+    let commit = git(&work, &["rev-parse", "HEAD"]);
+    git(
+        dir.path(),
+        &["clone", "--quiet", "--bare", "work", "remote.git"],
+    );
+    let url = format!("file://{}", dir.path().join("remote.git").display());
+    (dir, url, commit)
 }
 
 fn mode(path: &Path) -> u32 {
@@ -208,4 +243,60 @@ fn the_node_registers() {
     registry
         .register_all(&gaia_source_git::NODES)
         .expect("registers");
+}
+
+#[test]
+fn a_subdir_is_the_tree_of_that_directory() {
+    let (_dir, url, commit) = nested_remote();
+    let root = tempfile::tempdir().expect("tempdir");
+    let store = root.path().join("store");
+    let sub = "a/b".to_string();
+    let (digest, tree) = checkout_in(&store, &url, &commit, Some(&sub)).expect("checks out");
+    assert_eq!(
+        std::fs::read_to_string(tree.join("file")).expect("read"),
+        "inside\n"
+    );
+    assert!(!tree.join("top").exists(), "the root is not in the subdir");
+    assert!(!tree.join("a").exists(), "nothing above the subdir");
+    assert_eq!(tree_digest(&tree).expect("digest"), digest);
+
+    let (whole, _) = checkout_in(&store, &url, &commit, None).expect("whole");
+    assert_ne!(digest, whole, "the subdir and the root are two outputs");
+    let parent = "a".to_string();
+    let (other, _) = checkout_in(&store, &url, &commit, Some(&parent)).expect("parent");
+    assert_ne!(digest, other, "two subdirs are two outputs");
+}
+
+#[test]
+fn without_a_subdir_the_whole_root_is_the_tree() {
+    let (_dir, url, commit) = nested_remote();
+    let root = tempfile::tempdir().expect("tempdir");
+    let (_, tree) = checkout_in(&root.path().join("store"), &url, &commit, None).expect("whole");
+    assert!(tree.join("top").exists());
+    assert!(tree.join("a/b/file").exists());
+}
+
+#[test]
+fn a_missing_or_file_subdir_fails_naming_the_commit() {
+    let (_dir, url, commit) = nested_remote();
+    let root = tempfile::tempdir().expect("tempdir");
+    let store = root.path().join("store");
+
+    let missing = "nope".to_string();
+    let error = checkout_in(&store, &url, &commit, Some(&missing)).expect_err("fails");
+    println!("missing subdir: {error}");
+    assert!(error.to_string().contains(&commit), "{error}");
+    assert!(
+        error.to_string().contains("top level holds: a, top"),
+        "{error}"
+    );
+
+    let file = "top".to_string();
+    let error = checkout_in(&store, &url, &commit, Some(&file)).expect_err("fails");
+    println!("file subdir: {error}");
+    assert!(error.to_string().contains("is a file"), "{error}");
+
+    // Nothing was stored by either.
+    let store = Store::open(&store).expect("store");
+    assert!(step_records(&gaia_step::logs_dir(&store)).is_empty());
 }

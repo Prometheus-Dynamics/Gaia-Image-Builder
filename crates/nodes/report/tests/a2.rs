@@ -45,7 +45,7 @@ fn component(
     let vendor = scratch.join(format!("{name}-vendor"));
     std::fs::create_dir_all(&vendor).expect("mkdir");
     let git = which_git();
-    let src: Tree = source_git(store, &git, URL, COMMIT, &ctx).expect("source");
+    let src: Tree = source_git(store, &git, URL, COMMIT, None, &ctx).expect("source");
     let vendor: Tree = source_path(store, &vendor.display().to_string(), &ctx).expect("vendor");
     // The builder's root is pulled for the machine running the build: the
     // tools run here and only the target is cross-compiled.

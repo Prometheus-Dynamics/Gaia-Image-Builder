@@ -356,3 +356,43 @@ fn errors_name_the_description() {
     assert!(e.contains("the planner refused the graph"), "{e}");
     assert!(e.contains("recipes/tarball.toml"), "{e}");
 }
+
+#[test]
+fn a_git_source_subdir_is_its_node_setting() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (product, recipes) = describe(dir.path());
+    // hello-a's source names a directory of its checkout.
+    write(
+        &dir.path().join("components/hello-a/component.toml"),
+        &component("x86_64-unknown-linux-musl", "", "hello-a").replacen(
+            "ref = \"master\"\n",
+            "ref = \"master\"\nsubdir = \"a/b\"\n",
+            1,
+        ),
+    );
+    let loaded = Product::load(&product).expect("loads");
+    let recipes = Recipes::load_dir(&recipes).expect("recipes");
+    let built = build(
+        &loaded,
+        &lock(),
+        &recipes,
+        &registry(),
+        &setup(),
+        &Builders::default(),
+    )
+    .expect("builds");
+    let node = |label: &str| {
+        built
+            .doc
+            .graph
+            .nodes
+            .iter()
+            .find(|n| n.label.as_deref() == Some(label))
+            .unwrap_or_else(|| panic!("no node {label}"))
+    };
+    assert_eq!(
+        node("hello-a.src").consts.get("subdir"),
+        Some(&Lit::Str("a/b".into()))
+    );
+    assert_eq!(node("hello-b.src").consts.get("subdir"), None);
+}
