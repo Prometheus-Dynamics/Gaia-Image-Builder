@@ -60,7 +60,7 @@ fn product_dir(product: &Path) -> &Path {
 }
 
 /// What the descriptions ask for, a directory's path relative to the
-/// product.
+/// product's directory (`../../components/app` for one beside it).
 pub fn wants(product: &Path) -> Result<Vec<(String, Want)>, String> {
     let loaded = gaia_describe::Product::load(product).map_err(|e| e.to_string())?;
     let base = product_dir(product);

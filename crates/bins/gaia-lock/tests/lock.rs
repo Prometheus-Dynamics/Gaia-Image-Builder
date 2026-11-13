@@ -168,3 +168,74 @@ fn a_ref_that_is_not_there_names_the_source() {
     println!("{e}");
     assert!(e.contains("c.tagged: ") && e.contains("no ref `v9`"), "{e}");
 }
+
+/// A shared tree: `boards/`, `components/` and `products/` side by side,
+/// the component's directory source outside the product's directory.
+fn shared_tree(root: &Path) -> Options {
+    write(
+        &root.join("devices/components/c/component.toml"),
+        "version = 1\nname = \"c\"\n[sources.files]\npath = \"files\"\n",
+    );
+    write(&root.join("devices/components/c/files/a"), "a\n");
+    write(
+        &root.join("devices/boards/b/board.toml"),
+        "version = 1\nname = \"b\"\n[target]\narch = \"x86_64\"\nos = \"linux\"\n",
+    );
+    let product = root.join("devices/products/p/product.toml");
+    write(
+        &product,
+        "version = 1\nname = \"p\"\n[components]\nc = \"../../components/c/component.toml\"\n[[images]]\nname = \"i\"\nboard = \"../../boards/b/board.toml\"\ncomponents = [\"c\"]\nrecipe = \"r\"\n",
+    );
+    std::fs::create_dir_all(root.join("scratch")).expect("mkdir");
+    Options {
+        product,
+        lock: None,
+        update: Vec::new(),
+        tools: Tools {
+            git: "git".into(),
+            curl: "curl".into(),
+        },
+        scratch: root.join("scratch"),
+    }
+}
+
+#[test]
+fn a_tree_beside_the_product_is_locked_by_a_relative_path() {
+    let one = tempfile::tempdir().expect("tempdir");
+    let options = shared_tree(one.path());
+    run(&options);
+    let path = lock_path(&options);
+    let text = std::fs::read_to_string(&path).expect("the lock");
+    println!("{text}");
+    let Some(Entry::Tree { path: locked, .. }) =
+        Lock::read(&path).expect("reads").get("c.files").cloned()
+    else {
+        panic!("c.files is a tree");
+    };
+    assert_eq!(locked, "../../components/c/files");
+    let checkout = one.path().display().to_string();
+    assert!(
+        !text.contains(&checkout),
+        "the lock names no path of the checkout: {text}"
+    );
+    // Locked again, nothing changed: the relative path is the one wanted.
+    assert_eq!(run(&options), Vec::<String>::new());
+
+    // The same tree in another checkout gives the same lock, byte for byte.
+    let two = tempfile::tempdir().expect("tempdir");
+    let other = shared_tree(two.path());
+    run(&other);
+    let other_text = std::fs::read_to_string(lock_path(&other)).expect("the lock");
+    assert_eq!(text, other_text);
+}
+
+#[test]
+fn a_changed_file_in_a_tree_beside_the_product_changes_its_digest() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let options = shared_tree(dir.path());
+    run(&options);
+    write(&dir.path().join("devices/components/c/files/a"), "b\n");
+    let lines = run(&options);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].contains("c.files"), "{lines:?}");
+}
