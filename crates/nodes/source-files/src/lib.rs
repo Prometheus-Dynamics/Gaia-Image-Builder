@@ -9,6 +9,9 @@
 //!   written outside the tree: a member with an absolute path, a `..`, or a
 //!   path through a symlink is refused. Modes are normalized: files 0644, or
 //!   0755 when any execute bit is set; directories 0755.
+//! - **`gaia.source.input`**: a file the command line names (`--input`),
+//!   stored as one file under its name in a tree, keyed on its content and
+//!   that name, not on its path. A changed file is a new step.
 //! - **`gaia.source.download`**: a URL fetched with the `curl` program
 //!   given and checked against the lock's digest, keyed on that digest. A
 //!   download that stops part way resumes on the next run from what it got.
@@ -18,10 +21,12 @@
 mod archive;
 mod download;
 mod files;
+mod input;
 mod path;
 
 pub use archive::source_archive;
 pub use download::{partial_dir, source_download};
+pub use input::source_input;
 pub use path::source_path;
 
 /// The libraries this node links, pinned in its Cargo.toml. Its step key names
@@ -43,7 +48,8 @@ pub fn runtime_libs() -> [(&'static str, &'static str); 1] {
 use daedalus::prelude::NodeRecord;
 
 /// The nodes, for a registry.
-pub const NODES: [&NodeRecord; 3] = [
+pub const NODES: [&NodeRecord; 4] = [
+    &input::SOURCE_INPUT_NODE,
     &path::SOURCE_PATH_NODE,
     &archive::SOURCE_ARCHIVE_NODE,
     &download::SOURCE_DOWNLOAD_NODE,
