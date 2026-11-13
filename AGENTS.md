@@ -61,3 +61,13 @@ The work is a pre-planned list of PRs into `next`.
 Briefs marked `Runs: board` need real hardware. They run in a local session on the user's machine
 after the PR merges, and report what booted and what was compared. Timings count only from the
 board itself.
+
+Writing an image to the disk a board is running from:
+
+- Copy the image to the board's tmpfs and check its digest there before anything is overwritten.
+- Run the write from tmpfs only: a copy of the shell and its libraries, not the root's.
+- Remount the old root read-only, write, `sync`, then restart at once (`reboot -f` or sysrq `b`).
+- Never drop caches or read the disk back before the restart. Once the root is overwritten, a
+  program that pages its code back in reads the new bytes and crashes; when that program is
+  init, the kernel panics and the board needs a power cycle.
+- Check the result from the new system after it boots.
