@@ -44,6 +44,10 @@ fn plan(dir: &Path, extra: &[&str]) -> Output {
         "--tool",
         "veritysetup=/usr/sbin/veritysetup",
         "--tool",
+        "bwrap=/usr/bin/bwrap",
+        "--tool",
+        "toolchain=/opt/rust",
+        "--tool",
         "mke2fs=/usr/sbin/mke2fs",
         "--tool",
         "debugfs=/usr/sbin/debugfs",
@@ -106,6 +110,13 @@ fn the_plan_lists_the_config_the_board_gives() {
         "BR2_TARGET_UBOOT_CUSTOM_MAKEOPTS=\"ROCKCHIP_TPL=@zero-3e.rkbin@/bin/rk35/rk3566_ddr_1056MHz_v1.23.bin\"",
         "BR2_TARGET_ARM_TRUSTED_FIRMWARE_PLATFORM=\"rk3568\"",
         "built from LINUX=zero-3e.linux UBOOT=zero-3e.u-boot ARM_TRUSTED_FIRMWARE=zero-3e.tf-a",
+        // A Rust component: its crates from its Cargo.lock, its target from
+        // the board, its binary placed in the root filesystem.
+        "hello-rust.vendor                       gaia.build.rust.vendor",
+        "hello-rust.src.tree -> hello-rust.vendor.source",
+        "hello-rust.vendor.vendor -> hello-rust.build.vendor",
+        "hello-rust.root.rootfs -> hello-rust.build.root",
+        "hello-rust.build.tree -> zero-3e-demo.hello-rust.place0.from",
         // The image's own fragment, last.
         "[image.0.os.fragment]",
         "BR2_TARGET_GENERIC_HOSTNAME=\"zero3e\"",
@@ -113,6 +124,26 @@ fn the_plan_lists_the_config_the_board_gives() {
     ] {
         assert!(text.contains(line), "the plan has no line {line:?}");
     }
+}
+
+#[test]
+fn a_rust_component_takes_its_target_from_the_board() {
+    let dir = project();
+    let out = plan(dir.path(), &["--json"]);
+    assert!(out.status.success());
+    let both: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+    let nodes = both["graph"]["graph"]["nodes"].as_array().expect("nodes");
+    let build = nodes
+        .iter()
+        .find(|n| n["label"] == "hello-rust.build")
+        .expect("the build");
+    println!("{}", build["consts"]);
+    assert_eq!(
+        build["consts"]["triple"]["value"],
+        "aarch64-unknown-linux-musl"
+    );
+    assert_eq!(build["consts"]["cpu"]["value"], "cortex-a55");
+    assert_eq!(build["consts"]["package"]["value"], "hello-rust");
 }
 
 #[test]

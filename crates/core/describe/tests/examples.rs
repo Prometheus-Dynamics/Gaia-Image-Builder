@@ -120,6 +120,8 @@ fn the_demo_product_loads_its_board_and_component() {
     assert_eq!(
         wants,
         [
+            "hello-rust.root",
+            "hello-rust.src",
             "zero-3e-demo.buildroot",
             "zero-3e.linux",
             "zero-3e.rkbin",
