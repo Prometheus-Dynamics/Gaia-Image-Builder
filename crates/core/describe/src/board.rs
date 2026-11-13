@@ -49,6 +49,11 @@ pub struct Kernel {
     pub source: Option<String>,
     /// The in-tree defconfig the configuration starts from.
     pub defconfig: Option<String>,
+    /// A complete kernel configuration the build starts from in place of a
+    /// defconfig: a saved `.config`, beside the board file. Fragments are
+    /// applied after it, and every line of it is held to the final
+    /// configuration as a fragment's lines are.
+    pub config: Option<RelPath>,
     /// Config fragments applied on top, in order.
     pub fragments: Option<Vec<RelPath>>,
     /// The device tree the board boots, in-tree (`rockchip/rk3566-board`).
@@ -317,6 +322,9 @@ fn read_file(path: &Path) -> Result<BoardFile, Error> {
     resolve_sources(&mut file.sources, dir);
     if let Some(kernel) = &mut file.kernel {
         each(&mut kernel.fragments);
+        if let Some(config) = &mut kernel.config {
+            config.resolve(dir);
+        }
         if let Some(path) = &mut kernel.device_tree_dir {
             path.resolve(dir);
         }
@@ -355,6 +363,9 @@ fn read_file(path: &Path) -> Result<BoardFile, Error> {
         }
         if let Some(dir) = &kernel.device_tree_dir {
             local.push(("kernel.device_tree_dir".into(), dir.path()));
+        }
+        if let Some(config) = &kernel.config {
+            local.push(("kernel.config".into(), config.path()));
         }
     }
     if let Some(bootloader) = &file.bootloader {
@@ -495,6 +506,7 @@ fn merge(board: BoardFile, family: BoardFile) -> BoardFile {
                 device_tree: b.device_tree.or(f.device_tree),
                 device_tree_dir: b.device_tree_dir.or(f.device_tree_dir),
                 overlays: b.overlays.or(f.overlays),
+                config: b.config.or(f.config),
                 storage_drivers: b.storage_drivers.or(f.storage_drivers),
             }),
             (b, f) => b.or(f),

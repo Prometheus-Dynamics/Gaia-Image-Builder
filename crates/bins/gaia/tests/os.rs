@@ -684,3 +684,54 @@ fn a_component_generates_from_the_boards_description() {
         assert!(err.contains(message), "{to}: {err}");
     }
 }
+
+/// A board whose kernel starts from a complete configuration, a saved
+/// `.config`, in place of a defconfig.
+#[test]
+fn a_boards_kernel_starts_from_a_complete_configuration() {
+    let dir = project();
+    let board_dir = dir.path().join("examples/boards/zero-3e");
+    let board = board_dir.join("board.toml");
+    edit(
+        &board,
+        "device_tree_dir = \"assets/dts\"",
+        "device_tree_dir = \"assets/dts\"\nconfig = \"saved.config\"",
+    );
+    // The family states a defconfig: two starting points.
+    std::fs::write(board_dir.join("saved.config"), "CONFIG_X=y\n").expect("write");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("kernel.config"), "{err}");
+    assert!(err.contains("two starting points"), "{err}");
+
+    let family = dir.path().join("examples/boards/rk35xx/family.toml");
+    let text = std::fs::read_to_string(&family).expect("read");
+    let without: String = text
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("defconfig ="))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    assert_ne!(without, text, "the family states a defconfig");
+    std::fs::write(&family, without).expect("write");
+    let out = plan(dir.path(), &[]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("BR2_LINUX_KERNEL_USE_CUSTOM_CONFIG=y"),
+        "{text}"
+    );
+    assert!(
+        text.contains("BR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE=\"@files.")
+            && text.contains("/saved.config\""),
+        "{text}"
+    );
+    assert!(!text.contains("BR2_LINUX_KERNEL_USE_ARCH_DEFAULT_CONFIG=y"));
+
+    // A file that is not there is an error at the board's key.
+    std::fs::remove_file(board_dir.join("saved.config")).expect("remove");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("kernel.config"), "{err}");
+}

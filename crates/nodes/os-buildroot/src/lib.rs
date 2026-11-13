@@ -470,13 +470,21 @@ fn build(
                 contracts[0].0.asked_by, contracts[0].0.path
             )));
         }
-        if !has || (files.is_empty() && contracts.is_empty()) {
+        // A complete configuration the kernel starts from: held to the
+        // final config as the first of its fragments.
+        let complete = if package == "linux" {
+            config::string_option(&resolved, "BR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE")
+                .filter(|file| !file.is_empty())
+        } else {
+            None
+        };
+        if !has || (files.is_empty() && contracts.is_empty() && complete.is_none()) {
             continue;
         }
         let goal = format!("{package}-configure");
         work.run(&make_tool(host, src, &out, vars, &[goal.as_str()]))?;
         let mut fragments = Vec::new();
-        for file in files.split_whitespace() {
+        for file in complete.into_iter().chain(files.split_whitespace()) {
             let text = fs::read_to_string(file)
                 .map_err(|e| fail(format!("{package} config fragment {file}: {e}")))?;
             let name = Path::new(file)
