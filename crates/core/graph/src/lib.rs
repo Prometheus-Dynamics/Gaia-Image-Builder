@@ -6,7 +6,8 @@
 //!
 //! - **Sources:** one node per component source an image uses, labelled
 //!   `<component>.<source>`, pinned by the lock: `gaia.source.git` at the
-//!   locked commit, `gaia.source.download` and `gaia.source.oci` at the
+//!   locked commit (with the source's `subdir` as its `subdir` setting, when
+//!   it names one), `gaia.source.download` and `gaia.source.oci` at the
 //!   locked digest, `gaia.source.path` for a path.
 //! - **Builds:** one node per built component, labelled
 //!   `<component>.build`, its id from the [`Builders`] table. Its `source`

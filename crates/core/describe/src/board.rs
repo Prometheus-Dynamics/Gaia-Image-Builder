@@ -9,6 +9,7 @@ use crate::common::{FileRef, Mode, RelPath, SizeText, Source, check_source, reso
 use crate::{Error, read};
 use gaia_lock::Want;
 use gaia_types::{Arch, Os, PartitionRole, Target};
+use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -133,7 +134,8 @@ fn yes() -> bool {
     true
 }
 
-/// How the board is written to.
+/// How the board is written to. Gaia does not use these values; they are
+/// data for the tool that flashes the board.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Flash {
@@ -142,6 +144,32 @@ pub struct Flash {
     /// Files a method needs, by name.
     #[serde(default)]
     pub files: BTreeMap<String, FileRef>,
+    /// The address the flashing tool loads its program at. TOML integers
+    /// are signed, so a negative value is refused; hex (`0x80360000`) reads.
+    #[serde(default, deserialize_with = "non_negative")]
+    pub load_address: Option<u64>,
+    /// The medium the image is written to.
+    pub medium: Option<Medium>,
+}
+
+/// The medium a board's image is written to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Medium {
+    Sd,
+    Emmc,
+    SpiNand,
+    SpiNor,
+}
+
+/// A whole number of 0 or more, read from a TOML integer.
+fn non_negative<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<u64>, D::Error> {
+    match Option::<i64>::deserialize(deserializer)? {
+        None => Ok(None),
+        Some(value) => u64::try_from(value).map(Some).map_err(|_| {
+            de::Error::custom(format!("`{value}` is negative; an address is 0 or more"))
+        }),
+    }
 }
 
 /// One file as written: a board or a family.
@@ -466,6 +494,8 @@ fn merge(board: BoardFile, family: BoardFile) -> BoardFile {
                     files.extend(b.files);
                     files
                 },
+                load_address: b.load_address.or(f.load_address),
+                medium: b.medium.or(f.medium),
             }),
             (b, f) => b.or(f),
         },

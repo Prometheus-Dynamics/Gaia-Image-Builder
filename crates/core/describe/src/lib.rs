@@ -18,6 +18,8 @@
 //!
 //! Sources are named per file and pinned by the lock; [`Loaded::wants`]
 //! gives the lock check its list, named `<product, board or component>.<source>`.
+//! A git source may name a `subdir`: a directory of its checkout to use as
+//! the source's tree. The lock still pins the commit alone.
 
 mod board;
 mod common;
@@ -28,9 +30,10 @@ mod read;
 mod validate;
 
 pub use board::{
-    Board, Bootloader, Disk, Firmware, Flash, Kernel, PartitionNeed, Scheme, TrustedFirmware,
+    Board, Bootloader, Disk, Firmware, Flash, Kernel, Medium, PartitionNeed, Scheme,
+    TrustedFirmware,
 };
-pub use common::{FileRef, ImagePlatform, Mode, RelPath, SizeText, Source};
+pub use common::{FileRef, ImagePlatform, Mode, RelPath, SizeText, Source, Subdir};
 pub use component::{Build, Component, Group, Install, InstallFrom, Package, Service, User};
 pub use error::Error;
 pub use product::{ImageSpec, Loaded, OsProvider, OsSpec, Product};
