@@ -243,3 +243,29 @@ fn a_failed_tool_keeps_its_whole_output_in_a_run_log() {
     assert!(text.trim_end().ends_with(" exit 3"), "{text}");
     assert_eq!(daedalus_cpu_author::FixedError::code(&error), 3);
 }
+
+/// A line sink reads what the tool printed, so it has each line whole,
+/// however long: a tool's JSON is one line. The kept tail is still cut.
+#[test]
+fn a_line_sink_has_a_long_line_whole() {
+    use std::sync::{Arc, Mutex};
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("store")).expect("store");
+    let cx = Ctx::new();
+    let key = KeyBuilder::new("test.long", 1).finish();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let sink = seen.clone();
+    let mut tail = Vec::new();
+    Step::new(&store, &cx, "test.long", key)
+        .look_up_or_make(&[("out", Path::new("out"))], |work| {
+            let tool = Tool::new("/bin/sh")
+                .arg("-c")
+                .arg("head -c 5000 /dev/zero | tr '\\0' x; echo")
+                .on_line(move |_, line| sink.lock().expect("lock").push(line.len()));
+            tail = work.run(&tool)?.stdout_tail;
+            std::fs::write(work.dir().join("out"), "x").map_err(|e| StepError::body("t", e))
+        })
+        .expect("made");
+    assert_eq!(*seen.lock().expect("lock"), [5000]);
+    assert_eq!(tail[0].len(), 1024);
+}
