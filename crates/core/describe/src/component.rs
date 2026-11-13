@@ -1,8 +1,9 @@
 //! The component file: one piece of software and what it installs.
 
-use crate::common::{FileRef, Mode, Source, check_source, resolve_sources};
+use crate::common::{FileRef, Mode, Source, check_source, is_input_name, resolve_sources};
 use crate::{Error, read};
 use gaia_lock::Want;
+use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -73,7 +74,9 @@ pub struct Build {
 #[serde(deny_unknown_fields)]
 pub struct Install {
     /// A path in the build's output, or `{ file = ... }` beside this file,
-    /// or `{ source, path }` in a source.
+    /// or `{ source, path }` in a source, or `{ input = ... }`: a file the
+    /// command line names (`gaia plan --input NAME=PATH`), such as a
+    /// developer's key, which is not committed.
     pub from: InstallFrom,
     /// Where it goes in the image: an absolute path.
     pub to: String,
@@ -83,12 +86,28 @@ pub struct Install {
 }
 
 /// Where an installed file comes from.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum InstallFrom {
     /// A path in the build's output (`bin/server`).
     Built(String),
     File(FileRef),
+}
+
+// Read by hand, not untagged: a table that fails as a file reference then
+// keeps its own message and key, not "did not match any variant".
+impl<'de> Deserialize<'de> for InstallFrom {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match toml::Value::deserialize(deserializer)? {
+            toml::Value::String(path) => Ok(Self::Built(path)),
+            table @ toml::Value::Table(_) => FileRef::deserialize(table)
+                .map(Self::File)
+                .map_err(de::Error::custom),
+            _ => Err(de::Error::custom(
+                "`from` is a path in the build's output, or a table: `{ file = ... }`, `{ source, path }` or `{ input = ... }`",
+            )),
+        }
+    }
 }
 
 /// A service unit, enabled or only installed.
@@ -155,6 +174,17 @@ impl Component {
                 }
                 InstallFrom::Built(_) => {}
                 InstallFrom::File(file) => {
+                    if let FileRef::Input { name } = file
+                        && !is_input_name(name)
+                    {
+                        return Err(Error::new(
+                            path,
+                            format!("{key}.from.input"),
+                            format!(
+                                "`{name}` is not an input name: lowercase letters, digits and `-`, like `bench-key`"
+                            ),
+                        ));
+                    }
                     file.resolve(dir);
                     if let FileRef::Local { file } = file {
                         crate::common::check_exists(

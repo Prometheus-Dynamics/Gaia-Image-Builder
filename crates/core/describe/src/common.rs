@@ -313,13 +313,25 @@ pub(crate) fn resolve_sources(sources: &mut BTreeMap<String, Source>, dir: &Path
 }
 
 /// A file a step takes in: a path inside a source,
-/// `{ source = "rkbin", path = "bin/rk35/ddr.bin" }`, or a file beside the
-/// description, `{ file = "assets/boot.cmd" }`.
+/// `{ source = "rkbin", path = "bin/rk35/ddr.bin" }`, a file beside the
+/// description, `{ file = "assets/boot.cmd" }`, or a named input the command
+/// line gives, `{ input = "bench-key" }` (`gaia plan --input bench-key=PATH`).
+/// Only a component's install entry takes a named input.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "FileRefText")]
 pub enum FileRef {
-    InSource { source: String, path: String },
-    Local { file: RelPath },
+    InSource {
+        source: String,
+        path: String,
+    },
+    Local {
+        file: RelPath,
+    },
+    /// A file the command line names. The name is lowercase letters, digits
+    /// and `-` (see [`is_input_name`]), checked where it is used.
+    Input {
+        name: String,
+    },
 }
 
 #[derive(Deserialize)]
@@ -328,17 +340,22 @@ struct FileRefText {
     source: Option<String>,
     path: Option<String>,
     file: Option<RelPath>,
+    input: Option<String>,
 }
 
 impl TryFrom<FileRefText> for FileRef {
     type Error = String;
 
     fn try_from(text: FileRefText) -> Result<Self, String> {
-        match (text.source, text.path, text.file) {
-            (Some(source), Some(path), None) => Ok(Self::InSource { source, path }),
-            (None, None, Some(file)) => Ok(Self::Local { file }),
-            (Some(_), None, None) => Err("`source` needs a `path` inside it".into()),
-            _ => Err("either `source` and `path`, or `file`".into()),
+        match (text.input, text.source, text.path, text.file) {
+            (Some(name), None, None, None) => Ok(Self::Input { name }),
+            (Some(_), _, _, _) => {
+                Err("a named input is not combined with `source`, `path` or `file`".into())
+            }
+            (None, Some(source), Some(path), None) => Ok(Self::InSource { source, path }),
+            (None, None, None, Some(file)) => Ok(Self::Local { file }),
+            (None, Some(_), None, None) => Err("`source` needs a `path` inside it".into()),
+            _ => Err("either `source` and `path`, `file`, or `input`".into()),
         }
     }
 }
@@ -353,9 +370,18 @@ impl FileRef {
     pub fn source(&self) -> Option<&str> {
         match self {
             Self::InSource { source, .. } => Some(source),
-            Self::Local { .. } => None,
+            Self::Local { .. } | Self::Input { .. } => None,
         }
     }
+}
+
+/// Whether `name` is a named input's name: lowercase letters, digits and
+/// `-`, and not empty.
+pub(crate) fn is_input_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// Checks that `name`, used at `key` in `file`, is one of `sources`.

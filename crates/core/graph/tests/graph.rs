@@ -144,6 +144,7 @@ fn setup() -> Setup {
         .map(|(a, b)| (a.to_string(), b.to_string()))
         .collect(),
         buildroot: None,
+        inputs: Default::default(),
     }
 }
 

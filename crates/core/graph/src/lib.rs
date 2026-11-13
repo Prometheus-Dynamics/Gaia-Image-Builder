@@ -47,6 +47,13 @@
 //! - **Data:** the recipe input `data` is the image's one built data
 //!   component. With none, it is left out when every port it names is
 //!   optional, and an error otherwise.
+//! - **Named inputs:** a component's install entry may take its file from
+//!   `{ input = "name" }`, a file the command line gives (`--input name=PATH`,
+//!   in [`Setup::inputs`]). Its entries form their own group in the
+//!   component's layer: a `gaia.source.input` node, `<image>.<component>.input.<name>`,
+//!   placed by `gaia.tree.place`. The file is never in a description, so it
+//!   is not committed. A name the product's components use that is not
+//!   given, or a given name none uses, is an error.
 //! - **Everywhere:** an input named `store` gets the store, and one named
 //!   like a [`Setup`] tool gets that tool's path. Every node has
 //!   `daedalus.node.fusion: false`, so fail-fast and cancel stop between
@@ -82,6 +89,10 @@ pub struct Setup {
     pub tools: BTreeMap<String, String>,
     /// make, CPUs, jobs and the download cache, for an image with an OS.
     pub buildroot: Option<gaia_types::BuildrootHost>,
+    /// The named inputs the command line gives, by name: absolute paths to
+    /// regular files. An install entry's `{ input = name }` takes its file
+    /// from here.
+    pub inputs: BTreeMap<String, PathBuf>,
 }
 
 /// A component's `builder` name to the node that builds it.

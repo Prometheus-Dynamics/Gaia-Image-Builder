@@ -365,9 +365,16 @@ fn check_refs(
     sources: &BTreeMap<String, Source>,
 ) -> Result<(), Error> {
     let check = |key: &str, name: &str| check_source(path, key, name, sources.keys());
-    let check_ref = |key: String, file_ref: &FileRef| match file_ref.source() {
-        Some(name) => check(&format!("{key}.source"), name),
-        None => Ok(()),
+    let check_ref = |key: String, file_ref: &FileRef| match file_ref {
+        FileRef::Input { .. } => Err(Error::new(
+            path,
+            key,
+            "a named input is only for a component's install entry",
+        )),
+        _ => match file_ref.source() {
+            Some(name) => check(&format!("{key}.source"), name),
+            None => Ok(()),
+        },
     };
     if let Some(name) = file.kernel.as_ref().and_then(|k| k.source.as_deref()) {
         check("kernel.source", name)?;
