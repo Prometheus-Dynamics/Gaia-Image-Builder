@@ -24,6 +24,7 @@ mod component;
 mod error;
 mod product;
 mod read;
+mod validate;
 
 pub use board::{
     Board, Bootloader, Disk, Firmware, Flash, Kernel, PartitionNeed, Scheme, TrustedFirmware,
@@ -33,3 +34,4 @@ pub use component::{Build, Component, Group, Install, InstallFrom, Package, Serv
 pub use error::Error;
 pub use product::{ImageSpec, Loaded, Product};
 pub use read::VERSION;
+pub use validate::{Kind, kind_of, validate};

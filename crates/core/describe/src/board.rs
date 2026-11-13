@@ -244,6 +244,20 @@ impl Board {
     }
 }
 
+/// Checks a family file alone: its keys, that it extends nothing, and the
+/// sources it names itself. A board that extends it is checked with it.
+pub(crate) fn check_family(path: &Path) -> Result<(), Error> {
+    let family = read_file(path)?;
+    if family.extends.is_some() {
+        return Err(Error::new(
+            path,
+            "extends",
+            "a family file extends nothing; only a board extends, once",
+        ));
+    }
+    check_refs(path, &family, &family.sources)
+}
+
 /// Reads one file and resolves its paths against its directory.
 fn read_file(path: &Path) -> Result<BoardFile, Error> {
     let mut file: BoardFile = read::read(path)?;
