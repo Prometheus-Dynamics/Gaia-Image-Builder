@@ -8,7 +8,7 @@
 //! prints SKIPPED. Optional: `GAIA_BUILDROOT_CPUS` (a CPU list, `taskset`
 //! at `/usr/bin/taskset`), `GAIA_BUILDROOT_JOBS` (default 4).
 
-use gaia_os_buildroot::{BuildrootHost, ConfigFragment, os_buildroot};
+use gaia_os_buildroot::{BuildrootHost, ConfigFragment, OsConfig, build_os};
 use gaia_step::{Ctx, Store, logs_dir, step_records};
 use gaia_types::{Artifact, Tree};
 use std::fs;
@@ -79,12 +79,15 @@ fn build(
         config,
         _kernel_build,
         _toolchain,
-    ) = os_buildroot(
+    ) = build_os(
         &store_path,
         source.clone(),
-        fragments,
-        Vec::new(),
-        host.clone(),
+        &OsConfig {
+            fragments,
+            ..OsConfig::default()
+        },
+        &[],
+        &host.clone(),
         &Ctx::new(),
     )
     .expect("the Buildroot step");

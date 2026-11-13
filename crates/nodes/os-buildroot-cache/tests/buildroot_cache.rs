@@ -18,7 +18,7 @@
 //! (its output directory, which must not exist yet).
 
 use gaia_lock::Lock;
-use gaia_os_buildroot::{BuildrootHost, ConfigFragment, os_buildroot};
+use gaia_os_buildroot::{BuildrootHost, ConfigFragment, OsConfig, build_os};
 use gaia_os_buildroot_cache::{
     ccache_fragment, fill, interrupted, locked_file, os_buildroot_downloads, settings,
 };
@@ -169,12 +169,15 @@ fn offline_build() {
         download_dir: dl.display().to_string(),
     };
     let (rootfs, _kernel, _dt, _modules, _bootloader, images, config, _kernel_build, _toolchain) =
-        os_buildroot(
+        build_os(
             &store_dir.display().to_string(),
             source,
-            fragments,
-            Vec::new(),
-            host,
+            &OsConfig {
+                fragments,
+                ..OsConfig::default()
+            },
+            &[],
+            &host,
             &Ctx::new(),
         )
         .expect("the offline Buildroot build");

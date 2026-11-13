@@ -1,6 +1,10 @@
-# A demo product: the ZERO 3E with a USB gadget network.
+# A demo product: the ZERO 3E with a USB gadget network, on Buildroot.
 version = 1
 name = "zero-3e-demo"
+
+[sources.buildroot]
+git = "https://gitlab.com/buildroot.org/buildroot.git"
+ref = "2026.02.3"
 
 [components]
 usb-gadget-network = "../../components/usb-gadget-network/component.toml"
@@ -9,8 +13,10 @@ usb-gadget-network = "../../components/usb-gadget-network/component.toml"
 name = "zero-3e-demo"
 board = "../../boards/zero-3e/board.toml"
 components = ["usb-gadget-network"]
-recipe = "ab-rootfs"
+# The board gives the kernel, U-Boot and TF-A; os.fragment the rest.
+os = { provider = "buildroot", source = "buildroot", fragments = ["os.fragment"] }
+recipe = "slot"
 budget = "1G"
 
 [images.settings]
-hostname = "zero3e"
+device = "/data/slots/root.img"

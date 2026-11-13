@@ -1,12 +1,15 @@
 //! Laying the descriptions out as nodes and edges.
 
+use crate::os::{self, InputFrom};
 use crate::{Builders, Error, FUSION, HostInput, STEP, Setup};
 use daedalus::layers::graph::{
     EdgeDoc, EdgePolicyDoc, GraphBody, Lit, NodeDoc, NodeKindDoc, PortRefDoc,
 };
 use daedalus::prelude::Registry;
 use daedalus_registry::TypeRef;
-use gaia_describe::{Component, ImagePlatform, ImageSpec, Loaded, Source};
+use gaia_describe::{
+    Component, FileRef, ImagePlatform, ImageSpec, InstallFrom, Loaded, OsSpec, Source,
+};
 use gaia_lock::{Entry, Lock};
 use gaia_recipe::Recipes;
 use std::collections::{BTreeMap, BTreeSet};
@@ -194,6 +197,9 @@ pub(crate) fn wire(
     let mut built: BTreeMap<String, u32> = BTreeMap::new();
     let mut host_ports: BTreeMap<String, String> = BTreeMap::new();
     let mut inputs: BTreeMap<String, HostInput> = BTreeMap::new();
+    // OS input trees, once each: a locked source by its lock name, a
+    // directory by its path.
+    let mut os_inputs: BTreeMap<String, u32> = BTreeMap::new();
     for (i, image) in loaded.product.images.iter().enumerate() {
         let board = &loaded.boards[image.board.path()];
         let mut builds = Vec::new();
@@ -228,6 +234,26 @@ pub(crate) fn wire(
                 into.push((name.clone(), node));
             }
         }
+        let os = match &image.os {
+            None => None,
+            Some(spec) => Some(image_os(
+                &mut g,
+                &OsIn {
+                    index: i,
+                    image,
+                    spec,
+                    board,
+                    members: &members,
+                    builds: &builds,
+                    loaded,
+                    lock,
+                    setup,
+                },
+                &mut os_inputs,
+                &mut host_ports,
+                &mut inputs,
+            )?),
+        };
         let image_in = ImageIn {
             index: i,
             image,
@@ -237,6 +263,7 @@ pub(crate) fn wire(
             lock,
             board,
             product_file: &product_file,
+            os,
         };
         image_recipe(&mut g, &image_in, recipes, &mut host_ports, &mut inputs)?;
     }
@@ -310,15 +337,15 @@ fn component_build(
             .sources
             .get(&source_name)
             .ok_or_else(|| Error::at(file, "build.source", format!("no source {source_name}")))?;
-        let from = source_node(g, component, &source_name, source, lock, board)?;
+        let from = component_source(g, component, &source_name, source, lock, board)?;
         let out = g.first_output(from).unwrap_or("tree");
         g.edge((from, out), (node, &port));
     }
     Ok(node)
 }
 
-/// A node that gives one source, pinned by the lock.
-fn source_node(
+/// A component's source as a node.
+fn component_source(
     g: &mut Graph<'_>,
     component: &Component,
     name: &str,
@@ -326,9 +353,23 @@ fn source_node(
     lock: &Lock,
     board: &gaia_describe::Board,
 ) -> Result<u32, Error> {
-    let file = &component.file;
-    let key = format!("sources.{name}");
     let lock_name = format!("{}.{name}", component.name);
+    source_node(g, &component.file, name, &lock_name, source, lock, board)
+}
+
+/// A node that gives one source, written in `file` under `sources.<name>`,
+/// pinned by the lock under `lock_name`, and labelled by it.
+fn source_node(
+    g: &mut Graph<'_>,
+    file: &Path,
+    name: &str,
+    lock_name: &str,
+    source: &Source,
+    lock: &Lock,
+    board: &gaia_describe::Board,
+) -> Result<u32, Error> {
+    let key = format!("sources.{name}");
+    let lock_name = lock_name.to_string();
     let label = lock_name.clone();
     let pinned = || {
         lock.get(&lock_name).ok_or_else(|| {
@@ -415,6 +456,8 @@ struct ImageIn<'a> {
     lock: &'a Lock,
     board: &'a gaia_describe::Board,
     product_file: &'a Path,
+    /// Its OS step and its merged root filesystem, when it has an OS.
+    os: Option<(u32, u32)>,
 }
 
 /// The image's recipe, inline, its outputs to the host.
@@ -459,7 +502,27 @@ fn image_recipe(
         );
     }
     for (input, ports) in &group.inputs {
-        if input == "build" {
+        if input == "build"
+            && let Some((_, rootfs)) = at.os
+        {
+            for p in ports {
+                g.edge((rootfs, "tree"), (stages[&p.stage], &p.port));
+            }
+        } else if let Some(port) = os_output(input) {
+            let Some((os, _)) = at.os else {
+                return Err(Error::at(
+                    product_file,
+                    format!("images[{i}]"),
+                    format!(
+                        "recipe {} takes the OS's boot files as `{input}`; this image has no `os`",
+                        recipe.name
+                    ),
+                ));
+            };
+            for p in ports {
+                g.edge((os, port), (stages[&p.stage], &p.port));
+            }
+        } else if input == "build" {
             let [(_, node)] = builds else {
                 return Err(Error::at(
                     product_file,
@@ -576,7 +639,7 @@ fn image_source(g: &mut Graph<'_>, at: &ImageIn<'_>, recipe: &str) -> Result<u32
             ),
         ));
     };
-    source_node(g, component, name, source, at.lock, at.board)
+    component_source(g, component, name, source, at.lock, at.board)
 }
 
 /// The control data from the `[package]` table of the image's one component
@@ -659,6 +722,334 @@ fn image_disk(at: &ImageIn<'_>, recipe: &str) -> Result<gaia_types::DiskLayout, 
         });
     }
     Ok(gaia_types::DiskLayout { table, partitions })
+}
+
+/// The OS step's output a recipe input of this name takes: Buildroot's
+/// `images/` sorted by what each file is, and `os` for the rest of them.
+fn os_output(input: &str) -> Option<&'static str> {
+    Some(match input {
+        "kernel" => "kernel",
+        "device-trees" => "device_trees",
+        "bootloader" => "bootloader",
+        "os" => "images",
+        _ => return None,
+    })
+}
+
+/// One image's OS and what it is built with.
+struct OsIn<'a> {
+    index: usize,
+    image: &'a ImageSpec,
+    spec: &'a OsSpec,
+    board: &'a gaia_describe::Board,
+    members: &'a [&'a Component],
+    builds: &'a [(String, u32)],
+    loaded: &'a Loaded,
+    lock: &'a Lock,
+    setup: &'a Setup,
+}
+
+/// The image's OS step, its input trees and host inputs, and the image's
+/// root filesystem: the OS's tree, then each component's layer, merged.
+/// Gives the OS node and the merge node.
+fn image_os(
+    g: &mut Graph<'_>,
+    at: &OsIn<'_>,
+    os_inputs: &mut BTreeMap<String, u32>,
+    host_ports: &mut BTreeMap<String, String>,
+    inputs: &mut BTreeMap<String, HostInput>,
+) -> Result<(u32, u32), Error> {
+    let product = &at.loaded.product;
+    let file = &product.file;
+    let i = at.index;
+    let key = format!("images[{i}].os");
+    let plan = os::plan(at.board, i, at.spec, file, at.lock)?;
+    let source = product.sources.get(&at.spec.source).ok_or_else(|| {
+        Error::at(
+            file,
+            format!("{key}.source"),
+            format!("no source named `{}`", at.spec.source),
+        )
+    })?;
+    let lock_name = format!("{}.{}", product.name, at.spec.source);
+    let from = match os_inputs.get(&format!("source:{lock_name}")) {
+        Some(&node) => node,
+        None => {
+            let node = source_node(
+                g,
+                file,
+                &at.spec.source,
+                &lock_name,
+                source,
+                at.lock,
+                at.board,
+            )?;
+            os_inputs.insert(format!("source:{lock_name}"), node);
+            node
+        }
+    };
+    let os = g.add(
+        "gaia.os.buildroot",
+        format!("{}.os", at.image.name),
+        file,
+        &key,
+    )?;
+    let out = g.first_output(from).unwrap_or("tree");
+    g.edge((from, out), (os, "source"));
+    for (k, (name, input)) in plan.inputs.iter().enumerate() {
+        let (once, node) = match input {
+            InputFrom::Source {
+                file: described,
+                name: source_name,
+                source,
+            } => {
+                let once = format!("source:{name}");
+                match os_inputs.get(&once) {
+                    Some(&node) => (once, node),
+                    None => {
+                        let node = source_node(
+                            g,
+                            described,
+                            source_name,
+                            name,
+                            source,
+                            at.lock,
+                            at.board,
+                        )?;
+                        (once, node)
+                    }
+                }
+            }
+            InputFrom::Dir(dir) => {
+                let once = format!("dir:{}", dir.display());
+                match os_inputs.get(&once) {
+                    Some(&node) => (once, node),
+                    None => {
+                        let node = g.add(
+                            "gaia.source.path",
+                            format!("{}.os.{name}", at.image.name),
+                            file,
+                            &key,
+                        )?;
+                        g.set(node, "path", Lit::Str(dir.display().to_string()));
+                        (once, node)
+                    }
+                }
+            }
+        };
+        os_inputs.insert(once, node);
+        let out = g.first_output(node).unwrap_or("tree");
+        g.edge((node, out), (os, &format!("inputs{k}")));
+    }
+    let port = format!("{}.os", at.image.name);
+    host_input(
+        g,
+        host_ports,
+        inputs,
+        &port,
+        HostInput::Os(plan.config),
+        (os, "os"),
+    )?;
+    let buildroot = at.setup.buildroot.clone().ok_or_else(|| {
+        Error::at(
+            file,
+            key.clone(),
+            "the image has an OS, and the host gives no Buildroot setup (make, jobs, download directory)",
+        )
+    })?;
+    host_input(
+        g,
+        host_ports,
+        inputs,
+        "buildroot-host",
+        HostInput::Buildroot(buildroot),
+        (os, "host"),
+    )?;
+
+    // The root filesystem: the OS's tree, then the components' layers.
+    let layer = g.add(
+        "gaia.tree.layer",
+        format!("{}.os.layer", at.image.name),
+        file,
+        &key,
+    )?;
+    g.set(layer, "owner", Lit::Str("os".into()));
+    g.edge((os, "rootfs"), (layer, "tree"));
+    let mut layers = vec![layer];
+    for component in at.members {
+        let build = at
+            .builds
+            .iter()
+            .find(|(name, _)| *name == component.name)
+            .map(|(_, node)| *node);
+        layers.extend(component_layers(
+            g, at, component, build, host_ports, inputs,
+        )?);
+    }
+    let merge = g.add(
+        "gaia.tree.merge",
+        format!("{}.rootfs", at.image.name),
+        file,
+        &key,
+    )?;
+    for (k, layer) in layers.into_iter().enumerate() {
+        g.edge((layer, "layer"), (merge, &format!("layers{k}")));
+    }
+    Ok((os, merge))
+}
+
+/// A host input on `port`, fed to `to`. One port the images share (the
+/// Buildroot setup) is fed once.
+fn host_input(
+    g: &mut Graph<'_>,
+    host_ports: &mut BTreeMap<String, String>,
+    inputs: &mut BTreeMap<String, HostInput>,
+    port: &str,
+    value: HostInput,
+    to: (u32, &str),
+) -> Result<(), Error> {
+    host_ports.insert(port.to_string(), value.type_key().to_string());
+    inputs.insert(port.to_string(), value);
+    g.edge((0, port), to);
+    Ok(())
+}
+
+/// Where a group of install entries is placed from.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum PlaceFrom {
+    /// The component's build output.
+    Built,
+    /// The component's own directory.
+    Beside,
+    /// One of the component's sources.
+    Source(String),
+}
+
+/// A component's layers in the image: its install entries placed from
+/// where each comes from, or, with none, its whole build output.
+fn component_layers(
+    g: &mut Graph<'_>,
+    at: &OsIn<'_>,
+    component: &Component,
+    build: Option<u32>,
+    host_ports: &mut BTreeMap<String, String>,
+    inputs: &mut BTreeMap<String, HostInput>,
+) -> Result<Vec<u32>, Error> {
+    let file = &component.file;
+    let image = &at.image.name;
+    if component.install.is_empty() {
+        let Some(build) = build else {
+            return Ok(Vec::new());
+        };
+        let layer = g.add(
+            "gaia.tree.layer",
+            format!("{image}.{}.layer", component.name),
+            file,
+            "build",
+        )?;
+        g.set(layer, "owner", Lit::Str(component.name.clone()));
+        let out = g.first_output(build).unwrap_or("tree");
+        g.edge((build, out), (layer, "tree"));
+        return Ok(vec![layer]);
+    }
+    let dir = file.parent().unwrap_or(Path::new("/")).to_path_buf();
+    let mut groups: BTreeMap<PlaceFrom, Vec<gaia_types::Placement>> = BTreeMap::new();
+    for (n, install) in component.install.iter().enumerate() {
+        let key = format!("install[{n}]");
+        let (group, from) = match &install.from {
+            InstallFrom::Built(path) => (PlaceFrom::Built, path.clone()),
+            InstallFrom::File(FileRef::InSource { source, path }) => {
+                (PlaceFrom::Source(source.clone()), path.clone())
+            }
+            InstallFrom::File(FileRef::Local { file: local }) => {
+                let inside = local.path().strip_prefix(&dir).map_err(|_| {
+                    Error::at(
+                        file,
+                        format!("{key}.from"),
+                        format!(
+                            "{} is outside the component's directory",
+                            local.path().display()
+                        ),
+                    )
+                })?;
+                (PlaceFrom::Beside, inside.display().to_string())
+            }
+        };
+        let id = |name: &Option<String>, what: &str| -> Result<u32, Error> {
+            match name.as_deref() {
+                None | Some("root") => Ok(0),
+                Some(text) => text.parse().map_err(|_| {
+                    Error::at(
+                        file,
+                        format!("{key}.{what}"),
+                        format!(
+                            "`{text}` is not root or a number; other names get ids when accounts are wired"
+                        ),
+                    )
+                }),
+            }
+        };
+        groups
+            .entry(group)
+            .or_default()
+            .push(gaia_types::Placement {
+                from,
+                to: install.to.clone(),
+                mode: install.mode.map(|m| m.0),
+                uid: id(&install.owner, "owner")?,
+                gid: id(&install.group, "group")?,
+            });
+    }
+    let mut layers = Vec::new();
+    for (k, (group, placements)) in groups.into_iter().enumerate() {
+        let from = match &group {
+            PlaceFrom::Built => build.ok_or_else(|| {
+                Error::at(
+                    file,
+                    "install",
+                    "an entry is placed from the build's output, and the component has no build",
+                )
+            })?,
+            PlaceFrom::Beside => {
+                let node = g.add(
+                    "gaia.source.path",
+                    format!("{image}.{}.files", component.name),
+                    file,
+                    "install",
+                )?;
+                g.set(node, "path", Lit::Str(dir.display().to_string()));
+                node
+            }
+            PlaceFrom::Source(name) => {
+                let source = component.sources.get(name).ok_or_else(|| {
+                    Error::at(file, "install", format!("no source named `{name}`"))
+                })?;
+                component_source(g, component, name, source, at.lock, at.board)?
+            }
+        };
+        let place = g.add(
+            "gaia.tree.place",
+            format!("{image}.{}.place{k}", component.name),
+            file,
+            "install",
+        )?;
+        g.set(place, "owner", Lit::Str(component.name.clone()));
+        let out = g.first_output(from).unwrap_or("tree");
+        g.edge((from, out), (place, "from"));
+        let port = format!("{image}.{}.placements{k}", component.name);
+        host_input(
+            g,
+            host_ports,
+            inputs,
+            &port,
+            HostInput::Placements(gaia_types::Placements {
+                entries: placements,
+            }),
+            (place, "placements"),
+        )?;
+        layers.push(place);
+    }
+    Ok(layers)
 }
 
 /// A constant, said with its type.

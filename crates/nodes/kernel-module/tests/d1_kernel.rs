@@ -11,7 +11,7 @@
 //! gate it prints SKIPPED.
 
 use gaia_kernel_module::{KernelModuleHost, kernel_module};
-use gaia_os_buildroot::{BuildrootHost, ConfigFragment, os_buildroot};
+use gaia_os_buildroot::{BuildrootHost, ConfigFragment, OsConfig, build_os};
 use gaia_step::{Ctx, Store, logs_dir, step_records};
 use gaia_types::{Artifact, ArtifactKind, Tree};
 use std::fs;
@@ -197,12 +197,15 @@ fn hello_world_builds_against_the_d1_kernel_and_its_vermagic_matches() {
         config,
         kernel_build,
         toolchain,
-    ) = os_buildroot(
+    ) = build_os(
         &store_dir.display().to_string(),
         source_tree,
-        fragments,
-        Vec::new(),
-        buildroot_host(),
+        &OsConfig {
+            fragments,
+            ..OsConfig::default()
+        },
+        &[],
+        &buildroot_host(),
         &Ctx::new(),
     )
     .expect("the Buildroot step with a kernel");

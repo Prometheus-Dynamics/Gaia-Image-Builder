@@ -1,0 +1,32 @@
+# Written by `gaia lock`. Do not edit.
+version = 1
+
+[source."zero-3e-demo.buildroot"]
+kind = "git"
+url = "https://gitlab.com/buildroot.org/buildroot.git"
+ref = "2026.02.3"
+commit = "679b9ead7620bbf193620d1ebf56f53c1764d37a"
+
+[source."zero-3e.linux"]
+kind = "git"
+url = "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
+ref = "v7.3.3"
+commit = "d50d994bffa3c7c6db2d8bc4c5f0c55e3f46b0cd"
+
+[source."zero-3e.rkbin"]
+kind = "git"
+url = "https://github.com/rockchip-linux/rkbin.git"
+ref = "master"
+commit = "3e288fe814e059dd06833495f845cab04ac20a5c"
+
+[source."zero-3e.tf-a"]
+kind = "git"
+url = "https://github.com/ARM-software/arm-trusted-firmware.git"
+ref = "v2.15.0"
+commit = "da738d5eae93af342fdc4995dd3c05acb4c9d757"
+
+[source."zero-3e.u-boot"]
+kind = "git"
+url = "https://github.com/u-boot/u-boot.git"
+ref = "v2026.10"
+commit = "5508406582f6f7120dce0c4b3059819a41788db2"

@@ -3,7 +3,9 @@
 use gaia_step::Ctx;
 use gaia_store::{Store, tree_digest};
 use gaia_tree::{merge_layers, tree_accounts, tree_place, tree_services};
-use gaia_types::{Account, AccountGroup, FileEntry, Layer, Owned, Placement, Tree, owned_digest};
+use gaia_types::{
+    Account, AccountGroup, FileEntry, Layer, Owned, Placement, Placements, Tree, owned_digest,
+};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
@@ -57,7 +59,16 @@ fn place(
             gid: *uid,
         })
         .collect();
-    tree_place(&f.store, owner, tree, placements, &Ctx::new()).expect("places")
+    tree_place(
+        &f.store,
+        owner,
+        tree,
+        &Placements {
+            entries: placements,
+        },
+        &Ctx::new(),
+    )
+    .expect("places")
 }
 
 fn base(f: &Fixture) -> Layer {

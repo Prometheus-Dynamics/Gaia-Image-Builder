@@ -10,13 +10,14 @@
 //! - **Component** ([`Component`]): one piece of software, how it is built
 //!   and what it puts in the image.
 //! - **Product** ([`Product`]): which components go on which boards, the
-//!   recipe for each image and its size budget.
+//!   OS each image is built on, the recipe for each image and its size
+//!   budget.
 //!
 //! A path in a description is relative to the file it is written in. There
 //! is no interpolation: a value is what is written.
 //!
 //! Sources are named per file and pinned by the lock; [`Loaded::wants`]
-//! gives the lock check its list, named `<board or component>.<source>`.
+//! gives the lock check its list, named `<product, board or component>.<source>`.
 
 mod board;
 mod common;
@@ -32,6 +33,6 @@ pub use board::{
 pub use common::{FileRef, ImagePlatform, Mode, RelPath, SizeText, Source};
 pub use component::{Build, Component, Group, Install, InstallFrom, Package, Service, User};
 pub use error::Error;
-pub use product::{ImageSpec, Loaded, Product};
+pub use product::{ImageSpec, Loaded, OsProvider, OsSpec, Product};
 pub use read::VERSION;
 pub use validate::{Kind, kind_of, validate};

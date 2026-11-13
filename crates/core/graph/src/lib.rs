@@ -22,6 +22,16 @@
 //!   image's one component that has one, and `disk` the board's disk
 //!   layout ([`HostInput`]). Each recipe output
 //!   goes to the host as `<image>.<output>`.
+//! - **OS:** an image with `os` gets a `gaia.os.buildroot` step,
+//!   `<image>.os`, built from the product's source with a config the board
+//!   gives by rule and the image's own fragments (see `os`). It is fed on
+//!   `<image>.os` and the shared `buildroot-host`; the trees the
+//!   config names are its fan-in inputs. The recipe input `build` is then
+//!   `<image>.rootfs`: the OS's tree, then each component's layer (its
+//!   install entries placed, `gaia.tree.place`, or its whole build output),
+//!   merged by `gaia.tree.merge`. The OS's boot files (Buildroot's
+//!   `images/`) are four recipe inputs, by what each file is: `kernel`,
+//!   `device-trees`, `bootloader`, and `os` for the rest.
 //! - **Everywhere:** an input named `store` gets the store, and one named
 //!   like a [`Setup`] tool gets that tool's path. Every node has
 //!   `daedalus.node.fusion: false`, so fail-fast and cancel stop between
@@ -32,6 +42,7 @@
 //! description it came from.
 
 mod error;
+mod os;
 mod wire;
 
 pub use error::Error;
@@ -54,6 +65,8 @@ pub const STEP: &str = "gaia.step";
 pub struct Setup {
     pub store: PathBuf,
     pub tools: BTreeMap<String, String>,
+    /// make, CPUs, jobs and the download cache, for an image with an OS.
+    pub buildroot: Option<gaia_types::BuildrootHost>,
 }
 
 /// A component's `builder` name to the node that builds it.
@@ -98,6 +111,13 @@ pub enum HostInput {
     /// A disk's table and the board's own partitions, from the board's
     /// `[disk]` table and `[[partitions]]`.
     Disk(gaia_types::DiskLayout),
+    /// An image's OS config: the board's fragments by rule, then the
+    /// image's own, with the input trees they name.
+    Os(gaia_types::OsConfig),
+    /// The host side of every Buildroot run, from [`Setup`].
+    Buildroot(gaia_types::BuildrootHost),
+    /// A component's install entries from one tree.
+    Placements(gaia_types::Placements),
 }
 
 impl HostInput {
@@ -106,6 +126,9 @@ impl HostInput {
         match self {
             Self::Control(_) => "gaia:package-control",
             Self::Disk(_) => "gaia:disk-layout",
+            Self::Os(_) => "gaia:os-config",
+            Self::Buildroot(_) => "gaia:buildroot-host",
+            Self::Placements(_) => "gaia:placements",
         }
     }
 
@@ -139,6 +162,34 @@ impl HostInput {
                     line.push_str(&format!(", board partitions {}", names.join(" ")));
                 }
                 line
+            }
+            Self::Os(c) => {
+                let names: Vec<&str> = c.fragments.iter().map(|f| f.name.as_str()).collect();
+                let mut line = format!("fragments {}", names.join(" "));
+                if !c.inputs.is_empty() {
+                    line.push_str(&format!(", inputs {}", c.inputs.join(" ")));
+                }
+                let overrides: Vec<String> = c
+                    .overrides
+                    .iter()
+                    .map(|o| format!("{}={}", o.package, o.input))
+                    .collect();
+                if !overrides.is_empty() {
+                    line.push_str(&format!(", built from {}", overrides.join(" ")));
+                }
+                line
+            }
+            Self::Buildroot(h) => {
+                let mut line = format!("{} -j{}", h.make, h.jobs);
+                if !h.cpus.is_empty() {
+                    line.push_str(&format!(" on CPUs {}", h.cpus));
+                }
+                line.push_str(&format!(", downloads {}", h.download_dir));
+                line
+            }
+            Self::Placements(p) => {
+                let to: Vec<&str> = p.entries.iter().map(|p| p.to.as_str()).collect();
+                to.join(" ")
             }
         }
     }
