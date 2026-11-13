@@ -1256,6 +1256,7 @@ dependencies = [
  "daedalus-cpu-author",
  "daedalus-registry",
  "daedalus-types",
+ "gaia-sandbox",
  "gaia-step",
  "gaia-store",
  "gaia-types",
