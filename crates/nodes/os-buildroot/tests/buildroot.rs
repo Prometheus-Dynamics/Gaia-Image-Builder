@@ -60,6 +60,8 @@ struct Run {
     images: PathBuf,
     config: PathBuf,
     logs: PathBuf,
+    /// The root filesystem's entries: owners and modes from Buildroot.
+    entries: Vec<gaia_types::FileEntry>,
 }
 
 fn build(
@@ -121,6 +123,7 @@ fn build(
         made,
         outputs,
         rootfs: root(&rootfs.object),
+        entries: rootfs.entries.clone(),
         images: root(&images.object),
         config: root(&config.object),
         logs,
@@ -208,6 +211,36 @@ fn a_minimal_aarch64_buildroot_build_and_its_rebuilds() {
         println!("  {name}: {bytes} bytes");
     }
     assert!(first.made, "a first build makes its outputs");
+    // The owners and modes Buildroot gives an image, not the build user's.
+    let mode = |path: &str| {
+        first
+            .entries
+            .iter()
+            .find(|e| e.path == path)
+            .map(|e| (e.mode, e.uid, e.gid))
+    };
+    println!("rootfs entries: {}", first.entries.len());
+    for path in ["bin/busybox", "etc/shadow", "root", "tmp"] {
+        println!(
+            "  {path}: {:?}",
+            mode(path).map(|(m, u, g)| (format!("{m:o}"), u, g))
+        );
+    }
+    assert_eq!(
+        mode("bin/busybox"),
+        Some((0o4755, 0, 0)),
+        "busybox is setuid"
+    );
+    assert_eq!(
+        mode("etc/shadow"),
+        Some((0o600, 0, 0)),
+        "shadow is root's alone"
+    );
+    assert_eq!(mode("root"), Some((0o700, 0, 0)), "/root is root's alone");
+    assert!(
+        !first.images.join("rootfs.tar").exists(),
+        "the tar the entries are read from is not an output"
+    );
     assert!(
         first.rootfs.join("bin/busybox").is_file(),
         "busybox is in the root filesystem"
