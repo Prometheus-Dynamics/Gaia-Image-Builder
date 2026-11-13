@@ -60,6 +60,19 @@ pub(crate) enum InputFrom {
     },
     /// A directory beside a description.
     Dir(PathBuf),
+    /// One file of a component's source, as a tree with that file alone:
+    /// the step that reads it does not depend on the rest of the source.
+    Picked {
+        /// The component's file, where the source is written.
+        file: PathBuf,
+        /// The source's name in that file.
+        name: String,
+        source: Source,
+        /// The source's name in the lock.
+        lock_name: String,
+        /// The file in the source.
+        path: String,
+    },
 }
 
 /// The config and its input trees, in port order.
@@ -70,6 +83,13 @@ pub(crate) struct OsPlan {
 }
 
 impl OsPlan {
+    /// Adds a contract the kernel's final config must meet: `from` is the
+    /// tree that holds its file, under the input name of the contract.
+    pub(crate) fn require(&mut self, contract: gaia_types::KernelContract, from: InputFrom) {
+        self.input(contract.input.clone(), from);
+        self.config.kernel_contracts.push(contract);
+    }
+
     fn input(&mut self, name: String, from: InputFrom) -> String {
         if !self.inputs.iter().any(|(n, _)| *n == name) {
             self.inputs.push((name.clone(), from));
@@ -607,6 +627,7 @@ pub(crate) fn split(plan: &OsPlan, board: &Board) -> Parts {
                 inputs: inputs.iter().map(|(name, _)| name.clone()).collect(),
                 overrides,
                 externals: Vec::new(),
+                kernel_contracts: Vec::new(),
             },
             inputs,
         }

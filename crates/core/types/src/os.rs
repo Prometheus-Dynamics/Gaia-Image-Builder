@@ -45,6 +45,28 @@ pub struct SourceOverride {
     pub input: String,
 }
 
+/// A contract the kernel's final configuration must meet: a file in one of
+/// the input trees that lists the options a boot path needs built in, read
+/// for one kind of image, with the board's own storage drivers beside it.
+/// The step checks it once the kernel is configured, before it compiles.
+#[derive(Clone, Debug, PartialEq, Eq, Type, Serialize, Deserialize)]
+#[type_key("gaia:kernel-contract")]
+pub struct KernelContract {
+    /// The input tree that holds the file, by name.
+    pub input: String,
+    /// The file in that tree.
+    pub path: String,
+    /// Who asks, for the failure: the component that states the contract.
+    pub asked_by: String,
+    /// The board the kernel is for, for the failure.
+    pub board: String,
+    /// The image kind the contract is read for (`disk` or `mtd`).
+    pub kind: String,
+    /// The board's storage drivers, as `.config` writes them
+    /// (`CONFIG_...`): each must be built in.
+    pub storage_drivers: Vec<String>,
+}
+
 /// What an OS build is made from besides its provider's source: fragments,
 /// the names of its input trees in port order, source overrides and
 /// external trees.
@@ -58,11 +80,14 @@ pub struct OsConfig {
     pub overrides: Vec<SourceOverride>,
     /// Input trees given to Buildroot as `BR2_EXTERNAL`, by name.
     pub externals: Vec<String>,
+    /// Contracts the kernel's final configuration must meet.
+    #[serde(default)]
+    pub kernel_contracts: Vec<KernelContract>,
 }
 
 impl OsConfig {
-    /// An error for an input named twice, or an override or external that
-    /// names no input.
+    /// An error for an input named twice, or an override, an external or a
+    /// kernel contract that names no input.
     pub fn check(&self) -> Result<(), String> {
         for (i, name) in self.inputs.iter().enumerate() {
             if self.inputs[..i].contains(name) {
@@ -97,6 +122,12 @@ impl OsConfig {
         for e in &self.externals {
             named(e, "an external tree")?;
         }
+        for contract in &self.kernel_contracts {
+            named(
+                &contract.input,
+                &format!("the kernel contract of {}", contract.asked_by),
+            )?;
+        }
         Ok(())
     }
 }
@@ -114,6 +145,7 @@ mod tests {
                 input: "linux".into(),
             }],
             externals: vec!["files".into()],
+            kernel_contracts: Vec::new(),
         }
     }
 

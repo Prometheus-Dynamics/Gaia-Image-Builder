@@ -54,6 +54,12 @@ pub struct Kernel {
     pub device_tree_dir: Option<RelPath>,
     /// Device tree overlays built and installed.
     pub overlays: Option<Vec<String>>,
+    /// The drivers of the storage the board boots from, each as the
+    /// kernel's `.config` writes it (`CONFIG_MMC_SDHCI_OF_DWCMSHC`). Where
+    /// an image's boot path needs its storage built in (a root opened by an
+    /// initramfs that loads no modules), every one must be `=y`. A board's
+    /// list replaces its family's.
+    pub storage_drivers: Option<Vec<String>>,
 }
 
 /// The bootloader: its source, configuration and the files it is built
@@ -459,6 +465,7 @@ fn merge(board: BoardFile, family: BoardFile) -> BoardFile {
                 device_tree: b.device_tree.or(f.device_tree),
                 device_tree_dir: b.device_tree_dir.or(f.device_tree_dir),
                 overlays: b.overlays.or(f.overlays),
+                storage_drivers: b.storage_drivers.or(f.storage_drivers),
             }),
             (b, f) => b.or(f),
         },

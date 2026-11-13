@@ -959,6 +959,7 @@ dependencies = [
  "serde_json",
  "tar",
  "tempfile",
+ "toml",
 ]
 
 [[package]]

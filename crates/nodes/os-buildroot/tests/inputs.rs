@@ -116,6 +116,7 @@ fn config(text: &str) -> OsConfig {
             input: "board.linux".into(),
         }],
         externals: Vec::new(),
+        kernel_contracts: Vec::new(),
     }
 }
 
@@ -236,6 +237,63 @@ fn a_kernel_fragment_line_the_kernel_did_not_take_fails_before_the_build() {
     );
     assert!(
         why.contains("linux.fragment: `CONFIG_NO_SUCH_DRIVER=y` was dropped"),
+        "{why}"
+    );
+}
+
+/// A kernel contract: a file in an input tree lists what must be built in,
+/// and the kernel's final config is held to it before the kernel compiles.
+#[test]
+fn a_kernel_that_does_not_meet_its_contract_fails_before_the_build() {
+    use gaia_types::KernelContract;
+    let f = fixture();
+    let linux = f.tree("linux", &[("Makefile", "# a kernel\n")]);
+    let files = f.tree("files", &[("linux.fragment", "CONFIG_X=y\n")]);
+    // The stand-in kernel's config has X and Y on and Z off.
+    let contract = |always: &str, storage: &str| {
+        let text = format!(
+            "version = 1\n[always]\nall = [{always}]\n[kind.disk]\nall = []\none_of = [[\"Z\", \"Y\"]]\n[optional]\nall = []\n[initramfs]\nnone = \"\"\n[boot_check]\nchecked = []\n"
+        );
+        let tree = f.tree(
+            &format!("contract-{}", always.len()),
+            &[("slot-kernel.toml", &text)],
+        );
+        let mut config = config(TEXT);
+        config.inputs.push("contract.init".into());
+        config.kernel_contracts.push(KernelContract {
+            input: "contract.init".into(),
+            path: "slot-kernel.toml".into(),
+            asked_by: "init".into(),
+            board: "demo".into(),
+            kind: "disk".into(),
+            storage_drivers: vec![storage.into()],
+        });
+        (config, tree)
+    };
+
+    // Met: X always, one of Z or Y, the storage driver Y.
+    let (config, tree) = contract("\"X\"", "CONFIG_Y");
+    let (_, made) = f
+        .run(&config, &[linux.clone(), files.clone(), tree])
+        .expect("the contract is met");
+    assert!(made);
+
+    // Not met: Z is off, and so is the board's storage driver.
+    let (config, tree) = contract("\"X\", \"Z\"", "CONFIG_Z");
+    let why = f
+        .run(&config, &[linux, files, tree])
+        .expect_err("the contract is not met");
+    println!("{why}");
+    assert!(
+        why.contains("the kernel for the board demo does not meet the contract of init"),
+        "{why}"
+    );
+    assert!(
+        why.contains("CONFIG_Z is not set, and must be =y (slot-kernel.toml: always.all)"),
+        "{why}"
+    );
+    assert!(
+        why.contains("CONFIG_Z is not set, and must be =y (the board demo's storage_drivers)"),
         "{why}"
     );
 }

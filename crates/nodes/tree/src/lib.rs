@@ -28,6 +28,7 @@ mod accounts;
 mod file;
 mod layer;
 mod merge;
+mod pick;
 mod place;
 mod services;
 mod under;
@@ -37,6 +38,7 @@ pub use accounts::tree_accounts;
 pub use file::tree_file;
 pub use layer::tree_layer;
 pub use merge::{merge_layers, tree_merge};
+pub use pick::tree_pick;
 pub use place::tree_place;
 pub use services::tree_services;
 pub use under::tree_under;
@@ -46,7 +48,8 @@ use gaia_store::Digest;
 use gaia_types::Tree;
 
 /// The nodes, for a registry.
-pub const NODES: [&NodeRecord; 7] = [
+pub const NODES: [&NodeRecord; 8] = [
+    &pick::TREE_PICK_NODE,
     &under::TREE_UNDER_NODE,
     &place::TREE_PLACE_NODE,
     &file::TREE_FILE_NODE,

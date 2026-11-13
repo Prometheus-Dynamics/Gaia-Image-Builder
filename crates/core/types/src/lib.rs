@@ -26,6 +26,7 @@
 //! | `gaia:os-config` | [`OsConfig`]: an OS build's fragments, input trees and overrides |
 //! | `gaia:buildroot-fragment` | [`ConfigFragment`]: a block of Buildroot config |
 //! | `gaia:buildroot-host` | [`BuildrootHost`]: make, CPUs, jobs and the download cache |
+//! | `gaia:kernel-contract` | [`KernelContract`]: what a kernel must have built in, by a file in an input tree |
 //! | `gaia:source-override` | [`SourceOverride`]: a package built from an input tree |
 //!
 //! Kinds are open ([`ArtifactKind`], [`ImageKind`], [`PartitionRole`],
@@ -52,7 +53,7 @@ pub use disk::{DiskLayout, DiskPartition, DiskTable, RawBlob, TableScheme};
 pub use image::{Image, ImageKind, Partition, PartitionRole, Size};
 pub use layer::{Account, AccountGroup, Layer, Owned, Placement, Placements, owned_digest};
 pub use object::{Artifact, ArtifactKind, FileEntry, ObjectKind, StoreRef, Tree};
-pub use os::{BuildrootHost, ConfigFragment, OsConfig, SourceOverride};
+pub use os::{BuildrootHost, ConfigFragment, KernelContract, OsConfig, SourceOverride};
 pub use package::Control;
 pub use target::{Arch, Os, Target};
 
@@ -64,7 +65,7 @@ pub const NODES: [&daedalus::prelude::NodeRecord; 3] = [
 ];
 
 /// Every type's key, port types first, then the kinds and enums inside them.
-pub const KEYS: [&str; 29] = [
+pub const KEYS: [&str; 30] = [
     "gaia:object",
     "gaia:artifact",
     "gaia:tree",
@@ -87,6 +88,7 @@ pub const KEYS: [&str; 29] = [
     "gaia:buildroot-fragment",
     "gaia:buildroot-host",
     "gaia:source-override",
+    "gaia:kernel-contract",
     "gaia:object-kind",
     "gaia:artifact-kind",
     "gaia:image-kind",
