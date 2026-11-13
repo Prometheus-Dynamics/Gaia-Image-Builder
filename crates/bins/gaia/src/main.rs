@@ -56,6 +56,13 @@ fn main() -> ExitCode {
             println!("gaia {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
+        args::Command::Validate(options) => {
+            for file in &options.files {
+                let kind = gaia_describe::validate(file, options.kind).map_err(Stop::usage)?;
+                println!("ok  {}  {}", kind.as_str(), file.display());
+            }
+            Ok(())
+        }
         args::Command::Plan(options) => project::Project::open(&options)?.print_plan(options.json),
         args::Command::Build(options) => build::build(&options),
         args::Command::Clean(options) => clean::clean(&options),
