@@ -123,8 +123,16 @@ fn a_forced_failure_stops_the_build_and_the_other_chain() {
         })
         .collect();
     println!("fault record: {faults:?}");
-    assert_eq!(faults.len(), 1);
-    assert_eq!(faults[0].1, "gaia.proof.git: exited 128");
+    // Fail-fast now also cancels the good chain's clone, which was still running.
+    assert_eq!(faults.len(), 2, "{faults:?}");
+    assert!(faults.contains(&(
+        Some("broken.git".to_string()),
+        "gaia.proof.git: exited 128".to_string()
+    )));
+    assert!(faults.contains(&(
+        Some("good.git".to_string()),
+        "gaia.proof.git: cancelled".to_string()
+    )));
     assert!(take_tar(&mut loaded, "good").is_none());
     assert!(take_tar(&mut loaded, "broken").is_none());
 
@@ -290,10 +298,9 @@ fn slow_and_failing(store: &Path) -> daedalus::prelude::LoadedHost {
     LoadedHost::load(planned, LoadOptions::default()).expect("loads")
 }
 
-/// Fail-fast does not tell steps already running on other lanes to stop:
-/// the cancel word stays clear, so the step kit lets the long tool finish.
-/// The kit does watch the word at that point: set from outside once the
-/// failure is seen, the long tool stops within the kit's poll.
+/// Fail-fast tells steps already running on other lanes to stop: the run
+/// sets the cancel word once a step faults, and the step kit stops the long
+/// tool within its poll. The cancel word can also be set from outside.
 #[test]
 fn fail_fast_lets_a_running_step_finish_but_the_cancel_word_stops_it() {
     use std::time::{Duration, Instant};
@@ -318,9 +325,9 @@ fn fail_fast_lets_a_running_step_finish_but_the_cancel_word_stops_it() {
     println!("fail-fast: {stopped:?} after {took:?}\n{shown}");
     assert!(matches!(stopped, Stopped::Run(RunError::Fault { .. })));
     assert_eq!(fail.as_deref(), Some("exit 3"));
-    // The long step ran to its end: nothing told it to stop.
-    assert_eq!(slow.as_deref(), Some("ok"), "{shown}");
-    assert!(took >= Duration::from_secs(3));
+    // The long step was cancelled by the fail-fast stop, well before its 3 s sleep ended.
+    assert_eq!(slow.as_deref(), Some("cancelled"), "{shown}");
+    assert!(took < Duration::from_secs(3), "{shown}");
 
     // The same, with the cancel word set once the failing run has ended.
     let root = tempfile::tempdir().expect("tempdir");

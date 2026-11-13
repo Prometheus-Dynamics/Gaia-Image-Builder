@@ -82,6 +82,7 @@ fn a_recipe_with_two_nodes_expands_into_the_expected_group() {
         inputs: Default::default(),
         outputs: [("named".into(), port("name", "text"))].into(),
         consts: Vec::new(),
+        metadata: Default::default(),
     };
     expected.consts = vec![
         daedalus::layers::graph::StageConstDoc {
