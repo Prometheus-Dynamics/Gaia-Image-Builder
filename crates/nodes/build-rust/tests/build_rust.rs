@@ -168,6 +168,8 @@ fn build(root: &Path, triple: &str, cpu: &str, features: &[&str]) -> Option<Buil
         None,
         triple,
         Some(&cpu.to_string()),
+        None,
+        None,
         &Ctx::new(),
     )
     .expect("builds");
@@ -297,7 +299,7 @@ fn repository(dir: &Path) {
     );
     write(
         &dir.join("src/main.rs"),
-        "#[cfg(not(from_the_sources_config))]\ncompile_error!(\"the source's own rustflags were dropped\");\n\nfn main() {\n    cfg_if::cfg_if! {\n        if #[cfg(unix)] { println!(\"unix\"); } else { println!(\"other\"); }\n    }\n}\n",
+        "#[cfg(not(from_the_sources_config))]\ncompile_error!(\"the source's own rustflags were dropped\");\n\nconst CC: &str = env!(\"CC_aarch64_unknown_linux_musl\");\nconst CACHE: &str = env!(\"TOOL_CACHE_DIR\");\n\nfn main() {\n    println!(\"{CC} {CACHE}\");\n    cfg_if::cfg_if! {\n        if #[cfg(unix)] { println!(\"unix\"); } else { println!(\"other\"); }\n    }\n}\n",
     );
     write(
         &dir.join(".cargo/config.toml"),
@@ -377,6 +379,8 @@ fn a_repository_is_vendored_from_its_lock_and_built_with_its_profile_and_flags()
         Some(&"service".to_string()),
         TRIPLE,
         None,
+        Some(&"/src/tools/cc".to_string()),
+        Some(&"TOOL_CACHE_DIR=/build/tool-cache\n".to_string()),
         &Ctx::new(),
     )
     .expect("builds with the service profile and the config's flag");
@@ -386,6 +390,54 @@ fn a_repository_is_vendored_from_its_lock_and_built_with_its_profile_and_flags()
         .len();
     println!("bin/svc: {size} bytes ({} artifacts)", artifacts.len());
     assert!(size > 0);
+    // The compiler for the target, by the triple, and the component's own
+    // variable: both reached the compiler (the program was built with them).
+    let bytes = std::fs::read(out.join("bin/svc")).expect("read");
+    for text in [
+        "/src/tools/cc/aarch64-unknown-linux-musl",
+        "/build/tool-cache",
+    ] {
+        assert!(
+            bytes.windows(text.len()).any(|w| w == text.as_bytes()),
+            "{text} is not in the binary"
+        );
+    }
+}
+
+#[test]
+fn a_bad_env_line_or_a_reserved_name_is_refused() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("src");
+    write(&src.join("Cargo.toml"), "[package]\nname = \"svc\"\n");
+    write(&src.join("Cargo.lock"), "version = 4\n");
+    let store = dir.path().join("store");
+    let tree = stored_tree(&store, &src);
+    let run = |env: &str| {
+        build_rust(
+            &store.display().to_string(),
+            BWRAP,
+            tree.clone(),
+            &toolchain().display().to_string(),
+            tree.clone(),
+            tree.clone(),
+            "svc",
+            None,
+            None,
+            TRIPLE,
+            None,
+            None,
+            Some(&env.to_string()),
+            &Ctx::new(),
+        )
+        .expect_err("refused")
+        .to_string()
+    };
+    if !sandbox_here() {
+        return;
+    }
+    assert!(run("just words").contains("is not NAME=value"));
+    assert!(run("PATH=/bin").contains("is not one a component sets"));
+    assert!(run("CARGO_ENCODED_RUSTFLAGS=x").contains("is not one a component sets"));
 }
 
 #[test]

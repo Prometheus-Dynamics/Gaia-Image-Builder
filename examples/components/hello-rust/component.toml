@@ -1,0 +1,30 @@
+# A small Rust program built for the image's board: the form a Rust
+# component takes.
+#
+# - `src` is the crate, with its Cargo.lock committed. A git source works
+#   the same way (`git = "...", ref = "..."`).
+# - `root` is the image the build runs in, sandboxed and offline. It is for
+#   the build host, not the board, and is pinned by the lock.
+# - Nothing names a target: the triple and CPU are the board's (static musl).
+# - Nothing names the crates: they are fetched from what Cargo.lock records.
+version = 1
+name = "hello-rust"
+
+[sources.src]
+path = "src"
+
+[sources.root]
+image = "docker.io/library/debian:trixie-slim"
+platform = "host"
+
+[build]
+builder = "rust"
+source = "src"
+
+[build.settings]
+package = "hello-rust"
+
+[[install]]
+from = "bin/hello-rust"
+to = "/usr/bin/hello-rust"
+mode = "0755"

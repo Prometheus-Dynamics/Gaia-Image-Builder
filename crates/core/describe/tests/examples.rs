@@ -68,7 +68,7 @@ fn the_zero_3e_board_reads_with_its_family() {
         bootloader.blobs["ROCKCHIP_TPL"],
         FileRef::InSource {
             source: "rkbin".into(),
-            path: "bin/rk35/rk3566_ddr_1056MHz_v1.26.bin".into()
+            path: "bin/rk35/rk3566_ddr_1056MHz_v1.23.bin".into()
         }
     );
     // A family's fragment, resolved against the family file.

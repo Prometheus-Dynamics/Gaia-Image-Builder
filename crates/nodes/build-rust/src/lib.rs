@@ -57,12 +57,19 @@ const PATH_IN_SANDBOX: &str = "/toolchain/bin:/usr/bin:/bin";
 /// (a sysroot directory on this host, bound read-only) and the crates in
 /// `vendor`. `bwrap` is the bubblewrap program that runs every tool.
 ///
+/// `cc` and `env` are for a crate that compiles C: the image `root` carries
+/// the C compiler, `cc` names a directory of per-target compiler programs
+/// (in the source, at `/src/...`, or in the image), and `env` sets what that
+/// compiler needs (a cache directory under `/build`, say). Both are in the
+/// key through the sandbox's environment.
+///
 /// `features` goes back to a list (`Vec<String>`) when Daedalus decodes list
 /// constants (outside block X7, `docs/design.md`).
 #[node(
     id = "gaia.build.rust",
     inputs(
-        store, bwrap, root, toolchain, source, vendor, package, features, profile, triple, cpu
+        store, bwrap, root, toolchain, source, vendor, package, features, profile, triple, cpu, cc,
+        env
     ),
     outputs(tree, artifacts)
 )]
@@ -79,6 +86,8 @@ pub fn build_rust(
     profile: Option<&String>,
     triple: &str,
     cpu: Option<&String>,
+    cc: Option<&String>,
+    env: Option<&String>,
     cx: &Ctx,
 ) -> Result<(Tree, Vec<Artifact>), StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
@@ -90,6 +99,30 @@ pub fn build_rust(
             .ok_or_else(|| fail(format!("the {what} is not in the store")))?;
         Ok::<_, StepError>((object.digest, store.path(&object)))
     };
+    // The component's own variables, one `NAME=value` a line. Checked first:
+    // a bad line is the description's error, not a build's.
+    let mut component_env: Vec<(String, String)> = Vec::new();
+    for line in env.map(String::as_str).unwrap_or_default().lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Some((name, value)) = line.split_once('=') else {
+            return Err(fail(format!("env line `{line}` is not NAME=value")));
+        };
+        let reserved = ["PATH", "CARGO_HOME", "SOURCE_DATE_EPOCH", "RUSTFLAGS"];
+        let valid = !name.is_empty()
+            && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            && !reserved.contains(&name)
+            && !name.starts_with("CARGO_ENCODED_");
+        if !valid {
+            return Err(fail(format!(
+                "env name `{name}` is not one a component sets: letters, digits and _, and not {}",
+                reserved.join(", ")
+            )));
+        }
+        component_env.push((name.to_string(), value.to_string()));
+    }
     let (root_digest, root_dir) = dir_of(&root, "image")?;
     let (source_digest, source_dir) = dir_of(&source, "source")?;
     let (vendor_digest, vendor_dir) = dir_of(&vendor, "vendored crates tree")?;
@@ -184,6 +217,29 @@ pub fn build_rust(
         .cwd(SOURCE);
     if lld {
         sandbox = sandbox.env(target_var("LINKER"), "rust-lld");
+    }
+    // A crate that compiles C (through the `cc` crate) finds its compiler by
+    // target: `cc` is a directory in the sandbox holding one program per
+    // target, named for the triple (and `<triple>-ar`, when there is one).
+    if let Some(dir) = cc.map(String::as_str).filter(|dir| !dir.is_empty()) {
+        if !dir.starts_with('/') {
+            return Err(fail(format!(
+                "cc `{dir}` is not a path inside the sandbox: the source is at {SOURCE}"
+            )));
+        }
+        let name = triple.replace(['-', '.'], "_");
+        let dir = dir.trim_end_matches('/');
+        sandbox = sandbox.env(format!("CC_{name}"), format!("{dir}/{triple}"));
+        let ar = Path::new(dir)
+            .strip_prefix(SOURCE)
+            .ok()
+            .map(|inside| source_dir.join(inside).join(format!("{triple}-ar")));
+        if ar.is_some_and(|ar| ar.is_file()) {
+            sandbox = sandbox.env(format!("AR_{name}"), format!("{dir}/{triple}-ar"));
+        }
+    }
+    for (name, value) in &component_env {
+        sandbox = sandbox.env(name, value);
     }
     let key = sandbox
         .key(

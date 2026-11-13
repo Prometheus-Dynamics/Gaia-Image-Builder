@@ -20,9 +20,12 @@ ref = "v2026.10"
 git = "https://github.com/ARM-software/arm-trusted-firmware.git"
 ref = "v2.15.0"
 
+# Pinned to the commit Buildroot 2026.02.3 uses: its DDR init (v1.23) is the
+# one these boards have booted with. rkbin's master carries v1.26, and an
+# image built with it did not start on the ZERO 3E.
 [sources.rkbin]
 git = "https://github.com/rockchip-linux/rkbin.git"
-ref = "master"
+ref = "f43a462e7a1429a9d407ae52b4745033034a6cf9"
 
 [kernel]
 source = "linux"

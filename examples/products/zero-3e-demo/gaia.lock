@@ -1,6 +1,16 @@
 # Written by `gaia lock`. Do not edit.
 version = 1
 
+[source."hello-rust.root"]
+kind = "image"
+reference = "docker.io/library/debian:trixie-slim"
+digest = "sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2"
+
+[source."hello-rust.src"]
+kind = "tree"
+path = "../../components/hello-rust/src"
+digest = "sha256:8dcb2ac4d660c3b71e352efa57b6c4cd6bd71642dee569c5689929acc220bb8a"
+
 [source."zero-3e-demo.buildroot"]
 kind = "git"
 url = "https://gitlab.com/buildroot.org/buildroot.git"
@@ -16,8 +26,8 @@ commit = "d50d994bffa3c7c6db2d8bc4c5f0c55e3f46b0cd"
 [source."zero-3e.rkbin"]
 kind = "git"
 url = "https://github.com/rockchip-linux/rkbin.git"
-ref = "master"
-commit = "3e288fe814e059dd06833495f845cab04ac20a5c"
+ref = "f43a462e7a1429a9d407ae52b4745033034a6cf9"
+commit = "f43a462e7a1429a9d407ae52b4745033034a6cf9"
 
 [source."zero-3e.tf-a"]
 kind = "git"
