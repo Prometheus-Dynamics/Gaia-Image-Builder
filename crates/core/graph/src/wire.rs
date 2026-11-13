@@ -461,7 +461,7 @@ fn source_node(
     };
     let s = |v: &str| Lit::Str(v.to_string());
     let node = match source {
-        Source::Git { .. } => {
+        Source::Git { subdir, .. } => {
             let Entry::Git { url, commit, .. } = pinned()? else {
                 return Err(Error::at(
                     file,
@@ -472,6 +472,9 @@ fn source_node(
             let node = g.add("gaia.source.git", label, file, &key)?;
             g.set(node, "url", s(url));
             g.set(node, "commit", s(commit));
+            if let Some(subdir) = subdir {
+                g.set(node, "subdir", s(subdir.as_str()));
+            }
             node
         }
         Source::Download { .. } => {

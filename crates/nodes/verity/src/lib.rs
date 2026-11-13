@@ -1,20 +1,29 @@
-//! `gaia.verity`: a filesystem image with a dm-verity hash tree appended.
+//! `gaia.verity`: a filesystem image with a dm-verity hash tree appended,
+//! with no superblock.
 //!
-//! The image is copied, zero-padded to whole 4 KiB data blocks, and
-//! `veritysetup format` writes the tree after it: the superblock at the
-//! first hash-block boundary past the data, the tree in the blocks after
-//! that. The salt is the image's digest in hex and the UUID is derived from
-//! the same digest, so the same image gives the same root hash on every
-//! host. The hash type, algorithm and block sizes are fixed (kernel format,
-//! sha256, 4 KiB).
+//! The image is copied and zero-padded to whole 4 KiB data blocks.
+//! `veritysetup format --no-superblock` writes the hash tree to a separate
+//! file, and that file's bytes are appended to the data. The output is the
+//! data followed by the tree, nothing else. `hash_offset` is the data's
+//! length (`data_blocks * 4096`), and the tree's length is the size of the
+//! file veritysetup wrote, so a one-block image has no tree at all. The
+//! dm table's hash start is the tree's first block, `hash_offset / 4096`.
+//!
+//! The salt is the image's digest in hex, so the same image gives the same
+//! root hash on every host. The UUID is derived from the same digest and
+//! passed to veritysetup. The format is kernel type 1 with sha256 and 4 KiB
+//! data and hash blocks.
 //!
 //! Two outputs. `image` is the padded data with the tree appended, the same
 //! file the device holds. `table` is a text artifact with the root hash,
-//! salt, UUID, offsets and the dm-verity table line for `device`, which is
-//! the device the image is written to (the tree is on that same device).
+//! salt, UUID, data blocks, offsets and tree length, and the dm-verity table
+//! line for `device`, which is the device the image is written to (the tree
+//! is on that same device).
 //!
 //! `veritysetup` is pinned by path; its version is in the key, with the
-//! image's digest, so a changed image or tool remakes the tree.
+//! image's digest, so a changed image or tool remakes the tree. The key
+//! version moved to 2 when the layout changed, so outputs of the old
+//! superblock form are not reused.
 
 use daedalus::prelude::*;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store, Tool};
@@ -29,12 +38,12 @@ pub const BLOCK: u64 = 4096;
 const HASH_TYPE_KERNEL: u32 = 1;
 /// The table line's version field.
 const TABLE_VERSION: u32 = 1;
-/// The superblock and the tree's first block.
-const SUPERBLOCK_BLOCKS: u64 = 1;
 /// The table file's name in the output directory.
 const TABLE_FILE: &str = "verity.txt";
 /// The image file's name in the output directory.
 const IMAGE_FILE: &str = "image.img";
+/// The separate file veritysetup writes the tree to, before it is appended.
+const TREE_FILE: &str = "tree.bin";
 
 /// The image with a hash tree appended, and the artifact that says how to open it.
 #[node(
@@ -73,7 +82,7 @@ pub fn verity(
         .output()
         .map_err(|e| fail(format!("{veritysetup} --version: {e}")))?;
     let version = [version.stdout, version.stderr].concat();
-    let key = KeyBuilder::new(NAME, 1)
+    let key = KeyBuilder::new(NAME, 2)
         .config("veritysetup", &version)
         .config("device", device)
         .config("block", BLOCK.to_string())
@@ -93,20 +102,15 @@ pub fn verity(
                 .open(&data)
                 .and_then(|file| file.set_len(padded))
                 .map_err(|e| fail(format!("pad to {padded} bytes: {e}")))?;
-            let hash_offset = appended_hash_offset(padded, BLOCK);
+            let data_blocks = padded / BLOCK;
+            let hash_offset = data_blocks * BLOCK;
             let salt = object.digest.hex();
             let uuid = uuid_of(&object.digest);
+            let tree = work.dir().join(TREE_FILE);
             let out = work.run(
                 &Tool::new(veritysetup)
-                    .arg("format")
-                    .arg(&data)
-                    .arg(&data)
-                    .arg("--hash=sha256")
-                    .arg(format!("--data-block-size={BLOCK}"))
-                    .arg(format!("--hash-block-size={BLOCK}"))
-                    .arg(format!("--salt={salt}"))
-                    .arg(format!("--uuid={uuid}"))
-                    .arg(format!("--hash-offset={hash_offset}")),
+                    .args(format_args(&data, &tree, data_blocks, &salt))
+                    .arg(format!("--uuid={uuid}")),
             )?;
             let report = out.stdout_tail.join("\n");
             let root_hash = report_value(&report, "Root hash").map_err(fail)?;
@@ -119,18 +123,33 @@ pub fn verity(
                 .map_err(fail)?
                 .parse::<u64>()
                 .map_err(|e| fail(format!("data blocks: {e}")))?;
-            if blocks != padded / BLOCK {
+            if blocks != data_blocks {
                 return Err(fail(format!(
-                    "veritysetup covered {blocks} data blocks, expected {}",
-                    padded / BLOCK
+                    "veritysetup covered {blocks} data blocks, expected {data_blocks}"
+                )));
+            }
+            let tree_bytes = tree_len(&tree).map_err(fail)?;
+            if tree_bytes > 0 {
+                append_tree(&tree, &data).map_err(fail)?;
+            }
+            remove_tree(&tree).map_err(fail)?;
+            let image_bytes = hash_offset + tree_bytes;
+            let written = std::fs::metadata(&data)
+                .map_err(|e| fail(e.to_string()))?
+                .len();
+            if written != image_bytes {
+                return Err(fail(format!(
+                    "the image is {written} bytes, expected {image_bytes} ({hash_offset} data and {tree_bytes} tree)"
                 )));
             }
             let table = Table {
                 root_hash,
                 salt,
                 uuid,
-                data_blocks: blocks,
+                data_blocks,
                 hash_offset,
+                tree_bytes,
+                image_bytes,
                 device: device.to_string(),
             };
             std::fs::write(work.dir().join(TABLE_FILE), table.text())
@@ -162,7 +181,12 @@ pub struct Table {
     pub salt: String,
     pub uuid: String,
     pub data_blocks: u64,
+    /// The tree's offset in the image: the data's length.
     pub hash_offset: u64,
+    /// The appended tree's length, as veritysetup wrote it.
+    pub tree_bytes: u64,
+    /// The whole image: the data and the tree.
+    pub image_bytes: u64,
     pub device: String,
 }
 
@@ -172,9 +196,10 @@ impl Table {
         self.data_blocks * BLOCK / 512
     }
 
-    /// The tree's first hash block on the device, past the superblock.
+    /// The tree's first block on the device. With no superblock the tree
+    /// starts right at `hash_offset`.
     pub fn hash_start(&self) -> u64 {
-        self.hash_offset / BLOCK + SUPERBLOCK_BLOCKS
+        self.hash_offset / BLOCK
     }
 
     /// The dm-verity table line for the device, the form `dmsetup create`
@@ -197,16 +222,36 @@ impl Table {
         format!(
             "hash_type {HASH_TYPE_KERNEL}\nalgorithm sha256\nroot_hash {}\nsalt {}\nuuid {}\n\
              data_blocks {}\ndata_block_size {BLOCK}\nhash_block_size {BLOCK}\n\
-             hash_offset {}\nhash_start_block {}\ntable {}\n",
+             hash_offset {}\ntree_bytes {}\nimage_bytes {}\nhash_start_block {}\ntable {}\n",
             self.root_hash,
             self.salt,
             self.uuid,
             self.data_blocks,
             self.hash_offset,
+            self.tree_bytes,
+            self.image_bytes,
             self.hash_start(),
             self.line(),
         )
     }
+}
+
+/// The `veritysetup format` arguments for a tree with no superblock: the
+/// tree goes to `hash`, a separate file, and the data is `data`. The node
+/// runs these through its tool, and the tests run the same arguments
+/// directly with a given salt.
+pub fn format_args(data: &Path, hash: &Path, data_blocks: u64, salt: &str) -> Vec<String> {
+    vec![
+        "format".into(),
+        "--no-superblock".into(),
+        format!("--data-blocks={data_blocks}"),
+        "--hash=sha256".into(),
+        format!("--data-block-size={BLOCK}"),
+        format!("--hash-block-size={BLOCK}"),
+        format!("--salt={salt}"),
+        data.display().to_string(),
+        hash.display().to_string(),
+    ]
 }
 
 /// The length rounded up to whole data blocks: `veritysetup` covers exactly
@@ -215,10 +260,35 @@ pub fn padded_len(len: u64, block: u64) -> u64 {
     len.div_ceil(block) * block
 }
 
-/// Where the appended tree's superblock goes: the first hash-block boundary
-/// at or after the padded data.
-pub fn appended_hash_offset(padded: u64, block: u64) -> u64 {
-    padded.div_ceil(block) * block
+/// The length of the tree veritysetup wrote. A missing file is an empty
+/// tree, which is what one data block gives.
+fn tree_len(tree: &Path) -> Result<u64, String> {
+    match std::fs::metadata(tree) {
+        Ok(meta) => Ok(meta.len()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(e) => Err(format!("tree {}: {e}", tree.display())),
+    }
+}
+
+/// Appends the tree's bytes to the end of the image.
+fn append_tree(tree: &Path, data: &Path) -> Result<(), String> {
+    let mut from = std::fs::File::open(tree).map_err(|e| format!("open tree: {e}"))?;
+    let mut image = std::fs::OpenOptions::new()
+        .append(true)
+        .open(data)
+        .map_err(|e| format!("open image: {e}"))?;
+    std::io::copy(&mut from, &mut image)
+        .map(|_| ())
+        .map_err(|e| format!("append tree: {e}"))
+}
+
+/// Removes the separate tree file; it is not an output.
+fn remove_tree(tree: &Path) -> Result<(), String> {
+    match std::fs::remove_file(tree) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("remove tree: {e}")),
+    }
 }
 
 /// The value after `label:` in `veritysetup format`'s report.
@@ -233,8 +303,12 @@ fn report_value(report: &str, label: &str) -> Result<String, String> {
         .ok_or_else(|| format!("veritysetup output has no {label:?} line"))
 }
 
+/// Exactly `len` lowercase hex digits.
 fn is_hex_of_len(value: &str, len: usize) -> bool {
-    value.len() == len && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+    value.len() == len
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 /// A version 4 UUID from the digest's first 16 bytes, the way the EROFS
@@ -266,11 +340,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn layout_pads_to_blocks_and_puts_the_superblock_after_the_data() {
+    fn layout_pads_to_whole_blocks() {
         assert_eq!(padded_len(1, BLOCK), BLOCK);
         assert_eq!(padded_len(BLOCK, BLOCK), BLOCK);
         assert_eq!(padded_len(BLOCK + 1, BLOCK), 2 * BLOCK);
-        assert_eq!(appended_hash_offset(3 * BLOCK, BLOCK), 3 * BLOCK);
     }
 
     #[test]
@@ -281,19 +354,26 @@ mod tests {
             uuid: "01234567-89ab-4cde-8f01-23456789abcd".into(),
             data_blocks: 3,
             hash_offset: 3 * BLOCK,
+            tree_bytes: BLOCK,
+            image_bytes: 4 * BLOCK,
             device: "/dev/vda3".into(),
         };
         assert_eq!(table.sectors(), 24);
-        assert_eq!(table.hash_start(), 4);
+        assert_eq!(table.hash_start(), 3);
         assert_eq!(
             table.line(),
             format!(
-                "0 24 verity 1 /dev/vda3 /dev/vda3 4096 4096 3 4 sha256 {} {}",
+                "0 24 verity 1 /dev/vda3 /dev/vda3 4096 4096 3 3 sha256 {} {}",
                 "ab".repeat(32),
                 "cd".repeat(32)
             )
         );
-        assert!(table.text().contains("hash_start_block 4\n"));
+        assert!(table.text().contains("hash_start_block 3\n"));
+        assert!(
+            table
+                .text()
+                .contains("tree_bytes 4096\nimage_bytes 16384\n")
+        );
     }
 
     #[test]
@@ -306,6 +386,13 @@ mod tests {
         );
         assert_eq!(report_value(report, "Data blocks").expect("blocks"), "2");
         assert!(report_value(report, "Salt").is_err());
+    }
+
+    #[test]
+    fn salts_are_lowercase_hex() {
+        assert!(is_hex_of_len(&"0a".repeat(32), 64));
+        assert!(!is_hex_of_len(&"0A".repeat(32), 64));
+        assert!(!is_hex_of_len(&"0a".repeat(31), 64));
     }
 
     #[test]

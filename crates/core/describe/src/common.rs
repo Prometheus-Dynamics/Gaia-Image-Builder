@@ -118,18 +118,67 @@ impl<'de> Deserialize<'de> for Mode {
     }
 }
 
+/// A directory inside a git source's checkout, written `src/little/uboot`.
+/// Only normal names: no leading `/`, no `.` or `..`, not empty. Stored as
+/// those names joined by `/`, so `a//b/` and `a/b` are one directory.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct Subdir(String);
+
+impl<'de> Deserialize<'de> for Subdir {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        Self::parse(&text).map_err(de::Error::custom)
+    }
+}
+
+impl Subdir {
+    pub fn parse(text: &str) -> Result<Self, String> {
+        if text.is_empty() {
+            return Err(
+                "an empty `subdir`; write a directory of the checkout, like `src/uboot`".into(),
+            );
+        }
+        let mut names = Vec::new();
+        for part in Path::new(text).components() {
+            match part {
+                Component::Normal(name) => names.push(name.to_string_lossy().into_owned()),
+                Component::RootDir | Component::Prefix(_) => {
+                    return Err(format!(
+                        "`{text}` is absolute; a `subdir` is a path inside the checkout"
+                    ));
+                }
+                Component::CurDir | Component::ParentDir => {
+                    return Err(format!(
+                        "`{text}` has `.` or `..`; a `subdir` is a plain path inside the checkout"
+                    ));
+                }
+            }
+        }
+        Ok(Self(names.join("/")))
+    }
+
+    /// The directory's path inside the checkout, `/`-separated.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Where a source comes from. The lock pins it: a git source to a commit, a
 /// download to its digest, an image to its manifest digest, a directory to
 /// its tree digest.
 ///
-/// Written as exactly one of `git` (with `ref`), `download`, `image` (with an
-/// optional `platform`) or `path`.
+/// Written as exactly one of `git` (with `ref`, and an optional `subdir`
+/// naming a directory of the checkout to use instead of its root),
+/// `download`, `image` (with an optional `platform`) or `path`. The lock pins
+/// the repository's commit; `subdir` is not in the lock.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "SourceText")]
 pub enum Source {
     Git {
         url: String,
         reference: String,
+        subdir: Option<Subdir>,
     },
     Download {
         url: String,
@@ -164,6 +213,7 @@ struct SourceText {
     image: Option<String>,
     platform: Option<ImagePlatform>,
     path: Option<RelPath>,
+    subdir: Option<Subdir>,
 }
 
 impl TryFrom<SourceText> for Source {
@@ -172,12 +222,14 @@ impl TryFrom<SourceText> for Source {
     fn try_from(text: SourceText) -> Result<Self, String> {
         let has_ref = text.reference.is_some();
         let has_platform = text.platform.is_some();
+        let has_subdir = text.subdir.is_some();
         let source = match (text.git, text.download, text.image, text.path) {
             (Some(url), None, None, None) => Self::Git {
                 url,
                 reference: text
                     .reference
                     .ok_or("a git source needs `ref`: the tag or branch")?,
+                subdir: text.subdir,
             },
             (None, Some(url), None, None) => Self::Download { url },
             (None, None, Some(reference), None) => Self::Image {
@@ -196,6 +248,9 @@ impl TryFrom<SourceText> for Source {
         if has_platform && !matches!(source, Self::Image { .. }) {
             return Err("only an image source has a `platform`".into());
         }
+        if has_subdir && !matches!(source, Self::Git { .. }) {
+            return Err("only a git source has a `subdir`".into());
+        }
         Ok(source)
     }
 }
@@ -204,7 +259,7 @@ impl Source {
     /// What the lock must hold for it.
     pub fn want(&self) -> Want {
         match self {
-            Self::Git { url, reference } => Want::Git {
+            Self::Git { url, reference, .. } => Want::Git {
                 url: url.clone(),
                 reference: reference.clone(),
             },
