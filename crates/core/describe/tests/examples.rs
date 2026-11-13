@@ -114,7 +114,7 @@ fn the_demo_product_loads_its_board_and_component() {
     assert_eq!(loaded.boards.len(), 1);
     let component = &loaded.components["usb-gadget-network"];
     assert_eq!(component.install.len(), 2);
-    assert_eq!(component.install[0].mode.map(|m| m.0), Some(0o644));
+    assert_eq!(component.install[0].mode.map(|m| m.0), Some(0o755));
     let wants: Vec<_> = loaded.wants().into_iter().map(|(name, _)| name).collect();
     println!("lock names: {wants:?}");
     assert_eq!(

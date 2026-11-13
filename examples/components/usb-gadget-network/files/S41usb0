@@ -1,0 +1,22 @@
+#!/bin/sh
+# usb0 at 10.55.0.1/24 on the gadget port, and a DHCP server that gives the
+# host 10.55.0.2. An init script of its own: the system's
+# /etc/network/interfaces is the OS's file, and it reads no interfaces.d.
+case "$1" in
+start)
+	ifconfig usb0 10.55.0.1 netmask 255.255.255.0 up || exit 1
+	udhcpd /etc/udhcpd.usb0.conf
+	;;
+stop)
+	killall udhcpd 2>/dev/null
+	ifconfig usb0 down
+	;;
+restart)
+	"$0" stop
+	"$0" start
+	;;
+*)
+	echo "usage: $0 {start|stop|restart}"
+	exit 1
+	;;
+esac
