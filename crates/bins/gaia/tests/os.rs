@@ -183,11 +183,7 @@ fn the_json_plan_has_the_os_config_as_a_host_input() {
         .collect();
     assert_eq!(
         names,
-        [
-            "board.target",
-            "board.kernel",
-            "image.0.os.fragment"
-        ]
+        ["board.target", "board.kernel", "image.0.os.fragment"]
     );
     assert_eq!(os["value"]["overrides"][0]["package"], "LINUX");
     let host = inputs

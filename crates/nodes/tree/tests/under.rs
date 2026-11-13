@@ -31,8 +31,8 @@ fn a_tree_goes_under_the_prefix_with_its_modes_and_links() {
             .expect("chmod");
         std::os::unix::fs::symlink("kernel/a.ko", dir.join("6.1/first")).expect("link");
     });
-    let layer = tree_under(&store, "demo.kernel", &from, "/lib/modules", &Ctx::new())
-        .expect("under");
+    let layer =
+        tree_under(&store, "demo.kernel", &from, "/lib/modules", &Ctx::new()).expect("under");
     assert_eq!(layer.owner, "demo.kernel");
     let opened = Store::open(&store).expect("store");
     let out = layer.tree.object.path_in(&opened).expect("in the store");
@@ -41,7 +41,10 @@ fn a_tree_goes_under_the_prefix_with_its_modes_and_links() {
         std::fs::read_to_string(base.join("kernel/a.ko")).expect("read"),
         "module"
     );
-    let mode = std::fs::metadata(base.join("run")).expect("stat").permissions().mode();
+    let mode = std::fs::metadata(base.join("run"))
+        .expect("stat")
+        .permissions()
+        .mode();
     assert_eq!(mode & 0o777, 0o755, "the file's own mode");
     assert_eq!(
         std::fs::read_link(base.join("first")).expect("a link stays a link"),
