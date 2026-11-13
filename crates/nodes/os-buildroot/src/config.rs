@@ -138,6 +138,70 @@ pub fn not_taken(resolved: &str, fragments: &[ConfigFragment]) -> Vec<String> {
     missing
 }
 
+/// A Kconfig line of a kernel's or a bootloader's own config: the symbol it
+/// sets or unsets, and its value (`None` for unset: `# CONFIG_X is not set`
+/// or `CONFIG_X=n`).
+fn kconfig_line(line: &str) -> Option<(&str, Option<&str>)> {
+    let line = line.trim();
+    if let Some(rest) = line.strip_prefix("# ") {
+        let name = rest.strip_suffix(" is not set")?;
+        return name.starts_with("CONFIG_").then_some((name, None));
+    }
+    let (name, value) = line.split_once('=')?;
+    if !name.starts_with("CONFIG_") || name.contains(char::is_whitespace) {
+        return None;
+    }
+    Some((name, (value != "n").then_some(value)))
+}
+
+/// The lines of the fragment files (`name`, text) that a package's final
+/// `.config` does not have as written, each as `file: line`, with what the
+/// config has.
+///
+/// A kernel's or a bootloader's config merge drops a symbol that does not
+/// exist and changes one whose dependencies are not met, and says nothing,
+/// or only warns in a log nobody reads. So a fragment that asks for a
+/// driver the tree does not have, or leaves a dependency off, builds a
+/// kernel without it. A later file's line for a symbol is the one checked.
+pub fn kconfig_not_taken(resolved: &str, fragments: &[(String, String)]) -> Vec<String> {
+    use std::collections::BTreeMap;
+    let mut wanted: BTreeMap<&str, (&str, &str, Option<&str>)> = BTreeMap::new();
+    for (file, text) in fragments {
+        for line in text.lines() {
+            if let Some((name, value)) = kconfig_line(line) {
+                wanted.insert(name, (file.as_str(), line.trim(), value));
+            }
+        }
+    }
+    let mut have: BTreeMap<&str, (&str, Option<&str>)> = BTreeMap::new();
+    for line in resolved.lines() {
+        if let Some((name, value)) = kconfig_line(line) {
+            have.insert(name, (line.trim(), value));
+        }
+    }
+    let mut missing = Vec::new();
+    for (name, (file, line, value)) in &wanted {
+        match (value, have.get(name)) {
+            // Unset is unset, however either side writes it.
+            (None, None) | (None, Some((_, None))) => {}
+            (Some(want), Some((_, Some(got)))) if want == got => {}
+            (_, Some((got, _))) => missing.push(format!("{file}: `{line}` became `{got}`")),
+            (Some(_), None) => missing.push(format!(
+                "{file}: `{line}` was dropped (no such symbol in this tree, or its dependencies are not met)"
+            )),
+        }
+    }
+    missing
+}
+
+/// The value of a string option in a resolved Buildroot config, unquoted.
+pub fn string_option<'a>(resolved: &'a str, name: &str) -> Option<&'a str> {
+    resolved.lines().find_map(|line| {
+        let value = line.trim().strip_prefix(name)?.strip_prefix('=')?;
+        value.strip_prefix('"')?.strip_suffix('"')
+    })
+}
+
 fn matches_symbol(line: &str, name: &str) -> bool {
     matches!(symbol(line), Ok(Some(found)) if found == name)
 }
@@ -219,6 +283,56 @@ mod tests {
         );
         // Every line taken: nothing to report.
         assert!(not_taken(resolved, &fragments[2..]).is_empty());
+    }
+
+    #[test]
+    fn a_kernel_fragment_line_that_did_not_take_is_reported_with_its_file() {
+        let fragments = vec![
+            (
+                "family/linux.fragment".to_string(),
+                "CONFIG_EROFS_FS=y\nCONFIG_DM_VERITY=y\nCONFIG_USB_DEVICEFS=y\n# CONFIG_DEBUG_INFO is not set\nCONFIG_WLAN=n\n".to_string(),
+            ),
+            (
+                "board/linux.fragment".to_string(),
+                "CONFIG_USB_ETH=m\nCONFIG_LOCALVERSION=\"-board\"\nCONFIG_EROFS_FS=y\n".to_string(),
+            ),
+        ];
+        let resolved = "CONFIG_EROFS_FS=y\n# CONFIG_DM_VERITY is not set\nCONFIG_USB_ETH=y\nCONFIG_LOCALVERSION=\"-board\"\n";
+        assert_eq!(
+            kconfig_not_taken(resolved, &fragments),
+            [
+                "family/linux.fragment: `CONFIG_DM_VERITY=y` became `# CONFIG_DM_VERITY is not set`",
+                "family/linux.fragment: `CONFIG_USB_DEVICEFS=y` was dropped (no such symbol in this tree, or its dependencies are not met)",
+                "board/linux.fragment: `CONFIG_USB_ETH=m` became `CONFIG_USB_ETH=y`",
+            ]
+        );
+        // Unset both ways, and `=n`, are the same thing.
+        assert!(
+            kconfig_not_taken(
+                "",
+                &[("f".into(), "# CONFIG_A is not set\nCONFIG_B=n\n".into())]
+            )
+            .is_empty()
+        );
+        assert!(
+            kconfig_not_taken(
+                "# CONFIG_A is not set\n",
+                &[("f".into(), "CONFIG_A=n\n".into())]
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_string_option_is_read_unquoted() {
+        let config = "BR2_A=y\nBR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES=\"/a/x.fragment /b/y.fragment\"\nBR2_EMPTY=\"\"\n";
+        assert_eq!(
+            string_option(config, "BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES"),
+            Some("/a/x.fragment /b/y.fragment")
+        );
+        assert_eq!(string_option(config, "BR2_EMPTY"), Some(""));
+        assert_eq!(string_option(config, "BR2_A"), None);
+        assert_eq!(string_option(config, "BR2_MISSING"), None);
     }
 
     #[test]

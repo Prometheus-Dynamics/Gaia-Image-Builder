@@ -28,6 +28,11 @@ allnoconfig:
 
 olddefconfig show-build-order:
 \t@true
+
+linux-configure:
+\tmkdir -p $(O)/build/linux-custom
+\tprintf 'CONFIG_X=y\\nCONFIG_Y=y\\n# CONFIG_Z is not set\\n' > $(O)/build/linux-custom/.config
+\ttouch $(O)/build/linux-custom/Makefile
 ";
 
 struct Fixture {
@@ -204,4 +209,32 @@ fn an_unknown_name_in_a_fragment_is_an_error() {
         .run(&config("BR2_X=\"@files.9@/f\"\n"), &[linux, files])
         .expect_err("unknown name");
     assert!(why.contains("@files.9@ names no input tree"), "{why}");
+}
+
+#[test]
+fn a_kernel_fragment_line_the_kernel_did_not_take_fails_before_the_build() {
+    let f = fixture();
+    let linux = f.tree("linux", &[("Makefile", "# a kernel\n")]);
+    // The stand-in kernel's config has X and Y on and Z off. This fragment
+    // asks for X (taken), for Z (not taken) and for a symbol it does not have.
+    let files = f.tree(
+        "files",
+        &[(
+            "linux.fragment",
+            "CONFIG_X=y\nCONFIG_Z=y\nCONFIG_NO_SUCH_DRIVER=y\n",
+        )],
+    );
+    let why = f
+        .run(&config(TEXT), &[linux, files])
+        .expect_err("two lines did not take");
+    println!("{why}");
+    assert!(why.contains("linux's config did not take 2 lines"), "{why}");
+    assert!(
+        why.contains("linux.fragment: `CONFIG_Z=y` became `# CONFIG_Z is not set`"),
+        "{why}"
+    );
+    assert!(
+        why.contains("linux.fragment: `CONFIG_NO_SUCH_DRIVER=y` was dropped"),
+        "{why}"
+    );
 }
