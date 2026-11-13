@@ -113,11 +113,19 @@ pub fn build(options: &args::Project) -> Result<(), Stop> {
                     .at
                     .map(str::to_string)
                     .unwrap_or_else(|| fault.covers.join(" + "));
+                // Daedalus keeps a fixed length of a reason and says when it
+                // cut one; the whole message is then in the step's run log.
+                let cut = fault.reason_cut;
                 let reason = fault.reason();
                 let log = gaia_progress::reason_step(reason).and_then(|step| {
                     Reader::new(logs_dir(&store), std::process::id(), start_ns).failed_log(step)
                 });
-                message.push_str(&gaia_progress::failure(&at, reason, log.as_deref()));
+                let shown = if cut {
+                    format!("{reason}\n(reason cut; the whole message is in the run log)")
+                } else {
+                    reason.to_string()
+                };
+                message.push_str(&gaia_progress::failure(&at, &shown, log.as_deref()));
             }
             if message.is_empty() {
                 message = format!("the build failed: {e:?}");

@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// What Daedalus keeps of a fault's reason.
-const REASON_BYTES: usize = 64;
+const REASON_BYTES: usize = 120;
 
 /// One run of one step: where its outputs go, how it is cancelled, and its
 /// key.

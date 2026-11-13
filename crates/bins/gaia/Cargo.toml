@@ -15,7 +15,7 @@ path = "src/main.rs"
 [dependencies]
 ctrlc = "3"
 daedalus = { workspace = true }
-daedalus-cpu = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "831aecbe91d7fa8c5d5c65101ffb7e5309154039" }
+daedalus-cpu = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "b3916178f255ab9f55d230dff1395c08b3bca2c9" }
 gaia-build-command = { path = "../../nodes/build-command" }
 gaia-build-go = { path = "../../nodes/build-go" }
 gaia-build-java = { path = "../../nodes/build-java" }
