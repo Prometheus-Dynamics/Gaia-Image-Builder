@@ -31,35 +31,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 const NAME: &str = "gaia.generate";
-/// The names an argument may hold.
-pub const TOKENS: [&str; 4] = ["@source@", "@description@", "@out@", "@slot@"];
-
-/// The `@name@` words of `text` that are none of [`TOKENS`].
-pub fn unknown_tokens(text: &str) -> Vec<String> {
-    let mut unknown = Vec::new();
-    let mut rest = text;
-    while let Some(start) = rest.find('@') {
-        let after = &rest[start + 1..];
-        let Some(end) = after.find('@') else { break };
-        let word = &after[..end];
-        let whole = format!("@{word}@");
-        let is_name = !word.is_empty()
-            && word
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-        if is_name && !TOKENS.contains(&whole.as_str()) {
-            unknown.push(whole);
-        }
-        // A word that is no name (a path with an `@` in it) is left alone,
-        // and its closing `@` may open the next.
-        rest = if is_name {
-            &after[end + 1..]
-        } else {
-            &after[end..]
-        };
-    }
-    unknown
-}
+pub use gaia_types::{GENERATE_NAMES as TOKENS, unknown_generate_names as unknown_tokens};
 
 /// Runs `program` (a path in the tree `tool`) with `args` (a JSON array of
 /// strings, since a graph sets it as one constant) and gives what it wrote

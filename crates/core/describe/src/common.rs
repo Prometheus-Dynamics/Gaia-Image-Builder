@@ -339,6 +339,10 @@ pub enum FileRef {
     Description {
         name: String,
     },
+    /// A path in what the component's `[generate]` tool wrote.
+    Generated {
+        path: String,
+    },
 }
 
 #[derive(Deserialize)]
@@ -349,12 +353,25 @@ struct FileRefText {
     file: Option<RelPath>,
     input: Option<String>,
     description: Option<String>,
+    generated: Option<String>,
 }
 
 impl TryFrom<FileRefText> for FileRef {
     type Error = String;
 
     fn try_from(text: FileRefText) -> Result<Self, String> {
+        if let Some(path) = text.generated {
+            return match (
+                text.description,
+                text.input,
+                text.source,
+                text.path,
+                text.file,
+            ) {
+                (None, None, None, None, None) => Ok(Self::Generated { path }),
+                _ => Err("a generated file is not combined with another kind of source".into()),
+            };
+        }
         if let Some(name) = text.description {
             return match (text.input, text.source, text.path, text.file) {
                 (None, None, None, None) => Ok(Self::Description { name }),
@@ -372,7 +389,9 @@ impl TryFrom<FileRefText> for FileRef {
             (None, Some(source), Some(path), None) => Ok(Self::InSource { source, path }),
             (None, None, None, Some(file)) => Ok(Self::Local { file }),
             (None, Some(_), None, None) => Err("`source` needs a `path` inside it".into()),
-            _ => Err("either `source` and `path`, `file`, `input` or `description`".into()),
+            _ => Err(
+                "either `source` and `path`, `file`, `input`, `description` or `generated`".into(),
+            ),
         }
     }
 }
@@ -387,7 +406,10 @@ impl FileRef {
     pub fn source(&self) -> Option<&str> {
         match self {
             Self::InSource { source, .. } => Some(source),
-            Self::Local { .. } | Self::Input { .. } | Self::Description { .. } => None,
+            Self::Local { .. }
+            | Self::Input { .. }
+            | Self::Description { .. }
+            | Self::Generated { .. } => None,
         }
     }
 }

@@ -402,6 +402,11 @@ fn check_refs(
             key,
             "a board description is named by a component's install entry, not by the board",
         )),
+        FileRef::Generated { .. } => Err(Error::new(
+            path,
+            key,
+            "a generated file is named by a component's install entry, not by the board",
+        )),
         _ => match file_ref.source() {
             Some(name) => check(&format!("{key}.source"), name),
             None => Ok(()),

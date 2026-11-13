@@ -244,8 +244,10 @@ pub(crate) fn wire(
                     Some(&node) => node,
                     None => {
                         let several = boards_of.get(name.as_str()).is_some_and(|b| b.len() > 1);
-                        let node =
-                            component_build(&mut g, component, lock, builders, board, several)?;
+                        let build = component.build.as_ref().expect("a build");
+                        let node = component_build(
+                            &mut g, component, build, "build", lock, builders, board, several,
+                        )?;
                         built.insert(once, node);
                         node
                     }
@@ -270,6 +272,7 @@ pub(crate) fn wire(
                     wants_system: recipes
                         .get(&image.recipe, &product_file)
                         .is_ok_and(|recipe| recipe.inputs.contains_key("system")),
+                    builders,
                 },
                 &mut os_inputs,
                 &mut host_ports,
@@ -320,19 +323,28 @@ pub(crate) fn wire(
     ))
 }
 
-/// The component's sources its build uses, and its build node.
+/// The sources a build of the component uses, and the build's node. `build`
+/// is the component's own (`word` is `build`) or its tool's (`tool`): the
+/// word is in the steps' names and in the keys errors point at.
+#[allow(clippy::too_many_arguments)]
 fn component_build(
     g: &mut Graph<'_>,
     component: &Component,
+    build: &gaia_describe::Build,
+    word: &str,
     lock: &Lock,
     builders: &Builders,
     board: &gaia_describe::Board,
     several_boards: bool,
 ) -> Result<u32, Error> {
     let file = &component.file;
-    let build = component.build.as_ref().expect("a build");
     // A step of a component built for several boards says which it is for.
     let step = |what: &str| {
+        let what = match (word, what) {
+            ("build", what) => what.to_string(),
+            (word, "build") => word.to_string(),
+            (word, what) => format!("{word}.{what}"),
+        };
         if several_boards {
             format!("{}.{what}@{}", component.name, board.name)
         } else {
@@ -343,7 +355,7 @@ fn component_build(
         let known: Vec<&str> = builders.0.keys().map(String::as_str).collect();
         Error::at(
             file,
-            "build.builder",
+            &format!("{word}.builder"),
             format!(
                 "no builder {}; the builders are {}",
                 build.builder,
@@ -351,13 +363,13 @@ fn component_build(
             ),
         )
     })?;
-    let node = g.add(id, step("build"), file, "build.builder")?;
+    let node = g.add(id, step("build"), file, &format!("{word}.builder"))?;
     for (key, value) in &build.settings {
         if !g.has_input(node, key) {
             let ports: Vec<&str> = g.inputs(node).iter().map(|p| p.name).collect();
             return Err(Error::at(
                 file,
-                format!("build.settings.{key}"),
+                format!("{word}.settings.{key}"),
                 format!(
                     "{id} has no input `{key}`; its inputs are {}",
                     ports.join(", ")
@@ -366,7 +378,7 @@ fn component_build(
         }
         let lit = literal(value)
             .and_then(|lit| g.check(node, key, &lit).map(|()| lit))
-            .map_err(|e| Error::at(file, format!("build.settings.{key}"), e))?;
+            .map_err(|e| Error::at(file, format!("{word}.settings.{key}"), e))?;
         g.set(node, key, lit);
     }
     // The source it builds, then any input named like another source.
@@ -378,10 +390,13 @@ fn component_build(
     }
     let mut built_from = None;
     for (source_name, port) in wanted {
-        let source = component
-            .sources
-            .get(&source_name)
-            .ok_or_else(|| Error::at(file, "build.source", format!("no source {source_name}")))?;
+        let source = component.sources.get(&source_name).ok_or_else(|| {
+            Error::at(
+                file,
+                format!("{word}.source"),
+                format!("no source {source_name}"),
+            )
+        })?;
         let from = component_source(g, component, &source_name, source, lock, board)?;
         let out = g.first_output(from).unwrap_or("tree");
         g.edge((from, out), (node, &port));
@@ -422,7 +437,7 @@ fn component_build(
         && g.registry.entry(&vendor).is_some()
         && let Some((from, out)) = built_from
     {
-        let fetch = g.add(&vendor, step("vendor"), file, "build.builder")?;
+        let fetch = g.add(&vendor, step("vendor"), file, &format!("{word}.builder"))?;
         g.edge((from, out), (fetch, "source"));
         let fetched = g.first_output(fetch).unwrap_or("vendor");
         g.edge((fetch, fetched), (node, "vendor"));
@@ -962,6 +977,7 @@ struct OsIn<'a> {
     setup: &'a Setup,
     /// Whether the image's recipe takes `system`.
     wants_system: bool,
+    builders: &'a Builders,
 }
 
 /// The image's OS step, its input trees and host inputs, and the image's
@@ -1360,6 +1376,136 @@ enum PlaceFrom {
     Input(String),
     /// One of the board's descriptions, one file under its name.
     Description(String),
+    /// What the component's `[generate]` tool wrote.
+    Generated,
+}
+
+/// The step that runs a component's `[generate]` tool for the image: the
+/// tool, built for the build machine from the component's source, and the
+/// board's description it reads.
+fn generate_node(g: &mut Graph<'_>, at: &OsIn<'_>, component: &Component) -> Result<u32, Error> {
+    let file = &component.file;
+    let image = &at.image.name;
+    let generate = component.generate.as_ref().expect("a [generate]");
+    let described = at.board.descriptions.get(&generate.description).ok_or_else(|| {
+        let known: Vec<&str> = at.board.descriptions.keys().map(String::as_str).collect();
+        Error::at(
+            file,
+            "generate.description",
+            format!(
+                "{} generates from the board's description `{}`, and the board {} ({}) states none of that name under [descriptions]{}",
+                component.name,
+                generate.description,
+                at.board.name,
+                at.board.file.display(),
+                if known.is_empty() {
+                    String::new()
+                } else {
+                    format!("; it has {}", known.join(", "))
+                }
+            ),
+        )
+    })?;
+    // The tool runs on the build machine, whatever the board: a static
+    // binary for this machine's architecture, tuned for no CPU.
+    let mut settings = toml::Table::new();
+    settings.insert("package".into(), generate.tool.package.clone().into());
+    settings.insert(
+        "triple".into(),
+        format!("{}-unknown-linux-musl", std::env::consts::ARCH).into(),
+    );
+    settings.insert("cpu".into(), String::new().into());
+    let build = gaia_describe::Build {
+        builder: "rust".into(),
+        source: generate.tool.source.clone(),
+        settings,
+    };
+    let tool = component_build(
+        g,
+        component,
+        &build,
+        "tool",
+        at.lock,
+        at.builders,
+        at.board,
+        false,
+    )?;
+    let source = component
+        .sources
+        .get(&generate.tool.source)
+        .ok_or_else(|| {
+            Error::at(
+                file,
+                "generate.tool.source",
+                format!("no source named `{}`", generate.tool.source),
+            )
+        })?;
+    let source = component_source(
+        g,
+        component,
+        &generate.tool.source,
+        source,
+        at.lock,
+        at.board,
+    )?;
+    let description = g.add(
+        "gaia.source.input",
+        format!(
+            "{image}.{}.description.{}",
+            component.name, generate.description
+        ),
+        &at.board.file,
+        &format!("descriptions.{}", generate.description),
+    )?;
+    g.set(
+        description,
+        "path",
+        Lit::Str(described.path().display().to_string()),
+    );
+    g.set(description, "name", Lit::Str(generate.description.clone()));
+    // The image's slot id, for a recipe that has one.
+    let slot = at
+        .image
+        .settings
+        .get("slot")
+        .and_then(toml::Value::as_str)
+        .unwrap_or_default();
+    if slot.is_empty() && generate.args.iter().any(|arg| arg.contains("@slot@")) {
+        return Err(Error::at(
+            file,
+            "generate.args",
+            format!(
+                "an argument names @slot@, and the image {image} sets no `slot` in its settings"
+            ),
+        ));
+    }
+    let node = g.add(
+        "gaia.generate",
+        format!("{image}.{}.generate", component.name),
+        file,
+        "generate",
+    )?;
+    let json = |list: &[String]| Lit::Str(serde_json::to_string(list).unwrap_or_default());
+    g.set(
+        node,
+        "program",
+        Lit::Str(format!("bin/{}", generate.tool.package)),
+    );
+    g.set(
+        node,
+        "description_name",
+        Lit::Str(generate.description.clone()),
+    );
+    g.set(node, "args", json(&generate.args));
+    g.set(node, "outputs", json(&generate.outputs));
+    g.set(node, "slot", Lit::Str(slot.to_string()));
+    let out = g.first_output(tool).unwrap_or("tree");
+    g.edge((tool, out), (node, "tool"));
+    let out = g.first_output(source).unwrap_or("tree");
+    g.edge((source, out), (node, "source"));
+    let out = g.first_output(description).unwrap_or("tree");
+    g.edge((description, out), (node, "description"));
+    Ok(node)
 }
 
 /// A component's layers in the image: its install entries placed from
@@ -1374,6 +1520,12 @@ fn component_layers(
 ) -> Result<Vec<u32>, Error> {
     let file = &component.file;
     let image = &at.image.name;
+    // The generator runs for the image whether or not a file of its output
+    // is installed: a recipe takes from it too.
+    let generated = match &component.generate {
+        Some(_) => Some(generate_node(g, at, component)?),
+        None => None,
+    };
     if component.install.is_empty() {
         let Some(build) = build else {
             return Ok(Vec::new());
@@ -1411,6 +1563,7 @@ fn component_layers(
                 g.used_inputs.insert(name.clone());
                 (PlaceFrom::Input(name.clone()), name.clone())
             }
+            InstallFrom::File(FileRef::Generated { path }) => (PlaceFrom::Generated, path.clone()),
             InstallFrom::File(FileRef::Description { name }) => {
                 if !at.board.descriptions.contains_key(name) {
                     let known: Vec<&str> =
@@ -1512,6 +1665,13 @@ fn component_layers(
                 g.set(node, "name", Lit::Str(name.clone()));
                 node
             }
+            PlaceFrom::Generated => generated.ok_or_else(|| {
+                Error::at(
+                    file,
+                    "install",
+                    "names a generated file, but there is no [generate]",
+                )
+            })?,
             PlaceFrom::Description(name) => {
                 let described = at.board.descriptions.get(name).ok_or_else(|| {
                     Error::at(file, "install", format!("no description named `{name}`"))
