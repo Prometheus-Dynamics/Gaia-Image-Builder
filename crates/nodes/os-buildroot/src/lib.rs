@@ -314,6 +314,57 @@ fn build(
         )));
     }
 
+    // The kernel's and the bootloader's own configs, before anything
+    // compiles: every line their fragment files ask for must be in the
+    // package's final `.config`.
+    for (package, enabled, files_option) in [
+        (
+            "linux",
+            "BR2_LINUX_KERNEL=y",
+            "BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES",
+        ),
+        (
+            "uboot",
+            "BR2_TARGET_UBOOT=y",
+            "BR2_TARGET_UBOOT_CONFIG_FRAGMENT_FILES",
+        ),
+    ] {
+        let files = config::string_option(&resolved, files_option).unwrap_or_default();
+        if files.is_empty() || !resolved.lines().any(|line| line.trim() == enabled) {
+            continue;
+        }
+        let goal = format!("{package}-configure");
+        work.run(&make_tool(host, src, &out, vars, &[goal.as_str()]))?;
+        let mut fragments = Vec::new();
+        for file in files.split_whitespace() {
+            let text = fs::read_to_string(file)
+                .map_err(|e| fail(format!("{package} config fragment {file}: {e}")))?;
+            let name = Path::new(file)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            fragments.push((name, text));
+        }
+        let Some(final_config) = out::package_config(&out.join("build"), package)
+            .map_err(io_fail("the package's config"))?
+        else {
+            return Err(fail(format!(
+                "{package} was configured, and no .config was found under build/{package}-*"
+            )));
+        };
+        let text = fs::read_to_string(&final_config).map_err(io_fail("the package's config"))?;
+        let not_taken = config::kconfig_not_taken(&text, &fragments);
+        if !not_taken.is_empty() {
+            return Err(fail(format!(
+                "{package}'s config did not take {} line{} of its fragments as written:\n  {}",
+                not_taken.len(),
+                if not_taken.len() == 1 { "" } else { "s" },
+                not_taken.join("\n  ")
+            )));
+        }
+    }
+
     let shown = Arc::new(Mutex::new(String::new()));
     let sink = shown.clone();
     let order =

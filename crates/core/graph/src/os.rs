@@ -20,6 +20,23 @@
 //!   variable U-Boot reads; trusted firmware (`ARM_TRUSTED_FIRMWARE`) and
 //!   its platform, with U-Boot built with its BL31.
 //!
+//! The config is then divided into up to three builds, each keyed on its own
+//! part, so a change to one does not rebuild the others ([`split`]):
+//!
+//! - **kernel**: the board's kernel fragment and the image's
+//!   `BR2_LINUX_KERNEL...` lines.
+//! - **bootloader**: the board's bootloader fragment and the image's
+//!   `BR2_TARGET_...` lines that are a bootloader's (every `BR2_TARGET_`
+//!   option but the system's own: `GENERIC`, `ROOTFS`, root login, time
+//!   zone, optimisation).
+//! - **root filesystem**: everything else.
+//!
+//! The target fragment and the image's toolchain and build options go to
+//! all three; `BR2_PACKAGE_HOST_...` to the kernel and the bootloader, whose
+//! builds are what need host tools. A board with no kernel, or no
+//! bootloader, has no such build, and those lines stay in the root
+//! filesystem's.
+//!
 //! A file or directory the config names is an input tree of the step,
 //! written `@name@` in the text: a locked source by its lock name, a
 //! directory beside a description as `files.<n>`. In an image's own
@@ -446,4 +463,190 @@ fn text(lines: &[String]) -> String {
     let mut text = lines.join("\n");
     text.push('\n');
     text
+}
+
+/// The parts of one image's OS, each a build of its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Parts {
+    pub kernel: Option<OsPlan>,
+    pub bootloader: Option<OsPlan>,
+    pub rootfs: OsPlan,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Part {
+    Kernel,
+    Bootloader,
+    Rootfs,
+}
+
+/// Where a config symbol's line goes: one part, or several.
+fn parts_of(symbol: &str, kernel: bool, bootloader: bool) -> Vec<Part> {
+    const SYSTEM: [&str; 7] = [
+        "BR2_TARGET_GENERIC_",
+        "BR2_TARGET_ROOTFS_",
+        "BR2_TARGET_ENABLE_ROOT_LOGIN",
+        "BR2_TARGET_TZ",
+        "BR2_TARGET_LOCALTIME",
+        "BR2_TARGET_OPTIMIZATION",
+        "BR2_TARGET_LDFLAGS",
+    ];
+    const EVERY: [&str; 9] = [
+        "BR2_TOOLCHAIN",
+        "BR2_KERNEL_HEADERS",
+        "BR2_CCACHE",
+        "BR2_JLEVEL",
+        "BR2_GLOBAL_PATCH_DIR",
+        "BR2_DOWNLOAD_FORCE_CHECK_HASHES",
+        "BR2_PER_PACKAGE_DIRECTORIES",
+        "BR2_OPTIMIZE_",
+        "BR2_ENABLE_",
+    ];
+    let mut every = vec![Part::Rootfs];
+    if kernel {
+        every.push(Part::Kernel);
+    }
+    if bootloader {
+        every.push(Part::Bootloader);
+    }
+    if EVERY.iter().any(|prefix| symbol.starts_with(prefix)) {
+        return every;
+    }
+    if symbol.starts_with("BR2_PACKAGE_HOST_") {
+        let built: Vec<Part> = every.into_iter().filter(|p| *p != Part::Rootfs).collect();
+        return if built.is_empty() {
+            vec![Part::Rootfs]
+        } else {
+            built
+        };
+    }
+    if kernel && symbol.starts_with("BR2_LINUX_KERNEL") {
+        return vec![Part::Kernel];
+    }
+    if bootloader
+        && symbol.starts_with("BR2_TARGET_")
+        && !SYSTEM.iter().any(|prefix| symbol.starts_with(prefix))
+    {
+        return vec![Part::Bootloader];
+    }
+    vec![Part::Rootfs]
+}
+
+/// The symbol a config line sets or unsets.
+fn symbol_of(line: &str) -> Option<&str> {
+    let line = line.trim();
+    if let Some(rest) = line.strip_prefix("# ") {
+        return rest.strip_suffix(" is not set");
+    }
+    if line.starts_with('#') {
+        return None;
+    }
+    line.split_once('=').map(|(name, _)| name)
+}
+
+/// `plan` as its parts. Each has the fragments' lines that are its own,
+/// under the same fragment names, and only the input trees those lines and
+/// its overrides name.
+pub(crate) fn split(plan: &OsPlan, board: &Board) -> Parts {
+    let (has_kernel, has_bootloader) = (board.kernel.is_some(), board.bootloader.is_some());
+    let part = |which: Part| -> OsPlan {
+        let mut fragments = Vec::new();
+        for fragment in &plan.config.fragments {
+            let whole = match fragment.name.as_str() {
+                "board.target" => Some(true),
+                "board.kernel" => Some(which == Part::Kernel),
+                "board.bootloader" => Some(which == Part::Bootloader),
+                _ => None,
+            };
+            let text: String = match whole {
+                Some(true) => fragment.text.clone(),
+                Some(false) => String::new(),
+                None => fragment
+                    .text
+                    .lines()
+                    .filter(|line| {
+                        symbol_of(line).is_some_and(|symbol| {
+                            parts_of(symbol, has_kernel, has_bootloader).contains(&which)
+                        })
+                    })
+                    .map(|line| format!("{}\n", line.trim()))
+                    .collect(),
+            };
+            if !text.is_empty() {
+                fragments.push(ConfigFragment {
+                    name: fragment.name.clone(),
+                    text,
+                });
+            }
+        }
+        let overrides: Vec<SourceOverride> = plan
+            .config
+            .overrides
+            .iter()
+            .filter(|o| match which {
+                Part::Kernel => o.package == "LINUX",
+                Part::Bootloader => o.package != "LINUX",
+                Part::Rootfs => false,
+            })
+            .cloned()
+            .collect();
+        let used = |name: &str| {
+            let marker = format!("@{name}@");
+            fragments.iter().any(|f| f.text.contains(&marker))
+                || overrides.iter().any(|o| o.input == name)
+        };
+        let inputs: Vec<(String, InputFrom)> = plan
+            .inputs
+            .iter()
+            .filter(|(name, _)| used(name))
+            .cloned()
+            .collect();
+        OsPlan {
+            config: OsConfig {
+                fragments,
+                inputs: inputs.iter().map(|(name, _)| name.clone()).collect(),
+                overrides,
+                externals: Vec::new(),
+            },
+            inputs,
+        }
+    };
+    Parts {
+        kernel: has_kernel.then(|| part(Part::Kernel)),
+        bootloader: has_bootloader.then(|| part(Part::Bootloader)),
+        rootfs: part(Part::Rootfs),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_line_goes_to_the_part_that_builds_it() {
+        let to = |symbol: &str| parts_of(symbol, true, true);
+        assert!(to("BR2_LINUX_KERNEL_INSTALL_TARGET") == vec![Part::Kernel]);
+        assert!(to("BR2_TARGET_UBOOT_NEEDS_DTC") == vec![Part::Bootloader]);
+        assert!(to("BR2_TARGET_ARM_TRUSTED_FIRMWARE_IMAGES") == vec![Part::Bootloader]);
+        assert!(to("BR2_TARGET_GENERIC_HOSTNAME") == vec![Part::Rootfs]);
+        assert!(to("BR2_TARGET_ROOTFS_EXT2") == vec![Part::Rootfs]);
+        assert!(to("BR2_TARGET_ENABLE_ROOT_LOGIN") == vec![Part::Rootfs]);
+        assert!(to("BR2_PACKAGE_BUSYBOX") == vec![Part::Rootfs]);
+        assert!(to("BR2_INIT_SYSTEMD") == vec![Part::Rootfs]);
+        assert!(to("BR2_PACKAGE_HOST_DTC") == vec![Part::Kernel, Part::Bootloader]);
+        assert!(to("BR2_TOOLCHAIN_EXTERNAL").len() == 3);
+        // With no kernel or bootloader build, their lines stay where one
+        // build has everything.
+        assert!(parts_of("BR2_LINUX_KERNEL", false, false) == vec![Part::Rootfs]);
+        assert!(parts_of("BR2_TARGET_UBOOT", false, false) == vec![Part::Rootfs]);
+        assert!(parts_of("BR2_PACKAGE_HOST_DTC", false, false) == vec![Part::Rootfs]);
+    }
+
+    #[test]
+    fn a_symbol_is_read_from_a_set_or_an_unset_line() {
+        assert_eq!(symbol_of("BR2_X=y"), Some("BR2_X"));
+        assert_eq!(symbol_of("  # BR2_X is not set "), Some("BR2_X"));
+        assert_eq!(symbol_of("# a comment"), None);
+        assert_eq!(symbol_of(""), None);
+    }
 }
