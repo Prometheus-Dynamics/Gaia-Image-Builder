@@ -15,6 +15,7 @@ const PATH_TOOLS: &[(&str, &str)] = &[
     ("curl", "curl"),
     ("bwrap", "bwrap"),
     ("mke2fs", "mke2fs"),
+    ("debugfs", "debugfs"),
     ("mkfs_erofs", "mkfs.erofs"),
     ("veritysetup", "veritysetup"),
 ];
@@ -318,8 +319,12 @@ fn buildroot_host(
     })
 }
 
+/// `program` in a PATH directory, then in the system directories a user's
+/// PATH often leaves out (`mke2fs` and `debugfs` live there).
 fn on_path(program: &str) -> Option<PathBuf> {
-    std::env::split_paths(&std::env::var_os("PATH")?)
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    std::env::split_paths(&path)
+        .chain(["/usr/sbin", "/sbin"].map(PathBuf::from))
         .map(|dir| dir.join(program))
         .find(|path| path.is_file())
 }

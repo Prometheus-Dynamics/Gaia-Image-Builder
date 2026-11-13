@@ -100,12 +100,9 @@ fn the_demo_product_loads_its_board_and_component() {
         Product::load(examples().join("products/zero-3e-demo/product.toml")).expect("loads");
     assert_eq!(loaded.product.images.len(), 1);
     let image = &loaded.product.images[0];
-    assert_eq!(image.recipe, "slot");
+    assert_eq!(image.recipe, "sd-image");
     assert_eq!(image.budget.map(|s| s.0), Some(Size::mib(1024)));
-    assert_eq!(
-        image.settings["device"].as_str(),
-        Some("/data/slots/root.img")
-    );
+    assert_eq!(image.settings["id"].as_str(), Some("zero-3e-demo"));
     let os = image.os.as_ref().expect("an os");
     assert_eq!(os.provider, OsProvider::Buildroot);
     assert_eq!(os.source, "buildroot");

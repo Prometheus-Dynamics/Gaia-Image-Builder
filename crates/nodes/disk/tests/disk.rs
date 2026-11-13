@@ -438,3 +438,112 @@ fn a_uboot_environment_is_a_partitions_content() {
     };
     assert!(layout(TableScheme::Mbr, None, None, None, &[input], &[]).is_err());
 }
+
+/// A tree in `store` holding `files`, as a bootloader artifact.
+fn bootloader(store: &Store, dir: &Path, files: &[(&str, &[u8])]) -> gaia_types::Artifact {
+    let tree = dir.join("bootloader");
+    std::fs::create_dir_all(&tree).expect("mkdir");
+    for (name, bytes) in files {
+        std::fs::write(tree.join(name), bytes).expect("write");
+    }
+    gaia_types::Artifact {
+        kind: gaia_types::ArtifactKind::parse("bootloader"),
+        object: store.put_tree(&tree).expect("put").into(),
+    }
+}
+
+#[test]
+fn a_blob_is_one_file_of_a_tree_at_its_offset() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store_dir = dir.path().join("store");
+    let store = Store::open(&store_dir).expect("store");
+    let loader = pattern(3000, 5);
+    let from = bootloader(
+        &store,
+        dir.path(),
+        &[("u-boot.bin", &loader), ("bl31.elf", &pattern(100, 9))],
+    );
+    let root = store_dir.display().to_string();
+    let blob = gaia_disk::disk_blob(&root, &from, "u-boot.bin", "u-boot", 32 * 1024, &Ctx::new())
+        .expect("a blob");
+    assert_eq!(
+        (blob.name.as_str(), blob.offset),
+        ("u-boot", Size(32 * 1024))
+    );
+    let stored = store.path(&blob.content.object_ref().expect("stored"));
+    assert_eq!(std::fs::read(stored).expect("read"), loader);
+
+    // In a disk, its bytes are at the offset.
+    let root_fs = put(&store, dir.path(), "root.img", &pattern(8192, 3));
+    let image = disk_image(
+        &root,
+        "blob-disk",
+        &table(TableScheme::Gpt, None),
+        &[partition(
+            "rootfs",
+            "rootfs",
+            GPT_LINUX,
+            None,
+            Some(root_fs),
+        )],
+        &[blob],
+        &Ctx::new(),
+    )
+    .expect("a disk");
+    let bytes = bytes_of(&store, &image);
+    let at = 32 * 1024;
+    println!(
+        "blob bytes at {at}: {:02x?} ... (len {})",
+        &bytes[at..at + 8],
+        loader.len()
+    );
+    assert_eq!(&bytes[at..at + loader.len()], &loader[..]);
+
+    // The key is the file's bytes: another file in the tree changes nothing.
+    let more = bootloader(
+        &store,
+        &dir.path().join("second"),
+        &[("u-boot.bin", &loader), ("bl31.elf", &pattern(100, 77))],
+    );
+    let same = gaia_disk::disk_blob(&root, &more, "u-boot.bin", "u-boot", 32 * 1024, &Ctx::new())
+        .expect("the same blob");
+    assert_eq!(same.content, blob_content(&root, &from));
+}
+
+/// The blob's content for `u-boot.bin` of `from`.
+fn blob_content(root: &str, from: &gaia_types::Artifact) -> StoreRef {
+    gaia_disk::disk_blob(root, from, "u-boot.bin", "u-boot", 0, &Ctx::new())
+        .expect("a blob")
+        .content
+}
+
+#[test]
+fn a_blob_whose_file_is_missing_names_what_the_tree_has() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store_dir = dir.path().join("store");
+    let store = Store::open(&store_dir).expect("store");
+    let from = bootloader(
+        &store,
+        dir.path(),
+        &[("u-boot.bin", b"x"), ("bl31.elf", b"y")],
+    );
+    let root = store_dir.display().to_string();
+    let error = gaia_disk::disk_blob(
+        &root,
+        &from,
+        "u-boot-rockchip.bin",
+        "u-boot",
+        0,
+        &Ctx::new(),
+    )
+    .expect_err("missing");
+    let text = error.to_string();
+    println!("{text}");
+    assert!(
+        text.contains("no file 'u-boot-rockchip.bin'; it has bl31.elf, u-boot.bin"),
+        "{text}"
+    );
+    let error =
+        gaia_disk::disk_blob(&root, &from, "../x", "u-boot", 0, &Ctx::new()).expect_err("outside");
+    assert!(error.to_string().contains("not a path inside the tree"));
+}

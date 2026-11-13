@@ -1,0 +1,10 @@
+# The boot config U-Boot's distro boot reads from the bootable partition:
+# the kernel and device tree the OS installs under /boot, and the root
+# partition by its name. Untested on board.
+version = 1
+name = "extlinux-zero-3e"
+
+[[install]]
+from = { file = "files/extlinux.conf" }
+to = "/boot/extlinux/extlinux.conf"
+mode = "0644"

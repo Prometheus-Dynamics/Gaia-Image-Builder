@@ -44,6 +44,7 @@ name = "u-boot"
 role = "bootloader"
 offset = "32K"
 in_table = false
+content = "u-boot-rockchip.bin"
 
 [[partitions]]
 name = "uboot-env"
@@ -51,6 +52,9 @@ role = "raw"
 type = "3de21764-95bd-54bd-a5c3-4abe786f38a8"
 offset = "16M"
 size = "64K"
+
+[disk]
+scheme = "gpt"
 
 [flash]
 methods = ["sd-card", "maskrom"]

@@ -431,3 +431,117 @@ fn a_unit_without_an_install_section_cannot_be_enabled() {
         "{error}"
     );
 }
+
+/// A file in the store, as an image.
+fn image(f: &Fixture, bytes: &[u8]) -> gaia_types::Image {
+    let path = f.root.join("image.bin");
+    std::fs::write(&path, bytes).expect("write");
+    let store = Store::open(&f.store).expect("store");
+    gaia_types::Image {
+        kind: gaia_types::ImageKind::Filesystem,
+        object: store.put_file(&path).expect("put").into(),
+        size: gaia_types::Size(bytes.len() as u64),
+        partitions: Vec::new(),
+    }
+}
+
+fn tree_path(f: &Fixture, tree: &Tree) -> std::path::PathBuf {
+    let store = Store::open(&f.store).expect("store");
+    tree.object.path_in(&store).expect("stored")
+}
+
+#[test]
+fn a_file_is_added_to_a_tree_and_the_rest_is_kept() {
+    let f = fixture();
+    let mut base = stored(
+        &f,
+        "data",
+        &[("etc/app.conf", "a=1\n"), ("README", "data\n")],
+    );
+    base.entries = vec![FileEntry {
+        path: "etc/app.conf".into(),
+        mode: 0o600,
+        uid: 7,
+        gid: 7,
+    }];
+    let slot = image(&f, b"slot bytes");
+    let out = gaia_tree::tree_file(&f.store, Some(&base), &slot, "slots/root.img", &Ctx::new())
+        .expect("adds");
+    let dir = tree_path(&f, &out);
+    assert_eq!(
+        std::fs::read(dir.join("slots/root.img")).expect("the slot"),
+        b"slot bytes"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("etc/app.conf")).expect("kept"),
+        "a=1\n"
+    );
+    assert!(dir.join("README").is_file());
+    let mode = std::fs::metadata(dir.join("slots/root.img"))
+        .expect("meta")
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o644);
+    // The tree's own entries are kept, and the file is root's.
+    assert_eq!(
+        out.entries,
+        vec![
+            FileEntry {
+                path: "etc/app.conf".into(),
+                mode: 0o600,
+                uid: 7,
+                gid: 7
+            },
+            FileEntry {
+                path: "slots/root.img".into(),
+                mode: 0o644,
+                uid: 0,
+                gid: 0
+            },
+        ]
+    );
+    // The same inputs give the same tree; another file gives another.
+    let again = gaia_tree::tree_file(&f.store, Some(&base), &slot, "slots/root.img", &Ctx::new())
+        .expect("again");
+    assert_eq!(again, out);
+    let other = image(&f, b"other bytes");
+    let changed =
+        gaia_tree::tree_file(&f.store, Some(&base), &other, "slots/root.img", &Ctx::new())
+            .expect("changed");
+    assert_ne!(changed.object, out.object);
+}
+
+#[test]
+fn a_file_with_no_tree_is_a_tree_of_that_file() {
+    let f = fixture();
+    let slot = image(&f, b"slot bytes");
+    let out =
+        gaia_tree::tree_file(&f.store, None, &slot, "slots/root.img", &Ctx::new()).expect("adds");
+    let dir = tree_path(&f, &out);
+    let mut names: Vec<String> = std::fs::read_dir(&dir)
+        .expect("read")
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["slots"]);
+    assert!(dir.join("slots/root.img").is_file());
+}
+
+#[test]
+fn a_path_the_tree_has_or_one_outside_it_is_refused() {
+    let f = fixture();
+    let base = stored(&f, "data", &[("slots/root.img", "old\n")]);
+    let slot = image(&f, b"slot bytes");
+    let error = gaia_tree::tree_file(&f.store, Some(&base), &slot, "slots/root.img", &Ctx::new())
+        .expect_err("taken");
+    assert!(
+        error
+            .to_string()
+            .contains("/slots/root.img is already a file"),
+        "{error}"
+    );
+    let error = gaia_tree::tree_file(&f.store, Some(&base), &slot, "../out.img", &Ctx::new())
+        .expect_err("outside");
+    println!("{error}");
+}

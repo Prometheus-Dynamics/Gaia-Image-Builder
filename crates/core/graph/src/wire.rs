@@ -538,6 +538,20 @@ fn image_recipe(
             for p in ports {
                 g.edge((*node, out), (stages[&p.stage], &p.port));
             }
+        } else if input == "blobs" {
+            let list = image_blobs(g, at, &recipe.name)?;
+            for p in ports {
+                g.edge((list, "list"), (stages[&p.stage], &p.port));
+            }
+        } else if input == "data"
+            && at.data.is_empty()
+            && ports.iter().all(|p| {
+                g.inputs(stages[&p.stage])
+                    .iter()
+                    .any(|decl| decl.name == p.port && decl.optional)
+            })
+        {
+            // No data component, and every port that takes it is optional.
         } else if input == "data" {
             let [(_, node)] = at.data else {
                 return Err(Error::at(
@@ -640,6 +654,56 @@ fn image_source(g: &mut Graph<'_>, at: &ImageIn<'_>, recipe: &str) -> Result<u32
         ));
     };
     component_source(g, component, name, source, at.lock, at.board)
+}
+
+/// The board's areas outside the partition table that name their content,
+/// each a `gaia.disk.blob` picking that file from the OS's bootloader
+/// output, collected by one `gaia.disk.blobs`. Gives the collector.
+fn image_blobs(g: &mut Graph<'_>, at: &ImageIn<'_>, recipe: &str) -> Result<u32, Error> {
+    let board = at.board;
+    let name = &at.image.name;
+    let list = g.add(
+        "gaia.disk.blobs",
+        format!("{name}.blobs"),
+        &board.file,
+        "partitions",
+    )?;
+    let mut k = 0;
+    for (i, need) in board.partitions.iter().enumerate() {
+        let (false, Some(content)) = (need.in_table, &need.content) else {
+            continue;
+        };
+        let Some((os, _)) = at.os else {
+            return Err(Error::at(
+                at.product_file,
+                format!("images[{}]", at.index),
+                format!(
+                    "recipe {recipe} writes the board's `{}` area from the OS's bootloader output; this image has no `os`",
+                    need.name
+                ),
+            ));
+        };
+        let offset = need.offset.ok_or_else(|| {
+            Error::at(
+                &board.file,
+                format!("partitions[{i}].offset"),
+                "missing: an area outside the table is written at its offset",
+            )
+        })?;
+        let blob = g.add(
+            "gaia.disk.blob",
+            format!("{name}.blob.{}", need.name),
+            &board.file,
+            &format!("partitions[{i}]"),
+        )?;
+        g.set(blob, "path", Lit::Str(content.clone()));
+        g.set(blob, "name", Lit::Str(need.name.clone()));
+        g.set(blob, "offset", Lit::Int(offset.0.0 as i64));
+        g.edge((os, "bootloader"), (blob, "from"));
+        g.edge((blob, "blob"), (list, &format!("blobs{k}")));
+        k += 1;
+    }
+    Ok(list)
 }
 
 /// The control data from the `[package]` table of the image's one component

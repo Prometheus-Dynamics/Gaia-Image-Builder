@@ -7,3 +7,7 @@ description = "Generic x86_64 Linux test board, for planning recipes"
 [target]
 arch = "x86_64"
 os = "linux"
+
+# For recipes that lay out a disk.
+[disk]
+scheme = "gpt"
