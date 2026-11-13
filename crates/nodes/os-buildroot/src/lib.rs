@@ -12,7 +12,8 @@
 //! the step's scratch space, and its outputs are moved into the store, one
 //! artifact each:
 //!
-//! - **rootfs**: Buildroot's target tree.
+//! - **rootfs**: Buildroot's target tree, with the owners and modes
+//!   Buildroot gives a filesystem image as the tree's entries (see `perms`).
 //! - **kernel**, **device-trees**, **bootloader**, **images**: the files of
 //!   its `images/` directory, sorted by name (see `out`).
 //! - **modules**: the kernel modules inside the target (`lib/modules`).
@@ -38,6 +39,7 @@
 
 mod config;
 mod out;
+mod perms;
 mod progress;
 
 use daedalus::prelude::*;
@@ -51,13 +53,15 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 const NAME: &str = "gaia.os.buildroot";
-const KEY_VERSION: u32 = 1;
+/// 2: the root filesystem's owners and modes, from Buildroot's own tar.
+const KEY_VERSION: u32 = 2;
 /// The environment every make runs with. Nothing else is inherited.
 const PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 
 /// The step's outputs, by name and by path inside its directory. The last two
 /// are empty when the build has no kernel.
-const OUTPUTS: [(&str, &str); 9] = [
+const OUTPUTS: [(&str, &str); 10] = [
+    ("rootfs-entries", "rootfs-entries.json"),
     ("rootfs", "rootfs"),
     ("kernel", "kernel"),
     ("device-trees", "device-trees"),
@@ -200,6 +204,11 @@ pub fn build_os(
         .collect();
     let made = Step::new(&store, cx, NAME, key.finish())
         .look_up_or_make(&outputs, |work| build(work, &src, &vars, &fragments, host))?;
+    // Read back on a hit too: the entries are part of what the step made.
+    let listed = fs::read(store.path(&made.outputs["rootfs-entries"]))
+        .map_err(|e| StepError::body(NAME, format!("the root filesystem's entries: {e}")))?;
+    let rootfs_entries: Vec<gaia_types::FileEntry> = serde_json::from_slice(&listed)
+        .map_err(|e| StepError::body(NAME, format!("the root filesystem's entries: {e}")))?;
     let artifact = |name: &str, kind: ArtifactKind| Artifact {
         kind,
         object: made.outputs[name].into(),
@@ -211,7 +220,7 @@ pub fn build_os(
     Ok((
         Tree {
             object: made.outputs["rootfs"].into(),
-            entries: Vec::new(),
+            entries: rootfs_entries,
         },
         artifact("kernel", ArtifactKind::Kernel),
         artifact("device-trees", ArtifactKind::DeviceTree),
@@ -281,7 +290,14 @@ fn build(
     work.run(&make_tool(host, src, &out, vars, &["allnoconfig"]))?;
     let config = out.join(".config");
     let base = fs::read_to_string(&config).map_err(io_fail("the base config"))?;
-    let merged = config::merge(&base, fragments).map_err(fail)?;
+    // Last, so no description turns it off: the tar is where the root
+    // filesystem's owners and modes are read from.
+    let mut fragments = fragments.to_vec();
+    fragments.push(ConfigFragment {
+        name: "gaia.permissions".into(),
+        text: perms::FRAGMENT.into(),
+    });
+    let merged = config::merge(&base, &fragments).map_err(fail)?;
     fs::write(&config, merged).map_err(io_fail("the merged config"))?;
     work.run(&make_tool(host, src, &out, vars, &["olddefconfig"]))?;
 
@@ -315,6 +331,19 @@ fn build(
     let installed = installed.lock().map(|set| set.clone()).unwrap_or_default();
     work.progress(progress::done(&installed, &targets), total);
 
+    // The owners and modes Buildroot gives the image, from the tar it packed
+    // under fakeroot. The tar itself is not an output.
+    let tar = out.join("images").join(perms::TAR);
+    let entries = if tar.is_file() {
+        let entries = perms::entries(&tar, &out.join("target"))
+            .map_err(io_fail("the root filesystem's owners and modes"))?;
+        fs::remove_file(&tar).map_err(io_fail("the root filesystem's tar"))?;
+        entries
+    } else {
+        Vec::new()
+    };
+    let text = serde_json::to_vec(&entries).map_err(|e| fail(e.to_string()))?;
+    fs::write(dir.join("rootfs-entries.json"), text).map_err(io_fail("the entries"))?;
     fs::rename(out.join("target"), dir.join("rootfs")).map_err(io_fail("the target tree"))?;
     out::copy_tree(&dir.join("rootfs/lib/modules"), &dir.join("modules"))
         .map_err(io_fail("the kernel modules"))?;
