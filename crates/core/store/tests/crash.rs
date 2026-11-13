@@ -40,6 +40,20 @@ fn crash_child() {
     }
 }
 
+/// Whether the store at `root` has a whole entry recorded.
+fn has_entry(root: &Path) -> bool {
+    let Ok(shards) = fs::read_dir(root.join("entries")) else {
+        return false;
+    };
+    shards.flatten().any(|shard| {
+        fs::read_dir(shard.path()).is_ok_and(|files| {
+            files
+                .flatten()
+                .any(|file| file.file_name().to_string_lossy().ends_with(".json"))
+        })
+    })
+}
+
 #[test]
 fn a_crash_mid_commit_leaves_no_partial_entry() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -54,6 +68,17 @@ fn a_crash_mid_commit_leaves_no_partial_entry() {
             .env(ROOT_VAR, &root)
             .spawn()
             .expect("spawn child");
+        // The child is killed at a varying point after it has committed at
+        // least one step. Waiting for that commit, not for a fixed time,
+        // keeps the test meaning the same on a loaded machine.
+        let deadline = std::time::Instant::now() + Duration::from_secs(300);
+        while !has_entry(&root) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "round {round}: the child committed no step in 300 s"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
         std::thread::sleep(Duration::from_millis(30 + round * 29));
         child.kill().expect("SIGKILL");
         child.wait().expect("reap");
