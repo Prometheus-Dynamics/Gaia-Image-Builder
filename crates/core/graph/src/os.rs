@@ -6,7 +6,8 @@
 //! one board needs is in that board's file or the image's fragments.
 //!
 //! - **Target:** the architecture's option, and `BR2_<cpu>` for the CPU
-//!   (`cortex-a55` is `BR2_cortex_a55`).
+//!   (`cortex-a55` is `BR2_cortex_a55`; a big.LITTLE pair
+//!   `cortex-a76.cortex-a55` is `BR2_cortex_a76_a55`).
 //! - **Kernel:** the locked source as Buildroot's custom git repository or
 //!   tarball, built from Gaia's stored copy (`LINUX_OVERRIDE_SRCDIR`), so
 //!   Buildroot downloads nothing for it; the defconfig (`defconfig` is the
@@ -304,7 +305,21 @@ fn target(board: &Board) -> Result<String, Error> {
     };
     let mut lines: Vec<String> = arch.into_iter().map(str::to_string).collect();
     if let Some(cpu) = &board.target.cpu {
-        let symbol = cpu.replace(['-', '.'], "_");
+        // A big.LITTLE pair is written as the compiler takes it,
+        // `cortex-a76.cortex-a55`; Buildroot's option names the second core
+        // by its number alone, `BR2_cortex_a76_a55`.
+        let symbol = match cpu.split_once('.') {
+            Some((big, little)) => {
+                let family = big.split_once('-').map_or("", |(family, _)| family);
+                let little = little
+                    .strip_prefix(family)
+                    .and_then(|rest| rest.strip_prefix('-'))
+                    .unwrap_or(little);
+                format!("{big}_{little}")
+            }
+            None => cpu.clone(),
+        }
+        .replace(['-', '.'], "_");
         if !symbol
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_')

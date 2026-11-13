@@ -385,7 +385,10 @@ fn component_build(
         && !g.filled[node as usize].contains("cpu")
         && let Some(cpu) = &board.target.cpu
     {
-        g.set(node, "cpu", Lit::Str(cpu.clone()));
+        // Of a big.LITTLE pair (`cortex-a76.cortex-a55`), the little core:
+        // code tuned for it runs on both.
+        let cpu = cpu.rsplit('.').next().unwrap_or(cpu);
+        g.set(node, "cpu", Lit::Str(cpu.to_string()));
     }
     // The dependencies, fetched by the builder's own vendor step from what
     // the source's lock file names, when the component gives no `vendor`.
