@@ -11,8 +11,9 @@
 //! - **Kernel:** the locked source as Buildroot's custom git repository or
 //!   tarball, built from Gaia's stored copy (`LINUX_OVERRIDE_SRCDIR`), so
 //!   Buildroot downloads nothing for it; the defconfig (`defconfig` is the
-//!   architecture's default), the fragment files, the in-tree device tree
-//!   and the board's device tree directory.
+//!   architecture's default), the fragment files, the in-tree device tree,
+//!   the board's device tree directory, and the overlays by name (built by
+//!   the kernel build; they come out with the device trees).
 //! - **Bootloader:** the same for U-Boot (`UBOOT`), its defconfig and
 //!   fragment files; each blob is given to U-Boot's make as
 //!   `<NAME>=<path>`, so a blob's name in the board file is the make
@@ -152,11 +153,33 @@ pub(crate) fn plan(
                 quoted(&format!("@{name}@"))
             ));
         }
-        if kernel.overlays.as_ref().is_some_and(|o| !o.is_empty()) {
-            return Err(Error::at(
-                &board.file,
-                "kernel.overlays",
-                "device tree overlays are not given to an OS build yet",
+        // Overlays the kernel build makes, by the names it takes (a path
+        // under its device tree directory, no extension). A board's own
+        // overlay source sits in its device tree directory and is named here
+        // like an in-tree one.
+        if let Some(overlays) = kernel.overlays.as_ref().filter(|o| !o.is_empty()) {
+            for (n, name) in overlays.iter().enumerate() {
+                let plain = !name.is_empty()
+                    && !name.starts_with('/')
+                    && name.bytes().all(|b| {
+                        b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'/' | b'.' | b',')
+                    });
+                if !plain || name.ends_with(".dtbo") || name.ends_with(".dts") {
+                    return Err(Error::at(
+                        &board.file,
+                        format!("kernel.overlays[{n}]"),
+                        format!(
+                            "`{name}` is not an overlay's name: a path under the kernel's device tree directory, with no extension"
+                        ),
+                    ));
+                }
+            }
+            if !lines.iter().any(|l| l == "BR2_LINUX_KERNEL_DTS_SUPPORT=y") {
+                lines.push("BR2_LINUX_KERNEL_DTS_SUPPORT=y".into());
+            }
+            lines.push(format!(
+                "BR2_LINUX_KERNEL_INTREE_DTSO_NAMES={}",
+                quoted(&overlays.join(" "))
             ));
         }
         fragments.push(ConfigFragment {

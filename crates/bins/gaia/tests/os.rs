@@ -196,6 +196,32 @@ fn a_board_change_changes_the_config() {
 }
 
 #[test]
+fn a_boards_overlays_are_built_by_the_kernel_build() {
+    let dir = project();
+    let board = dir.path().join("examples/boards/zero-3e/board.toml");
+    edit(
+        &board,
+        "device_tree_dir = \"assets/dts\"",
+        "device_tree_dir = \"assets/dts\"\noverlays = [\"overlays/first\", \"overlays/second-board\"]",
+    );
+    let out = plan(dir.path(), &[]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains(
+            "BR2_LINUX_KERNEL_INTREE_DTSO_NAMES=\"overlays/first overlays/second-board\""
+        ),
+        "{text}"
+    );
+    edit(&board, "\"overlays/first\"", "\"overlays/first.dtbo\"");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("kernel.overlays[0]"), "{err}");
+    assert!(err.contains("with no extension"), "{err}");
+}
+
+#[test]
 fn a_big_little_pair_is_buildroots_option_and_the_little_core_for_rust() {
     let dir = project();
     edit(
