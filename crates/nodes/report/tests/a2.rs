@@ -72,9 +72,12 @@ fn component(
         src,
         vendor,
         "hello-world",
-        "",
+        None,
+        None,
         triple,
-        cpu,
+        Some(&cpu.to_string()),
+        None,
+        None,
         &ctx,
     )
     .expect("build");

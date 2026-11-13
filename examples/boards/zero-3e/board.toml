@@ -20,7 +20,7 @@ defconfig = "radxa-zero-3-rk3566"
 # Each blob is given to U-Boot's make by its name: binman reads the DDR
 # init from ROCKCHIP_TPL.
 [bootloader.blobs]
-ROCKCHIP_TPL = { source = "rkbin", path = "bin/rk35/rk3566_ddr_1056MHz_v1.26.bin" }
+ROCKCHIP_TPL = { source = "rkbin", path = "bin/rk35/rk3566_ddr_1056MHz_v1.23.bin" }
 
 [bootloader.trusted_firmware]
 platform = "rk3568"

@@ -12,7 +12,12 @@
 //!   `<component>.build`, its id from the [`Builders`] table. Its `source`
 //!   input is the source the build names; any other input named like one of
 //!   the component's sources is wired to it; its settings are constants on
-//!   inputs of those names.
+//!   inputs of those names. An input `triple` or `cpu` the settings leave
+//!   out is the board's target (static musl for Linux), so one component
+//!   file serves every board, and a component is built once per board. An
+//!   input `vendor` with no source of that name is filled by the builder's
+//!   own vendor step, `<component>.vendor` (the node `<builder's id>.vendor`,
+//!   when there is one), from the source the build names.
 //! - **Images:** the image's recipe (F1), with the image's settings as its
 //!   parameters, laid out inline: each stage a node labelled
 //!   `<image>::<stage>`. The recipe input `build` takes the image's built

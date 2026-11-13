@@ -115,8 +115,8 @@ fn a_product_is_checked_with_the_files_it_names() {
     let dir = examples();
     edit(
         &dir.path().join(PRODUCT),
-        "components = [\"usb-gadget-network\", \"extlinux\"]",
-        "components = [\"usb-gadget\", \"extlinux\"]",
+        "components = [\"usb-gadget-network\"",
+        "components = [\"usb-gadget\"",
     );
     let out = validate(dir.path(), &[PRODUCT]);
     assert_eq!(out.status.code(), Some(2));

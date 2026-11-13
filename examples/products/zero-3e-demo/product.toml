@@ -9,11 +9,12 @@ ref = "2026.02.3"
 [components]
 usb-gadget-network = "../../components/usb-gadget-network/component.toml"
 extlinux = "../../components/extlinux-zero-3e/component.toml"
+hello-rust = "../../components/hello-rust/component.toml"
 
 [[images]]
 name = "zero-3e-demo"
 board = "../../boards/zero-3e/board.toml"
-components = ["usb-gadget-network", "extlinux"]
+components = ["usb-gadget-network", "extlinux", "hello-rust"]
 # The board gives the kernel, U-Boot and TF-A; os.fragment the rest.
 os = { provider = "buildroot", source = "buildroot", fragments = ["os.fragment"] }
 recipe = "sd-image"

@@ -68,7 +68,7 @@ fn the_zero_3e_board_reads_with_its_family() {
         bootloader.blobs["ROCKCHIP_TPL"],
         FileRef::InSource {
             source: "rkbin".into(),
-            path: "bin/rk35/rk3566_ddr_1056MHz_v1.26.bin".into()
+            path: "bin/rk35/rk3566_ddr_1056MHz_v1.23.bin".into()
         }
     );
     // A family's fragment, resolved against the family file.
@@ -120,6 +120,8 @@ fn the_demo_product_loads_its_board_and_component() {
     assert_eq!(
         wants,
         [
+            "hello-rust.root",
+            "hello-rust.src",
             "zero-3e-demo.buildroot",
             "zero-3e.linux",
             "zero-3e.rkbin",
