@@ -59,6 +59,9 @@ fn main() -> ExitCode {
         args::Command::Validate(options) => {
             for file in &options.files {
                 let kind = gaia_describe::validate(file, options.kind).map_err(Stop::usage)?;
+                if kind == gaia_describe::Kind::Product {
+                    project::check_recipe_names(file, options.recipes.as_deref())?;
+                }
                 println!("ok  {}  {}", kind.as_str(), file.display());
             }
             Ok(())
