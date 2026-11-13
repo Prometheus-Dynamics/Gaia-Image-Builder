@@ -40,15 +40,49 @@ pub fn resolve(want: &Want, base: &Path, tools: &Tools, scratch: &Path) -> Resul
     }
 }
 
-/// `path` as written relative to `base`, when it lies under it.
+/// `path` relative to `base`, with `..` for each directory of `base` it is
+/// not under: `components/app` beside `products/demo` is
+/// `../../components/app`. So a lock holds no path of the checkout it was
+/// written in, wherever the product's files sit. Only paths with no common
+/// root (another Windows drive) stay absolute.
 pub fn relative(path: &Path, base: &Path) -> String {
-    let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-    let base = std::path::absolute(base).unwrap_or_else(|_| base.to_path_buf());
-    path.strip_prefix(&base)
-        .map(Path::to_path_buf)
-        .unwrap_or(path)
-        .display()
-        .to_string()
+    use std::path::Component;
+    let path = normal(&std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()));
+    let base = normal(&std::path::absolute(base).unwrap_or_else(|_| base.to_path_buf()));
+    let (from, to): (Vec<_>, Vec<_>) = (base.components().collect(), path.components().collect());
+    let shared = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    if shared == 0 || !matches!(from[shared - 1], Component::RootDir | Component::Normal(_)) {
+        return path.display().to_string();
+    }
+    let mut out = std::path::PathBuf::new();
+    for _ in shared..from.len() {
+        out.push("..");
+    }
+    for part in &to[shared..] {
+        out.push(part);
+    }
+    if out.as_os_str().is_empty() {
+        out.push(".");
+    }
+    out.display().to_string()
+}
+
+/// `path` without `.` and `name/..` pairs.
+fn normal(path: &Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut out = std::path::PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !out.pop() {
+                    out.push("..");
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 fn is_hex_commit(text: &str) -> bool {
@@ -249,4 +283,25 @@ fn token(curl: &Path, challenge: &str, repository: &str, scratch: &Path) -> Resu
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
         .ok_or_else(|| "no token in the answer".into())
+}
+
+#[cfg(test)]
+mod relative_tests {
+    use super::relative;
+    use std::path::Path;
+
+    #[test]
+    fn under_beside_and_the_same() {
+        let base = Path::new("/w/devices/products/p");
+        for (path, expected) in [
+            ("/w/devices/products/p/files", "files"),
+            ("/w/devices/products/p/a/b", "a/b"),
+            ("/w/devices/components/c/files", "../../components/c/files"),
+            ("/w/devices/products/p", "."),
+            ("/w/devices/products/p/x/../y", "y"),
+            ("/elsewhere/tree", "../../../../elsewhere/tree"),
+        ] {
+            assert_eq!(relative(Path::new(path), base), expected, "{path}");
+        }
+    }
 }
