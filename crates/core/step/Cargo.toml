@@ -8,17 +8,17 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
-daedalus-cpu-author = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+daedalus-cpu-author = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "90ec12e0648df3d6d69d4992cae6ec8895daa651" }
 gaia-store = { path = "../store" }
 rustix = { version = "1", features = ["process"] }
 sha2 = "0.11.0"
 
 [dev-dependencies]
-daedalus-cpu-author = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+daedalus-cpu-author = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "90ec12e0648df3d6d69d4992cae6ec8895daa651" }
 daedalus = { workspace = true }
-daedalus-cpu = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
-daedalus-registry = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
-daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+daedalus-cpu = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "90ec12e0648df3d6d69d4992cae6ec8895daa651" }
+daedalus-registry = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "90ec12e0648df3d6d69d4992cae6ec8895daa651" }
+daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "90ec12e0648df3d6d69d4992cae6ec8895daa651" }
 tempfile = "3"
 rustix = { version = "1", features = ["process"] }
 

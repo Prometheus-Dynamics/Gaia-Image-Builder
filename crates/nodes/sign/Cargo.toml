@@ -12,9 +12,9 @@ publish = false
 base64 = "=0.22.1"
 blake2 = "=0.10.6"
 daedalus = { workspace = true }
-daedalus-cpu-author = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
-daedalus-registry = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
-daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "9d8ed1369e4e236f343668bcf718713476fd7def" }
+daedalus-cpu-author = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "90ec12e0648df3d6d69d4992cae6ec8895daa651" }
+daedalus-registry = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "90ec12e0648df3d6d69d4992cae6ec8895daa651" }
+daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "90ec12e0648df3d6d69d4992cae6ec8895daa651" }
 ed25519-dalek = "=2.2.0"
 gaia-step = { path = "../../core/step" }
 gaia-store = { path = "../../core/store" }
