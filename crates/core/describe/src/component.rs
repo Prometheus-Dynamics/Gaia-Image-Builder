@@ -37,6 +37,35 @@ pub struct Component {
     pub package: Option<Package>,
     /// What the component needs of the image it is in.
     pub requires: Option<Requires>,
+    /// Files a tool of the component's writes from the board's description.
+    pub generate: Option<Generate>,
+}
+
+/// Files derived from one of the board's descriptions by a tool built from
+/// one of the component's sources, for the build machine, and run once per
+/// image. Installs take them with `from = { generated = "<path>" }`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Generate {
+    pub tool: GenerateTool,
+    /// Which of the board's `[descriptions]` the tool reads.
+    pub description: String,
+    /// The tool's arguments. `@source@` is the tool's source tree,
+    /// `@description@` the board's description file, `@out@` the directory
+    /// it writes into, `@slot@` the image's slot id.
+    pub args: Vec<String>,
+    /// What the tool writes at the top of `@out@`: each must be there when
+    /// it ends, and nothing else.
+    pub outputs: Vec<String>,
+}
+
+/// The tool: a package of one of the component's sources.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GenerateTool {
+    pub source: String,
+    /// The package to build; its binary of the same name is the tool.
+    pub package: String,
 }
 
 /// What a component needs of the image it is in, checked by the build.
@@ -182,6 +211,55 @@ impl Component {
                 component.sources.keys(),
             )?;
         }
+        if let Some(generate) = &component.generate {
+            check_source(
+                path,
+                "generate.tool.source",
+                &generate.tool.source,
+                component.sources.keys(),
+            )?;
+            if !is_input_name(&generate.description) {
+                return Err(Error::new(
+                    path,
+                    "generate.description",
+                    format!(
+                        "`{}` is not a description's name: lowercase letters, digits and `-`",
+                        generate.description
+                    ),
+                ));
+            }
+            for (index, arg) in generate.args.iter().enumerate() {
+                let unknown = gaia_types::unknown_generate_names(arg);
+                if !unknown.is_empty() {
+                    return Err(Error::new(
+                        path,
+                        format!("generate.args[{index}]"),
+                        format!(
+                            "names {}; the names are {}",
+                            unknown.join(", "),
+                            gaia_types::GENERATE_NAMES.join(", ")
+                        ),
+                    ));
+                }
+            }
+            if generate.outputs.is_empty() {
+                return Err(Error::new(
+                    path,
+                    "generate.outputs",
+                    "no output is declared; the tool's files are named here",
+                ));
+            }
+            for (index, output) in generate.outputs.iter().enumerate() {
+                if output.is_empty() || output.contains('/') || output.starts_with('.') {
+                    return Err(Error::new(
+                        path,
+                        format!("generate.outputs[{index}]"),
+                        format!("`{output}` is not a name at the top of the output directory"),
+                    ));
+                }
+            }
+        }
+        let declared: Option<Vec<String>> = component.generate.as_ref().map(|g| g.outputs.clone());
         for (index, install) in component.install.iter_mut().enumerate() {
             let key = format!("install[{index}]");
             match &mut install.from {
@@ -204,6 +282,29 @@ impl Component {
                                 "`{name}` is not an input name: lowercase letters, digits and `-`, like `bench-key`"
                             ),
                         ));
+                    }
+                    if let FileRef::Generated { path: generated } = file {
+                        let top = generated.split('/').next().unwrap_or_default();
+                        match &declared {
+                            None => {
+                                return Err(Error::new(
+                                    path,
+                                    format!("{key}.from.generated"),
+                                    "names a generated file, but there is no [generate]",
+                                ));
+                            }
+                            Some(outputs) if !outputs.iter().any(|output| output == top) => {
+                                return Err(Error::new(
+                                    path,
+                                    format!("{key}.from.generated"),
+                                    format!(
+                                        "`{generated}` is in no declared output; [generate] declares {}",
+                                        outputs.join(", ")
+                                    ),
+                                ));
+                            }
+                            Some(_) => {}
+                        }
                     }
                     if let FileRef::Description { name } = file
                         && !is_input_name(name)

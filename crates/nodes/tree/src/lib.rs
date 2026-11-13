@@ -26,6 +26,7 @@
 
 mod accounts;
 mod file;
+mod generate;
 mod layer;
 mod merge;
 mod pick;
@@ -36,6 +37,7 @@ mod walk;
 
 pub use accounts::tree_accounts;
 pub use file::tree_file;
+pub use generate::{TOKENS, generate, unknown_tokens};
 pub use layer::tree_layer;
 pub use merge::{merge_layers, tree_merge};
 pub use pick::tree_pick;
@@ -48,7 +50,8 @@ use gaia_store::Digest;
 use gaia_types::Tree;
 
 /// The nodes, for a registry.
-pub const NODES: [&NodeRecord; 8] = [
+pub const NODES: [&NodeRecord; 9] = [
+    &generate::GENERATE_NODE,
     &pick::TREE_PICK_NODE,
     &under::TREE_UNDER_NODE,
     &place::TREE_PLACE_NODE,
