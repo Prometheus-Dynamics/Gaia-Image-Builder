@@ -37,7 +37,8 @@
 //!   `<image>.blob.<name>`, picking that file from the OS's bootloader
 //!   output, collected by `<image>.blobs` (`gaia.disk.blobs`).
 //! - **Data:** the recipe input `data` is the image's one built data
-//!   component; with none, the ports it names must be optional.
+//!   component. With none, it is left out when every port it names is
+//!   optional, and an error otherwise.
 //! - **Everywhere:** an input named `store` gets the store, and one named
 //!   like a [`Setup`] tool gets that tool's path. Every node has
 //!   `daedalus.node.fusion: false`, so fail-fast and cancel stop between

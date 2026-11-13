@@ -543,16 +543,22 @@ fn image_recipe(
             for p in ports {
                 g.edge((list, "list"), (stages[&p.stage], &p.port));
             }
-        } else if input == "data" && at.data.is_empty() {
-            // No data component: the ports stay unfilled, which is an
-            // error below unless each is optional.
+        } else if input == "data"
+            && at.data.is_empty()
+            && ports.iter().all(|p| {
+                g.inputs(stages[&p.stage])
+                    .iter()
+                    .any(|decl| decl.name == p.port && decl.optional)
+            })
+        {
+            // No data component, and every port that takes it is optional.
         } else if input == "data" {
             let [(_, node)] = at.data else {
                 return Err(Error::at(
                     product_file,
                     format!("images[{i}].data"),
                     format!(
-                        "recipe {} takes at most one built component as `data`; this image has {}",
+                        "recipe {} takes one built component as `data`; this image has {}",
                         recipe.name,
                         at.data.len()
                     ),
