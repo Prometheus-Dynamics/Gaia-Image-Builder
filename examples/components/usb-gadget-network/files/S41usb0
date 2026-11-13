@@ -1,22 +1,92 @@
 #!/bin/sh
-# usb0 at 10.55.0.1/24 on the gadget port, and a DHCP server that gives the
-# host 10.55.0.2. An init script of its own: the system's
-# /etc/network/interfaces is the OS's file, and it reads no interfaces.d.
+# A USB network gadget (CDC NCM) on the board's device port, usb0 at
+# 10.55.0.1/24, and a DHCP server that gives the host 10.55.0.2. An init
+# script of its own: the system's /etc/network/interfaces is the OS's file,
+# and it reads no interfaces.d.
+#
+# The two Ethernet addresses are the same on every boot, so the host's
+# network profile for the board still matches after a restart. They come
+# from the board's identity by the rule Lemnos uses for its NCM function:
+# SHA-256("lemnos-usb-ncm\0" + "<family>:<serial>"), the first six bytes,
+# made locally administered and unicast; the host's address has the last
+# bit clear, the device's has it set.
+#
+# family: the board's id as its Lemnos board file states it (`[board] id`),
+# which the image installs as the one line of /etc/usb-gadget.family. It is
+# never guessed: an address from a guess would change the day the real id
+# arrives. serial: the device tree's serial-number, as lowercase hex of 8 to
+# 32 digits with its leading zeros. With no id, or a serial of another
+# shape, no address is set (the kernel picks random ones) and the script
+# says which was missing.
+G=/sys/kernel/config/usb_gadget/net
+
+family() {
+	[ -r /etc/usb-gadget.family ] && head -n 1 /etc/usb-gadget.family
+}
+
+# The serial in $1 as the rule hashes it, or nothing if it does not fit.
+serial() {
+	s=$(printf '%s' "$1" | tr 'A-F' 'a-f')
+	case "$s" in
+	*[!0-9a-f]* | "") return ;;
+	esac
+	[ ${#s} -ge 8 ] && [ ${#s} -le 32 ] && printf '%s' "$s"
+}
+
+# The two addresses for "<family>:<serial>" in $1: "host dev".
+addresses() {
+	h=$(printf 'lemnos-usb-ncm\0%s' "$1" | sha256sum | cut -c1-12)
+	b0=$(( (0x$(echo "$h" | cut -c1-2) & 0xfc) | 0x02 ))
+	last=$(( 0x$(echo "$h" | cut -c11-12) ))
+	mid=$(echo "$h" | cut -c3-10 | sed 's/../&:/g')
+	printf '%02x:%s%02x %02x:%s%02x\n' \
+		"$b0" "$mid" $((last & 0xfe)) "$b0" "$mid" $((last | 1))
+}
+
 case "$1" in
+addresses)
+	# For a check on a build machine: the addresses of the family and
+	# serial given, or nothing for a serial that does not fit.
+	s=$(serial "$3")
+	[ -n "$2" ] && [ -n "$s" ] && addresses "$2:$s"
+	;;
 start)
+	mountpoint -q /sys/kernel/config || mount -t configfs none /sys/kernel/config || exit 1
+	udc=$(ls /sys/class/udc | head -n 1)
+	[ -n "$udc" ] || { echo "usb0: no USB device controller"; exit 1; }
+	mkdir -p "$G/strings/0x409" "$G/configs/c.1/strings/0x409" "$G/functions/ncm.usb0" || exit 1
+	echo 0x1d6b > "$G/idVendor"
+	echo 0x0104 > "$G/idProduct"
+	id=$(family)
+	serial=$(serial "$(tr -d '\000' < /proc/device-tree/serial-number 2>/dev/null)")
+	if [ -z "$id" ]; then
+		echo "usb0: no board id in /etc/usb-gadget.family; the addresses are random"
+	elif [ -z "$serial" ]; then
+		echo "usb0: the device tree's serial-number is not 8 to 32 hex digits; the addresses are random"
+	else
+		set -- $(addresses "$id:$serial")
+		echo "$1" > "$G/functions/ncm.usb0/host_addr"
+		echo "$2" > "$G/functions/ncm.usb0/dev_addr"
+		echo "$serial" > "$G/strings/0x409/serialnumber"
+	fi
+	echo "USB network" > "$G/strings/0x409/product"
+	echo "NCM" > "$G/configs/c.1/strings/0x409/configuration"
+	[ -e "$G/configs/c.1/ncm.usb0" ] || ln -s "$G/functions/ncm.usb0" "$G/configs/c.1/" || exit 1
+	echo "$udc" > "$G/UDC" || exit 1
 	ifconfig usb0 10.55.0.1 netmask 255.255.255.0 up || exit 1
 	udhcpd /etc/udhcpd.usb0.conf
 	;;
 stop)
 	killall udhcpd 2>/dev/null
 	ifconfig usb0 down
+	echo "" > "$G/UDC" 2>/dev/null
 	;;
 restart)
 	"$0" stop
 	"$0" start
 	;;
 *)
-	echo "usage: $0 {start|stop|restart}"
+	echo "usage: $0 {start|stop|restart|addresses <family> <serial>}"
 	exit 1
 	;;
 esac

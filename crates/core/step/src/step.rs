@@ -1,9 +1,14 @@
 //! Look up or make.
 
+use crate::error::ErrorKind;
+use crate::log::RunLog;
 use crate::{Ctx, StepError, Tool, ToolOutput, tool};
 use gaia_store::{Check, ObjectRef, StepKey, Store};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+/// What Daedalus keeps of a fault's reason.
+const REASON_BYTES: usize = 64;
 
 /// One run of one step: where its outputs go, how it is cancelled, and its
 /// key.
@@ -94,11 +99,41 @@ impl<'a> Step<'a> {
             key: self.key,
             logs: &self.logs,
         };
-        body(&mut work)?;
+        if let Err(error) = body(&mut work) {
+            return Err(self.logged(error));
+        }
         let entry = scratch
             .commit_step(&self.key, outputs)
             .map_err(&store_error)?;
         self.recorded(start_ns, entry.outputs, true)
+    }
+
+    /// A failure of the body's own code that a fault record cannot hold,
+    /// with its whole message in a run log of its own. Daedalus keeps
+    /// [`REASON_BYTES`] of a fault's reason, so a check that lists what it
+    /// found (config lines that did not take) would lose the list; the log
+    /// keeps it, and the failure names the log. A message that fits is
+    /// returned as it is, and so is a tool's failure, which has its log.
+    fn logged(&self, error: StepError) -> StepError {
+        let message = match error.kind() {
+            ErrorKind::Body(why)
+                if error.log().is_none()
+                    && (why.contains('\n')
+                        || self.name.len() + ": ".len() + why.len() > REASON_BYTES) =>
+            {
+                why.clone()
+            }
+            _ => return error,
+        };
+        let Ok(log) = RunLog::create(&self.logs, self.name, &self.key, "(the step's own check)")
+        else {
+            return error;
+        };
+        for line in message.lines() {
+            log.line("err", line);
+        }
+        log.end("failed");
+        error.with_log(log.path.clone())
     }
 
     /// Adds this look-up-or-make to the step record and returns it.
