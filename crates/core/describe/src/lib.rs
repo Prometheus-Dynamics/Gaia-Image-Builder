@@ -34,7 +34,9 @@ pub use board::{
     TrustedFirmware,
 };
 pub use common::{FileRef, ImagePlatform, Mode, RelPath, SizeText, Source, Subdir};
-pub use component::{Build, Component, Group, Install, InstallFrom, Package, Service, User};
+pub use component::{
+    Build, Component, Group, InSource, Install, InstallFrom, Package, Requires, Service, User,
+};
 pub use error::Error;
 pub use product::{ImageSpec, Loaded, OsProvider, OsSpec, Product};
 pub use read::VERSION;

@@ -26,6 +26,7 @@
 //! | `gaia:os-config` | [`OsConfig`]: an OS build's fragments, input trees and overrides |
 //! | `gaia:buildroot-fragment` | [`ConfigFragment`]: a block of Buildroot config |
 //! | `gaia:buildroot-host` | [`BuildrootHost`]: make, CPUs, jobs and the download cache |
+//! | `gaia:kernel-contract` | [`KernelContract`]: what a kernel must have built in, by a file in an input tree |
 //! | `gaia:source-override` | [`SourceOverride`]: a package built from an input tree |
 //!
 //! Kinds are open ([`ArtifactKind`], [`ImageKind`], [`PartitionRole`],
@@ -52,7 +53,7 @@ pub use disk::{DiskLayout, DiskPartition, DiskTable, RawBlob, TableScheme};
 pub use image::{Image, ImageKind, Partition, PartitionRole, Size};
 pub use layer::{Account, AccountGroup, Layer, Owned, Placement, Placements, owned_digest};
 pub use object::{Artifact, ArtifactKind, FileEntry, ObjectKind, StoreRef, Tree};
-pub use os::{BuildrootHost, ConfigFragment, OsConfig, SourceOverride};
+pub use os::{BuildrootHost, ConfigFragment, KernelContract, OsConfig, SourceOverride};
 pub use package::Control;
 pub use target::{Arch, Os, Target};
 

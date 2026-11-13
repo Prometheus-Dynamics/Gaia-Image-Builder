@@ -387,3 +387,91 @@ fn a_recipe_that_takes_os_needs_an_image_with_one() {
         "{err}"
     );
 }
+
+/// A component states a kernel contract: a file in one of its sources. The
+/// kernel's build gets that file alone (not the whole source), with the
+/// board's storage drivers and the image's kind.
+#[test]
+fn a_components_kernel_contract_is_checked_in_the_kernels_build() {
+    let dir = project();
+    let component = dir
+        .path()
+        .join("examples/components/hello-rust/component.toml");
+    let board = dir.path().join("examples/boards/zero-3e/board.toml");
+    std::fs::write(
+        dir.path()
+            .join("examples/components/hello-rust/src/slot-kernel.toml"),
+        "version = 1\n",
+    )
+    .expect("write");
+    edit(
+        &component,
+        "[build]\n",
+        "[requires]\nkernel_contract = { source = \"src\", path = \"slot-kernel.toml\" }\n\n[build]\n",
+    );
+    edit(
+        &board,
+        "device_tree_dir = \"assets/dts\"",
+        "device_tree_dir = \"assets/dts\"\nstorage_drivers = [\"CONFIG_MMC_DW_ROCKCHIP\", \"CONFIG_MMC_SDHCI_OF_DWCMSHC\"]",
+    );
+    let out = plan(dir.path(), &[]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    for line in [
+        "zero-3e-demo.os.contract.hello-rust     gaia.tree.pick",
+        "hello-rust.src.tree -> zero-3e-demo.os.contract.hello-rust.tree",
+        "zero-3e-demo.os.contract.hello-rust.tree -> zero-3e-demo.kernel.inputs",
+    ] {
+        assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
+    }
+    // Only the kernel's build has it.
+    assert!(!text.contains("zero-3e-demo.os.contract.hello-rust.tree -> zero-3e-demo.os.inputs"));
+    assert!(
+        !text
+            .contains("zero-3e-demo.os.contract.hello-rust.tree -> zero-3e-demo.bootloader.inputs")
+    );
+
+    let json = plan(dir.path(), &["--json"]);
+    let both: serde_json::Value = serde_json::from_slice(&json.stdout).expect("json");
+    let kernel = both["host_inputs"]
+        .as_array()
+        .expect("host inputs")
+        .iter()
+        .find(|i| i["port"] == "zero-3e-demo.os.kernel")
+        .expect("the kernel's config");
+    let contract = &kernel["value"]["kernel_contracts"][0];
+    println!("{contract}");
+    assert_eq!(contract["input"], "contract.hello-rust");
+    assert_eq!(contract["path"], "slot-kernel.toml");
+    assert_eq!(contract["asked_by"], "hello-rust");
+    assert_eq!(contract["board"], "zero-3e");
+    assert_eq!(contract["kind"], "disk");
+    assert_eq!(
+        contract["storage_drivers"][1],
+        "CONFIG_MMC_SDHCI_OF_DWCMSHC"
+    );
+
+    // A driver not written as the kernel's config writes it.
+    edit(&board, "\"CONFIG_MMC_DW_ROCKCHIP\"", "\"MMC_DW_ROCKCHIP\"");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("kernel.storage_drivers"), "{err}");
+    assert!(
+        err.contains("`MMC_DW_ROCKCHIP` is not an option as the kernel's .config writes it"),
+        "{err}"
+    );
+    edit(&board, "\"MMC_DW_ROCKCHIP\"", "\"CONFIG_MMC_DW_ROCKCHIP\"");
+
+    // A source the component does not have.
+    edit(
+        &component,
+        "source = \"src\", path = \"slot-kernel.toml\"",
+        "source = \"lemnos\", path = \"slot-kernel.toml\"",
+    );
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("requires.kernel_contract.source"), "{err}");
+    assert!(err.contains("no source named `lemnos`"), "{err}");
+}

@@ -35,6 +35,26 @@ pub struct Component {
     /// What the component says about itself as a package for another
     /// system's installer (`.ipk`, `.deb`).
     pub package: Option<Package>,
+    /// What the component needs of the image it is in.
+    pub requires: Option<Requires>,
+}
+
+/// What a component needs of the image it is in, checked by the build.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Requires {
+    /// A file in one of the component's sources that lists the kernel
+    /// options its boot path needs built in. The kernel of every image
+    /// with the component is checked against it.
+    pub kernel_contract: Option<InSource>,
+}
+
+/// A file in one of a description's sources.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InSource {
+    pub source: String,
+    pub path: String,
 }
 
 /// A component as a package: the control data opkg and dpkg read.

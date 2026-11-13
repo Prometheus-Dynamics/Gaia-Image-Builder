@@ -38,6 +38,7 @@
 //! count reaches Daedalus after `make` ends. See the PR for that gap.
 
 mod config;
+mod contract;
 mod host;
 mod out;
 mod perms;
@@ -150,6 +151,9 @@ pub(crate) struct Prepared {
     pub vars: Vec<String>,
     /// The fragments with each `@name@` replaced by its tree's path.
     pub fragments: Vec<ConfigFragment>,
+    /// The contracts the kernel's final config must meet, each with the
+    /// path of its file in the store.
+    pub contracts: Vec<(gaia_types::KernelContract, PathBuf)>,
 }
 
 impl Prepared {
@@ -176,7 +180,21 @@ impl Prepared {
         for o in &config.overrides {
             key = key.config(&format!("override.{}", o.package), &o.input);
         }
-        key.config("externals", config.externals.join("\n"))
+        key = key.config("externals", config.externals.join("\n"));
+        // Only when there is one: a build without a contract keeps its key.
+        for contract in &config.kernel_contracts {
+            key = key.config(
+                &format!("kernel-contract.{}", contract.input),
+                format!(
+                    "{}\n{}\n{}\n{}",
+                    contract.path,
+                    contract.board,
+                    contract.kind,
+                    contract.storage_drivers.join(" ")
+                ),
+            );
+        }
+        key
     }
 }
 
@@ -232,12 +250,21 @@ pub(crate) fn prepare(
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
+    let contracts = config
+        .kernel_contracts
+        .iter()
+        .map(|contract| {
+            let file = path_of(&contract.input).join(&contract.path);
+            (contract.clone(), file)
+        })
+        .collect();
     Ok(Prepared {
         src,
         src_digest,
         dirs,
         vars,
         fragments,
+        contracts,
     })
 }
 
@@ -431,7 +458,19 @@ fn build(
         ),
     ] {
         let files = config::string_option(&resolved, files_option).unwrap_or_default();
-        if files.is_empty() || !resolved.lines().any(|line| line.trim() == enabled) {
+        let has = resolved.lines().any(|line| line.trim() == enabled);
+        let contracts: &[_] = if package == "linux" {
+            &prepared.contracts
+        } else {
+            &[]
+        };
+        if !contracts.is_empty() && !has {
+            return Err(fail(format!(
+                "{} states a kernel contract ({}), and this build has no kernel",
+                contracts[0].0.asked_by, contracts[0].0.path
+            )));
+        }
+        if !has || (files.is_empty() && contracts.is_empty()) {
             continue;
         }
         let goal = format!("{package}-configure");
@@ -463,6 +502,20 @@ fn build(
                 if not_taken.len() == 1 { "" } else { "s" },
                 not_taken.join("\n  ")
             )));
+        }
+        // What a boot path needs built in, by its owner's own list.
+        for (contract, file) in contracts {
+            let stated = fs::read_to_string(file)
+                .map_err(|e| fail(format!("the kernel contract {}: {e}", contract.path)))?;
+            let missing = contract::problems(&stated, &text, contract).map_err(fail)?;
+            if !missing.is_empty() {
+                return Err(fail(format!(
+                    "the kernel for the board {} does not meet the contract of {}:\n  {}",
+                    contract.board,
+                    contract.asked_by,
+                    missing.join("\n  ")
+                )));
+            }
         }
     }
 

@@ -979,7 +979,76 @@ fn image_os(
     let i = at.index;
     let key = format!("images[{i}].os");
     let plan = os::plan(at.board, i, at.spec, file, at.lock)?;
-    let parts = os::split(&plan, at.board);
+    let mut parts = os::split(&plan, at.board);
+    // A component's kernel contract is checked in the kernel's build, with
+    // the board's storage drivers and the kind of image the board takes.
+    for component in at.members {
+        let Some(wanted) = component
+            .requires
+            .as_ref()
+            .and_then(|requires| requires.kernel_contract.as_ref())
+        else {
+            continue;
+        };
+        let at_key = "requires.kernel_contract";
+        let source = component.sources.get(&wanted.source).ok_or_else(|| {
+            Error::at(
+                &component.file,
+                format!("{at_key}.source"),
+                format!("no source named `{}`", wanted.source),
+            )
+        })?;
+        let Some(kernel) = parts.kernel.as_mut() else {
+            return Err(Error::at(
+                &component.file,
+                at_key,
+                format!(
+                    "{} states a kernel contract, and the board {} of the image {} has no kernel to check",
+                    component.name, at.board.name, at.image.name
+                ),
+            ));
+        };
+        let drivers = at
+            .board
+            .kernel
+            .as_ref()
+            .and_then(|kernel| kernel.storage_drivers.clone())
+            .unwrap_or_default();
+        if let Some(bad) = drivers.iter().find(|name| {
+            !name.starts_with("CONFIG_")
+                || !name
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        }) {
+            return Err(Error::at(
+                &at.board.file,
+                "kernel.storage_drivers",
+                format!("`{bad}` is not an option as the kernel's .config writes it (CONFIG_NAME)"),
+            ));
+        }
+        // Raw NAND takes an mtd image; everything else a disk.
+        let kind = match at.board.flash.as_ref().and_then(|flash| flash.medium) {
+            Some(gaia_describe::Medium::SpiNand) => "mtd",
+            _ => "disk",
+        };
+        kernel.require(
+            gaia_types::KernelContract {
+                input: format!("contract.{}", component.name),
+                path: wanted.path.clone(),
+                asked_by: component.name.clone(),
+                board: at.board.name.clone(),
+                kind: kind.into(),
+                storage_drivers: drivers,
+            },
+            InputFrom::Picked {
+                file: component.file.clone(),
+                name: wanted.source.clone(),
+                source: source.clone(),
+                lock_name: format!("{}.{}", component.name, wanted.source),
+                path: wanted.path.clone(),
+            },
+        );
+    }
     let source = product.sources.get(&at.spec.source).ok_or_else(|| {
         Error::at(
             file,
@@ -1044,6 +1113,39 @@ fn image_os(
                                 at.lock,
                                 at.board,
                             )?;
+                            (once, node)
+                        }
+                    }
+                }
+                InputFrom::Picked {
+                    file: described,
+                    name: source_name,
+                    source,
+                    lock_name,
+                    path,
+                } => {
+                    let once = format!("picked:{lock_name}:{path}");
+                    match os_inputs.get(&once) {
+                        Some(&node) => (once, node),
+                        None => {
+                            let from = source_node(
+                                g,
+                                described,
+                                source_name,
+                                lock_name,
+                                source,
+                                at.lock,
+                                at.board,
+                            )?;
+                            let node = g.add(
+                                "gaia.tree.pick",
+                                format!("{}.os.{name}", at.image.name),
+                                described,
+                                "requires.kernel_contract",
+                            )?;
+                            g.set(node, "path", Lit::Str(path.clone()));
+                            let out = g.first_output(from).unwrap_or("tree");
+                            g.edge((from, out), (node, "tree"));
                             (once, node)
                         }
                     }
