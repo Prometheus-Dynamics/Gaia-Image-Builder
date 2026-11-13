@@ -50,6 +50,9 @@ impl Format {
 }
 
 /// `artifact` compressed with xz at `level` (0 to 9) on `threads` threads.
+/// This is a general compressor: its presets above 6 use a dictionary above
+/// 8 MiB, which a board refuses; the file a board takes is made by
+/// `gaia.flash.image`.
 #[node(
     id = "gaia.compress.xz",
     inputs(store, artifact, level, threads),

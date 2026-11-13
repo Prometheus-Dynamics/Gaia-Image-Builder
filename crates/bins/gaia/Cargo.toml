@@ -26,6 +26,7 @@ gaia-check = { path = "../../nodes/check" }
 gaia-compress = { path = "../../nodes/compress" }
 gaia-describe = { path = "../../core/describe" }
 gaia-disk = { path = "../../nodes/disk" }
+gaia-flash-image = { path = "../../nodes/flash-image" }
 gaia-fs-erofs = { path = "../../nodes/fs-erofs" }
 gaia-fs-ext4 = { path = "../../nodes/fs-ext4" }
 gaia-fs-ubi = { path = "../../nodes/fs-ubi" }
