@@ -1,7 +1,9 @@
-# USB gadget network on the OTG port (g_ether: CDC ECM and RNDIS), with the
-# OTG controller in peripheral mode (rk3566-radxa-zero-3e-gadget.dts), for a
-# board without a cable on its Ethernet port.
+# USB gadgets on the OTG port, made at run time through configfs (CDC NCM
+# for a network: the gadget's init script sets its Ethernet addresses before
+# it binds, which a built-in g_ether does not allow), with the OTG controller
+# in peripheral mode (rk3566-radxa-zero-3e-gadget.dts), for a board without
+# a cable on its Ethernet port.
 CONFIG_USB_GADGET=y
 CONFIG_USB_DWC3_DUAL_ROLE=y
-CONFIG_USB_ETH=y
-CONFIG_USB_ETH_RNDIS=y
+CONFIG_USB_CONFIGFS=y
+CONFIG_USB_CONFIGFS_NCM=y

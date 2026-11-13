@@ -130,3 +130,28 @@ fn the_demo_product_loads_its_board_and_component() {
         ]
     );
 }
+
+/// The gadget network's Ethernet addresses are the same on every boot: its
+/// script derives them from the board's identity by the rule Lemnos uses
+/// for its NCM function. The vector is that rule's.
+#[test]
+fn the_gadget_networks_addresses_follow_the_identity_rule() {
+    let script = examples().join("components/usb-gadget-network/files/S41usb0");
+    let out = std::process::Command::new("/bin/sh")
+        .arg(&script)
+        .args(["addresses", "lemnos-test:0123456789abcdef"])
+        .output()
+        .expect("sh");
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "aa:22:75:11:2a:72 aa:22:75:11:2a:73",
+        "host then device"
+    );
+    let fragment = std::fs::read_to_string(examples().join("boards/zero-3e/assets/linux.fragment"))
+        .expect("read");
+    assert!(
+        fragment.contains("CONFIG_USB_CONFIGFS_NCM=y") && !fragment.contains("CONFIG_USB_ETH=y"),
+        "the script makes the gadget; a built-in one would bind first with random addresses"
+    );
+}
