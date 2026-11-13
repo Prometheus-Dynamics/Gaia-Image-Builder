@@ -264,6 +264,9 @@ pub(crate) fn wire(
                     loaded,
                     lock,
                     setup,
+                    wants_system: recipes
+                        .get(&image.recipe, &product_file)
+                        .is_ok_and(|recipe| recipe.inputs.contains_key("system")),
                 },
                 &mut os_inputs,
                 &mut host_ports,
@@ -590,6 +593,12 @@ fn image_recipe(
             for p in ports {
                 g.edge((os.merged, "tree"), (stages[&p.stage], &p.port));
             }
+        } else if input == "system"
+            && let Some(os) = at.os
+        {
+            for p in ports {
+                g.edge((os.system, "tree"), (stages[&p.stage], &p.port));
+            }
         } else if matches!(
             input.as_str(),
             "kernel" | "device-trees" | "bootloader" | "os"
@@ -607,7 +616,8 @@ fn image_recipe(
             for p in ports {
                 g.edge((os, port), (stages[&p.stage], &p.port));
             }
-        } else if input == "build" {
+        } else if input == "build" || input == "system" {
+            // With no OS there is nothing under /boot to leave out: the same tree.
             let [(_, node)] = builds else {
                 return Err(Error::at(
                     product_file,
@@ -881,6 +891,10 @@ struct OsNodes {
     kernel: Option<u32>,
     bootloader: Option<u32>,
     merged: u32,
+    /// The root filesystem without the kernel's image and device trees
+    /// under /boot: what a slot holds, whose kernel is read from elsewhere.
+    /// The same node as `merged` when nothing is under /boot.
+    system: u32,
 }
 
 impl OsNodes {
@@ -909,6 +923,8 @@ struct OsIn<'a> {
     loaded: &'a Loaded,
     lock: &'a Lock,
     setup: &'a Setup,
+    /// Whether the image's recipe takes `system`.
+    wants_system: bool,
 }
 
 /// The image's OS step, its input trees and host inputs, and the image's
@@ -1089,6 +1105,9 @@ fn image_os(
     g.set(layer, "owner", Lit::Str("os".into()));
     g.edge((os, "rootfs"), (layer, "tree"));
     let mut layers = vec![layer];
+    // The kernel's image and device trees under /boot, kept apart: `build`
+    // has them, `system` does not.
+    let mut boot_layers: Vec<u32> = Vec::new();
     // What the kernel's build made that the root filesystem carries: its
     // modules, and its image and device trees when the image wants them.
     if let Some(kernel) = kernel {
@@ -1106,8 +1125,8 @@ fn image_os(
         };
         layers.push(under(g, "modules", "modules", "/lib/modules")?);
         if boot_in_rootfs {
-            layers.push(under(g, "image", "kernel", "/boot")?);
-            layers.push(under(g, "device-trees", "device_trees", "/boot")?);
+            boot_layers.push(under(g, "image", "kernel", "/boot")?);
+            boot_layers.push(under(g, "device-trees", "device_trees", "/boot")?);
         }
     }
     for component in at.members {
@@ -1126,14 +1145,31 @@ fn image_os(
         file,
         &key,
     )?;
-    for (k, layer) in layers.into_iter().enumerate() {
-        g.edge((layer, "layer"), (merge, &format!("layers{k}")));
+    for (k, layer) in layers.iter().chain(&boot_layers).enumerate() {
+        g.edge((*layer, "layer"), (merge, &format!("layers{k}")));
     }
+    // A second tree without /boot's kernel files, only when the recipe asks
+    // for `system` and there is something to leave out.
+    let system = if at.wants_system && !boot_layers.is_empty() {
+        let node = g.add(
+            "gaia.tree.merge",
+            format!("{}.system", at.image.name),
+            file,
+            &key,
+        )?;
+        for (k, layer) in layers.iter().enumerate() {
+            g.edge((*layer, "layer"), (node, &format!("layers{k}")));
+        }
+        node
+    } else {
+        merge
+    };
     Ok(OsNodes {
         rootfs: os,
         kernel,
         bootloader,
         merged: merge,
+        system,
     })
 }
 

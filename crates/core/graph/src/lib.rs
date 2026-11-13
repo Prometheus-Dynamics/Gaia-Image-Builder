@@ -35,7 +35,9 @@
 //!   config names are its fan-in inputs. The recipe input `build` is then
 //!   `<image>.rootfs`: the OS's tree, then each component's layer (its
 //!   install entries placed, `gaia.tree.place`, or its whole build output),
-//!   merged by `gaia.tree.merge`. The OS's boot files (Buildroot's
+//!   merged by `gaia.tree.merge`. The recipe input `system` is the same
+//!   tree without the kernel's image and device trees under /boot, for an
+//!   output that is not booted from (a slot whose kernel is read elsewhere). The OS's boot files (Buildroot's
 //!   `images/`) are four recipe inputs, by what each file is: `kernel`,
 //!   `device-trees`, `bootloader`, and `os` for the rest.
 //! - **Raw areas:** the recipe input `blobs` is the board's areas outside
