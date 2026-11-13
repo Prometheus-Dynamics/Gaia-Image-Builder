@@ -29,6 +29,8 @@ struct Graph<'r> {
     origins: Vec<Origin>,
     /// Inputs an edge or a constant fills, by node.
     filled: Vec<BTreeSet<String>>,
+    /// The named inputs a laid-out install entry takes.
+    used_inputs: BTreeSet<String>,
 }
 
 impl Graph<'_> {
@@ -192,6 +194,7 @@ pub(crate) fn wire(
             file: PathBuf::new(),
         }],
         filled: vec![BTreeSet::new()],
+        used_inputs: BTreeSet::new(),
     };
     // Each built component once, by the product's name for it.
     let mut built: BTreeMap<String, u32> = BTreeMap::new();
@@ -282,6 +285,24 @@ pub(crate) fn wire(
             os,
         };
         image_recipe(&mut g, &image_in, recipes, &mut host_ports, &mut inputs)?;
+    }
+    for name in setup.inputs.keys() {
+        if !g.used_inputs.contains(name) {
+            let taken: Vec<&str> = g.used_inputs.iter().map(String::as_str).collect();
+            let taken = if taken.is_empty() {
+                "none".to_string()
+            } else {
+                taken.join(", ")
+            };
+            return Err(Error::at(
+                &product_file,
+                "",
+                format!(
+                    "--input {name}={} names no input the product's components take; the inputs it takes are {taken}",
+                    setup.inputs[name].display()
+                ),
+            ));
+        }
     }
     g.fill(setup)?;
     g.nodes[0].port_types = host_ports;
@@ -1085,6 +1106,8 @@ enum PlaceFrom {
     Beside,
     /// One of the component's sources.
     Source(String),
+    /// A named input the command line gives, one file under its name.
+    Input(String),
 }
 
 /// A component's layers in the image: its install entries placed from
@@ -1122,6 +1145,19 @@ fn component_layers(
             InstallFrom::Built(path) => (PlaceFrom::Built, path.clone()),
             InstallFrom::File(FileRef::InSource { source, path }) => {
                 (PlaceFrom::Source(source.clone()), path.clone())
+            }
+            InstallFrom::File(FileRef::Input { name }) => {
+                if !at.setup.inputs.contains_key(name) {
+                    return Err(Error::at(
+                        file,
+                        format!("{key}.from.input"),
+                        format!(
+                            "the named input `{name}` is not given; give it with --input {name}=<path>"
+                        ),
+                    ));
+                }
+                g.used_inputs.insert(name.clone());
+                (PlaceFrom::Input(name.clone()), name.clone())
             }
             InstallFrom::File(FileRef::Local { file: local }) => {
                 let inside = local.path().strip_prefix(&dir).map_err(|_| {
@@ -1187,6 +1223,20 @@ fn component_layers(
                     Error::at(file, "install", format!("no source named `{name}`"))
                 })?;
                 component_source(g, component, name, source, at.lock, at.board)?
+            }
+            PlaceFrom::Input(name) => {
+                let path = at.setup.inputs.get(name).ok_or_else(|| {
+                    Error::at(file, "install", format!("no input named `{name}`"))
+                })?;
+                let node = g.add(
+                    "gaia.source.input",
+                    format!("{image}.{}.input.{name}", component.name),
+                    file,
+                    "install",
+                )?;
+                g.set(node, "path", Lit::Str(path.display().to_string()));
+                g.set(node, "name", Lit::Str(name.clone()));
+                node
             }
         };
         let place = g.add(

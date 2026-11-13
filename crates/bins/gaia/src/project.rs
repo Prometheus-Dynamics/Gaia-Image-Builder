@@ -50,6 +50,7 @@ impl Project {
             buildroot: buildroot_host(&store, &tools),
             store,
             tools,
+            inputs: inputs(&options.inputs)?,
         };
         let registry = registry();
         let built = gaia_graph::build(&loaded, &lock, &recipes, &registry, &setup, &builders())
@@ -322,6 +323,24 @@ pub fn store_dir(flag: Option<&Path>) -> Result<PathBuf, Stop> {
 
 fn absolute(path: &Path) -> PathBuf {
     std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// The `--input` files, by name, as absolute paths. Each must be a regular
+/// file now; a component that takes one is checked when the graph is laid
+/// out.
+fn inputs(given: &BTreeMap<String, PathBuf>) -> Result<BTreeMap<String, PathBuf>, Stop> {
+    given
+        .iter()
+        .map(|(name, path)| {
+            if !path.is_file() {
+                return Err(Stop::usage(format!(
+                    "--input {name}: {} is not a regular file",
+                    path.display()
+                )));
+            }
+            Ok((name.clone(), absolute(path)))
+        })
+        .collect()
 }
 
 /// The `--tool` paths, then known tools found on PATH, then rustc's

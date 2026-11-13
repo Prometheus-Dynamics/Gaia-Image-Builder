@@ -242,6 +242,13 @@ pub(crate) fn plan(
                     format!("@{input}@/{path}")
                 }
                 FileRef::Local { file } => plan.file(file.path()),
+                FileRef::Input { .. } => {
+                    return Err(Error::at(
+                        &board.file,
+                        format!("bootloader.blobs.{name}"),
+                        "a named input is only for a component's install entry",
+                    ));
+                }
             };
             opts.push(format!("{name}={path}"));
         }
