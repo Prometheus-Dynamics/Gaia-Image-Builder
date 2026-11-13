@@ -177,6 +177,7 @@ fn offline_build() {
                 ..OsConfig::default()
             },
             &[],
+            &gaia_os_buildroot::no_seed(&store_dir.display().to_string()).expect("seed"),
             &host,
             &Ctx::new(),
         )

@@ -87,6 +87,12 @@ fn the_plan_lists_the_config_the_board_gives() {
         "zero-3e-demo.os                         gaia.os.buildroot",
         "zero-3e-demo.kernel                     gaia.os.buildroot",
         "zero-3e-demo.bootloader                 gaia.os.buildroot",
+        // The host tools, built once from the whole config, and given to
+        // each of the three.
+        "zero-3e-demo.host-tools                 gaia.os.buildroot.host",
+        "zero-3e-demo.host-tools.seed -> zero-3e-demo.os.seed",
+        "zero-3e-demo.host-tools.seed -> zero-3e-demo.kernel.seed",
+        "zero-3e-demo.host-tools.seed -> zero-3e-demo.bootloader.seed",
         "zero-3e-demo.buildroot.tree -> zero-3e-demo.os.source",
         "zero-3e-demo.buildroot.tree -> zero-3e-demo.kernel.source",
         "zero-3e-demo.buildroot.tree -> zero-3e-demo.bootloader.source",

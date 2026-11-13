@@ -205,6 +205,7 @@ fn hello_world_builds_against_the_d1_kernel_and_its_vermagic_matches() {
             ..OsConfig::default()
         },
         &[],
+        &gaia_os_buildroot::no_seed(&store_dir.display().to_string()).expect("seed"),
         &buildroot_host(),
         &Ctx::new(),
     )
