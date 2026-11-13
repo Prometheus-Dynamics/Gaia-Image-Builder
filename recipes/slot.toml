@@ -1,8 +1,8 @@
 # A root slot: the built tree as an EROFS image, with dm-verity appended.
-# Both slots of an A/B pair take this image; the device names where it is
-# written. Untested on board.
+# A slot is a file on the data partition; `device` names where it is read
+# from. Untested on board.
 version = 1
-name = "ab-slot"
+name = "slot"
 description = "A root slot: EROFS with a dm-verity tree appended."
 
 [stages]
@@ -34,5 +34,5 @@ sets = ["erofs.level"]
 
 [parameters.device]
 type = "string"
-description = "The device the slot is written to. The verity tree is on it too."
+description = "Where the slot is read from: its file, or a device. The verity tree is in it too."
 sets = ["verity.device"]

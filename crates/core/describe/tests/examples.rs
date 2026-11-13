@@ -1,6 +1,6 @@
 //! The examples in the new form parse, and say what they should.
 
-use gaia_describe::{Board, FileRef, Product, Source};
+use gaia_describe::{Board, FileRef, OsProvider, Product, Source};
 use gaia_types::{Arch, Os, PartitionRole, Size};
 use std::path::{Path, PathBuf};
 
@@ -65,7 +65,7 @@ fn the_zero_3e_board_reads_with_its_family() {
         (Some("tf-a"), Some("rk3568"))
     );
     assert_eq!(
-        bootloader.blobs["tpl"],
+        bootloader.blobs["ROCKCHIP_TPL"],
         FileRef::InSource {
             source: "rkbin".into(),
             path: "bin/rk35/rk3566_ddr_1056MHz_v1.23.bin".into()
@@ -100,9 +100,20 @@ fn the_demo_product_loads_its_board_and_component() {
         Product::load(examples().join("products/zero-3e-demo/product.toml")).expect("loads");
     assert_eq!(loaded.product.images.len(), 1);
     let image = &loaded.product.images[0];
-    assert_eq!(image.recipe, "ab-rootfs");
+    assert_eq!(image.recipe, "slot");
     assert_eq!(image.budget.map(|s| s.0), Some(Size::mib(1024)));
-    assert_eq!(image.settings["hostname"].as_str(), Some("zero3e"));
+    assert_eq!(
+        image.settings["device"].as_str(),
+        Some("/data/slots/root.img")
+    );
+    let os = image.os.as_ref().expect("an os");
+    assert_eq!(os.provider, OsProvider::Buildroot);
+    assert_eq!(os.source, "buildroot");
+    assert!(
+        os.fragments[0]
+            .path()
+            .ends_with("examples/products/zero-3e-demo/os.fragment")
+    );
     assert_eq!(loaded.boards.len(), 1);
     let component = &loaded.components["usb-gadget-network"];
     assert_eq!(component.install.len(), 2);
@@ -112,6 +123,7 @@ fn the_demo_product_loads_its_board_and_component() {
     assert_eq!(
         wants,
         [
+            "zero-3e-demo.buildroot",
             "zero-3e.linux",
             "zero-3e.rkbin",
             "zero-3e.tf-a",

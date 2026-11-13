@@ -1,9 +1,14 @@
 //! `gaia.os.buildroot`: a root filesystem and boot files built by Buildroot.
 //!
-//! Inputs: the Buildroot source (a stored tree), config fragments (text from
-//! descriptions, applied in order over Buildroot's own `allnoconfig`),
-//! external trees (`BR2_EXTERNAL`), and the host's make, CPU pinning, job
-//! count and download cache. Buildroot runs in a fresh output directory in
+//! Inputs: the Buildroot source (a stored tree); the config
+//! ([`OsConfig`]): fragments, text from descriptions applied in order over
+//! Buildroot's own `allnoconfig`, the names of the input trees, packages
+//! built from one of them (`<PACKAGE>_OVERRIDE_SRCDIR`) and those given as
+//! `BR2_EXTERNAL`; the input trees, on ports `inputs0`, `inputs1` and so
+//! on; and the host's make, CPU pinning, job count and download cache. A
+//! fragment names an input tree as `@name@`, replaced with its path when
+//! the config is written, so the key does not change with the store's
+//! place. Buildroot runs in a fresh output directory in
 //! the step's scratch space, and its outputs are moved into the store, one
 //! artifact each:
 //!
@@ -21,8 +26,9 @@
 //! Outputs are added, never changed: a build with no kernel makes the same
 //! files and the same key, and two empty trees more.
 //!
-//! The key holds the source's digest, each external tree's digest, the
-//! fragments' text and the make program. The download cache, job count and
+//! The key holds the source's digest, each input tree's digest by name, the
+//! fragments' text as written, the overrides, the externals and the make
+//! program. The download cache, job count and
 //! CPU list change how fast it runs, not what it makes, so they are not in
 //! the key.
 //!
@@ -36,8 +42,8 @@ mod progress;
 
 use daedalus::prelude::*;
 use gaia_step::{Ctx, Digest, KeyBuilder, Step, StepError, Store, Stream, Tool, Work};
+use daedalus_cpu_author::FanIn;
 use gaia_types::{Artifact, ArtifactKind, Tree};
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs;
 use std::io;
@@ -63,41 +69,29 @@ const OUTPUTS: [(&str, &str); 9] = [
     ("toolchain", "toolchain"),
 ];
 
-/// A block of Buildroot config from a description: `BR2_...=value` and
-/// `# BR2_... is not set` lines.
-#[derive(Clone, Debug, PartialEq, Eq, Type, Serialize, Deserialize)]
-#[type_key("gaia:buildroot-fragment")]
-pub struct ConfigFragment {
-    /// Names the fragment in errors and in the key. Unique in one build.
-    pub name: String,
-    pub text: String,
-}
+pub use gaia_types::{BuildrootHost, ConfigFragment, OsConfig};
 
-/// The host side of a Buildroot run: make, an optional CPU pin, the job
-/// count and the download cache.
-#[derive(Clone, Debug, PartialEq, Eq, Type, Serialize, Deserialize)]
-#[type_key("gaia:buildroot-host")]
-pub struct BuildrootHost {
-    /// Absolute path of the make program.
-    pub make: String,
-    /// Absolute path of `taskset`, used when `cpus` is set.
-    pub taskset: String,
-    /// A CPU list such as `6-31`; empty for no pinning.
-    pub cpus: String,
-    /// Make jobs, at least 1.
-    pub jobs: u32,
-    /// Absolute path of the download cache (`BR2_DL_DIR`).
-    pub download_dir: String,
-}
+/// The node's outputs, in port order.
+pub type Outputs = (
+    Tree,
+    Artifact,
+    Artifact,
+    Artifact,
+    Artifact,
+    Artifact,
+    Artifact,
+    Tree,
+    Tree,
+);
 
-/// Builds the Buildroot tree `source` with `fragments` and `external` trees,
+/// Builds the Buildroot tree `source` with `config` and its input trees,
 /// and gives its root filesystem and the artifacts described in the module
 /// docs, in that order.
-// The seven outputs are one tuple: the node macro reads it as the output ports.
+// The nine outputs are one tuple: the node macro reads it as the output ports.
 #[allow(clippy::type_complexity)]
 #[node(
     id = "gaia.os.buildroot",
-    inputs(store, source, fragments, external, host),
+    inputs(store, source, config, inputs, host),
     outputs(
         rootfs,
         kernel,
@@ -113,9 +107,9 @@ pub struct BuildrootHost {
 pub fn os_buildroot(
     store: &str,
     source: Tree,
-    fragments: Vec<ConfigFragment>,
-    external: Vec<Tree>,
-    host: BuildrootHost,
+    config: &OsConfig,
+    inputs: FanIn<'_, Tree>,
+    host: &BuildrootHost,
     cx: &Ctx,
 ) -> Result<
     (
@@ -131,29 +125,81 @@ pub fn os_buildroot(
     ),
     StepError,
 > {
+    let inputs: Vec<Tree> = inputs.iter().map(|tree| (*tree).clone()).collect();
+    build_os(store, source, config, &inputs, host, cx)
+}
+
+/// The node's body, with the input trees as a slice.
+pub fn build_os(
+    store: &str,
+    source: Tree,
+    config: &OsConfig,
+    inputs: &[Tree],
+    host: &BuildrootHost,
+    cx: &Ctx,
+) -> Result<Outputs, StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
     let fail = |why: String| StepError::body(NAME, why);
-    check(&fragments, &host).map_err(fail)?;
+    check(config, inputs.len(), host).map_err(fail)?;
     let (src, src_digest) = in_store(&store, &source, "the Buildroot source").map_err(fail)?;
     let mut key = KeyBuilder::new(NAME, KEY_VERSION)
         .input("source", src_digest)
         .config("base", "allnoconfig")
         .config("make", &host.make);
-    let mut externals = Vec::with_capacity(external.len());
-    for (i, tree) in external.iter().enumerate() {
-        let (dir, digest) = in_store(&store, tree, &format!("external tree {i}")).map_err(fail)?;
-        key = key.input(&format!("external.{i}"), digest);
-        externals.push(dir);
+    let mut dirs = Vec::with_capacity(inputs.len());
+    for (name, tree) in config.inputs.iter().zip(inputs) {
+        let (dir, digest) = in_store(&store, tree, &format!("input {name}")).map_err(fail)?;
+        key = key.input(&format!("input.{name}"), digest);
+        dirs.push((name.clone(), dir));
     }
-    for fragment in &fragments {
+    for fragment in &config.fragments {
         key = key.config(&format!("fragment.{}", fragment.name), &fragment.text);
     }
+    for o in &config.overrides {
+        key = key.config(&format!("override.{}", o.package), &o.input);
+    }
+    key = key.config("externals", config.externals.join("\n"));
+    let path_of = |name: &str| -> PathBuf {
+        dirs.iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, dir)| dir.clone())
+            .unwrap_or_default()
+    };
+    let mut vars = Vec::new();
+    if !config.externals.is_empty() {
+        let joined = config
+            .externals
+            .iter()
+            .map(|name| path_of(name).display().to_string())
+            .collect::<Vec<_>>()
+            .join(":");
+        vars.push(format!("BR2_EXTERNAL={joined}"));
+    }
+    for o in &config.overrides {
+        vars.push(format!(
+            "{}_OVERRIDE_SRCDIR={}",
+            o.package,
+            path_of(&o.input).display()
+        ));
+    }
+    let fragments = config
+        .fragments
+        .iter()
+        .map(|f| {
+            Ok(ConfigFragment {
+                name: f.name.clone(),
+                text: config::substitute(&f.text, &dirs)
+                    .map_err(|why| format!("fragment {:?}: {why}", f.name))?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()
+        .map_err(fail)?;
     let outputs: Vec<(&str, &Path)> = OUTPUTS
         .iter()
         .map(|(name, path)| (*name, Path::new(*path)))
         .collect();
     let made = Step::new(&store, cx, NAME, key.finish()).look_up_or_make(&outputs, |work| {
-        build(work, &src, &externals, &fragments, &host)
+        build(work, &src, &vars, &fragments, host)
     })?;
     let artifact = |name: &str, kind: ArtifactKind| Artifact {
         kind,
@@ -179,7 +225,15 @@ pub fn os_buildroot(
     ))
 }
 
-fn check(fragments: &[ConfigFragment], host: &BuildrootHost) -> Result<(), String> {
+fn check(config: &OsConfig, inputs: usize, host: &BuildrootHost) -> Result<(), String> {
+    config.check()?;
+    if inputs != config.inputs.len() {
+        return Err(format!(
+            "the config names {} input trees, and {inputs} are given",
+            config.inputs.len()
+        ));
+    }
+    let fragments = &config.fragments;
     if host.jobs == 0 {
         return Err("host jobs must be at least 1".into());
     }
@@ -213,7 +267,7 @@ fn in_store(store: &Store, tree: &Tree, what: &str) -> Result<(PathBuf, Digest),
 fn build(
     work: &mut Work<'_>,
     src: &Path,
-    externals: &[PathBuf],
+    vars: &[String],
     fragments: &[ConfigFragment],
     host: &BuildrootHost,
 ) -> Result<(), StepError> {
@@ -225,16 +279,16 @@ fn build(
     let out = dir.join("out");
     fs::create_dir(&out).map_err(io_fail("output directory"))?;
 
-    work.run(&make_tool(host, src, &out, externals, &["allnoconfig"]))?;
+    work.run(&make_tool(host, src, &out, vars, &["allnoconfig"]))?;
     let config = out.join(".config");
     let base = fs::read_to_string(&config).map_err(io_fail("the base config"))?;
     let merged = config::merge(&base, fragments).map_err(fail)?;
     fs::write(&config, merged).map_err(io_fail("the merged config"))?;
-    work.run(&make_tool(host, src, &out, externals, &["olddefconfig"]))?;
+    work.run(&make_tool(host, src, &out, vars, &["olddefconfig"]))?;
 
     let shown = Arc::new(Mutex::new(String::new()));
     let sink = shown.clone();
-    let order = make_tool(host, src, &out, externals, &["show-build-order"]).on_line(
+    let order = make_tool(host, src, &out, vars, &["show-build-order"]).on_line(
         move |stream, line| {
             if stream == Stream::Stdout
                 && let Ok(mut text) = sink.lock()
@@ -252,7 +306,7 @@ fn build(
 
     let installed = Arc::new(Mutex::new(BTreeSet::new()));
     let sink = installed.clone();
-    let build = make_tool(host, src, &out, externals, &[]).on_line(move |_, line| {
+    let build = make_tool(host, src, &out, vars, &[]).on_line(move |_, line| {
         if let Some(name) = progress::installed_to_target(line)
             && let Ok(mut set) = sink.lock()
         {
@@ -292,7 +346,7 @@ fn make_tool(
     host: &BuildrootHost,
     src: &Path,
     out: &Path,
-    externals: &[PathBuf],
+    vars: &[String],
     goals: &[&str],
 ) -> Tool {
     let tool = if host.cpus.is_empty() {
@@ -303,21 +357,13 @@ fn make_tool(
             .arg(&host.cpus)
             .arg(&host.make)
     };
-    let mut tool = tool
-        .cwd(src)
+    tool.cwd(src)
         .arg("--no-print-directory")
         .arg(format!("-j{}", host.jobs))
         .arg(format!("O={}", out.display()))
-        .arg(format!("BR2_DL_DIR={}", host.download_dir));
-    if !externals.is_empty() {
-        let joined = externals
-            .iter()
-            .map(|path| path.display().to_string())
-            .collect::<Vec<_>>()
-            .join(":");
-        tool = tool.arg(format!("BR2_EXTERNAL={joined}"));
-    }
-    tool.args(goals)
+        .arg(format!("BR2_DL_DIR={}", host.download_dir))
+        .args(vars)
+        .args(goals)
         .env("PATH", PATH)
         .env("LC_ALL", "C")
         .env("HOME", out.display().to_string())

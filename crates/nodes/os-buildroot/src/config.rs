@@ -67,6 +67,34 @@ pub fn merge(base: &str, fragments: &[ConfigFragment]) -> Result<String, String>
     Ok(text)
 }
 
+/// `text` with each `@name@` of an input tree replaced by its path. An
+/// `@...@` of letters, digits, `.`, `-` and `_` that names no input is an
+/// error, so a misspelled name is not left for Buildroot to find.
+pub fn substitute(text: &str, inputs: &[(String, std::path::PathBuf)]) -> Result<String, String> {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('@') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        let name_end = after
+            .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')))
+            .unwrap_or(after.len());
+        if name_end > 0 && after[name_end..].starts_with('@') {
+            let name = &after[..name_end];
+            let Some((_, path)) = inputs.iter().find(|(n, _)| n == name) else {
+                return Err(format!("@{name}@ names no input tree"));
+            };
+            out.push_str(&path.display().to_string());
+            rest = &after[name_end + 1..];
+        } else {
+            out.push('@');
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
 fn matches_symbol(line: &str, name: &str) -> bool {
     matches!(symbol(line), Ok(Some(found)) if found == name)
 }
@@ -123,6 +151,29 @@ mod tests {
             merge("BR2_aarch64=y", &[]).expect("merge"),
             "BR2_aarch64=y\n"
         );
+    }
+
+    #[test]
+    fn an_input_name_becomes_its_path() {
+        let inputs = vec![
+            ("zero.linux".to_string(), std::path::PathBuf::from("/s/objects/aa")),
+            ("files.0".to_string(), std::path::PathBuf::from("/s/objects/bb")),
+        ];
+        let text = "BR2_X=\"@files.0@/a.fragment @files.0@/b\"\nBR2_Y=\"me@host\"\n";
+        assert_eq!(
+            substitute(text, &inputs).expect("substituted"),
+            "BR2_X=\"/s/objects/bb/a.fragment /s/objects/bb/b\"\nBR2_Y=\"me@host\"\n"
+        );
+        assert_eq!(
+            substitute("BR2_X=\"@zero.linux@\"", &inputs).expect("one"),
+            "BR2_X=\"/s/objects/aa\""
+        );
+    }
+
+    #[test]
+    fn a_name_that_is_no_input_is_an_error() {
+        let why = substitute("BR2_X=\"@nothing@/f\"", &[]).expect_err("unknown");
+        assert_eq!(why, "@nothing@ names no input tree");
     }
 
     #[test]
