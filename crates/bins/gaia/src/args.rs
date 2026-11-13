@@ -9,6 +9,7 @@ pub const HELP: &str = "\
 gaia: build images from product descriptions
 
 usage:
+  gaia validate <file.toml>... [--kind product|board|family|component]
   gaia plan  <product.toml> [project flags] [--json]
   gaia build <product.toml> [project flags] [--jobs N]
   gaia lock  <product.toml> [--update SOURCE]... [--check]  (see gaia lock --help)
@@ -24,16 +25,30 @@ project flags:
                      toolchain, ...); repeatable. Without it, a known tool
                      is looked up on PATH, and `toolchain` is rustc's sysroot.
 
+validate checks description files and what they name: no lock, no tools,
+no network. It stops at the first bad file, naming the key. Without --kind,
+a file with `images` is a product; one with a board's keys (target, kernel,
+partitions, ...) is a board, or a family when it has no name and extends
+nothing; any other is a component.
+
 plan prints the graph document and the plan and runs nothing. build runs
 the graph; Ctrl-C stops at the next step boundary. clean keeps what the
 latest N builds (default 3) used and removes the rest. show prints what an
 output of the latest build holds and the steps it came from.
 ";
 
+/// `gaia validate`: the files, and the kind to check each as.
+#[derive(Debug, Default, PartialEq)]
+pub struct Validate {
+    pub files: Vec<PathBuf>,
+    pub kind: Option<gaia_describe::Kind>,
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Help,
     Version,
+    Validate(Validate),
     Plan(Project),
     Build(Project),
     Clean(Clean),
@@ -114,6 +129,30 @@ pub fn parse(words: &[String]) -> Result<Command, Stop> {
             } else {
                 Command::Plan(project)
             }
+        }
+        "validate" => {
+            let mut validate = Validate::default();
+            while let Some(word) = words.next() {
+                match word {
+                    "--kind" => {
+                        let text = words.value(word)?;
+                        validate.kind =
+                            Some(gaia_describe::Kind::parse(text).ok_or_else(|| {
+                                Stop::usage(format!(
+                                    "--kind takes product, board, family or component, not `{text}`"
+                                ))
+                            })?);
+                    }
+                    flag if flag.starts_with('-') => {
+                        return Err(Stop::usage(format!("validate has no flag `{flag}`")));
+                    }
+                    file => validate.files.push(file.into()),
+                }
+            }
+            if validate.files.is_empty() {
+                return Err(Stop::usage("validate needs at least one file"));
+            }
+            Command::Validate(validate)
         }
         "lock" => return Ok(Command::Lock(rest.to_vec())),
         "clean" => {
