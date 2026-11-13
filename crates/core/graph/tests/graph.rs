@@ -396,3 +396,49 @@ fn a_git_source_subdir_is_its_node_setting() {
     );
     assert_eq!(node("hello-b.src").consts.get("subdir"), None);
 }
+
+#[test]
+fn an_image_written_with_its_digest_hands_the_oci_node_the_bare_reference() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (product, recipes) = describe(dir.path());
+    let digested = format!("{IMAGE}@{IMAGE_DIGEST}");
+    write(
+        &dir.path().join("components/hello-a/component.toml"),
+        &component("x86_64-unknown-linux-musl", "", "hello-a").replacen(
+            &format!("image = \"{IMAGE}\""),
+            &format!("image = \"{digested}\""),
+            1,
+        ),
+    );
+    let mut lock = lock();
+    lock.entries.insert(
+        "hello-a.root".into(),
+        Entry::Image {
+            reference: digested.clone(),
+            digest: IMAGE_DIGEST.into(),
+        },
+    );
+    let loaded = Product::load(&product).expect("loads");
+    let recipes = Recipes::load_dir(&recipes).expect("recipes");
+    let built = build(
+        &loaded,
+        &lock,
+        &recipes,
+        &registry(),
+        &setup(),
+        &Builders::default(),
+    )
+    .expect("builds");
+    let node = built
+        .doc
+        .graph
+        .nodes
+        .iter()
+        .find(|n| n.label.as_deref() == Some("hello-a.root"))
+        .expect("the image node");
+    assert_eq!(node.consts.get("reference"), Some(&Lit::Str(IMAGE.into())));
+    assert_eq!(
+        node.consts.get("digest"),
+        Some(&Lit::Str(IMAGE_DIGEST.into()))
+    );
+}

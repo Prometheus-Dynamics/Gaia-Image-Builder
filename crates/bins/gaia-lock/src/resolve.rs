@@ -89,6 +89,10 @@ fn is_hex_commit(text: &str) -> bool {
     matches!(text.len(), 40 | 64) && text.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
+/// What to write when a git ref cannot be asked for: the commit itself.
+pub(crate) const GIT_HINT: &str =
+    "writing the full commit as `ref` in the description avoids this request";
+
 /// The commit `reference` names at `url`: an annotated tag's commit, then a
 /// tag, a branch, or a ref named in full. A commit names itself.
 fn git_commit(git: &Path, url: &str, reference: &str) -> Result<String, String> {
@@ -99,10 +103,10 @@ fn git_commit(git: &Path, url: &str, reference: &str) -> Result<String, String> 
         .args(["ls-remote", "--", url])
         .env("GIT_TERMINAL_PROMPT", "0")
         .output()
-        .map_err(|e| format!("{}: {e}", git.display()))?;
+        .map_err(|e| format!("{}: {e}; {GIT_HINT}", git.display()))?;
     if !out.status.success() {
         return Err(format!(
-            "git ls-remote {}: {}",
+            "git ls-remote {}: {}; {GIT_HINT}",
             gaia_lock::redact(url),
             String::from_utf8_lossy(&out.stderr).trim()
         ));
@@ -150,6 +154,9 @@ fn download_digest(curl: &Path, url: &str, scratch: &Path) -> Result<String, Str
     Ok(digest.to_string())
 }
 
+/// What to write when an image's tag cannot be asked for: its digest.
+const IMAGE_HINT: &str = "writing the digest in the description avoids this request";
+
 const ACCEPT: &str = "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json";
 
 /// The manifest digest `reference`'s tag names now, asked anonymously. A
@@ -163,11 +170,18 @@ fn image_digest(curl: &Path, reference: &str, scratch: &Path) -> Result<String, 
     let tag = last.split_once(':').map_or("latest", |(_, tag)| tag);
     let url = format!("{}/v2/{}/manifests/{tag}", parsed.base, parsed.repository);
     let body = scratch.join("manifest");
-    let mut answer = get(curl, &url, &[format!("Accept: {ACCEPT}")], &body)?;
+    let hint = format!(
+        "{IMAGE_HINT}: `image = \"{}@sha256:<64 hex digits>\"`",
+        reference
+            .split_once('@')
+            .map_or(reference, |(bare, _)| bare)
+    );
+    let mut answer = get(curl, &url, &[format!("Accept: {ACCEPT}")], &body)
+        .map_err(|e| format!("{e}; {hint}"))?;
     if answer.status == 401 {
         let challenge = answer.header("www-authenticate").unwrap_or_default();
         let token = token(curl, &challenge, &parsed.repository, scratch)
-            .map_err(|e| format!("{reference}: {e}"))?;
+            .map_err(|e| format!("{reference}: {e}; {hint}"))?;
         answer = get(
             curl,
             &url,
@@ -176,10 +190,11 @@ fn image_digest(curl: &Path, reference: &str, scratch: &Path) -> Result<String, 
                 format!("Authorization: Bearer {token}"),
             ],
             &body,
-        )?;
+        )
+        .map_err(|e| format!("{e}; {hint}"))?;
     }
     if answer.status != 200 {
-        return Err(format!("{url}: HTTP {}", answer.status));
+        return Err(format!("{url}: HTTP {}; {hint}", answer.status));
     }
     // The digest of the manifest's bytes is the digest; a registry's
     // header must agree with it.

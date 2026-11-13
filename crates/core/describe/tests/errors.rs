@@ -330,3 +330,33 @@ fn an_unknown_data_component_names_images_data() {
         "did you mean `state`?",
     );
 }
+
+#[test]
+fn a_malformed_image_digest_is_refused_at_its_key() {
+    let good = "a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2";
+    for text in [
+        format!("docker.io/library/rust:1.99-slim@sha256:{}", &good[1..]),
+        format!("docker.io/library/rust:1.99-slim@sha256:{}0", good),
+        format!(
+            "docker.io/library/rust:1.99-slim@sha256:{}",
+            good.to_uppercase()
+        ),
+        format!("docker.io/library/rust:1.99-slim@md5:{good}"),
+        format!("docker.io/library/rust:1.99-slim@{good}"),
+        "docker.io/library/rust:1.99-slim@".to_string(),
+    ] {
+        let text = format!("version = 1\nname = \"c\"\n[sources.root]\nimage = \"{text}\"\n");
+        let dir = files(&[("c.toml", text.as_str())]);
+        let path = dir.path().join("c.toml");
+        let error = Component::read(&path).expect_err("refused");
+        println!("{error}");
+        assert_names(&error, &path, "sources.root.image", "is not a digest");
+    }
+    // A digest in the right form is read as written.
+    let text = format!(
+        "version = 1\nname = \"c\"\n[sources.root]\nimage = \"docker.io/library/rust:1.99-slim@sha256:{good}\"\n"
+    );
+    let dir = files(&[("c.toml", text.as_str())]);
+    let component = Component::read(dir.path().join("c.toml")).expect("reads");
+    assert!(component.sources.contains_key("root"));
+}
