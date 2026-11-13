@@ -38,6 +38,7 @@
 //! count reaches Daedalus after `make` ends. See the PR for that gap.
 
 mod config;
+mod host;
 mod out;
 mod perms;
 mod progress;
@@ -52,13 +53,13 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-const NAME: &str = "gaia.os.buildroot";
+pub(crate) const NAME: &str = "gaia.os.buildroot";
 /// 2: the root filesystem's owners and modes, from Buildroot's own tar.
 /// (The check that every config line was taken changes no output, so no
-/// new version.)
-const KEY_VERSION: u32 = 2;
+/// new version.) 3: the host tools another step built, as an input.
+const KEY_VERSION: u32 = 3;
 /// The environment every make runs with. Nothing else is inherited.
-const PATH: &str = "/usr/local/bin:/usr/bin:/bin";
+pub(crate) const PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 
 /// The step's outputs, by name and by path inside its directory. The last two
 /// are empty when the build has no kernel.
@@ -76,6 +77,7 @@ const OUTPUTS: [(&str, &str); 10] = [
 ];
 
 pub use gaia_types::{BuildrootHost, ConfigFragment, OsConfig};
+pub use host::{build_host, host_goals, os_buildroot_host};
 
 /// The node's outputs, in port order.
 pub type Outputs = (
@@ -97,7 +99,7 @@ pub type Outputs = (
 #[allow(clippy::type_complexity)]
 #[node(
     id = "gaia.os.buildroot",
-    inputs(store, source, os, inputs, host),
+    inputs(store, source, os, inputs, seed, host),
     outputs(
         rootfs,
         kernel,
@@ -115,6 +117,7 @@ pub fn os_buildroot(
     source: Tree,
     os: &OsConfig,
     inputs: FanIn<'_, Tree>,
+    seed: Tree,
     host: &BuildrootHost,
     cx: &Ctx,
 ) -> Result<
@@ -132,43 +135,69 @@ pub fn os_buildroot(
     StepError,
 > {
     let inputs: Vec<Tree> = inputs.iter().map(|tree| (*tree).clone()).collect();
-    build_os(store, source, os, &inputs, host, cx)
+    build_os(store, source, os, &inputs, &seed, host, cx)
 }
 
-/// The node's body, with the input trees as a slice.
-pub fn build_os(
-    store: &str,
-    source: Tree,
+/// What a Buildroot run is given, worked out from the config and the input
+/// trees: the same for the OS step and for the host tools' step.
+pub(crate) struct Prepared {
+    /// The Buildroot source in the store.
+    pub src: PathBuf,
+    pub src_digest: Digest,
+    /// Each input tree: its name, its path in the store, its digest.
+    pub dirs: Vec<(String, PathBuf, Digest)>,
+    /// `NAME=value` arguments for make: externals and source overrides.
+    pub vars: Vec<String>,
+    /// The fragments with each `@name@` replaced by its tree's path.
+    pub fragments: Vec<ConfigFragment>,
+}
+
+impl Prepared {
+    /// The key parts every step over this config has: the source, each
+    /// input tree, the fragments as written, the overrides, the externals
+    /// and the make program.
+    pub fn key(
+        &self,
+        name: &str,
+        version: u32,
+        config: &OsConfig,
+        host: &BuildrootHost,
+    ) -> KeyBuilder {
+        let mut key = KeyBuilder::new(name, version)
+            .input("source", self.src_digest)
+            .config("base", "allnoconfig")
+            .config("make", &host.make);
+        for (name, _, digest) in &self.dirs {
+            key = key.input(&format!("input.{name}"), *digest);
+        }
+        for fragment in &config.fragments {
+            key = key.config(&format!("fragment.{}", fragment.name), &fragment.text);
+        }
+        for o in &config.overrides {
+            key = key.config(&format!("override.{}", o.package), &o.input);
+        }
+        key.config("externals", config.externals.join("\n"))
+    }
+}
+
+pub(crate) fn prepare(
+    store: &Store,
+    source: &Tree,
     config: &OsConfig,
     inputs: &[Tree],
     host: &BuildrootHost,
-    cx: &Ctx,
-) -> Result<Outputs, StepError> {
-    let store = Store::open(store).map_err(StepError::store(NAME))?;
-    let fail = |why: String| StepError::body(NAME, why);
-    check(config, inputs.len(), host).map_err(fail)?;
-    let (src, src_digest) = in_store(&store, &source, "the Buildroot source").map_err(fail)?;
-    let mut key = KeyBuilder::new(NAME, KEY_VERSION)
-        .input("source", src_digest)
-        .config("base", "allnoconfig")
-        .config("make", &host.make);
+) -> Result<Prepared, String> {
+    check(config, inputs.len(), host)?;
+    let (src, src_digest) = in_store(store, source, "the Buildroot source")?;
     let mut dirs = Vec::with_capacity(inputs.len());
     for (name, tree) in config.inputs.iter().zip(inputs) {
-        let (dir, digest) = in_store(&store, tree, &format!("input {name}")).map_err(fail)?;
-        key = key.input(&format!("input.{name}"), digest);
-        dirs.push((name.clone(), dir));
+        let (dir, digest) = in_store(store, tree, &format!("input {name}"))?;
+        dirs.push((name.clone(), dir, digest));
     }
-    for fragment in &config.fragments {
-        key = key.config(&format!("fragment.{}", fragment.name), &fragment.text);
-    }
-    for o in &config.overrides {
-        key = key.config(&format!("override.{}", o.package), &o.input);
-    }
-    key = key.config("externals", config.externals.join("\n"));
     let path_of = |name: &str| -> PathBuf {
         dirs.iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, dir)| dir.clone())
+            .find(|(n, _, _)| n == name)
+            .map(|(_, dir, _)| dir.clone())
             .unwrap_or_default()
     };
     let mut vars = Vec::new();
@@ -188,24 +217,70 @@ pub fn build_os(
             path_of(&o.input).display()
         ));
     }
+    let paths: Vec<(String, PathBuf)> = dirs
+        .iter()
+        .map(|(name, dir, _)| (name.clone(), dir.clone()))
+        .collect();
     let fragments = config
         .fragments
         .iter()
         .map(|f| {
             Ok(ConfigFragment {
                 name: f.name.clone(),
-                text: config::substitute(&f.text, &dirs)
+                text: config::substitute(&f.text, &paths)
                     .map_err(|why| format!("fragment {:?}: {why}", f.name))?,
             })
         })
-        .collect::<Result<Vec<_>, String>>()
-        .map_err(fail)?;
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(Prepared {
+        src,
+        src_digest,
+        dirs,
+        vars,
+        fragments,
+    })
+}
+
+/// An empty seed: no host tools from another step, so the build makes its
+/// own. For a build that stands alone.
+pub fn no_seed(store: &str) -> Result<Tree, StepError> {
+    let store = Store::open(store).map_err(StepError::store(NAME))?;
+    let scratch = store.scratch().map_err(StepError::store(NAME))?;
+    fs::create_dir(scratch.path().join("seed"))
+        .map_err(|e| StepError::body(NAME, format!("an empty seed: {e}")))?;
+    let made = scratch
+        .commit(&[("seed", Path::new("seed"))])
+        .map_err(StepError::store(NAME))?;
+    Ok(Tree {
+        object: made["seed"].into(),
+        entries: Vec::new(),
+    })
+}
+
+/// The node's body, with the input trees as a slice. `seed` is the host
+/// tools another step built (see [`host`]); an empty tree is none.
+pub fn build_os(
+    store: &str,
+    source: Tree,
+    config: &OsConfig,
+    inputs: &[Tree],
+    seed: &Tree,
+    host: &BuildrootHost,
+    cx: &Ctx,
+) -> Result<Outputs, StepError> {
+    let store = Store::open(store).map_err(StepError::store(NAME))?;
+    let fail = |why: String| StepError::body(NAME, why);
+    let prepared = prepare(&store, &source, config, inputs, host).map_err(fail)?;
+    let (seed_dir, seed_digest) = in_store(&store, seed, "the host tools").map_err(fail)?;
+    let key = prepared
+        .key(NAME, KEY_VERSION, config, host)
+        .input("seed", seed_digest);
     let outputs: Vec<(&str, &Path)> = OUTPUTS
         .iter()
         .map(|(name, path)| (*name, Path::new(*path)))
         .collect();
     let made = Step::new(&store, cx, NAME, key.finish())
-        .look_up_or_make(&outputs, |work| build(work, &src, &vars, &fragments, host))?;
+        .look_up_or_make(&outputs, |work| build(work, &prepared, &seed_dir, host))?;
     // Read back on a hit too: the entries are part of what the step made.
     let listed = fs::read(store.path(&made.outputs["rootfs-entries"]))
         .map_err(|e| StepError::body(NAME, format!("the root filesystem's entries: {e}")))?;
@@ -264,7 +339,11 @@ fn check(config: &OsConfig, inputs: usize, host: &BuildrootHost) -> Result<(), S
 }
 
 /// A tree in the store: its path there and its digest.
-fn in_store(store: &Store, tree: &Tree, what: &str) -> Result<(PathBuf, Digest), String> {
+pub(crate) fn in_store(
+    store: &Store,
+    tree: &Tree,
+    what: &str,
+) -> Result<(PathBuf, Digest), String> {
     let object = tree
         .object
         .object_ref()
@@ -274,34 +353,34 @@ fn in_store(store: &Store, tree: &Tree, what: &str) -> Result<(PathBuf, Digest),
 
 /// The body of the step: configure, resolve, make, then sort the outputs
 /// out of Buildroot's output directory.
-fn build(
+/// Buildroot's config in `out`: its `allnoconfig`, the fragments over it,
+/// resolved, with every line checked to have been taken. Returns the
+/// resolved text.
+pub(crate) fn configure(
+    step: &'static str,
     work: &mut Work<'_>,
-    src: &Path,
-    vars: &[String],
-    fragments: &[ConfigFragment],
+    prepared: &Prepared,
+    out: &Path,
     host: &BuildrootHost,
-) -> Result<(), StepError> {
-    let fail = |why: String| StepError::body(NAME, why);
+) -> Result<String, StepError> {
+    let fail = |why: String| StepError::body(step, why);
     let io_fail = |what: &'static str| {
-        move |error: io::Error| StepError::body(NAME, format!("{what}: {error}"))
+        move |error: io::Error| StepError::body(step, format!("{what}: {error}"))
     };
-    let dir = work.dir().to_path_buf();
-    let out = dir.join("out");
-    fs::create_dir(&out).map_err(io_fail("output directory"))?;
-
-    work.run(&make_tool(host, src, &out, vars, &["allnoconfig"]))?;
+    let (src, vars) = (&prepared.src, &prepared.vars);
+    work.run(&make_tool(host, src, out, vars, &["allnoconfig"]))?;
     let config = out.join(".config");
     let base = fs::read_to_string(&config).map_err(io_fail("the base config"))?;
     // Last, so no description turns it off: the tar is where the root
     // filesystem's owners and modes are read from.
-    let mut fragments = fragments.to_vec();
+    let mut fragments = prepared.fragments.clone();
     fragments.push(ConfigFragment {
         name: "gaia.permissions".into(),
         text: perms::FRAGMENT.into(),
     });
     let merged = config::merge(&base, &fragments).map_err(fail)?;
     fs::write(&config, merged).map_err(io_fail("the merged config"))?;
-    work.run(&make_tool(host, src, &out, vars, &["olddefconfig"]))?;
+    work.run(&make_tool(host, src, out, vars, &["olddefconfig"]))?;
     // What Buildroot resolved must be what was asked for.
     let resolved = fs::read_to_string(&config).map_err(io_fail("the resolved config"))?;
     let not_taken = config::not_taken(&resolved, &fragments);
@@ -313,6 +392,28 @@ fn build(
             not_taken.join("\n  ")
         )));
     }
+    Ok(resolved)
+}
+
+fn build(
+    work: &mut Work<'_>,
+    prepared: &Prepared,
+    seed: &Path,
+    host: &BuildrootHost,
+) -> Result<(), StepError> {
+    let fail = |why: String| StepError::body(NAME, why);
+    let io_fail = |what: &'static str| {
+        move |error: io::Error| StepError::body(NAME, format!("{what}: {error}"))
+    };
+    let (src, vars) = (&prepared.src, &prepared.vars);
+    let dir = work.dir().to_path_buf();
+    let out = dir.join("out");
+    fs::create_dir(&out).map_err(io_fail("output directory"))?;
+    // The host tools another step built, before Buildroot looks: it finds
+    // them installed and builds none of them again.
+    host::plant(seed, &out).map_err(io_fail("the host tools"))?;
+    let config = out.join(".config");
+    let resolved = configure(NAME, work, prepared, &out, host)?;
 
     // The kernel's and the bootloader's own configs, before anything
     // compiles: every line their fragment files ask for must be in the
@@ -433,7 +534,7 @@ fn build(
 
 /// One make run in `out`, for `goals` (none means Buildroot's default,
 /// `all`). With a CPU list, make runs under `taskset`.
-fn make_tool(
+pub(crate) fn make_tool(
     host: &BuildrootHost,
     src: &Path,
     out: &Path,
@@ -461,4 +562,4 @@ fn make_tool(
 }
 
 /// The node, for a registry.
-pub const NODES: [&NodeRecord; 1] = [&OS_BUILDROOT_NODE];
+pub const NODES: [&NodeRecord; 2] = [&OS_BUILDROOT_NODE, &host::OS_BUILDROOT_HOST_NODE];

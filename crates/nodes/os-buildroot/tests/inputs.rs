@@ -87,6 +87,7 @@ impl Fixture {
             source,
             config,
             inputs,
+            &gaia_os_buildroot::no_seed(&self.store.display().to_string()).expect("seed"),
             &host,
             &Ctx::new(),
         )

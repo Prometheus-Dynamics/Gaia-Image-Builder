@@ -199,8 +199,8 @@ fn kill_group(group: u32) {
 }
 
 /// Reads a stream to its end, writing every line whole to the run log,
-/// handing it to `sink`, and keeping the last [`TAIL_LINES`] (each cut to
-/// 1 KiB).
+/// handing it whole to `sink`, and keeping the last [`TAIL_LINES`] (each
+/// cut to 1 KiB).
 fn tail(
     stream: Option<impl Read>,
     which: Stream,
@@ -233,15 +233,17 @@ fn tail(
             },
             &line,
         );
+        // The sink has the line whole, as the log does: what it reads may
+        // be one long line (a tool's JSON). Only the kept tail is cut.
+        if let Some(sink) = sink {
+            sink(which, &line);
+        }
         if line.len() > LINE_BYTES {
             let mut end = LINE_BYTES;
             while !line.is_char_boundary(end) {
                 end -= 1;
             }
             line.truncate(end);
-        }
-        if let Some(sink) = sink {
-            sink(which, &line);
         }
         if lines.len() == TAIL_LINES {
             lines.pop_front();

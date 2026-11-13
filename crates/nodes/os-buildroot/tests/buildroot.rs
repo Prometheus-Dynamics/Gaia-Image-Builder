@@ -89,6 +89,7 @@ fn build(
             ..OsConfig::default()
         },
         &[],
+        &gaia_os_buildroot::no_seed(&store_path).expect("seed"),
         &host.clone(),
         &Ctx::new(),
     )

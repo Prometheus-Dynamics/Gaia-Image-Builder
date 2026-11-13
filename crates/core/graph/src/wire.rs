@@ -1014,18 +1014,14 @@ fn image_os(
     // One build per part: `<image>.os` is the root filesystem's,
     // `<image>.kernel` and `<image>.bootloader` the board's.
     let mut step = |g: &mut Graph<'_>,
+                    id: &str,
                     what: &str,
                     port: String,
                     plan: os::OsPlan,
                     host_ports: &mut BTreeMap<String, String>,
                     inputs: &mut BTreeMap<String, HostInput>|
      -> Result<u32, Error> {
-        let os = g.add(
-            "gaia.os.buildroot",
-            format!("{}.{what}", at.image.name),
-            file,
-            &key,
-        )?;
+        let os = g.add(id, format!("{}.{what}", at.image.name), file, &key)?;
         let out = g.first_output(from).unwrap_or("tree");
         g.edge((from, out), (os, "source"));
         for (k, (name, input)) in plan.inputs.iter().enumerate() {
@@ -1101,34 +1097,57 @@ fn image_os(
                 .any(|line| line.trim() == "BR2_LINUX_KERNEL_INSTALL_TARGET=y")
         })
     });
+    // The host tools, built once from the whole config; each build below
+    // starts with them in place.
+    let tools = step(
+        g,
+        "gaia.os.buildroot.host",
+        "host-tools",
+        format!("{name}.os.host-tools"),
+        plan,
+        host_ports,
+        inputs,
+    )?;
     let os = step(
         g,
+        "gaia.os.buildroot",
         "os",
         format!("{name}.os"),
         parts.rootfs,
         host_ports,
         inputs,
     )?;
+    g.edge((tools, "seed"), (os, "seed"));
     let kernel = match parts.kernel {
-        Some(plan) => Some(step(
-            g,
-            "kernel",
-            format!("{name}.os.kernel"),
-            plan,
-            host_ports,
-            inputs,
-        )?),
+        Some(plan) => {
+            let node = step(
+                g,
+                "gaia.os.buildroot",
+                "kernel",
+                format!("{name}.os.kernel"),
+                plan,
+                host_ports,
+                inputs,
+            )?;
+            g.edge((tools, "seed"), (node, "seed"));
+            Some(node)
+        }
         None => None,
     };
     let bootloader = match parts.bootloader {
-        Some(plan) => Some(step(
-            g,
-            "bootloader",
-            format!("{name}.os.bootloader"),
-            plan,
-            host_ports,
-            inputs,
-        )?),
+        Some(plan) => {
+            let node = step(
+                g,
+                "gaia.os.buildroot",
+                "bootloader",
+                format!("{name}.os.bootloader"),
+                plan,
+                host_ports,
+                inputs,
+            )?;
+            g.edge((tools, "seed"), (node, "seed"));
+            Some(node)
+        }
         None => None,
     };
 
