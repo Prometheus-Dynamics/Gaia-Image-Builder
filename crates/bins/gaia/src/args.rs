@@ -9,7 +9,7 @@ pub const HELP: &str = "\
 gaia: build images from product descriptions
 
 usage:
-  gaia validate <file.toml>... [--kind product|board|family|component]
+  gaia validate <file.toml>... [--kind product|board|family|component] [--recipes DIR]
   gaia plan  <product.toml> [project flags] [--json]
   gaia build <product.toml> [project flags] [--jobs N]
   gaia lock  <product.toml> [--update SOURCE]... [--check]  (see gaia lock --help)
@@ -29,7 +29,10 @@ validate checks description files and what they name: no lock, no tools,
 no network. It stops at the first bad file, naming the key. Without --kind,
 a file with `images` is a product; one with a board's keys (target, kernel,
 partitions, ...) is a board, or a family when it has no name and extends
-nothing; any other is a component.
+nothing; any other is a component. A product's images must name recipes
+that exist: the names are read from --recipes DIR, else recipes/ next to
+the product, and the check is skipped when there is no such directory and
+no --recipes. Recipe settings are not checked.
 
 plan prints the graph document and the plan and runs nothing. build runs
 the graph; Ctrl-C stops at the next step boundary. clean keeps what the
@@ -42,6 +45,7 @@ output of the latest build holds and the steps it came from.
 pub struct Validate {
     pub files: Vec<PathBuf>,
     pub kind: Option<gaia_describe::Kind>,
+    pub recipes: Option<PathBuf>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -143,6 +147,7 @@ pub fn parse(words: &[String]) -> Result<Command, Stop> {
                                 ))
                             })?);
                     }
+                    "--recipes" => validate.recipes = Some(words.value(word)?.into()),
                     flag if flag.starts_with('-') => {
                         return Err(Stop::usage(format!("validate has no flag `{flag}`")));
                     }
@@ -267,6 +272,13 @@ mod tests {
             parsed("build p.toml --tool git").expect_err("an error"),
             "--tool takes NAME=PATH, not `git`"
         );
+        assert!(matches!(
+            parsed("validate p.toml --recipes r"),
+            Ok(Command::Validate(Validate {
+                recipes: Some(_),
+                ..
+            }))
+        ));
         assert_eq!(
             parsed("clean extra").expect_err("an error"),
             "clean takes no `extra`"

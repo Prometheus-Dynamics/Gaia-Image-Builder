@@ -162,3 +162,83 @@ fn no_file_a_missing_file_and_a_bad_kind_are_errors() {
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("--kind takes"));
 }
+
+/// The repository's recipes, copied into the temp dir as `recipes/`.
+fn recipes(dir: &Path) {
+    copy_dir(&repo().join("recipes"), &dir.join("recipes"));
+}
+
+const RECIPE: &str = "recipe = \"sd-image\"";
+
+#[test]
+fn a_product_whose_recipes_exist_passes_with_the_recipes_dir() {
+    let dir = examples();
+    recipes(dir.path());
+    let out = validate(dir.path(), &["--recipes", "recipes", PRODUCT]);
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .collect::<Vec<_>>(),
+        [format!("ok  product  {PRODUCT}")]
+    );
+}
+
+#[test]
+fn a_recipe_name_that_is_close_is_refused_with_the_one_meant() {
+    let dir = examples();
+    recipes(dir.path());
+    edit(&dir.path().join(PRODUCT), RECIPE, "recipe = \"sd-imag\"");
+    let out = validate(dir.path(), &["--recipes", "recipes", PRODUCT]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains(PRODUCT), "{err}");
+    assert!(err.contains("images[0].recipe"), "{err}");
+    assert!(err.contains("no recipe named `sd-imag`"), "{err}");
+    assert!(err.contains("did you mean `sd-image`?"), "{err}");
+}
+
+#[test]
+fn a_recipe_name_far_from_any_lists_the_recipes_there_are() {
+    let dir = examples();
+    recipes(dir.path());
+    edit(
+        &dir.path().join(PRODUCT),
+        RECIPE,
+        "recipe = \"zzzzzzzzzzzz\"",
+    );
+    let out = validate(dir.path(), &["--recipes", "recipes", PRODUCT]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains(PRODUCT), "{err}");
+    assert!(err.contains("images[0].recipe"), "{err}");
+    assert!(err.contains("no recipe named `zzzzzzzzzzzz`"), "{err}");
+    assert!(!err.contains("did you mean"), "{err}");
+    assert!(err.contains("the recipes are "), "{err}");
+    for name in ["data-ext4", "firmware", "sd-image", "slot"] {
+        assert!(err.contains(name), "{err}");
+    }
+}
+
+#[test]
+fn without_a_recipes_dir_the_recipe_check_is_skipped() {
+    let dir = examples();
+    edit(&dir.path().join(PRODUCT), RECIPE, "recipe = \"sd-imag\"");
+    let out = validate(dir.path(), &[PRODUCT]);
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .collect::<Vec<_>>(),
+        [format!("ok  product  {PRODUCT}")]
+    );
+}
+
+#[test]
+fn a_recipes_dir_that_does_not_exist_is_an_error_when_given() {
+    let dir = examples();
+    let out = validate(dir.path(), &["--recipes", "no-such-dir", PRODUCT]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("no-such-dir"), "{err}");
+}

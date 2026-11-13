@@ -1,11 +1,16 @@
 //! Node `gaia.source.git`: a git commit, as a stored tree of its checkout.
 //!
 //! Inputs: the store, the `git` program (pinned by path), the repository
-//! URL and the commit the lock resolved. Output: a [`Tree`] of the checkout
-//! without `.git`.
+//! URL, the commit the lock resolved and an optional `subdir`. Output: a
+//! [`Tree`] of the checkout without `.git`, or of the `subdir` directory of
+//! it.
 //!
-//! - **Key:** the commit, and nothing else. The same commit from any URL or
-//!   mirror is the same tree.
+//! - **Key:** the commit, and the `subdir` when one is set. The same commit
+//!   from any URL or mirror is the same tree.
+//! - **Subdir:** a directory of the commit, as its own tree: its names at
+//!   the top of the output, nothing above it. A `subdir` that is not a
+//!   directory at that commit fails, naming the commit and the top level's
+//!   names.
 //! - **Shared object cache:** objects are fetched into one bare repository
 //!   per URL in `git/` next to the store, shared by every product that uses
 //!   the store. A commit already there is not fetched again.
@@ -41,13 +46,18 @@ pub fn cache_repository(cache: &Path, url: &str) -> PathBuf {
     cache.join(format!("{hex}.git"))
 }
 
-/// Checks out `commit` of `url` into the store.
-#[node(id = "gaia.source.git", inputs(store, git, url, commit), outputs(tree))]
+/// Checks out `commit` of `url` into the store, or its `subdir` directory.
+#[node(
+    id = "gaia.source.git",
+    inputs(store, git, url, commit, subdir),
+    outputs(tree)
+)]
 pub fn source(
     store: &str,
     git: &str,
     url: &str,
     commit: &str,
+    subdir: Option<&String>,
     cx: &Ctx,
 ) -> Result<Tree, StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
@@ -58,12 +68,55 @@ pub fn source(
             format!("{url}: `{commit}` is not a full commit id; the lock gives one"),
         ));
     }
-    let key = KeyBuilder::new(NAME, 1).config("commit", commit).finish();
+    let subdir = match subdir {
+        Some(text) => {
+            Some(check_subdir(text).map_err(|why| StepError::body(NAME, format!("{url}: {why}")))?)
+        }
+        None => None,
+    };
+    let mut key = KeyBuilder::new(NAME, 1).config("commit", commit);
+    if let Some(subdir) = &subdir {
+        key = key.config("subdir", subdir);
+    }
+    let key = key.finish();
     let cache = cache_repository(&cache_dir(&store), url);
     let made = Step::new(&store, cx, NAME, key).look_up_or_make(
         &[("tree", Path::new("tree"))],
         |work| {
             fetch(work, git, url, commit, &cache)?;
+            // What the tree is read from: the commit's root, or a directory of
+            // it. Checked here, where the commit is in the cache.
+            let from = match &subdir {
+                None => commit.to_string(),
+                Some(subdir) => {
+                    let at = format!("{commit}:{subdir}");
+                    match query(git, &cache, &["cat-file", "-t", &at]).as_deref() {
+                        Some("tree\n") => at,
+                        Some(_) => {
+                            return Err(StepError::body(
+                                NAME,
+                                format!("{url}: `{subdir}` at commit {commit} is a file, not a directory"),
+                            ));
+                        }
+                        None => {
+                            let mut names: Vec<String> =
+                                query(git, &cache, &["ls-tree", "--name-only", commit])
+                                    .unwrap_or_default()
+                                    .lines()
+                                    .map(str::to_string)
+                                    .collect();
+                            names.sort();
+                            return Err(StepError::body(
+                                NAME,
+                                format!(
+                                    "{url}: no directory `{subdir}` at commit {commit}; its top level holds: {}",
+                                    if names.is_empty() { "nothing".to_string() } else { names.join(", ") }
+                                ),
+                            ));
+                        }
+                    }
+                }
+            };
             let tree = work.dir().join("tree");
             fs::create_dir(&tree).map_err(|e| StepError::body(NAME, e))?;
             let index = work.dir().join("index");
@@ -80,7 +133,7 @@ pub fn source(
                     .env("GIT_INDEX_FILE", &index)
             };
             // This step's own index, so steps sharing the cache never share one.
-            work.run(&in_cache(&["read-tree", commit]))?;
+            work.run(&in_cache(&["read-tree", &from]))?;
             work.run(&in_cache(&["checkout-index", "--all", "--force"]))?;
             fs::remove_file(&index).map_err(|e| StepError::body(NAME, e))?;
             normalize_modes(&tree).map_err(|e| StepError::body(NAME, e))
@@ -163,6 +216,41 @@ fn fetch(
         )
     })?;
     Ok(())
+}
+
+/// A read-only git query on the cache: its stdout, or `None` when git fails.
+fn query(git: &str, cache: &Path, args: &[&str]) -> Option<String> {
+    let output = std::process::Command::new(git)
+        .arg("--git-dir")
+        .arg(cache)
+        .args(args)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// A `subdir` in normal names only, joined by `/`: what the description
+/// checks too, here for a node run on its own.
+fn check_subdir(text: &str) -> Result<String, String> {
+    use std::path::Component;
+    if text.is_empty() {
+        return Err("an empty subdir".into());
+    }
+    let mut names = Vec::new();
+    for part in Path::new(text).components() {
+        match part {
+            Component::Normal(name) => names.push(name.to_string_lossy().into_owned()),
+            _ => return Err(format!("subdir `{text}` is not a plain relative path")),
+        }
+    }
+    Ok(names.join("/"))
 }
 
 /// Git wants a home; the cache's parent is one nothing else reads.

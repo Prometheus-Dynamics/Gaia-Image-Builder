@@ -320,3 +320,101 @@ fn retention_keeps_what_is_referenced() {
         0
     );
 }
+
+/// A stored tree and its object.
+fn stored(store: &Store, dir: &Path) -> ObjectRef {
+    let src = dir.join("src");
+    fs::create_dir_all(src.join("sub")).expect("dir");
+    fs::write(src.join("sub/f"), b"content").expect("write");
+    fs::write(src.join("g"), b"other").expect("write");
+    store.put_tree(&src).expect("put")
+}
+
+#[test]
+fn a_verified_object_is_not_read_again_until_it_is_touched() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("store")).expect("open");
+    let tree = stored(&store, dir.path());
+    let record = dir
+        .path()
+        .join("store/verified/tree")
+        .join(&tree.digest.hex()[..2])
+        .join(tree.digest.hex());
+
+    // The first digest check reads it all, and records its state.
+    assert!(!record.exists());
+    assert!(store.check(&tree, Check::Digest));
+    assert!(record.is_file(), "the state is recorded");
+
+    // Proof that the second check reads no content: the content is changed
+    // with the size and the modification time put back, and the check still
+    // passes. This is exactly what the record trusts.
+    let file = store.path(&tree).join("sub/f");
+    let before = fs::metadata(&file)
+        .expect("meta")
+        .modified()
+        .expect("mtime");
+    fs::write(&file, b"CONTENT").expect("same size, other bytes");
+    File::options()
+        .write(true)
+        .open(&file)
+        .expect("open")
+        .set_times(FileTimes::new().set_modified(before))
+        .expect("mtime back");
+    assert!(
+        store.check(&tree, Check::Digest),
+        "the same state: accepted without reading"
+    );
+
+    // Touched: the state differs, so it is read in full, and fails.
+    set_mtime(&file, 1_000);
+    assert!(
+        !store.check(&tree, Check::Digest),
+        "a touched object is hashed again, and this one does not match"
+    );
+}
+
+#[test]
+fn a_changed_size_mode_or_entry_is_read_again() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("store")).expect("open");
+
+    // A new entry.
+    let tree = stored(&store, dir.path());
+    assert!(store.check(&tree, Check::Digest));
+    fs::write(store.path(&tree).join("sub/new"), b"").expect("write");
+    assert!(!store.check(&tree, Check::Digest), "an added file");
+    fs::remove_file(store.path(&tree).join("sub/new")).expect("rm");
+    assert!(
+        store.check(&tree, Check::Digest),
+        "as it was: matches again"
+    );
+
+    // A mode.
+    chmod(&store.path(&tree).join("g"), 0o600);
+    assert!(!store.check(&tree, Check::Digest), "a changed mode");
+}
+
+#[test]
+fn without_its_record_an_object_is_read_in_full() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("store")).expect("open");
+    let tree = stored(&store, dir.path());
+    assert!(store.check(&tree, Check::Digest));
+
+    // The same quiet change as above, but with the record removed: caught.
+    let file = store.path(&tree).join("sub/f");
+    let before = fs::metadata(&file)
+        .expect("meta")
+        .modified()
+        .expect("mtime");
+    fs::write(&file, b"CONTENT").expect("write");
+    File::options()
+        .write(true)
+        .open(&file)
+        .expect("open")
+        .set_times(FileTimes::new().set_modified(before))
+        .expect("mtime back");
+    fs::remove_dir_all(dir.path().join("store/verified")).expect("rm");
+    assert!(!store.check(&tree, Check::Digest));
+}

@@ -95,6 +95,49 @@ pub fn substitute(text: &str, inputs: &[(String, std::path::PathBuf)]) -> Result
     Ok(out)
 }
 
+/// The lines of `fragments` that `resolved` (the `.config` after Buildroot's
+/// own `olddefconfig`) does not have as written: each as `fragment: line`,
+/// with what the config has for that symbol.
+///
+/// Buildroot drops a symbol it does not know and changes one whose
+/// dependencies are not met, and says nothing. Without this, a misspelled
+/// option, or a CPU Buildroot has no option for, builds something else.
+/// A later fragment's line for the same symbol is the one that counts.
+pub fn not_taken(resolved: &str, fragments: &[ConfigFragment]) -> Vec<String> {
+    use std::collections::BTreeMap;
+    let mut wanted: BTreeMap<String, (String, String)> = BTreeMap::new();
+    for fragment in fragments {
+        for line in fragment.text.lines() {
+            if let Ok(Some(name)) = symbol(line) {
+                wanted.insert(
+                    name.to_string(),
+                    (fragment.name.clone(), line.trim().to_string()),
+                );
+            }
+        }
+    }
+    let mut have: BTreeMap<&str, &str> = BTreeMap::new();
+    for line in resolved.lines() {
+        if let Ok(Some(name)) = symbol(line) {
+            have.insert(name, line.trim());
+        }
+    }
+    let mut missing = Vec::new();
+    for (name, (fragment, line)) in &wanted {
+        let unset = line.starts_with('#');
+        match have.get(name.as_str()) {
+            Some(got) if *got == line => {}
+            // An unset symbol may simply be absent from the config.
+            None if unset => {}
+            Some(got) => missing.push(format!("{fragment}: `{line}` became `{got}`")),
+            None => missing.push(format!(
+                "{fragment}: `{line}` was dropped (no such option, or its dependencies are not met)"
+            )),
+        }
+    }
+    missing
+}
+
 fn matches_symbol(line: &str, name: &str) -> bool {
     matches!(symbol(line), Ok(Some(found)) if found == name)
 }
@@ -151,6 +194,31 @@ mod tests {
             merge("BR2_aarch64=y", &[]).expect("merge"),
             "BR2_aarch64=y\n"
         );
+    }
+
+    #[test]
+    fn a_line_buildroot_dropped_or_changed_is_reported_with_its_fragment() {
+        let fragments = [
+            fragment(
+                "board.target",
+                "BR2_aarch64=y\nBR2_cortex_a76_cortex_a55=y\n",
+            ),
+            fragment(
+                "image",
+                "BR2_PACKAGE_BUSYBOX=y\nBR2_INIT_SYSTEMD=y\n# BR2_PACKAGE_FOO is not set\n",
+            ),
+            fragment("later", "BR2_TARGET_GENERIC_HOSTNAME=\"two\"\n"),
+        ];
+        let resolved = "BR2_aarch64=y\nBR2_PACKAGE_BUSYBOX=y\n# BR2_INIT_SYSTEMD is not set\nBR2_TARGET_GENERIC_HOSTNAME=\"two\"\n";
+        assert_eq!(
+            not_taken(resolved, &fragments),
+            [
+                "image: `BR2_INIT_SYSTEMD=y` became `# BR2_INIT_SYSTEMD is not set`",
+                "board.target: `BR2_cortex_a76_cortex_a55=y` was dropped (no such option, or its dependencies are not met)",
+            ]
+        );
+        // Every line taken: nothing to report.
+        assert!(not_taken(resolved, &fragments[2..]).is_empty());
     }
 
     #[test]
