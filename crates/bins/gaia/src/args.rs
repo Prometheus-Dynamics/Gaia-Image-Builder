@@ -24,9 +24,14 @@ project flags:
   --tool NAME=PATH   a tool a step takes by input name (git, curl, bwrap,
                      toolchain, ...); repeatable. Without it, a known tool
                      is looked up on PATH, and `toolchain` is rustc's sysroot.
+  --input NAME=PATH  a file a component installs as `{ input = NAME }`, such
+                     as a developer's key, which is not committed; repeatable.
+                     A relative PATH is from the current directory. Every
+                     input a component names must be given, and each given
+                     one must be used. No `~` expansion: the shell does it.
 
 validate checks description files and what they name: no lock, no tools,
-no network. It stops at the first bad file, naming the key. Without --kind,
+no inputs, no network. It stops at the first bad file, naming the key. Without --kind,
 a file with `images` is a product; one with a board's keys (target, kernel,
 partitions, ...) is a board, or a family when it has no name and extends
 nothing; any other is a component. A product's images must name recipes
@@ -69,6 +74,8 @@ pub struct Project {
     pub lock: Option<PathBuf>,
     pub recipes: Option<PathBuf>,
     pub tools: BTreeMap<String, String>,
+    /// `--input NAME=PATH`, by name.
+    pub inputs: BTreeMap<String, PathBuf>,
     pub jobs: Option<usize>,
     /// `plan` only: the graph and plan as JSON.
     pub json: bool,
@@ -113,6 +120,18 @@ pub fn parse(words: &[String]) -> Result<Command, Stop> {
                                 Stop::usage(format!("--tool takes NAME=PATH, not `{pair}`"))
                             })?;
                         project.tools.insert(name.into(), path.into());
+                    }
+                    "--input" => {
+                        let pair = words.value(word)?;
+                        let (name, path) = pair
+                            .split_once('=')
+                            .filter(|(n, p)| !n.is_empty() && !p.is_empty())
+                            .ok_or_else(|| {
+                                Stop::usage(format!("--input takes NAME=PATH, not `{pair}`"))
+                            })?;
+                        if project.inputs.insert(name.into(), path.into()).is_some() {
+                            return Err(Stop::usage(format!("--input {name} is given twice")));
+                        }
                     }
                     "--json" if !build => project.json = true,
                     "--jobs" if build => {
@@ -251,6 +270,22 @@ mod tests {
         assert_eq!(p.product, PathBuf::from("p.toml"));
         assert_eq!(p.jobs, Some(4));
         assert_eq!(p.tools["git"], "/usr/bin/git");
+        let Ok(Command::Plan(p)) = parsed("plan p.toml --input bench-key=keys/a.pub") else {
+            panic!("plan");
+        };
+        assert_eq!(p.inputs["bench-key"], PathBuf::from("keys/a.pub"));
+        assert_eq!(
+            parsed("plan p.toml --input bench-key").expect_err("an error"),
+            "--input takes NAME=PATH, not `bench-key`"
+        );
+        assert_eq!(
+            parsed("plan p.toml --input =keys/a.pub").expect_err("an error"),
+            "--input takes NAME=PATH, not `=keys/a.pub`"
+        );
+        assert_eq!(
+            parsed("plan p.toml --input a=x --input a=y").expect_err("an error"),
+            "--input a is given twice"
+        );
         assert_eq!(parsed(""), Ok(Command::Help));
         assert_eq!(
             parsed("plan p.toml --jobs 4").expect_err("an error"),

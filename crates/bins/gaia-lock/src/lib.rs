@@ -12,7 +12,10 @@
 //!
 //! A git ref resolves to its commit (an annotated tag to the commit it
 //! tags), a download to the digest of its bytes, an image tag to its
-//! manifest digest, asked anonymously.
+//! manifest digest, asked anonymously. A ref that is a full commit, and an
+//! image written with its `@sha256:` digest, are recorded as written: no
+//! request is made for them. Once locked, a source is not asked again unless
+//! `--update` names it or its description changes what it asks for.
 
 pub mod command;
 mod resolve;

@@ -171,7 +171,9 @@ impl Subdir {
 /// Written as exactly one of `git` (with `ref`, and an optional `subdir`
 /// naming a directory of the checkout to use instead of its root),
 /// `download`, `image` (with an optional `platform`) or `path`. The lock pins
-/// the repository's commit; `subdir` is not in the lock.
+/// the repository's commit; `subdir` is not in the lock. An `image` may name
+/// its digest as `reference@sha256:<64 hex>`, which the lock then records
+/// without asking the registry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "SourceText")]
 pub enum Source {
@@ -210,10 +212,33 @@ struct SourceText {
     #[serde(rename = "ref")]
     reference: Option<String>,
     download: Option<String>,
+    #[serde(default, deserialize_with = "image_text")]
     image: Option<String>,
     platform: Option<ImagePlatform>,
     path: Option<RelPath>,
     subdir: Option<Subdir>,
+}
+
+/// An image written as `reference`, or `reference@sha256:<64 lowercase hex>`
+/// to name its manifest digest. Anything after `@` must be that digest, so
+/// a malformed one is refused at `sources.<name>.image`.
+fn image_text<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    let Some(text) = Option::<String>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    if let Some((_, digest)) = text.split_once('@') {
+        let hex = digest.strip_prefix("sha256:").unwrap_or_default();
+        let valid = hex.len() == 64
+            && hex
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        if !valid {
+            return Err(de::Error::custom(format!(
+                "`{digest}` is not a digest; write `@sha256:` and 64 lowercase hex digits, or leave the `@` part out"
+            )));
+        }
+    }
+    Ok(Some(text))
 }
 
 impl TryFrom<SourceText> for Source {
@@ -288,13 +313,25 @@ pub(crate) fn resolve_sources(sources: &mut BTreeMap<String, Source>, dir: &Path
 }
 
 /// A file a step takes in: a path inside a source,
-/// `{ source = "rkbin", path = "bin/rk35/ddr.bin" }`, or a file beside the
-/// description, `{ file = "assets/boot.cmd" }`.
+/// `{ source = "rkbin", path = "bin/rk35/ddr.bin" }`, a file beside the
+/// description, `{ file = "assets/boot.cmd" }`, or a named input the command
+/// line gives, `{ input = "bench-key" }` (`gaia plan --input bench-key=PATH`).
+/// Only a component's install entry takes a named input.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "FileRefText")]
 pub enum FileRef {
-    InSource { source: String, path: String },
-    Local { file: RelPath },
+    InSource {
+        source: String,
+        path: String,
+    },
+    Local {
+        file: RelPath,
+    },
+    /// A file the command line names. The name is lowercase letters, digits
+    /// and `-` (see [`is_input_name`]), checked where it is used.
+    Input {
+        name: String,
+    },
 }
 
 #[derive(Deserialize)]
@@ -303,17 +340,22 @@ struct FileRefText {
     source: Option<String>,
     path: Option<String>,
     file: Option<RelPath>,
+    input: Option<String>,
 }
 
 impl TryFrom<FileRefText> for FileRef {
     type Error = String;
 
     fn try_from(text: FileRefText) -> Result<Self, String> {
-        match (text.source, text.path, text.file) {
-            (Some(source), Some(path), None) => Ok(Self::InSource { source, path }),
-            (None, None, Some(file)) => Ok(Self::Local { file }),
-            (Some(_), None, None) => Err("`source` needs a `path` inside it".into()),
-            _ => Err("either `source` and `path`, or `file`".into()),
+        match (text.input, text.source, text.path, text.file) {
+            (Some(name), None, None, None) => Ok(Self::Input { name }),
+            (Some(_), _, _, _) => {
+                Err("a named input is not combined with `source`, `path` or `file`".into())
+            }
+            (None, Some(source), Some(path), None) => Ok(Self::InSource { source, path }),
+            (None, None, None, Some(file)) => Ok(Self::Local { file }),
+            (None, Some(_), None, None) => Err("`source` needs a `path` inside it".into()),
+            _ => Err("either `source` and `path`, `file`, or `input`".into()),
         }
     }
 }
@@ -328,9 +370,18 @@ impl FileRef {
     pub fn source(&self) -> Option<&str> {
         match self {
             Self::InSource { source, .. } => Some(source),
-            Self::Local { .. } => None,
+            Self::Local { .. } | Self::Input { .. } => None,
         }
     }
+}
+
+/// Whether `name` is a named input's name: lowercase letters, digits and
+/// `-`, and not empty.
+pub(crate) fn is_input_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// Checks that `name`, used at `key` in `file`, is one of `sources`.

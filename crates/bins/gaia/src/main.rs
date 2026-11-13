@@ -53,7 +53,11 @@ fn main() -> ExitCode {
             Ok(())
         }
         args::Command::Version => {
-            println!("gaia {}", env!("CARGO_PKG_VERSION"));
+            println!(
+                "gaia {} ({})",
+                env!("CARGO_PKG_VERSION"),
+                env!("GAIA_COMMIT")
+            );
             Ok(())
         }
         args::Command::Validate(options) => {
