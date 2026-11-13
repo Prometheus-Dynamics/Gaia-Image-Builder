@@ -65,7 +65,7 @@ pub const NODES: [&daedalus::prelude::NodeRecord; 3] = [
 ];
 
 /// Every type's key, port types first, then the kinds and enums inside them.
-pub const KEYS: [&str; 29] = [
+pub const KEYS: [&str; 30] = [
     "gaia:object",
     "gaia:artifact",
     "gaia:tree",
@@ -88,6 +88,7 @@ pub const KEYS: [&str; 29] = [
     "gaia:buildroot-fragment",
     "gaia:buildroot-host",
     "gaia:source-override",
+    "gaia:kernel-contract",
     "gaia:object-kind",
     "gaia:artifact-kind",
     "gaia:image-kind",
