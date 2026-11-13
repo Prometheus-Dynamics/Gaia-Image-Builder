@@ -1,0 +1,165 @@
+# A disk for an SD card or eMMC:
+#
+# - the board's areas outside the table (a bootloader at a fixed offset),
+#   from the OS's bootloader output;
+# - the board's own partitions;
+# - `rootfs`: the built tree as ext4, marked bootable. A bootloader that
+#   scans bootable partitions finds its boot files in the tree itself (the
+#   kernel, the device tree and a boot config are a component's to install);
+# - `data`: ext4 with the image's data component, if it has one, and the
+#   root slot (the built tree as EROFS with dm-verity) as a file in it.
+#   There is no A/B: a slot is a file on the data partition.
+#
+# Untested on board.
+version = 1
+name = "sd-image"
+description = "An SD card or eMMC disk: the board's areas and partitions, a bootable ext4 root, and a data partition holding the root slot."
+
+[stages]
+root = "gaia.fs.ext4"
+erofs = "gaia.fs.erofs"
+verity = "gaia.verity"
+slot = "gaia.tree.file"
+data = "gaia.fs.ext4"
+rootp = "gaia.disk.partition"
+datap = "gaia.disk.partition"
+disk = "gaia.disk"
+
+[[connects]]
+from = "erofs.image"
+to = "verity.image"
+
+[[connects]]
+from = "verity.image"
+to = "slot.file"
+
+[[connects]]
+from = "slot.tree"
+to = "data.tree"
+
+[[connects]]
+from = "root.image"
+to = "rootp.content"
+
+[[connects]]
+from = "data.image"
+to = "datap.content"
+
+[[connects]]
+from = ["rootp.partition", "datap.partition"]
+to = "disk.partitions"
+
+[inputs]
+build = ["root.tree", "erofs.tree"]
+data = ["slot.tree"]
+disk = ["disk.layout"]
+blobs = ["disk.blobs"]
+
+[outputs]
+disk = "disk.image"
+slot = "verity.image"
+table = "verity.table"
+
+[parameters.id]
+type = "string"
+description = "Names the disk: its GUIDs are derived from it, so they stay the same across rebuilds."
+sets = ["disk.id"]
+
+[parameters.root_size]
+type = "int"
+default = 0
+description = "The root partition's filesystem size in bytes; 0 sizes it to the tree plus root_margin."
+sets = ["root.size"]
+
+[parameters.root_margin]
+type = "int"
+default = 67108864
+description = "Free bytes left over the tree in the root filesystem when root_size is 0."
+sets = ["root.margin"]
+
+[parameters.data_size]
+type = "int"
+default = 0
+description = "The data partition's filesystem size in bytes; 0 sizes it to its content plus data_margin."
+sets = ["data.size"]
+
+[parameters.data_margin]
+type = "int"
+default = 67108864
+description = "Free bytes left over the content in the data filesystem when data_size is 0."
+sets = ["data.margin"]
+
+[parameters.journal]
+type = "bool"
+default = true
+description = "Whether the two ext4 filesystems have a journal."
+sets = ["root.journal", "data.journal"]
+
+[parameters.root_name]
+type = "string"
+default = "rootfs"
+description = "The root partition's name and filesystem label; a kernel command line names it (root=PARTLABEL=...)."
+sets = ["root.label", "rootp.name"]
+
+[parameters.data_name]
+type = "string"
+default = "data"
+description = "The data partition's name and filesystem label."
+sets = ["data.label", "datap.name"]
+
+[parameters.root_role]
+type = "string"
+default = "rootfs"
+sets = ["rootp.role"]
+
+[parameters.data_role]
+type = "string"
+default = "data"
+sets = ["datap.role"]
+
+[parameters.partition_type]
+type = "string"
+default = "0fc63daf-8483-4772-8e79-3d69d8477de4"
+description = "Both partitions' type in the table: a GPT type GUID (the default is Linux filesystem data) or an MBR type byte such as 0x83."
+sets = ["rootp.table_type", "datap.table_type"]
+
+[parameters.root_bootable]
+type = "bool"
+default = true
+description = "Marks the root partition bootable, for a bootloader that scans for one."
+sets = ["rootp.bootable"]
+
+[parameters.data_bootable]
+type = "bool"
+default = false
+sets = ["datap.bootable"]
+
+# 0: each partition at the next boundary, sized by its filesystem.
+[parameters.auto]
+type = "int"
+default = 0
+sets = ["rootp.offset", "datap.offset", "rootp.size", "datap.size"]
+
+[parameters.compression]
+type = "string"
+default = "zstd"
+description = "The slot's EROFS compression: none, lz4, lz4hc, lzma, deflate or zstd."
+sets = ["erofs.compression"]
+
+[parameters.level]
+type = "int"
+default = 0
+description = "The compressor's level; 0 is its default."
+sets = ["erofs.level"]
+
+[parameters.slot_path]
+type = "string"
+default = "slots/root.img"
+description = "Where the slot is in the data partition."
+sets = ["slot.path"]
+
+[parameters.slot_device]
+type = "string"
+default = "/data/slots/root.img"
+description = "Where the running system reads the slot from, for its dm-verity table."
+sets = ["verity.device"]

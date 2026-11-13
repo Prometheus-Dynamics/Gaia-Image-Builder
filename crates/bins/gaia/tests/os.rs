@@ -43,6 +43,10 @@ fn plan(dir: &Path, extra: &[&str]) -> Output {
         "mkfs_erofs=/usr/bin/mkfs.erofs",
         "--tool",
         "veritysetup=/usr/sbin/veritysetup",
+        "--tool",
+        "mke2fs=/usr/sbin/mke2fs",
+        "--tool",
+        "debugfs=/usr/sbin/debugfs",
     ];
     args.extend(extra);
     let out = Command::new(env!("CARGO_BIN_EXE_gaia"))
@@ -81,6 +85,15 @@ fn the_plan_lists_the_config_the_board_gives() {
         "zero-3e-demo.os.layer.layer -> zero-3e-demo.rootfs.layers0",
         "zero-3e-demo.usb-gadget-network.place0.layer -> zero-3e-demo.rootfs.layers1",
         "zero-3e-demo.rootfs.tree -> zero-3e-demo::erofs.tree",
+        "zero-3e-demo.rootfs.tree -> zero-3e-demo::root.tree",
+        // The board's raw area, from the OS's bootloader output.
+        "zero-3e-demo.os.bootloader -> zero-3e-demo.blob.u-boot.from",
+        "zero-3e-demo.blob.u-boot.blob -> zero-3e-demo.blobs.blobs0",
+        "zero-3e-demo.blobs.list -> zero-3e-demo::disk.blobs",
+        "zero-3e-demo.disk-layout  gaia:disk-layout  gpt, board partitions uboot-env",
+        // The slot, a file in the data partition.
+        "zero-3e-demo::verity.image -> zero-3e-demo::slot.file",
+        "zero-3e-demo::slot.tree -> zero-3e-demo::data.tree",
         // The config, by rule from the board, at the locked commits.
         "BR2_aarch64=y",
         "BR2_cortex_a55=y",
@@ -191,7 +204,7 @@ fn an_unlocked_board_source_says_to_lock() {
 fn a_recipe_input_takes_the_os_boot_files_by_what_they_are() {
     let dir = project();
     edit(
-        &dir.path().join("recipes/slot.toml"),
+        &dir.path().join("recipes/sd-image.toml"),
         "[inputs]\n",
         "[inputs]\nbootloader = [\"verity.veritysetup\"]\n",
     );
@@ -207,6 +220,39 @@ fn a_recipe_input_takes_the_os_boot_files_by_what_they_are() {
 }
 
 #[test]
+fn the_boards_raw_area_needs_an_image_with_an_os() {
+    let dir = project();
+    edit(
+        &dir.path()
+            .join("examples/products/zero-3e-demo/product.toml"),
+        "os = { provider = \"buildroot\", source = \"buildroot\", fragments = [\"os.fragment\"] }\n",
+        "",
+    );
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("writes the board's `u-boot` area from the OS's bootloader output; this image has no `os`"),
+        "{err}"
+    );
+}
+
+#[test]
+fn content_on_a_partition_in_the_table_is_an_error_at_its_key() {
+    let dir = project();
+    edit(
+        &dir.path().join("examples/boards/rk35xx/family.toml"),
+        "size = \"64K\"\n",
+        "size = \"64K\"\ncontent = \"env.bin\"\n",
+    );
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("partitions[1].content"), "{err}");
+    assert!(err.contains("only an area outside the table"), "{err}");
+}
+
+#[test]
 fn a_recipe_that_takes_os_needs_an_image_with_one() {
     let dir = project();
     edit(
@@ -216,9 +262,9 @@ fn a_recipe_that_takes_os_needs_an_image_with_one() {
         "",
     );
     edit(
-        &dir.path().join("recipes/slot.toml"),
-        "build = [\"erofs.tree\"]",
-        "bootloader = [\"erofs.tree\"]",
+        &dir.path().join("recipes/sd-image.toml"),
+        "blobs = [\"disk.blobs\"]\n",
+        "bootloader = [\"verity.veritysetup\"]\n",
     );
     let out = plan(dir.path(), &[]);
     assert_eq!(out.status.code(), Some(2));

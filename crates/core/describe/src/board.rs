@@ -124,6 +124,9 @@ pub struct PartitionNeed {
     /// Whether the partition table lists it. A raw bootloader area is not.
     #[serde(default = "yes")]
     pub in_table: bool,
+    /// For an area outside the table: the file written there, by its name
+    /// in the OS's bootloader output (`u-boot-rockchip.bin`).
+    pub content: Option<String>,
 }
 
 fn yes() -> bool {
@@ -354,6 +357,25 @@ fn check_refs(
         }
         for (blob, file_ref) in &bootloader.blobs {
             check_ref(format!("bootloader.blobs.{blob}"), file_ref)?;
+        }
+    }
+    for (index, need) in file.partitions.iter().flatten().enumerate() {
+        if need.content.is_none() {
+            continue;
+        }
+        if need.in_table {
+            return Err(Error::new(
+                path,
+                format!("partitions[{index}].content"),
+                "only an area outside the table (`in_table = false`) names its content; a partition's content comes from the recipe",
+            ));
+        }
+        if need.offset.is_none() {
+            return Err(Error::new(
+                path,
+                format!("partitions[{index}].offset"),
+                "missing: an area outside the table is written at its offset",
+            ));
         }
     }
     for (index, firmware) in file.firmware.iter().flatten().enumerate() {

@@ -25,6 +25,7 @@
 //! entries: what a later step keys on so an owner change reaches it.
 
 mod accounts;
+mod file;
 mod layer;
 mod merge;
 mod place;
@@ -32,6 +33,7 @@ mod services;
 mod walk;
 
 pub use accounts::tree_accounts;
+pub use file::tree_file;
 pub use layer::tree_layer;
 pub use merge::{merge_layers, tree_merge};
 pub use place::tree_place;
@@ -42,8 +44,9 @@ use gaia_store::Digest;
 use gaia_types::Tree;
 
 /// The nodes, for a registry.
-pub const NODES: [&NodeRecord; 5] = [
+pub const NODES: [&NodeRecord; 6] = [
     &place::TREE_PLACE_NODE,
+    &file::TREE_FILE_NODE,
     &layer::TREE_LAYER_NODE,
     &accounts::TREE_ACCOUNTS_NODE,
     &services::TREE_SERVICES_NODE,

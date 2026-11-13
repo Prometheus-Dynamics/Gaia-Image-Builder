@@ -35,8 +35,10 @@ use daedalus::prelude::*;
 use daedalus_cpu_author::FanIn;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store};
 use gaia_store::Digest;
+use gaia_types::{
+    Artifact, Image, ImageKind, ObjectKind, Partition, PartitionRole, Size, StoreRef,
+};
 pub use gaia_types::{DiskLayout, DiskPartition, DiskTable, RawBlob, TableScheme};
-use gaia_types::{Image, ImageKind, ObjectKind, Partition, PartitionRole, Size, StoreRef};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
@@ -57,13 +59,14 @@ pub struct UbootVar {
 }
 
 /// The disk image of `layout` (the table and the board's partitions), then
-/// the partitions fed in, in port order: the node.
+/// the partitions fed in, in port order, and the raw `blobs`, when there are
+/// any: the node.
 ///
-/// No raw blobs yet: a CPU node takes one fan-in, and the partitions have
-/// it. Blobs need their own node (see `docs/prs/F7.md`).
+/// A CPU node takes one fan-in, and the partitions have it, so the blobs
+/// come as one list, from `gaia.disk.blobs`.
 #[node(
     id = "gaia.disk",
-    inputs(store, id, layout, partitions),
+    inputs(store, id, layout, partitions, blobs),
     outputs(image)
 )]
 pub fn disk(
@@ -71,11 +74,97 @@ pub fn disk(
     id: &str,
     layout: &DiskLayout,
     partitions: FanIn<'_, DiskPartition>,
+    blobs: Option<&Vec<RawBlob>>,
     cx: &Ctx,
 ) -> Result<Image, StepError> {
     let mut all = layout.partitions.clone();
     all.extend(partitions.iter().map(|p| (*p).clone()));
-    disk_image(store, id, &layout.table, &all, &[], cx)
+    let blobs = blobs.map(Vec::as_slice).unwrap_or_default();
+    disk_image(store, id, &layout.table, &all, blobs, cx)
+}
+
+/// One raw blob: the file `path` of the tree `from` (an OS's bootloader
+/// output, say), written `offset` bytes from the disk's start: the node.
+/// The file is stored on its own, so the disk keys on its bytes and not on
+/// the rest of the tree.
+#[node(
+    id = "gaia.disk.blob",
+    inputs(store, from, path, name, offset),
+    outputs(blob)
+)]
+pub fn disk_blob(
+    store: &str,
+    from: &Artifact,
+    path: &str,
+    name: &str,
+    offset: u64,
+    cx: &Ctx,
+) -> Result<RawBlob, StepError> {
+    const BLOB: &str = "gaia.disk.blob";
+    let fail = |why: String| StepError::body(BLOB, format!("blob '{name}': {why}"));
+    let store = Store::open(store).map_err(StepError::store(BLOB))?;
+    if from.object.kind != ObjectKind::Tree {
+        return Err(fail(
+            "its source is a file, not a tree to pick a file from".into(),
+        ));
+    }
+    let object = from
+        .object
+        .object_ref()
+        .ok_or_else(|| fail("its source is not in the store".into()))?;
+    let relative = Path::new(path);
+    let plain = !path.is_empty()
+        && relative
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)));
+    if !plain {
+        return Err(fail(format!(
+            "'{path}' is not a path inside the tree: no leading /, no . or .."
+        )));
+    }
+    let file = store.path(&object).join(relative);
+    if !file.is_file() {
+        let mut names: Vec<String> = std::fs::read_dir(store.path(&object))
+            .map(|dir| {
+                dir.flatten()
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        return Err(fail(format!(
+            "the tree has no file '{path}'; it has {}",
+            if names.is_empty() {
+                "nothing".to_string()
+            } else {
+                names.join(", ")
+            }
+        )));
+    }
+    let key = KeyBuilder::new(BLOB, 1)
+        .config("path", path)
+        .input("from", object.digest)
+        .finish();
+    let made = Step::new(&store, cx, BLOB, key).look_up_or_make(
+        &[("blob", Path::new("blob.bin"))],
+        |work| {
+            std::fs::copy(&file, work.dir().join("blob.bin"))
+                .map(|_| ())
+                .map_err(|e| fail(e.to_string()))
+        },
+    )?;
+    Ok(RawBlob {
+        name: name.to_string(),
+        offset: Size(offset),
+        content: made.outputs["blob"].into(),
+    })
+}
+
+/// Any number of raw blobs, on ports `blobs0`, `blobs1` and so on, as the
+/// one list `gaia.disk` takes: the node.
+#[node(id = "gaia.disk.blobs", inputs(blobs), outputs(list))]
+pub fn disk_blobs(blobs: FanIn<'_, RawBlob>) -> Vec<RawBlob> {
+    blobs.iter().map(|blob| (*blob).clone()).collect()
 }
 
 /// One partition of a disk, holding the image `content` when there is one:
@@ -347,4 +436,10 @@ fn copy_at(dest: &mut File, source: &Path, offset: u64) -> Result<(), String> {
 }
 
 /// The nodes, for a registry.
-pub const NODES: [&NodeRecord; 3] = [&DISK_NODE, &DISK_PARTITION_NODE, &UBOOT_ENV_NODE];
+pub const NODES: [&NodeRecord; 5] = [
+    &DISK_NODE,
+    &DISK_PARTITION_NODE,
+    &DISK_BLOB_NODE,
+    &DISK_BLOBS_NODE,
+    &UBOOT_ENV_NODE,
+];
