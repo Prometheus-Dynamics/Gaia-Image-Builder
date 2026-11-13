@@ -475,3 +475,76 @@ fn a_components_kernel_contract_is_checked_in_the_kernels_build() {
     assert!(err.contains("requires.kernel_contract.source"), "{err}");
     assert!(err.contains("no source named `lemnos`"), "{err}");
 }
+
+/// A board states files that describe it to other programs, by name; a
+/// component installs one by that name, whatever the board is.
+#[test]
+fn a_component_installs_the_boards_description_by_name() {
+    let dir = project();
+    let board_dir = dir.path().join("examples/boards/zero-3e");
+    let board = board_dir.join("board.toml");
+    let component = dir
+        .path()
+        .join("examples/components/usb-gadget-network/component.toml");
+    let add_install = "[[install]]\nfrom = { description = \"daemon\" }\nto = \"/etc/daemon/board.toml\"\nmode = \"0644\"\n";
+    let text = std::fs::read_to_string(&component).expect("read");
+    std::fs::write(&component, format!("{text}\n{add_install}")).expect("write");
+
+    // The board states none: an error at the install, naming both.
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    println!("{err}");
+    assert!(err.contains("install[2].from.description"), "{err}");
+    assert!(
+        err.contains(
+            "usb-gadget-network installs the board's description `daemon`, and the board zero-3e"
+        ),
+        "{err}"
+    );
+    assert!(
+        err.contains("states none of that name under [descriptions]"),
+        "{err}"
+    );
+
+    // Stated, and the file is not there: an error at the board's key.
+    let text = std::fs::read_to_string(&board).expect("read");
+    std::fs::write(
+        &board,
+        format!("{text}\n[descriptions]\ndaemon = \"daemon-board.toml\"\n"),
+    )
+    .expect("write");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("descriptions.daemon"), "{err}");
+
+    // There: one file, installed where the component says.
+    std::fs::write(board_dir.join("daemon-board.toml"), "id = \"zero-3e\"\n").expect("write");
+    let out = plan(dir.path(), &[]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    for line in [
+        "zero-3e-demo.usb-gadget-network.description.daemon  gaia.source.input",
+        "zero-3e-demo.usb-gadget-network.description.daemon.tree -> zero-3e-demo.usb-gadget-network.place1.from",
+        "/etc/daemon/board.toml",
+    ] {
+        assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
+    }
+
+    // A description is named by a component, not by the board itself.
+    edit(
+        &board,
+        "ROCKCHIP_TPL = { source = \"rkbin\", path = \"bin/rk35/rk3566_ddr_1056MHz_v1.23.bin\" }",
+        "ROCKCHIP_TPL = { description = \"daemon\" }",
+    );
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains(
+            "a board description is named by a component's install entry, not by the board"
+        ),
+        "{err}"
+    );
+}

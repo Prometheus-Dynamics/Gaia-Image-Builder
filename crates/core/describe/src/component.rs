@@ -205,6 +205,17 @@ impl Component {
                             ),
                         ));
                     }
+                    if let FileRef::Description { name } = file
+                        && !is_input_name(name)
+                    {
+                        return Err(Error::new(
+                            path,
+                            format!("{key}.from.description"),
+                            format!(
+                                "`{name}` is not a description's name: lowercase letters, digits and `-`"
+                            ),
+                        ));
+                    }
                     file.resolve(dir);
                     if let FileRef::Local { file } = file {
                         crate::common::check_exists(

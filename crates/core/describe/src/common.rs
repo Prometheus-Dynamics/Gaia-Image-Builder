@@ -316,7 +316,10 @@ pub(crate) fn resolve_sources(sources: &mut BTreeMap<String, Source>, dir: &Path
 /// `{ source = "rkbin", path = "bin/rk35/ddr.bin" }`, a file beside the
 /// description, `{ file = "assets/boot.cmd" }`, or a named input the command
 /// line gives, `{ input = "bench-key" }` (`gaia plan --input bench-key=PATH`).
-/// Only a component's install entry takes a named input.
+/// A component's install entry also takes one of the board's descriptions by
+/// name, `{ description = "daemon" }`: the file the image's board states
+/// under `[descriptions]`. Only an install entry takes a named input or a
+/// description.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "FileRefText")]
 pub enum FileRef {
@@ -332,6 +335,10 @@ pub enum FileRef {
     Input {
         name: String,
     },
+    /// One of the board's `[descriptions]`, by name.
+    Description {
+        name: String,
+    },
 }
 
 #[derive(Deserialize)]
@@ -341,12 +348,22 @@ struct FileRefText {
     path: Option<String>,
     file: Option<RelPath>,
     input: Option<String>,
+    description: Option<String>,
 }
 
 impl TryFrom<FileRefText> for FileRef {
     type Error = String;
 
     fn try_from(text: FileRefText) -> Result<Self, String> {
+        if let Some(name) = text.description {
+            return match (text.input, text.source, text.path, text.file) {
+                (None, None, None, None) => Ok(Self::Description { name }),
+                _ => Err(
+                    "a board description is not combined with `input`, `source`, `path` or `file`"
+                        .into(),
+                ),
+            };
+        }
         match (text.input, text.source, text.path, text.file) {
             (Some(name), None, None, None) => Ok(Self::Input { name }),
             (Some(_), _, _, _) => {
@@ -355,7 +372,7 @@ impl TryFrom<FileRefText> for FileRef {
             (None, Some(source), Some(path), None) => Ok(Self::InSource { source, path }),
             (None, None, None, Some(file)) => Ok(Self::Local { file }),
             (None, Some(_), None, None) => Err("`source` needs a `path` inside it".into()),
-            _ => Err("either `source` and `path`, `file`, or `input`".into()),
+            _ => Err("either `source` and `path`, `file`, `input` or `description`".into()),
         }
     }
 }
@@ -370,7 +387,7 @@ impl FileRef {
     pub fn source(&self) -> Option<&str> {
         match self {
             Self::InSource { source, .. } => Some(source),
-            Self::Local { .. } | Self::Input { .. } => None,
+            Self::Local { .. } | Self::Input { .. } | Self::Description { .. } => None,
         }
     }
 }
