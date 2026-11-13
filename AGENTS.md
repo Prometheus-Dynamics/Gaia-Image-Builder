@@ -25,7 +25,13 @@ The work is a pre-planned list of PRs into `next`.
   `docs/node-authoring.md`, `docs/host.md` and `docs/design.md` say how nodes, groups, failure
   policy, lanes and progress work. Use them; don't rebuild them.
 - Stay inside the paths your PR creates. Don't edit the root `Cargo.toml`, `TODO.md`, or a changelog.
-  `Cargo.lock` is ignored. Keeping to this is what lets many sessions run at once without conflicts.
+  Keeping to this is what lets many sessions run at once without conflicts. The one PR that moves
+  the Daedalus pin edits every manifest, the root's included, and nothing else.
+- `Cargo.lock` is committed: Gaia ships a program, and what is built at a commit is what its own
+  gate tested. When your PR changes a `Cargo.toml`, run `cargo metadata --format-version 1 >
+  /dev/null` and commit the lock with it; that updates only what the manifests changed. The gate
+  stops on a lock that does not match. On a conflict in `Cargo.lock`, take `next`'s file and run
+  the same command. Don't run `cargo update` in a feature PR: moving dependencies is its own PR.
 - Add a crate by creating its directory under `crates/<folder>/`. Name it `gaia-<directory>`.
   Inherit shared dependencies with `workspace = true`, and declare any others in your own crate.
 - If your PR needs a shared interface changed (`crates/core/*`), stop and say so in the PR
