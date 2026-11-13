@@ -82,16 +82,30 @@ fn the_plan_lists_the_config_the_board_gives() {
     assert!(out.status.success());
     let text = String::from_utf8_lossy(&out.stdout);
     for line in [
-        // The OS step, its sources and the merged root filesystem.
+        // Three builds from the one Buildroot tree: the root filesystem,
+        // the kernel and the bootloader, each with only its own sources.
         "zero-3e-demo.os                         gaia.os.buildroot",
+        "zero-3e-demo.kernel                     gaia.os.buildroot",
+        "zero-3e-demo.bootloader                 gaia.os.buildroot",
         "zero-3e-demo.buildroot.tree -> zero-3e-demo.os.source",
-        "zero-3e.linux.tree -> zero-3e-demo.os.inputs0",
+        "zero-3e-demo.buildroot.tree -> zero-3e-demo.kernel.source",
+        "zero-3e-demo.buildroot.tree -> zero-3e-demo.bootloader.source",
+        "zero-3e.linux.tree -> zero-3e-demo.kernel.inputs0",
+        "zero-3e.u-boot.tree -> zero-3e-demo.bootloader.inputs1",
+        // The kernel build's modules, image and device trees are layers of
+        // the root filesystem, at the paths Buildroot installs them to.
+        "zero-3e-demo.kernel.modules -> zero-3e-demo.kernel.modules.from",
+        "zero-3e-demo.kernel.kernel -> zero-3e-demo.kernel.image.from",
+        "zero-3e-demo.kernel.device_trees -> zero-3e-demo.kernel.device-trees.from",
         "zero-3e-demo.os.layer.layer -> zero-3e-demo.rootfs.layers0",
-        "zero-3e-demo.usb-gadget-network.place0.layer -> zero-3e-demo.rootfs.layers1",
-        "zero-3e-demo.rootfs.tree -> zero-3e-demo::erofs.tree",
+        "zero-3e-demo.kernel.modules.layer -> zero-3e-demo.rootfs.layers1",
+        "zero-3e-demo.usb-gadget-network.place0.layer -> zero-3e-demo.rootfs.layers2",
         "zero-3e-demo.rootfs.tree -> zero-3e-demo::root.tree",
-        // The board's raw area, from the OS's bootloader output.
-        "zero-3e-demo.os.bootloader -> zero-3e-demo.blob.u-boot.from",
+        // The slot's tree is the same without the kernel's boot files.
+        "zero-3e-demo.kernel.modules.layer -> zero-3e-demo.system.layers1",
+        "zero-3e-demo.system.tree -> zero-3e-demo::erofs.tree",
+        // The board's raw area, from the bootloader build's output.
+        "zero-3e-demo.bootloader.bootloader -> zero-3e-demo.blob.u-boot.from",
         "zero-3e-demo.blob.u-boot.blob -> zero-3e-demo.blobs.blobs0",
         "zero-3e-demo.blobs.list -> zero-3e-demo::disk.blobs",
         "zero-3e-demo.disk-layout  gaia:disk-layout  gpt, board partitions uboot-env",
@@ -109,7 +123,10 @@ fn the_plan_lists_the_config_the_board_gives() {
         "BR2_TARGET_UBOOT_BOARD_DEFCONFIG=\"radxa-zero-3-rk3566\"",
         "BR2_TARGET_UBOOT_CUSTOM_MAKEOPTS=\"ROCKCHIP_TPL=@zero-3e.rkbin@/bin/rk35/rk3566_ddr_1056MHz_v1.23.bin\"",
         "BR2_TARGET_ARM_TRUSTED_FIRMWARE_PLATFORM=\"rk3568\"",
-        "built from LINUX=zero-3e.linux UBOOT=zero-3e.u-boot ARM_TRUSTED_FIRMWARE=zero-3e.tf-a",
+        "inputs zero-3e.linux files.0 files.1 files.2, built from LINUX=zero-3e.linux",
+        "built from UBOOT=zero-3e.u-boot ARM_TRUSTED_FIRMWARE=zero-3e.tf-a",
+        // The root filesystem's build has neither.
+        "zero-3e-demo.os  gaia:os-config  fragments board.target image.0.os.fragment, inputs files.3\n",
         // A Rust component: its crates from its Cargo.lock, its target from
         // the board, its binary placed in the root filesystem.
         "hello-rust.vendor                       gaia.build.rust.vendor",
@@ -155,8 +172,8 @@ fn the_json_plan_has_the_os_config_as_a_host_input() {
     let inputs = both["host_inputs"].as_array().expect("host inputs");
     let os = inputs
         .iter()
-        .find(|i| i["port"] == "zero-3e-demo.os")
-        .expect("the os config");
+        .find(|i| i["port"] == "zero-3e-demo.os.kernel")
+        .expect("the kernel's config");
     assert_eq!(os["type"], "gaia:os-config");
     let names: Vec<&str> = os["value"]["fragments"]
         .as_array()
@@ -169,7 +186,6 @@ fn the_json_plan_has_the_os_config_as_a_host_input() {
         [
             "board.target",
             "board.kernel",
-            "board.bootloader",
             "image.0.os.fragment"
         ]
     );
@@ -193,6 +209,19 @@ fn a_board_change_changes_the_config() {
     assert!(out.status.success());
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("BR2_TARGET_ARM_TRUSTED_FIRMWARE_PLATFORM=\"rk3588\""));
+}
+
+/// The kernel image and device trees are in `/boot` of the bring-up root
+/// only: the slot's tree has the modules and not the boot files.
+#[test]
+fn the_slots_tree_has_no_kernel_boot_files() {
+    let dir = project();
+    let out = plan(dir.path(), &[]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("zero-3e-demo.kernel.image.layer -> zero-3e-demo.rootfs.layers"));
+    assert!(!text.contains("zero-3e-demo.kernel.image.layer -> zero-3e-demo.system.layers"));
+    assert!(!text.contains("zero-3e-demo.kernel.device-trees.layer -> zero-3e-demo.system.layers"));
 }
 
 #[test]

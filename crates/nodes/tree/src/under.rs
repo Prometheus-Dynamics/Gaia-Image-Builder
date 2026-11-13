@@ -8,9 +8,10 @@ use std::path::Path;
 
 const NAME: &str = "gaia.tree.under";
 
-/// Everything `from` holds, at `prefix` (a directory in the image): the
-/// tree's own paths under it, or the one file by `name`. `owner` claims the
+/// Everything the tree `from` holds, at `prefix` (a directory in the image):
+/// the tree's own paths under it, with their modes. `owner` claims the
 /// paths. An empty tree gives an empty layer: nothing, not even `prefix`.
+/// A `from` that is one file is refused.
 ///
 /// For what one step makes and another tree carries: a kernel's modules
 /// under `/lib/modules`, its image and device trees under `/boot`.
