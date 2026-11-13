@@ -1358,6 +1358,8 @@ enum PlaceFrom {
     Source(String),
     /// A named input the command line gives, one file under its name.
     Input(String),
+    /// One of the board's descriptions, one file under its name.
+    Description(String),
 }
 
 /// A component's layers in the image: its install entries placed from
@@ -1408,6 +1410,28 @@ fn component_layers(
                 }
                 g.used_inputs.insert(name.clone());
                 (PlaceFrom::Input(name.clone()), name.clone())
+            }
+            InstallFrom::File(FileRef::Description { name }) => {
+                if !at.board.descriptions.contains_key(name) {
+                    let known: Vec<&str> =
+                        at.board.descriptions.keys().map(String::as_str).collect();
+                    return Err(Error::at(
+                        file,
+                        format!("{key}.from.description"),
+                        format!(
+                            "{} installs the board's description `{name}`, and the board {} ({}) states none of that name under [descriptions]{}",
+                            component.name,
+                            at.board.name,
+                            at.board.file.display(),
+                            if known.is_empty() {
+                                String::new()
+                            } else {
+                                format!("; it has {}", known.join(", "))
+                            }
+                        ),
+                    ));
+                }
+                (PlaceFrom::Description(name.clone()), name.clone())
             }
             InstallFrom::File(FileRef::Local { file: local }) => {
                 let inside = local.path().strip_prefix(&dir).map_err(|_| {
@@ -1485,6 +1509,24 @@ fn component_layers(
                     "install",
                 )?;
                 g.set(node, "path", Lit::Str(path.display().to_string()));
+                g.set(node, "name", Lit::Str(name.clone()));
+                node
+            }
+            PlaceFrom::Description(name) => {
+                let described = at.board.descriptions.get(name).ok_or_else(|| {
+                    Error::at(file, "install", format!("no description named `{name}`"))
+                })?;
+                let node = g.add(
+                    "gaia.source.input",
+                    format!("{image}.{}.description.{name}", component.name),
+                    &at.board.file,
+                    &format!("descriptions.{name}"),
+                )?;
+                g.set(
+                    node,
+                    "path",
+                    Lit::Str(described.path().display().to_string()),
+                );
                 g.set(node, "name", Lit::Str(name.clone()));
                 node
             }
