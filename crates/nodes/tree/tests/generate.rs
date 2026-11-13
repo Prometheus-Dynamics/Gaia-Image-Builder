@@ -1,5 +1,7 @@
 //! `gaia.generate`: a tool run on a board's description, with a shell script
-//! as the tool. Runs everywhere.
+//! as the tool, in the sandbox. The sandbox's root is made here from this
+//! machine's shell, the few programs the script runs and the libraries
+//! they load. Skipped where no sandbox can run.
 
 use gaia_step::{Ctx, Store, logs_dir, step_records};
 use gaia_tree::{generate, unknown_tokens};
@@ -18,6 +20,53 @@ if [ "$5" = "extra" ]; then echo x > "$3/surprise"; fi
 if [ "$5" = "short" ]; then rm "$3/board.dts"; fi
 env > "$3/boot/env"
 "#;
+
+const BWRAP: &str = "/usr/bin/bwrap";
+
+/// Whether a sandbox can run here.
+fn available() -> bool {
+    let ok = std::path::Path::new(BWRAP).exists()
+        && std::process::Command::new(BWRAP)
+            .args(["--unshare-all", "--ro-bind", "/", "/", "true"])
+            .status()
+            .is_ok_and(|s| s.success());
+    if !ok {
+        assert!(
+            std::env::var_os("GAIA_REQUIRE_SANDBOX").is_none(),
+            "GAIA_REQUIRE_SANDBOX is set, and no sandbox runs here"
+        );
+        println!("SKIPPED: no bubblewrap with user namespaces here");
+    }
+    ok
+}
+
+/// A root filesystem in `dir` with `/bin/sh`, the programs the stand-in
+/// tool runs, and every library they load, each at the path it has here.
+fn make_root(dir: &std::path::Path) {
+    let place = |from: &std::path::Path, at: &std::path::Path| {
+        let to = dir.join(at.strip_prefix("/").expect("absolute"));
+        if !to.exists() {
+            std::fs::create_dir_all(to.parent().expect("parent")).expect("mkdir");
+            std::fs::copy(from, &to).expect("copy");
+        }
+    };
+    for name in ["sh", "cat", "mkdir", "rm", "env"] {
+        let program = std::fs::canonicalize(format!("/usr/bin/{name}")).expect("a program");
+        place(&program, std::path::Path::new(&format!("/bin/{name}")));
+        let listed = std::process::Command::new("ldd")
+            .arg(&program)
+            .output()
+            .expect("ldd");
+        for line in String::from_utf8_lossy(&listed.stdout).lines() {
+            // `name => /path (addr)` or `/path (addr)`.
+            for word in line.split_whitespace().filter(|word| word.starts_with('/')) {
+                let library = std::path::Path::new(word);
+                let real = std::fs::canonicalize(library).expect("a library");
+                place(&real, library);
+            }
+        }
+    }
+}
 
 struct Fixture {
     _dir: tempfile::TempDir,
@@ -52,6 +101,18 @@ impl Fixture {
         }
     }
 
+    fn root(&self) -> Tree {
+        let dir = self.root.join("rootfs");
+        if !dir.exists() {
+            make_root(&dir);
+        }
+        let store = Store::open(&self.store).expect("store");
+        Tree {
+            object: store.put_tree(&dir).expect("put").into(),
+            entries: Vec::new(),
+        }
+    }
+
     fn run(
         &self,
         name: &str,
@@ -70,6 +131,8 @@ impl Fixture {
         let description = self.tree("description", &[("daemon", "zero", 0o644)]);
         let made = generate(
             &self.store,
+            BWRAP,
+            self.root(),
             tool,
             "bin/gen",
             source,
@@ -98,6 +161,9 @@ const ARGS: &str = r#"["@source@/socs", "@description@", "@out@", "@slot@"]"#;
 
 #[test]
 fn the_tool_writes_the_declared_outputs_from_the_description() {
+    if !available() {
+        return;
+    }
     let f = Fixture::new();
     let out = f.run("a", "one", ARGS, "base").expect("generated");
     let read = |name: &str| std::fs::read_to_string(out.join(name)).expect(name);
@@ -106,6 +172,10 @@ fn the_tool_writes_the_declared_outputs_from_the_description() {
     // Nothing of the caller's environment reaches the tool.
     let env = read("boot/env");
     assert!(!env.contains("HOME=") && !env.contains("USER="), "{env}");
+    assert!(env.contains("LC_ALL=C"), "{env}");
+    // And nothing of this machine's paths: the tool was given the same
+    // names any store would give it.
+    assert!(env.contains("PWD=/out"), "{env}");
 
     // The same again is found in the store; another slot is another run.
     f.run("a", "one", ARGS, "base").expect("again");
@@ -120,10 +190,13 @@ fn the_tool_writes_the_declared_outputs_from_the_description() {
 
 #[test]
 fn the_source_is_in_the_key_only_when_an_argument_names_it() {
+    if !available() {
+        return;
+    }
     let f = Fixture::new();
-    // Not pointed at the source: its content does not matter. (The tool is
-    // given a directory of the description's tree for its first argument.)
-    let args = r#"["@description@/../../socs", "@description@", "@out@", "x"]"#;
+    // Not pointed at the source by name: its content is not in the key.
+    // (The path is where the sandbox has it; the name is what says so.)
+    let args = r#"["/source/socs", "@description@", "@out@", "x"]"#;
     let _ = f.run("a", "one", args, "");
     let before = f.made();
     let _ = f.run("b", "two", args, "");
@@ -137,6 +210,9 @@ fn the_source_is_in_the_key_only_when_an_argument_names_it() {
 
 #[test]
 fn an_output_not_written_and_a_file_not_declared_fail_by_name() {
+    if !available() {
+        return;
+    }
     let f = Fixture::new();
     let extra = r#"["@source@/socs", "@description@", "@out@", "s", "extra"]"#;
     let why = f
@@ -155,6 +231,9 @@ fn an_output_not_written_and_a_file_not_declared_fail_by_name() {
 
 #[test]
 fn an_unknown_name_and_a_slot_the_image_does_not_have_are_refused() {
+    if !available() {
+        return;
+    }
     let f = Fixture::new();
     let why = f
         .run(
