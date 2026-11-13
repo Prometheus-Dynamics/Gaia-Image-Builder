@@ -30,6 +30,7 @@ mod fsutil;
 mod object;
 mod retain;
 mod scratch;
+mod verified;
 
 pub use digest::{Digest, file_digest, tree_digest};
 pub use entry::{StepEntry, StepKey};
@@ -53,7 +54,10 @@ pub struct Store {
 pub enum Check {
     /// The object's path exists and is of its kind. Cheap.
     Present,
-    /// The object's content is read again and must match its digest.
+    /// The object's content must match its digest. It is read in full the
+    /// first time; after that it is accepted while its size, mode and
+    /// modification times are the ones recorded then, and read again when
+    /// any has changed.
     Digest,
 }
 
@@ -92,11 +96,24 @@ impl Store {
             Kind::File => metadata.is_file(),
             Kind::Tree => metadata.is_dir(),
         };
-        kind_matches
-            && match check {
-                Check::Present => true,
-                Check::Digest => object.kind.digest(&path).ok() == Some(object.digest),
+        if !kind_matches {
+            return false;
+        }
+        match check {
+            Check::Present => true,
+            // Read in full once, then trusted while nothing has touched it
+            // (see `verified`).
+            Check::Digest => {
+                if self.still_verified(object) {
+                    return true;
+                }
+                let matches = object.kind.digest(&path).ok() == Some(object.digest);
+                if matches {
+                    self.record_verified(object);
+                }
+                matches
             }
+        }
     }
 
     /// A new scratch directory for one step's outputs.
