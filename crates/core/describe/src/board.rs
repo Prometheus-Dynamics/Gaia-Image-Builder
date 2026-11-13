@@ -36,6 +36,10 @@ pub struct Board {
     /// The disk image's partition table, for a board written as one disk.
     pub disk: Option<Disk>,
     pub flash: Option<Flash>,
+    /// Files that describe this board to other programs, by the name their
+    /// reader gives them. A component installs one, or generates from one,
+    /// by that name: the same file for every use.
+    pub descriptions: BTreeMap<String, RelPath>,
 }
 
 /// The kernel: its source, configuration and device trees.
@@ -196,6 +200,8 @@ struct BoardFile {
     partitions: Option<Vec<PartitionNeed>>,
     disk: Option<Disk>,
     flash: Option<Flash>,
+    #[serde(default)]
+    descriptions: BTreeMap<String, RelPath>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -268,6 +274,7 @@ impl Board {
                 disk => disk,
             },
             flash: merged.flash,
+            descriptions: merged.descriptions,
         })
     }
 
@@ -328,7 +335,20 @@ fn read_file(path: &Path) -> Result<BoardFile, Error> {
             file.resolve(dir);
         }
     }
+    for (name, description) in &mut file.descriptions {
+        if !crate::common::is_input_name(name) {
+            return Err(Error::new(
+                path,
+                format!("descriptions.{name}"),
+                "a description's name is lowercase letters, digits and `-`",
+            ));
+        }
+        description.resolve(dir);
+    }
     let mut local: Vec<(String, &Path)> = Vec::new();
+    for (name, description) in &file.descriptions {
+        local.push((format!("descriptions.{name}"), description.path()));
+    }
     if let Some(kernel) = &file.kernel {
         for (index, fragment) in kernel.fragments.iter().flatten().enumerate() {
             local.push((format!("kernel.fragments[{index}]"), fragment.path()));
@@ -376,6 +396,16 @@ fn check_refs(
             path,
             key,
             "a named input is only for a component's install entry",
+        )),
+        FileRef::Description { .. } => Err(Error::new(
+            path,
+            key,
+            "a board description is named by a component's install entry, not by the board",
+        )),
+        FileRef::Generated { .. } => Err(Error::new(
+            path,
+            key,
+            "a generated file is named by a component's install entry, not by the board",
         )),
         _ => match file_ref.source() {
             Some(name) => check(&format!("{key}.source"), name),
@@ -491,6 +521,12 @@ fn merge(board: BoardFile, family: BoardFile) -> BoardFile {
         },
         firmware: board.firmware.or(family.firmware),
         partitions: board.partitions.or(family.partitions),
+        descriptions: {
+            // By name: the board's file for a name replaces its family's.
+            let mut all = family.descriptions;
+            all.extend(board.descriptions);
+            all
+        },
         disk: match (board.disk, family.disk) {
             (Some(b), Some(f)) => Some(Disk {
                 scheme: b.scheme.or(f.scheme),

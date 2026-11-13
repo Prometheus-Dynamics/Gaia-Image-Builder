@@ -475,3 +475,212 @@ fn a_components_kernel_contract_is_checked_in_the_kernels_build() {
     assert!(err.contains("requires.kernel_contract.source"), "{err}");
     assert!(err.contains("no source named `lemnos`"), "{err}");
 }
+
+/// A board states files that describe it to other programs, by name; a
+/// component installs one by that name, whatever the board is.
+#[test]
+fn a_component_installs_the_boards_description_by_name() {
+    let dir = project();
+    let board_dir = dir.path().join("examples/boards/zero-3e");
+    let board = board_dir.join("board.toml");
+    let component = dir
+        .path()
+        .join("examples/components/usb-gadget-network/component.toml");
+    let add_install = "[[install]]\nfrom = { description = \"daemon\" }\nto = \"/etc/daemon/board.toml\"\nmode = \"0644\"\n";
+    let text = std::fs::read_to_string(&component).expect("read");
+    std::fs::write(&component, format!("{text}\n{add_install}")).expect("write");
+
+    // The board states none: an error at the install, naming both.
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    println!("{err}");
+    assert!(err.contains("install[2].from.description"), "{err}");
+    assert!(
+        err.contains(
+            "usb-gadget-network installs the board's description `daemon`, and the board zero-3e"
+        ),
+        "{err}"
+    );
+    assert!(
+        err.contains("states none of that name under [descriptions]"),
+        "{err}"
+    );
+
+    // Stated, and the file is not there: an error at the board's key.
+    let text = std::fs::read_to_string(&board).expect("read");
+    std::fs::write(
+        &board,
+        format!("{text}\n[descriptions]\ndaemon = \"daemon-board.toml\"\n"),
+    )
+    .expect("write");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("descriptions.daemon"), "{err}");
+
+    // There: one file, installed where the component says.
+    std::fs::write(board_dir.join("daemon-board.toml"), "id = \"zero-3e\"\n").expect("write");
+    let out = plan(dir.path(), &[]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    for line in [
+        "zero-3e-demo.usb-gadget-network.description.daemon  gaia.source.input",
+        "zero-3e-demo.usb-gadget-network.description.daemon.tree -> zero-3e-demo.usb-gadget-network.place1.from",
+        "/etc/daemon/board.toml",
+    ] {
+        assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
+    }
+
+    // A description is named by a component, not by the board itself.
+    edit(
+        &board,
+        "ROCKCHIP_TPL = { source = \"rkbin\", path = \"bin/rk35/rk3566_ddr_1056MHz_v1.23.bin\" }",
+        "ROCKCHIP_TPL = { description = \"daemon\" }",
+    );
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains(
+            "a board description is named by a component's install entry, not by the board"
+        ),
+        "{err}"
+    );
+}
+
+/// A component generates files from the board's description with a tool
+/// built from one of its sources: the plan has the tool's build for the
+/// build machine, the run and the install, and nothing is built or run to
+/// find what is wrong with it.
+#[test]
+fn a_component_generates_from_the_boards_description() {
+    let dir = project();
+    let board_dir = dir.path().join("examples/boards/zero-3e");
+    let board = board_dir.join("board.toml");
+    let component = dir
+        .path()
+        .join("examples/components/hello-rust/component.toml");
+    let block = "[generate]\ntool = { source = \"src\", package = \"hello-rust\" }\ndescription = \"daemon\"\nargs = [\"tree\", \"--socs\", \"@source@/socs\", \"@description@\", \"-o\", \"@out@/board.dts\", \"--modprobe\", \"@out@/modprobe.conf\"]\noutputs = [\"board.dts\", \"modprobe.conf\"]\n\n[[install]]\nfrom = { generated = \"modprobe.conf\" }\nto = \"/etc/modprobe.d/board.conf\"\nmode = \"0644\"\n";
+    let original = std::fs::read_to_string(&component).expect("read");
+    std::fs::write(&component, format!("{original}\n{block}")).expect("write");
+
+    // The board states no such description: an error at the generator.
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    println!("{err}");
+    assert!(err.contains("generate.description"), "{err}");
+    assert!(
+        err.contains(
+            "hello-rust generates from the board's description `daemon`, and the board zero-3e"
+        ),
+        "{err}"
+    );
+
+    let text = std::fs::read_to_string(&board).expect("read");
+    std::fs::write(
+        &board,
+        format!("{text}\n[descriptions]\ndaemon = \"daemon-board.toml\"\n"),
+    )
+    .expect("write");
+    std::fs::write(board_dir.join("daemon-board.toml"), "id = \"zero-3e\"\n").expect("write");
+    let out = plan(dir.path(), &[]);
+    assert!(out.status.success());
+    // The step list's columns are as wide as its longest name: compared
+    // with runs of spaces as one.
+    let text = String::from_utf8_lossy(&out.stdout)
+        .split(' ')
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    for line in [
+        // The tool, built as any Rust component is, and its crates.
+        "hello-rust.tool gaia.build.rust",
+        "hello-rust.tool.vendor gaia.build.rust.vendor",
+        "hello-rust.tool.vendor.vendor -> hello-rust.tool.vendor",
+        // The run: the tool, its source, the board's description.
+        "zero-3e-demo.hello-rust.generate gaia.generate",
+        "hello-rust.tool.tree -> zero-3e-demo.hello-rust.generate.tool",
+        "hello-rust.src.tree -> zero-3e-demo.hello-rust.generate.source",
+        "zero-3e-demo.hello-rust.description.daemon.tree -> zero-3e-demo.hello-rust.generate.description",
+        // A generated file, installed.
+        "zero-3e-demo.hello-rust.generate.tree -> zero-3e-demo.hello-rust.place",
+        "/etc/modprobe.d/board.conf",
+    ] {
+        assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
+    }
+    let json = plan(dir.path(), &["--json"]);
+    let both: serde_json::Value = serde_json::from_slice(&json.stdout).expect("json");
+    let nodes = both["graph"]["graph"]["nodes"].as_array().expect("nodes");
+    let find = |label: &str| {
+        nodes
+            .iter()
+            .find(|n| n["label"] == label)
+            .unwrap_or_else(|| panic!("no node {label}"))
+    };
+    let tool = find("hello-rust.tool");
+    // For the build machine, not the board: static, and tuned for no CPU.
+    let triple = tool["consts"]["triple"]["value"].as_str().expect("triple");
+    assert!(triple.ends_with("-unknown-linux-musl"), "{triple}");
+    assert!(triple.starts_with(std::env::consts::ARCH), "{triple}");
+    assert_eq!(tool["consts"]["cpu"]["value"], "");
+    // The component's own build is still the board's.
+    assert_eq!(
+        find("hello-rust.build")["consts"]["triple"]["value"],
+        "aarch64-unknown-linux-musl"
+    );
+    let run = find("zero-3e-demo.hello-rust.generate");
+    assert_eq!(run["consts"]["program"]["value"], "bin/hello-rust");
+    assert_eq!(run["consts"]["description_name"]["value"], "daemon");
+    assert_eq!(
+        run["consts"]["outputs"]["value"],
+        "[\"board.dts\",\"modprobe.conf\"]"
+    );
+
+    // What a plan refuses, each at its key.
+    let cases = [
+        (
+            "\"@source@/socs\"",
+            "\"@sources@/socs\"",
+            "generate.args[2]",
+            "names @sources@; the names are @source@, @description@, @out@, @slot@",
+        ),
+        (
+            "from = { generated = \"modprobe.conf\" }",
+            "from = { generated = \"udev.rules\" }",
+            ".from.generated",
+            "`udev.rules` is in no declared output; [generate] declares board.dts, modprobe.conf",
+        ),
+        (
+            "tool = { source = \"src\"",
+            "tool = { source = \"lemnos\"",
+            "generate.tool.source",
+            "no source named `lemnos`",
+        ),
+        (
+            "\"@out@/board.dts\"",
+            "\"@out@/@slot@.dts\"",
+            "generate.args",
+            "names @slot@, and the image zero-3e-demo sets no `slot` in its settings",
+        ),
+        (
+            "outputs = [\"board.dts\", \"modprobe.conf\"]",
+            "outputs = [\"boot/board.dts\", \"modprobe.conf\"]",
+            "generate.outputs[0]",
+            "is not a name at the top of the output directory",
+        ),
+    ];
+    for (from, to, key, message) in cases {
+        std::fs::write(
+            &component,
+            format!("{original}\n{}", block.replace(from, to)),
+        )
+        .expect("write");
+        let out = plan(dir.path(), &[]);
+        assert_eq!(out.status.code(), Some(2), "{to}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(key), "{to}: {err}");
+        assert!(err.contains(message), "{to}: {err}");
+    }
+}

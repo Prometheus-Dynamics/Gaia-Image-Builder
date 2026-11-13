@@ -97,3 +97,34 @@ pub const KEYS: [&str; 30] = [
     "gaia:arch",
     "gaia:os",
 ];
+
+/// The names a `[generate]` tool's argument may hold: its source tree, the
+/// board's description file, the directory it writes into, the slot's id.
+pub const GENERATE_NAMES: [&str; 4] = ["@source@", "@description@", "@out@", "@slot@"];
+
+/// The `@name@` words of `text` that are none of [`GENERATE_NAMES`]. A word
+/// between two `@` that is no name (lowercase letters, digits and `-`) is
+/// not one: `user@host` and a path with an `@` in it are left alone.
+pub fn unknown_generate_names(text: &str) -> Vec<String> {
+    let mut unknown = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find('@') {
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('@') else { break };
+        let word = &after[..end];
+        let whole = format!("@{word}@");
+        let is_name = !word.is_empty()
+            && word
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+        if is_name && !GENERATE_NAMES.contains(&whole.as_str()) {
+            unknown.push(whole);
+        }
+        rest = if is_name {
+            &after[end + 1..]
+        } else {
+            &after[end..]
+        };
+    }
+    unknown
+}
