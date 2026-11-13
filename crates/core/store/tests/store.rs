@@ -341,10 +341,22 @@ fn a_verified_object_is_not_read_again_until_it_is_touched() {
         .join(&tree.digest.hex()[..2])
         .join(tree.digest.hex());
 
-    // The first digest check reads it all, and records its state.
-    assert!(!record.exists());
+    // Putting it hashed it, so its state is recorded from the start: the
+    // first lookup after a build reads no content either.
+    assert!(
+        record.is_file(),
+        "the state is recorded when it is committed"
+    );
     assert!(store.check(&tree, Check::Digest));
-    assert!(record.is_file(), "the state is recorded");
+
+    // An object that is already in the store is not read when the same
+    // content is committed again, so that gives it no record: only a full
+    // read does.
+    fs::remove_file(&record).expect("remove the record");
+    assert_eq!(stored(&store, dir.path()), tree);
+    assert!(!record.exists(), "no record for content that was not read");
+    assert!(store.check(&tree, Check::Digest));
+    assert!(record.is_file(), "the full read records it");
 
     // Proof that the second check reads no content: the content is changed
     // with the size and the modification time put back, and the check still

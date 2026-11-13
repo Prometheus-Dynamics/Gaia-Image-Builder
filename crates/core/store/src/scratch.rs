@@ -64,7 +64,12 @@ impl<'s> Scratch<'s> {
                 kind,
                 digest: kind.digest(&path)?,
             };
-            fsutil::place(&path, &self.store.path(&object))?;
+            // What was hashed a moment ago is what the store now holds, so
+            // the first lookup need not read it all again. An object that
+            // was already there was not read here, and gets no record.
+            if fsutil::place(&path, &self.store.path(&object))? {
+                self.store.record_verified(&object);
+            }
             refs.insert(name.to_string(), object);
         }
         Ok(refs)
