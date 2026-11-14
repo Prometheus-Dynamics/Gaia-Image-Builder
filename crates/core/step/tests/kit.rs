@@ -323,3 +323,37 @@ fn a_bodys_failure_gets_a_log_only_when_the_reason_cannot_hold_it() {
     assert!(fail_with(120).log().is_none(), "120 bytes fit");
     assert!(fail_with(121).log().is_some(), "121 do not");
 }
+
+#[test]
+fn two_makers_of_one_key_make_it_once() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path().join("store");
+    let ran = std::sync::atomic::AtomicUsize::new(0);
+    let key = || {
+        KeyBuilder::new("test.once", 1)
+            .input("src", Digest::of_bytes(b"same"))
+            .finish()
+    };
+    // Each maker would write its own bytes: an output that is not the same
+    // twice, as a tool build's is not.
+    let make = |text: &'static str| {
+        let store = Store::open(&root).expect("store");
+        let cx = Ctx::new();
+        let made = Step::new(&store, &cx, "test.once", key())
+            .look_up_or_make(&[("out", Path::new("out"))], |work| {
+                ran.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                write_out(text)(work)
+            })
+            .expect("made");
+        (made.made, made.outputs["out"])
+    };
+    let (a, b) = std::thread::scope(|scope| {
+        let a = scope.spawn(|| make("first"));
+        let b = scope.spawn(|| make("second"));
+        (a.join().expect("a"), b.join().expect("b"))
+    });
+    assert_eq!(ran.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(a.0 != b.0, "one made it and one found it");
+    assert_eq!(a.1, b.1, "both have the one recorded output");
+}

@@ -170,6 +170,29 @@ impl Store {
         entry::write(&self.entry_path(key), entry)
     }
 
+    /// The one right to make `key`'s step in this store, waited for while
+    /// another process or thread holds it. Two makers of one key would each
+    /// do the whole work, and where a step's output is not the same bytes
+    /// twice, the later record would replace the earlier and orphan every
+    /// step keyed on the earlier output. The holder looks the key up again
+    /// once it has the right: the other maker may have recorded it.
+    ///
+    /// The right is a lock on a file under `making/`; it ends when the
+    /// value is dropped, and when its process dies.
+    pub fn making(&self, key: &StepKey) -> Result<Making> {
+        let dir = self.root.join("making");
+        fs::create_dir_all(&dir).map_err(|e| Error::io("create", &dir, e))?;
+        let path = dir.join(format!("{}.lock", key.0.hex()));
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .map_err(|e| Error::io("open", &path, e))?;
+        file.lock().map_err(|e| Error::io("lock", &path, e))?;
+        Ok(Making { _file: file })
+    }
+
     fn entry_path(&self, key: &StepKey) -> PathBuf {
         let hex = key.0.hex();
         self.root
@@ -177,6 +200,12 @@ impl Store {
             .join(&hex[..2])
             .join(format!("{hex}.json"))
     }
+}
+
+/// The right to make one key's step; see [`Store::making`].
+#[derive(Debug)]
+pub struct Making {
+    _file: fs::File,
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
