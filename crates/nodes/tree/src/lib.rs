@@ -26,6 +26,7 @@
 
 mod accounts;
 mod by_role;
+mod cmdline;
 mod file;
 mod generate;
 mod layer;
@@ -38,6 +39,7 @@ mod walk;
 
 pub use accounts::tree_accounts;
 pub use by_role::{Record, RecordRole, placements, records, tree_by_role};
+pub use cmdline::{assemble as cmdline_assemble, cmdline, root_hash_of};
 pub use file::tree_file;
 pub use generate::{TOKENS, generate, unknown_tokens};
 pub use layer::tree_layer;
@@ -52,9 +54,10 @@ use gaia_store::Digest;
 use gaia_types::Tree;
 
 /// The nodes, for a registry.
-pub const NODES: [&NodeRecord; 10] = [
+pub const NODES: [&NodeRecord; 11] = [
     &by_role::TREE_BY_ROLE_NODE,
     &generate::GENERATE_NODE,
+    &cmdline::CMDLINE_NODE,
     &pick::TREE_PICK_NODE,
     &under::TREE_UNDER_NODE,
     &place::TREE_PLACE_NODE,
