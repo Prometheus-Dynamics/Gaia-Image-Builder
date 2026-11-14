@@ -56,8 +56,8 @@ pub struct ImageSpec {
     pub recipe: String,
     /// The most the image may be.
     pub budget: Option<SizeText>,
-    /// The recipe's own settings. The recipe checks them when the graph is
-    /// planned.
+    /// The recipe's own settings: `gaia validate` checks their names and
+    /// types; planning checks them whole, with any `--setting` added.
     #[serde(default)]
     pub settings: toml::Table,
 }

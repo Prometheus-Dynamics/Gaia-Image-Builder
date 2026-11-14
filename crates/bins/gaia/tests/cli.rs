@@ -251,3 +251,84 @@ fn version_commit_is_the_head_the_binary_was_built_from() {
     let commit = commit.strip_suffix("-dirty").unwrap_or(commit);
     assert_eq!(commit, head, "built from another commit: {line}");
 }
+
+/// The tarball recipe with a compression stage: `level` has no default,
+/// `threads` has one, `tags` is a list.
+fn product_with_parameters(dir: &Path) {
+    product(dir);
+    write(
+        &dir.join("recipes/tarball.toml"),
+        "version = 1\nname = \"tarball\"\n[stages]\ntar = \"gaia.compress.tar\"\npack = \"gaia.compress.zstd\"\n[[connects]]\nfrom = \"tar.archive\"\nto = \"pack.artifact\"\n[inputs]\nbuild = [\"tar.tree\"]\n[outputs]\ntar = \"pack.compressed\"\n[parameters.level]\ntype = \"int\"\nsets = [\"pack.level\"]\n[parameters.threads]\ntype = \"int\"\ndefault = 1\nsets = [\"pack.threads\"]\n",
+    );
+}
+
+/// The constant the node labelled `label` has on `input`, in the plan's
+/// graph.
+fn constant(json: &serde_json::Value, label: &str, input: &str) -> serde_json::Value {
+    let nodes = json["graph"]["graph"]["nodes"].as_array().expect("nodes");
+    let node = nodes
+        .iter()
+        .find(|node| node["label"] == label)
+        .unwrap_or_else(|| panic!("no node {label}"));
+    node["consts"][input]["value"].clone()
+}
+
+#[test]
+fn a_setting_gives_what_the_product_leaves_unset() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    product_with_parameters(dir.path());
+    // Unset, and no default: plan names it.
+    let out = gaia(dir.path(), &["plan", "product.toml"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("parameters.level: recipe tarball: missing"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = gaia(
+        dir.path(),
+        &["plan", "product.toml", "--json", "--setting", "a.level=7"],
+    );
+    assert!(out.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+    assert_eq!(constant(&json, "a::pack", "level"), 7);
+    assert_eq!(constant(&json, "a::pack", "threads"), 1);
+
+    let refused = |args: &[&str]| {
+        let mut all = vec!["plan", "product.toml"];
+        all.extend_from_slice(args);
+        let out = gaia(dir.path(), &all);
+        assert_eq!(out.status.code(), Some(2), "{args:?} was not refused");
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+    let err = refused(&["--setting", "a.level=7", "--setting", "b.level=7"]);
+    assert!(
+        err.contains("--setting b.level=7: product.toml has no image `b`; its images are a"),
+        "{err}"
+    );
+    let err = refused(&["--setting", "a.levle=7"]);
+    assert!(
+        err.contains("--setting a.levle=7: recipe tarball declares no parameter `levle`; its parameters are level, threads"),
+        "{err}"
+    );
+    let err = refused(&["--setting", "a.level=high"]);
+    assert!(
+        err.contains("--setting a.level=high: recipe tarball's `level` wants an int, not `high`"),
+        "{err}"
+    );
+    // One the product sets is the product's.
+    let text = std::fs::read_to_string(dir.path().join("product.toml")).expect("read");
+    std::fs::write(
+        dir.path().join("product.toml"),
+        format!("{text}[images.settings]\nlevel = 3\n"),
+    )
+    .expect("write");
+    assert!(gaia(dir.path(), &["plan", "product.toml"]).status.success());
+    let err = refused(&["--setting", "a.level=7"]);
+    assert!(
+        err.contains(
+            "--setting a.level=7: product.toml already sets it (images[0].settings.level)"
+        ),
+        "{err}"
+    );
+}

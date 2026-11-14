@@ -242,3 +242,56 @@ fn a_recipes_dir_that_does_not_exist_is_an_error_when_given() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("no-such-dir"), "{err}");
 }
+
+const SETTINGS: &str = "[images.settings]\nid = \"zero-3e-demo\"\n";
+
+#[test]
+fn an_image_setting_the_recipe_does_not_declare_is_refused_by_name() {
+    let dir = examples();
+    recipes(dir.path());
+    edit(
+        &dir.path().join(PRODUCT),
+        SETTINGS,
+        &format!("{SETTINGS}journl = false\n"),
+    );
+    let out = validate(dir.path(), &["--recipes", "recipes", PRODUCT]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains(&format!(
+            "{PRODUCT}: images[0].settings.journl: recipe sd-image: not a parameter of this recipe; did you mean journal?"
+        )),
+        "{err}"
+    );
+}
+
+#[test]
+fn an_image_setting_of_the_wrong_type_is_refused_by_name() {
+    let dir = examples();
+    recipes(dir.path());
+    edit(
+        &dir.path().join(PRODUCT),
+        SETTINGS,
+        &format!("{SETTINGS}journal = \"yes\"\n"),
+    );
+    let out = validate(dir.path(), &["--recipes", "recipes", PRODUCT]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains(&format!(
+            "{PRODUCT}: images[0].settings.journal: recipe sd-image: wants a bool, got the string \"yes\""
+        )),
+        "{err}"
+    );
+}
+
+/// A parameter with no default may be left for `--setting` at plan or
+/// build.
+#[test]
+fn a_parameter_left_unset_is_not_refused() {
+    let dir = examples();
+    recipes(dir.path());
+    edit(&dir.path().join(PRODUCT), SETTINGS, "[images.settings]\n");
+    let out = validate(dir.path(), &["--recipes", "recipes", PRODUCT]);
+    assert!(out.status.success());
+}

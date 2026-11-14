@@ -194,7 +194,11 @@ impl Recipe {
     }
 }
 
-pub(crate) fn group(recipe: &Recipe, values: &toml::Table, from: &Path) -> Result<GroupDoc, Error> {
+pub(crate) fn check_settings(
+    recipe: &Recipe,
+    values: &toml::Table,
+    from: &Path,
+) -> Result<(), Error> {
     let param_error = |name: &str, message: String| {
         Error::new(from, format!("parameters.{name}"), message).recipe(&recipe.name)
     };
@@ -216,6 +220,20 @@ pub(crate) fn group(recipe: &Recipe, values: &toml::Table, from: &Path) -> Resul
             ));
         }
     }
+    for (name, value) in values {
+        recipe.parameters[name]
+            .kind
+            .lit(value)
+            .map_err(|e| param_error(name, e))?;
+    }
+    Ok(())
+}
+
+pub(crate) fn group(recipe: &Recipe, values: &toml::Table, from: &Path) -> Result<GroupDoc, Error> {
+    let param_error = |name: &str, message: String| {
+        Error::new(from, format!("parameters.{name}"), message).recipe(&recipe.name)
+    };
+    check_settings(recipe, values, from)?;
     let mut consts = Vec::new();
     for (at, value) in &recipe.consts {
         consts.push(StageConstDoc {

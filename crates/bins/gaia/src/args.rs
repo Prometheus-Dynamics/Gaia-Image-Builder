@@ -32,6 +32,13 @@ project flags:
                      A relative PATH is from the current directory. Every
                      input a component names must be given, and each given
                      one must be used. No `~` expansion: the shell does it.
+  --setting IMAGE.NAME=VALUE
+                     a recipe parameter of the image IMAGE that the product
+                     leaves unset, such as a version known only at build
+                     time; repeatable. VALUE is read as the parameter's type
+                     (a list of strings: comma-separated). A parameter the
+                     product sets, one the recipe does not declare and an
+                     image the product does not have are refused.
 
 validate checks description files and what they name: no lock, no tools,
 no inputs, no network. It stops at the first bad file, naming the key. Without --kind,
@@ -40,7 +47,10 @@ partitions, ...) is a board, or a family when it has no name and extends
 nothing; any other is a component. A product's images must name recipes
 that exist: the names are read from --recipes DIR, else recipes/ next to
 the product, and the check is skipped when there is no such directory and
-no --recipes. Recipe settings are not checked.
+no --recipes. Each image's settings are checked against its recipe's
+parameters: a name the recipe does not declare, or a value of the wrong
+type, is refused. A parameter with no default may be left unset there and
+given with plan's or build's --setting.
 
 plan prints the graph document and the plan and runs nothing. build runs
 the graph; Ctrl-C stops at the next step boundary. clean keeps what the
@@ -80,6 +90,8 @@ pub struct Project {
     pub tools: BTreeMap<String, String>,
     /// `--input NAME=PATH`, by name.
     pub inputs: BTreeMap<String, PathBuf>,
+    /// `--setting IMAGE.NAME=VALUE`, in the order given.
+    pub settings: Vec<Setting>,
     pub jobs: Option<usize>,
     /// `build` only: run only as far as the steps of this id.
     pub until: Option<String>,
@@ -88,6 +100,21 @@ pub struct Project {
     pub config_only: bool,
     /// `plan` only: the graph and plan as JSON.
     pub json: bool,
+}
+
+/// `--setting IMAGE.NAME=VALUE`: a recipe parameter for one image, as text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Setting {
+    pub image: String,
+    pub name: String,
+    pub value: String,
+}
+
+impl Setting {
+    /// The flag as it was given.
+    pub fn given(&self) -> String {
+        format!("--setting {}.{}={}", self.image, self.name, self.value)
+    }
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -160,6 +187,35 @@ pub fn parse(words: &[String]) -> Result<Command, Stop> {
                         if project.inputs.insert(name.into(), path.into()).is_some() {
                             return Err(Stop::usage(format!("--input {name} is given twice")));
                         }
+                    }
+                    "--setting" => {
+                        let text = words.value(word)?;
+                        let setting = text
+                            .split_once('=')
+                            .and_then(|(at, value)| {
+                                let (image, name) = at.rsplit_once('.')?;
+                                (!image.is_empty() && !name.is_empty()).then(|| Setting {
+                                    image: image.into(),
+                                    name: name.into(),
+                                    value: value.into(),
+                                })
+                            })
+                            .ok_or_else(|| {
+                                Stop::usage(format!(
+                                    "--setting takes IMAGE.NAME=VALUE, not `{text}`"
+                                ))
+                            })?;
+                        if project
+                            .settings
+                            .iter()
+                            .any(|s| s.image == setting.image && s.name == setting.name)
+                        {
+                            return Err(Stop::usage(format!(
+                                "--setting {}.{} is given twice",
+                                setting.image, setting.name
+                            )));
+                        }
+                        project.settings.push(setting);
                     }
                     "--json" if !build => project.json = true,
                     "--jobs" if build => {
@@ -332,6 +388,37 @@ mod tests {
         assert_eq!(
             parsed("plan p.toml --input a=x --input a=y").expect_err("an error"),
             "--input a is given twice"
+        );
+        let Ok(Command::Build(p)) =
+            parsed("build p.toml --setting raze-base.version=2026.1.0 --setting a.b.c=x=y")
+        else {
+            panic!("build");
+        };
+        assert_eq!(
+            p.settings,
+            [
+                Setting {
+                    image: "raze-base".into(),
+                    name: "version".into(),
+                    value: "2026.1.0".into()
+                },
+                Setting {
+                    image: "a.b".into(),
+                    name: "c".into(),
+                    value: "x=y".into()
+                }
+            ]
+        );
+        assert_eq!(p.settings[1].given(), "--setting a.b.c=x=y");
+        for bad in ["version=1", ".version=1", "a.=1", "a.version"] {
+            assert_eq!(
+                parsed(&format!("plan p.toml --setting {bad}")).expect_err("an error"),
+                format!("--setting takes IMAGE.NAME=VALUE, not `{bad}`")
+            );
+        }
+        assert_eq!(
+            parsed("plan p.toml --setting a.v=1 --setting a.v=2").expect_err("an error"),
+            "--setting a.v is given twice"
         );
         assert_eq!(parsed(""), Ok(Command::Help));
         assert_eq!(
