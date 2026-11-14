@@ -31,6 +31,7 @@ mod file;
 mod generate;
 mod layer;
 mod merge;
+mod overlay;
 mod pick;
 mod place;
 mod services;
@@ -44,6 +45,9 @@ pub use file::tree_file;
 pub use generate::{TOKENS, generate, unknown_tokens};
 pub use layer::tree_layer;
 pub use merge::{merge_layers, tree_merge};
+pub use overlay::{
+    compiler as overlay_compiler, devicetree_overlay, version_of as overlay_version_of,
+};
 pub use pick::tree_pick;
 pub use place::tree_place;
 pub use services::tree_services;
@@ -54,10 +58,11 @@ use gaia_store::Digest;
 use gaia_types::Tree;
 
 /// The nodes, for a registry.
-pub const NODES: [&NodeRecord; 11] = [
+pub const NODES: [&NodeRecord; 12] = [
     &by_role::TREE_BY_ROLE_NODE,
     &generate::GENERATE_NODE,
     &cmdline::CMDLINE_NODE,
+    &overlay::DEVICETREE_OVERLAY_NODE,
     &pick::TREE_PICK_NODE,
     &under::TREE_UNDER_NODE,
     &place::TREE_PLACE_NODE,
