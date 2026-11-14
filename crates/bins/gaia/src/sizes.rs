@@ -189,7 +189,19 @@ pub fn sizes(options: &args::Sizes) -> Result<(), Stop> {
             "gaia.fs.erofs" | "gaia.fs.ext4" | "gaia.fs.vfat" => {
                 if let Some((bytes, object)) = file("image") {
                     let kind = step.step.trim_start_matches("gaia.fs.");
-                    row(format!("filesystem {kind}"), bytes, short(object));
+                    // An erofs says whether it was read back after it was
+                    // made: a size beside that line is of a verified image.
+                    let read_back = out("read-back")
+                        .and_then(|record| std::fs::read_to_string(store.path(record)).ok())
+                        .map(|text| text.lines().next().unwrap_or_default().to_string());
+                    let detail = match (kind, read_back) {
+                        (_, Some(line)) => format!("{}; {line}", short(object)),
+                        ("erofs", None) => {
+                            format!("{}; NOT read back after it was made", short(object))
+                        }
+                        (_, None) => short(object),
+                    };
+                    row(format!("filesystem {kind}"), bytes, detail);
                 }
             }
             "gaia.verity" => {

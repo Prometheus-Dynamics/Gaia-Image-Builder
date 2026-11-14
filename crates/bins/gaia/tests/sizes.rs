@@ -120,6 +120,13 @@ fn the_sizes_of_a_run_are_read_from_its_record_and_the_store() {
             .count(),
         1
     );
+    // This record's erofs step has no read-back output: its row says so.
+    assert!(
+        rows.iter()
+            .any(|(w, _, d)| w == "filesystem erofs"
+                && d.ends_with("NOT read back after it was made")),
+        "{rows:#?}"
+    );
     assert_eq!(find("generated image (boot partition)", ""), 8192);
     assert_eq!(find("payload kernel", "of 8192 in its bay"), 5000);
     assert_eq!(find("payload cmdline", "of 4096 in its bay"), 12);
