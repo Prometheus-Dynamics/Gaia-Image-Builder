@@ -332,3 +332,57 @@ fn a_setting_gives_what_the_product_leaves_unset() {
         "{err}"
     );
 }
+
+/// `keep_setid` reaches every EROFS stage of the image's recipe, as one
+/// string of paths; a recipe with none, and a path that is not one, are
+/// refused by key.
+#[test]
+fn keep_setid_reaches_the_images_erofs_stages() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    product(dir.path());
+    let text = std::fs::read_to_string(dir.path().join("product.toml")).expect("read");
+    let with = |keep: &str| {
+        std::fs::write(
+            dir.path().join("product.toml"),
+            text.replace(
+                "recipe = \"tarball\"\n",
+                &format!("recipe = \"tarball\"\nkeep_setid = {keep}\n"),
+            ),
+        )
+        .expect("write");
+    };
+    with("[\"/bin/busybox\", \"/usr/bin/su\"]");
+    let out = gaia(dir.path(), &["plan", "product.toml"]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("images[0].keep_setid: recipe tarball makes no EROFS root"),
+        "{err}"
+    );
+
+    write(
+        &dir.path().join("recipes/tarball.toml"),
+        "version = 1\nname = \"tarball\"\n[stages]\nfs = \"gaia.fs.erofs\"\n[inputs]\nbuild = [\"fs.tree\"]\n[outputs]\nroot = \"fs.image\"\n[consts]\n\"fs.compression\" = \"none\"\n\"fs.level\" = 0\n",
+    );
+    let out = gaia(dir.path(), &["plan", "product.toml", "--json"]);
+    assert!(out.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+    assert_eq!(
+        constant(&json, "a::fs", "keep_setid"),
+        "/bin/busybox /usr/bin/su"
+    );
+
+    for (keep, why) in [
+        ("[\"bin/busybox\"]", "`bin/busybox` is not an absolute path"),
+        ("[\"/bin/a b\"]", "has whitespace"),
+        ("[\"/bin/../su\"]", "has a `.` or `..` part"),
+        ("[\"/bin/su\", \"/bin/su\"]", "is listed twice"),
+    ] {
+        with(keep);
+        let out = gaia(dir.path(), &["plan", "product.toml"]);
+        assert_eq!(out.status.code(), Some(2), "{keep}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("images[0].keep_setid["), "{err}");
+        assert!(err.contains(why), "{keep}: {err}");
+    }
+}

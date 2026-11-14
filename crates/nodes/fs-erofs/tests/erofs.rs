@@ -74,6 +74,17 @@ fn entries(uid: u32) -> Vec<FileEntry> {
 }
 
 fn image(root: &Path, uid: u32, compression: &str) -> (u64, PathBuf) {
+    image_keeping(root, uid, compression, &["/usr/bin/tool"]).expect("builds")
+}
+
+/// The sample as an image, with setuid and setgid bits kept on `keep` only.
+fn image_keeping(
+    root: &Path,
+    uid: u32,
+    compression: &str,
+    keep: &[&str],
+) -> Result<(u64, PathBuf), String> {
+    let keep: Option<String> = (!keep.is_empty()).then(|| keep.join(" "));
     let src = root.join("src");
     if !src.exists() {
         sample(&src);
@@ -96,14 +107,15 @@ fn image(root: &Path, uid: u32, compression: &str) -> (u64, PathBuf) {
         None,
         None,
         None,
+        keep.as_ref(),
         None,
         &Ctx::new(),
     )
-    .expect("builds");
-    (
+    .map_err(|e| e.to_string())?;
+    Ok((
         image.size.0,
         image.object.path_in(&store).expect("in store"),
-    )
+    ))
 }
 
 #[test]
@@ -223,6 +235,7 @@ fn sizes_by_compression() {
         None,
         None,
         None,
+        None,
         &Ctx::new(),
     )
     .expect_err("unknown");
@@ -287,6 +300,7 @@ fn a_kernel_that_cannot_read_the_compression_fails_the_step() {
             compression,
             0,
             (cluster != 0).then_some(&cluster),
+            None,
             None,
             None,
             None,
@@ -393,6 +407,7 @@ fn packing_options_are_passed_held_to_the_kernel_and_keyed() {
             on(0),
             on(1),
             on(2),
+            None,
             kernel,
             &Ctx::new(),
         )
@@ -461,6 +476,7 @@ fn packing_options_are_passed_held_to_the_kernel_and_keyed() {
         None,
         None,
         None,
+        None,
         &Ctx::new(),
     )
     .expect_err("fragments of nothing compressed")
@@ -517,6 +533,7 @@ fn an_image_that_does_not_hold_the_tree_fails_whatever_the_tool_said() {
         None,
         None,
         None,
+        None,
         &Ctx::new(),
     )
     .expect_err("the image is of nothing")
@@ -527,4 +544,68 @@ fn an_image_that_does_not_hold_the_tree_fails_whatever_the_tool_said() {
             && why.contains("of its files differ when read back"),
         "{why}"
     );
+}
+
+/// The mode of `inside` in the image at `path`, extracted with its modes.
+fn extracted_mode(root: &Path, path: &Path, inside: &str) -> u32 {
+    let x = root.join(format!("x-{}", file_digest(path).expect("digest")));
+    if x.exists() {
+        return std::fs::symlink_metadata(x.join(inside))
+            .expect("extracted")
+            .mode()
+            & 0o7777;
+    }
+    let fsck = Command::new(tool("fsck.erofs"))
+        .arg(format!("--extract={}", x.display()))
+        .arg("--preserve-perms")
+        .arg(path)
+        .output()
+        .expect("fsck.erofs");
+    assert!(
+        fsck.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fsck.stderr)
+    );
+    std::fs::symlink_metadata(x.join(inside))
+        .expect("extracted")
+        .mode()
+        & 0o7777
+}
+
+/// A setuid file the tree's entries give 4755: kept when listed, cleared
+/// when not; a listed path that is not there, or has no such bit, fails.
+#[test]
+fn setuid_and_setgid_bits_are_cleared_but_on_the_paths_kept() {
+    if !available() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (_, kept) = image_keeping(dir.path(), 1000, "none", &["/usr/bin/tool"]).expect("builds");
+    assert_eq!(extracted_mode(dir.path(), &kept, "usr/bin/tool"), 0o4755);
+    let (_, cleared) = image_keeping(dir.path(), 1000, "none", &[]).expect("builds");
+    assert_eq!(extracted_mode(dir.path(), &cleared, "usr/bin/tool"), 0o755);
+    // The rest as the entries say.
+    assert_eq!(
+        extracted_mode(dir.path(), &cleared, "var/lib/camera/state"),
+        0o600
+    );
+
+    for (keep, why) in [
+        (
+            "/usr/bin/none",
+            "keep_setid /usr/bin/none: the tree has no such file",
+        ),
+        (
+            "/etc/hostname",
+            "keep_setid /etc/hostname: it carries no setuid or setgid bit",
+        ),
+        ("usr/bin/tool", "is not an absolute path in the image"),
+        (
+            "/usr/../usr/bin/tool",
+            "is not an absolute path in the image",
+        ),
+    ] {
+        let error = image_keeping(dir.path(), 1000, "none", &[keep]).expect_err("refused");
+        assert!(error.contains(why), "{keep}: {error}");
+    }
 }

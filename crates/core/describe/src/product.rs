@@ -56,6 +56,12 @@ pub struct ImageSpec {
     pub recipe: String,
     /// The most the image may be.
     pub budget: Option<SizeText>,
+    /// Absolute paths in the image's EROFS root that keep their setuid and
+    /// setgid bits. Every other such bit is cleared when the root is made,
+    /// and each one cleared is reported; a listed path the root does not
+    /// have, or one with no such bit, fails the build.
+    #[serde(default)]
+    pub keep_setid: Vec<String>,
     /// The recipe's own settings: `gaia validate` checks their names and
     /// types; planning checks them whole, with any `--setting` added.
     #[serde(default)]
@@ -140,6 +146,27 @@ impl Product {
                         image.initramfs[at]
                     ),
                 ));
+            }
+            let mut kept = std::collections::BTreeSet::new();
+            for (at, keep) in image.keep_setid.iter().enumerate() {
+                let fault = if !keep.starts_with('/') || keep.len() < 2 {
+                    Some("is not an absolute path in the image")
+                } else if keep.chars().any(char::is_whitespace) {
+                    Some("has whitespace, which no path kept may have")
+                } else if keep.split('/').any(|part| part == ".." || part == ".") {
+                    Some("has a `.` or `..` part; give the path itself")
+                } else if !kept.insert(keep.trim_end_matches('/')) {
+                    Some("is listed twice")
+                } else {
+                    None
+                };
+                if let Some(fault) = fault {
+                    return Err(Error::new(
+                        path,
+                        format!("images[{index}].keep_setid[{at}]"),
+                        format!("`{keep}` {fault}"),
+                    ));
+                }
             }
             let lists = [
                 ("components", &image.components),
