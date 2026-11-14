@@ -9,17 +9,29 @@
 //! own generator writes is taken from what the generator wrote, at the
 //! layout's path.
 //!
-//! The layout, TOML, `version = 2`:
+//! The layout, TOML, `version = 3`:
 //!
 //! ```toml
-//! version = 2
+//! version = 3
 //! [[file]]
 //! name = "kernel8.img"        # the path in the directory
 //! role = "kernel"             # what it is
 //! source = "build"            # the build has it by role; or "generated"
 //! firmware = ["rpi-tryboot"]  # the kinds of boot it is for
 //! required = true
+//!
+//! [[record]]                  # a file at the root of the boot partition,
+//! name = "trial.rec"          # beside the slots' directories, that the
+//! role = "trial"              # generator pre-creates at a fixed size
+//! firmware = ["rpi-tryboot"]
+//! bytes = 1024
+//! source = "generated"
 //! ```
+//!
+//! The records are not part of a slot's directory, so this step does not
+//! place them; it reads them, refuses what it does not know in them as in
+//! the rest, and [`records`] gives them to the step that makes the boot
+//! partition.
 //!
 //! Another version, or a key this reader does not know, is refused: it
 //! means a newer file.
@@ -33,7 +45,7 @@ use std::path::Path;
 
 const NAME: &str = "gaia.tree.by-role";
 /// The version this reader knows.
-const VERSION: i64 = 2;
+const VERSION: i64 = 3;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -41,6 +53,36 @@ struct Layout {
     #[allow(dead_code)]
     version: i64,
     file: Vec<Entry>,
+    record: Vec<RecordEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecordEntry {
+    name: String,
+    role: RecordRole,
+    firmware: Vec<String>,
+    bytes: u64,
+    source: Source,
+}
+
+/// What a record file holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RecordRole {
+    Trial,
+    Reason,
+    Episodes,
+}
+
+/// One record file at the root of the boot partition, for a firmware.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Record {
+    /// Its name at the root of the boot partition.
+    pub name: String,
+    pub role: RecordRole,
+    /// Its exact size.
+    pub bytes: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,15 +115,9 @@ pub struct Placed {
     pub required: bool,
 }
 
-/// Where each role goes for `firmware`, by the layout `text` (named `file`
-/// in errors), in the layout's order.
-///
-/// # Errors
-///
-/// A layout of another version, with an unknown key, with a path that
-/// leaves the directory, or with a role or a path listed twice for the
-/// firmware.
-pub fn placements(text: &str, file: &str, firmware: &str) -> Result<Vec<Placed>, String> {
+/// The layout `text` (named `file` in errors), read: this version, and no
+/// key this reader does not know.
+fn read(text: &str, file: &str) -> Result<Layout, String> {
     let value: toml::Value =
         toml::from_str(text).map_err(|e| format!("{file}: {}", e.message()))?;
     match value.get("version").and_then(toml::Value::as_integer) {
@@ -93,9 +129,67 @@ pub fn placements(text: &str, file: &str, firmware: &str) -> Result<Vec<Placed>,
         }
         None => return Err(format!("{file}: no `version`")),
     }
-    let layout: Layout = value
+    value
         .try_into()
-        .map_err(|e: toml::de::Error| format!("{file}: {}", e.message()))?;
+        .map_err(|e: toml::de::Error| format!("{file}: {}", e.message()))
+}
+
+/// The record files the layout `text` lists for `firmware`, in its order:
+/// files at the root of the boot partition that the layout's owner's
+/// generator pre-creates.
+///
+/// # Errors
+///
+/// As [`placements`]; and a record that is not the generator's, has no
+/// size, or has a name that is not one file name or is listed twice.
+pub fn records(text: &str, file: &str, firmware: &str) -> Result<Vec<Record>, String> {
+    let layout = read(text, file)?;
+    let mut found: Vec<Record> = Vec::new();
+    for entry in &layout.record {
+        if !entry.firmware.iter().any(|kind| kind == firmware) {
+            continue;
+        }
+        let name = inside(&entry.name).map_err(|why| format!("{file}: {why}"))?;
+        if name.contains('/') {
+            return Err(format!(
+                "{file}: the record {name} is not at the root of the boot partition"
+            ));
+        }
+        if entry.source != Source::Generated {
+            return Err(format!(
+                "{file}: the record {name} is not the generator's; a build has no record to supply"
+            ));
+        }
+        if entry.bytes == 0 {
+            return Err(format!("{file}: the record {name} has no size"));
+        }
+        if found
+            .iter()
+            .any(|other| other.name == name || other.role == entry.role)
+        {
+            return Err(format!(
+                "{file}: the record {name} is listed twice for {firmware}, by name or by role"
+            ));
+        }
+        found.push(Record {
+            name,
+            role: entry.role,
+            bytes: entry.bytes,
+        });
+    }
+    Ok(found)
+}
+
+/// Where each role goes for `firmware`, by the layout `text` (named `file`
+/// in errors), in the layout's order.
+///
+/// # Errors
+///
+/// A layout of another version, with an unknown key, with a path that
+/// leaves the directory, or with a role or a path listed twice for the
+/// firmware.
+pub fn placements(text: &str, file: &str, firmware: &str) -> Result<Vec<Placed>, String> {
+    let layout = read(text, file)?;
     let mut found: Vec<Placed> = Vec::new();
     for entry in &layout.file {
         if !entry.firmware.iter().any(|kind| kind == firmware) {
