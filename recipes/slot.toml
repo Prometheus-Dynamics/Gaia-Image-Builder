@@ -19,6 +19,9 @@ build = ["erofs.tree"]
 # be able to read the erofs made here, or the build fails saying which
 # option is missing.
 kernel-build = ["erofs.kernel"]
+# The image's own build's host tools: its mkfs.erofs and veritysetup make
+# the slot, not this machine's. An image with no OS is given them as tools.
+host-tools = ["erofs.tools", "verity.tools"]
 
 [outputs]
 slot = "verity.image"

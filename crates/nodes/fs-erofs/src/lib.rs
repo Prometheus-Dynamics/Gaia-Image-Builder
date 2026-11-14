@@ -85,18 +85,23 @@ pub fn kernel_reads(config: &str, compression: &str) -> Result<(), String> {
 /// (0 for the compressor's default), in physical clusters of up to
 /// `cluster` bytes (0 or unset for the tool's default, one block).
 ///
+/// `tools` is the image's build's host tools, when it has an OS: the
+/// `mkfs.erofs` in them makes the image, and `mkfs_erofs` (a path on this
+/// machine) is used only for an image with no OS build.
+///
 /// `kernel` is the image's kernel build tree, when it has one: its final
 /// `.config` must be able to read what is made ([`kernel_reads`]), or the
 /// step fails before anything is made. Nothing is changed in the kernel.
 #[node(
     id = "gaia.fs.erofs",
-    inputs(store, mkfs_erofs, tree, compression, level, cluster, kernel),
+    inputs(store, mkfs_erofs, tools, tree, compression, level, cluster, kernel),
     outputs(image)
 )]
 #[allow(clippy::too_many_arguments)]
 pub fn fs_erofs(
     store: &str,
-    mkfs_erofs: &str,
+    mkfs_erofs: Option<&String>,
+    tools: Option<&Tree>,
     tree: Tree,
     compression: &str,
     level: u32,
@@ -106,6 +111,18 @@ pub fn fs_erofs(
 ) -> Result<Image, StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
     let fail = |e: String| StepError::body(NAME, e);
+    // The image's own build's mkfs.erofs when it has one, never this
+    // machine's: what makes the image is pinned with it.
+    let program = gaia_step::image_tool(
+        &store,
+        tools.and_then(|tree| tree.object.object_ref()).as_ref(),
+        mkfs_erofs.map(String::as_str),
+        "mkfs.erofs",
+        "BR2_PACKAGE_HOST_EROFS_UTILS=y",
+    )
+    .map_err(fail)?;
+    let program = program.display().to_string();
+    let mkfs_erofs: &str = &program;
     if !COMPRESSORS.contains(&compression) {
         return Err(fail(format!(
             "compression {compression:?} is not one of {}",

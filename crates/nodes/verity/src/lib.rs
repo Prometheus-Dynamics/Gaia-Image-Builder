@@ -48,18 +48,31 @@ const TREE_FILE: &str = "tree.bin";
 /// The image with a hash tree appended, and the artifact that says how to open it.
 #[node(
     id = "gaia.verity",
-    inputs(store, veritysetup, image, device),
+    inputs(store, veritysetup, tools, image, device),
     outputs(image, table)
 )]
 pub fn verity(
     store: &str,
-    veritysetup: &str,
+    veritysetup: Option<&String>,
+    tools: Option<&gaia_types::Tree>,
     image: Image,
     device: &str,
     cx: &Ctx,
 ) -> Result<(Image, Artifact), StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
     let fail = |e: String| StepError::body(NAME, e);
+    // The image's own build's veritysetup when it has one, never this
+    // machine's.
+    let program = gaia_step::image_tool(
+        &store,
+        tools.and_then(|tree| tree.object.object_ref()).as_ref(),
+        veritysetup.map(String::as_str),
+        "veritysetup",
+        "BR2_PACKAGE_HOST_CRYPTSETUP=y",
+    )
+    .map_err(fail)?;
+    let program = program.display().to_string();
+    let veritysetup: &str = &program;
     if device.is_empty() || device.chars().any(char::is_whitespace) {
         return Err(fail(format!(
             "device {device:?} must be a non-empty path without spaces"
