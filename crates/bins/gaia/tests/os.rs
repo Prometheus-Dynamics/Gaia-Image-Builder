@@ -726,6 +726,12 @@ fn a_recipe_takes_the_generators_files_by_role() {
         "[kernel]\ncmdline = \"console=ttyS2,1500000 rootwait\"\n",
     );
     edit(&product, "recipe = \"sd-image\"", "recipe = \"slot-boot\"");
+    // One component goes in the initramfs, not the root filesystem.
+    edit(
+        &product,
+        "components = [\"usb-gadget-network\", \"extlinux\", \"hello-rust\"]",
+        "components = [\"usb-gadget-network\", \"hello-rust\"]\ninitramfs = [\"extlinux\"]",
+    );
     edit(
         &product,
         "id = \"zero-3e-demo\"",
@@ -746,9 +752,16 @@ fn a_recipe_takes_the_generators_files_by_role() {
         "hello-rust.src.tree -> zero-3e-demo::overlay.contract",
         "zero-3e-demo.host-tools.seed -> zero-3e-demo::overlay.tools",
         "zero-3e-demo::verity.table -> zero-3e-demo::cmdline.table",
+        // The initramfs: its component's files, merged apart from the root.
+        "zero-3e-demo.extlinux-zero-3e.place0.layer -> zero-3e-demo.initramfs.layers0",
+        "zero-3e-demo.initramfs.tree -> zero-3e-demo::initramfs.tree",
     ] {
         assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
     }
+    assert!(
+        !text.contains("zero-3e-demo.extlinux-zero-3e.place0.layer -> zero-3e-demo.rootfs"),
+        "the initramfs's component is in the root filesystem too\n{text}"
+    );
     let json = plan(dir.path(), &["--json"]);
     let both: serde_json::Value = serde_json::from_slice(&json.stdout).expect("json");
     let nodes = both["graph"]["graph"]["nodes"].as_array().expect("nodes");
@@ -811,6 +824,32 @@ fn a_recipe_takes_the_generators_files_by_role() {
         assert!(err.contains(key), "{to}: {err}");
         assert!(err.contains(message), "{to}: {err}");
     }
+    // A component in both trees, and a recipe that takes an initramfs from
+    // an image that names none.
+    std::fs::write(&component, format!("{original}\n{block}")).expect("write");
+    edit(
+        &product,
+        "initramfs = [\"extlinux\"]",
+        "initramfs = [\"hello-rust\"]",
+    );
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("images[0].initramfs[0]"), "{err}");
+    assert!(err.contains("`hello-rust` is in `components` too"), "{err}");
+    edit(&product, "initramfs = [\"hello-rust\"]\n", "");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("recipe slot-boot takes the image's initramfs tree; this image names no components under `initramfs`"),
+        "{err}"
+    );
+    edit(
+        &product,
+        "components = [\"usb-gadget-network\", \"hello-rust\"]",
+        "components = [\"usb-gadget-network\", \"hello-rust\"]\ninitramfs = [\"extlinux\"]",
+    );
     // No generator in the image at all.
     std::fs::write(&component, &original).expect("write");
     let out = plan(dir.path(), &[]);
