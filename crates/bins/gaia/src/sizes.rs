@@ -3,7 +3,8 @@
 //! A size manifest read from a run's record and the store, not typed by
 //! hand: each output the build gave, then what its steps made that a size
 //! is asked of (the disk, the root filesystem, the slot, the initramfs, the
-//! boot partition and what its writer said of the fit, the kernel raw and
+//! images a generator wrote (each by the output it was given as) and what
+//! its writer said of the fit, the first-flash file, the kernel raw and
 //! gzipped, the modules, the bootloader's files), and for each merged tree
 //! the bytes each component put in it. The same command on another run
 //! gives the other column of a comparison.
@@ -219,6 +220,17 @@ pub fn sizes(options: &args::Sizes) -> Result<(), Stop> {
         });
     };
     let short = |object: &ObjectRef| object.digest.hex()[..12].to_string();
+    // What the build gave each object as, by the output's own name (the
+    // part after the image's): a step that makes two things of one kind,
+    // a boot partition and a bundle, is told apart by it.
+    let given_as: BTreeMap<String, String> = run
+        .outputs
+        .iter()
+        .map(|(name, output)| {
+            let own = name.rsplit_once('.').map_or(name.as_str(), |(_, own)| own);
+            (output.object.digest.hex(), own.to_string())
+        })
+        .collect();
 
     for (name, output) in &run.outputs {
         let (bytes, count) = size(&store, &output.object);
@@ -280,11 +292,11 @@ pub fn sizes(options: &args::Sizes) -> Result<(), Stop> {
             }
             "gaia.generate.image" => {
                 if let Some((bytes, object)) = file("image") {
-                    row(
-                        "generated image (boot partition)".into(),
-                        bytes,
-                        short(object),
-                    );
+                    let what = match given_as.get(&object.digest.hex()) {
+                        Some(own) => format!("generated image ({own})"),
+                        None => "generated image".into(),
+                    };
+                    row(what, bytes, short(object));
                 }
                 if let Some(report) = out("report")
                     && let Ok(text) = std::fs::read_to_string(store.path(report))
@@ -305,6 +317,11 @@ pub fn sizes(options: &args::Sizes) -> Result<(), Stop> {
                         };
                         row(format!("payload {role}"), stored, detail);
                     }
+                }
+            }
+            "gaia.flash.image" => {
+                if let Some((bytes, object)) = file("file") {
+                    row("first-flash file".into(), bytes, short(object));
                 }
             }
             "gaia.os.buildroot" => {
