@@ -23,6 +23,16 @@
 //! `@slot@` the image's slot id, `@size@` the image's size in bytes and
 //! `@out@` the file to write. Any other `@name@` is refused.
 //!
+//! A recipe can give the run more, for a file that holds the whole slot (a
+//! bundle an installer takes): `@rootfs@`, the slot's root image, and
+//! `@verity-table@`, its table; `@product@` and `@version@`, the image's
+//! own; and a signing key. The key is a file the environment names
+//! (`key_env`), bound for the runs at `@key@` and given to the tool by the
+//! run's `key_args`, which are added to `args` only when there is a key. It
+//! is never stored, and the step is keyed on what the build says
+//! identifies it (`key_id`), not on the key. With no `size`, the file
+//! written may be any size.
+//!
 //! The tool runs as [`crate::generate`]'s does: sandboxed in the image it
 //! was built in, with no network and nothing of this machine. The file
 //! written must be exactly `size` bytes.
@@ -42,6 +52,11 @@ const SOURCE: &str = "/source";
 const DESCRIPTION: &str = "/description";
 const PAYLOAD: &str = "/payload";
 const OUT: &str = "/out";
+/// Where the slot's root image, its verity table and a signing key file
+/// are, when the recipe gives them: each one file.
+const ROOTFS: &str = "/rootfs.img";
+const TABLE: &str = "/verity-table";
+const KEY: &str = "/signing-key";
 /// The file the tool writes, in the output directory.
 const IMAGE: &str = "image";
 pub use gaia_types::GENERATE_IMAGE_NAMES as TOKENS;
@@ -60,6 +75,10 @@ pub struct Runs {
     pub args: Vec<String>,
     #[serde(default)]
     pub verify: Vec<String>,
+    /// Added to `args` when the build has a signing key: how the tool is
+    /// given it (`@key@` is the key file).
+    #[serde(default)]
+    pub key_args: Vec<String>,
 }
 
 /// The image `runs` (JSON of [`Runs`]) makes from `payload`: `size` bytes,
@@ -78,7 +97,13 @@ pub struct Runs {
         payload,
         runs,
         slot,
-        size
+        size,
+        rootfs,
+        table,
+        key_env,
+        key_id,
+        product,
+        version
     ),
     outputs(image, report)
 )]
@@ -96,6 +121,12 @@ pub fn generate_image(
     runs: &str,
     slot: &str,
     size: i64,
+    rootfs: Option<&gaia_types::Image>,
+    table: Option<&Artifact>,
+    key_env: Option<&String>,
+    key_id: Option<&String>,
+    product: Option<&String>,
+    version: Option<&String>,
     cx: &Ctx,
 ) -> Result<(Artifact, Artifact), StepError> {
     let fail = |why: String| StepError::body(NAME, why);
@@ -128,8 +159,64 @@ pub fn generate_image(
     if runs.args.is_empty() {
         return Err(fail("no `args`: nothing would write the image".into()));
     }
-    if size <= 0 {
-        return Err(fail(format!("size {size}: an image has a size above 0")));
+    // The signing key: a file the environment names, never a stored thing.
+    // With one, the tool is told of it by the run's `key_args`; the step is
+    // keyed on what the build says identifies the key, not on the key.
+    let key_env = key_env.map(String::as_str).unwrap_or_default();
+    let key_id = key_id.map(String::as_str).unwrap_or_default();
+    let key_file = if key_env.is_empty() {
+        None
+    } else {
+        if key_id.is_empty() {
+            return Err(fail(format!(
+                "a signing key is taken from {key_env}, and nothing says which key it is: state its public key or id, which the step is keyed on in place of the key"
+            )));
+        }
+        if runs.key_args.is_empty() {
+            return Err(fail(format!(
+                "a signing key is taken from {key_env}, and the tool's runs have no `key_args` to give it by"
+            )));
+        }
+        let path = std::env::var_os(key_env)
+            .map(std::path::PathBuf::from)
+            .filter(|path| path.is_file())
+            .ok_or_else(|| {
+                fail(format!(
+                    "{key_env} is not set to a key file's path: the image is signed with the key it names"
+                ))
+            })?;
+        Some(path)
+    };
+    let mut written_args = runs.args.clone();
+    if key_file.is_some() {
+        written_args.extend(runs.key_args.iter().cloned());
+    }
+    let runs = Runs {
+        args: written_args,
+        ..runs
+    };
+    let rootfs_object = match rootfs {
+        Some(image) => Some(
+            image
+                .object
+                .object_ref()
+                .ok_or_else(|| fail("the root image is not in the store".into()))?,
+        ),
+        None => None,
+    };
+    let table_object = match table {
+        Some(table) => Some(
+            table
+                .object
+                .object_ref()
+                .ok_or_else(|| fail("the verity table is not in the store".into()))?,
+        ),
+        None => None,
+    };
+    let product = product.map(String::as_str).unwrap_or_default();
+    let version = version.map(String::as_str).unwrap_or_default();
+    if size < 0 {
+        return Err(fail(format!("size {size}: not a size")));
     }
     for arg in runs.fit.iter().chain(&runs.args).chain(&runs.verify) {
         let unknown = unknown_tokens(arg);
@@ -144,6 +231,36 @@ pub fn generate_image(
             return Err(fail(format!(
                 "the argument {arg:?} names @slot@, and the image has no slot id"
             )));
+        }
+        for (name, given, what) in [
+            ("@size@", size != 0, "the recipe gives no size"),
+            (
+                "@rootfs@",
+                rootfs_object.is_some(),
+                "the recipe gives no root image",
+            ),
+            (
+                "@verity-table@",
+                table_object.is_some(),
+                "the recipe gives no verity table",
+            ),
+            ("@key@", key_file.is_some(), "the build has no signing key"),
+            (
+                "@product@",
+                !product.is_empty(),
+                "the image states no product",
+            ),
+            (
+                "@version@",
+                !version.is_empty(),
+                "the image states no version",
+            ),
+        ] {
+            if arg.contains(name) && !given {
+                return Err(fail(format!(
+                    "the argument {arg:?} names {name}, and {what}"
+                )));
+            }
         }
     }
     if !runs.args.iter().any(|arg| arg.contains("@out@")) {
@@ -161,6 +278,13 @@ pub fn generate_image(
         .input(store.path(&payload_object), PAYLOAD)
         .env("PATH", "/usr/bin:/bin")
         .env("LC_ALL", "C");
+    let mut sandbox = sandbox;
+    if let Some(object) = &rootfs_object {
+        sandbox = sandbox.input(store.path(object), ROOTFS);
+    }
+    if let Some(object) = &table_object {
+        sandbox = sandbox.input(store.path(object), TABLE);
+    }
     let mut key = sandbox
         .key(KeyBuilder::new(NAME, 1))
         .input("root", root_object.digest)
@@ -177,6 +301,26 @@ pub fn generate_image(
     if uses_source {
         key = key.input("source", source_object.digest);
     }
+    // Each further input only when it is given: a run without them has the
+    // key it had.
+    if let Some(object) = &rootfs_object {
+        key = key.input("rootfs", object.digest);
+    }
+    if let Some(object) = &table_object {
+        key = key.input("table", object.digest);
+    }
+    if key_file.is_some() {
+        key = key.config("key id", key_id);
+    }
+    if !product.is_empty() || !version.is_empty() {
+        key = key.config("product", product).config("version", version);
+    }
+    // The key file is bound for the runs only: it is no input of the key,
+    // and the sandbox with it is not the one the key was taken from.
+    let sandbox = match &key_file {
+        Some(path) => sandbox.input(path.clone(), KEY),
+        None => sandbox,
+    };
     let program_in = format!("{TOOL}/{program_rel}");
     let described_in = format!("{DESCRIPTION}/{described}");
     let image_in = format!("{OUT}/{IMAGE}");
@@ -198,6 +342,11 @@ pub fn generate_image(
                             .replace("@slot@", slot)
                             .replace("@size@", &size.to_string())
                             .replace("@out@", &image_in)
+                            .replace("@rootfs@", ROOTFS)
+                            .replace("@verity-table@", TABLE)
+                            .replace("@key@", KEY)
+                            .replace("@product@", product)
+                            .replace("@version@", version)
                     })
                     .collect()
             };
@@ -229,7 +378,7 @@ pub fn generate_image(
             let image = out.join(IMAGE);
             let written = std::fs::metadata(&image)
                 .map_err(|_| StepError::body(NAME, format!("{program} wrote no file at @out@")))?;
-            if !written.is_file() || written.len() != size.unsigned_abs() {
+            if !written.is_file() || (size != 0 && written.len() != size.unsigned_abs()) {
                 return Err(StepError::body(
                     NAME,
                     format!(
