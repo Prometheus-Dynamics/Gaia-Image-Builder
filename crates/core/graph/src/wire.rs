@@ -704,9 +704,19 @@ fn image_recipe(
             for p in ports {
                 g.edge((os.system, "tree"), (stages[&p.stage], &p.port));
             }
+        } else if input == "kernel-build"
+            && at.os.is_none()
+            && ports.iter().all(|p| {
+                g.inputs(stages[&p.stage])
+                    .iter()
+                    .any(|decl| decl.name == p.port && decl.optional)
+            })
+        {
+            // No OS, so no kernel to hold what the recipe makes to; and
+            // every port that would take its build is optional.
         } else if matches!(
             input.as_str(),
-            "kernel" | "device-trees" | "bootloader" | "os"
+            "kernel" | "device-trees" | "bootloader" | "os" | "kernel-build"
         ) {
             let Some((os, port)) = at.os.and_then(|os| os.output(input)) else {
                 return Err(Error::at(
@@ -1151,6 +1161,7 @@ impl OsNodes {
             "device-trees" => (self.kernel.unwrap_or(self.rootfs), "device_trees"),
             "bootloader" => (self.bootloader.unwrap_or(self.rootfs), "bootloader"),
             "os" => (self.rootfs, "images"),
+            "kernel-build" => (self.kernel.unwrap_or(self.rootfs), "kernel_build"),
             _ => return None,
         })
     }

@@ -29,19 +29,79 @@ use std::path::{Path, PathBuf};
 const NAME: &str = "gaia.fs.erofs";
 const COMPRESSORS: [&str; 6] = ["none", "lz4", "lz4hc", "lzma", "deflate", "zstd"];
 
+/// The kernel options an erofs compressed with `compression` needs built
+/// in, for a kernel that opens it as its root: the filesystem, and for a
+/// compressed one its decompression and the algorithm's own option (lz4
+/// has none of its own).
+pub fn kernel_options(compression: &str) -> Vec<&'static str> {
+    let mut options = vec!["CONFIG_EROFS_FS"];
+    if compression != "none" {
+        options.push("CONFIG_EROFS_FS_ZIP");
+    }
+    match compression {
+        "lzma" => options.push("CONFIG_EROFS_FS_ZIP_LZMA"),
+        "deflate" => options.push("CONFIG_EROFS_FS_ZIP_DEFLATE"),
+        "zstd" => options.push("CONFIG_EROFS_FS_ZIP_ZSTD"),
+        _ => {}
+    }
+    options
+}
+
+/// How `option` stands in the kernel configuration `config`: its value
+/// (`y`, `m`), or `not set` for a line that says so or for no line.
+pub fn option_value<'a>(config: &'a str, option: &str) -> &'a str {
+    config
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix(option)
+                .and_then(|rest| rest.strip_prefix('='))
+        })
+        .unwrap_or("not set")
+}
+
+/// Whether a kernel with the final configuration `config` can open an erofs
+/// compressed with `compression` as its root.
+///
+/// # Errors
+///
+/// The algorithm, each option that is not `=y` and how it stands.
+pub fn kernel_reads(config: &str, compression: &str) -> Result<(), String> {
+    let lacking: Vec<String> = kernel_options(compression)
+        .into_iter()
+        .filter(|option| option_value(config, option) != "y")
+        .map(|option| format!("{option} is `{}`", option_value(config, option)))
+        .collect();
+    if lacking.is_empty() {
+        return Ok(());
+    }
+    // What is missing first: a failure's reason is kept short.
+    Err(format!(
+        "{} in the kernel's .config; an erofs root ({compression}) needs =y",
+        lacking.join(", ")
+    ))
+}
+
 /// The EROFS image of `tree`, compressed with `compression` at `level`
-/// (0 for the compressor's default).
+/// (0 for the compressor's default), in physical clusters of up to
+/// `cluster` bytes (0 or unset for the tool's default, one block).
+///
+/// `kernel` is the image's kernel build tree, when it has one: its final
+/// `.config` must be able to read what is made ([`kernel_reads`]), or the
+/// step fails before anything is made. Nothing is changed in the kernel.
 #[node(
     id = "gaia.fs.erofs",
-    inputs(store, mkfs_erofs, tree, compression, level),
+    inputs(store, mkfs_erofs, tree, compression, level, cluster, kernel),
     outputs(image)
 )]
+#[allow(clippy::too_many_arguments)]
 pub fn fs_erofs(
     store: &str,
     mkfs_erofs: &str,
     tree: Tree,
     compression: &str,
     level: u32,
+    cluster: Option<&i64>,
+    kernel: Option<&Tree>,
     cx: &Ctx,
 ) -> Result<Image, StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
@@ -51,6 +111,29 @@ pub fn fs_erofs(
             "compression {compression:?} is not one of {}",
             COMPRESSORS.join(", ")
         )));
+    }
+    let cluster = cluster.copied().unwrap_or(0);
+    if cluster < 0 || cluster % 4096 != 0 {
+        return Err(fail(format!(
+            "cluster {cluster} is not a number of 4096-byte blocks"
+        )));
+    }
+    if cluster != 0 && compression == "none" {
+        return Err(fail(format!(
+            "cluster {cluster} is set and compression is none: clusters are of compressed data"
+        )));
+    }
+    // Checked on every run, found in the store or not: the kernel is not in
+    // the key, so a kernel that lost the option fails here all the same.
+    if let Some(kernel) = kernel {
+        let build = kernel
+            .object
+            .path_in(&store)
+            .ok_or_else(|| fail("the kernel build tree is not in the store".into()))?;
+        // A build with no kernel has an empty tree: nothing to hold it to.
+        if let Ok(config) = std::fs::read_to_string(build.join(".config")) {
+            kernel_reads(&config, compression).map_err(fail)?;
+        }
     }
     let owned =
         owned_digest(&tree).ok_or_else(|| fail("a tree that is not in the store".into()))?;
@@ -66,13 +149,17 @@ pub fn fs_erofs(
         Ok([out.stdout, out.stderr].concat())
     })
     .map_err(|e| fail(format!("{mkfs_erofs} --version: {e}")))?;
-    let key = KeyBuilder::new(NAME, 1)
+    let mut key = KeyBuilder::new(NAME, 1)
         .config("mkfs.erofs", &version)
         .config("compression", compression)
         .config("level", level.to_string())
         .input("tree", owned)
-        .libs(crate::LIBS)
-        .finish();
+        .libs(crate::LIBS);
+    // An image with the default clusters has the key it had.
+    if cluster != 0 {
+        key = key.config("cluster", cluster.to_string());
+    }
+    let key = key.finish();
     let made = Step::new(&store, cx, NAME, key).look_up_or_make(
         &[("image", Path::new("image.erofs"))],
         |work| {
@@ -88,6 +175,9 @@ pub fn fs_erofs(
                     z.push_str(&format!(",level={level}"));
                 }
                 mkfs = mkfs.arg(z);
+            }
+            if cluster != 0 {
+                mkfs = mkfs.arg(format!("-C{cluster}"));
             }
             work.run(&mkfs.arg(work.dir().join("image.erofs")).arg(&tar_path))?;
             std::fs::remove_file(&tar_path).map_err(|e| fail(e.to_string()))

@@ -55,6 +55,10 @@ to = "disk.partitions"
 # without those files; with no OS, `system` is the same tree as `build`.
 build = ["root.tree"]
 system = ["erofs.tree"]
+# The image's kernel build, when it has one: its final configuration must
+# be able to read the erofs made here, or the build fails saying which
+# option is missing.
+kernel-build = ["erofs.kernel"]
 data = ["slot.tree"]
 disk = ["disk.layout"]
 blobs = ["disk.blobs"]
@@ -149,6 +153,12 @@ type = "string"
 default = "zstd"
 description = "The slot's EROFS compression: none, lz4, lz4hc, lzma, deflate or zstd."
 sets = ["erofs.compression"]
+
+[parameters.cluster]
+type = "int"
+default = 0
+description = "The most bytes of a compressed cluster, a multiple of 4096; 0 is the tool's default, one block. Bigger is smaller on disk and costs RAM and time to read."
+sets = ["erofs.cluster"]
 
 [parameters.level]
 type = "int"
