@@ -295,3 +295,54 @@ fn a_parameter_left_unset_is_not_refused() {
     let out = validate(dir.path(), &["--recipes", "recipes", PRODUCT]);
     assert!(out.status.success());
 }
+
+const GENERATOR: &str = "examples/components/hello-rust/component.toml";
+
+/// A `[generate.data]` block with `extra` added to its table.
+fn generator_block(args: &str, extra: &str) -> String {
+    format!(
+        "\n[generate]\ntool = {{ source = \"src\", package = \"hello-rust\" }}\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"@out@\"]\noutputs = [\"overlay.dts\"]\n\n[generate.data]\nargs = [{args}]\n{extra}"
+    )
+}
+
+#[test]
+fn a_generators_keys_file_must_exist_and_be_named() {
+    let dir = examples();
+    let file = dir.path().join(GENERATOR);
+    let original = std::fs::read_to_string(&file).expect("read");
+    let files = file.parent().expect("dir").join("files");
+    std::fs::create_dir_all(&files).expect("mkdir");
+    std::fs::write(files.join("slot-keys"), "abcd bench\n").expect("write");
+    let with_keys = "\"data-partition\", \"--keys\", \"@keys@\", \"--out\", \"@out@\"";
+    let without = "\"data-partition\", \"--out\", \"@out@\"";
+    for (args, extra, why) in [
+        (with_keys, "keys = \"files/slot-keys\"\n", None),
+        (
+            with_keys,
+            "keys = \"files/none\"\n",
+            Some("generate.data.keys"),
+        ),
+        (
+            with_keys,
+            "",
+            Some("a run names @keys@, and no `keys` file is given"),
+        ),
+        (
+            without,
+            "keys = \"files/slot-keys\"\n",
+            Some("a keys file is given, and no run names @keys@"),
+        ),
+    ] {
+        std::fs::write(&file, format!("{original}{}", generator_block(args, extra)))
+            .expect("write");
+        let out = validate(dir.path(), &[GENERATOR]);
+        let err = String::from_utf8_lossy(&out.stderr);
+        match why {
+            None => assert!(out.status.success(), "{err}"),
+            Some(why) => {
+                assert_eq!(out.status.code(), Some(2), "{extra}");
+                assert!(err.contains(why), "{err}");
+            }
+        }
+    }
+}

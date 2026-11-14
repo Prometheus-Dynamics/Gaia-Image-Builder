@@ -920,14 +920,14 @@ sets = ["bundle.key_id"]
     // A name no run may hold, and a component that says nothing of a bundle.
     std::fs::write(
         &component,
-        format!("{original}\n{}", block.replace("\"@key@\"]", "\"@keys@\"]")),
+        format!("{original}\n{}", block.replace("\"@key@\"]", "\"@keyz@\"]")),
     )
     .expect("write");
     let out = plan(dir.path(), &[]);
     assert_eq!(out.status.code(), Some(2));
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("generate.bundle.key_args[1]"), "{err}");
-    assert!(err.contains("names @keys@"), "{err}");
+    assert!(err.contains("names @keyz@"), "{err}");
     let cut = block
         .split("\n[generate.bundle]")
         .next()
@@ -1551,14 +1551,17 @@ fn a_first_flash_disk_fills_the_boards_partitions() {
     let component = dir
         .path()
         .join("examples/components/hello-rust/component.toml");
-    let block = "[generate]\ntool = { source = \"src\", package = \"hello-rust\" }\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"--slot\", \"@slot@\", \"@out@\"]\noutputs = [\"overlay.dts\", \"words\", \"manifest-boot.json\"]\n\n[generate.provides]\nboard-overlay = \"overlay.dts\"\nmanifest-boot = \"manifest-boot.json\"\ncmdline = \"words/cmdline.txt\"\ncmdline-slot = \"words/slot.txt\"\n\n[generate.image]\nargs = [\"part\", \"--payload\", \"@payload@\", \"--size\", \"@size@\", \"--out\", \"@out@\"]\n\n[generate.bundle]\nargs = [\"bundle\", \"--payload\", \"@payload@\", \"--rootfs\", \"@rootfs@\", \"--verity-table\", \"@verity-table@\", \"--product\", \"@product@\", \"--version\", \"@version@\", \"--payload-out\", \"@payload-out@\", \"--out\", \"@out@\"]\n\n[generate.data]\nargs = [\"data-partition\", \"--install\", \"@bundle@\", \"--out\", \"@out@\"]\n";
+    let block = "[generate]\ntool = { source = \"src\", package = \"hello-rust\" }\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"--slot\", \"@slot@\", \"@out@\"]\noutputs = [\"overlay.dts\", \"words\", \"manifest-boot.json\"]\n\n[generate.provides]\nboard-overlay = \"overlay.dts\"\nmanifest-boot = \"manifest-boot.json\"\ncmdline = \"words/cmdline.txt\"\ncmdline-slot = \"words/slot.txt\"\n\n[generate.image]\nargs = [\"part\", \"--payload\", \"@payload@\", \"--size\", \"@size@\", \"--out\", \"@out@\"]\n\n[generate.bundle]\nargs = [\"bundle\", \"--payload\", \"@payload@\", \"--rootfs\", \"@rootfs@\", \"--verity-table\", \"@verity-table@\", \"--product\", \"@product@\", \"--version\", \"@version@\", \"--payload-out\", \"@payload-out@\", \"--out\", \"@out@\"]\n\n[generate.data]\nargs = [\"data-partition\", \"--install\", \"@bundle@\", \"--boot-image\", \"@boot-image@\", \"--keys\", \"@keys@\", \"--time\", \"@time@\", \"--data-size\", \"@data-size@\", \"--out\", \"@out@\"]\nverify = [\"data-partition\", \"--verify\", \"@out@\", \"--boot-image\", \"@boot-image@\"]\nkeys = \"files/slot-keys\"\n";
     let original = std::fs::read_to_string(&component).expect("read");
     std::fs::write(&component, format!("{original}\n{block}")).expect("write");
+    let files = component.parent().expect("dir").join("files");
+    std::fs::create_dir_all(&files).expect("mkdir");
+    std::fs::write(files.join("slot-keys"), "abcd bench\n").expect("write");
     let text = std::fs::read_to_string(&board).expect("read");
     std::fs::write(
         &board,
         format!(
-            "{text}\n[descriptions]\ndaemon = \"daemon-board.toml\"\n\n[[partitions]]\nname = \"boot\"\nrole = \"boot\"\ntype = \"ebd0a0a2-b9e5-4433-87c0-68b6b72699c7\"\nsize = \"64M\"\n\n[[partitions]]\nname = \"data\"\nrole = \"data\"\ntype = \"0fc63daf-8483-4772-8e79-3d69d8477de4\"\n"
+            "{text}\n[descriptions]\ndaemon = \"daemon-board.toml\"\n\n[[partitions]]\nname = \"boot\"\nrole = \"boot\"\ntype = \"ebd0a0a2-b9e5-4433-87c0-68b6b72699c7\"\nsize = \"64M\"\n\n[[partitions]]\nname = \"data\"\nrole = \"data\"\ntype = \"0fc63daf-8483-4772-8e79-3d69d8477de4\"\nsize = \"256M\"\n"
         ),
     )
     .expect("write");
@@ -1588,6 +1591,9 @@ fn a_first_flash_disk_fills_the_boards_partitions() {
         "zero-3e-demo::bundle.image -> zero-3e-demo::data.bundle",
         "hello-rust.tool.tree -> zero-3e-demo::data.tool",
         "zero-3e-demo::data.tree -> zero-3e-demo::datafs.tree",
+        // The data run's boot image and the component's keys file.
+        "zero-3e-demo::boot.image -> zero-3e-demo::data.boot_image",
+        "zero-3e-demo.hello-rust.generate.data.keys.tree -> zero-3e-demo::data.keys",
         // The board's partitions, filled.
         "zero-3e-demo::boot.image -> zero-3e-demo::bootp.file",
         "zero-3e-demo::datafs.image -> zero-3e-demo::datap.content",
@@ -1620,4 +1626,28 @@ fn a_first_flash_disk_fills_the_boards_partitions() {
     assert!(consts("zero-3e-demo::flash").get("key_env").is_none());
     assert_eq!(consts("zero-3e-demo::bootp")["name"]["value"], "boot");
     assert_eq!(consts("zero-3e-demo::datap")["name"]["value"], "data");
+    // The data partition's size in the board's layout: the run's
+    // @data-size@ and the data filesystem's size, one number.
+    assert_eq!(
+        consts("zero-3e-demo::data")["data_size"]["value"],
+        268_435_456
+    );
+    assert_eq!(consts("zero-3e-demo::datafs")["size"]["value"], 268_435_456);
+
+    // A data partition with no size, while [generate.data] writes for it:
+    // refused, naming the board.
+    let text = std::fs::read_to_string(&board).expect("read");
+    std::fs::write(
+        &board,
+        text.replace(
+            "type = \"0fc63daf-8483-4772-8e79-3d69d8477de4\"\nsize = \"256M\"\n",
+            "type = \"0fc63daf-8483-4772-8e79-3d69d8477de4\"\n",
+        ),
+    )
+    .expect("write");
+    let out = plan(dir.path(), &[]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "{err}");
+    assert!(err.contains("partition 'data' has no size, and"), "{err}");
+    assert!(err.contains("board.toml"), "{err}");
 }

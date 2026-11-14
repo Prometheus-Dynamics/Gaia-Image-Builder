@@ -66,6 +66,9 @@ struct Generator {
     bundle_runs: Option<String>,
     /// And of `[generate.data]`.
     data_runs: Option<String>,
+    /// The keys file a table names, as a tree, by the table
+    /// (`generate.data`) and with its port.
+    keys: BTreeMap<&'static str, (u32, &'static str)>,
 }
 
 impl Graph<'_> {
@@ -858,6 +861,12 @@ fn image_recipe(
                         g.check(stage, port, &value)
                             .map_err(|e| Error::at(&recipe.file, format!("inputs.{input}"), e))?;
                         g.set(stage, port, value);
+                    }
+                    if let Some(from) = generator.keys.get(table) {
+                        g.edge(*from, (stage, "keys"));
+                    }
+                    if table == "generate.data" {
+                        data_size(g, at, recipe, &group, &stages, &p.stage, &generator.file)?;
                     }
                 }
             } else if let Some(role) = input.strip_prefix("provides.") {
@@ -1973,6 +1982,30 @@ fn generate_node(g: &mut Graph<'_>, at: &OsIn<'_>, component: &Component) -> Res
     g.edge((source, out), (node, "source"));
     let description_out = g.first_output(description).unwrap_or("tree");
     g.edge((description, description_out), (node, "description"));
+    // The keys file each table names, stored as a tree a run binds.
+    let mut keys = BTreeMap::new();
+    for (table, runs) in [
+        ("generate.image", &generate.image),
+        ("generate.bundle", &generate.bundle),
+        ("generate.data", &generate.data),
+    ] {
+        let Some(path) = runs.as_ref().and_then(|runs| runs.keys.as_ref()) else {
+            continue;
+        };
+        let node = g.add(
+            "gaia.source.input",
+            format!("{image}.{}.{table}.keys", component.name),
+            file,
+            &format!("{table}.keys"),
+        )?;
+        g.set(node, "path", Lit::Str(path.path().display().to_string()));
+        g.set(
+            node,
+            "name",
+            Lit::Str(gaia_types::GENERATE_KEYS_NAME.to_string()),
+        );
+        keys.insert(table, (node, g.first_output(node).unwrap_or("tree")));
+    }
     g.generators
         .entry(image.clone())
         .or_default()
@@ -1990,8 +2023,93 @@ fn generate_node(g: &mut Graph<'_>, at: &OsIn<'_>, component: &Component) -> Res
             image_runs: generate.image.as_ref().map(runs_json),
             bundle_runs: generate.bundle.as_ref().map(runs_json),
             data_runs: generate.data.as_ref().map(runs_json),
+            keys,
         });
     Ok(node)
+}
+
+/// The data tree's partition size: a `[generate.data]` stage's tree that
+/// the recipe makes an ext4 of, put in a partition by name, is for the
+/// board's partition of that name. Its size, which the board must give, is
+/// the run's `@data-size@` and the ext4's size, so the two cannot differ.
+#[allow(clippy::too_many_arguments)]
+fn data_size(
+    g: &mut Graph<'_>,
+    at: &ImageIn<'_>,
+    recipe: &gaia_recipe::Recipe,
+    group: &daedalus::layers::graph::GroupDoc,
+    stages: &BTreeMap<String, u32>,
+    stage: &str,
+    generator_file: &Path,
+) -> Result<(), Error> {
+    let fed = |from_stage: &str, from_port: &str, to_id: &str, to_ports: &[&str]| {
+        group
+            .connects
+            .iter()
+            .find(|(from, to)| {
+                from.stage == from_stage
+                    && from.port == from_port
+                    && group.stages.get(&to.stage).map(String::as_str) == Some(to_id)
+                    && to_ports.contains(&to.port.as_str())
+            })
+            .map(|(_, to)| to.stage.clone())
+    };
+    let ext4 = fed(stage, "tree", "gaia.fs.ext4", &["tree"]);
+    let partition = ext4
+        .as_deref()
+        .and_then(|ext4| fed(ext4, "image", "gaia.disk.partition", &["content", "file"]));
+    let (Some(ext4), Some(partition)) = (ext4, partition) else {
+        // A tree that goes into no partition: nothing to size, and a run
+        // that names @data-size@ is refused by the step.
+        return Ok(());
+    };
+    let name = match g.nodes[stages[&partition] as usize].consts.get("name") {
+        Some(Lit::Str(name)) => name.clone(),
+        _ => return Ok(()),
+    };
+    let board = at.board;
+    let Some(need) = board.partitions.iter().find(|p| p.name == name) else {
+        return Err(Error::at(
+            &recipe.file,
+            format!("stages.{partition}"),
+            format!(
+                "the data tree goes into partition '{name}', and the board's layout has no partition of that name"
+            ),
+        ));
+    };
+    let Some(size) = need.size.as_ref().map(|s| s.0.0) else {
+        return Err(Error::at(
+            &board.file,
+            "partitions",
+            format!(
+                "partition '{name}' has no size, and {} writes its contents ([generate.data]) for a partition of a known size: give it one",
+                generator_file.display()
+            ),
+        ));
+    };
+    let size = i64::try_from(size).map_err(|_| {
+        Error::at(
+            &board.file,
+            "partitions",
+            format!("partition '{name}': size {size} is too large"),
+        )
+    })?;
+    let ext4_node = stages[&ext4];
+    if let Some(Lit::Int(given)) = g.nodes[ext4_node as usize].consts.get("size")
+        && *given != 0
+        && *given != size
+    {
+        return Err(Error::at(
+            &recipe.file,
+            format!("stages.{ext4}"),
+            format!(
+                "the data filesystem is given size {given}, and its partition '{name}' is {size} bytes in the board's layout: the board's size is the one used"
+            ),
+        ));
+    }
+    g.set(ext4_node, "size", Lit::Int(size));
+    g.set(stages[stage], "data_size", Lit::Int(size));
+    Ok(())
 }
 
 /// A `[generate.image]` or `[generate.bundle]` as the step takes it.

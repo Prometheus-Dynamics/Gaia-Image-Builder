@@ -67,6 +67,15 @@ install)
 checkinstall)
   # checkinstall OUT SLOT
   grep -q "^product " "$2/slots/$3.bundle" && echo "install ok" ;;
+datapart)
+  # datapart BUNDLE BOOT KEYS TIME SIZE OUT: what the run was given, in OUT
+  mkdir "$7"
+  cp "$2" "$7/bundle"; cp "$3" "$7/boot"; cp "$4" "$7/keys"
+  printf '%s %s\n' "$5" "$6" > "$7/stamp"
+  echo "data for $6 bytes" ;;
+checkdata)
+  # checkdata OUT BOOT
+  [ "$(cat "$2/boot")" = "$(cat "$3")" ] && echo "data ok" ;;
 checkbundle)
   # checkbundle OUT [--pubkey FILE]
   grep -q "^product " "$2"
@@ -194,6 +203,9 @@ impl Fixture {
             runs,
             slot,
             size,
+            None,
+            None,
+            None,
             None,
             None,
             None,
@@ -394,6 +406,9 @@ impl Fixture {
             Some(&"helios".to_string()),
             Some(&"2026.2.0".to_string()),
             None,
+            None,
+            None,
+            None,
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
@@ -584,6 +599,9 @@ impl Fixture {
             None,
             None,
             bundle.as_ref(),
+            None,
+            None,
+            None,
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
@@ -643,4 +661,124 @@ fn a_directory_is_written_from_the_bundle() {
         why.contains("gaia.generate.tree: bin/img wrote no directory at @out@"),
         "{why}"
     );
+}
+
+const DATA: &str = r#"{
+  "args": ["datapart", "@bundle@", "@boot-image@", "@keys@", "@time@", "@data-size@", "@out@"],
+  "verify": ["checkdata", "@out@", "@boot-image@"]
+}"#;
+
+impl Fixture {
+    /// The directory the data run writes, given a boot image, a keys file
+    /// and a partition size, each when `Some`.
+    fn data(
+        &self,
+        boot: Option<&[u8]>,
+        keys: Option<&str>,
+        data_size: Option<i64>,
+    ) -> Result<(PathBuf, String), String> {
+        let store = Store::open(&self.store).expect("store");
+        let artifact = |name: &str, bytes: &[u8]| {
+            let path = self.root.join(name);
+            std::fs::write(&path, bytes).expect("write");
+            gaia_types::Artifact {
+                kind: gaia_types::ArtifactKind::parse("generated-image"),
+                object: store.put_file(&path).expect("put").into(),
+            }
+        };
+        let bundle = artifact("the.bundle", b"product helios\n");
+        let boot = boot.map(|bytes| artifact("boot.img", bytes));
+        let keys = keys.map(|text| self.tree("keys", &[("keys", text, 0o644)]));
+        let (tree, report, _) = generate_tree(
+            &self.store,
+            BWRAP,
+            self.root(),
+            self.tree("tool", &[("bin/img", TOOL, 0o755)]),
+            "bin/img",
+            self.tree("source", &[("socs/soc", "rk", 0o644)]),
+            self.tree("description", &[("board", "zero", 0o644)]),
+            "board",
+            self.tree("payload-i", &[("kernel", "k1", 0o644)]),
+            DATA,
+            "base",
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(&bundle),
+            boot.as_ref(),
+            keys.as_ref(),
+            data_size.as_ref(),
+            &Ctx::new(),
+        )
+        .map_err(|e| e.to_string())?;
+        Ok((
+            tree.object.path_in(&store).expect("in the store"),
+            String::from_utf8(
+                std::fs::read(report.object.path_in(&store).expect("in the store")).expect("read"),
+            )
+            .expect("text"),
+        ))
+    }
+}
+
+/// A data run is given the boot image, the component's keys, the build's
+/// source date and the partition's size; each named and not given is
+/// refused.
+#[test]
+fn a_data_run_is_given_the_boot_image_keys_time_and_size() {
+    if !available() {
+        return;
+    }
+    let f = Fixture::new();
+    let (dir, report) = f
+        .data(Some(b"BOOT"), Some("abcd bench\n"), Some(1 << 30))
+        .expect("made");
+    let read = |name: &str| std::fs::read_to_string(dir.join(name)).expect(name);
+    assert_eq!(read("bundle"), "product helios\n");
+    assert_eq!(read("boot"), "BOOT");
+    assert_eq!(read("keys"), "abcd bench\n");
+    assert_eq!(read("stamp"), "1970-01-01T00:00:00Z 1073741824\n");
+    assert_eq!(report, "data for 1073741824 bytes\ndata ok\n");
+    // Another size, other keys, another boot image: each another step.
+    f.data(Some(b"BOOT"), Some("abcd bench\n"), Some(1 << 29))
+        .expect("another size");
+    f.data(Some(b"BOOT"), Some("ef01 other\n"), Some(1 << 30))
+        .expect("other keys");
+    f.data(Some(b"BOOT2"), Some("abcd bench\n"), Some(1 << 30))
+        .expect("another boot image");
+    let store = Store::open(&f.store).expect("store");
+    let made = step_records(&logs_dir(&store))
+        .into_iter()
+        .filter(|r| r.step == "gaia.generate.tree" && r.made)
+        .count();
+    assert_eq!(made, 4);
+
+    for (boot, keys, size, why) in [
+        (
+            None,
+            Some("k\n"),
+            Some(1),
+            "names @boot-image@, and the recipe gives no boot image",
+        ),
+        (
+            Some(&b"B"[..]),
+            None,
+            Some(1),
+            "names @keys@, and the component gives no keys file",
+        ),
+        (
+            Some(&b"B"[..]),
+            Some("k\n"),
+            None,
+            "names @data-size@, and the build gives no partition size",
+        ),
+    ] {
+        let error = f.data(boot, keys, size).expect_err("refused");
+        assert!(error.contains(why), "{error}");
+    }
 }

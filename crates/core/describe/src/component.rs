@@ -1,6 +1,6 @@
 //! The component file: one piece of software and what it installs.
 
-use crate::common::{FileRef, Mode, Source, check_source, is_input_name, resolve_sources};
+use crate::common::{FileRef, Mode, RelPath, Source, check_source, is_input_name, resolve_sources};
 use crate::{Error, read};
 use gaia_lock::Want;
 use serde::de::{self, Deserializer};
@@ -81,7 +81,12 @@ pub struct Generate {
 /// One image a `[generate]` tool writes from a payload: up to three runs,
 /// each the tool's arguments. `@source@`, `@description@` and `@slot@` are
 /// as in `[generate]`; `@payload@` is the payload directory, `@size@` the
-/// image's size in bytes and `@out@` the one file to write.
+/// image's size in bytes and `@out@` the one file to write. Where the
+/// recipe gives them: `@bundle@` the slot's bundle, `@boot-image@` the
+/// image's boot partition image, `@data-size@` the size in bytes of the
+/// board's partition the output is for. `@keys@` is the file `keys` names;
+/// `@time@` the build's source date, `1970-01-01T00:00:00Z`, as every
+/// build of this builder has it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GenerateImage {
@@ -103,6 +108,9 @@ pub struct GenerateImage {
     /// the file of the key's public half.
     #[serde(default)]
     pub verify_key_args: Vec<String>,
+    /// A file of this component, relative to its file, that the runs name
+    /// as `@keys@`: the keys the tool writes into what it makes.
+    pub keys: Option<RelPath>,
 }
 
 /// The tool: a package of one of the component's sources.
@@ -268,6 +276,49 @@ impl Component {
                 &build.source,
                 component.sources.keys(),
             )?;
+        }
+        if let Some(generate) = &mut component.generate {
+            for (table, image) in [
+                ("image", &mut generate.image),
+                ("bundle", &mut generate.bundle),
+                ("data", &mut generate.data),
+            ] {
+                let Some(image) = image else { continue };
+                let names_keys = [
+                    &image.fit,
+                    &image.args,
+                    &image.verify,
+                    &image.key_args,
+                    &image.verify_key_args,
+                ]
+                .iter()
+                .any(|args| args.iter().any(|arg| arg.contains("@keys@")));
+                match &mut image.keys {
+                    Some(keys) => {
+                        keys.resolve(dir);
+                        crate::common::check_exists(
+                            path,
+                            &format!("generate.{table}.keys"),
+                            keys.path(),
+                        )?;
+                        if !names_keys {
+                            return Err(Error::new(
+                                path,
+                                format!("generate.{table}.keys"),
+                                "a keys file is given, and no run names @keys@",
+                            ));
+                        }
+                    }
+                    None if names_keys => {
+                        return Err(Error::new(
+                            path,
+                            format!("generate.{table}"),
+                            "a run names @keys@, and no `keys` file is given",
+                        ));
+                    }
+                    None => {}
+                }
+            }
         }
         if let Some(generate) = &component.generate {
             check_source(
