@@ -78,6 +78,7 @@ fn component(
         Some(&cpu.to_string()),
         None,
         None,
+        None,
         &ctx,
     )
     .expect("build");
