@@ -49,6 +49,9 @@ const SOURCE: &str = "/src";
 const VENDOR: &str = "/vendor";
 const BUILD: &str = "/build";
 const PATH_IN_SANDBOX: &str = "/toolchain/bin:/usr/bin:/bin";
+/// Where a build's own tools are bound, and `PATH` with them.
+const TOOLS: &str = "/tools";
+const PATH_WITH_TOOLS: &str = "/toolchain/bin:/tools/bin:/tools:/usr/bin:/bin";
 
 /// Builds `package` from `source` for `triple` (tuned for `cpu`, when not
 /// empty), with `features` (names separated by spaces or commas, as cargo
@@ -63,13 +66,17 @@ const PATH_IN_SANDBOX: &str = "/toolchain/bin:/usr/bin:/bin";
 /// compiler needs (a cache directory under `/build`, say). Both are in the
 /// key through the sandbox's environment.
 ///
+/// `tools` is a tree of programs the build needs and the image lacks (a C
+/// compiler for the target, say), bound read-only at `/tools`, with
+/// `/tools/bin` and `/tools` on `PATH` after the toolchain. It is in the key.
+///
 /// `features` goes back to a list (`Vec<String>`) when Daedalus decodes list
 /// constants (outside block X7, `docs/design.md`).
 #[node(
     id = "gaia.build.rust",
     inputs(
         store, bwrap, root, toolchain, source, vendor, package, features, profile, triple, cpu, cc,
-        env
+        env, tools
     ),
     outputs(tree, artifacts)
 )]
@@ -88,6 +95,7 @@ pub fn build_rust(
     cpu: Option<&String>,
     cc: Option<&String>,
     env: Option<&String>,
+    tools: Option<&Tree>,
     cx: &Ctx,
 ) -> Result<(Tree, Vec<Artifact>), StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
@@ -200,8 +208,15 @@ pub fn build_rust(
             triple.to_ascii_uppercase().replace(['-', '.'], "_")
         )
     };
-    let mut sandbox = base
-        .env("PATH", PATH_IN_SANDBOX)
+    let tools = match tools {
+        Some(tree) => Some(dir_of(tree, "tools tree")?),
+        None => None,
+    };
+    let mut sandbox = match &tools {
+        Some((_, dir)) => base.input(dir.clone(), TOOLS).env("PATH", PATH_WITH_TOOLS),
+        None => base.env("PATH", PATH_IN_SANDBOX),
+    };
+    sandbox = sandbox
         .env("CARGO_HOME", format!("{BUILD}/cargo-home"))
         .env(target_var("RUSTFLAGS"), flags.join(" "))
         .env(
@@ -241,21 +256,22 @@ pub fn build_rust(
     for (name, value) in &component_env {
         sandbox = sandbox.env(name, value);
     }
-    let key = sandbox
-        .key(
-            KeyBuilder::new(NAME, RECIPE_VERSION)
-                .config("rustc", rustc)
-                .config("cargo", cargo)
-                .config("package", package)
-                .config("profile", profile)
-                .config("features", features.join(","))
-                .config("triple", triple)
-                .config("cpu", cpu)
-                .input("image", root_digest)
-                .input("source", source_digest)
-                .input("vendor", vendor_digest),
-        )
-        .finish();
+    // A build with no tools has the key it always had.
+    let mut key = KeyBuilder::new(NAME, RECIPE_VERSION)
+        .config("rustc", rustc)
+        .config("cargo", cargo)
+        .config("package", package)
+        .config("profile", profile)
+        .config("features", features.join(","))
+        .config("triple", triple)
+        .config("cpu", cpu)
+        .input("image", root_digest)
+        .input("source", source_digest)
+        .input("vendor", vendor_digest);
+    if let Some((digest, _)) = &tools {
+        key = key.input("tools", *digest);
+    }
+    let key = sandbox.key(key).finish();
     let made =
         Step::new(&store, cx, NAME, key).look_up_or_make(&[("out", Path::new("out"))], |work| {
             let build = work.dir().to_path_buf();

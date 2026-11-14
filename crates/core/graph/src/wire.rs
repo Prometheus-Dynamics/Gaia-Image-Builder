@@ -415,7 +415,21 @@ fn component_build(
                 format!("no source {source_name}"),
             )
         })?;
-        let from = component_source(g, component, &source_name, source, lock, board)?;
+        let mut from = component_source(g, component, &source_name, source, lock, board)?;
+        // A download is an archive: a build takes it unpacked, without the
+        // one directory an archive has at its top.
+        if matches!(source, gaia_describe::Source::Download { .. }) {
+            let unpack = g.add(
+                "gaia.source.archive",
+                step(&format!("{source_name}.unpacked")),
+                file,
+                &format!("sources.{source_name}"),
+            )?;
+            let out = g.first_output(from).unwrap_or("file");
+            g.edge((from, out), (unpack, "archive"));
+            g.set(unpack, "strip", Lit::Int(1));
+            from = unpack;
+        }
         let out = g.first_output(from).unwrap_or("tree");
         g.edge((from, out), (node, &port));
         if port == "source" {

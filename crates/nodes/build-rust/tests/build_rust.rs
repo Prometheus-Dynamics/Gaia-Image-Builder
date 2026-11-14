@@ -170,6 +170,7 @@ fn build(root: &Path, triple: &str, cpu: &str, features: &[&str]) -> Option<Buil
         Some(&cpu.to_string()),
         None,
         None,
+        None,
         &Ctx::new(),
     )
     .expect("builds");
@@ -299,7 +300,7 @@ fn repository(dir: &Path) {
     );
     write(
         &dir.join("src/main.rs"),
-        "#[cfg(not(from_the_sources_config))]\ncompile_error!(\"the source's own rustflags were dropped\");\n\nconst CC: &str = env!(\"CC_aarch64_unknown_linux_musl\");\nconst CACHE: &str = env!(\"TOOL_CACHE_DIR\");\n\nfn main() {\n    println!(\"{CC} {CACHE}\");\n    cfg_if::cfg_if! {\n        if #[cfg(unix)] { println!(\"unix\"); } else { println!(\"other\"); }\n    }\n}\n",
+        "#[cfg(not(from_the_sources_config))]\ncompile_error!(\"the source's own rustflags were dropped\");\n\nconst CC: &str = env!(\"CC_aarch64_unknown_linux_musl\");\nconst CACHE: &str = env!(\"TOOL_CACHE_DIR\");\n\n#[cfg(not(from_the_tools_tree))]\ncompile_error!(\"the program in the tools tree did not run\");\n\nfn main() {\n    println!(\"{CC} {CACHE}\");\n    cfg_if::cfg_if! {\n        if #[cfg(unix)] { println!(\"unix\"); } else { println!(\"other\"); }\n    }\n}\n",
     );
     write(
         &dir.join(".cargo/config.toml"),
@@ -344,6 +345,20 @@ fn a_repository_is_vendored_from_its_lock_and_built_with_its_profile_and_flags()
     let store_text = store.display().to_string();
     let toolchain = toolchain().display().to_string();
     let source = stored_tree(&store, &src);
+    // A program the image does not have, found by its name on PATH: a
+    // wrapper cargo runs the compiler through, which adds a cfg the source
+    // refuses to compile without.
+    let tools_dir = dir.path().join("tools");
+    write(
+        &tools_dir.join("mytool"),
+        "#!/bin/sh\nexec \"$@\" --cfg from_the_tools_tree\n",
+    );
+    std::fs::set_permissions(
+        tools_dir.join("mytool"),
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .expect("chmod");
+    let tools = stored_tree(&store, &tools_dir);
 
     let vendor = gaia_build_rust::vendor(&store_text, &toolchain, source.clone(), &Ctx::new())
         .expect("vendors");
@@ -380,7 +395,8 @@ fn a_repository_is_vendored_from_its_lock_and_built_with_its_profile_and_flags()
         TRIPLE,
         None,
         Some(&"/src/tools/cc".to_string()),
-        Some(&"TOOL_CACHE_DIR=/build/tool-cache\n".to_string()),
+        Some(&"TOOL_CACHE_DIR=/build/tool-cache\nRUSTC_WRAPPER=mytool\n".to_string()),
+        Some(&tools),
         &Ctx::new(),
     )
     .expect("builds with the service profile and the config's flag");
@@ -427,6 +443,7 @@ fn a_bad_env_line_or_a_reserved_name_is_refused() {
             None,
             None,
             Some(&env.to_string()),
+            None,
             &Ctx::new(),
         )
         .expect_err("refused")
