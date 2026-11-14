@@ -57,6 +57,12 @@ pub struct Generate {
     /// What the tool writes at the top of `@out@`: each must be there when
     /// it ends, and nothing else.
     pub outputs: Vec<String>,
+    /// What some of those files are, by role, for an image's recipe: a
+    /// role's name and the file's path under `@out@`. The roles are the
+    /// tool's owner's words (`board-overlay`, `cmdline`, `cmdline-slot`,
+    /// `manifest-boot`); a recipe takes one as its input `provides.<role>`.
+    #[serde(default)]
+    pub provides: BTreeMap<String, String>,
 }
 
 /// The tool: a package of one of the component's sources.
@@ -267,6 +273,32 @@ impl Component {
                         path,
                         format!("generate.outputs[{index}]"),
                         format!("`{output}` is not a name at the top of the output directory"),
+                    ));
+                }
+            }
+        }
+        if let Some(generate) = &component.generate {
+            for (role, provided) in &generate.provides {
+                if !is_input_name(role) {
+                    return Err(Error::new(
+                        path,
+                        format!("generate.provides.{role}"),
+                        "a role is lowercase letters, digits and `-`",
+                    ));
+                }
+                let top = provided.split('/').next().unwrap_or_default();
+                let inside = !provided.is_empty()
+                    && provided
+                        .split('/')
+                        .all(|part| !part.is_empty() && part != "." && part != "..");
+                if !inside || !generate.outputs.iter().any(|output| output == top) {
+                    return Err(Error::new(
+                        path,
+                        format!("generate.provides.{role}"),
+                        format!(
+                            "`{provided}` is in no declared output; [generate] declares {}",
+                            generate.outputs.join(", ")
+                        ),
                     ));
                 }
             }

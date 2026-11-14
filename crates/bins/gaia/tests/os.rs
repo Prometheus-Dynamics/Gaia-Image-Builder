@@ -696,6 +696,138 @@ fn a_component_generates_from_the_boards_description() {
     }
 }
 
+/// A recipe takes what the image's generator wrote by role, the board's
+/// base command line and the OS build's host tools: no file name of the
+/// generator's is in the recipe or the product.
+#[test]
+fn a_recipe_takes_the_generators_files_by_role() {
+    let dir = project();
+    let board_dir = dir.path().join("examples/boards/zero-3e");
+    let board = board_dir.join("board.toml");
+    let product = dir
+        .path()
+        .join("examples/products/zero-3e-demo/product.toml");
+    let component = dir
+        .path()
+        .join("examples/components/hello-rust/component.toml");
+    let block = "[generate]\ntool = { source = \"src\", package = \"hello-rust\" }\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"--slot\", \"@slot@\", \"@out@\"]\noutputs = [\"overlay.dts\", \"words\", \"manifest-boot.json\"]\n\n[generate.provides]\nboard-overlay = \"overlay.dts\"\nmanifest-boot = \"manifest-boot.json\"\ncmdline = \"words/cmdline.txt\"\ncmdline-slot = \"words/slot.txt\"\n";
+    let original = std::fs::read_to_string(&component).expect("read");
+    std::fs::write(&component, format!("{original}\n{block}")).expect("write");
+    let text = std::fs::read_to_string(&board).expect("read");
+    std::fs::write(
+        &board,
+        format!("{text}\n[descriptions]\ndaemon = \"daemon-board.toml\"\n"),
+    )
+    .expect("write");
+    std::fs::write(board_dir.join("daemon-board.toml"), "id = \"zero-3e\"\n").expect("write");
+    edit(
+        &board,
+        "[kernel]\n",
+        "[kernel]\ncmdline = \"console=ttyS2,1500000 rootwait\"\n",
+    );
+    edit(&product, "recipe = \"sd-image\"", "recipe = \"slot-boot\"");
+    edit(
+        &product,
+        "id = \"zero-3e-demo\"",
+        "slot = \"base\"\ndevice = \"/dev/mmcblk0p3\"",
+    );
+
+    let out = plan(dir.path(), &[]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    let text = String::from_utf8_lossy(&out.stdout)
+        .split(' ')
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    for line in [
+        "zero-3e-demo.hello-rust.generate.tree -> zero-3e-demo::overlay.source",
+        "zero-3e-demo.hello-rust.generate.tree -> zero-3e-demo::cmdline.generated",
+        "hello-rust.src.tree -> zero-3e-demo::overlay.contract",
+        "zero-3e-demo.host-tools.seed -> zero-3e-demo::overlay.tools",
+        "zero-3e-demo::verity.table -> zero-3e-demo::cmdline.table",
+    ] {
+        assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
+    }
+    let json = plan(dir.path(), &["--json"]);
+    let both: serde_json::Value = serde_json::from_slice(&json.stdout).expect("json");
+    let nodes = both["graph"]["graph"]["nodes"].as_array().expect("nodes");
+    let consts = |label: &str| {
+        &nodes
+            .iter()
+            .find(|n| n["label"] == label)
+            .unwrap_or_else(|| panic!("no node {label}"))["consts"]
+    };
+    let overlay = consts("zero-3e-demo::overlay");
+    assert_eq!(overlay["source_path"]["value"], "overlay.dts");
+    assert_eq!(overlay["stated_path"]["value"], "manifest-boot.json");
+    assert_eq!(
+        overlay["contract_path"]["value"],
+        "contracts/overlay-dtc.toml"
+    );
+    let name = overlay["base_name"]["value"].as_str().expect("a name");
+    assert!(name.ends_with(".dtb") && !name.contains('/'), "{name}");
+    let cmdline = consts("zero-3e-demo::cmdline");
+    assert_eq!(cmdline["base"]["value"], "console=ttyS2,1500000 rootwait");
+    assert_eq!(cmdline["words_path"]["value"], "words/cmdline.txt");
+    assert_eq!(cmdline["slot_path"]["value"], "words/slot.txt");
+    assert_eq!(cmdline["slot"]["value"], "base");
+    // The generator is run for the same slot.
+    assert_eq!(
+        consts("zero-3e-demo.hello-rust.generate")["slot"]["value"],
+        "base"
+    );
+
+    // What a plan refuses, each at its key.
+    let cases = [
+        (
+            "cmdline-slot = \"words/slot.txt\"\n",
+            "",
+            "generate.provides",
+            "recipe slot-boot takes the generated file of the role `cmdline-slot`; hello-rust provides board-overlay, cmdline, manifest-boot",
+        ),
+        (
+            "cmdline = \"words/cmdline.txt\"",
+            "cmdline = \"other/cmdline.txt\"",
+            "generate.provides.cmdline",
+            "`other/cmdline.txt` is in no declared output; [generate] declares overlay.dts, words, manifest-boot.json",
+        ),
+        (
+            "board-overlay = ",
+            "Board_Overlay = ",
+            "generate.provides.Board_Overlay",
+            "a role is lowercase letters, digits and `-`",
+        ),
+    ];
+    for (from, to, key, message) in cases {
+        std::fs::write(
+            &component,
+            format!("{original}\n{}", block.replace(from, to)),
+        )
+        .expect("write");
+        let out = plan(dir.path(), &[]);
+        assert_eq!(out.status.code(), Some(2), "{to}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(key), "{to}: {err}");
+        assert!(err.contains(message), "{to}: {err}");
+    }
+    // No generator in the image at all.
+    std::fs::write(&component, &original).expect("write");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("from the image's one component with a [generate]; this image has 0"),
+        "{err}"
+    );
+    // A command line of two lines.
+    edit(&board, "1500000 rootwait\"", "1500000\\nrootwait\"");
+    let out = plan(dir.path(), &[]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("kernel.cmdline"), "{err}");
+    assert!(err.contains("more than one line"), "{err}");
+}
+
 /// A board whose kernel starts from a complete configuration, a saved
 /// `.config`, in place of a defconfig.
 #[test]

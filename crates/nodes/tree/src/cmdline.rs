@@ -21,6 +21,10 @@
 //! with the source and the word named. Nothing of those words is spelled in
 //! this code: the keys and the namespace are read from the file.
 //!
+//! An image that has a slot id gives it: the first of the slot's words must
+//! then have it as its value, so a generator run for another slot (or for
+//! none) is caught here and not at boot.
+//!
 //! The line is bounded: a kernel keeps only so many bytes of it. Over the
 //! limit, the build fails with the size, the limit and the source whose
 //! words crossed it.
@@ -129,6 +133,14 @@ pub fn assemble(
     Ok(line)
 }
 
+/// Whether the first of the slot's words `text` has `slot` as its value.
+pub fn names_slot(text: &str, slot: &str) -> bool {
+    text.split_whitespace()
+        .next()
+        .and_then(|word| word.split_once('='))
+        .is_some_and(|(_, value)| value == slot)
+}
+
 /// The `root_hash` of a verity table artifact's text.
 pub fn root_hash_of(table: &str) -> Option<&str> {
     table
@@ -141,10 +153,13 @@ pub fn root_hash_of(table: &str) -> Option<&str> {
 /// `generated` is a tree with the generator's words at `words_path` and the
 /// slot's at `slot_path` (either path empty for none); `table` is the
 /// slot's verity table; `limit` is the most bytes the line may have (0 for
-/// no limit).
+/// no limit); `slot` is the image's slot id (empty for none), which the
+/// first of the slot's words must name.
 #[node(
     id = "gaia.cmdline",
-    inputs(store, base, generated, words_path, slot_path, extra, table, limit),
+    inputs(
+        store, base, generated, words_path, slot_path, slot, extra, table, limit
+    ),
     outputs(cmdline)
 )]
 #[allow(clippy::too_many_arguments)]
@@ -154,6 +169,7 @@ pub fn cmdline(
     generated: Tree,
     words_path: &str,
     slot_path: &str,
+    slot: &str,
     extra: &str,
     table: &Artifact,
     limit: i64,
@@ -175,7 +191,17 @@ pub fn cmdline(
             .map_err(|e| fail(format!("{what}, {relative}: {e}")))
     };
     let words = read(words_path, "the generator's words")?;
+    let slot_id = slot;
     let slot = read(slot_path, "the slot's words")?;
+    if let Some(text) = &slot
+        && !slot_id.is_empty()
+        && !names_slot(text, slot_id)
+    {
+        return Err(fail(format!(
+            "the slot's words begin `{}`, and the image's slot is `{slot_id}`: the generator was run for another",
+            text.split_whitespace().next().unwrap_or_default()
+        )));
+    }
     let roothash = match &slot {
         None => String::new(),
         Some(_) => {

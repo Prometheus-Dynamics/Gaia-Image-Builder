@@ -81,6 +81,10 @@ pub struct Kernel {
     /// initramfs that loads no modules), every one must be `=y`. A board's
     /// list replaces its family's.
     pub storage_drivers: Option<Vec<String>>,
+    /// The words every kernel command line of the board starts with: its
+    /// console and the like, on one line. An image's recipe takes them as
+    /// its input `cmdline-base`. A board's replace its family's.
+    pub cmdline: Option<String>,
 }
 
 /// The bootloader: its source, configuration and the files it is built
@@ -440,6 +444,15 @@ fn check_refs(
     if let Some(name) = file.kernel.as_ref().and_then(|k| k.source.as_deref()) {
         check("kernel.source", name)?;
     }
+    if let Some(words) = file.kernel.as_ref().and_then(|k| k.cmdline.as_deref())
+        && words.contains(['\n', '\r'])
+    {
+        return Err(Error::new(
+            path,
+            "kernel.cmdline",
+            "more than one line; a kernel command line is one",
+        ));
+    }
     if let Some(bootloader) = &file.bootloader {
         if let Some(name) = &bootloader.source {
             check("bootloader.source", name)?;
@@ -522,6 +535,7 @@ fn merge(board: BoardFile, family: BoardFile) -> BoardFile {
                 overlays: b.overlays.or(f.overlays),
                 config: b.config.or(f.config),
                 storage_drivers: b.storage_drivers.or(f.storage_drivers),
+                cmdline: b.cmdline.or(f.cmdline),
             }),
             (b, f) => b.or(f),
         },

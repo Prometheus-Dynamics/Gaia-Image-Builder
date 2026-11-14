@@ -31,6 +31,22 @@ struct Graph<'r> {
     filled: Vec<BTreeSet<String>>,
     /// The named inputs a laid-out install entry takes.
     used_inputs: BTreeSet<String>,
+    /// Each image's generators: what a recipe takes from them.
+    generators: BTreeMap<String, Vec<Generator>>,
+    /// Each image's host tools step.
+    host_tools: BTreeMap<String, u32>,
+}
+
+/// A component's `[generate]` step in one image.
+#[derive(Clone)]
+struct Generator {
+    component: String,
+    file: PathBuf,
+    /// The step, whose `tree` is what the tool wrote.
+    node: u32,
+    /// The tool's source, and the port its tree is on.
+    source: (u32, &'static str),
+    provides: BTreeMap<String, String>,
 }
 
 impl Graph<'_> {
@@ -195,6 +211,8 @@ pub(crate) fn wire(
         }],
         filled: vec![BTreeSet::new()],
         used_inputs: BTreeSet::new(),
+        generators: BTreeMap::new(),
+        host_tools: BTreeMap::new(),
     };
     // Each built component once, by the product's name for it.
     let mut built: BTreeMap<String, u32> = BTreeMap::new();
@@ -699,6 +717,91 @@ fn image_recipe(
             for p in ports {
                 g.edge((*node, out), (stages[&p.stage], &p.port));
             }
+        } else if input == "generated"
+            || input == "generator-source"
+            || input.starts_with("provides.")
+        {
+            let made = g.generators.get(&image.name).cloned().unwrap_or_default();
+            let [generator] = made.as_slice() else {
+                return Err(Error::at(
+                    product_file,
+                    format!("images[{i}].components"),
+                    format!(
+                        "recipe {} takes `{input}` from the image's one component with a [generate]; this image has {}",
+                        recipe.name,
+                        made.len()
+                    ),
+                ));
+            };
+            if let Some(role) = input.strip_prefix("provides.") {
+                let Some(path) = generator.provides.get(role) else {
+                    let known: Vec<&str> = generator.provides.keys().map(String::as_str).collect();
+                    return Err(Error::at(
+                        &generator.file,
+                        "generate.provides",
+                        format!(
+                            "recipe {} takes the generated file of the role `{role}`; {} provides {}",
+                            recipe.name,
+                            generator.component,
+                            if known.is_empty() {
+                                "none".to_string()
+                            } else {
+                                known.join(", ")
+                            }
+                        ),
+                    ));
+                };
+                stated(g, &stages, ports, &recipe.file, input, path)?;
+            } else {
+                let (node, port) = if input == "generated" {
+                    (generator.node, "tree")
+                } else {
+                    generator.source
+                };
+                for p in ports {
+                    g.edge((node, port), (stages[&p.stage], &p.port));
+                }
+            }
+        } else if input == "host-tools" {
+            let Some(tools) = g.host_tools.get(&image.name).copied() else {
+                return Err(Error::at(
+                    product_file,
+                    format!("images[{i}]"),
+                    format!(
+                        "recipe {} takes the OS build's host tools; this image has no `os`",
+                        recipe.name
+                    ),
+                ));
+            };
+            for p in ports {
+                g.edge((tools, "seed"), (stages[&p.stage], &p.port));
+            }
+        } else if input == "cmdline-base" {
+            let words = at
+                .board
+                .kernel
+                .as_ref()
+                .and_then(|kernel| kernel.cmdline.clone())
+                .unwrap_or_default();
+            stated(g, &stages, ports, &recipe.file, input, &words)?;
+        } else if input == "device-tree-name" {
+            let Some(tree) = at
+                .board
+                .kernel
+                .as_ref()
+                .and_then(|kernel| kernel.device_tree.as_deref())
+            else {
+                return Err(Error::at(
+                    &at.board.file,
+                    "kernel.device_tree",
+                    format!(
+                        "recipe {} takes the name of the board's device tree; the board {} states none",
+                        recipe.name, at.board.name
+                    ),
+                ));
+            };
+            let name = format!("{}.dtb", tree.rsplit('/').next().unwrap_or(tree));
+            stated(g, &stages, ports, &recipe.file, input, &name)?;
         } else if input == "blobs" {
             let list = image_blobs(g, at, &recipe.name)?;
             for p in ports {
@@ -786,6 +889,25 @@ fn image_recipe(
         }
         host_ports.insert(port.clone(), ty);
         g.edge((node, &at.port), (0, &port));
+    }
+    Ok(())
+}
+
+/// Sets the text `value` of the recipe input `input` on each of `ports`.
+fn stated(
+    g: &mut Graph<'_>,
+    stages: &BTreeMap<String, u32>,
+    ports: &[daedalus::layers::graph::StagePortDoc],
+    recipe_file: &Path,
+    input: &str,
+    value: &str,
+) -> Result<(), Error> {
+    for p in ports {
+        let node = stages[&p.stage];
+        let value = Lit::Str(value.to_string());
+        g.check(node, &p.port, &value)
+            .map_err(|e| Error::at(recipe_file, format!("inputs.{input}"), e))?;
+        g.set(node, &p.port, value);
     }
     Ok(())
 }
@@ -1272,6 +1394,7 @@ fn image_os(
         host_ports,
         inputs,
     )?;
+    g.host_tools.insert(name.to_string(), tools);
     let os = step(
         g,
         "gaia.os.buildroot",
@@ -1565,6 +1688,16 @@ fn generate_node(g: &mut Graph<'_>, at: &OsIn<'_>, component: &Component) -> Res
     g.edge((tool, out), (node, "tool"));
     let out = g.first_output(source).unwrap_or("tree");
     g.edge((source, out), (node, "source"));
+    g.generators
+        .entry(image.clone())
+        .or_default()
+        .push(Generator {
+            component: component.name.clone(),
+            file: file.clone(),
+            node,
+            source: (source, out),
+            provides: generate.provides.clone(),
+        });
     let out = g.first_output(description).unwrap_or("tree");
     g.edge((description, out), (node, "description"));
     Ok(node)

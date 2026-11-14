@@ -41,7 +41,9 @@ mod walk;
 
 pub use accounts::tree_accounts;
 pub use by_role::{Record, RecordRole, placements, records, tree_by_role};
-pub use cmdline::{assemble as cmdline_assemble, cmdline, root_hash_of};
+pub use cmdline::{
+    assemble as cmdline_assemble, cmdline, names_slot as cmdline_names_slot, root_hash_of,
+};
 pub use file::tree_file;
 pub use generate::{TOKENS, generate, unknown_tokens};
 pub use layer::tree_layer;

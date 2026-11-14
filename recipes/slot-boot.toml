@@ -1,0 +1,82 @@
+# A root slot and what boots it: the root as an EROFS image with dm-verity
+# appended, the board's overlay compiled and proven against the kernel's
+# device tree, and the slot's whole kernel command line with the root hash
+# in it. The overlay's source and the command line's words are written by
+# the image's one component with a [generate], which names them by role.
+# Untested on board.
+version = 1
+name = "slot-boot"
+description = "A root slot (EROFS, dm-verity) with its compiled board overlay and whole kernel command line."
+
+[stages]
+erofs = "gaia.fs.erofs"
+verity = "gaia.verity"
+overlay = "gaia.devicetree.overlay"
+cmdline = "gaia.cmdline"
+
+[[connects]]
+from = "erofs.image"
+to = "verity.image"
+
+[[connects]]
+from = "verity.table"
+to = "cmdline.table"
+
+[inputs]
+system = ["erofs.tree"]
+generated = ["overlay.source", "cmdline.generated"]
+generator-source = ["overlay.contract"]
+host-tools = ["overlay.tools"]
+device-trees = ["overlay.base"]
+device-tree-name = ["overlay.base_name"]
+cmdline-base = ["cmdline.base"]
+"provides.board-overlay" = ["overlay.source_path"]
+"provides.manifest-boot" = ["overlay.stated_path"]
+"provides.cmdline" = ["cmdline.words_path"]
+"provides.cmdline-slot" = ["cmdline.slot_path"]
+
+[outputs]
+slot = "verity.image"
+table = "verity.table"
+overlay = "overlay.overlay"
+cmdline = "cmdline.cmdline"
+
+[parameters.slot]
+type = "string"
+description = "The slot's id: what the generator writes the slot's words for."
+sets = ["cmdline.slot"]
+
+[parameters.compression]
+type = "string"
+default = "zstd"
+description = "EROFS compression: none, lz4, lz4hc, lzma, deflate or zstd."
+sets = ["erofs.compression"]
+
+[parameters.level]
+type = "int"
+default = 0
+description = "The compressor's level; 0 is its default."
+sets = ["erofs.level"]
+
+[parameters.device]
+type = "string"
+description = "Where the slot is read from: its file, or a device. The verity tree is in it too."
+sets = ["verity.device"]
+
+[parameters.overlay_contract]
+type = "string"
+default = "contracts/overlay-dtc.toml"
+description = "The overlay compiler's contract, a file of the generator's source."
+sets = ["overlay.contract_path"]
+
+[parameters.cmdline_extra]
+type = "string"
+default = ""
+description = "Words the image adds to the kernel command line, before the slot's."
+sets = ["cmdline.extra"]
+
+[parameters.cmdline_limit]
+type = "int"
+default = 2048
+description = "The most bytes the kernel command line may have; 0 for no limit."
+sets = ["cmdline.limit"]

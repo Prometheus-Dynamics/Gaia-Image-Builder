@@ -10,6 +10,16 @@ const WORDS: &str = "mod.owned=vendor,dev-a,vendor,dev-b mod.pisp_be=vendor,dev-
 const SLOT: &str = "os.slot=base os.roothash=@roothash@ os.src.rpi-boot-mode-1=/soc@107c000000/mmc@fff000 panic=5\n";
 
 fn run(base: &str, extra: &str, slot_path: &str, limit: i64) -> Result<String, String> {
+    run_for("base", base, extra, slot_path, limit)
+}
+
+fn run_for(
+    slot_id: &str,
+    base: &str,
+    extra: &str,
+    slot_path: &str,
+    limit: i64,
+) -> Result<String, String> {
     let dir = tempfile::tempdir().expect("tempdir");
     let store_path = dir.path().join("store").display().to_string();
     let store = Store::open(&store_path).expect("store");
@@ -32,6 +42,7 @@ fn run(base: &str, extra: &str, slot_path: &str, limit: i64) -> Result<String, S
         },
         "cmdline.txt",
         slot_path,
+        slot_id,
         extra,
         &Artifact {
             kind: ArtifactKind::parse("verity-table"),
@@ -76,4 +87,21 @@ fn a_word_the_slot_owns_and_a_line_too_long_fail_the_step() {
     assert!(why.contains("a word of the slot"), "{why}");
     let why = run("", "", "missing.txt", 0).expect_err("no such file");
     assert!(why.contains("the slot's words, missing.txt"), "{why}");
+}
+
+#[test]
+fn the_slots_words_are_for_the_images_slot() {
+    // Words written for `base`, in an image whose slot is `trial`.
+    let why = run_for("trial", "", "", "cmdline-slot.txt", 0).expect_err("another slot");
+    assert!(
+        why.contains("the slot's words begin `os.slot=base`, and the image's slot is `trial`"),
+        "{why}"
+    );
+    // An image with no slot id checks nothing; one with no slot words has
+    // nothing to check.
+    run_for("", "", "", "cmdline-slot.txt", 0).expect("unchecked");
+    run_for("trial", "a=1", "", "", 0).expect("no slot words");
+    assert!(gaia_tree::cmdline_names_slot("os.slot=base x=1", "base"));
+    assert!(!gaia_tree::cmdline_names_slot("os.slot=base2", "base"));
+    assert!(!gaia_tree::cmdline_names_slot("quiet", ""));
 }
