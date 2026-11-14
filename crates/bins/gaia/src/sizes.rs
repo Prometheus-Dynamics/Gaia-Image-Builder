@@ -113,6 +113,35 @@ struct Owned {
 }
 
 pub fn sizes(options: &args::Sizes) -> Result<(), Stop> {
+    if let Some(image) = &options.image {
+        if options.run.is_some() {
+            return Err(Stop::usage("sizes takes a run or --image, not both"));
+        }
+        let rows: Vec<Row> = crate::image_sizes::measure(image, &std::env::temp_dir())
+            .map_err(|e| Stop::usage(format!("{}: {e}", image.display())))?
+            .into_iter()
+            .map(|(what, bytes, detail)| Row {
+                what,
+                bytes,
+                detail,
+            })
+            .collect();
+        if options.json {
+            let text = serde_json::to_string_pretty(&serde_json::json!({
+                "image": image,
+                "rows": rows,
+            }))
+            .map_err(Stop::usage)?;
+            println!("{text}");
+            return Ok(());
+        }
+        println!("image    {}", image.display());
+        let width = rows.iter().map(|r| r.what.len()).max().unwrap_or(0);
+        for r in &rows {
+            println!("{:width$}  {:>12}  {}", r.what, r.bytes, r.detail);
+        }
+        return Ok(());
+    }
     let store = Store::open(project::store_dir(options.store.as_deref())?).map_err(Stop::usage)?;
     let record = match &options.run {
         Some(path) => path.clone(),
