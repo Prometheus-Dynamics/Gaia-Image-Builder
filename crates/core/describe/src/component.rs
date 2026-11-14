@@ -141,6 +141,9 @@ pub enum InstallFrom {
     /// A path in the build's output (`bin/server`).
     Built(String),
     File(FileRef),
+    /// Nothing is copied: the path is a symbolic link to this target
+    /// (`{ link = "/run/board" }`), which need not be in the image.
+    Link(String),
 }
 
 // Read by hand, not untagged: a table that fails as a file reference then
@@ -149,6 +152,15 @@ impl<'de> Deserialize<'de> for InstallFrom {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         match toml::Value::deserialize(deserializer)? {
             toml::Value::String(path) => Ok(Self::Built(path)),
+            toml::Value::Table(table) if table.contains_key("link") => {
+                match (table.len(), table.get("link").and_then(toml::Value::as_str)) {
+                    (1, Some(target)) => Ok(Self::Link(target.to_string())),
+                    (1, None) => Err(de::Error::custom("`link` is the link's target, a string")),
+                    _ => Err(de::Error::custom(
+                        "a link is not combined with another kind of source",
+                    )),
+                }
+            }
             table @ toml::Value::Table(_) => FileRef::deserialize(table)
                 .map(Self::File)
                 .map_err(de::Error::custom),
@@ -271,6 +283,22 @@ impl Component {
                     ));
                 }
                 InstallFrom::Built(_) => {}
+                InstallFrom::Link(target) => {
+                    if target.is_empty() {
+                        return Err(Error::new(
+                            path,
+                            format!("{key}.from.link"),
+                            "a link needs a target",
+                        ));
+                    }
+                    if install.mode.is_some() {
+                        return Err(Error::new(
+                            path,
+                            format!("{key}.mode"),
+                            "a link has no mode of its own",
+                        ));
+                    }
+                }
                 InstallFrom::File(file) => {
                     if let FileRef::Input { name } = file
                         && !is_input_name(name)

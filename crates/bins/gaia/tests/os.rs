@@ -818,3 +818,54 @@ fn a_product_named_with_no_directory_has_its_fragments_directory() {
     );
     assert!(!paths.contains(&""), "no empty path: {paths:?}");
 }
+
+/// A component states a path that is a symbolic link, not a file.
+#[test]
+fn a_component_installs_a_symbolic_link() {
+    let dir = project();
+    let component = dir
+        .path()
+        .join("examples/components/usb-gadget-network/component.toml");
+    let original = std::fs::read_to_string(&component).expect("read");
+    let add =
+        |entry: &str| std::fs::write(&component, format!("{original}\n{entry}")).expect("write");
+    add("[[install]]\nfrom = { link = \"/run/board\" }\nto = \"/etc/board\"\n");
+    let out = plan(dir.path(), &["--json"]);
+    assert!(out.status.success());
+    let both: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+    let nodes = both["graph"]["graph"]["nodes"].as_array().expect("nodes");
+    let links = nodes
+        .iter()
+        .find(|n| n["label"] == "zero-3e-demo.usb-gadget-network.links")
+        .expect("the links step");
+    assert_eq!(links["id"], "gaia.tree.links");
+    assert_eq!(links["consts"]["owner"]["value"], "usb-gadget-network");
+    assert_eq!(
+        links["consts"]["links"]["value"],
+        "[[\"/etc/board\",\"/run/board\"]]"
+    );
+
+    for (entry, key, message) in [
+        (
+            "[[install]]\nfrom = { link = \"/run/board\" }\nto = \"/etc/board\"\nmode = \"0755\"\n",
+            ".mode",
+            "a link has no mode of its own",
+        ),
+        (
+            "[[install]]\nfrom = { link = \"\" }\nto = \"/etc/board\"\n",
+            ".from.link",
+            "a link needs a target",
+        ),
+        (
+            "[[install]]\nfrom = { link = \"/run/board\", file = \"files/S41usb0\" }\nto = \"/etc/board\"\n",
+            "install",
+            "a link is not combined with another kind of source",
+        ),
+    ] {
+        add(entry);
+        let out = plan(dir.path(), &[]);
+        assert_eq!(out.status.code(), Some(2), "{entry}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(key) && err.contains(message), "{entry}: {err}");
+    }
+}
