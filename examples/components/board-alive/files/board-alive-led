@@ -1,0 +1,52 @@
+#!/bin/sh
+# Beats the board's LEDs at boot; a slow blink once a network interface that
+# is not a USB gadget's has an IPv4 address; back to the beat if it is lost.
+# Looks every two seconds: it depends on no DHCP client's hooks.
+
+leds() {
+    if [ -r /etc/board-alive.leds ]; then
+        cat /etc/board-alive.leds
+    else
+        ls /sys/class/leds 2>/dev/null
+    fi
+}
+
+show() {
+    for led in $(leds); do
+        dir=/sys/class/leds/$led
+        [ -w "$dir/trigger" ] || continue
+        case "$1" in
+            beat)
+                echo heartbeat > "$dir/trigger" 2>/dev/null
+                ;;
+            leased)
+                echo timer > "$dir/trigger" 2>/dev/null
+                echo 1000 > "$dir/delay_on" 2>/dev/null
+                echo 1000 > "$dir/delay_off" 2>/dev/null
+                ;;
+        esac
+    done
+}
+
+# An address on an interface that is not the loopback and not a gadget's
+# (a gadget's has the address the image gives it, lease or no lease).
+leased() {
+    for dev in /sys/class/net/*; do
+        name=${dev##*/}
+        [ "$name" = lo ] && continue
+        [ -e "$dev/device" ] || continue
+        case "$(readlink -f "$dev/device")" in */gadget*) continue ;; esac
+        ip -4 -o addr show dev "$name" scope global 2>/dev/null | grep -q . && return 0
+    done
+    return 1
+}
+
+state=
+while :; do
+    if leased; then now=leased; else now=beat; fi
+    if [ "$now" != "$state" ]; then
+        show "$now"
+        state=$now
+    fi
+    sleep 2
+done
