@@ -1565,9 +1565,15 @@ fn component_layers(
     }
     let dir = file.parent().unwrap_or(Path::new("/")).to_path_buf();
     let mut groups: BTreeMap<PlaceFrom, Vec<gaia_types::Placement>> = BTreeMap::new();
+    // Paths that are symbolic links: nothing is placed, a link is made.
+    let mut links: Vec<(String, String)> = Vec::new();
     for (n, install) in component.install.iter().enumerate() {
         let key = format!("install[{n}]");
         let (group, from) = match &install.from {
+            InstallFrom::Link(target) => {
+                links.push((install.to.clone(), target.clone()));
+                continue;
+            }
             InstallFrom::Built(path) => (PlaceFrom::Built, path.clone()),
             InstallFrom::File(FileRef::InSource { source, path }) => {
                 (PlaceFrom::Source(source.clone()), path.clone())
@@ -1734,6 +1740,21 @@ fn component_layers(
             (place, "placements"),
         )?;
         layers.push(place);
+    }
+    if !links.is_empty() {
+        let node = g.add(
+            "gaia.tree.links",
+            format!("{image}.{}.links", component.name),
+            file,
+            "install",
+        )?;
+        g.set(node, "owner", Lit::Str(component.name.clone()));
+        g.set(
+            node,
+            "links",
+            Lit::Str(serde_json::to_string(&links).unwrap_or_default()),
+        );
+        layers.push(node);
     }
     Ok(layers)
 }
