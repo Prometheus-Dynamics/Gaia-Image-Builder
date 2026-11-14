@@ -720,7 +720,8 @@ fn a_slot_needs_the_builds_own_tools_and_a_compression_they_write() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("images[0].settings.compression"), "{err}");
     assert!(
-        err.contains("sets erofs compression `zstd`, which its build's own mkfs.erofs does not write (Buildroot builds the host tool with lz4, lz4hc, lzma)"),
+        err.contains("sets erofs compression `zstd`, which its build's own mkfs.erofs does not write: Buildroot builds the host erofs-utils with lz4, lz4hc, lzma and without zstd")
+            && err.contains("`zstd` needs a host erofs-utils built with it, which this builder does not have yet"),
         "{err}"
     );
     edit(

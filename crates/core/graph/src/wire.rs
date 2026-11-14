@@ -1010,7 +1010,7 @@ fn image_recipe(
                     product_file,
                     format!("images[{i}].settings.compression"),
                     format!(
-                        "the image {} sets erofs compression `{compression}`, which its build's own mkfs.erofs does not write (Buildroot builds the host tool with {}): set `compression` to one of those",
+                        "the image {} sets erofs compression `{compression}`, which its build's own mkfs.erofs does not write: Buildroot builds the host erofs-utils with {} and without zstd, deflate and zlib, and no tool of the build machine makes an image. Set `compression` to one of those; `{compression}` needs a host erofs-utils built with it, which this builder does not have yet",
                         image.name,
                         HOST_EROFS_COMPRESSIONS[1..].join(", ")
                     ),
