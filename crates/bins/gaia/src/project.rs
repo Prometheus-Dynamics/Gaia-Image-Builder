@@ -31,7 +31,7 @@ impl Project {
     pub fn open(options: &args::Project) -> Result<Self, Stop> {
         let product = &options.product;
         let dir = product.parent().unwrap_or(Path::new("."));
-        let loaded = gaia_describe::Product::load(product).map_err(Stop::usage)?;
+        let mut loaded = gaia_describe::Product::load(product).map_err(Stop::usage)?;
         let lock_path = options
             .lock
             .clone()
@@ -44,6 +44,7 @@ impl Project {
         } else {
             gaia_recipe::Recipes::default()
         };
+        apply_settings(&mut loaded.product, product, &recipes, &options.settings)?;
         let store = absolute(&store_dir(options.store.as_deref())?);
         let tools = tools(&options.tools);
         let setup = Setup {
@@ -255,10 +256,64 @@ pub fn recipes_dir(product: &Path, flag: Option<&Path>) -> PathBuf {
     }
 }
 
+/// `--setting IMAGE.NAME=VALUE`: each fills a parameter of the image's
+/// recipe that the product leaves unset, read as the parameter's type.
+fn apply_settings(
+    product: &mut gaia_describe::Product,
+    file: &Path,
+    recipes: &gaia_recipe::Recipes,
+    given: &[args::Setting],
+) -> Result<(), Stop> {
+    for setting in given {
+        let flag = setting.given();
+        let refuse = |why: String| Stop::usage(format!("{flag}: {why}"));
+        let names: Vec<&str> = product.images.iter().map(|i| i.name.as_str()).collect();
+        let Some(index) = names.iter().position(|n| *n == setting.image) else {
+            return Err(refuse(format!(
+                "{} has no image `{}`; its images are {}",
+                file.display(),
+                setting.image,
+                names.join(", ")
+            )));
+        };
+        let image = &mut product.images[index];
+        let recipe = recipes
+            .get(&image.recipe, file)
+            .map_err(|e| refuse(e.to_string()))?;
+        let Some(parameter) = recipe.parameters.get(&setting.name) else {
+            let known: Vec<&str> = recipe.parameters.keys().map(String::as_str).collect();
+            return Err(refuse(format!(
+                "recipe {} declares no parameter `{}`; its parameters are {}",
+                recipe.name,
+                setting.name,
+                known.join(", ")
+            )));
+        };
+        if image.settings.contains_key(&setting.name) {
+            return Err(refuse(format!(
+                "{} already sets it (images[{index}].settings.{}); --setting gives only what the product leaves unset",
+                file.display(),
+                setting.name
+            )));
+        }
+        let text = setting.value.as_str();
+        let value = parameter.kind.from_text(text).ok_or_else(|| {
+            refuse(format!(
+                "recipe {}'s `{}` wants {}, not `{text}`",
+                recipe.name, setting.name, parameter.kind
+            ))
+        })?;
+        image.settings.insert(setting.name.clone(), value);
+    }
+    Ok(())
+}
+
 /// `gaia validate` of a product: every image's recipe is one the recipes
-/// directory holds. Only the names are checked: no settings, no plan. With
-/// no `--recipes` and no `recipes/` next to the product, nothing is checked.
-pub fn check_recipe_names(product: &Path, flag: Option<&Path>) -> Result<(), Stop> {
+/// directory holds, and the image's settings are parameters the recipe
+/// declares, each of its type. A parameter left unset is not refused here:
+/// it may have a default, or come from `--setting`. With no `--recipes`
+/// and no `recipes/` next to the product, nothing is checked.
+pub fn check_recipes(product: &Path, flag: Option<&Path>) -> Result<(), Stop> {
     let dir = recipes_dir(product, flag);
     if flag.is_none() && !dir.is_dir() {
         return Ok(());
@@ -267,7 +322,18 @@ pub fn check_recipe_names(product: &Path, flag: Option<&Path>) -> Result<(), Sto
     let loaded = gaia_describe::Product::read(product).map_err(Stop::usage)?;
     let known: Vec<String> = recipes.by_name.keys().cloned().collect();
     for (index, image) in loaded.images.iter().enumerate() {
-        if recipes.by_name.contains_key(&image.recipe) {
+        if let Some(recipe) = recipes.by_name.get(&image.recipe) {
+            recipe
+                .check_settings(&image.settings, product)
+                .map_err(|e| {
+                    let name = e.key.strip_prefix("parameters.").unwrap_or(&e.key);
+                    Stop::usage(format!(
+                        "{}: images[{index}].settings.{name}: recipe {}: {}",
+                        product.display(),
+                        recipe.name,
+                        e.message
+                    ))
+                })?;
             continue;
         }
         let mut message = format!("no recipe named `{}`", image.recipe);

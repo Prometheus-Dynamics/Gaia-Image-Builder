@@ -58,4 +58,16 @@ impl Recipe {
     pub fn group(&self, values: &toml::Table, from: &std::path::Path) -> Result<GroupDoc, Error> {
         file::group(self, values, from)
     }
+
+    /// Checks `values` (from the file `from`) against the parameters: every
+    /// name is one the recipe declares, and every value has its type. A
+    /// parameter left out is not checked here: it may have a default, or be
+    /// given when the graph is planned.
+    pub fn check_settings(
+        &self,
+        values: &toml::Table,
+        from: &std::path::Path,
+    ) -> Result<(), Error> {
+        file::check_settings(self, values, from)
+    }
 }

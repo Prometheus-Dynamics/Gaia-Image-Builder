@@ -29,6 +29,24 @@ impl fmt::Display for ParamType {
 }
 
 impl ParamType {
+    /// `text`, as given on a command line, as a value of this type: `true`
+    /// or `false`, a decimal int, a float, the text itself, or a
+    /// comma-separated list of strings. None when it is not one.
+    pub fn from_text(self, text: &str) -> Option<toml::Value> {
+        match self {
+            Self::Bool => text.parse().ok().map(toml::Value::Boolean),
+            Self::Int => text.parse().ok().map(toml::Value::Integer),
+            Self::Float => text.parse().ok().map(toml::Value::Float),
+            Self::String => Some(toml::Value::String(text.into())),
+            Self::Strings => Some(toml::Value::Array(
+                text.split(',')
+                    .filter(|item| !item.is_empty())
+                    .map(|item| toml::Value::String(item.into()))
+                    .collect(),
+            )),
+        }
+    }
+
     /// `value` as this type's constant, or what it was instead.
     pub fn lit(self, value: &toml::Value) -> Result<Lit, String> {
         match (self, value) {
