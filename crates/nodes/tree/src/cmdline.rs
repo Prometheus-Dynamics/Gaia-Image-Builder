@@ -67,7 +67,7 @@ pub fn assemble(
                 ));
             }
             let hex = roothash.len() >= 64
-                && roothash.len() % 2 == 0
+                && roothash.len().is_multiple_of(2)
                 && roothash
                     .bytes()
                     .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
