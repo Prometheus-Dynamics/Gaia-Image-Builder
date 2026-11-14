@@ -816,6 +816,13 @@ fn a_recipe_takes_the_generators_files_by_role() {
         // The initramfs: its component's files, merged apart from the root.
         "zero-3e-demo.extlinux-zero-3e.place0.layer -> zero-3e-demo.initramfs.layers0",
         "zero-3e-demo.initramfs.tree -> zero-3e-demo::initramfs.tree",
+        // The boot files together, each under the name of what it is.
+        "zero-3e-demo.kernel.kernel -> zero-3e-demo::as_kernel.from",
+        "zero-3e-demo.kernel.device_trees -> zero-3e-demo::as_device_tree.from",
+        "zero-3e-demo::initramfs.archive -> zero-3e-demo::as_initramfs.from",
+        "zero-3e-demo::cmdline.cmdline -> zero-3e-demo::as_cmdline.from",
+        "zero-3e-demo::overlay.overlay -> zero-3e-demo::as_overlay.from",
+        "zero-3e-demo::as_overlay.tree -> host.zero-3e-demo.payload",
     ] {
         assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
     }
@@ -841,6 +848,15 @@ fn a_recipe_takes_the_generators_files_by_role() {
     );
     let name = overlay["base_name"]["value"].as_str().expect("a name");
     assert!(name.ends_with(".dtb") && !name.contains('/'), "{name}");
+    assert_eq!(
+        consts("zero-3e-demo::as_device_tree")["path"]["value"],
+        overlay["base_name"]["value"],
+        "the device tree placed is the one the overlay was proven on"
+    );
+    assert_eq!(
+        consts("zero-3e-demo::as_overlay")["role"]["value"],
+        "board-overlay"
+    );
     let cmdline = consts("zero-3e-demo::cmdline");
     assert_eq!(cmdline["base"]["value"], "console=ttyS2,1500000 rootwait");
     assert_eq!(cmdline["words_path"]["value"], "words/cmdline.txt");
