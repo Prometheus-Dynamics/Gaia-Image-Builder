@@ -750,6 +750,34 @@ fn a_slot_needs_the_builds_own_tools_and_a_compression_they_write() {
     }
 }
 
+/// The form of the kernel image is the board's to state: the kernel's build
+/// then makes that form, for every product on the board.
+#[test]
+fn a_board_states_the_form_of_its_kernel_image() {
+    let dir = project();
+    let board = dir.path().join("examples/boards/zero-3e/board.toml");
+    // Unset: nothing is said, and Buildroot makes the architecture's own.
+    let out = plan(dir.path(), &[]);
+    assert!(out.status.success());
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("BR2_LINUX_KERNEL_IMAGE"));
+
+    edit(&board, "[kernel]\n", "[kernel]\nimage = \"Image.gz\"\n");
+    let out = plan(dir.path(), &[]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("BR2_LINUX_KERNEL_IMAGEGZ=y"), "{text}");
+
+    edit(&board, "image = \"Image.gz\"", "image = \"Image.zst\"");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("kernel.image"), "{err}");
+    assert!(
+        err.contains("`Image.zst` is not a kernel image form; the forms are Image, Image.gz, zImage, uImage, bzImage, vmlinux"),
+        "{err}"
+    );
+}
+
 /// An image that names an initramfs with a recipe that takes none would
 /// ship those components in no output: refused, by name.
 #[test]
