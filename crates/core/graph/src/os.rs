@@ -39,8 +39,11 @@
 //!
 //! A file or directory the config names is an input tree of the step,
 //! written `@name@` in the text: a locked source by its lock name, a
-//! directory beside a description as `files.<n>`. In an image's own
-//! fragment, `@here@` is the fragment's directory.
+//! file or a directory beside a description as `files.<n>` (a file as a
+//! tree with that file alone, so a build is keyed on what it names and not
+//! on its neighbours). In an image's own fragment, `@here@/<path>` is that
+//! file or directory beside the fragment, and a bare `@here@` the
+//! fragment's whole directory.
 
 use crate::Error;
 use gaia_describe::{Board, FileRef, OsSpec, RelPath, Source};
@@ -60,6 +63,10 @@ pub(crate) enum InputFrom {
     },
     /// A directory beside a description.
     Dir(PathBuf),
+    /// One file beside a description, as a tree with that file alone: the
+    /// step that reads it does not depend on what else is in its directory
+    /// (a README, a lock, another build's fragment).
+    File(PathBuf),
     /// One file of a component's source, as a tree with that file alone:
     /// the step that reads it does not depend on the rest of the source.
     Picked {
@@ -98,7 +105,20 @@ impl OsPlan {
         name
     }
 
-    /// A directory as an input, `files.<n>` by first use.
+    /// A new `files.<n>`, by first use.
+    fn next_files(&mut self, from: InputFrom) -> String {
+        if let Some((name, _)) = self.inputs.iter().find(|(_, have)| *have == from) {
+            return name.clone();
+        }
+        let n = self
+            .inputs
+            .iter()
+            .filter(|(_, from)| matches!(from, InputFrom::Dir(_) | InputFrom::File(_)))
+            .count();
+        self.input(format!("files.{n}"), from)
+    }
+
+    /// A whole directory as an input, `files.<n>` by first use.
     fn dir(&mut self, dir: &Path) -> String {
         // The directory of a file named with no directory is this one: an
         // empty path is no directory to a step.
@@ -107,27 +127,54 @@ impl OsPlan {
         } else {
             dir
         };
-        if let Some((name, _)) = self
-            .inputs
-            .iter()
-            .find(|(_, from)| *from == InputFrom::Dir(dir.to_path_buf()))
-        {
-            return name.clone();
-        }
-        let n = self
-            .inputs
-            .iter()
-            .filter(|(_, from)| matches!(from, InputFrom::Dir(_)))
-            .count();
-        self.input(format!("files.{n}"), InputFrom::Dir(dir.to_path_buf()))
+        self.next_files(InputFrom::Dir(dir.to_path_buf()))
     }
 
-    /// A file beside a description, as `@files.<n>@/<name>`.
+    /// A file beside a description, as `@files.<n>@/<name>`: an input with
+    /// that file alone.
     fn file(&mut self, path: &Path) -> String {
-        let dir = path.parent().unwrap_or(Path::new("/"));
-        let name = self.dir(dir);
         let file = path.file_name().unwrap_or_default().to_string_lossy();
+        let name = self.next_files(InputFrom::File(path.to_path_buf()));
         format!("@{name}@/{file}")
+    }
+
+    /// `text` with each `@here@` (the directory `dir` of the file the text
+    /// is from) as an input: `@here@/<path>` is that file, or that
+    /// directory, alone; `@here@` by itself, or before a path that is not
+    /// there, is the whole of `dir`.
+    fn here(&mut self, text: &str, dir: &Path) -> String {
+        const HERE: &str = "@here@";
+        let mut out = String::new();
+        let mut rest = text;
+        while let Some(at) = rest.find(HERE) {
+            out.push_str(&rest[..at]);
+            rest = &rest[at + HERE.len()..];
+            let path: &str = match rest.strip_prefix('/') {
+                Some(after) => {
+                    let end = after
+                        .find(|c: char| c.is_whitespace() || c == '"' || c == '\'')
+                        .unwrap_or(after.len());
+                    &after[..end]
+                }
+                None => "",
+            };
+            let named = dir.join(path);
+            let plain = !path.is_empty()
+                && path
+                    .split('/')
+                    .all(|part| !part.is_empty() && part != "." && part != "..");
+            if plain && named.is_file() {
+                out.push_str(&self.file(&named));
+                rest = &rest[1 + path.len()..];
+            } else if plain && named.is_dir() {
+                out.push_str(&format!("@{}@", self.dir(&named)));
+                rest = &rest[1 + path.len()..];
+            } else {
+                out.push_str(&format!("@{}@", self.dir(dir)));
+            }
+        }
+        out.push_str(rest);
+        out
     }
 
     fn override_with(&mut self, package: &str, input: &str) {
@@ -363,8 +410,7 @@ pub(crate) fn plan(
         })?;
         let body = if body.contains("@here@") {
             let dir = file.path().parent().unwrap_or(Path::new("/"));
-            let here = plan.dir(dir);
-            body.replace("@here@", &format!("@{here}@"))
+            plan.here(&body, dir)
         } else {
             body
         };

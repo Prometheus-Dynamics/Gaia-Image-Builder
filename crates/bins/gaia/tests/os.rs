@@ -97,7 +97,11 @@ fn the_plan_lists_the_config_the_board_gives() {
         "zero-3e-demo.buildroot.tree -> zero-3e-demo.kernel.source",
         "zero-3e-demo.buildroot.tree -> zero-3e-demo.bootloader.source",
         "zero-3e.linux.tree -> zero-3e-demo.kernel.inputs0",
-        "zero-3e.u-boot.tree -> zero-3e-demo.bootloader.inputs1",
+        "zero-3e.u-boot.tree -> zero-3e-demo.bootloader.inputs0",
+        // Each build takes the files it names, each alone: the kernel its
+        // fragments, the bootloader its own, and neither the other's.
+        "zero-3e-demo.os.files.0.tree -> zero-3e-demo.kernel.inputs1",
+        "zero-3e-demo.os.files.3.tree -> zero-3e-demo.bootloader.inputs1",
         // The kernel build's modules, image and device trees are layers of
         // the root filesystem, at the paths Buildroot installs them to.
         "zero-3e-demo.kernel.modules -> zero-3e-demo.kernel.modules.from",
@@ -132,7 +136,7 @@ fn the_plan_lists_the_config_the_board_gives() {
         "inputs zero-3e.linux files.0 files.1 files.2, built from LINUX=zero-3e.linux",
         "built from UBOOT=zero-3e.u-boot ARM_TRUSTED_FIRMWARE=zero-3e.tf-a",
         // The root filesystem's build has neither.
-        "zero-3e-demo.os  gaia:os-config  fragments board.target image.0.os.fragment, inputs files.3\n",
+        "zero-3e-demo.os  gaia:os-config  fragments board.target image.0.os.fragment, inputs files.4\n",
         // A Rust component: its crates from its Cargo.lock, its target from
         // the board, its binary placed in the root filesystem.
         "hello-rust.vendor                       gaia.build.rust.vendor",
@@ -768,11 +772,50 @@ fn a_kernel_with_no_starting_configuration_is_an_error_in_the_plan() {
 
 /// A product built from its own directory by a bare file name: the
 /// directory of a fragment named with no directory is `.`, not an empty
-/// path, which no step can read.
+/// path, which no step can read. And what a fragment names beside itself
+/// is an input by itself: a file as that file alone, a directory as that
+/// directory, and only a bare `@here@` as the fragment's whole directory.
 #[test]
 fn a_product_named_with_no_directory_has_its_fragments_directory() {
     let dir = project();
     let product = dir.path().join("examples/products/zero-3e-demo");
+    let inputs_of = |nodes: &[serde_json::Value], id: &str| -> Vec<String> {
+        nodes
+            .iter()
+            .filter(|n| n["id"] == id)
+            .filter_map(|n| n["consts"]["path"]["value"].as_str())
+            .map(str::to_string)
+            .collect()
+    };
+    // As the example is: its fragment names one file beside itself, so the
+    // product's directory (its README, its lock) is no input of a build.
+    let out = plan(dir.path(), &["--json"]);
+    assert!(out.status.success());
+    let both: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+    let nodes = both["graph"]["graph"]["nodes"].as_array().expect("nodes");
+    let whole = inputs_of(nodes, "gaia.source.path");
+    assert!(
+        !whole
+            .iter()
+            .any(|path| path.ends_with("products/zero-3e-demo")),
+        "the product's directory is an input: {whole:?}"
+    );
+    let single = inputs_of(nodes, "gaia.source.input");
+    assert!(
+        single
+            .iter()
+            .any(|path| path.ends_with("products/zero-3e-demo/busybox.fragment")),
+        "the named file alone: {single:?}"
+    );
+    // A directory named beside the fragment, and the bare directory.
+    std::fs::create_dir_all(product.join("patches/linux")).expect("mkdir");
+    let fragment = product.join("os.fragment");
+    let text = std::fs::read_to_string(&fragment).expect("read");
+    std::fs::write(
+        &fragment,
+        format!("{text}BR2_GLOBAL_PATCH_DIR=\"@here@/patches\"\nBR2_ROOTFS_OVERLAY=\"@here@\"\n"),
+    )
+    .expect("write");
     let out = Command::new(env!("CARGO_BIN_EXE_gaia"))
         .args([
             "plan",
@@ -810,17 +853,25 @@ fn a_product_named_with_no_directory_has_its_fragments_directory() {
     );
     let both: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
     let nodes = both["graph"]["graph"]["nodes"].as_array().expect("nodes");
-    let paths: Vec<&str> = nodes
-        .iter()
-        .filter(|n| n["id"] == "gaia.source.path")
-        .filter_map(|n| n["consts"]["path"]["value"].as_str())
-        .collect();
+    let paths = inputs_of(nodes, "gaia.source.path");
     println!("{paths:?}");
     assert!(
-        paths.contains(&"."),
+        paths.iter().any(|path| path == "."),
         "the product's own directory: {paths:?}"
     );
-    assert!(!paths.contains(&""), "no empty path: {paths:?}");
+    assert!(
+        !paths.iter().any(String::is_empty),
+        "no empty path: {paths:?}"
+    );
+    assert!(
+        paths.iter().any(|path| path == "patches"),
+        "the named directory alone: {paths:?}"
+    );
+    let single = inputs_of(nodes, "gaia.source.input");
+    assert!(
+        single.iter().any(|path| path == "busybox.fragment"),
+        "the named file alone: {single:?}"
+    );
 }
 
 /// A component states a path that is a symbolic link, not a file.
