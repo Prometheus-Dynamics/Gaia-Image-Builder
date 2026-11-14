@@ -35,8 +35,8 @@ pub use board::{
 };
 pub use common::{FileRef, ImagePlatform, Mode, RelPath, SizeText, Source, Subdir};
 pub use component::{
-    Build, Component, Generate, GenerateTool, Group, InSource, Install, InstallFrom, Package,
-    Requires, Service, User,
+    Build, Component, Generate, GenerateImage, GenerateTool, Group, InSource, Install, InstallFrom,
+    Package, Requires, Service, User,
 };
 pub use error::Error;
 pub use product::{ImageSpec, Loaded, OsProvider, OsSpec, Product};

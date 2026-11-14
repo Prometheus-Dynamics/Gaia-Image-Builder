@@ -102,10 +102,27 @@ pub const KEYS: [&str; 30] = [
 /// board's description file, the directory it writes into, the slot's id.
 pub const GENERATE_NAMES: [&str; 4] = ["@source@", "@description@", "@out@", "@slot@"];
 
-/// The `@name@` words of `text` that are none of [`GENERATE_NAMES`]. A word
-/// between two `@` that is no name (lowercase letters, digits and `-`) is
-/// not one: `user@host` and a path with an `@` in it are left alone.
+/// The names an argument of a `[generate.image]` run may hold: the tool's
+/// source tree, the board's description file, the payload directory, the
+/// slot's id, the image's size in bytes and the file to write.
+pub const GENERATE_IMAGE_NAMES: [&str; 6] = [
+    "@source@",
+    "@description@",
+    "@payload@",
+    "@slot@",
+    "@size@",
+    "@out@",
+];
+
+/// The `@name@` words of `text` that are none of [`GENERATE_NAMES`].
 pub fn unknown_generate_names(text: &str) -> Vec<String> {
+    unknown_names(text, &GENERATE_NAMES)
+}
+
+/// The `@name@` words of `text` that are none of `names`. A word between
+/// two `@` that is no name (lowercase letters, digits and `-`) is not one:
+/// `user@host` and a path with an `@` in it are left alone.
+pub fn unknown_names(text: &str, names: &[&str]) -> Vec<String> {
     let mut unknown = Vec::new();
     let mut rest = text;
     while let Some(start) = rest.find('@') {
@@ -117,7 +134,7 @@ pub fn unknown_generate_names(text: &str) -> Vec<String> {
             && word
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-        if is_name && !GENERATE_NAMES.contains(&whole.as_str()) {
+        if is_name && !names.contains(&whole.as_str()) {
             unknown.push(whole);
         }
         rest = if is_name {
