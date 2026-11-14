@@ -16,6 +16,7 @@ usage:
   gaia clean [--store DIR] [--keep N] [--dry-run]
   gaia show  <image>.<output> [--store DIR]
   gaia sizes [<run.json>] [--store DIR] [--json] [--xz]
+  gaia sizes --image <disk image[.xz]> [--json]
 
 project flags:
   --store DIR        the content store (default: $GAIA_STORE, or
@@ -103,6 +104,9 @@ pub struct Sizes {
     pub json: bool,
     /// Also compress each disk image, for its size.
     pub xz: bool,
+    /// A disk image to measure in place of a run: one this builder did
+    /// not make.
+    pub image: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -240,6 +244,7 @@ pub fn parse(words: &[String]) -> Result<Command, Stop> {
                     "--store" => sizes.store = Some(words.value(word)?.into()),
                     "--json" => sizes.json = true,
                     "--xz" => sizes.xz = true,
+                    "--image" => sizes.image = Some(words.value(word)?.into()),
                     _ => words.positional(word, &mut run)?,
                 }
             }
