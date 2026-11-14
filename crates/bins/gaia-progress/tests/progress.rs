@@ -132,7 +132,10 @@ fn a_failure_shows_the_last_stderr_lines_of_its_failed_log() {
     let reason = "test.tool: /bin/sh exited 3";
     let step = gaia_progress::reason_step(reason).expect("a step");
     let reader = Reader::new(logs.to_path_buf(), PID, 1_000);
-    let found = reader.failed_log(step).expect("the failed log");
+    let none = std::collections::BTreeSet::new();
+    let found = reader
+        .failed_log(step, reason, &none)
+        .expect("the failed log");
     assert_eq!(found, failed);
 
     let shown = failure("image.rootfs", reason, Some(&found));
@@ -148,4 +151,43 @@ fn a_failure_shows_the_last_stderr_lines_of_its_failed_log() {
     // No log: the reason alone.
     assert_eq!(failure("x", "no tool", None), "failed: x\n  no tool\n");
     assert_eq!(gaia_progress::reason_step("a reason without a step"), None);
+}
+
+/// Three nodes of one step in one build: one fails and the two others are
+/// cancelled, later. Each failure is shown its own log.
+#[test]
+fn each_of_several_failures_of_one_step_gets_its_own_log() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let logs = dir.path();
+    let failed = log(
+        logs,
+        "test.tool",
+        2_000,
+        PID,
+        "err| no platform\n# end 2500 exit 2\n",
+    );
+    let first = log(logs, "test.tool", 2_100, PID, "# end 2600 cancelled\n");
+    let second = log(logs, "test.tool", 2_200, PID, "# end 2600 cancelled\n");
+    let reader = Reader::new(logs.to_path_buf(), PID, 1_000);
+    let mut taken = std::collections::BTreeSet::new();
+    let mut given = Vec::new();
+    // In the order a build reports them: a cancelled one first.
+    for reason in [
+        "test.tool: cancelled",
+        "test.tool: cancelled",
+        "test.tool: exited 2",
+    ] {
+        let found = reader
+            .failed_log("test.tool", reason, &taken)
+            .expect("a log");
+        taken.insert(found.clone());
+        given.push(found);
+    }
+    assert_eq!(given, [second, first, failed]);
+    // The one that failed, asked for first, is not a cancelled one's log.
+    let none = std::collections::BTreeSet::new();
+    assert_eq!(
+        reader.failed_log("test.tool", "test.tool: /usr/bin/make exited 2", &none),
+        Some(given[2].clone())
+    );
 }
