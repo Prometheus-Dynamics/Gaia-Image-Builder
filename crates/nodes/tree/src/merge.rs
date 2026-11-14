@@ -146,6 +146,23 @@ fn claim(store: &Store, layers: &[Layer]) -> Result<BTreeMap<String, Claim>, Ste
             }
         }
         for (path, Found { node, mode }) in found {
+            // A path through a directory that an earlier layer made a link
+            // to another directory of the image (`/lib` to `usr/lib`) is
+            // the path under that directory: one tree with a merged `/usr`
+            // and another that writes `/lib/modules` mean the same place.
+            let through = redirect(&claims, &path, node == Node::Dir);
+            if through != path && node == Node::Dir && claims.contains_key(&through) {
+                // The directory itself is the one the link names: nothing
+                // of this layer's to add but its name as an owner.
+                if let Some(old) = claims.get_mut(&through)
+                    && old.node == Node::Dir
+                    && !old.owners.contains(owner)
+                {
+                    old.owners.push(owner.clone());
+                }
+                continue;
+            }
+            let from = root.join(&path);
             let chosen = set.contains_key(path.as_str()) || mode != PLAIN_DIR;
             let (mode, uid, gid) = match set.get(path.as_str()) {
                 Some(entry) => (entry.mode & 0o7777, entry.uid, entry.gid),
@@ -158,9 +175,10 @@ fn claim(store: &Store, layers: &[Layer]) -> Result<BTreeMap<String, Claim>, Ste
                 uid,
                 gid,
                 owners: vec![owner.clone()],
-                from: root.join(&path),
+                from,
                 replaced_by: None,
             };
+            let path = through;
             let Some(old) = claims.get_mut(&path) else {
                 claims.insert(path, new);
                 continue;
@@ -233,6 +251,66 @@ fn claim(store: &Store, layers: &[Layer]) -> Result<BTreeMap<String, Claim>, Ste
         }
     }
     Ok(claims)
+}
+
+/// `path` with every leading directory that an earlier layer claimed as a
+/// link to a directory inside the image replaced by that directory; and the
+/// path itself too, when it is a directory here (`whole`). A link that
+/// leaves the image, or names a file or nothing the image has, is left: the
+/// conflict it makes is reported as one.
+fn redirect(claims: &BTreeMap<String, Claim>, path: &str, whole: bool) -> String {
+    let mut path = path.to_string();
+    // Links to links end; a loop of them is cut off.
+    for _ in 0..16 {
+        let parts: Vec<&str> = path.split('/').collect();
+        let last = if whole { parts.len() } else { parts.len() - 1 };
+        let mut moved = None;
+        for n in 1..=last {
+            let prefix = parts[..n].join("/");
+            let Some(Claim {
+                node: Node::Link(target),
+                ..
+            }) = claims.get(&prefix)
+            else {
+                continue;
+            };
+            // The target, from the image's root.
+            let mut at: Vec<&str> = if target.is_absolute() {
+                Vec::new()
+            } else {
+                parts[..n - 1].to_vec()
+            };
+            let mut inside = true;
+            for part in target.components() {
+                match part {
+                    std::path::Component::Normal(name) => match name.to_str() {
+                        Some(name) => at.push(name),
+                        None => inside = false,
+                    },
+                    std::path::Component::ParentDir => inside &= at.pop().is_some(),
+                    _ => {}
+                }
+            }
+            let to = at.join("/");
+            // To a directory of the image, or to another link (followed
+            // the next time round).
+            if !inside || !claims.get(&to).is_some_and(|c| c.node != Node::File) {
+                continue;
+            }
+            let rest = parts[n..].join("/");
+            moved = Some(if rest.is_empty() {
+                to
+            } else {
+                format!("{to}/{rest}")
+            });
+            break;
+        }
+        match moved {
+            Some(next) => path = next,
+            None => break,
+        }
+    }
+    path
 }
 
 /// Writes the claimed paths, parents first, then sets each mode (deepest
