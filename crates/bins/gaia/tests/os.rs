@@ -696,6 +696,59 @@ fn a_component_generates_from_the_boards_description() {
     }
 }
 
+/// An image with an OS makes its slot with that build's own tools: the
+/// fragment lines that provide them, and a compression they write, are
+/// held at plan time, before anything is built.
+#[test]
+fn a_slot_needs_the_builds_own_tools_and_a_compression_they_write() {
+    let dir = project();
+    let product = dir
+        .path()
+        .join("examples/products/zero-3e-demo/product.toml");
+    let fragment = dir
+        .path()
+        .join("examples/products/zero-3e-demo/os.fragment");
+    assert!(plan(dir.path(), &[]).status.success());
+
+    edit(
+        &product,
+        "id = \"zero-3e-demo\"",
+        "id = \"zero-3e-demo\"\ncompression = \"zstd\"",
+    );
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("images[0].settings.compression"), "{err}");
+    assert!(
+        err.contains("sets erofs compression `zstd`, which its build's own mkfs.erofs does not write (Buildroot builds the host tool with lz4, lz4hc, lzma)"),
+        "{err}"
+    );
+    edit(
+        &product,
+        "compression = \"zstd\"",
+        "compression = \"lz4hc\"",
+    );
+    assert!(plan(dir.path(), &[]).status.success());
+
+    for (line, program) in [
+        ("BR2_PACKAGE_HOST_CRYPTSETUP=y\n", "veritysetup"),
+        ("BR2_PACKAGE_HOST_EROFS_UTILS=y\n", "mkfs.erofs"),
+    ] {
+        edit(&fragment, line, "");
+        let out = plan(dir.path(), &[]);
+        assert_eq!(out.status.code(), Some(2), "{line}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("images[0].os.fragments"), "{err}");
+        assert!(
+            err.contains(&format!(
+                "with the build's own {program}, and no OS fragment of the image has `{}`: add it",
+                line.trim()
+            )),
+            "{err}"
+        );
+    }
+}
+
 /// An image that names an initramfs with a recipe that takes none would
 /// ship those components in no output: refused, by name.
 #[test]

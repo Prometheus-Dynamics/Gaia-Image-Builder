@@ -37,6 +37,11 @@ struct Graph<'r> {
     host_tools: BTreeMap<String, u32>,
 }
 
+/// The erofs compressions the host `mkfs.erofs` of a Buildroot build
+/// writes: Buildroot configures the host erofs-utils with lz4 and lzma, and
+/// without zstd, deflate or zlib.
+const HOST_EROFS_COMPRESSIONS: [&str; 4] = ["none", "lz4", "lz4hc", "lzma"];
+
 /// A component's `[generate]` step in one image.
 #[derive(Clone)]
 struct Generator {
@@ -964,6 +969,54 @@ fn image_recipe(
             }
         }
         // Any other input is filled like a stage's own: store or a tool.
+    }
+    // An image with an OS makes its slot with that build's own tools: the
+    // lines that make the build provide them, and a compression those tools
+    // write. The steps refuse the same at build time, which is the truth;
+    // here it is seen in seconds, before anything is built.
+    if at.os.is_some() {
+        let prefix = format!("{}.os", image.name);
+        let stated = |line: &str| {
+            inputs.iter().any(|(port, input)| {
+                (port == &prefix || port.starts_with(&format!("{prefix}.")))
+                    && matches!(input, HostInput::Os(config) if config
+                        .fragments
+                        .iter()
+                        .any(|f| f.text.lines().any(|have| have.trim() == line)))
+            })
+        };
+        for (stage, id) in &group.stages {
+            let (program, line) = match id.as_str() {
+                "gaia.fs.erofs" => ("mkfs.erofs", "BR2_PACKAGE_HOST_EROFS_UTILS=y"),
+                "gaia.verity" => ("veritysetup", "BR2_PACKAGE_HOST_CRYPTSETUP=y"),
+                _ => continue,
+            };
+            if !stated(line) {
+                return Err(Error::at(
+                    product_file,
+                    format!("images[{i}].os.fragments"),
+                    format!(
+                        "recipe {}'s stage `{stage}` makes part of the image {} with the build's own {program}, and no OS fragment of the image has `{line}`: add it",
+                        recipe.name, image.name
+                    ),
+                ));
+            }
+            if id == "gaia.fs.erofs"
+                && let Some(Lit::Str(compression)) =
+                    g.nodes[stages[stage] as usize].consts.get("compression")
+                && !HOST_EROFS_COMPRESSIONS.contains(&compression.as_str())
+            {
+                return Err(Error::at(
+                    product_file,
+                    format!("images[{i}].settings.compression"),
+                    format!(
+                        "the image {} sets erofs compression `{compression}`, which its build's own mkfs.erofs does not write (Buildroot builds the host tool with {}): set `compression` to one of those",
+                        image.name,
+                        HOST_EROFS_COMPRESSIONS[1..].join(", ")
+                    ),
+                ));
+            }
+        }
     }
     // What an image names for its recipe to take, and the recipe inputs that
     // take it. A key the recipe takes none of would be accepted and in no

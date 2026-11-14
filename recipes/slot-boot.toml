@@ -113,8 +113,8 @@ sets = ["cmdline.slot", "boot.slot"]
 
 [parameters.compression]
 type = "string"
-default = "zstd"
-description = "EROFS compression: none, lz4, lz4hc, lzma, deflate or zstd."
+default = "lzma"
+description = "EROFS compression. An image with an OS is made with its build's own mkfs.erofs, which writes none, lz4, lz4hc and lzma; deflate and zstd are for a tool given to an image with no OS."
 sets = ["erofs.compression"]
 
 [parameters.cluster]
