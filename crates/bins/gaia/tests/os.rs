@@ -696,6 +696,31 @@ fn a_component_generates_from_the_boards_description() {
     }
 }
 
+/// An image that names an initramfs with a recipe that takes none would
+/// ship those components in no output: refused, by name.
+#[test]
+fn an_initramfs_for_a_recipe_that_takes_none_is_refused() {
+    let dir = project();
+    let product = dir
+        .path()
+        .join("examples/products/zero-3e-demo/product.toml");
+    edit(
+        &product,
+        "components = [\"usb-gadget-network\", \"extlinux\", \"hello-rust\"]",
+        "components = [\"usb-gadget-network\", \"hello-rust\"]\ninitramfs = [\"extlinux\"]",
+    );
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("images[0].initramfs"), "{err}");
+    assert!(
+        err.contains(
+            "names an initramfs (extlinux), and its recipe sd-image takes none: nothing would hold those components"
+        ),
+        "{err}"
+    );
+}
+
 /// A recipe takes what the image's generator wrote by role, the board's
 /// base command line and the OS build's host tools: no file name of the
 /// generator's is in the recipe or the product.

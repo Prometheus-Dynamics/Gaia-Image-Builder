@@ -899,6 +899,20 @@ fn image_recipe(
         }
         // Any other input is filled like a stage's own: store or a tool.
     }
+    // An image that names an initramfs and ships none: its recipe must take
+    // the tree, or the components named are in no output at all.
+    if !image.initramfs.is_empty() && !group.inputs.contains_key("initramfs") {
+        return Err(Error::at(
+            product_file,
+            format!("images[{i}].initramfs"),
+            format!(
+                "the image {} names an initramfs ({}), and its recipe {} takes none: nothing would hold those components",
+                image.name,
+                image.initramfs.join(", "),
+                recipe.name
+            ),
+        ));
+    }
     for (output, at) in &group.outputs {
         let node = stages[&at.stage];
         let id = g.nodes[node as usize].id.clone();
