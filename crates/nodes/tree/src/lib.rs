@@ -37,7 +37,7 @@ mod under;
 mod walk;
 
 pub use accounts::tree_accounts;
-pub use by_role::{placements, tree_by_role};
+pub use by_role::{Record, RecordRole, placements, records, tree_by_role};
 pub use file::tree_file;
 pub use generate::{TOKENS, generate, unknown_tokens};
 pub use layer::tree_layer;

@@ -1,14 +1,14 @@
 //! `gaia.tree.by-role`: a directory filled by role from a layout file.
 
 use gaia_step::{Ctx, Store};
-use gaia_tree::{placements, tree_by_role};
+use gaia_tree::{RecordRole, placements, records, tree_by_role};
 use gaia_types::Tree;
 
 /// The shape of a slot's boot directory layout: files the build has by
 /// role and one the layout's owner's generator writes, for one firmware,
 /// and one file for another.
 const LAYOUT: &str = r#"
-version = 2
+version = 3
 
 [[file]]
 name = "kernel8.img"
@@ -51,6 +51,20 @@ role = "notes"
 source = "build"
 firmware = ["rpi-tryboot"]
 required = false
+
+[[record]]
+name = "trial.rec"
+role = "trial"
+firmware = ["rpi-tryboot"]
+bytes = 1024
+source = "generated"
+
+[[record]]
+name = "reason.rec"
+role = "reason"
+firmware = ["rpi-tryboot"]
+bytes = 1024
+source = "generated"
 
 [[file]]
 name = "extlinux/extlinux.conf"
@@ -224,11 +238,11 @@ fn a_missing_required_role_and_an_unknown_role_are_named() {
 fn another_version_an_unknown_key_and_a_bad_layout_are_refused() {
     let read = |text: &str| placements(text, "slot-layout.toml", "rpi-tryboot");
     assert_eq!(
-        read(&LAYOUT.replace("version = 2", "version = 1")),
-        Err("slot-layout.toml: version 1; this build reads version 2".into())
+        read(&LAYOUT.replace("version = 3", "version = 2")),
+        Err("slot-layout.toml: version 2; this build reads version 3".into())
     );
     assert_eq!(
-        read(&LAYOUT.replace("version = 2", "")),
+        read(&LAYOUT.replace("version = 3", "")),
         Err("slot-layout.toml: no `version`".into())
     );
     let err = read(&LAYOUT.replace("role = \"notes\"", "role = \"notes\"\nmode = \"0644\""))
@@ -289,4 +303,54 @@ fn a_change_for_another_firmware_or_elsewhere_in_the_source_is_no_new_step() {
         .fill_with(LAYOUT, "a", &FILES, &[("overlays/README", "new\n")])
         .expect("filled");
     assert_ne!(fourth, first);
+}
+
+/// The boot partition's record files: read, not placed in a slot's
+/// directory, and held to the same refusals.
+#[test]
+fn the_record_files_are_read_and_what_is_unknown_in_them_is_refused() {
+    let read = |text: &str| records(text, "slot-layout.toml", "rpi-tryboot");
+    let found = read(LAYOUT).expect("reads");
+    assert_eq!(found.len(), 2);
+    assert_eq!(
+        (found[0].name.as_str(), found[0].role, found[0].bytes),
+        ("trial.rec", RecordRole::Trial, 1024)
+    );
+    assert_eq!(found[1].role, RecordRole::Reason);
+    // None for a firmware that has none.
+    assert_eq!(records(LAYOUT, "x", "uboot"), Ok(Vec::new()));
+
+    let err = read(&LAYOUT.replace("role = \"reason\"", "role = \"counter\"")).expect_err("role");
+    assert!(err.contains("unknown variant `counter`"), "{err}");
+    let err = read(&LAYOUT.replace(
+        "bytes = 1024\nsource = \"generated\"\n\n[[record]]",
+        "bytes = 1024\nsource = \"generated\"\ncopies = 2\n\n[[record]]",
+    ))
+    .expect_err("unknown key");
+    assert!(err.contains("unknown field `copies`"), "{err}");
+    let err =
+        read(&LAYOUT.replace("name = \"reason.rec\"", "name = \"trial.rec\"")).expect_err("twice");
+    assert!(
+        err.contains("the record trial.rec is listed twice"),
+        "{err}"
+    );
+    let err = read(&LAYOUT.replace("name = \"reason.rec\"", "name = \"slots/reason.rec\""))
+        .expect_err("not at the root");
+    assert!(
+        err.contains("is not at the root of the boot partition"),
+        "{err}"
+    );
+    // A record the build would have to supply: there is none to supply.
+    let err = read(&LAYOUT.replacen(
+        "role = \"trial\"\nfirmware = [\"rpi-tryboot\"]\nbytes = 1024\nsource = \"generated\"",
+        "role = \"trial\"\nfirmware = [\"rpi-tryboot\"]\nbytes = 1024\nsource = \"build\"",
+        1,
+    ))
+    .expect_err("a build's record");
+    assert!(err.contains("is not the generator's"), "{err}");
+    // A layout with no record table at all is an older file: refused.
+    let cut = LAYOUT.split("[[record]]").next().expect("head").to_string()
+        + "[[file]]\nname = \"extlinux/extlinux.conf\"\nrole = \"boot-menu\"\nsource = \"build\"\nfirmware = [\"uboot\"]\nrequired = true\n";
+    let err = read(&cut).expect_err("no records");
+    assert!(err.contains("missing field `record`"), "{err}");
 }
