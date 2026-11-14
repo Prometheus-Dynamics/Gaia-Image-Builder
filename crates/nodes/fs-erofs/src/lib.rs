@@ -81,9 +81,74 @@ pub fn kernel_reads(config: &str, compression: &str) -> Result<(), String> {
     ))
 }
 
+/// The kernel's version, from the first lines of its build tree's
+/// `Makefile` (`VERSION = 6`, `PATCHLEVEL = 12`).
+pub fn kernel_version(makefile: &str) -> Option<(u32, u32)> {
+    let number = |name: &str| {
+        makefile.lines().take(8).find_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            (key.trim() == name).then(|| value.trim().parse::<u32>().ok())?
+        })
+    };
+    Some((number("VERSION")?, number("PATCHLEVEL")?))
+}
+
+/// The first kernel that reads each thing an erofs image can be made
+/// with: an algorithm, or a way of packing compressed data.
+const KERNEL_SINCE: [(&str, (u32, u32)); 7] = [
+    ("big clusters", (5, 13)),
+    ("lzma", (5, 16)),
+    ("ztailpacking", (5, 17)),
+    ("fragments", (6, 1)),
+    ("dedupe", (6, 1)),
+    ("deflate", (6, 6)),
+    ("zstd", (6, 10)),
+];
+
+/// Whether a kernel of `version` reads an erofs made with each of `asked`
+/// (names of [`KERNEL_SINCE`]; any other needs no version).
+///
+/// # Errors
+///
+/// The kernel's version and each thing it is too old for, with the version
+/// that reads it.
+pub fn kernel_new_enough(version: (u32, u32), asked: &[&str]) -> Result<(), String> {
+    let short: Vec<String> = asked
+        .iter()
+        .filter_map(|name| {
+            KERNEL_SINCE
+                .iter()
+                .find(|(what, since)| what == name && version < *since)
+                .map(|(what, since)| format!("{what} needs {}.{}", since.0, since.1))
+        })
+        .collect();
+    if short.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "the image's kernel is {}.{}; of its erofs, {}",
+        version.0,
+        version.1,
+        short.join(", ")
+    ))
+}
+
 /// The EROFS image of `tree`, compressed with `compression` at `level`
 /// (0 for the compressor's default), in physical clusters of up to
 /// `cluster` bytes (0 or unset for the tool's default, one block).
+///
+/// `dictsize` is the lzma dictionary in bytes (0 or unset for the tool's
+/// own choice): the kernel holds one of this size while the image is
+/// mounted. `fragments`, `ztailpacking` and `dedupe` are the tool's ways of
+/// packing small files and tails more tightly, each off unless set. (Its
+/// `all-fragments` is not offered: reading a tar, as this step has it do
+/// for the owners and modes, erofs-utils 1.8.10 writes every file's data
+/// as zeros with it, and reports success.)
+///
+/// What is made is read back before it is kept: the image is unpacked with
+/// the same tools' `fsck.erofs` and every file compared with the tree's. An
+/// image that does not hold the tree fails the step, whatever the tool
+/// said.
 ///
 /// `tools` is the image's build's host tools, when it has an OS: the
 /// `mkfs.erofs` in them makes the image, and `mkfs_erofs` (a path on this
@@ -94,7 +159,20 @@ pub fn kernel_reads(config: &str, compression: &str) -> Result<(), String> {
 /// step fails before anything is made. Nothing is changed in the kernel.
 #[node(
     id = "gaia.fs.erofs",
-    inputs(store, mkfs_erofs, tools, tree, compression, level, cluster, kernel),
+    inputs(
+        store,
+        mkfs_erofs,
+        tools,
+        tree,
+        compression,
+        level,
+        cluster,
+        dictsize,
+        fragments,
+        ztailpacking,
+        dedupe,
+        kernel
+    ),
     outputs(image)
 )]
 #[allow(clippy::too_many_arguments)]
@@ -106,6 +184,10 @@ pub fn fs_erofs(
     compression: &str,
     level: u32,
     cluster: Option<&i64>,
+    dictsize: Option<&i64>,
+    fragments: Option<&bool>,
+    ztailpacking: Option<&bool>,
+    dedupe: Option<&bool>,
     kernel: Option<&Tree>,
     cx: &Ctx,
 ) -> Result<Image, StepError> {
@@ -140,8 +222,42 @@ pub fn fs_erofs(
             "cluster {cluster} is set and compression is none: clusters are of compressed data"
         )));
     }
+    let dictsize = dictsize.copied().unwrap_or(0);
+    if dictsize < 0 || (dictsize != 0 && compression != "lzma") {
+        return Err(fail(format!(
+            "dictsize {dictsize} is for lzma, above 0; the compression is {compression}"
+        )));
+    }
+    // The extended options asked for, as mkfs.erofs names them.
+    let extended: Vec<&str> = [
+        (fragments, "fragments"),
+        (ztailpacking, "ztailpacking"),
+        (dedupe, "dedupe"),
+    ]
+    .into_iter()
+    .filter(|(on, _)| on.copied().unwrap_or(false))
+    .map(|(_, name)| name)
+    .collect();
+    if !extended.is_empty() && compression == "none" {
+        return Err(fail(format!(
+            "{} is set and compression is none: these are ways of packing compressed data",
+            extended.join(", ")
+        )));
+    }
     // Checked on every run, found in the store or not: the kernel is not in
     // the key, so a kernel that lost the option fails here all the same.
+    if let Some(kernel) = kernel
+        && let Some(build) = kernel.object.path_in(&store)
+        && let Ok(makefile) = std::fs::read_to_string(build.join("Makefile"))
+        && let Some(version) = kernel_version(&makefile)
+    {
+        let mut asked: Vec<&str> = vec![compression];
+        if cluster > 4096 {
+            asked.push("big clusters");
+        }
+        asked.extend(&extended);
+        kernel_new_enough(version, &asked).map_err(fail)?;
+    }
     if let Some(kernel) = kernel {
         let build = kernel
             .object
@@ -172,9 +288,16 @@ pub fn fs_erofs(
         .config("level", level.to_string())
         .input("tree", owned)
         .libs(crate::LIBS);
-    // An image with the default clusters has the key it had.
+    // An image with the default clusters has the key it had; and so for
+    // each thing asked for beyond the defaults.
     if cluster != 0 {
         key = key.config("cluster", cluster.to_string());
+    }
+    if dictsize != 0 {
+        key = key.config("dictsize", dictsize.to_string());
+    }
+    if !extended.is_empty() {
+        key = key.config("extended", extended.join(","));
     }
     let key = key.finish();
     let made = Step::new(&store, cx, NAME, key).look_up_or_make(
@@ -191,13 +314,45 @@ pub fn fs_erofs(
                 if level > 0 {
                     z.push_str(&format!(",level={level}"));
                 }
+                if dictsize != 0 {
+                    z.push_str(&format!(",dictsize={dictsize}"));
+                }
                 mkfs = mkfs.arg(z);
             }
             if cluster != 0 {
                 mkfs = mkfs.arg(format!("-C{cluster}"));
             }
-            work.run(&mkfs.arg(work.dir().join("image.erofs")).arg(&tar_path))?;
-            std::fs::remove_file(&tar_path).map_err(|e| fail(e.to_string()))
+            if !extended.is_empty() {
+                mkfs = mkfs.arg(format!("-E{}", extended.join(",")));
+            }
+            let image = work.dir().join("image.erofs");
+            work.run(&mkfs.arg(&image).arg(&tar_path))?;
+            std::fs::remove_file(&tar_path).map_err(|e| fail(e.to_string()))?;
+            // Read back with the same tools: the tool's exit status is not
+            // proof that the image holds the tree.
+            let fsck = Path::new(mkfs_erofs).with_file_name("fsck.erofs");
+            if !fsck.is_file() {
+                return Err(fail(format!(
+                    "no fsck.erofs beside {mkfs_erofs}: what was made cannot be read back"
+                )));
+            }
+            let check = work.dir().join("check");
+            work.run(
+                &Tool::new(&fsck)
+                    .arg(format!("--extract={}", check.display()))
+                    .arg(&image),
+            )?;
+            let differing = differing(&dir, &check).map_err(|e| fail(format!("read back: {e}")))?;
+            remove_tree(&check);
+            if !differing.is_empty() {
+                return Err(fail(format!(
+                    "the image made does not hold the tree: {} of its files differ when read back ({}{})",
+                    differing.len(),
+                    differing[..differing.len().min(3)].join(", "),
+                    if differing.len() > 3 { ", ..." } else { "" }
+                )));
+            }
+            Ok(())
         },
     )?;
     let object = made.outputs["image"];
@@ -210,6 +365,48 @@ pub fn fs_erofs(
         size: Size(bytes),
         partitions: Vec::new(),
     })
+}
+
+/// The regular files and symlinks of `tree` that `unpacked` does not hold
+/// with the same bytes (or the same target).
+fn differing(tree: &Path, unpacked: &Path) -> std::io::Result<Vec<String>> {
+    let mut paths = BTreeMap::new();
+    walk(tree, "", &mut paths)?;
+    let mut differ = Vec::new();
+    for (path, full) in paths {
+        let meta = std::fs::symlink_metadata(&full)?;
+        let other = unpacked.join(&path);
+        let same = if meta.file_type().is_symlink() {
+            std::fs::read_link(&other)
+                .is_ok_and(|to| std::fs::read_link(&full).is_ok_and(|want| to == want))
+        } else if meta.is_file() {
+            std::fs::read(&other)
+                .is_ok_and(|got| std::fs::read(&full).is_ok_and(|want| got == want))
+        } else {
+            true
+        };
+        if !same {
+            differ.push(path);
+        }
+    }
+    Ok(differ)
+}
+
+/// Removes a tree fsck.erofs unpacked, whose directories may not be
+/// writable.
+fn remove_tree(dir: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    fn open(dir: &Path) {
+        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir()) {
+                open(&path);
+            }
+        }
+    }
+    open(dir);
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// The tree as a tar: paths sorted, times 0, numeric owners with no
