@@ -153,27 +153,58 @@ impl Reader {
         running
     }
 
-    /// The newest run log of `step` from this build whose tool did not end
-    /// with `exit 0`: it failed, or was stopped before it ended.
-    pub fn failed_log(&self, step: &str) -> Option<PathBuf> {
+    /// The run log of `step` from this build for the failure `reason`
+    /// (`<step>: ... exited 2`, `<step>: cancelled`): of the logs whose
+    /// tool did not end with `exit 0` and that are not in `taken`, the
+    /// newest that ended as the reason says, or else the newest. Several
+    /// nodes of one step can fail in one build (one fails, its siblings
+    /// are cancelled): each failure gets its own log when the caller puts
+    /// each one it is given into `taken`.
+    pub fn failed_log(
+        &self,
+        step: &str,
+        reason: &str,
+        taken: &BTreeSet<PathBuf>,
+    ) -> Option<PathBuf> {
         let dir = self.logs.join(step.replace(
             |c: char| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')),
             "_",
         ));
-        fs::read_dir(dir)
+        // How the log of this failure ends: `exit <n>` or `cancelled`.
+        let wanted = reason
+            .rsplit_once("exited ")
+            .map(|(_, status)| format!("exit {}", status.trim()))
+            .or_else(|| {
+                reason
+                    .ends_with("cancelled")
+                    .then(|| "cancelled".to_string())
+            });
+        let mut logs: Vec<(u128, PathBuf, String)> = fs::read_dir(dir)
             .ok()?
             .flatten()
             .map(|file| file.path())
-            .filter_map(|path| Some((self.ours(&path)?, path)))
-            .filter(|(_, path)| {
-                let tail = tail(path, 4096);
-                tail.lines()
+            .filter(|path| !taken.contains(path))
+            .filter_map(|path| {
+                let start = self.ours(&path)?;
+                let tail = tail(&path, 4096);
+                let end = tail
+                    .lines()
                     .rev()
                     .find_map(|line| line.strip_prefix("# end "))
-                    .is_none_or(|end| !end.ends_with(" exit 0"))
+                    .and_then(|end| end.split_once(' '))
+                    .map(|(_, status)| status.to_string())
+                    .unwrap_or_default();
+                (end != "exit 0").then_some((start, path, end))
             })
-            .max()
-            .map(|(_, path)| path)
+            .collect();
+        logs.sort();
+        let matching = wanted.and_then(|wanted| {
+            logs.iter()
+                .rev()
+                .find(|(_, _, end)| *end == wanted)
+                .map(|(_, path, _)| path.clone())
+        });
+        matching.or_else(|| logs.pop().map(|(_, path, _)| path))
     }
 
     /// The start time of a log named `<start>-<key>-<pid>-<n>.log` written

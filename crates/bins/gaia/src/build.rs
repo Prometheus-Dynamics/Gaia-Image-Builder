@@ -108,6 +108,8 @@ pub fn build(options: &args::Project) -> Result<(), Stop> {
         }
         Err(e) => {
             let mut message = String::new();
+            // Each failure its own log, when several nodes of one step fail.
+            let mut taken = std::collections::BTreeSet::new();
             for fault in loaded.fault_reports() {
                 let at = fault
                     .at
@@ -118,8 +120,10 @@ pub fn build(options: &args::Project) -> Result<(), Stop> {
                 let cut = fault.reason_cut;
                 let reason = fault.reason();
                 let log = gaia_progress::reason_step(reason).and_then(|step| {
-                    Reader::new(logs_dir(&store), std::process::id(), start_ns).failed_log(step)
+                    Reader::new(logs_dir(&store), std::process::id(), start_ns)
+                        .failed_log(step, reason, &taken)
                 });
+                taken.extend(log.clone());
                 let shown = if cut {
                     format!("{reason}\n(reason cut; the whole message is in the run log)")
                 } else {
