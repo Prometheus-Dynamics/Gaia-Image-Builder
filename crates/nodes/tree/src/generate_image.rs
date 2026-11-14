@@ -11,12 +11,15 @@
 //! Up to three runs of the tool, each a list of arguments:
 //!
 //! - `fit` (optional), before anything is written: the tool says whether
-//!   the payload fits, and fails when it does not. What it prints is kept
-//!   as the step's `report` (a line per role and its stored size, say), so
-//!   a board's sizes are set from a build and not guessed.
+//!   the payload fits, and fails when it does not.
 //! - `args`: writes the image, the one file `@out@`.
 //! - `verify` (optional): the tool reads back what it wrote; a non-zero
 //!   exit fails the step.
+//!
+//! What the runs print on standard output, in that order, is kept as the
+//! step's `report` (a line per role and its stored size, what was written,
+//! a line per check of the read-back), so a board's sizes are set from a
+//! build and not guessed, and what the tool found is on record.
 //!
 //! In an argument: `@source@` is the tool's source tree, `@description@`
 //! the board's description file, `@payload@` the payload directory,
@@ -337,7 +340,7 @@ pub fn generate_image(
     }
     let mut key = sandbox
         // 2: a third output, the payload as the tool bundled it.
-        .key(KeyBuilder::new(NAME, 2))
+        .key(KeyBuilder::new(NAME, 3))
         .input("root", root_object.digest)
         .input("tool", tool_object.digest)
         .config("program", program)
@@ -422,24 +425,27 @@ pub fn generate_image(
                     .tool(&program_in)
                     .map(|tool| tool.args(fill(args)))
             };
-            // Whether it fits, and what the tool says of it, before a byte
-            // is written.
+            // What the tool says on its standard output, run by run, is the
+            // step's report: whether it fits, before a byte is written; what
+            // it wrote; what it found reading that back.
             let said = Arc::new(Mutex::new(String::new()));
-            if !runs.fit.is_empty() {
+            let telling = |args: &[String]| {
                 let sink = said.clone();
-                let tool = run(&runs.fit).map_err(io)?.on_line(move |stream, line| {
-                    if stream == Stream::Stdout
-                        && let Ok(mut text) = sink.lock()
-                    {
-                        text.push_str(line);
-                        text.push('\n');
-                    }
-                });
-                work.run(&tool)?;
+                run(args).map(|tool| {
+                    tool.on_line(move |stream, line| {
+                        if stream == Stream::Stdout
+                            && let Ok(mut text) = sink.lock()
+                        {
+                            text.push_str(line);
+                            text.push('\n');
+                        }
+                    })
+                })
+            };
+            if !runs.fit.is_empty() {
+                work.run(&telling(&runs.fit).map_err(io)?)?;
             }
-            let report = said.lock().map(|text| text.clone()).unwrap_or_default();
-            std::fs::write(work.dir().join("report.txt"), &report).map_err(io)?;
-            work.run(&run(&runs.args).map_err(io)?)?;
+            work.run(&telling(&runs.args).map_err(io)?)?;
             let image = out.join(IMAGE);
             let written = std::fs::metadata(&image)
                 .map_err(|_| StepError::body(NAME, format!("{program} wrote no file at @out@")))?;
@@ -453,8 +459,10 @@ pub fn generate_image(
                 ));
             }
             if !runs.verify.is_empty() {
-                work.run(&run(&runs.verify).map_err(io)?)?;
+                work.run(&telling(&runs.verify).map_err(io)?)?;
             }
+            let report = said.lock().map(|text| text.clone()).unwrap_or_default();
+            std::fs::write(work.dir().join("report.txt"), &report).map_err(io)?;
             // The payload as the tool put it in what it wrote, when a run
             // asks for it: the tool makes the directory, which must be new
             // to it. Otherwise an empty one, so the step always has one.
