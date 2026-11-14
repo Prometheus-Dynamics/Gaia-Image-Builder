@@ -418,9 +418,9 @@ fn the_images_own_host_tools_are_used_and_nothing_else() {
     .expect_err("no veritysetup in the host tools")
     .to_string();
     assert!(
-        why.contains(
-            "the image's host tools have no veritysetup: add `BR2_PACKAGE_HOST_CRYPTSETUP=y`"
-        ),
+        why.ends_with(
+            "no veritysetup in the image's host tools: add `BR2_PACKAGE_HOST_CRYPTSETUP=y` to its OS fragment"
+        ) && why.len() <= 120,
         "{why}"
     );
     // Neither host tools nor a tool given.
