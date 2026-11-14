@@ -18,6 +18,8 @@
 //!   its `images/` directory, sorted by name (see `out`).
 //! - **modules**: the kernel modules inside the target (`lib/modules`).
 //! - **config**: the resolved `.config`, as `buildroot.config`.
+//! - **bootloader**: the bootloader's images, and `u-boot.config`, U-Boot's
+//!   final configuration, when the build made U-Boot.
 //! - **kernel-build**: when the build has a kernel, the tree an external module
 //!   build needs after `modules_prepare` (see `out::copy_kernel_build`). Empty
 //!   otherwise.
@@ -575,6 +577,15 @@ fn build(
     out::copy_tree(&dir.join("rootfs/lib/modules"), &dir.join("modules"))
         .map_err(io_fail("the kernel modules"))?;
     out::sort_images(&out.join("images"), &dir).map_err(io_fail("the images"))?;
+    // The bootloader's final configuration, beside what it made: what a
+    // claim about a built U-Boot is read from, as the kernel's is from its
+    // build tree.
+    if let Some(final_config) =
+        out::package_config(&out.join("build"), "uboot").map_err(io_fail("U-Boot's config"))?
+    {
+        fs::copy(&final_config, dir.join("bootloader/u-boot.config"))
+            .map_err(io_fail("U-Boot's config"))?;
+    }
     fs::create_dir(dir.join("config")).map_err(io_fail("the config directory"))?;
     fs::copy(&config, dir.join("config/buildroot.config")).map_err(io_fail("the config"))?;
     match out::kernel_build_source(&out.join("build")).map_err(io_fail("the kernel build"))? {
