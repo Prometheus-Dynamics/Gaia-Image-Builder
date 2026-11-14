@@ -750,6 +750,181 @@ fn a_slot_needs_the_builds_own_tools_and_a_compression_they_write() {
     }
 }
 
+/// A recipe has the generator's tool write a file that holds the whole
+/// slot: the tool again, with the payload, the root image, its verity table
+/// and the image's product and version, and a signing key the build names.
+#[test]
+fn a_recipe_has_the_generators_tool_write_a_bundle() {
+    let dir = project();
+    let board_dir = dir.path().join("examples/boards/zero-3e");
+    let board = board_dir.join("board.toml");
+    let product = dir
+        .path()
+        .join("examples/products/zero-3e-demo/product.toml");
+    let component = dir
+        .path()
+        .join("examples/components/hello-rust/component.toml");
+    std::fs::write(
+        dir.path().join("recipes/bundle-test.toml"),
+        r#"version = 1
+name = "bundle-test"
+description = "A slot and the bundle the generator's tool writes of it."
+
+[stages]
+erofs = "gaia.fs.erofs"
+verity = "gaia.verity"
+as_kernel = "gaia.tree.role"
+bundle = "gaia.generate.image"
+
+[[connects]]
+from = "erofs.image"
+to = "verity.image"
+
+[[connects]]
+from = "verity.image"
+to = "bundle.rootfs"
+
+[[connects]]
+from = "verity.table"
+to = "bundle.table"
+
+[[connects]]
+from = "as_kernel.tree"
+to = "bundle.payload"
+
+[consts]
+"as_kernel.role" = "kernel"
+"bundle.size" = 0
+"erofs.compression" = "lzma"
+"erofs.level" = 0
+
+[inputs]
+system = ["erofs.tree"]
+kernel = ["as_kernel.from"]
+kernel-build = ["erofs.kernel"]
+host-tools = ["erofs.tools", "verity.tools"]
+generator-bundle = ["bundle.runs"]
+
+[outputs]
+bundle = "bundle.image"
+
+[parameters.slot]
+type = "string"
+description = "The slot's id."
+sets = ["bundle.slot"]
+
+[parameters.device]
+type = "string"
+description = "Where the slot is read from."
+sets = ["verity.device"]
+
+[parameters.product]
+type = "string"
+description = "The product's name, for the bundle."
+sets = ["bundle.product"]
+
+[parameters.version]
+type = "string"
+description = "The product's version, for the bundle."
+sets = ["bundle.version"]
+
+[parameters.sign_key_env]
+type = "string"
+default = ""
+description = "The environment variable that names the signing key's file; empty for an unsigned bundle."
+sets = ["bundle.key_env"]
+
+[parameters.sign_key_id]
+type = "string"
+default = ""
+description = "What identifies the signing key: its public key or id."
+sets = ["bundle.key_id"]
+"#,
+    )
+    .expect("recipe");
+    let block = "[generate]\ntool = { source = \"src\", package = \"hello-rust\" }\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"@out@\"]\noutputs = [\"overlay.dts\"]\n\n[generate.bundle]\nargs = [\"bundle\", \"--slot\", \"@slot@\", \"--payload\", \"@payload@\", \"--rootfs\", \"@rootfs@\", \"--verity-table\", \"@verity-table@\", \"--product\", \"@product@\", \"--version\", \"@version@\", \"--out\", \"@out@\"]\nkey_args = [\"--key-file\", \"@key@\"]\nverify = [\"bundle\", \"--verify\", \"@out@\"]\n";
+    let original = std::fs::read_to_string(&component).expect("read");
+    std::fs::write(&component, format!("{original}\n{block}")).expect("write");
+    let text = std::fs::read_to_string(&board).expect("read");
+    std::fs::write(
+        &board,
+        format!("{text}\n[descriptions]\ndaemon = \"daemon-board.toml\"\n"),
+    )
+    .expect("write");
+    std::fs::write(board_dir.join("daemon-board.toml"), "id = \"zero-3e\"\n").expect("write");
+    edit(
+        &product,
+        "recipe = \"sd-image\"",
+        "recipe = \"bundle-test\"",
+    );
+    edit(
+        &product,
+        "id = \"zero-3e-demo\"",
+        "slot = \"base\"\ndevice = \"/dev/mmcblk0p3\"\nproduct = \"demo\"\nversion = \"1.2.3\"\nsign_key_env = \"DEMO_SIGNING_KEY\"\nsign_key_id = \"ed25519:abc\"",
+    );
+
+    let out = plan(dir.path(), &[]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    let text = String::from_utf8_lossy(&out.stdout)
+        .split(' ')
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    for line in [
+        "zero-3e-demo::verity.image -> zero-3e-demo::bundle.rootfs",
+        "zero-3e-demo::verity.table -> zero-3e-demo::bundle.table",
+        "zero-3e-demo::as_kernel.tree -> zero-3e-demo::bundle.payload",
+        "hello-rust.tool.tree -> zero-3e-demo::bundle.tool",
+        "hello-rust.root.rootfs -> zero-3e-demo::bundle.root",
+        "zero-3e-demo.hello-rust.description.daemon.tree -> zero-3e-demo::bundle.description",
+        "zero-3e-demo::bundle.image -> host.zero-3e-demo.bundle",
+    ] {
+        assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
+    }
+    let json = plan(dir.path(), &["--json"]);
+    let both: serde_json::Value = serde_json::from_slice(&json.stdout).expect("json");
+    let nodes = both["graph"]["graph"]["nodes"].as_array().expect("nodes");
+    let bundle = &nodes
+        .iter()
+        .find(|n| n["label"] == "zero-3e-demo::bundle")
+        .expect("the bundle stage")["consts"];
+    assert_eq!(bundle["slot"]["value"], "base");
+    assert_eq!(bundle["product"]["value"], "demo");
+    assert_eq!(bundle["version"]["value"], "1.2.3");
+    // The variable's name and the key's identity: never a key.
+    assert_eq!(bundle["key_env"]["value"], "DEMO_SIGNING_KEY");
+    assert_eq!(bundle["key_id"]["value"], "ed25519:abc");
+    let runs: serde_json::Value =
+        serde_json::from_str(bundle["runs"]["value"].as_str().expect("runs")).expect("json");
+    assert_eq!(runs["key_args"][1], "@key@");
+    assert_eq!(runs["args"][0], "bundle");
+
+    // A name no run may hold, and a component that says nothing of a bundle.
+    std::fs::write(
+        &component,
+        format!("{original}\n{}", block.replace("\"@key@\"]", "\"@keys@\"]")),
+    )
+    .expect("write");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("generate.bundle.key_args[1]"), "{err}");
+    assert!(err.contains("names @keys@"), "{err}");
+    let cut = block
+        .split("\n[generate.bundle]")
+        .next()
+        .expect("the block");
+    std::fs::write(&component, format!("{original}\n{cut}\n")).expect("write");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("recipe bundle-test has hello-rust's tool write a bundle; the component states no [generate.bundle]"),
+        "{err}"
+    );
+}
+
 /// An image that names an initramfs with a recipe that takes none would
 /// ship those components in no output: refused, by name.
 #[test]
