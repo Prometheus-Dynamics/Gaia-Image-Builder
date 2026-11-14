@@ -157,7 +157,9 @@ pub fn root_hash_of(table: &str) -> Option<&str> {
 /// first of the slot's words must name.
 #[node(
     id = "gaia.cmdline",
-    inputs(store, base, generated, words_path, slot_path, slot, extra, table, limit),
+    inputs(
+        store, base, generated, words_path, slot_path, slot, extra, table, limit
+    ),
     outputs(cmdline)
 )]
 #[allow(clippy::too_many_arguments)]

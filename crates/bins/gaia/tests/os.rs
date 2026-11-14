@@ -700,7 +700,9 @@ fn a_recipe_takes_the_generators_files_by_role() {
     let dir = project();
     let board_dir = dir.path().join("examples/boards/zero-3e");
     let board = board_dir.join("board.toml");
-    let product = dir.path().join("examples/products/zero-3e-demo/product.toml");
+    let product = dir
+        .path()
+        .join("examples/products/zero-3e-demo/product.toml");
     let component = dir
         .path()
         .join("examples/components/hello-rust/component.toml");
@@ -714,7 +716,11 @@ fn a_recipe_takes_the_generators_files_by_role() {
     )
     .expect("write");
     std::fs::write(board_dir.join("daemon-board.toml"), "id = \"zero-3e\"\n").expect("write");
-    edit(&board, "[kernel]\n", "[kernel]\ncmdline = \"console=ttyS2,1500000 rootwait\"\n");
+    edit(
+        &board,
+        "[kernel]\n",
+        "[kernel]\ncmdline = \"console=ttyS2,1500000 rootwait\"\n",
+    );
     edit(&product, "recipe = \"sd-image\"", "recipe = \"slot-boot\"");
     edit(
         &product,
@@ -751,7 +757,10 @@ fn a_recipe_takes_the_generators_files_by_role() {
     let overlay = consts("zero-3e-demo::overlay");
     assert_eq!(overlay["source_path"]["value"], "overlay.dts");
     assert_eq!(overlay["stated_path"]["value"], "manifest-boot.json");
-    assert_eq!(overlay["contract_path"]["value"], "contracts/overlay-dtc.toml");
+    assert_eq!(
+        overlay["contract_path"]["value"],
+        "contracts/overlay-dtc.toml"
+    );
     let name = overlay["base_name"]["value"].as_str().expect("a name");
     assert!(name.ends_with(".dtb") && !name.contains('/'), "{name}");
     let cmdline = consts("zero-3e-demo::cmdline");
