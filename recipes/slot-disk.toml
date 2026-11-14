@@ -5,7 +5,10 @@
 #
 # - `data`: the slot installed on a data partition, a directory the
 #   generator's tool writes from the bundle in its own layout (its
-#   [generate.data]), made an ext4 filesystem;
+#   [generate.data]), made an ext4 filesystem. Its run is given the boot
+#   partition image (`@boot-image@`) and the data partition's size from
+#   the board's layout (`@data-size@`), which the board must give; the
+#   ext4 is made that size, so the two are one number;
 # - `disk`: the board's [disk] table with the boot partition and that data
 #   partition in the board's partitions of those names (`boot_name`,
 #   `data_name`): the board's layout gives each one's place, size and
@@ -114,6 +117,11 @@ to = "datafs.tree"
 from = "boot.image"
 to = "bootp.file"
 
+# The boot partition image is the data run's `@boot-image@` too.
+[[connects]]
+from = "boot.image"
+to = "data.boot_image"
+
 [[connects]]
 from = "datafs.image"
 to = "datap.content"
@@ -129,6 +137,10 @@ to = "flash.image"
 [consts]
 # A directory has no size; the filesystem made of it has.
 "data.size" = 0
+# The data filesystem is its partition's size in the board's layout: the
+# build sets it from there.
+"datafs.size" = 0
+"datafs.margin" = 0
 # The board's layout gives the partitions' place, size, type and flag.
 "bootp.table_type" = ""
 "bootp.bootable" = false
@@ -333,18 +345,6 @@ type = "string"
 default = ""
 description = "The data filesystem's label; empty for none (a label is its reader's to want)."
 sets = ["datafs.label"]
-
-[parameters.data_size]
-type = "int"
-default = 0
-description = "The data filesystem's size in bytes; 0 sizes it to its content plus data_margin."
-sets = ["datafs.size"]
-
-[parameters.data_margin]
-type = "int"
-default = 16777216
-description = "Free bytes left over the content in the data filesystem when data_size is 0."
-sets = ["datafs.margin"]
 
 [parameters.data_journal]
 type = "bool"

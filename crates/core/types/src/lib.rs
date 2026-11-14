@@ -110,7 +110,11 @@ pub const GENERATE_NAMES: [&str; 4] = ["@source@", "@description@", "@out@", "@s
 /// a directory the tool writes the payload into as it bundled it; what
 /// identifies the signing key; the file of its public half; and the
 /// slot's bundle.
-pub const GENERATE_IMAGE_NAMES: [&str; 15] = [
+/// The name a component's keys file has in the tree a generator run is
+/// given it in: `@keys@` is that file.
+pub const GENERATE_KEYS_NAME: &str = "keys";
+
+pub const GENERATE_IMAGE_NAMES: [&str; 19] = [
     "@source@",
     "@description@",
     "@payload@",
@@ -126,6 +130,10 @@ pub const GENERATE_IMAGE_NAMES: [&str; 15] = [
     "@key-id@",
     "@pubkey@",
     "@bundle@",
+    "@boot-image@",
+    "@keys@",
+    "@time@",
+    "@data-size@",
 ];
 
 /// The `@name@` words of `text` that are none of [`GENERATE_NAMES`].

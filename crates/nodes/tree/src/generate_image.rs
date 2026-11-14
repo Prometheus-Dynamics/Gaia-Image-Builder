@@ -46,7 +46,12 @@
 //! bundle's manifest names (an empty tree when no run asks for it).
 //!
 //! `@bundle@` is the slot's bundle, a file the recipe gives (a run that
-//! installs the slot somewhere, say).
+//! installs the slot somewhere, say); `@boot-image@` the image's boot
+//! partition image, another; `@data-size@` the size in bytes of the board's
+//! partition the output is for, which the build reads from the board's
+//! layout. `@keys@` is a file of the tool's component (the keys the tool
+//! writes into what it makes), and `@time@` the build's source date,
+//! `1970-01-01T00:00:00Z`, the time every build of this builder has.
 //!
 //! `gaia.generate.tree` is the same with one difference: `@out@` is a
 //! directory the tool makes and fills (a data partition's contents with
@@ -81,6 +86,14 @@ const KEY: &str = "/signing-key";
 const PUBKEY: &str = "/signing-pubkey";
 /// Where the slot's bundle is, when the recipe gives it.
 const BUNDLE: &str = "/bundle";
+/// Where the boot partition image is, when the recipe gives it.
+const BOOT_IMAGE: &str = "/boot-image";
+/// The directory the component's keys file is bound at, and its name there.
+const KEYS: &str = "/keys";
+use gaia_types::GENERATE_KEYS_NAME as KEYS_NAME;
+/// The build's source date, as a run is given it: the epoch, as every
+/// build of this builder is dated.
+pub const TIME: &str = "1970-01-01T00:00:00Z";
 /// The directory a run writes the payload into as it bundled it, in the
 /// output directory.
 const PAYLOAD_OUT: &str = "payload";
@@ -136,7 +149,10 @@ pub struct Runs {
         pubkey_env,
         product,
         version,
-        bundle
+        bundle,
+        boot_image,
+        keys,
+        data_size
     ),
     outputs(image, report, payload)
 )]
@@ -162,6 +178,9 @@ pub fn generate_image(
     product: Option<&String>,
     version: Option<&String>,
     bundle: Option<&Artifact>,
+    boot_image: Option<&Artifact>,
+    keys: Option<&Tree>,
+    data_size: Option<&i64>,
     cx: &Ctx,
 ) -> Result<(Artifact, Artifact, Tree), StepError> {
     let (image, report, payload) = make(
@@ -187,6 +206,11 @@ pub fn generate_image(
         product,
         version,
         bundle,
+        More {
+            boot_image,
+            keys,
+            data_size: data_size.copied(),
+        },
         cx,
     )?;
     Ok((
@@ -229,7 +253,10 @@ pub fn generate_image(
         pubkey_env,
         product,
         version,
-        bundle
+        bundle,
+        boot_image,
+        keys,
+        data_size
     ),
     outputs(tree, report, payload)
 )]
@@ -255,6 +282,9 @@ pub fn generate_tree(
     product: Option<&String>,
     version: Option<&String>,
     bundle: Option<&Artifact>,
+    boot_image: Option<&Artifact>,
+    keys: Option<&Tree>,
+    data_size: Option<&i64>,
     cx: &Ctx,
 ) -> Result<(Tree, Artifact, Tree), StepError> {
     let (tree, report, payload) = make(
@@ -280,6 +310,11 @@ pub fn generate_tree(
         product,
         version,
         bundle,
+        More {
+            boot_image,
+            keys,
+            data_size: data_size.copied(),
+        },
         cx,
     )?;
     Ok((
@@ -296,6 +331,13 @@ pub fn generate_tree(
             entries: Vec::new(),
         },
     ))
+}
+
+/// What a recipe may give the runs beyond the rest.
+struct More<'a> {
+    boot_image: Option<&'a Artifact>,
+    keys: Option<&'a Tree>,
+    data_size: Option<i64>,
 }
 
 /// What a run writes at `@out@`.
@@ -329,6 +371,7 @@ fn make(
     product: Option<&String>,
     version: Option<&String>,
     bundle: Option<&Artifact>,
+    more: More<'_>,
     cx: &Ctx,
 ) -> Result<(StoreRef, StoreRef, StoreRef), StepError> {
     let fail = |why: String| StepError::body(name, why);
@@ -445,6 +488,32 @@ fn make(
         ),
         None => None,
     };
+    let boot_object = match more.boot_image {
+        Some(image) => Some(
+            image
+                .object
+                .object_ref()
+                .ok_or_else(|| fail("the boot image is not in the store".into()))?,
+        ),
+        None => None,
+    };
+    let keys_object = match more.keys {
+        Some(tree) => {
+            let object = tree
+                .object
+                .object_ref()
+                .ok_or_else(|| fail("the keys file is not in the store".into()))?;
+            if !store.path(&object).join(KEYS_NAME).is_file() {
+                return Err(fail(format!("the keys tree has no file `{KEYS_NAME}`")));
+            }
+            Some(object)
+        }
+        None => None,
+    };
+    let data_size = more.data_size.unwrap_or(0);
+    if data_size < 0 {
+        return Err(fail(format!("data size {data_size}: not a size")));
+    }
     let product = product.map(String::as_str).unwrap_or_default();
     let version = version.map(String::as_str).unwrap_or_default();
     if writes == Writes::Tree && size != 0 {
@@ -507,6 +576,21 @@ fn make(
                 bundle_object.is_some(),
                 "the recipe gives no bundle",
             ),
+            (
+                "@boot-image@",
+                boot_object.is_some(),
+                "the recipe gives no boot image",
+            ),
+            (
+                "@keys@",
+                keys_object.is_some(),
+                "the component gives no keys file",
+            ),
+            (
+                "@data-size@",
+                data_size != 0,
+                "the build gives no partition size",
+            ),
         ] {
             if arg.contains(name) && !given {
                 return Err(fail(format!(
@@ -540,6 +624,12 @@ fn make(
     if let Some(object) = &bundle_object {
         sandbox = sandbox.input(store.path(object), BUNDLE);
     }
+    if let Some(object) = &boot_object {
+        sandbox = sandbox.input(store.path(object), BOOT_IMAGE);
+    }
+    if let Some(object) = &keys_object {
+        sandbox = sandbox.input(store.path(object), KEYS);
+    }
     let mut key = sandbox
         // 2: a third output, the payload as the tool bundled it.
         .key(KeyBuilder::new(name, 3))
@@ -568,6 +658,15 @@ fn make(
     if let Some(object) = &bundle_object {
         key = key.input("bundle", object.digest);
     }
+    if let Some(object) = &boot_object {
+        key = key.input("boot image", object.digest);
+    }
+    if let Some(object) = &keys_object {
+        key = key.input("keys", object.digest);
+    }
+    if data_size != 0 {
+        key = key.config("data size", data_size.to_string());
+    }
     if key_file.is_some() {
         key = key.config("key id", key_id);
     }
@@ -593,6 +692,7 @@ fn make(
     let described_in = format!("{DESCRIPTION}/{described}");
     let image_in = format!("{OUT}/{IMAGE}");
     let payload_in = format!("{OUT}/{PAYLOAD_OUT}");
+    let keys_in = format!("{KEYS}/{KEYS_NAME}");
     let made = Step::new(&store, cx, name, key.finish()).look_up_or_make(
         &[
             ("image", Path::new("out/image")),
@@ -621,6 +721,10 @@ fn make(
                             .replace("@product@", product)
                             .replace("@version@", version)
                             .replace("@bundle@", BUNDLE)
+                            .replace("@boot-image@", BOOT_IMAGE)
+                            .replace("@keys@", &keys_in)
+                            .replace("@time@", TIME)
+                            .replace("@data-size@", &data_size.to_string())
                     })
                     .collect()
             };
