@@ -93,6 +93,10 @@ fn image(root: &Path, uid: u32, compression: &str) -> (u64, PathBuf) {
         0,
         None,
         None,
+        None,
+        None,
+        None,
+        None,
         &Ctx::new(),
     )
     .expect("builds");
@@ -215,6 +219,10 @@ fn sizes_by_compression() {
         0,
         None,
         None,
+        None,
+        None,
+        None,
+        None,
         &Ctx::new(),
     )
     .expect_err("unknown");
@@ -279,6 +287,10 @@ fn a_kernel_that_cannot_read_the_compression_fails_the_step() {
             compression,
             0,
             (cluster != 0).then_some(&cluster),
+            None,
+            None,
+            None,
+            None,
             kernel,
             &Ctx::new(),
         )
@@ -313,4 +325,184 @@ fn a_kernel_that_cannot_read_the_compression_fails_the_step() {
     );
     let why = make("none", 65536, None).expect_err("no compression");
     assert!(why.contains("clusters are of compressed data"), "{why}");
+}
+
+/// The ways of packing an image beyond its algorithm: asked for by name,
+/// held to the kernel's version, and part of what the image is.
+#[test]
+fn packing_options_are_passed_held_to_the_kernel_and_keyed() {
+    use gaia_fs_erofs::{kernel_new_enough, kernel_version};
+    assert_eq!(
+        kernel_version("# SPDX\nVERSION = 6\nPATCHLEVEL = 12\nSUBLEVEL = 3\n"),
+        Some((6, 12))
+    );
+    assert_eq!(kernel_version("all:\n\techo\n"), None);
+    assert_eq!(
+        kernel_new_enough((6, 1), &["lzma", "fragments", "dedupe"]),
+        Ok(())
+    );
+    assert_eq!(
+        kernel_new_enough((5, 15), &["lzma", "big clusters", "fragments", "lz4"]),
+        Err(
+            "the image's kernel is 5.15; of its erofs, lzma needs 5.16, fragments needs 6.1".into()
+        )
+    );
+
+    if !available() || !has("lzma") {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("src");
+    sample(&src);
+    let store_path = dir.path().join("store");
+    let store = Store::open(&store_path).expect("store");
+    let tree = || Tree {
+        object: store.put_tree(&src).expect("put").into(),
+        entries: Vec::new(),
+    };
+    let kernel = |version: &str| {
+        let build = dir.path().join(format!("kernel-{version}"));
+        std::fs::create_dir_all(&build).expect("mkdir");
+        let (major, minor) = version.split_once('.').expect("a version");
+        std::fs::write(
+            build.join("Makefile"),
+            format!("VERSION = {major}\nPATCHLEVEL = {minor}\n"),
+        )
+        .expect("write");
+        std::fs::write(
+            build.join(".config"),
+            "CONFIG_EROFS_FS=y\nCONFIG_EROFS_FS_ZIP=y\nCONFIG_EROFS_FS_ZIP_LZMA=y\n",
+        )
+        .expect("write");
+        Tree {
+            object: store.put_tree(&build).expect("put").into(),
+            entries: Vec::new(),
+        }
+    };
+    let make = |compression: &str, dictsize: i64, options: [bool; 3], kernel: Option<&Tree>| {
+        let on = |n: usize| options[n].then_some(&true);
+        fs_erofs(
+            &store_path.display().to_string(),
+            Some(&tool("mkfs.erofs")),
+            None,
+            tree(),
+            compression,
+            6,
+            Some(&65536),
+            (dictsize != 0).then_some(&dictsize),
+            on(0),
+            on(1),
+            on(2),
+            kernel,
+            &Ctx::new(),
+        )
+        .map_err(|e| e.to_string())
+    };
+    let none = [false; 3];
+    let plain = make("lzma", 0, none, None).expect("plain");
+    // Fragments and tail packing, with a smaller dictionary.
+    let packed = make("lzma", 1 << 20, [true, true, false], None).expect("packed");
+    assert_ne!(packed.object, plain.object, "another image, another key");
+    println!(
+        "plain {} bytes, packed {} bytes",
+        plain.size.0, packed.size.0
+    );
+    let dump = Command::new(tool("dump.erofs"))
+        .arg("-s")
+        .arg(packed.object.path_in(&store).expect("in store"))
+        .output()
+        .expect("dump.erofs");
+    let text = String::from_utf8_lossy(&dump.stdout);
+    assert!(text.contains("fragments"), "{text}");
+    // A kernel too old for what was asked.
+    let old = kernel("5.16");
+    let why = make("lzma", 0, [true, false, false], Some(&old)).expect_err("5.16");
+    assert!(
+        why.contains("the image's kernel is 5.16; of its erofs, fragments needs 6.1"),
+        "{why}"
+    );
+    let new = kernel("6.12");
+    make("lzma", 0, [true, false, true], Some(&new)).expect("6.12 reads them");
+    // What does not go together.
+    let why = make("lz4", 1 << 20, none, None).expect_err("a dictionary for lz4");
+    assert!(why.contains("dictsize 1048576 is for lzma"), "{why}");
+    let why = fs_erofs(
+        &store_path.display().to_string(),
+        Some(&tool("mkfs.erofs")),
+        None,
+        tree(),
+        "none",
+        0,
+        None,
+        None,
+        Some(&true),
+        None,
+        None,
+        None,
+        &Ctx::new(),
+    )
+    .expect_err("fragments of nothing compressed")
+    .to_string();
+    assert!(
+        why.contains("fragments is set and compression is none"),
+        "{why}"
+    );
+}
+
+/// A tool that says it made the image and did not put the tree's bytes in
+/// it (as a real one did, with one of its options): the step reads back
+/// what was made, and fails.
+#[test]
+fn an_image_that_does_not_hold_the_tree_fails_whatever_the_tool_said() {
+    if !available() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("src");
+    sample(&src);
+    let store_path = dir.path().join("store");
+    let store = Store::open(&store_path).expect("store");
+    // A mkfs.erofs that makes a good image of an empty directory, and exits
+    // 0; the real fsck.erofs beside it.
+    let tools = dir.path().join("tools");
+    let empty = dir.path().join("empty");
+    std::fs::create_dir_all(&tools).expect("mkdir");
+    std::fs::create_dir_all(&empty).expect("mkdir");
+    let script = format!(
+        "#!/bin/sh\ncase \"$1\" in --version) exec {real} --version ;; esac\nfor last in \"$@\"; do prev=$image; image=$last; done\nexec {real} --quiet \"$prev\" {empty}\n",
+        real = tool("mkfs.erofs"),
+        empty = empty.display()
+    );
+    let lying = tools.join("mkfs.erofs");
+    std::fs::write(&lying, script).expect("write");
+    std::fs::set_permissions(&lying, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+        .expect("chmod");
+    std::os::unix::fs::symlink(tool("fsck.erofs"), tools.join("fsck.erofs")).expect("symlink");
+    let tree = Tree {
+        object: store.put_tree(&src).expect("put").into(),
+        entries: Vec::new(),
+    };
+    let why = fs_erofs(
+        &store_path.display().to_string(),
+        Some(&lying.display().to_string()),
+        None,
+        tree,
+        "none",
+        0,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &Ctx::new(),
+    )
+    .expect_err("the image is of nothing")
+    .to_string();
+    println!("{why}");
+    assert!(
+        why.contains("the image made does not hold the tree:")
+            && why.contains("of its files differ when read back"),
+        "{why}"
+    );
 }

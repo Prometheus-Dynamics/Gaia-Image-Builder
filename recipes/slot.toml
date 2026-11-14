@@ -39,6 +39,30 @@ default = 0
 description = "The most bytes of a compressed cluster, a multiple of 4096; 0 is the tool's default, one block. Bigger is smaller on disk and costs RAM and time to read."
 sets = ["erofs.cluster"]
 
+[parameters.dictsize]
+type = "int"
+default = 0
+description = "The lzma dictionary in bytes; 0 is the tool's own choice. The kernel holds one dictionary of this size while the image is mounted."
+sets = ["erofs.dictsize"]
+
+[parameters.fragments]
+type = "bool"
+default = false
+description = "Pack the tails of files, and small files, together (mkfs.erofs -Efragments). Smaller; a kernel from 6.1."
+sets = ["erofs.fragments"]
+
+[parameters.ztailpacking]
+type = "bool"
+default = false
+description = "Keep a file's compressed tail beside its inode (mkfs.erofs -Eztailpacking). A kernel from 5.17."
+sets = ["erofs.ztailpacking"]
+
+[parameters.dedupe]
+type = "bool"
+default = false
+description = "Store equal compressed data once (mkfs.erofs -Ededupe). Slow to make; a kernel from 6.1."
+sets = ["erofs.dedupe"]
+
 [parameters.level]
 type = "int"
 default = 0
