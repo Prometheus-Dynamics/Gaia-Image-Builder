@@ -173,8 +173,13 @@ pub fn devicetree_overlay(
         .object_ref()
         .ok_or_else(|| fail("the base device trees are not in the store".into()))?;
     let tool = |name: &str| -> Result<std::path::PathBuf, StepError> {
-        let path = store.path(&tools_object).join("bin").join(name);
-        if path.is_file() {
+        // A host tools tree, or the seed of one (its `host/` directory).
+        let root = store.path(&tools_object);
+        let found = [root.join("bin"), root.join("host/bin")]
+            .into_iter()
+            .map(|dir| dir.join(name))
+            .find(|path| path.is_file());
+        if let Some(path) = found {
             Ok(path)
         } else {
             Err(fail(format!(
