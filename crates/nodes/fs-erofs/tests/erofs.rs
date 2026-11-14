@@ -90,6 +90,8 @@ fn image(root: &Path, uid: u32, compression: &str) -> (u64, PathBuf) {
         tree,
         compression,
         0,
+        None,
+        None,
         &Ctx::new(),
     )
     .expect("builds");
@@ -209,9 +211,103 @@ fn sizes_by_compression() {
         tree,
         "brotli",
         0,
+        None,
+        None,
         &Ctx::new(),
     )
     .expect_err("unknown");
     println!("{error}");
     assert!(error.to_string().contains("not one of"));
+}
+
+/// The image's kernel must be able to open what is made: the option for
+/// the compression, built in, in its final configuration. Checked before
+/// anything is made, and again when the image is found in the store.
+#[test]
+fn a_kernel_that_cannot_read_the_compression_fails_the_step() {
+    use gaia_fs_erofs::{kernel_options, kernel_reads};
+    // As a trimmed kernel had it: lzma and no zstd.
+    let config = "CONFIG_EROFS_FS=y\nCONFIG_EROFS_FS_ZIP=y\nCONFIG_EROFS_FS_ZIP_LZMA=y\n# CONFIG_EROFS_FS_ZIP_ZSTD is not set\nCONFIG_EROFS_FS_ZIP_DEFLATE=m\n";
+    assert_eq!(kernel_reads(config, "lzma"), Ok(()));
+    assert_eq!(kernel_reads(config, "lz4"), Ok(()));
+    assert_eq!(kernel_reads(config, "lz4hc"), Ok(()));
+    assert_eq!(kernel_reads(config, "none"), Ok(()));
+    let why = kernel_reads(config, "zstd").expect_err("no zstd");
+    assert!(
+        why.starts_with("CONFIG_EROFS_FS_ZIP_ZSTD is `not set` in the kernel's .config")
+            && why.ends_with("an erofs root (zstd) needs =y")
+            && "gaia.fs.erofs: ".len() + why.len() <= 120,
+        "{why}"
+    );
+    // A module is not built in: a root is opened before modules load.
+    let why = kernel_reads(config, "deflate").expect_err("a module");
+    assert!(why.contains("CONFIG_EROFS_FS_ZIP_DEFLATE is `m`"), "{why}");
+    // No erofs at all, and no line for it.
+    let why = kernel_reads("CONFIG_EXT4_FS=y\n", "none").expect_err("no erofs");
+    assert!(why.contains("CONFIG_EROFS_FS is `not set`"), "{why}");
+    assert_eq!(kernel_options("none"), ["CONFIG_EROFS_FS"]);
+
+    if !available() || !has("zstd") {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("src");
+    sample(&src);
+    let store_path = dir.path().join("store");
+    let store = Store::open(&store_path).expect("store");
+    let tree = || Tree {
+        object: store.put_tree(&src).expect("put").into(),
+        entries: Vec::new(),
+    };
+    let kernel = |text: &str| {
+        let build = dir.path().join("kernel-build");
+        std::fs::create_dir_all(&build).expect("mkdir");
+        std::fs::write(build.join(".config"), text).expect("write");
+        Tree {
+            object: store.put_tree(&build).expect("put").into(),
+            entries: Vec::new(),
+        }
+    };
+    let make = |compression: &str, cluster: i64, kernel: Option<&Tree>| {
+        fs_erofs(
+            &store_path.display().to_string(),
+            &tool("mkfs.erofs"),
+            tree(),
+            compression,
+            0,
+            (cluster != 0).then_some(&cluster),
+            kernel,
+            &Ctx::new(),
+        )
+        .map_err(|e| e.to_string())
+    };
+    let without = kernel(config);
+    let why = make("zstd", 0, Some(&without)).expect_err("the kernel has no zstd");
+    println!("{why}");
+    assert!(
+        why.contains("CONFIG_EROFS_FS_ZIP_ZSTD is `not set`"),
+        "{why}"
+    );
+    // Made for a kernel that reads it; then the same image, found in the
+    // store, is refused all the same for a kernel that does not.
+    let with = kernel(&config.replace(
+        "# CONFIG_EROFS_FS_ZIP_ZSTD is not set",
+        "CONFIG_EROFS_FS_ZIP_ZSTD=y",
+    ));
+    let made = make("zstd", 0, Some(&with)).expect("the kernel reads zstd");
+    assert!(make("zstd", 0, Some(&without)).is_err());
+    // Bigger clusters are another image; a size that is not blocks is refused.
+    let big = make("zstd", 65536, Some(&with)).expect("64 KiB clusters");
+    assert_ne!(big.object, made.object);
+    println!(
+        "4 KiB clusters {} bytes, 64 KiB clusters {} bytes",
+        made.size.0, big.size.0
+    );
+    let why = make("zstd", 5000, None).expect_err("not blocks");
+    assert!(
+        why.contains("cluster 5000 is not a number of 4096-byte blocks"),
+        "{why}"
+    );
+    let why = make("none", 65536, None).expect_err("no compression");
+    assert!(why.contains("clusters are of compressed data"), "{why}");
 }
