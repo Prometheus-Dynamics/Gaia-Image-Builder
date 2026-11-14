@@ -44,15 +44,12 @@ const PAYLOAD: &str = "/payload";
 const OUT: &str = "/out";
 /// The file the tool writes, in the output directory.
 const IMAGE: &str = "image";
-/// The names an argument may hold.
-pub const TOKENS: [&str; 6] = [
-    "@source@",
-    "@description@",
-    "@payload@",
-    "@slot@",
-    "@size@",
-    "@out@",
-];
+pub use gaia_types::GENERATE_IMAGE_NAMES as TOKENS;
+
+/// The `@name@` words of `arg` that are not one of [`TOKENS`].
+pub fn unknown_tokens(arg: &str) -> Vec<String> {
+    gaia_types::unknown_names(arg, &TOKENS)
+}
 
 /// The tool's runs, as a component states them.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -63,32 +60,6 @@ pub struct Runs {
     pub args: Vec<String>,
     #[serde(default)]
     pub verify: Vec<String>,
-}
-
-/// The `@name@` words of `arg` that are not one of [`TOKENS`].
-pub fn unknown_tokens(arg: &str) -> Vec<String> {
-    let mut unknown = Vec::new();
-    let mut rest = arg;
-    while let Some(start) = rest.find('@') {
-        let after = &rest[start + 1..];
-        let Some(end) = after.find('@') else { break };
-        let name = &after[..end];
-        let word = format!("@{name}@");
-        let is_name = !name.is_empty()
-            && name
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_');
-        if is_name && !TOKENS.contains(&word.as_str()) {
-            unknown.push(word);
-            rest = &after[end + 1..];
-        } else if is_name {
-            rest = &after[end + 1..];
-        } else {
-            // Not a name: the second `@` may open one.
-            rest = after;
-        }
-    }
-    unknown
 }
 
 /// The image `runs` (JSON of [`Runs`]) makes from `payload`: `size` bytes,

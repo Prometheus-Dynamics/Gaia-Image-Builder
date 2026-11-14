@@ -771,7 +771,7 @@ fn a_recipe_takes_the_generators_files_by_role() {
     let component = dir
         .path()
         .join("examples/components/hello-rust/component.toml");
-    let block = "[generate]\ntool = { source = \"src\", package = \"hello-rust\" }\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"--slot\", \"@slot@\", \"@out@\"]\noutputs = [\"overlay.dts\", \"words\", \"manifest-boot.json\"]\n\n[generate.provides]\nboard-overlay = \"overlay.dts\"\nmanifest-boot = \"manifest-boot.json\"\ncmdline = \"words/cmdline.txt\"\ncmdline-slot = \"words/slot.txt\"\n";
+    let block = "[generate]\ntool = { source = \"src\", package = \"hello-rust\" }\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"--slot\", \"@slot@\", \"@out@\"]\noutputs = [\"overlay.dts\", \"words\", \"manifest-boot.json\"]\n\n[generate.provides]\nboard-overlay = \"overlay.dts\"\nmanifest-boot = \"manifest-boot.json\"\ncmdline = \"words/cmdline.txt\"\ncmdline-slot = \"words/slot.txt\"\n\n[generate.image]\nfit = [\"part\", \"--min-size\", \"--payload\", \"@payload@\"]\nargs = [\"part\", \"@description@\", \"--slot\", \"@slot@\", \"--payload\", \"@payload@\", \"--size\", \"@size@\", \"--out\", \"@out@\"]\nverify = [\"part\", \"--verify\", \"@out@\"]\n";
     let original = std::fs::read_to_string(&component).expect("read");
     std::fs::write(&component, format!("{original}\n{block}")).expect("write");
     let text = std::fs::read_to_string(&board).expect("read");
@@ -796,7 +796,7 @@ fn a_recipe_takes_the_generators_files_by_role() {
     edit(
         &product,
         "id = \"zero-3e-demo\"",
-        "slot = \"base\"\ndevice = \"/dev/mmcblk0p3\"",
+        "slot = \"base\"\ndevice = \"/dev/mmcblk0p3\"\nboot_size = 67108864",
     );
 
     let out = plan(dir.path(), &[]);
@@ -823,6 +823,13 @@ fn a_recipe_takes_the_generators_files_by_role() {
         "zero-3e-demo::cmdline.cmdline -> zero-3e-demo::as_cmdline.from",
         "zero-3e-demo::overlay.overlay -> zero-3e-demo::as_overlay.from",
         "zero-3e-demo::as_overlay.tree -> host.zero-3e-demo.payload",
+        // The generator's tool again, on the payload: the boot partition.
+        "zero-3e-demo::as_overlay.tree -> zero-3e-demo::boot.payload",
+        "hello-rust.tool.tree -> zero-3e-demo::boot.tool",
+        "hello-rust.root.rootfs -> zero-3e-demo::boot.root",
+        "hello-rust.src.tree -> zero-3e-demo::boot.source",
+        "zero-3e-demo.hello-rust.description.daemon.tree -> zero-3e-demo::boot.description",
+        "zero-3e-demo::boot.image -> host.zero-3e-demo.boot",
     ] {
         assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
     }
@@ -857,6 +864,15 @@ fn a_recipe_takes_the_generators_files_by_role() {
         consts("zero-3e-demo::as_overlay")["role"]["value"],
         "board-overlay"
     );
+    let boot = consts("zero-3e-demo::boot");
+    assert_eq!(boot["program"]["value"], "bin/hello-rust");
+    assert_eq!(boot["description_name"]["value"], "daemon");
+    assert_eq!(boot["slot"]["value"], "base");
+    assert_eq!(boot["size"]["value"], 67_108_864);
+    let runs: serde_json::Value =
+        serde_json::from_str(boot["runs"]["value"].as_str().expect("runs")).expect("json");
+    assert_eq!(runs["verify"][1], "--verify");
+    assert_eq!(runs["args"][9], "@out@");
     let cmdline = consts("zero-3e-demo::cmdline");
     assert_eq!(cmdline["base"]["value"], "console=ttyS2,1500000 rootwait");
     assert_eq!(cmdline["words_path"]["value"], "words/cmdline.txt");
@@ -883,6 +899,18 @@ fn a_recipe_takes_the_generators_files_by_role() {
             "`other/cmdline.txt` is in no declared output; [generate] declares overlay.dts, words, manifest-boot.json",
         ),
         (
+            "\"--payload\", \"@payload@\", \"--size\"",
+            "\"--payload\", \"@payloads@\", \"--size\"",
+            "generate.image.args[5]",
+            "names @payloads@; the names are @source@, @description@, @payload@, @slot@, @size@, @out@",
+        ),
+        (
+            "\"--out\", \"@out@\"]",
+            "\"--out\"]",
+            "generate.image.args",
+            "no argument names @out@, the file the tool writes",
+        ),
+        (
             "board-overlay = ",
             "Board_Overlay = ",
             "generate.provides.Board_Overlay",
@@ -901,6 +929,18 @@ fn a_recipe_takes_the_generators_files_by_role() {
         assert!(err.contains(key), "{to}: {err}");
         assert!(err.contains(message), "{to}: {err}");
     }
+    // The recipe has the generator's tool write an image, and the component
+    // says nothing of how.
+    let cut = block.split("\n[generate.image]").next().expect("the block");
+    std::fs::write(&component, format!("{original}\n{cut}\n")).expect("write");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("generate.image"), "{err}");
+    assert!(
+        err.contains("recipe slot-boot has hello-rust's tool write an image; the component states no [generate.image]"),
+        "{err}"
+    );
     // A component in both trees, and a recipe that takes an initramfs from
     // an image that names none.
     std::fs::write(&component, format!("{original}\n{block}")).expect("write");

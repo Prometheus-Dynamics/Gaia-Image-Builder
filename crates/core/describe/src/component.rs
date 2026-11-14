@@ -63,6 +63,27 @@ pub struct Generate {
     /// `manifest-boot`); a recipe takes one as its input `provides.<role>`.
     #[serde(default)]
     pub provides: BTreeMap<String, String>,
+    /// An image file the same tool writes from a tree the image's recipe
+    /// gives it (its boot files by role): `[generate.image]`.
+    pub image: Option<GenerateImage>,
+}
+
+/// One image a `[generate]` tool writes from a payload: up to three runs,
+/// each the tool's arguments. `@source@`, `@description@` and `@slot@` are
+/// as in `[generate]`; `@payload@` is the payload directory, `@size@` the
+/// image's size in bytes and `@out@` the one file to write.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GenerateImage {
+    /// Run first: fails when the payload does not fit; what it prints is
+    /// the step's report.
+    #[serde(default)]
+    pub fit: Vec<String>,
+    /// Writes the image at `@out@`, exactly `@size@` bytes.
+    pub args: Vec<String>,
+    /// Run last on what was written: a non-zero exit fails the build.
+    #[serde(default)]
+    pub verify: Vec<String>,
 }
 
 /// The tool: a package of one of the component's sources.
@@ -257,6 +278,37 @@ impl Component {
                             unknown.join(", "),
                             gaia_types::GENERATE_NAMES.join(", ")
                         ),
+                    ));
+                }
+            }
+            if let Some(image) = &generate.image {
+                let runs = [
+                    ("fit", &image.fit),
+                    ("args", &image.args),
+                    ("verify", &image.verify),
+                ];
+                for (run, args) in runs {
+                    for (index, arg) in args.iter().enumerate() {
+                        let unknown =
+                            gaia_types::unknown_names(arg, &gaia_types::GENERATE_IMAGE_NAMES);
+                        if !unknown.is_empty() {
+                            return Err(Error::new(
+                                path,
+                                format!("generate.image.{run}[{index}]"),
+                                format!(
+                                    "names {}; the names are {}",
+                                    unknown.join(", "),
+                                    gaia_types::GENERATE_IMAGE_NAMES.join(", ")
+                                ),
+                            ));
+                        }
+                    }
+                }
+                if !image.args.iter().any(|arg| arg.contains("@out@")) {
+                    return Err(Error::new(
+                        path,
+                        "generate.image.args",
+                        "no argument names @out@, the file the tool writes",
                     ));
                 }
             }

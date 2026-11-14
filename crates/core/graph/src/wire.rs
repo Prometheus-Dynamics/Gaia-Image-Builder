@@ -47,6 +47,16 @@ struct Generator {
     /// The tool's source, and the port its tree is on.
     source: (u32, &'static str),
     provides: BTreeMap<String, String>,
+    /// The tool's build, the image it runs in and the board's description,
+    /// each with its port: what a step that runs the tool again takes.
+    tool: (u32, &'static str),
+    root: (u32, &'static str),
+    description: (u32, &'static str),
+    /// The tool's program, and the name of the description it reads.
+    program: String,
+    description_name: String,
+    /// The runs of `[generate.image]`, as the step takes them (JSON).
+    image_runs: Option<String>,
 }
 
 impl Graph<'_> {
@@ -750,6 +760,7 @@ fn image_recipe(
             }
         } else if input == "generated"
             || input == "generator-source"
+            || input == "generator-image"
             || input.starts_with("provides.")
         {
             let made = g.generators.get(&image.name).cloned().unwrap_or_default();
@@ -764,7 +775,42 @@ fn image_recipe(
                     ),
                 ));
             };
-            if let Some(role) = input.strip_prefix("provides.") {
+            if input == "generator-image" {
+                // A stage that runs the generator's tool again, on what the
+                // recipe gives it: everything of the tool but the payload,
+                // the slot and the size, which are the recipe's.
+                let Some(runs) = &generator.image_runs else {
+                    return Err(Error::at(
+                        &generator.file,
+                        "generate.image",
+                        format!(
+                            "recipe {} has {}'s tool write an image; the component states no [generate.image]",
+                            recipe.name, generator.component
+                        ),
+                    ));
+                };
+                for p in ports {
+                    let stage = stages[&p.stage];
+                    for (port, from) in [
+                        ("tool", generator.tool),
+                        ("root", generator.root),
+                        ("source", generator.source),
+                        ("description", generator.description),
+                    ] {
+                        g.edge(from, (stage, port));
+                    }
+                    for (port, text) in [
+                        ("program", &generator.program),
+                        ("description_name", &generator.description_name),
+                        ("runs", runs),
+                    ] {
+                        let value = Lit::Str(text.clone());
+                        g.check(stage, port, &value)
+                            .map_err(|e| Error::at(&recipe.file, format!("inputs.{input}"), e))?;
+                        g.set(stage, port, value);
+                    }
+                }
+            } else if let Some(role) = input.strip_prefix("provides.") {
                 let Some(path) = generator.provides.get(role) else {
                     let known: Vec<&str> = generator.provides.keys().map(String::as_str).collect();
                     return Err(Error::at(
@@ -1821,12 +1867,14 @@ fn generate_node(g: &mut Graph<'_>, at: &OsIn<'_>, component: &Component) -> Res
         )
     })?;
     let root = component_source(g, component, "root", root, at.lock, at.board)?;
-    let out = g.first_output(root).unwrap_or("rootfs");
-    g.edge((root, out), (node, "root"));
-    let out = g.first_output(tool).unwrap_or("tree");
-    g.edge((tool, out), (node, "tool"));
+    let root_out = g.first_output(root).unwrap_or("rootfs");
+    g.edge((root, root_out), (node, "root"));
+    let tool_out = g.first_output(tool).unwrap_or("tree");
+    g.edge((tool, tool_out), (node, "tool"));
     let out = g.first_output(source).unwrap_or("tree");
     g.edge((source, out), (node, "source"));
+    let description_out = g.first_output(description).unwrap_or("tree");
+    g.edge((description, description_out), (node, "description"));
     g.generators
         .entry(image.clone())
         .or_default()
@@ -1836,9 +1884,20 @@ fn generate_node(g: &mut Graph<'_>, at: &OsIn<'_>, component: &Component) -> Res
             node,
             source: (source, out),
             provides: generate.provides.clone(),
+            tool: (tool, tool_out),
+            root: (root, root_out),
+            description: (description, description_out),
+            program: format!("bin/{}", generate.tool.package),
+            description_name: generate.description.clone(),
+            image_runs: generate.image.as_ref().map(|image| {
+                serde_json::json!({
+                    "fit": image.fit,
+                    "args": image.args,
+                    "verify": image.verify,
+                })
+                .to_string()
+            }),
         });
-    let out = g.first_output(description).unwrap_or("tree");
-    g.edge((description, out), (node, "description"));
     Ok(node)
 }
 

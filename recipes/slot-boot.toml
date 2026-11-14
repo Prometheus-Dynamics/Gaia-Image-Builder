@@ -5,7 +5,10 @@
 # line with the root hash in it. Those boot files are also given together
 # as `payload`: a tree with each under the name of what it is (kernel,
 # device-tree, initramfs, cmdline, board-overlay), for the program that owns
-# the boot directory's file names to place. The overlay's source and the command line's words are written by
+# the boot directory's file names to place. That program then writes the
+# boot partition's whole image from them (`boot`), the size the image's
+# layout gives it (`boot_size`), and what it says of how they fit is kept
+# (`boot-report`). The overlay's source and the command line's words are written by
 # the image's one component with a [generate], which names them by role.
 # Untested on board.
 version = 1
@@ -23,6 +26,7 @@ as_device_tree = "gaia.tree.role"
 as_initramfs = "gaia.tree.role"
 as_cmdline = "gaia.tree.role"
 as_overlay = "gaia.tree.role"
+boot = "gaia.generate.image"
 
 [[connects]]
 from = "erofs.image"
@@ -60,6 +64,10 @@ to = "as_overlay.tree"
 from = "overlay.overlay"
 to = "as_overlay.from"
 
+[[connects]]
+from = "as_overlay.tree"
+to = "boot.payload"
+
 [consts]
 "as_kernel.role" = "kernel"
 "as_device_tree.role" = "device-tree"
@@ -77,6 +85,8 @@ kernel-build = ["erofs.kernel"]
 initramfs = ["initramfs.tree"]
 generated = ["overlay.source", "cmdline.generated"]
 generator-source = ["overlay.contract"]
+# The generator's tool run again, on the payload: its [generate.image].
+generator-image = ["boot.runs"]
 host-tools = ["overlay.tools", "erofs.tools", "verity.tools"]
 device-trees = ["overlay.base", "as_device_tree.from"]
 device-tree-name = ["overlay.base_name", "as_device_tree.path"]
@@ -93,11 +103,13 @@ overlay = "overlay.overlay"
 cmdline = "cmdline.cmdline"
 initramfs = "initramfs.archive"
 payload = "as_overlay.tree"
+boot = "boot.image"
+boot-report = "boot.report"
 
 [parameters.slot]
 type = "string"
 description = "The slot's id: what the generator writes the slot's words for."
-sets = ["cmdline.slot"]
+sets = ["cmdline.slot", "boot.slot"]
 
 [parameters.compression]
 type = "string"
@@ -139,3 +151,8 @@ type = "int"
 default = 2048
 description = "The most bytes the kernel command line may have; 0 for no limit."
 sets = ["cmdline.limit"]
+
+[parameters.boot_size]
+type = "int"
+description = "The boot partition's size in bytes, as the image's layout has it: the tool writes exactly this many."
+sets = ["boot.size"]
