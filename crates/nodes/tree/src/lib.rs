@@ -35,6 +35,7 @@ mod merge;
 mod overlay;
 mod pick;
 mod place;
+mod role;
 mod services;
 mod under;
 mod walk;
@@ -54,6 +55,7 @@ pub use overlay::{
 };
 pub use pick::tree_pick;
 pub use place::tree_place;
+pub use role::tree_role;
 pub use services::tree_services;
 pub use under::tree_under;
 
@@ -62,7 +64,8 @@ use gaia_store::Digest;
 use gaia_types::Tree;
 
 /// The nodes, for a registry.
-pub const NODES: [&NodeRecord; 13] = [
+pub const NODES: [&NodeRecord; 14] = [
+    &role::TREE_ROLE_NODE,
     &by_role::TREE_BY_ROLE_NODE,
     &generate::GENERATE_NODE,
     &cmdline::CMDLINE_NODE,

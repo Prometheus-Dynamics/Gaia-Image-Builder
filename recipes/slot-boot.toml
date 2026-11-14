@@ -2,7 +2,10 @@
 # appended, the image's initramfs (the components it names under
 # `initramfs`) as a newc archive, the board's overlay compiled and proven
 # against the kernel's device tree, and the slot's whole kernel command
-# line with the root hash in it. The overlay's source and the command line's words are written by
+# line with the root hash in it. Those boot files are also given together
+# as `payload`: a tree with each under the name of what it is (kernel,
+# device-tree, initramfs, cmdline, board-overlay), for the program that owns
+# the boot directory's file names to place. The overlay's source and the command line's words are written by
 # the image's one component with a [generate], which names them by role.
 # Untested on board.
 version = 1
@@ -15,6 +18,11 @@ verity = "gaia.verity"
 overlay = "gaia.devicetree.overlay"
 cmdline = "gaia.cmdline"
 initramfs = "gaia.initramfs"
+as_kernel = "gaia.tree.role"
+as_device_tree = "gaia.tree.role"
+as_initramfs = "gaia.tree.role"
+as_cmdline = "gaia.tree.role"
+as_overlay = "gaia.tree.role"
 
 [[connects]]
 from = "erofs.image"
@@ -24,14 +32,50 @@ to = "verity.image"
 from = "verity.table"
 to = "cmdline.table"
 
+[[connects]]
+from = "as_kernel.tree"
+to = "as_device_tree.tree"
+
+[[connects]]
+from = "as_device_tree.tree"
+to = "as_initramfs.tree"
+
+[[connects]]
+from = "initramfs.archive"
+to = "as_initramfs.from"
+
+[[connects]]
+from = "as_initramfs.tree"
+to = "as_cmdline.tree"
+
+[[connects]]
+from = "cmdline.cmdline"
+to = "as_cmdline.from"
+
+[[connects]]
+from = "as_cmdline.tree"
+to = "as_overlay.tree"
+
+[[connects]]
+from = "overlay.overlay"
+to = "as_overlay.from"
+
+[consts]
+"as_kernel.role" = "kernel"
+"as_device_tree.role" = "device-tree"
+"as_initramfs.role" = "initramfs"
+"as_cmdline.role" = "cmdline"
+"as_overlay.role" = "board-overlay"
+
 [inputs]
+kernel = ["as_kernel.from"]
 system = ["erofs.tree"]
 initramfs = ["initramfs.tree"]
 generated = ["overlay.source", "cmdline.generated"]
 generator-source = ["overlay.contract"]
 host-tools = ["overlay.tools"]
-device-trees = ["overlay.base"]
-device-tree-name = ["overlay.base_name"]
+device-trees = ["overlay.base", "as_device_tree.from"]
+device-tree-name = ["overlay.base_name", "as_device_tree.path"]
 cmdline-base = ["cmdline.base"]
 "provides.board-overlay" = ["overlay.source_path"]
 "provides.manifest-boot" = ["overlay.stated_path"]
@@ -44,6 +88,7 @@ table = "verity.table"
 overlay = "overlay.overlay"
 cmdline = "cmdline.cmdline"
 initramfs = "initramfs.archive"
+payload = "as_overlay.tree"
 
 [parameters.slot]
 type = "string"
