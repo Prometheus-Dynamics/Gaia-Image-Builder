@@ -400,6 +400,28 @@ fn packing_options_are_passed_held_to_the_kernel_and_keyed() {
     };
     let none = [false; 3];
     let plain = make("lzma", 0, none, None).expect("plain");
+    // The rest makes images with fragments. Not every fsck.erofs unpacks
+    // one (1.9.1 fails with "path is not a directory" where 1.8.10 and
+    // 1.9.4 do not), and with one that cannot, the step's read-back fails,
+    // as it should. So this machine's tools are asked directly first.
+    let probe = dir.path().join("probe.erofs");
+    let probed = Command::new(tool("mkfs.erofs"))
+        .args(["--quiet", "-zlzma", "-C65536", "-Efragments,ztailpacking"])
+        .arg(&probe)
+        .arg(&src)
+        .status()
+        .is_ok_and(|s| s.success())
+        && Command::new(tool("fsck.erofs"))
+            .arg(format!("--extract={}", dir.path().join("probe").display()))
+            .arg(&probe)
+            .output()
+            .is_ok_and(|out| out.status.success());
+    if !probed {
+        println!(
+            "SKIPPED: this machine's erofs tools do not make and unpack an image with fragments"
+        );
+        return;
+    }
     // Fragments and tail packing, with a smaller dictionary.
     let packed = make("lzma", 1 << 20, [true, true, false], None).expect("packed");
     assert_ne!(packed.object, plain.object, "another image, another key");
