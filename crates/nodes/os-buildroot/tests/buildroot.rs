@@ -193,6 +193,7 @@ fn a_minimal_aarch64_buildroot_build_and_its_rebuilds() {
         cpus,
         jobs,
         download_dir: download,
+        config_only: false,
     };
     let dir = tempfile::tempdir().expect("tempdir");
     let store_dir = dir.path().join("store");

@@ -32,6 +32,10 @@ pub struct BuildrootHost {
     pub jobs: u32,
     /// Absolute path of the download cache (`BR2_DL_DIR`).
     pub download_dir: String,
+    /// Stop when the configuration is resolved and every line of it held:
+    /// make no host tools. For a check of a product that compiles nothing.
+    #[serde(default)]
+    pub config_only: bool,
 }
 
 /// A package Buildroot builds from one of the input trees instead of

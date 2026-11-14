@@ -245,6 +245,81 @@ fn the_a2_product_is_one_planned_graph() {
     assert_eq!(explain.nodes.len(), 11);
 }
 
+/// A product cut down to one kind of step: those steps, what they need, and
+/// nothing given back to the host.
+#[test]
+fn a_graph_is_cut_down_to_a_step_and_what_it_needs() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (product, recipes) = describe(dir.path());
+    let loaded = Product::load(&product).expect("loads");
+    loaded.wants();
+    let recipes = Recipes::load_dir(&recipes).expect("recipes");
+    let registry = registry();
+    let whole = build(
+        &loaded,
+        &lock(),
+        &recipes,
+        &registry,
+        &setup(),
+        &Builders::default(),
+    )
+    .expect("builds");
+    let cut = whole.clone().until("gaia.build.rust").expect("cut");
+    let labels: Vec<&str> = cut
+        .doc
+        .graph
+        .nodes
+        .iter()
+        .map(|n| n.label.as_deref().unwrap_or("host"))
+        .collect();
+    // Each build and what it reads: no tar after it.
+    assert_eq!(
+        labels,
+        [
+            "host",
+            "hello-a.build",
+            "hello-a.src",
+            "hello-a.root",
+            "hello-a.vendor",
+            "hello-b.build",
+            "hello-b.src",
+            "hello-b.root",
+            "hello-b.vendor"
+        ]
+    );
+    assert_eq!(cut.origins.len(), labels.len());
+    let mut edges: Vec<(u32, u32)> = cut
+        .doc
+        .graph
+        .edges
+        .iter()
+        .map(|e| (e.from.node, e.to.node))
+        .collect();
+    edges.sort_unstable();
+    // Renumbered: every edge is into one of the two builds.
+    assert_eq!(edges, [(2, 1), (3, 1), (4, 1), (6, 5), (7, 5), (8, 5)]);
+    assert!(cut.doc.graph.nodes[0].port_types.is_empty(), "no output");
+    let requires: Vec<&str> = cut.doc.requires.iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(
+        requires,
+        [
+            "gaia.build.rust",
+            "gaia.source.git",
+            "gaia.source.oci",
+            "gaia.source.path"
+        ]
+    );
+    // The planner takes what is left.
+    let planned = cut.plan(&registry).expect("plans");
+    assert_eq!(explain_plan(&planned).nodes.len(), 9);
+
+    let why = whole.until("gaia.os.buildroot.host").expect_err("no OS");
+    assert!(
+        why.starts_with("the product has no step `gaia.os.buildroot.host`; its steps are gaia.build.rust, gaia.compress.tar"),
+        "{why}"
+    );
+}
+
 #[test]
 fn errors_name_the_description() {
     let dir = tempfile::tempdir().expect("tempdir");

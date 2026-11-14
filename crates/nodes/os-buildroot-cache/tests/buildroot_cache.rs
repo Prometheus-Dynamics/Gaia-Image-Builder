@@ -167,6 +167,7 @@ fn offline_build() {
         cpus: cpus(),
         jobs: jobs(),
         download_dir: dl.display().to_string(),
+        config_only: false,
     };
     let (rootfs, _kernel, _dt, _modules, _bootloader, images, config, _kernel_build, _toolchain) =
         build_os(

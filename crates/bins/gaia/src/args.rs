@@ -11,7 +11,7 @@ gaia: build images from product descriptions
 usage:
   gaia validate <file.toml>... [--kind product|board|family|component] [--recipes DIR]
   gaia plan  <product.toml> [project flags] [--json]
-  gaia build <product.toml> [project flags] [--jobs N]
+  gaia build <product.toml> [project flags] [--jobs N] [--config-only | --until STEP]
   gaia lock  <product.toml> [--update SOURCE]... [--check]  (see gaia lock --help)
   gaia clean [--store DIR] [--keep N] [--dry-run]
   gaia show  <image>.<output> [--store DIR]
@@ -77,6 +77,11 @@ pub struct Project {
     /// `--input NAME=PATH`, by name.
     pub inputs: BTreeMap<String, PathBuf>,
     pub jobs: Option<usize>,
+    /// `build` only: run only as far as the steps of this id.
+    pub until: Option<String>,
+    /// `build` only: resolve and check each image's OS configuration and
+    /// make nothing.
+    pub config_only: bool,
     /// `plan` only: the graph and plan as JSON.
     pub json: bool,
 }
@@ -141,6 +146,8 @@ pub fn parse(words: &[String]) -> Result<Command, Stop> {
                             Stop::usage(format!("--jobs takes a count above 0, not `{text}`"))
                         })?);
                     }
+                    "--until" if build => project.until = Some(words.value(word)?.to_string()),
+                    "--config-only" if build => project.config_only = true,
                     _ => words.positional(word, &mut product)?,
                 }
             }

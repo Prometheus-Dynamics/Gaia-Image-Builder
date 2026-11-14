@@ -123,6 +123,88 @@ pub struct Built {
     pub inputs: BTreeMap<String, HostInput>,
 }
 
+impl Built {
+    /// The graph cut down to the steps `step` (a node id) and what they
+    /// need: for running a product only as far as a check of it, such as
+    /// the resolution of its OS configuration, with nothing after. No
+    /// output is left for the host to take.
+    ///
+    /// # Errors
+    ///
+    /// The product has no such step; the steps it has are named.
+    pub fn until(mut self, step: &str) -> Result<Self, String> {
+        let nodes = &self.doc.graph.nodes;
+        let mut keep = vec![false; nodes.len()];
+        let mut todo: Vec<usize> = (1..nodes.len()).filter(|&n| nodes[n].id == step).collect();
+        if todo.is_empty() {
+            let mut ids: Vec<&str> = nodes.iter().skip(1).map(|n| n.id.as_str()).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            return Err(format!(
+                "the product has no step `{step}`; its steps are {}",
+                ids.join(", ")
+            ));
+        }
+        while let Some(node) = todo.pop() {
+            if std::mem::replace(&mut keep[node], true) {
+                continue;
+            }
+            for edge in &self.doc.graph.edges {
+                // What a kept step takes from another step; the host (0)
+                // is always there.
+                if edge.to.node as usize == node && edge.from.node != 0 {
+                    todo.push(edge.from.node as usize);
+                }
+            }
+        }
+        keep[0] = true;
+        let mut index = vec![0u32; keep.len()];
+        let mut next = 0u32;
+        for (old, kept) in keep.iter().enumerate() {
+            if *kept {
+                index[old] = next;
+                next += 1;
+            }
+        }
+        let graph = &mut self.doc.graph;
+        graph
+            .edges
+            .retain(|edge| keep[edge.from.node as usize] && keep[edge.to.node as usize]);
+        // Nothing is given back to the host: the steps are the result.
+        graph.edges.retain(|edge| edge.to.node != 0);
+        for edge in &mut graph.edges {
+            edge.from.node = index[edge.from.node as usize];
+            edge.to.node = index[edge.to.node as usize];
+        }
+        let mut old = 0;
+        graph.nodes.retain(|_| {
+            old += 1;
+            keep[old - 1]
+        });
+        let mut old = 0;
+        self.origins.retain(|_| {
+            old += 1;
+            keep[old - 1]
+        });
+        // The host's ports that still feed a step.
+        let fed: std::collections::BTreeSet<String> = graph
+            .edges
+            .iter()
+            .filter(|edge| edge.from.node == 0)
+            .map(|edge| edge.from.port.clone())
+            .collect();
+        graph.nodes[0]
+            .port_types
+            .retain(|port, _| fed.contains(port));
+        self.inputs.retain(|port, _| fed.contains(port));
+        let mut ids: Vec<String> = graph.nodes.iter().skip(1).map(|n| n.id.clone()).collect();
+        ids.sort();
+        ids.dedup();
+        self.doc.requires.retain(|r| ids.contains(&r.id));
+        Ok(self)
+    }
+}
+
 /// A structured value from the descriptions that the host feeds into the
 /// graph, because a graph constant cannot be a struct yet (outside block
 /// X7 in `docs/design.md`). Interim: when X7 lands each becomes a constant
