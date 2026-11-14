@@ -193,7 +193,7 @@ impl Fat {
             12 => {
                 let b = at(file, self.fat_at + cluster * 3 / 2, 2)?;
                 let pair = u16le(&b, 0);
-                let value = if cluster % 2 == 0 {
+                let value = if cluster.is_multiple_of(2) {
                     pair & 0xFFF
                 } else {
                     pair >> 4
@@ -238,7 +238,7 @@ impl Fat {
         into: &mut Vec<(String, u64, u64)>,
     ) -> std::io::Result<()> {
         let mut long: Vec<(u8, String)> = Vec::new();
-        for entry in raw.chunks_exact(32) {
+        for entry in raw.as_chunks::<32>().0 {
             if entry[0] == 0 {
                 break;
             }

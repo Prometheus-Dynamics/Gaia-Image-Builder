@@ -159,7 +159,7 @@ fn fat_volume() -> Vec<u8> {
     let mut set = |cluster: usize, value: u16| {
         let at = fat + cluster * 3 / 2;
         let pair = u16::from_le_bytes([v[at], v[at + 1]]);
-        let pair = if cluster % 2 == 0 {
+        let pair = if cluster.is_multiple_of(2) {
             (pair & 0xF000) | value
         } else {
             (pair & 0x000F) | (value << 4)
