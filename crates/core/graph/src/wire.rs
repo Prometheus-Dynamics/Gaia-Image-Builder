@@ -932,6 +932,7 @@ fn image_recipe(
                 "bootloader",
                 "os",
                 "host-tools",
+                "kernel-build",
             ],
         ),
     ];
