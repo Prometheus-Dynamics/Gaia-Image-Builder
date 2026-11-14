@@ -36,10 +36,22 @@ pub struct Board {
     /// The disk image's partition table, for a board written as one disk.
     pub disk: Option<Disk>,
     pub flash: Option<Flash>,
+    /// How the board's own boot firmware starts a system, where it has one.
+    pub boot: Option<Boot>,
     /// Files that describe this board to other programs, by the name their
     /// reader gives them. A component installs one, or generates from one,
     /// by that name: the same file for every use.
     pub descriptions: BTreeMap<String, RelPath>,
+}
+
+/// The board's boot firmware.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Boot {
+    /// The firmware's kind, by the name the programs that read its boot
+    /// files give it (`rpi-tryboot`). A layout or a kernel contract is read
+    /// for this name.
+    pub firmware: Option<String>,
 }
 
 /// The kernel: its source, configuration and device trees.
@@ -205,6 +217,7 @@ struct BoardFile {
     partitions: Option<Vec<PartitionNeed>>,
     disk: Option<Disk>,
     flash: Option<Flash>,
+    boot: Option<Boot>,
     #[serde(default)]
     descriptions: BTreeMap<String, RelPath>,
 }
@@ -279,6 +292,7 @@ impl Board {
                 disk => disk,
             },
             flash: merged.flash,
+            boot: merged.boot,
             descriptions: merged.descriptions,
         })
     }
@@ -533,6 +547,12 @@ fn merge(board: BoardFile, family: BoardFile) -> BoardFile {
         },
         firmware: board.firmware.or(family.firmware),
         partitions: board.partitions.or(family.partitions),
+        boot: match (board.boot, family.boot) {
+            (Some(b), Some(f)) => Some(Boot {
+                firmware: b.firmware.or(f.firmware),
+            }),
+            (b, f) => b.or(f),
+        },
         descriptions: {
             // By name: the board's file for a name replaces its family's.
             let mut all = family.descriptions;

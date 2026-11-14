@@ -252,7 +252,7 @@ fn a_kernel_that_does_not_meet_its_contract_fails_before_the_build() {
     // The stand-in kernel's config has X and Y on and Z off.
     let contract = |always: &str, storage: &str| {
         let text = format!(
-            "version = 1\n[always]\nall = [{always}]\n[kind.disk]\nall = []\none_of = [[\"Z\", \"Y\"]]\n[optional]\nall = []\n[initramfs]\nnone = \"\"\n[boot_check]\nchecked = []\n"
+            "version = 2\n[always]\nall = [{always}]\n[kind.disk]\nall = []\none_of = [[\"Z\", \"Y\"]]\n[firmware.none]\nall = []\n[optional]\nall = []\n[initramfs]\nnone = \"\"\n[boot_check]\nchecked = []\n"
         );
         let tree = f.tree(
             &format!("contract-{}", always.len()),
@@ -266,6 +266,7 @@ fn a_kernel_that_does_not_meet_its_contract_fails_before_the_build() {
             asked_by: "init".into(),
             board: "demo".into(),
             kind: "disk".into(),
+            firmware: String::new(),
             storage_drivers: vec![storage.into()],
         });
         (config, tree)

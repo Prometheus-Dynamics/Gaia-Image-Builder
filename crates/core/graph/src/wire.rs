@@ -1054,6 +1054,12 @@ fn image_os(
                 asked_by: component.name.clone(),
                 board: at.board.name.clone(),
                 kind: kind.into(),
+                firmware: at
+                    .board
+                    .boot
+                    .as_ref()
+                    .and_then(|boot| boot.firmware.clone())
+                    .unwrap_or_default(),
                 storage_drivers: drivers,
             },
             InputFrom::Picked {

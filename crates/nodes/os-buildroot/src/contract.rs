@@ -8,15 +8,17 @@
 //! root, so it is read from its source at the locked commit and no copy is
 //! kept here: a later commit that adds an option tightens the build.
 //!
-//! The file, TOML, `version = 1`, names written without `CONFIG_`:
+//! The file, TOML, `version = 2`, names written without `CONFIG_`:
 //!
 //! ```toml
-//! version = 1
+//! version = 2
 //! [always]
 //! all = ["BLK_DEV_DM"]                       # every image
 //! [kind.disk]
 //! all = ["EXT4_FS"]                          # images of this kind
 //! one_of = [["MMC_BLOCK", "BLK_DEV_NVME"]]   # at least one of each list
+//! [firmware.rpi-tryboot]
+//! all = ["BCM_VCIO"]                         # boards of this boot firmware
 //! [optional]
 //! all = ["VFAT_FS"]                          # named, not enforced
 //! [initramfs]
@@ -34,7 +36,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 
 /// The version this reader knows.
-const VERSION: i64 = 1;
+const VERSION: i64 = 2;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -43,6 +45,7 @@ struct File {
     version: i64,
     always: All,
     kind: BTreeMap<String, Kind>,
+    firmware: BTreeMap<String, All>,
     #[allow(dead_code)]
     optional: All,
     #[allow(dead_code)]
@@ -129,10 +132,29 @@ pub fn problems(text: &str, config: &str, want: &KernelContract) -> Result<Vec<S
         }
     };
 
+    // The boot firmware's own group, for a board that has one.
+    let none = Vec::new();
+    let firmware = if want.firmware.is_empty() {
+        &none
+    } else {
+        &contract
+            .firmware
+            .get(&want.firmware)
+            .ok_or_else(|| {
+                let known: Vec<&str> = contract.firmware.keys().map(String::as_str).collect();
+                format!(
+                    "{file}: no `firmware.{}`; its boot firmwares are {}",
+                    want.firmware,
+                    known.join(", ")
+                )
+            })?
+            .all
+    };
     let mut missing = Vec::new();
     let groups = [
         ("always.all".to_string(), &contract.always.all),
         (format!("kind.{}.all", want.kind), &kind.all),
+        (format!("firmware.{}.all", want.firmware), firmware),
     ];
     for (group, symbols) in &groups {
         for symbol in symbols.iter().filter(|symbol| !built_in(symbol)) {
@@ -182,7 +204,7 @@ mod tests {
     use super::*;
 
     const CONTRACT: &str = r#"
-version = 1
+version = 2
 [always]
 all = ["BLK_DEV_DM", "DM_VERITY"]
 [kind.disk]
@@ -191,6 +213,8 @@ one_of = [["MMC_BLOCK", "BLK_DEV_NVME"]]
 [kind.mtd]
 all = ["MTD_UBI"]
 one_of = []
+[firmware.rom-a]
+all = ["MAILBOX", "ROM_A_FW"]
 [optional]
 all = ["VFAT_FS"]
 [initramfs]
@@ -207,6 +231,7 @@ checked = ["BLK_DEV_DM"]
             asked_by: "init".into(),
             board: "demo".into(),
             kind: kind.into(),
+            firmware: String::new(),
             storage_drivers: storage.iter().map(|s| s.to_string()).collect(),
         }
     }
@@ -259,12 +284,12 @@ checked = ["BLK_DEV_DM"]
     #[test]
     fn another_version_or_an_unknown_key_is_refused() {
         let w = want("disk", &["CONFIG_X"]);
-        let newer = CONTRACT.replace("version = 1", "version = 2");
+        let newer = CONTRACT.replace("version = 2", "version = 3");
         assert_eq!(
             problems(&newer, "", &w),
-            Err("contracts/slot-kernel.toml: version 2; this build reads version 1".into())
+            Err("contracts/slot-kernel.toml: version 3; this build reads version 2".into())
         );
-        let none = CONTRACT.replace("version = 1", "");
+        let none = CONTRACT.replace("version = 2", "");
         assert_eq!(
             problems(&none, "", &w),
             Err("contracts/slot-kernel.toml: no `version`".into())
@@ -281,5 +306,32 @@ checked = ["BLK_DEV_DM"]
         let short = CONTRACT.replace("[optional]\nall = [\"VFAT_FS\"]\n", "");
         let err = problems(&short, "", &w).expect_err("missing key");
         assert!(err.contains("missing field `optional`"), "{err}");
+    }
+
+    #[test]
+    fn a_boards_boot_firmware_adds_its_own_group() {
+        let config = "CONFIG_BLK_DEV_DM=y\nCONFIG_DM_VERITY=y\nCONFIG_EXT4_FS=y\nCONFIG_MMC_BLOCK=y\nCONFIG_MMC_HOST=y\nCONFIG_MAILBOX=y\nCONFIG_ROM_A_FW=m\n";
+        // A board with no boot firmware of its own: the group is not read.
+        assert_eq!(
+            problems(CONTRACT, config, &want("disk", &["CONFIG_MMC_HOST"])),
+            Ok(Vec::new())
+        );
+        let mut with = want("disk", &["CONFIG_MMC_HOST"]);
+        with.firmware = "rom-a".into();
+        assert_eq!(
+            problems(CONTRACT, config, &with),
+            Ok(vec![
+                "CONFIG_ROM_A_FW=m, and must be =y (contracts/slot-kernel.toml: firmware.rom-a.all)"
+                    .to_string()
+            ])
+        );
+        with.firmware = "rom-b".into();
+        assert_eq!(
+            problems(CONTRACT, config, &with),
+            Err(
+                "contracts/slot-kernel.toml: no `firmware.rom-b`; its boot firmwares are rom-a"
+                    .into()
+            )
+        );
     }
 }

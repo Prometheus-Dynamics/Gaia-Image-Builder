@@ -87,11 +87,11 @@ const RECORDED: &str = "
     gaia:disk-table bdf819301870eb86
     gaia:disk-partition a9f281ead6a6e53c
     gaia:raw-blob a34597c3a0a074cb
-    gaia:os-config 171f8f2fd3a1f94a
+    gaia:os-config 6139f0be7c760f6b
     gaia:buildroot-fragment 2847827726c91ae9
     gaia:buildroot-host 236dfb6e85f8d0d4
     gaia:source-override d72cbdcff1dd0ea1
-    gaia:kernel-contract 544345c138c5fcb2
+    gaia:kernel-contract 8e9aa241a307528f
     gaia:object-kind 8ea567075e428736
     gaia:artifact-kind 1ce777e4bb50c505
     gaia:image-kind a54f2ea6cb3fe288

@@ -62,6 +62,9 @@ pub struct KernelContract {
     pub board: String,
     /// The image kind the contract is read for (`disk` or `mtd`).
     pub kind: String,
+    /// The board's boot firmware, by the contract's name for it; empty for
+    /// a board with none of its own.
+    pub firmware: String,
     /// The board's storage drivers, as `.config` writes them
     /// (`CONFIG_...`): each must be built in.
     pub storage_drivers: Vec<String>,
