@@ -400,20 +400,26 @@ fn packing_options_are_passed_held_to_the_kernel_and_keyed() {
     };
     let none = [false; 3];
     let plain = make("lzma", 0, none, None).expect("plain");
-    // The rest makes images with fragments, which a fsck.erofs before 1.8
-    // cannot unpack ("path is not a directory"): the step's read-back then
-    // fails, as it should, and there is nothing to test it with.
-    let version = Command::new(tool("fsck.erofs"))
-        .arg("--version")
-        .output()
-        .map(|out| String::from_utf8_lossy(&[out.stdout, out.stderr].concat()).into_owned())
-        .unwrap_or_default();
-    let numbers: Vec<u32> = version
-        .split(|c: char| !c.is_ascii_digit())
-        .filter_map(|word| word.parse().ok())
-        .collect();
-    if numbers.len() < 2 || (numbers[0], numbers[1]) < (1, 8) {
-        println!("SKIPPED: {} cannot unpack fragments", version.trim());
+    // The rest makes images with fragments. Not every fsck.erofs unpacks
+    // one (1.9.1 fails with "path is not a directory" where 1.8.10 and
+    // 1.9.4 do not), and with one that cannot, the step's read-back fails,
+    // as it should. So this machine's tools are asked directly first.
+    let probe = dir.path().join("probe.erofs");
+    let probed = Command::new(tool("mkfs.erofs"))
+        .args(["--quiet", "-zlzma", "-C65536", "-Efragments,ztailpacking"])
+        .arg(&probe)
+        .arg(&src)
+        .status()
+        .is_ok_and(|s| s.success())
+        && Command::new(tool("fsck.erofs"))
+            .arg(format!("--extract={}", dir.path().join("probe").display()))
+            .arg(&probe)
+            .output()
+            .is_ok_and(|out| out.status.success());
+    if !probed {
+        println!(
+            "SKIPPED: this machine's erofs tools do not make and unpack an image with fragments"
+        );
         return;
     }
     // Fragments and tail packing, with a smaller dictionary.
