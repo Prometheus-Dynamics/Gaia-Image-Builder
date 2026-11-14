@@ -47,7 +47,7 @@ impl Project {
         let store = absolute(&store_dir(options.store.as_deref())?);
         let tools = tools(&options.tools);
         let setup = Setup {
-            buildroot: buildroot_host(&store, &tools).map(|mut host| {
+            buildroot: buildroot_host(&store, &tools, options.jobs).map(|mut host| {
                 host.config_only = options.config_only;
                 host
             }),
@@ -389,12 +389,23 @@ fn tools(given: &BTreeMap<String, String>) -> BTreeMap<String, String> {
 
 /// The host side of a Buildroot run: make and taskset from the tools or
 /// PATH, the CPU list from `GAIA_CPUS` (none: no pin), the jobs from
-/// `GAIA_JOBS` (none: every CPU), and the download cache from
+/// `--jobs`, else `GAIA_JOBS` (neither: every CPU), and the download cache from
 /// `GAIA_BUILDROOT_DL` (none: `buildroot-downloads` beside the store's
 /// objects). None without make.
+/// The jobs an OS build's make runs with: `--jobs` when the build was given
+/// one (the bound on what the build runs at once is the bound on make too),
+/// else `GAIA_JOBS`, else every CPU.
+pub fn make_jobs(flag: Option<usize>, env: Option<&str>, cpus: u32) -> u32 {
+    flag.and_then(|jobs| u32::try_from(jobs).ok())
+        .or_else(|| env.and_then(|text| text.parse().ok()))
+        .filter(|&jobs| jobs > 0)
+        .unwrap_or(cpus)
+}
+
 fn buildroot_host(
     store: &Path,
     tools: &BTreeMap<String, String>,
+    jobs: Option<usize>,
 ) -> Option<gaia_types::BuildrootHost> {
     let found = |name: &str| {
         tools
@@ -403,11 +414,11 @@ fn buildroot_host(
             .or_else(|| on_path(name).map(|p| p.display().to_string()))
     };
     let make = found("make")?;
-    let jobs = std::env::var("GAIA_JOBS")
-        .ok()
-        .and_then(|j| j.parse().ok())
-        .filter(|&j: &u32| j > 0)
-        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get() as u32));
+    let jobs = make_jobs(
+        jobs,
+        std::env::var("GAIA_JOBS").ok().as_deref(),
+        std::thread::available_parallelism().map_or(1, |n| n.get() as u32),
+    );
     let download_dir = std::env::var("GAIA_BUILDROOT_DL")
         .map(PathBuf::from)
         .unwrap_or_else(|_| store.join("buildroot-downloads"));
@@ -433,6 +444,19 @@ fn on_path(program: &str) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    /// `--jobs` is the bound on an OS build's make too; the variable is for
+    /// a build that was given no flag.
+    #[test]
+    fn the_jobs_flag_bounds_make() {
+        use super::make_jobs;
+        assert_eq!(make_jobs(Some(13), None, 32), 13);
+        assert_eq!(make_jobs(Some(13), Some("26"), 32), 13, "the flag wins");
+        assert_eq!(make_jobs(None, Some("8"), 32), 8);
+        assert_eq!(make_jobs(None, None, 32), 32);
+        assert_eq!(make_jobs(None, Some("0"), 32), 32, "0 is no count");
+        assert_eq!(make_jobs(None, Some("many"), 32), 32);
+    }
+
     /// Every crate in `crates/nodes` is a dependency here, so its nodes can
     /// be in [`super::registry`].
     #[test]

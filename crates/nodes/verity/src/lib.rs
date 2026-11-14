@@ -20,6 +20,17 @@
 //! line for `device`, which is the device the image is written to (the tree
 //! is on that same device).
 //!
+//! The table's text is an interface: programs that are not this builder's
+//! read it (an installer's bundle writer takes the root hash, salt and
+//! sizes from it, and checks them against each other). Its lines are
+//! `key value`, in this order: `hash_type`, `algorithm`, `root_hash`,
+//! `salt`, `uuid`, `data_blocks`, `data_block_size`, `hash_block_size`,
+//! `hash_offset`, `tree_bytes`, `image_bytes`, `hash_start_block`, then
+//! `table`. They hold: `hash_offset = data_blocks * data_block_size`, and
+//! `image_bytes = hash_offset + tree_bytes`, the image file's length. A
+//! key is not renamed or dropped, and that arithmetic not changed, without
+//! its readers being told first; a test holds both.
+//!
 //! `veritysetup` is pinned by path; its version is in the key, with the
 //! image's digest, so a changed image or tool remakes the tree. The key
 //! version moved to 2 when the layout changed, so outputs of the old
@@ -380,6 +391,51 @@ mod tests {
                 "ab".repeat(32),
                 "cd".repeat(32)
             )
+        );
+        // The table's text is read by other programs: its keys, their
+        // order and what holds between them are an interface.
+        let text = table.text();
+        let lines: Vec<(&str, &str)> = text
+            .lines()
+            .map(|line| line.split_once(' ').expect("key value"))
+            .collect();
+        let keys: Vec<&str> = lines.iter().map(|(key, _)| *key).collect();
+        assert_eq!(
+            keys,
+            [
+                "hash_type",
+                "algorithm",
+                "root_hash",
+                "salt",
+                "uuid",
+                "data_blocks",
+                "data_block_size",
+                "hash_block_size",
+                "hash_offset",
+                "tree_bytes",
+                "image_bytes",
+                "hash_start_block",
+                "table"
+            ]
+        );
+        let value = |key: &str| lines.iter().find(|(k, _)| *k == key).expect(key).1;
+        let number = |key: &str| value(key).parse::<u64>().expect(key);
+        assert_eq!(value("hash_type"), "1");
+        assert_eq!(value("algorithm"), "sha256");
+        assert_eq!(value("root_hash").len(), 64);
+        assert_eq!(value("salt").len(), 64);
+        assert_eq!(
+            number("hash_offset"),
+            number("data_blocks") * number("data_block_size")
+        );
+        assert_eq!(
+            number("image_bytes"),
+            number("hash_offset") + number("tree_bytes")
+        );
+        assert_eq!(number("hash_block_size"), 4096);
+        assert_eq!(
+            number("hash_start_block"),
+            number("hash_offset") / number("hash_block_size")
         );
         assert!(table.text().contains("hash_start_block 3\n"));
         assert!(
