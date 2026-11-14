@@ -16,8 +16,10 @@
 mod args;
 mod build;
 mod clean;
+mod image_sizes;
 mod project;
 mod record;
+mod rootfs_sizes;
 mod show;
 mod sizes;
 
