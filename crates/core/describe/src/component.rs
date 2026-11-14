@@ -66,6 +66,11 @@ pub struct Generate {
     /// An image file the same tool writes from a tree the image's recipe
     /// gives it (its boot files by role): `[generate.image]`.
     pub image: Option<GenerateImage>,
+    /// A file that holds the whole slot, which the same tool writes from
+    /// the same tree and, where the recipe gives them, the slot's root
+    /// image, its verity table, the image's product and version, and a
+    /// signing key: `[generate.bundle]`.
+    pub bundle: Option<GenerateImage>,
 }
 
 /// One image a `[generate]` tool writes from a payload: up to three runs,
@@ -84,6 +89,11 @@ pub struct GenerateImage {
     /// Run last on what was written: a non-zero exit fails the build.
     #[serde(default)]
     pub verify: Vec<String>,
+    /// Added to `args` when the build has a signing key, whose file is
+    /// `@key@`. Without a key they are left out, and what is written is
+    /// unsigned.
+    #[serde(default)]
+    pub key_args: Vec<String>,
 }
 
 /// The tool: a package of one of the component's sources.
@@ -281,11 +291,13 @@ impl Component {
                     ));
                 }
             }
-            if let Some(image) = &generate.image {
+            for (table, image) in [("image", &generate.image), ("bundle", &generate.bundle)] {
+                let Some(image) = image else { continue };
                 let runs = [
                     ("fit", &image.fit),
                     ("args", &image.args),
                     ("verify", &image.verify),
+                    ("key_args", &image.key_args),
                 ];
                 for (run, args) in runs {
                     for (index, arg) in args.iter().enumerate() {
@@ -294,7 +306,7 @@ impl Component {
                         if !unknown.is_empty() {
                             return Err(Error::new(
                                 path,
-                                format!("generate.image.{run}[{index}]"),
+                                format!("generate.{table}.{run}[{index}]"),
                                 format!(
                                     "names {}; the names are {}",
                                     unknown.join(", "),
@@ -307,7 +319,7 @@ impl Component {
                 if !image.args.iter().any(|arg| arg.contains("@out@")) {
                     return Err(Error::new(
                         path,
-                        "generate.image.args",
+                        format!("generate.{table}.args"),
                         "no argument names @out@, the file the tool writes",
                     ));
                 }

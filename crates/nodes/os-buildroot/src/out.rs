@@ -81,6 +81,19 @@ pub fn package_config(build: &Path, package: &str) -> io::Result<Option<std::pat
     Ok(found.into_iter().next())
 }
 
+/// The files Buildroot keeps at the top of its target tree for its own use,
+/// which its filesystem images leave out (`fs/common.mk` excludes the
+/// first, `TARGET_DIR_WARNING_FILE`): no part of a root filesystem.
+pub const BOOKKEEPING: [&str; 1] = ["THIS_IS_NOT_YOUR_ROOT_FILESYSTEM"];
+
+/// The names of [`BOOKKEEPING`] that `root` holds at its top.
+pub fn bookkeeping_in(root: &Path) -> Vec<&'static str> {
+    BOOKKEEPING
+        .into_iter()
+        .filter(|name| fs::symlink_metadata(root.join(name)).is_ok())
+        .collect()
+}
+
 /// Moves each entry of `images` into `out/<bucket>/`, creating the four
 /// bucket directories even when they stay empty.
 pub fn sort_images(images: &Path, out: &Path) -> io::Result<()> {
@@ -312,6 +325,18 @@ mod tests {
         sort_images(&dir.path().join("nothing"), &out).expect("sort");
         assert!(out.join("kernel").is_dir());
         assert!(out.join("images").is_dir());
+    }
+
+    #[test]
+    fn buildroots_own_files_are_found_at_the_top_of_a_root() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        fs::create_dir_all(root.join("etc")).expect("mkdir");
+        assert!(bookkeeping_in(root).is_empty());
+        fs::write(root.join("THIS_IS_NOT_YOUR_ROOT_FILESYSTEM"), "Warning!").expect("write");
+        // A file of that name deeper down is a package's own business.
+        fs::write(root.join("etc/THIS_IS_NOT_YOUR_ROOT_FILESYSTEM"), "x").expect("write");
+        assert_eq!(bookkeeping_in(root), ["THIS_IS_NOT_YOUR_ROOT_FILESYSTEM"]);
     }
 
     #[test]

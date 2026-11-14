@@ -235,6 +235,8 @@ fn build(
     goals: &[&str],
     host: &BuildrootHost,
 ) -> Result<(), StepError> {
+    // One build at a time: each has the whole job count.
+    let _turn = crate::turn();
     let io_fail = |what: &'static str| {
         move |error: io::Error| StepError::body(NAME, format!("{what}: {error}"))
     };

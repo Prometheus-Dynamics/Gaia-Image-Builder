@@ -29,6 +29,17 @@ write)
   if [ "$7" = "short" ]; then head -c 10 /dev/zero > "$6"; fi ;;
 verify)
   head -c 5 "$2" | grep -q "$3" ;;
+bundle)
+  # bundle OUT PAYLOAD ROOTFS TABLE PRODUCT VERSION [--key FILE]
+  {
+    printf 'product %s version %s\n' "$6" "$7"
+    printf 'kernel %s\n' "$(cat "$3/kernel")"
+    printf 'rootfs %s bytes\n' "$(wc -c < "$4")"
+    printf 'table %s\n' "$(cat "$5")"
+    if [ "$8" = "--key" ]; then printf 'signed with %s\n' "$(cat "$9")"; else echo unsigned; fi
+  } > "$2" ;;
+checkbundle)
+  grep -q "^product " "$2" ;;
 esac
 "#;
 
@@ -150,6 +161,12 @@ impl Fixture {
             runs,
             slot,
             size,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
@@ -239,7 +256,7 @@ fn what_cannot_be_run_is_refused_before_anything_runs() {
             RUNS.replace("@payload@", "@payloads@"),
             "base",
             4096,
-            "names @payloads@; the names are @source@, @description@, @payload@, @slot@, @size@, @out@",
+            "names @payloads@; the names are @source@, @description@, @payload@, @slot@, @size@, @out@, @rootfs@, @verity-table@, @key@, @product@, @version@",
         ),
         (
             RUNS.to_string(),
@@ -251,7 +268,7 @@ fn what_cannot_be_run_is_refused_before_anything_runs() {
             RUNS.to_string(),
             "base",
             0,
-            "size 0: an image has a size above 0",
+            "names @size@, and the recipe gives no size",
         ),
         (
             RUNS.replace("\"@size@\", \"@out@\"", "\"@size@\""),
@@ -277,5 +294,169 @@ fn what_cannot_be_run_is_refused_before_anything_runs() {
     assert_eq!(
         unknown_image_tokens("@payloads@ user@host a@b.c"),
         ["@payloads@"]
+    );
+}
+
+const BUNDLE: &str = r#"{
+  "args": ["bundle", "@out@", "@payload@", "@rootfs@", "@verity-table@", "@product@", "@version@"],
+  "key_args": ["--key", "@key@"],
+  "verify": ["checkbundle", "@out@"]
+}"#;
+
+impl Fixture {
+    /// A file as the slot's root image and one as its verity table, and
+    /// the bundle run on them; `key` is the environment variable that
+    /// names a key file, and what the build says identifies the key.
+    fn bundle(&self, runs: &str, key: Option<(&str, &str)>) -> Result<String, String> {
+        let store = Store::open(&self.store).expect("store");
+        let file = |name: &str, bytes: &[u8]| {
+            let path = self.root.join(name);
+            std::fs::write(&path, bytes).expect("write");
+            store.put_file(&path).expect("put")
+        };
+        let rootfs = gaia_types::Image {
+            kind: gaia_types::ImageKind::Filesystem,
+            object: file("rootfs.img", &[9u8; 4096]).into(),
+            size: gaia_types::Size(4096),
+            partitions: Vec::new(),
+        };
+        let table = gaia_types::Artifact {
+            kind: gaia_types::ArtifactKind::parse("verity-table"),
+            object: file("table", b"root_hash abc").into(),
+        };
+        let (env, id) = match key {
+            Some((env, id)) => (Some(env.to_string()), Some(id.to_string())),
+            None => (None, None),
+        };
+        let (image, _) = generate_image(
+            &self.store,
+            BWRAP,
+            self.root(),
+            self.tree("tool", &[("bin/img", TOOL, 0o755)]),
+            "bin/img",
+            self.tree("source", &[("socs/soc", "rk", 0o644)]),
+            self.tree("description", &[("board", "zero", 0o644)]),
+            "board",
+            self.tree(
+                "payload-b",
+                &[("kernel", "k1", 0o644), ("cmdline", "quiet", 0o644)],
+            ),
+            runs,
+            "base",
+            0,
+            Some(&rootfs),
+            Some(&table),
+            env.as_ref(),
+            id.as_ref(),
+            Some(&"helios".to_string()),
+            Some(&"2026.2.0".to_string()),
+            &Ctx::new(),
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(String::from_utf8(
+            std::fs::read(image.object.path_in(&store).expect("in the store")).expect("read"),
+        )
+        .expect("text"))
+    }
+}
+
+/// A file that holds the whole slot: the tool is given the root image, its
+/// verity table and the image's product and version beside the payload, and
+/// a signing key only when the build has one.
+#[test]
+fn a_bundle_is_written_from_the_slot_and_signed_when_there_is_a_key() {
+    if !available() {
+        return;
+    }
+    // The key is a file the environment names: the test runs again in a
+    // process of its own that has the variable.
+    if std::env::var_os("GAIA_TEST_BUNDLE_KEY").is_none() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let status = std::process::Command::new(std::env::current_exe().expect("exe"))
+            .args([
+                "a_bundle_is_written_from_the_slot_and_signed_when_there_is_a_key",
+                "--exact",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("GAIA_TEST_BUNDLE_KEY", dir.path().join("dev.key"))
+            .status()
+            .expect("child");
+        assert!(status.success(), "the test failed in its child");
+        return;
+    }
+    let f = Fixture::new();
+    let unsigned = f.bundle(BUNDLE, None).expect("unsigned");
+    assert_eq!(
+        unsigned,
+        "product helios version 2026.2.0\nkernel k1\nrootfs 4096 bytes\ntable root_hash abc\nunsigned\n"
+    );
+    // A key file the environment names: bound for the run, its `key_args`
+    // added, and the step keyed on the key's stated identity.
+    let key = std::path::PathBuf::from(
+        std::env::var_os("GAIA_TEST_BUNDLE_KEY").expect("set for the child"),
+    );
+    std::fs::write(&key, "secret-of-key-one").expect("write");
+    let signed = f
+        .bundle(BUNDLE, Some(("GAIA_TEST_BUNDLE_KEY", "key-one")))
+        .expect("signed");
+    assert!(
+        signed.ends_with("signed with secret-of-key-one\n"),
+        "{signed}"
+    );
+    let made = f.made();
+    // The same key again: found. Another key by its identity: made again.
+    f.bundle(BUNDLE, Some(("GAIA_TEST_BUNDLE_KEY", "key-one")))
+        .expect("again");
+    assert_eq!(f.made(), made);
+    std::fs::write(&key, "secret-of-key-two").expect("write");
+    let other = f
+        .bundle(BUNDLE, Some(("GAIA_TEST_BUNDLE_KEY", "key-two")))
+        .expect("another key");
+    assert!(
+        other.ends_with("signed with secret-of-key-two\n"),
+        "{other}"
+    );
+    // The secret is in no record of the step: not in its logs.
+    let store = Store::open(&f.store).expect("store");
+    let logs = logs_dir(&store);
+    let mut texts = String::new();
+    for entry in std::fs::read_dir(logs.join("gaia.generate.image"))
+        .expect("logs")
+        .flatten()
+    {
+        texts.push_str(&std::fs::read_to_string(entry.path()).unwrap_or_default());
+    }
+    assert!(
+        !texts.contains("secret-of-key"),
+        "the key's bytes are in a log"
+    );
+    // (The key file's path is in the log, in the sandbox's own command
+    // line: where the key is kept is not the key.)
+    assert!(texts.contains(&key.display().to_string()));
+    // What is refused: a key with nothing that says which, a variable that
+    // names no file, a key the runs cannot be given, and a name the recipe
+    // gives nothing for.
+    let why = f
+        .bundle(BUNDLE, Some(("GAIA_TEST_BUNDLE_KEY", "")))
+        .expect_err("no identity");
+    assert!(why.contains("nothing says which key it is"), "{why}");
+    let why = f
+        .bundle(BUNDLE, Some(("GAIA_TEST_NO_SUCH_KEY", "key-one")))
+        .expect_err("no file");
+    assert!(
+        why.contains("GAIA_TEST_NO_SUCH_KEY is not set to a key file's path"),
+        "{why}"
+    );
+    let no_key_args = BUNDLE.replace("\"key_args\": [\"--key\", \"@key@\"],", "");
+    let why = f
+        .bundle(&no_key_args, Some(("GAIA_TEST_BUNDLE_KEY", "key-one")))
+        .expect_err("no key_args");
+    assert!(why.contains("have no `key_args` to give it by"), "{why}");
+    let needs_key = BUNDLE.replace("\"@version@\"]", "\"@version@\", \"@key@\"]");
+    let why = f.bundle(&needs_key, None).expect_err("@key@ with no key");
+    assert!(
+        why.contains("names @key@, and the build has no signing key"),
+        "{why}"
     );
 }
