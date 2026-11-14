@@ -1028,7 +1028,7 @@ fn a_recipe_takes_the_generators_files_by_role() {
     let component = dir
         .path()
         .join("examples/components/hello-rust/component.toml");
-    let block = "[generate]\ntool = { source = \"src\", package = \"hello-rust\" }\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"--slot\", \"@slot@\", \"@out@\"]\noutputs = [\"overlay.dts\", \"words\", \"manifest-boot.json\"]\n\n[generate.provides]\nboard-overlay = \"overlay.dts\"\nmanifest-boot = \"manifest-boot.json\"\ncmdline = \"words/cmdline.txt\"\ncmdline-slot = \"words/slot.txt\"\n\n[generate.image]\nfit = [\"part\", \"--min-size\", \"--payload\", \"@payload@\"]\nargs = [\"part\", \"@description@\", \"--slot\", \"@slot@\", \"--payload\", \"@payload@\", \"--size\", \"@size@\", \"--out\", \"@out@\"]\nverify = [\"part\", \"--verify\", \"@out@\"]\n";
+    let block = "[generate]\ntool = { source = \"src\", package = \"hello-rust\" }\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"--slot\", \"@slot@\", \"@out@\"]\noutputs = [\"overlay.dts\", \"words\", \"manifest-boot.json\"]\n\n[generate.provides]\nboard-overlay = \"overlay.dts\"\nmanifest-boot = \"manifest-boot.json\"\ncmdline = \"words/cmdline.txt\"\ncmdline-slot = \"words/slot.txt\"\n\n[generate.image]\nfit = [\"part\", \"--min-size\", \"--payload\", \"@payload@\"]\nargs = [\"part\", \"@description@\", \"--slot\", \"@slot@\", \"--payload\", \"@payload@\", \"--size\", \"@size@\", \"--out\", \"@out@\"]\nverify = [\"part\", \"--verify\", \"@out@\"]\n\n[generate.bundle]\nargs = [\"bundle\", \"--payload\", \"@payload@\", \"--rootfs\", \"@rootfs@\", \"--verity-table\", \"@verity-table@\", \"--product\", \"@product@\", \"--version\", \"@version@\", \"--payload-out\", \"@payload-out@\", \"--out\", \"@out@\"]\nkey_args = [\"--key-file\", \"@key@\", \"--expect-key-id\", \"@key-id@\"]\nverify = [\"bundle\", \"--verify\", \"@out@\"]\nverify_key_args = [\"--pubkey\", \"@pubkey@\"]\n";
     let original = std::fs::read_to_string(&component).expect("read");
     std::fs::write(&component, format!("{original}\n{block}")).expect("write");
     let text = std::fs::read_to_string(&board).expect("read");
@@ -1053,7 +1053,7 @@ fn a_recipe_takes_the_generators_files_by_role() {
     edit(
         &product,
         "id = \"zero-3e-demo\"",
-        "slot = \"base\"\ndevice = \"/dev/mmcblk0p3\"\nboot_size = 67108864",
+        "slot = \"base\"\ndevice = \"/dev/mmcblk0p3\"\nboot_size = 67108864\nproduct = \"demo\"\nversion = \"1.2.3\"",
     );
 
     let out = plan(dir.path(), &[]);
@@ -1079,9 +1079,15 @@ fn a_recipe_takes_the_generators_files_by_role() {
         "zero-3e-demo::initramfs.archive -> zero-3e-demo::as_initramfs.from",
         "zero-3e-demo::cmdline.cmdline -> zero-3e-demo::as_cmdline.from",
         "zero-3e-demo::overlay.overlay -> zero-3e-demo::as_overlay.from",
-        "zero-3e-demo::as_overlay.tree -> host.zero-3e-demo.payload",
-        // The generator's tool again, on the payload: the boot partition.
-        "zero-3e-demo::as_overlay.tree -> zero-3e-demo::boot.payload",
+        // The generator's tool again: the bundle from the payload, the
+        // root image and its table; then the boot partition from the
+        // payload as the bundle has it, which is also what the image gives.
+        "zero-3e-demo::as_overlay.tree -> zero-3e-demo::bundle.payload",
+        "zero-3e-demo::verity.image -> zero-3e-demo::bundle.rootfs",
+        "zero-3e-demo::verity.table -> zero-3e-demo::bundle.table",
+        "zero-3e-demo::bundle.payload -> zero-3e-demo::boot.payload",
+        "zero-3e-demo::bundle.payload -> host.zero-3e-demo.payload",
+        "zero-3e-demo::bundle.image -> host.zero-3e-demo.bundle",
         "hello-rust.tool.tree -> zero-3e-demo::boot.tool",
         "hello-rust.root.rootfs -> zero-3e-demo::boot.root",
         "hello-rust.src.tree -> zero-3e-demo::boot.source",
@@ -1188,14 +1194,37 @@ fn a_recipe_takes_the_generators_files_by_role() {
     }
     // The recipe has the generator's tool write an image, and the component
     // says nothing of how.
-    let cut = block.split("\n[generate.image]").next().expect("the block");
-    std::fs::write(&component, format!("{original}\n{cut}\n")).expect("write");
+    let (before, after) = block
+        .split_once("\n[generate.image]")
+        .expect("the image block");
+    let bundle = after
+        .split_once("\n[generate.bundle]")
+        .expect("the bundle block")
+        .1;
+    std::fs::write(
+        &component,
+        format!("{original}\n{before}\n[generate.bundle]{bundle}\n"),
+    )
+    .expect("write");
     let out = plan(dir.path(), &[]);
     assert_eq!(out.status.code(), Some(2));
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("generate.image"), "{err}");
     assert!(
         err.contains("recipe slot-boot has hello-rust's tool write an image; the component states no [generate.image]"),
+        "{err}"
+    );
+    // The same for the bundle.
+    let cut = block
+        .split("\n[generate.bundle]")
+        .next()
+        .expect("the block");
+    std::fs::write(&component, format!("{original}\n{cut}\n")).expect("write");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("recipe slot-boot has hello-rust's tool write a bundle; the component states no [generate.bundle]"),
         "{err}"
     );
     // A component in both trees, and a recipe that takes an initramfs from
