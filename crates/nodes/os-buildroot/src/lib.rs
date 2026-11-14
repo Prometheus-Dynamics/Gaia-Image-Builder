@@ -12,7 +12,8 @@
 //! the step's scratch space, and its outputs are moved into the store, one
 //! artifact each:
 //!
-//! - **rootfs**: Buildroot's target tree, with the owners and modes
+//! - **rootfs**: Buildroot's target tree without the files Buildroot keeps
+//!   there for itself (`out::BOOKKEEPING`), with the owners and modes
 //!   Buildroot gives a filesystem image as the tree's entries (see `perms`).
 //! - **kernel**, **device-trees**, **bootloader**, **images**: the files of
 //!   its `images/` directory, sorted by name (see `out`).
@@ -575,7 +576,23 @@ fn build(
     };
     let text = serde_json::to_vec(&entries).map_err(|e| fail(e.to_string()))?;
     fs::write(dir.join("rootfs-entries.json"), text).map_err(io_fail("the entries"))?;
+    // What Buildroot leaves at the top of its target tree for its own use:
+    // its image steps leave these out, and so does this.
+    for name in out::BOOKKEEPING {
+        match fs::remove_file(out.join("target").join(name)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(io_fail("Buildroot's own file in the target")(error)),
+        }
+    }
     fs::rename(out.join("target"), dir.join("rootfs")).map_err(io_fail("the target tree"))?;
+    let left = out::bookkeeping_in(&dir.join("rootfs"));
+    if !left.is_empty() {
+        return Err(fail(format!(
+            "the root filesystem holds Buildroot's own files, which are no part of an image: {}",
+            left.join(", ")
+        )));
+    }
     out::copy_tree(&dir.join("rootfs/lib/modules"), &dir.join("modules"))
         .map_err(io_fail("the kernel modules"))?;
     out::sort_images(&out.join("images"), &dir).map_err(io_fail("the images"))?;
