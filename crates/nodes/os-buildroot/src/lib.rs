@@ -186,10 +186,11 @@ impl Prepared {
             key = key.config(
                 &format!("kernel-contract.{}", contract.input),
                 format!(
-                    "{}\n{}\n{}\n{}",
+                    "{}\n{}\n{}\n{}\n{}",
                     contract.path,
                     contract.board,
                     contract.kind,
+                    contract.firmware,
                     contract.storage_drivers.join(" ")
                 ),
             );

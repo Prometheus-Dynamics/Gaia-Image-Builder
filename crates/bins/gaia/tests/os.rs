@@ -401,7 +401,7 @@ fn a_components_kernel_contract_is_checked_in_the_kernels_build() {
     std::fs::write(
         dir.path()
             .join("examples/components/hello-rust/src/slot-kernel.toml"),
-        "version = 1\n",
+        "version = 2\n",
     )
     .expect("write");
     edit(
@@ -446,6 +446,10 @@ fn a_components_kernel_contract_is_checked_in_the_kernels_build() {
     assert_eq!(contract["asked_by"], "hello-rust");
     assert_eq!(contract["board"], "zero-3e");
     assert_eq!(contract["kind"], "disk");
+    assert_eq!(
+        contract["firmware"], "",
+        "this board has no boot firmware of its own"
+    );
     assert_eq!(
         contract["storage_drivers"][1],
         "CONFIG_MMC_SDHCI_OF_DWCMSHC"
