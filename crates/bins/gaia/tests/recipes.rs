@@ -183,3 +183,40 @@ fn a_data_recipe_without_a_data_component_names_images_data() {
         "{error}"
     );
 }
+
+/// `slot-disk` is `slot-boot` and more: every stage, edge, input, output,
+/// constant and setting of `slot-boot` is in it, the same, so a change to
+/// the one that misses the other fails here.
+#[test]
+fn slot_disk_is_slot_boot_and_more() {
+    let recipes = Recipes::load_dir(repo().join("recipes")).expect("the recipes load");
+    let boot = &recipes.by_name["slot-boot"];
+    let disk = &recipes.by_name["slot-disk"];
+    for (stage, node) in &boot.stages {
+        assert_eq!(disk.stages.get(stage), Some(node), "stage {stage}");
+    }
+    for connect in &boot.connects {
+        assert!(disk.connects.contains(connect), "{connect:?}");
+    }
+    for (input, ports) in &boot.inputs {
+        let have = disk.inputs.get(input).expect(input);
+        for port in ports {
+            assert!(have.contains(port), "input {input}: {port}");
+        }
+    }
+    for (output, port) in &boot.outputs {
+        assert_eq!(disk.outputs.get(output), Some(port), "output {output}");
+    }
+    for (port, value) in &boot.consts {
+        assert_eq!(disk.consts.get(port), Some(value), "const {port}");
+    }
+    for (name, parameter) in &boot.parameters {
+        let have = disk.parameters.get(name).expect(name);
+        assert_eq!(have.kind, parameter.kind, "parameter {name}");
+        assert_eq!(have.default, parameter.default, "parameter {name}");
+        assert_eq!(have.description, parameter.description, "parameter {name}");
+        for port in &parameter.sets {
+            assert!(have.sets.contains(port), "parameter {name}: {port}");
+        }
+    }
+}
