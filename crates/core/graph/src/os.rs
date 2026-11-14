@@ -100,6 +100,13 @@ impl OsPlan {
 
     /// A directory as an input, `files.<n>` by first use.
     fn dir(&mut self, dir: &Path) -> String {
+        // The directory of a file named with no directory is this one: an
+        // empty path is no directory to a step.
+        let dir = if dir.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            dir
+        };
         if let Some((name, _)) = self
             .inputs
             .iter()
@@ -159,6 +166,16 @@ pub(crate) fn plan(
                 "BR2_LINUX_KERNEL",
                 "LINUX",
             )?);
+        }
+        if kernel.config.is_none() && kernel.defconfig.is_none() {
+            return Err(Error::at(
+                &board.file,
+                "kernel",
+                format!(
+                    "the board {} states no configuration for its kernel to start from: `defconfig` (an in-tree one, or \"defconfig\" for the architecture's own) or `config` (a complete one); Buildroot stops without it",
+                    board.name
+                ),
+            ));
         }
         if let (Some(_), Some(_)) = (&kernel.config, &kernel.defconfig) {
             return Err(Error::at(

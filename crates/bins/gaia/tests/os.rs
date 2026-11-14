@@ -738,3 +738,83 @@ fn a_boards_kernel_starts_from_a_complete_configuration() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("kernel.config"), "{err}");
 }
+
+/// A kernel with nothing to start its configuration from is an error where
+/// the plan is made: Buildroot would stop on it much later.
+#[test]
+fn a_kernel_with_no_starting_configuration_is_an_error_in_the_plan() {
+    let dir = project();
+    let family = dir.path().join("examples/boards/rk35xx/family.toml");
+    let text = std::fs::read_to_string(&family).expect("read");
+    let without: String = text
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("defconfig ="))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    std::fs::write(&family, without).expect("write");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("board.toml: kernel:"), "{err}");
+    assert!(
+        err.contains("the board zero-3e states no configuration for its kernel to start from"),
+        "{err}"
+    );
+}
+
+/// A product built from its own directory by a bare file name: the
+/// directory of a fragment named with no directory is `.`, not an empty
+/// path, which no step can read.
+#[test]
+fn a_product_named_with_no_directory_has_its_fragments_directory() {
+    let dir = project();
+    let product = dir.path().join("examples/products/zero-3e-demo");
+    let out = Command::new(env!("CARGO_BIN_EXE_gaia"))
+        .args([
+            "plan",
+            "product.toml",
+            "--json",
+            "--recipes",
+            "../../../recipes",
+            "--tool",
+            "make=/usr/bin/make",
+            "--tool",
+            "mkfs_erofs=/usr/bin/mkfs.erofs",
+            "--tool",
+            "veritysetup=/usr/sbin/veritysetup",
+            "--tool",
+            "bwrap=/usr/bin/bwrap",
+            "--tool",
+            "toolchain=/opt/rust",
+            "--tool",
+            "mke2fs=/usr/sbin/mke2fs",
+            "--tool",
+            "debugfs=/usr/sbin/debugfs",
+        ])
+        .current_dir(&product)
+        .env("GAIA_STORE", dir.path().join("store"))
+        .env("GAIA_JOBS", "4")
+        .env_remove("GAIA_CPUS")
+        .env_remove("GAIA_BUILDROOT_DL")
+        .env_remove("XDG_CACHE_HOME")
+        .output()
+        .expect("runs");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let both: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+    let nodes = both["graph"]["graph"]["nodes"].as_array().expect("nodes");
+    let paths: Vec<&str> = nodes
+        .iter()
+        .filter(|n| n["id"] == "gaia.source.path")
+        .filter_map(|n| n["consts"]["path"]["value"].as_str())
+        .collect();
+    println!("{paths:?}");
+    assert!(
+        paths.contains(&"."),
+        "the product's own directory: {paths:?}"
+    );
+    assert!(!paths.contains(&""), "no empty path: {paths:?}");
+}
