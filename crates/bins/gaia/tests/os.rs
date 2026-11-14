@@ -775,6 +775,15 @@ erofs = "gaia.fs.erofs"
 verity = "gaia.verity"
 as_kernel = "gaia.tree.role"
 bundle = "gaia.generate.image"
+data = "gaia.generate.tree"
+
+[[connects]]
+from = "bundle.image"
+to = "data.bundle"
+
+[[connects]]
+from = "as_kernel.tree"
+to = "data.payload"
 
 [[connects]]
 from = "erofs.image"
@@ -795,6 +804,7 @@ to = "bundle.payload"
 [consts]
 "as_kernel.role" = "kernel"
 "bundle.size" = 0
+"data.size" = 0
 "erofs.compression" = "lzma"
 "erofs.level" = 0
 
@@ -804,14 +814,16 @@ kernel = ["as_kernel.from"]
 kernel-build = ["erofs.kernel"]
 host-tools = ["erofs.tools", "verity.tools"]
 generator-bundle = ["bundle.runs"]
+generator-data = ["data.runs"]
 
 [outputs]
 bundle = "bundle.image"
+data = "data.tree"
 
 [parameters.slot]
 type = "string"
 description = "The slot's id."
-sets = ["bundle.slot"]
+sets = ["bundle.slot", "data.slot"]
 
 [parameters.device]
 type = "string"
@@ -842,7 +854,7 @@ sets = ["bundle.key_id"]
 "#,
     )
     .expect("recipe");
-    let block = "[generate]\ntool = { source = \"src\", package = \"hello-rust\" }\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"@out@\"]\noutputs = [\"overlay.dts\"]\n\n[generate.bundle]\nargs = [\"bundle\", \"--slot\", \"@slot@\", \"--payload\", \"@payload@\", \"--rootfs\", \"@rootfs@\", \"--verity-table\", \"@verity-table@\", \"--product\", \"@product@\", \"--version\", \"@version@\", \"--out\", \"@out@\"]\nkey_args = [\"--key-file\", \"@key@\"]\nverify = [\"bundle\", \"--verify\", \"@out@\"]\n";
+    let block = "[generate]\ntool = { source = \"src\", package = \"hello-rust\" }\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"@out@\"]\noutputs = [\"overlay.dts\"]\n\n[generate.bundle]\nargs = [\"bundle\", \"--slot\", \"@slot@\", \"--payload\", \"@payload@\", \"--rootfs\", \"@rootfs@\", \"--verity-table\", \"@verity-table@\", \"--product\", \"@product@\", \"--version\", \"@version@\", \"--out\", \"@out@\"]\nkey_args = [\"--key-file\", \"@key@\"]\nverify = [\"bundle\", \"--verify\", \"@out@\"]\n\n[generate.data]\nargs = [\"data-partition\", \"--install\", \"@bundle@\", \"--out\", \"@out@\"]\nverify = [\"data-partition\", \"--verify\", \"@out@\"]\n";
     let original = std::fs::read_to_string(&component).expect("read");
     std::fs::write(&component, format!("{original}\n{block}")).expect("write");
     let text = std::fs::read_to_string(&board).expect("read");
@@ -879,6 +891,11 @@ sets = ["bundle.key_id"]
         "hello-rust.root.rootfs -> zero-3e-demo::bundle.root",
         "zero-3e-demo.hello-rust.description.daemon.tree -> zero-3e-demo::bundle.description",
         "zero-3e-demo::bundle.image -> host.zero-3e-demo.bundle",
+        // The same tool installs the bundle into a directory: the data
+        // partition's contents.
+        "zero-3e-demo::bundle.image -> zero-3e-demo::data.bundle",
+        "hello-rust.tool.tree -> zero-3e-demo::data.tool",
+        "zero-3e-demo::data.tree -> host.zero-3e-demo.data",
     ] {
         assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
     }
@@ -921,6 +938,27 @@ sets = ["bundle.key_id"]
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         err.contains("recipe bundle-test has hello-rust's tool write a bundle; the component states no [generate.bundle]"),
+        "{err}"
+    );
+    // And of the data partition's contents.
+    let cut = block.split("\n[generate.data]").next().expect("the block");
+    std::fs::write(&component, format!("{original}\n{cut}\n")).expect("write");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("recipe bundle-test has hello-rust's tool write a data partition's contents; the component states no [generate.data]"),
+        "{err}"
+    );
+    let no_out = block.replace(
+        "\"--install\", \"@bundle@\", \"--out\", \"@out@\"]",
+        "\"--install\", \"@bundle@\"]",
+    );
+    std::fs::write(&component, format!("{original}\n{no_out}")).expect("write");
+    let out = plan(dir.path(), &[]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("no argument names @out@, the directory the tool writes"),
         "{err}"
     );
 }

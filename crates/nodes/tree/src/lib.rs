@@ -49,7 +49,7 @@ pub use cmdline::{
 pub use file::tree_file;
 pub use generate::{TOKENS, generate, unknown_tokens};
 pub use generate_image::{
-    Runs as ImageRuns, TOKENS as IMAGE_TOKENS, generate_image,
+    Runs as ImageRuns, TOKENS as IMAGE_TOKENS, generate_image, generate_tree,
     unknown_tokens as unknown_image_tokens,
 };
 pub use layer::tree_layer;
@@ -69,8 +69,9 @@ use gaia_store::Digest;
 use gaia_types::Tree;
 
 /// The nodes, for a registry.
-pub const NODES: [&NodeRecord; 15] = [
+pub const NODES: [&NodeRecord; 16] = [
     &generate_image::GENERATE_IMAGE_NODE,
+    &generate_image::GENERATE_TREE_NODE,
     &role::TREE_ROLE_NODE,
     &by_role::TREE_BY_ROLE_NODE,
     &generate::GENERATE_NODE,

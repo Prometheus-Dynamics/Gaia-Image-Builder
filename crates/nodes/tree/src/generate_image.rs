@@ -45,20 +45,29 @@
 //! third output, `payload`, so the next step places the very bytes the
 //! bundle's manifest names (an empty tree when no run asks for it).
 //!
+//! `@bundle@` is the slot's bundle, a file the recipe gives (a run that
+//! installs the slot somewhere, say).
+//!
+//! `gaia.generate.tree` is the same with one difference: `@out@` is a
+//! directory the tool makes and fills (a data partition's contents with
+//! the slot installed in it, in the tool's own layout), the step's first
+//! output, a tree. It has no size; the filesystem it goes into has.
+//!
 //! The tool runs as [`crate::generate`]'s does: sandboxed in the image it
 //! was built in, with no network and nothing of this machine. The file
-//! written must be exactly `size` bytes.
+//! written must be exactly `size` bytes, when there is a size.
 
 use crate::walk::inside;
 use daedalus::prelude::*;
 use gaia_sandbox::Sandbox;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store, Stream};
-use gaia_types::{Artifact, ArtifactKind, Tree};
+use gaia_types::{Artifact, ArtifactKind, StoreRef, Tree};
 use serde::Deserialize;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 const NAME: &str = "gaia.generate.image";
+const TREE_NAME: &str = "gaia.generate.tree";
 const TOOL: &str = "/tool";
 const SOURCE: &str = "/source";
 const DESCRIPTION: &str = "/description";
@@ -70,6 +79,8 @@ const ROOTFS: &str = "/rootfs.img";
 const TABLE: &str = "/verity-table";
 const KEY: &str = "/signing-key";
 const PUBKEY: &str = "/signing-pubkey";
+/// Where the slot's bundle is, when the recipe gives it.
+const BUNDLE: &str = "/bundle";
 /// The directory a run writes the payload into as it bundled it, in the
 /// output directory.
 const PAYLOAD_OUT: &str = "payload";
@@ -102,7 +113,7 @@ pub struct Runs {
 }
 
 /// The image `runs` (JSON of [`Runs`]) makes from `payload`: `size` bytes,
-/// written by `program` of `tool`, with what its `fit` run printed.
+/// written by `program` of `tool`, with what its runs printed.
 #[node(
     id = "gaia.generate.image",
     inputs(
@@ -124,7 +135,8 @@ pub struct Runs {
         key_id,
         pubkey_env,
         product,
-        version
+        version,
+        bundle
     ),
     outputs(image, report, payload)
 )]
@@ -149,10 +161,178 @@ pub fn generate_image(
     pubkey_env: Option<&String>,
     product: Option<&String>,
     version: Option<&String>,
+    bundle: Option<&Artifact>,
     cx: &Ctx,
 ) -> Result<(Artifact, Artifact, Tree), StepError> {
-    let fail = |why: String| StepError::body(NAME, why);
-    let store = Store::open(store).map_err(StepError::store(NAME))?;
+    let (image, report, payload) = make(
+        NAME,
+        Writes::File,
+        store,
+        bwrap,
+        root,
+        tool,
+        program,
+        source,
+        description,
+        description_name,
+        payload,
+        runs,
+        slot,
+        size,
+        rootfs,
+        table,
+        key_env,
+        key_id,
+        pubkey_env,
+        product,
+        version,
+        bundle,
+        cx,
+    )?;
+    Ok((
+        Artifact {
+            kind: ArtifactKind::parse("generated-image"),
+            object: image,
+        },
+        Artifact {
+            kind: ArtifactKind::parse("report"),
+            object: report,
+        },
+        Tree {
+            object: payload,
+            entries: Vec::new(),
+        },
+    ))
+}
+
+/// The directory `runs` makes: as [`generate_image`], with `@out@` a
+/// directory the tool fills, and no size.
+#[node(
+    id = "gaia.generate.tree",
+    inputs(
+        store,
+        bwrap,
+        root,
+        tool,
+        program,
+        source,
+        description,
+        description_name,
+        payload,
+        runs,
+        slot,
+        size,
+        rootfs,
+        table,
+        key_env,
+        key_id,
+        pubkey_env,
+        product,
+        version,
+        bundle
+    ),
+    outputs(tree, report, payload)
+)]
+#[allow(clippy::too_many_arguments)]
+pub fn generate_tree(
+    store: &str,
+    bwrap: &str,
+    root: Tree,
+    tool: Tree,
+    program: &str,
+    source: Tree,
+    description: Tree,
+    description_name: &str,
+    payload: Tree,
+    runs: &str,
+    slot: &str,
+    size: i64,
+    rootfs: Option<&gaia_types::Image>,
+    table: Option<&Artifact>,
+    key_env: Option<&String>,
+    key_id: Option<&String>,
+    pubkey_env: Option<&String>,
+    product: Option<&String>,
+    version: Option<&String>,
+    bundle: Option<&Artifact>,
+    cx: &Ctx,
+) -> Result<(Tree, Artifact, Tree), StepError> {
+    let (tree, report, payload) = make(
+        TREE_NAME,
+        Writes::Tree,
+        store,
+        bwrap,
+        root,
+        tool,
+        program,
+        source,
+        description,
+        description_name,
+        payload,
+        runs,
+        slot,
+        size,
+        rootfs,
+        table,
+        key_env,
+        key_id,
+        pubkey_env,
+        product,
+        version,
+        bundle,
+        cx,
+    )?;
+    Ok((
+        Tree {
+            object: tree,
+            entries: Vec::new(),
+        },
+        Artifact {
+            kind: ArtifactKind::parse("report"),
+            object: report,
+        },
+        Tree {
+            object: payload,
+            entries: Vec::new(),
+        },
+    ))
+}
+
+/// What a run writes at `@out@`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Writes {
+    File,
+    Tree,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn make(
+    name: &'static str,
+    writes: Writes,
+    store: &str,
+    bwrap: &str,
+    root: Tree,
+    tool: Tree,
+    program: &str,
+    source: Tree,
+    description: Tree,
+    description_name: &str,
+    payload: Tree,
+    runs: &str,
+    slot: &str,
+    size: i64,
+    rootfs: Option<&gaia_types::Image>,
+    table: Option<&Artifact>,
+    key_env: Option<&String>,
+    key_id: Option<&String>,
+    pubkey_env: Option<&String>,
+    product: Option<&String>,
+    version: Option<&String>,
+    bundle: Option<&Artifact>,
+    cx: &Ctx,
+) -> Result<(StoreRef, StoreRef, StoreRef), StepError> {
+    let fail = |why: String| StepError::body(name, why);
+    let store = Store::open(store).map_err(StepError::store(name))?;
     let in_store = |tree: &Tree, what: &str| {
         tree.object
             .object_ref()
@@ -256,8 +436,22 @@ pub fn generate_image(
         ),
         None => None,
     };
+    let bundle_object = match bundle {
+        Some(bundle) => Some(
+            bundle
+                .object
+                .object_ref()
+                .ok_or_else(|| fail("the bundle is not in the store".into()))?,
+        ),
+        None => None,
+    };
     let product = product.map(String::as_str).unwrap_or_default();
     let version = version.map(String::as_str).unwrap_or_default();
+    if writes == Writes::Tree && size != 0 {
+        return Err(fail(format!(
+            "size {size}: a directory has no size; the filesystem it goes into has"
+        )));
+    }
     if size < 0 {
         return Err(fail(format!("size {size}: not a size")));
     }
@@ -308,6 +502,11 @@ pub fn generate_image(
                 !version.is_empty(),
                 "the image states no version",
             ),
+            (
+                "@bundle@",
+                bundle_object.is_some(),
+                "the recipe gives no bundle",
+            ),
         ] {
             if arg.contains(name) && !given {
                 return Err(fail(format!(
@@ -338,9 +537,12 @@ pub fn generate_image(
     if let Some(object) = &table_object {
         sandbox = sandbox.input(store.path(object), TABLE);
     }
+    if let Some(object) = &bundle_object {
+        sandbox = sandbox.input(store.path(object), BUNDLE);
+    }
     let mut key = sandbox
         // 2: a third output, the payload as the tool bundled it.
-        .key(KeyBuilder::new(NAME, 3))
+        .key(KeyBuilder::new(name, 3))
         .input("root", root_object.digest)
         .input("tool", tool_object.digest)
         .config("program", program)
@@ -362,6 +564,9 @@ pub fn generate_image(
     }
     if let Some(object) = &table_object {
         key = key.input("table", object.digest);
+    }
+    if let Some(object) = &bundle_object {
+        key = key.input("bundle", object.digest);
     }
     if key_file.is_some() {
         key = key.config("key id", key_id);
@@ -388,14 +593,14 @@ pub fn generate_image(
     let described_in = format!("{DESCRIPTION}/{described}");
     let image_in = format!("{OUT}/{IMAGE}");
     let payload_in = format!("{OUT}/{PAYLOAD_OUT}");
-    let made = Step::new(&store, cx, NAME, key.finish()).look_up_or_make(
+    let made = Step::new(&store, cx, name, key.finish()).look_up_or_make(
         &[
             ("image", Path::new("out/image")),
             ("report", Path::new("report.txt")),
             ("payload", Path::new("out/payload")),
         ],
         |work| {
-            let io = |e: std::io::Error| StepError::body(NAME, e.to_string());
+            let io = |e: std::io::Error| StepError::body(name, e.to_string());
             let out = work.dir().join("out");
             std::fs::create_dir(&out).map_err(io)?;
             let fill = |args: &[String]| -> Vec<String> {
@@ -415,6 +620,7 @@ pub fn generate_image(
                             .replace("@payload-out@", &payload_in)
                             .replace("@product@", product)
                             .replace("@version@", version)
+                            .replace("@bundle@", BUNDLE)
                     })
                     .collect()
             };
@@ -447,16 +653,29 @@ pub fn generate_image(
             }
             work.run(&telling(&runs.args).map_err(io)?)?;
             let image = out.join(IMAGE);
-            let written = std::fs::metadata(&image)
-                .map_err(|_| StepError::body(NAME, format!("{program} wrote no file at @out@")))?;
-            if !written.is_file() || (size != 0 && written.len() != size.unsigned_abs()) {
-                return Err(StepError::body(
-                    NAME,
-                    format!(
-                        "{program} wrote {} bytes at @out@; the image's size is {size}",
-                        written.len()
-                    ),
-                ));
+            match writes {
+                Writes::File => {
+                    let written = std::fs::metadata(&image).map_err(|_| {
+                        StepError::body(name, format!("{program} wrote no file at @out@"))
+                    })?;
+                    if !written.is_file() || (size != 0 && written.len() != size.unsigned_abs()) {
+                        return Err(StepError::body(
+                            name,
+                            format!(
+                                "{program} wrote {} bytes at @out@; the image's size is {size}",
+                                written.len()
+                            ),
+                        ));
+                    }
+                }
+                Writes::Tree => {
+                    if !image.is_dir() {
+                        return Err(StepError::body(
+                            name,
+                            format!("{program} wrote no directory at @out@"),
+                        ));
+                    }
+                }
             }
             if !runs.verify.is_empty() {
                 work.run(&telling(&runs.verify).map_err(io)?)?;
@@ -470,7 +689,7 @@ pub fn generate_image(
             if wants_payload {
                 if !payload_out.is_dir() {
                     return Err(StepError::body(
-                        NAME,
+                        name,
                         format!("{program} wrote no directory at @payload-out@"),
                     ));
                 }
@@ -481,17 +700,8 @@ pub fn generate_image(
         },
     )?;
     Ok((
-        Artifact {
-            kind: ArtifactKind::parse("generated-image"),
-            object: made.outputs["image"].into(),
-        },
-        Artifact {
-            kind: ArtifactKind::parse("report"),
-            object: made.outputs["report"].into(),
-        },
-        Tree {
-            object: made.outputs["payload"].into(),
-            entries: Vec::new(),
-        },
+        made.outputs["image"].into(),
+        made.outputs["report"].into(),
+        made.outputs["payload"].into(),
     ))
 }

@@ -64,6 +64,8 @@ struct Generator {
     image_runs: Option<String>,
     /// And of `[generate.bundle]`.
     bundle_runs: Option<String>,
+    /// And of `[generate.data]`.
+    data_runs: Option<String>,
 }
 
 impl Graph<'_> {
@@ -769,6 +771,7 @@ fn image_recipe(
             || input == "generator-source"
             || input == "generator-image"
             || input == "generator-bundle"
+            || input == "generator-data"
             || input.starts_with("provides.")
         {
             let made = g.generators.get(&image.name).cloned().unwrap_or_default();
@@ -783,14 +786,21 @@ fn image_recipe(
                     ),
                 ));
             };
-            if input == "generator-image" || input == "generator-bundle" {
+            if input == "generator-image"
+                || input == "generator-bundle"
+                || input == "generator-data"
+            {
                 // A stage that runs the generator's tool again, on what the
                 // recipe gives it: everything of the tool but the payload,
                 // the slot and the rest, which are the recipe's.
-                let (table, what, stated) = if input == "generator-image" {
-                    ("generate.image", "an image", &generator.image_runs)
-                } else {
-                    ("generate.bundle", "a bundle", &generator.bundle_runs)
+                let (table, what, stated) = match input.as_str() {
+                    "generator-image" => ("generate.image", "an image", &generator.image_runs),
+                    "generator-bundle" => ("generate.bundle", "a bundle", &generator.bundle_runs),
+                    _ => (
+                        "generate.data",
+                        "a data partition's contents",
+                        &generator.data_runs,
+                    ),
                 };
                 let Some(runs) = stated else {
                     return Err(Error::at(
@@ -1952,6 +1962,7 @@ fn generate_node(g: &mut Graph<'_>, at: &OsIn<'_>, component: &Component) -> Res
             description_name: generate.description.clone(),
             image_runs: generate.image.as_ref().map(runs_json),
             bundle_runs: generate.bundle.as_ref().map(runs_json),
+            data_runs: generate.data.as_ref().map(runs_json),
         });
     Ok(node)
 }
