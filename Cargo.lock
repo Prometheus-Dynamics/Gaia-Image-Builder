@@ -593,6 +593,7 @@ dependencies = [
  "ctrlc",
  "daedalus",
  "daedalus-cpu",
+ "flate2",
  "gaia-build-command",
  "gaia-build-go",
  "gaia-build-java",
@@ -632,9 +633,11 @@ dependencies = [
  "gaia-tree",
  "gaia-types",
  "gaia-verity",
+ "lzma-sys",
  "serde",
  "serde_json",
  "tempfile",
+ "xz2",
 ]
 
 [[package]]

@@ -15,6 +15,7 @@ usage:
   gaia lock  <product.toml> [--update SOURCE]... [--check]  (see gaia lock --help)
   gaia clean [--store DIR] [--keep N] [--dry-run]
   gaia show  <image>.<output> [--store DIR]
+  gaia sizes [<run.json>] [--store DIR] [--json] [--xz]
 
 project flags:
   --store DIR        the content store (default: $GAIA_STORE, or
@@ -62,6 +63,7 @@ pub enum Command {
     Build(Project),
     Clean(Clean),
     Show(Show),
+    Sizes(Sizes),
     /// `gaia lock`: the words after `lock`.
     Lock(Vec<String>),
 }
@@ -91,6 +93,16 @@ pub struct Clean {
     pub store: Option<PathBuf>,
     pub keep: Option<usize>,
     pub dry_run: bool,
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct Sizes {
+    /// The run's record; the latest in the store when not given.
+    pub run: Option<PathBuf>,
+    pub store: Option<PathBuf>,
+    pub json: bool,
+    /// Also compress each disk image, for its size.
+    pub xz: bool,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -219,6 +231,20 @@ pub fn parse(words: &[String]) -> Result<Command, Stop> {
             show.output =
                 output.ok_or_else(|| Stop::usage("show needs an output, as <image>.<output>"))?;
             Command::Show(show)
+        }
+        "sizes" => {
+            let mut sizes = Sizes::default();
+            let mut run = None;
+            while let Some(word) = words.next() {
+                match word {
+                    "--store" => sizes.store = Some(words.value(word)?.into()),
+                    "--json" => sizes.json = true,
+                    "--xz" => sizes.xz = true,
+                    _ => words.positional(word, &mut run)?,
+                }
+            }
+            sizes.run = run.map(PathBuf::from);
+            Command::Sizes(sizes)
         }
         other => {
             return Err(Stop::usage(format!(
