@@ -1963,6 +1963,7 @@ fn runs_json(runs: &gaia_describe::GenerateImage) -> String {
         "args": runs.args,
         "verify": runs.verify,
         "key_args": runs.key_args,
+        "verify_key_args": runs.verify_key_args,
     })
     .to_string()
 }

@@ -94,6 +94,10 @@ pub struct GenerateImage {
     /// unsigned.
     #[serde(default)]
     pub key_args: Vec<String>,
+    /// Added to `verify` when the build has a signing key: `@pubkey@` is
+    /// the file of the key's public half.
+    #[serde(default)]
+    pub verify_key_args: Vec<String>,
 }
 
 /// The tool: a package of one of the component's sources.
@@ -298,6 +302,7 @@ impl Component {
                     ("args", &image.args),
                     ("verify", &image.verify),
                     ("key_args", &image.key_args),
+                    ("verify_key_args", &image.verify_key_args),
                 ];
                 for (run, args) in runs {
                     for (index, arg) in args.iter().enumerate() {

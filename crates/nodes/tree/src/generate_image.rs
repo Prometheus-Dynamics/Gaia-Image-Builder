@@ -33,6 +33,15 @@
 //! identifies it (`key_id`), not on the key. With no `size`, the file
 //! written may be any size.
 //!
+//! `@key-id@` is that identity, for a tool that refuses a key file that is
+//! not the one meant. `@pubkey@` is the key's public half, a file another
+//! variable names (`pubkey_env`), for the run's `verify_key_args`, which
+//! are added to `verify` when the build signs: without it a tool can only
+//! say the signature was not checked. And `@payload-out@` is a directory
+//! the tool makes and writes the payload into as it bundled it: the step's
+//! third output, `payload`, so the next step places the very bytes the
+//! bundle's manifest names (an empty tree when no run asks for it).
+//!
 //! The tool runs as [`crate::generate`]'s does: sandboxed in the image it
 //! was built in, with no network and nothing of this machine. The file
 //! written must be exactly `size` bytes.
@@ -57,6 +66,10 @@ const OUT: &str = "/out";
 const ROOTFS: &str = "/rootfs.img";
 const TABLE: &str = "/verity-table";
 const KEY: &str = "/signing-key";
+const PUBKEY: &str = "/signing-pubkey";
+/// The directory a run writes the payload into as it bundled it, in the
+/// output directory.
+const PAYLOAD_OUT: &str = "payload";
 /// The file the tool writes, in the output directory.
 const IMAGE: &str = "image";
 pub use gaia_types::GENERATE_IMAGE_NAMES as TOKENS;
@@ -79,6 +92,10 @@ pub struct Runs {
     /// given it (`@key@` is the key file).
     #[serde(default)]
     pub key_args: Vec<String>,
+    /// Added to `verify` when the build has a signing key: how the tool is
+    /// given what to check the signature with (`@pubkey@`).
+    #[serde(default)]
+    pub verify_key_args: Vec<String>,
 }
 
 /// The image `runs` (JSON of [`Runs`]) makes from `payload`: `size` bytes,
@@ -102,10 +119,11 @@ pub struct Runs {
         table,
         key_env,
         key_id,
+        pubkey_env,
         product,
         version
     ),
-    outputs(image, report)
+    outputs(image, report, payload)
 )]
 #[allow(clippy::too_many_arguments)]
 pub fn generate_image(
@@ -125,10 +143,11 @@ pub fn generate_image(
     table: Option<&Artifact>,
     key_env: Option<&String>,
     key_id: Option<&String>,
+    pubkey_env: Option<&String>,
     product: Option<&String>,
     version: Option<&String>,
     cx: &Ctx,
-) -> Result<(Artifact, Artifact), StepError> {
+) -> Result<(Artifact, Artifact, Tree), StepError> {
     let fail = |why: String| StepError::body(NAME, why);
     let store = Store::open(store).map_err(StepError::store(NAME))?;
     let in_store = |tree: &Tree, what: &str| {
@@ -187,12 +206,33 @@ pub fn generate_image(
             })?;
         Some(path)
     };
+    // The public half, a file another variable names: for the tool to
+    // check its own signature with. Public, so its bytes are in the key.
+    let pubkey_env = pubkey_env.map(String::as_str).unwrap_or_default();
+    let pubkey_file = if pubkey_env.is_empty() || key_file.is_none() {
+        None
+    } else {
+        let path = std::env::var_os(pubkey_env)
+            .map(std::path::PathBuf::from)
+            .filter(|path| path.is_file())
+            .ok_or_else(|| {
+                fail(format!(
+                    "{pubkey_env} is not set to the signing key's public key file's path"
+                ))
+            })?;
+        Some(path)
+    };
     let mut written_args = runs.args.clone();
+    let mut verify_args = runs.verify.clone();
     if key_file.is_some() {
         written_args.extend(runs.key_args.iter().cloned());
+        if !verify_args.is_empty() {
+            verify_args.extend(runs.verify_key_args.iter().cloned());
+        }
     }
     let runs = Runs {
         args: written_args,
+        verify: verify_args,
         ..runs
     };
     let rootfs_object = match rootfs {
@@ -246,6 +286,16 @@ pub fn generate_image(
             ),
             ("@key@", key_file.is_some(), "the build has no signing key"),
             (
+                "@key-id@",
+                key_file.is_some(),
+                "the build has no signing key",
+            ),
+            (
+                "@pubkey@",
+                pubkey_file.is_some(),
+                "the build names no public key file",
+            ),
+            (
                 "@product@",
                 !product.is_empty(),
                 "the image states no product",
@@ -286,7 +336,8 @@ pub fn generate_image(
         sandbox = sandbox.input(store.path(object), TABLE);
     }
     let mut key = sandbox
-        .key(KeyBuilder::new(NAME, 1))
+        // 2: a third output, the payload as the tool bundled it.
+        .key(KeyBuilder::new(NAME, 2))
         .input("root", root_object.digest)
         .input("tool", tool_object.digest)
         .config("program", program)
@@ -312,6 +363,11 @@ pub fn generate_image(
     if key_file.is_some() {
         key = key.config("key id", key_id);
     }
+    if let Some(path) = &pubkey_file {
+        let bytes = std::fs::read(path).map_err(|e| fail(format!("{pubkey_env}: {e}")))?;
+        key = key.input("public key", gaia_step::Digest::of_bytes(&bytes));
+    }
+    let wants_payload = all().any(|arg| arg.contains("@payload-out@"));
     if !product.is_empty() || !version.is_empty() {
         key = key.config("product", product).config("version", version);
     }
@@ -321,13 +377,19 @@ pub fn generate_image(
         Some(path) => sandbox.input(path.clone(), KEY),
         None => sandbox,
     };
+    let sandbox = match &pubkey_file {
+        Some(path) => sandbox.input(path.clone(), PUBKEY),
+        None => sandbox,
+    };
     let program_in = format!("{TOOL}/{program_rel}");
     let described_in = format!("{DESCRIPTION}/{described}");
     let image_in = format!("{OUT}/{IMAGE}");
+    let payload_in = format!("{OUT}/{PAYLOAD_OUT}");
     let made = Step::new(&store, cx, NAME, key.finish()).look_up_or_make(
         &[
             ("image", Path::new("out/image")),
             ("report", Path::new("report.txt")),
+            ("payload", Path::new("out/payload")),
         ],
         |work| {
             let io = |e: std::io::Error| StepError::body(NAME, e.to_string());
@@ -345,6 +407,9 @@ pub fn generate_image(
                             .replace("@rootfs@", ROOTFS)
                             .replace("@verity-table@", TABLE)
                             .replace("@key@", KEY)
+                            .replace("@key-id@", key_id)
+                            .replace("@pubkey@", PUBKEY)
+                            .replace("@payload-out@", &payload_in)
                             .replace("@product@", product)
                             .replace("@version@", version)
                     })
@@ -390,6 +455,20 @@ pub fn generate_image(
             if !runs.verify.is_empty() {
                 work.run(&run(&runs.verify).map_err(io)?)?;
             }
+            // The payload as the tool put it in what it wrote, when a run
+            // asks for it: the tool makes the directory, which must be new
+            // to it. Otherwise an empty one, so the step always has one.
+            let payload_out = out.join(PAYLOAD_OUT);
+            if wants_payload {
+                if !payload_out.is_dir() {
+                    return Err(StepError::body(
+                        NAME,
+                        format!("{program} wrote no directory at @payload-out@"),
+                    ));
+                }
+            } else {
+                std::fs::create_dir(&payload_out).map_err(io)?;
+            }
             Ok(())
         },
     )?;
@@ -401,6 +480,10 @@ pub fn generate_image(
         Artifact {
             kind: ArtifactKind::parse("report"),
             object: made.outputs["report"].into(),
+        },
+        Tree {
+            object: made.outputs["payload"].into(),
+            entries: Vec::new(),
         },
     ))
 }

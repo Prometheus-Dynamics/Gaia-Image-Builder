@@ -106,8 +106,10 @@ pub const GENERATE_NAMES: [&str; 4] = ["@source@", "@description@", "@out@", "@s
 /// run may hold: the tool's source tree, the board's description file, the
 /// payload directory, the slot's id, the image's size in bytes and the file
 /// to write; and, where the recipe gives them, the slot's root image, its
-/// verity table, a signing key file, and the product's name and version.
-pub const GENERATE_IMAGE_NAMES: [&str; 11] = [
+/// verity table, a signing key file, and the product's name and version;
+/// a directory the tool writes the payload into as it bundled it; what
+/// identifies the signing key; and the file of its public half.
+pub const GENERATE_IMAGE_NAMES: [&str; 14] = [
     "@source@",
     "@description@",
     "@payload@",
@@ -119,6 +121,9 @@ pub const GENERATE_IMAGE_NAMES: [&str; 11] = [
     "@key@",
     "@product@",
     "@version@",
+    "@payload-out@",
+    "@key-id@",
+    "@pubkey@",
 ];
 
 /// The `@name@` words of `text` that are none of [`GENERATE_NAMES`].
