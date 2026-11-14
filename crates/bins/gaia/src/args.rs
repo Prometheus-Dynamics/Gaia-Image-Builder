@@ -390,7 +390,7 @@ mod tests {
             "--input a is given twice"
         );
         let Ok(Command::Build(p)) =
-            parsed("build p.toml --setting raze-base.version=2026.1.0 --setting a.b.c=x=y")
+            parsed("build p.toml --setting demo.version=2026.1.0 --setting a.b.c=x=y")
         else {
             panic!("build");
         };
@@ -398,7 +398,7 @@ mod tests {
             p.settings,
             [
                 Setting {
-                    image: "raze-base".into(),
+                    image: "demo".into(),
                     name: "version".into(),
                     value: "2026.1.0".into()
                 },
