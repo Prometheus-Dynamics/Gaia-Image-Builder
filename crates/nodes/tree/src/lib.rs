@@ -29,6 +29,7 @@ mod by_role;
 mod cmdline;
 mod file;
 mod generate;
+mod generate_image;
 mod layer;
 mod links;
 mod merge;
@@ -47,6 +48,10 @@ pub use cmdline::{
 };
 pub use file::tree_file;
 pub use generate::{TOKENS, generate, unknown_tokens};
+pub use generate_image::{
+    Runs as ImageRuns, TOKENS as IMAGE_TOKENS, generate_image,
+    unknown_tokens as unknown_image_tokens,
+};
 pub use layer::tree_layer;
 pub use links::tree_links;
 pub use merge::{merge_layers, tree_merge};
@@ -64,7 +69,8 @@ use gaia_store::Digest;
 use gaia_types::Tree;
 
 /// The nodes, for a registry.
-pub const NODES: [&NodeRecord; 14] = [
+pub const NODES: [&NodeRecord; 15] = [
+    &generate_image::GENERATE_IMAGE_NODE,
     &role::TREE_ROLE_NODE,
     &by_role::TREE_BY_ROLE_NODE,
     &generate::GENERATE_NODE,
