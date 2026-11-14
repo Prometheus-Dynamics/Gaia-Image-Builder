@@ -431,6 +431,8 @@ fn build(
     seed: &Path,
     host: &BuildrootHost,
 ) -> Result<(), StepError> {
+    // One build at a time: each has the whole job count.
+    let _turn = turn();
     let fail = |why: String| StepError::body(NAME, why);
     let io_fail = |what: &'static str| {
         move |error: io::Error| StepError::body(NAME, format!("{what}: {error}"))
@@ -607,6 +609,40 @@ fn build(
 
 /// One make run in `out`, for `goals` (none means Buildroot's default,
 /// `all`). With a CPU list, make runs under `taskset`.
+/// One Buildroot build at a time in this process. Each is given the whole
+/// job count (`-j<jobs>`), so two at once would run twice the bound the
+/// build was given; the host tools and the builds that start from them
+/// take turns instead, and the bound is the bound.
+static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// This build's turn, held until the guard is dropped.
+pub(crate) fn turn() -> std::sync::MutexGuard<'static, ()> {
+    TURN.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The make command for `goals`: its arguments, in order, for a test to
+/// read.
+pub fn make_arguments(
+    host: &BuildrootHost,
+    out: &Path,
+    vars: &[String],
+    goals: &[&str],
+) -> Vec<String> {
+    let mut args = Vec::new();
+    if !host.cpus.is_empty() {
+        args.extend([host.taskset.clone(), "-c".into(), host.cpus.clone()]);
+    }
+    args.push(host.make.clone());
+    args.push("--no-print-directory".into());
+    args.push(format!("-j{}", host.jobs));
+    args.push(format!("O={}", out.display()));
+    args.push(format!("BR2_DL_DIR={}", host.download_dir));
+    args.extend(vars.iter().cloned());
+    args.extend(goals.iter().map(|goal| (*goal).to_string()));
+    args
+}
+
 pub(crate) fn make_tool(
     host: &BuildrootHost,
     src: &Path,
@@ -614,21 +650,11 @@ pub(crate) fn make_tool(
     vars: &[String],
     goals: &[&str],
 ) -> Tool {
-    let tool = if host.cpus.is_empty() {
-        Tool::new(&host.make)
-    } else {
-        Tool::new(&host.taskset)
-            .arg("-c")
-            .arg(&host.cpus)
-            .arg(&host.make)
-    };
-    tool.cwd(src)
-        .arg("--no-print-directory")
-        .arg(format!("-j{}", host.jobs))
-        .arg(format!("O={}", out.display()))
-        .arg(format!("BR2_DL_DIR={}", host.download_dir))
-        .args(vars)
-        .args(goals)
+    let mut arguments = make_arguments(host, out, vars, goals).into_iter();
+    let program = arguments.next().unwrap_or_default();
+    Tool::new(program)
+        .cwd(src)
+        .args(arguments)
         .env("PATH", PATH)
         .env("LC_ALL", "C")
         .env("HOME", out.display().to_string())
@@ -636,3 +662,70 @@ pub(crate) fn make_tool(
 
 /// The node, for a registry.
 pub const NODES: [&NodeRecord; 2] = [&OS_BUILDROOT_NODE, &host::OS_BUILDROOT_HOST_NODE];
+
+#[cfg(test)]
+mod bound_tests {
+    use super::*;
+
+    fn host(jobs: u32, cpus: &str) -> BuildrootHost {
+        BuildrootHost {
+            make: "/usr/bin/make".into(),
+            taskset: "/usr/bin/taskset".into(),
+            cpus: cpus.into(),
+            jobs,
+            download_dir: "/dl".into(),
+            config_only: false,
+        }
+    }
+
+    /// The job count the build was given is on make's command line, with
+    /// the CPU pin before it when there is one.
+    #[test]
+    fn makes_command_line_has_the_job_count_it_was_given() {
+        let args = make_arguments(&host(13, ""), Path::new("/out"), &[], &["world"]);
+        assert_eq!(
+            args,
+            [
+                "/usr/bin/make",
+                "--no-print-directory",
+                "-j13",
+                "O=/out",
+                "BR2_DL_DIR=/dl",
+                "world"
+            ]
+        );
+        let pinned = make_arguments(&host(4, "6-31"), Path::new("/out"), &["A=1".into()], &[]);
+        assert_eq!(
+            pinned[..6],
+            [
+                "/usr/bin/taskset",
+                "-c",
+                "6-31",
+                "/usr/bin/make",
+                "--no-print-directory",
+                "-j4"
+            ]
+        );
+        assert_eq!(pinned.iter().filter(|arg| arg.starts_with("-j")).count(), 1);
+    }
+
+    /// Builds take turns: each has the whole job count, so two at once
+    /// would be twice the bound.
+    #[test]
+    fn two_builds_do_not_run_at_once() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let (running, most) = (AtomicUsize::new(0), AtomicUsize::new(0));
+        std::thread::scope(|scope| {
+            for _ in 0..3 {
+                scope.spawn(|| {
+                    let _turn = turn();
+                    let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+                    most.fetch_max(now, Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_millis(60));
+                    running.fetch_sub(1, Ordering::SeqCst);
+                });
+            }
+        });
+        assert_eq!(most.load(Ordering::SeqCst), 1);
+    }
+}
