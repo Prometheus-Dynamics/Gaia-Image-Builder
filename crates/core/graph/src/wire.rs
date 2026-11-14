@@ -238,9 +238,12 @@ pub(crate) fn wire(
         let mut builds = Vec::new();
         let mut data = Vec::new();
         let mut members = Vec::new();
+        let mut initramfs_builds = Vec::new();
+        let mut initramfs_members = Vec::new();
         for (list, names, into) in [
             ("components", &image.components, &mut builds),
             ("data", &image.data, &mut data),
+            ("initramfs", &image.initramfs, &mut initramfs_builds),
         ] {
             for name in names {
                 let component = loaded.components.get(name).ok_or_else(|| {
@@ -252,6 +255,22 @@ pub(crate) fn wire(
                 })?;
                 if list == "components" {
                     members.push(component);
+                }
+                if list == "initramfs" {
+                    if !(component.users.is_empty()
+                        && component.groups.is_empty()
+                        && component.services.is_empty())
+                    {
+                        return Err(Error::at(
+                            &component.file,
+                            "",
+                            format!(
+                                "{name} is in the initramfs of the image {}, and states users, groups or services: an initramfs has files only",
+                                image.name
+                            ),
+                        ));
+                    }
+                    initramfs_members.push(component);
                 }
                 if component.build.is_none() {
                     continue;
@@ -284,6 +303,8 @@ pub(crate) fn wire(
                     board,
                     members: &members,
                     builds: &builds,
+                    initramfs: &initramfs_members,
+                    initramfs_builds: &initramfs_builds,
                     loaded,
                     lock,
                     setup,
@@ -762,6 +783,25 @@ fn image_recipe(
                     g.edge((node, port), (stages[&p.stage], &p.port));
                 }
             }
+        } else if input == "initramfs" {
+            let Some(tree) = at.os.and_then(|os| os.initramfs) else {
+                return Err(Error::at(
+                    product_file,
+                    format!("images[{i}].initramfs"),
+                    format!(
+                        "recipe {} takes the image's initramfs tree; this image names no components under `initramfs`{}",
+                        recipe.name,
+                        if at.os.is_none() {
+                            " and has no `os`"
+                        } else {
+                            ""
+                        }
+                    ),
+                ));
+            };
+            for p in ports {
+                g.edge((tree, "tree"), (stages[&p.stage], &p.port));
+            }
         } else if input == "host-tools" {
             let Some(tools) = g.host_tools.get(&image.name).copied() else {
                 return Err(Error::at(
@@ -858,6 +898,20 @@ fn image_recipe(
             }
         }
         // Any other input is filled like a stage's own: store or a tool.
+    }
+    // An image that names an initramfs and ships none: its recipe must take
+    // the tree, or the components named are in no output at all.
+    if !image.initramfs.is_empty() && !group.inputs.contains_key("initramfs") {
+        return Err(Error::at(
+            product_file,
+            format!("images[{i}].initramfs"),
+            format!(
+                "the image {} names an initramfs ({}), and its recipe {} takes none: nothing would hold those components",
+                image.name,
+                image.initramfs.join(", "),
+                recipe.name
+            ),
+        ));
     }
     for (output, at) in &group.outputs {
         let node = stages[&at.stage];
@@ -1083,6 +1137,8 @@ struct OsNodes {
     /// under /boot: what a slot holds, whose kernel is read from elsewhere.
     /// The same node as `merged` when nothing is under /boot.
     system: u32,
+    /// The image's initramfs tree, when it names components for one.
+    initramfs: Option<u32>,
 }
 
 impl OsNodes {
@@ -1108,6 +1164,9 @@ struct OsIn<'a> {
     board: &'a gaia_describe::Board,
     members: &'a [&'a Component],
     builds: &'a [(String, u32)],
+    /// The components of its initramfs tree, and their builds.
+    initramfs: &'a [&'a Component],
+    initramfs_builds: &'a [(String, u32)],
     loaded: &'a Loaded,
     lock: &'a Lock,
     setup: &'a Setup,
@@ -1507,12 +1566,39 @@ fn image_os(
     } else {
         merge
     };
+    // The initramfs: its components' installs, merged, apart from the root.
+    let initramfs = if at.initramfs.is_empty() {
+        None
+    } else {
+        let mut layers = Vec::new();
+        for component in at.initramfs {
+            let build = at
+                .initramfs_builds
+                .iter()
+                .find(|(name, _)| *name == component.name)
+                .map(|(_, node)| *node);
+            layers.extend(component_layers(
+                g, at, component, build, host_ports, inputs,
+            )?);
+        }
+        let node = g.add(
+            "gaia.tree.merge",
+            format!("{}.initramfs", at.image.name),
+            file,
+            &key,
+        )?;
+        for (k, layer) in layers.iter().enumerate() {
+            g.edge((*layer, "layer"), (node, &format!("layers{k}")));
+        }
+        Some(node)
+    };
     Ok(OsNodes {
         rootfs: os,
         kernel,
         bootloader,
         merged: merge,
         system,
+        initramfs,
     })
 }
 

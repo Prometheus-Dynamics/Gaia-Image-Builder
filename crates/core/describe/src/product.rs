@@ -44,6 +44,11 @@ pub struct ImageSpec {
     /// partition: a recipe's `data` input.
     #[serde(default)]
     pub data: Vec<String>,
+    /// Names from `[components]` whose installs make the image's initramfs
+    /// tree, apart from its root filesystem: a recipe's `initramfs` input.
+    /// A component is in one of the two trees, not both.
+    #[serde(default)]
+    pub initramfs: Vec<String>,
     /// The OS the image is built on. Unset: the recipe's inputs are only
     /// the components.
     pub os: Option<OsSpec>,
@@ -122,7 +127,25 @@ impl Product {
                     format!("`{}` names another image too", image.name),
                 ));
             }
-            let lists = [("components", &image.components), ("data", &image.data)];
+            if let Some(at) = image
+                .initramfs
+                .iter()
+                .position(|name| image.components.contains(name))
+            {
+                return Err(Error::new(
+                    path,
+                    format!("images[{index}].initramfs[{at}]"),
+                    format!(
+                        "`{}` is in `components` too; a component is in the root filesystem or in the initramfs, not both",
+                        image.initramfs[at]
+                    ),
+                ));
+            }
+            let lists = [
+                ("components", &image.components),
+                ("data", &image.data),
+                ("initramfs", &image.initramfs),
+            ];
             for (list, at, name) in lists.iter().flat_map(|(list, names)| {
                 names.iter().enumerate().map(move |(at, n)| (*list, at, n))
             }) {

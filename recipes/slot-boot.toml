@@ -1,18 +1,20 @@
 # A root slot and what boots it: the root as an EROFS image with dm-verity
-# appended, the board's overlay compiled and proven against the kernel's
-# device tree, and the slot's whole kernel command line with the root hash
-# in it. The overlay's source and the command line's words are written by
+# appended, the image's initramfs (the components it names under
+# `initramfs`) as a newc archive, the board's overlay compiled and proven
+# against the kernel's device tree, and the slot's whole kernel command
+# line with the root hash in it. The overlay's source and the command line's words are written by
 # the image's one component with a [generate], which names them by role.
 # Untested on board.
 version = 1
 name = "slot-boot"
-description = "A root slot (EROFS, dm-verity) with its compiled board overlay and whole kernel command line."
+description = "A root slot (EROFS, dm-verity) with its initramfs, compiled board overlay and whole kernel command line."
 
 [stages]
 erofs = "gaia.fs.erofs"
 verity = "gaia.verity"
 overlay = "gaia.devicetree.overlay"
 cmdline = "gaia.cmdline"
+initramfs = "gaia.initramfs"
 
 [[connects]]
 from = "erofs.image"
@@ -24,6 +26,7 @@ to = "cmdline.table"
 
 [inputs]
 system = ["erofs.tree"]
+initramfs = ["initramfs.tree"]
 generated = ["overlay.source", "cmdline.generated"]
 generator-source = ["overlay.contract"]
 host-tools = ["overlay.tools"]
@@ -40,6 +43,7 @@ slot = "verity.image"
 table = "verity.table"
 overlay = "overlay.overlay"
 cmdline = "cmdline.cmdline"
+initramfs = "initramfs.archive"
 
 [parameters.slot]
 type = "string"
