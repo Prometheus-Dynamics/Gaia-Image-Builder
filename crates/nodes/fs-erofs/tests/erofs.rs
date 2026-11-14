@@ -86,7 +86,8 @@ fn image(root: &Path, uid: u32, compression: &str) -> (u64, PathBuf) {
     };
     let image = fs_erofs(
         &store_path.display().to_string(),
-        &tool("mkfs.erofs"),
+        Some(&tool("mkfs.erofs")),
+        None,
         tree,
         compression,
         0,
@@ -207,7 +208,8 @@ fn sizes_by_compression() {
     };
     let error = fs_erofs(
         &store_path.display().to_string(),
-        &tool("mkfs.erofs"),
+        Some(&tool("mkfs.erofs")),
+        None,
         tree,
         "brotli",
         0,
@@ -271,7 +273,8 @@ fn a_kernel_that_cannot_read_the_compression_fails_the_step() {
     let make = |compression: &str, cluster: i64, kernel: Option<&Tree>| {
         fs_erofs(
             &store_path.display().to_string(),
-            &tool("mkfs.erofs"),
+            Some(&tool("mkfs.erofs")),
+            None,
             tree(),
             compression,
             0,

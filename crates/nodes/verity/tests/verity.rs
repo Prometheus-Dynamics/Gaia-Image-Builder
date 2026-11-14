@@ -84,7 +84,8 @@ fn build(root: &Path, bytes: &[u8], device: &str, tool: &str) -> Built {
     };
     let (out, table) = verity(
         &store_path.display().to_string(),
-        tool,
+        Some(&tool.to_string()),
+        None,
         image,
         device,
         &Ctx::new(),
@@ -361,7 +362,8 @@ fn a_bad_device_or_a_missing_tool_is_an_error() {
     let root = store_path.display().to_string();
     let error = verity(
         &root,
-        "/nonexistent/veritysetup",
+        Some(&"/nonexistent/veritysetup".to_string()),
+        None,
         image(),
         "/dev/vda3",
         &Ctx::new(),
@@ -370,11 +372,70 @@ fn a_bad_device_or_a_missing_tool_is_an_error() {
     assert!(format!("{error:?}").contains("veritysetup"), "{error:?}");
     let error = verity(
         &root,
-        "/nonexistent/veritysetup",
+        Some(&"/nonexistent/veritysetup".to_string()),
+        None,
         image(),
         "two words",
         &Ctx::new(),
     )
     .expect_err("a device with a space");
     assert!(format!("{error:?}").contains("device"), "{error:?}");
+}
+
+/// An image with an OS build is made with that build's own veritysetup:
+/// host tools that lack it are refused with the line that adds it, and a
+/// tool of this machine, though given, is not used.
+#[test]
+fn the_images_own_host_tools_are_used_and_nothing_else() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store_path = dir.path().join("store");
+    let store = Store::open(&store_path).expect("store");
+    let file = dir.path().join("fs.img");
+    std::fs::write(&file, vec![7u8; 8192]).expect("write");
+    let image = || Image {
+        kind: ImageKind::Filesystem,
+        object: store.put_file(&file).expect("put").into(),
+        size: gaia_types::Size(8192),
+        partitions: Vec::new(),
+    };
+    // Host tools with no veritysetup in them.
+    let seed = dir.path().join("seed");
+    std::fs::create_dir_all(seed.join("host/bin")).expect("mkdir");
+    std::fs::write(seed.join("host/bin/dtc"), b"").expect("write");
+    let tools = gaia_types::Tree {
+        object: store.put_tree(&seed).expect("put").into(),
+        entries: Vec::new(),
+    };
+    let given = "/usr/sbin/veritysetup".to_string();
+    let why = verity(
+        &store_path.display().to_string(),
+        Some(&given),
+        Some(&tools),
+        image(),
+        "/dev/vda3",
+        &Ctx::new(),
+    )
+    .expect_err("no veritysetup in the host tools")
+    .to_string();
+    assert!(
+        why.ends_with(
+            "no veritysetup in the image's host tools: add `BR2_PACKAGE_HOST_CRYPTSETUP=y` to its OS fragment"
+        ) && why.len() <= 120,
+        "{why}"
+    );
+    // Neither host tools nor a tool given.
+    let why = verity(
+        &store_path.display().to_string(),
+        None,
+        None,
+        image(),
+        "/dev/vda3",
+        &Ctx::new(),
+    )
+    .expect_err("no tool at all")
+    .to_string();
+    assert!(
+        why.contains("no veritysetup: the image has no OS build"),
+        "{why}"
+    );
 }

@@ -812,6 +812,16 @@ fn image_recipe(
             for p in ports {
                 g.edge((tree, "tree"), (stages[&p.stage], &p.port));
             }
+        } else if input == "host-tools"
+            && at.os.is_none()
+            && ports.iter().all(|p| {
+                g.inputs(stages[&p.stage])
+                    .iter()
+                    .any(|decl| decl.name == p.port && decl.optional)
+            })
+        {
+            // No OS build, so no host tools; every port that would take
+            // them is optional, and its step then needs its tool given.
         } else if input == "host-tools" {
             let Some(tools) = g.host_tools.get(&image.name).copied() else {
                 return Err(Error::at(

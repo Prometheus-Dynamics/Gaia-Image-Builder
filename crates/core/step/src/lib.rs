@@ -53,3 +53,38 @@ pub use log::{StepRecord, logs_dir, now_ns, step_records, step_records_from};
 pub use step::{Made, Step, Work};
 pub use tool::{Stream, Tool, ToolOutput};
 pub use version::once_per_process;
+
+/// The program `name` of an image's own host tools, for a step that makes
+/// part of the image with it: from the tree `tools` (a build's host tools,
+/// or their seed with them under `host/`) when the image has one, and then
+/// from nowhere else; else the path `given`. `line` is the configuration
+/// line that makes the build provide the program, for the error.
+///
+/// # Errors
+///
+/// Host tools without the program, naming the line to add; or neither.
+pub fn image_tool(
+    store: &Store,
+    tools: Option<&ObjectRef>,
+    given: Option<&str>,
+    name: &str,
+    line: &str,
+) -> Result<std::path::PathBuf, String> {
+    match (tools, given) {
+        (Some(tools), _) => {
+            let root = store.path(tools);
+            ["host/sbin", "host/bin", "sbin", "bin"]
+                .iter()
+                .map(|dir| root.join(dir).join(name))
+                .find(|path| path.is_file())
+                .ok_or_else(|| {
+                    // Short: a failure's reason is kept to one line.
+                    format!("no {name} in the image's host tools: add `{line}` to its OS fragment")
+                })
+        }
+        (None, Some(path)) if !path.is_empty() => Ok(path.into()),
+        (None, _) => Err(format!(
+            "no {name}: the image has no OS build to make it, and none is given as a tool"
+        )),
+    }
+}
