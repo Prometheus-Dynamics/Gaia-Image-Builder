@@ -3,7 +3,7 @@
 //! `gaia.generate`). Skipped where no sandbox can run.
 
 use gaia_step::{Ctx, Store, logs_dir, step_records};
-use gaia_tree::{generate_image, unknown_image_tokens};
+use gaia_tree::{generate_image, generate_tree, unknown_image_tokens};
 use gaia_types::Tree;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -57,6 +57,16 @@ bundle)
     cp "$payload/kernel" "$pout/kernel"
     printf '%s roothash=abc\n' "$(cat "$payload/cmdline")" > "$pout/cmdline"
   fi ;;
+install)
+  # install BUNDLE SLOT OUT [none]: the slot installed in a new directory
+  if [ "$4" = "" ]; then exit 2; fi
+  if [ "$5" = "none" ]; then exit 0; fi
+  mkdir "$4"; mkdir "$4/slots"
+  cp "$2" "$4/slots/$3.bundle"
+  echo "installed $3" ;;
+checkinstall)
+  # checkinstall OUT SLOT
+  grep -q "^product " "$2/slots/$3.bundle" && echo "install ok" ;;
 checkbundle)
   # checkbundle OUT [--pubkey FILE]
   grep -q "^product " "$2"
@@ -184,6 +194,7 @@ impl Fixture {
             runs,
             slot,
             size,
+            None,
             None,
             None,
             None,
@@ -382,6 +393,7 @@ impl Fixture {
             pubkey.as_ref(),
             Some(&"helios".to_string()),
             Some(&"2026.2.0".to_string()),
+            None,
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
@@ -525,6 +537,110 @@ fn a_bundle_is_written_from_the_slot_and_signed_when_there_is_a_key() {
     let why = f.bundle(&needs_key, None).expect_err("@key@ with no key");
     assert!(
         why.contains("names @key@, and the build has no signing key"),
+        "{why}"
+    );
+}
+
+const INSTALL: &str = r#"{
+  "args": ["install", "@bundle@", "@slot@", "@out@"],
+  "verify": ["checkinstall", "@out@", "@slot@"]
+}"#;
+
+impl Fixture {
+    /// The directory the install run writes from a bundle of `bytes`.
+    fn install(
+        &self,
+        runs: &str,
+        bytes: Option<&[u8]>,
+        size: i64,
+    ) -> Result<(PathBuf, String), String> {
+        let store = Store::open(&self.store).expect("store");
+        let bundle = bytes.map(|bytes| {
+            let path = self.root.join("the.bundle");
+            std::fs::write(&path, bytes).expect("write");
+            gaia_types::Artifact {
+                kind: gaia_types::ArtifactKind::parse("generated-image"),
+                object: store.put_file(&path).expect("put").into(),
+            }
+        });
+        let (tree, report, _) = generate_tree(
+            &self.store,
+            BWRAP,
+            self.root(),
+            self.tree("tool", &[("bin/img", TOOL, 0o755)]),
+            "bin/img",
+            self.tree("source", &[("socs/soc", "rk", 0o644)]),
+            self.tree("description", &[("board", "zero", 0o644)]),
+            "board",
+            self.tree("payload-i", &[("kernel", "k1", 0o644)]),
+            runs,
+            "base",
+            size,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            bundle.as_ref(),
+            &Ctx::new(),
+        )
+        .map_err(|e| e.to_string())?;
+        Ok((
+            tree.object.path_in(&store).expect("in the store"),
+            String::from_utf8(
+                std::fs::read(report.object.path_in(&store).expect("in the store")).expect("read"),
+            )
+            .expect("text"),
+        ))
+    }
+}
+
+/// A directory the tool fills from the slot's bundle: a data partition's
+/// contents with the slot installed, in the tool's own layout.
+#[test]
+fn a_directory_is_written_from_the_bundle() {
+    if !available() {
+        return;
+    }
+    let f = Fixture::new();
+    let (dir, report) = f
+        .install(INSTALL, Some(b"product helios\n"), 0)
+        .expect("made");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("slots/base.bundle")).expect("installed"),
+        "product helios\n"
+    );
+    assert_eq!(report, "installed base\ninstall ok\n");
+    // The same bundle again is found; another is made.
+    f.install(INSTALL, Some(b"product helios\n"), 0)
+        .expect("again");
+    f.install(INSTALL, Some(b"product other\n"), 0)
+        .expect("another bundle");
+    let store = Store::open(&f.store).expect("store");
+    let made = step_records(&logs_dir(&store))
+        .into_iter()
+        .filter(|r| r.step == "gaia.generate.tree" && r.made)
+        .count();
+    assert_eq!(made, 2);
+
+    // No bundle given, a size, and no directory written: each refused.
+    let why = f.install(INSTALL, None, 0).expect_err("no bundle");
+    assert!(
+        why.contains("names @bundle@, and the recipe gives no bundle"),
+        "{why}"
+    );
+    let why = f
+        .install(INSTALL, Some(b"product helios\n"), 4096)
+        .expect_err("a size");
+    assert!(why.contains("a directory has no size"), "{why}");
+    let none = INSTALL.replace("\"@out@\"]", "\"@out@\", \"none\"]");
+    let why = f
+        .install(&none, Some(b"product helios\n"), 0)
+        .expect_err("nothing written");
+    assert!(
+        why.contains("gaia.generate.tree: bin/img wrote no directory at @out@"),
         "{why}"
     );
 }
