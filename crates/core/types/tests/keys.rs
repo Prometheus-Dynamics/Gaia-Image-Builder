@@ -89,7 +89,7 @@ const RECORDED: &str = "
     gaia:raw-blob a34597c3a0a074cb
     gaia:os-config 6139f0be7c760f6b
     gaia:buildroot-fragment 2847827726c91ae9
-    gaia:buildroot-host 236dfb6e85f8d0d4
+    gaia:buildroot-host ed215c7849858e8b
     gaia:source-override d72cbdcff1dd0ea1
     gaia:kernel-contract 8e9aa241a307528f
     gaia:object-kind 8ea567075e428736
