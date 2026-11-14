@@ -71,6 +71,11 @@ pub struct Generate {
     /// image, its verity table, the image's product and version, and a
     /// signing key: `[generate.bundle]`.
     pub bundle: Option<GenerateImage>,
+    /// A directory the same tool writes from the slot's bundle (`@bundle@`):
+    /// a data partition's contents with the slot installed, in the tool's
+    /// own layout, for the image's recipe to make a filesystem of:
+    /// `[generate.data]`. `@out@` is the directory.
+    pub data: Option<GenerateImage>,
 }
 
 /// One image a `[generate]` tool writes from a payload: up to three runs,
@@ -295,7 +300,11 @@ impl Component {
                     ));
                 }
             }
-            for (table, image) in [("image", &generate.image), ("bundle", &generate.bundle)] {
+            for (table, image) in [
+                ("image", &generate.image),
+                ("bundle", &generate.bundle),
+                ("data", &generate.data),
+            ] {
                 let Some(image) = image else { continue };
                 let runs = [
                     ("fit", &image.fit),
@@ -322,10 +331,15 @@ impl Component {
                     }
                 }
                 if !image.args.iter().any(|arg| arg.contains("@out@")) {
+                    let what = if table == "data" {
+                        "the directory the tool writes"
+                    } else {
+                        "the file the tool writes"
+                    };
                     return Err(Error::new(
                         path,
                         format!("generate.{table}.args"),
-                        "no argument names @out@, the file the tool writes",
+                        format!("no argument names @out@, {what}"),
                     ));
                 }
             }

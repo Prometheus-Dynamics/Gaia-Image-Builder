@@ -1,0 +1,353 @@
+# A whole disk for a first flash, around a root slot: everything
+# `slot-boot` makes (see there: the EROFS root with dm-verity, the
+# initramfs, the overlay, the command line, the slot's bundle and the boot
+# partition), and then
+#
+# - `data`: the slot installed on a data partition, a directory the
+#   generator's tool writes from the bundle in its own layout (its
+#   [generate.data]), made an ext4 filesystem;
+# - `disk`: the board's [disk] table with the boot partition and that data
+#   partition in the board's partitions of those names (`boot_name`,
+#   `data_name`): the board's layout gives each one's place, size and
+#   type, the build gives its content;
+# - `flash`: the disk as the first-flash file a board's flasher takes: one
+#   xz stream, LZMA2 only, CRC64, an 8 MiB dictionary at most. Unsigned.
+#
+# The recipe's own stages and settings are slot-boot's, the same; a test
+# holds them so. Untested on board.
+version = 1
+name = "slot-disk"
+description = "A first-flash disk: a root slot made as slot-boot makes it, installed on an ext4 data partition, with the boot partition, in the board's disk layout, as one xz stream."
+
+[stages]
+erofs = "gaia.fs.erofs"
+verity = "gaia.verity"
+overlay = "gaia.devicetree.overlay"
+cmdline = "gaia.cmdline"
+initramfs = "gaia.initramfs"
+as_kernel = "gaia.tree.role"
+as_device_tree = "gaia.tree.role"
+as_initramfs = "gaia.tree.role"
+as_cmdline = "gaia.tree.role"
+as_overlay = "gaia.tree.role"
+bundle = "gaia.generate.image"
+boot = "gaia.generate.image"
+data = "gaia.generate.tree"
+datafs = "gaia.fs.ext4"
+bootp = "gaia.disk.partition"
+datap = "gaia.disk.partition"
+disk = "gaia.disk"
+flash = "gaia.flash.image"
+
+[[connects]]
+from = "erofs.image"
+to = "verity.image"
+
+[[connects]]
+from = "verity.table"
+to = "cmdline.table"
+
+[[connects]]
+from = "as_kernel.tree"
+to = "as_device_tree.tree"
+
+[[connects]]
+from = "as_device_tree.tree"
+to = "as_initramfs.tree"
+
+[[connects]]
+from = "initramfs.archive"
+to = "as_initramfs.from"
+
+[[connects]]
+from = "as_initramfs.tree"
+to = "as_cmdline.tree"
+
+[[connects]]
+from = "cmdline.cmdline"
+to = "as_cmdline.from"
+
+[[connects]]
+from = "as_cmdline.tree"
+to = "as_overlay.tree"
+
+[[connects]]
+from = "overlay.overlay"
+to = "as_overlay.from"
+
+# The slot's bundle: the same tool writes it from the payload, the root
+# image and its verity table, and gives the payload back as it bundled it.
+# The boot partition is then written from THAT payload, so the first slot's
+# boot files on the image are the bytes the bundle's manifest names.
+[[connects]]
+from = "as_overlay.tree"
+to = "bundle.payload"
+
+[[connects]]
+from = "verity.image"
+to = "bundle.rootfs"
+
+[[connects]]
+from = "verity.table"
+to = "bundle.table"
+
+[[connects]]
+from = "bundle.payload"
+to = "boot.payload"
+
+# The slot installed from its bundle, by the same tool: the data
+# partition's contents.
+[[connects]]
+from = "bundle.image"
+to = "data.bundle"
+
+[[connects]]
+from = "bundle.payload"
+to = "data.payload"
+
+[[connects]]
+from = "data.tree"
+to = "datafs.tree"
+
+# The board's partitions of those names, with the build's content.
+[[connects]]
+from = "boot.image"
+to = "bootp.file"
+
+[[connects]]
+from = "datafs.image"
+to = "datap.content"
+
+[[connects]]
+from = ["bootp.partition", "datap.partition"]
+to = "disk.partitions"
+
+[[connects]]
+from = "disk.image"
+to = "flash.image"
+
+[consts]
+# A directory has no size; the filesystem made of it has.
+"data.size" = 0
+# The board's layout gives the partitions' place, size, type and flag.
+"bootp.table_type" = ""
+"bootp.bootable" = false
+"bootp.offset" = 0
+"bootp.size" = 0
+"datap.table_type" = ""
+"datap.bootable" = false
+"datap.offset" = 0
+"datap.size" = 0
+"flash.format" = "disk"
+"as_kernel.role" = "kernel"
+"as_device_tree.role" = "device-tree"
+"as_initramfs.role" = "initramfs"
+"as_cmdline.role" = "cmdline"
+"as_overlay.role" = "board-overlay"
+# A bundle is as long as it is.
+"bundle.size" = 0
+
+[inputs]
+kernel = ["as_kernel.from"]
+system = ["erofs.tree"]
+# The image's kernel build, when it has one: its final configuration must
+# be able to read the erofs made here, or the build fails saying which
+# option is missing.
+kernel-build = ["erofs.kernel"]
+initramfs = ["initramfs.tree"]
+generated = ["overlay.source", "cmdline.generated"]
+generator-source = ["overlay.contract"]
+# The generator's tool run again, on the payload: its [generate.image].
+generator-image = ["boot.runs"]
+# And its [generate.bundle].
+generator-bundle = ["bundle.runs"]
+# And its [generate.data].
+generator-data = ["data.runs"]
+# The board's [disk] table and partitions.
+disk = ["disk.layout"]
+host-tools = ["overlay.tools", "erofs.tools", "verity.tools"]
+device-trees = ["overlay.base", "as_device_tree.from"]
+device-tree-name = ["overlay.base_name", "as_device_tree.path"]
+cmdline-base = ["cmdline.base"]
+"provides.board-overlay" = ["overlay.source_path"]
+"provides.manifest-boot" = ["overlay.stated_path"]
+"provides.cmdline" = ["cmdline.words_path"]
+"provides.cmdline-slot" = ["cmdline.slot_path"]
+
+[outputs]
+slot = "verity.image"
+table = "verity.table"
+overlay = "overlay.overlay"
+cmdline = "cmdline.cmdline"
+initramfs = "initramfs.archive"
+payload = "bundle.payload"
+bundle = "bundle.image"
+bundle-report = "bundle.report"
+boot = "boot.image"
+boot-report = "boot.report"
+data = "data.tree"
+data-report = "data.report"
+data-fs = "datafs.image"
+disk = "disk.image"
+flash = "flash.file"
+
+[parameters.slot]
+type = "string"
+description = "The slot's id: what the generator writes the slot's words for."
+sets = ["cmdline.slot", "boot.slot", "bundle.slot", "data.slot"]
+
+[parameters.compression]
+type = "string"
+default = "lzma"
+description = "EROFS compression. An image with an OS is made with its build's own mkfs.erofs, which writes none, lz4, lz4hc and lzma; deflate and zstd are for a tool given to an image with no OS. lzma is the default because it is the smallest the pinned tool writes, not as a decision: the algorithm is to be decided by a board measurement on the first slot image (lzma, lz4hc, and zstd from an unpinned tool for comparison)."
+sets = ["erofs.compression"]
+
+[parameters.cluster]
+type = "int"
+default = 0
+description = "The most bytes of a compressed cluster, a multiple of 4096; 0 is the tool's default, one block. Bigger is smaller on disk and costs RAM and time to read."
+sets = ["erofs.cluster"]
+
+[parameters.dictsize]
+type = "int"
+default = 0
+description = "The lzma dictionary in bytes; 0 is the tool's own choice. The kernel holds one dictionary of this size while the image is mounted."
+sets = ["erofs.dictsize"]
+
+[parameters.fragments]
+type = "bool"
+default = false
+description = "Pack the tails of files, and small files, together (mkfs.erofs -Efragments). Smaller; a kernel from 6.1."
+sets = ["erofs.fragments"]
+
+[parameters.ztailpacking]
+type = "bool"
+default = false
+description = "Keep a file's compressed tail beside its inode (mkfs.erofs -Eztailpacking). A kernel from 5.17."
+sets = ["erofs.ztailpacking"]
+
+[parameters.dedupe]
+type = "bool"
+default = false
+description = "Store equal compressed data once (mkfs.erofs -Ededupe). Slow to make; a kernel from 6.1."
+sets = ["erofs.dedupe"]
+
+[parameters.level]
+type = "int"
+default = 0
+description = "The compressor's level; 0 is its default."
+sets = ["erofs.level"]
+
+[parameters.device]
+type = "string"
+description = "Where the slot is read from: its file, or a device. The verity tree is in it too."
+sets = ["verity.device"]
+
+[parameters.overlay_contract]
+type = "string"
+default = "contracts/overlay-dtc.toml"
+description = "The overlay compiler's contract, a file of the generator's source."
+sets = ["overlay.contract_path"]
+
+[parameters.cmdline_extra]
+type = "string"
+default = ""
+description = "Words the image adds to the kernel command line, before the slot's."
+sets = ["cmdline.extra"]
+
+[parameters.cmdline_limit]
+type = "int"
+default = 2048
+description = "The most bytes the kernel command line may have; 0 for no limit."
+sets = ["cmdline.limit"]
+
+[parameters.boot_size]
+type = "int"
+description = "The boot partition's size in bytes, as the image's layout has it: the tool writes exactly this many."
+sets = ["boot.size"]
+
+[parameters.product]
+type = "string"
+description = "The product's name, as the slot's bundle states it."
+sets = ["bundle.product"]
+
+[parameters.version]
+type = "string"
+description = "The product's version, as the slot's bundle states it."
+sets = ["bundle.version"]
+
+[parameters.sign_key_env]
+type = "string"
+default = ""
+description = "The environment variable that names the signing key's file. Empty: the bundle is unsigned."
+sets = ["bundle.key_env"]
+
+[parameters.sign_key_id]
+type = "string"
+default = ""
+description = "What identifies the signing key (its key id): the build is keyed on it, never on the key, and the tool refuses a key file that is another's."
+sets = ["bundle.key_id"]
+
+[parameters.sign_pubkey_env]
+type = "string"
+default = ""
+description = "The environment variable that names the file of the signing key's public half, for the tool to check its own signature with."
+sets = ["bundle.pubkey_env"]
+
+[parameters.id]
+type = "string"
+description = "Names the disk: its GUIDs or MBR signature are derived from it, so they stay the same across rebuilds."
+sets = ["disk.id"]
+
+[parameters.board_id]
+type = "string"
+description = "The board's id, as its flasher checks the first-flash file against."
+sets = ["flash.board"]
+
+[parameters.boot_name]
+type = "string"
+default = "boot"
+description = "The board's partition the boot partition's image fills."
+sets = ["bootp.name"]
+
+[parameters.boot_role]
+type = "string"
+default = "boot"
+description = "That partition's role."
+sets = ["bootp.role"]
+
+[parameters.data_name]
+type = "string"
+default = "data"
+description = "The board's partition the data filesystem fills."
+sets = ["datap.name"]
+
+[parameters.data_role]
+type = "string"
+default = "data"
+description = "That partition's role."
+sets = ["datap.role"]
+
+[parameters.data_label]
+type = "string"
+default = ""
+description = "The data filesystem's label; empty for none (a label is its reader's to want)."
+sets = ["datafs.label"]
+
+[parameters.data_size]
+type = "int"
+default = 0
+description = "The data filesystem's size in bytes; 0 sizes it to its content plus data_margin."
+sets = ["datafs.size"]
+
+[parameters.data_margin]
+type = "int"
+default = 16777216
+description = "Free bytes left over the content in the data filesystem when data_size is 0."
+sets = ["datafs.margin"]
+
+[parameters.data_journal]
+type = "bool"
+default = true
+description = "Whether the data filesystem has a journal."
+sets = ["datafs.journal"]
