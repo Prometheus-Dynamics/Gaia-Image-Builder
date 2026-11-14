@@ -698,6 +698,33 @@ fn image_recipe(
         )?;
         stages.insert(stage.clone(), node);
     }
+    // The paths that keep their setuid and setgid bits, to every EROFS the
+    // recipe makes; listed for a recipe with none, they would keep nothing.
+    if !image.keep_setid.is_empty() {
+        let erofs: Vec<&String> = group
+            .stages
+            .iter()
+            .filter(|(_, id)| id.as_str() == "gaia.fs.erofs")
+            .map(|(stage, _)| stage)
+            .collect();
+        if erofs.is_empty() {
+            return Err(Error::at(
+                product_file,
+                format!("images[{i}].keep_setid"),
+                format!(
+                    "recipe {} makes no EROFS root, so no setuid or setgid bit is cleared and none needs keeping: remove keep_setid",
+                    recipe.name
+                ),
+            ));
+        }
+        for stage in erofs {
+            g.set(
+                stages[stage],
+                "keep_setid",
+                Lit::Str(image.keep_setid.join(" ")),
+            );
+        }
+    }
     for c in &group.consts {
         let node = stages[&c.at.stage];
         g.check(node, &c.at.port, &c.value)

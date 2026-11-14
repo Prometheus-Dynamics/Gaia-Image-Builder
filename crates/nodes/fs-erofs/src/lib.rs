@@ -12,6 +12,14 @@
 //! (`lz4`, `lz4hc`, `lzma`, `deflate`, `zstd`), with an optional level.
 //! `mkfs.erofs` is pinned by path; its version is in the key, with the
 //! tree's `owned_digest`, so an owner change remakes the image.
+//!
+//! No setuid or setgid bit reaches the image unless asked for: every one is
+//! cleared except on the paths in `keep_setid` (absolute, as the image has
+//! them). A build system may set such a bit on a package's file with no way
+//! to take it back, so the rule is here, for every file. A listed path that
+//! the tree does not have, or that carries no such bit, fails the step:
+//! nothing listed is ignored. The step's `setid` output says each bit
+//! cleared and each kept, with path and mode.
 
 /// The libraries this node links, pinned in its Cargo.toml. Its step key names
 /// them, and `tests/libs.rs` checks each version against the pin.
@@ -155,6 +163,10 @@ pub fn kernel_new_enough(version: (u32, u32), asked: &[&str]) -> Result<(), Stri
 /// `mkfs.erofs` in them makes the image, and `mkfs_erofs` (a path on this
 /// machine) is used only for an image with no OS build.
 ///
+/// `keep_setid`: the paths whose setuid and setgid bits are kept,
+/// separated by whitespace; every other such bit is cleared (see the
+/// crate's documentation).
+///
 /// `kernel` is the image's kernel build tree, when it has one: its final
 /// `.config` must be able to read what is made ([`kernel_reads`]), or the
 /// step fails before anything is made. Nothing is changed in the kernel.
@@ -172,6 +184,7 @@ pub fn kernel_new_enough(version: (u32, u32), asked: &[&str]) -> Result<(), Stri
         fragments,
         ztailpacking,
         dedupe,
+        keep_setid,
         kernel
     ),
     outputs(image)
@@ -189,6 +202,7 @@ pub fn fs_erofs(
     fragments: Option<&bool>,
     ztailpacking: Option<&bool>,
     dedupe: Option<&bool>,
+    keep_setid: Option<&String>,
     kernel: Option<&Tree>,
     cx: &Ctx,
 ) -> Result<Image, StepError> {
@@ -269,6 +283,16 @@ pub fn fs_erofs(
             kernel_reads(&config, compression).map_err(fail)?;
         }
     }
+    let keep: Vec<String> = keep_setid
+        .map(|text| text.split_whitespace().map(str::to_string).collect())
+        .unwrap_or_default();
+    for path in &keep {
+        if !path.starts_with('/') || path.split('/').any(|part| part == "..") || path.len() < 2 {
+            return Err(fail(format!(
+                "keep_setid {path:?} is not an absolute path in the image"
+            )));
+        }
+    }
     let owned =
         owned_digest(&tree).ok_or_else(|| fail("a tree that is not in the store".into()))?;
     let dir = tree
@@ -285,7 +309,8 @@ pub fn fs_erofs(
     .map_err(|e| fail(format!("{mkfs_erofs} --version: {e}")))?;
     // 2: what is made is read back, and the step says so in an output of
     // its own. No image made before that is taken for one that was.
-    let mut key = KeyBuilder::new(NAME, 2)
+    // 3: setuid and setgid bits are cleared but for those kept.
+    let mut key = KeyBuilder::new(NAME, 3)
         .config("mkfs.erofs", &version)
         .config("compression", compression)
         .config("level", level.to_string())
@@ -302,15 +327,23 @@ pub fn fs_erofs(
     if !extended.is_empty() {
         key = key.config("extended", extended.join(","));
     }
+    if !keep.is_empty() {
+        key = key.config("keep_setid", keep.join("\n"));
+    }
     let key = key.finish();
     let made = Step::new(&store, cx, NAME, key).look_up_or_make(
         &[
             ("image", Path::new("image.erofs")),
             ("read-back", Path::new("read-back.txt")),
+            ("setid", Path::new("setid.txt")),
         ],
         |work| {
             let tar_path = work.dir().join("tree.tar");
-            write_tar(&dir, &tree.entries, &tar_path).map_err(|e| fail(format!("tar: {e}")))?;
+            let setid = write_tar(&dir, &tree.entries, &keep, &tar_path)
+                .map_err(|e| fail(format!("tar: {e}")))?
+                .map_err(fail)?;
+            std::fs::write(work.dir().join("setid.txt"), setid)
+                .map_err(|e| fail(e.to_string()))?;
             let mut mkfs = Tool::new(mkfs_erofs)
                 .args(["--quiet", "--tar=f", "-T0", "-x-1"])
                 .arg("-U")
@@ -424,21 +457,61 @@ fn remove_tree(dir: &Path) {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// The setuid and setgid bits.
+const SETID: u32 = 0o6000;
+
 /// The tree as a tar: paths sorted, times 0, numeric owners with no
-/// names, owners and modes from `entries` or root and the stored mode.
-fn write_tar(root: &Path, entries: &[FileEntry], out: &Path) -> std::io::Result<()> {
+/// names, owners and modes from `entries` or root and the stored mode, and
+/// no setuid or setgid bit but on the paths in `keep`. Returns the report of
+/// the bits cleared and kept, or why a path in `keep` cannot be kept.
+fn write_tar(
+    root: &Path,
+    entries: &[FileEntry],
+    keep: &[String],
+    out: &Path,
+) -> std::io::Result<Result<String, String>> {
     let by_path: BTreeMap<&str, &FileEntry> =
         entries.iter().map(|e| (e.path.as_str(), e)).collect();
     let mut paths = BTreeMap::new();
     walk(root, "", &mut paths)?;
+    let mode_of = |path: &str, full: &Path| -> std::io::Result<u32> {
+        Ok(match by_path.get(path) {
+            Some(e) => e.mode & 0o7777,
+            None => std::fs::symlink_metadata(full)?.mode() & 0o7777,
+        })
+    };
+    for path in keep {
+        let relative = path.trim_start_matches('/');
+        let Some(full) = paths.get(relative) else {
+            return Ok(Err(format!("keep_setid {path}: the tree has no such file")));
+        };
+        let meta = std::fs::symlink_metadata(full)?;
+        if meta.file_type().is_symlink() || mode_of(relative, full)? & SETID == 0 {
+            return Ok(Err(format!(
+                "keep_setid {path}: it carries no setuid or setgid bit, so there is nothing to keep"
+            )));
+        }
+    }
+    let mut report = String::new();
     let mut builder = tar::Builder::new(std::io::BufWriter::new(std::fs::File::create(out)?));
     builder.mode(tar::HeaderMode::Deterministic);
     for (path, full) in paths {
         let meta = std::fs::symlink_metadata(&full)?;
-        let (uid, gid, mode) = match by_path.get(path.as_str()) {
+        let (uid, gid, mut mode) = match by_path.get(path.as_str()) {
             Some(e) => (e.uid, e.gid, e.mode & 0o7777),
             None => (0, 0, meta.mode() & 0o7777),
         };
+        if mode & SETID != 0 && !meta.file_type().is_symlink() {
+            if keep.iter().any(|k| k.trim_start_matches('/') == path) {
+                report.push_str(&format!("kept    /{path} {mode:04o}\n"));
+            } else {
+                report.push_str(&format!(
+                    "cleared /{path} {mode:04o} -> {:04o}\n",
+                    mode & !SETID
+                ));
+                mode &= !SETID;
+            }
+        }
         let mut header = tar::Header::new_gnu();
         header.set_uid(u64::from(uid));
         header.set_gid(u64::from(gid));
@@ -464,7 +537,11 @@ fn write_tar(root: &Path, entries: &[FileEntry], out: &Path) -> std::io::Result<
         .into_inner()?
         .into_inner()
         .map_err(|e| e.into_error())?
-        .sync_all()
+        .sync_all()?;
+    if report.is_empty() {
+        report.push_str("no setuid or setgid bits\n");
+    }
+    Ok(Ok(report))
 }
 
 fn walk(dir: &Path, prefix: &str, out: &mut BTreeMap<String, PathBuf>) -> std::io::Result<()> {
@@ -506,3 +583,57 @@ fn uuid_of(digest: &Digest) -> String {
 
 /// The node, for a registry.
 pub const NODES: [&NodeRecord; 1] = [&FS_EROFS_NODE];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The report: each bit cleared and each kept, by path and mode.
+    #[test]
+    fn the_report_names_each_bit_cleared_and_kept() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().join("root");
+        std::fs::create_dir_all(root.join("bin")).expect("mkdir");
+        for name in ["busybox", "su", "plain"] {
+            std::fs::write(root.join("bin").join(name), name).expect("write");
+        }
+        let entry = |path: &str, mode| FileEntry {
+            path: path.into(),
+            mode,
+            uid: 0,
+            gid: 0,
+        };
+        let entries = [
+            entry("bin/busybox", 0o4755),
+            entry("bin/su", 0o6750),
+            entry("bin/plain", 0o755),
+        ];
+        let tar = dir.path().join("t.tar");
+        let report = write_tar(&root, &entries, &["/bin/su".into()], &tar)
+            .expect("io")
+            .expect("kept");
+        assert_eq!(
+            report,
+            "cleared /bin/busybox 4755 -> 0755\nkept    /bin/su 6750\n"
+        );
+        let modes: BTreeMap<String, u32> =
+            tar::Archive::new(std::fs::File::open(&tar).expect("open"))
+                .entries()
+                .expect("entries")
+                .map(|e| {
+                    let e = e.expect("entry");
+                    (
+                        e.path().expect("path").display().to_string(),
+                        e.header().mode().expect("mode"),
+                    )
+                })
+                .collect();
+        assert_eq!(modes["bin/busybox"], 0o755);
+        assert_eq!(modes["bin/su"], 0o6750);
+        assert_eq!(modes["bin/plain"], 0o755);
+        let none = write_tar(&root, &entries[2..], &[], &tar)
+            .expect("io")
+            .expect("ok");
+        assert_eq!(none, "no setuid or setgid bits\n");
+    }
+}
