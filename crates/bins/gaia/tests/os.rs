@@ -795,7 +795,9 @@ fn a_product_named_with_no_directory_has_its_fragments_directory() {
     let nodes = both["graph"]["graph"]["nodes"].as_array().expect("nodes");
     let whole = inputs_of(nodes, "gaia.source.path");
     assert!(
-        !whole.iter().any(|path| path.ends_with("products/zero-3e-demo")),
+        !whole
+            .iter()
+            .any(|path| path.ends_with("products/zero-3e-demo")),
         "the product's directory is an input: {whole:?}"
     );
     let single = inputs_of(nodes, "gaia.source.input");
@@ -857,7 +859,10 @@ fn a_product_named_with_no_directory_has_its_fragments_directory() {
         paths.iter().any(|path| path == "."),
         "the product's own directory: {paths:?}"
     );
-    assert!(!paths.iter().any(String::is_empty), "no empty path: {paths:?}");
+    assert!(
+        !paths.iter().any(String::is_empty),
+        "no empty path: {paths:?}"
+    );
     assert!(
         paths.iter().any(|path| path == "patches"),
         "the named directory alone: {paths:?}"
