@@ -19,6 +19,7 @@ mod clean;
 mod project;
 mod record;
 mod show;
+mod sizes;
 
 use std::process::ExitCode;
 
@@ -74,6 +75,7 @@ fn main() -> ExitCode {
         args::Command::Build(options) => build::build(&options),
         args::Command::Clean(options) => clean::clean(&options),
         args::Command::Show(options) => show::show(&options),
+        args::Command::Sizes(options) => sizes::sizes(&options),
         args::Command::Lock(words) => {
             gaia_lock_cmd::command::run(&words).map_err(|(code, message)| Stop { code, message })
         }
