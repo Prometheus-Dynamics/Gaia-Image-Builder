@@ -47,7 +47,10 @@ impl Project {
         let store = absolute(&store_dir(options.store.as_deref())?);
         let tools = tools(&options.tools);
         let setup = Setup {
-            buildroot: buildroot_host(&store, &tools),
+            buildroot: buildroot_host(&store, &tools).map(|mut host| {
+                host.config_only = options.config_only;
+                host
+            }),
             store,
             tools,
             inputs: inputs(&options.inputs)?,
@@ -55,6 +58,21 @@ impl Project {
         let registry = registry();
         let built = gaia_graph::build(&loaded, &lock, &recipes, &registry, &setup, &builders())
             .map_err(Stop::usage)?;
+        // The configuration alone: only the step that resolves it, told to
+        // stop there.
+        let until = match (&options.until, options.config_only) {
+            (Some(_), true) => {
+                return Err(Stop::usage(
+                    "--config-only and --until are one or the other",
+                ));
+            }
+            (None, true) => Some("gaia.os.buildroot.host"),
+            (step, false) => step.as_deref(),
+        };
+        let built = match until {
+            Some(step) => built.until(step).map_err(Stop::usage)?,
+            None => built,
+        };
         Ok(Self {
             product: product.clone(),
             setup,
@@ -399,6 +417,7 @@ fn buildroot_host(
         cpus: std::env::var("GAIA_CPUS").unwrap_or_default(),
         jobs,
         download_dir: absolute(&download_dir).display().to_string(),
+        config_only: false,
     })
 }
 
