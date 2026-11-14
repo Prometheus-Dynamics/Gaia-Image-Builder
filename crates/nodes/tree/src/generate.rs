@@ -20,18 +20,29 @@
 //! A tool that silently stops writing a file, or starts writing a new one,
 //! fails the step by that file's name.
 //!
-//! The tool runs with an empty environment in the step's own directory. It
-//! is not yet inside the network-less sandbox the builders use.
+//! The tool runs in the sandbox the builders use, with the image it was
+//! built in as its root: no network, nothing of the host but what is
+//! bound. Its source is at `/source`, the board's description at
+//! `/description/<name>`, and `/out` is the one path it can write. So the
+//! paths it is given are the same in every store, and a tool linked
+//! against the image's C library finds it.
 
 use crate::walk::inside;
 use daedalus::prelude::*;
-use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store, Tool};
+use gaia_sandbox::Sandbox;
+use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store};
 use gaia_types::Tree;
 use std::collections::BTreeSet;
 use std::path::Path;
 
 const NAME: &str = "gaia.generate";
 pub use gaia_types::{GENERATE_NAMES as TOKENS, unknown_generate_names as unknown_tokens};
+
+/// Where the sandbox binds each input and the writable output directory.
+const TOOL: &str = "/tool";
+const SOURCE: &str = "/source";
+const DESCRIPTION: &str = "/description";
+const OUT: &str = "/out";
 
 /// Runs `program` (a path in the tree `tool`) with `args` (a JSON array of
 /// strings, since a graph sets it as one constant) and gives what it wrote
@@ -41,11 +52,14 @@ pub use gaia_types::{GENERATE_NAMES as TOKENS, unknown_generate_names as unknown
 /// `source` is the tool's source tree, `description` a tree with the
 /// board's description as its one file `description_name`, and `slot` the
 /// slot's id (empty when the image has none: an argument that names
-/// `@slot@` is then an error).
+/// `@slot@` is then an error). `root` is the image the tool was built in,
+/// the sandbox's root filesystem, and `bwrap` the bubblewrap program.
 #[node(
     id = "gaia.generate",
     inputs(
         store,
+        bwrap,
+        root,
         tool,
         program,
         source,
@@ -60,6 +74,8 @@ pub use gaia_types::{GENERATE_NAMES as TOKENS, unknown_generate_names as unknown
 #[allow(clippy::too_many_arguments)]
 pub fn generate(
     store: &str,
+    bwrap: &str,
+    root: Tree,
     tool: Tree,
     program: &str,
     source: Tree,
@@ -77,6 +93,7 @@ pub fn generate(
             .object_ref()
             .ok_or_else(|| fail(format!("{what} is not in the store")))
     };
+    let root_object = in_store(&root, "the image the tool runs in")?;
     let tool_object = in_store(&tool, "the tool")?;
     let source_object = in_store(&source, "the tool's source")?;
     let description_object = in_store(&description, "the board's description")?;
@@ -128,8 +145,16 @@ pub fn generate(
     }
     let uses_source = args.iter().any(|arg| arg.contains("@source@"));
 
+    let sandbox = Sandbox::new(bwrap, store.path(&root_object))
+        .input(store.path(&tool_object), TOOL)
+        .input(store.path(&source_object), SOURCE)
+        .input(store.path(&description_object), DESCRIPTION)
+        .env("PATH", "/usr/bin:/bin")
+        .env("LC_ALL", "C");
     // The arguments as written: no path of this store is in the key.
-    let mut key = KeyBuilder::new(NAME, 1)
+    let mut key = sandbox
+        .key(KeyBuilder::new(NAME, 2))
+        .input("root", root_object.digest)
         .input("tool", tool_object.digest)
         .config("program", program)
         .input("description", description_object.digest)
@@ -144,7 +169,8 @@ pub fn generate(
     if uses_source {
         key = key.input("source", source_object.digest);
     }
-    let source_path = store.path(&source_object);
+    let program_in = format!("{TOOL}/{}", inside(program).map_err(fail)?);
+    let described_in = format!("{DESCRIPTION}/{}", inside(description_name).map_err(fail)?);
     let made = Step::new(&store, cx, NAME, key.finish()).look_up_or_make(
         &[("tree", Path::new("out"))],
         |work| {
@@ -154,18 +180,19 @@ pub fn generate(
             let filled: Vec<String> = args
                 .iter()
                 .map(|arg| {
-                    arg.replace("@source@", &source_path.display().to_string())
-                        .replace("@description@", &described.display().to_string())
-                        .replace("@out@", &out.display().to_string())
+                    arg.replace("@source@", SOURCE)
+                        .replace("@description@", &described_in)
+                        .replace("@out@", OUT)
                         .replace("@slot@", slot)
                 })
                 .collect();
-            work.run(
-                &Tool::new(&program_path)
-                    .args(filled)
-                    .cwd(work.dir())
-                    .env("LC_ALL", "C"),
-            )?;
+            let tool = sandbox
+                .clone()
+                .output(&out, OUT)
+                .tool(&program_in)
+                .map_err(io)?
+                .args(filled);
+            work.run(&tool)?;
             let mut written = BTreeSet::new();
             for entry in std::fs::read_dir(&out).map_err(io)? {
                 written.insert(

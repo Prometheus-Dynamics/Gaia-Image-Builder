@@ -1406,13 +1406,14 @@ fn generate_node(g: &mut Graph<'_>, at: &OsIn<'_>, component: &Component) -> Res
             ),
         )
     })?;
-    // The tool runs on the build machine, whatever the board: a static
-    // binary for this machine's architecture, tuned for no CPU.
+    // The tool runs on the build machine, whatever the board: built for
+    // this machine's architecture against the C library of the image it is
+    // built in (the image it is then run in), tuned for no CPU.
     let mut settings = toml::Table::new();
     settings.insert("package".into(), generate.tool.package.clone().into());
     settings.insert(
         "triple".into(),
-        format!("{}-unknown-linux-musl", std::env::consts::ARCH).into(),
+        format!("{}-unknown-linux-gnu", std::env::consts::ARCH).into(),
     );
     settings.insert("cpu".into(), String::new().into());
     let build = gaia_describe::Build {
@@ -1499,6 +1500,21 @@ fn generate_node(g: &mut Graph<'_>, at: &OsIn<'_>, component: &Component) -> Res
     g.set(node, "args", json(&generate.args));
     g.set(node, "outputs", json(&generate.outputs));
     g.set(node, "slot", Lit::Str(slot.to_string()));
+    // The image the tool was built in is the root it runs in: the
+    // component's `root` source, the one its builds take.
+    let root = component.sources.get("root").ok_or_else(|| {
+        Error::at(
+            file,
+            "generate.tool",
+            format!(
+                "{}'s tool runs in the image it is built in, and the component has no `root` source (an image for the build machine)",
+                component.name
+            ),
+        )
+    })?;
+    let root = component_source(g, component, "root", root, at.lock, at.board)?;
+    let out = g.first_output(root).unwrap_or("rootfs");
+    g.edge((root, out), (node, "root"));
     let out = g.first_output(tool).unwrap_or("tree");
     g.edge((tool, out), (node, "tool"));
     let out = g.first_output(source).unwrap_or("tree");

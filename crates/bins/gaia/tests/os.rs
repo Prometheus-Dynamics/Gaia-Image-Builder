@@ -604,6 +604,9 @@ fn a_component_generates_from_the_boards_description() {
         "hello-rust.tool.tree -> zero-3e-demo.hello-rust.generate.tool",
         "hello-rust.src.tree -> zero-3e-demo.hello-rust.generate.source",
         "zero-3e-demo.hello-rust.description.daemon.tree -> zero-3e-demo.hello-rust.generate.description",
+        // It runs in the image it was built in.
+        "hello-rust.root.rootfs -> hello-rust.tool.root",
+        "hello-rust.root.rootfs -> zero-3e-demo.hello-rust.generate.root",
         // A generated file, installed.
         "zero-3e-demo.hello-rust.generate.tree -> zero-3e-demo.hello-rust.place",
         "/etc/modprobe.d/board.conf",
@@ -620,9 +623,9 @@ fn a_component_generates_from_the_boards_description() {
             .unwrap_or_else(|| panic!("no node {label}"))
     };
     let tool = find("hello-rust.tool");
-    // For the build machine, not the board: static, and tuned for no CPU.
+    // For the build machine, not the board, and tuned for no CPU.
     let triple = tool["consts"]["triple"]["value"].as_str().expect("triple");
-    assert!(triple.ends_with("-unknown-linux-musl"), "{triple}");
+    assert!(triple.ends_with("-unknown-linux-gnu"), "{triple}");
     assert!(triple.starts_with(std::env::consts::ARCH), "{triple}");
     assert_eq!(tool["consts"]["cpu"]["value"], "");
     // The component's own build is still the board's.
