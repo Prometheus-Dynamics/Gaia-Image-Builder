@@ -16,8 +16,14 @@ fn symbol(line: &str) -> Result<Option<&str>, String> {
     if line.is_empty() {
         return Ok(None);
     }
-    if let Some(rest) = line.strip_prefix("# ") {
-        if let Some(name) = rest.strip_suffix(" is not set") {
+    // A comment is any `#` line, a bare `#` included; `# NAME is not set`
+    // is the one comment that says something, when NAME is one word.
+    if let Some(rest) = line.strip_prefix('#') {
+        if let Some(name) = rest
+            .strip_prefix(' ')
+            .and_then(|rest| rest.strip_suffix(" is not set"))
+            && !name.contains(char::is_whitespace)
+        {
             return check(name).map(Some);
         }
         return Ok(None);
@@ -374,5 +380,26 @@ mod tests {
         );
         let why = merge("", &[fragment("bad", "just words\n")]).expect_err("bad line");
         assert!(why.contains("is not NAME=value"), "{why}");
+    }
+
+    #[test]
+    fn any_hash_line_is_a_comment_but_the_one_that_unsets_a_symbol() {
+        // A bare `#`, a `#` with no space, prose, and prose that happens to
+        // end in "is not set" are comments; one word before it is a symbol.
+        for line in [
+            "#",
+            "#  ",
+            "#no space",
+            "# a note",
+            "# this option is not set",
+        ] {
+            assert_eq!(symbol(line), Ok(None), "{line:?}");
+        }
+        assert_eq!(symbol("# BR2_X is not set"), Ok(Some("BR2_X")));
+        assert!(
+            symbol("# X is not set").is_err(),
+            "one word that is no symbol"
+        );
+        assert!(symbol("words").is_err());
     }
 }
