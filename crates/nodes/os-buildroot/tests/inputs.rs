@@ -297,3 +297,61 @@ fn a_kernel_that_does_not_meet_its_contract_fails_before_the_build() {
         "{why}"
     );
 }
+
+/// A complete kernel configuration the build starts from: every line of it
+/// is held to the kernel's final config, as the first of the fragments, so
+/// a later fragment's line for a symbol is the one that counts.
+#[test]
+fn a_complete_kernel_configuration_is_held_to_the_final_one() {
+    let f = fixture();
+    let linux = f.tree("linux", &[("Makefile", "# a kernel\n")]);
+    // The stand-in kernel's config has X and Y on and Z off.
+    let text = "BR2_LINUX_KERNEL=y\nBR2_LINUX_KERNEL_USE_CUSTOM_CONFIG=y\nBR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE=\"@files.0@/full.config\"\n";
+    let with_fragment = "BR2_LINUX_KERNEL=y\nBR2_LINUX_KERNEL_USE_CUSTOM_CONFIG=y\nBR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE=\"@files.0@/full.config\"\nBR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES=\"@files.0@/linux.fragment\"\n";
+
+    // The same as the final config: it holds.
+    let same = f.tree(
+        "same",
+        &[(
+            "full.config",
+            "CONFIG_X=y\nCONFIG_Y=y\n# CONFIG_Z is not set\n",
+        )],
+    );
+    let (_, made) = f
+        .run(&config(text), &[linux.clone(), same])
+        .expect("the configuration holds");
+    assert!(made);
+
+    // A line of it that the kernel did not keep.
+    let other = f.tree(
+        "other",
+        &[(
+            "full.config",
+            "CONFIG_X=y\nCONFIG_Y=m\n# CONFIG_Z is not set\n",
+        )],
+    );
+    let why = f
+        .run(&config(text), &[linux.clone(), other])
+        .expect_err("one line did not hold");
+    println!("{why}");
+    assert!(why.contains("linux's config did not take 1 line"), "{why}");
+    assert!(
+        why.contains("full.config: `CONFIG_Y=m` became `CONFIG_Y=y`"),
+        "{why}"
+    );
+
+    // The same file with a fragment after it that sets that symbol: the
+    // fragment's line is the one checked.
+    let both = f.tree(
+        "both",
+        &[
+            (
+                "full.config",
+                "CONFIG_X=y\nCONFIG_Y=m\n# CONFIG_Z is not set\n",
+            ),
+            ("linux.fragment", "CONFIG_Y=y\n"),
+        ],
+    );
+    f.run(&config(with_fragment), &[linux, both])
+        .expect("the fragment's line holds");
+}

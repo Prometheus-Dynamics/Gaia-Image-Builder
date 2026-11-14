@@ -160,6 +160,20 @@ pub(crate) fn plan(
                 "LINUX",
             )?);
         }
+        if let (Some(_), Some(_)) = (&kernel.config, &kernel.defconfig) {
+            return Err(Error::at(
+                &board.file,
+                "kernel.config",
+                "a complete configuration and a `defconfig` are two starting points; the board (with its family) states one",
+            ));
+        }
+        if let Some(config) = &kernel.config {
+            lines.push("BR2_LINUX_KERNEL_USE_CUSTOM_CONFIG=y".into());
+            lines.push(format!(
+                "BR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE={}",
+                quoted(&plan.file(config.path()))
+            ));
+        }
         match kernel.defconfig.as_deref() {
             None => {}
             Some("defconfig") => lines.push("BR2_LINUX_KERNEL_USE_ARCH_DEFAULT_CONFIG=y".into()),
