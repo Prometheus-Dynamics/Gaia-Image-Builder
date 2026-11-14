@@ -54,6 +54,17 @@ pub struct Boot {
     pub firmware: Option<String>,
 }
 
+/// The kernel image forms a board can state, and the Buildroot option that
+/// makes each.
+pub const KERNEL_IMAGES: [(&str, &str); 6] = [
+    ("Image", "BR2_LINUX_KERNEL_IMAGE"),
+    ("Image.gz", "BR2_LINUX_KERNEL_IMAGEGZ"),
+    ("zImage", "BR2_LINUX_KERNEL_ZIMAGE"),
+    ("uImage", "BR2_LINUX_KERNEL_UIMAGE"),
+    ("bzImage", "BR2_LINUX_KERNEL_BZIMAGE"),
+    ("vmlinux", "BR2_LINUX_KERNEL_VMLINUX"),
+];
+
 /// The kernel: its source, configuration and device trees.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -85,6 +96,11 @@ pub struct Kernel {
     /// console and the like, on one line. An image's recipe takes them as
     /// its input `cmdline-base`. A board's replace its family's.
     pub cmdline: Option<String>,
+    /// The form of the kernel image the build makes, as the kernel's own
+    /// build names it: `Image`, `Image.gz`, `zImage`, `uImage`, `bzImage`
+    /// or `vmlinux`. The form the board's firmware loads: a fact of the
+    /// board, not of a product. Unset: the architecture's usual form.
+    pub image: Option<String>,
 }
 
 /// The bootloader: its source, configuration and the files it is built
@@ -444,6 +460,22 @@ fn check_refs(
     if let Some(name) = file.kernel.as_ref().and_then(|k| k.source.as_deref()) {
         check("kernel.source", name)?;
     }
+    if let Some(image) = file.kernel.as_ref().and_then(|k| k.image.as_deref())
+        && !KERNEL_IMAGES.iter().any(|(name, _)| *name == image)
+    {
+        return Err(Error::new(
+            path,
+            "kernel.image",
+            format!(
+                "`{image}` is not a kernel image form; the forms are {}",
+                KERNEL_IMAGES
+                    .iter()
+                    .map(|(name, _)| *name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        ));
+    }
     if let Some(words) = file.kernel.as_ref().and_then(|k| k.cmdline.as_deref())
         && words.contains(['\n', '\r'])
     {
@@ -536,6 +568,7 @@ fn merge(board: BoardFile, family: BoardFile) -> BoardFile {
                 config: b.config.or(f.config),
                 storage_drivers: b.storage_drivers.or(f.storage_drivers),
                 cmdline: b.cmdline.or(f.cmdline),
+                image: b.image.or(f.image),
             }),
             (b, f) => b.or(f),
         },

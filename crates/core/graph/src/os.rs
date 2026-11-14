@@ -258,6 +258,14 @@ pub(crate) fn plan(
         if kernel.device_tree.is_some() || kernel.device_tree_dir.is_some() {
             lines.push("BR2_LINUX_KERNEL_DTS_SUPPORT=y".into());
         }
+        // The image form the board's firmware loads, when the board says.
+        if let Some(image) = &kernel.image
+            && let Some((_, option)) = gaia_describe::KERNEL_IMAGES
+                .iter()
+                .find(|(name, _)| name == image)
+        {
+            lines.push(format!("{option}=y"));
+        }
         if let Some(dt) = &kernel.device_tree {
             lines.push(format!("BR2_LINUX_KERNEL_INTREE_DTS_NAME={}", quoted(dt)));
         }

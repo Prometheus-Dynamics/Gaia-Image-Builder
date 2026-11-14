@@ -148,7 +148,8 @@ pub fn kernel_new_enough(version: (u32, u32), asked: &[&str]) -> Result<(), Stri
 /// What is made is read back before it is kept: the image is unpacked with
 /// the same tools' `fsck.erofs` and every file compared with the tree's. An
 /// image that does not hold the tree fails the step, whatever the tool
-/// said.
+/// said; one that does is kept with the step's second output, `read-back`,
+/// a line that says how many were compared.
 ///
 /// `tools` is the image's build's host tools, when it has an OS: the
 /// `mkfs.erofs` in them makes the image, and `mkfs_erofs` (a path on this
@@ -282,7 +283,9 @@ pub fn fs_erofs(
         Ok([out.stdout, out.stderr].concat())
     })
     .map_err(|e| fail(format!("{mkfs_erofs} --version: {e}")))?;
-    let mut key = KeyBuilder::new(NAME, 1)
+    // 2: what is made is read back, and the step says so in an output of
+    // its own. No image made before that is taken for one that was.
+    let mut key = KeyBuilder::new(NAME, 2)
         .config("mkfs.erofs", &version)
         .config("compression", compression)
         .config("level", level.to_string())
@@ -301,7 +304,10 @@ pub fn fs_erofs(
     }
     let key = key.finish();
     let made = Step::new(&store, cx, NAME, key).look_up_or_make(
-        &[("image", Path::new("image.erofs"))],
+        &[
+            ("image", Path::new("image.erofs")),
+            ("read-back", Path::new("read-back.txt")),
+        ],
         |work| {
             let tar_path = work.dir().join("tree.tar");
             write_tar(&dir, &tree.entries, &tar_path).map_err(|e| fail(format!("tar: {e}")))?;
@@ -342,7 +348,8 @@ pub fn fs_erofs(
                     .arg(format!("--extract={}", check.display()))
                     .arg(&image),
             )?;
-            let differing = differing(&dir, &check).map_err(|e| fail(format!("read back: {e}")))?;
+            let (compared, differing) =
+                differing(&dir, &check).map_err(|e| fail(format!("read back: {e}")))?;
             remove_tree(&check);
             if !differing.is_empty() {
                 return Err(fail(format!(
@@ -352,6 +359,12 @@ pub fn fs_erofs(
                     if differing.len() > 3 { ", ..." } else { "" }
                 )));
             }
+            // The record that it was: what a size is read beside.
+            std::fs::write(
+                work.dir().join("read-back.txt"),
+                format!("{compared} files and links read back with fsck.erofs: all as the tree has them\n"),
+            )
+            .map_err(|e| fail(e.to_string()))?;
             Ok(())
         },
     )?;
@@ -367,12 +380,13 @@ pub fn fs_erofs(
     })
 }
 
-/// The regular files and symlinks of `tree` that `unpacked` does not hold
-/// with the same bytes (or the same target).
-fn differing(tree: &Path, unpacked: &Path) -> std::io::Result<Vec<String>> {
+/// How many regular files and symlinks `tree` has, and those of them that
+/// `unpacked` does not hold with the same bytes (or the same target).
+fn differing(tree: &Path, unpacked: &Path) -> std::io::Result<(usize, Vec<String>)> {
     let mut paths = BTreeMap::new();
     walk(tree, "", &mut paths)?;
     let mut differ = Vec::new();
+    let mut compared = 0;
     for (path, full) in paths {
         let meta = std::fs::symlink_metadata(&full)?;
         let other = unpacked.join(&path);
@@ -383,13 +397,14 @@ fn differing(tree: &Path, unpacked: &Path) -> std::io::Result<Vec<String>> {
             std::fs::read(&other)
                 .is_ok_and(|got| std::fs::read(&full).is_ok_and(|want| got == want))
         } else {
-            true
+            continue;
         };
+        compared += 1;
         if !same {
             differ.push(path);
         }
     }
-    Ok(differ)
+    Ok((compared, differ))
 }
 
 /// Removes a tree fsck.erofs unpacked, whose directories may not be

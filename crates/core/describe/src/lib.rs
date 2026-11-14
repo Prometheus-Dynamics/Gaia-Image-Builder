@@ -30,8 +30,8 @@ mod read;
 mod validate;
 
 pub use board::{
-    Board, Boot, Bootloader, Disk, Firmware, Flash, Kernel, Medium, PartitionNeed, Scheme,
-    TrustedFirmware,
+    Board, Boot, Bootloader, Disk, Firmware, Flash, KERNEL_IMAGES, Kernel, Medium, PartitionNeed,
+    Scheme, TrustedFirmware,
 };
 pub use common::{FileRef, ImagePlatform, Mode, RelPath, SizeText, Source, Subdir};
 pub use component::{
