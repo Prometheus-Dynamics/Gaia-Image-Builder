@@ -909,19 +909,50 @@ fn image_recipe(
         }
         // Any other input is filled like a stage's own: store or a tool.
     }
-    // An image that names an initramfs and ships none: its recipe must take
-    // the tree, or the components named are in no output at all.
-    if !image.initramfs.is_empty() && !group.inputs.contains_key("initramfs") {
-        return Err(Error::at(
-            product_file,
-            format!("images[{i}].initramfs"),
-            format!(
-                "the image {} names an initramfs ({}), and its recipe {} takes none: nothing would hold those components",
-                image.name,
-                image.initramfs.join(", "),
-                recipe.name
-            ),
-        ));
+    // What an image names for its recipe to take, and the recipe inputs that
+    // take it. A key the recipe takes none of would be accepted and in no
+    // output: refused, by name.
+    let os_named: Vec<String> = image.os.iter().map(|os| os.source.clone()).collect();
+    let named: [(&str, &[String], &[&str]); 4] = [
+        (
+            "components",
+            &image.components,
+            &["build", "system", "source"],
+        ),
+        ("data", &image.data, &["data"]),
+        ("initramfs", &image.initramfs, &["initramfs"]),
+        (
+            "os",
+            &os_named,
+            &[
+                "build",
+                "system",
+                "kernel",
+                "device-trees",
+                "bootloader",
+                "os",
+                "host-tools",
+            ],
+        ),
+    ];
+    for (key, names, taken_by) in named {
+        if !names.is_empty()
+            && !taken_by
+                .iter()
+                .any(|input| group.inputs.contains_key(*input))
+        {
+            return Err(Error::at(
+                product_file,
+                format!("images[{i}].{key}"),
+                format!(
+                    "the image {} names `{key}` ({}), and its recipe {} takes none of it (a recipe takes it as its input {}): it would be in no output",
+                    image.name,
+                    names.join(", "),
+                    recipe.name,
+                    taken_by.join(", ")
+                ),
+            ));
+        }
     }
     for (output, at) in &group.outputs {
         let node = stages[&at.stage];
