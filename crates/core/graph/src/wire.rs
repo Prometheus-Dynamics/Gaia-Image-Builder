@@ -1172,6 +1172,32 @@ fn image_os(
                         }
                     }
                 }
+                InputFrom::File(path) => {
+                    let once = format!("file:{}", path.display());
+                    match os_inputs.get(&once) {
+                        Some(&node) => (once, node),
+                        None => {
+                            let node = g.add(
+                                "gaia.source.input",
+                                format!("{}.os.{name}", at.image.name),
+                                file,
+                                &key,
+                            )?;
+                            g.set(node, "path", Lit::Str(path.display().to_string()));
+                            g.set(
+                                node,
+                                "name",
+                                Lit::Str(
+                                    path.file_name()
+                                        .unwrap_or_default()
+                                        .to_string_lossy()
+                                        .into_owned(),
+                                ),
+                            );
+                            (once, node)
+                        }
+                    }
+                }
                 InputFrom::Dir(dir) => {
                     let once = format!("dir:{}", dir.display());
                     match os_inputs.get(&once) {
