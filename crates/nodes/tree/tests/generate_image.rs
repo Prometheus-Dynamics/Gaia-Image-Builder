@@ -24,11 +24,12 @@ fit)
     if [ "$n" -gt 16 ]; then echo "$(basename "$f") is over its bay" >&2; exit 3; fi
   done ;;
 write)
+  echo "wrote slot $4"
   head -c "$5" /dev/zero > "$6"
   printf 'board %s slot %s kernel %s\n' "$(cat "$2")" "$4" "$(cat "$3/kernel")" | dd of="$6" conv=notrunc 2>/dev/null
   if [ "$7" = "short" ]; then head -c 10 /dev/zero > "$6"; fi ;;
 verify)
-  head -c 5 "$2" | grep -q "$3" ;;
+  head -c 5 "$2" | grep -q "$3" && echo "read back ok" ;;
 bundle)
   # bundle OUT PAYLOAD ROOTFS TABLE PRODUCT VERSION [--key FILE --expect ID] [--payload-out DIR]
   out=$2; payload=$3; rootfs=$4; table=$5; product=$6; version=$7; shift 7
@@ -229,7 +230,11 @@ fn the_tool_writes_the_image_from_the_payload_and_says_what_fits() {
     assert!(image.starts_with(b"board zero slot base kernel k1\n"));
     assert!(image[40..].iter().all(|b| *b == 0));
     // What the fit run printed: each payload file and its stored size.
-    assert_eq!(report, "cmdline 5\nkernel 2\n");
+    // Every run's standard output, in the order of the runs.
+    assert_eq!(
+        report,
+        "cmdline 5\nkernel 2\nwrote slot base\nread back ok\n"
+    );
     // The same again is found; another payload, slot or size is made.
     f.run("k1", RUNS, "base", 4096).expect("again");
     assert_eq!(f.made(), 1);
