@@ -77,10 +77,78 @@ pub fn disk(
     blobs: Option<&Vec<RawBlob>>,
     cx: &Ctx,
 ) -> Result<Image, StepError> {
-    let mut all = layout.partitions.clone();
-    all.extend(partitions.iter().map(|p| (*p).clone()));
+    let fed: Vec<DiskPartition> = partitions.iter().map(|p| (*p).clone()).collect();
+    let all = fill(&layout.partitions, &fed)
+        .map_err(|e| StepError::body(NAME, format!("disk '{id}': {e}")))?;
     let blobs = blobs.map(Vec::as_slice).unwrap_or_default();
     disk_image(store, id, &layout.table, &all, blobs, cx)
+}
+
+/// The board's partitions with the recipe's: a recipe partition named as a
+/// board partition is that partition, and gives only its content. The
+/// board's place, size, type, role and flag stand, so a recipe can fill a
+/// layout without restating it; what a recipe partition states that the
+/// board says otherwise is refused, by name. Any other recipe partition
+/// follows the board's, in order.
+///
+/// # Errors
+///
+/// A recipe partition that differs from the board's of its name, or a
+/// board partition filled twice.
+pub fn fill(board: &[DiskPartition], fed: &[DiskPartition]) -> Result<Vec<DiskPartition>, String> {
+    let mut all = board.to_vec();
+    for partition in fed {
+        let Some(at) = all
+            .iter()
+            .take(board.len())
+            .position(|have| have.name == partition.name)
+        else {
+            all.push(partition.clone());
+            continue;
+        };
+        let have = &mut all[at];
+        let name = &partition.name;
+        let differs = |what: &str, board: String, recipe: String| {
+            format!(
+                "partition '{name}': the board's layout gives its {what} as {board}, and the recipe as {recipe}; the board's layout is the one to change"
+            )
+        };
+        if !partition.table_type.is_empty() && partition.table_type != have.table_type {
+            return Err(differs(
+                "type",
+                have.table_type.clone(),
+                partition.table_type.clone(),
+            ));
+        }
+        if let Some(size) = partition.size
+            && have.size != Some(size)
+        {
+            return Err(differs(
+                "size",
+                have.size
+                    .map_or("its content's".into(), |s| s.0.to_string()),
+                size.0.to_string(),
+            ));
+        }
+        if let Some(offset) = partition.offset
+            && have.offset != Some(offset)
+        {
+            return Err(differs(
+                "offset",
+                have.offset
+                    .map_or("the next boundary".into(), |s| s.0.to_string()),
+                offset.0.to_string(),
+            ));
+        }
+        if partition.bootable && !have.bootable {
+            return Err(differs("active flag", "off".into(), "on".into()));
+        }
+        if have.content.is_some() {
+            return Err(format!("partition '{name}' is filled twice"));
+        }
+        have.content.clone_from(&partition.content);
+    }
+    Ok(all)
 }
 
 /// One raw blob: the file `path` of the tree `from` (an OS's bootloader
@@ -167,15 +235,17 @@ pub fn disk_blobs(blobs: FanIn<'_, RawBlob>) -> Vec<RawBlob> {
     blobs.iter().map(|blob| (*blob).clone()).collect()
 }
 
-/// One partition of a disk, holding the image `content` when there is one:
-/// the node. `role` is a partition role's name; `offset` and `size` of 0
-/// leave the place and size to the layout (the next boundary, the content's
-/// size).
+/// One partition of a disk, holding the image `content` when there is one,
+/// or the file `file` (a partition's image another program wrote): the
+/// node. A recipe gives one or the other; given both, `content` is taken.
+/// `role` is a partition role's name; `offset` and `size` of 0 leave the
+/// place and size to the layout (the next boundary, the content's size).
 #[node(
     id = "gaia.disk.partition",
-    inputs(name, role, table_type, bootable, offset, size, content),
+    inputs(name, role, table_type, bootable, offset, size, content, file),
     outputs(partition)
 )]
+#[allow(clippy::too_many_arguments)]
 pub fn disk_partition(
     name: &str,
     role: &str,
@@ -184,6 +254,7 @@ pub fn disk_partition(
     offset: u64,
     size: u64,
     content: Option<&Image>,
+    file: Option<&Artifact>,
 ) -> DiskPartition {
     DiskPartition {
         name: name.to_string(),
@@ -192,7 +263,9 @@ pub fn disk_partition(
         bootable,
         offset: (offset != 0).then_some(Size(offset)),
         size: (size != 0).then_some(Size(size)),
-        content: content.map(|image| image.object.clone()),
+        content: content
+            .map(|image| image.object.clone())
+            .or_else(|| file.map(|artifact| artifact.object.clone())),
     }
 }
 
@@ -443,3 +516,73 @@ pub const NODES: [&NodeRecord; 5] = [
     &DISK_BLOBS_NODE,
     &UBOOT_ENV_NODE,
 ];
+
+#[cfg(test)]
+mod fill_tests {
+    use super::*;
+    use gaia_types::{ObjectKind, PartitionRole, Size, StoreRef};
+
+    fn part(name: &str, table_type: &str, size: Option<u64>) -> DiskPartition {
+        DiskPartition {
+            name: name.into(),
+            role: PartitionRole::parse(name),
+            table_type: table_type.into(),
+            bootable: false,
+            offset: None,
+            size: size.map(Size),
+            content: None,
+        }
+    }
+
+    fn content(digest: &str) -> Option<StoreRef> {
+        Some(StoreRef {
+            kind: ObjectKind::File,
+            digest: format!("sha256:{digest}"),
+        })
+    }
+
+    #[test]
+    fn a_recipe_partition_fills_the_boards_of_its_name() {
+        let board = [
+            part("boot", "0x0c", Some(82_837_504)),
+            part("data", "0x83", None),
+        ];
+        let mut boot = part("boot", "", None);
+        boot.content = content("aa");
+        let mut data = part("data", "", None);
+        data.content = content("bb");
+        let all = fill(&board, &[boot, data]).expect("fills");
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].table_type, "0x0c");
+        assert_eq!(all[0].size, Some(Size(82_837_504)));
+        assert_eq!(all[0].content, content("aa"));
+        assert_eq!(all[1].content, content("bb"));
+        // A partition the board does not name follows the board's.
+        let all = fill(&board, &[part("extra", "0x83", None)]).expect("appends");
+        assert_eq!(all[2].name, "extra");
+    }
+
+    #[test]
+    fn what_a_recipe_states_otherwise_is_refused() {
+        let board = [part("boot", "0x0c", Some(4096))];
+        let why = fill(&board, &[part("boot", "0x83", None)]).expect_err("type");
+        assert_eq!(
+            why,
+            "partition 'boot': the board's layout gives its type as 0x0c, and the recipe as 0x83; the board's layout is the one to change"
+        );
+        let why = fill(&board, &[part("boot", "", Some(8192))]).expect_err("size");
+        assert!(
+            why.contains("its size as 4096, and the recipe as 8192"),
+            "{why}"
+        );
+        let mut active = part("boot", "", None);
+        active.bootable = true;
+        assert!(fill(&board, &[active]).is_err());
+        // The same type and size, restated: no difference.
+        assert!(fill(&board, &[part("boot", "0x0c", Some(4096))]).is_ok());
+        let mut twice = part("boot", "", None);
+        twice.content = content("aa");
+        let why = fill(&board, &[twice.clone(), twice]).expect_err("twice");
+        assert_eq!(why, "partition 'boot' is filled twice");
+    }
+}

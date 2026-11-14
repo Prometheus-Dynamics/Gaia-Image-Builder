@@ -38,6 +38,8 @@ fn the_sizes_of_a_run_are_read_from_its_record_and_the_store() {
         b"kernel 5000 8192\ncmdline 12 4096\n",
     );
     write(&root.join("erofs.img"), &[4u8; 4096]);
+    write(&root.join("bundle.img"), &[5u8; 6000]);
+    write(&root.join("first-flash.img.xz"), &[6u8; 700]);
     let tree = |name: &str| store.put_tree(&root.join(name)).expect("put").to_string();
     let file = |name: &str| store.put_file(&root.join(name)).expect("put").to_string();
     let record = serde_json::json!({
@@ -47,6 +49,7 @@ fn the_sizes_of_a_run_are_read_from_its_record_and_the_store() {
         "outcome": "done",
         "outputs": {
             "img.slot": {"ty": "gaia:image", "object": file("erofs.img"), "from": []},
+            "img.boot": {"ty": "gaia:artifact", "object": file("boot.img"), "from": []},
         },
         "steps": [
             {"step": "gaia.os.buildroot", "key": "sha256:01", "made": true, "ms": 1, "outputs": {
@@ -64,6 +67,13 @@ fn the_sizes_of_a_run_are_read_from_its_record_and_the_store() {
             }},
             {"step": "gaia.generate.image", "key": "sha256:04", "made": true, "ms": 1, "outputs": {
                 "image": file("boot.img"), "report": file("report.txt"),
+            }},
+            // The same node again, for an image the build gives under no name.
+            {"step": "gaia.generate.image", "key": "sha256:05", "made": true, "ms": 1, "outputs": {
+                "image": file("bundle.img"),
+            }},
+            {"step": "gaia.flash.image", "key": "sha256:06", "made": true, "ms": 1, "outputs": {
+                "file": file("first-flash.img.xz"),
             }},
         ],
     });
@@ -127,7 +137,10 @@ fn the_sizes_of_a_run_are_read_from_its_record_and_the_store() {
                 && d.ends_with("NOT read back after it was made")),
         "{rows:#?}"
     );
-    assert_eq!(find("generated image (boot partition)", ""), 8192);
+    // Each generated image by the output it was given as.
+    assert_eq!(find("generated image (boot)", ""), 8192);
+    assert_eq!(find("generated image", ""), 6000);
+    assert_eq!(find("first-flash file", ""), 700);
     assert_eq!(find("payload kernel", "of 8192 in its bay"), 5000);
     assert_eq!(find("payload cmdline", "of 4096 in its bay"), 12);
 

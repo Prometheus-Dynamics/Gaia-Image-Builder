@@ -775,6 +775,15 @@ erofs = "gaia.fs.erofs"
 verity = "gaia.verity"
 as_kernel = "gaia.tree.role"
 bundle = "gaia.generate.image"
+data = "gaia.generate.tree"
+
+[[connects]]
+from = "bundle.image"
+to = "data.bundle"
+
+[[connects]]
+from = "as_kernel.tree"
+to = "data.payload"
 
 [[connects]]
 from = "erofs.image"
@@ -795,6 +804,7 @@ to = "bundle.payload"
 [consts]
 "as_kernel.role" = "kernel"
 "bundle.size" = 0
+"data.size" = 0
 "erofs.compression" = "lzma"
 "erofs.level" = 0
 
@@ -804,14 +814,16 @@ kernel = ["as_kernel.from"]
 kernel-build = ["erofs.kernel"]
 host-tools = ["erofs.tools", "verity.tools"]
 generator-bundle = ["bundle.runs"]
+generator-data = ["data.runs"]
 
 [outputs]
 bundle = "bundle.image"
+data = "data.tree"
 
 [parameters.slot]
 type = "string"
 description = "The slot's id."
-sets = ["bundle.slot"]
+sets = ["bundle.slot", "data.slot"]
 
 [parameters.device]
 type = "string"
@@ -842,7 +854,7 @@ sets = ["bundle.key_id"]
 "#,
     )
     .expect("recipe");
-    let block = "[generate]\ntool = { source = \"src\", package = \"hello-rust\" }\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"@out@\"]\noutputs = [\"overlay.dts\"]\n\n[generate.bundle]\nargs = [\"bundle\", \"--slot\", \"@slot@\", \"--payload\", \"@payload@\", \"--rootfs\", \"@rootfs@\", \"--verity-table\", \"@verity-table@\", \"--product\", \"@product@\", \"--version\", \"@version@\", \"--out\", \"@out@\"]\nkey_args = [\"--key-file\", \"@key@\"]\nverify = [\"bundle\", \"--verify\", \"@out@\"]\n";
+    let block = "[generate]\ntool = { source = \"src\", package = \"hello-rust\" }\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"@out@\"]\noutputs = [\"overlay.dts\"]\n\n[generate.bundle]\nargs = [\"bundle\", \"--slot\", \"@slot@\", \"--payload\", \"@payload@\", \"--rootfs\", \"@rootfs@\", \"--verity-table\", \"@verity-table@\", \"--product\", \"@product@\", \"--version\", \"@version@\", \"--out\", \"@out@\"]\nkey_args = [\"--key-file\", \"@key@\"]\nverify = [\"bundle\", \"--verify\", \"@out@\"]\n\n[generate.data]\nargs = [\"data-partition\", \"--install\", \"@bundle@\", \"--out\", \"@out@\"]\nverify = [\"data-partition\", \"--verify\", \"@out@\"]\n";
     let original = std::fs::read_to_string(&component).expect("read");
     std::fs::write(&component, format!("{original}\n{block}")).expect("write");
     let text = std::fs::read_to_string(&board).expect("read");
@@ -879,6 +891,11 @@ sets = ["bundle.key_id"]
         "hello-rust.root.rootfs -> zero-3e-demo::bundle.root",
         "zero-3e-demo.hello-rust.description.daemon.tree -> zero-3e-demo::bundle.description",
         "zero-3e-demo::bundle.image -> host.zero-3e-demo.bundle",
+        // The same tool installs the bundle into a directory: the data
+        // partition's contents.
+        "zero-3e-demo::bundle.image -> zero-3e-demo::data.bundle",
+        "hello-rust.tool.tree -> zero-3e-demo::data.tool",
+        "zero-3e-demo::data.tree -> host.zero-3e-demo.data",
     ] {
         assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
     }
@@ -921,6 +938,27 @@ sets = ["bundle.key_id"]
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         err.contains("recipe bundle-test has hello-rust's tool write a bundle; the component states no [generate.bundle]"),
+        "{err}"
+    );
+    // And of the data partition's contents.
+    let cut = block.split("\n[generate.data]").next().expect("the block");
+    std::fs::write(&component, format!("{original}\n{cut}\n")).expect("write");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("recipe bundle-test has hello-rust's tool write a data partition's contents; the component states no [generate.data]"),
+        "{err}"
+    );
+    let no_out = block.replace(
+        "\"--install\", \"@bundle@\", \"--out\", \"@out@\"]",
+        "\"--install\", \"@bundle@\"]",
+    );
+    std::fs::write(&component, format!("{original}\n{no_out}")).expect("write");
+    let out = plan(dir.path(), &[]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("no argument names @out@, the directory the tool writes"),
         "{err}"
     );
 }
@@ -1497,4 +1535,89 @@ fn a_component_installs_a_symbolic_link() {
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(err.contains(key) && err.contains(message), "{entry}: {err}");
     }
+}
+
+/// `slot-disk`: the slot installed on a data partition by the generator's
+/// tool, and the board's partitions of those names filled with the boot
+/// partition and that filesystem, as one first-flash file.
+#[test]
+fn a_first_flash_disk_fills_the_boards_partitions() {
+    let dir = project();
+    let board_dir = dir.path().join("examples/boards/zero-3e");
+    let board = board_dir.join("board.toml");
+    let product = dir
+        .path()
+        .join("examples/products/zero-3e-demo/product.toml");
+    let component = dir
+        .path()
+        .join("examples/components/hello-rust/component.toml");
+    let block = "[generate]\ntool = { source = \"src\", package = \"hello-rust\" }\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"--slot\", \"@slot@\", \"@out@\"]\noutputs = [\"overlay.dts\", \"words\", \"manifest-boot.json\"]\n\n[generate.provides]\nboard-overlay = \"overlay.dts\"\nmanifest-boot = \"manifest-boot.json\"\ncmdline = \"words/cmdline.txt\"\ncmdline-slot = \"words/slot.txt\"\n\n[generate.image]\nargs = [\"part\", \"--payload\", \"@payload@\", \"--size\", \"@size@\", \"--out\", \"@out@\"]\n\n[generate.bundle]\nargs = [\"bundle\", \"--payload\", \"@payload@\", \"--rootfs\", \"@rootfs@\", \"--verity-table\", \"@verity-table@\", \"--product\", \"@product@\", \"--version\", \"@version@\", \"--payload-out\", \"@payload-out@\", \"--out\", \"@out@\"]\n\n[generate.data]\nargs = [\"data-partition\", \"--install\", \"@bundle@\", \"--out\", \"@out@\"]\n";
+    let original = std::fs::read_to_string(&component).expect("read");
+    std::fs::write(&component, format!("{original}\n{block}")).expect("write");
+    let text = std::fs::read_to_string(&board).expect("read");
+    std::fs::write(
+        &board,
+        format!(
+            "{text}\n[descriptions]\ndaemon = \"daemon-board.toml\"\n\n[[partitions]]\nname = \"boot\"\nrole = \"boot\"\ntype = \"ebd0a0a2-b9e5-4433-87c0-68b6b72699c7\"\nsize = \"64M\"\n\n[[partitions]]\nname = \"data\"\nrole = \"data\"\ntype = \"0fc63daf-8483-4772-8e79-3d69d8477de4\"\n"
+        ),
+    )
+    .expect("write");
+    std::fs::write(board_dir.join("daemon-board.toml"), "id = \"zero-3e\"\n").expect("write");
+    edit(&product, "recipe = \"sd-image\"", "recipe = \"slot-disk\"");
+    edit(
+        &product,
+        "components = [\"usb-gadget-network\", \"extlinux\", \"hello-rust\"]",
+        "components = [\"usb-gadget-network\", \"hello-rust\"]\ninitramfs = [\"extlinux\"]",
+    );
+    edit(
+        &product,
+        "id = \"zero-3e-demo\"",
+        "id = \"zero-3e-demo\"\nboard_id = \"zero-3e\"\ndata_label = \"slots-data\"\nslot = \"base\"\ndevice = \"/dev/mmcblk0p3\"\nboot_size = 67108864\nproduct = \"demo\"\nversion = \"1.2.3\"",
+    );
+
+    let out = plan(dir.path(), &[]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    let text = String::from_utf8_lossy(&out.stdout)
+        .split(' ')
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    for line in [
+        // The slot installed from its bundle, by the generator's tool.
+        "zero-3e-demo::bundle.image -> zero-3e-demo::data.bundle",
+        "hello-rust.tool.tree -> zero-3e-demo::data.tool",
+        "zero-3e-demo::data.tree -> zero-3e-demo::datafs.tree",
+        // The board's partitions, filled.
+        "zero-3e-demo::boot.image -> zero-3e-demo::bootp.file",
+        "zero-3e-demo::datafs.image -> zero-3e-demo::datap.content",
+        "zero-3e-demo::bootp.partition -> zero-3e-demo::disk.partitions0",
+        "zero-3e-demo::datap.partition -> zero-3e-demo::disk.partitions1",
+        "zero-3e-demo.disk-layout -> zero-3e-demo::disk.layout",
+        "zero-3e-demo::disk.image -> zero-3e-demo::flash.image",
+        "zero-3e-demo::flash.file -> host.zero-3e-demo.flash",
+        "zero-3e-demo::disk.image -> host.zero-3e-demo.disk",
+    ] {
+        assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
+    }
+    let json = plan(dir.path(), &["--json"]);
+    let both: serde_json::Value = serde_json::from_slice(&json.stdout).expect("json");
+    let nodes = both["graph"]["graph"]["nodes"].as_array().expect("nodes");
+    let consts = |label: &str| {
+        nodes
+            .iter()
+            .find(|n| n["label"] == label)
+            .unwrap_or_else(|| panic!("no stage {label}"))["consts"]
+            .clone()
+    };
+    assert_eq!(
+        consts("zero-3e-demo::datafs")["label"]["value"],
+        "slots-data"
+    );
+    assert_eq!(consts("zero-3e-demo::flash")["board"]["value"], "zero-3e");
+    assert_eq!(consts("zero-3e-demo::flash")["format"]["value"], "disk");
+    // Unsigned: the recipe gives the first-flash file no key.
+    assert!(consts("zero-3e-demo::flash").get("key_env").is_none());
+    assert_eq!(consts("zero-3e-demo::bootp")["name"]["value"], "boot");
+    assert_eq!(consts("zero-3e-demo::datap")["name"]["value"], "data");
 }
