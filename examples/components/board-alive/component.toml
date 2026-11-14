@@ -1,0 +1,37 @@
+# Keeps a board recoverable without hands, and shows that it is alive:
+#
+# - the hardware watchdog is armed by systemd as soon as it starts, so a
+#   hang restarts the board (and a restart that hangs is cut short too);
+# - every LED the kernel offers beats at boot, and changes to a slow blink
+#   once an interface other than a USB gadget's has an IPv4 address, so a
+#   board with only Ethernet shows its DHCP lease without a console.
+#
+# For images whose init is systemd. The kernel needs a watchdog driver for
+# the board built in (not a module: it must be there before the root is),
+# CONFIG_LEDS_TRIGGER_HEARTBEAT=y and CONFIG_LEDS_TRIGGER_TIMER=y, and the
+# board's device tree an LED and an enabled watchdog node.
+#
+# The LEDs it drives are every one under /sys/class/leds unless the image
+# installs /etc/board-alive.leds, one LED name a line.
+# Untested on board.
+version = 1
+name = "board-alive"
+
+[[install]]
+from = { file = "files/10-watchdog.conf" }
+to = "/etc/systemd/system.conf.d/10-watchdog.conf"
+mode = "0644"
+
+[[install]]
+from = { file = "files/board-alive-led" }
+to = "/usr/libexec/board-alive-led"
+mode = "0755"
+
+[[install]]
+from = { file = "files/board-alive-led.service" }
+to = "/etc/systemd/system/board-alive-led.service"
+mode = "0644"
+
+[[services]]
+unit = "board-alive-led.service"
+enable = true

@@ -91,6 +91,22 @@ impl<'a> Step<'a> {
                 return self.recorded(start_ns, entry.outputs, false);
             }
         }
+        // One maker of a key at a time, in this store: a second waits, and
+        // then finds what the first recorded.
+        let _making = self.store.making(&self.key).map_err(&store_error)?;
+        if let Some(entry) = self
+            .store
+            .lookup(&self.key, self.check)
+            .map_err(&store_error)?
+            .filter(|entry| {
+                entry.outputs.len() == outputs.len()
+                    && outputs
+                        .iter()
+                        .all(|(name, _)| entry.outputs.contains_key(*name))
+            })
+        {
+            return self.recorded(start_ns, entry.outputs, false);
+        }
         let scratch = self.store.scratch().map_err(&store_error)?;
         let mut work = Work {
             dir: scratch.path(),
