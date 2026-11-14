@@ -102,16 +102,23 @@ pub const KEYS: [&str; 30] = [
 /// board's description file, the directory it writes into, the slot's id.
 pub const GENERATE_NAMES: [&str; 4] = ["@source@", "@description@", "@out@", "@slot@"];
 
-/// The names an argument of a `[generate.image]` run may hold: the tool's
-/// source tree, the board's description file, the payload directory, the
-/// slot's id, the image's size in bytes and the file to write.
-pub const GENERATE_IMAGE_NAMES: [&str; 6] = [
+/// The names an argument of a `[generate.image]` or `[generate.bundle]`
+/// run may hold: the tool's source tree, the board's description file, the
+/// payload directory, the slot's id, the image's size in bytes and the file
+/// to write; and, where the recipe gives them, the slot's root image, its
+/// verity table, a signing key file, and the product's name and version.
+pub const GENERATE_IMAGE_NAMES: [&str; 11] = [
     "@source@",
     "@description@",
     "@payload@",
     "@slot@",
     "@size@",
     "@out@",
+    "@rootfs@",
+    "@verity-table@",
+    "@key@",
+    "@product@",
+    "@version@",
 ];
 
 /// The `@name@` words of `text` that are none of [`GENERATE_NAMES`].

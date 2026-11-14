@@ -62,6 +62,8 @@ struct Generator {
     description_name: String,
     /// The runs of `[generate.image]`, as the step takes them (JSON).
     image_runs: Option<String>,
+    /// And of `[generate.bundle]`.
+    bundle_runs: Option<String>,
 }
 
 impl Graph<'_> {
@@ -766,6 +768,7 @@ fn image_recipe(
         } else if input == "generated"
             || input == "generator-source"
             || input == "generator-image"
+            || input == "generator-bundle"
             || input.starts_with("provides.")
         {
             let made = g.generators.get(&image.name).cloned().unwrap_or_default();
@@ -780,16 +783,21 @@ fn image_recipe(
                     ),
                 ));
             };
-            if input == "generator-image" {
+            if input == "generator-image" || input == "generator-bundle" {
                 // A stage that runs the generator's tool again, on what the
                 // recipe gives it: everything of the tool but the payload,
-                // the slot and the size, which are the recipe's.
-                let Some(runs) = &generator.image_runs else {
+                // the slot and the rest, which are the recipe's.
+                let (table, what, stated) = if input == "generator-image" {
+                    ("generate.image", "an image", &generator.image_runs)
+                } else {
+                    ("generate.bundle", "a bundle", &generator.bundle_runs)
+                };
+                let Some(runs) = stated else {
                     return Err(Error::at(
                         &generator.file,
-                        "generate.image",
+                        table,
                         format!(
-                            "recipe {} has {}'s tool write an image; the component states no [generate.image]",
+                            "recipe {} has {}'s tool write {what}; the component states no [{table}]",
                             recipe.name, generator.component
                         ),
                     ));
@@ -1942,16 +1950,21 @@ fn generate_node(g: &mut Graph<'_>, at: &OsIn<'_>, component: &Component) -> Res
             description: (description, description_out),
             program: format!("bin/{}", generate.tool.package),
             description_name: generate.description.clone(),
-            image_runs: generate.image.as_ref().map(|image| {
-                serde_json::json!({
-                    "fit": image.fit,
-                    "args": image.args,
-                    "verify": image.verify,
-                })
-                .to_string()
-            }),
+            image_runs: generate.image.as_ref().map(runs_json),
+            bundle_runs: generate.bundle.as_ref().map(runs_json),
         });
     Ok(node)
+}
+
+/// A `[generate.image]` or `[generate.bundle]` as the step takes it.
+fn runs_json(runs: &gaia_describe::GenerateImage) -> String {
+    serde_json::json!({
+        "fit": runs.fit,
+        "args": runs.args,
+        "verify": runs.verify,
+        "key_args": runs.key_args,
+    })
+    .to_string()
 }
 
 /// A component's layers in the image: its install entries placed from
