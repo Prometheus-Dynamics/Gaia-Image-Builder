@@ -715,8 +715,44 @@ fn an_initramfs_for_a_recipe_that_takes_none_is_refused() {
     assert!(err.contains("images[0].initramfs"), "{err}");
     assert!(
         err.contains(
-            "names an initramfs (extlinux), and its recipe sd-image takes none: nothing would hold those components"
+            "names `initramfs` (extlinux), and its recipe sd-image takes none of it (a recipe takes it as its input initramfs): it would be in no output"
         ),
+        "{err}"
+    );
+}
+
+/// The same for every key an image names things under for its recipe: data
+/// for a recipe that takes no data, components and an OS for a recipe that
+/// takes only data.
+#[test]
+fn what_an_image_names_and_its_recipe_does_not_take_is_refused() {
+    let dir = project();
+    let product = dir
+        .path()
+        .join("examples/products/zero-3e-demo/product.toml");
+    edit(
+        &product,
+        "recipe = \"sd-image\"",
+        "data = [\"hello-rust\"]\nrecipe = \"slot\"",
+    );
+    edit(&product, "id = \"zero-3e-demo\"", "device = \"/dev/x\"");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("images[0].data"), "{err}");
+    assert!(
+        err.contains("names `data` (hello-rust), and its recipe slot takes none of it"),
+        "{err}"
+    );
+    // A recipe that takes only data: the components and the OS are in no output.
+    edit(&product, "recipe = \"slot\"", "recipe = \"data-ext4\"");
+    edit(&product, "device = \"/dev/x\"", "");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("images[0].components"), "{err}");
+    assert!(
+        err.contains("its recipe data-ext4 takes none of it (a recipe takes it as its input build, system, source)"),
         "{err}"
     );
 }

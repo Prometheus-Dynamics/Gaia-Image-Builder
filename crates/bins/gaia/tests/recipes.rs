@@ -74,6 +74,16 @@ fn product(dir: &Path, examples: &Path, name: &str, recipe: &gaia_recipe::Recipe
     } else {
         ""
     };
+    // And it is in `components` only for a recipe that takes components:
+    // what an image names and its recipe does not take is refused.
+    let components = if ["build", "system", "source"]
+        .iter()
+        .any(|input| recipe.inputs.contains_key(*input))
+    {
+        "components = [\"test-tree\"]\n"
+    } else {
+        ""
+    };
     let mut settings = String::new();
     for (key, param) in &recipe.parameters {
         if param.default.is_none() {
@@ -83,7 +93,7 @@ fn product(dir: &Path, examples: &Path, name: &str, recipe: &gaia_recipe::Recipe
     std::fs::write(
         dir.join("product.toml"),
         format!(
-            "version = 1\nname = \"{name}\"\n[components]\ntest-tree = \"components/test-tree/component.toml\"\n\n[[images]]\nname = \"img\"\nboard = \"boards/generic-test/board.toml\"\ncomponents = [\"test-tree\"]\n{data}recipe = \"{name}\"\n\n[images.settings]\n{settings}"
+            "version = 1\nname = \"{name}\"\n[components]\ntest-tree = \"components/test-tree/component.toml\"\n\n[[images]]\nname = \"img\"\nboard = \"boards/generic-test/board.toml\"\n{components}{data}recipe = \"{name}\"\n\n[images.settings]\n{settings}"
         ),
     )
     .expect("product");
