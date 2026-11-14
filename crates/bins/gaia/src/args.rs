@@ -17,6 +17,7 @@ usage:
   gaia show  <image>.<output> [--store DIR]
   gaia sizes [<run.json>] [--store DIR] [--json] [--xz]
   gaia sizes --image <disk image[.xz]> [--json]
+  gaia sizes --rootfs <erofs image> [--tools DIR] [--store DIR] [--json]
 
 project flags:
   --store DIR        the content store (default: $GAIA_STORE, or
@@ -107,6 +108,12 @@ pub struct Sizes {
     /// A disk image to measure in place of a run: one this builder did
     /// not make.
     pub image: Option<PathBuf>,
+    /// An erofs root filesystem image to measure in place of a run.
+    pub rootfs: Option<PathBuf>,
+    /// With `rootfs`: a build's host tools (the directory with
+    /// `dump.erofs` and `fsck.erofs`, or one whose `bin` or `host/bin`
+    /// has them); the latest build's in the store when not given.
+    pub tools: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -245,6 +252,8 @@ pub fn parse(words: &[String]) -> Result<Command, Stop> {
                     "--json" => sizes.json = true,
                     "--xz" => sizes.xz = true,
                     "--image" => sizes.image = Some(words.value(word)?.into()),
+                    "--rootfs" => sizes.rootfs = Some(words.value(word)?.into()),
+                    "--tools" => sizes.tools = Some(words.value(word)?.into()),
                     _ => words.positional(word, &mut run)?,
                 }
             }

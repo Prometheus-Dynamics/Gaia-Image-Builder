@@ -316,3 +316,109 @@ fn an_image_this_builder_did_not_make_is_measured_from_its_bytes() {
         "{text}"
     );
 }
+
+/// With this machine's erofs tools as the tools given. Skipped where they
+/// are not installed.
+#[test]
+fn a_root_filesystem_image_is_measured_with_the_tools_given() {
+    let have = |name: &str| Path::new("/usr/bin").join(name).is_file();
+    if !["mkfs.erofs", "dump.erofs", "fsck.erofs"]
+        .iter()
+        .all(|name| have(name))
+    {
+        assert!(
+            std::env::var_os("GAIA_REQUIRE_TOOLS").is_none(),
+            "GAIA_REQUIRE_TOOLS is set, and the erofs tools are not here"
+        );
+        println!("SKIPPED: no mkfs.erofs, dump.erofs and fsck.erofs on this machine");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path().join("root");
+    write(&root.join("usr/bin/app"), &[5u8; 9000]);
+    write(&root.join("usr/lib/modules/6.1/kernel/a.ko"), &[1u8; 300]);
+    write(
+        &root.join("usr/lib/modules/6.1/kernel/b.ko.xz"),
+        &[1u8; 200],
+    );
+    write(&root.join("usr/lib/modules/6.1/modules.dep"), &[1u8; 50]);
+    write(&root.join("etc/app.conf"), b"a=1\n");
+    std::os::unix::fs::symlink("usr/lib", root.join("lib")).expect("symlink");
+    let image = dir.path().join("rootfs.erofs");
+    let made = Command::new("/usr/bin/mkfs.erofs")
+        .args(["--quiet", "-zlz4"])
+        .arg(&image)
+        .arg(&root)
+        .status()
+        .expect("mkfs.erofs");
+    assert!(made.success());
+
+    let out = Command::new(env!("CARGO_BIN_EXE_gaia"))
+        .args(["sizes", "--json", "--tools", "/usr/bin", "--rootfs"])
+        .arg(&image)
+        .env("TMPDIR", dir.path())
+        .output()
+        .expect("gaia runs");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let shown: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+    let rows: Vec<(String, u64, String)> = shown["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .map(|r| {
+            (
+                r["what"].as_str().expect("what").trim().to_string(),
+                r["bytes"].as_u64().expect("bytes"),
+                r["detail"].as_str().expect("detail").to_string(),
+            )
+        })
+        .collect();
+    let find = |what: &str| {
+        rows.iter()
+            .find(|(w, _, _)| w == what)
+            .unwrap_or_else(|| panic!("no row {what} in {rows:#?}"))
+    };
+    assert_eq!(
+        find("rootfs image").1,
+        std::fs::metadata(&image).expect("stat").len()
+    );
+    assert!(find("compression").2.starts_with("lz4"), "{rows:#?}");
+    let unpacked = find("rootfs unpacked");
+    assert_eq!(unpacked.1, 9000 + 300 + 200 + 50 + 4);
+    assert!(unpacked.2.starts_with("5 files, ") && unpacked.2.ends_with("1 symlinks"));
+    // The modules once, though /lib is a link to where they are.
+    assert_eq!(find("kernel modules").1, 500);
+    assert_eq!(find("kernel modules").2, "2 modules");
+    assert_eq!(find("kernel modules tree").1, 550);
+    assert_eq!(find("tree usr/bin").1, 9000);
+    assert_eq!(find("file usr/bin/app").1, 9000);
+    assert!(find("not measured").2.contains("each component's bytes"));
+    // The scratch directory is gone.
+    assert!(
+        std::fs::read_dir(dir.path())
+            .expect("read")
+            .flatten()
+            .all(|e| !e
+                .file_name()
+                .to_string_lossy()
+                .starts_with("gaia-sizes-rootfs-"))
+    );
+
+    // Tools that are not there are refused by name.
+    let out = Command::new(env!("CARGO_BIN_EXE_gaia"))
+        .args(["sizes", "--tools", "/nonexistent", "--rootfs"])
+        .arg(&image)
+        .output()
+        .expect("gaia runs");
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("/nonexistent has no dump.erofs and fsck.erofs"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
