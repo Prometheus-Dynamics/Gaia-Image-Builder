@@ -8,7 +8,8 @@
 //! root, so it is read from its source at the locked commit and no copy is
 //! kept here: a later commit that adds an option tightens the build.
 //!
-//! The file, TOML, `version = 2`, names written without `CONFIG_`:
+//! The file, TOML, `version = 2` or `3` (the same shape), names written
+//! without `CONFIG_`:
 //!
 //! ```toml
 //! version = 2
@@ -35,8 +36,9 @@ use gaia_types::KernelContract;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
-/// The version this reader knows.
-const VERSION: i64 = 2;
+/// The versions this reader knows. 3 has the shape of 2 (it lists one more
+/// option), so a source at either is read while its consumers move.
+const VERSIONS: [i64; 2] = [2, 3];
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -86,10 +88,10 @@ pub fn problems(text: &str, config: &str, want: &KernelContract) -> Result<Vec<S
     let value: toml::Value =
         toml::from_str(text).map_err(|e| format!("{file}: {}", e.message()))?;
     match value.get("version").and_then(toml::Value::as_integer) {
-        Some(VERSION) => {}
+        Some(known) if VERSIONS.contains(&known) => {}
         Some(other) => {
             return Err(format!(
-                "{file}: version {other}; this build reads version {VERSION}"
+                "{file}: version {other}; this build reads versions 2 and 3"
             ));
         }
         None => return Err(format!("{file}: no `version`")),
@@ -284,10 +286,14 @@ checked = ["BLK_DEV_DM"]
     #[test]
     fn another_version_or_an_unknown_key_is_refused() {
         let w = want("disk", &["CONFIG_X"]);
-        let newer = CONTRACT.replace("version = 2", "version = 3");
+        // Version 3 is read as 2 is; a version after it is refused.
+        let three = CONTRACT.replace("version = 2", "version = 3");
+        assert_eq!(problems(&three, "", &w), problems(CONTRACT, "", &w));
+        assert!(problems(&three, "", &w).is_ok());
+        let newer = CONTRACT.replace("version = 2", "version = 4");
         assert_eq!(
             problems(&newer, "", &w),
-            Err("contracts/slot-kernel.toml: version 3; this build reads version 2".into())
+            Err("contracts/slot-kernel.toml: version 4; this build reads versions 2 and 3".into())
         );
         let none = CONTRACT.replace("version = 2", "");
         assert_eq!(
