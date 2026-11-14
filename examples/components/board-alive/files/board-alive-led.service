@@ -1,0 +1,12 @@
+[Unit]
+Description=LED pattern: alive at boot, another once the network has an address
+DefaultDependencies=no
+After=sysinit.target
+
+[Service]
+ExecStart=/usr/libexec/board-alive-led
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
