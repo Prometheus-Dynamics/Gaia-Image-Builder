@@ -81,6 +81,7 @@ impl Fixture {
             cpus: String::new(),
             jobs: 1,
             download_dir: self.root.join("dl").display().to_string(),
+            config_only: false,
         };
         let out = build_os(
             &self.store.display().to_string(),

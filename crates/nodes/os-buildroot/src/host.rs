@@ -98,6 +98,18 @@ pub fn build_host(
     let text = fs::read_to_string(store.path(&planned.outputs["plan"]))
         .map_err(|e| StepError::body(PLAN, format!("the plan: {e}")))?;
     let goals = text.lines().next().unwrap_or_default().to_string();
+    // A check of the configuration alone: it is resolved and held, and no
+    // tool is made. The seed is an empty tree nothing may build from.
+    if host.config_only {
+        let empty = store.scratch().map_err(StepError::store(NAME))?;
+        let dir = empty.path().join("empty");
+        fs::create_dir(&dir).map_err(|e| StepError::body(NAME, e.to_string()))?;
+        let object = store.put_tree(&dir).map_err(StepError::store(NAME))?;
+        return Ok(Tree {
+            object: object.into(),
+            entries: Vec::new(),
+        });
+    }
 
     let mut key = KeyBuilder::new(NAME, KEY_VERSION)
         .input("source", prepared.src_digest)
