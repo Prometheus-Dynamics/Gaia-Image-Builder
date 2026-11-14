@@ -135,7 +135,10 @@ pub fn not_taken(resolved: &str, fragments: &[ConfigFragment]) -> Vec<String> {
             Some(got) if *got == line => {}
             // An unset symbol may simply be absent from the config.
             None if unset => {}
-            Some(got) => missing.push(format!("{fragment}: `{line}` became `{got}`")),
+            Some(got) => missing.push(format!(
+                "{fragment}: `{line}` became `{got}`{}",
+                string_hint(line, got)
+            )),
             None => missing.push(format!(
                 "{fragment}: `{line}` was dropped (no such option, or its dependencies are not met)"
             )),
@@ -191,7 +194,10 @@ pub fn kconfig_not_taken(resolved: &str, fragments: &[(String, String)]) -> Vec<
             // Unset is unset, however either side writes it.
             (None, None) | (None, Some((_, None))) => {}
             (Some(want), Some((_, Some(got)))) if want == got => {}
-            (_, Some((got, _))) => missing.push(format!("{file}: `{line}` became `{got}`")),
+            (_, Some((got, _))) => missing.push(format!(
+                "{file}: `{line}` became `{got}`{}",
+                string_hint(line, got)
+            )),
             (Some(_), None) => missing.push(format!(
                 "{file}: `{line}` was dropped (no such symbol in this tree, or its dependencies are not met)"
             )),
@@ -210,6 +216,17 @@ pub fn string_option<'a>(resolved: &'a str, name: &str) -> Option<&'a str> {
 
 fn matches_symbol(line: &str, name: &str) -> bool {
     matches!(symbol(line), Ok(Some(found)) if found == name)
+}
+
+/// What to write, when a line that unsets an option came out as an empty
+/// string: the option is a string, which has no "is not set" form.
+fn string_hint(line: &str, got: &str) -> String {
+    match got.strip_suffix("=\"\"") {
+        Some(name) if line.starts_with('#') => {
+            format!(" ({name} is a string option: write {name}=\"\")")
+        }
+        _ => String::new(),
+    }
 }
 
 #[cfg(test)]
@@ -289,6 +306,16 @@ mod tests {
         );
         // Every line taken: nothing to report.
         assert!(not_taken(resolved, &fragments[2..]).is_empty());
+        // A string option unset as a bool is: the refusal says what to write.
+        assert_eq!(
+            not_taken(
+                "BR2_SYSTEM_DHCP=\"\"\n",
+                &[fragment("image", "# BR2_SYSTEM_DHCP is not set\n")]
+            ),
+            [
+                "image: `# BR2_SYSTEM_DHCP is not set` became `BR2_SYSTEM_DHCP=\"\"` (BR2_SYSTEM_DHCP is a string option: write BR2_SYSTEM_DHCP=\"\")"
+            ]
+        );
     }
 
     #[test]
