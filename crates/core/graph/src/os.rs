@@ -39,8 +39,11 @@
 //!
 //! A file or directory the config names is an input tree of the step,
 //! written `@name@` in the text: a locked source by its lock name, a
-//! directory beside a description as `files.<n>`. In an image's own
-//! fragment, `@here@` is the fragment's directory.
+//! file or a directory beside a description as `files.<n>` (a file as a
+//! tree with that file alone, so a build is keyed on what it names and not
+//! on its neighbours). In an image's own fragment, `@here@/<path>` is that
+//! file or directory beside the fragment, and a bare `@here@` the
+//! fragment's whole directory.
 
 use crate::Error;
 use gaia_describe::{Board, FileRef, OsSpec, RelPath, Source};
