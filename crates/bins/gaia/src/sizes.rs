@@ -112,7 +112,67 @@ struct Owned {
     owners: Vec<String>,
 }
 
+/// The host tools of the newest build in the store that has erofs tools.
+fn erofs_tools(store: &Store) -> Option<std::path::PathBuf> {
+    record::all(store).into_iter().rev().find_map(|path| {
+        let run = Run::read(&path).ok()?;
+        run.steps
+            .iter()
+            .filter(|step| step.step == "gaia.os.buildroot.host")
+            .filter_map(|step| step.outputs.get("seed"))
+            .map(|seed| store.path(seed))
+            .find(|seed| crate::rootfs_sizes::tools_dir(seed).is_some())
+    })
+}
+
+fn print(title: &str, path: &Path, rows: &[Row], json: bool) -> Result<(), Stop> {
+    if json {
+        let text = serde_json::to_string_pretty(&serde_json::json!({
+            title: path,
+            "rows": rows,
+        }))
+        .map_err(Stop::usage)?;
+        println!("{text}");
+        return Ok(());
+    }
+    println!("{title:8} {}", path.display());
+    let width = rows.iter().map(|r| r.what.len()).max().unwrap_or(0);
+    for r in rows {
+        println!("{:width$}  {:>12}  {}", r.what, r.bytes, r.detail);
+    }
+    Ok(())
+}
+
 pub fn sizes(options: &args::Sizes) -> Result<(), Stop> {
+    if let Some(rootfs) = &options.rootfs {
+        if options.run.is_some() || options.image.is_some() {
+            return Err(Stop::usage(
+                "sizes takes one of a run, --image and --rootfs",
+            ));
+        }
+        let tools = match &options.tools {
+            Some(tools) => tools.clone(),
+            None => {
+                let store = Store::open(project::store_dir(options.store.as_deref())?)
+                    .map_err(Stop::usage)?;
+                erofs_tools(&store).ok_or_else(|| {
+                    Stop::usage(
+                        "no build in this store has erofs tools in its host tools; give --tools DIR",
+                    )
+                })?
+            }
+        };
+        let rows: Vec<Row> = crate::rootfs_sizes::measure(rootfs, &tools, &std::env::temp_dir())
+            .map_err(Stop::usage)?
+            .into_iter()
+            .map(|(what, bytes, detail)| Row {
+                what,
+                bytes,
+                detail,
+            })
+            .collect();
+        return print("rootfs", rootfs, &rows, options.json);
+    }
     if let Some(image) = &options.image {
         if options.run.is_some() {
             return Err(Stop::usage("sizes takes a run or --image, not both"));
