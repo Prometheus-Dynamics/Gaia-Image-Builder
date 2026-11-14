@@ -101,6 +101,13 @@ fn every_recipe_plans_for_the_generic_test_board() {
         recipes_dir.display()
     );
     for (name, recipe) in &recipes.by_name {
+        // A recipe that takes a generator's files needs a board with an OS,
+        // a kernel's device tree and a component with a [generate]: the
+        // generic board has none. It is planned by its own test, on the
+        // example board (`a_recipe_takes_the_generators_files_by_role`).
+        if recipe.inputs.contains_key("generated") {
+            continue;
+        }
         let dir = tempfile::tempdir().expect("tempdir");
         product(dir.path(), &examples, name, recipe);
         let mut args = vec![
