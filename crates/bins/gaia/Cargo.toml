@@ -19,6 +19,7 @@ flate2 = "=1.1.11"
 daedalus-cpu = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "b3916178f255ab9f55d230dff1395c08b3bca2c9" }
 gaia-build-command = { path = "../../nodes/build-command" }
 gaia-build-go = { path = "../../nodes/build-go" }
+gaia-build-make = { path = "../../nodes/build-make" }
 gaia-build-java = { path = "../../nodes/build-java" }
 gaia-build-node = { path = "../../nodes/build-node" }
 gaia-build-python = { path = "../../nodes/build-python" }

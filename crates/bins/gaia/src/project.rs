@@ -215,6 +215,7 @@ pub fn registry() -> Registry {
         &gaia_build_rust::NODES,
         &gaia_build_command::NODES,
         &gaia_build_go::NODES,
+        &gaia_build_make::NODES,
         &gaia_build_java::NODES,
         &gaia_build_node::NODES,
         &gaia_build_python::NODES,
@@ -382,7 +383,7 @@ fn distance(a: &str, b: &str) -> usize {
 /// Every builder name a component may give.
 fn builders() -> Builders {
     let mut builders = Builders::default();
-    for name in ["go", "java", "node", "python"] {
+    for name in ["go", "java", "make", "node", "python"] {
         builders
             .0
             .insert(name.to_string(), format!("gaia.build.{name}"));
