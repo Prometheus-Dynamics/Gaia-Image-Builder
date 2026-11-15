@@ -1,0 +1,23 @@
+# CanMV K230D AI-CAM (bench product): the K230 family's Buildroot and
+# boot chain, with a USB gadget network on the USB-C port. Not built on
+# hardware; the K230 boot chain is not yet expressible (docs/prs/B8-k230d.md).
+version = 1
+name = "k230d-ai-cam"
+
+[sources.buildroot]
+git = "https://gitlab.com/buildroot.org/buildroot.git"
+ref = "2026.02.3"
+
+[components]
+usb-gadget-network = "../../components/usb-gadget-network/component.toml"
+
+[[images]]
+name = "k230d-ai-cam"
+board = "../../boards/k230d-ai-cam/board.toml"
+components = ["usb-gadget-network"]
+os = { provider = "buildroot", source = "buildroot", fragments = ["os.fragment"] }
+recipe = "sd-image"
+budget = "1G"
+
+[images.settings]
+id = "k230d-ai-cam"

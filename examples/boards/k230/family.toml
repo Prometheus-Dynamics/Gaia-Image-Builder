@@ -1,0 +1,78 @@
+# Canaan K230D (RISC-V, RVV 1.0, 128 MB) on the K230 family: mainline Linux
+# 7.3.3 for the kernel and the Canaan K230 SDK's U-Boot 2022.10 for the boot
+# chain. Mainline U-Boot has no K230 SPL or MMC driver, so the SDK's U-Boot
+# (k230d_canmv_bpi) is the bootloader. Untested on board, and not built.
+#
+# Not expressed here yet (the B8 port notes are in the branch commit message):
+# - the SDK overlay of U-Boot 2022.10 (212 files, boot/uboot/u-boot-2022.10-overlay)
+#   has no source kind; the family names upstream 2022.10 only;
+# - the SPL and U-Boot headers (k230_priv_gzip, firmware_gen, mkimage) that the
+#   SDK's post-image makes as fn_*.bin; no schema step runs them, so the
+#   partitions below name outputs no step produces.
+version = 1
+
+[target]
+arch = "riscv64"
+os = "linux"
+
+[sources.linux]
+git = "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
+ref = "v7.3.3"
+
+[sources.u-boot]
+git = "https://source.denx.de/u-boot/u-boot.git"
+ref = "v2022.10"
+
+[kernel]
+source = "linux"
+defconfig = "defconfig"
+fragments = ["assets/linux.fragment"]
+
+[bootloader]
+source = "u-boot"
+defconfig = "k230d_canmv_bpi"
+
+# The SPL is written at 1 MiB, its copy at 1.5 MiB; U-Boot at 2 MiB, its
+# environment at 1.875 MiB and 3.5 MiB (the SDK's genimage.cfg). The boot
+# ROM reads these, so they sit outside the partition table.
+[[partitions]]
+name = "spl"
+role = "bootloader"
+offset = "1M"
+in_table = false
+content = "fn_u-boot-spl.bin"
+
+[[partitions]]
+name = "spl-copy"
+role = "bootloader"
+offset = "1536K"
+in_table = false
+content = "fn_u-boot-spl.bin"
+
+[[partitions]]
+name = "uboot-env"
+role = "raw"
+offset = "1920K"
+in_table = false
+content = "env.env"
+
+[[partitions]]
+name = "uboot"
+role = "bootloader"
+offset = "2M"
+in_table = false
+content = "fn_ug_u-boot.bin"
+
+[[partitions]]
+name = "env"
+role = "raw"
+offset = "3584K"
+in_table = false
+content = "env.env"
+
+[disk]
+scheme = "gpt"
+
+[flash]
+methods = ["sd-card", "usb-boot"]
+medium = "sd"

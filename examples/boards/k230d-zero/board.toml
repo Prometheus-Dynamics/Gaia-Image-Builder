@@ -1,0 +1,16 @@
+# BPI-CanMV-K230D-Zero (K230D, RVV 1.0) on the K230 family. The device tree
+# is the ruyisdk kernel fork's bananapi-canmv-k230d-zero.dts (fork commit
+# ae4a7e6), not in mainline 7.3.3: a guess that it compiles against 7.3.3's
+# k230.dtsi, not checked. Untested on board.
+version = 1
+extends = "../k230/family.toml"
+name = "k230d-zero"
+description = "BPI-CanMV-K230D-Zero (K230D)"
+
+[target]
+cpu = "xuantie-c908"
+
+[kernel]
+device_tree = "canaan/bananapi-canmv-k230d-zero"
+device_tree_dir = "assets/dts"
+fragments = ["../k230/assets/linux.fragment", "assets/linux.fragment"]

@@ -1,0 +1,20 @@
+# Written by `gaia lock`. Do not edit.
+version = 1
+
+[source."k230d-ai-cam.buildroot"]
+kind = "git"
+url = "https://gitlab.com/buildroot.org/buildroot.git"
+ref = "2026.02.3"
+commit = "679b9ead7620bbf193620d1ebf56f53c1764d37a"
+
+[source."k230d-ai-cam.linux"]
+kind = "git"
+url = "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
+ref = "v7.3.3"
+commit = "d50d994bffa3c7c6db2d8bc4c5f0c55e3f46b0cd"
+
+[source."k230d-ai-cam.u-boot"]
+kind = "git"
+url = "https://source.denx.de/u-boot/u-boot.git"
+ref = "v2022.10"
+commit = "4debc57a3da6c3f4d3f89a637e99206f4cea0a96"

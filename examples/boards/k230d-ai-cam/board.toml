@@ -1,0 +1,14 @@
+# CanMV K230D AI-CAM on the K230 family: its own device tree (SD and USB
+# nodes written from the SDK's addresses and the bindings, not checked on
+# hardware). Untested on board.
+version = 1
+extends = "../k230/family.toml"
+name = "k230d-ai-cam"
+description = "CanMV K230D AI-CAM (K230D)"
+
+[target]
+cpu = "xuantie-c908"
+
+[kernel]
+device_tree = "canaan/k230d-ai-cam"
+device_tree_dir = "assets/dts"

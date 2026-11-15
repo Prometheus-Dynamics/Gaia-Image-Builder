@@ -1,0 +1,88 @@
+// SPDX-License-Identifier: GPL-2.0 OR MIT
+/*
+ * CanMV K230D AI-CAM on mainline Linux. Mainline's k230.dtsi stops at the
+ * UARTs (7.3.3 and 7.4-rc1), so the SD and USB controllers are added here,
+ * for the mainline drivers (sdhci-of-dwcmshc, phy-k230-usb, dwc2), with the
+ * addresses and interrupts of the K230 Linux SDK's k230.dtsi. No pinctrl
+ * states: as with the SDK's k230d-canmv.dts, the kernel keeps the pins the
+ * SDK's U-Boot set up.
+ * Written from the SDK and the bindings, untested on board.
+ */
+#include "canaan/k230.dtsi"
+
+/ {
+	model = "CanMV K230D AI-CAM";
+	compatible = "canaan,canmv-k230d-ai-cam", "canaan,kendryte-k230";
+
+	aliases {
+		serial0 = &uart0;
+		mmc0 = &mmc_sd1;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+		bootargs = "root=/dev/mmcblk0p2 rootwait rw rootfstype=ext4 console=ttyS0,115200 earlycon=sbi";
+	};
+
+	/* The K230D's in-package 128 MB. */
+	memory@0 {
+		device_type = "memory";
+		reg = <0x0 0x0 0x0 0x8000000>;
+	};
+
+	timerx_pulse_in: clock-50000000 {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <50000000>;
+	};
+
+	soc {
+		usbphy: usb-phy@91585000 {
+			compatible = "canaan,k230-usb-phy";
+			reg = <0x0 0x91585000 0x0 0x400>;
+			#phy-cells = <1>;
+		};
+
+		/* The USB-C port. The K230D post-image script puts it in device
+		 * mode for the gadget network. */
+		usb0: usb@91500000 {
+			compatible = "snps,dwc2";
+			reg = <0x0 0x91500000 0x0 0x40000>;
+			interrupts = <173 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sysclk K230_HS_USB0_AHB_GATE>;
+			clock-names = "otg";
+			phys = <&usbphy 0>;
+			phy-names = "usb2-phy";
+			g-rx-fifo-size = <512>;
+			g-np-tx-fifo-size = <64>;
+			g-tx-fifo-size = <512 1024 64 64 64 64>;
+		};
+
+		/* The TF slot. */
+		mmc_sd1: mmc@91581000 {
+			compatible = "canaan,k230-sdio";
+			reg = <0x0 0x91581000 0x0 0x1000>;
+			interrupts = <144 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sysclk K230_HS_SD1_CARD_GATE>,
+				 <&sysclk K230_HS_SD1_AHB_GATE>,
+				 <&sysclk K230_HS_SD1_AXI_GATE>,
+				 <&sysclk K230_HS_SD1_BASE_GATE>,
+				 <&sysclk K230_HS_SD1_TIMER_GATE>;
+			clock-names = "core", "bus", "axi", "block", "timer";
+			canaan,usb-phy = <&usbphy>;
+			bus-width = <4>;
+			max-frequency = <50000000>;
+			cap-sd-highspeed;
+			no-1-8-v;
+		};
+	};
+};
+
+&uart0 {
+	status = "okay";
+};
+
+&sysclk {
+	clocks = <&osc24m>, <&timerx_pulse_in>;
+	clock-names = "osc24m", "timer-pulse-in";
+};
