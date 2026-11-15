@@ -1066,7 +1066,7 @@ fn a_recipe_takes_the_generators_files_by_role() {
     let component = dir
         .path()
         .join("examples/components/hello-rust/component.toml");
-    let block = "[generate]\ntool = { source = \"src\", package = \"hello-rust\" }\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"--slot\", \"@slot@\", \"@out@\"]\noutputs = [\"overlay.dts\", \"words\", \"manifest-boot.json\"]\n\n[generate.provides]\nboard-overlay = \"overlay.dts\"\nmanifest-boot = \"manifest-boot.json\"\ncmdline = \"words/cmdline.txt\"\ncmdline-slot = \"words/slot.txt\"\n\n[generate.image]\nfit = [\"part\", \"--min-size\", \"--payload\", \"@payload@\"]\nargs = [\"part\", \"@description@\", \"--slot\", \"@slot@\", \"--payload\", \"@payload@\", \"--size\", \"@size@\", \"--out\", \"@out@\"]\nverify = [\"part\", \"--verify\", \"@out@\"]\n\n[generate.bundle]\nargs = [\"bundle\", \"--payload\", \"@payload@\", \"--rootfs\", \"@rootfs@\", \"--verity-table\", \"@verity-table@\", \"--product\", \"@product@\", \"--version\", \"@version@\", \"--payload-out\", \"@payload-out@\", \"--out\", \"@out@\"]\nkey_args = [\"--key-file\", \"@key@\", \"--expect-key-id\", \"@key-id@\"]\nverify = [\"bundle\", \"--verify\", \"@out@\"]\nverify_key_args = [\"--pubkey\", \"@pubkey@\"]\n";
+    let block = "[generate]\ntool = { source = \"src\", package = \"hello-rust\" }\ndescription = \"daemon\"\nargs = [\"tree\", \"@description@\", \"--slot\", \"@slot@\", \"@out@\"]\noutputs = [\"overlay.dts\", \"words\", \"manifest-boot.json\"]\n\n[generate.provides]\nboard-overlay = \"overlay.dts\"\nmanifest-boot = \"manifest-boot.json\"\ncmdline = \"words/cmdline.txt\"\ncmdline-slot = \"words/slot.txt\"\n\n[generate.image]\nfit = [\"part\", \"--min-size\", \"--payload\", \"@payload@\"]\nargs = [\"part\", \"@description@\", \"--slot\", \"@slot@\", \"--payload\", \"@payload@\", \"--size\", \"@size@\", \"--out\", \"@out@\"]\nverify = [\"part\", \"--verify\", \"@out@\", \"--merge\", \"@tool:merge@\"]\ntools = { merge = \"hello-rust:bin/hello-rust\" }\n\n[generate.bundle]\nargs = [\"bundle\", \"--payload\", \"@payload@\", \"--rootfs\", \"@rootfs@\", \"--verity-table\", \"@verity-table@\", \"--product\", \"@product@\", \"--version\", \"@version@\", \"--payload-out\", \"@payload-out@\", \"--out\", \"@out@\"]\nkey_args = [\"--key-file\", \"@key@\", \"--expect-key-id\", \"@key-id@\"]\nverify = [\"bundle\", \"--verify\", \"@out@\"]\nverify_key_args = [\"--pubkey\", \"@pubkey@\"]\n";
     let original = std::fs::read_to_string(&component).expect("read");
     std::fs::write(&component, format!("{original}\n{block}")).expect("write");
     let text = std::fs::read_to_string(&board).expect("read");
@@ -1132,6 +1132,9 @@ fn a_recipe_takes_the_generators_files_by_role() {
         "hello-rust.tool.tree -> zero-3e-demo::boot.tool",
         "hello-rust.root.rootfs -> zero-3e-demo::boot.root",
         "hello-rust.src.tree -> zero-3e-demo::boot.source",
+        // The program a boot run names as @tool:merge@: the build of the
+        // product's component it maps to.
+        "hello-rust.build.tree -> zero-3e-demo::boot.tools0",
         "zero-3e-demo.hello-rust.description.daemon.tree -> zero-3e-demo::boot.description",
         "zero-3e-demo::boot.image -> host.zero-3e-demo.boot",
     ] {
@@ -1176,6 +1179,9 @@ fn a_recipe_takes_the_generators_files_by_role() {
     let runs: serde_json::Value =
         serde_json::from_str(boot["runs"]["value"].as_str().expect("runs")).expect("json");
     assert_eq!(runs["verify"][1], "--verify");
+    // Another component's program, by name: its build, and its path there.
+    assert_eq!(runs["tools"]["merge"], "bin/hello-rust");
+    assert_eq!(boot["tool_names"]["value"], "merge");
     assert_eq!(runs["args"][9], "@out@");
     let cmdline = consts("zero-3e-demo::cmdline");
     assert_eq!(cmdline["base"]["value"], "console=ttyS2,1500000 rootwait");
@@ -1213,6 +1219,12 @@ fn a_recipe_takes_the_generators_files_by_role() {
             "\"--out\"]",
             "generate.image.args",
             "no argument names @out@, the file the tool writes",
+        ),
+        (
+            "\"hello-rust:bin/hello-rust\"",
+            "\"nope:bin/nope\"",
+            "generate.image.tools.merge",
+            "the product has no component `nope`",
         ),
         (
             "board-overlay = ",

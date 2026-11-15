@@ -2,6 +2,7 @@
 //! shell script as the tool, in the sandbox (its root made here, as for
 //! `gaia.generate`). Skipped where no sandbox can run.
 
+use daedalus_cpu_author::FanIn;
 use gaia_step::{Ctx, Store, logs_dir, step_records};
 use gaia_tree::{generate_image, generate_tree, unknown_image_tokens};
 use gaia_types::Tree;
@@ -74,6 +75,10 @@ datapart)
   cp "$2" "$7/bundle"; cp "$3" "$7/boot"; cp "$4" "$7/keys"
   printf '%s %s\n' "$5" "$6" > "$7/stamp"
   echo "data for $6 bytes" ;;
+runtool)
+  # runtool PROGRAM OUT: what the other component's program says, in OUT
+  mkdir "$3"
+  "$2" > "$3/said" ;;
 checkdata)
   # checkdata OUT BOOT
   [ "$(cat "$2/boot")" = "$(cat "$3")" ] && echo "data ok" ;;
@@ -215,6 +220,8 @@ impl Fixture {
             None,
             None,
             None,
+            None,
+            FanIn::values(&[]),
             None,
             &Ctx::new(),
         )
@@ -412,6 +419,8 @@ impl Fixture {
             None,
             None,
             None,
+            FanIn::values(&[]),
+            None,
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
@@ -606,6 +615,8 @@ impl Fixture {
             None,
             None,
             None,
+            FanIn::values(&[]),
+            None,
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
@@ -731,6 +742,8 @@ impl Fixture {
             keys.as_ref(),
             data_size.as_ref(),
             firmware.as_ref(),
+            FanIn::values(&[]),
+            None,
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
@@ -805,6 +818,104 @@ fn a_data_run_is_given_the_boot_image_keys_time_and_size() {
         ),
     ] {
         let error = f.data(boot, keys, size, true).expect_err("refused");
+        assert!(error.contains(why), "{error}");
+    }
+}
+
+const TOOLED: &str = r#"{
+  "args": ["runtool", "@tool:helper@", "@out@"],
+  "tools": {"helper": "bin/helper"}
+}"#;
+
+impl Fixture {
+    /// The directory a run naming `@tool:helper@` writes, given `tools`.
+    fn tooled(&self, runs: &str, names: &str, tools: &[Tree]) -> Result<PathBuf, String> {
+        let store = Store::open(&self.store).expect("store");
+        let tools: Vec<Option<Tree>> = tools.iter().cloned().map(Some).collect();
+        let (tree, _, _) = generate_tree(
+            &self.store,
+            BWRAP,
+            self.root(),
+            self.tree("tool", &[("bin/img", TOOL, 0o755)]),
+            "bin/img",
+            self.tree("source", &[("socs/soc", "rk", 0o644)]),
+            self.tree("description", &[("board", "zero", 0o644)]),
+            "board",
+            self.tree("payload-i", &[("kernel", "k1", 0o644)]),
+            runs,
+            "base",
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            FanIn::values(&tools),
+            Some(&names.to_string()),
+            &Ctx::new(),
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(tree.object.path_in(&store).expect("in the store"))
+    }
+}
+
+/// A run names another component's program as `@tool:NAME@`: its build is
+/// bound read-only and the word is the program's path there. A name not
+/// given, a build without the program and a build the runs do not map are
+/// refused.
+#[test]
+fn a_run_calls_another_components_program_by_name() {
+    if !available() {
+        return;
+    }
+    let f = Fixture::new();
+    let helper = |said: &str| {
+        f.tree(
+            &format!("helper-{said}"),
+            &[("bin/helper", &format!("#!/bin/sh\necho {said}\n"), 0o755)],
+        )
+    };
+    let out = f.tooled(TOOLED, "helper", &[helper("one")]).expect("made");
+    assert_eq!(
+        std::fs::read_to_string(out.join("said")).expect("said"),
+        "one\n"
+    );
+    // Another build of the program is another step.
+    let out = f.tooled(TOOLED, "helper", &[helper("two")]).expect("made");
+    assert_eq!(
+        std::fs::read_to_string(out.join("said")).expect("said"),
+        "two\n"
+    );
+    for (names, tools, why) in [
+        (
+            "",
+            vec![],
+            "names @tool:helper@, and the recipe gives no build of it",
+        ),
+        (
+            "helper",
+            vec![f.tree("empty", &[("bin/other", "x", 0o755)])],
+            "the build of tool helper has no bin/helper",
+        ),
+        (
+            "helper other",
+            vec![helper("one"), helper("one")],
+            "a build of tool other is given, and the runs map no `other`",
+        ),
+        (
+            "helper",
+            vec![],
+            "0 tool builds are given and 1 names for them",
+        ),
+    ] {
+        let error = f.tooled(TOOLED, names, &tools).expect_err(why);
         assert!(error.contains(why), "{error}");
     }
 }

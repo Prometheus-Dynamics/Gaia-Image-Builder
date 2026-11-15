@@ -142,6 +142,25 @@ pub fn unknown_generate_names(text: &str) -> Vec<String> {
     unknown_names(text, &GENERATE_NAMES)
 }
 
+/// The names of the `@tool:NAME@` words of `text`, in order: a run of a
+/// generator's tool naming another component's program, which the
+/// component's `tools` maps. NAME is lowercase letters, digits and `-`.
+pub fn tool_refs(text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("@tool:") {
+        let after = &rest[start + "@tool:".len()..];
+        match after.find('@') {
+            Some(end) => {
+                names.push(after[..end].to_string());
+                rest = &after[end + 1..];
+            }
+            None => break,
+        }
+    }
+    names
+}
+
 /// The `@name@` words of `text` that are none of `names`. A word between
 /// two `@` that is no name (lowercase letters, digits and `-`) is not one:
 /// `user@host` and a path with an `@` in it are left alone.
