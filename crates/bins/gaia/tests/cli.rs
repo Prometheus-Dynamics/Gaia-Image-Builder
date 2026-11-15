@@ -386,3 +386,35 @@ fn keep_setid_reaches_the_images_erofs_stages() {
         assert!(err.contains(why), "{keep}: {err}");
     }
 }
+
+#[test]
+fn a_make_build_takes_its_other_sources_by_name() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    product(dir.path());
+    write(
+        &dir.path().join("components/hello/component.toml"),
+        "version = 1\nname = \"hello\"\n[sources.build]\npath = \"build\"\n[sources.lib]\npath = \"lib\"\n[sources.vendor]\npath = \"vendor\"\n[sources.root]\nimage = \"docker.io/library/debian:trixie-slim\"\n[build]\nbuilder = \"make\"\nsource = \"build\"\n",
+    );
+    write(
+        &dir.path().join("components/hello/build/Makefile"),
+        "all:\n",
+    );
+    write(&dir.path().join("components/hello/lib/a.c"), "\n");
+    let out = gaia(dir.path(), &["plan", "product.toml"]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    for line in [
+        "hello.build.tree -> hello.build.source",
+        "hello.root.rootfs -> hello.build.root",
+        // Every other source, in name order; the image is the root, not a source.
+        "hello.lib.tree -> hello.build.deps0",
+        "hello.vendor.tree -> hello.build.deps1",
+    ] {
+        assert!(text.contains(line), "no line {line:?}:\n{text}");
+    }
+    assert!(
+        !text.contains("hello.root.rootfs -> hello.build.deps"),
+        "{text}"
+    );
+    assert!(!text.contains("deps2"), "{text}");
+}
