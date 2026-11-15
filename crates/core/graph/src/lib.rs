@@ -69,6 +69,7 @@
 mod error;
 mod os;
 mod wire;
+pub mod rust_group;
 
 pub use error::Error;
 pub use wire::Origin;
