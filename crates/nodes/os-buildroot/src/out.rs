@@ -65,11 +65,10 @@ pub fn package_config(build: &Path, package: &str) -> io::Result<Option<std::pat
         let Some(rest) = name.strip_prefix(&prefix) else {
             continue;
         };
-        // `linux-headers-6.1`, `linux-firmware-...`: another package.
-        if rest.starts_with(|c: char| c.is_ascii_alphabetic())
-            && !rest.starts_with("custom")
-            && !rest.starts_with('v')
-        {
+        // `linux-headers-6.1`, `linux-firmware-...`: another package. A
+        // version is a number, `v...`, `custom` (an override source) or a
+        // commit, whose hex may start with a letter.
+        if !is_version(rest) {
             continue;
         }
         let config = entry.path().join(".config");
@@ -79,6 +78,20 @@ pub fn package_config(build: &Path, package: &str) -> io::Result<Option<std::pat
     }
     found.sort();
     Ok(found.into_iter().next())
+}
+
+/// Whether `text`, the rest of a build directory's name after
+/// `<package>-`, is a version: it starts with a digit, is `v...` or
+/// `custom`, or is a commit (7 to 40 lowercase hex digits).
+fn is_version(text: &str) -> bool {
+    let commit = (7..=40).contains(&text.len())
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    commit
+        || text.starts_with(|c: char| c.is_ascii_digit())
+        || text.starts_with('v')
+        || text.starts_with("custom")
 }
 
 /// The files Buildroot keeps at the top of its target tree for its own use,
@@ -399,6 +412,31 @@ mod tests {
         ] {
             assert!(!to.join(dropped).exists(), "{dropped} is dropped");
         }
+    }
+
+    #[test]
+    fn a_package_built_at_a_commit_has_its_config_found() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tools = dir.path().join("uboot-tools-2025.10");
+        fs::create_dir_all(&tools).expect("tools");
+        fs::write(tools.join(".config"), "tools").expect("config");
+        assert_eq!(package_config(dir.path(), "uboot").expect("scan"), None);
+        // A commit whose hex starts with a letter is a version too.
+        let built = dir
+            .path()
+            .join("uboot-d50d994bffa3c7c6db2d8bc4c5f0c55e3f46b0cd");
+        fs::create_dir_all(&built).expect("uboot");
+        fs::write(built.join(".config"), "uboot").expect("config");
+        assert_eq!(
+            package_config(dir.path(), "uboot").expect("scan"),
+            Some(built.join(".config"))
+        );
+        assert!(is_version("custom") && is_version("2026.10") && is_version("v7.3.4"));
+        assert!(
+            !is_version("tools-2025.10")
+                && !is_version("headers-6.1")
+                && !is_version("firmware-2025")
+        );
     }
 
     #[test]
