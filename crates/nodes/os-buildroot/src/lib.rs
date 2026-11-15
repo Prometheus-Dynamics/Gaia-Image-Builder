@@ -382,6 +382,15 @@ pub(crate) fn in_store(
     Ok((store.path(&object), object.digest))
 }
 
+/// Whether a resolved config makes Buildroot build every host tool from
+/// source. Buildroot's own `check-host-*` rules then never use the host's
+/// bison, flex, xz, cmake or Python, so Gaia never sets it.
+pub(crate) fn forces_host_build(resolved: &str) -> bool {
+    resolved
+        .lines()
+        .any(|line| line.trim() == "BR2_FORCE_HOST_BUILD=y")
+}
+
 /// The body of the step: configure, resolve, make, then sort the outputs
 /// out of Buildroot's output directory.
 /// Buildroot's config in `out`: its `allnoconfig`, the fragments over it,
@@ -414,6 +423,13 @@ pub(crate) fn configure(
     work.run(&make_tool(host, src, out, vars, &["olddefconfig"]))?;
     // What Buildroot resolved must be what was asked for.
     let resolved = fs::read_to_string(&config).map_err(io_fail("the resolved config"))?;
+    if forces_host_build(&resolved) {
+        return Err(fail(
+            "BR2_FORCE_HOST_BUILD=y: Buildroot would build every host tool from source \
+             and ignore the host's; the configuration must not set it"
+                .into(),
+        ));
+    }
     let not_taken = config::not_taken(&resolved, &fragments);
     if !not_taken.is_empty() {
         return Err(fail(format!(
@@ -724,6 +740,35 @@ mod bound_tests {
             ]
         );
         assert_eq!(pinned.iter().filter(|arg| arg.starts_with("-j")).count(), 1);
+    }
+
+    /// Every make runs with the fixed PATH, and nothing inherited: the host
+    /// tools Buildroot's `check-host-*` rules look for are in its dirs, and
+    /// no entry is empty, relative or ".", which Buildroot refuses.
+    #[test]
+    fn make_runs_with_the_fixed_path_only() {
+        let tool = make_tool(&host(4, ""), Path::new("/src"), Path::new("/out"), &[], &[]);
+        let debug = format!("{tool:?}");
+        assert!(
+            debug.contains(r#"("PATH", "/usr/local/bin:/usr/bin:/bin")"#),
+            "{debug}"
+        );
+        assert_eq!(debug.matches(r#"("PATH", "#).count(), 1, "{debug}");
+        let entries: Vec<&str> = PATH.split(':').collect();
+        assert!(entries.iter().all(|dir| dir.starts_with('/')), "{PATH}");
+        assert!(entries.contains(&"/usr/bin"), "{PATH}");
+        assert!(!PATH.contains(' ') && !PATH.contains('\t'), "{PATH}");
+    }
+
+    /// A configuration that forces host builds is refused; the option off,
+    /// or merely mentioned, is not.
+    #[test]
+    fn a_forced_host_build_is_seen_in_the_resolved_config() {
+        assert!(forces_host_build("BR2_FORCE_HOST_BUILD=y\nBR2_x=y\n"));
+        assert!(forces_host_build("  BR2_FORCE_HOST_BUILD=y\n"));
+        assert!(!forces_host_build("# BR2_FORCE_HOST_BUILD is not set\n"));
+        assert!(!forces_host_build("BR2_PER_PACKAGE_DIRECTORIES=y\n"));
+        assert!(!forces_host_build(""));
     }
 
     /// Builds take turns: each has the whole job count, so two at once
