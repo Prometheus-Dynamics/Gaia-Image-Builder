@@ -547,3 +547,59 @@ fn a_blob_whose_file_is_missing_names_what_the_tree_has() {
         gaia_disk::disk_blob(&root, &from, "../x", "u-boot", 0, &Ctx::new()).expect_err("outside");
     assert!(error.to_string().contains("not a path inside the tree"));
 }
+
+#[test]
+fn a_disk_where_u_boot_would_save_its_environment_over_the_table_is_refused() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store_dir = dir.path().join("store");
+    let store = Store::open(&store_dir).expect("store");
+    let root = store_dir.display().to_string();
+    let mmc = "CONFIG_ENV_IS_IN_MMC=y\nCONFIG_ENV_SIZE=0x10000\nCONFIG_ENV_REDUNDANT=y\nCONFIG_PARTITION_TYPE_GUID=y\nCONFIG_ENV_OFFSET=0x3f8000\nCONFIG_ENV_OFFSET_REDUND=0x0\n";
+    let old = bootloader(
+        &store,
+        &dir.path().join("old"),
+        &[("u-boot.bin", b"x"), ("u-boot.config", mmc.as_bytes())],
+    );
+    let fixed_text = format!("{mmc}CONFIG_ENV_MMC_USE_DT=y\n");
+    let fixed = bootloader(
+        &store,
+        &dir.path().join("fixed"),
+        &[
+            ("u-boot.bin", b"x"),
+            ("u-boot.config", fixed_text.as_bytes()),
+        ],
+    );
+    let none = bootloader(&store, &dir.path().join("none"), &[("u-boot.bin", b"x")]);
+    assert_eq!(
+        gaia_disk::bootloader_config(&root, &none).expect("read"),
+        None
+    );
+
+    let mut env = partition(
+        "uboot-env",
+        "raw",
+        "3DE21764-95BD-54BD-A5C3-4ABE786F38A8",
+        Some(128 * 1024),
+        None,
+    );
+    env.offset = Some(Size(MIB));
+    let parts = [env];
+    let run = |from: &gaia_types::Artifact| {
+        let config = gaia_disk::bootloader_config(&root, from).expect("read");
+        gaia_disk::disk_image_checked(
+            &root,
+            "env",
+            &table(TableScheme::Gpt, None),
+            &parts,
+            &[],
+            config.as_deref(),
+            &Ctx::new(),
+        )
+    };
+    let refused = run(&old).expect_err("refused").to_string();
+    assert!(
+        refused.contains("CONFIG_ENV_OFFSET_REDUND 0x0") && refused.contains("partition table"),
+        "{refused}"
+    );
+    run(&fixed).expect("the fallback is off, and both copies fit the partition");
+}

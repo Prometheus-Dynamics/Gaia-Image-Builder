@@ -25,6 +25,7 @@
 
 pub mod crc;
 pub mod env;
+pub mod env_place;
 pub mod layout;
 pub mod table;
 
@@ -64,9 +65,15 @@ pub struct UbootVar {
 ///
 /// A CPU node takes one fan-in, and the partitions have it, so the blobs
 /// come as one list, from `gaia.disk.blobs`.
+///
+/// `bootloader` is the OS's bootloader output, when the disk has one. When
+/// it holds U-Boot's final configuration (`u-boot.config`), the places
+/// U-Boot would save its environment to are checked against the layout
+/// ([`env_place`]) and a disk where a `saveenv` would write over the table,
+/// a bootloader area or a partition is refused.
 #[node(
     id = "gaia.disk",
-    inputs(store, id, layout, partitions, blobs),
+    inputs(store, id, layout, partitions, blobs, bootloader),
     outputs(image)
 )]
 pub fn disk(
@@ -75,13 +82,50 @@ pub fn disk(
     layout: &DiskLayout,
     partitions: FanIn<'_, DiskPartition>,
     blobs: Option<&Vec<RawBlob>>,
+    bootloader: Option<&Artifact>,
     cx: &Ctx,
 ) -> Result<Image, StepError> {
+    let fail = |e: String| StepError::body(NAME, format!("disk '{id}': {e}"));
     let fed: Vec<DiskPartition> = partitions.iter().map(|p| (*p).clone()).collect();
-    let all = fill(&layout.partitions, &fed)
-        .map_err(|e| StepError::body(NAME, format!("disk '{id}': {e}")))?;
+    let all = fill(&layout.partitions, &fed).map_err(fail)?;
     let blobs = blobs.map(Vec::as_slice).unwrap_or_default();
-    disk_image(store, id, &layout.table, &all, blobs, cx)
+    let uboot_config = match bootloader {
+        Some(from) => bootloader_config(store, from).map_err(fail)?,
+        None => None,
+    };
+    disk_image_checked(
+        store,
+        id,
+        &layout.table,
+        &all,
+        blobs,
+        uboot_config.as_deref(),
+        cx,
+    )
+}
+
+/// U-Boot's final configuration (`u-boot.config`) in the bootloader output,
+/// when it is there.
+///
+/// # Errors
+///
+/// An output not in the store, or a config that cannot be read.
+pub fn bootloader_config(store: &str, from: &Artifact) -> Result<Option<String>, String> {
+    if from.object.kind != ObjectKind::Tree {
+        return Ok(None);
+    }
+    let store = Store::open(store).map_err(|e| e.to_string())?;
+    let object = from
+        .object
+        .object_ref()
+        .ok_or_else(|| "the bootloader output is not in the store".to_string())?;
+    let file = store.path(&object).join("u-boot.config");
+    if !file.is_file() {
+        return Ok(None);
+    }
+    std::fs::read_to_string(&file)
+        .map(Some)
+        .map_err(|e| format!("U-Boot's config: {e}"))
 }
 
 /// The board's partitions with the recipe's: a recipe partition named as a
@@ -296,13 +340,27 @@ fn content(store: &Store, what: &str, reference: &StoreRef) -> Result<Content, S
     })
 }
 
-/// The disk image, as [`disk`] makes it.
+/// The disk image, as [`disk`] makes it with no bootloader output.
 pub fn disk_image(
     store: &str,
     id: &str,
     table: &DiskTable,
     partitions: &[DiskPartition],
     blobs: &[RawBlob],
+    cx: &Ctx,
+) -> Result<Image, StepError> {
+    disk_image_checked(store, id, table, partitions, blobs, None, cx)
+}
+
+/// The disk image, as [`disk`] makes it: with `uboot_config`, U-Boot's final
+/// configuration, its environment's places are checked against the layout.
+pub fn disk_image_checked(
+    store: &str,
+    id: &str,
+    table: &DiskTable,
+    partitions: &[DiskPartition],
+    blobs: &[RawBlob],
+    uboot_config: Option<&str>,
     cx: &Ctx,
 ) -> Result<Image, StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
@@ -353,6 +411,16 @@ pub fn disk_image(
         &blob_inputs,
     )
     .map_err(fail)?;
+    if let Some(config) = uboot_config {
+        let names: Vec<String> = blobs.iter().map(|b| b.name.clone()).collect();
+        let found = env_place::problems(config, &planned, &inputs, &names);
+        if !found.is_empty() {
+            return Err(fail(format!(
+                "U-Boot's environment would be saved over the disk's own data: {}",
+                found.join("; ")
+            )));
+        }
+    }
     let writes = table_writes(id, table.scheme, &planned, partitions).map_err(fail)?;
 
     let mut key = KeyBuilder::new(NAME, 1)

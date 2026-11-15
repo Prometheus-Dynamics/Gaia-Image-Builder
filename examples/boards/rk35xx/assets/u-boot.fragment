@@ -1,9 +1,17 @@
 # The environment lives in the GPT partition with U-Boot's environment type
-# GUID (the empty "uboot-env" partition), as on Buildroot's rock5b.
+# GUID (the empty "uboot-env" partition, 128K), two copies at its end, on
+# the SD card the image boots from: U-Boot's mmc 1 on this family's boards
+# (mmc 0 is the eMMC socket). With no such partition on that card, U-Boot
+# keeps its built-in environment and saves nowhere: the raw-offset
+# fallback (ENV_OFFSET over the loader, ENV_OFFSET_REDUND at 0, over the
+# partition table) is off (ENV_MMC_USE_DT, and the dtb names no offset).
 CONFIG_ENV_SIZE=0x10000
+CONFIG_ENV_REDUNDANT=y
 CONFIG_PARTITION_TYPE_GUID=y
 # CONFIG_ENV_IS_NOWHERE is not set
 CONFIG_ENV_IS_IN_MMC=y
+CONFIG_ENV_MMC_DEVICE_INDEX=1
+CONFIG_ENV_MMC_USE_DT=y
 # Not used here, and from v2026.10 its PKCS#11 signing needs a GnuTLS built
 # with p11-kit, which Buildroot's host-gnutls is not.
 # CONFIG_TOOLS_MKEFICAPSULE is not set

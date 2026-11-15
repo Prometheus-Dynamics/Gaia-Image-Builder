@@ -83,7 +83,7 @@ fn the_zero_3e_board_reads_with_its_family() {
     assert_eq!(board.partitions.len(), 2);
     assert_eq!(board.partitions[0].role, PartitionRole::Bootloader);
     assert!(!board.partitions[0].in_table);
-    assert_eq!(board.partitions[1].size.map(|s| s.0), Some(Size::kib(64)));
+    assert_eq!(board.partitions[1].size.map(|s| s.0), Some(Size::kib(128)));
     assert_eq!(board.partitions[1].offset.map(|s| s.0), Some(Size::mib(16)));
 
     let flash = board.flash.as_ref().expect("flash");
