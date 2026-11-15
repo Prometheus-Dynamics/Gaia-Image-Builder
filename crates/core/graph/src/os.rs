@@ -445,6 +445,8 @@ pub(crate) fn plan(
             text: text(&lines),
         });
     }
+    // Before the descriptions, so a description can turn a default off.
+    fragments.push(parallel_defaults());
     for (j, file) in os.fragments.iter().enumerate() {
         let key = format!("images[{index}].os.fragments[{j}]");
         let body = fs::read_to_string(file.path()).map_err(|e| {
@@ -475,6 +477,17 @@ pub(crate) fn plan(
         .check()
         .map_err(|e| Error::at(product_file, format!("images[{index}].os"), e))?;
     Ok(plan)
+}
+
+/// The default that makes Buildroot build with per-package directories, so
+/// its packages build at once under `make -j`. A description turns it off
+/// with `# BR2_PER_PACKAGE_DIRECTORIES is not set`, which comes later and
+/// wins. Its own fragment, so another default fragment merges beside it.
+fn parallel_defaults() -> ConfigFragment {
+    ConfigFragment {
+        name: "gaia.parallel".into(),
+        text: "BR2_PER_PACKAGE_DIRECTORIES=y\n".into(),
+    }
 }
 
 /// The architecture's and the CPU's options.
@@ -851,6 +864,19 @@ mod tests {
         assert!(parts_of("BR2_LINUX_KERNEL", false, false) == vec![Part::Rootfs]);
         assert!(parts_of("BR2_TARGET_UBOOT", false, false) == vec![Part::Rootfs]);
         assert!(parts_of("BR2_PACKAGE_HOST_DTC", false, false) == vec![Part::Rootfs]);
+    }
+
+    /// Per-package directories are on by default, and the default is one
+    /// fragment that a description can turn off after it.
+    #[test]
+    fn per_package_directories_are_on_by_default() {
+        let fragment = parallel_defaults();
+        assert_eq!(fragment.name, "gaia.parallel");
+        assert_eq!(fragment.text, "BR2_PER_PACKAGE_DIRECTORIES=y\n");
+        assert_eq!(
+            symbol_of(fragment.text.trim_end()),
+            Some("BR2_PER_PACKAGE_DIRECTORIES")
+        );
     }
 
     #[test]

@@ -16,6 +16,14 @@
 //! (`build/<package>/.stamp_*` and its file lists). A build with the seed
 //! planted in its output directory finds those packages installed.
 //!
+//! With per-package directories on (Gaia's default, see [`crate::ppd`]) the
+//! goals install into `per-package/<package>/host`, not `host/`. The step
+//! merges those trees into `host/` itself, since Buildroot's own merge runs
+//! only for a whole build. The seed's packages are planted back into
+//! `per-package/` by the build that uses the seed, so a package the seed holds
+//! is complete wherever a build finds it. The seed's `packages` file lists
+//! them.
+//!
 //! A step's output directory is a new path every time, and host tools name
 //! it (a `.pc` file's prefix, a script's interpreter). The seed is made
 //! independent of the path the way Buildroot's own SDK is: library search
@@ -33,7 +41,7 @@
 //! values, and the input trees the values name. So what changes how a host
 //! tool is built changes the key, and nothing else does.
 
-use crate::{BuildrootHost, OsConfig, Prepared, configure, make_tool, prepare};
+use crate::{BuildrootHost, OsConfig, Prepared, configure, make_tool, ppd, prepare};
 use daedalus::prelude::*;
 use daedalus_cpu_author::FanIn;
 use gaia_step::{Ctx, Digest, KeyBuilder, Step, StepError, Store, Stream, Tool, Work};
@@ -47,7 +55,7 @@ use std::sync::{Arc, Mutex};
 
 const PLAN: &str = "gaia.os.buildroot.host-plan";
 const NAME: &str = "gaia.os.buildroot.host";
-const KEY_VERSION: u32 = 1;
+const KEY_VERSION: u32 = 2;
 /// What stands for the output directory in the seed's text files.
 const MARKER: &str = "@GAIA_BUILDROOT_OUT@";
 /// Variables every host package is built with, beside its own.
@@ -248,9 +256,14 @@ fn build(
     }
     let out = dir.join("out");
     fs::create_dir(&out).map_err(io_fail("output directory"))?;
-    configure(NAME, work, prepared, &out, host)?;
+    let resolved = configure(NAME, work, prepared, &out, host)?;
     let (src, vars) = (&prepared.src, &prepared.vars);
     work.run(&make_tool(host, src, &out, vars, goals))?;
+    // With per-package directories, the goals installed into their own
+    // trees: merge them into `host/` as Buildroot's finalize would.
+    if ppd::enabled(&resolved) {
+        ppd::merge_host(&out, goals).map_err(io_fail("the host directory"))?;
+    }
     // Library search paths relative to the binary, as Buildroot does at the
     // end of a whole build and for its SDK.
     if out.join("host/bin/patchelf").is_file() {
@@ -270,6 +283,8 @@ fn build(
         work.run(&fix)?;
     }
     fs::rename(out.join("host"), seed.join("host")).map_err(io_fail("the host directory"))?;
+    fs::write(seed.join(ppd::PACKAGES_FILE), goals.join("\n"))
+        .map_err(io_fail("the seed's packages"))?;
     // Each built package's marks: the dot files at the top of its build
     // directory, and nothing of what it compiled.
     let build = seed.join("build");
@@ -306,7 +321,7 @@ fn build(
 }
 
 /// Every file under `root`, relative, sorted: regular files and symlinks.
-fn files(root: &Path) -> io::Result<Vec<PathBuf>> {
+pub(crate) fn files(root: &Path) -> io::Result<Vec<PathBuf>> {
     let mut found = Vec::new();
     let mut pending = vec![root.to_path_buf()];
     while let Some(dir) = pending.pop() {
@@ -370,7 +385,7 @@ fn unplant(seed: &Path, out: &str) -> io::Result<(Vec<String>, Vec<String>, Vec<
 }
 
 /// Replaces a file's content, whatever its mode, and puts the mode back.
-fn write_keeping_mode(path: &Path, meta: &fs::Metadata, bytes: &[u8]) -> io::Result<()> {
+pub(crate) fn write_keeping_mode(path: &Path, meta: &fs::Metadata, bytes: &[u8]) -> io::Result<()> {
     let mode = meta.permissions().mode();
     fs::set_permissions(path, fs::Permissions::from_mode(mode | 0o200))?;
     fs::write(path, bytes)?;
@@ -422,4 +437,17 @@ pub(crate) fn plant(seed: &Path, out: &Path) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Plants the seed's packages into `out`'s per-package directories, after
+/// the build's config is resolved: only when that config has them on (see
+/// [`ppd`]). Each seeded package gets a clone of the planted `host/`, so it
+/// is complete, and an empty `target/`. A seed with no host packages plants
+/// nothing.
+pub(crate) fn plant_per_package(seed: &Path, out: &Path, resolved: &str) -> io::Result<()> {
+    if !ppd::enabled(resolved) || !seed.join("host").is_dir() {
+        return Ok(());
+    }
+    let packages = ppd::read_packages(seed)?;
+    ppd::plant(&out.join("host"), out, &packages)
 }

@@ -45,6 +45,7 @@ mod contract;
 mod host;
 mod out;
 mod perms;
+mod ppd;
 mod progress;
 
 use daedalus::prelude::*;
@@ -447,6 +448,10 @@ fn build(
     host::plant(seed, &out).map_err(io_fail("the host tools"))?;
     let config = out.join(".config");
     let resolved = configure(NAME, work, prepared, &out, host)?;
+    // With per-package directories on, the seed's packages get their own
+    // trees, complete and installed, before anything builds.
+    host::plant_per_package(seed, &out, &resolved)
+        .map_err(io_fail("the host tools' per-package directories"))?;
 
     // The kernel's and the bootloader's own configs, before anything
     // compiles: every line their fragment files ask for must be in the
