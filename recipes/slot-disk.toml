@@ -177,6 +177,9 @@ generator-bundle = ["bundle.runs"]
 generator-data = ["data.runs"]
 # The board's [disk] table and partitions.
 disk = ["disk.layout"]
+# The OS's bootloader output: where its U-Boot saves its environment is
+# checked against the disk, and a disk it would write over is refused.
+bootloader = ["disk.bootloader"]
 host-tools = ["overlay.tools", "erofs.tools", "verity.tools"]
 # The OS build's device trees, with a `<name>.dtbo` for each overlay its
 # kernel built: the bundle's and boot partition's `@firmware@` too.

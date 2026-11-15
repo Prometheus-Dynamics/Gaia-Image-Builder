@@ -771,7 +771,7 @@ fn image_recipe(
             for p in ports {
                 g.edge((os.system, "tree"), (stages[&p.stage], &p.port));
             }
-        } else if input == "kernel-build"
+        } else if matches!(input.as_str(), "kernel-build" | "bootloader")
             && at.os.is_none()
             && ports.iter().all(|p| {
                 g.inputs(stages[&p.stage])
@@ -779,8 +779,9 @@ fn image_recipe(
                     .any(|decl| decl.name == p.port && decl.optional)
             })
         {
-            // No OS, so no kernel to hold what the recipe makes to; and
-            // every port that would take its build is optional.
+            // No OS, so no kernel to hold what the recipe makes to, nor a
+            // bootloader to check the disk against; and every port that
+            // would take them is optional.
         } else if matches!(
             input.as_str(),
             "kernel" | "device-trees" | "bootloader" | "os" | "kernel-build"

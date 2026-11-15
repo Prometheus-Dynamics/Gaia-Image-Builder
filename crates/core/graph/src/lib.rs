@@ -43,7 +43,10 @@
 //! - **Raw areas:** the recipe input `blobs` is the board's areas outside
 //!   the partition table that name their `content`: each a `gaia.disk.blob`,
 //!   `<image>.blob.<name>`, picking that file from the OS's bootloader
-//!   output, collected by `<image>.blobs` (`gaia.disk.blobs`).
+//!   output, collected by `<image>.blobs` (`gaia.disk.blobs`). A disk also
+//!   takes the bootloader output itself (`bootloader`), to check where its
+//!   U-Boot saves its environment against the layout; with no OS it is left
+//!   out when every port it names is optional, as `kernel-build` is.
 //! - **Data:** the recipe input `data` is the image's one built data
 //!   component. With none, it is left out when every port it names is
 //!   optional, and an error otherwise.

@@ -65,6 +65,9 @@ host-tools = ["erofs.tools", "verity.tools"]
 data = ["slot.tree"]
 disk = ["disk.layout"]
 blobs = ["disk.blobs"]
+# The OS's bootloader output: where its U-Boot saves its environment is
+# checked against the disk, and a disk it would write over is refused.
+bootloader = ["disk.bootloader"]
 
 [outputs]
 disk = "disk.image"
