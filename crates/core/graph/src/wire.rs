@@ -455,6 +455,18 @@ fn component_build(
             wanted.push((name.clone(), name.clone()));
         }
     }
+    // A make build reads every other source of the component, bound by
+    // name: each to the fan-in `deps`, the names in the same order.
+    let mut dep_names = Vec::new();
+    if id == "gaia.build.make" {
+        for name in component.sources.keys() {
+            if *name != build.source && name != "root" {
+                wanted.push((name.clone(), format!("deps{}", dep_names.len())));
+                dep_names.push(name.clone());
+            }
+        }
+        g.set(node, "dep_names", Lit::Str(dep_names.join(" ")));
+    }
     let mut built_from = None;
     for (source_name, port) in wanted {
         let source = component.sources.get(&source_name).ok_or_else(|| {

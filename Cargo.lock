@@ -597,6 +597,7 @@ dependencies = [
  "gaia-build-command",
  "gaia-build-go",
  "gaia-build-java",
+ "gaia-build-make",
  "gaia-build-node",
  "gaia-build-python",
  "gaia-build-rust",
@@ -678,6 +679,21 @@ dependencies = [
  "daedalus-cpu-author",
  "daedalus-registry",
  "daedalus-types",
+ "gaia-step",
+ "gaia-store",
+ "gaia-types",
+ "tempfile",
+]
+
+[[package]]
+name = "gaia-build-make"
+version = "2.0.6-dev"
+dependencies = [
+ "daedalus",
+ "daedalus-cpu-author",
+ "daedalus-registry",
+ "daedalus-types",
+ "gaia-sandbox",
  "gaia-step",
  "gaia-store",
  "gaia-types",

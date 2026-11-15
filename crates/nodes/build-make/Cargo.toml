@@ -1,0 +1,25 @@
+[package]
+name = "gaia-build-make"
+description = "Node: a C (or any make) build, run by the component's own Makefile in a pinned image, sandboxed and offline"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+daedalus = { workspace = true }
+daedalus-cpu-author = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "b3916178f255ab9f55d230dff1395c08b3bca2c9" }
+daedalus-registry = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "b3916178f255ab9f55d230dff1395c08b3bca2c9" }
+daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "b3916178f255ab9f55d230dff1395c08b3bca2c9" }
+gaia-sandbox = { path = "../../core/sandbox" }
+gaia-step = { path = "../../core/step" }
+gaia-store = { path = "../../core/store" }
+gaia-types = { path = "../../core/types" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
