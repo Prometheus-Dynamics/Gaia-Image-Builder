@@ -1,0 +1,133 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
+/*
+ * Rockchip RV1126B: the part of the SoC that Linux 7.3 can drive with the
+ * drivers in the tree: the CPUs, GIC, arch timer, CRU, power domains, UART0
+ * and SDMMC0. Addresses, interrupts and compatibles are copied from the
+ * vendor tree (rockchip-linux/kernel develop-6.6, rv1126b.dtsi, GPL-2.0);
+ * the mainline bindings were checked against 7.3.3 (CRU, power-controller,
+ * dw_mmc-rockchip). Not in this file, because 7.3.3 has no driver to bind
+ * them to: pinctrl (the bootloader's pin setup is kept for SDMMC0), GPIO,
+ * GMAC, USB, I2C and the rest. Untested on board.
+ */
+
+#include <dt-bindings/clock/rockchip,rv1126b-cru.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+
+/ {
+	compatible = "rockchip,rv1126b";
+	interrupt-parent = <&gic>;
+	#address-cells = <2>;
+	#size-cells = <2>;
+
+	aliases {
+		serial0 = &uart0;
+		mmc1 = &sdmmc0;
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu0: cpu@0 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a53";
+			reg = <0x0>;
+			enable-method = "psci";
+		};
+
+		cpu1: cpu@1 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a53";
+			reg = <0x1>;
+			enable-method = "psci";
+		};
+
+		cpu2: cpu@2 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a53";
+			reg = <0x2>;
+			enable-method = "psci";
+		};
+
+		cpu3: cpu@3 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a53";
+			reg = <0x3>;
+			enable-method = "psci";
+		};
+	};
+
+	psci {
+		compatible = "arm,psci-1.0";
+		method = "smc";
+	};
+
+	xin24m: xin24m {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+		clock-output-names = "xin24m";
+	};
+
+	timer {
+		compatible = "arm,armv8-timer";
+		interrupts = <GIC_PPI 13 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>,
+			     <GIC_PPI 14 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>,
+			     <GIC_PPI 11 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>,
+			     <GIC_PPI 10 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>;
+	};
+
+	cru: clock-controller@20000000 {
+		compatible = "rockchip,rv1126b-cru";
+		reg = <0x0 0x20000000 0x0 0xc0000>;
+		clocks = <&xin24m>;
+		clock-names = "xin24m";
+		#clock-cells = <1>;
+		#reset-cells = <1>;
+	};
+
+	pmu: power-management@20838000 {
+		compatible = "rockchip,rv1126b-pmu", "syscon", "simple-mfd";
+		reg = <0x0 0x20838000 0x0 0x400>;
+
+		power: power-controller {
+			compatible = "rockchip,rv1126b-power-controller";
+			#power-domain-cells = <1>;
+		};
+	};
+
+	uart0: serial@20810000 {
+		compatible = "rockchip,rv1126b-uart", "snps,dw-apb-uart";
+		reg = <0x0 0x20810000 0x0 0x100>;
+		interrupts = <GIC_SPI 56 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru SCLK_UART0>, <&cru PCLK_UART0>;
+		clock-names = "baudclk", "apb_pclk";
+		reg-shift = <2>;
+		reg-io-width = <4>;
+		status = "disabled";
+	};
+
+	sdmmc0: mmc@21d60000 {
+		compatible = "rockchip,rv1126b-dw-mshc", "rockchip,rk3288-dw-mshc";
+		reg = <0x0 0x21d60000 0x0 0x4000>;
+		interrupts = <GIC_SPI 187 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru HCLK_SDMMC0>, <&cru CCLK_SDMMC0>;
+		clock-names = "biu", "ciu";
+		fifo-depth = <0x100>;
+		max-frequency = <200000000>;
+		status = "disabled";
+	};
+
+	gic: interrupt-controller@21201000 {
+		compatible = "arm,gic-400";
+		#interrupt-cells = <3>;
+		#address-cells = <0>;
+		interrupt-controller;
+		reg = <0x0 0x21201000 0x0 0x1000>,
+		      <0x0 0x21202000 0x0 0x2000>,
+		      <0x0 0x21204000 0x0 0x2000>,
+		      <0x0 0x21206000 0x0 0x2000>;
+		interrupts = <GIC_PPI 9 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>;
+	};
+};

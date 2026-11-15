@@ -1,0 +1,42 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
+/*
+ * Luckfox Aura: the RV1126B on its microSD card and UART0 console. The
+ * board's wiring is from Hardware/Schematic/Luckfox-Aura.pdf in
+ * LuckfoxTECH/luckfox-aura-docs: SDMMC0 on the microSD slot, card detect on
+ * GPIO0_A5, UART0 on the debug header (GPIO0_B3/B4, not confirmed here).
+ * Guessed, not confirmed: the 1 GiB of DRAM at 0x0 (the part is LPDDR4X and
+ * U-Boot may rewrite the memory node), and the card's power and card-detect
+ * wiring, which is left to the bootloader (broken-cd). Untested on board.
+ */
+
+/dts-v1/;
+
+#include "rv1126b.dtsi"
+
+/ {
+	model = "Luckfox Aura";
+	compatible = "luckfox,aura", "rockchip,rv1126b";
+
+	chosen {
+		stdout-path = "serial0:1500000n8";
+	};
+
+	memory@0 {
+		device_type = "memory";
+		reg = <0x0 0x0 0x0 0x40000000>;
+	};
+};
+
+&uart0 {
+	status = "okay";
+};
+
+&sdmmc0 {
+	bus-width = <4>;
+	cap-sd-highspeed;
+	disable-wp;
+	no-sdio;
+	no-mmc;
+	broken-cd;
+	status = "okay";
+};

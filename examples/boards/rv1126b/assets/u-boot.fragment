@@ -1,0 +1,13 @@
+# The environment lives in the GPT partition with U-Boot's environment type
+# GUID (the 128K "uboot-env" partition, two copies at its end), on the
+# microSD card: mmc 1, which the vendor's SDMMC IOMUX config maps SDMMC0
+# to, with no eMMC on the board. Without that partition U-Boot keeps its
+# built-in environment and saves nowhere (the raw-offset fallback is off:
+# ENV_MMC_USE_DT, and the device tree names no offset).
+CONFIG_ENV_SIZE=0x10000
+CONFIG_ENV_REDUNDANT=y
+CONFIG_PARTITION_TYPE_GUID=y
+# CONFIG_ENV_IS_NOWHERE is not set
+CONFIG_ENV_IS_IN_MMC=y
+CONFIG_ENV_MMC_DEVICE_INDEX=1
+CONFIG_ENV_MMC_USE_DT=y

@@ -1,0 +1,71 @@
+# Rockchip RV1126B family: mainline Linux 7.3.3 with the SoC's clock, reset
+# and power-domain drivers, and Rockchip's own U-Boot next-dev (the only
+# U-Boot with an RV1126B port) with rkbin's DDR init and closed BL31. No
+# TF-A: none exists for this SoC. A board file extends this and keeps what
+# differs. Untested on board.
+version = 1
+
+[target]
+arch = "aarch64"
+os = "linux"
+
+[sources.linux]
+git = "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
+ref = "v7.3.3"
+
+# Rockchip's next-dev branch, pinned to the commit read on 2026-11-14. The
+# rv1126b_defconfig and rv1126b-env-sdcard_defconfig are in it; upstream
+# U-Boot v2026.10 has no RV1126B port.
+[sources.u-boot]
+git = "https://github.com/rockchip-linux/u-boot.git"
+ref = "1c535d65b8509f388d09e49fb6961f49fda35a1d"
+
+# rkbin at 3e288fe: the RV1126B DDR blobs and rv1126b_bl31_v1.13.elf. The
+# pin Buildroot 2026.02.3 uses (f43a462) is not in the local clone and is
+# not known to carry them.
+[sources.rkbin]
+git = "https://github.com/rockchip-linux/rkbin.git"
+ref = "3e288fe814e059dd06833495f845cab04ac20a5c"
+
+[kernel]
+source = "linux"
+defconfig = "defconfig"
+fragments = ["assets/linux.fragment"]
+
+[bootloader]
+source = "u-boot"
+defconfig = "rv1126b-env-sdcard"
+fragments = ["assets/u-boot.fragment"]
+
+# Each blob is given to U-Boot's make by its name. BL31 is rkbin's closed
+# image for the SPL's FIT. ROCKCHIP_TPL is the LPDDR4X DDR init (a guess:
+# the "lp4x" 1332 MHz build; the board's DRAM part is not confirmed).
+[bootloader.blobs]
+ROCKCHIP_TPL = { source = "rkbin", path = "bin/rv11/rv1126b_ddr_lp4x_1332MHz_tb_v1.10.bin" }
+BL31 = { source = "rkbin", path = "bin/rv11/rv1126b_bl31_v1.13.elf" }
+
+# The boot ROM reads the loader from sector 64, outside the partition table,
+# and U-Boot keeps its environment in the partition with U-Boot's
+# environment type GUID. The image's U-Boot is written with the loader, as
+# the RK35xx family's is. Whether Buildroot's U-Boot build makes this file
+# for RV1126B is not checked: its rockchip path expects binman, which this
+# U-Boot does not use for RV1126B.
+[[partitions]]
+name = "u-boot"
+role = "bootloader"
+offset = "32K"
+in_table = false
+content = "u-boot-rockchip.bin"
+
+[[partitions]]
+name = "uboot-env"
+role = "raw"
+type = "3de21764-95bd-54bd-a5c3-4abe786f38a8"
+offset = "16M"
+size = "128K"
+
+[disk]
+scheme = "gpt"
+
+[flash]
+methods = ["sd-card"]

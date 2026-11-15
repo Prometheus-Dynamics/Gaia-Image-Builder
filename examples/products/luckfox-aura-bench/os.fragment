@@ -1,0 +1,36 @@
+# The bench's Buildroot config on top of what the board gives: the toolchain,
+# the system, and what the U-Boot build needs for this SoC family.
+BR2_TOOLCHAIN_EXTERNAL=y
+BR2_TOOLCHAIN_EXTERNAL_BOOTLIN=y
+BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_AARCH64_GLIBC_STABLE=y
+BR2_TARGET_GENERIC_HOSTNAME="aura"
+BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_MDEV=y
+BR2_PACKAGE_BUSYBOX=y
+
+# The config starts from Buildroot's allnoconfig, so what a defconfig would
+# turn on by default is named here: the root filesystem writable, root's
+# login, and a getty on the UART0 console.
+BR2_TARGET_GENERIC_REMOUNT_ROOTFS_RW=y
+BR2_TARGET_ENABLE_ROOT_LOGIN=y
+BR2_TARGET_GENERIC_GETTY=y
+BR2_TARGET_GENERIC_GETTY_PORT="ttyS0"
+BR2_TARGET_GENERIC_GETTY_BAUDRATE_KEEP=y
+
+BR2_LINUX_KERNEL_INSTALL_TARGET=y
+BR2_LINUX_KERNEL_NEEDS_HOST_OPENSSL=y
+BR2_LINUX_KERNEL_NEEDS_HOST_PYTHON3=y
+
+# The U-Boot file the image's "u-boot" partition takes. No TF-A: BL31 is
+# rkbin's, given to the build as a make variable by the board.
+BR2_TARGET_UBOOT_NEEDS_DTC=y
+BR2_TARGET_UBOOT_NEEDS_PYLIBFDT=y
+BR2_TARGET_UBOOT_NEEDS_PYELFTOOLS=y
+BR2_TARGET_UBOOT_NEEDS_OPENSSL=y
+BR2_TARGET_UBOOT_NEEDS_GNUTLS=y
+BR2_TARGET_UBOOT_NEEDS_UTIL_LINUX=y
+BR2_TARGET_UBOOT_FORMAT_CUSTOM=y
+BR2_TARGET_UBOOT_FORMAT_CUSTOM_NAME="u-boot-rockchip.bin"
+BR2_PACKAGE_HOST_DTC=y
+# The slot is made with this build's own tools, not the build machine's.
+BR2_PACKAGE_HOST_EROFS_UTILS=y
+BR2_PACKAGE_HOST_CRYPTSETUP=y
