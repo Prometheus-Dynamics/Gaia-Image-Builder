@@ -26,7 +26,15 @@
 //! gzip = "RD_GZIP"                           # by the initramfs's compression
 //! [boot_check]
 //! checked = ["BLK_DEV_DM"]                   # what the program checks itself
+//! [crash_log]
+//! all = ["PSTORE", "PSTORE_RAM"]             # optional: boards with a crash-log region
 //! ```
+//!
+//! `[crash_log]` is the one optional group (additive at version 3): it is
+//! read and its keys are checked like any group's, but nothing is required
+//! of the kernel from it here. Its symbols are required only of a board that
+//! declares a crash-log region, and the board's declaration is not part of
+//! what a build is given yet.
 //!
 //! Another version, or a key this reader does not know at any level, is
 //! refused: it means a newer file, and guessing what it asks for would pass
@@ -54,6 +62,10 @@ struct File {
     initramfs: BTreeMap<String, String>,
     #[allow(dead_code)]
     boot_check: BootCheck,
+    /// Optional: absent in a file written before the group existed.
+    #[allow(dead_code)]
+    #[serde(default)]
+    crash_log: Option<All>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -312,6 +324,24 @@ checked = ["BLK_DEV_DM"]
         let short = CONTRACT.replace("[optional]\nall = [\"VFAT_FS\"]\n", "");
         let err = problems(&short, "", &w).expect_err("missing key");
         assert!(err.contains("missing field `optional`"), "{err}");
+    }
+
+    #[test]
+    fn the_optional_crash_log_group_is_read_and_asks_nothing_of_the_kernel() {
+        let w = want("disk", &["CONFIG_X"]);
+        let with = CONTRACT.replace(
+            "version = 2",
+            "version = 3\n[crash_log]\nall = [\"PSTORE\", \"PSTORE_RAM\", \"PSTORE_CONSOLE\"]",
+        );
+        // Read like the file without it: no symbol of the group is required.
+        assert_eq!(
+            problems(&with, "", &w),
+            problems(&CONTRACT.replace("version = 2", "version = 3"), "", &w)
+        );
+        // Its own keys are checked: one it does not know is refused.
+        let extra = with.replace("[crash_log]\n", "[crash_log]\nsize = 1\n");
+        let err = problems(&extra, "", &w).expect_err("unknown key in crash_log");
+        assert!(err.contains("size"), "{err}");
     }
 
     #[test]
