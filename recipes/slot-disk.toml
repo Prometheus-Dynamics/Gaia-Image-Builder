@@ -178,7 +178,9 @@ generator-data = ["data.runs"]
 # The board's [disk] table and partitions.
 disk = ["disk.layout"]
 host-tools = ["overlay.tools", "erofs.tools", "verity.tools"]
-device-trees = ["overlay.base", "as_device_tree.from"]
+# The OS build's device trees, with a `<name>.dtbo` for each overlay its
+# kernel built: the bundle's and boot partition's `@firmware@` too.
+device-trees = ["overlay.base", "as_device_tree.from", "boot.firmware", "bundle.firmware"]
 device-tree-name = ["overlay.base_name", "as_device_tree.path"]
 cmdline-base = ["cmdline.base"]
 "provides.board-overlay" = ["overlay.source_path"]

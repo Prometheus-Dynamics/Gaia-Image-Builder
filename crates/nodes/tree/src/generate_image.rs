@@ -49,7 +49,9 @@
 //! installs the slot somewhere, say); `@boot-image@` the image's boot
 //! partition image, another; `@data-size@` the size in bytes of the board's
 //! partition the output is for, which the build reads from the board's
-//! layout. `@keys@` is a file of the tool's component (the keys the tool
+//! layout. `@firmware@` is the OS build's device trees and overlays, a
+//! directory with a `<name>.dtbo` for each overlay its kernel built.
+//! `@keys@` is a file of the tool's component (the keys the tool
 //! writes into what it makes), and `@time@` the build's source date,
 //! `1970-01-01T00:00:00Z`, the time every build of this builder has.
 //!
@@ -88,6 +90,9 @@ const PUBKEY: &str = "/signing-pubkey";
 const BUNDLE: &str = "/bundle";
 /// Where the boot partition image is, when the recipe gives it.
 const BOOT_IMAGE: &str = "/boot-image";
+/// Where the OS build's device trees and overlays are, when the recipe
+/// gives them.
+const FIRMWARE: &str = "/firmware";
 /// The directory the component's keys file is bound at, and its name there.
 const KEYS: &str = "/keys";
 use gaia_types::GENERATE_KEYS_NAME as KEYS_NAME;
@@ -152,7 +157,8 @@ pub struct Runs {
         bundle,
         boot_image,
         keys,
-        data_size
+        data_size,
+        firmware
     ),
     outputs(image, report, payload)
 )]
@@ -181,6 +187,7 @@ pub fn generate_image(
     boot_image: Option<&Artifact>,
     keys: Option<&Tree>,
     data_size: Option<&i64>,
+    firmware: Option<&Artifact>,
     cx: &Ctx,
 ) -> Result<(Artifact, Artifact, Tree), StepError> {
     let (image, report, payload) = make(
@@ -210,6 +217,7 @@ pub fn generate_image(
             boot_image,
             keys,
             data_size: data_size.copied(),
+            firmware,
         },
         cx,
     )?;
@@ -256,7 +264,8 @@ pub fn generate_image(
         bundle,
         boot_image,
         keys,
-        data_size
+        data_size,
+        firmware
     ),
     outputs(tree, report, payload)
 )]
@@ -285,6 +294,7 @@ pub fn generate_tree(
     boot_image: Option<&Artifact>,
     keys: Option<&Tree>,
     data_size: Option<&i64>,
+    firmware: Option<&Artifact>,
     cx: &Ctx,
 ) -> Result<(Tree, Artifact, Tree), StepError> {
     let (tree, report, payload) = make(
@@ -314,6 +324,7 @@ pub fn generate_tree(
             boot_image,
             keys,
             data_size: data_size.copied(),
+            firmware,
         },
         cx,
     )?;
@@ -338,6 +349,7 @@ struct More<'a> {
     boot_image: Option<&'a Artifact>,
     keys: Option<&'a Tree>,
     data_size: Option<i64>,
+    firmware: Option<&'a Artifact>,
 }
 
 /// What a run writes at `@out@`.
@@ -510,6 +522,14 @@ fn make(
         }
         None => None,
     };
+    let firmware_object = match more.firmware {
+        Some(tree) => Some(
+            tree.object
+                .object_ref()
+                .ok_or_else(|| fail("the device trees are not in the store".into()))?,
+        ),
+        None => None,
+    };
     let data_size = more.data_size.unwrap_or(0);
     if data_size < 0 {
         return Err(fail(format!("data size {data_size}: not a size")));
@@ -591,6 +611,11 @@ fn make(
                 data_size != 0,
                 "the build gives no partition size",
             ),
+            (
+                "@firmware@",
+                firmware_object.is_some(),
+                "the recipe gives no device trees",
+            ),
         ] {
             if arg.contains(name) && !given {
                 return Err(fail(format!(
@@ -630,6 +655,9 @@ fn make(
     if let Some(object) = &keys_object {
         sandbox = sandbox.input(store.path(object), KEYS);
     }
+    if let Some(object) = &firmware_object {
+        sandbox = sandbox.input(store.path(object), FIRMWARE);
+    }
     let mut key = sandbox
         // 2: a third output, the payload as the tool bundled it.
         .key(KeyBuilder::new(name, 3))
@@ -666,6 +694,9 @@ fn make(
     }
     if data_size != 0 {
         key = key.config("data size", data_size.to_string());
+    }
+    if let Some(object) = &firmware_object {
+        key = key.input("firmware", object.digest);
     }
     if key_file.is_some() {
         key = key.config("key id", key_id);
@@ -725,6 +756,7 @@ fn make(
                             .replace("@keys@", &keys_in)
                             .replace("@time@", TIME)
                             .replace("@data-size@", &data_size.to_string())
+                            .replace("@firmware@", FIRMWARE)
                     })
                     .collect()
             };

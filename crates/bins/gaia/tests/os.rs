@@ -1114,6 +1114,9 @@ fn a_recipe_takes_the_generators_files_by_role() {
         // The boot files together, each under the name of what it is.
         "zero-3e-demo.kernel.kernel -> zero-3e-demo::as_kernel.from",
         "zero-3e-demo.kernel.device_trees -> zero-3e-demo::as_device_tree.from",
+        // The device trees and overlays, the runs' @firmware@.
+        "zero-3e-demo.kernel.device_trees -> zero-3e-demo::boot.firmware",
+        "zero-3e-demo.kernel.device_trees -> zero-3e-demo::bundle.firmware",
         "zero-3e-demo::initramfs.archive -> zero-3e-demo::as_initramfs.from",
         "zero-3e-demo::cmdline.cmdline -> zero-3e-demo::as_cmdline.from",
         "zero-3e-demo::overlay.overlay -> zero-3e-demo::as_overlay.from",
