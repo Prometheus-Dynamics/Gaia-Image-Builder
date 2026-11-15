@@ -17,16 +17,22 @@
 //!   download that stops part way resumes on the next run from what it got.
 //!   A digest mismatch fails, naming both digests, and the partial file is
 //!   dropped.
+//! - **`gaia.source.patch`**: a source tree with patch series applied by
+//!   the `patch` program given, `-p1 --fuzz=0`: a directory in its `series`
+//!   order or, without one, its `*.patch` files in name order. Keyed on the
+//!   source, each patch's bytes and name in order, and `patch`'s version.
 
 mod archive;
 mod download;
 mod files;
 mod input;
+mod patch;
 mod path;
 
 pub use archive::source_archive;
 pub use download::{partial_dir, source_download};
 pub use input::source_input;
+pub use patch::source_patch;
 pub use path::source_path;
 
 /// The libraries this node links, pinned in its Cargo.toml. Its step key names
@@ -48,9 +54,10 @@ pub fn runtime_libs() -> [(&'static str, &'static str); 1] {
 use daedalus::prelude::NodeRecord;
 
 /// The nodes, for a registry.
-pub const NODES: [&NodeRecord; 4] = [
+pub const NODES: [&NodeRecord; 5] = [
     &input::SOURCE_INPUT_NODE,
     &path::SOURCE_PATH_NODE,
     &archive::SOURCE_ARCHIVE_NODE,
     &download::SOURCE_DOWNLOAD_NODE,
+    &patch::SOURCE_PATCH_NODE,
 ];

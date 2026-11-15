@@ -101,6 +101,13 @@ pub struct Kernel {
     /// or `vmlinux`. The form the board's firmware loads: a fact of the
     /// board, not of a product. Unset: the architecture's usual form.
     pub image: Option<String>,
+    /// Patch series applied to the source before it is built, in order:
+    /// each a patch file, or a directory of patches (its `series` order,
+    /// or its `*.patch` files by name), beside the board file (`file`) or
+    /// in one of its sources (`source` and `path`). Applied strictly
+    /// (`patch -p1 --fuzz=0`). A board's list replaces its family's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patches: Option<Vec<FileRef>>,
 }
 
 /// The bootloader: its source, configuration and the files it is built
@@ -115,6 +122,13 @@ pub struct Bootloader {
     #[serde(default)]
     pub blobs: BTreeMap<String, FileRef>,
     pub trusted_firmware: Option<TrustedFirmware>,
+    /// Patch series applied to the source before it is built, in order:
+    /// each a patch file, or a directory of patches (its `series` order,
+    /// or its `*.patch` files by name), beside the board file (`file`) or
+    /// in one of its sources (`source` and `path`). Applied strictly
+    /// (`patch -p1 --fuzz=0`). A board's list replaces its family's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patches: Option<Vec<FileRef>>,
 }
 
 /// Trusted firmware built for the bootloader to carry.
@@ -123,6 +137,13 @@ pub struct Bootloader {
 pub struct TrustedFirmware {
     pub source: Option<String>,
     pub platform: Option<String>,
+    /// Patch series applied to the source before it is built, in order:
+    /// each a patch file, or a directory of patches (its `series` order,
+    /// or its `*.patch` files by name), beside the board file (`file`) or
+    /// in one of its sources (`source` and `path`). Applied strictly
+    /// (`patch -p1 --fuzz=0`). A board's list replaces its family's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patches: Option<Vec<FileRef>>,
 }
 
 /// One firmware file put into the image.
@@ -362,11 +383,22 @@ fn read_file(path: &Path) -> Result<BoardFile, Error> {
         if let Some(path) = &mut kernel.device_tree_dir {
             path.resolve(dir);
         }
+        for patch in kernel.patches.iter_mut().flatten() {
+            patch.resolve(dir);
+        }
     }
     if let Some(bootloader) = &mut file.bootloader {
         each(&mut bootloader.fragments);
         for blob in bootloader.blobs.values_mut() {
             blob.resolve(dir);
+        }
+        for patch in bootloader.patches.iter_mut().flatten() {
+            patch.resolve(dir);
+        }
+        if let Some(tf) = &mut bootloader.trusted_firmware {
+            for patch in tf.patches.iter_mut().flatten() {
+                patch.resolve(dir);
+            }
         }
     }
     for firmware in file.firmware.iter_mut().flatten() {
@@ -401,6 +433,11 @@ fn read_file(path: &Path) -> Result<BoardFile, Error> {
         if let Some(config) = &kernel.config {
             local.push(("kernel.config".into(), config.path()));
         }
+        for (index, patch) in kernel.patches.iter().flatten().enumerate() {
+            if let FileRef::Local { file } = patch {
+                local.push((format!("kernel.patches[{index}].file"), file.path()));
+            }
+        }
     }
     if let Some(bootloader) = &file.bootloader {
         for (index, fragment) in bootloader.fragments.iter().flatten().enumerate() {
@@ -409,6 +446,20 @@ fn read_file(path: &Path) -> Result<BoardFile, Error> {
         for (name, blob) in &bootloader.blobs {
             if let FileRef::Local { file } = blob {
                 local.push((format!("bootloader.blobs.{name}.file"), file.path()));
+            }
+        }
+        let tf = bootloader.trusted_firmware.as_ref();
+        for (key, patches) in [
+            ("bootloader.patches", bootloader.patches.as_ref()),
+            (
+                "bootloader.trusted_firmware.patches",
+                tf.and_then(|t| t.patches.as_ref()),
+            ),
+        ] {
+            for (index, patch) in patches.into_iter().flatten().enumerate() {
+                if let FileRef::Local { file } = patch {
+                    local.push((format!("{key}[{index}].file"), file.path()));
+                }
             }
         }
     }
@@ -499,6 +550,26 @@ fn check_refs(
         for (blob, file_ref) in &bootloader.blobs {
             check_ref(format!("bootloader.blobs.{blob}"), file_ref)?;
         }
+        let tf = bootloader.trusted_firmware.as_ref();
+        for (key, patches) in [
+            ("bootloader.patches", bootloader.patches.as_ref()),
+            (
+                "bootloader.trusted_firmware.patches",
+                tf.and_then(|t| t.patches.as_ref()),
+            ),
+        ] {
+            for (index, file_ref) in patches.into_iter().flatten().enumerate() {
+                check_ref(format!("{key}[{index}]"), file_ref)?;
+            }
+        }
+    }
+    for (index, file_ref) in file
+        .kernel
+        .iter()
+        .flat_map(|k| k.patches.iter().flatten())
+        .enumerate()
+    {
+        check_ref(format!("kernel.patches[{index}]"), file_ref)?;
     }
     for (index, need) in file.partitions.iter().flatten().enumerate() {
         if need.content.is_none() {
@@ -569,6 +640,7 @@ fn merge(board: BoardFile, family: BoardFile) -> BoardFile {
                 storage_drivers: b.storage_drivers.or(f.storage_drivers),
                 cmdline: b.cmdline.or(f.cmdline),
                 image: b.image.or(f.image),
+                patches: b.patches.or(f.patches),
             }),
             (b, f) => b.or(f),
         },
@@ -582,10 +654,12 @@ fn merge(board: BoardFile, family: BoardFile) -> BoardFile {
                     blobs.extend(b.blobs);
                     blobs
                 },
+                patches: b.patches.or(f.patches),
                 trusted_firmware: match (b.trusted_firmware, f.trusted_firmware) {
                     (Some(b), Some(f)) => Some(TrustedFirmware {
                         source: b.source.or(f.source),
                         platform: b.platform.or(f.platform),
+                        patches: b.patches.or(f.patches),
                     }),
                     (b, f) => b.or(f),
                 },
