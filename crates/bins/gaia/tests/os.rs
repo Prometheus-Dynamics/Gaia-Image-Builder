@@ -118,6 +118,9 @@ fn the_plan_lists_the_config_the_board_gives() {
         "zero-3e-demo.bootloader.bootloader -> zero-3e-demo.blob.u-boot.from",
         "zero-3e-demo.blob.u-boot.blob -> zero-3e-demo.blobs.blobs0",
         "zero-3e-demo.blobs.list -> zero-3e-demo::disk.blobs",
+        // And U-Boot's config from it, which the disk checks the
+        // environment's places against.
+        "zero-3e-demo.bootloader.bootloader -> zero-3e-demo::disk.bootloader",
         "zero-3e-demo.disk-layout  gaia:disk-layout  gpt, board partitions uboot-env",
         // The slot, a file in the data partition.
         "zero-3e-demo::verity.image -> zero-3e-demo::slot.file",
@@ -442,8 +445,8 @@ fn a_recipe_input_takes_the_os_boot_files_by_what_they_are() {
     let dir = project();
     edit(
         &dir.path().join("recipes/sd-image.toml"),
-        "[inputs]\n",
-        "[inputs]\nbootloader = [\"verity.veritysetup\"]\n",
+        "bootloader = [\"disk.bootloader\"]\n",
+        "bootloader = [\"verity.veritysetup\"]\n",
     );
     // The types differ (an artifact into a string), so the planner refuses
     // it, naming the edge: the input reached the OS step's output.
@@ -479,8 +482,8 @@ fn content_on_a_partition_in_the_table_is_an_error_at_its_key() {
     let dir = project();
     edit(
         &dir.path().join("examples/boards/rk35xx/family.toml"),
-        "size = \"64K\"\n",
-        "size = \"64K\"\ncontent = \"env.bin\"\n",
+        "size = \"128K\"\n",
+        "size = \"128K\"\ncontent = \"env.bin\"\n",
     );
     let out = plan(dir.path(), &[]);
     assert_eq!(out.status.code(), Some(2));
@@ -501,13 +504,18 @@ fn a_recipe_that_takes_os_needs_an_image_with_one() {
     edit(
         &dir.path().join("recipes/sd-image.toml"),
         "blobs = [\"disk.blobs\"]\n",
-        "bootloader = [\"verity.veritysetup\"]\n",
+        "",
+    );
+    edit(
+        &dir.path().join("recipes/sd-image.toml"),
+        "bootloader = [\"disk.bootloader\"]\n",
+        "kernel = [\"verity.veritysetup\"]\n",
     );
     let out = plan(dir.path(), &[]);
     assert_eq!(out.status.code(), Some(2));
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
-        err.contains("boot files as `bootloader`; this image has no `os`"),
+        err.contains("boot files as `kernel`; this image has no `os`"),
         "{err}"
     );
 }
