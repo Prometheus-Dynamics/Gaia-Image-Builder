@@ -18,6 +18,7 @@ const PATH_TOOLS: &[(&str, &str)] = &[
     ("debugfs", "debugfs"),
     ("mkfs_erofs", "mkfs.erofs"),
     ("veritysetup", "veritysetup"),
+    ("patch", "patch"),
 ];
 
 pub struct Project {

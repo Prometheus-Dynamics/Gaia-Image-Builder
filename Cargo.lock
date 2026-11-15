@@ -1186,6 +1186,7 @@ dependencies = [
  "gaia-types",
  "lzma-sys",
  "miniz_oxide",
+ "serde_json",
  "tar",
  "tempfile",
  "xz2",

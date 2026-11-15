@@ -1542,106 +1542,7 @@ fn image_os(
         let out = g.first_output(from).unwrap_or("tree");
         g.edge((from, out), (os, "source"));
         for (k, (name, input)) in plan.inputs.iter().enumerate() {
-            let (once, node) = match input {
-                InputFrom::Source {
-                    file: described,
-                    name: source_name,
-                    source,
-                } => {
-                    let once = format!("source:{name}");
-                    match os_inputs.get(&once) {
-                        Some(&node) => (once, node),
-                        None => {
-                            let node = source_node(
-                                g,
-                                described,
-                                source_name,
-                                name,
-                                source,
-                                at.lock,
-                                at.board,
-                            )?;
-                            (once, node)
-                        }
-                    }
-                }
-                InputFrom::Picked {
-                    file: described,
-                    name: source_name,
-                    source,
-                    lock_name,
-                    path,
-                } => {
-                    let once = format!("picked:{lock_name}:{path}");
-                    match os_inputs.get(&once) {
-                        Some(&node) => (once, node),
-                        None => {
-                            let from = source_node(
-                                g,
-                                described,
-                                source_name,
-                                lock_name,
-                                source,
-                                at.lock,
-                                at.board,
-                            )?;
-                            let node = g.add(
-                                "gaia.tree.pick",
-                                format!("{}.os.{name}", at.image.name),
-                                described,
-                                "requires.kernel_contract",
-                            )?;
-                            g.set(node, "path", Lit::Str(path.clone()));
-                            let out = g.first_output(from).unwrap_or("tree");
-                            g.edge((from, out), (node, "tree"));
-                            (once, node)
-                        }
-                    }
-                }
-                InputFrom::File(path) => {
-                    let once = format!("file:{}", path.display());
-                    match os_inputs.get(&once) {
-                        Some(&node) => (once, node),
-                        None => {
-                            let node = g.add(
-                                "gaia.source.input",
-                                format!("{}.os.{name}", at.image.name),
-                                file,
-                                &key,
-                            )?;
-                            g.set(node, "path", Lit::Str(path.display().to_string()));
-                            g.set(
-                                node,
-                                "name",
-                                Lit::Str(
-                                    path.file_name()
-                                        .unwrap_or_default()
-                                        .to_string_lossy()
-                                        .into_owned(),
-                                ),
-                            );
-                            (once, node)
-                        }
-                    }
-                }
-                InputFrom::Dir(dir) => {
-                    let once = format!("dir:{}", dir.display());
-                    match os_inputs.get(&once) {
-                        Some(&node) => (once, node),
-                        None => {
-                            let node = g.add(
-                                "gaia.source.path",
-                                format!("{}.os.{name}", at.image.name),
-                                file,
-                                &key,
-                            )?;
-                            g.set(node, "path", Lit::Str(dir.display().to_string()));
-                            (once, node)
-                        }
-                    }
-                }
-            };
-            os_inputs.insert(once, node);
+            let node = os_input_node(g, at, file, &key, name, input, os_inputs)?;
             let out = g.first_output(node).unwrap_or("tree");
             g.edge((node, out), (os, &format!("inputs{k}")));
         }
@@ -2462,4 +2363,143 @@ fn literal(value: &toml::Value) -> Result<Lit, String> {
         }
         _ => return Err("a setting is a bool, int, float, string or list".into()),
     })
+}
+
+/// The node that gives the OS build its input `name`, made once per
+/// image's OS (by where it is from) and kept in `os_inputs`.
+fn os_input_node(
+    g: &mut Graph<'_>,
+    at: &OsIn<'_>,
+    file: &Path,
+    key: &str,
+    name: &str,
+    input: &InputFrom,
+    os_inputs: &mut BTreeMap<String, u32>,
+) -> Result<u32, Error> {
+    let (once, node) = match input {
+        InputFrom::Patched { base, patches } => {
+            let once = format!("patched:{name}");
+            match os_inputs.get(&once) {
+                Some(&node) => (once, node),
+                None => {
+                    let (base_name, base_from) = &**base;
+                    let base_node =
+                        os_input_node(g, at, file, key, base_name, base_from, os_inputs)?;
+                    let node = g.add(
+                        "gaia.source.patch",
+                        format!("{}.os.{name}", at.image.name),
+                        file,
+                        key,
+                    )?;
+                    let out = g.first_output(base_node).unwrap_or("tree");
+                    g.edge((base_node, out), (node, "source"));
+                    let mut paths = Vec::new();
+                    for (n, (tree_name, tree, path)) in patches.iter().enumerate() {
+                        let from = os_input_node(g, at, file, key, tree_name, tree, os_inputs)?;
+                        let out = g.first_output(from).unwrap_or("tree");
+                        g.edge((from, out), (node, &format!("patches{n}")));
+                        paths.push(path.clone());
+                    }
+                    g.set(
+                        node,
+                        "paths",
+                        Lit::Str(serde_json::to_string(&paths).unwrap_or_default()),
+                    );
+                    (once, node)
+                }
+            }
+        }
+        InputFrom::Source {
+            file: described,
+            name: source_name,
+            source,
+        } => {
+            let once = format!("source:{name}");
+            match os_inputs.get(&once) {
+                Some(&node) => (once, node),
+                None => {
+                    let node =
+                        source_node(g, described, source_name, name, source, at.lock, at.board)?;
+                    (once, node)
+                }
+            }
+        }
+        InputFrom::Picked {
+            file: described,
+            name: source_name,
+            source,
+            lock_name,
+            path,
+        } => {
+            let once = format!("picked:{lock_name}:{path}");
+            match os_inputs.get(&once) {
+                Some(&node) => (once, node),
+                None => {
+                    let from = source_node(
+                        g,
+                        described,
+                        source_name,
+                        lock_name,
+                        source,
+                        at.lock,
+                        at.board,
+                    )?;
+                    let node = g.add(
+                        "gaia.tree.pick",
+                        format!("{}.os.{name}", at.image.name),
+                        described,
+                        "requires.kernel_contract",
+                    )?;
+                    g.set(node, "path", Lit::Str(path.clone()));
+                    let out = g.first_output(from).unwrap_or("tree");
+                    g.edge((from, out), (node, "tree"));
+                    (once, node)
+                }
+            }
+        }
+        InputFrom::File(path) => {
+            let once = format!("file:{}", path.display());
+            match os_inputs.get(&once) {
+                Some(&node) => (once, node),
+                None => {
+                    let node = g.add(
+                        "gaia.source.input",
+                        format!("{}.os.{name}", at.image.name),
+                        file,
+                        key,
+                    )?;
+                    g.set(node, "path", Lit::Str(path.display().to_string()));
+                    g.set(
+                        node,
+                        "name",
+                        Lit::Str(
+                            path.file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .into_owned(),
+                        ),
+                    );
+                    (once, node)
+                }
+            }
+        }
+        InputFrom::Dir(dir) => {
+            let once = format!("dir:{}", dir.display());
+            match os_inputs.get(&once) {
+                Some(&node) => (once, node),
+                None => {
+                    let node = g.add(
+                        "gaia.source.path",
+                        format!("{}.os.{name}", at.image.name),
+                        file,
+                        key,
+                    )?;
+                    g.set(node, "path", Lit::Str(dir.display().to_string()));
+                    (once, node)
+                }
+            }
+        }
+    };
+    os_inputs.insert(once, node);
+    Ok(node)
 }

@@ -231,6 +231,126 @@ fn the_slots_tree_has_no_kernel_boot_files() {
 }
 
 #[test]
+fn a_boards_patches_are_applied_to_the_source_the_build_overrides_with() {
+    let dir = project();
+    let board_dir = dir.path().join("examples/boards/zero-3e");
+    let board = board_dir.join("board.toml");
+    std::fs::create_dir_all(board_dir.join("patches/linux")).expect("mkdir");
+    std::fs::write(board_dir.join("patches/linux/0001-a.patch"), "x").expect("write");
+    edit(
+        &board,
+        "device_tree_dir = \"assets/dts\"",
+        "device_tree_dir = \"assets/dts\"\npatches = [{ file = \"patches/linux\" }]",
+    );
+    edit(
+        &board,
+        "platform = \"rk3568\"",
+        "platform = \"rk3568\"\npatches = [{ source = \"rkbin\", path = \"tools/tf-a\" }]",
+    );
+    let out = plan(dir.path(), &[]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    let text = String::from_utf8_lossy(&out.stdout)
+        .split(' ')
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    for line in [
+        // The kernel's source, patched by the board's directory, is what
+        // the kernel build takes.
+        "zero-3e-demo.os.zero-3e.linux.patched gaia.source.patch",
+        "-> zero-3e-demo.os.zero-3e.linux.patched.source",
+        "zero-3e-demo.os.zero-3e.linux.patch0.tree -> zero-3e-demo.os.zero-3e.linux.patched.patches0",
+        "zero-3e-demo.os.zero-3e.linux.patched.tree -> zero-3e-demo.kernel.inputs",
+        // TF-A's, by a directory of one of the board's sources.
+        "zero-3e-demo.os.zero-3e.tf-a.patched gaia.source.patch",
+        "-> zero-3e-demo.os.zero-3e.tf-a.patched.patches0",
+        "zero-3e-demo.os.zero-3e.tf-a.patched.tree -> zero-3e-demo.bootloader.inputs",
+    ] {
+        assert!(text.contains(line), "the plan has no line {line:?}\n{text}");
+    }
+    // U-Boot has none: its source goes in as it is.
+    assert!(!text.contains("u-boot.patched"), "{text}");
+    let json = plan(dir.path(), &["--json"]);
+    let both: serde_json::Value = serde_json::from_slice(&json.stdout).expect("json");
+    let nodes = both["graph"]["graph"]["nodes"].as_array().expect("nodes");
+    let consts = |label: &str| {
+        &nodes
+            .iter()
+            .find(|n| n["label"] == label)
+            .unwrap_or_else(|| panic!("no node {label}"))["consts"]
+    };
+    assert_eq!(
+        consts("zero-3e-demo.os.zero-3e.linux.patched")["paths"]["value"],
+        "[\"\"]"
+    );
+    assert_eq!(
+        consts("zero-3e-demo.os.zero-3e.tf-a.patched")["paths"]["value"],
+        "[\"tools/tf-a\"]"
+    );
+    // Each build overrides the package with the patched tree, never the
+    // source as it is.
+    let overrides: Vec<(String, String)> = both["host_inputs"]
+        .as_array()
+        .expect("host inputs")
+        .iter()
+        .flat_map(|input| {
+            input["value"]["overrides"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        })
+        .map(|o| {
+            (
+                o["package"].as_str().expect("package").to_string(),
+                o["input"].as_str().expect("input").to_string(),
+            )
+        })
+        .collect();
+    for (package, input) in [
+        ("LINUX", "zero-3e.linux.patched"),
+        ("ARM_TRUSTED_FIRMWARE", "zero-3e.tf-a.patched"),
+        ("UBOOT", "zero-3e.u-boot"),
+    ] {
+        let used: Vec<&str> = overrides
+            .iter()
+            .filter(|(p, _)| p == package)
+            .map(|(_, i)| i.as_str())
+            .collect();
+        assert!(
+            !used.is_empty() && used.iter().all(|i| *i == input),
+            "{package}: {used:?}"
+        );
+    }
+
+    // What is refused, at its key.
+    for (from, to, why) in [
+        (
+            "patches = [{ file = \"patches/linux\" }]",
+            "patches = [{ file = \"patches/none\" }]",
+            "kernel.patches[0].file",
+        ),
+        (
+            "patches = [{ source = \"rkbin\", path = \"tools/tf-a\" }]",
+            "patches = [{ source = \"nope\", path = \"tools/tf-a\" }]",
+            "bootloader.trusted_firmware.patches[0].source",
+        ),
+        (
+            "patches = [{ file = \"patches/linux\" }]",
+            "patches = [{ input = \"x\" }]",
+            "kernel.patches[0]",
+        ),
+    ] {
+        edit(&board, from, to);
+        let out = plan(dir.path(), &[]);
+        assert_eq!(out.status.code(), Some(2), "{to}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(why), "{to}: {err}");
+        edit(&board, to, from);
+    }
+}
+
+#[test]
 fn a_boards_overlays_are_built_by_the_kernel_build() {
     let dir = project();
     let board = dir.path().join("examples/boards/zero-3e/board.toml");

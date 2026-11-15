@@ -55,6 +55,13 @@ use std::path::{Path, PathBuf};
 /// Where an input tree comes from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum InputFrom {
+    /// A source with patch series applied (`gaia.source.patch`): the source
+    /// by its input name, and each patch tree by a name of its own with the
+    /// path in it to apply (empty: the whole tree).
+    Patched {
+        base: Box<(String, InputFrom)>,
+        patches: Vec<(String, InputFrom, String)>,
+    },
     /// A locked source, written in `file` under `sources.<name>`.
     Source {
         file: PathBuf,
@@ -209,10 +216,18 @@ pub(crate) fn plan(
                 board,
                 name,
                 "kernel.source",
+                kernel.patches.as_deref(),
                 lock,
                 "BR2_LINUX_KERNEL",
                 "LINUX",
             )?);
+        }
+        if kernel.source.is_none() && kernel.patches.as_ref().is_some_and(|p| !p.is_empty()) {
+            return Err(Error::at(
+                &board.file,
+                "kernel.patches",
+                "patches are applied to the board's own kernel source, and it names none (`source`)",
+            ));
         }
         if kernel.config.is_none() && kernel.defconfig.is_none() {
             return Err(Error::at(
@@ -311,6 +326,27 @@ pub(crate) fn plan(
         });
     }
     if let Some(boot) = &board.bootloader {
+        let tf = boot.trusted_firmware.as_ref();
+        for (key, source, patches) in [
+            (
+                "bootloader.patches",
+                boot.source.as_ref(),
+                boot.patches.as_ref(),
+            ),
+            (
+                "bootloader.trusted_firmware.patches",
+                tf.and_then(|t| t.source.as_ref()),
+                tf.and_then(|t| t.patches.as_ref()),
+            ),
+        ] {
+            if source.is_none() && patches.is_some_and(|p| !p.is_empty()) {
+                return Err(Error::at(
+                    &board.file,
+                    key,
+                    "patches are applied to the board's own source here, and it names none (`source`)",
+                ));
+            }
+        }
         let mut lines = vec![
             "BR2_TARGET_UBOOT=y".to_string(),
             "BR2_TARGET_UBOOT_BUILD_SYSTEM_KCONFIG=y".to_string(),
@@ -321,6 +357,7 @@ pub(crate) fn plan(
                 board,
                 name,
                 "bootloader.source",
+                boot.patches.as_deref(),
                 lock,
                 "BR2_TARGET_UBOOT",
                 "UBOOT",
@@ -389,6 +426,7 @@ pub(crate) fn plan(
                     board,
                     name,
                     "bootloader.trusted_firmware.source",
+                    tf.patches.as_deref(),
                     lock,
                     "BR2_TARGET_ARM_TRUSTED_FIRMWARE",
                     "ARM_TRUSTED_FIRMWARE",
@@ -494,11 +532,17 @@ fn board_source_input(
     name: &str,
     key: &str,
 ) -> Result<String, Error> {
+    let (input, from) = board_source(board, name, key)?;
+    Ok(plan.input(input, from))
+}
+
+/// The board's source `name` as an input: its name and where it is from.
+fn board_source(board: &Board, name: &str, key: &str) -> Result<(String, InputFrom), Error> {
     let source = board
         .sources
         .get(name)
         .ok_or_else(|| Error::at(&board.file, key, format!("no source named `{name}`")))?;
-    Ok(plan.input(
+    Ok((
         format!("{}.{name}", board.name),
         InputFrom::Source {
             file: board.file.clone(),
@@ -511,16 +555,77 @@ fn board_source_input(
 /// A package's source: Buildroot's custom git or tarball options with the
 /// locked commit or URL, so the config says what it is built from, and an
 /// override to the stored copy, so Buildroot fetches nothing for it.
+#[allow(clippy::too_many_arguments)]
 fn locked_source(
     plan: &mut OsPlan,
     board: &Board,
     name: &str,
     key: &str,
+    patches: Option<&[FileRef]>,
     lock: &Lock,
     prefix: &str,
     package: &str,
 ) -> Result<Vec<String>, Error> {
-    let input = board_source_input(plan, board, name, key)?;
+    let patches = patches.unwrap_or_default();
+    let (input, from) = board_source(board, name, key)?;
+    // With patches, the build takes the source as they leave it: a tree of
+    // its own, under a name of its own; the lock still names the source.
+    let input_used = if patches.is_empty() {
+        plan.input(input.clone(), from)
+    } else {
+        let field = key.strip_suffix(".source").unwrap_or(key);
+        let mut trees = Vec::new();
+        for (n, patch) in patches.iter().enumerate() {
+            let at = format!("{field}.patches[{n}]");
+            let (tree_name, tree, path) = match patch {
+                FileRef::Local { file } => {
+                    let path = file.path();
+                    if path.is_dir() {
+                        (
+                            format!("{input}.patch{n}"),
+                            InputFrom::Dir(path.to_path_buf()),
+                            String::new(),
+                        )
+                    } else {
+                        (
+                            format!("{input}.patch{n}"),
+                            InputFrom::File(path.to_path_buf()),
+                            path.file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .into_owned(),
+                        )
+                    }
+                }
+                FileRef::InSource { source, path } => {
+                    let (tree_name, tree) = board_source(board, source, &format!("{at}.source"))?;
+                    if lock.get(&tree_name).is_none() {
+                        return Err(Error::at(
+                            &board.file,
+                            format!("sources.{source}"),
+                            format!("{tree_name} is not in the lock; lock it first"),
+                        ));
+                    }
+                    (tree_name, tree, path.clone())
+                }
+                _ => {
+                    return Err(Error::at(
+                        &board.file,
+                        at,
+                        "a patch is a file beside the board (`file`) or in one of its sources (`source` and `path`)",
+                    ));
+                }
+            };
+            trees.push((tree_name, tree, path));
+        }
+        plan.input(
+            format!("{input}.patched"),
+            InputFrom::Patched {
+                base: Box::new((input.clone(), from)),
+                patches: trees,
+            },
+        )
+    };
     let lines = match lock.get(&input) {
         Some(Entry::Git { url, commit, .. }) => vec![
             format!("{prefix}_CUSTOM_GIT=y"),
@@ -547,7 +652,7 @@ fn locked_source(
             ));
         }
     };
-    plan.override_with(package, &input);
+    plan.override_with(package, &input_used);
     Ok(lines)
 }
 
