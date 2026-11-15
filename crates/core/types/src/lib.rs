@@ -114,7 +114,7 @@ pub const GENERATE_NAMES: [&str; 4] = ["@source@", "@description@", "@out@", "@s
 /// given it in: `@keys@` is that file.
 pub const GENERATE_KEYS_NAME: &str = "keys";
 
-pub const GENERATE_IMAGE_NAMES: [&str; 19] = [
+pub const GENERATE_IMAGE_NAMES: [&str; 20] = [
     "@source@",
     "@description@",
     "@payload@",
@@ -134,6 +134,7 @@ pub const GENERATE_IMAGE_NAMES: [&str; 19] = [
     "@keys@",
     "@time@",
     "@data-size@",
+    "@firmware@",
 ];
 
 /// The `@name@` words of `text` that are none of [`GENERATE_NAMES`].

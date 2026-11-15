@@ -68,8 +68,9 @@ checkinstall)
   # checkinstall OUT SLOT
   grep -q "^product " "$2/slots/$3.bundle" && echo "install ok" ;;
 datapart)
-  # datapart BUNDLE BOOT KEYS TIME SIZE OUT: what the run was given, in OUT
+  # datapart BUNDLE BOOT KEYS TIME SIZE OUT FIRMWARE: what the run was given, in OUT
   mkdir "$7"
+  for f in "$8"/*; do echo "${f##*/}"; done > "$7/firmware"
   cp "$2" "$7/bundle"; cp "$3" "$7/boot"; cp "$4" "$7/keys"
   printf '%s %s\n' "$5" "$6" > "$7/stamp"
   echo "data for $6 bytes" ;;
@@ -203,6 +204,7 @@ impl Fixture {
             runs,
             slot,
             size,
+            None,
             None,
             None,
             None,
@@ -409,6 +411,7 @@ impl Fixture {
             None,
             None,
             None,
+            None,
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
@@ -602,6 +605,7 @@ impl Fixture {
             None,
             None,
             None,
+            None,
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
@@ -664,7 +668,7 @@ fn a_directory_is_written_from_the_bundle() {
 }
 
 const DATA: &str = r#"{
-  "args": ["datapart", "@bundle@", "@boot-image@", "@keys@", "@time@", "@data-size@", "@out@"],
+  "args": ["datapart", "@bundle@", "@boot-image@", "@keys@", "@time@", "@data-size@", "@out@", "@firmware@"],
   "verify": ["checkdata", "@out@", "@boot-image@"]
 }"#;
 
@@ -676,6 +680,7 @@ impl Fixture {
         boot: Option<&[u8]>,
         keys: Option<&str>,
         data_size: Option<i64>,
+        firmware: bool,
     ) -> Result<(PathBuf, String), String> {
         let store = Store::open(&self.store).expect("store");
         let artifact = |name: &str, bytes: &[u8]| {
@@ -689,6 +694,18 @@ impl Fixture {
         let bundle = artifact("the.bundle", b"product helios\n");
         let boot = boot.map(|bytes| artifact("boot.img", bytes));
         let keys = keys.map(|text| self.tree("keys", &[("keys", text, 0o644)]));
+        let firmware = firmware.then(|| gaia_types::Artifact {
+            kind: gaia_types::ArtifactKind::DeviceTree,
+            object: self
+                .tree(
+                    "firmware",
+                    &[
+                        ("board.dtb", "dtb", 0o644),
+                        ("ramoops-pi5.dtbo", "o", 0o644),
+                    ],
+                )
+                .object,
+        });
         let (tree, report, _) = generate_tree(
             &self.store,
             BWRAP,
@@ -713,6 +730,7 @@ impl Fixture {
             boot.as_ref(),
             keys.as_ref(),
             data_size.as_ref(),
+            firmware.as_ref(),
             &Ctx::new(),
         )
         .map_err(|e| e.to_string())?;
@@ -736,20 +754,21 @@ fn a_data_run_is_given_the_boot_image_keys_time_and_size() {
     }
     let f = Fixture::new();
     let (dir, report) = f
-        .data(Some(b"BOOT"), Some("abcd bench\n"), Some(1 << 30))
+        .data(Some(b"BOOT"), Some("abcd bench\n"), Some(1 << 30), true)
         .expect("made");
     let read = |name: &str| std::fs::read_to_string(dir.join(name)).expect(name);
     assert_eq!(read("bundle"), "product helios\n");
     assert_eq!(read("boot"), "BOOT");
     assert_eq!(read("keys"), "abcd bench\n");
     assert_eq!(read("stamp"), "1970-01-01T00:00:00Z 1073741824\n");
+    assert_eq!(read("firmware"), "board.dtb\nramoops-pi5.dtbo\n");
     assert_eq!(report, "data for 1073741824 bytes\ndata ok\n");
     // Another size, other keys, another boot image: each another step.
-    f.data(Some(b"BOOT"), Some("abcd bench\n"), Some(1 << 29))
+    f.data(Some(b"BOOT"), Some("abcd bench\n"), Some(1 << 29), true)
         .expect("another size");
-    f.data(Some(b"BOOT"), Some("ef01 other\n"), Some(1 << 30))
+    f.data(Some(b"BOOT"), Some("ef01 other\n"), Some(1 << 30), true)
         .expect("other keys");
-    f.data(Some(b"BOOT2"), Some("abcd bench\n"), Some(1 << 30))
+    f.data(Some(b"BOOT2"), Some("abcd bench\n"), Some(1 << 30), true)
         .expect("another boot image");
     let store = Store::open(&f.store).expect("store");
     let made = step_records(&logs_dir(&store))
@@ -758,6 +777,13 @@ fn a_data_run_is_given_the_boot_image_keys_time_and_size() {
         .count();
     assert_eq!(made, 4);
 
+    let error = f
+        .data(Some(b"B"), Some("k\n"), Some(1), false)
+        .expect_err("no firmware");
+    assert!(
+        error.contains("names @firmware@, and the recipe gives no device trees"),
+        "{error}"
+    );
     for (boot, keys, size, why) in [
         (
             None,
@@ -778,7 +804,7 @@ fn a_data_run_is_given_the_boot_image_keys_time_and_size() {
             "names @data-size@, and the build gives no partition size",
         ),
     ] {
-        let error = f.data(boot, keys, size).expect_err("refused");
+        let error = f.data(boot, keys, size, true).expect_err("refused");
         assert!(error.contains(why), "{error}");
     }
 }

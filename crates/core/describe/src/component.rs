@@ -84,7 +84,9 @@ pub struct Generate {
 /// image's size in bytes and `@out@` the one file to write. Where the
 /// recipe gives them: `@bundle@` the slot's bundle, `@boot-image@` the
 /// image's boot partition image, `@data-size@` the size in bytes of the
-/// board's partition the output is for. `@keys@` is the file `keys` names;
+/// board's partition the output is for, `@firmware@` the OS build's
+/// device trees and overlays (each `<name>.dtbo`), a directory. `@keys@` is
+/// the file `keys` names;
 /// `@time@` the build's source date, `1970-01-01T00:00:00Z`, as every
 /// build of this builder has it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
