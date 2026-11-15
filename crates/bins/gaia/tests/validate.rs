@@ -346,3 +346,61 @@ fn a_generators_keys_file_must_exist_and_be_named() {
         }
     }
 }
+
+#[test]
+fn a_generators_tools_are_mapped_and_named() {
+    let dir = examples();
+    let file = dir.path().join(GENERATOR);
+    let original = std::fs::read_to_string(&file).expect("read");
+    let with_tool = "\"data-partition\", \"--merge\", \"@tool:dtmerge@\", \"--out\", \"@out@\"";
+    let without = "\"data-partition\", \"--out\", \"@out@\"";
+    for (args, extra, why) in [
+        (
+            with_tool,
+            "tools = { dtmerge = \"rpi-dtmerge:bin/dtmerge\" }\n",
+            None,
+        ),
+        (
+            with_tool,
+            "",
+            Some("a run names @tool:dtmerge@, and `tools` maps no `dtmerge`"),
+        ),
+        (
+            without,
+            "tools = { dtmerge = \"rpi-dtmerge:bin/dtmerge\" }\n",
+            Some("generate.data.tools.dtmerge: no run names @tool:dtmerge@"),
+        ),
+        (
+            with_tool,
+            "tools = { dtmerge = \"bin/dtmerge\" }\n",
+            Some("is not `component:path`"),
+        ),
+        (
+            with_tool,
+            "tools = { dtmerge = \"rpi-dtmerge:../dtmerge\" }\n",
+            Some("is not `component:path`"),
+        ),
+        (
+            with_tool,
+            "tools = { dtmerge = \"rpi-dtmerge:/bin/dtmerge\" }\n",
+            Some("is not `component:path`"),
+        ),
+        (
+            "\"data-partition\", \"@tool:Dt@\", \"@out@\"",
+            "tools = { Dt = \"rpi-dtmerge:bin/dtmerge\" }\n",
+            Some("`Dt` is not a tool's name"),
+        ),
+    ] {
+        std::fs::write(&file, format!("{original}{}", generator_block(args, extra)))
+            .expect("write");
+        let out = validate(dir.path(), &[GENERATOR]);
+        let err = String::from_utf8_lossy(&out.stderr);
+        match why {
+            None => assert!(out.status.success(), "{err}"),
+            Some(why) => {
+                assert_eq!(out.status.code(), Some(2), "{extra}");
+                assert!(err.contains(why), "{err}");
+            }
+        }
+    }
+}

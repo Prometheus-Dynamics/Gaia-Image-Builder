@@ -69,7 +69,13 @@ struct Generator {
     /// The keys file a table names, as a tree, by the table
     /// (`generate.data`) and with its port.
     keys: BTreeMap<&'static str, (u32, &'static str)>,
+    /// The builds of the programs a table's runs name as `@tool:NAME@`, by
+    /// the table, each NAME with its build's output.
+    tools: BTreeMap<&'static str, Vec<(String, Port)>>,
 }
+
+/// A node's output: the node and the port's name.
+type Port = (u32, &'static str);
 
 impl Graph<'_> {
     fn add(&mut self, id: &str, label: String, file: &Path, key: &str) -> Result<u32, Error> {
@@ -876,6 +882,13 @@ fn image_recipe(
                     }
                     if let Some(from) = generator.keys.get(table) {
                         g.edge(*from, (stage, "keys"));
+                    }
+                    if let Some(tools) = generator.tools.get(table) {
+                        let names: Vec<&str> = tools.iter().map(|(n, _)| n.as_str()).collect();
+                        g.set(stage, "tool_names", Lit::Str(names.join(" ")));
+                        for (n, (_, from)) in tools.iter().enumerate() {
+                            g.edge(*from, (stage, &format!("tools{n}")));
+                        }
                     }
                     if table == "generate.data" {
                         data_size(g, at, recipe, &group, &stages, &p.stage, &generator.file)?;
@@ -2018,6 +2031,57 @@ fn generate_node(g: &mut Graph<'_>, at: &OsIn<'_>, component: &Component) -> Res
         );
         keys.insert(table, (node, g.first_output(node).unwrap_or("tree")));
     }
+    // The programs of other components a table's runs name: each the
+    // build of the product's component of that name, once per generator.
+    let mut tools = BTreeMap::new();
+    let mut tool_builds: BTreeMap<String, u32> = BTreeMap::new();
+    for (table, runs) in [
+        ("generate.image", &generate.image),
+        ("generate.bundle", &generate.bundle),
+        ("generate.data", &generate.data),
+    ] {
+        let Some(runs) = runs else { continue };
+        let mut named = Vec::new();
+        for (name, value) in &runs.tools {
+            let key = format!("{table}.tools.{name}");
+            let (wanted, _) = value.split_once(':').unwrap_or((value, ""));
+            let other = at.loaded.components.get(wanted).ok_or_else(|| {
+                Error::at(
+                    file,
+                    &key,
+                    format!("the product has no component `{wanted}`"),
+                )
+            })?;
+            let Some(other_build) = &other.build else {
+                return Err(Error::at(
+                    file,
+                    &key,
+                    format!("the component `{wanted}` has no [build] to take a program from"),
+                ));
+            };
+            let node = match tool_builds.get(wanted) {
+                Some(&node) => node,
+                None => {
+                    let node = component_build(
+                        g,
+                        other,
+                        other_build,
+                        "build",
+                        at.lock,
+                        at.builders,
+                        at.board,
+                        false,
+                    )?;
+                    tool_builds.insert(wanted.to_string(), node);
+                    node
+                }
+            };
+            named.push((name.clone(), (node, g.first_output(node).unwrap_or("tree"))));
+        }
+        if !named.is_empty() {
+            tools.insert(table, named);
+        }
+    }
     g.generators
         .entry(image.clone())
         .or_default()
@@ -2036,6 +2100,7 @@ fn generate_node(g: &mut Graph<'_>, at: &OsIn<'_>, component: &Component) -> Res
             bundle_runs: generate.bundle.as_ref().map(runs_json),
             data_runs: generate.data.as_ref().map(runs_json),
             keys,
+            tools,
         });
     Ok(node)
 }
@@ -2132,6 +2197,14 @@ fn runs_json(runs: &gaia_describe::GenerateImage) -> String {
         "verify": runs.verify,
         "key_args": runs.key_args,
         "verify_key_args": runs.verify_key_args,
+        "tools": runs
+            .tools
+            .iter()
+            .map(|(name, value)| {
+                let program = value.split_once(':').map(|(_, p)| p).unwrap_or_default();
+                (name.clone(), serde_json::Value::from(program))
+            })
+            .collect::<serde_json::Map<_, _>>(),
     })
     .to_string()
 }

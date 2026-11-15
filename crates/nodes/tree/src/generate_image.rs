@@ -66,6 +66,7 @@
 
 use crate::walk::inside;
 use daedalus::prelude::*;
+use daedalus_cpu_author::FanIn;
 use gaia_sandbox::Sandbox;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store, Stream};
 use gaia_types::{Artifact, ArtifactKind, StoreRef, Tree};
@@ -93,6 +94,8 @@ const BOOT_IMAGE: &str = "/boot-image";
 /// Where the OS build's device trees and overlays are, when the recipe
 /// gives them.
 const FIRMWARE: &str = "/firmware";
+/// Where each tool's build is, as `/tools/<name>`.
+const TOOLS: &str = "/tools";
 /// The directory the component's keys file is bound at, and its name there.
 const KEYS: &str = "/keys";
 use gaia_types::GENERATE_KEYS_NAME as KEYS_NAME;
@@ -128,6 +131,10 @@ pub struct Runs {
     /// given what to check the signature with (`@pubkey@`).
     #[serde(default)]
     pub verify_key_args: Vec<String>,
+    /// Each `@tool:NAME@` a run names: NAME to the program's path in the
+    /// build the step is given for NAME (`tools`, by `tool_names`).
+    #[serde(default)]
+    pub tools: std::collections::BTreeMap<String, String>,
 }
 
 /// The image `runs` (JSON of [`Runs`]) makes from `payload`: `size` bytes,
@@ -158,7 +165,9 @@ pub struct Runs {
         boot_image,
         keys,
         data_size,
-        firmware
+        firmware,
+        tools,
+        tool_names
     ),
     outputs(image, report, payload)
 )]
@@ -188,6 +197,8 @@ pub fn generate_image(
     keys: Option<&Tree>,
     data_size: Option<&i64>,
     firmware: Option<&Artifact>,
+    tools: FanIn<'_, Tree>,
+    tool_names: Option<&String>,
     cx: &Ctx,
 ) -> Result<(Artifact, Artifact, Tree), StepError> {
     let (image, report, payload) = make(
@@ -218,6 +229,8 @@ pub fn generate_image(
             keys,
             data_size: data_size.copied(),
             firmware,
+            tools: tools.iter().map(|t| (*t).clone()).collect(),
+            tool_names: tool_names.map(String::as_str).unwrap_or_default(),
         },
         cx,
     )?;
@@ -265,7 +278,9 @@ pub fn generate_image(
         boot_image,
         keys,
         data_size,
-        firmware
+        firmware,
+        tools,
+        tool_names
     ),
     outputs(tree, report, payload)
 )]
@@ -295,6 +310,8 @@ pub fn generate_tree(
     keys: Option<&Tree>,
     data_size: Option<&i64>,
     firmware: Option<&Artifact>,
+    tools: FanIn<'_, Tree>,
+    tool_names: Option<&String>,
     cx: &Ctx,
 ) -> Result<(Tree, Artifact, Tree), StepError> {
     let (tree, report, payload) = make(
@@ -325,6 +342,8 @@ pub fn generate_tree(
             keys,
             data_size: data_size.copied(),
             firmware,
+            tools: tools.iter().map(|t| (*t).clone()).collect(),
+            tool_names: tool_names.map(String::as_str).unwrap_or_default(),
         },
         cx,
     )?;
@@ -350,6 +369,10 @@ struct More<'a> {
     keys: Option<&'a Tree>,
     data_size: Option<i64>,
     firmware: Option<&'a Artifact>,
+    /// The builds of the programs the runs name as `@tool:NAME@`, by the
+    /// names in `tool_names` (separated by spaces, in the same order).
+    tools: Vec<Tree>,
+    tool_names: &'a str,
 }
 
 /// What a run writes at `@out@`.
@@ -530,6 +553,49 @@ fn make(
         ),
         None => None,
     };
+    // The other components' programs: each given build has the program the
+    // runs map its name to, and each name a run uses is given.
+    let tool_names: Vec<&str> = more.tool_names.split_whitespace().collect();
+    if tool_names.len() != more.tools.len() {
+        return Err(fail(format!(
+            "{} tool builds are given and {} names for them",
+            more.tools.len(),
+            tool_names.len()
+        )));
+    }
+    let mut tools = Vec::new();
+    for (tool_name, tree) in tool_names.iter().zip(&more.tools) {
+        let object = in_store(tree, &format!("the build of tool {tool_name}"))?;
+        let Some(program) = runs.tools.get(*tool_name) else {
+            return Err(fail(format!(
+                "a build of tool {tool_name} is given, and the runs map no `{tool_name}`"
+            )));
+        };
+        let program = inside(program).map_err(fail)?;
+        if !store.path(&object).join(&program).is_file() {
+            return Err(fail(format!(
+                "the build of tool {tool_name} has no {program}"
+            )));
+        }
+        tools.push((tool_name.to_string(), object, program));
+    }
+    let every_run = || {
+        runs.fit
+            .iter()
+            .chain(&runs.args)
+            .chain(&runs.verify)
+            .chain(&runs.key_args)
+            .chain(&runs.verify_key_args)
+    };
+    for arg in every_run() {
+        for named in gaia_types::tool_refs(arg) {
+            if !tools.iter().any(|(given, _, _)| *given == named) {
+                return Err(fail(format!(
+                    "the argument {arg:?} names @tool:{named}@, and the recipe gives no build of it"
+                )));
+            }
+        }
+    }
     let data_size = more.data_size.unwrap_or(0);
     if data_size < 0 {
         return Err(fail(format!("data size {data_size}: not a size")));
@@ -658,6 +724,9 @@ fn make(
     if let Some(object) = &firmware_object {
         sandbox = sandbox.input(store.path(object), FIRMWARE);
     }
+    for (tool_name, object, _) in &tools {
+        sandbox = sandbox.input(store.path(object), format!("{TOOLS}/{tool_name}"));
+    }
     let mut key = sandbox
         // 2: a third output, the payload as the tool bundled it.
         .key(KeyBuilder::new(name, 3))
@@ -698,6 +767,20 @@ fn make(
     if let Some(object) = &firmware_object {
         key = key.input("firmware", object.digest);
     }
+    for (tool_name, object, program) in &tools {
+        key = key
+            .input(&format!("tool {tool_name}"), object.digest)
+            .config(&format!("tool {tool_name} program"), program);
+    }
+    let tool_in: Vec<(String, String)> = tools
+        .iter()
+        .map(|(tool_name, _, program)| {
+            (
+                format!("@tool:{tool_name}@"),
+                format!("{TOOLS}/{tool_name}/{program}"),
+            )
+        })
+        .collect();
     if key_file.is_some() {
         key = key.config("key id", key_id);
     }
@@ -737,6 +820,9 @@ fn make(
             let fill = |args: &[String]| -> Vec<String> {
                 args.iter()
                     .map(|arg| {
+                        let arg = tool_in
+                            .iter()
+                            .fold(arg.clone(), |arg, (word, path)| arg.replace(word, path));
                         arg.replace("@source@", SOURCE)
                             .replace("@description@", &described_in)
                             .replace("@payload@", PAYLOAD)

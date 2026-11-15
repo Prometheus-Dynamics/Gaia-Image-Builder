@@ -88,7 +88,8 @@ pub struct Generate {
 /// device trees and overlays (each `<name>.dtbo`), a directory. `@keys@` is
 /// the file `keys` names;
 /// `@time@` the build's source date, `1970-01-01T00:00:00Z`, as every
-/// build of this builder has it.
+/// build of this builder has it. `@tool:NAME@` is the program `tools`
+/// maps NAME to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GenerateImage {
@@ -113,6 +114,13 @@ pub struct GenerateImage {
     /// A file of this component, relative to its file, that the runs name
     /// as `@keys@`: the keys the tool writes into what it makes.
     pub keys: Option<RelPath>,
+    /// Programs of other components the runs call, as `@tool:NAME@`: NAME
+    /// to `component:path`, the product's name for a component with a
+    /// build and the program's path in its build output. The program runs
+    /// in this tool's image, so it is one that needs nothing of an image
+    /// (built static) or is built in the same one.
+    #[serde(default)]
+    pub tools: BTreeMap<String, String>,
 }
 
 /// The tool: a package of one of the component's sources.
@@ -263,6 +271,66 @@ pub struct Group {
     pub gid: Option<u32>,
 }
 
+/// A table's `tools`: each a plain name mapped to `component:path`, named
+/// by a run, and each `@tool:NAME@` of a run mapped.
+fn check_tools(path: &Path, table: &str, image: &GenerateImage) -> Result<(), Error> {
+    let at = |name: &str| format!("generate.{table}.tools.{name}");
+    for (name, value) in &image.tools {
+        if !is_input_name(name) {
+            return Err(Error::new(
+                path,
+                at(name),
+                format!("`{name}` is not a tool's name: lowercase letters, digits and `-`"),
+            ));
+        }
+        let program = value.split_once(':').and_then(|(component, program)| {
+            let plain = !component.is_empty()
+                && !program.is_empty()
+                && !program.starts_with('/')
+                && program
+                    .split('/')
+                    .all(|part| !part.is_empty() && part != "." && part != "..");
+            plain.then_some(program)
+        });
+        if program.is_none() {
+            return Err(Error::new(
+                path,
+                at(name),
+                format!(
+                    "`{value}` is not `component:path`: a component of the product and a path in its build output"
+                ),
+            ));
+        }
+    }
+    let runs = [
+        &image.fit,
+        &image.args,
+        &image.verify,
+        &image.key_args,
+        &image.verify_key_args,
+    ];
+    let named: std::collections::BTreeSet<String> = runs
+        .iter()
+        .flat_map(|args| args.iter())
+        .flat_map(|arg| gaia_types::tool_refs(arg))
+        .collect();
+    if let Some(name) = named.iter().find(|name| !image.tools.contains_key(*name)) {
+        return Err(Error::new(
+            path,
+            format!("generate.{table}"),
+            format!("a run names @tool:{name}@, and `tools` maps no `{name}`"),
+        ));
+    }
+    if let Some(name) = image.tools.keys().find(|name| !named.contains(*name)) {
+        return Err(Error::new(
+            path,
+            at(name),
+            format!("no run names @tool:{name}@"),
+        ));
+    }
+    Ok(())
+}
+
 impl Component {
     /// Reads the component file at `path`.
     pub fn read(path: impl AsRef<Path>) -> Result<Self, Error> {
@@ -286,6 +354,7 @@ impl Component {
                 ("data", &mut generate.data),
             ] {
                 let Some(image) = image else { continue };
+                check_tools(path, table, image)?;
                 let names_keys = [
                     &image.fit,
                     &image.args,
