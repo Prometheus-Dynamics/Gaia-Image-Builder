@@ -656,6 +656,8 @@ fn a_component_installs_the_boards_description_by_name() {
     assert!(err.contains("descriptions.daemon"), "{err}");
 
     // There: one file, installed where the component says.
+    // A board's partitions replace its family's, so it restates the
+    // bootloader area and the environment partition beside its own.
     std::fs::write(board_dir.join("daemon-board.toml"), "id = \"zero-3e\"\n").expect("write");
     let out = plan(dir.path(), &[]);
     assert!(out.status.success());
@@ -1704,7 +1706,7 @@ fn a_first_flash_disk_fills_the_boards_partitions() {
     std::fs::write(
         &board,
         format!(
-            "{text}\n[descriptions]\ndaemon = \"daemon-board.toml\"\n\n[[partitions]]\nname = \"boot\"\nrole = \"boot\"\ntype = \"ebd0a0a2-b9e5-4433-87c0-68b6b72699c7\"\nsize = \"64M\"\n\n[[partitions]]\nname = \"data\"\nrole = \"data\"\ntype = \"0fc63daf-8483-4772-8e79-3d69d8477de4\"\nsize = \"256M\"\n"
+            "{text}\n[descriptions]\ndaemon = \"daemon-board.toml\"\n\n[[partitions]]\nname = \"u-boot\"\nrole = \"bootloader\"\noffset = \"32K\"\nin_table = false\ncontent = \"u-boot-rockchip.bin\"\n\n[[partitions]]\nname = \"uboot-env\"\nrole = \"raw\"\ntype = \"3de21764-95bd-54bd-a5c3-4abe786f38a8\"\noffset = \"16M\"\nsize = \"128K\"\n\n[[partitions]]\nname = \"boot\"\nrole = \"boot\"\ntype = \"ebd0a0a2-b9e5-4433-87c0-68b6b72699c7\"\nsize = \"64M\"\n\n[[partitions]]\nname = \"data\"\nrole = \"data\"\ntype = \"0fc63daf-8483-4772-8e79-3d69d8477de4\"\nsize = \"256M\"\n"
         ),
     )
     .expect("write");
@@ -1743,6 +1745,11 @@ fn a_first_flash_disk_fills_the_boards_partitions() {
         "zero-3e-demo::bootp.partition -> zero-3e-demo::disk.partitions0",
         "zero-3e-demo::datap.partition -> zero-3e-demo::disk.partitions1",
         "zero-3e-demo.disk-layout -> zero-3e-demo::disk.layout",
+        // The board's area outside the table, from the bootloader build,
+        // and U-Boot's config the disk checks the environment against.
+        "zero-3e-demo.bootloader.bootloader -> zero-3e-demo.blob.u-boot.from",
+        "zero-3e-demo.blobs.list -> zero-3e-demo::disk.blobs",
+        "zero-3e-demo.bootloader.bootloader -> zero-3e-demo::disk.bootloader",
         "zero-3e-demo::disk.image -> zero-3e-demo::flash.image",
         "zero-3e-demo::flash.file -> host.zero-3e-demo.flash",
         "zero-3e-demo::disk.image -> host.zero-3e-demo.disk",

@@ -9,7 +9,9 @@
 #   partition image (`@boot-image@`) and the data partition's size from
 #   the board's layout (`@data-size@`), which the board must give; the
 #   ext4 is made that size, so the two are one number;
-# - `disk`: the board's [disk] table with the boot partition and that data
+# - `disk`: the board's [disk] table, its areas outside the table (the
+#   bootloader the boot ROM reads, from the OS's bootloader output), and
+#   the boot partition and that data
 #   partition in the board's partitions of those names (`boot_name`,
 #   `data_name`): the board's layout gives each one's place, size and
 #   type, the build gives its content;
@@ -177,6 +179,10 @@ generator-bundle = ["bundle.runs"]
 generator-data = ["data.runs"]
 # The board's [disk] table and partitions.
 disk = ["disk.layout"]
+# The board's areas outside the partition table (a bootloader at a fixed
+# offset), from the OS's bootloader output: a first flash is the whole
+# card, so it carries what the boot ROM reads first.
+blobs = ["disk.blobs"]
 # The OS's bootloader output: where its U-Boot saves its environment is
 # checked against the disk, and a disk it would write over is refused.
 bootloader = ["disk.bootloader"]
