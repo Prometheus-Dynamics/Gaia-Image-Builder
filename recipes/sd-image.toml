@@ -157,7 +157,7 @@ sets = ["rootp.offset", "datap.offset", "rootp.size", "datap.size"]
 [parameters.compression]
 type = "string"
 default = "lzma"
-description = "The slot's EROFS compression. An image with an OS is made with its build's own mkfs.erofs, which writes none, lz4, lz4hc and lzma; deflate and zstd are for a tool given to an image with no OS. lzma is the default because it is the smallest the pinned tool writes, not as a decision: the algorithm is to be decided by a board measurement on the first slot image (lzma, lz4hc, and zstd from an unpinned tool for comparison)."
+description = "The slot's EROFS compression. An image with an OS is made with its build's own mkfs.erofs, which writes none, lz4, lz4hc and lzma; deflate and zstd are for a tool given to an image with no OS. lzma is the default because it is the smallest the pinned tool writes, not as a decision: the algorithm is to be decided by a board measurement on the first slot image (lzma, lz4hc, and zstd from an unpinned tool for comparison). For an iteration build, `--setting <image>.compression=lz4` is the fastest to make (lz4hc packs tighter and takes longer); release and bench images keep lzma. A root bigger than lzma's may not fit the slot partition the board gives it."
 sets = ["erofs.compression"]
 
 [parameters.cluster]
