@@ -43,9 +43,27 @@
 //!
 //! The key holds the source's digest, each input tree's digest by name, the
 //! fragments' text as written, the toolchain defaults when they apply, the
-//! overrides, the externals and the make program. The download cache, job count
-//! and CPU list change how fast it runs, not what it makes, so they are not in
-//! the key.
+//! overrides, the externals and the make program. The download cache, the compiler cache's directory, the mirror,
+//! the job count and the CPU list change how fast it runs, or where its
+//! sources come from, not what it makes, so they are not in the key. The
+//! compiler cache is on by a fragment (`gaia.ccache`, from the graph): that
+//! is in the key, and its directory is not.
+//!
+//! Settings, from the host (`gaia::project`), none of them in the key:
+//!
+//! - `GAIA_BUILDROOT_DL`: the download directory (`BR2_DL_DIR`). Default:
+//!   `buildroot-downloads` beside the store's objects.
+//! - `GAIA_BUILDROOT_MIRROR`: a primary download site (`BR2_PRIMARY_SITE`),
+//!   a URI such as `https://mirror.example/buildroot`. Buildroot tries it
+//!   first and then the package's own site and its backup site, so nothing
+//!   is lost if the mirror lacks a file. Each download is checked against the
+//!   hash Buildroot has for it, when there is one; a package with no hash
+//!   file is not checked, so a mirror of such a package is trusted as much as
+//!   the site it copies. Default: none.
+//! - The compiler cache: `buildroot-ccache` beside the store's objects
+//!   (`BR2_CCACHE_DIR`), shared by every build of the store, bounded to
+//!   `CCACHE_MAX_SIZE`. The graph turns it on by default (`gaia.ccache`); a
+//!   description turns it off with `# BR2_CCACHE is not set`.
 //!
 //! Progress: Buildroot's `Installing to target` lines are counted as they
 //! print, but the step kit reports progress only between tool runs, so the
@@ -79,6 +97,10 @@ const KEY_VERSION: u32 = 3;
 const WORK_BYTES: u64 = 24 << 30;
 /// The environment every make runs with. Nothing else is inherited.
 pub(crate) const PATH: &str = "/usr/local/bin:/usr/bin:/bin";
+/// The compiler cache's size bound, for every build of a store. It is an
+/// environment variable of make, which ccache reads on each run, so a cache
+/// made before it was set is kept to the bound too.
+pub(crate) const CCACHE_MAX_SIZE: &str = "20G";
 
 /// The step's outputs, by name and by path inside its directory. The last two
 /// are empty when the build has no kernel.
@@ -392,7 +414,30 @@ fn check(config: &OsConfig, inputs: usize, host: &BuildrootHost) -> Result<(), S
             return Err(format!("{what} {path:?} is not an absolute path"));
         }
     }
+    if !host.ccache_dir.is_empty() && !Path::new(&host.ccache_dir).is_absolute() {
+        return Err(format!(
+            "ccache directory {:?} is not an absolute path",
+            host.ccache_dir
+        ));
+    }
+    if !host.mirror.is_empty() {
+        check_mirror(&host.mirror)?;
+    }
     Ok(())
+}
+
+/// A mirror is a URI Buildroot's download helper reads: a scheme, then a
+/// path, with no white space or quotes, since it is given to make as a
+/// command-line word and written into the download commands.
+pub fn check_mirror(url: &str) -> Result<(), String> {
+    let plain = !url.contains(|c: char| c.is_whitespace() || "\\\"'$".contains(c));
+    if url.contains("://") && plain {
+        Ok(())
+    } else {
+        Err(format!(
+            "mirror {url:?} is not a URI (scheme://path, with no white space or quotes)"
+        ))
+    }
 }
 
 /// A tree in the store: its path there and its digest.
@@ -667,9 +712,14 @@ fn build(
             out::copy_kernel_build(&source, &dir.join("kernel-build"))
                 .map_err(io_fail("the kernel build tree"))?;
             // Buildroot's host directory holds the cross compiler it built or
-            // installed, with its sysroot. Nothing in it names the output path.
+            // installed, with its sysroot. Its text files and links name the
+            // output path (a `.pc` prefix, a script's interpreter): the
+            // marker stands for it, so the stored tree is the same whether
+            // the build ran in RAM or on disk.
             fs::rename(out.join("host"), dir.join("toolchain"))
                 .map_err(io_fail("the toolchain"))?;
+            host::mark_out(&dir.join("toolchain"), &out.display().to_string())
+                .map_err(io_fail("the toolchain's paths"))?;
         }
         None => {
             fs::create_dir(dir.join("kernel-build")).map_err(io_fail("the kernel build"))?;
@@ -710,6 +760,15 @@ pub fn make_arguments(
     args.push(format!("-j{}", host.jobs));
     args.push(format!("O={}", out.display()));
     args.push(format!("BR2_DL_DIR={}", host.download_dir));
+    // Command-line variables, not config lines: a path is then in no
+    // `.config` text or key. The mirror is not BR2_PRIMARY_SITE_ONLY=n:
+    // Buildroot tests that for emptiness, so `n` would drop the upstream.
+    if !host.ccache_dir.is_empty() {
+        args.push(format!("BR2_CCACHE_DIR={}", host.ccache_dir));
+    }
+    if !host.mirror.is_empty() {
+        args.push(format!("BR2_PRIMARY_SITE={}", host.mirror));
+    }
     args.extend(vars.iter().cloned());
     args.extend(goals.iter().map(|goal| (*goal).to_string()));
     args
@@ -729,6 +788,7 @@ pub(crate) fn make_tool(
         .args(arguments)
         .env("PATH", PATH)
         .env("LC_ALL", "C")
+        .env("CCACHE_MAXSIZE", CCACHE_MAX_SIZE)
         .env("HOME", out.display().to_string())
 }
 
@@ -780,6 +840,8 @@ mod toolchain_tests {
             jobs: 4,
             download_dir: "/dl".into(),
             config_only: false,
+            ccache_dir: String::new(),
+            mirror: String::new(),
         }
     }
 
@@ -870,7 +932,78 @@ mod bound_tests {
             cpus: cpus.into(),
             jobs,
             download_dir: "/dl".into(),
+            ccache_dir: String::new(),
+            mirror: String::new(),
             config_only: false,
+        }
+    }
+
+    /// The compiler cache's directory and the mirror are make variables on
+    /// the command line, given only when they are set.
+    #[test]
+    fn the_ccache_directory_and_the_mirror_are_make_variables() {
+        let mut host = host(4, "");
+        let bare = make_arguments(&host, Path::new("/out"), &[], &[]);
+        assert!(bare.iter().all(|arg| !arg.starts_with("BR2_CCACHE_DIR=")));
+        assert!(bare.iter().all(|arg| !arg.starts_with("BR2_PRIMARY_SITE")));
+        host.ccache_dir = "/store/buildroot-ccache".into();
+        host.mirror = "https://mirror.example/br".into();
+        let set = make_arguments(&host, Path::new("/out"), &[], &["all"]);
+        assert!(set.contains(&"BR2_CCACHE_DIR=/store/buildroot-ccache".to_string()));
+        assert!(set.contains(&"BR2_PRIMARY_SITE=https://mirror.example/br".to_string()));
+        // The upstream site is the fallback: the variable that would switch
+        // it off is never given.
+        assert!(set.iter().all(|arg| !arg.contains("PRIMARY_SITE_ONLY")));
+        assert_eq!(set.last().map(String::as_str), Some("all"));
+    }
+
+    /// The key of a build holds the compiler cache as on or off, and neither
+    /// its directory nor the mirror: they change where the cache lives and
+    /// where sources come from, and the hashes pin what is built.
+    #[test]
+    fn the_key_has_neither_the_compiler_cache_directory_nor_the_mirror() {
+        let fragment = |text: &str| ConfigFragment {
+            name: "gaia.ccache".into(),
+            text: text.into(),
+        };
+        let prepared = Prepared {
+            src: PathBuf::from("/store/buildroot"),
+            src_digest: Digest::of_bytes(b"source"),
+            dirs: Vec::new(),
+            vars: Vec::new(),
+            fragments: vec![fragment("BR2_CCACHE=y\n")],
+            defaults: Vec::new(),
+            contracts: Vec::new(),
+        };
+        let on = OsConfig {
+            fragments: vec![fragment("BR2_CCACHE=y\n")],
+            ..OsConfig::default()
+        };
+        let mut first = host(4, "");
+        first.ccache_dir = "/store-a/buildroot-ccache".into();
+        let mut second = host(4, "");
+        second.ccache_dir = "/store-b/buildroot-ccache".into();
+        second.mirror = "https://mirror.example/br".into();
+        let key = |host: &BuildrootHost| prepared.key("test", 1, &on, host).finish();
+        assert!(key(&first) == key(&second));
+        let off = OsConfig {
+            fragments: vec![fragment("# BR2_CCACHE is not set\n")],
+            ..OsConfig::default()
+        };
+        assert!(prepared.key("test", 1, &off, &first).finish() != key(&first));
+    }
+
+    #[test]
+    fn a_mirror_must_be_a_uri_with_no_white_space_or_quotes() {
+        assert!(check_mirror("https://mirror.example/buildroot").is_ok());
+        assert!(check_mirror("file:///srv/dl").is_ok());
+        for bad in [
+            "mirror.example",
+            "https://a b",
+            "https://a\"b",
+            "https://$(X)",
+        ] {
+            assert!(check_mirror(bad).is_err(), "{bad:?}");
         }
     }
 

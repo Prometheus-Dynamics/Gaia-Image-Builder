@@ -223,7 +223,13 @@ mod tests {
             },
         ];
         for variant in variants {
-            let builds = vec![base.clone(), RustBuild { package: "b".into(), ..variant }];
+            let builds = vec![
+                base.clone(),
+                RustBuild {
+                    package: "b".into(),
+                    ..variant
+                },
+            ];
             let groups = group(&builds);
             assert_eq!(groups.len(), 2, "{:?}", builds[1]);
         }
@@ -236,7 +242,14 @@ mod tests {
         let groups = group(&builds);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].members, [0, 1, 2, 3, 4]);
-        assert_eq!(groups[0].packages.iter().filter(|p| *p == "lemnosd").count(), 1);
+        assert_eq!(
+            groups[0]
+                .packages
+                .iter()
+                .filter(|p| *p == "lemnosd")
+                .count(),
+            1
+        );
     }
 
     #[test]

@@ -193,6 +193,8 @@ fn a_minimal_aarch64_buildroot_build_and_its_rebuilds() {
         cpus,
         jobs,
         download_dir: download,
+        ccache_dir: String::new(),
+        mirror: String::new(),
         config_only: false,
     };
     let dir = tempfile::tempdir().expect("tempdir");

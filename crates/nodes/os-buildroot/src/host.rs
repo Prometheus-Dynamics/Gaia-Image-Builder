@@ -350,23 +350,39 @@ fn plan(work: &mut Work<'_>, prepared: &Prepared, host: &BuildrootHost) -> Resul
         let tool = make_tool(host, src, &out, vars, &["printvars"])
             .arg(format!("VARS={}", patterns.join(" ")))
             .arg("PARALLEL_JOBS=1");
-        let mut values = captured(work, tool)?;
+        let values = captured(work, tool)?;
         let mut names: Vec<(String, String)> = vec![
             (out.display().to_string(), "@out@".into()),
             (src.display().to_string(), "@buildroot@".into()),
             (host.download_dir.clone(), "@downloads@".into()),
         ];
+        // The compiler cache's directory and the mirror are not in the key:
+        // a host tool's values name them, and the names do not change.
+        for (path, name) in [(&host.ccache_dir, "@ccache@"), (&host.mirror, "@mirror@")] {
+            if !path.is_empty() {
+                names.push((path.clone(), name.into()));
+            }
+        }
         for (name, dir, _) in &prepared.dirs {
             names.push((dir.display().to_string(), format!("@{name}@")));
         }
-        // Longest first: one path may begin another.
-        names.sort_by_key(|(path, _)| std::cmp::Reverse(path.len()));
-        for (path, name) in &names {
-            values = values.replace(path, name);
-        }
-        text.push_str(&values);
+        text.push_str(&named(&values, &names));
     }
     fs::write(dir.join("plan.txt"), text).map_err(|e| fail(format!("the plan: {e}")))
+}
+
+/// `values` with each path of `names` replaced by its name. Longest path
+/// first: one path may begin another. An empty path is none, and is skipped:
+/// replacing it would write the name between every character.
+fn named(values: &str, names: &[(String, String)]) -> String {
+    let mut sorted: Vec<&(String, String)> =
+        names.iter().filter(|(path, _)| !path.is_empty()).collect();
+    sorted.sort_by_key(|(path, _)| std::cmp::Reverse(path.len()));
+    let mut text = values.to_string();
+    for (path, name) in sorted {
+        text = text.replace(path, name);
+    }
+    text
 }
 
 /// Builds the goals and makes the seed of what they installed.
@@ -515,6 +531,39 @@ fn unplant(seed: &Path, out: &str) -> io::Result<(Vec<String>, Vec<String>, Vec<
         }
     }
     Ok((relocs, links, binaries))
+}
+
+/// Takes the path `out` out of a tree that is stored and never planted
+/// again (the toolchain a kernel module is built with): text files and
+/// symlink targets get the marker in its place. The tree's digest then does
+/// not change with where the build ran, in RAM or on disk, as far as text
+/// goes. A binary that names the path keeps it, as in the seed; returns how
+/// many do.
+pub(crate) fn mark_out(tree: &Path, out: &str) -> io::Result<usize> {
+    let mut binaries = 0;
+    for relative in files(tree)? {
+        let path = tree.join(&relative);
+        let meta = fs::symlink_metadata(&path)?;
+        if meta.file_type().is_symlink() {
+            let target = fs::read_link(&path)?.display().to_string();
+            if target.contains(out) {
+                fs::remove_file(&path)?;
+                std::os::unix::fs::symlink(target.replace(out, MARKER), &path)?;
+            }
+            continue;
+        }
+        let bytes = fs::read(&path)?;
+        if !contains(&bytes, out.as_bytes()) {
+            continue;
+        }
+        match String::from_utf8(bytes) {
+            Ok(text) if !text.contains('\0') => {
+                write_keeping_mode(&path, &meta, text.replace(out, MARKER).as_bytes())?;
+            }
+            _ => binaries += 1,
+        }
+    }
+    Ok(binaries)
 }
 
 /// Replaces a file's content, whatever its mode, and puts the mode back.
@@ -694,5 +743,80 @@ mod tests {
         assert_eq!(found.len(), 2);
         assert_eq!(found[0].1, "HOST_A_X=one\n\ttwo\n");
         assert_eq!(found[1].0, "HOST_B_Y");
+    }
+
+    /// The plan's values with this run's paths named: the compiler cache's
+    /// directory and the mirror (as host-ccache's default directory and
+    /// the download sites print them) leave no path in the text.
+    #[test]
+    fn a_plan_names_the_compiler_cache_and_the_mirror() {
+        let values = "HOST_CCACHE_DEFAULT_CCACHE_DIR = /store/buildroot-ccache\n\
+            LINUX_ALL_DOWNLOADS = https://mirror.example/br/linux.tar.xz https://kernel.org/x\n";
+        let names = |ccache: &str, mirror: &str| -> Vec<(String, String)> {
+            vec![
+                (ccache.into(), "@ccache@".into()),
+                (mirror.into(), "@mirror@".into()),
+            ]
+        };
+        let one = named(
+            values,
+            &names("/store/buildroot-ccache", "https://mirror.example/br"),
+        );
+        assert_eq!(
+            one,
+            "HOST_CCACHE_DEFAULT_CCACHE_DIR = @ccache@\n\
+            LINUX_ALL_DOWNLOADS = @mirror@/linux.tar.xz https://kernel.org/x\n"
+        );
+        // Another store and another mirror give the same plan text.
+        let other = values
+            .replace("/store/buildroot-ccache", "/elsewhere/buildroot-ccache")
+            .replace("https://mirror.example/br", "https://second.example");
+        assert_eq!(
+            named(
+                &other,
+                &names("/elsewhere/buildroot-ccache", "https://second.example")
+            ),
+            one
+        );
+    }
+
+    /// No mirror and no compiler cache directory: nothing is replaced. An
+    /// empty path would otherwise match between every two characters.
+    #[test]
+    fn an_empty_path_names_nothing() {
+        let names = vec![
+            (String::new(), "@mirror@".into()),
+            ("/out".into(), "@out@".into()),
+        ];
+        assert_eq!(named("a/out/b", &names), "a@out@/b");
+    }
+
+    /// The toolchain tree is the same bytes wherever the build ran: text
+    /// and link targets name the marker, and a binary is counted, not cut.
+    #[test]
+    fn a_stored_tree_names_the_marker_not_where_it_was_built() {
+        let made = |out: &str| -> (String, String, usize) {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let tree = dir.path().join("toolchain");
+            fs::create_dir_all(tree.join("bin")).expect("dirs");
+            fs::write(tree.join("bin/tool.pc"), format!("prefix={out}/host\n")).expect("text");
+            fs::write(tree.join("bin/other"), "no path here\n").expect("text");
+            let mut binary = format!("{out}/host").into_bytes();
+            binary.push(0);
+            fs::write(tree.join("bin/elf"), binary).expect("binary");
+            std::os::unix::fs::symlink(format!("{out}/host/lib"), tree.join("lib")).expect("link");
+            let binaries = mark_out(&tree, out).expect("mark");
+            (
+                fs::read_to_string(tree.join("bin/tool.pc")).expect("read"),
+                fs::read_link(tree.join("lib")).expect("link").display().to_string(),
+                binaries,
+            )
+        };
+        let disk = made("/store/scratch/1-2-3/out");
+        let ram = made("/dev/shm/gaia-abc/4-5-6/out");
+        assert_eq!(disk, ram);
+        assert_eq!(disk.0, format!("prefix={MARKER}/host\n"));
+        assert_eq!(disk.1, format!("{MARKER}/host/lib"));
+        assert_eq!(disk.2, 1);
     }
 }

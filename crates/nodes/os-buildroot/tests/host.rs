@@ -87,6 +87,8 @@ impl Fixture {
             cpus: String::new(),
             jobs: 1,
             download_dir: self.root.join("dl").display().to_string(),
+            ccache_dir: String::new(),
+            mirror: String::new(),
             config_only: false,
         }
     }

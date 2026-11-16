@@ -459,7 +459,9 @@ fn tools(given: &BTreeMap<String, String>) -> BTreeMap<String, String> {
 /// PATH, the CPU list from `GAIA_CPUS` (none: no pin), the jobs from
 /// `--jobs`, else `GAIA_JOBS` (neither: every CPU), and the download cache from
 /// `GAIA_BUILDROOT_DL` (none: `buildroot-downloads` beside the store's
-/// objects). None without make.
+/// objects). The compiler cache is `buildroot-ccache` beside them, shared by
+/// every build of the store; `GAIA_BUILDROOT_MIRROR` is the primary download
+/// site (none: no mirror). None without make.
 /// The jobs an OS build's make runs with: `--jobs` when the build was given
 /// one (the bound on what the build runs at once is the bound on make too),
 /// else `GAIA_JOBS`, else every CPU.
@@ -490,12 +492,18 @@ fn buildroot_host(
     let download_dir = std::env::var("GAIA_BUILDROOT_DL")
         .map(PathBuf::from)
         .unwrap_or_else(|_| store.join("buildroot-downloads"));
+    let ccache_dir = store.join("buildroot-ccache");
     Some(gaia_types::BuildrootHost {
         make,
         taskset: found("taskset").unwrap_or_default(),
         cpus: std::env::var("GAIA_CPUS").unwrap_or_default(),
         jobs,
         download_dir: absolute(&download_dir).display().to_string(),
+        ccache_dir: absolute(&ccache_dir).display().to_string(),
+        mirror: std::env::var("GAIA_BUILDROOT_MIRROR")
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
         config_only: false,
     })
 }
