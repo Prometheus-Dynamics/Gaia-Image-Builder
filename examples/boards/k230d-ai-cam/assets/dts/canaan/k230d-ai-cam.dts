@@ -11,7 +11,7 @@
  * (model, compatible, the UART0 debug console behind the CH342K bridge, SD on
  * SDIO1 as mmc_sd1, WiFi RTL8189FTV on SDIO0, USB0 OTG, 128 MB), with
  * 0036-...-swap-mmc0-mmc1-aliases.patch's SD-as-mmc1 superseded by 0024's own
- * alias block on this board (SD is mmc0 here, so root=/dev/mmcblk0p2).
+ * alias block on this board (SD is mmc0 here, so root=/dev/mmcblk0p1).
  *
  * First image: UART0 console at 115200 (ttyS0, the bench's CH342K bridge) and
  * the SD card (SDIO1) only. The vendor's stdout is UART2 (ttyS2): not used here.
@@ -42,7 +42,7 @@
 
 	chosen {
 		stdout-path = "serial0:115200n8";
-		bootargs = "root=/dev/mmcblk0p2 rootwait rw rootfstype=ext4 console=ttyS0,115200 earlycon=sbi";
+		bootargs = "root=/dev/mmcblk0p1 rootwait rw rootfstype=ext4 console=ttyS0,115200 earlycon=sbi";
 	};
 
 	/* The K230D's in-package 128 MB. */
