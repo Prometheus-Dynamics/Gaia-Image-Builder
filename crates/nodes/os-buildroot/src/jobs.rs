@@ -42,6 +42,9 @@ pub(crate) const BUILDS: usize = 3;
 /// of the process has the same job count and make, so the first one sets both.
 static POOL: OnceLock<Result<Jobserver, String>> = OnceLock::new();
 
+/// How often a waiting build checks whether its run was cut short.
+const WAIT: std::time::Duration = std::time::Duration::from_millis(20);
+
 /// The pool's name for each fifo it makes, unique within the process.
 static FIFOS: AtomicUsize = AtomicUsize::new(0);
 
@@ -135,17 +138,26 @@ impl Jobserver {
         })
     }
 
-    /// Waits for a slot, and takes it.
-    pub(crate) fn admit(&self) -> Slot<'_> {
+    /// Waits for a slot, and takes it. The wait ends early, with
+    /// [`Refused::Cancelled`], when `cancelled` says the run has been cut
+    /// short (Ctrl-C, or a sibling step that faulted under fail-fast): a
+    /// build that never got a slot then never starts its make.
+    pub(crate) fn admit(&self, cancelled: &dyn Fn() -> bool) -> Result<Slot<'_>, Refused> {
         let mut free = self.free.lock().unwrap_or_else(PoisonError::into_inner);
-        while *free == 0 {
+        loop {
+            if cancelled() {
+                return Err(Refused::Cancelled);
+            }
+            if *free > 0 {
+                *free -= 1;
+                return Ok(Slot { pool: self });
+            }
             free = self
                 .released
-                .wait(free)
-                .unwrap_or_else(PoisonError::into_inner);
+                .wait_timeout(free, WAIT)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
         }
-        *free -= 1;
-        Slot { pool: self }
     }
 }
 
@@ -169,10 +181,23 @@ impl Drop for Slot<'_> {
     }
 }
 
+/// Why a build did not get its slot.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Refused {
+    /// The run was cut short while the build waited.
+    Cancelled,
+    /// The pool could not be made.
+    Pool(String),
+}
+
 /// This process's slot for a build with `make` and `jobs` jobs, waiting until
-/// one of the process's builds gives its own back.
-pub(crate) fn admit(make: &str, jobs: usize) -> Result<Slot<'static>, String> {
-    Ok(pool(make, jobs)?.admit())
+/// one of the process's builds gives its own back, or the run is cancelled.
+pub(crate) fn admit(
+    make: &str,
+    jobs: usize,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Slot<'static>, Refused> {
+    pool(make, jobs).map_err(Refused::Pool)?.admit(cancelled)
 }
 
 /// A fifo holding `tokens` tokens, and the `fifo:` name of it that a make is
@@ -258,7 +283,7 @@ t%:
         std::thread::scope(|scope| {
             for _ in 0..builds {
                 scope.spawn(|| {
-                    let slot = pool.admit();
+                    let slot = pool.admit(&|| false).expect("a slot");
                     let status = build_make(dir.path(), &slot, pool.jobs, goal)
                         .status()
                         .expect("make");
@@ -328,7 +353,7 @@ t%:
         std::thread::scope(|scope| {
             for _ in 0..3 {
                 scope.spawn(|| {
-                    let slot = pool.admit();
+                    let slot = pool.admit(&|| false).expect("a slot");
                     let status = build_make(dir.path(), &slot, 13, "all")
                         .status()
                         .expect("make");
@@ -357,14 +382,14 @@ t%:
         write_makefile(dir.path());
         std::thread::scope(|scope| {
             scope.spawn(|| {
-                let slot = pool.admit();
+                let slot = pool.admit(&|| false).expect("a slot");
                 let status = build_make(dir.path(), &slot, 13, "fail")
                     .status()
                     .expect("make");
                 assert!(!status.success());
             });
             scope.spawn(|| {
-                let slot = pool.admit();
+                let slot = pool.admit(&|| false).expect("a slot");
                 let status = build_make(dir.path(), &slot, 13, "all")
                     .status()
                     .expect("make");
@@ -392,7 +417,7 @@ t%:
         let Some(pool) = fifo_pool(13) else { return };
         let dir = tempfile::tempdir().expect("a directory");
         write_makefile(dir.path());
-        let victim_slot = pool.admit();
+        let victim_slot = pool.admit(&|| false).expect("a slot");
         let mut victim = build_make(dir.path(), &victim_slot, 13, "all")
             .spawn()
             .expect("make");
@@ -400,7 +425,7 @@ t%:
         victim.kill().expect("the kill");
         let _ = victim.wait();
         drop(victim_slot);
-        let other_slot = pool.admit();
+        let other_slot = pool.admit(&|| false).expect("a slot");
         let mut other = build_make(dir.path(), &other_slot, 13, "all")
             .spawn()
             .expect("make");
@@ -418,12 +443,36 @@ t%:
         }
     }
 
+    /// A build waiting for a slot returns when the run is cancelled, and
+    /// does not wait for the slot to be given back.
+    #[test]
+    fn a_waiting_build_returns_when_the_run_is_cancelled() {
+        use std::sync::atomic::AtomicBool;
+        let pool = Jobserver::new(4, false).expect("a pool");
+        let held = pool.admit(&|| false).expect("the one slot");
+        let cancel = AtomicBool::new(false);
+        let (sent, outcome) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                let refused = pool.admit(&|| cancel.load(Ordering::SeqCst)).is_err();
+                let _ = sent.send(refused);
+            });
+            std::thread::sleep(Duration::from_millis(100));
+            cancel.store(true, Ordering::SeqCst);
+            let seen = outcome.recv_timeout(Duration::from_secs(5));
+            // The slot goes back before the check, so a wait that did not
+            // end on the cancel ends here and the test fails, not hangs.
+            drop(held);
+            assert_eq!(seen, Ok(true), "the waiting build did not see the cancel");
+        });
+    }
+
     /// The slot is given back when dropped, so a waiting build gets it.
     #[test]
     fn a_slot_is_given_back_when_dropped() {
         let pool = Jobserver::new(4, false).expect("a pool");
-        let first = pool.admit();
+        let first = pool.admit(&|| false).expect("a slot");
         drop(first);
-        let _second = pool.admit();
+        let _second = pool.admit(&|| false).expect("a slot");
     }
 }

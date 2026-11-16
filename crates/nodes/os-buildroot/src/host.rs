@@ -334,7 +334,7 @@ fn overrides_goal(package: &str, goal: &str) -> bool {
 /// with, with this run's paths replaced by names.
 fn plan(work: &mut Work<'_>, prepared: &Prepared, host: &BuildrootHost) -> Result<(), StepError> {
     let fail = |why: String| StepError::body(PLAN, why);
-    let slot = admit(host).map_err(fail)?;
+    let slot = admit(PLAN, host, &|| work.cancelled())?;
     let dir = work.dir().to_path_buf();
     let out = dir.join("out");
     fs::create_dir(&out).map_err(|e| fail(format!("output directory: {e}")))?;
@@ -414,7 +414,7 @@ fn build_steps(
 ) -> Result<(), StepError> {
     // This build's slot in the process's make jobserver, shared with the
     // other builds of the process (see `jobs`).
-    let slot = admit(host).map_err(|why| StepError::body(NAME, why))?;
+    let slot = admit(NAME, host, &|| work.cancelled())?;
     let io_fail = |what: &'static str| {
         move |error: io::Error| StepError::body(NAME, format!("{what}: {error}"))
     };

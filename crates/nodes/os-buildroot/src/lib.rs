@@ -82,7 +82,7 @@ mod times;
 
 use daedalus::prelude::*;
 use daedalus_cpu_author::FanIn;
-use gaia_step::{Ctx, Digest, KeyBuilder, Step, StepError, Store, Stream, Tool, Work};
+use gaia_step::{Ctx, Digest, ErrorKind, KeyBuilder, Step, StepError, Store, Stream, Tool, Work};
 use gaia_types::{Artifact, ArtifactKind, Tree};
 use std::collections::BTreeSet;
 use std::fs;
@@ -564,7 +564,7 @@ fn build_steps(
 ) -> Result<(), StepError> {
     // The builds of this process share one job count: this build's slot in
     // it, held until the build's last make is done.
-    let slot = admit(host).map_err(|why| StepError::body(NAME, why))?;
+    let slot = admit(NAME, host, &|| work.cancelled())?;
     let fail = |why: String| StepError::body(NAME, why);
     let io_fail = |what: &'static str| {
         move |error: io::Error| StepError::body(NAME, format!("{what}: {error}"))
@@ -767,9 +767,16 @@ fn build_steps(
 
 /// This build's slot in the process's make jobserver (see [`jobs`]), taken
 /// now and held until the build is done.
-pub(crate) fn admit(host: &BuildrootHost) -> Result<jobs::Slot<'static>, String> {
+pub(crate) fn admit(
+    step: &'static str,
+    host: &BuildrootHost,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<jobs::Slot<'static>, StepError> {
     let jobs = usize::try_from(host.jobs).unwrap_or(usize::MAX);
-    jobs::admit(&host.make, jobs)
+    jobs::admit(&host.make, jobs, cancelled).map_err(|refused| match refused {
+        jobs::Refused::Cancelled => StepError::new(step, ErrorKind::Cancelled, Vec::new()),
+        jobs::Refused::Pool(why) => StepError::body(step, why),
+    })
 }
 
 /// The make command for `goals`: its arguments, in order, for a test to
@@ -1100,7 +1107,7 @@ mod bound_tests {
     #[test]
     fn make_runs_with_the_fixed_path_only() {
         let pool = jobs::Jobserver::new(4, false).expect("a pool");
-        let slot = pool.admit();
+        let slot = pool.admit(&|| false).expect("a slot");
         let tool = make_tool(
             &host(4, ""),
             Path::new("/src"),
@@ -1138,7 +1145,7 @@ mod bound_tests {
     #[test]
     fn a_build_with_the_pool_passes_the_jobserver_and_no_job_count() {
         let pool = jobs::Jobserver::new(13, true).expect("a pool");
-        let slot = pool.admit();
+        let slot = pool.admit(&|| false).expect("a slot");
         let tool = make_tool(
             &host(13, ""),
             Path::new("/src"),
