@@ -1,5 +1,10 @@
 //! `gaia.source.input`: a file the command line names, as a stored tree
 //! that holds that one file under its name.
+//!
+//! The copy is 0755 when the file is executable by anyone, and 0644
+//! otherwise: a script a build runs from the tree (a Buildroot post-build
+//! script named by a fragment) stays runnable, and nothing else of the
+//! file's mode on this machine reaches the store.
 
 use daedalus::prelude::*;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store};
@@ -35,10 +40,21 @@ pub fn source_input(store: &str, path: &str, name: &str, cx: &Ctx) -> Result<Tre
         ));
     }
     let digest = file_digest(file).map_err(|e| StepError::body(NAME, format!("{path}: {e}")))?;
-    let key = KeyBuilder::new(NAME, 1)
+    let executable = std::fs::metadata(file)
+        .map_err(|e| StepError::body(NAME, format!("{path}: {e}")))?
+        .permissions()
+        .mode()
+        & 0o111
+        != 0;
+    let mut key = KeyBuilder::new(NAME, 1)
         .input("file", digest)
-        .config("name", name)
-        .finish();
+        .config("name", name);
+    // Only when it is: a file that is not executable keeps the key it had.
+    if executable {
+        key = key.config("executable", "yes");
+    }
+    let key = key.finish();
+    let mode = if executable { 0o755 } else { 0o644 };
     let made = Step::new(&store, cx, NAME, key)
         .ram_work(WORK_BYTES)
         .look_up_or_make(&[("tree", Path::new("tree"))], |work| {
@@ -47,7 +63,7 @@ pub fn source_input(store: &str, path: &str, name: &str, cx: &Ctx) -> Result<Tre
             let copy = dir.join(name);
             std::fs::copy(file, &copy)
                 .map_err(|e| StepError::body(NAME, format!("{path}: {e}")))?;
-            std::fs::set_permissions(&copy, std::fs::Permissions::from_mode(0o644))
+            std::fs::set_permissions(&copy, std::fs::Permissions::from_mode(mode))
                 .map_err(|e| StepError::body(NAME, e))?;
             // Changed while it was copied: not the bytes the key names.
             let copied = file_digest(&copy).map_err(|e| StepError::body(NAME, e))?;

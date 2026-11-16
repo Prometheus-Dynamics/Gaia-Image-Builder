@@ -1887,3 +1887,80 @@ fn a_first_flash_disk_fills_the_boards_partitions() {
     assert!(err.contains("partition 'data' has no size, and"), "{err}");
     assert!(err.contains("board.toml"), "{err}");
 }
+
+/// A script an OS fragment names beside it (`@here@/post-build.sh`, for
+/// Buildroot to run) is executable in the tree the build is given: the real
+/// product path, from the fragment to the store, stopped before the OS
+/// build. Stored 0644, Buildroot fails at `target-finalize` with
+/// "Permission denied", after the whole root file system is built.
+#[test]
+fn a_script_a_fragment_names_is_executable_in_the_store() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = project();
+    let product = dir.path().join("examples/products/zero-3e-demo");
+    let script = product.join("post-build.sh");
+    std::fs::write(&script, "#!/bin/sh\nexit 0\n").expect("write");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    let fragment = product.join("os.fragment");
+    let mut text = std::fs::read_to_string(&fragment).expect("read");
+    text.push_str("BR2_ROOTFS_POST_BUILD_SCRIPT=\"@here@/post-build.sh\"\n");
+    std::fs::write(&fragment, text).expect("write");
+
+    // The plan names the step that stores it.
+    let out = plan(dir.path(), &[]);
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let line = stdout
+        .lines()
+        .find(|l| l.contains("BR2_ROOTFS_POST_BUILD_SCRIPT=\"@files."))
+        .expect("the script's line in the OS config");
+    let index = line
+        .split("@files.")
+        .nth(1)
+        .and_then(|rest| rest.split('@').next())
+        .expect("the files index");
+    let step = format!("zero-3e-demo.os.files.{index}");
+    assert!(
+        stdout
+            .lines()
+            .any(|l| l.contains(&step) && l.contains("gaia.source.input")),
+        "{step} is a gaia.source.input step"
+    );
+
+    let out = Command::new(env!("CARGO_BIN_EXE_gaia"))
+        .args([
+            "build",
+            "examples/products/zero-3e-demo/product.toml",
+            "--recipes",
+            "recipes",
+            "--until",
+            "gaia.source.input",
+        ])
+        .current_dir(dir.path())
+        .env("GAIA_STORE", dir.path().join("store"))
+        .env("GAIA_JOBS", "2")
+        .env_remove("GAIA_EROFS_TOOL")
+        .output()
+        .expect("runs");
+    print!("{}", String::from_utf8_lossy(&out.stdout));
+    eprint!("{}", String::from_utf8_lossy(&out.stderr));
+    assert!(out.status.success(), "the build until the input steps");
+
+    let mut found = Vec::new();
+    let trees = dir.path().join("store/objects/tree");
+    for shard in std::fs::read_dir(&trees).expect("trees") {
+        for tree in std::fs::read_dir(shard.expect("shard").path()).expect("shard") {
+            let stored = tree.expect("tree").path().join("post-build.sh");
+            if stored.is_file() {
+                found.push(
+                    std::fs::metadata(&stored)
+                        .expect("stat")
+                        .permissions()
+                        .mode()
+                        & 0o777,
+                );
+            }
+        }
+    }
+    assert_eq!(found, [0o755], "the stored script's mode");
+}
