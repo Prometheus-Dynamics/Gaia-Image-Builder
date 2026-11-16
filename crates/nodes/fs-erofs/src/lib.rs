@@ -321,7 +321,15 @@ pub fn fs_erofs(
     );
     // The worker count is the same for a given host, and changes no byte of
     // the image, so it is not in the key.
-    let workers = workers_flag(&String::from_utf8_lossy(&version), worker_count());
+    // Asked of the tool itself: a tool built without threads has the version
+    // of one built with them, and refuses the flag.
+    let help = std::process::Command::new(mkfs_erofs)
+        .arg("--help")
+        .env_clear()
+        .output()
+        .map(|out| [out.stdout, out.stderr].concat())
+        .map_err(|e| fail(format!("{mkfs_erofs} --help: {e}")))?;
+    let workers = workers_flag(&String::from_utf8_lossy(&help), worker_count());
     let made = Step::new(&store, cx, NAME, key).look_up_or_make(
         &[
             ("image", Path::new("image.erofs")),
@@ -483,27 +491,16 @@ pub fn mkfs_options(
     args
 }
 
-/// The first erofs-utils that takes `--workers`.
-const WORKERS_SINCE: (u32, u32) = (1, 8);
-
-/// The version in a `--version` text, from its first line
-/// (`mkfs.erofs (erofs-utils) 1.9.4`): the first word of two or three
-/// dot-separated numbers.
-pub fn erofs_utils_version(text: &str) -> Option<(u32, u32)> {
-    text.lines().next()?.split_whitespace().find_map(|word| {
-        let mut parts = word.split('.');
-        let major = parts.next()?.parse().ok()?;
-        let minor = parts.next()?.parse().ok()?;
-        Some((major, minor))
-    })
-}
-
-/// `--workers=N` when the tool whose `--version` is `version` takes it,
-/// and `workers` is above 0; none otherwise, so an older tool is run as it
-/// was. The count is for the CPUs this process may use: how many mkfs.erofs
-/// runs at once is up to the host, not to the image.
-pub fn workers_flag(version: &str, workers: u32) -> Option<String> {
-    let takes = erofs_utils_version(version).is_some_and(|found| found >= WORKERS_SINCE);
+/// `--workers=N` when the tool whose `--help` is `help` lists the flag, and
+/// `workers` is above 0; none otherwise, so a tool without it is run as it
+/// was. The help text decides, not the version: erofs-utils built without
+/// threads has no `--workers` at any version. The count is for the CPUs this
+/// process may use: how many mkfs.erofs runs at once is up to the host, not
+/// to the image.
+pub fn workers_flag(help: &str, workers: u32) -> Option<String> {
+    let takes = help
+        .lines()
+        .any(|line| line.trim_start().starts_with("--workers"));
     (takes && workers > 0).then(|| format!("--workers={workers}"))
 }
 
@@ -822,27 +819,16 @@ mod tests {
         );
     }
 
-    /// The flag is passed to erofs-utils 1.8 and later, for a count above 0.
+    /// The flag is passed to a tool whose help lists it, for a count above
+    /// 0; a 1.8.10 built without threads lists none and gets none.
     #[test]
-    fn the_workers_flag_needs_erofs_utils_1_8() {
-        let v19 = "mkfs.erofs (erofs-utils) 1.9.4\navailable compressors: lz4\n";
-        assert_eq!(workers_flag(v19, 26).as_deref(), Some("--workers=26"));
-        let v18 = "mkfs.erofs (erofs-utils) 1.8.10\n";
-        assert_eq!(workers_flag(v18, 4).as_deref(), Some("--workers=4"));
-        let v17 = "mkfs.erofs (erofs-utils) 1.7.1\n";
-        assert_eq!(workers_flag(v17, 4), None, "1.7 has no --workers");
-        assert_eq!(workers_flag(v19, 0), None, "no workers, no flag");
-        assert_eq!(workers_flag("no version here", 4), None);
-    }
-
-    #[test]
-    fn the_version_is_read_from_the_first_line() {
-        assert_eq!(
-            erofs_utils_version("mkfs.erofs (erofs-utils) 1.9.4\n1.2 later"),
-            Some((1, 9))
-        );
-        assert_eq!(erofs_utils_version(""), None);
-        assert_eq!(erofs_utils_version("\nmkfs.erofs 1.9"), None);
+    fn the_workers_flag_needs_a_tool_that_lists_it() {
+        let threads = "Usage: mkfs.erofs [OPTIONS] FILE SOURCE(s)\n --uid-offset=#  add offset\n --workers=#            set the number of worker threads to # (default: 32)\n";
+        assert_eq!(workers_flag(threads, 26).as_deref(), Some("--workers=26"));
+        let none = "Usage: mkfs.erofs [OPTIONS] FILE SOURCE(s)\n --uid-offset=#  add offset\n";
+        assert_eq!(workers_flag(none, 4), None, "no --workers in the help");
+        assert_eq!(workers_flag(threads, 0), None, "no workers, no flag");
+        assert_eq!(workers_flag("see the --workers note", 4), None);
     }
 
     /// The key changes with the compression and its settings, and is the
