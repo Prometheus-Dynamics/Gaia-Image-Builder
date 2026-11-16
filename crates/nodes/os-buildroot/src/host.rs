@@ -29,15 +29,19 @@
 //! Buildroot what it would do: the packages to build, and the expanded value
 //! of every variable of those packages and of the host compiler's flags
 //! (`make printvars`), with the paths of this run replaced by names. The
-//! build is keyed on the Buildroot source, that list, a digest of those
-//! values, and the input trees the values name. So what changes how a host
-//! tool is built changes the key, and nothing else does.
+//! build is keyed on the Buildroot source, the packages it builds, a digest
+//! of their values, and the input trees those values name. A package that
+//! names a board's input tree, or a source the config overrides, is built by
+//! each build instead of the seed, so it is not in that key. The reverse
+//! dependency lists are not in it either: they name the targets a config
+//! selects, and no host tool is built differently for them. So what changes
+//! how a shared host tool is built changes the key, and nothing else does.
 
 use crate::{BuildrootHost, OsConfig, Prepared, configure, make_tool, prepare};
 use daedalus::prelude::*;
 use daedalus_cpu_author::FanIn;
 use gaia_step::{Ctx, Digest, KeyBuilder, Step, StepError, Store, Stream, Tool, Work};
-use gaia_types::Tree;
+use gaia_types::{SourceOverride, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -47,7 +51,7 @@ use std::sync::{Arc, Mutex};
 
 const PLAN: &str = "gaia.os.buildroot.host-plan";
 const NAME: &str = "gaia.os.buildroot.host";
-const KEY_VERSION: u32 = 1;
+const KEY_VERSION: u32 = 3;
 /// What stands for the output directory in the seed's text files.
 const MARKER: &str = "@GAIA_BUILDROOT_OUT@";
 /// Variables every host package is built with, beside its own.
@@ -95,9 +99,11 @@ pub fn build_host(
         .look_up_or_make(&[("plan", Path::new("plan.txt"))], |work| {
             plan(work, &prepared, host)
         })?;
-    let text = fs::read_to_string(store.path(&planned.outputs["plan"]))
+    let plan_text = fs::read_to_string(store.path(&planned.outputs["plan"]))
         .map_err(|e| StepError::body(PLAN, format!("the plan: {e}")))?;
-    let goals = text.lines().next().unwrap_or_default().to_string();
+    // Only what the shared seed is built from is keyed: see `shared_plan`.
+    let shared = shared_plan(&plan_text, &config.inputs, &config.overrides);
+    let (goals, text) = (shared.goals.join(" "), shared.text);
     // A check of the configuration alone: it is resolved and held, and no
     // tool is made. The seed is an empty tree nothing may build from.
     if host.config_only {
@@ -184,6 +190,129 @@ pub fn host_goals(show_info: &str) -> Result<Vec<String>, String> {
         .filter(|name| all_host(name, &info, &mut known))
         .cloned()
         .collect())
+}
+
+/// The plan as the shared seed sees it.
+pub struct SharedPlan {
+    /// The goals the shared seed builds, in plan order.
+    pub goals: Vec<String>,
+    /// The goal line, then the variables of the shared goals and the global
+    /// ones. Reverse dependency variables are left out.
+    pub text: String,
+}
+
+/// Splits a plan into the goals of the shared seed and the values they are
+/// keyed on. A goal is left to each build when it names an input tree (the
+/// board's own files), when it is the host variant of a source the config
+/// overrides (`host-uboot-tools` for `UBOOT`), or when it depends on such a
+/// goal, all the way down.
+pub fn shared_plan(plan: &str, inputs: &[String], overrides: &[SourceOverride]) -> SharedPlan {
+    let (goal_line, body) = plan.split_once('\n').unwrap_or((plan, ""));
+    let goals: Vec<&str> = goal_line.split_whitespace().collect();
+    let vars = variables(body);
+    let values_of = |goal: &str| -> String {
+        vars.iter()
+            .filter(|(name, _)| owner(name, &goals) == Some(goal))
+            .map(|(_, lines)| lines.as_str())
+            .collect()
+    };
+    let mut board: BTreeSet<&str> = BTreeSet::new();
+    for goal in &goals {
+        let own = values_of(goal);
+        let named = inputs
+            .iter()
+            .any(|input| own.contains(&format!("@{input}@")));
+        if named || overrides.iter().any(|o| overrides_goal(&o.package, goal)) {
+            board.insert(*goal);
+        }
+    }
+    let mut grew = true;
+    while grew {
+        grew = false;
+        for goal in &goals {
+            if !board.contains(goal) && depends_on_board(&vars, goal, &board) {
+                board.insert(*goal);
+                grew = true;
+            }
+        }
+    }
+    let shared: Vec<&str> = goals
+        .iter()
+        .copied()
+        .filter(|goal| !board.contains(goal))
+        .collect();
+    let mut text = format!("{}\n", shared.join(" "));
+    for (name, lines) in &vars {
+        if name.ends_with("_RDEPENDENCIES")
+            || owner(name, &goals).is_some_and(|g| board.contains(g))
+        {
+            continue;
+        }
+        text.push_str(lines);
+    }
+    SharedPlan {
+        goals: shared.iter().map(|goal| goal.to_string()).collect(),
+        text,
+    }
+}
+
+/// Whether a goal's `DEPENDENCIES` name one of the board's goals.
+fn depends_on_board(vars: &[(&str, String)], goal: &str, board: &BTreeSet<&str>) -> bool {
+    let want = format!("{}DEPENDENCIES", variable_prefix(goal));
+    vars.iter()
+        .find(|(name, _)| *name == want)
+        .and_then(|(_, lines)| lines.lines().next())
+        .and_then(|line| line.split_once('='))
+        .is_some_and(|(_, deps)| deps.split_whitespace().any(|dep| board.contains(dep)))
+}
+
+/// The variables of a plan body: each `NAME=` line with the lines after it,
+/// up to the next one, since a value may span lines.
+fn variables(body: &str) -> Vec<(&str, String)> {
+    let mut found: Vec<(&str, String)> = Vec::new();
+    for line in body.lines() {
+        if let Some(name) = variable_name(line) {
+            found.push((name, format!("{line}\n")));
+        } else if let Some((_, lines)) = found.last_mut() {
+            lines.push_str(line);
+            lines.push('\n');
+        }
+    }
+    found
+}
+
+/// The name a line sets: upper-case letters, digits and underscores, then `=`.
+fn variable_name(line: &str) -> Option<&str> {
+    let (name, _) = line.split_once('=')?;
+    let valid = name.starts_with(|c: char| c.is_ascii_uppercase())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_');
+    valid.then_some(name)
+}
+
+/// The start of a host package's variable names: `host-acl` has `HOST_ACL_`.
+fn variable_prefix(goal: &str) -> String {
+    let name = goal.strip_prefix("host-").unwrap_or(goal);
+    format!("HOST_{}_", name.to_uppercase().replace('-', "_"))
+}
+
+/// The goal a variable belongs to: the longest goal whose prefix the name
+/// has, so `HOST_GETTEXT_TINY_VERSION` is not a variable of `host-gettext`.
+fn owner<'a>(name: &str, goals: &[&'a str]) -> Option<&'a str> {
+    goals
+        .iter()
+        .copied()
+        .filter(|goal| name.starts_with(variable_prefix(goal).as_str()))
+        .max_by_key(|goal| goal.len())
+}
+
+/// Whether the config overrides a source the host package is built from:
+/// `UBOOT` covers `host-uboot` and `host-uboot-tools`.
+fn overrides_goal(package: &str, goal: &str) -> bool {
+    let package = package.to_lowercase().replace('_', "-");
+    let name = goal.strip_prefix("host-").unwrap_or(goal);
+    name == package || name.starts_with(&format!("{package}-"))
 }
 
 /// The plan: the goals on the first line, then the values they are built
@@ -422,4 +551,116 @@ pub(crate) fn plant(seed: &Path, out: &Path) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Plan lines cut from a real plan: four host packages, the global
+    /// variables, and two more host packages (`host-libxcrypt` and
+    /// `host-mkpasswd`) that only the first plan builds.
+    const WITH_EXTRA: &str = include_str!("../tests/host-plan/plan-extra-tools.txt");
+    /// The same four packages from a plan that lacks the two extras.
+    const BASE: &str = include_str!("../tests/host-plan/plan-base.txt");
+
+    fn no_inputs() -> Vec<String> {
+        Vec::new()
+    }
+
+    /// The text without its goal line, and without the variables of the
+    /// two packages only one plan builds.
+    fn values_of_common(text: &str) -> Vec<&str> {
+        text.lines()
+            .skip(1)
+            .filter(|line| {
+                !line.starts_with("HOST_MKPASSWD_") && !line.starts_with("HOST_LIBXCRYPT_")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn reverse_dependencies_are_not_keyed() {
+        let shared = shared_plan(BASE, &no_inputs(), &[]);
+        assert_eq!(
+            shared.goals,
+            ["host-acl", "host-dtc", "host-pkgconf", "host-skeleton"]
+        );
+        assert!(
+            shared
+                .text
+                .lines()
+                .all(|line| !line.contains("_RDEPENDENCIES=")),
+            "a reverse dependency list is in the key"
+        );
+    }
+
+    /// The two plans differ only in their reverse dependency lists and in
+    /// the two extra packages. The values the shared seed is keyed on are
+    /// the same otherwise, so the two plans share one seed.
+    #[test]
+    fn same_packages_key_the_same_whatever_the_targets() {
+        let with_extra = shared_plan(WITH_EXTRA, &no_inputs(), &[]);
+        let base = shared_plan(BASE, &no_inputs(), &[]);
+        assert_eq!(
+            values_of_common(&with_extra.text),
+            values_of_common(&base.text)
+        );
+        assert_eq!(
+            with_extra.text.lines().next(),
+            Some(with_extra.goals.join(" ").as_str())
+        );
+    }
+
+    /// A goal whose values name an input tree is left to each build, and
+    /// so no input tree it names is in the shared key.
+    #[test]
+    fn a_goal_naming_an_input_tree_is_left_to_each_build() {
+        let plan = format!("{BASE}HOST_DTC_SOURCE_SITE=@board-tree@/dtc\n");
+        let inputs = vec!["board-tree".to_string()];
+        let shared = shared_plan(&plan, &inputs, &[]);
+        assert_eq!(shared.goals, ["host-acl", "host-pkgconf", "host-skeleton"]);
+        assert!(!shared.text.contains("@board-tree@"));
+        assert!(!shared.text.contains("HOST_DTC_"));
+    }
+
+    #[test]
+    fn an_overridden_source_and_what_depends_on_it_are_left_to_each_build() {
+        let overrides = vec![SourceOverride {
+            package: "PKGCONF".into(),
+            input: "board-tree".into(),
+        }];
+        let shared = shared_plan(BASE, &no_inputs(), &overrides);
+        // host-dtc depends on host-pkgconf, so it is left to each build too.
+        assert_eq!(shared.goals, ["host-acl", "host-skeleton"]);
+        assert!(!shared.text.contains("HOST_DTC_"));
+        assert!(!shared.text.contains("HOST_PKGCONF_"));
+    }
+
+    #[test]
+    fn a_host_variant_of_an_overridden_source_is_board_specific() {
+        assert!(overrides_goal("UBOOT", "host-uboot"));
+        assert!(overrides_goal("UBOOT", "host-uboot-tools"));
+        assert!(!overrides_goal("UBOOT", "host-ubootstrap"));
+        assert!(!overrides_goal("UBOOT", "host-acl"));
+    }
+
+    #[test]
+    fn the_longest_goal_owns_a_variable() {
+        let goals = ["host-gettext", "host-gettext-tiny"];
+        assert_eq!(
+            owner("HOST_GETTEXT_TINY_VERSION", &goals),
+            Some("host-gettext-tiny")
+        );
+        assert_eq!(owner("HOST_GETTEXT_VERSION", &goals), Some("host-gettext"));
+        assert_eq!(owner("HOSTCC", &goals), None);
+    }
+
+    #[test]
+    fn a_value_spanning_lines_stays_with_its_variable() {
+        let found = variables("HOST_A_X=one\n\ttwo\nHOST_B_Y=three\n");
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].1, "HOST_A_X=one\n\ttwo\n");
+        assert_eq!(found[1].0, "HOST_B_Y");
+    }
 }
