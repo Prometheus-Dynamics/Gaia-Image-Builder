@@ -10,7 +10,9 @@
 //! back to the raw offsets `CONFIG_ENV_OFFSET` and, with a redundant
 //! environment, `CONFIG_ENV_OFFSET_REDUND`, unless `CONFIG_ENV_MMC_USE_DT`
 //! turns the fallback off. A raw offset is checked wherever it could land:
-//! it may only fall inside an environment partition.
+//! it may only fall inside an environment partition, or on an area outside
+//! the table that starts there and is the environment's size: the
+//! environment the disk ships.
 //!
 //! An environment that is not on MMC, or a configuration that is not U-Boot's,
 //! is not checked.
@@ -139,6 +141,11 @@ pub fn problems(
             continue;
         }
         for (name, place) in blob_names.iter().zip(&layout.blobs) {
+            // An area that starts at the offset and is the environment's own
+            // size is the environment as the disk ships it, not data under it.
+            if place.start == offset && place.size == size {
+                continue;
+            }
             if offset < place.start + place.size && place.start < end {
                 found.push(format!(
                     "{label} {offset:#x} puts {len} bytes of environment over the area '{name}' at {:#x}; {hint}",
@@ -259,6 +266,54 @@ mod tests {
         // The redundant offset is only read for a redundant environment.
         let single = format!("{MMC}CONFIG_ENV_OFFSET=0x1000000\nCONFIG_ENV_OFFSET_REDUND=0x0\n");
         assert!(check(&single, 64 * K).is_empty());
+    }
+
+    /// A disk that ships its environment as areas outside the table: a raw
+    /// offset on such an area passes; one byte off, or over a longer area,
+    /// is refused, and so is a copy with no area of its own over a loader.
+    #[test]
+    fn a_raw_offset_on_the_shipped_environment_area_passes() {
+        let parts = [root()];
+        let names: Vec<String> = ["spl", "env", "env-redund"].map(String::from).into();
+        let on = |first: u64, second: u64, env_len: u64, config: &str| {
+            let blobs = [
+                BlobInput {
+                    name: "spl".into(),
+                    offset: M,
+                    len: 300 * K,
+                },
+                BlobInput {
+                    name: "env".into(),
+                    offset: first,
+                    len: env_len,
+                },
+                BlobInput {
+                    name: "env-redund".into(),
+                    offset: second,
+                    len: env_len,
+                },
+            ];
+            let placed = layout(TableScheme::Gpt, Some(4 * M), None, None, &parts, &blobs)
+                .expect("lays out");
+            problems(config, &placed, &parts, &names)
+        };
+        let config = "CONFIG_ENV_IS_IN_MMC=y\nCONFIG_ENV_SIZE=0x2000\nCONFIG_ENV_REDUNDANT=y\nCONFIG_ENV_OFFSET=0x300000\nCONFIG_ENV_OFFSET_REDUND=0x320000\n";
+        assert_eq!(on(3 * M, 3200 * K, 8 * K, config), Vec::<String>::new());
+        // The areas are elsewhere: the offsets land on nothing, which is free.
+        assert!(on(2 * M, 2200 * K, 8 * K, config).is_empty());
+        // An area there of another size is something else's data.
+        let found = on(3 * M, 3200 * K, 16 * K, config);
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found[0].contains("area 'env'"), "{found:?}");
+        // An area that starts before the offset is written into.
+        let found = on(3 * M - 4 * K, 3200 * K, 8 * K, config);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].contains("area 'env' at 0x2ff000"), "{found:?}");
+        // The loader is no environment, whatever the offset.
+        let over = "CONFIG_ENV_IS_IN_MMC=y\nCONFIG_ENV_SIZE=0x2000\nCONFIG_ENV_OFFSET=0x100000\n";
+        let found = on(3 * M, 3200 * K, 8 * K, over);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].contains("area 'spl'"), "{found:?}");
     }
 
     #[test]

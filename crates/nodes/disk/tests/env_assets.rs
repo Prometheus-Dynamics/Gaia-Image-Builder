@@ -31,7 +31,11 @@ fn crc32(data: &[u8]) -> u32 {
     for &byte in data {
         crc ^= byte as u32;
         for _ in 0..8 {
-            crc = if crc & 1 == 1 { (crc >> 1) ^ 0xedb8_8320 } else { crc >> 1 };
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xedb8_8320
+            } else {
+                crc >> 1
+            };
         }
     }
     !crc
@@ -43,7 +47,10 @@ fn the_committed_copies_are_the_writers_output() {
     for name in ["u-boot-env.bin", "u-boot-env-redund.bin"] {
         let got = std::fs::read(assets().join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(got.len(), SIZE as usize, "{name} is 0x2000 bytes");
-        assert!(got == want, "{name} differs from the writer's output of u-boot-env.txt: regenerate it");
+        assert!(
+            got == want,
+            "{name} differs from the writer's output of u-boot-env.txt: regenerate it"
+        );
     }
 }
 
@@ -53,7 +60,11 @@ fn the_blobs_parse_back_as_u_boot_reads_them() {
     let stored_crc = u32::from_le_bytes([blob[0], blob[1], blob[2], blob[3]]);
     assert_eq!(blob[4], 1, "the flag byte of the active copy");
     let data = &blob[5..];
-    assert_eq!(crc32(data), stored_crc, "the CRC covers the data after the flag");
+    assert_eq!(
+        crc32(data),
+        stored_crc,
+        "the CRC covers the data after the flag"
+    );
     // Variables: `name=value` NUL-separated, ended by an empty string, then 0xff.
     let mut parsed = Vec::new();
     for entry in data.split(|&b| b == 0) {
@@ -62,7 +73,10 @@ fn the_blobs_parse_back_as_u_boot_reads_them() {
         }
         let text = std::str::from_utf8(entry).expect("text");
         let (name, value) = text.split_once('=').expect("name=value");
-        parsed.push(UbootVar { name: name.into(), value: value.into() });
+        parsed.push(UbootVar {
+            name: name.into(),
+            value: value.into(),
+        });
     }
     let want = text_vars();
     assert_eq!(parsed.len(), want.len());
