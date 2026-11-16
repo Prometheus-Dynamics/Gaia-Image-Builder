@@ -29,7 +29,7 @@
  *
  * Written from the vendor patches and the bindings, untested on board.
  */
-#include "canaan/k230.dtsi"
+#include "k230.dtsi"
 
 / {
 	model = "K230D CanMV Junroc AI Cam";
