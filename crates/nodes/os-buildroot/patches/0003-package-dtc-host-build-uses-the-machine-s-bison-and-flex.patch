@@ -1,0 +1,49 @@
+From: Gaia Image Builder <noreply@anthropic.com>
+Subject: [PATCH] package/dtc: host build uses the machine's bison and flex
+
+HOST_DTC_DEPENDENCIES names host-bison and host-flex without a condition,
+so every build with host-dtc builds both first, and host-bison needs
+host-m4. Measured in one host stage: bison 71 s, flex 20 s, m4 184 s,
+dtc 7 s. The dtc tarball has no generated parser or lexer, so the host
+build does run bison and flex, but a machine's own programs do that job.
+
+Buildroot's BR2_BISON_HOST_DEPENDENCY and BR2_FLEX_HOST_DEPENDENCY are
+empty when a program is on PATH, whatever its version
+(support/dependencies/check-host-bison-flex.mk), so they cannot say that a
+program is too old. The machine's program is therefore used only when it
+is at least the version Buildroot builds as its own host tool (bison 3.8.2,
+flex 2.6.4). Otherwise host-bison or host-flex is built, as before. The
+target dtc's dependencies are not changed: Buildroot's comment there says
+the BR2_*_HOST_DEPENDENCY variables are for host code only.
+
+---
+ package/dtc/dtc.mk | 17 ++++++++++++++++-
+ 1 file changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/package/dtc/dtc.mk b/package/dtc/dtc.mk
+--- a/package/dtc/dtc.mk
++++ b/package/dtc/dtc.mk
+@@ -12,7 +12,22 @@
+ DTC_CPE_ID_VALID = YES
+ DTC_INSTALL_STAGING = YES
+ DTC_DEPENDENCIES = host-bison host-flex host-pkgconf
+-HOST_DTC_DEPENDENCIES = host-bison host-flex host-pkgconf
++# The tarball has no generated parser or lexer, so the host build runs bison
++# and flex on dtc-parser.y and dtc-lexer.l. Buildroot's
++# BR2_BISON_HOST_DEPENDENCY and BR2_FLEX_HOST_DEPENDENCY are empty when a
++# program is on PATH, whatever its version (support/dependencies/
++# check-host-bison-flex.mk), so they cannot say that a program is too old.
++# The machine's program is used when it is at least the version Buildroot
++# builds as its own host tool, HOST_DTC_BISON_MIN and HOST_DTC_FLEX_MIN. The
++# version test is made once, and only when the host package is in the
++# configuration. Otherwise host-bison or host-flex is built, as before.
++HOST_DTC_BISON_MIN = 3.8.2
++HOST_DTC_FLEX_MIN = 2.6.4
++ifeq ($(BR2_PACKAGE_HOST_DTC),y)
++HOST_DTC_BISON_OK := $(shell v=$$(bison --version 2>/dev/null | sed -n '1s/.* //p'); [ -n "$$v" ] && [ "$$(printf '%s\n' '$(HOST_DTC_BISON_MIN)' "$$v" | sort -V | head -n1)" = '$(HOST_DTC_BISON_MIN)' ] && echo y)
++HOST_DTC_FLEX_OK := $(shell v=$$(flex --version 2>/dev/null | sed -n '1s/.* //p'); [ -n "$$v" ] && [ "$$(printf '%s\n' '$(HOST_DTC_FLEX_MIN)' "$$v" | sort -V | head -n1)" = '$(HOST_DTC_FLEX_MIN)' ] && echo y)
++endif
++HOST_DTC_DEPENDENCIES = $(if $(HOST_DTC_BISON_OK),,host-bison) $(if $(HOST_DTC_FLEX_OK),,host-flex) host-pkgconf
+
+ DTC_MAKE_OPTS = \
+ 	PREFIX=/usr \

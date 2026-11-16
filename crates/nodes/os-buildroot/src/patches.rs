@@ -1,6 +1,6 @@
 //! Gaia's own changes to the Buildroot source it builds with.
 //!
-//! Two patches ship in `patches/`, as `git format-patch` writes them for
+//! Three patches ship in `patches/`, as `git format-patch` writes them for
 //! Buildroot (`-p1`). They are applied to a copy of the source before any
 //! Buildroot step uses it, so every make (the host stage, its plan, the OS
 //! build) runs the same patched tree:
@@ -10,11 +10,16 @@
 //!   copy-on-write clones on a filesystem with reflinks.
 //! - **0002**: two `$(shell)` calls made while the Makefiles are read become
 //!   `:=` and `firstword`/`patsubst`, with the same values.
+//! - **0003**: the host build of dtc takes the machine's bison and flex when
+//!   they are at least the versions Buildroot builds for its own host tools,
+//!   and builds host-bison and host-flex (with host-m4) only when they are
+//!   not. See [`PATCHES`] for the minimum and the reasons.
 //!
-//! Neither changes what a package builds, so the patches are applied to the
-//! exact upstream text, strictly (`patch -p1 --fuzz=0`). A patch that does
-//! not apply to a Buildroot version is skipped with a warning line that
-//! names it: both are speed changes, and a future Buildroot must still build.
+//! 0001 and 0002 change no output, so they are applied to the exact upstream
+//! text, strictly (`patch -p1 --fuzz=0`). 0003 changes what the host stage
+//! builds (`changes_outputs`). A patch that does not apply to a Buildroot
+//! version is skipped with a warning line that names it: all three are
+//! changes a future Buildroot must still build without.
 //!
 //! The keys: the package-level keys (the host stage's and the plan's, and
 //! the OS build's) hash the unpatched source's digest. A patch that changes
@@ -56,7 +61,23 @@ pub(crate) struct GaiaPatch {
 }
 
 /// The patches, in the order they are applied.
-pub(crate) const PATCHES: [GaiaPatch; 2] = [
+///
+/// 0003 changes the host build of dtc (`package/dtc/dtc.mk`), so it is
+/// `changes_outputs`: once it applies, its digest is in the key of every
+/// Buildroot build, so a store entry made without it is never reused with
+/// it (and the other way round). The keys of builds without host-dtc change
+/// too, once: a coarse key, kept because the entry is the same for all of
+/// them. The host plan's values also carry the machine's choice, since they
+/// list `HOST_DTC_BISON_OK` and `HOST_DTC_DEPENDENCIES`, so a machine with
+/// older tools keys a different host stage.
+///
+/// The minimum: bison 3.8.2 and flex 2.6.4, the versions Buildroot builds as
+/// its own host tools. The dtc 1.7.2 tarball states no minimum: its parser
+/// and lexer are generated at build time (`dtc-parser.y` uses `%locations`,
+/// `dtc-lexer.l` `%option noyywrap nounput noinput never-interactive`). A
+/// program older than the minimum is not tried: the build makes host-bison
+/// or host-flex instead, as it did before the patch.
+pub(crate) const PATCHES: [GaiaPatch; 3] = [
     GaiaPatch {
         name: "0001-package-pkg-utils-clone-per-package-trees-with-reflinks.patch",
         text: include_str!(
@@ -70,6 +91,13 @@ pub(crate) const PATCHES: [GaiaPatch; 2] = [
             "../patches/0002-package-avoid-shell-calls-while-parsing-the-Makefiles.patch"
         ),
         changes_outputs: false,
+    },
+    GaiaPatch {
+        name: "0003-package-dtc-host-build-uses-the-machine-s-bison-and-flex.patch",
+        text: include_str!(
+            "../patches/0003-package-dtc-host-build-uses-the-machine-s-bison-and-flex.patch"
+        ),
+        changes_outputs: true,
     },
 ];
 
@@ -319,11 +347,25 @@ mod tests {
         for file in ["pkg-utils.mk", "Makefile.in", "pkg-luarocks.mk"] {
             fs::copy(from.join(file), to.join(file)).expect("copy fixture");
         }
+        fs::create_dir(to.join("dtc")).expect("dtc dir");
+        fs::copy(from.join("dtc/dtc.mk"), to.join("dtc/dtc.mk")).expect("copy fixture");
         dir
     }
 
     fn read(dir: &Path, file: &str) -> String {
         fs::read_to_string(dir.join("package").join(file)).expect("read")
+    }
+
+    /// The shipped dtc patch's text, applied to a copy of the fixture's
+    /// `package/dtc/dtc.mk` of `version`: the file the make tests run.
+    fn patched_dtc_mk(version: &str) -> tempfile::TempDir {
+        let tree = copy_of(version);
+        let scratch = tempfile::tempdir().expect("tempdir");
+        let file = scratch.path().join(PATCHES[2].name);
+        fs::write(&file, PATCHES[2].text).expect("write");
+        let applied = apply_one(tree.path(), &file).expect("apply");
+        assert!(applied, "0003 applies to {version}");
+        tree
     }
 
     fn all_applied(outcomes: &[(String, bool)]) -> bool {
@@ -340,6 +382,7 @@ mod tests {
         assert!(read(tree.path(), "pkg-utils.mk").contains("cp -a --reflink=auto"));
         assert!(read(tree.path(), "Makefile.in").contains("export PERL:=$(shell which perl)"));
         assert!(read(tree.path(), "pkg-luarocks.mk").contains("firstword"));
+        assert!(read(tree.path(), "dtc/dtc.mk").contains("HOST_DTC_BISON_OK :="));
     }
 
     #[test]
@@ -351,6 +394,7 @@ mod tests {
         assert!(read(tree.path(), "pkg-utils.mk").contains("cp -a --reflink=auto"));
         assert!(read(tree.path(), "Makefile.in").contains("export PERL:=$(shell which perl)"));
         assert!(read(tree.path(), "pkg-luarocks.mk").contains("firstword"));
+        assert!(read(tree.path(), "dtc/dtc.mk").contains("HOST_DTC_BISON_OK :="));
     }
 
     #[test]
@@ -374,10 +418,38 @@ mod tests {
             vec![
                 (PATCHES[0].name.to_string(), true),
                 (PATCHES[1].name.to_string(), false),
+                (PATCHES[2].name.to_string(), true),
             ]
         );
         assert_eq!(read(tree.path(), "pkg-luarocks.mk"), before);
         assert!(read(tree.path(), "pkg-utils.mk").contains("cp -a --reflink=auto"));
+    }
+
+    /// A Buildroot whose dtc.mk differs from the one 0003 was made against
+    /// skips 0003 with its warning, leaves dtc.mk as it was, and keeps the
+    /// two other patches applied.
+    #[test]
+    fn the_dtc_patch_is_skipped_on_a_dtc_mk_it_does_not_match() {
+        let tree = copy_of("2026.08");
+        let file = tree.path().join("package/dtc/dtc.mk");
+        let text = fs::read_to_string(&file).expect("read");
+        let changed = text.replace(
+            "HOST_DTC_DEPENDENCIES = host-bison",
+            "HOST_DTC_DEPENDENCIES = host-bison-x",
+        );
+        assert_ne!(text, changed, "the fixture names the line");
+        fs::write(&file, &changed).expect("write");
+        let scratch = tempfile::tempdir().expect("tempdir");
+        let outcomes = apply_all(tree.path(), scratch.path()).expect("apply");
+        assert_eq!(outcomes[2], (PATCHES[2].name.to_string(), false));
+        assert!(outcomes[0].1 && outcomes[1].1, "{outcomes:?}");
+        assert_eq!(fs::read_to_string(&file).expect("read"), changed);
+        let entry = key_entry(Mode::On, &outcomes).expect("an entry");
+        assert!(
+            entry.contains(&format!("skipped {}", PATCHES[2].name)),
+            "{entry}"
+        );
+        assert!(!entry.contains("applied "), "{entry}");
     }
 
     #[test]
@@ -390,11 +462,49 @@ mod tests {
         }
     }
 
+    /// Only the patch that changes outputs is in the key when all apply:
+    /// its digest, so a build with it never shares a store entry with one
+    /// without it.
     #[test]
-    fn all_applied_and_no_output_change_adds_nothing_to_the_key() {
+    fn an_applied_output_changing_patch_is_in_the_key_by_its_digest() {
         let outcomes: Vec<(String, bool)> =
             PATCHES.iter().map(|p| (p.name.to_string(), true)).collect();
-        assert_eq!(key_entry(Mode::On, &outcomes), None);
+        let entry = key_entry(Mode::On, &outcomes).expect("an entry");
+        assert_eq!(
+            entry,
+            format!(
+                "applied {} {}",
+                PATCHES[2].name,
+                Digest::of_bytes(PATCHES[2].text.as_bytes())
+            )
+        );
+        assert!(!entry.contains(PATCHES[0].name), "{entry}");
+        assert!(!entry.contains(PATCHES[1].name), "{entry}");
+    }
+
+    /// The digest is of the patch text: a changed patch is a changed key.
+    #[test]
+    fn the_key_entry_changes_with_the_patch_text() {
+        let outcomes: Vec<(String, bool)> =
+            PATCHES.iter().map(|p| (p.name.to_string(), true)).collect();
+        let entry = key_entry(Mode::On, &outcomes).expect("an entry");
+        let other = format!("applied {} {}", PATCHES[2].name, Digest::of_bytes(b"other"));
+        assert_ne!(entry, other);
+    }
+
+    /// A patch that changes no output adds nothing when it applies, so the
+    /// two speed patches keep the keys they had.
+    #[test]
+    fn a_patch_that_changes_no_output_adds_nothing_when_it_applies() {
+        for (index, patch) in PATCHES.iter().enumerate() {
+            if patch.changes_outputs {
+                continue;
+            }
+            let outcomes: Vec<(String, bool)> =
+                PATCHES.iter().map(|p| (p.name.to_string(), true)).collect();
+            let entry = key_entry(Mode::On, &outcomes).unwrap_or_default();
+            assert!(!entry.contains(patch.name), "patch {index}: {entry}");
+        }
     }
 
     #[test]
@@ -403,7 +513,11 @@ mod tests {
             PATCHES.iter().map(|p| (p.name.to_string(), true)).collect();
         outcomes[1].1 = false;
         let entry = key_entry(Mode::On, &outcomes).expect("an entry");
-        assert_eq!(entry, format!("skipped {}", PATCHES[1].name));
+        // 0003 applies and changes outputs, so its digest is there as well.
+        let lines: Vec<&str> = entry.lines().collect();
+        assert_eq!(lines.len(), 2, "{entry}");
+        assert_eq!(lines[0], format!("skipped {}", PATCHES[1].name));
+        assert!(lines[1].starts_with(&format!("applied {}", PATCHES[2].name)));
     }
 
     #[test]
@@ -412,6 +526,101 @@ mod tests {
             PATCHES.iter().map(|p| (p.name.to_string(), true)).collect();
         assert_eq!(key_entry(Mode::Off, &outcomes).as_deref(), Some("off"));
         assert_ne!(key_entry(Mode::Off, &[]), key_entry(Mode::On, &outcomes));
+    }
+
+    /// Makes `HOST_DTC_DEPENDENCIES` of the patched dtc.mk of `version`,
+    /// with `tools` on the PATH: each `(program, first line of --version)`.
+    /// The PATH has no other bison or flex, and only the text tools the
+    /// test needs beside them.
+    fn host_dtc_dependencies(version: &str, tools: &[(&str, &str)]) -> String {
+        let tree = patched_dtc_mk(version);
+        let bin = tempfile::tempdir().expect("tempdir");
+        for (program, line) in tools {
+            let file = bin.path().join(program);
+            fs::write(&file, format!("#!/bin/sh\necho '{line}'\n")).expect("write");
+            let executable =
+                <fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o755);
+            fs::set_permissions(&file, executable).expect("mode");
+        }
+        let base = tempfile::tempdir().expect("tempdir");
+        for program in ["sed", "sort", "head", "printf"] {
+            let found = ["/usr/bin", "/bin"]
+                .iter()
+                .map(|dir| Path::new(dir).join(program))
+                .find(|path| path.is_file())
+                .expect("a text tool");
+            std::os::unix::fs::symlink(found, base.path().join(program)).expect("link");
+        }
+        let probe = tree.path().join("probe.mk");
+        fs::write(
+            &probe,
+            "BR2_PACKAGE_HOST_DTC := y\ninclude package/dtc/dtc.mk\n$(info $(HOST_DTC_DEPENDENCIES))\nall: ;\n",
+        )
+        .expect("probe");
+        let path = format!("{}:{}", bin.path().display(), base.path().display());
+        // Found before the PATH under test is set: the child's PATH is not
+        // searched for its own program.
+        let make = ["/usr/bin/make", "/bin/make"]
+            .into_iter()
+            .find(|path| Path::new(path).is_file())
+            .expect("make");
+        let output = Command::new(make)
+            .args(["-s", "-f"])
+            .arg(&probe)
+            .current_dir(tree.path())
+            .env("PATH", path)
+            .output()
+            .expect("make runs");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        // Make leaves a space where an empty `$(if)` is: the words are what
+        // matter.
+        String::from_utf8(output.stdout)
+            .expect("utf-8")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// The machine's bison and flex are used when they are at least the
+    /// versions Buildroot builds, and compared as versions (3.10 is newer
+    /// than 3.8.2). An older one, or none, gets its host package.
+    #[test]
+    fn the_host_dtc_takes_only_bison_and_flex_at_least_buildroots_versions() {
+        let new_bison = "bison (GNU Bison) 3.8.2";
+        let new_flex = "flex 2.6.4";
+        assert_eq!(
+            host_dtc_dependencies("2026.02.3", &[("bison", new_bison), ("flex", new_flex)]),
+            "host-pkgconf"
+        );
+        assert_eq!(
+            host_dtc_dependencies(
+                "2026.08",
+                &[("bison", "bison (GNU Bison) 3.10"), ("flex", new_flex)]
+            ),
+            "host-pkgconf"
+        );
+        assert_eq!(
+            host_dtc_dependencies(
+                "2026.02.3",
+                &[("bison", "bison (GNU Bison) 2.3"), ("flex", new_flex)]
+            ),
+            "host-bison host-pkgconf"
+        );
+        assert_eq!(
+            host_dtc_dependencies(
+                "2026.02.3",
+                &[("bison", new_bison), ("flex", "flex 2.5.35")]
+            ),
+            "host-flex host-pkgconf"
+        );
+        assert_eq!(
+            host_dtc_dependencies("2026.08", &[]),
+            "host-bison host-flex host-pkgconf"
+        );
     }
 
     #[test]
