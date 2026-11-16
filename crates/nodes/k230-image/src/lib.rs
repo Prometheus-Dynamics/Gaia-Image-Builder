@@ -58,6 +58,18 @@ pub enum Error {
     GzipMethod(u8),
     /// The stream does not inflate to its ISIZE and CRC-32.
     GzipCheck,
+    /// A uImage name longer than the 31 bytes its field holds.
+    Name(usize),
+    /// The data is longer than a uImage size field holds.
+    TooLarge,
+    /// Offset 0 of a uImage is not its magic.
+    UImageMagic,
+    /// The uImage header CRC does not match the header.
+    UImageHeaderCrc,
+    /// The uImage data CRC does not match the data.
+    UImageDataCrc,
+    /// The uImage name is not text.
+    UImageName,
 }
 
 impl fmt::Display for Error {
@@ -71,6 +83,18 @@ impl fmt::Display for Error {
             Error::GzipShort => write!(f, "gzip stream shorter than its header and trailer"),
             Error::GzipMethod(cm) => write!(f, "gzip CM byte is {cm:#04x}, not 0x08 or the priv marker"),
             Error::GzipCheck => write!(f, "gzip stream does not inflate to its ISIZE and CRC-32"),
+            Error::Name(n) => write!(f, "uImage name is {n} bytes, the field holds 31"),
+            Error::TooLarge => write!(f, "data is larger than a uImage size field holds"),
+            Error::UImageMagic => write!(f, "uImage magic is wrong"),
+            Error::UImageHeaderCrc => write!(f, "uImage header CRC does not match the header"),
+            Error::UImageDataCrc => write!(f, "uImage data CRC does not match the data"),
+            Error::UImageName => write!(f, "uImage name is not text"),
+            Error::Name(n) => write!(f, "uImage name is {n} bytes, the field holds 31"),
+            Error::TooLarge => write!(f, "data is larger than a uImage size field holds"),
+            Error::UImageMagic => write!(f, "uImage magic is wrong"),
+            Error::UImageHeaderCrc => write!(f, "uImage header CRC does not match the header"),
+            Error::UImageDataCrc => write!(f, "uImage data CRC does not match the data"),
+            Error::UImageName => write!(f, "uImage name is not text"),
         }
     }
 }
@@ -182,6 +206,156 @@ pub fn undo_priv_gzip(stream: &[u8]) -> Result<Vec<u8>, Error> {
     Ok(raw)
 }
 
+/// The legacy uImage header (U-Boot `include/image.h`, `legacy_img_hdr`): 64
+/// bytes, every multi-byte field big-endian. Offsets: magic 0, header CRC 4,
+/// time 8, size 12, load 16, entry 20, data CRC 24, OS 28, arch 29, type 30,
+/// compression 31, name 32..64 (NUL-padded). The header CRC is the CRC-32 of
+/// the header with its own CRC field zeroed; the data CRC is the CRC-32 of the
+/// data.
+pub const UIMAGE_MAGIC: u32 = 0x2705_1956;
+/// The header's length.
+pub const UIMAGE_HEADER_LEN: usize = 64;
+/// Values from the probe image: its U-Boot uImage is OS 17, arch 26, type 5
+/// (firmware), comp 1 (gzip); its OpenSBI one is OS 5, arch 26, type 2
+/// (kernel), comp 0 (none). Both have load and entry 0 (the build's
+/// CONFIG_SYS_TEXT_BASE is 0; OpenSBI is loaded by U-Boot's bootm).
+pub const OS_LINUX: u8 = 5;
+pub const OS_U_BOOT: u8 = 17;
+pub const ARCH_RISCV: u8 = 26;
+pub const TYPE_KERNEL: u8 = 2;
+pub const TYPE_FIRMWARE: u8 = 5;
+pub const COMP_NONE: u8 = 0;
+pub const COMP_GZIP: u8 = 1;
+
+/// The fields of a uImage header the caller chooses. `time` is the build time
+/// in seconds: 0 makes the image reproducible. The probe image has 1794142272
+/// for U-Boot and 1794142285 for OpenSBI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UImageFields<'a> {
+    pub os: u8,
+    pub arch: u8,
+    pub kind: u8,
+    pub comp: u8,
+    pub load: u32,
+    pub entry: u32,
+    pub time: u32,
+    pub name: &'a str,
+}
+
+fn crc32(parts: &[&[u8]]) -> u32 {
+    let mut crc = flate2::Crc::new();
+    for part in parts {
+        crc.update(part);
+    }
+    crc.sum()
+}
+
+/// The 64-byte uImage header for data of `size` bytes whose CRC-32 is `dcrc`.
+pub fn uimage_header(fields: &UImageFields<'_>, size: u32, dcrc: u32) -> Result<[u8; UIMAGE_HEADER_LEN], Error> {
+    let name = fields.name.as_bytes();
+    if name.len() > 31 {
+        return Err(Error::Name(name.len()));
+    }
+    let mut h = [0u8; UIMAGE_HEADER_LEN];
+    h[0..4].copy_from_slice(&UIMAGE_MAGIC.to_be_bytes());
+    h[8..12].copy_from_slice(&fields.time.to_be_bytes());
+    h[12..16].copy_from_slice(&size.to_be_bytes());
+    h[16..20].copy_from_slice(&fields.load.to_be_bytes());
+    h[20..24].copy_from_slice(&fields.entry.to_be_bytes());
+    h[24..28].copy_from_slice(&dcrc.to_be_bytes());
+    h[28] = fields.os;
+    h[29] = fields.arch;
+    h[30] = fields.kind;
+    h[31] = fields.comp;
+    h[32..32 + name.len()].copy_from_slice(name);
+    let hcrc = crc32(&[&h[0..4], &[0u8; 4], &h[8..]]);
+    h[4..8].copy_from_slice(&hcrc.to_be_bytes());
+    Ok(h)
+}
+
+/// A uImage over `data`: its header, then the data.
+pub fn uimage(fields: &UImageFields<'_>, data: &[u8]) -> Result<Vec<u8>, Error> {
+    let size = u32::try_from(data.len()).map_err(|_| Error::TooLarge)?;
+    let dcrc = crc32(&[data]);
+    let mut out = uimage_header(fields, size, dcrc)?.to_vec();
+    out.extend_from_slice(data);
+    Ok(out)
+}
+
+/// The image the K230 ROM and SPL take as the second stage: the U-Boot
+/// uImage over the priv gzip of `raw` (`uboot.bin`).
+pub fn uboot_uimage(raw: &[u8], time: u32) -> Result<Vec<u8>, Error> {
+    let stream = priv_gzip(raw)?;
+    uimage(
+        &UImageFields { os: OS_U_BOOT, arch: ARCH_RISCV, kind: TYPE_FIRMWARE, comp: COMP_GZIP, load: 0, entry: 0, time, name: "uboot" },
+        &stream,
+    )
+}
+
+/// The OpenSBI firmware the boot partition carries for U-Boot's `bootm`: a
+/// kernel-type uImage over the raw `fw_jump.bin`, no compression.
+pub fn opensbi_uimage(raw: &[u8], time: u32) -> Result<Vec<u8>, Error> {
+    uimage(
+        &UImageFields { os: OS_LINUX, arch: ARCH_RISCV, kind: TYPE_KERNEL, comp: COMP_NONE, load: 0, entry: 0, time, name: "linux" },
+        raw,
+    )
+}
+
+/// A uImage's header fields, read back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UImageInfo {
+    pub os: u8,
+    pub arch: u8,
+    pub kind: u8,
+    pub comp: u8,
+    pub load: u32,
+    pub entry: u32,
+    pub time: u32,
+    pub size: u32,
+    pub dcrc: u32,
+    pub name: String,
+}
+
+/// Parses a uImage header's fields back out (big-endian), checking its magic,
+/// its header CRC and, given the data, the data CRC.
+pub fn check_uimage(image: &[u8]) -> Result<UImageInfo, Error> {
+    if image.len() < UIMAGE_HEADER_LEN {
+        return Err(Error::Short { need: UIMAGE_HEADER_LEN, have: image.len() });
+    }
+    let be = |o: usize| u32::from_be_bytes([image[o], image[o + 1], image[o + 2], image[o + 3]]);
+    if be(0) != UIMAGE_MAGIC {
+        return Err(Error::UImageMagic);
+    }
+    let hcrc = be(4);
+    let mut h = [0u8; UIMAGE_HEADER_LEN];
+    h.copy_from_slice(&image[..UIMAGE_HEADER_LEN]);
+    h[4..8].fill(0);
+    if crc32(&[&h]) != hcrc {
+        return Err(Error::UImageHeaderCrc);
+    }
+    let size = be(12) as usize;
+    if image.len() < UIMAGE_HEADER_LEN + size {
+        return Err(Error::Short { need: UIMAGE_HEADER_LEN + size, have: image.len() });
+    }
+    if crc32(&[&image[UIMAGE_HEADER_LEN..UIMAGE_HEADER_LEN + size]]) != be(24) {
+        return Err(Error::UImageDataCrc);
+    }
+    let name_end = image[32..64].iter().position(|&b| b == 0).unwrap_or(32);
+    let name = std::str::from_utf8(&image[32..32 + name_end]).map_err(|_| Error::UImageName)?;
+    Ok(UImageInfo {
+        os: image[28],
+        arch: image[29],
+        kind: image[30],
+        comp: image[31],
+        load: be(16),
+        entry: be(20),
+        time: be(8),
+        size: size as u32,
+        dcrc: be(24),
+        name: name.to_owned(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,5 +457,75 @@ mod tests {
 
     fn hex(bytes: &[u8]) -> String {
         bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    const UBOOT_UIMAGE_HEADER: &[u8] = include_bytes!("../tests/fixtures/uboot-uimage.header.bin");
+    const OPENSBI_UIMAGE_HEADER: &[u8] = include_bytes!("../tests/fixtures/opensbi-uimage.header.bin");
+
+    #[test]
+    fn uboot_uimage_header_reproduces_the_probe_bytes() {
+        // The probe's U-Boot uImage: size 314,671, data CRC 0x97648f44, time
+        // 1794142272. The header is rebuilt from those fields and must be the
+        // 64 bytes the image holds (its header CRC is checked too).
+        let fields = UImageFields {
+            os: OS_U_BOOT, arch: ARCH_RISCV, kind: TYPE_FIRMWARE, comp: COMP_GZIP,
+            load: 0, entry: 0, time: 1_794_142_272, name: "uboot",
+        };
+        let h = uimage_header(&fields, 314_671, 0x9764_8f44).expect("header");
+        assert_eq!(&h[..], UBOOT_UIMAGE_HEADER);
+        assert_eq!(le_or_be_hcrc(&h), 0xa7f1_4645);
+    }
+
+    #[test]
+    fn opensbi_uimage_header_reproduces_the_probe_bytes() {
+        // The probe's fw_jump_add_uboot_head.bin: size 139,656, data CRC
+        // 0x91a98d33, time 1794142285, kernel type, no compression.
+        let fields = UImageFields {
+            os: OS_LINUX, arch: ARCH_RISCV, kind: TYPE_KERNEL, comp: COMP_NONE,
+            load: 0, entry: 0, time: 1_794_142_285, name: "linux",
+        };
+        let h = uimage_header(&fields, 139_656, 0x91a9_8d33).expect("header");
+        assert_eq!(&h[..], OPENSBI_UIMAGE_HEADER);
+    }
+
+    #[test]
+    fn check_uimage_reads_back_what_was_written() {
+        let data = b"raw second stage".to_vec();
+        let fields = UImageFields {
+            os: OS_LINUX, arch: ARCH_RISCV, kind: TYPE_KERNEL, comp: COMP_NONE,
+            load: 0, entry: 0, time: 0, name: "linux",
+        };
+        let image = uimage(&fields, &data).expect("uimage");
+        let info = check_uimage(&image).expect("checks");
+        assert_eq!(info.size as usize, data.len());
+        assert_eq!(info.name, "linux");
+        assert_eq!(info.time, 0);
+        let mut bad = image.clone();
+        bad[HEADER_LEN_FOR_TEST] ^= 1;
+        assert_eq!(check_uimage(&bad), Err(Error::UImageDataCrc));
+        let mut bad = image;
+        bad[9] ^= 1;
+        assert_eq!(check_uimage(&bad), Err(Error::UImageHeaderCrc));
+    }
+
+    #[test]
+    fn uboot_image_is_priv_gzip_inside_a_uimage_inside_the_first_stage() {
+        let raw: Vec<u8> = (0..20_000u32).map(|i| (i % 211) as u8).collect();
+        let uimage = uboot_uimage(&raw, 0).expect("uimage");
+        let info = check_uimage(&uimage).expect("checks");
+        assert_eq!((info.os, info.kind, info.comp), (OS_U_BOOT, TYPE_FIRMWARE, COMP_GZIP));
+        // The data is the priv-marked stream, which undoes to the raw U-Boot.
+        let stream = &uimage[UIMAGE_HEADER_LEN..];
+        assert_eq!(stream[2], PRIV_GZIP_CM);
+        assert_eq!(undo_priv_gzip(stream).expect("inflates"), raw);
+        // The first stage over it passes its own check.
+        let image = wrap_firstage(&uimage);
+        assert_eq!(parse_firstage(&image).expect("parses").payload_len as usize, VERSION_LEN + uimage.len());
+    }
+
+    const HEADER_LEN_FOR_TEST: usize = UIMAGE_HEADER_LEN + 3;
+
+    fn le_or_be_hcrc(h: &[u8; UIMAGE_HEADER_LEN]) -> u32 {
+        u32::from_be_bytes([h[4], h[5], h[6], h[7]])
     }
 }

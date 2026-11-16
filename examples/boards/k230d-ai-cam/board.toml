@@ -13,13 +13,9 @@ cpu = "xuantie-c908"
 device_tree = "canaan/k230d-ai-cam"
 device_tree_dir = "assets/dts"
 
-# The AI-CAM's own U-Boot device tree and defconfig, not the BPI Zero's: its
-# pad table is a stated input (assets/patches/...ai-cam.patch, the dts's
-# comment), with the bank voltages undefined until they are filled in, so the
-# build refuses until they are. The family's patch comes first.
+# The AI-CAM's U-Boot is the vendor's own board, k230d_canmv_junroc_ai_cam, from
+# Canaan's k230_linux_sdk at fc6cc215: its device tree (pad table and bank
+# modes, from the schematic), board files and defconfig, all in the family's
+# patch as the vendor wrote them. No pad table of ours.
 [bootloader]
-defconfig = "k230d_ai_cam"
-patches = [
-  { file = "../k230/assets/patches/u-boot-v2022.10-k230d.patch" },
-  { file = "assets/patches/u-boot-v2022.10-k230d-ai-cam.patch" },
-]
+defconfig = "k230d_canmv_junroc_ai_cam"

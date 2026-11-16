@@ -1,32 +1,44 @@
-Generated patch record for k230/assets/patches/u-boot-v2022.10-k230d.patch
+u-boot-v2022.10-k230d.patch: generation record
 
-Source: Canaan SDK U-Boot 2022.10 overlay (bsp/k230_linux_sdk/buildroot-overlay/boot/uboot/u-boot-2022.10-overlay, 212 files) against upstream v2022.10 (4debc57a, bsp/u-boot-v2022.10).
+Provenance: Canaan k230_linux_sdk fc6cc2151d54cb307be47f81815023f7ffb0eae6 (2026-10-10), buildroot-overlay/boot/uboot/u-boot-2022.10-overlay, read by git archive (read-only). Provenance line: "Canaan k230_linux_sdk fc6cc215, k230d_canmv_junroc_ai_cam.dts".
+Base: upstream U-Boot v2022.10 (4debc57a, bsp/u-boot-v2022.10). Replaces the older SDK overlay base (k230_linux_sdk output of the earlier line, 212 files).
 
-Command (scratch dir; uboot-a = upstream copies of the 212 overlay paths; uboot-c = uboot-a with the 134 kept overlay files written over it; arch/riscv/Kconfig edited to drop the 7 other-board source lines):
-  diff -ruN uboot-a uboot-c | sed -e 's|^--- uboot-a/|--- a/|' -e 's|^+++ uboot-c/|+++ b/|' > u-boot-v2022.10-k230d.patch
-  check: patch -p1 --fuzz=0 --dry-run against the full v2022.10 tree (exit 0)
+Command (scratch dir: A = upstream copies of the 249 vendor overlay paths that exist upstream; C = A with the 146 kept vendor files written over it; arch/riscv/Kconfig edited; config.mk replaced):
+  git -C <sdk> archive fc6cc215 buildroot-overlay/boot/uboot/u-boot-2022.10-overlay | tar -x -C <scratch>/vendor
+  python3: keep/drop rules below, copy kept files to C, edit C/arch/riscv/Kconfig and C/arch/riscv/cpu/k230/config.mk
+  diff -ruN A C | sed -e 's|^--- A/|--- a/|' -e 's|^+++ C/|+++ b/|' > u-boot-v2022.10-k230d.patch
+  check: patch -p1 --fuzz=0 --dry-run against the full v2022.10 tree: exit 0 (done).
+  check: every obj-y source in arch/riscv/cpu/k230, board/canaan/common, board/canaan/k230d_canmv, board/canaan/k230d_canmv_junroc_ai_cam Makefiles exists (done). Compile not run.
 
-Size: before (full overlay, earlier k230-sdk patch) 23,990,986 bytes; after (this patch) 1,681,352 bytes; the AI-CAM patch 6,702 bytes (k230d-ai-cam/assets/patches).
-Largest removed: LPDDR4 DDR init for other boards (sip_lpddr4_init_32_swap_3200_*: about 4.1 MB; _1600: 1.0 MB).
+Size: this patch 1,817,984 bytes. Previous trimmed patch (older base) 1,680,004 bytes; full vendor overlay as a patch would be about 24 MB (earlier measure, older base).
 
-Kept: arch/riscv/cpu/k230, board/canaan/common (k230_board_common, k230_img, k230_perf, k230_spl, sdk_autoconf.h, sip_lpddr4_init_32_swap_2667.c: the only DDR init the K230D config selects, board/canaan/k230d_canmv/Kconfig SIPLP4_2667), board/canaan/k230d_canmv, configs/k230d_canmv_defconfig, k230d_canmv_bpi_defconfig, k230d_canmv_burntool_defconfig, arch/riscv/dts/k230d*.dts, k230.dtsi, k230d.dtsi, the generic overlay files (drivers, cmd, env, common, lib, net, include).
+Lines patched out of the overlay (arch/riscv/cpu/k230/config.mk): the whole add_firmware_head rule (SDK version 41 lines), replaced by a 6-line comment. Removed calls: python3 tools/firmware_gen_no_securiy.py -n on the SPL (u-boot-spl-k230.bin) and on u-boot.img (fn_u-boot.img); tools/endian-swap.py on the SPL; gzip -k -f u-boot.bin; tools/mkimage -C gzip (u-boot.img); dd into sd.iso at 1 MiB (SPL) and 2 MiB (fn_u-boot.img). Why: Gaia's k230-firstage step makes the K230 headers and the priv gzip from the plain binaries. Nothing else in the tree reads fn_*, *-k230*, u-boot.img, sd.iso (grep: only config.mk).
+Also removed from the tree: tools/firmware_gen_no_securiy.py and tools/firmware_gen.py (their only caller was that rule).
 
-Dropped (78):
+arch/riscv/Kconfig: 10 'source' lines for other boards removed (k230_fpga, k230_evb, k230_canmv, k230_canmv_01studio, k230_canmv_mrt, k230_canmv_dongshanpi, k230_canmv_gt6700, k230_unsiplp4, k230_siplp4, k230_canmv_huskylens). Kept: k230d_canmv and k230d_canmv_junroc_ai_cam.
+
+Kept (146): arch/riscv/cpu/k230 (all), board/canaan/common (k230_board_common, k230_img, k230_perf, k230_spl, sdk_autoconf.h, sip_lpddr4_init_32_swap_2667.c), board/canaan/k230d_canmv, board/canaan/k230d_canmv_junroc_ai_cam, configs k230d_canmv{,_bpi,_burntool,_junroc_ai_cam}_defconfig, arch/riscv/dts k230d_canmv{,_bpi,_junroc_ai_cam}.dts, k230.dtsi, k230d.dtsi, include/dt-bindings k230_evb.h, the generic overlay files.
+
+Dropped (103, with reasons; 'logo' is an images directory used only by a Kconfig default for an option our configs do not enable):
   arch/riscv/dts/k230_canmv_01studio.dts   [dts of other boards]
+  arch/riscv/dts/k230_canmv_01studio_mmc.dts   [dts of other boards]
   arch/riscv/dts/k230_canmv_dongshanpi.dts   [dts of other boards]
   arch/riscv/dts/k230_canmv.dts   [dts of other boards]
+  arch/riscv/dts/k230_canmv_gt6700.dts   [dts of other boards]
+  arch/riscv/dts/k230_canmv_huskylens.dts   [dts of other boards]
+  arch/riscv/dts/k230_canmv_lckfb.dts   [dts of other boards]
+  arch/riscv/dts/k230_canmv_mrt.dts   [dts of other boards]
   arch/riscv/dts/k230_canmv_v2.dts   [dts of other boards]
+  arch/riscv/dts/k230_canmv_v3.dts   [dts of other boards]
   arch/riscv/dts/k230d_doorlock_ov9286.dts   [dts of other boards]
   arch/riscv/dts/k230d_evb.dtsi   [dts of other boards]
   arch/riscv/dts/k230_evb_doorlock_ov9286.dts   [dts of other boards]
   arch/riscv/dts/k230_evb.dts   [dts of other boards]
-  arch/riscv/dts/k230_evb.dtsi   [dts of other boards]
-  arch/riscv/dts/k230_evb_nand.dts   [dts of other boards]
   arch/riscv/dts/k230_evb_sip.dts   [dts of other boards]
   arch/riscv/dts/k230_fpga.dts   [dts of other boards]
-  board/canaan/common/sip_lpddr4_init_32_swap_1600.c   [DDR init not selected by k230d configs (CONFIG_SIPLP4_2667 only)]
-  board/canaan/common/sip_lpddr4_init_32_swap_3200_with_allodt.c   [DDR init not selected by k230d configs (CONFIG_SIPLP4_2667 only)]
-  board/canaan/common/sip_lpddr4_init_32_swap_3200_with_wodt.c   [DDR init not selected by k230d configs (CONFIG_SIPLP4_2667 only)]
+  board/canaan/common/sip_lpddr4_init_32_swap_1600.c   [DDR init not selected by the K230D or junroc configs (CONFIG_SIPLP4_2667 only)]
+  board/canaan/common/sip_lpddr4_init_32_swap_3200_with_allodt.c   [DDR init not selected by the K230D or junroc configs (CONFIG_SIPLP4_2667 only)]
+  board/canaan/common/sip_lpddr4_init_32_swap_3200_with_wodt.c   [DDR init not selected by the K230D or junroc configs (CONFIG_SIPLP4_2667 only)]
   board/canaan/k230_canmv_01studio/board.c   [other boards' board directories]
   board/canaan/k230_canmv_01studio/canmv_01studio_ddr_init_1600.c   [other boards' board directories]
   board/canaan/k230_canmv_01studio/canmv_01studio_ddr_init_2133.c   [other boards' board directories]
@@ -34,19 +46,34 @@ Dropped (78):
   board/canaan/k230_canmv_01studio/.gitignore   [other boards' board directories]
   board/canaan/k230_canmv_01studio/Kconfig   [other boards' board directories]
   board/canaan/k230_canmv_01studio/lpddr4_init_32_swap_1066.c   [other boards' board directories]
+  board/canaan/k230_canmv_01studio/lpddr4_init_32_swap_1600_without_odt.c   [other boards' board directories]
   board/canaan/k230_canmv_01studio/lpddr4_init_32_swap_2667.c   [other boards' board directories]
   board/canaan/k230_canmv_01studio/lpddr4_init_32_swap_3200.c   [other boards' board directories]
   board/canaan/k230_canmv_01studio/Makefile   [other boards' board directories]
   board/canaan/k230_canmv/board.c   [other boards' board directories]
   board/canaan/k230_canmv_dongshanpi/board.c   [other boards' board directories]
+  board/canaan/k230_canmv_dongshanpi/canmv_ddr_init_1866.c   [other boards' board directories]
+  board/canaan/k230_canmv_dongshanpi/canmv_ddr_init_2133.c   [other boards' board directories]
   board/canaan/k230_canmv_dongshanpi/.gitignore   [other boards' board directories]
-  board/canaan/k230_canmv_dongshanpi/k230pi_ddr_init_2133.c   [other boards' board directories]
   board/canaan/k230_canmv_dongshanpi/Kconfig   [other boards' board directories]
+  board/canaan/k230_canmv_dongshanpi/lpddr4_init_32_swap_2667.c   [other boards' board directories]
   board/canaan/k230_canmv_dongshanpi/Makefile   [other boards' board directories]
   board/canaan/k230_canmv/.gitignore   [other boards' board directories]
+  board/canaan/k230_canmv_gt6700/board.c   [other boards' board directories]
+  board/canaan/k230_canmv_gt6700/Kconfig   [other boards' board directories]
+  board/canaan/k230_canmv_gt6700/Makefile   [other boards' board directories]
+  board/canaan/k230_canmv_huskylens/board.c   [other boards' board directories]
+  board/canaan/k230_canmv_huskylens/.gitignore   [other boards' board directories]
+  board/canaan/k230_canmv_huskylens/Kconfig   [other boards' board directories]
+  board/canaan/k230_canmv_huskylens/lpddr4_init_32_swap_2667.c   [other boards' board directories]
+  board/canaan/k230_canmv_huskylens/Makefile   [other boards' board directories]
   board/canaan/k230_canmv/k230pi_ddr_init_2133.c   [other boards' board directories]
   board/canaan/k230_canmv/Kconfig   [other boards' board directories]
   board/canaan/k230_canmv/Makefile   [other boards' board directories]
+  board/canaan/k230_canmv_mrt/board.c   [other boards' board directories]
+  board/canaan/k230_canmv_mrt/Kconfig   [other boards' board directories]
+  board/canaan/k230_canmv_mrt/lpddr4_init_32_swap_2667.c   [other boards' board directories]
+  board/canaan/k230_canmv_mrt/Makefile   [other boards' board directories]
   board/canaan/k230_evb/board.c   [other boards' board directories]
   board/canaan/k230_evb/ddr_init_2133.c   [other boards' board directories]
   board/canaan/k230_evb/.gitignore   [other boards' board directories]
@@ -75,21 +102,44 @@ Dropped (78):
   configs/k230_canmv_defconfig   [defconfigs of other boards]
   configs/k230_canmv_dongshanpi_burntool_defconfig   [defconfigs of other boards]
   configs/k230_canmv_dongshanpi_defconfig   [defconfigs of other boards]
+  configs/k230_canmv_gt6700_defconfig   [defconfigs of other boards]
+  configs/k230_canmv_huskylens_defconfig   [defconfigs of other boards]
+  configs/k230_canmv_lckfb_defconfig   [defconfigs of other boards]
+  configs/k230_canmv_mrt_defconfig   [defconfigs of other boards]
   configs/k230_canmv_v2_defconfig   [defconfigs of other boards]
+  configs/k230_canmv_v3_defconfig   [defconfigs of other boards]
+  configs/k230d_doorlock_ov9286_defconfig   [defconfig of another board]
   configs/k230_evb_burntool_defconfig   [defconfigs of other boards]
   configs/k230_evb_ddr4_defconfig   [defconfigs of other boards]
   configs/k230_evb_defconfig   [defconfigs of other boards]
   configs/k230_evb_doorlock_defconfig   [defconfigs of other boards]
   configs/k230_evb_doorlock_ov9286_defconfig   [defconfigs of other boards]
-  configs/k230_evb_nand_defconfig   [defconfigs of other boards]
   configs/k230_evb_sip_defconfig   [defconfigs of other boards]
   configs/k230_fpga_defconfig   [defconfigs of other boards]
-  configs/k230d_doorlock_ov9286_defconfig   [defconfig of another board]
   .gitignore   [CI and repo metadata]
   .gitlab-ci.yml   [CI and repo metadata]
   .gitlab/merge_request_templates/bug.md   [CI and repo metadata]
   .gitlab/merge_request_templates/doc.md   [CI and repo metadata]
   .gitlab/merge_request_templates/feature.md   [CI and repo metadata]
+  tools/firmware_gen_no_securiy.py   [Python header tools: their only caller (config.mk add_firmware_head) is patched out]
+  tools/firmware_gen.py   [Python header tools: their only caller (config.mk add_firmware_head) is patched out]
+  b.sh   [vendor helper script with a hardcoded /opt/toolchain path, not a build input]
 
-Completeness: every obj-y source in arch/riscv/cpu/k230/Makefile, board/canaan/common/Makefile and board/canaan/k230d_canmv/Makefile exists (checked). Not compiled yet: a compile of k230d_canmv_bpi is the real proof (next build).
-Unverified: the generic overlay files outside board/ are kept conservatively, not proven needed.
+Files taken from the vendor commit (sha256, bytes, path); the kept-tree copies are byte-identical:
+  f50cd61fe0722b16e0bd5398f9deed31b8d9c3ae2bede2dce416ecbf1db73c33      9761  arch/riscv/dts/k230d_canmv_junroc_ai_cam.dts
+  f60858b4873946f2e88cd40b0cf6e0996130e4158a2e156455803b261d105d41       917  board/canaan/k230d_canmv_junroc_ai_cam/board.c
+  75c05cd62a0ba63742c864db50987f4a68f25b8291e76edbafef80177b1d746e       324  board/canaan/k230d_canmv_junroc_ai_cam/Kconfig
+  a2b286090f81462cde2f2948a21d2752c4b835a26208ad3724f1b9b3eae02e4b      2223  board/canaan/k230d_canmv_junroc_ai_cam/Makefile
+  84ccc9552012fca4e1e1cc90af277c9c8acaa2fd3d51d3a02021076ec750963a      2971  configs/k230d_canmv_junroc_ai_cam_defconfig
+  4a1024dd684f51aeb6f8f4dabcc221c89f73b290232eebeb990a9dcee7d0282b      8795  arch/riscv/dts/k230d_canmv_bpi.dts
+  f396bf67d9bd3878d807452b3d9659b326132da880ec3a6217ab76b3dab7de7f      8345  arch/riscv/dts/k230d_canmv.dts
+  ef599fda90db5c33f9d3150333c4d152cb578f9b618ad6d063aa1bb1430c0f4c      2949  configs/k230d_canmv_bpi_defconfig
+  cdf614822da6099c75f8329361f50e42bffce49e385ab83d81ea3a2eb95cb5ed      2943  configs/k230d_canmv_defconfig
+  e32dea05695bd8aa97b1396146a161805854f010de8e0fe61e7081568f17f492      8952  arch/riscv/dts/k230.dtsi
+  83830caac135ebd8537818ee1e93a679e35f42f8e6a25f73b6247e3f1e74318c      3272  arch/riscv/dts/k230d.dtsi
+  e0fb375a09076fe4b469381faa5392a37f2489a91569884c50b80f442ace8809      5420  board/canaan/common/k230_spl.c
+  f624b6381ed55dbd84c05bafeeb6f476265c058ff9eb48442ca3c6b01d4eaa7e     27408  board/canaan/common/k230_img.c
+  98e08062ba6cef480efdd4fe1a977d4b9fd69f797b586ec3ffbb1b0826ad06bd     12712  arch/riscv/cpu/k230/unzip.c
+  5dc1ac3cc8c8a09ca02f0b658a13b452ab175ea1a4a5e63820944a38663efde9      2400  arch/riscv/cpu/k230/dram.c
+
+Files changed from the older SDK overlay that the K230D configs build (old -> vendor): k230d_canmv.dts, k230d_canmv_bpi.dts, k230.dtsi, board/canaan/k230d_canmv/board.c, both k230d defconfigs, board/canaan/common/k230_spl.c, k230_img.c, arch/riscv/cpu/k230/dram.c. Unchanged: k230d.dtsi, lib/gunzip.c, arch/riscv/cpu/k230/unzip.c (the priv-gzip marker path).

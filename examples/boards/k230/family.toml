@@ -31,7 +31,7 @@ fragments = ["assets/linux.fragment"]
 # The SDK's U-Boot 2022.10 overlay, trimmed to what the K230D configs build, as
 # one patch against upstream v2022.10. Generated, not hand-written: the command,
 # the dropped paths and the sizes are in
-# assets/patches/u-boot-v2022.10-k230d.generation.txt.
+# assets/patches/u-boot-v2022.10-k230d.generation.txt (vendor commit fc6cc215).
 [bootloader]
 source = "u-boot"
 defconfig = "k230d_canmv_bpi"
