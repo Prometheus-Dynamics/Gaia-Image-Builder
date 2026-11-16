@@ -51,7 +51,6 @@ store_verify() {
   cargo build --locked -q -p gaia
   local gaia="${CARGO_TARGET_DIR:-target}/debug/gaia" dir first h rc
   dir=$(mktemp -d "${TMPDIR:-/tmp}/gate-store-verify.XXXXXX")
-  trap 'rm -rf -- "${dir:?}"' RETURN
   for text in alpha beta; do
     printf '%s\n' "$text" > "$dir/tmp"
     h=$(sha256sum "$dir/tmp" | cut -d' ' -f1)
@@ -59,10 +58,19 @@ store_verify() {
     mv "$dir/tmp" "$dir/store/objects/file/${h:0:2}/$h"
     first=${first:-$dir/store/objects/file/${h:0:2}/$h}
   done
-  "$gaia" store verify --store "$dir/store"
+  # No RETURN trap: it would fire again when the caller returns, with no
+  # `dir`. The directory is removed on each way out.
+  rc=0
+  "$gaia" store verify --store "$dir/store" || rc=$?
+  if [ "$rc" != 0 ]; then
+    rm -rf -- "$dir"
+    echo "store verify: a store whose objects match must exit 0, exited $rc" >&2
+    return 1
+  fi
   printf 'gamma\n' > "$first"
   rc=0
   "$gaia" store verify --store "$dir/store" > /dev/null || rc=$?
+  rm -rf -- "$dir"
   if [ "$rc" != 2 ]; then
     echo "store verify: an object that does not match must exit 2, exited $rc" >&2
     return 1
