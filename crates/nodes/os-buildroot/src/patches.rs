@@ -166,6 +166,58 @@ pub(crate) fn key_entry(mode: Mode, outcomes: &[(String, bool)]) -> Option<Strin
     (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
+/// The machine's programs an output-changing patch lets a build use in place
+/// of Buildroot's own: the parser generators (0003, 0004).
+const MACHINE_PARSERS: [&str; 2] = ["bison", "flex"];
+
+/// Whether a patch that lets the build take the machine's parser generators
+/// applied: every patch that changes outputs does that, and nothing else.
+pub(crate) fn takes_machine_parsers(outcomes: &[(String, bool)]) -> bool {
+    PATCHES.iter().any(|patch| {
+        patch.changes_outputs
+            && outcomes
+                .iter()
+                .any(|(name, applied)| name == patch.name && *applied)
+    })
+}
+
+/// The first line of each parser generator's `--version` on the build's
+/// PATH, or `none` for one that is not there: what the patched Buildroot
+/// decides on, so a store made with one bison is not reused with another.
+pub(crate) fn machine_parsers() -> Vec<(String, String)> {
+    MACHINE_PARSERS
+        .iter()
+        .map(|program| {
+            let line = Command::new(program)
+                .arg("--version")
+                .env_clear()
+                .env("PATH", crate::PATH)
+                .env("LC_ALL", "C")
+                .output()
+                .ok()
+                .filter(|out| out.status.success())
+                .and_then(|out| {
+                    String::from_utf8_lossy(&out.stdout)
+                        .lines()
+                        .next()
+                        .map(str::to_string)
+                })
+                .unwrap_or_else(|| "none".into());
+            (program.to_string(), line)
+        })
+        .collect()
+}
+
+/// `entry` with one line per parser generator, `machine <program> <version
+/// line>`.
+pub(crate) fn with_parsers(entry: Option<String>, parsers: &[(String, String)]) -> Option<String> {
+    let mut lines: Vec<String> = entry.into_iter().collect();
+    for (program, version) in parsers {
+        lines.push(format!("machine {program} {version}"));
+    }
+    Some(lines.join("\n"))
+}
+
 /// Reads a step's report: each line `applied <name>` or `skipped <name>`.
 pub(crate) fn parse_report(text: &str) -> Result<Vec<(String, bool)>, String> {
     text.lines()
@@ -333,7 +385,12 @@ pub(crate) fn apply_to(
     }
     let patched = patched_source(store, cx, &prepared.src, prepared.src_digest)?;
     warn_skipped(&patched.outcomes);
-    prepared.patch_key = key_entry(mode, &patched.outcomes);
+    let entry = key_entry(mode, &patched.outcomes);
+    prepared.patch_key = if takes_machine_parsers(&patched.outcomes) {
+        with_parsers(entry, &machine_parsers())
+    } else {
+        entry
+    };
     prepared.src = patched.tree;
     Ok(())
 }
@@ -582,6 +639,57 @@ mod tests {
             PATCHES.iter().map(|p| (p.name.to_string(), true)).collect();
         assert_eq!(key_entry(Mode::Off, &outcomes).as_deref(), Some("off"));
         assert_ne!(key_entry(Mode::Off, &[]), key_entry(Mode::On, &outcomes));
+    }
+
+    /// The machine's bison and flex are in the key when a patch that lets a
+    /// build take them applied, by their version lines, and not otherwise.
+    #[test]
+    fn the_machines_parser_generators_are_in_the_key() {
+        let all: Vec<(String, bool)> = PATCHES.iter().map(|p| (p.name.to_string(), true)).collect();
+        assert!(takes_machine_parsers(&all));
+        // Only the patches that change no output applied: Buildroot builds
+        // its own bison and flex, and the machine's are no input.
+        let plain: Vec<(String, bool)> = PATCHES
+            .iter()
+            .map(|p| (p.name.to_string(), !p.changes_outputs))
+            .collect();
+        assert!(!takes_machine_parsers(&plain));
+        assert!(!takes_machine_parsers(&[]));
+
+        let tools = |bison: &str| {
+            vec![
+                ("bison".to_string(), bison.to_string()),
+                ("flex".to_string(), "flex 2.6.4".to_string()),
+            ]
+        };
+        let entry = key_entry(Mode::On, &all);
+        let new = with_parsers(entry.clone(), &tools("bison (GNU Bison) 3.8.2")).expect("entry");
+        assert!(new.starts_with(entry.as_deref().expect("digests")), "{new}");
+        assert!(
+            new.ends_with("machine bison bison (GNU Bison) 3.8.2\nmachine flex flex 2.6.4"),
+            "{new}"
+        );
+        let old = with_parsers(entry.clone(), &tools("bison (GNU Bison) 2.3"));
+        let none = with_parsers(entry, &tools("none"));
+        assert_ne!(Some(new.clone()), old);
+        assert_ne!(Some(new), none);
+        assert_ne!(old, none);
+        // An entry with nothing else still names them.
+        assert_eq!(
+            with_parsers(None, &tools("none")).as_deref(),
+            Some("machine bison none\nmachine flex flex 2.6.4")
+        );
+    }
+
+    /// What this machine has is read as one line each, in a fixed order.
+    #[test]
+    fn the_machines_parser_generators_are_read_by_name() {
+        let found = machine_parsers();
+        let names: Vec<&str> = found.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["bison", "flex"]);
+        for (name, line) in &found {
+            assert!(!line.is_empty() && !line.contains('\n'), "{name}: {line:?}");
+        }
     }
 
     /// The words `make` prints for `probe` (a makefile body, with the
