@@ -32,7 +32,8 @@ use std::process::Command;
 
 const NAME: &str = "gaia.os.buildroot.patch";
 /// Changes when how the patches are applied changes.
-const RECIPE_VERSION: u32 = 1;
+/// 2: the copy keeps file modes (1 lost them, and Buildroot's scripts with them).
+const RECIPE_VERSION: u32 = 2;
 /// The environment variable that turns the patches off (`off`) or on.
 pub(crate) const ENV: &str = "GAIA_BUILDROOT_PATCHES";
 /// The key entry the choice adds, when it is not the default.
@@ -179,19 +180,36 @@ pub(crate) fn patched_source(
 fn make_patched(work: &mut Work<'_>, source: &Path) -> Result<(), StepError> {
     let dir = work.dir().to_path_buf();
     let tree = dir.join("tree");
-    // Files are written as the user's umask allows, not as the store has
-    // them: a patch edits its copy.
-    let copy = Tool::new("cp")
-        .args(["-R", "--reflink=auto", "--no-preserve=mode"])
-        .arg(source)
-        .arg(&tree)
-        .env("PATH", crate::PATH);
-    work.run(&copy)?;
+    for (program, args) in copy_commands(source, &tree) {
+        work.run(&Tool::new(program).args(args).env("PATH", crate::PATH))?;
+    }
     let outcomes =
         apply_all(&tree, &dir.join("patches")).map_err(|why| StepError::body(NAME, why))?;
     fs::write(dir.join(REPORT), report_text(&outcomes))
         .map_err(|e| StepError::body(NAME, format!("the patches report: {e}")))?;
     Ok(())
+}
+
+/// The commands that copy the source at `source` to `tree` for patching:
+/// a copy that keeps each file's mode, since Buildroot runs its own scripts
+/// (`support/scripts/*`) straight from its tree, and then the owner's write
+/// permission on all of it, since the store's files are read-only and a
+/// patch edits its copy.
+fn copy_commands(source: &Path, tree: &Path) -> [(&'static str, Vec<String>); 2] {
+    let (source, tree) = (source.display().to_string(), tree.display().to_string());
+    [
+        (
+            "cp",
+            vec![
+                "-R".into(),
+                "--reflink=auto".into(),
+                "--preserve=mode".into(),
+                source,
+                tree.clone(),
+            ],
+        ),
+        ("chmod", vec!["-R".into(), "u+w".into(), tree]),
+    ]
 }
 
 /// Applies each of [`PATCHES`] to the tree at `tree` in turn, writing the
@@ -408,5 +426,32 @@ mod tests {
         let text = report_text(&outcomes);
         assert_eq!(parse_report(&text).expect("parse"), outcomes);
         assert!(parse_report("maybe a.patch\n").is_err());
+    }
+
+    /// The copy a patch edits keeps what the source could run and can be
+    /// written: a read-only script of the source is still a script.
+    #[test]
+    fn the_copy_keeps_the_exec_bit_and_can_be_written() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = dir.path().join("source");
+        fs::create_dir_all(source.join("support/scripts")).expect("dirs");
+        let script = source.join("support/scripts/mkmakefile");
+        fs::write(&script, "#!/bin/sh\n").expect("script");
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o555)).expect("mode");
+        let plain = source.join("Makefile");
+        fs::write(&plain, "all:\n").expect("file");
+        fs::set_permissions(&plain, fs::Permissions::from_mode(0o444)).expect("mode");
+        let tree = dir.path().join("tree");
+        for (program, args) in copy_commands(&source, &tree) {
+            let status = std::process::Command::new(program)
+                .args(&args)
+                .status()
+                .expect("run");
+            assert!(status.success(), "{program} {args:?}");
+        }
+        let mode = |path: &Path| fs::metadata(path).expect("meta").permissions().mode() & 0o777;
+        assert_eq!(mode(&tree.join("support/scripts/mkmakefile")), 0o755);
+        assert_eq!(mode(&tree.join("Makefile")), 0o644);
     }
 }
