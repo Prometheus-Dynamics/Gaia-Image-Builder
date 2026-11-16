@@ -25,16 +25,19 @@
 //! and static libraries (`lib/<name>`), as one tree for placing and as
 //! artifacts.
 
+mod group;
+mod split;
 mod vendor;
 
 pub use vendor::vendor;
 
 use daedalus::prelude::*;
 use gaia_sandbox::Sandbox;
-use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store};
+use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store, Stream, Work};
 use gaia_types::{Artifact, ArtifactKind, Tree};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 const NAME: &str = "gaia.build.rust";
 /// The probe that reads a tool's version inside the sandbox.
@@ -107,6 +110,8 @@ pub fn build_rust(
             .ok_or_else(|| fail(format!("the {what} is not in the store")))?;
         Ok::<_, StepError>((object.digest, store.path(&object)))
     };
+    // One package, or a sorted list of them (a group): checked first.
+    let names = group::names(package).map_err(fail)?;
     // The component's own variables, one `NAME=value` a line. Checked first:
     // a bad line is the description's error, not a build's.
     let mut component_env: Vec<(String, String)> = Vec::new();
@@ -272,6 +277,9 @@ pub fn build_rust(
         key = key.input("tools", *digest);
     }
     let key = sandbox.key(key).finish();
+    let manifest = format!("{SOURCE}/Cargo.toml");
+    let target_dir = format!("{BUILD}/target");
+    let cargo = format!("{TOOLCHAIN}/bin/cargo");
     let made =
         Step::new(&store, cx, NAME, key).look_up_or_make(&[("out", Path::new("out"))], |work| {
             let build = work.dir().to_path_buf();
@@ -284,33 +292,175 @@ pub fn build_rust(
             }
             std::fs::write(home.join("config.toml"), vendor_config(&vendor_dir))
                 .map_err(|e| fail(format!("cargo config: {e}")))?;
-            let mut tool = sandbox
-                .clone()
-                .output(&build, BUILD)
-                .tool(&format!("{TOOLCHAIN}/bin/cargo"))
-                .map_err(|e| fail(format!("the sandbox: {e}")))?
-                .args([
-                    "build",
-                    "--profile",
-                    profile,
-                    "--locked",
-                    "--offline",
-                    "--package",
-                    package,
-                ])
-                .args(["--target", triple])
-                .arg("--manifest-path")
-                .arg(format!("{SOURCE}/Cargo.toml"))
-                .arg("--target-dir")
-                .arg(format!("{BUILD}/target"));
-            if !features.is_empty() {
-                tool = tool.args(["--features", &features.join(",")]);
+            let profile_dir = target.join(triple).join(profile);
+            let build_with = |packages: &[&str]| {
+                group::build_args(profile, triple, packages, &features, &manifest, &target_dir)
+            };
+            if let [only] = names[..] {
+                sandboxed(work, &sandbox, &build, &cargo, &build_with(&[only]))?;
+                collect(&profile_dir, &out)?;
+                return Ok(());
             }
-            work.run(&tool)?;
-            collect(&target.join(triple).join(profile), &out)
+            // Several packages: one cargo run when no crate changes its
+            // features, else one run per package in the same target directory.
+            let metadata = sandboxed(
+                work,
+                &sandbox,
+                &build,
+                &cargo,
+                &cargo_metadata_args(&manifest),
+            )?;
+            match merge_refusal(work, &sandbox, &build, &cargo, &names, triple, &manifest, &features)? {
+                None => {
+                    sandboxed(work, &sandbox, &build, &cargo, &build_with(&names))?;
+                }
+                Some(why) => {
+                    eprintln!(
+                        "gaia.build.rust: {} built one package at a time, not in one cargo run: {why}",
+                        names.join(", ")
+                    );
+                    for package in &names {
+                        sandboxed(work, &sandbox, &build, &cargo, &build_with(&[*package]))?;
+                    }
+                }
+            }
+            for package in &names {
+                let files = group::built_files(&metadata, package).map_err(fail)?;
+                collect_package(&profile_dir, &out.join(package), &files)?;
+            }
+            std::fs::create_dir_all(&out).map_err(|e| fail(format!("{}: {e}", out.display())))
         })?;
     let out = made.outputs["out"];
     let out_dir = store.path(&out);
+    let mut artifacts = Vec::new();
+    if let [only] = names[..] {
+        artifacts = artifacts_in(&store, &out_dir)?;
+        if artifacts.is_empty() {
+            return Err(fail(format!(
+                "{only} built no binary or library for {triple}"
+            )));
+        }
+    } else {
+        for package in &names {
+            let found = artifacts_in(&store, &out_dir.join(package))?;
+            if found.is_empty() {
+                return Err(fail(format!(
+                    "{package} built no binary or library for {triple}"
+                )));
+            }
+            artifacts.extend(found);
+        }
+    }
+    Ok((
+        Tree {
+            object: out.into(),
+            entries: Vec::new(),
+        },
+        artifacts,
+    ))
+}
+
+/// Runs `program` (cargo) in the sandbox with `args`, the build directory
+/// writable, and returns what it printed on its standard output, a line at
+/// a time. Its standard error is the run log's.
+fn sandboxed(
+    work: &mut Work<'_>,
+    sandbox: &Sandbox,
+    build: &Path,
+    program: &str,
+    args: &[String],
+) -> Result<String, StepError> {
+    let captured = Arc::new(Mutex::new(String::new()));
+    let sink = Arc::clone(&captured);
+    let tool = sandbox
+        .clone()
+        .output(build, BUILD)
+        .tool(program)
+        .map_err(|e| StepError::body(NAME, format!("the sandbox: {e}")))?
+        .args(args)
+        .on_line(move |stream, line| {
+            if let Stream::Stdout = stream {
+                let mut text = sink.lock().unwrap_or_else(|e| e.into_inner());
+                text.push_str(line);
+                text.push('\n');
+            }
+        });
+    work.run(&tool)?;
+    let text = captured.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    Ok(text)
+}
+
+/// `cargo metadata` for the packages' own targets: no dependencies, so it
+/// needs no crate and gives the same answer in any build.
+fn cargo_metadata_args(manifest: &str) -> Vec<String> {
+    [
+        "metadata",
+        "--format-version",
+        "1",
+        "--no-deps",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        manifest,
+    ]
+    .map(String::from)
+    .to_vec()
+}
+
+/// Why `packages` cannot share one cargo run (see [`group::refusal`]), or
+/// `None` when they can: each package's own build is listed, and the build of
+/// them together is listed, in the sandbox.
+#[allow(clippy::too_many_arguments)]
+fn merge_refusal(
+    work: &mut Work<'_>,
+    sandbox: &Sandbox,
+    build: &Path,
+    cargo: &str,
+    packages: &[&str],
+    triple: &str,
+    manifest: &str,
+    features: &[&str],
+) -> Result<Option<String>, StepError> {
+    let tree = |work: &mut Work<'_>, of: &[&str]| -> Result<group::Features, StepError> {
+        let args = group::tree_args(triple, of, manifest);
+        Ok(group::features_of(&sandboxed(
+            work, sandbox, build, cargo, &args,
+        )?))
+    };
+    // A set feature is refused before any listing is made.
+    if !features.is_empty() {
+        return Ok(group::refusal(features, &[], &group::Features::new()));
+    }
+    let merged = tree(work, packages)?;
+    let mut solo = Vec::new();
+    for package in packages {
+        solo.push((*package, tree(work, &[*package])?));
+    }
+    Ok(group::refusal(features, &solo, &merged))
+}
+
+/// One package's files out of a profile directory that holds several
+/// packages' builds: the ones `files` names, under `out/bin` or `out/lib`.
+fn collect_package(profile: &Path, out: &Path, files: &[group::Built]) -> Result<(), StepError> {
+    let fail = |e: std::io::Error| StepError::body(NAME, format!("{}: {e}", out.display()));
+    for file in files {
+        let from = profile.join(&file.file);
+        if !from.is_file() {
+            return Err(StepError::body(
+                NAME,
+                format!("the build left no {} in {}", file.file, profile.display()),
+            ));
+        }
+        let dir = out.join(file.sub);
+        std::fs::create_dir_all(&dir).map_err(fail)?;
+        std::fs::copy(&from, dir.join(&file.file)).map_err(fail)?;
+    }
+    std::fs::create_dir_all(out).map_err(fail)
+}
+
+/// The artifacts of an output tree: each file of `bin/` and `lib/`, in the
+/// store, in name order (binaries first).
+fn artifacts_in(store: &Store, out_dir: &Path) -> Result<Vec<Artifact>, StepError> {
     let mut artifacts = Vec::new();
     for (sub, kind) in [
         ("bin", ArtifactKind::Binary),
@@ -330,18 +480,7 @@ pub fn build_rust(
             });
         }
     }
-    if artifacts.is_empty() {
-        return Err(fail(format!(
-            "{package} built no binary or library for {triple}"
-        )));
-    }
-    Ok((
-        Tree {
-            object: out.into(),
-            entries: Vec::new(),
-        },
-        artifacts,
-    ))
+    Ok(artifacts)
 }
 
 /// Cargo's config: the vendored tree's own source replacement (crates.io
@@ -392,4 +531,83 @@ fn collect(profile: &Path, out: &Path) -> Result<(), StepError> {
 }
 
 /// The node, for a registry.
-pub const NODES: [&NodeRecord; 2] = [&BUILD_RUST_NODE, &vendor::VENDOR_NODE];
+pub const NODES: [&NodeRecord; 3] = [
+    &BUILD_RUST_NODE,
+    &vendor::VENDOR_NODE,
+    &split::BUILD_RUST_PART_NODE,
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `cargo metadata --no-deps` for two packages: a binary each, and a
+    /// shared and a static library in the second.
+    const METADATA: &str = r#"{"packages":[
+      {"name":"lemnosd","targets":[{"name":"lemnosd","kind":["bin"]}]},
+      {"name":"lemnos-orion","targets":[{"name":"lemnos-orion","kind":["bin"]},{"name":"orion-ffi","kind":["cdylib"]},{"name":"orion-static","kind":["staticlib"]}]}
+    ],"workspace_members":[]}"#;
+
+    fn names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// A profile directory as one cargo run of both packages leaves it: the
+    /// files of each, and cargo's own files beside them.
+    fn profile(dir: &Path) -> PathBuf {
+        let profile = dir.join("target/aarch64-unknown-linux-musl/service");
+        std::fs::create_dir_all(profile.join("deps")).expect("mkdir");
+        for file in [
+            "lemnosd",
+            "lemnos-orion",
+            "liborion_ffi.so",
+            "liborion_static.a",
+        ] {
+            std::fs::write(profile.join(file), file).expect("write");
+        }
+        std::fs::write(profile.join("deps/lemnosd-0a1b2c.d"), "x").expect("write");
+        std::fs::write(profile.join("lemnosd.d"), "x").expect("write");
+        profile
+    }
+
+    #[test]
+    fn a_package_takes_its_own_binaries_and_libraries_out_of_a_shared_profile() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let profile = profile(dir.path());
+        let out = dir.path().join("out");
+        let orion = group::built_files(METADATA, "lemnos-orion").expect("files");
+        collect_package(&profile, &out.join("lemnos-orion"), &orion).expect("collected");
+        assert_eq!(names(&out.join("lemnos-orion/bin")), ["lemnos-orion"]);
+        assert_eq!(
+            names(&out.join("lemnos-orion/lib")),
+            ["liborion_ffi.so", "liborion_static.a"]
+        );
+        let lemnosd = group::built_files(METADATA, "lemnosd").expect("files");
+        collect_package(&profile, &out.join("lemnosd"), &lemnosd).expect("collected");
+        assert_eq!(names(&out.join("lemnosd/bin")), ["lemnosd"]);
+        assert!(!out.join("lemnosd/lib").exists(), "no library of its own");
+    }
+
+    #[test]
+    fn a_missing_file_of_a_package_is_an_error_naming_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let profile = profile(dir.path());
+        std::fs::remove_file(profile.join("lemnosd")).expect("remove");
+        let out = dir.path().join("out");
+        let files = group::built_files(METADATA, "lemnosd").expect("files");
+        let error =
+            collect_package(&profile, &out.join("lemnosd"), &files).expect_err("a missing binary");
+        assert!(error.to_string().contains("no lemnosd"), "{error}");
+    }
+
+    #[test]
+    fn a_package_the_metadata_lacks_is_an_error() {
+        assert!(group::built_files(METADATA, "lemnos-ctl").is_err());
+    }
+}

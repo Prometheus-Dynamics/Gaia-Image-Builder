@@ -128,6 +128,8 @@ fn registry() -> Registry {
         .register_all(&gaia_compress::NODES)
         .expect("compress");
     registry.register_all(&gaia_source_oci::NODES).expect("oci");
+    // The copies a shared tree takes: the product's registry has them too.
+    registry.register_all(&gaia_types::NODES).expect("copies");
     registry
 }
 
@@ -516,5 +518,222 @@ fn an_image_written_with_its_digest_hands_the_oci_node_the_bare_reference() {
     assert_eq!(
         node.consts.get("digest"),
         Some(&Lit::Str(IMAGE_DIGEST.into()))
+    );
+}
+
+/// The Raze's Lemnos packages: one source and root, one target and profile,
+/// one image each on one board. `odd` gives one of them other features.
+const LEMNOS: [&str; 4] = ["lemnosd", "lemnos-ctl", "lemnos-orion", "lemnos-slot-init"];
+
+fn lemnos(dir: &Path, odd: Option<(&str, &str)>) -> (PathBuf, PathBuf) {
+    write(
+        &dir.join("boards/a55/board.toml"),
+        "version = 1\nname = \"a55\"\n[target]\narch = \"aarch64\"\ncpu = \"cortex-a55\"\nos = \"linux\"\n",
+    );
+    write(
+        &dir.join("recipes/tarball.toml"),
+        "version = 1\nname = \"tarball\"\ndescription = \"The built tree, as a sorted tar.\"\n[stages]\ntar = \"gaia.compress.tar\"\n[inputs]\nbuild = [\"tar.tree\"]\n[outputs]\ntar = \"tar.archive\"\n",
+    );
+    let mut components = String::new();
+    let mut images = String::new();
+    for name in LEMNOS {
+        let features = match odd {
+            Some((odd_name, features)) if odd_name == name => features,
+            _ => "",
+        };
+        write(
+            &dir.join(format!("components/{name}/component.toml")),
+            &format!(
+                r#"version = 1
+name = "{name}"
+[sources.src]
+git = "{URL}"
+ref = "master"
+[sources.root]
+image = "{IMAGE}"
+platform = "host"
+[build]
+builder = "rust"
+source = "src"
+[build.settings]
+package = "{name}"
+features = "{features}"
+triple = "aarch64-unknown-linux-musl"
+profile = "service"
+"#
+            ),
+        );
+        components.push_str(&format!("{name} = \"components/{name}/component.toml\"\n"));
+        images.push_str(&format!(
+            "[[images]]\nname = \"{name}\"\nboard = \"boards/a55/board.toml\"\ncomponents = [\"{name}\"]\nrecipe = \"tarball\"\n\n"
+        ));
+    }
+    write(
+        &dir.join("product.toml"),
+        &format!("version = 1\nname = \"lemnos\"\n[components]\n{components}\n{images}"),
+    );
+    (dir.join("product.toml"), dir.join("recipes"))
+}
+
+fn lemnos_lock() -> Lock {
+    lemnos_lock_at(None)
+}
+
+/// The lock of the Lemnos product; `other` is one package whose source is at
+/// another commit.
+fn lemnos_lock_at(other: Option<(&str, &str)>) -> Lock {
+    let mut lock = Lock::default();
+    for name in LEMNOS {
+        let commit = match other {
+            Some((odd, commit)) if odd == name => commit,
+            _ => COMMIT,
+        };
+        lock.entries.insert(
+            format!("{name}.src"),
+            Entry::Git {
+                url: URL.into(),
+                reference: "master".into(),
+                commit: commit.into(),
+            },
+        );
+        lock.entries.insert(
+            format!("{name}.root"),
+            Entry::Image {
+                reference: IMAGE.into(),
+                digest: IMAGE_DIGEST.into(),
+            },
+        );
+    }
+    lock
+}
+
+/// The four Lemnos packages plan one build node, and each component takes
+/// its own package's part of it.
+#[test]
+fn the_lemnos_packages_plan_one_build_and_a_part_each() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (product, recipes) = lemnos(dir.path(), None);
+    let loaded = Product::load(&product).expect("loads");
+    loaded.wants();
+    let recipes = Recipes::load_dir(&recipes).expect("recipes");
+    let registry = registry();
+    let built = build(
+        &loaded,
+        &lemnos_lock(),
+        &recipes,
+        &registry,
+        &setup(),
+        &Builders::default(),
+    )
+    .expect("builds");
+    let nodes = &built.doc.graph.nodes;
+    let builds: Vec<usize> = (0..nodes.len())
+        .filter(|&i| nodes[i].id == "gaia.build.rust")
+        .collect();
+    assert_eq!(builds.len(), 1, "one cargo run for the four packages");
+    assert_eq!(
+        nodes[builds[0]].consts.get("package"),
+        Some(&Lit::Str(
+            "lemnos-ctl,lemnos-orion,lemnos-slot-init,lemnosd".into()
+        ))
+    );
+    let parts: Vec<usize> = (0..nodes.len())
+        .filter(|&i| nodes[i].id == "gaia.build.rust.part")
+        .collect();
+    assert_eq!(parts.len(), 4);
+    for name in LEMNOS {
+        let label = format!("{name}.part");
+        let part = parts
+            .iter()
+            .copied()
+            .find(|&i| nodes[i].label.as_deref() == Some(label.as_str()))
+            .unwrap_or_else(|| panic!("no part {label}"));
+        assert_eq!(
+            nodes[part].consts.get("package"),
+            Some(&Lit::Str(name.into())),
+            "{label}"
+        );
+        let fed_by_group = built
+            .doc
+            .graph
+            .edges
+            .iter()
+            .any(|e| e.to.node as usize == part && e.from.node as usize == builds[0]);
+        assert!(fed_by_group, "{label} is not fed by the group build");
+    }
+    // The planner takes it.
+    built.plan(&registry).expect("plans");
+}
+
+/// A package whose features differ is built in its own cargo run; the other
+/// three still share one.
+#[test]
+fn a_package_with_other_features_is_not_in_the_group() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (product, recipes) = lemnos(dir.path(), Some(("lemnos-ctl", "fake-devices")));
+    let loaded = Product::load(&product).expect("loads");
+    loaded.wants();
+    let recipes = Recipes::load_dir(&recipes).expect("recipes");
+    let registry = registry();
+    let built = build(
+        &loaded,
+        &lemnos_lock(),
+        &recipes,
+        &registry,
+        &setup(),
+        &Builders::default(),
+    )
+    .expect("builds");
+    let nodes = &built.doc.graph.nodes;
+    let packages: Vec<String> = (0..nodes.len())
+        .filter(|&i| nodes[i].id == "gaia.build.rust")
+        .map(|i| match nodes[i].consts.get("package") {
+            Some(Lit::Str(text)) => text.clone(),
+            other => panic!("no package: {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        packages,
+        ["lemnos-orion,lemnos-slot-init,lemnosd", "lemnos-ctl"]
+    );
+    let parts = (0..nodes.len())
+        .filter(|&i| nodes[i].id == "gaia.build.rust.part")
+        .count();
+    assert_eq!(parts, 3, "the three share a group; the other builds alone");
+}
+
+/// A package whose source is another commit is built on its own.
+#[test]
+fn a_package_at_another_commit_is_not_in_the_group() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (product, recipes) = lemnos(dir.path(), None);
+    let loaded = Product::load(&product).expect("loads");
+    loaded.wants();
+    let recipes = Recipes::load_dir(&recipes).expect("recipes");
+    let registry = registry();
+    let lock = lemnos_lock_at(Some((
+        "lemnos-orion",
+        "455a956e13e62c97081d66e0e8f3bf2aced1eac8",
+    )));
+    let built = build(
+        &loaded,
+        &lock,
+        &recipes,
+        &registry,
+        &setup(),
+        &Builders::default(),
+    )
+    .expect("builds");
+    let nodes = &built.doc.graph.nodes;
+    let packages: Vec<String> = (0..nodes.len())
+        .filter(|&i| nodes[i].id == "gaia.build.rust")
+        .map(|i| match nodes[i].consts.get("package") {
+            Some(Lit::Str(text)) => text.clone(),
+            other => panic!("no package: {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        packages,
+        ["lemnos-ctl,lemnos-slot-init,lemnosd", "lemnos-orion"]
     );
 }
