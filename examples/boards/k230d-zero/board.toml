@@ -13,3 +13,7 @@ description = "BPI-CanMV-K230D-Zero (K230D)"
 device_tree = "canaan/bananapi-canmv-k230d-zero"
 device_tree_dir = "assets/dts"
 fragments = ["../k230/assets/linux.fragment", "assets/linux.fragment"]
+
+# The Zero's own U-Boot defconfig (a family may not name one).
+[bootloader]
+defconfig = "k230d_canmv_bpi"

@@ -31,7 +31,6 @@ fragments = ["assets/linux.fragment"]
 # assets/patches/u-boot-v2022.10-k230d.generation.txt (vendor commit fc6cc215).
 [bootloader]
 source = "u-boot"
-defconfig = "k230d_canmv_bpi"
 patches = [{ file = "assets/patches/u-boot-v2022.10-k230d.patch" }]
 fragments = ["assets/u-boot.fragment"]
 
