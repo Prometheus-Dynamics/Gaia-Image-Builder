@@ -133,6 +133,9 @@ impl Project {
         for (name, path) in &self.setup.tools {
             println!("tool    {name} = {path}");
         }
+        for note in &self.built.notes {
+            println!("{note}");
+        }
         println!(
             "\ngraph: {} nodes, {} edges",
             graph.nodes.len() - 1,

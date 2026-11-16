@@ -60,6 +60,14 @@ output of the latest build holds and the steps it came from. store verify
 reads every object in the store in full and checks it against its digest:
 it lists each one that does not match, and exits 2 when any does. With
 --fix, those are removed, so the next build makes them again.
+
+environment:
+  GAIA_EROFS_TOOL=buildroot  an image with an OS makes its EROFS with its
+                     build's own host erofs-utils, not the build machine's
+                     mkfs.erofs, so a release can pin that tool. Unset or
+                     `machine` (the default): the machine's mkfs.erofs when it
+                     is erofs-utils 1.8 or later with what the image asks.
+                     Plan says which tool each image uses and why.
 ";
 
 /// `gaia validate`: the files, and the kind to check each as.
