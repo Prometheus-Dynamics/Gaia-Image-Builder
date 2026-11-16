@@ -227,7 +227,12 @@ fn a_missing_commit_fails_naming_the_url() {
     assert!(error.to_string().contains(missing), "{error}");
     // Nothing was stored.
     let store = Store::open(root.path().join("store")).expect("store");
-    assert!(step_records(&gaia_step::logs_dir(&store)).is_empty());
+    // A failed body is recorded as failed, and names no output.
+    assert!(
+        step_records(&gaia_step::logs_dir(&store))
+            .iter()
+            .all(|r| r.report.failed && r.outputs.is_empty())
+    );
 
     let error = checkout(&root.path().join("store"), &remote.url, "main").expect_err("fails");
     println!("not a commit id: {error}");
@@ -298,5 +303,10 @@ fn a_missing_or_file_subdir_fails_naming_the_commit() {
 
     // Nothing was stored by either.
     let store = Store::open(&store).expect("store");
-    assert!(step_records(&gaia_step::logs_dir(&store)).is_empty());
+    // A failed body is recorded as failed, and names no output.
+    assert!(
+        step_records(&gaia_step::logs_dir(&store))
+            .iter()
+            .all(|r| r.report.failed && r.outputs.is_empty())
+    );
 }

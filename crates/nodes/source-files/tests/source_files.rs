@@ -372,7 +372,12 @@ fn a_wrong_digest_fails_with_both_digests() {
             .join(format!("{}.part", want.hex()))
             .exists()
     );
-    assert!(step_records(&logs_dir(&store)).is_empty());
+    // A failed body is recorded as failed, and names no output.
+    assert!(
+        step_records(&logs_dir(&store))
+            .iter()
+            .all(|r| r.report.failed && r.outputs.is_empty())
+    );
 }
 
 #[test]

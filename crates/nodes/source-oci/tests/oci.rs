@@ -464,7 +464,12 @@ fn every_digest_is_checked() {
         "{error}"
     );
     let store = Store::open(root.path().join("store")).expect("store");
-    assert!(gaia_step::step_records(&gaia_step::logs_dir(&store)).is_empty());
+    // A failed body is recorded as failed, and names no output.
+    assert!(
+        gaia_step::step_records(&gaia_step::logs_dir(&store))
+            .iter()
+            .all(|r| r.report.failed && r.outputs.is_empty())
+    );
 }
 
 #[test]

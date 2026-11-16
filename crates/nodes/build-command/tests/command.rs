@@ -243,9 +243,14 @@ fn an_undeclared_output_is_an_error_naming_it() {
         error.contains("declared output /out/blink.bin is not a file"),
         "{error}"
     );
-    // Nothing of a refused run is kept.
+    // Nothing of a refused run is kept: its record says the body ran and
+    // failed, and names no output.
     let store = Store::open(&f.store).expect("store");
-    assert!(step_records(&logs_dir(&store)).iter().all(|r| !r.made));
+    assert!(
+        step_records(&logs_dir(&store))
+            .iter()
+            .all(|r| !r.made || (r.report.failed && r.outputs.is_empty()))
+    );
 }
 
 #[test]
