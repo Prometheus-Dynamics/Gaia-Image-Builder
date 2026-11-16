@@ -105,9 +105,15 @@ pub struct Kernel {
     /// each a patch file, or a directory of patches (its `series` order,
     /// or its `*.patch` files by name), beside the board file (`file`) or
     /// in one of its sources (`source` and `path`). Applied strictly
-    /// (`patch -p1 --fuzz=0`). A board's list replaces its family's.
+    /// (`patch -p1 --fuzz=0`). A board's list follows its family's: the
+    /// family's entries are applied first, then the board's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patches: Option<Vec<FileRef>>,
+    /// `false` on a board: its `patches` replace its family's, and with no
+    /// `patches` the family's are dropped. Unset or `true`: they follow the
+    /// family's. Only a board that extends a family states it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inherit_patches: Option<bool>,
 }
 
 /// The bootloader: its source, configuration and the files it is built
@@ -126,9 +132,15 @@ pub struct Bootloader {
     /// each a patch file, or a directory of patches (its `series` order,
     /// or its `*.patch` files by name), beside the board file (`file`) or
     /// in one of its sources (`source` and `path`). Applied strictly
-    /// (`patch -p1 --fuzz=0`). A board's list replaces its family's.
+    /// (`patch -p1 --fuzz=0`). A board's list follows its family's: the
+    /// family's entries are applied first, then the board's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patches: Option<Vec<FileRef>>,
+    /// `false` on a board: its `patches` replace its family's, and with no
+    /// `patches` the family's are dropped. Unset or `true`: they follow the
+    /// family's. Only a board that extends a family states it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inherit_patches: Option<bool>,
 }
 
 /// Trusted firmware built for the bootloader to carry.
@@ -141,9 +153,15 @@ pub struct TrustedFirmware {
     /// each a patch file, or a directory of patches (its `series` order,
     /// or its `*.patch` files by name), beside the board file (`file`) or
     /// in one of its sources (`source` and `path`). Applied strictly
-    /// (`patch -p1 --fuzz=0`). A board's list replaces its family's.
+    /// (`patch -p1 --fuzz=0`). A board's list follows its family's: the
+    /// family's entries are applied first, then the board's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patches: Option<Vec<FileRef>>,
+    /// `false` on a board: its `patches` replace its family's, and with no
+    /// `patches` the family's are dropped. Unset or `true`: they follow the
+    /// family's. Only a board that extends a family states it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inherit_patches: Option<bool>,
 }
 
 /// One firmware file put into the image.
@@ -314,6 +332,7 @@ impl Board {
             }
         }
         check_refs(path, &board, &sources)?;
+        check_patch_lists(path, &board, family_path.as_deref().zip(family.as_ref()))?;
         let merged = match family {
             Some(family) => merge(board, family),
             None => board,
@@ -622,6 +641,102 @@ fn check_refs(
     Ok(())
 }
 
+/// A board's patch list with its family's: the family's entries first, then
+/// the board's. With `inherit` false the board's alone, which may be none.
+fn join_patches(
+    board: Option<Vec<FileRef>>,
+    family: Option<Vec<FileRef>>,
+    inherit: Option<bool>,
+) -> Option<Vec<FileRef>> {
+    if inherit == Some(false) {
+        return board;
+    }
+    match (family, board) {
+        (Some(mut all), Some(board)) => {
+            all.extend(board);
+            Some(all)
+        }
+        (family, board) => board.or(family),
+    }
+}
+
+/// The three patch lists of a board file with their keys and `inherit_patches`.
+type PatchLists<'a> = [(&'static str, Option<&'a Vec<FileRef>>, Option<bool>); 3];
+
+fn patch_lists(file: &BoardFile) -> PatchLists<'_> {
+    let kernel = file.kernel.as_ref();
+    let bootloader = file.bootloader.as_ref();
+    let tf = bootloader.and_then(|b| b.trusted_firmware.as_ref());
+    [
+        (
+            "kernel",
+            kernel.and_then(|k| k.patches.as_ref()),
+            kernel.and_then(|k| k.inherit_patches),
+        ),
+        (
+            "bootloader",
+            bootloader.and_then(|b| b.patches.as_ref()),
+            bootloader.and_then(|b| b.inherit_patches),
+        ),
+        (
+            "bootloader.trusted_firmware",
+            tf.and_then(|t| t.patches.as_ref()),
+            tf.and_then(|t| t.inherit_patches),
+        ),
+    ]
+}
+
+/// What `inherit_patches` and a board's patch lists may not be: stated by a
+/// family or by a board with no family, and an entry of the family's list
+/// stated again by a board that inherits it (it would be applied twice).
+fn check_patch_lists(
+    path: &Path,
+    board: &BoardFile,
+    family: Option<(&Path, &BoardFile)>,
+) -> Result<(), Error> {
+    let Some((family_path, family)) = family else {
+        for (key, _, inherit) in patch_lists(board) {
+            if inherit.is_some() {
+                return Err(Error::new(
+                    path,
+                    format!("{key}.inherit_patches"),
+                    "this board extends no family, so it has no patches to inherit: remove the key",
+                ));
+            }
+        }
+        return Ok(());
+    };
+    for (key, _, inherit) in patch_lists(family) {
+        if inherit.is_some() {
+            return Err(Error::new(
+                family_path,
+                format!("{key}.inherit_patches"),
+                "a family inherits nothing; only a board that extends it states this key",
+            ));
+        }
+    }
+    for ((key, mine, inherit), (_, theirs, _)) in
+        patch_lists(board).into_iter().zip(patch_lists(family))
+    {
+        if inherit == Some(false) {
+            continue;
+        }
+        for (index, entry) in mine.into_iter().flatten().enumerate() {
+            if theirs.is_some_and(|theirs| theirs.contains(entry)) {
+                return Err(Error::new(
+                    path,
+                    format!("{key}.patches[{index}]"),
+                    format!(
+                        "this entry is in the family's list ({}) already, and a board's patches follow its family's: remove it here, or set `inherit_patches = false` in [{key}] to replace the family's list",
+                        family_path.display()
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// `board` over `family`.
 fn merge(board: BoardFile, family: BoardFile) -> BoardFile {
     BoardFile {
@@ -654,7 +769,8 @@ fn merge(board: BoardFile, family: BoardFile) -> BoardFile {
                 storage_drivers: b.storage_drivers.or(f.storage_drivers),
                 cmdline: b.cmdline.or(f.cmdline),
                 image: b.image.or(f.image),
-                patches: b.patches.or(f.patches),
+                patches: join_patches(b.patches, f.patches, b.inherit_patches),
+                inherit_patches: None,
             }),
             (b, f) => b.or(f),
         },
@@ -668,12 +784,14 @@ fn merge(board: BoardFile, family: BoardFile) -> BoardFile {
                     blobs.extend(b.blobs);
                     blobs
                 },
-                patches: b.patches.or(f.patches),
+                patches: join_patches(b.patches, f.patches, b.inherit_patches),
+                inherit_patches: None,
                 trusted_firmware: match (b.trusted_firmware, f.trusted_firmware) {
                     (Some(b), Some(f)) => Some(TrustedFirmware {
                         source: b.source.or(f.source),
                         platform: b.platform.or(f.platform),
-                        patches: b.patches.or(f.patches),
+                        patches: join_patches(b.patches, f.patches, b.inherit_patches),
+                        inherit_patches: None,
                     }),
                     (b, f) => b.or(f),
                 },
