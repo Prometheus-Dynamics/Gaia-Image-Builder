@@ -99,7 +99,6 @@ type = "0fc63daf-8483-4772-8e79-3d69d8477de4"
 name = "data"
 role = "data"
 type = "0fc63daf-8483-4772-8e79-3d69d8477de4"
-size = "64M"
 
 [disk]
 scheme = "gpt"
