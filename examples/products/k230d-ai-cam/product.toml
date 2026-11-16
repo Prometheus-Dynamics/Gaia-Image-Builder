@@ -3,12 +3,15 @@
 # the environment at 3 MiB; OpenSBI; mainline Linux 7.3.3 with the board's dts), on
 # Buildroot. The image goes to an SD card ONLY (removable); it is never written to
 # internal flash, so a bad image is recovered by swapping the card.
-# Untested on board, and never built. Interim, until gaia.firmware.k230 is a node
-# and Gaia builds the tool from crates/nodes/k230-image:
-# - the tool is the staged release binary k230-firstage (sha256 b425fb06…,
-#   built from crates/nodes/k230-image at 292c9f31), named by [sources.k230-tool]
-#   below as a path source (a directory holding only that file), so its store path
-#   reaches the post-image through BR2_ROOTFS_POST_SCRIPT_ARGS;
+# Untested on board, and never built. Interim, until the gaia.firmware.k230 step is a node:
+# - the wrap tool is given beside this file: interim: the wrap tool is given beside this
+#   file; build it with `cargo build --release -p gaia-k230-image` and link or copy
+#   target/release/k230-firstage here (k230-firstage, not committed: see .gitignore).
+#   Gaia stores that single file as 0644 (the execute bit is dropped), so the
+#   post-image copies it and sets +x itself.
+#   Tonight it is a symlink to the staged release binary (sha256 b425fb06…, built
+#   from crates/nodes/k230-image at 292c9f31). The OS fragment names it as
+#   @here@/k230-firstage, so it reaches post-image.sh as its second argument.
 # - the environment and the boot files are made by post-image.sh (U-Boot's own
 #   mkenvimage from the build tree, and the kernel Image into /boot by Buildroot).
 version = 1

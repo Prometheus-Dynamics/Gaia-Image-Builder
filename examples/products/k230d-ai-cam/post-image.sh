@@ -17,7 +17,12 @@
 # Untested: this script has not run in a Buildroot build yet.
 set -e
 # $1 is the images dir (Buildroot), $2 the tool (BR2_ROOTFS_POST_SCRIPT_ARGS).
-tool="${2:?the k230-firstage tool path is the post-image's second argument}"
+# Gaia stores a file input as 0644 (gaia.source.input drops the execute bit), so the
+# tool is copied to a scratch file here and made executable; no interpreter runs it.
+tool_src="${2:?the k230-firstage tool path is the post-image's second argument}"
+tool="$BUILD_DIR/k230-firstage-exec"
+cp "$tool_src" "$tool"
+chmod +x "$tool"
 uboot_build=$(ls -d "$BUILD_DIR"/uboot-* | head -n 1)
 dtb=k230d-ai-cam.dtb
 cd "$BINARIES_DIR"
