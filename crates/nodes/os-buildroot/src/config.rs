@@ -46,6 +46,93 @@ fn check(name: &str) -> Result<&str, String> {
     }
 }
 
+/// The toolchain a build starts from when no description picks one: Bootlin's
+/// prebuilt glibc toolchain, the stable release, for the build's architecture.
+/// Each variant is named with the description lines that name its
+/// architecture (see [`VARIANTS`]).
+///
+/// Buildroot's choice of Bootlin variant has no default of its own, so Kconfig
+/// takes the first variant that fits, the bleeding-edge one, unless a variant
+/// is named. Only the variant for the build's own architecture is written: a
+/// line for another variant takes the choice over even when it does not fit,
+/// and Kconfig then drops it and falls back.
+const BOOTLIN: &str = "\
+BR2_TOOLCHAIN_EXTERNAL=y
+BR2_TOOLCHAIN_EXTERNAL_BOOTLIN=y
+";
+
+/// The stable glibc variant for each architecture: the description lines that
+/// name the architecture, and the variant's line. The 32-bit ARM variant is
+/// the hard-float ARMv7 one; an ARM build that is not ARMv7 hard-float gets
+/// Kconfig's own pick, as a build with no architecture line does.
+const VARIANTS: [(&[&str], &str); 5] = [
+    (
+        &["BR2_aarch64=y"],
+        "BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_AARCH64_GLIBC_STABLE=y",
+    ),
+    (
+        &["BR2_x86_64=y"],
+        "BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_X86_64_GLIBC_STABLE=y",
+    ),
+    (
+        &["BR2_arm=y"],
+        "BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_ARMV7_EABIHF_GLIBC_STABLE=y",
+    ),
+    (
+        &["BR2_riscv=y", "BR2_RISCV_64=y"],
+        "BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_RISCV64_LP64D_GLIBC_STABLE=y",
+    ),
+    (
+        &["BR2_riscv=y", "BR2_RISCV_32=y"],
+        "BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_RISCV32_ILP32D_GLIBC_STABLE=y",
+    ),
+];
+
+/// The fragment that starts every build with the toolchain default: none when
+/// a description sets or unsets a Buildroot or external toolchain option, since
+/// that description chose its own toolchain. `descriptions` are the config's
+/// fragments as written, in order. Lines that do not parse are left for
+/// [`merge`] to refuse.
+pub fn defaults(descriptions: &[ConfigFragment]) -> Vec<ConfigFragment> {
+    let chooses = descriptions.iter().any(|fragment| {
+        fragment
+            .text
+            .lines()
+            .filter_map(|line| symbol(line).ok().flatten())
+            .any(chooses_toolchain)
+    });
+    if chooses {
+        return Vec::new();
+    }
+    let mut text = BOOTLIN.to_string();
+    if let Some(variant) = variant(descriptions) {
+        text.push_str(variant);
+        text.push('\n');
+    }
+    vec![ConfigFragment {
+        name: "gaia.toolchain".into(),
+        text,
+    }]
+}
+
+/// The variant line for the architecture the descriptions name, if one does.
+fn variant(descriptions: &[ConfigFragment]) -> Option<&'static str> {
+    let names = |line: &str| {
+        descriptions
+            .iter()
+            .any(|fragment| fragment.text.lines().any(|text| text.trim() == line))
+    };
+    VARIANTS
+        .iter()
+        .find(|(lines, _)| lines.iter().all(|line| names(line)))
+        .map(|(_, variant)| *variant)
+}
+
+/// Whether a symbol is one of the options that pick a toolchain.
+fn chooses_toolchain(name: &str) -> bool {
+    name.starts_with("BR2_TOOLCHAIN_BUILDROOT") || name.starts_with("BR2_TOOLCHAIN_EXTERNAL")
+}
+
 /// `base` with every fragment applied in order. Each line of a fragment
 /// drops the lines of the same symbol before it, then is added. The result
 /// ends with a newline.
@@ -238,6 +325,112 @@ mod tests {
             name: name.into(),
             text: text.into(),
         }
+    }
+
+    /// The toolchain default is there when no description chooses one: the
+    /// two Bootlin lines, and the stable variant for the architecture the
+    /// descriptions name. A description's own line replaces the default's.
+    #[test]
+    fn the_toolchain_default_is_there_unless_a_description_chooses_one() {
+        let arm64 = [fragment("board.target", "BR2_aarch64=y\n")];
+        let defaults = defaults(&arm64);
+        assert_eq!(defaults.len(), 1);
+        assert_eq!(defaults[0].name, "gaia.toolchain");
+        assert_eq!(
+            defaults[0].text,
+            "BR2_TOOLCHAIN_EXTERNAL=y\nBR2_TOOLCHAIN_EXTERNAL_BOOTLIN=y\n\
+             BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_AARCH64_GLIBC_STABLE=y\n"
+        );
+        let merged = merge(
+            "BR2_aarch64=y\n",
+            &[
+                defaults[0].clone(),
+                fragment("image", "BR2_PACKAGE_BUSYBOX=y\n"),
+            ],
+        )
+        .expect("merge");
+        assert_eq!(
+            merged,
+            "BR2_aarch64=y\nBR2_TOOLCHAIN_EXTERNAL=y\nBR2_TOOLCHAIN_EXTERNAL_BOOTLIN=y\n\
+             BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_AARCH64_GLIBC_STABLE=y\nBR2_PACKAGE_BUSYBOX=y\n"
+        );
+        // A description's line for the same symbol replaces the default's.
+        let replaced = merge(
+            "",
+            &[
+                defaults[0].clone(),
+                fragment(
+                    "board",
+                    "BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_AARCH64_GLIBC_STABLE=n\n",
+                ),
+            ],
+        )
+        .expect("merge");
+        assert!(!replaced.contains("AARCH64_GLIBC_STABLE=y"), "{replaced}");
+    }
+
+    /// Only the variant for the build's own architecture is written, so no
+    /// other variant's line takes the choice over.
+    #[test]
+    fn the_default_names_only_its_own_architectures_variant() {
+        let variant_of = |descriptions: &[ConfigFragment]| {
+            let text = &defaults(descriptions)[0].text;
+            text.lines()
+                .filter(|line| line.starts_with("BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_"))
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            variant_of(&[fragment("t", "BR2_x86_64=y\n")]),
+            ["BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_X86_64_GLIBC_STABLE=y"]
+        );
+        assert_eq!(
+            variant_of(&[fragment("t", "BR2_arm=y\n")]),
+            ["BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_ARMV7_EABIHF_GLIBC_STABLE=y"]
+        );
+        // RISC-V names its width as well as its architecture.
+        assert_eq!(
+            variant_of(&[fragment("t", "BR2_riscv=y\nBR2_RISCV_64=y\n")]),
+            ["BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_RISCV64_LP64D_GLIBC_STABLE=y"]
+        );
+        assert_eq!(
+            variant_of(&[fragment("t", "BR2_riscv=y\nBR2_RISCV_32=y\n")]),
+            ["BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_RISCV32_ILP32D_GLIBC_STABLE=y"]
+        );
+        // No architecture line, no variant: Kconfig's own pick.
+        let none = defaults(&[fragment("t", "BR2_PACKAGE_BUSYBOX=y\n")]);
+        assert_eq!(
+            none[0].text,
+            "BR2_TOOLCHAIN_EXTERNAL=y\nBR2_TOOLCHAIN_EXTERNAL_BOOTLIN=y\n"
+        );
+    }
+
+    /// A description that sets or unsets a Buildroot or external toolchain
+    /// option, in any form, chooses the toolchain, and the default is left out.
+    #[test]
+    fn the_toolchain_default_is_left_out_when_a_description_chooses_one() {
+        for text in [
+            "BR2_TOOLCHAIN_BUILDROOT=y\n",
+            "BR2_TOOLCHAIN_BUILDROOT_GLIBC=y\n",
+            "# BR2_TOOLCHAIN_BUILDROOT is not set\n",
+            "BR2_TOOLCHAIN_EXTERNAL=y\n",
+            "BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_AARCH64_GLIBC_BLEEDING_EDGE=y\n",
+            "BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_RISCV64_LP64D_GLIBC_STABLE=y\n",
+            "# BR2_TOOLCHAIN_EXTERNAL_BOOTLIN is not set\n",
+        ] {
+            let descriptions = [
+                fragment("board.target", "BR2_aarch64=y\n"),
+                fragment("image", text),
+            ];
+            assert!(defaults(&descriptions).is_empty(), "{text:?}");
+        }
+        // A symbol that only starts like one of them is not a toolchain option.
+        assert_eq!(
+            defaults(&[fragment("image", "BR2_TOOLCHAIN_HEADERS_AT_LEAST_5_4=y\n")]).len(),
+            1
+        );
+        // And with no descriptions at all, the default is there.
+        assert_eq!(defaults(&[]).len(), 1);
     }
 
     #[test]
