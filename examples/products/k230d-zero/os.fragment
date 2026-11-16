@@ -11,21 +11,15 @@ BR2_TARGET_GENERIC_ISSUE="Welcome to the CanMV K230D Zero"
 BR2_SYSTEM_DHCP="eth0"
 BR2_PACKAGE_BUSYBOX=y
 BR2_PACKAGE_DROPBEAR=y
-BR2_TARGET_ROOTFS_EXT2=y
-BR2_TARGET_ROOTFS_EXT2_4=y
-BR2_TARGET_ROOTFS_EXT2_SIZE="256M"
 BR2_TARGET_OPENSBI=y
 BR2_TARGET_OPENSBI_PLAT="generic"
 BR2_TARGET_UBOOT=y
 BR2_PACKAGE_HOST_EROFS_UTILS=y
+# Interim: until the Rust verity lands (another worker); then this line goes.
 BR2_PACKAGE_HOST_CRYPTSETUP=y
-# U-Boot's host tools (the junroc config sets CONFIG_FIT_SIGNATURE: openssl/engine.h
-# is needed on the host), and dtc, pylibfdt and pyelftools for its build. Buildroot's
-# host packages supply them.
+# U-Boot's host tools need openssl/engine.h (the junroc config sets CONFIG_FIT_SIGNATURE);
+# Buildroot's host OpenSSL supplies it. This U-Boot config has no binman and builds its own dtc.
 BR2_TARGET_UBOOT_NEEDS_OPENSSL=y
-BR2_TARGET_UBOOT_NEEDS_DTC=y
-BR2_TARGET_UBOOT_NEEDS_PYLIBFDT=y
-BR2_TARGET_UBOOT_NEEDS_PYELFTOOLS=y
 
 # The bootloader's binaries into images/ for the family's wrapped areas (SPL, U-Boot,
 # OpenSBI fw_jump.bin), as the AI-CAM's fragment has them.
