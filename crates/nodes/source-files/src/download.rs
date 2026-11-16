@@ -77,7 +77,16 @@ pub fn source_download(
                     format!("{url}: digest mismatch: the lock says {want}, the download is {got}"),
                 ));
             }
-            fs::rename(&partial, work.dir().join("file")).map_err(|e| StepError::body(NAME, e))
+            // The partial file is beside the store, and the store may be a
+            // file system of its own (a subvolume): then it is copied over.
+            let file = work.dir().join("file");
+            match fs::rename(&partial, &file) {
+                Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
+                    fs::copy(&partial, &file).and_then(|_| fs::remove_file(&partial))
+                }
+                done => done,
+            }
+            .map_err(|e| StepError::body(NAME, e))
         },
     )?;
     Ok(Artifact {
