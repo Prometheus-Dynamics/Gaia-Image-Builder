@@ -37,9 +37,17 @@ fn plan(dir: &Path, extra: &[&str]) -> Output {
 
 /// `plan` with environment variables set for the run.
 fn plan_env(dir: &Path, extra: &[&str], env: &[(&str, &str)]) -> Output {
+    plan_product_env(dir, "examples/products/zero-3e-demo/product.toml", extra, env)
+}
+
+fn plan_product(dir: &Path, product: &str, extra: &[&str]) -> Output {
+    plan_product_env(dir, product, extra, &[])
+}
+
+fn plan_product_env(dir: &Path, product: &str, extra: &[&str], env: &[(&str, &str)]) -> Output {
     let mut args = vec![
         "plan",
-        "examples/products/zero-3e-demo/product.toml",
+        product,
         "--recipes",
         "recipes",
         "--tool",
@@ -2234,4 +2242,40 @@ fn without_users_or_services_there_is_no_accounts_or_services_layer() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(!text.contains("zero-3e-demo.accounts"));
     assert!(!text.contains("zero-3e-demo.services"));
+}
+
+/// The K230D AI-CAM: its wrapped areas are gaia.firmware.k230 nodes between the
+/// bootloader output and their blobs; an area without a wrap is planned as before.
+#[test]
+fn the_k230_wrapped_areas_go_through_firmware_k230() {
+    let dir = project();
+    let out = plan_product(dir.path(), "examples/products/k230d-ai-cam/product.toml", &[]);
+    assert_eq!(out.status.code(), Some(0));
+    let text = String::from_utf8_lossy(&out.stdout);
+    for line in [
+        "k230d-ai-cam.wrap.spl  ",
+        "k230d-ai-cam.wrap.uboot-opensbi  ",
+    ] {
+        assert!(text.contains(line), "missing node {line:?}\n{text}");
+    }
+    for edge in [
+        "k230d-ai-cam.bootloader.bootloader -> k230d-ai-cam.wrap.spl.from",
+        "k230d-ai-cam.wrap.spl.wrapped -> k230d-ai-cam.blob.spl.from",
+        "k230d-ai-cam.bootloader.bootloader -> k230d-ai-cam.wrap.uboot.from",
+        "k230d-ai-cam.wrap.uboot.wrapped -> k230d-ai-cam.blob.uboot.from",
+        "k230d-ai-cam.bootloader.bootloader -> k230d-ai-cam.wrap.uboot-opensbi.from",
+        "k230d-ai-cam.wrap.uboot-opensbi.wrapped -> k230d-ai-cam.blob.uboot-opensbi.from",
+    ] {
+        assert!(text.contains(edge), "missing edge {edge:?}\n{text}");
+    }
+    // The environment area has no wrap: its blob takes the bootloader output directly.
+    assert!(
+        text.contains("k230d-ai-cam.bootloader.bootloader -> k230d-ai-cam.blob.uboot-env.from"),
+        "{text}"
+    );
+    assert!(!text.contains("k230d-ai-cam.wrap.uboot-env"), "{text}");
+    assert!(
+        text.contains("BR2_TARGET_UBOOT_BOARD_DEFCONFIG=\"k230d_canmv_junroc_ai_cam\""),
+        "{text}"
+    );
 }
