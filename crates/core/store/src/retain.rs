@@ -38,17 +38,28 @@ pub struct RetainReport {
 impl Store {
     /// Removes every entry not in `keep`, every object neither `keep` nor a
     /// kept entry names, and what dead processes left in `scratch/`. With
-    /// `apply` false, only reports what it would remove.
+    /// `apply` false, only reports what it would remove. What is removed is
+    /// first renamed into `trash/`, and the trash is emptied last.
     ///
     /// Run it alone: a step committing meanwhile could lose an object
-    /// between its commit and its entry.
+    /// between its commit and its entry, and the trash is emptied while
+    /// nothing else may be using it.
     pub fn retain(&self, keep: &Keep, apply: bool) -> Result<RetainReport> {
         let mut report = RetainReport::default();
         let mut objects = keep.objects.clone();
+        let trash = self.root().join("trash");
+        // What the trash held before this run: counted when it is emptied.
+        // What this run moves there was counted when it was moved.
+        let waiting: BTreeSet<String> = children(&trash)?
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        // Moves what is removed to the trash, where the removal happens at
+        // the end, once nothing else is left to do (see `lib`).
         let remove = |path: &Path, report: &mut RetainReport| -> Result<()> {
             report.bytes_removed += disk_bytes(path);
             if apply {
-                fsutil::remove_tree(path)?;
+                fsutil::bury(path, &trash)?;
             }
             Ok(())
         };
@@ -107,8 +118,24 @@ impl Store {
             for (name, path) in children(&ram)? {
                 if !fsutil::name_pid(&name).is_some_and(fsutil::process_alive) {
                     report.leftovers_removed += 1;
-                    remove(&path, &mut report)?;
+                    report.bytes_removed += disk_bytes(&path);
+                    if apply {
+                        fsutil::remove_tree(&path)?;
+                    }
                 }
+            }
+        }
+
+        // Everything moved to the trash, by this run or by a dropped scratch
+        // since the last one. Only here does a tree get removed: this is the
+        // step that runs alone.
+        for (name, path) in children(&trash)? {
+            if waiting.contains(&name) {
+                report.leftovers_removed += 1;
+                report.bytes_removed += disk_bytes(&path);
+            }
+            if apply {
+                fsutil::remove_tree(&path)?;
             }
         }
         Ok(report)

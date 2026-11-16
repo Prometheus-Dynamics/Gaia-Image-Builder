@@ -10,9 +10,11 @@ use std::path::{Component, Path, PathBuf};
 /// One step's output directory. Committing moves the named outputs into the
 /// store; dropping it without a commit removes everything in it.
 ///
-/// A RAM work directory (see [`crate::Store::scratch_for`]) holds its claim
-/// on the RAM budget until it is dropped, and the outputs committed from it
-/// are copied to the store, since the store's disk is another file system.
+/// A disk scratch directory lives inside the store (in its subvolume, when
+/// it has one), so committing an output is a rename. A RAM work directory
+/// (see [`crate::Store::scratch_for`]) holds its claim on the RAM budget
+/// until it is dropped, and the outputs committed from it are copied to the
+/// store, since the store's disk is another file system.
 #[derive(Debug)]
 pub struct Scratch<'s> {
     store: &'s Store,
@@ -151,8 +153,15 @@ impl<'s> Scratch<'s> {
 impl Drop for Scratch<'_> {
     fn drop(&mut self) {
         // Nothing is kept in RAM after the step: a failed step's outputs go
-        // with it, and its log is written elsewhere.
-        let _ = fsutil::remove_tree(&self.dir);
+        // with it, and its log is written elsewhere. A disk scratch is moved
+        // to the store's trash instead: removing a tree on the store's disk
+        // while other steps run would block them (see the module docs of
+        // `lib`). The trash is emptied by `Store::retain`.
+        let _ = if self.in_memory() {
+            fsutil::remove_tree(&self.dir)
+        } else {
+            fsutil::bury(&self.dir, &self.store.root().join("trash"))
+        };
     }
 }
 
@@ -421,6 +430,84 @@ mod tests {
             .expect("scratch");
         assert!(!big.in_memory(), "a step over the cap never takes RAM");
         assert_eq!(budget.in_use(), 0);
+    }
+
+    #[test]
+    fn a_dropped_disk_scratch_goes_to_the_trash() {
+        let base = tempfile::tempdir().expect("tempdir");
+        let (store, _) = store_in(base.path());
+        let scratch = store.scratch().expect("scratch");
+        let dir = scratch.path().to_path_buf();
+        output_tree(&dir.join("out"));
+        scratch.discard();
+        assert!(!dir.exists(), "the dropped scratch is gone from its place");
+        let trash = store.root().join("trash");
+        assert_eq!(fs::read_dir(&trash).expect("trash").count(), 1);
+        store.retain(&crate::Keep::default(), true).expect("retain");
+        assert_eq!(fs::read_dir(&trash).expect("trash").count(), 0);
+    }
+
+    #[test]
+    fn a_commit_of_an_object_already_there_leaves_its_copy_to_the_drop() {
+        let base = tempfile::tempdir().expect("tempdir");
+        let (store, _) = store_in(base.path());
+        let first = store.scratch().expect("scratch");
+        output_tree(&first.path().join("out"));
+        first.commit(&[("out", Path::new("out"))]).expect("first");
+        let second = store.scratch().expect("scratch");
+        let dir = second.path().to_path_buf();
+        output_tree(&dir.join("out"));
+        let made = second.commit(&[("out", Path::new("out"))]).expect("second");
+        assert!(store.check(&made["out"], Check::Digest));
+        assert!(!dir.exists(), "the drop removes what the commit left");
+    }
+
+    #[test]
+    fn a_new_store_is_a_subvolume_where_its_parent_is_btrfs() {
+        let base = tempfile::tempdir().expect("tempdir");
+        let (store, _) = store_in(base.path());
+        assert_eq!(
+            fsutil::is_subvolume(store.root()),
+            fsutil::on_btrfs(base.path())
+        );
+        // Everything a step needs is there either way.
+        let scratch = store.scratch().expect("scratch");
+        output_tree(&scratch.path().join("out"));
+        let made = scratch
+            .commit(&[("out", Path::new("out"))])
+            .expect("commit");
+        assert!(store.check(&made["out"], Check::Digest));
+    }
+
+    #[test]
+    fn a_store_on_a_file_system_without_subvolumes_is_a_directory() {
+        // /dev/shm is tmpfs: never btrfs.
+        let Ok(shm) = tempfile::Builder::new().tempdir_in("/dev/shm") else {
+            return;
+        };
+        let store = Store::open(shm.path().join("store")).expect("store");
+        assert!(store.root().is_dir());
+        assert!(!fsutil::is_subvolume(store.root()));
+        let scratch = store.scratch().expect("scratch");
+        output_tree(&scratch.path().join("out"));
+        assert!(scratch.commit(&[("out", Path::new("out"))]).is_ok());
+    }
+
+    #[test]
+    fn a_dead_process_scratch_is_swept_to_the_trash_and_emptied() {
+        let base = tempfile::tempdir().expect("tempdir");
+        let (store, _) = store_in(base.path());
+        // A pid no process has (above the kernel's pid limit).
+        let dead = store.root().join("scratch").join("999999999-0-1");
+        output_tree(&dead.join("out"));
+        let dry = store.retain(&crate::Keep::default(), false).expect("dry");
+        assert!(dead.exists(), "a dry run removes nothing");
+        assert_eq!(dry.leftovers_removed, 1);
+        let applied = store.retain(&crate::Keep::default(), true).expect("apply");
+        assert!(!dead.exists());
+        assert_eq!(applied.leftovers_removed, 1, "counted once, not twice");
+        let trash = store.root().join("trash");
+        assert_eq!(fs::read_dir(&trash).expect("trash").count(), 0);
     }
 
     #[test]

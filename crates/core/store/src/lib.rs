@@ -22,7 +22,28 @@
 //! objects/tree/<2 hex>/<64 hex>/    a tree, by its tree digest
 //! entries/<2 hex>/<64 hex>.json     a step entry, by step key
 //! scratch/<pid>-<n>/                steps at work
+//! trash/<pid>-<n>-<nanos>/          what was dropped, awaiting removal
 //! ```
+//!
+//! **Subvolumes.** On btrfs, a store created by [`Store::open`] is a btrfs
+//! subvolume, not a plain directory. Everything in one btrfs subvolume shares
+//! one file system tree and its locks, so a store that shares a subvolume
+//! with other work trees waits on them for every metadata operation. A
+//! subvolume has a tree of its own: the store's scratch writes, commits and
+//! removals contend only with each other. Its scratch directories are plain
+//! directories inside it, so a commit is a rename into `objects/`, which is
+//! free. A store on another file system, or a store that already exists, is
+//! a plain directory, and nothing else changes. See `fsutil::make_root`.
+//!
+//! **Trash.** Removing a tree of millions of small files takes an hour on a
+//! busy disk, and blocks the steps around it. So a dropped scratch directory,
+//! or an object or entry that [`Store::retain`] removes, is renamed into
+//! `trash/` (instant, same subvolume), and [`Store::retain`] empties `trash/`
+//! at the end of its run, when it is run alone. Deleting a btrfs subvolume
+//! needs privilege, unless the mount has the `user_subvol_rm_allowed` option,
+//! so a subvolume per scratch directory would not make its removal cheaper:
+//! the rename into `trash/` is what makes it instant. The option is for the
+//! machine's owner to decide; the store does not need it.
 
 mod digest;
 mod entry;
@@ -65,10 +86,19 @@ pub enum Check {
 }
 
 impl Store {
-    /// Opens the store at `root`, creating its directories when missing.
+    /// Opens the store at `root`, creating it when missing: as a btrfs
+    /// subvolume when its parent is on btrfs (see the module docs), and its
+    /// directories when they are missing.
     pub fn open(root: impl Into<PathBuf>) -> Result<Self> {
         let root = root.into();
-        for dir in ["objects/file", "objects/tree", "entries", "scratch"] {
+        fsutil::make_root(&root)?;
+        for dir in [
+            "objects/file",
+            "objects/tree",
+            "entries",
+            "scratch",
+            "trash",
+        ] {
             let path = root.join(dir);
             fs::create_dir_all(&path).map_err(|e| Error::io("create", &path, e))?;
         }
