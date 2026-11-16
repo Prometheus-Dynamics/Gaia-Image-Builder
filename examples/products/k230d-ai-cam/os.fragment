@@ -19,7 +19,6 @@ BR2_TARGET_OPENSBI_ADDITIONAL_VARIABLES="FW_TEXT_START=0"
 BR2_TARGET_UBOOT=y
 BR2_PACKAGE_HOST_EROFS_UTILS=y
 # Interim: until the Rust verity lands (another worker); then this line goes.
-BR2_PACKAGE_HOST_CRYPTSETUP=y
 # U-Boot's host tools need openssl/engine.h (the junroc config sets CONFIG_FIT_SIGNATURE);
 # Buildroot's host OpenSSL supplies it. This U-Boot config has no binman and builds its own dtc.
 BR2_TARGET_UBOOT_NEEDS_OPENSSL=y
