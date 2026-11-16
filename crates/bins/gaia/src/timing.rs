@@ -1,0 +1,381 @@
+//! Where a build's time went: the items that took the most wall time, and
+//! the critical path. Both are read from a run's steps, which a build
+//! prints at its end and keeps in its record.
+
+use crate::record::{PathStep, Step};
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BTreeSet};
+
+/// How many items the table shows.
+pub const TOP: usize = 10;
+/// The step detail that names a Buildroot make's packages. The packages
+/// are items of their own in the table.
+const PACKAGES: &str = "packages";
+
+/// The graph the steps came from: every node's id, and the ids of the nodes
+/// it takes from directly.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Deps {
+    pub nodes: BTreeSet<String>,
+    pub upstream: BTreeMap<String, BTreeSet<String>>,
+}
+
+/// What a row of the table is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Kind {
+    Step,
+    Package,
+}
+
+/// One row of the table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Item {
+    pub kind: Kind,
+    pub name: String,
+    pub wall_ms: u64,
+    /// CPU time of the step's tools. A package's CPU time is not measured,
+    /// so a package has none.
+    pub cpu_ms: Option<u64>,
+    pub jobs: Option<u32>,
+    /// Whether it was made (not found in the store). A package always was.
+    pub made: bool,
+}
+
+/// The `n` items that took the most wall time, most first: the steps and
+/// the packages their details name, ties broken by kind (steps first) and
+/// name.
+pub fn top_items(steps: &[Step], n: usize) -> Vec<Item> {
+    let mut items = Vec::new();
+    for step in steps {
+        items.push(Item {
+            kind: Kind::Step,
+            name: step.step.clone(),
+            wall_ms: step.ms,
+            cpu_ms: Some(step.cpu_ms),
+            jobs: step.jobs,
+            made: step.made,
+        });
+        let Some(packages) = step.details.get(PACKAGES).and_then(|v| v.as_array()) else {
+            continue;
+        };
+        for package in packages {
+            let (Some(name), Some(total)) = (
+                package.get("name").and_then(|v| v.as_str()),
+                package.get("total_s").and_then(|v| v.as_f64()),
+            ) else {
+                continue;
+            };
+            items.push(Item {
+                kind: Kind::Package,
+                name: name.to_string(),
+                wall_ms: (total * 1_000.0).round().max(0.0) as u64,
+                cpu_ms: None,
+                jobs: step.jobs,
+                made: true,
+            });
+        }
+    }
+    items.sort_by_key(|item| (Reverse(item.wall_ms), item.kind, item.name.clone()));
+    items.truncate(n);
+    items
+}
+
+/// The node a step belongs to: the step's own name when it is a node, else
+/// the longest node whose id the name extends with `-` (a node's helper
+/// step, such as `<node>-plan`).
+fn node_of<'a>(step: &'a str, deps: &'a Deps) -> Option<&'a str> {
+    if let Some(node) = deps.nodes.get(step) {
+        return Some(node.as_str());
+    }
+    deps.nodes
+        .iter()
+        .filter(|node| {
+            step.strip_prefix(node.as_str())
+                .is_some_and(|rest| rest.starts_with('-'))
+        })
+        .max_by_key(|node| node.len())
+        .map(String::as_str)
+}
+
+/// Every node `node` takes from, directly or through others.
+fn upstream_of(node: &str, deps: &Deps) -> BTreeSet<String> {
+    let mut seen = BTreeSet::new();
+    let mut todo = vec![node.to_string()];
+    while let Some(current) = todo.pop() {
+        for dep in deps.upstream.get(&current).into_iter().flatten() {
+            if seen.insert(dep.clone()) {
+                todo.push(dep.clone());
+            }
+        }
+    }
+    seen
+}
+
+/// The chain of steps that set the run's end, first to last. It starts at
+/// the step that ended last, and each step before it is the one that ended
+/// last among those it depends on, which had to end before it began. A
+/// step with no node in the graph depends on nothing and is not chained
+/// to. Steps without times (a record from before they were kept) give no
+/// path.
+pub fn critical_path(steps: &[Step], deps: &Deps) -> Vec<PathStep> {
+    let timed = |step: &Step| step.end_ns > 0;
+    let Some(last) = steps
+        .iter()
+        .enumerate()
+        .filter(|(_, step)| timed(step))
+        .max_by_key(|(index, step)| (step.end_ns, *index))
+        .map(|(index, _)| index)
+    else {
+        return Vec::new();
+    };
+    let mut chain = vec![last];
+    while let Some(&current) = chain.last() {
+        let Some(node) = node_of(&steps[current].step, deps) else {
+            break;
+        };
+        let upstream = upstream_of(node, deps);
+        let started = steps[current].start_ns;
+        let before = (0..steps.len()).filter(|&other| {
+            other != current
+                && timed(&steps[other])
+                && steps[other].end_ns <= started
+                && node_of(&steps[other].step, deps)
+                    .is_some_and(|other_node| other_node == node || upstream.contains(other_node))
+        });
+        match before.max_by_key(|&other| (steps[other].end_ns, other)) {
+            Some(other) => chain.push(other),
+            None => break,
+        }
+    }
+    chain
+        .into_iter()
+        .rev()
+        .map(|index| PathStep {
+            step: steps[index].step.clone(),
+            ms: steps[index].ms,
+        })
+        .collect()
+}
+
+/// Seconds, to a tenth, for the table.
+fn secs(ms: u64) -> String {
+    format!("{:.1}", ms as f64 / 1_000.0)
+}
+
+/// The table and the critical path, as the lines `gaia build` prints.
+pub fn report(items: &[Item], path: &[PathStep]) -> String {
+    let mut text = String::new();
+    if !items.is_empty() {
+        let width = items
+            .iter()
+            .map(|item| item.name.len())
+            .max()
+            .unwrap_or(4)
+            .max(4);
+        text.push_str(&format!(
+            "top {} by wall time:\n  {:<5} {:<width$}  {:>8}  {:>7}  {:>4}  {}\n",
+            items.len(),
+            "kind",
+            "name",
+            "wall s",
+            "cpu s",
+            "-j",
+            "hit/miss",
+        ));
+        for item in items {
+            let kind = match item.kind {
+                Kind::Step => "step",
+                Kind::Package => "pkg",
+            };
+            text.push_str(&format!(
+                "  {:<5} {:<width$}  {:>8}  {:>7}  {:>4}  {}\n",
+                kind,
+                item.name,
+                secs(item.wall_ms),
+                item.cpu_ms.map_or("-".to_string(), secs),
+                item.jobs.map_or("-".to_string(), |jobs| jobs.to_string()),
+                if item.made { "miss" } else { "hit" },
+            ));
+        }
+    }
+    if !path.is_empty() {
+        let chain: Vec<String> = path
+            .iter()
+            .map(|step| format!("{} {} s", step.step, secs(step.ms)))
+            .collect();
+        text.push_str(&format!("critical path: {}\n", chain.join(" -> ")));
+    }
+    text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn step(name: &str, start_s: u64, end_s: u64) -> Step {
+        Step {
+            step: name.into(),
+            key: "sha256:00".into(),
+            made: true,
+            ms: (end_s - start_s) * 1_000,
+            outputs: BTreeMap::new(),
+            start_ns: start_s * 1_000_000_000,
+            end_ns: end_s * 1_000_000_000,
+            cpu_ms: 0,
+            jobs: None,
+            failed: false,
+            details: BTreeMap::new(),
+        }
+    }
+
+    fn packages(list: &[(&str, f64)]) -> serde_json::Value {
+        serde_json::Value::Array(
+            list.iter()
+                .map(|(name, total)| serde_json::json!({"name": name, "total_s": total, "phases": {}}))
+                .collect(),
+        )
+    }
+
+    fn deps(edges: &[(&str, &str)], nodes: &[&str]) -> Deps {
+        let mut upstream: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for (from, to) in edges {
+            upstream
+                .entry((*to).into())
+                .or_default()
+                .insert((*from).into());
+        }
+        Deps {
+            nodes: nodes.iter().map(|n| (*n).to_string()).collect(),
+            upstream,
+        }
+    }
+
+    #[test]
+    fn top_items_sort_by_wall_time_then_kind_then_name() {
+        let mut buildroot = step("gaia.os.buildroot", 0, 100);
+        buildroot.cpu_ms = 90_000;
+        buildroot.jobs = Some(13);
+        buildroot.details.insert(
+            PACKAGES.into(),
+            packages(&[("glibc", 40.0), ("zlib", 100.0), ("busybox", 2.5)]),
+        );
+        let steps = vec![buildroot, step("gaia.fs.erofs", 100, 101)];
+        let items = top_items(&steps, 10);
+        let order: Vec<(&str, Kind)> = items.iter().map(|i| (i.name.as_str(), i.kind)).collect();
+        assert_eq!(
+            order,
+            [
+                ("gaia.os.buildroot", Kind::Step),
+                ("zlib", Kind::Package),
+                ("glibc", Kind::Package),
+                ("busybox", Kind::Package),
+                ("gaia.fs.erofs", Kind::Step),
+            ]
+        );
+        // A package has no CPU time of its own; the step's job count is
+        // the packages' too.
+        assert_eq!(items[1].cpu_ms, None);
+        assert_eq!(items[1].jobs, Some(13));
+        assert_eq!(items[0].cpu_ms, Some(90_000));
+        assert_eq!(items[0].jobs, Some(13));
+    }
+
+    #[test]
+    fn top_items_keep_ten_at_most_and_ties_by_name() {
+        let steps: Vec<Step> = (0..12)
+            .map(|i| step(&format!("s{:02}", 11 - i), 0, 5))
+            .collect();
+        let items = top_items(&steps, TOP);
+        assert_eq!(items.len(), TOP);
+        let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names[0], "s00");
+        assert_eq!(names[9], "s09");
+    }
+
+    #[test]
+    fn critical_path_follows_dependencies_not_just_time() {
+        // a -> b -> c is the chain; d is independent and ends after c, so
+        // it is the last step but no part of the chain that set c's start.
+        let graph = deps(&[("a", "b"), ("b", "c")], &["a", "b", "c", "d"]);
+        let steps = vec![
+            step("a", 0, 10),
+            step("d", 1, 50),
+            step("b", 10, 30),
+            step("c", 30, 40),
+        ];
+        let path = critical_path(&steps, &graph);
+        let names: Vec<&str> = path.iter().map(|p| p.step.as_str()).collect();
+        // d ended last, so the chain starts there, and d has no dependency.
+        assert_eq!(names, ["d"]);
+
+        let steps = vec![
+            step("a", 0, 10),
+            step("x", 2, 20),
+            step("b", 10, 30),
+            step("c", 30, 40),
+        ];
+        let graph = deps(&[("a", "b"), ("b", "c")], &["a", "b", "c", "x"]);
+        let names: Vec<String> = critical_path(&steps, &graph)
+            .into_iter()
+            .map(|p| p.step)
+            .collect();
+        assert_eq!(names, ["a", "b", "c"], "x is not upstream of c");
+    }
+
+    #[test]
+    fn critical_path_takes_the_latest_dependency_and_reads_helper_steps() {
+        // Node `host` has a helper step `host-plan` that runs first; its
+        // seed step is `host`. `top` takes from `host` and from `slow`,
+        // which ended later than `host` did, so `slow` is the one on the path.
+        let graph = deps(
+            &[("host", "top"), ("slow", "top")],
+            &["host", "slow", "top"],
+        );
+        let steps = vec![
+            step("host-plan", 0, 1),
+            step("host", 1, 5),
+            step("slow", 0, 8),
+            step("top", 8, 12),
+        ];
+        let names: Vec<String> = critical_path(&steps, &graph)
+            .into_iter()
+            .map(|p| p.step)
+            .collect();
+        assert_eq!(names, ["slow", "top"]);
+    }
+
+    #[test]
+    fn steps_without_times_give_no_path() {
+        let graph = deps(&[], &["a"]);
+        let mut old = step("a", 0, 1);
+        old.end_ns = 0;
+        assert!(critical_path(&[old], &graph).is_empty());
+    }
+
+    #[test]
+    fn report_has_the_table_and_the_path() {
+        let items = vec![Item {
+            kind: Kind::Package,
+            name: "glibc".into(),
+            wall_ms: 1_375_000,
+            cpu_ms: None,
+            jobs: Some(13),
+            made: true,
+        }];
+        let path = vec![PathStep {
+            step: "gaia.os.buildroot".into(),
+            ms: 3_331_000,
+        }];
+        let text = report(&items, &path);
+        assert!(text.starts_with("top 1 by wall time:\n"), "{text}");
+        assert!(text.contains("pkg   glibc"), "{text}");
+        assert!(text.contains("1375.0"), "{text}");
+        assert!(text.contains("-    13  miss"), "{text}");
+        assert!(
+            text.ends_with("critical path: gaia.os.buildroot 3331.0 s\n"),
+            "{text}"
+        );
+        assert_eq!(report(&[], &[]), "");
+    }
+}

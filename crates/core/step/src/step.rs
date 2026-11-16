@@ -1,7 +1,7 @@
 //! Look up or make.
 
 use crate::error::ErrorKind;
-use crate::log::RunLog;
+use crate::log::{Report, RunLog};
 use crate::{Ctx, StepError, Tool, ToolOutput, tool};
 use gaia_store::{Check, ObjectRef, StepKey, Store};
 use std::collections::BTreeMap;
@@ -88,7 +88,7 @@ impl<'a> Step<'a> {
                     .iter()
                     .all(|(name, _)| entry.outputs.contains_key(*name));
             if same_outputs {
-                return self.recorded(start_ns, entry.outputs, false);
+                return self.recorded(start_ns, entry.outputs, false, Report::default());
             }
         }
         // One maker of a key at a time, in this store: a second waits, and
@@ -105,7 +105,7 @@ impl<'a> Step<'a> {
                         .all(|(name, _)| entry.outputs.contains_key(*name))
             })
         {
-            return self.recorded(start_ns, entry.outputs, false);
+            return self.recorded(start_ns, entry.outputs, false, Report::default());
         }
         let scratch = self.store.scratch().map_err(&store_error)?;
         let mut work = Work {
@@ -114,14 +114,24 @@ impl<'a> Step<'a> {
             name: self.name,
             key: self.key,
             logs: &self.logs,
+            report: Report::default(),
         };
-        if let Err(error) = body(&mut work) {
+        let result = body(&mut work);
+        let report = work.report;
+        if let Err(error) = result {
+            // The record says the body ran and failed, with what it measured
+            // before it failed; the step's own error is what goes up.
+            let failed = Report {
+                failed: true,
+                ..report
+            };
+            let _ = self.write_record(start_ns, BTreeMap::new(), true, failed);
             return Err(self.logged(error));
         }
         let entry = scratch
             .commit_step(&self.key, outputs)
             .map_err(&store_error)?;
-        self.recorded(start_ns, entry.outputs, true)
+        self.recorded(start_ns, entry.outputs, true, report)
     }
 
     /// A failure of the body's own code that a fault record cannot hold,
@@ -158,7 +168,25 @@ impl<'a> Step<'a> {
         start_ns: u128,
         outputs: BTreeMap<String, ObjectRef>,
         made: bool,
+        report: Report,
     ) -> Result<Made, StepError> {
+        let record = self
+            .write_record(start_ns, outputs, made, report)
+            .map_err(|error| StepError::body(self.name, format!("step record: {error}")))?;
+        Ok(Made {
+            outputs: record.outputs,
+            made,
+        })
+    }
+
+    /// Appends this look-up-or-make to the step record, as it ended now.
+    fn write_record(
+        &self,
+        start_ns: u128,
+        outputs: BTreeMap<String, ObjectRef>,
+        made: bool,
+        report: Report,
+    ) -> std::io::Result<crate::StepRecord> {
         let record = crate::StepRecord {
             start_ns,
             end_ns: crate::now_ns(),
@@ -167,13 +195,10 @@ impl<'a> Step<'a> {
             step: self.name.to_string(),
             key: self.key,
             outputs,
+            report,
         };
-        crate::log::record_step(&self.logs, &record)
-            .map_err(|error| StepError::body(self.name, format!("step record: {error}")))?;
-        Ok(Made {
-            outputs: record.outputs,
-            made,
-        })
+        crate::log::record_step(&self.logs, &record)?;
+        Ok(record)
     }
 }
 
@@ -185,6 +210,7 @@ pub struct Work<'a> {
     name: &'a str,
     key: StepKey,
     logs: &'a Path,
+    report: Report,
 }
 
 impl std::fmt::Debug for Work<'_> {
@@ -221,8 +247,30 @@ impl Work<'_> {
     /// names another, sees only the environment it lists, and is killed
     /// with its whole process group when the run is cancelled. Everything
     /// it prints goes to a run log of its own ([`ToolOutput::log`],
-    /// [`StepError::log`]).
+    /// [`StepError::log`]). Its CPU time is added to the step's record,
+    /// whether it succeeds or not.
     pub fn run(&mut self, tool: &Tool) -> Result<ToolOutput, StepError> {
-        tool::run(tool, self.cx, self.name, self.dir, self.logs, &self.key)
+        tool::run(
+            tool,
+            self.cx,
+            self.name,
+            self.dir,
+            self.logs,
+            &self.key,
+            &mut self.report.cpu_ns,
+        )
+    }
+
+    /// The job count this step was given, for its record: the `-j` of a
+    /// make, say.
+    pub fn jobs(&mut self, jobs: u32) {
+        self.report.jobs = Some(jobs);
+    }
+
+    /// Adds `value` to the step's record under `name`, replacing an earlier
+    /// detail of that name. The record keeps it whether the body succeeds
+    /// or fails, so a failed body can report what it got through.
+    pub fn detail(&mut self, name: &str, value: serde_json::Value) {
+        self.report.details.insert(name.to_string(), value);
     }
 }

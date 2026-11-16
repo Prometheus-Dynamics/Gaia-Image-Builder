@@ -19,7 +19,7 @@ pub fn show(options: &args::Show) -> Result<(), Stop> {
         let names: Vec<&str> = run.outputs.keys().map(String::as_str).collect();
         return Err(Stop::usage(format!(
             "the latest build ({}) has no `{}`; it has: {}",
-            run.outcome,
+            run.state(),
             options.output,
             names.join(", ")
         )));

@@ -46,6 +46,7 @@ mod host;
 mod out;
 mod perms;
 mod progress;
+mod times;
 
 use daedalus::prelude::*;
 use daedalus_cpu_author::FanIn;
@@ -426,7 +427,21 @@ pub(crate) fn configure(
     Ok(resolved)
 }
 
+/// The OS build's make, and then its packages' times in the record, whether
+/// the make failed or not.
 fn build(
+    work: &mut Work<'_>,
+    prepared: &Prepared,
+    seed: &Path,
+    host: &BuildrootHost,
+) -> Result<(), StepError> {
+    let out = work.dir().join("out");
+    let result = build_steps(work, prepared, seed, host);
+    times::record(work, &out, host.jobs);
+    result
+}
+
+fn build_steps(
     work: &mut Work<'_>,
     prepared: &Prepared,
     seed: &Path,

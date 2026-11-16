@@ -3,6 +3,7 @@
 
 use crate::project::Project;
 use crate::record::{self, Origin, Output, Run};
+use crate::timing;
 use crate::{CANCELLED, FAILED, Stop, args};
 use daedalus::prelude::{LoadOptions, LoadedHost};
 use daedalus::runner::{FailurePolicy, Lanes, Pool, RunError};
@@ -60,6 +61,11 @@ pub fn build(options: &args::Project) -> Result<(), Stop> {
             .unwrap_or(1)
     });
     let start_ns = now_ns();
+    // The record exists from the start, with this process and no outcome, so
+    // a build that dies leaves a record that says so.
+    let product = std::path::absolute(&project.product).unwrap_or(project.product.clone());
+    let mut run = Run::started(product, u64::try_from(start_ns).unwrap_or(u64::MAX));
+    run.write(&store)?;
     let watch = Watch::start(gaia_progress::Options::for_stderr(
         logs_dir(&store),
         std::process::id(),
@@ -78,6 +84,8 @@ pub fn build(options: &args::Project) -> Result<(), Stop> {
     watch.finish();
 
     let pid = std::process::id();
+    // A step without a job count of its own was given the build's budget.
+    let budget = u32::try_from(jobs).unwrap_or(u32::MAX);
     let steps: Vec<record::Step> = step_records(&logs_dir(&store))
         .into_iter()
         .filter(|r| r.pid == pid && r.start_ns >= start_ns)
@@ -87,8 +95,17 @@ pub fn build(options: &args::Project) -> Result<(), Stop> {
             made: r.made,
             ms: u64::try_from(r.end_ns.saturating_sub(r.start_ns) / 1_000_000).unwrap_or(u64::MAX),
             outputs: r.outputs,
+            start_ns: u64::try_from(r.start_ns).unwrap_or(u64::MAX),
+            end_ns: u64::try_from(r.end_ns).unwrap_or(u64::MAX),
+            cpu_ms: r.report.cpu_ns / 1_000_000,
+            jobs: r.report.jobs.or(Some(budget)),
+            failed: r.report.failed,
+            details: r.report.details,
         })
         .collect();
+    let deps = dependencies(&project);
+    let critical_path = timing::critical_path(&steps, &deps);
+    let items = timing::top_items(&steps, timing::TOP);
 
     let (outcome, stop) = match result {
         Ok(()) => ("done", None),
@@ -155,24 +172,47 @@ pub fn build(options: &args::Project) -> Result<(), Stop> {
             outputs.insert(port, Output { ty, object, from });
         }
     }
-    let run = Run {
-        product: std::path::absolute(&project.product).unwrap_or(project.product.clone()),
-        start_ns: u64::try_from(start_ns).unwrap_or(u64::MAX),
-        end_ns: u64::try_from(end_ns).unwrap_or(u64::MAX),
-        outcome: outcome.into(),
-        outputs,
-        steps,
-    };
+    run.end_ns = u64::try_from(end_ns).unwrap_or(u64::MAX);
+    run.outcome = Some(outcome.into());
+    run.outputs = outputs;
+    run.steps = steps;
+    run.critical_path = critical_path;
     let path = run.write(&store)?;
     for (port, output) in &run.outputs {
         println!("{port}  {}", store.path(&output.object).display());
     }
+    // On stderr, so the port lines on stdout stay as they are; the last
+    // line on stdout is the outcome and the record.
+    eprint!("{}", timing::report(&items, &run.critical_path));
     println!(
         "{outcome} in {:.1} s; recorded in {}",
         (end_ns - start_ns) as f64 / 1e9,
         path.display()
     );
     stop.map_or(Ok(()), Err)
+}
+
+/// The graph's node ids, and each node's direct upstream nodes, for the
+/// critical path. Node 0 is the host, which no step is.
+fn dependencies(project: &Project) -> timing::Deps {
+    let graph = &project.built.doc.graph;
+    let ids: Vec<String> = graph.nodes.iter().map(|node| node.id.clone()).collect();
+    let mut upstream: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for edge in &graph.edges {
+        let (Some(from), Some(to)) = (
+            ids.get(edge.from.node as usize),
+            ids.get(edge.to.node as usize),
+        ) else {
+            continue;
+        };
+        if edge.from.node != 0 {
+            upstream.entry(to.clone()).or_default().insert(from.clone());
+        }
+    }
+    timing::Deps {
+        nodes: ids.into_iter().collect(),
+        upstream,
+    }
 }
 
 /// The object at host port `port`.

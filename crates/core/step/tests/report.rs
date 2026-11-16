@@ -1,0 +1,97 @@
+//! What a step's record keeps beyond its outputs: the CPU time of its tools,
+//! the job count it was given, its details, and a failed body.
+
+use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store, Tool};
+use std::path::Path;
+
+/// A tool that spins for a while: enough CPU to read back.
+fn spin() -> Tool {
+    Tool::new("/bin/sh")
+        .arg("-c")
+        .arg("i=0; while [ $i -lt 300000 ]; do i=$((i+1)); done")
+        .env("PATH", "/usr/bin:/bin")
+}
+
+#[test]
+fn a_tools_cpu_time_and_the_steps_report_are_recorded() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("store")).expect("store");
+    let cx = Ctx::new();
+    let key = KeyBuilder::new("test.report", 1).finish();
+    Step::new(&store, &cx, "test.report", key)
+        .look_up_or_make(&[("out", Path::new("out"))], |work| {
+            work.jobs(4);
+            work.detail("packages", serde_json::json!([{"name": "one"}]));
+            work.run(&spin())?;
+            std::fs::write(work.dir().join("out"), "x")
+                .map_err(|e| StepError::body("test.report", e))
+        })
+        .expect("made");
+
+    let records = gaia_step::step_records(&gaia_step::logs_dir(&store));
+    assert_eq!(records.len(), 1);
+    let report = &records[0].report;
+    assert!(report.cpu_ns > 0, "a spinning tool used CPU: {report:?}");
+    assert_eq!(report.jobs, Some(4));
+    assert!(!report.failed);
+    assert_eq!(report.details["packages"][0]["name"], "one");
+}
+
+#[test]
+fn a_failed_body_is_recorded_with_what_it_measured() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("store")).expect("store");
+    let cx = Ctx::new();
+    let key = KeyBuilder::new("test.failed", 1).finish();
+    let error = Step::new(&store, &cx, "test.failed", key)
+        .look_up_or_make(&[("out", Path::new("out"))], |work| {
+            work.jobs(2);
+            work.detail(
+                "packages",
+                serde_json::json!([{"name": "half", "open": "build"}]),
+            );
+            work.run(&spin())?;
+            Err(StepError::body("test.failed", "broke"))
+        })
+        .expect_err("fails");
+    assert_eq!(error.to_string(), "test.failed: broke");
+
+    let records = gaia_step::step_records(&gaia_step::logs_dir(&store));
+    assert_eq!(records.len(), 1, "a failed body has a record too");
+    let record = &records[0];
+    assert!(record.made, "the body ran");
+    assert!(record.outputs.is_empty());
+    assert!(record.report.failed);
+    assert!(
+        record.report.cpu_ns > 0,
+        "the time before the failure is kept"
+    );
+    assert_eq!(record.report.jobs, Some(2));
+    assert_eq!(record.report.details["packages"][0]["open"], "build");
+}
+
+#[test]
+fn a_record_line_without_a_report_parses_with_an_empty_one() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("store")).expect("store");
+    let cx = Ctx::new();
+    let key = KeyBuilder::new("test.old", 1).finish();
+    Step::new(&store, &cx, "test.old", key)
+        .look_up_or_make(&[("out", Path::new("out"))], |work| {
+            std::fs::write(work.dir().join("out"), "x").map_err(|e| StepError::body("test.old", e))
+        })
+        .expect("made");
+    // A line as written before reports existed: no tab, no JSON.
+    let logs = gaia_step::logs_dir(&store);
+    let path = logs.join("steps.log");
+    let text = std::fs::read_to_string(&path).expect("steps.log");
+    let old: String = text
+        .lines()
+        .map(|line| format!("{}\n", line.split_once('\t').map_or(line, |(head, _)| head)))
+        .collect();
+    std::fs::write(&path, old).expect("rewrite");
+
+    let records = gaia_step::step_records(&logs);
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].report, gaia_step::Report::default());
+}
