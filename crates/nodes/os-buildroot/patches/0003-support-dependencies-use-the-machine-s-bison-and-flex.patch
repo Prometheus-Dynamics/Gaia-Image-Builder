@@ -1,0 +1,77 @@
+From: Gaia Image Builder <noreply@anthropic.com>
+Subject: [PATCH] support/dependencies: use the machine's bison and flex when new enough
+
+Buildroot takes the build machine's bison and flex only when a program of
+that name is on the PATH, whatever its version, and builds host-bison and
+host-flex otherwise (BR2_BISON_HOST_DEPENDENCY, BR2_FLEX_HOST_DEPENDENCY).
+host-bison needs host-m4, so a machine's old or missing bison costs a long
+host stage (measured in one host stage: bison 71 s, flex 20 s, m4 184 s).
+
+A machine program is now used when it is at least the version Buildroot
+builds as its own host tool: bison 3.8.2 and flex 2.6.4. Older programs are
+not used and are built as host packages, as before. The check is made once
+per make, from the first line of `bison --version` and `flex --version`.
+
+The host dtc takes these variables instead of naming host-bison and
+host-flex itself, and so does the kernel's build of its dtc parser
+(linux/linux.mk): the dtc tarball and the kernel generate their parsers at
+build time, from dtc-parser.y and dtc-lexer.l, and both only need a bison
+and a flex that can read them.
+
+---
+ support/dependencies/check-host-bison-flex.mk | 23 +++++++++++++++++----
+ package/dtc/dtc.mk                            |  5 +++--
+ 2 files changed, 23 insertions(+), 5 deletions(-)
+
+diff --git a/support/dependencies/check-host-bison-flex.mk b/support/dependencies/check-host-bison-flex.mk
+--- a/support/dependencies/check-host-bison-flex.mk
++++ b/support/dependencies/check-host-bison-flex.mk
+@@ -1,14 +1,29 @@
+-# If the system lacks bison or flex, add
+-# dependencies to suitable host packages
++# If the system lacks bison or flex, or has one older than the version
++# Buildroot builds as its own host tool, add dependencies to suitable host
++# packages
+ #
+ # BR2_{BISON,FLES}_HOST_DEPENDENCY should only be used to build code
+ # that runs on host, e.g. Kconfig. To build code for target use plain
+ # host-{bison,flex}.
+ 
+-ifeq ($(shell which bison 2>/dev/null),)
++# The oldest bison and flex the build takes from the system: the versions
++# Buildroot builds as host-bison and host-flex. An older one is not used,
++# so an old system bison does not stop a build that needs a newer one.
++BR2_BISON_HOST_MIN_VERSION = 3.8.2
++BR2_FLEX_HOST_MIN_VERSION = 2.6.4
++
++# Expands to "new" when the program $(1) is on the PATH and its version is at
++# least $(2), and to nothing otherwise. The version is the last word of the
++# first line of `$(1) --version`, which both print as "... 3.8.2". Versions
++# are compared with sort, so 3.10 is newer than 3.8.2.
++define host-program-new-enough
++$(shell v=$$($(1) --version 2>/dev/null | sed -n '1s/.* //p'); [ -n "$$v" ] && [ "$$(printf '%s\n' '$(2)' "$$v" | sort -V | head -n1)" = '$(2)' ] && echo new)
++endef
++
++ifneq ($(call host-program-new-enough,bison,$(BR2_BISON_HOST_MIN_VERSION)),new)
+ BR2_BISON_HOST_DEPENDENCY = host-bison
+ endif
+ 
+-ifeq ($(shell which flex 2>/dev/null),)
++ifneq ($(call host-program-new-enough,flex,$(BR2_FLEX_HOST_MIN_VERSION)),new)
+ BR2_FLEX_HOST_DEPENDENCY = host-flex
+ endif
+diff --git a/package/dtc/dtc.mk b/package/dtc/dtc.mk
+--- a/package/dtc/dtc.mk
++++ b/package/dtc/dtc.mk
+@@ -12,7 +12,10 @@
+ DTC_CPE_ID_VALID = YES
+ DTC_INSTALL_STAGING = YES
+ DTC_DEPENDENCIES = host-bison host-flex host-pkgconf
+-HOST_DTC_DEPENDENCIES = host-bison host-flex host-pkgconf
++# The host build generates the parser and lexer from dtc-parser.y and
++# dtc-lexer.l: the tarball has none. The machine's bison and flex are used
++# when they are new enough (support/dependencies/check-host-bison-flex.mk).
++HOST_DTC_DEPENDENCIES = $(BR2_BISON_HOST_DEPENDENCY) $(BR2_FLEX_HOST_DEPENDENCY) host-pkgconf
+ 
+ DTC_MAKE_OPTS = \
+ 	PREFIX=/usr \

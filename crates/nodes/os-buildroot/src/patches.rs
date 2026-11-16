@@ -1,6 +1,6 @@
 //! Gaia's own changes to the Buildroot source it builds with.
 //!
-//! Three patches ship in `patches/`, as `git format-patch` writes them for
+//! Four patches ship in `patches/`, as `git format-patch` writes them for
 //! Buildroot (`-p1`). They are applied to a copy of the source before any
 //! Buildroot step uses it, so every make (the host stage, its plan, the OS
 //! build) runs the same patched tree:
@@ -10,20 +10,22 @@
 //!   copy-on-write clones on a filesystem with reflinks.
 //! - **0002**: two `$(shell)` calls made while the Makefiles are read become
 //!   `:=` and `firstword`/`patsubst`, with the same values.
-//! - **0003**: the host build of dtc takes the machine's bison and flex when
-//!   they are at least the versions Buildroot builds for its own host tools,
-//!   and builds host-bison and host-flex (with host-m4) only when they are
-//!   not. See [`PATCHES`] for the minimum and the reasons.
+//! - **0003**: Buildroot's bison and flex choice
+//!   (`support/dependencies/check-host-bison-flex.mk`) takes the machine's
+//!   programs when they are at least Buildroot's own versions, not any
+//!   program on the PATH. The dtc host build uses that choice.
+//! - **0004**: the kernel's dtc parser (`linux/linux.mk`) uses the same
+//!   choice, instead of always building host-bison and host-flex.
 //!
 //! 0001 and 0002 change no output, so they are applied to the exact upstream
-//! text, strictly (`patch -p1 --fuzz=0`). 0003 changes what the host stage
-//! builds (`changes_outputs`). A patch that does not apply to a Buildroot
-//! version is skipped with a warning line that names it: all three are
+//! text, strictly (`patch -p1 --fuzz=0`). 0003 and 0004 change what the host
+//! stage builds (`changes_outputs`). A patch that does not apply to a Buildroot
+//! version is skipped with a warning line that names it: all four are
 //! changes a future Buildroot must still build without.
 //!
 //! The keys: the package-level keys (the host stage's and the plan's, and
 //! the OS build's) hash the unpatched source's digest. A patch that changes
-//! no output adds nothing to the key when it applies, so the two shipped
+//! no output adds nothing to the key when it applies, so the two speed
 //! patches add nothing to any key. A skipped patch, or the off switch, adds
 //! an entry, because the build then differs from the default one. A patch
 //! that changes outputs (`changes_outputs`) adds its digest when it applies.
@@ -62,22 +64,24 @@ pub(crate) struct GaiaPatch {
 
 /// The patches, in the order they are applied.
 ///
-/// 0003 changes the host build of dtc (`package/dtc/dtc.mk`), so it is
-/// `changes_outputs`: once it applies, its digest is in the key of every
-/// Buildroot build, so a store entry made without it is never reused with
-/// it (and the other way round). The keys of builds without host-dtc change
-/// too, once: a coarse key, kept because the entry is the same for all of
-/// them. The host plan's values also carry the machine's choice, since they
-/// list `HOST_DTC_BISON_OK` and `HOST_DTC_DEPENDENCIES`, so a machine with
-/// older tools keys a different host stage.
+/// 0003 and 0004 change what a build makes (`changes_outputs`): they choose
+/// the machine's bison and flex or Buildroot's host-bison and host-flex, so
+/// the built host tools differ. Once one applies, its digest is in the key of
+/// every Buildroot build, so a store entry made without it is never reused
+/// with it (and the other way round). That also re-keys builds that have no
+/// dtc or kernel dtc parser, once: a coarse key, kept because the entry is
+/// the same for all of them. The host plan's values list
+/// `BR2_BISON_HOST_DEPENDENCY` and `HOST_DTC_DEPENDENCIES`, so a machine with
+/// other tools keys a different host stage.
 ///
 /// The minimum: bison 3.8.2 and flex 2.6.4, the versions Buildroot builds as
-/// its own host tools. The dtc 1.7.2 tarball states no minimum: its parser
-/// and lexer are generated at build time (`dtc-parser.y` uses `%locations`,
-/// `dtc-lexer.l` `%option noyywrap nounput noinput never-interactive`). A
-/// program older than the minimum is not tried: the build makes host-bison
-/// or host-flex instead, as it did before the patch.
-pub(crate) const PATCHES: [GaiaPatch; 3] = [
+/// its own host tools (`BR2_BISON_HOST_MIN_VERSION`, `BR2_FLEX_HOST_MIN_VERSION`
+/// in `support/dependencies/check-host-bison-flex.mk`). The dtc 1.7.2 tarball
+/// states no minimum: its parser and lexer are generated at build time
+/// (`dtc-parser.y` uses `%locations`, `dtc-lexer.l` `%option noyywrap nounput
+/// noinput never-interactive`). A program older than the minimum is not used:
+/// the build makes host-bison or host-flex, as it did before.
+pub(crate) const PATCHES: [GaiaPatch; 4] = [
     GaiaPatch {
         name: "0001-package-pkg-utils-clone-per-package-trees-with-reflinks.patch",
         text: include_str!(
@@ -93,9 +97,16 @@ pub(crate) const PATCHES: [GaiaPatch; 3] = [
         changes_outputs: false,
     },
     GaiaPatch {
-        name: "0003-package-dtc-host-build-uses-the-machine-s-bison-and-flex.patch",
+        name: "0003-support-dependencies-use-the-machine-s-bison-and-flex.patch",
         text: include_str!(
-            "../patches/0003-package-dtc-host-build-uses-the-machine-s-bison-and-flex.patch"
+            "../patches/0003-support-dependencies-use-the-machine-s-bison-and-flex.patch"
+        ),
+        changes_outputs: true,
+    },
+    GaiaPatch {
+        name: "0004-linux-kernel-dtc-parser-uses-the-machine-s-bison-and-flex.patch",
+        text: include_str!(
+            "../patches/0004-linux-kernel-dtc-parser-uses-the-machine-s-bison-and-flex.patch"
         ),
         changes_outputs: true,
     },
@@ -338,33 +349,48 @@ mod tests {
             .join(format!("buildroot-{version}"))
     }
 
-    /// A copy of the fixture's touched files in a new directory.
+    /// The files the shipped patches touch, relative to a Buildroot root.
+    const TOUCHED: [&str; 6] = [
+        "package/pkg-utils.mk",
+        "package/Makefile.in",
+        "package/pkg-luarocks.mk",
+        "package/dtc/dtc.mk",
+        "support/dependencies/check-host-bison-flex.mk",
+        "linux/linux.mk",
+    ];
+
+    /// A copy of the fixture's touched files, in a new Buildroot root.
     fn copy_of(version: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("tempdir");
-        let from = fixture(version).join("package");
-        let to = dir.path().join("package");
-        fs::create_dir(&to).expect("package dir");
-        for file in ["pkg-utils.mk", "Makefile.in", "pkg-luarocks.mk"] {
-            fs::copy(from.join(file), to.join(file)).expect("copy fixture");
+        for rel in TOUCHED {
+            let to = dir.path().join(rel);
+            fs::create_dir_all(to.parent().expect("a parent")).expect("dirs");
+            fs::copy(fixture(version).join(rel), to).expect("copy fixture");
         }
-        fs::create_dir(to.join("dtc")).expect("dtc dir");
-        fs::copy(from.join("dtc/dtc.mk"), to.join("dtc/dtc.mk")).expect("copy fixture");
         dir
     }
 
-    fn read(dir: &Path, file: &str) -> String {
-        fs::read_to_string(dir.join("package").join(file)).expect("read")
+    /// The text of `rel` (a path under the Buildroot root) in `root`.
+    fn text_of(root: &Path, rel: &str) -> String {
+        fs::read_to_string(root.join(rel)).expect("read")
     }
 
-    /// The shipped dtc patch's text, applied to a copy of the fixture's
-    /// `package/dtc/dtc.mk` of `version`: the file the make tests run.
-    fn patched_dtc_mk(version: &str) -> tempfile::TempDir {
+    /// A package file of the fixtures: `file` under `package/`.
+    fn read(dir: &Path, file: &str) -> String {
+        text_of(dir, &format!("package/{file}"))
+    }
+
+    /// The fixture of `version` with the shipped patches 0003 and 0004
+    /// applied: the trees the make tests run.
+    fn patched_tree(version: &str) -> tempfile::TempDir {
         let tree = copy_of(version);
         let scratch = tempfile::tempdir().expect("tempdir");
-        let file = scratch.path().join(PATCHES[2].name);
-        fs::write(&file, PATCHES[2].text).expect("write");
-        let applied = apply_one(tree.path(), &file).expect("apply");
-        assert!(applied, "0003 applies to {version}");
+        for index in [2, 3] {
+            let file = scratch.path().join(PATCHES[index].name);
+            fs::write(&file, PATCHES[index].text).expect("write");
+            let applied = apply_one(tree.path(), &file).expect("apply");
+            assert!(applied, "{} applies to {version}", PATCHES[index].name);
+        }
         tree
     }
 
@@ -382,7 +408,18 @@ mod tests {
         assert!(read(tree.path(), "pkg-utils.mk").contains("cp -a --reflink=auto"));
         assert!(read(tree.path(), "Makefile.in").contains("export PERL:=$(shell which perl)"));
         assert!(read(tree.path(), "pkg-luarocks.mk").contains("firstword"));
-        assert!(read(tree.path(), "dtc/dtc.mk").contains("HOST_DTC_BISON_OK :="));
+        assert!(
+            text_of(tree.path(), "package/dtc/dtc.mk")
+                .contains("HOST_DTC_DEPENDENCIES = $(BR2_BISON_HOST_DEPENDENCY)")
+        );
+        assert!(
+            text_of(tree.path(), "support/dependencies/check-host-bison-flex.mk")
+                .contains("BR2_BISON_HOST_MIN_VERSION = 3.8.2")
+        );
+        assert!(
+            text_of(tree.path(), "linux/linux.mk")
+                .contains("LINUX_DEPENDENCIES += $(BR2_BISON_HOST_DEPENDENCY)")
+        );
     }
 
     #[test]
@@ -394,7 +431,18 @@ mod tests {
         assert!(read(tree.path(), "pkg-utils.mk").contains("cp -a --reflink=auto"));
         assert!(read(tree.path(), "Makefile.in").contains("export PERL:=$(shell which perl)"));
         assert!(read(tree.path(), "pkg-luarocks.mk").contains("firstword"));
-        assert!(read(tree.path(), "dtc/dtc.mk").contains("HOST_DTC_BISON_OK :="));
+        assert!(
+            text_of(tree.path(), "package/dtc/dtc.mk")
+                .contains("HOST_DTC_DEPENDENCIES = $(BR2_BISON_HOST_DEPENDENCY)")
+        );
+        assert!(
+            text_of(tree.path(), "support/dependencies/check-host-bison-flex.mk")
+                .contains("BR2_BISON_HOST_MIN_VERSION = 3.8.2")
+        );
+        assert!(
+            text_of(tree.path(), "linux/linux.mk")
+                .contains("LINUX_DEPENDENCIES += $(BR2_BISON_HOST_DEPENDENCY)")
+        );
     }
 
     #[test]
@@ -419,6 +467,7 @@ mod tests {
                 (PATCHES[0].name.to_string(), true),
                 (PATCHES[1].name.to_string(), false),
                 (PATCHES[2].name.to_string(), true),
+                (PATCHES[3].name.to_string(), true),
             ]
         );
         assert_eq!(read(tree.path(), "pkg-luarocks.mk"), before);
@@ -449,7 +498,10 @@ mod tests {
             entry.contains(&format!("skipped {}", PATCHES[2].name)),
             "{entry}"
         );
-        assert!(!entry.contains("applied "), "{entry}");
+        assert!(
+            !entry.contains(&format!("applied {}", PATCHES[2].name)),
+            "{entry}"
+        );
     }
 
     #[test]
@@ -470,14 +522,17 @@ mod tests {
         let outcomes: Vec<(String, bool)> =
             PATCHES.iter().map(|p| (p.name.to_string(), true)).collect();
         let entry = key_entry(Mode::On, &outcomes).expect("an entry");
-        assert_eq!(
-            entry,
-            format!(
-                "applied {} {}",
-                PATCHES[2].name,
-                Digest::of_bytes(PATCHES[2].text.as_bytes())
-            )
-        );
+        let expected: Vec<String> = [2, 3]
+            .iter()
+            .map(|&index| {
+                format!(
+                    "applied {} {}",
+                    PATCHES[index].name,
+                    Digest::of_bytes(PATCHES[index].text.as_bytes())
+                )
+            })
+            .collect();
+        assert_eq!(entry, expected.join("\n"));
         assert!(!entry.contains(PATCHES[0].name), "{entry}");
         assert!(!entry.contains(PATCHES[1].name), "{entry}");
     }
@@ -513,11 +568,12 @@ mod tests {
             PATCHES.iter().map(|p| (p.name.to_string(), true)).collect();
         outcomes[1].1 = false;
         let entry = key_entry(Mode::On, &outcomes).expect("an entry");
-        // 0003 applies and changes outputs, so its digest is there as well.
+        // 0003 and 0004 apply and change outputs, so their digests are there.
         let lines: Vec<&str> = entry.lines().collect();
-        assert_eq!(lines.len(), 2, "{entry}");
+        assert_eq!(lines.len(), 3, "{entry}");
         assert_eq!(lines[0], format!("skipped {}", PATCHES[1].name));
         assert!(lines[1].starts_with(&format!("applied {}", PATCHES[2].name)));
+        assert!(lines[2].starts_with(&format!("applied {}", PATCHES[3].name)));
     }
 
     #[test]
@@ -528,12 +584,12 @@ mod tests {
         assert_ne!(key_entry(Mode::Off, &[]), key_entry(Mode::On, &outcomes));
     }
 
-    /// Makes `HOST_DTC_DEPENDENCIES` of the patched dtc.mk of `version`,
-    /// with `tools` on the PATH: each `(program, first line of --version)`.
-    /// The PATH has no other bison or flex, and only the text tools the
-    /// test needs beside them.
-    fn host_dtc_dependencies(version: &str, tools: &[(&str, &str)]) -> String {
-        let tree = patched_dtc_mk(version);
+    /// The words `make` prints for `probe` (a makefile body, with the
+    /// `$(info)` it ends with) in the patched tree of `version`, with
+    /// `tools` on the PATH: each `(program, first line of --version)`. Only
+    /// those tools and the text tools the probe's shell needs are on it.
+    fn make_words(version: &str, probe: &str, tools: &[(&str, &str)]) -> String {
+        let tree = patched_tree(version);
         let bin = tempfile::tempdir().expect("tempdir");
         for (program, line) in tools {
             let file = bin.path().join(program);
@@ -551,22 +607,18 @@ mod tests {
                 .expect("a text tool");
             std::os::unix::fs::symlink(found, base.path().join(program)).expect("link");
         }
-        let probe = tree.path().join("probe.mk");
-        fs::write(
-            &probe,
-            "BR2_PACKAGE_HOST_DTC := y\ninclude package/dtc/dtc.mk\n$(info $(HOST_DTC_DEPENDENCIES))\nall: ;\n",
-        )
-        .expect("probe");
-        let path = format!("{}:{}", bin.path().display(), base.path().display());
+        let probe_file = tree.path().join("probe.mk");
+        fs::write(&probe_file, probe).expect("probe");
         // Found before the PATH under test is set: the child's PATH is not
         // searched for its own program.
         let make = ["/usr/bin/make", "/bin/make"]
             .into_iter()
             .find(|path| Path::new(path).is_file())
             .expect("make");
+        let path = format!("{}:{}", bin.path().display(), base.path().display());
         let output = Command::new(make)
             .args(["-s", "-f"])
-            .arg(&probe)
+            .arg(&probe_file)
             .current_dir(tree.path())
             .env("PATH", path)
             .output()
@@ -585,6 +637,29 @@ mod tests {
             .join(" ")
     }
 
+    /// The host dtc's dependencies: its own, with the machine's bison and
+    /// flex when they are new enough.
+    fn host_dtc_dependencies(version: &str, tools: &[(&str, &str)]) -> String {
+        make_words(
+            version,
+            "BR2_PACKAGE_HOST_DTC := y\ninclude support/dependencies/check-host-bison-flex.mk\ninclude package/dtc/dtc.mk\n$(info $(HOST_DTC_DEPENDENCIES))\n.DEFAULT_GOAL := probe\nprobe: ;\n",
+            tools,
+        )
+    }
+
+    /// The kernel's host packages for its dtc parser, of a device tree
+    /// kernel (`dts`) or of one without the option.
+    fn kernel_parser_hosts(version: &str, dts: bool, tools: &[(&str, &str)]) -> String {
+        let option = if dts { "y" } else { "" };
+        make_words(
+            version,
+            &format!(
+                "BR2_LINUX_KERNEL_DTS_SUPPORT := {option}\ninclude support/dependencies/check-host-bison-flex.mk\ninclude linux/linux.mk\n$(info $(filter host-bison host-flex,$(LINUX_DEPENDENCIES)))\n.DEFAULT_GOAL := probe\nprobe: ;\n"
+            ),
+            tools,
+        )
+    }
+
     /// The machine's bison and flex are used when they are at least the
     /// versions Buildroot builds, and compared as versions (3.10 is newer
     /// than 3.8.2). An older one, or none, gets its host package.
@@ -592,35 +667,76 @@ mod tests {
     fn the_host_dtc_takes_only_bison_and_flex_at_least_buildroots_versions() {
         let new_bison = "bison (GNU Bison) 3.8.2";
         let new_flex = "flex 2.6.4";
-        assert_eq!(
-            host_dtc_dependencies("2026.02.3", &[("bison", new_bison), ("flex", new_flex)]),
-            "host-pkgconf"
-        );
-        assert_eq!(
-            host_dtc_dependencies(
-                "2026.08",
-                &[("bison", "bison (GNU Bison) 3.10"), ("flex", new_flex)]
-            ),
-            "host-pkgconf"
-        );
-        assert_eq!(
-            host_dtc_dependencies(
-                "2026.02.3",
-                &[("bison", "bison (GNU Bison) 2.3"), ("flex", new_flex)]
-            ),
-            "host-bison host-pkgconf"
-        );
-        assert_eq!(
-            host_dtc_dependencies(
-                "2026.02.3",
-                &[("bison", new_bison), ("flex", "flex 2.5.35")]
-            ),
-            "host-flex host-pkgconf"
-        );
-        assert_eq!(
-            host_dtc_dependencies("2026.08", &[]),
-            "host-bison host-flex host-pkgconf"
-        );
+        for version in ["2026.02.3", "2026.08"] {
+            assert_eq!(
+                host_dtc_dependencies(version, &[("bison", new_bison), ("flex", new_flex)]),
+                "host-pkgconf",
+                "{version}"
+            );
+            assert_eq!(
+                host_dtc_dependencies(
+                    version,
+                    &[("bison", "bison (GNU Bison) 3.10"), ("flex", new_flex)]
+                ),
+                "host-pkgconf",
+                "{version}"
+            );
+            assert_eq!(
+                host_dtc_dependencies(
+                    version,
+                    &[("bison", "bison (GNU Bison) 2.3"), ("flex", new_flex)]
+                ),
+                "host-bison host-pkgconf",
+                "{version}"
+            );
+            assert_eq!(
+                host_dtc_dependencies(version, &[("bison", new_bison), ("flex", "flex 2.5.35")]),
+                "host-flex host-pkgconf",
+                "{version}"
+            );
+            assert_eq!(
+                host_dtc_dependencies(version, &[]),
+                "host-bison host-flex host-pkgconf",
+                "{version}"
+            );
+        }
+    }
+
+    /// The kernel's dtc parser: none of the host packages when the machine
+    /// has new enough tools, the missing or old ones built otherwise, and
+    /// nothing at all for a kernel without a device tree option.
+    #[test]
+    fn the_kernel_parser_takes_only_bison_and_flex_at_least_buildroots_versions() {
+        let new_bison = "bison (GNU Bison) 3.8.2";
+        let new_flex = "flex 2.6.4";
+        for version in ["2026.02.3", "2026.08"] {
+            let new = [("bison", new_bison), ("flex", new_flex)];
+            assert_eq!(kernel_parser_hosts(version, true, &new), "", "{version}");
+            assert_eq!(
+                kernel_parser_hosts(
+                    version,
+                    true,
+                    &[("bison", "bison (GNU Bison) 2.3"), ("flex", new_flex)]
+                ),
+                "host-bison",
+                "{version}"
+            );
+            assert_eq!(
+                kernel_parser_hosts(
+                    version,
+                    true,
+                    &[("bison", new_bison), ("flex", "flex 2.5.35")]
+                ),
+                "host-flex",
+                "{version}"
+            );
+            assert_eq!(
+                kernel_parser_hosts(version, true, &[]),
+                "host-bison host-flex",
+                "{version}"
+            );
+            assert_eq!(kernel_parser_hosts(version, false, &[]), "", "{version}");
+        }
     }
 
     #[test]

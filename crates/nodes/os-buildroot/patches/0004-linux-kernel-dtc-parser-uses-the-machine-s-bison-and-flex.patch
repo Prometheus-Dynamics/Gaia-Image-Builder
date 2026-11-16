@@ -1,0 +1,37 @@
+From: Gaia Image Builder <noreply@anthropic.com>
+Subject: [PATCH] linux: build the dtc parser with the machine's bison and flex when new enough
+
+With a device tree kernel, linux/linux.mk added host-bison and host-flex to
+the kernel's dependencies unconditionally: the kernel generates its dtc
+parser at build time, and the comment said Buildroot's own were used "for
+reproducibility". host-bison needs host-m4, so this cost a long host stage
+on every machine (measured: bison 132.7 s and flex 39.2 s in one build).
+
+The kernel now depends on $(BR2_BISON_HOST_DEPENDENCY) and
+$(BR2_FLEX_HOST_DEPENDENCY), which are empty for a machine program that is
+at least Buildroot's own bison 3.8.2 and flex 2.6.4 (see 0003), and are
+host-bison and host-flex otherwise. The kernel's dtc binary, and the dtbs
+it compiles, are the same whichever parser generator made the parser; that
+is checked for one kernel tree with a bison from each.
+
+---
+ linux/linux.mk | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/linux/linux.mk b/linux/linux.mk
+--- a/linux/linux.mk
++++ b/linux/linux.mk
+@@ -479,9 +479,10 @@
+ 
+ ifeq ($(BR2_LINUX_KERNEL_DTS_SUPPORT),y)
+ # Starting with 4.17, the generated dtc parser code is no longer
+-# shipped with the kernel sources, so we need flex and bison. For
+-# reproducibility, we use our owns rather than the host ones.
+-LINUX_DEPENDENCIES += host-bison host-flex
++# shipped with the kernel sources, so we need flex and bison. The
++# machine's ones are used when they are new enough, and host-bison and
++# host-flex are built otherwise (check-host-bison-flex.mk).
++LINUX_DEPENDENCIES += $(BR2_BISON_HOST_DEPENDENCY) $(BR2_FLEX_HOST_DEPENDENCY)
+ 
+ ifeq ($(BR2_LINUX_KERNEL_DTB_IS_SELF_BUILT),)
+ define LINUX_BUILD_DTB
