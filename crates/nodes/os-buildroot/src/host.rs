@@ -45,7 +45,10 @@
 //! selects, and no host tool is built differently for them. So what changes
 //! how a shared host tool is built changes the key, and nothing else does.
 
-use crate::{BuildrootHost, OsConfig, Prepared, admit, configure, make_tool, ppd, prepare, times};
+use crate::{
+    BuildrootHost, OsConfig, Prepared, admit, configure, in_store, make_tool, ppd, prepare,
+    prepare_plan, times,
+};
 use daedalus::prelude::*;
 use daedalus_cpu_author::FanIn;
 use gaia_step::{Ctx, Digest, KeyBuilder, Step, StepError, Store, Stream, Tool, Work};
@@ -76,10 +79,35 @@ const STAMP_SECONDS: u64 = 1_000_000_000;
 /// trees, as a seed for `gaia.os.buildroot`.
 #[node(
     id = "gaia.os.buildroot.host",
-    inputs(store, source, os, inputs, host),
+    inputs(store, source, os, inputs, plan, host),
     outputs(seed)
 )]
 pub fn os_buildroot_host(
+    store: &str,
+    source: Tree,
+    os: &OsConfig,
+    inputs: FanIn<'_, Tree>,
+    plan: Tree,
+    host: &BuildrootHost,
+    cx: &Ctx,
+) -> Result<Tree, StepError> {
+    let inputs: Vec<Tree> = inputs.iter().map(|tree| (*tree).clone()).collect();
+    build_host(store, source, os, &inputs, &plan, host, cx)
+}
+
+/// The plan's file, as the plan node made it.
+const PLAN_FILE: &str = "plan.txt";
+
+/// The plan of the host tools: what Buildroot would build for the host, and
+/// with what. Its inputs are the Buildroot source and the config, and only
+/// the input trees the plan reads or needs (`OsConfig::plan_inputs`), so it
+/// does not wait for the kernel's, the bootloader's or the files' trees.
+#[node(
+    id = "gaia.os.buildroot.host-plan",
+    inputs(store, source, os, inputs, host),
+    outputs(plan)
+)]
+pub fn os_buildroot_host_plan(
     store: &str,
     source: Tree,
     os: &OsConfig,
@@ -88,7 +116,38 @@ pub fn os_buildroot_host(
     cx: &Ctx,
 ) -> Result<Tree, StepError> {
     let inputs: Vec<Tree> = inputs.iter().map(|tree| (*tree).clone()).collect();
-    build_host(store, source, os, &inputs, host, cx)
+    build_plan(store, source, os, &inputs, host, cx)
+}
+
+/// The plan node's body: the plan, as a tree holding `plan.txt`.
+pub fn build_plan(
+    store: &str,
+    source: Tree,
+    config: &OsConfig,
+    inputs: &[Tree],
+    host: &BuildrootHost,
+    cx: &Ctx,
+) -> Result<Tree, StepError> {
+    let store = Store::open(store).map_err(StepError::store(PLAN))?;
+    let mut prepared = prepare_plan(&store, &source, config, inputs, host)
+        .map_err(|why| StepError::body(PLAN, why))?;
+    let mode = crate::patches::mode_from_env().map_err(|why| StepError::body(PLAN, why))?;
+    crate::patches::apply_to(&store, cx, &mut prepared, mode)?;
+    let plan_key = prepared.key(PLAN, KEY_VERSION, config, host).finish();
+    let planned = Step::new(&store, cx, PLAN, plan_key)
+        .look_up_or_make(&[("plan", Path::new(PLAN_FILE))], |work| {
+            plan(work, &prepared, host)
+        })?;
+    let scratch = store.scratch().map_err(StepError::store(PLAN))?;
+    let dir = scratch.path().join("plan");
+    fs::create_dir(&dir).map_err(|e| StepError::body(PLAN, e.to_string()))?;
+    fs::copy(store.path(&planned.outputs["plan"]), dir.join(PLAN_FILE))
+        .map_err(|e| StepError::body(PLAN, format!("the plan: {e}")))?;
+    let object = store.put_tree(&dir).map_err(StepError::store(PLAN))?;
+    Ok(Tree {
+        object: object.into(),
+        entries: Vec::new(),
+    })
 }
 
 /// The node's body, with the input trees as a slice.
@@ -97,6 +156,7 @@ pub fn build_host(
     source: Tree,
     config: &OsConfig,
     inputs: &[Tree],
+    plan: &Tree,
     host: &BuildrootHost,
     cx: &Ctx,
 ) -> Result<Tree, StepError> {
@@ -106,14 +166,12 @@ pub fn build_host(
     let mode = crate::patches::mode_from_env().map_err(|why| StepError::body(NAME, why))?;
     crate::patches::apply_to(&store, cx, &mut prepared, mode)?;
 
-    // What Buildroot would build for the host, and with what.
-    let plan_key = prepared.key(PLAN, KEY_VERSION, config, host).finish();
-    let planned = Step::new(&store, cx, PLAN, plan_key)
-        .look_up_or_make(&[("plan", Path::new("plan.txt"))], |work| {
-            plan(work, &prepared, host)
-        })?;
-    let plan_text = fs::read_to_string(store.path(&planned.outputs["plan"]))
-        .map_err(|e| StepError::body(PLAN, format!("the plan: {e}")))?;
+    // What Buildroot would build for the host, and with what: the plan
+    // node's text.
+    let (plan_dir, _) =
+        in_store(&store, plan, "the host plan").map_err(|why| StepError::body(NAME, why))?;
+    let plan_text = fs::read_to_string(plan_dir.join(PLAN_FILE))
+        .map_err(|e| StepError::body(NAME, format!("the host plan: {e}")))?;
     // Only what the shared seed is built from is keyed: see `shared_plan`.
     let shared = shared_plan(&plan_text, &config.inputs, &config.overrides);
     let (goals, text) = (shared.goals.join(" "), shared.text);
@@ -370,7 +428,7 @@ fn plan(work: &mut Work<'_>, prepared: &Prepared, host: &BuildrootHost) -> Resul
                 names.push((path.clone(), name.into()));
             }
         }
-        for (name, dir, _) in &prepared.dirs {
+        for (name, dir) in &prepared.paths {
             names.push((dir.display().to_string(), format!("@{name}@")));
         }
         text.push_str(&named(&values, &names));

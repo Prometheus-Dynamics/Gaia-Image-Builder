@@ -10,7 +10,7 @@
 //!   the host tools again; one that does, does.
 
 use gaia_os_buildroot::{
-    BuildrootHost, ConfigFragment, OsConfig, build_host, build_os, host_goals, no_seed,
+    BuildrootHost, ConfigFragment, OsConfig, build_host, build_os, build_plan, host_goals, no_seed,
 };
 use gaia_step::{Ctx, Store, logs_dir, step_records};
 use gaia_types::Tree;
@@ -37,6 +37,7 @@ show-info:
 
 printvars:
 \t@printf 'HOST_A_CONF_OPTS=--prefix=%s --fast=%s\\n' '$(O)/host' \"$$(grep -c BR2_A_FAST=y $(O)/.config || true)\"
+\t@printf 'HOST_CFLAGS=%s\\n' \"$$(grep '^BR2_A_DATA=' $(O)/.config || true)\"
 
 host-a:
 \tmkdir -p $(O)/host/etc $(O)/host/bin $(O)/build/host-a-1/src
@@ -70,9 +71,28 @@ impl Fixture {
     }
 
     fn source(&self) -> Tree {
-        let dir = self.root.join("buildroot");
+        self.source_with("")
+    }
+
+    /// The Buildroot tree, with one more file `extra`: a stand-in for a
+    /// patch to Buildroot.
+    fn source_with(&self, extra: &str) -> Tree {
+        let dir = self.root.join(format!("buildroot-{}", extra.len()));
         fs::create_dir_all(&dir).expect("dir");
         fs::write(dir.join("Makefile"), MAKEFILE).expect("write");
+        fs::write(dir.join("gaia-extra"), extra).expect("write");
+        let store = Store::open(&self.store).expect("store");
+        Tree {
+            object: store.put_tree(&dir).expect("stored").into(),
+            entries: Vec::new(),
+        }
+    }
+
+    /// An input tree holding one file `text`, stored.
+    fn tree(&self, text: &str) -> Tree {
+        let dir = self.root.join(format!("tree-{text}"));
+        fs::create_dir_all(&dir).expect("dir");
+        fs::write(dir.join("file"), text).expect("write");
         let store = Store::open(&self.store).expect("store");
         Tree {
             object: store.put_tree(&dir).expect("stored").into(),
@@ -108,11 +128,27 @@ impl Fixture {
     }
 
     fn seed(&self, lines: &str) -> Tree {
+        self.seed_with(&config(lines), &[], self.source())
+    }
+
+    /// The plan node, then the host stage with its tree. The plan is given
+    /// the input trees it reads or needs, as the graph gives them.
+    fn seed_with(&self, config: &OsConfig, inputs: &[Tree], source: Tree) -> Tree {
+        let plan = build_plan(
+            &self.store(),
+            source.clone(),
+            config,
+            &plan_trees(config, inputs),
+            &self.host(),
+            &Ctx::new(),
+        )
+        .expect("the plan");
         build_host(
             &self.store(),
-            self.source(),
-            &config(lines),
-            &[],
+            source,
+            config,
+            inputs,
+            &plan,
             &self.host(),
             &Ctx::new(),
         )
@@ -229,4 +265,120 @@ fn only_what_changes_a_host_tool_builds_the_host_tools_again() {
     // A line that changes how the host package is configured.
     f.seed("BR2_X=y\nBR2_A_FAST=y\n");
     assert_eq!(made(&f), (3, 2));
+}
+
+/// The input trees the plan is given: those `OsConfig::plan_inputs` names,
+/// in order, as the graph gives them.
+fn plan_trees(config: &OsConfig, inputs: &[Tree]) -> Vec<Tree> {
+    config
+        .plan_inputs()
+        .iter()
+        .map(|name| {
+            let at = config.inputs.iter().position(|n| n == name).expect("named");
+            inputs[at].clone()
+        })
+        .collect()
+}
+
+/// A config with one fragment, and the names of its input trees.
+fn config_with(lines: &str, inputs: &[&str]) -> OsConfig {
+    OsConfig {
+        inputs: inputs.iter().map(|name| (*name).to_string()).collect(),
+        ..config(lines)
+    }
+}
+
+/// The plan does not wait for a tree it does not read: a kernel's tree is
+/// not given to it, and it is made once. A change to the config or to the
+/// Buildroot tree makes it again.
+#[test]
+fn the_plan_key_is_the_buildroot_tree_and_the_config_only() {
+    let f = Fixture::new();
+    let plan = |f: &Fixture, config: &OsConfig, source: Tree| {
+        build_plan(&f.store(), source, config, &[], &f.host(), &Ctx::new()).expect("the plan");
+    };
+    let kernel = config_with("BR2_X=y\n", &["kernel"]);
+    plan(&f, &kernel, f.source());
+    assert_eq!(f.made("gaia.os.buildroot.host-plan"), 1);
+    plan(&f, &kernel, f.source());
+    assert_eq!(
+        f.made("gaia.os.buildroot.host-plan"),
+        1,
+        "the plan ran again"
+    );
+    plan(
+        &f,
+        &config_with("BR2_X=y\nBR2_Y=y\n", &["kernel"]),
+        f.source(),
+    );
+    assert_eq!(
+        f.made("gaia.os.buildroot.host-plan"),
+        2,
+        "a config change did not plan again"
+    );
+    plan(&f, &kernel, f.source_with("patched"));
+    assert_eq!(
+        f.made("gaia.os.buildroot.host-plan"),
+        3,
+        "a Buildroot change did not plan again"
+    );
+}
+
+/// A tree the plan needs (here, the patch directory the config names) is in
+/// the plan's key: the plan runs again when it changes.
+#[test]
+fn a_tree_the_plan_needs_is_in_its_key() {
+    let f = Fixture::new();
+    let patched = |f: &Fixture, tree: Tree| {
+        let config = OsConfig {
+            fragments: vec![ConfigFragment {
+                name: "f".into(),
+                text: "BR2_GLOBAL_PATCH_DIR=\"@patches@\"\n".into(),
+            }],
+            inputs: vec!["patches".into()],
+            ..OsConfig::default()
+        };
+        build_plan(
+            &f.store(),
+            f.source(),
+            &config,
+            &[tree],
+            &f.host(),
+            &Ctx::new(),
+        )
+        .expect("the plan");
+    };
+    patched(&f, f.tree("one"));
+    patched(&f, f.tree("one"));
+    assert_eq!(f.made("gaia.os.buildroot.host-plan"), 1);
+    patched(&f, f.tree("two"));
+    assert_eq!(f.made("gaia.os.buildroot.host-plan"), 2);
+}
+
+/// The host stage keeps its key on an input tree that the shared variables
+/// of the seed name: a change to that tree builds the host tools again. (A
+/// package that names a tree is a board package, built by each build, and
+/// is not in the seed: its variables are not in the key.)
+#[test]
+fn the_host_stage_builds_again_when_a_tree_it_builds_from_changes() {
+    let f = Fixture::new();
+    let with = |f: &Fixture, data: Tree| {
+        let config = config_with("BR2_A_DATA=\"@data@\"\n", &["data"]);
+        f.seed_with(&config, &[data], f.source())
+    };
+    let first = with(&f, f.tree("one"));
+    assert_eq!(f.made("gaia.os.buildroot.host"), 1);
+    let again = with(&f, f.tree("one"));
+    assert_eq!(
+        f.made("gaia.os.buildroot.host"),
+        1,
+        "the same tree built again"
+    );
+    assert_eq!(again, first);
+    with(&f, f.tree("two"));
+    assert_eq!(
+        f.made("gaia.os.buildroot.host"),
+        2,
+        "a changed tree did not rebuild"
+    );
 }

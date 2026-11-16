@@ -103,6 +103,26 @@ pub struct OsConfig {
 }
 
 impl OsConfig {
+    /// The input trees the host plan reads or needs, in the inputs' order:
+    /// the externals (Buildroot reads their descriptions and packages), and
+    /// the tree a `BR2_GLOBAL_PATCH_DIR` names (Buildroot stops when that
+    /// directory does not exist). Every other input is not read by the plan,
+    /// so the plan does not wait for it.
+    pub fn plan_inputs(&self) -> Vec<String> {
+        let patch_dirs: Vec<&str> = self
+            .fragments
+            .iter()
+            .flat_map(|fragment| fragment.text.lines())
+            .filter(|line| line.trim_start().starts_with("BR2_GLOBAL_PATCH_DIR="))
+            .flat_map(|line| line.split('@').skip(1).step_by(2))
+            .collect();
+        self.inputs
+            .iter()
+            .filter(|name| self.externals.contains(name) || patch_dirs.contains(&name.as_str()))
+            .cloned()
+            .collect()
+    }
+
     /// An error for an input named twice, or an override, an external or a
     /// kernel contract that names no input.
     pub fn check(&self) -> Result<(), String> {
@@ -152,6 +172,31 @@ impl OsConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The plan needs the externals and the global patch directory's tree,
+    /// in the inputs' order, and no other input.
+    #[test]
+    fn the_plan_needs_the_externals_and_the_patch_directory_only() {
+        let config = OsConfig {
+            fragments: vec![ConfigFragment {
+                name: "f".into(),
+                text:
+                    "BR2_GLOBAL_PATCH_DIR=\"@patches@/gaia\"\n# BR2_GLOBAL_PATCH_DIR is not set\n"
+                        .into(),
+            }],
+            inputs: ["kernel", "patches", "board", "ext", "blob"]
+                .map(String::from)
+                .to_vec(),
+            externals: vec!["ext".into()],
+            ..OsConfig::default()
+        };
+        assert_eq!(config.plan_inputs(), ["patches", "ext"]);
+        let none = OsConfig {
+            inputs: vec!["kernel".into()],
+            ..OsConfig::default()
+        };
+        assert!(none.plan_inputs().is_empty());
+    }
 
     fn config() -> OsConfig {
         OsConfig {

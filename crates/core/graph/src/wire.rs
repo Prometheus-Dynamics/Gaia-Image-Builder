@@ -1861,6 +1861,48 @@ fn image_os(
             "the image has an OS, and the host gives no Buildroot setup (make, jobs, download directory)",
         )
     })?;
+    // The host plan: what the host tools are built with, from the Buildroot
+    // tree, the config and only the input trees the plan reads or needs
+    // (`OsConfig::plan_inputs`). It does not wait for the others, so it starts
+    // when the Buildroot tree is stored, not when the kernel's source is.
+    let plan_node = g.add(
+        "gaia.os.buildroot.host-plan",
+        format!("{}.host-plan", at.image.name),
+        file,
+        &key,
+    )?;
+    let out = g.first_output(from).unwrap_or("tree");
+    g.edge((from, out), (plan_node, "source"));
+    for (k, input_name) in plan.config.plan_inputs().iter().enumerate() {
+        let Some((_, input)) = plan.inputs.iter().find(|(n, _)| n == input_name) else {
+            return Err(Error::at(
+                file,
+                key.clone(),
+                format!(
+                    "the host plan needs the input {input_name}, which the config does not name"
+                ),
+            ));
+        };
+        let node = os_input_node(g, at, file, &key, input_name, input, os_inputs)?;
+        let out = g.first_output(node).unwrap_or("tree");
+        g.edge((node, out), (plan_node, &format!("inputs{k}")));
+    }
+    host_input(
+        g,
+        host_ports,
+        inputs,
+        &format!("{}.os.host-tools", at.image.name),
+        HostInput::Os(plan.config.clone()),
+        (plan_node, "os"),
+    )?;
+    host_input(
+        g,
+        host_ports,
+        inputs,
+        "buildroot-host",
+        HostInput::Buildroot(buildroot.clone()),
+        (plan_node, "host"),
+    )?;
     // One build per part: `<image>.os` is the root filesystem's,
     // `<image>.kernel` and `<image>.bootloader` the board's.
     let mut step = |g: &mut Graph<'_>,
@@ -1918,6 +1960,7 @@ fn image_os(
         host_ports,
         inputs,
     )?;
+    g.edge((plan_node, "plan"), (tools, "plan"));
     g.host_tools.insert(name.to_string(), tools);
     let os = step(
         g,

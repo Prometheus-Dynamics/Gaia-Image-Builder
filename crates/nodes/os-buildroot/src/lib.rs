@@ -121,7 +121,7 @@ const OUTPUTS: [(&str, &str); 10] = [
 ];
 
 pub use gaia_types::{BuildrootHost, ConfigFragment, OsConfig};
-pub use host::{build_host, host_goals, os_buildroot_host};
+pub use host::{build_host, build_plan, host_goals, os_buildroot_host, os_buildroot_host_plan};
 
 /// The node's outputs, in port order.
 pub type Outputs = (
@@ -190,6 +190,10 @@ pub(crate) struct Prepared {
     pub src_digest: Digest,
     /// Each input tree: its name, its path in the store, its digest.
     pub dirs: Vec<(String, PathBuf, Digest)>,
+    /// Each input name with the path the run gives it: its store path, or
+    /// for the plan an input it does not have, its placeholder (see
+    /// [`placeholder`]). The names of the paths in the plan's text.
+    pub paths: Vec<(String, PathBuf)>,
     /// `NAME=value` arguments for make: externals and source overrides.
     pub vars: Vec<String>,
     /// The fragments with each `@name@` replaced by its tree's path.
@@ -263,6 +267,17 @@ impl Prepared {
     }
 }
 
+/// The root of the placeholder paths the plan gives the input trees it does
+/// not have. Nothing is there: the plan reads none of those trees (only
+/// what `OsConfig::plan_inputs` names), and one path for every run keeps the
+/// plan's text and key the same wherever the trees are stored.
+pub(crate) const PLACEHOLDER: &str = "/gaia-plan-placeholder";
+
+/// The placeholder path of the input `name` in the plan.
+pub(crate) fn placeholder(name: &str) -> PathBuf {
+    Path::new(PLACEHOLDER).join(name)
+}
+
 pub(crate) fn prepare(
     store: &Store,
     source: &Tree,
@@ -277,10 +292,68 @@ pub(crate) fn prepare(
         let (dir, digest) = in_store(store, tree, &format!("input {name}"))?;
         dirs.push((name.clone(), dir, digest));
     }
+    let paths = dirs
+        .iter()
+        .map(|(name, dir, _)| (name.clone(), dir.clone()))
+        .collect();
+    assemble(src, src_digest, dirs, paths, config)
+}
+
+/// What the host plan is given: the Buildroot source and the config, and the
+/// input trees the plan reads or needs (`OsConfig::plan_inputs`, in that
+/// order). Every other input is at its placeholder path, which is all the
+/// plan knows of it: its text and key do not depend on the trees.
+pub(crate) fn prepare_plan(
+    store: &Store,
+    source: &Tree,
+    config: &OsConfig,
+    trees: &[Tree],
+    host: &BuildrootHost,
+) -> Result<Prepared, String> {
+    check(config, config.inputs.len(), host)?;
+    let needed = config.plan_inputs();
+    if trees.len() != needed.len() {
+        return Err(format!(
+            "the plan needs {} input trees, and {} are given",
+            needed.len(),
+            trees.len()
+        ));
+    }
+    let (src, src_digest) = in_store(store, source, "the Buildroot source")?;
+    let mut dirs = Vec::with_capacity(trees.len());
+    for (name, tree) in needed.iter().zip(trees) {
+        let (dir, digest) = in_store(store, tree, &format!("input {name}"))?;
+        dirs.push((name.clone(), dir, digest));
+    }
+    let paths = config
+        .inputs
+        .iter()
+        .map(|name| {
+            let path = dirs
+                .iter()
+                .find(|(n, _, _)| n == name)
+                .map(|(_, dir, _)| dir.clone())
+                .unwrap_or_else(|| placeholder(name));
+            (name.clone(), path)
+        })
+        .collect();
+    assemble(src, src_digest, dirs, paths, config)
+}
+
+/// The `Prepared` of a run: its make variables, its fragments with each
+/// `@name@` replaced by the input's path, and its contracts.
+fn assemble(
+    src: PathBuf,
+    src_digest: Digest,
+    dirs: Vec<(String, PathBuf, Digest)>,
+    paths: Vec<(String, PathBuf)>,
+    config: &OsConfig,
+) -> Result<Prepared, String> {
     let path_of = |name: &str| -> PathBuf {
-        dirs.iter()
-            .find(|(n, _, _)| n == name)
-            .map(|(_, dir, _)| dir.clone())
+        paths
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, path)| path.clone())
             .unwrap_or_default()
     };
     let mut vars = Vec::new();
@@ -300,10 +373,6 @@ pub(crate) fn prepare(
             path_of(&o.input).display()
         ));
     }
-    let paths: Vec<(String, PathBuf)> = dirs
-        .iter()
-        .map(|(name, dir, _)| (name.clone(), dir.clone()))
-        .collect();
     let fragments = config
         .fragments
         .iter()
@@ -328,6 +397,7 @@ pub(crate) fn prepare(
         src,
         src_digest,
         dirs,
+        paths,
         vars,
         fragments,
         defaults,
@@ -854,7 +924,11 @@ pub(crate) fn make_tool(
 }
 
 /// The node, for a registry.
-pub const NODES: [&NodeRecord; 2] = [&OS_BUILDROOT_NODE, &host::OS_BUILDROOT_HOST_NODE];
+pub const NODES: [&NodeRecord; 3] = [
+    &OS_BUILDROOT_NODE,
+    &host::OS_BUILDROOT_HOST_PLAN_NODE,
+    &host::OS_BUILDROOT_HOST_NODE,
+];
 
 /// A `Prepared` for the key and merge tests: the source and no input trees,
 /// with these fragments and toolchain defaults.
@@ -864,6 +938,7 @@ fn prepared_for_test(fragments: Vec<ConfigFragment>, defaults: Vec<ConfigFragmen
         src: PathBuf::from("/src"),
         src_digest: Digest::of_bytes(b"source"),
         dirs: Vec::new(),
+        paths: Vec::new(),
         vars: Vec::new(),
         fragments,
         defaults,
@@ -1032,6 +1107,7 @@ mod bound_tests {
             src: PathBuf::from("/store/buildroot"),
             src_digest: Digest::of_bytes(b"source"),
             dirs: Vec::new(),
+            paths: Vec::new(),
             vars: Vec::new(),
             fragments: vec![fragment("BR2_CCACHE=y\n")],
             defaults: Vec::new(),
