@@ -134,8 +134,8 @@ mod tests {
         }
     }
 
-    /// The Raze's four Lemnos packages: one source, one target, one profile.
-    fn raze() -> Vec<RustBuild> {
+    /// Four packages of one workspace: one source, one target, one profile.
+    fn four_packages() -> Vec<RustBuild> {
         vec![
             build("lemnosd", "lemnosd"),
             build("lemnos-ctl", "lemnos-ctl"),
@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn one_source_target_and_profile_is_one_run() {
-        let groups = group(&raze());
+        let groups = group(&four_packages());
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].members, [0, 1, 2, 3]);
         assert_eq!(
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn a_different_rev_is_its_own_run() {
-        let mut builds = raze();
+        let mut builds = four_packages();
         builds[2].source = "455a956e".into();
         let groups = group(&builds);
         assert_eq!(groups.len(), 2);
@@ -172,7 +172,7 @@ mod tests {
 
     #[test]
     fn a_host_helper_is_not_merged_with_the_target_binaries() {
-        let mut builds = raze();
+        let mut builds = four_packages();
         builds.push(RustBuild {
             triple: "x86_64-unknown-linux-gnu".into(),
             profile: "release".into(),
@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn the_same_package_twice_is_one_package_in_one_run() {
-        let mut builds = raze();
+        let mut builds = four_packages();
         builds.push(build("lemnosd-again", "lemnosd"));
         let groups = group(&builds);
         assert_eq!(groups.len(), 1);
@@ -254,7 +254,7 @@ mod tests {
 
     #[test]
     fn groups_keep_their_first_member_order_and_cover_every_build_once() {
-        let mut builds = raze();
+        let mut builds = four_packages();
         builds[1].profile = "release".into();
         builds[3].cpu = "cortex-a53".into();
         let groups = group(&builds);

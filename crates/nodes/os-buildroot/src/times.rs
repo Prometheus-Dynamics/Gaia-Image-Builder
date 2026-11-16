@@ -177,7 +177,7 @@ pub(crate) fn record(work: &mut Work<'_>, out: &Path, jobs: u32) {
 mod tests {
     use super::*;
 
-    /// A real log of a build, copied from the live output of a Raze image:
+    /// A real log of a build, copied from the live output of an image build:
     /// six packages, the last one (`host-gcc-final`) open at its build.
     const FIXTURE: &str = include_str!("../tests/fixtures/build-time.log");
 
