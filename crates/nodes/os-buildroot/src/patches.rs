@@ -31,6 +31,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const NAME: &str = "gaia.os.buildroot.patch";
+/// The work directory this step expects when no earlier run recorded its
+/// size. In RAM when there is room (see `gaia_step::Step::ram_work`): a tree
+/// of many small files is written once to the store's disk, not written,
+/// read back and renamed there.
+const WORK_BYTES: u64 = 1 << 30;
 /// Changes when how the patches are applied changes.
 /// 2: the copy keeps file modes (1 lost them, and Buildroot's scripts with them).
 const RECIPE_VERSION: u32 = 2;
@@ -162,10 +167,12 @@ pub(crate) fn patched_source(
             Digest::of_bytes(patch.text.as_bytes()),
         );
     }
-    let made = Step::new(store, cx, NAME, key.finish()).look_up_or_make(
-        &[("tree", Path::new("tree")), ("report", Path::new(REPORT))],
-        |work| make_patched(work, source),
-    )?;
+    let made = Step::new(store, cx, NAME, key.finish())
+        .ram_work(WORK_BYTES)
+        .look_up_or_make(
+            &[("tree", Path::new("tree")), ("report", Path::new(REPORT))],
+            |work| make_patched(work, source),
+        )?;
     let report = fs::read_to_string(store.path(&made.outputs["report"]))
         .map_err(|e| StepError::body(NAME, format!("the patches report: {e}")))?;
     let outcomes = parse_report(&report).map_err(|e| StepError::body(NAME, e))?;

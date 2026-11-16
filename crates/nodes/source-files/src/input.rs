@@ -9,6 +9,11 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 const NAME: &str = "gaia.source.input";
+/// The work directory this step expects when no earlier run recorded its
+/// size. In RAM when there is room (see `gaia_step::Step::ram_work`): a tree
+/// of many small files is written once to the store's disk, not written,
+/// read back and renamed there.
+const WORK_BYTES: u64 = 1 << 30;
 
 /// Stores the regular file at `path` as `name` in a tree, keyed on the
 /// file's content digest and `name`, not its path: the same bytes from two
@@ -34,9 +39,9 @@ pub fn source_input(store: &str, path: &str, name: &str, cx: &Ctx) -> Result<Tre
         .input("file", digest)
         .config("name", name)
         .finish();
-    let made = Step::new(&store, cx, NAME, key).look_up_or_make(
-        &[("tree", Path::new("tree"))],
-        |work| {
+    let made = Step::new(&store, cx, NAME, key)
+        .ram_work(WORK_BYTES)
+        .look_up_or_make(&[("tree", Path::new("tree"))], |work| {
             let dir = work.dir().join("tree");
             std::fs::create_dir(&dir).map_err(|e| StepError::body(NAME, e))?;
             let copy = dir.join(name);
@@ -53,8 +58,7 @@ pub fn source_input(store: &str, path: &str, name: &str, cx: &Ctx) -> Result<Tre
                 ));
             }
             Ok(())
-        },
-    )?;
+        })?;
     Ok(Tree {
         object: made.outputs["tree"].into(),
         entries: Vec::new(),

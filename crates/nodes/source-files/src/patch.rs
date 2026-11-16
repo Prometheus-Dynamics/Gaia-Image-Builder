@@ -8,6 +8,11 @@ use gaia_types::Tree;
 use std::path::{Path, PathBuf};
 
 const NAME: &str = "gaia.source.patch";
+/// The work directory this step expects when no earlier run recorded its
+/// size. In RAM when there is room (see `gaia_step::Step::ram_work`): a tree
+/// of many small files is written once to the store's disk, not written,
+/// read back and renamed there.
+const WORK_BYTES: u64 = 2 << 30;
 /// Changes when how the patches are applied changes.
 const RECIPE_VERSION: u32 = 1;
 
@@ -89,9 +94,9 @@ pub fn source_patch(
             .config(&format!("patch {n} name"), name);
     }
     let src = store.path(&source_object);
-    let made = Step::new(&store, cx, NAME, key.finish()).look_up_or_make(
-        &[("tree", Path::new("tree"))],
-        |work| {
+    let made = Step::new(&store, cx, NAME, key.finish())
+        .ram_work(WORK_BYTES)
+        .look_up_or_make(&[("tree", Path::new("tree"))], |work| {
             let tree = work.dir().join("tree");
             copy_tree(&src, &tree).map_err(|e| StepError::body(NAME, e.to_string()))?;
             let total = files.len();
@@ -110,8 +115,7 @@ pub fn source_patch(
                 work.progress(n as u32 + 1, total as u32);
             }
             Ok(())
-        },
-    )?;
+        })?;
     Ok(Tree {
         object: made.outputs["tree"].into(),
         entries: Vec::new(),

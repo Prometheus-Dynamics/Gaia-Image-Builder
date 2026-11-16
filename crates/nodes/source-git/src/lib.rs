@@ -33,6 +33,11 @@ use std::path::{Path, PathBuf};
 
 /// The node's id, and the step name in its errors and logs.
 pub const NAME: &str = "gaia.source.git";
+/// The work directory this step expects when no earlier run recorded its
+/// size. In RAM when there is room (see `gaia_step::Step::ram_work`): a tree
+/// of many small files is written once to the store's disk, not written,
+/// read back and renamed there.
+const WORK_BYTES: u64 = 2 << 30;
 
 /// The shared object cache for `store`: `git` next to its root.
 pub fn cache_dir(store: &Store) -> PathBuf {
@@ -80,7 +85,9 @@ pub fn source(
     }
     let key = key.finish();
     let cache = cache_repository(&cache_dir(&store), url);
-    let made = Step::new(&store, cx, NAME, key).look_up_or_make(
+    let made = Step::new(&store, cx, NAME, key)
+        .ram_work(WORK_BYTES)
+        .look_up_or_make(
         &[("tree", Path::new("tree"))],
         |work| {
             fetch(work, git, url, commit, &cache)?;

@@ -10,6 +10,11 @@ use std::path::{Component, Path, PathBuf};
 use tar::EntryType;
 
 const NAME: &str = "gaia.source.archive";
+/// The work directory this step expects when no earlier run recorded its
+/// size. In RAM when there is room (see `gaia_step::Step::ram_work`): a tree
+/// of many small files is written once to the store's disk, not written,
+/// read back and renamed there.
+const WORK_BYTES: u64 = 2 << 30;
 
 /// Unpacks `archive`, dropping `strip` leading path components of each
 /// member; a member with no more than that is left out.
@@ -38,16 +43,15 @@ pub fn source_archive(
         .libs(crate::LIBS)
         .libs(&crate::runtime_libs())
         .finish();
-    let made = Step::new(&store, cx, NAME, key).look_up_or_make(
-        &[("tree", Path::new("tree"))],
-        |work| {
+    let made = Step::new(&store, cx, NAME, key)
+        .ram_work(WORK_BYTES)
+        .look_up_or_make(&[("tree", Path::new("tree"))], |work| {
             let tree = work.dir().join("tree");
             fs::create_dir(&tree).map_err(|e| StepError::body(NAME, e))?;
             unpack(&file, &tree, strip, || work.cancelled())
                 .map_err(|e| StepError::body(NAME, format!("{}: {e}", object.digest)))?;
             normalize_modes(&tree).map_err(|e| StepError::body(NAME, e))
-        },
-    )?;
+        })?;
     Ok(Tree {
         object: made.outputs["tree"].into(),
         entries: Vec::new(),
