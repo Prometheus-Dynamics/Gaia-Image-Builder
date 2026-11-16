@@ -8,7 +8,6 @@ name = "k230d-zero"
 description = "BPI-CanMV-K230D-Zero (K230D)"
 
 [target]
-cpu = "xuantie-c908"
 
 [kernel]
 device_tree = "canaan/bananapi-canmv-k230d-zero"

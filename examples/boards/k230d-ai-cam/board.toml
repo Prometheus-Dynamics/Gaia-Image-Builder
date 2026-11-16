@@ -6,5 +6,20 @@ extends = "../k230/family.toml"
 name = "k230d-ai-cam"
 description = "CanMV K230D AI-CAM (K230D)"
 
-[target]
-cpu = "xuantie-c908"
+
+[kernel]
+device_tree = "canaan/k230d-ai-cam"
+device_tree_dir = "assets/dts"
+
+# The AI-CAM's U-Boot is the vendor's own board, k230d_canmv_junroc_ai_cam, from
+# Canaan's k230_linux_sdk at fc6cc215: its device tree (pad table and bank
+# modes, from the schematic), board files and defconfig, all in the family's
+# patch byte for byte. One change on top, for the bench (agreed): U-Boot's
+# console is UART0 (the CH342K bridge), not the vendor's UART2. That is the
+# second patch below, only the stdout-path line.
+[bootloader]
+defconfig = "k230d_canmv_junroc_ai_cam"
+patches = [
+  { file = "../k230/assets/patches/u-boot-v2022.10-k230d.patch" },
+  { file = "assets/patches/u-boot-v2022.10-k230d-ai-cam-console-uart0.patch" },
+]
