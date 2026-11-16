@@ -22,3 +22,4 @@ budget = "1G"
 
 [images.settings]
 id = "k230d-zero"
+root_bootable = false

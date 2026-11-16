@@ -3,10 +3,7 @@
 # environment at 3 MiB), OpenSBI, mainline Linux 7.3.3 with the board's dts. The
 # SPL, U-Boot and OpenSBI areas are wrapped by gaia.firmware.k230 (the family's wrap
 # keys). The image goes to an SD card ONLY (removable), never internal flash.
-# Untested on board, and not built yet.
-# NOT YET BUILDABLE: the environment area (u-boot-env.bin, 3 MiB) has no producer:
-# the gaia.uboot.env node is not wired to a board key yet, so the build fails at that
-# area's blob. Nothing else in this product uses a script.
+# Untested on board.
 version = 1
 name = "k230d-ai-cam"
 
@@ -27,3 +24,6 @@ budget = "1G"
 
 [images.settings]
 id = "k230d-ai-cam"
+# U-Boot reads partition 1 by number (ext4load mmc 1:1); nothing scans for a
+# bootable one, and the board's layout marks none.
+root_bootable = false
