@@ -451,7 +451,7 @@ fn a_recipe_input_takes_the_os_boot_files_by_what_they_are() {
     edit(
         &dir.path().join("recipes/sd-image.toml"),
         "bootloader = [\"disk.bootloader\"]\n",
-        "bootloader = [\"verity.veritysetup\"]\n",
+        "bootloader = [\"verity.device\"]\n",
     );
     // The types differ (an artifact into a string), so the planner refuses
     // it, naming the edge: the input reached the OS step's output.
@@ -459,7 +459,7 @@ fn a_recipe_input_takes_the_os_boot_files_by_what_they_are() {
     assert_eq!(out.status.code(), Some(2));
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
-        err.contains("`gaia.os.buildroot`.bootloader -> `gaia.verity`.veritysetup"),
+        err.contains("`gaia.os.buildroot`.bootloader -> `gaia.verity`.device"),
         "{err}"
     );
 }
@@ -514,7 +514,7 @@ fn a_recipe_that_takes_os_needs_an_image_with_one() {
     edit(
         &dir.path().join("recipes/sd-image.toml"),
         "bootloader = [\"disk.bootloader\"]\n",
-        "kernel = [\"verity.veritysetup\"]\n",
+        "kernel = [\"verity.device\"]\n",
     );
     let out = plan(dir.path(), &[]);
     assert_eq!(out.status.code(), Some(2));
@@ -866,23 +866,20 @@ fn a_slot_needs_the_builds_own_tools_and_a_compression_they_write() {
     );
     assert!(plan(dir.path(), &[]).status.success());
 
-    for (line, program) in [
-        ("BR2_PACKAGE_HOST_CRYPTSETUP=y\n", "veritysetup"),
-        ("BR2_PACKAGE_HOST_EROFS_UTILS=y\n", "mkfs.erofs"),
-    ] {
-        edit(&fragment, line, "");
-        let out = plan(dir.path(), &[]);
-        assert_eq!(out.status.code(), Some(2), "{line}");
-        let err = String::from_utf8_lossy(&out.stderr);
-        assert!(err.contains("images[0].os.fragments"), "{err}");
-        assert!(
-            err.contains(&format!(
-                "with the build's own {program}, and no OS fragment of the image has `{}`: add it",
-                line.trim()
-            )),
-            "{err}"
-        );
-    }
+    // The slot's verity tree needs no host tool; only mkfs.erofs does.
+    let (line, program) = ("BR2_PACKAGE_HOST_EROFS_UTILS=y\n", "mkfs.erofs");
+    edit(&fragment, line, "");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2), "{line}");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("images[0].os.fragments"), "{err}");
+    assert!(
+        err.contains(&format!(
+            "with the build's own {program}, and no OS fragment of the image has `{}`: add it",
+            line.trim()
+        )),
+        "{err}"
+    );
 }
 
 /// A recipe has the generator's tool write a file that holds the whole
@@ -947,7 +944,7 @@ to = "bundle.payload"
 system = ["erofs.tree"]
 kernel = ["as_kernel.from"]
 kernel-build = ["erofs.kernel"]
-host-tools = ["erofs.tools", "verity.tools"]
+host-tools = ["erofs.tools"]
 generator-bundle = ["bundle.runs"]
 generator-data = ["data.runs"]
 
