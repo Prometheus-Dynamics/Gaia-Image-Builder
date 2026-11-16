@@ -38,3 +38,6 @@ BR2_TARGET_UBOOT_NEEDS_PYELFTOOLS=y
 BR2_LINUX_KERNEL_INSTALL_TARGET=y
 # The boot files the post-image makes beside the root image (post-image.sh).
 BR2_ROOTFS_POST_IMAGE_SCRIPT="@here@/post-image.sh"
+# The post-image receives the images dir first, then these: the staged k230-firstage
+# tool (the board source k230-tool: a locked path tree, boards/k230d-ai-cam/board.toml).
+BR2_ROOTFS_POST_SCRIPT_ARGS="@k230d-ai-cam.k230-tool@/k230-firstage"

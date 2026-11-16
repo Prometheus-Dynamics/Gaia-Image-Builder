@@ -1,6 +1,16 @@
-# CanMV K230D AI-CAM (bench product): the K230 family's Buildroot and
-# boot chain, with a USB gadget network on the USB-C port. Not built on
-# hardware; the K230 boot chain is not yet expressible (docs/prs/B8-k230d.md).
+# CanMV K230D AI-CAM (bench product, Canaan's junroc board): the K230 family's
+# boot chain (vendor U-Boot k230d_canmv_junroc_ai_cam with the console on UART0 and
+# the environment at 3 MiB; OpenSBI; mainline Linux 7.3.3 with the board's dts), on
+# Buildroot. The image goes to an SD card ONLY (removable); it is never written to
+# internal flash, so a bad image is recovered by swapping the card.
+# Untested on board, and never built. Interim, until gaia.firmware.k230 is a node
+# and Gaia builds the tool from crates/nodes/k230-image:
+# - the tool is the staged release binary k230-firstage (sha256 b425fb06…,
+#   built from crates/nodes/k230-image at 292c9f31), named by [sources.k230-tool]
+#   below as a path source (a directory holding only that file), so its store path
+#   reaches the post-image through BR2_ROOTFS_POST_SCRIPT_ARGS;
+# - the environment and the boot files are made by post-image.sh (U-Boot's own
+#   mkenvimage from the build tree, and the kernel Image into /boot by Buildroot).
 version = 1
 name = "k230d-ai-cam"
 

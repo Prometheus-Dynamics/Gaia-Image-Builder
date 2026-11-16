@@ -7,8 +7,8 @@
 #   u-boot-opensbi.bin   OpenSBI fw_jump as a legacy uImage (kernel, no compression)
 #   u-boot-env.bin       U-Boot environment copy 1 (ENV_OFFSET 0x300000)
 #   u-boot-env-redund.bin  copy 2, the redundant form (ENV_OFFSET_REDUND 0x320000)
-# Every header tool is Gaia's k230-firstage (crates/nodes/k230-image), named by the
-# K230_FIRSTAGE environment variable; mkenvimage is U-Boot's own, from the build tree.
+# Every header tool is Gaia's k230-firstage (crates/nodes/k230-image), passed as the
+# second argument; mkenvimage is U-Boot's own, from the build tree.
 # Nothing here runs a vendor binary.
 #
 # The bootloader's own binaries are plain: spl/u-boot-spl.bin and u-boot.bin in the
@@ -16,7 +16,8 @@
 #
 # Untested: this script has not run in a Buildroot build yet.
 set -e
-tool="${K230_FIRSTAGE:?K230_FIRSTAGE must name the pinned k230-firstage tool}"
+# $1 is the images dir (Buildroot), $2 the tool (BR2_ROOTFS_POST_SCRIPT_ARGS).
+tool="${2:?the k230-firstage tool path is the post-image's second argument}"
 uboot_build=$(ls -d "$BUILD_DIR"/uboot-* | head -n 1)
 dtb=k230d-ai-cam.dtb
 cd "$BINARIES_DIR"

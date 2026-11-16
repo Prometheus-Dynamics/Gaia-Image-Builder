@@ -1,3 +1,9 @@
+# NOT BOOTABLE, not built tonight: this product has no post-image, so the SPL,
+# U-Boot, OpenSBI and environment blobs the family's layout names are never made, and
+# the build fails at the disk step, not at plan. The family's environment layout (3 MiB)
+# is the AI-CAM's; the Zero's own boot files need its own post-image (copy
+# examples/products/k230d-ai-cam/post-image.sh and the k230d-ai-cam tool source).
+# Image goes to an SD card only.
 # BPI-CanMV-K230D-Zero (bench product): the K230 family's Buildroot and
 # boot chain, with a USB gadget network on the USB-C port. Not built on
 # hardware; the K230 boot chain is not yet expressible (docs/prs/B8-k230d.md).
