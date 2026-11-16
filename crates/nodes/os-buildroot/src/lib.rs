@@ -44,6 +44,7 @@ mod config;
 mod contract;
 mod host;
 mod out;
+mod patches;
 mod perms;
 mod ppd;
 mod progress;
@@ -158,6 +159,9 @@ pub(crate) struct Prepared {
     /// The contracts the kernel's final config must meet, each with the
     /// path of its file in the store.
     pub contracts: Vec<(gaia_types::KernelContract, PathBuf)>,
+    /// The value of the key entry the Gaia patches add, when the choice is
+    /// not the default (see [`patches`]). `None` for the default.
+    pub patch_key: Option<String>,
 }
 
 impl Prepared {
@@ -178,6 +182,7 @@ impl Prepared {
         for (name, _, digest) in &self.dirs {
             key = key.input(&format!("input.{name}"), *digest);
         }
+        key = self.patch_config(key);
         for fragment in &config.fragments {
             key = key.config(&format!("fragment.{}", fragment.name), &fragment.text);
         }
@@ -200,6 +205,15 @@ impl Prepared {
             );
         }
         key
+    }
+
+    /// `key` with the entry the Gaia patches add, when there is one. The
+    /// source's digest in the key is the unpatched one.
+    pub fn patch_config(&self, key: KeyBuilder) -> KeyBuilder {
+        match &self.patch_key {
+            Some(value) => key.config(patches::KEY_NAME, value),
+            None => key,
+        }
     }
 }
 
@@ -270,6 +284,7 @@ pub(crate) fn prepare(
         vars,
         fragments,
         contracts,
+        patch_key: None,
     })
 }
 
@@ -302,7 +317,9 @@ pub fn build_os(
 ) -> Result<Outputs, StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
     let fail = |why: String| StepError::body(NAME, why);
-    let prepared = prepare(&store, &source, config, inputs, host).map_err(fail)?;
+    let mut prepared = prepare(&store, &source, config, inputs, host).map_err(fail)?;
+    let mode = patches::mode_from_env().map_err(fail)?;
+    patches::apply_to(&store, cx, &mut prepared, mode)?;
     let (seed_dir, seed_digest) = in_store(&store, seed, "the host tools").map_err(fail)?;
     let key = prepared
         .key(NAME, KEY_VERSION, config, host)

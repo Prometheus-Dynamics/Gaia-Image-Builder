@@ -94,8 +94,10 @@ pub fn build_host(
     cx: &Ctx,
 ) -> Result<Tree, StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
-    let prepared =
+    let mut prepared =
         prepare(&store, &source, config, inputs, host).map_err(|why| StepError::body(NAME, why))?;
+    let mode = crate::patches::mode_from_env().map_err(|why| StepError::body(NAME, why))?;
+    crate::patches::apply_to(&store, cx, &mut prepared, mode)?;
 
     // What Buildroot would build for the host, and with what.
     let plan_key = prepared.key(PLAN, KEY_VERSION, config, host).finish();
@@ -124,6 +126,7 @@ pub fn build_host(
         .config("make", &host.make)
         .config("goals", &goals)
         .input("values", Digest::of_bytes(text.as_bytes()));
+    key = prepared.patch_config(key);
     // An input tree the values name is one a host package is built from.
     for (name, _, digest) in &prepared.dirs {
         if text.contains(&format!("@{name}@")) {
