@@ -89,12 +89,6 @@ impl fmt::Display for Error {
             Error::UImageHeaderCrc => write!(f, "uImage header CRC does not match the header"),
             Error::UImageDataCrc => write!(f, "uImage data CRC does not match the data"),
             Error::UImageName => write!(f, "uImage name is not text"),
-            Error::Name(n) => write!(f, "uImage name is {n} bytes, the field holds 31"),
-            Error::TooLarge => write!(f, "data is larger than a uImage size field holds"),
-            Error::UImageMagic => write!(f, "uImage magic is wrong"),
-            Error::UImageHeaderCrc => write!(f, "uImage header CRC does not match the header"),
-            Error::UImageDataCrc => write!(f, "uImage data CRC does not match the data"),
-            Error::UImageName => write!(f, "uImage name is not text"),
         }
     }
 }
