@@ -82,16 +82,54 @@ fn started(dir: &Path) -> bool {
     })
 }
 
-/// Removes the build directories [`in_progress`] lists and the marker, so
-/// the next make builds those packages from the start. Returns the names
+/// Removes the build directories [`in_progress`] lists, each one's
+/// per-package directory when the build has them, and the marker, so the
+/// next make builds those packages from the start. Returns the names
 /// removed, sorted; empty when there was nothing to redo.
 pub fn redo(out: &Path) -> io::Result<Vec<String>> {
     let names = in_progress(out)?;
+    let per_package = per_package_names(out)?;
     for name in &names {
         fs::remove_dir_all(out.join("build").join(name))?;
+        // With per-package directories, what the package had installed so
+        // far is in its own tree: a half-done install left there would reach
+        // the packages built on it, and the root filesystem.
+        if let Some(package) = package_of(name, &per_package) {
+            fs::remove_dir_all(out.join("per-package").join(package))?;
+        }
     }
     finish(out)?;
     Ok(names)
+}
+
+/// The names under `out/per-package`: one directory per package, named
+/// without its version. Empty when the build has no per-package directories.
+fn per_package_names(out: &Path) -> io::Result<Vec<String>> {
+    let dir = out.join("per-package");
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut names = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        names.push(entry?.file_name().to_string_lossy().into_owned());
+    }
+    Ok(names)
+}
+
+/// The package a build directory (`name-version`) belongs to, among
+/// `packages`: the longest one the directory's name starts with, followed by
+/// `-`. The longest, because `linux-headers-7.1` is `linux-headers`, not
+/// `linux`.
+fn package_of<'a>(build_dir: &str, packages: &'a [String]) -> Option<&'a str> {
+    packages
+        .iter()
+        .filter(|package| {
+            build_dir
+                .strip_prefix(package.as_str())
+                .is_some_and(|rest| rest.starts_with('-'))
+        })
+        .max_by_key(|package| package.len())
+        .map(String::as_str)
 }
 
 #[cfg(test)]
@@ -152,5 +190,22 @@ mod tests {
         assert!(out.join("build/buildroot-config/conf.o").is_file());
         assert!(out.join("build/host-m4-1.4.21/.stamp_installed").is_file());
         assert!(!was_killed(&out), "the redo clears the marker");
+    }
+
+    #[test]
+    fn a_killed_package_loses_its_per_package_tree_and_no_other_does() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let out = dir.path().join("out");
+        package(&out, "linux-headers-7.1.13", &[".stamp_extracted"]);
+        package(&out, "linux-7.1.13", &[".stamp_built", ".stamp_installed"]);
+        for name in ["linux", "linux-headers", "busybox"] {
+            fs::create_dir_all(out.join("per-package").join(name).join("target")).expect("tree");
+        }
+        start(&out).expect("start");
+        assert_eq!(redo(&out).expect("redo"), ["linux-headers-7.1.13"]);
+        assert!(!out.join("per-package/linux-headers").exists());
+        // `linux` is a prefix of the killed one's name, and is kept.
+        assert!(out.join("per-package/linux").is_dir());
+        assert!(out.join("per-package/busybox").is_dir());
     }
 }
