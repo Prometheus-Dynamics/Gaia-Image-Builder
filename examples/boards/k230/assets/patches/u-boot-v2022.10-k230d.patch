@@ -16111,7 +16111,7 @@ diff -ruN A/board/canaan/common/logo/vo_table.h C/board/canaan/common/logo/vo_ta
 +#endif
 diff -ruN A/board/canaan/common/Makefile C/board/canaan/common/Makefile
 --- a/board/canaan/common/Makefile	1969-12-31 16:00:00.000000000 -0800
-+++ b/board/canaan/common/Makefile	2026-10-09 18:26:13.000000000 -0700
++++ b/board/canaan/common/Makefile	2026-11-16 03:31:28.057576502 -0700
 @@ -0,0 +1,67 @@
 +# /* Copyright (c) 2023, Canaan Bright Sight Co., Ltd
 +#  *
@@ -16154,16 +16154,16 @@ diff -ruN A/board/canaan/common/Makefile C/board/canaan/common/Makefile
 +obj-$(CONFIG_SIPLP4_2667) += gen_siplp4_2667.o
 +
 +$(obj)/gen_siplp4_3200_hwodt.c: $(src)/sip_lpddr4_init_32_swap_3200_with_wodt.c
-+	($(srctree)/arch/riscv/cpu/k230/ddr_2d.sh $< $@ 0x50000 0x53fff 0x54000 0x5433d  0x542bd || exit 1)
++	(bash $(srctree)/arch/riscv/cpu/k230/ddr_2d.sh $< $@ 0x50000 0x53fff 0x54000 0x5433d  0x542bd || exit 1)
 +
 +$(obj)/gen_siplp4_3200_allodt.c: $(src)/sip_lpddr4_init_32_swap_3200_with_allodt.c
-+	($(srctree)/arch/riscv/cpu/k230/ddr_2d.sh $< $@ 0x50000 0x53fff 0x54000 0x5433d  0x542bd || exit 1)
++	(bash $(srctree)/arch/riscv/cpu/k230/ddr_2d.sh $< $@ 0x50000 0x53fff 0x54000 0x5433d  0x542bd || exit 1)
 +
 +$(obj)/gen_siplp4_1600.c: $(src)/sip_lpddr4_init_32_swap_1600.c
-+	($(srctree)/arch/riscv/cpu/k230/ddr.sh $< $@ 0x50000 0x53fff 0x54000 0x5433d  || exit 1)
++	(bash $(srctree)/arch/riscv/cpu/k230/ddr.sh $< $@ 0x50000 0x53fff 0x54000 0x5433d  || exit 1)
 +
 +$(obj)/gen_siplp4_2667.c: $(src)/sip_lpddr4_init_32_swap_2667.c
-+	($(srctree)/arch/riscv/cpu/k230/ddr.sh $< $@ 0x50000 0x53fff 0x54000 0x5433d  || exit 1)
++	(bash $(srctree)/arch/riscv/cpu/k230/ddr.sh $< $@ 0x50000 0x53fff 0x54000 0x5433d  || exit 1)
 +
 +EXTRA_CFLAGS += -I$(srctree)/arch/$(ARCH)/cpu/k230/
 +EXTRA_CFLAGS += -I$(srctree)/arch/$(ARCH)/cpu/k230/puf_fw/pufs_common

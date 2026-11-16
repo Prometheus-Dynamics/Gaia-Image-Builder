@@ -23,3 +23,10 @@ BR2_TARGET_UBOOT_CUSTOM_VERSION=y
 BR2_TARGET_UBOOT_CUSTOM_VERSION_VALUE="2022.10"
 BR2_PACKAGE_HOST_EROFS_UTILS=y
 BR2_PACKAGE_HOST_CRYPTSETUP=y
+# U-Boot's host tools (the junroc config sets CONFIG_FIT_SIGNATURE: openssl/engine.h
+# is needed on the host), and dtc, pylibfdt and pyelftools for its build. Buildroot's
+# host packages supply them.
+BR2_TARGET_UBOOT_NEEDS_OPENSSL=y
+BR2_TARGET_UBOOT_NEEDS_DTC=y
+BR2_TARGET_UBOOT_NEEDS_PYLIBFDT=y
+BR2_TARGET_UBOOT_NEEDS_PYELFTOOLS=y
