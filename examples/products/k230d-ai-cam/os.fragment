@@ -17,8 +17,10 @@ BR2_TARGET_ROOTFS_EXT2_SIZE="256M"
 BR2_TARGET_OPENSBI=y
 BR2_TARGET_OPENSBI_PLAT="generic"
 BR2_TARGET_OPENSBI_LINUX_PAYLOAD=y
+# The vendor's FW_TEXT_START: fw_jump then jumps to 0x200000 (the kernel address U-Boot loads to).
+BR2_TARGET_OPENSBI_ADDITIONAL_VARIABLES="FW_TEXT_START=0"
 BR2_TARGET_UBOOT=y
-BR2_TARGET_UBOOT_BOARDNAME="k230d_canmv_bpi"
+BR2_TARGET_UBOOT_BOARDNAME="k230d_canmv_junroc_ai_cam"
 BR2_TARGET_UBOOT_CUSTOM_VERSION=y
 BR2_TARGET_UBOOT_CUSTOM_VERSION_VALUE="2022.10"
 BR2_PACKAGE_HOST_EROFS_UTILS=y
@@ -30,3 +32,9 @@ BR2_TARGET_UBOOT_NEEDS_OPENSSL=y
 BR2_TARGET_UBOOT_NEEDS_DTC=y
 BR2_TARGET_UBOOT_NEEDS_PYLIBFDT=y
 BR2_TARGET_UBOOT_NEEDS_PYELFTOOLS=y
+
+# The kernel Image into the root filesystem's /boot, which the environment's
+# bootcmd loads (ext4load mmc 1:1 /boot/Image). The device tree is the board's.
+BR2_LINUX_KERNEL_INSTALL_TARGET=y
+# The boot files the post-image makes beside the root image (post-image.sh).
+BR2_ROOTFS_POST_IMAGE_SCRIPT="@here@/post-image.sh"

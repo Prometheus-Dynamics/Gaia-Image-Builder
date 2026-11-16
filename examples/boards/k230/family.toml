@@ -33,11 +33,6 @@ fragments = ["assets/linux.fragment"]
 source = "u-boot"
 defconfig = "k230d_canmv_bpi"
 patches = [{ file = "assets/patches/u-boot-v2022.10-k230d.patch" }]
-
-[bootloader]
-source = "u-boot"
-defconfig = "k230d_canmv_bpi"
-patches = [{ file = "assets/patches/u-boot-v2022.10-k230d.patch" }]
 fragments = ["assets/u-boot.fragment"]
 
 # The K230 boot ROM and SPL (the layout of the SDK's genimage, without its
