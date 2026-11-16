@@ -1,16 +1,11 @@
-# The K230D Zero's Buildroot options on top of what the board gives: a
-# system with DHCP on eth0 and a root login, as the ZERO 3E demo has. The
-# toolchain is the Xuantie GCC 10.4 the SDK names, set by its path where it
-# is installed (BR2_TOOLCHAIN_EXTERNAL_PATH, not in this file: see B8 notes).
+# The K230D's Buildroot options on top of what the board gives: a system with
+# DHCP on eth0 and a root login. The toolchain is not named here: the speed
+# branch's default (Bootlin riscv64) applies, and the first build decides whether
+# it builds the C908 code and the SDK U-Boot. The vendor Xuantie GCC 10 was a host
+# path and waits on a fetchable URL (BR2_TOOLCHAIN_EXTERNAL_URL): coordinator's.
 BR2_riscv=y
 BR2_RISCV_ISA_RVC=y
 BR2_RISCV_ISA_RVV=y
-BR2_TOOLCHAIN_EXTERNAL=y
-BR2_TOOLCHAIN_EXTERNAL_CUSTOM=y
-BR2_TOOLCHAIN_EXTERNAL_CUSTOM_PREFIX="riscv64-unknown-linux-gnu"
-BR2_TOOLCHAIN_EXTERNAL_GCC_10=y
-BR2_TOOLCHAIN_EXTERNAL_HEADERS_6_6=y
-BR2_TOOLCHAIN_EXTERNAL_CUSTOM_GLIBC=y
 BR2_TARGET_GENERIC_HOSTNAME="k230d-zero"
 BR2_TARGET_GENERIC_ISSUE="Welcome to the CanMV K230D Zero"
 BR2_SYSTEM_DHCP="eth0"
