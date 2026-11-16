@@ -45,7 +45,7 @@
 //! selects, and no host tool is built differently for them. So what changes
 //! how a shared host tool is built changes the key, and nothing else does.
 
-use crate::{BuildrootHost, OsConfig, Prepared, configure, make_tool, ppd, prepare, times};
+use crate::{BuildrootHost, OsConfig, Prepared, admit, configure, make_tool, ppd, prepare, times};
 use daedalus::prelude::*;
 use daedalus_cpu_author::FanIn;
 use gaia_step::{Ctx, Digest, KeyBuilder, Step, StepError, Store, Stream, Tool, Work};
@@ -334,12 +334,16 @@ fn overrides_goal(package: &str, goal: &str) -> bool {
 /// with, with this run's paths replaced by names.
 fn plan(work: &mut Work<'_>, prepared: &Prepared, host: &BuildrootHost) -> Result<(), StepError> {
     let fail = |why: String| StepError::body(PLAN, why);
+    let slot = admit(host).map_err(fail)?;
     let dir = work.dir().to_path_buf();
     let out = dir.join("out");
     fs::create_dir(&out).map_err(|e| fail(format!("output directory: {e}")))?;
-    configure(PLAN, work, prepared, &out, host)?;
+    configure(PLAN, work, prepared, &out, host, &slot)?;
     let (src, vars) = (&prepared.src, &prepared.vars);
-    let info = captured(work, make_tool(host, src, &out, vars, &["show-info"]))?;
+    let info = captured(
+        work,
+        make_tool(host, src, &out, vars, &["show-info"], &slot),
+    )?;
     let goals = host_goals(&info).map_err(fail)?;
     let mut text = goals.join(" ");
     text.push('\n');
@@ -350,7 +354,7 @@ fn plan(work: &mut Work<'_>, prepared: &Prepared, host: &BuildrootHost) -> Resul
             .collect();
         patterns.push(SHARED_VARS.into());
         // One job, so the job count of this machine is in no value.
-        let tool = make_tool(host, src, &out, vars, &["printvars"])
+        let tool = make_tool(host, src, &out, vars, &["printvars"], &slot)
             .arg(format!("VARS={}", patterns.join(" ")))
             .arg("PARALLEL_JOBS=1");
         let values = captured(work, tool)?;
@@ -408,8 +412,9 @@ fn build_steps(
     goals: &[&str],
     host: &BuildrootHost,
 ) -> Result<(), StepError> {
-    // One build at a time: each has the whole job count.
-    let _turn = crate::turn();
+    // This build's slot in the process's make jobserver, shared with the
+    // other builds of the process (see `jobs`).
+    let slot = admit(host).map_err(|why| StepError::body(NAME, why))?;
     let io_fail = |what: &'static str| {
         move |error: io::Error| StepError::body(NAME, format!("{what}: {error}"))
     };
@@ -421,9 +426,9 @@ fn build_steps(
     }
     let out = dir.join("out");
     fs::create_dir(&out).map_err(io_fail("output directory"))?;
-    let resolved = configure(NAME, work, prepared, &out, host)?;
+    let resolved = configure(NAME, work, prepared, &out, host, &slot)?;
     let (src, vars) = (&prepared.src, &prepared.vars);
-    work.run(&make_tool(host, src, &out, vars, goals))?;
+    work.run(&make_tool(host, src, &out, vars, goals, &slot))?;
     // With per-package directories, the goals installed into their own
     // trees: merge them into `host/` as Buildroot's finalize would.
     if ppd::enabled(&resolved) {

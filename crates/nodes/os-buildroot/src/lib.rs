@@ -72,6 +72,7 @@
 mod config;
 mod contract;
 mod host;
+mod jobs;
 mod out;
 mod patches;
 mod perms;
@@ -506,19 +507,20 @@ pub(crate) fn configure(
     prepared: &Prepared,
     out: &Path,
     host: &BuildrootHost,
+    slot: &jobs::Slot<'_>,
 ) -> Result<String, StepError> {
     let fail = |why: String| StepError::body(step, why);
     let io_fail = |what: &'static str| {
         move |error: io::Error| StepError::body(step, format!("{what}: {error}"))
     };
     let (src, vars) = (&prepared.src, &prepared.vars);
-    work.run(&make_tool(host, src, out, vars, &["allnoconfig"]))?;
+    work.run(&make_tool(host, src, out, vars, &["allnoconfig"], slot))?;
     let config = out.join(".config");
     let base = fs::read_to_string(&config).map_err(io_fail("the base config"))?;
     let (applied, fragments) = merged_fragments(prepared);
     let merged = config::merge(&base, &applied).map_err(fail)?;
     fs::write(&config, merged).map_err(io_fail("the merged config"))?;
-    work.run(&make_tool(host, src, out, vars, &["olddefconfig"]))?;
+    work.run(&make_tool(host, src, out, vars, &["olddefconfig"], slot))?;
     // What Buildroot resolved must be what was asked for.
     let resolved = fs::read_to_string(&config).map_err(io_fail("the resolved config"))?;
     if forces_host_build(&resolved) {
@@ -560,8 +562,9 @@ fn build_steps(
     seed: &Path,
     host: &BuildrootHost,
 ) -> Result<(), StepError> {
-    // One build at a time: each has the whole job count.
-    let _turn = turn();
+    // The builds of this process share one job count: this build's slot in
+    // it, held until the build's last make is done.
+    let slot = admit(host).map_err(|why| StepError::body(NAME, why))?;
     let fail = |why: String| StepError::body(NAME, why);
     let io_fail = |what: &'static str| {
         move |error: io::Error| StepError::body(NAME, format!("{what}: {error}"))
@@ -574,7 +577,7 @@ fn build_steps(
     // them installed and builds none of them again.
     host::plant(seed, &out).map_err(io_fail("the host tools"))?;
     let config = out.join(".config");
-    let resolved = configure(NAME, work, prepared, &out, host)?;
+    let resolved = configure(NAME, work, prepared, &out, host, &slot)?;
     // With per-package directories on, the seed's packages get their own
     // trees, complete and installed, before anything builds.
     host::plant_per_package(seed, &out, &resolved)
@@ -620,7 +623,7 @@ fn build_steps(
             continue;
         }
         let goal = format!("{package}-configure");
-        work.run(&make_tool(host, src, &out, vars, &[goal.as_str()]))?;
+        work.run(&make_tool(host, src, &out, vars, &[goal.as_str()], &slot))?;
         let mut fragments = Vec::new();
         for file in complete.into_iter().chain(files.split_whitespace()) {
             let text = fs::read_to_string(file)
@@ -667,15 +670,16 @@ fn build_steps(
 
     let shown = Arc::new(Mutex::new(String::new()));
     let sink = shown.clone();
-    let order =
-        make_tool(host, src, &out, vars, &["show-build-order"]).on_line(move |stream, line| {
+    let order = make_tool(host, src, &out, vars, &["show-build-order"], &slot).on_line(
+        move |stream, line| {
             if stream == Stream::Stdout
                 && let Ok(mut text) = sink.lock()
             {
                 text.push_str(line);
                 text.push('\n');
             }
-        });
+        },
+    );
     work.run(&order)?;
     let listed = shown.lock().map(|text| text.clone()).unwrap_or_default();
     let targets = progress::target_packages(&listed);
@@ -684,7 +688,7 @@ fn build_steps(
 
     let installed = Arc::new(Mutex::new(BTreeSet::new()));
     let sink = installed.clone();
-    let build = make_tool(host, src, &out, vars, &[]).on_line(move |_, line| {
+    let build = make_tool(host, src, &out, vars, &[], &slot).on_line(move |_, line| {
         if let Some(name) = progress::installed_to_target(line)
             && let Ok(mut set) = sink.lock()
         {
@@ -761,27 +765,32 @@ fn build_steps(
     Ok(())
 }
 
-/// One make run in `out`, for `goals` (none means Buildroot's default,
-/// `all`). With a CPU list, make runs under `taskset`.
-/// One Buildroot build at a time in this process. Each is given the whole
-/// job count (`-j<jobs>`), so two at once would run twice the bound the
-/// build was given; the host tools and the builds that start from them
-/// take turns instead, and the bound is the bound.
-static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// This build's turn, held until the guard is dropped.
-pub(crate) fn turn() -> std::sync::MutexGuard<'static, ()> {
-    TURN.lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+/// This build's slot in the process's make jobserver (see [`jobs`]), taken
+/// now and held until the build is done.
+pub(crate) fn admit(host: &BuildrootHost) -> Result<jobs::Slot<'static>, String> {
+    let jobs = usize::try_from(host.jobs).unwrap_or(usize::MAX);
+    jobs::admit(&host.make, jobs)
 }
 
 /// The make command for `goals`: its arguments, in order, for a test to
-/// read.
+/// read. The job count is on the command line.
 pub fn make_arguments(
     host: &BuildrootHost,
     out: &Path,
     vars: &[String],
     goals: &[&str],
+) -> Vec<String> {
+    arguments(host, out, vars, goals, false)
+}
+
+/// The arguments of [`make_arguments`]; with `shared`, no job count, since
+/// the jobserver's `MAKEFLAGS` carries it.
+fn arguments(
+    host: &BuildrootHost,
+    out: &Path,
+    vars: &[String],
+    goals: &[&str],
+    shared: bool,
 ) -> Vec<String> {
     let mut args = Vec::new();
     if !host.cpus.is_empty() {
@@ -789,7 +798,9 @@ pub fn make_arguments(
     }
     args.push(host.make.clone());
     args.push("--no-print-directory".into());
-    args.push(format!("-j{}", host.jobs));
+    if !shared {
+        args.push(format!("-j{}", host.jobs));
+    }
     args.push(format!("O={}", out.display()));
     args.push(format!("BR2_DL_DIR={}", host.download_dir));
     // Command-line variables, not config lines: a path is then in no
@@ -806,22 +817,33 @@ pub fn make_arguments(
     args
 }
 
+/// One make run in `out`, for `goals` (none means Buildroot's default,
+/// `all`), in `slot`. With the pool's fifo the make gets the jobserver in
+/// `MAKEFLAGS` and no job count: Buildroot's own make then adds no `-j` to
+/// its package makes, which take their jobs from the same pool. Without a
+/// fifo the job count is on the command line, and the slot is a turn. With a
+/// CPU list, make runs under `taskset`.
 pub(crate) fn make_tool(
     host: &BuildrootHost,
     src: &Path,
     out: &Path,
     vars: &[String],
     goals: &[&str],
+    slot: &jobs::Slot<'_>,
 ) -> Tool {
-    let mut arguments = make_arguments(host, out, vars, goals).into_iter();
-    let program = arguments.next().unwrap_or_default();
-    Tool::new(program)
+    let mut words = arguments(host, out, vars, goals, slot.makeflags().is_some()).into_iter();
+    let program = words.next().unwrap_or_default();
+    let tool = Tool::new(program)
         .cwd(src)
-        .args(arguments)
+        .args(words)
         .env("PATH", PATH)
         .env("LC_ALL", "C")
         .env("CCACHE_MAXSIZE", CCACHE_MAX_SIZE)
-        .env("HOME", out.display().to_string())
+        .env("HOME", out.display().to_string());
+    match slot.makeflags() {
+        Some(flags) => tool.env("MAKEFLAGS", flags),
+        None => tool,
+    }
 }
 
 /// The node, for a registry.
@@ -1077,7 +1099,16 @@ mod bound_tests {
     /// no entry is empty, relative or ".", which Buildroot refuses.
     #[test]
     fn make_runs_with_the_fixed_path_only() {
-        let tool = make_tool(&host(4, ""), Path::new("/src"), Path::new("/out"), &[], &[]);
+        let pool = jobs::Jobserver::new(4, false).expect("a pool");
+        let slot = pool.admit();
+        let tool = make_tool(
+            &host(4, ""),
+            Path::new("/src"),
+            Path::new("/out"),
+            &[],
+            &[],
+            &slot,
+        );
         let debug = format!("{tool:?}");
         assert!(
             debug.contains(r#"("PATH", "/usr/local/bin:/usr/bin:/bin")"#),
@@ -1101,23 +1132,33 @@ mod bound_tests {
         assert!(!forces_host_build(""));
     }
 
-    /// Builds take turns: each has the whole job count, so two at once
-    /// would be twice the bound.
+    /// With the pool's fifo, a build's make has the jobserver in `MAKEFLAGS`
+    /// and no job count on its command line; the job count is what Buildroot's
+    /// package makes inherit, so they add no `-j` of their own.
     #[test]
-    fn two_builds_do_not_run_at_once() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        let (running, most) = (AtomicUsize::new(0), AtomicUsize::new(0));
-        std::thread::scope(|scope| {
-            for _ in 0..3 {
-                scope.spawn(|| {
-                    let _turn = turn();
-                    let now = running.fetch_add(1, Ordering::SeqCst) + 1;
-                    most.fetch_max(now, Ordering::SeqCst);
-                    std::thread::sleep(std::time::Duration::from_millis(60));
-                    running.fetch_sub(1, Ordering::SeqCst);
-                });
-            }
-        });
-        assert_eq!(most.load(Ordering::SeqCst), 1);
+    fn a_build_with_the_pool_passes_the_jobserver_and_no_job_count() {
+        let pool = jobs::Jobserver::new(13, true).expect("a pool");
+        let slot = pool.admit();
+        let tool = make_tool(
+            &host(13, ""),
+            Path::new("/src"),
+            Path::new("/out"),
+            &[],
+            &["world"],
+            &slot,
+        );
+        let debug = format!("{tool:?}");
+        assert!(
+            debug.contains(r#"("MAKEFLAGS", "-j --jobserver-auth=fifo:/proc/"#),
+            "{debug}"
+        );
+        assert!(!debug.contains("-j13"), "{debug}");
+        let plain = make_arguments(&host(13, ""), Path::new("/out"), &[], &["world"]);
+        assert!(plain.contains(&"-j13".to_string()));
+        let shared = arguments(&host(13, ""), Path::new("/out"), &[], &["world"], true);
+        assert!(
+            !shared.iter().any(|arg| arg.starts_with("-j")),
+            "{shared:?}"
+        );
     }
 }

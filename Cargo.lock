@@ -976,6 +976,7 @@ dependencies = [
  "gaia-step",
  "gaia-store",
  "gaia-types",
+ "rustix",
  "serde",
  "serde_json",
  "tar",
