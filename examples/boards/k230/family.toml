@@ -3,12 +3,9 @@
 # chain. Mainline U-Boot has no K230 SPL or MMC driver, so the SDK's U-Boot
 # (k230d_canmv_bpi) is the bootloader. Untested on board, and not built.
 #
-# Not expressed here yet (the B8 port notes are in the branch commit message):
-# - the SDK overlay of U-Boot 2022.10 (212 files, boot/uboot/u-boot-2022.10-overlay)
-#   has no source kind; the family names upstream 2022.10 only;
-# - the SPL and U-Boot headers (k230_priv_gzip, firmware_gen, mkimage) that the
-#   SDK's post-image makes as fn_*.bin; no schema step runs them, so the
-#   partitions below name outputs no step produces.
+# The first-stage headers (SPL, U-Boot, OpenSBI) are made by the build's
+# post-image script with Gaia's k230-firstage tool (assets/post-image.sh); the
+# names they write start with u-boot or spl, so the bootloader output holds them.
 version = 1
 
 [target]
@@ -37,11 +34,14 @@ source = "u-boot"
 defconfig = "k230d_canmv_bpi"
 patches = [{ file = "assets/patches/u-boot-v2022.10-k230d.patch" }]
 
-# The header steps (post-image.sh) make these files in the OS output; the
-# names start with u-boot or spl so the bootloader bucket holds them.
-# The SPL is written at 1 MiB, its copy at 1.5 MiB; U-Boot at 2 MiB, its
-# environment at 1.875 MiB and 3.5 MiB (the SDK's genimage.cfg). The boot
-# ROM reads these, so they sit outside the partition table.
+[bootloader]
+source = "u-boot"
+defconfig = "k230d_canmv_bpi"
+patches = [{ file = "assets/patches/u-boot-v2022.10-k230d.patch" }]
+fragments = ["assets/u-boot.fragment"]
+
+# The K230 boot ROM and SPL (the layout of the SDK's genimage, without its
+# MBR: GPT here). Outside the partition table, so the table starts at 4 MiB.
 [[partitions]]
 name = "spl"
 role = "bootloader"
@@ -57,25 +57,52 @@ in_table = false
 content = "spl-fn.bin"
 
 [[partitions]]
-name = "uboot-env"
-role = "raw"
-offset = "1920K"
-in_table = false
-content = "u-boot-env.env"
-
-[[partitions]]
 name = "uboot"
 role = "bootloader"
 offset = "2M"
 in_table = false
 content = "u-boot-fn.bin"
 
+# The U-Boot environment: copy 1 at 3 MiB and copy 2 at 3.125 MiB (u-boot.fragment).
+# Both are 128 KiB slots; the environment is 8 KiB. Written by the post-image.
 [[partitions]]
-name = "env"
+name = "uboot-env"
+role = "raw"
+offset = "3M"
+size = "128K"
+in_table = false
+content = "u-boot-env.bin"
+
+[[partitions]]
+name = "uboot-env-redund"
+role = "raw"
+offset = "3200K"
+size = "128K"
+in_table = false
+content = "u-boot-env-redund.bin"
+
+# OpenSBI (fw_jump) as a plain uImage (kernel type, no K230 header), read by the
+# environment's `mmc read 0x3000000 0x1c00 <count>`. 0x380000 + ~140 KB < 4 MiB.
+[[partitions]]
+name = "uboot-opensbi"
 role = "raw"
 offset = "3584K"
 in_table = false
-content = "u-boot-env.env"
+content = "u-boot-opensbi.bin"
+
+# The root filesystem: partition 1 of the table, the one U-Boot's bootcmd reads
+# (ext4load mmc 1:1 /boot/Image). Its /boot holds Image and the device tree.
+[[partitions]]
+name = "rootfs"
+role = "rootfs"
+offset = "4M"
+type = "72ec70a6-cf74-40e6-bd49-4bb1d1c6ac65"
+
+[[partitions]]
+name = "data"
+role = "data"
+type = "0fc63daf-8483-4772-8e79-3d69d8477de4"
+size = "64M"
 
 [disk]
 scheme = "gpt"

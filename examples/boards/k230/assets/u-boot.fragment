@@ -1,0 +1,17 @@
+# The K230 family's U-Boot environment, on top of the board's defconfig (the
+# vendor's junroc defconfig sets ENV_OFFSET 0x300000 and both MMC and SPI-flash
+# locations; this makes the stored environment MMC only, with a redundant copy).
+# Agreed with Atlas and Lemnos: the layout is these two areas, outside the
+# partition table, and both are 0x2000 bytes of environment in a 128 KiB slot.
+#   0x300000 (3 MiB):     environment copy 1
+#   0x320000 (3.125 MiB): environment copy 2 (redundant: a flags byte follows the CRC)
+# SYS_MMC_ENV_DEV 1 is the boot SD card (U-Boot's mmc 1; the vendor's dts maps
+# SDIO1 to mmc1 in U-Boot).
+CONFIG_ENV_IS_IN_MMC=y
+# CONFIG_ENV_IS_IN_SPI_FLASH is not set
+# CONFIG_ENV_IS_NOWHERE is not set
+CONFIG_ENV_OFFSET=0x300000
+CONFIG_ENV_OFFSET_REDUND=0x320000
+CONFIG_ENV_SIZE=0x2000
+CONFIG_SYS_REDUNDAND_ENVIRONMENT=y
+CONFIG_SYS_MMC_ENV_DEV=1
