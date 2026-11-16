@@ -261,6 +261,9 @@ pub(crate) fn wire(
                 .insert(board.name.as_str());
         }
     }
+    // The Rust builds that one cargo run can make together, by board.
+    let candidates = rust_candidates(loaded, lock, &boards_of);
+    let (grouped, mut rust_groups) = rust_groups(&candidates);
     for (i, image) in loaded.product.images.iter().enumerate() {
         let board = &loaded.boards[image.board.path()];
         let mut builds = Vec::new();
@@ -310,9 +313,22 @@ pub(crate) fn wire(
                     None => {
                         let several = boards_of.get(name.as_str()).is_some_and(|b| b.len() > 1);
                         let build = component.build.as_ref().expect("a build");
-                        let node = component_build(
-                            &mut g, component, build, "build", lock, builders, board, several,
-                        )?;
+                        let node = match grouped.get(&once) {
+                            Some(&index) => grouped_build(
+                                &mut g,
+                                &candidates,
+                                &mut rust_groups[index],
+                                component,
+                                build,
+                                board,
+                                several,
+                                lock,
+                                builders,
+                            )?,
+                            None => component_build(
+                                &mut g, component, build, "build", lock, builders, board, several,
+                            )?,
+                        };
                         built.insert(once, node);
                         node
                     }
@@ -388,6 +404,250 @@ pub(crate) fn wire(
         g.origins,
         inputs,
     ))
+}
+
+/// A Rust component build the product makes, for grouping: the component,
+/// its build and board, the key it is built once by, and what cargo compiles
+/// for it. Only builds whose shape is known are candidates.
+struct RustCandidate<'a> {
+    component: &'a Component,
+    build: &'a gaia_describe::Build,
+    board: &'a gaia_describe::Board,
+    once: String,
+    several: bool,
+    shape: crate::rust_group::RustBuild,
+}
+
+/// A group of Rust builds that share one cargo run: the first member's index
+/// in the candidates, the packages it builds, and its node once made.
+struct RustGroup {
+    first: usize,
+    packages: String,
+    node: Option<u32>,
+}
+
+/// The Rust component builds of the product, once each per board, in the
+/// order the images name them.
+fn rust_candidates<'a>(
+    loaded: &'a Loaded,
+    lock: &Lock,
+    boards_of: &BTreeMap<&str, BTreeSet<&str>>,
+) -> Vec<RustCandidate<'a>> {
+    let mut out = Vec::new();
+    let mut seen = BTreeSet::new();
+    for image in &loaded.product.images {
+        let board = &loaded.boards[image.board.path()];
+        for name in image
+            .components
+            .iter()
+            .chain(&image.data)
+            .chain(&image.initramfs)
+        {
+            let Some(component) = loaded.components.get(name) else {
+                continue;
+            };
+            let Some(build) = component.build.as_ref() else {
+                continue;
+            };
+            if build.builder != "rust" || !seen.insert(format!("{name}\n{}", board.name)) {
+                continue;
+            }
+            let Some(shape) = rust_shape(component, build, lock, board) else {
+                continue;
+            };
+            out.push(RustCandidate {
+                component,
+                build,
+                board,
+                once: format!("{name}\n{}", board.name),
+                several: boards_of
+                    .get(name.as_str())
+                    .is_some_and(|boards| boards.len() > 1),
+                shape,
+            });
+        }
+    }
+    out
+}
+
+/// The groups of more than one Rust build, per board, and each grouped
+/// build's group (by its once key). Builds in no group are built alone.
+fn rust_groups(candidates: &[RustCandidate<'_>]) -> (BTreeMap<String, usize>, Vec<RustGroup>) {
+    let mut boards: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    for (i, candidate) in candidates.iter().enumerate() {
+        boards
+            .entry(candidate.board.name.as_str())
+            .or_default()
+            .push(i);
+    }
+    let mut of = BTreeMap::new();
+    let mut groups = Vec::new();
+    for indexes in boards.values() {
+        let shapes: Vec<crate::rust_group::RustBuild> = indexes
+            .iter()
+            .map(|&i| candidates[i].shape.clone())
+            .collect();
+        for group in crate::rust_group::group(&shapes) {
+            if group.members.len() < 2 {
+                continue;
+            }
+            let index = groups.len();
+            groups.push(RustGroup {
+                first: indexes[group.members[0]],
+                packages: group.packages_key(),
+                node: None,
+            });
+            for member in group.members {
+                of.insert(candidates[indexes[member]].once.clone(), index);
+            }
+        }
+    }
+    (of, groups)
+}
+
+/// What cargo compiles for a Rust component build, as the grouping compares
+/// it: each source by its pinned identity (the lock's entry, and the subdir
+/// of a git source), the target, profile, features, CPU, C settings and tools.
+/// `None` when a source is not pinned or a setting is missing: the build is
+/// then made alone, and its own error (if any) is the one it has always had.
+fn rust_shape(
+    component: &Component,
+    build: &gaia_describe::Build,
+    lock: &Lock,
+    board: &gaia_describe::Board,
+) -> Option<crate::rust_group::RustBuild> {
+    let text = |key: &str| -> String {
+        match build.settings.get(key) {
+            Some(value) => value
+                .as_str()
+                .map_or_else(|| value.to_string(), str::to_string),
+            None => String::new(),
+        }
+    };
+    let package = build.settings.get("package")?.as_str()?.to_string();
+    let identity = |name: &str| -> Option<String> {
+        let source = component.sources.get(name)?;
+        // A source is its pinned identity: the lock's entry, and the subdir
+        // of a git source. A source the lock does not pin (a path) has none
+        // here, so a build that names one is made alone.
+        let subdir = match source {
+            gaia_describe::Source::Git { subdir, .. } => subdir
+                .as_ref()
+                .map_or(String::new(), |s| s.as_str().to_string()),
+            _ => String::new(),
+        };
+        let entry = lock.get(&format!("{}.{name}", component.name))?;
+        Some(format!("{entry:?} {subdir}"))
+    };
+    let source = identity(&build.source)?;
+    // The sources a builder reads by name, when the component gives them.
+    let named = |name: &str| -> Option<String> {
+        if !component.sources.contains_key(name) {
+            return Some(String::new());
+        }
+        identity(name)
+    };
+    let root = named("root")?;
+    let vendor = named("vendor")?;
+    let tools = named("tools")?;
+    let triple = if build.settings.contains_key("triple") {
+        text("triple")
+    } else {
+        target_triple(&board.target)?.to_string()
+    };
+    let cpu = if build.settings.contains_key("cpu") {
+        text("cpu")
+    } else {
+        board
+            .target
+            .cpu
+            .as_deref()
+            .map(|cpu| cpu.rsplit('.').next().unwrap_or(cpu).to_string())
+            .unwrap_or_default()
+    };
+    let profile = match text("profile").as_str() {
+        "" | "release" => "release".to_string(),
+        other => other.to_string(),
+    };
+    let mut features: Vec<String> = text("features")
+        .split([' ', ','])
+        .filter(|f| !f.is_empty())
+        .map(String::from)
+        .collect();
+    features.sort();
+    features.dedup();
+    Some(crate::rust_group::RustBuild {
+        component: component.name.clone(),
+        package,
+        source: format!("{source}|{vendor}"),
+        root,
+        triple,
+        profile,
+        features,
+        cpu,
+        cc: text("cc"),
+        env: text("env"),
+        tools,
+    })
+}
+
+/// The package a component's build names.
+fn package_setting(build: &gaia_describe::Build) -> String {
+    build
+        .settings
+        .get("package")
+        .and_then(toml::Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// The build of a component that shares a cargo run with others: the group's
+/// one build node, made the first time a member asks, and this component's
+/// part of it (its own package's output).
+#[allow(clippy::too_many_arguments)]
+fn grouped_build(
+    g: &mut Graph<'_>,
+    candidates: &[RustCandidate<'_>],
+    group: &mut RustGroup,
+    component: &Component,
+    build: &gaia_describe::Build,
+    board: &gaia_describe::Board,
+    several: bool,
+    lock: &Lock,
+    builders: &Builders,
+) -> Result<u32, Error> {
+    let node = match group.node {
+        Some(node) => node,
+        None => {
+            let first = &candidates[group.first];
+            let mut shared = first.build.clone();
+            shared
+                .settings
+                .insert("package".into(), group.packages.clone().into());
+            let node = component_build(
+                g,
+                first.component,
+                &shared,
+                "build",
+                lock,
+                builders,
+                first.board,
+                first.several,
+            )?;
+            group.node = Some(node);
+            node
+        }
+    };
+    let name = if several {
+        format!("{}.part@{}", component.name, board.name)
+    } else {
+        format!("{}.part", component.name)
+    };
+    let part = g.add("gaia.build.rust.part", name, &component.file, "build")?;
+    let out = g.first_output(node).unwrap_or("tree");
+    g.edge((node, out), (part, "group"));
+    g.set(part, "package", Lit::Str(package_setting(build)));
+    Ok(part)
 }
 
 /// The sources a build of the component uses, and the build's node. `build`
