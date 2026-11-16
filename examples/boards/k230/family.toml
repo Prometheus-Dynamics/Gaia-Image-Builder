@@ -28,10 +28,16 @@ source = "linux"
 defconfig = "defconfig"
 fragments = ["assets/linux.fragment"]
 
+# The SDK's U-Boot 2022.10 overlay (its board, configs and SPL driver), as one
+# patch against upstream v2022.10. Generated, not hand-written: see the header
+# of assets/patches/u-boot-v2022.10-k230-sdk.patch for the command and its size.
 [bootloader]
 source = "u-boot"
 defconfig = "k230d_canmv_bpi"
+patches = [{ file = "assets/patches/u-boot-v2022.10-k230-sdk.patch" }]
 
+# The header steps (post-image.sh) make these files in the OS output; the
+# names start with u-boot or spl so the bootloader bucket holds them.
 # The SPL is written at 1 MiB, its copy at 1.5 MiB; U-Boot at 2 MiB, its
 # environment at 1.875 MiB and 3.5 MiB (the SDK's genimage.cfg). The boot
 # ROM reads these, so they sit outside the partition table.
@@ -40,35 +46,35 @@ name = "spl"
 role = "bootloader"
 offset = "1M"
 in_table = false
-content = "fn_u-boot-spl.bin"
+content = "spl-fn.bin"
 
 [[partitions]]
 name = "spl-copy"
 role = "bootloader"
 offset = "1536K"
 in_table = false
-content = "fn_u-boot-spl.bin"
+content = "spl-fn.bin"
 
 [[partitions]]
 name = "uboot-env"
 role = "raw"
 offset = "1920K"
 in_table = false
-content = "env.env"
+content = "u-boot-env.env"
 
 [[partitions]]
 name = "uboot"
 role = "bootloader"
 offset = "2M"
 in_table = false
-content = "fn_ug_u-boot.bin"
+content = "u-boot-fn.bin"
 
 [[partitions]]
 name = "env"
 role = "raw"
 offset = "3584K"
 in_table = false
-content = "env.env"
+content = "u-boot-env.env"
 
 [disk]
 scheme = "gpt"

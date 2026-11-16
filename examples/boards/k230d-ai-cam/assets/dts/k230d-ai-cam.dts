@@ -43,10 +43,11 @@
 			#phy-cells = <1>;
 		};
 
-		/* The USB-C port. The K230D post-image script puts it in device
-		 * mode for the gadget network. */
+		/* The USB-C port, in device mode for the gadget network (usb0,
+		 * 10.55.0.1). The SDK's U-Boot does not set it: no ID pin is wired. */
 		usb0: usb@91500000 {
 			compatible = "snps,dwc2";
+			dr_mode = "peripheral";
 			reg = <0x0 0x91500000 0x0 0x40000>;
 			interrupts = <173 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&sysclk K230_HS_USB0_AHB_GATE>;

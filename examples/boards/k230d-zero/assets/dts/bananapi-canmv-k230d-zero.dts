@@ -48,6 +48,8 @@
 };
 &usb0 {
 	status = "okay";
+	/* The USB-C port as a device: the gadget network (usb0, 10.55.0.1). */
+	dr_mode = "peripheral";
 };
 &usb1 {
 	status = "okay";
