@@ -4,6 +4,7 @@ use crate::error::ErrorKind;
 use crate::log::RunLog;
 use crate::{Ctx, StepError};
 use gaia_store::StepKey;
+use rustix::process::{Pid, WaitId, WaitIdOptions, waitid};
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::fmt;
@@ -109,6 +110,9 @@ impl Tool {
     }
 }
 
+/// Runs `tool` to its end and adds the CPU time its process and the
+/// processes it waited for took, in nanoseconds, to `cpu_ns`. The time is
+/// read before the child is reaped, so it is also read when the run fails.
 pub(crate) fn run(
     tool: &Tool,
     cx: &Ctx,
@@ -116,6 +120,7 @@ pub(crate) fn run(
     dir: &Path,
     logs: &Path,
     key: &StepKey,
+    cpu_ns: &mut u64,
 ) -> Result<ToolOutput, StepError> {
     let log = RunLog::create(logs, step, key, &tool.command_line()).map_err(|error| {
         let why = format!("cannot write a run log in {}: {error}", logs.display());
@@ -146,18 +151,27 @@ pub(crate) fn run(
         let log = &log;
         let out = scope.spawn(move || tail(stdout, Stream::Stdout, sink, log));
         let err = scope.spawn(move || tail(stderr, Stream::Stderr, sink, log));
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break Some(status),
-                Ok(None) if cx.cancelled() => break None,
-                Ok(None) => std::thread::sleep(POLL),
-                Err(_) => break child.wait().ok(),
+        // Waits for the exit without reaping it: the child stays a zombie
+        // until its CPU time is read below.
+        let cancelled = loop {
+            match exited(group) {
+                Ok(true) => break false,
+                Ok(false) if cx.cancelled() => break true,
+                Ok(false) => std::thread::sleep(POLL),
+                Err(_) => break false,
             }
         };
         // Whatever the tool left running in its group goes with it, so no
         // stray process outlives the step or holds its pipes open.
         kill_group(group);
-        let _ = child.wait();
+        if let Some(pid) = pid_of(group) {
+            let _ = waitid(
+                WaitId::Pid(pid),
+                WaitIdOptions::EXITED | WaitIdOptions::NOWAIT,
+            );
+        }
+        *cpu_ns += cpu_time_ns(group).unwrap_or(0);
+        let status = child.wait().ok().filter(|_| !cancelled);
         let stdout_tail = out.join().unwrap_or_default();
         let stderr_tail = err.join().unwrap_or_default();
         let kind = match status {
@@ -196,6 +210,45 @@ fn kill_group(group: u32) {
         return;
     };
     let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+}
+
+/// The process ID of a child, as the wait calls take it.
+fn pid_of(group: u32) -> Option<Pid> {
+    i32::try_from(group).ok().and_then(Pid::from_raw)
+}
+
+/// Whether the child `group` has exited, without reaping it. A child whose
+/// ID cannot be a process ID has nothing to wait for.
+fn exited(group: u32) -> std::io::Result<bool> {
+    let Some(pid) = pid_of(group) else {
+        return Ok(true);
+    };
+    let status = waitid(
+        WaitId::Pid(pid),
+        WaitIdOptions::EXITED | WaitIdOptions::NOWAIT | WaitIdOptions::NOHANG,
+    )?;
+    Ok(status.is_some())
+}
+
+/// Clock ticks per second in `/proc`'s CPU fields. Linux reports them in
+/// `USER_HZ`, which is 100 on every architecture Gaia builds for.
+const USER_HZ: u64 = 100;
+
+/// User plus system CPU time of the zombie `pid`, its waited-for children
+/// included (`/proc/<pid>/stat` fields 14 to 17). `None` when the file
+/// cannot be read or parsed.
+fn cpu_time_ns(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The command name is in parentheses and may hold spaces; the fields
+    // after its last parenthesis start at field 3, the state.
+    let after = stat.rsplit_once(')')?.1;
+    let fields: Vec<&str> = after.split_whitespace().collect();
+    let ticks: u64 = fields
+        .get(11..15)?
+        .iter()
+        .map(|field| field.parse::<u64>().ok())
+        .sum::<Option<u64>>()?;
+    Some(ticks * 1_000_000_000 / USER_HZ)
 }
 
 /// Reads a stream to its end, writing every line whole to the run log,

@@ -23,6 +23,7 @@
 //! ```
 
 use gaia_store::{Digest, ObjectRef, StepKey, Store};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -110,21 +111,49 @@ pub(crate) fn file_name(step: &str) -> String {
 /// The step record's file in a run log directory.
 const STEPS: &str = "steps.log";
 
+/// What a step adds to its record beyond its outputs: how long its tools
+/// ran, the job count it was given, whether it failed, and the details its
+/// body reported.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Report {
+    /// User and system CPU time of the processes its tools ran, and of the
+    /// children those processes waited for, in nanoseconds.
+    #[serde(default)]
+    pub cpu_ns: u64,
+    /// The job count the step was given, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jobs: Option<u32>,
+    /// Whether the body failed.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub failed: bool,
+    /// What the body reported with [`crate::Work::detail`], by name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub details: BTreeMap<String, serde_json::Value>,
+}
+
+/// For `skip_serializing_if`: a flag that is off is left out.
+fn is_false(flag: &bool) -> bool {
+    !*flag
+}
+
 /// One look-up-or-make, as the step record has it.
 ///
-/// Every [`crate::Step::look_up_or_make`] that ends with outputs appends one
-/// line to `steps.log` in the run log directory:
+/// Every [`crate::Step::look_up_or_make`] that ends with outputs, and every
+/// one whose body fails, appends one line to `steps.log` in the run log
+/// directory:
 ///
 /// ```text
-/// <start ns> <end ns> <pid> hit|made <step> <key> <output>=<object> ...
+/// <start ns> <end ns> <pid> hit|made <step> <key> <output>=<object> ...<TAB><report JSON>
 /// ```
 ///
 /// `hit` means the entry was found and the body did not run. A step that
-/// was given a RAM work directory (see [`crate::Step::ram_work`]) also ends
-/// its line with `work=<bytes>`, the size its work directory had when the
-/// body ended; the next run of that step expects about that much. Like the
-/// run logs, this is for people and tests to read, and for that expectation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// was given a RAM work directory (see [`crate::Step::ram_work`]) also has
+/// `work=<bytes>` after its outputs, the size its work directory had when
+/// the body ended; the next run of that step expects about that much. The
+/// report is after a tab, as one JSON object on the line; a line without one
+/// (written before reports) has an empty report. Like the run logs, this is
+/// for people and tests to read, and for that expectation.
+#[derive(Debug, Clone, PartialEq)]
 pub struct StepRecord {
     pub start_ns: u128,
     pub end_ns: u128,
@@ -137,6 +166,7 @@ pub struct StepRecord {
     /// The size of the step's work directory when its body ended, if it was
     /// measured.
     pub work_bytes: Option<u64>,
+    pub report: Report,
 }
 
 impl StepRecord {
@@ -156,11 +186,18 @@ impl StepRecord {
         if let Some(bytes) = self.work_bytes {
             line.push_str(&format!(" work={bytes}"));
         }
+        let report = serde_json::to_string(&self.report).unwrap_or_else(|_| "{}".into());
+        line.push('\t');
+        line.push_str(&report);
         line.push('\n');
         line
     }
 
     fn parse(line: &str) -> Option<Self> {
+        let (line, report) = match line.split_once('\t') {
+            Some((line, report)) => (line, serde_json::from_str(report).ok()?),
+            None => (line, Report::default()),
+        };
         let mut words = line.split_whitespace();
         let start_ns = words.next()?.parse().ok()?;
         let end_ns = words.next()?.parse().ok()?;
@@ -191,6 +228,7 @@ impl StepRecord {
             key,
             outputs,
             work_bytes,
+            report,
         })
     }
 }

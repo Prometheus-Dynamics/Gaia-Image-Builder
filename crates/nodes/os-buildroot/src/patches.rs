@@ -187,8 +187,8 @@ fn make_patched(work: &mut Work<'_>, source: &Path) -> Result<(), StepError> {
         .arg(&tree)
         .env("PATH", crate::PATH);
     work.run(&copy)?;
-    let outcomes = apply_all(&tree, &dir.join("patches"))
-        .map_err(|why| StepError::body(NAME, why))?;
+    let outcomes =
+        apply_all(&tree, &dir.join("patches")).map_err(|why| StepError::body(NAME, why))?;
     fs::write(dir.join(REPORT), report_text(&outcomes))
         .map_err(|e| StepError::body(NAME, format!("the patches report: {e}")))?;
     Ok(())
@@ -309,8 +309,8 @@ mod tests {
     fn both_patches_apply_to_buildroot_2026_02_3() {
         let tree = copy_of("2026.02.3");
         let scratch = tempfile::tempdir().expect("tempdir");
-        let outcomes = apply_all(tree.path(), scratch.path().join("patches").as_path())
-            .expect("apply");
+        let outcomes =
+            apply_all(tree.path(), scratch.path().join("patches").as_path()).expect("apply");
         assert!(all_applied(&outcomes), "{outcomes:?}");
         assert!(read(tree.path(), "pkg-utils.mk").contains("cp -a --reflink=auto"));
         assert!(read(tree.path(), "Makefile.in").contains("export PERL:=$(shell which perl)"));
@@ -367,19 +367,15 @@ mod tests {
 
     #[test]
     fn all_applied_and_no_output_change_adds_nothing_to_the_key() {
-        let outcomes: Vec<(String, bool)> = PATCHES
-            .iter()
-            .map(|p| (p.name.to_string(), true))
-            .collect();
+        let outcomes: Vec<(String, bool)> =
+            PATCHES.iter().map(|p| (p.name.to_string(), true)).collect();
         assert_eq!(key_entry(Mode::On, &outcomes), None);
     }
 
     #[test]
     fn a_skipped_patch_is_in_the_key() {
-        let mut outcomes: Vec<(String, bool)> = PATCHES
-            .iter()
-            .map(|p| (p.name.to_string(), true))
-            .collect();
+        let mut outcomes: Vec<(String, bool)> =
+            PATCHES.iter().map(|p| (p.name.to_string(), true)).collect();
         outcomes[1].1 = false;
         let entry = key_entry(Mode::On, &outcomes).expect("an entry");
         assert_eq!(entry, format!("skipped {}", PATCHES[1].name));
@@ -387,10 +383,8 @@ mod tests {
 
     #[test]
     fn the_off_switch_is_in_the_key() {
-        let outcomes: Vec<(String, bool)> = PATCHES
-            .iter()
-            .map(|p| (p.name.to_string(), true))
-            .collect();
+        let outcomes: Vec<(String, bool)> =
+            PATCHES.iter().map(|p| (p.name.to_string(), true)).collect();
         assert_eq!(key_entry(Mode::Off, &outcomes).as_deref(), Some("off"));
         assert_ne!(key_entry(Mode::Off, &[]), key_entry(Mode::On, &outcomes));
     }
@@ -407,7 +401,10 @@ mod tests {
 
     #[test]
     fn the_report_reads_back_what_it_wrote() {
-        let outcomes = vec![("a.patch".to_string(), true), ("b.patch".to_string(), false)];
+        let outcomes = vec![
+            ("a.patch".to_string(), true),
+            ("b.patch".to_string(), false),
+        ];
         let text = report_text(&outcomes);
         assert_eq!(parse_report(&text).expect("parse"), outcomes);
         assert!(parse_report("maybe a.patch\n").is_err());

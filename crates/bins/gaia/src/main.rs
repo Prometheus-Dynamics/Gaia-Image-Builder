@@ -22,6 +22,7 @@ mod record;
 mod rootfs_sizes;
 mod show;
 mod sizes;
+mod timing;
 
 use std::process::ExitCode;
 

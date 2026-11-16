@@ -45,7 +45,7 @@
 //! selects, and no host tool is built differently for them. So what changes
 //! how a shared host tool is built changes the key, and nothing else does.
 
-use crate::{BuildrootHost, OsConfig, Prepared, configure, make_tool, ppd, prepare};
+use crate::{BuildrootHost, OsConfig, Prepared, configure, make_tool, ppd, prepare, times};
 use daedalus::prelude::*;
 use daedalus_cpu_author::FanIn;
 use gaia_step::{Ctx, Digest, KeyBuilder, Step, StepError, Store, Stream, Tool, Work};
@@ -388,8 +388,21 @@ fn named(values: &str, names: &[(String, String)]) -> String {
     text
 }
 
-/// Builds the goals and makes the seed of what they installed.
+/// Builds the goals and makes the seed of what they installed, then records
+/// the packages' times whether the build failed or not.
 fn build(
+    work: &mut Work<'_>,
+    prepared: &Prepared,
+    goals: &[&str],
+    host: &BuildrootHost,
+) -> Result<(), StepError> {
+    let out = work.dir().join("out");
+    let result = build_steps(work, prepared, goals, host);
+    times::record(work, &out, host.jobs);
+    result
+}
+
+fn build_steps(
     work: &mut Work<'_>,
     prepared: &Prepared,
     goals: &[&str],
@@ -811,7 +824,10 @@ mod tests {
             let binaries = mark_out(&tree, out).expect("mark");
             (
                 fs::read_to_string(tree.join("bin/tool.pc")).expect("read"),
-                fs::read_link(tree.join("lib")).expect("link").display().to_string(),
+                fs::read_link(tree.join("lib"))
+                    .expect("link")
+                    .display()
+                    .to_string(),
                 binaries,
             )
         };

@@ -16,9 +16,12 @@
 //!    failed exit into a [`StepError`] that names the step. Each run's whole
 //!    output goes to a run log file next to the store ([`logs_dir`]), which
 //!    a failed step keeps.
-//! 4. **Step record.** Each look-up-or-make that ends with outputs adds a
-//!    line to `steps.log` in the same directory: hit or made, the key and
-//!    the outputs ([`step_records`]). It is a log: no step reads it.
+//! 4. **Step record.** Each look-up-or-make that ends with outputs, and each
+//!    one whose body fails, adds a line to `steps.log` in the same
+//!    directory: hit or made, the key, the outputs, and a [`Report`] (the
+//!    CPU time of its tools, the job count, the details its body reported
+//!    with [`Work::detail`]). See [`step_records`]. It is a log: no step
+//!    reads it.
 //!
 //! What a step does not do: retry, time out, schedule or keep state.
 //! Retries and stopping are Daedalus step policy; the store is the only state.
@@ -49,7 +52,7 @@ pub use daedalus_cpu_author::Ctx;
 pub use error::{ErrorKind, StepError, code};
 pub use gaia_store::{Check, Digest, ObjectRef, StepKey, Store};
 pub use key::KeyBuilder;
-pub use log::{StepRecord, logs_dir, now_ns, step_records, step_records_from};
+pub use log::{Report, StepRecord, logs_dir, now_ns, step_records, step_records_from};
 pub use step::{Made, Step, Work};
 pub use tool::{Stream, Tool, ToolOutput};
 pub use version::once_per_process;

@@ -407,7 +407,7 @@ pub fn sizes(options: &args::Sizes) -> Result<(), Stop> {
         return Ok(());
     }
     println!("run      {}", record.display());
-    println!("product  {} ({})", run.product.display(), run.outcome);
+    println!("product  {} ({})", run.product.display(), run.state());
     let width = rows.iter().map(|r| r.what.len()).max().unwrap_or(0);
     for r in &rows {
         println!("{:width$}  {:>12}  {}", r.what, r.bytes, r.detail);

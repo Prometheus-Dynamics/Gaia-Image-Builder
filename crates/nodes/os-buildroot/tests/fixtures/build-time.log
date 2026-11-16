@@ -1,0 +1,75 @@
+1794718425.514193974:start:download            : skeleton-init-common
+1794718425.959118555:end  :download            : skeleton-init-common
+1794718426.832992609:start:extract             : skeleton-init-common
+1794718426.992462356:end  :extract             : skeleton-init-common
+1794718428.650367665:start:patch               : skeleton-init-common
+1794718432.178447263:end  :patch               : skeleton-init-common
+1794718432.572330826:start:configure           : skeleton-init-common
+1794718433.929865470:end  :configure           : skeleton-init-common
+1794718435.114964080:start:build               : skeleton-init-common
+1794718435.127932642:end  :build               : skeleton-init-common
+1794718435.910700199:start:install-staging     : skeleton-init-common
+1794718437.122808303:end  :install-staging     : skeleton-init-common
+1794718437.627819231:start:install-target      : skeleton-init-common
+1794718438.868145073:end  :install-target      : skeleton-init-common
+1794718440.483781263:start:download            : skeleton-init-sysv
+1794718440.778404018:end  :download            : skeleton-init-sysv
+1794718441.278531605:start:extract             : skeleton-init-sysv
+1794718441.303189643:end  :extract             : skeleton-init-sysv
+1794718442.012279302:start:patch               : skeleton-init-sysv
+1794718442.051012496:end  :patch               : skeleton-init-sysv
+1794718442.360745115:start:configure           : skeleton-init-sysv
+1794718442.567401596:end  :configure           : skeleton-init-sysv
+1794718442.979973680:start:build               : skeleton-init-sysv
+1794718442.993339958:end  :build               : skeleton-init-sysv
+1794718443.466363133:start:install-target      : skeleton-init-sysv
+1794718443.570589196:end  :install-target      : skeleton-init-sysv
+1794718444.961553655:start:download            : skeleton
+1794718445.034164914:end  :download            : skeleton
+1794718445.291678148:start:extract             : skeleton
+1794718445.490204173:end  :extract             : skeleton
+1794718446.022856660:start:patch               : skeleton
+1794718446.060409482:end  :patch               : skeleton
+1794718446.409368309:start:configure           : skeleton
+1794718446.575268595:end  :configure           : skeleton
+1794718446.883964993:start:build               : skeleton
+1794718446.890692099:end  :build               : skeleton
+1794718447.184904114:start:install-target      : skeleton
+1794718447.205976943:end  :install-target      : skeleton
+1794718448.633986192:start:download            : linux-headers
+1794718474.790030233:end  :download            : linux-headers
+1794718475.243220343:start:extract             : linux-headers
+1794720298.025249745:end  :extract             : linux-headers
+1794720299.555221319:start:patch               : linux-headers
+1794720311.708715984:end  :patch               : linux-headers
+1794720312.360889573:start:configure           : linux-headers
+1794720347.438205413:end  :configure           : linux-headers
+1794720348.681574325:start:build               : linux-headers
+1794720348.720721896:end  :build               : linux-headers
+1794720349.826459456:start:install-staging     : linux-headers
+1794720353.541902536:end  :install-staging     : linux-headers
+1794720354.484602550:start:install-target      : linux-headers
+1794720354.509381118:end  :install-target      : linux-headers
+1794720357.464258373:start:download            : glibc
+1794720525.187586552:end  :download            : glibc
+1794720526.247048454:start:extract             : glibc
+1794720578.269442763:end  :extract             : glibc
+1794720578.953980754:start:patch               : glibc
+1794720581.895674717:end  :patch               : glibc
+1794720583.360291555:start:configure           : glibc
+1794720634.617910561:end  :configure           : glibc
+1794720636.411567037:start:build               : glibc
+1794721039.225639858:end  :build               : glibc
+1794721040.730857743:start:install-staging     : glibc
+1794721737.975652386:end  :install-staging     : glibc
+1794721739.988631716:start:install-target      : glibc
+1794721740.516295278:end  :install-target      : glibc
+1794721742.477538636:start:download            : host-gcc-final
+1794721747.545363270:end  :download            : host-gcc-final
+1794721747.865874078:start:extract             : host-gcc-final
+1794721778.543373923:end  :extract             : host-gcc-final
+1794721779.107009291:start:patch               : host-gcc-final
+1794721781.964968857:end  :patch               : host-gcc-final
+1794721783.456644158:start:configure           : host-gcc-final
+1794721792.551447381:end  :configure           : host-gcc-final
+1794721792.993292286:start:build               : host-gcc-final
