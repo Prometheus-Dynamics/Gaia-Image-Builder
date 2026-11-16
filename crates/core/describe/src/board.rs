@@ -298,6 +298,20 @@ impl Board {
         sources.extend(board.sources.clone());
         if let (Some(family), Some(family_path)) = (&family, &family_path) {
             check_refs(family_path, family, &sources)?;
+            // A U-Boot defconfig sets a board's pins and their voltages: a
+            // board that named none would silently get its family's, which
+            // is another board's. So a family states none.
+            if family
+                .bootloader
+                .as_ref()
+                .is_some_and(|boot| boot.defconfig.is_some())
+            {
+                return Err(Error::new(
+                    family_path,
+                    "bootloader.defconfig",
+                    "a family states no U-Boot defconfig: it carries a board's pin and voltage setup, so each board names its own",
+                ));
+            }
         }
         check_refs(path, &board, &sources)?;
         let merged = match family {

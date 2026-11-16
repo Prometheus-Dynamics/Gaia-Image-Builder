@@ -1510,6 +1510,41 @@ fn a_boards_kernel_starts_from_a_complete_configuration() {
     assert!(err.contains("kernel.config"), "{err}");
 }
 
+/// A U-Boot defconfig sets a board's pins and voltages. A board that names
+/// none is refused where the plan is made, and a family may not give one:
+/// a board would otherwise be built with another board's, silently.
+#[test]
+fn a_board_names_its_own_u_boot_defconfig_and_a_family_gives_none() {
+    let dir = project();
+    let board = dir.path().join("examples/boards/zero-3e/board.toml");
+    let text = std::fs::read_to_string(&board).expect("read");
+    let without = text.replace("defconfig = \"radxa-zero-3-rk3566\"\n", "");
+    assert_ne!(without, text);
+    std::fs::write(&board, &without).expect("write");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("the board zero-3e names no U-Boot defconfig"),
+        "{err}"
+    );
+
+    // The family naming one does not stand in for the board: it is refused.
+    let family = dir.path().join("examples/boards/rk35xx/family.toml");
+    let family_text = std::fs::read_to_string(&family).expect("read");
+    let with = family_text.replace(
+        "[bootloader]\nsource = \"u-boot\"\n",
+        "[bootloader]\nsource = \"u-boot\"\ndefconfig = \"radxa-zero-3-rk3566\"\n",
+    );
+    assert_ne!(with, family_text);
+    std::fs::write(&family, with).expect("write");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("family.toml: bootloader.defconfig"), "{err}");
+    assert!(err.contains("a family states no U-Boot defconfig"), "{err}");
+}
+
 /// A kernel with nothing to start its configuration from is an error where
 /// the plan is made: Buildroot would stop on it much later.
 #[test]

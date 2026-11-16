@@ -364,12 +364,20 @@ pub(crate) fn plan(
                 "UBOOT",
             )?);
         }
-        if let Some(name) = &boot.defconfig {
-            lines.push(format!(
-                "BR2_TARGET_UBOOT_BOARD_DEFCONFIG={}",
-                quoted(name.strip_suffix("_defconfig").unwrap_or(name))
+        let Some(name) = &boot.defconfig else {
+            return Err(Error::at(
+                &board.file,
+                "bootloader.defconfig",
+                format!(
+                    "the board {} names no U-Boot defconfig: it carries the board's pin and voltage setup, so the board states its own (a family gives none)",
+                    board.name
+                ),
             ));
-        }
+        };
+        lines.push(format!(
+            "BR2_TARGET_UBOOT_BOARD_DEFCONFIG={}",
+            quoted(name.strip_suffix("_defconfig").unwrap_or(name))
+        ));
         if let Some(files) = &boot.fragments {
             lines.push(format!(
                 "BR2_TARGET_UBOOT_CONFIG_FRAGMENT_FILES={}",
