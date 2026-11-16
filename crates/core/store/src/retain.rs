@@ -1,7 +1,7 @@
 //! Retention: removing what nothing kept refers to. It runs only when asked;
 //! the store never deletes on its own.
 
-use crate::{Digest, Error, Kind, ObjectRef, Result, StepKey, Store, entry, fsutil};
+use crate::{Digest, Error, Kind, ObjectRef, Result, StepKey, Store, entry, fsutil, placement};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
@@ -99,6 +99,16 @@ impl Store {
             if !fsutil::name_pid(&name).is_some_and(fsutil::process_alive) {
                 report.leftovers_removed += 1;
                 remove(&path, &mut report)?;
+            }
+        }
+        // RAM work directories a dead process left in /dev/shm.
+        let ram = placement::ram_root(self.root(), Path::new(placement::SHM));
+        if ram.is_dir() {
+            for (name, path) in children(&ram)? {
+                if !fsutil::name_pid(&name).is_some_and(fsutil::process_alive) {
+                    report.leftovers_removed += 1;
+                    remove(&path, &mut report)?;
+                }
             }
         }
         Ok(report)

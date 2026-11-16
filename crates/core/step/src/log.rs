@@ -95,7 +95,7 @@ impl RunLog {
 
 /// A step name as a directory name: anything but letters, digits, `.`, `-`
 /// and `_` becomes `_`.
-fn file_name(step: &str) -> String {
+pub(crate) fn file_name(step: &str) -> String {
     step.chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
@@ -119,8 +119,11 @@ const STEPS: &str = "steps.log";
 /// <start ns> <end ns> <pid> hit|made <step> <key> <output>=<object> ...
 /// ```
 ///
-/// `hit` means the entry was found and the body did not run. Like the run
-/// logs, this is for people and tests to read; no step reads it back.
+/// `hit` means the entry was found and the body did not run. A step that
+/// was given a RAM work directory (see [`crate::Step::ram_work`]) also ends
+/// its line with `work=<bytes>`, the size its work directory had when the
+/// body ended; the next run of that step expects about that much. Like the
+/// run logs, this is for people and tests to read, and for that expectation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StepRecord {
     pub start_ns: u128,
@@ -131,6 +134,9 @@ pub struct StepRecord {
     pub step: String,
     pub key: StepKey,
     pub outputs: BTreeMap<String, ObjectRef>,
+    /// The size of the step's work directory when its body ended, if it was
+    /// measured.
+    pub work_bytes: Option<u64>,
 }
 
 impl StepRecord {
@@ -146,6 +152,9 @@ impl StepRecord {
         );
         for (name, object) in &self.outputs {
             line.push_str(&format!(" {name}={object}"));
+        }
+        if let Some(bytes) = self.work_bytes {
+            line.push_str(&format!(" work={bytes}"));
         }
         line.push('\n');
         line
@@ -164,7 +173,12 @@ impl StepRecord {
         let step = words.next()?.to_string();
         let key = StepKey(Digest::parse(words.next()?)?);
         let mut outputs = BTreeMap::new();
+        let mut work_bytes = None;
         for word in words {
+            if let Some(bytes) = word.strip_prefix("work=") {
+                work_bytes = Some(bytes.parse().ok()?);
+                continue;
+            }
             let (name, object) = word.split_once('=')?;
             outputs.insert(name.to_string(), object.parse().ok()?);
         }
@@ -176,6 +190,7 @@ impl StepRecord {
             step,
             key,
             outputs,
+            work_bytes,
         })
     }
 }

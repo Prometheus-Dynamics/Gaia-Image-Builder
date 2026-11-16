@@ -28,13 +28,16 @@ mod digest;
 mod entry;
 mod fsutil;
 mod object;
+mod placement;
 mod retain;
 mod scratch;
 mod verified;
 
 pub use digest::{Digest, file_digest, tree_digest};
 pub use entry::{StepEntry, StepKey};
+pub use fsutil::used_bytes;
 pub use object::{Kind, ObjectRef};
+pub use placement::{Mode, Room, Settings, parse_size, ram_root};
 pub use retain::{Keep, RetainReport};
 pub use scratch::Scratch;
 
@@ -116,9 +119,56 @@ impl Store {
         }
     }
 
-    /// A new scratch directory for one step's outputs.
+    /// A new scratch directory for one step's outputs, on the store's disk.
     pub fn scratch(&self) -> Result<Scratch<'_>> {
         Scratch::new(self)
+    }
+
+    /// A new scratch directory for a step that expects to write `expected`
+    /// bytes. Whether it is in RAM is decided by `GAIA_WORK_DIR` and
+    /// `GAIA_RAM_MAX` (see [`placement`]); otherwise it is on the disk, as
+    /// [`Store::scratch`] makes it.
+    pub fn scratch_for(&self, expected: u64) -> Result<Scratch<'_>> {
+        let settings = Settings::from_env()?;
+        let shm = std::path::Path::new(placement::SHM);
+        self.scratch_with(
+            expected,
+            &settings,
+            Room::read(shm),
+            shm,
+            &placement::BUDGET,
+        )
+    }
+
+    /// [`Store::scratch_for`] with what it reads from the environment and the
+    /// machine given, so the choice can be tested.
+    pub(crate) fn scratch_with(
+        &self,
+        expected: u64,
+        settings: &Settings,
+        room: Room,
+        shm: &Path,
+        budget: &'static placement::RamBudget,
+    ) -> Result<Scratch<'_>> {
+        let wanted = match settings.mode {
+            Mode::Disk => false,
+            Mode::Ram => true,
+            Mode::Auto => placement::auto_fits(room, expected),
+        };
+        if !wanted {
+            return self.scratch();
+        }
+        let root = placement::ram_root(self.root(), shm);
+        match budget.claim(expected, settings.ram_max) {
+            Some(claim) => Scratch::in_ram(self, &root, claim),
+            None if settings.mode == Mode::Ram => Err(Error::work(format!(
+                "a RAM work directory of {expected} bytes would pass GAIA_RAM_MAX={} \
+                 ({} bytes are in use)",
+                settings.ram_max,
+                budget.in_use()
+            ))),
+            None => self.scratch(),
+        }
     }
 
     /// Copies the file at `path` into the store.
@@ -225,6 +275,9 @@ pub enum Error {
     Missing { output: String, object: ObjectRef },
     /// An entry file that does not parse.
     BadEntry { path: PathBuf, reason: String },
+    /// A work directory that cannot be placed as asked: a setting that does
+    /// not parse, or a RAM work directory that would pass the cap.
+    Work { reason: String },
 }
 
 impl Error {
@@ -234,6 +287,10 @@ impl Error {
             path: path.to_path_buf(),
             source,
         }
+    }
+
+    pub(crate) fn work(reason: String) -> Self {
+        Self::Work { reason }
     }
 }
 
@@ -258,6 +315,7 @@ impl fmt::Display for Error {
             Self::BadEntry { path, reason } => {
                 write!(f, "step entry {}: {reason}", path.display())
             }
+            Self::Work { reason } => write!(f, "work directory: {reason}"),
         }
     }
 }
