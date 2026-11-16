@@ -86,7 +86,7 @@ fn walk(path: &Path, name: &mut Vec<u8>, out: &mut Vec<(Vec<u8>, [u8; 33])>) -> 
 }
 
 impl Store {
-    fn verified_path(&self, object: &ObjectRef) -> PathBuf {
+    pub(crate) fn verified_path(&self, object: &ObjectRef) -> PathBuf {
         let hex = object.digest.hex();
         self.root()
             .join("verified")
@@ -102,6 +102,11 @@ impl Store {
             return false;
         };
         state(&self.path(object)).is_ok_and(|now| now == recorded.trim())
+    }
+
+    /// Removes the record of `object`, if it has one.
+    pub(crate) fn remove_record(&self, object: &ObjectRef) {
+        let _ = fs::remove_file(self.verified_path(object));
     }
 
     /// Records `object`'s state, after its digest matched. A record that

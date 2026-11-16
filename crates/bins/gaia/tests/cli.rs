@@ -418,3 +418,73 @@ fn a_make_build_takes_its_other_sources_by_name() {
     );
     assert!(!text.contains("deps2"), "{text}");
 }
+
+/// `gaia store verify` on a store with one file and one tree: a clean store
+/// exits 0; an object whose content was rewritten, with its size and
+/// modification time put back, exits 2 and names its path; `--fix` removes
+/// it and the next run is clean again.
+#[test]
+fn store_verify_names_an_edited_object_and_fix_removes_it() {
+    use std::os::unix::fs::FileExt as _;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store_dir = dir.path().join("store");
+    let store = gaia_store::Store::open(&store_dir).expect("store");
+    let file = dir.path().join("file");
+    write(&file, "original");
+    let object = store.put_file(&file).expect("put");
+    let src = dir.path().join("src");
+    write(&src.join("sub/f"), "content");
+    let tree = store.put_tree(&src).expect("put");
+    let verify = |extra: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_gaia"))
+            .args(["store", "verify", "--store"])
+            .arg(&store_dir)
+            .args(extra)
+            .output()
+            .expect("run")
+    };
+    let clean = verify(&[]);
+    assert_eq!(
+        clean.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&clean.stdout)
+    );
+
+    // Same length, mtime put back: the edit a size-and-mtime check cannot see.
+    let path = store.path(&object);
+    let before = std::fs::metadata(&path)
+        .expect("meta")
+        .modified()
+        .expect("mtime");
+    let handle = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .expect("open");
+    handle.write_all_at(b"tampere", 0).expect("write");
+    handle
+        .set_times(std::fs::FileTimes::new().set_modified(before))
+        .expect("mtime back");
+    let edited = verify(&[]);
+    let report = String::from_utf8_lossy(&edited.stdout).into_owned();
+    assert_eq!(edited.status.code(), Some(2), "{report}");
+    assert!(
+        report.contains(&format!("bad  {}", path.display())),
+        "{report}"
+    );
+    assert!(report.contains("1 do not match"), "{report}");
+
+    let fixed = verify(&["--fix"]);
+    assert_eq!(
+        fixed.status.code(),
+        Some(2),
+        "a mismatch exits 2, fixed or not"
+    );
+    assert!(!path.exists(), "--fix removed it");
+    assert!(store.path(&tree).is_dir(), "a clean object stays");
+    assert_eq!(
+        verify(&[]).status.code(),
+        Some(0),
+        "the store is clean again"
+    );
+}
