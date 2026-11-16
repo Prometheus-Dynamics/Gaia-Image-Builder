@@ -139,7 +139,7 @@ fn the_plan_lists_the_config_the_board_gives() {
         "inputs zero-3e.linux files.0 files.1 files.2, built from LINUX=zero-3e.linux",
         "built from UBOOT=zero-3e.u-boot ARM_TRUSTED_FIRMWARE=zero-3e.tf-a",
         // The root filesystem's build has neither.
-        "zero-3e-demo.os  gaia:os-config  fragments gaia.ccache board.target gaia.parallel image.0.os.fragment, inputs files.4\n",
+        "zero-3e-demo.os  gaia:os-config  fragments board.target gaia.parallel image.0.os.fragment, inputs files.4\n",
         // A Rust component: its crates from its Cargo.lock, its target from
         // the board, its binary placed in the root filesystem.
         "hello-rust.vendor                       gaia.build.rust.vendor",
@@ -197,7 +197,6 @@ fn the_json_plan_has_the_os_config_as_a_host_input() {
     assert_eq!(
         names,
         [
-            "gaia.ccache",
             "board.target",
             "board.kernel",
             "gaia.parallel",

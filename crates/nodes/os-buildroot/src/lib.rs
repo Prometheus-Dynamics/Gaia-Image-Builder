@@ -46,8 +46,8 @@
 //! overrides, the externals and the make program. The download cache, the compiler cache's directory, the mirror,
 //! the job count and the CPU list change how fast it runs, or where its
 //! sources come from, not what it makes, so they are not in the key. The
-//! compiler cache is on by a fragment (`gaia.ccache`, from the graph): that
-//! is in the key, and its directory is not.
+//! compiler cache is on only when a description says `BR2_CCACHE=y`: that
+//! line is in the key, and the cache's directory is not.
 //!
 //! Settings, from the host (`gaia::project`), none of them in the key:
 //!
@@ -62,8 +62,8 @@
 //!   the site it copies. Default: none.
 //! - The compiler cache: `buildroot-ccache` beside the store's objects
 //!   (`BR2_CCACHE_DIR`), shared by every build of the store, bounded to
-//!   `CCACHE_MAX_SIZE`. The graph turns it on by default (`gaia.ccache`); a
-//!   description turns it off with `# BR2_CCACHE is not set`.
+//!   `CCACHE_MAX_SIZE`. Off by default (a build from nothing only pays for
+//!   it); a description turns it on with `BR2_CCACHE=y`.
 //!
 //! Progress: Buildroot's `Installing to target` lines are counted as they
 //! print, but the step kit reports progress only between tool runs, so the

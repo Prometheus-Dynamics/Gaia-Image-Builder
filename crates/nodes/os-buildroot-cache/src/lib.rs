@@ -10,10 +10,10 @@
 //!   against its digest. A file already there with the right digest is kept.
 //!   With every file present, the build needs no network: Buildroot finds
 //!   each source by its hash file and never fetches it.
-//! - **ccache**: the compiler cache is on by the graph's default fragment
-//!   (`gaia.ccache`), and its directory is the host's (`ccache_dir`, one for
-//!   each store). Neither is a node here: the directory is no part of the
-//!   key or of the output.
+//! - **ccache**: the compiler cache is on when a description says
+//!   `BR2_CCACHE=y` (off by default), and its directory is the host's
+//!   (`ccache_dir`, one for each store). Neither is a node here: the
+//!   directory is no part of the key or of the output.
 //! - **Clean builds** (`rebuild`): a config change makes a new key, and the
 //!   node rebuilds from nothing. It names the config options that changed
 //!   between the previous and the current fragments, so the reason is in

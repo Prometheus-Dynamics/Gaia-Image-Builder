@@ -500,20 +500,15 @@ fn parallel_defaults() -> ConfigFragment {
 }
 
 /// The fragments every OS build starts from, before the board's and the
-/// image's own. A later line for a symbol replaces this one, so an image
-/// turns a default off by writing its `# NAME is not set` line.
+/// image's own: none. Buildroot's compiler cache is not among them: in a
+/// build from nothing every compile misses, each configure probe costs about
+/// twice as much through the cache (measured: 100 small compiles 1.3 s plain,
+/// 2.6 s through a cold cache), and the cache itself is five host packages.
+/// A build that reruns a step on nearly the same sources turns it on with
+/// `BR2_CCACHE=y` in its fragment; the cache's directory is then the store's
+/// (given to make by the host, so no key holds it).
 fn defaults() -> Vec<ConfigFragment> {
-    vec![ccache_default()]
-}
-
-/// Buildroot's compiler cache is on: target and host compilers go through
-/// ccache. Only that is in the fragment: the cache's directory is given to
-/// make by the host, so the key does not change with the store's place.
-fn ccache_default() -> ConfigFragment {
-    ConfigFragment {
-        name: "gaia.ccache".into(),
-        text: "BR2_CCACHE=y\n".into(),
-    }
+    Vec::new()
 }
 
 /// The architecture's and the CPU's options.
@@ -905,15 +900,11 @@ mod tests {
         );
     }
 
-    /// The compiler cache is on by default, as the first fragment, and its
-    /// text is a constant: where the cache is, is not in it.
+    /// The compiler cache is off unless a description turns it on: no
+    /// default fragment names it.
     #[test]
-    fn the_compiler_cache_is_on_by_a_constant_default_fragment() {
-        let fragments = defaults();
-        assert_eq!(fragments.len(), 1);
-        assert_eq!(fragments[0].name, "gaia.ccache");
-        assert_eq!(fragments[0].text, "BR2_CCACHE=y\n");
-        assert!(!fragments[0].text.contains('/'));
+    fn the_compiler_cache_is_not_a_default() {
+        assert!(defaults().is_empty());
     }
 
     #[test]
