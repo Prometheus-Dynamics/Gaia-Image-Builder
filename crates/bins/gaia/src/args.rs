@@ -14,6 +14,7 @@ usage:
   gaia build <product.toml> [project flags] [--jobs N] [--config-only | --until STEP]
   gaia lock  <product.toml> [--update SOURCE]... [--check]  (see gaia lock --help)
   gaia clean [--store DIR] [--keep N] [--dry-run]
+  gaia store verify [--store DIR] [--fix]
   gaia show  <image>.<output> [--store DIR]
   gaia sizes [<run.json>] [--store DIR] [--json] [--xz]
   gaia sizes --image <disk image[.xz]> [--json]
@@ -55,7 +56,10 @@ given with plan's or build's --setting.
 plan prints the graph document and the plan and runs nothing. build runs
 the graph; Ctrl-C stops at the next step boundary. clean keeps what the
 latest N builds (default 3) used and removes the rest. show prints what an
-output of the latest build holds and the steps it came from.
+output of the latest build holds and the steps it came from. store verify
+reads every object in the store in full and checks it against its digest:
+it lists each one that does not match, and exits 2 when any does. With
+--fix, those are removed, so the next build makes them again.
 ";
 
 /// `gaia validate`: the files, and the kind to check each as.
@@ -74,6 +78,7 @@ pub enum Command {
     Plan(Project),
     Build(Project),
     Clean(Clean),
+    Store(StoreCommand),
     Show(Show),
     Sizes(Sizes),
     /// `gaia lock`: the words after `lock`.
@@ -122,6 +127,19 @@ pub struct Clean {
     pub store: Option<PathBuf>,
     pub keep: Option<usize>,
     pub dry_run: bool,
+}
+
+/// `gaia store <action>`.
+#[derive(Debug, PartialEq)]
+pub enum StoreCommand {
+    Verify(Verify),
+}
+
+/// `gaia store verify`: every object read in full (see `Store::verify`).
+#[derive(Debug, Default, PartialEq)]
+pub struct Verify {
+    pub store: Option<PathBuf>,
+    pub fix: bool,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -286,6 +304,29 @@ pub fn parse(words: &[String]) -> Result<Command, Stop> {
             }
             Command::Clean(clean)
         }
+        "store" => {
+            let action = words
+                .next()
+                .ok_or_else(|| Stop::usage("store needs an action: verify"))?;
+            match action {
+                "verify" => {
+                    let mut verify = Verify::default();
+                    let mut none = None;
+                    while let Some(word) = words.next() {
+                        match word {
+                            "--store" => verify.store = Some(words.value(word)?.into()),
+                            "--fix" => verify.fix = true,
+                            _ => words.positional(word, &mut none)?,
+                        }
+                    }
+                    if let Some(extra) = none {
+                        return Err(Stop::usage(format!("store verify takes no `{extra}`")));
+                    }
+                    Command::Store(StoreCommand::Verify(verify))
+                }
+                other => return Err(Stop::usage(format!("store has no action `{other}`"))),
+            }
+        }
         "show" => {
             let mut show = Show::default();
             let mut output = None;
@@ -363,6 +404,29 @@ mod tests {
     fn parsed(line: &str) -> Result<Command, String> {
         let words: Vec<String> = line.split_whitespace().map(String::from).collect();
         parse(&words).map_err(|s| s.message)
+    }
+
+    #[test]
+    fn store_verify_takes_a_store_and_fix() {
+        let Ok(Command::Store(StoreCommand::Verify(verify))) =
+            parsed("store verify --fix --store /x")
+        else {
+            panic!("store verify");
+        };
+        assert!(verify.fix);
+        assert_eq!(verify.store, Some(PathBuf::from("/x")));
+        assert_eq!(
+            parsed("store").expect_err("an error"),
+            "store needs an action: verify"
+        );
+        assert_eq!(
+            parsed("store scrub").expect_err("an error"),
+            "store has no action `scrub`"
+        );
+        assert_eq!(
+            parsed("store verify extra").expect_err("an error"),
+            "store verify takes no `extra`"
+        );
     }
 
     #[test]

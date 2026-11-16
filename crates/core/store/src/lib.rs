@@ -53,6 +53,7 @@ mod placement;
 mod retain;
 mod scratch;
 mod verified;
+mod verify;
 
 pub use digest::{Digest, file_digest, tree_digest};
 pub use entry::{StepEntry, StepKey};
@@ -61,6 +62,7 @@ pub use object::{Kind, ObjectRef};
 pub use placement::{Mode, Room, Settings, parse_size, ram_root};
 pub use retain::{Keep, RetainReport};
 pub use scratch::Scratch;
+pub use verify::{Problem, VerifyReport};
 
 use std::fmt;
 use std::fs;

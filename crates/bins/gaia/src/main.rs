@@ -22,6 +22,7 @@ mod record;
 mod rootfs_sizes;
 mod show;
 mod sizes;
+mod store;
 mod timing;
 
 use std::process::ExitCode;
@@ -77,6 +78,7 @@ fn main() -> ExitCode {
         args::Command::Plan(options) => project::Project::open(&options)?.print_plan(options.json),
         args::Command::Build(options) => build::build(&options),
         args::Command::Clean(options) => clean::clean(&options),
+        args::Command::Store(args::StoreCommand::Verify(options)) => store::verify(&options),
         args::Command::Show(options) => show::show(&options),
         args::Command::Sizes(options) => sizes::sizes(&options),
         args::Command::Lock(words) => {

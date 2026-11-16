@@ -101,6 +101,11 @@ impl Store {
                 } else {
                     report.objects_removed += 1;
                     remove(&path, &mut report)?;
+                    // The record goes with the object: a later object with
+                    // the same name must be read again, not trusted.
+                    if apply && let Some(digest) = Digest::parse(&name) {
+                        self.remove_record(&ObjectRef { kind, digest });
+                    }
                 }
             }
         }
@@ -156,7 +161,7 @@ fn children(dir: &Path) -> Result<Vec<(String, std::path::PathBuf)>> {
 }
 
 /// The entries of each `<2 hex>` directory under `dir`.
-fn children_two_deep(dir: &Path) -> Result<Vec<(String, std::path::PathBuf)>> {
+pub(crate) fn children_two_deep(dir: &Path) -> Result<Vec<(String, std::path::PathBuf)>> {
     let mut out = Vec::new();
     for (_, shard) in children(dir)? {
         if shard.is_dir() {
