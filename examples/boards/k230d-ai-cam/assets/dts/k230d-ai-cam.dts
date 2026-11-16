@@ -6,13 +6,33 @@
  * addresses and interrupts of the K230 Linux SDK's k230.dtsi. No pinctrl
  * states: as with the SDK's k230d-canmv.dts, the kernel keeps the pins the
  * SDK's U-Boot set up.
- * Written from the SDK and the bindings, untested on board.
+ * Node set from the vendor's Linux patches for this board (Canaan
+ * k230_linux_sdk fc6cc215, buildroot-overlay/linux): 0024-add-junroc-board.patch
+ * (model, compatible, the UART0 debug console behind the CH342K bridge, SD on
+ * SDIO1 as mmc_sd1, WiFi RTL8189FTV on SDIO0, USB0 OTG, 128 MB), with
+ * 0036-...-swap-mmc0-mmc1-aliases.patch's SD-as-mmc1 superseded by 0024's own
+ * alias block on this board (SD is mmc0 here, so root=/dev/mmcblk0p2).
+ *
+ * First image: UART0 console at 115200 (ttyS0, the bench's CH342K bridge) and
+ * the SD card (SDIO1) only. The vendor's stdout is UART2 (ttyS2): not used here.
+ * Known from the vendor dts, NOT enabled in this image:
+ *   - WiFi RTL8189FTV on SDIO0 (mmc_sd0, no-1-8-v): needs its firmware and
+ *     the SDIO pins; the vendor's 0024 sets status okay.
+ *   - camera GC2093 on I2C4 (vendor 0026/0031): MIPI RX1, MCLK1 on IO13
+ *     (cam2_mclk_pins), reset GPIO10 (csi reset-gpios), CSI0/CSI1 disabled.
+ *   - touch on I2C3 (reset GPIO23, irq GPIO22); DSI panel TX0, reset GPIO24,
+ *     backlight GPIO25.
+ *   - USB0 OTG (vendor dr_mode "otg"); here its node is present and disabled.
+ * The U-Boot pad table (K230D junroc, from the schematic) is in U-Boot's
+ * device tree, not here; the kernel keeps the pins U-Boot set.
+ *
+ * Written from the vendor patches and the bindings, untested on board.
  */
 #include "canaan/k230.dtsi"
 
 / {
-	model = "CanMV K230D AI-CAM";
-	compatible = "canaan,canmv-k230d-ai-cam", "canaan,kendryte-k230";
+	model = "K230D CanMV Junroc AI Cam";
+	compatible = "canaan,canmv-k230d-junroc-ai-cam", "canaan,canmv-k230d", "canaan,kendryte-k230";
 
 	aliases {
 		serial0 = &uart0;
@@ -43,11 +63,11 @@
 			#phy-cells = <1>;
 		};
 
-		/* The USB-C port, in device mode for the gadget network (usb0,
-		 * 10.55.0.1). The SDK's U-Boot does not set it: no ID pin is wired. */
+		/* USB0 OTG (vendor dr_mode "otg"), disabled in the first image. */
 		usb0: usb@91500000 {
 			compatible = "snps,dwc2";
-			dr_mode = "peripheral";
+			status = "disabled";
+			dr_mode = "otg";
 			reg = <0x0 0x91500000 0x0 0x40000>;
 			interrupts = <173 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&sysclk K230_HS_USB0_AHB_GATE>;
@@ -62,6 +82,7 @@
 		/* The TF slot. */
 		mmc_sd1: mmc@91581000 {
 			compatible = "canaan,k230-sdio";
+			status = "okay";
 			reg = <0x0 0x91581000 0x0 0x1000>;
 			interrupts = <144 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&sysclk K230_HS_SD1_CARD_GATE>,
@@ -79,6 +100,7 @@
 	};
 };
 
+/* UART0: the debug console (CH342K bridge). */
 &uart0 {
 	status = "okay";
 };
