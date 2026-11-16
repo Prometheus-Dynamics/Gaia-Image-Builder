@@ -1,6 +1,6 @@
 [package]
 name = "gaia-verity"
-description = "Node: a filesystem image with a dm-verity hash tree appended (veritysetup), salt and UUID derived from the image, root hash and table line out"
+description = "Node: a filesystem image with a dm-verity hash tree appended (computed here), salt and UUID derived from the image, root hash and table line out"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -16,6 +16,7 @@ daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", 
 gaia-step = { path = "../../core/step" }
 gaia-store = { path = "../../core/store" }
 gaia-types = { path = "../../core/types" }
+sha2 = "0.11.0"
 
 [dev-dependencies]
 tempfile = "3"

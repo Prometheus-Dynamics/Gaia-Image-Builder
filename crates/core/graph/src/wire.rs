@@ -1328,7 +1328,6 @@ fn image_recipe(
         for (stage, id) in &group.stages {
             let (program, line) = match id.as_str() {
                 "gaia.fs.erofs" => ("mkfs.erofs", "BR2_PACKAGE_HOST_EROFS_UTILS=y"),
-                "gaia.verity" => ("veritysetup", "BR2_PACKAGE_HOST_CRYPTSETUP=y"),
                 _ => continue,
             };
             if !stated(line) {

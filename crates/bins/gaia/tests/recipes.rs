@@ -20,7 +20,6 @@ const IMAGE_DIGEST: &str =
 const TOOLS: &[(&str, &str)] = &[
     ("toolchain", "/opt/toolchain"),
     ("mkfs_erofs", "/opt/tools/mkfs.erofs"),
-    ("veritysetup", "/opt/tools/veritysetup"),
     ("mke2fs", "/opt/tools/mke2fs"),
     ("debugfs", "/opt/tools/debugfs"),
     ("git", "/usr/bin/git"),
