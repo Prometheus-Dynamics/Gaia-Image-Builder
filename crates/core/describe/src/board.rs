@@ -228,7 +228,17 @@ pub struct PartitionNeed {
     /// For an area outside the table: the file written there, by its name
     /// in the OS's bootloader output (`u-boot-rockchip.bin`).
     pub content: Option<String>,
+    /// For an area outside the table with `content`: how that file is made
+    /// into what the ROM, SPL or U-Boot reads, by `gaia.firmware.k230`:
+    /// `k230-first-stage` (the SPL: the K230 header over it), `k230-u-boot`
+    /// (U-Boot's `u-boot.bin`: priv gzip, a uImage, then the K230 header) or
+    /// `opensbi-uimage` (OpenSBI's `fw_jump.bin`: a uImage, no K230 header).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrap: Option<String>,
 }
+
+/// The `wrap` values a partition may take.
+pub const WRAP_KINDS: [&str; 3] = ["k230-first-stage", "k230-u-boot", "opensbi-uimage"];
 
 fn yes() -> bool {
     true
@@ -643,6 +653,25 @@ fn check_refs(
         check_ref(format!("kernel.patches[{index}]"), file_ref)?;
     }
     for (index, need) in file.partitions.iter().flatten().enumerate() {
+        if let Some(wrap) = &need.wrap {
+            if !WRAP_KINDS.contains(&wrap.as_str()) {
+                return Err(Error::new(
+                    path,
+                    format!("partitions[{index}].wrap"),
+                    format!(
+                        "'{wrap}' is not a wrap kind: use {}",
+                        WRAP_KINDS.join(", ")
+                    ),
+                ));
+            }
+            if need.content.is_none() || need.in_table {
+                return Err(Error::new(
+                    path,
+                    format!("partitions[{index}].wrap"),
+                    "a wrap applies to an area outside the table that names its `content`",
+                ));
+            }
+        }
         if need.content.is_none() {
             continue;
         }

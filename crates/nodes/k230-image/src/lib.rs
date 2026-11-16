@@ -24,6 +24,9 @@
 //! ordinary deflate stream with a CRC-32 and ISIZE trailer.
 
 use std::fmt;
+
+pub mod node;
+pub use node::{NODES, WrapKind, wrap_bytes, verify};
 use std::io::Write;
 
 use sha2::{Digest, Sha256};

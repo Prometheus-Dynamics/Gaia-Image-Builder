@@ -26,7 +26,10 @@ impl Bucket {
     }
 }
 
-const BOOTLOADER_PREFIXES: [&str; 6] = ["u-boot", "idbloader", "MLO", "spl", "bl31", "tf-a"];
+/// The names a bootloader's output starts with: U-Boot's and its SPL's, the
+/// TF-A images, and OpenSBI's firmware (`fw_jump.bin`, `fw_dynamic.bin`,
+/// `fw_payload.bin`, and their `.elf`), which a board's blobs take.
+const BOOTLOADER_PREFIXES: [&str; 7] = ["u-boot", "idbloader", "MLO", "spl", "bl31", "tf-a", "fw_"];
 const KERNEL_PREFIXES: [&str; 5] = ["Image", "zImage", "bzImage", "uImage", "vmlinux"];
 
 /// The bucket of a file named `name`. Device trees by extension; bootloader
@@ -337,6 +340,15 @@ mod tests {
             let meta = fs::metadata(to.join("bin").join(name)).expect("copied");
             assert_eq!(meta.permissions().mode() & 0o7777, mode, "{name}");
         }
+    }
+
+    #[test]
+    fn opensbi_firmware_is_a_bootloader_file() {
+        for name in ["fw_jump.bin", "fw_dynamic.bin", "fw_payload.bin", "fw_jump.elf"] {
+            assert_eq!(bucket(name, true), Bucket::Bootloader, "{name}");
+        }
+        // Not OpenSBI's: a name that merely contains "fw".
+        assert_eq!(bucket("wifi-fw.bin", true), Bucket::Images);
     }
 
     #[test]

@@ -1628,7 +1628,23 @@ fn image_blobs(g: &mut Graph<'_>, at: &ImageIn<'_>, recipe: &str) -> Result<u32,
         g.set(blob, "path", Lit::Str(content.clone()));
         g.set(blob, "name", Lit::Str(need.name.clone()));
         g.set(blob, "offset", Lit::Int(offset.0.0 as i64));
-        g.edge((os, "bootloader"), (blob, "from"));
+        match &need.wrap {
+            // The file is made into the image the ROM, SPL or U-Boot reads, between
+            // the bootloader output and the area's blob (the same file name).
+            Some(kind) => {
+                let wrap = g.add(
+                    "gaia.firmware.k230",
+                    format!("{name}.wrap.{}", need.name),
+                    &board.file,
+                    &format!("partitions[{i}].wrap"),
+                )?;
+                g.set(wrap, "path", Lit::Str(content.clone()));
+                g.set(wrap, "kind", Lit::Str(kind.clone()));
+                g.edge((os, "bootloader"), (wrap, "from"));
+                g.edge((wrap, "wrapped"), (blob, "from"));
+            }
+            None => g.edge((os, "bootloader"), (blob, "from")),
+        }
         g.edge((blob, "blob"), (list, &format!("blobs{k}")));
         k += 1;
     }

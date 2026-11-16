@@ -256,6 +256,7 @@ pub fn registry() -> Registry {
         &gaia_strip::NODES,
         &gaia_verity::NODES,
         &gaia_disk::NODES,
+        &gaia_k230_image::NODES,
         &gaia_package::NODES,
         &gaia_check::NODES,
         &gaia_size::NODES,

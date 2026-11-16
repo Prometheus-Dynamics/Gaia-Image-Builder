@@ -16,7 +16,8 @@ BR2_TARGET_ROOTFS_EXT2_4=y
 BR2_TARGET_ROOTFS_EXT2_SIZE="256M"
 BR2_TARGET_OPENSBI=y
 BR2_TARGET_OPENSBI_PLAT="generic"
-# The vendor's FW_TEXT_START: fw_jump then jumps to 0x200000 (the kernel address U-Boot loads to).
+# The vendor's FW_TEXT_START: fw_jump then jumps to FW_JUMP_ADDR = 0x200000, the
+# kernel address U-Boot loads to (OpenSBI 1.4 generic objects.mk).
 BR2_TARGET_OPENSBI_ADDITIONAL_VARIABLES="FW_TEXT_START=0"
 BR2_TARGET_UBOOT=y
 BR2_PACKAGE_HOST_EROFS_UTILS=y
@@ -32,8 +33,12 @@ BR2_TARGET_UBOOT_NEEDS_PYELFTOOLS=y
 # The kernel Image into the root filesystem's /boot, which the environment's
 # bootcmd loads (ext4load mmc 1:1 /boot/Image). The device tree is the board's.
 BR2_LINUX_KERNEL_INSTALL_TARGET=y
-# The boot files the post-image makes beside the root image (post-image.sh).
-BR2_ROOTFS_POST_IMAGE_SCRIPT="@here@/post-image.sh"
-# The post-image receives the images dir first, then these: the wrap tool, a file
-# beside this fragment (interim: see the product's README comment in product.toml).
-BR2_ROOTFS_POST_SCRIPT_ARGS="@here@/k230-firstage"
+
+# The bootloader's own binaries, installed into the bootloader output (images/)
+# for the board's areas: the SPL (u-boot-spl.bin), U-Boot (u-boot.bin) and OpenSBI's
+# fw_jump.bin. The wrapping is gaia.firmware.k230 (the board's wrap keys), not a
+# post-image script.
+BR2_TARGET_UBOOT_SPL=y
+BR2_TARGET_UBOOT_SPL_NAME="spl/u-boot-spl.bin"
+BR2_TARGET_UBOOT_FORMAT_BIN=y
+BR2_TARGET_OPENSBI_INSTALL_JUMP_IMG=y

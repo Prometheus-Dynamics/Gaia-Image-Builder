@@ -360,3 +360,43 @@ fn a_malformed_image_digest_is_refused_at_its_key() {
     let component = Component::read(dir.path().join("c.toml")).expect("reads");
     assert!(component.sources.contains_key("root"));
 }
+
+#[test]
+fn an_unknown_wrap_kind_is_refused_and_named() {
+    let (error, dir) = board_error(
+        "version = 1\nname = \"b\"\n[target]\narch = \"riscv64\"\n[[partitions]]\nname = \"spl\"\nrole = \"bootloader\"\noffset = \"1M\"\nin_table = false\ncontent = \"spl.bin\"\nwrap = \"k230-spl\"\n",
+    );
+    assert_names(
+        &error,
+        &dir.path().join("b/board.toml"),
+        "partitions[0].wrap",
+        "'k230-spl' is not a wrap kind",
+    );
+}
+
+#[test]
+fn a_wrap_on_a_table_partition_is_refused() {
+    let (error, dir) = board_error(
+        "version = 1\nname = \"b\"\n[target]\narch = \"riscv64\"\n[[partitions]]\nname = \"rootfs\"\nrole = \"rootfs\"\ntype = \"x\"\nwrap = \"k230-first-stage\"\n",
+    );
+    assert_names(
+        &error,
+        &dir.path().join("b/board.toml"),
+        "partitions[0].wrap",
+        "outside the table",
+    );
+}
+
+#[test]
+fn a_wrapped_area_parses_with_its_kind() {
+    let dir = files(&[
+        ("family.toml", FAMILY),
+        (
+            "b/board.toml",
+            "version = 1\nname = \"b\"\n[target]\narch = \"riscv64\"\n[[partitions]]\nname = \"spl\"\nrole = \"bootloader\"\noffset = \"1M\"\nin_table = false\ncontent = \"spl-fn.bin\"\nwrap = \"k230-first-stage\"\n",
+        ),
+        ("b/frag", ""),
+    ]);
+    let board = Board::read(&dir.path().join("b/board.toml")).expect("parses");
+    assert_eq!(board.partitions[0].wrap.as_deref(), Some("k230-first-stage"));
+}

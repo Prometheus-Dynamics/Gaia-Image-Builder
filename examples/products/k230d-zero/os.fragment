@@ -26,3 +26,10 @@ BR2_TARGET_UBOOT_NEEDS_OPENSSL=y
 BR2_TARGET_UBOOT_NEEDS_DTC=y
 BR2_TARGET_UBOOT_NEEDS_PYLIBFDT=y
 BR2_TARGET_UBOOT_NEEDS_PYELFTOOLS=y
+
+# The bootloader's binaries into images/ for the family's wrapped areas (SPL, U-Boot,
+# OpenSBI fw_jump.bin), as the AI-CAM's fragment has them.
+BR2_TARGET_UBOOT_SPL=y
+BR2_TARGET_UBOOT_SPL_NAME="spl/u-boot-spl.bin"
+BR2_TARGET_UBOOT_FORMAT_BIN=y
+BR2_TARGET_OPENSBI_INSTALL_JUMP_IMG=y

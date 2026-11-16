@@ -3,9 +3,9 @@
 # chain. Mainline U-Boot has no K230 SPL or MMC driver, so the SDK's U-Boot
 # (k230d_canmv_bpi) is the bootloader. Untested on board, and not built.
 #
-# The first-stage headers (SPL, U-Boot, OpenSBI) are made by the build's
-# post-image script with Gaia's k230-firstage tool (assets/post-image.sh); the
-# names they write start with u-boot or spl, so the bootloader output holds them.
+# The SPL, U-Boot and OpenSBI areas are wrapped by gaia.firmware.k230 (their `wrap`
+# keys, crates/nodes/k230-image): the K230 headers and the uImage, from the files
+# Buildroot installs in the bootloader output (images/).
 version = 1
 
 [target]
@@ -41,21 +41,24 @@ name = "spl"
 role = "bootloader"
 offset = "1M"
 in_table = false
-content = "spl-fn.bin"
+content = "u-boot-spl.bin"
+wrap = "k230-first-stage"
 
 [[partitions]]
 name = "spl-copy"
 role = "bootloader"
 offset = "1536K"
 in_table = false
-content = "spl-fn.bin"
+content = "u-boot-spl.bin"
+wrap = "k230-first-stage"
 
 [[partitions]]
 name = "uboot"
 role = "bootloader"
 offset = "2M"
 in_table = false
-content = "u-boot-fn.bin"
+content = "u-boot.bin"
+wrap = "k230-u-boot"
 
 # The U-Boot environment: copy 1 at 3 MiB and copy 2 at 3.125 MiB (u-boot.fragment).
 # Both are 128 KiB slots; the environment is 8 KiB. Written by the post-image.
@@ -82,7 +85,8 @@ name = "uboot-opensbi"
 role = "raw"
 offset = "3584K"
 in_table = false
-content = "u-boot-opensbi.bin"
+content = "fw_jump.bin"
+wrap = "opensbi-uimage"
 
 # The root filesystem: partition 1 of the table, the one U-Boot's bootcmd reads
 # (ext4load mmc 1:1 /boot/Image). Its /boot holds Image and the device tree.
