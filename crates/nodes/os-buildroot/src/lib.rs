@@ -30,10 +30,21 @@
 //! Outputs are added, never changed: a build with no kernel makes the same
 //! files and the same key, and two empty trees more.
 //!
+//! Toolchain: unless a fragment sets or unsets a `BR2_TOOLCHAIN_BUILDROOT` or
+//! `BR2_TOOLCHAIN_EXTERNAL` option, the build starts from Bootlin's prebuilt
+//! glibc toolchain for the architecture its fragments name (the
+//! `gaia.toolchain` defaults, see `config::defaults`), so Buildroot does not
+//! compile GCC, glibc and the kernel headers first. A product that needs its
+//! own toolchain sets one of those options, and then gets no default. The
+//! defaults go in before the fragments, and a fragment's line for the same
+//! symbol replaces the default's. Their lines are not checked the way the
+//! fragments' are: where Bootlin does not serve a configuration, Kconfig falls
+//! back and the build goes on with what Buildroot picks.
+//!
 //! The key holds the source's digest, each input tree's digest by name, the
-//! fragments' text as written, the overrides, the externals and the make
-//! program. The download cache, job count and
-//! CPU list change how fast it runs, not what it makes, so they are not in
+//! fragments' text as written, the toolchain defaults when they apply, the
+//! overrides, the externals and the make program. The download cache, job count
+//! and CPU list change how fast it runs, not what it makes, so they are not in
 //! the key.
 //!
 //! Progress: Buildroot's `Installing to target` lines are counted as they
@@ -154,6 +165,9 @@ pub(crate) struct Prepared {
     pub vars: Vec<String>,
     /// The fragments with each `@name@` replaced by its tree's path.
     pub fragments: Vec<ConfigFragment>,
+    /// The toolchain defaults, applied before `fragments` and not checked
+    /// against the resolved config. Empty when a fragment chooses a toolchain.
+    pub defaults: Vec<ConfigFragment>,
     /// The contracts the kernel's final config must meet, each with the
     /// path of its file in the store.
     pub contracts: Vec<(gaia_types::KernelContract, PathBuf)>,
@@ -176,6 +190,11 @@ impl Prepared {
             .config("make", &host.make);
         for (name, _, digest) in &self.dirs {
             key = key.input(&format!("input.{name}"), *digest);
+        }
+        // Only when there are some: a build that chooses its toolchain keeps
+        // the key it had.
+        for fragment in &self.defaults {
+            key = key.config(&format!("defaults.{}", fragment.name), &fragment.text);
         }
         for fragment in &config.fragments {
             key = key.config(&format!("fragment.{}", fragment.name), &fragment.text);
@@ -262,12 +281,14 @@ pub(crate) fn prepare(
             (contract.clone(), file)
         })
         .collect();
+    let defaults = config::defaults(&fragments);
     Ok(Prepared {
         src,
         src_digest,
         dirs,
         vars,
         fragments,
+        defaults,
         contracts,
     })
 }
@@ -382,11 +403,26 @@ pub(crate) fn in_store(
     Ok((store.path(&object), object.digest))
 }
 
+/// The fragments a config is merged from, and the ones whose lines must all
+/// have been taken: `(applied, checked)`. Applied: the toolchain defaults,
+/// then the descriptions, then the permissions, last so no description turns
+/// them off. Checked: the descriptions and the permissions, not the defaults.
+pub(crate) fn merged_fragments(prepared: &Prepared) -> (Vec<ConfigFragment>, Vec<ConfigFragment>) {
+    let mut checked = prepared.fragments.clone();
+    checked.push(ConfigFragment {
+        name: "gaia.permissions".into(),
+        text: perms::FRAGMENT.into(),
+    });
+    let mut applied = prepared.defaults.clone();
+    applied.extend(checked.iter().cloned());
+    (applied, checked)
+}
+
 /// The body of the step: configure, resolve, make, then sort the outputs
 /// out of Buildroot's output directory.
-/// Buildroot's config in `out`: its `allnoconfig`, the fragments over it,
-/// resolved, with every line checked to have been taken. Returns the
-/// resolved text.
+/// Buildroot's config in `out`: its `allnoconfig`, the toolchain defaults and
+/// the fragments over it, resolved, with every fragment line checked to have
+/// been taken. Returns the resolved text.
 pub(crate) fn configure(
     step: &'static str,
     work: &mut Work<'_>,
@@ -402,14 +438,8 @@ pub(crate) fn configure(
     work.run(&make_tool(host, src, out, vars, &["allnoconfig"]))?;
     let config = out.join(".config");
     let base = fs::read_to_string(&config).map_err(io_fail("the base config"))?;
-    // Last, so no description turns it off: the tar is where the root
-    // filesystem's owners and modes are read from.
-    let mut fragments = prepared.fragments.clone();
-    fragments.push(ConfigFragment {
-        name: "gaia.permissions".into(),
-        text: perms::FRAGMENT.into(),
-    });
-    let merged = config::merge(&base, &fragments).map_err(fail)?;
+    let (applied, fragments) = merged_fragments(prepared);
+    let merged = config::merge(&base, &applied).map_err(fail)?;
     fs::write(&config, merged).map_err(io_fail("the merged config"))?;
     work.run(&make_tool(host, src, out, vars, &["olddefconfig"]))?;
     // What Buildroot resolved must be what was asked for.
@@ -679,6 +709,130 @@ pub(crate) fn make_tool(
 
 /// The node, for a registry.
 pub const NODES: [&NodeRecord; 2] = [&OS_BUILDROOT_NODE, &host::OS_BUILDROOT_HOST_NODE];
+
+/// A `Prepared` for the key and merge tests: the source and no input trees,
+/// with these fragments and toolchain defaults.
+#[cfg(test)]
+fn prepared_for_test(fragments: Vec<ConfigFragment>, defaults: Vec<ConfigFragment>) -> Prepared {
+    Prepared {
+        src: PathBuf::from("/src"),
+        src_digest: Digest::of_bytes(b"source"),
+        dirs: Vec::new(),
+        vars: Vec::new(),
+        fragments,
+        defaults,
+        contracts: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod toolchain_tests {
+    use super::*;
+
+    fn fragment(name: &str, text: &str) -> ConfigFragment {
+        ConfigFragment {
+            name: name.into(),
+            text: text.into(),
+        }
+    }
+
+    fn key_of(prepared: &Prepared) -> gaia_step::StepKey {
+        prepared
+            .key(
+                "gaia.os.buildroot",
+                KEY_VERSION,
+                &OsConfig::default(),
+                &host_for_test(),
+            )
+            .finish()
+    }
+
+    fn host_for_test() -> BuildrootHost {
+        BuildrootHost {
+            make: "/usr/bin/make".into(),
+            taskset: "/usr/bin/taskset".into(),
+            cpus: String::new(),
+            jobs: 4,
+            download_dir: "/dl".into(),
+            config_only: false,
+        }
+    }
+
+    /// The defaults are applied first, then the descriptions, then the
+    /// permissions; only the descriptions and the permissions are checked.
+    #[test]
+    fn the_defaults_are_applied_first_and_not_checked() {
+        let defaults = config::defaults(&[fragment("image", "BR2_PACKAGE_BUSYBOX=y\n")]);
+        let prepared =
+            prepared_for_test(vec![fragment("image", "BR2_PACKAGE_BUSYBOX=y\n")], defaults);
+        let (applied, checked) = merged_fragments(&prepared);
+        assert_eq!(applied[0].name, "gaia.toolchain");
+        assert_eq!(applied.len(), checked.len() + 1);
+        assert_eq!(
+            applied.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
+            ["gaia.toolchain", "image", "gaia.permissions"]
+        );
+        assert!(
+            checked.iter().all(|f| f.name != "gaia.toolchain"),
+            "the defaults are not checked: {:?}",
+            checked.iter().map(|f| &f.name).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            checked.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
+            ["image", "gaia.permissions"]
+        );
+    }
+
+    /// A line the resolved config dropped is reported for a description, and
+    /// is not for the defaults: the checked list has no default in it.
+    #[test]
+    fn a_default_line_buildroot_drops_is_not_reported() {
+        let prepared = prepared_for_test(
+            vec![fragment("board.target", "BR2_PACKAGE_NO_SUCH=y\n")],
+            config::defaults(&[]),
+        );
+        let (_, checked) = merged_fragments(&prepared);
+        // The resolved config has none of the defaults' lines: the
+        // architecture does not fit the variant, so Kconfig dropped them.
+        let reported = config::not_taken("BR2_PACKAGE_BUSYBOX=y\n", &checked);
+        assert!(
+            reported
+                .iter()
+                .all(|line| !line.starts_with("gaia.toolchain")),
+            "a default line was reported: {reported:?}"
+        );
+        assert!(
+            reported
+                .iter()
+                .any(|line| line.starts_with("board.target: `BR2_PACKAGE_NO_SUCH=y` was dropped")),
+            "the description's line is reported: {reported:?}"
+        );
+    }
+
+    /// The key changes with the defaults and without them, and a build that
+    /// chooses its toolchain has the same key whether or not defaults are
+    /// computed for it.
+    #[test]
+    fn the_key_changes_with_the_defaults_and_not_for_a_chosen_toolchain() {
+        let descriptions = vec![fragment("image", "BR2_PACKAGE_BUSYBOX=y\n")];
+        let with = prepared_for_test(descriptions.clone(), config::defaults(&descriptions));
+        let without = prepared_for_test(descriptions.clone(), Vec::new());
+        assert_ne!(key_of(&with), key_of(&without));
+        // The same defaults text keys the same.
+        let again = prepared_for_test(descriptions.clone(), config::defaults(&descriptions));
+        assert_eq!(key_of(&with), key_of(&again));
+
+        // A chosen toolchain gets no defaults, so its key is the key it had
+        // before the defaults existed: the same as a build with none.
+        let chosen = vec![fragment("board", "BR2_TOOLCHAIN_BUILDROOT=y\n")];
+        let chosen_defaults = config::defaults(&chosen);
+        assert!(chosen_defaults.is_empty());
+        assert_eq!(
+            key_of(&prepared_for_test(chosen.clone(), chosen_defaults)),
+            key_of(&prepared_for_test(chosen, Vec::new()))
+        );
+    }
+}
 
 #[cfg(test)]
 mod bound_tests {
