@@ -235,6 +235,10 @@ pub struct PartitionNeed {
     /// `opensbi-uimage` (OpenSBI's `fw_jump.bin`: a uImage, no K230 header).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wrap: Option<String>,
+    /// For an area outside the table, instead of `content`: a file beside this
+    /// description (`assets/u-boot-env.bin`), written there as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<RelPath>,
 }
 
 /// The `wrap` values a partition may take.
@@ -473,6 +477,11 @@ fn read_file(path: &Path) -> Result<BoardFile, Error> {
     for firmware in file.firmware.iter_mut().flatten() {
         firmware.from.resolve(dir);
     }
+    for need in file.partitions.iter_mut().flatten() {
+        if let Some(file) = &mut need.file {
+            file.resolve(dir);
+        }
+    }
     if let Some(flash) = &mut file.flash {
         for file in flash.files.values_mut() {
             file.resolve(dir);
@@ -653,6 +662,37 @@ fn check_refs(
         check_ref(format!("kernel.patches[{index}]"), file_ref)?;
     }
     for (index, need) in file.partitions.iter().flatten().enumerate() {
+        if let Some(beside) = &need.file {
+            let key = format!("partitions[{index}].file");
+            if need.content.is_some() {
+                return Err(Error::new(
+                    path,
+                    key,
+                    format!("area '{}' gives `file` or `content`, not both", need.name),
+                ));
+            }
+            if need.in_table {
+                return Err(Error::new(
+                    path,
+                    key,
+                    format!("area '{}' is in the table; a file is written only to an area outside it (`in_table = false`)", need.name),
+                ));
+            }
+            if need.wrap.is_some() {
+                return Err(Error::new(
+                    path,
+                    key,
+                    format!("area '{}': a `wrap` applies to the bootloader's file; a board file is written as it is", need.name),
+                ));
+            }
+            if !beside.path().is_file() {
+                return Err(Error::new(
+                    path,
+                    key,
+                    format!("area '{}': no file {}", need.name, beside.path().display()),
+                ));
+            }
+        }
         if let Some(wrap) = &need.wrap {
             if !WRAP_KINDS.contains(&wrap.as_str()) {
                 return Err(Error::new(

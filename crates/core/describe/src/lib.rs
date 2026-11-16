@@ -31,7 +31,7 @@ mod validate;
 
 pub use board::{
     Board, Boot, Bootloader, Disk, Firmware, Flash, KERNEL_IMAGES, KERNEL_TOOLCHAINS, Kernel,
-    Medium, PartitionNeed, Scheme, TrustedFirmware,
+    Medium, PartitionNeed, Scheme, TrustedFirmware, WRAP_KINDS,
 };
 pub use common::{FileRef, ImagePlatform, Mode, RelPath, SizeText, Source, Subdir};
 pub use component::{

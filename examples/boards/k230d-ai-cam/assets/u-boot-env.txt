@@ -1,0 +1,3 @@
+bootdelay=3
+bootcmd=mmc dev 1 && mmc read 0x3000000 0x1c00 0x400 && ext4load mmc 1:1 0x200000 /boot/Image && ext4load mmc 1:1 0x2200000 /boot/k230d-ai-cam.dtb && bootm 0x3000000 - 0x2200000
+bootargs=root=/dev/mmcblk0p1 rootwait rw rootfstype=ext4 console=ttyS0,115200 earlycon=sbi

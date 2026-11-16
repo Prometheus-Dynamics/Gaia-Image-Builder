@@ -639,3 +639,28 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod wrap_kind_tests {
+    /// describe's `WRAP_KINDS` (what a board's `wrap` key may name) and the node's
+    /// `WrapKind` must be the same names: each describe name parses to a kind that
+    /// names itself the same way, and there are no other kinds.
+    #[test]
+    fn describe_and_the_node_name_the_same_wrap_kinds() {
+        let mut parsed = Vec::new();
+        for name in gaia_describe::WRAP_KINDS {
+            let kind = gaia_k230_image::WrapKind::parse(name)
+                .unwrap_or_else(|why| panic!("describe names '{name}', the node refuses it: {why}"));
+            assert_eq!(kind.name(), name);
+            parsed.push(kind);
+        }
+        for kind in [
+            gaia_k230_image::WrapKind::FirstStage,
+            gaia_k230_image::WrapKind::UBoot,
+            gaia_k230_image::WrapKind::OpensbiUimage,
+        ] {
+            assert!(parsed.contains(&kind), "the node has {kind:?}, describe does not name it");
+        }
+        assert_eq!(parsed.len(), 3);
+    }
+}

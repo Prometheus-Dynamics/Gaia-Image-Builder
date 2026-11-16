@@ -1599,6 +1599,43 @@ fn image_blobs(g: &mut Graph<'_>, at: &ImageIn<'_>, recipe: &str) -> Result<u32,
     )?;
     let mut k = 0;
     for (i, need) in board.partitions.iter().enumerate() {
+        // An area written from a file beside the board (its environment, say): the
+        // file as a one-file tree, not the bootloader's output.
+        if let (false, Some(beside)) = (need.in_table, &need.file) {
+            let file_name = beside
+                .path()
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let offset = need.offset.ok_or_else(|| {
+                Error::at(
+                    &board.file,
+                    format!("partitions[{i}].offset"),
+                    "missing: an area outside the table is written at its offset",
+                )
+            })?;
+            let input = g.add(
+                "gaia.source.input",
+                format!("{name}.file.{}", need.name),
+                &board.file,
+                &format!("partitions[{i}].file"),
+            )?;
+            g.set(input, "path", Lit::Str(beside.path().display().to_string()));
+            g.set(input, "name", Lit::Str(file_name.clone()));
+            let blob = g.add(
+                "gaia.disk.blob",
+                format!("{name}.blob.{}", need.name),
+                &board.file,
+                &format!("partitions[{i}]"),
+            )?;
+            g.set(blob, "path", Lit::Str(file_name));
+            g.set(blob, "name", Lit::Str(need.name.clone()));
+            g.set(blob, "offset", Lit::Int(offset.0.0 as i64));
+            g.edge((input, "tree"), (blob, "from"));
+            g.edge((blob, "blob"), (list, &format!("blobs{k}")));
+            k += 1;
+            continue;
+        }
         let (false, Some(content)) = (need.in_table, &need.content) else {
             continue;
         };

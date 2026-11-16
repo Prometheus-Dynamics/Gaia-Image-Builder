@@ -29,7 +29,7 @@ pub mod env_place;
 pub mod layout;
 pub mod table;
 
-pub use env::{UBOOT_ENV_NODE, uboot_env, uboot_env_artifact, uboot_env_image};
+pub use env::{UBOOT_ENV_NODE, parse_env_text, uboot_env, uboot_env_artifact, uboot_env_image};
 pub use layout::{BlobInput, Layout, PartitionInput, Placed, layout};
 
 use daedalus::prelude::*;

@@ -61,14 +61,14 @@ content = "u-boot.bin"
 wrap = "k230-u-boot"
 
 # The U-Boot environment: copy 1 at 3 MiB and copy 2 at 3.125 MiB (u-boot.fragment).
-# Both are 128 KiB slots; the environment is 8 KiB. Written by the post-image.
+# Both are 128 KiB slots; the environment is 8 KiB. The content is the board's (a
+# board gives its own `file`); this family gives none, so no environment is written.
 [[partitions]]
 name = "uboot-env"
 role = "raw"
 offset = "3M"
 size = "128K"
 in_table = false
-content = "u-boot-env.bin"
 
 [[partitions]]
 name = "uboot-env-redund"
@@ -76,7 +76,6 @@ role = "raw"
 offset = "3200K"
 size = "128K"
 in_table = false
-content = "u-boot-env-redund.bin"
 
 # OpenSBI (fw_jump) as a plain uImage (kernel type, no K230 header), read by the
 # environment's `mmc read 0x3000000 0x1c00 <count>`. 0x380000 + ~140 KB < 4 MiB.

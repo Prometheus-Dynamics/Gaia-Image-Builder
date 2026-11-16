@@ -61,6 +61,27 @@ pub fn uboot_env_image(vars: &[UbootVar], size: u64, redundant: bool) -> Result<
     Ok(image)
 }
 
+/// The variables a U-Boot environment text lists: one `name=value` per line.
+/// Blank lines and lines starting with `#` are skipped. A line without an `=`
+/// is an error, named by its number.
+pub fn parse_env_text(text: &str) -> Result<Vec<UbootVar>, String> {
+    let mut vars = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        let line = line.trim_end();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((name, value)) = line.split_once('=') else {
+            return Err(format!("line {}: '{line}' is not name=value", index + 1));
+        };
+        vars.push(UbootVar {
+            name: name.to_string(),
+            value: value.to_string(),
+        });
+    }
+    Ok(vars)
+}
+
 /// The U-Boot environment node: the variables as an environment of `size`
 /// bytes, written `copies` times. The artifact is the partition's content.
 #[node(
