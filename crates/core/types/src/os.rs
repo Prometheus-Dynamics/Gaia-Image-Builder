@@ -18,7 +18,7 @@ pub struct ConfigFragment {
 }
 
 /// The host side of a Buildroot run: make, an optional CPU pin, the job
-/// count and the download cache.
+/// count, the download cache, the compiler cache's directory and a mirror.
 #[derive(Clone, Debug, PartialEq, Eq, Type, Serialize, Deserialize)]
 #[type_key("gaia:buildroot-host")]
 pub struct BuildrootHost {
@@ -32,6 +32,16 @@ pub struct BuildrootHost {
     pub jobs: u32,
     /// Absolute path of the download cache (`BR2_DL_DIR`).
     pub download_dir: String,
+    /// Absolute path of the compiler cache's directory (`BR2_CCACHE_DIR`),
+    /// shared by every build of one store. Empty: none given, and a build
+    /// keeps its cache in its own directory.
+    #[serde(default)]
+    pub ccache_dir: String,
+    /// A primary download site (`BR2_PRIMARY_SITE`), tried before each
+    /// package's own site. Empty: none. The package's own site and the
+    /// backup site stay as the fallback.
+    #[serde(default)]
+    pub mirror: String,
     /// Stop when the configuration is resolved and every line of it held:
     /// make no host tools. For a check of a product that compiles nothing.
     #[serde(default)]

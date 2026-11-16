@@ -209,23 +209,39 @@ fn plan(work: &mut Work<'_>, prepared: &Prepared, host: &BuildrootHost) -> Resul
         let tool = make_tool(host, src, &out, vars, &["printvars"])
             .arg(format!("VARS={}", patterns.join(" ")))
             .arg("PARALLEL_JOBS=1");
-        let mut values = captured(work, tool)?;
+        let values = captured(work, tool)?;
         let mut names: Vec<(String, String)> = vec![
             (out.display().to_string(), "@out@".into()),
             (src.display().to_string(), "@buildroot@".into()),
             (host.download_dir.clone(), "@downloads@".into()),
         ];
+        // The compiler cache's directory and the mirror are not in the key:
+        // a host tool's values name them, and the names do not change.
+        for (path, name) in [(&host.ccache_dir, "@ccache@"), (&host.mirror, "@mirror@")] {
+            if !path.is_empty() {
+                names.push((path.clone(), name.into()));
+            }
+        }
         for (name, dir, _) in &prepared.dirs {
             names.push((dir.display().to_string(), format!("@{name}@")));
         }
-        // Longest first: one path may begin another.
-        names.sort_by_key(|(path, _)| std::cmp::Reverse(path.len()));
-        for (path, name) in &names {
-            values = values.replace(path, name);
-        }
-        text.push_str(&values);
+        text.push_str(&named(&values, &names));
     }
     fs::write(dir.join("plan.txt"), text).map_err(|e| fail(format!("the plan: {e}")))
+}
+
+/// `values` with each path of `names` replaced by its name. Longest path
+/// first: one path may begin another. An empty path is none, and is skipped:
+/// replacing it would write the name between every character.
+fn named(values: &str, names: &[(String, String)]) -> String {
+    let mut sorted: Vec<&(String, String)> =
+        names.iter().filter(|(path, _)| !path.is_empty()).collect();
+    sorted.sort_by_key(|(path, _)| std::cmp::Reverse(path.len()));
+    let mut text = values.to_string();
+    for (path, name) in sorted {
+        text = text.replace(path, name);
+    }
+    text
 }
 
 /// Builds the goals and makes the seed of what they installed.
@@ -422,4 +438,55 @@ pub(crate) fn plant(seed: &Path, out: &Path) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The plan's values with this run's paths named: the compiler cache's
+    /// directory and the mirror (as host-ccache's default directory and
+    /// the download sites print them) leave no path in the text.
+    #[test]
+    fn a_plan_names_the_compiler_cache_and_the_mirror() {
+        let values = "HOST_CCACHE_DEFAULT_CCACHE_DIR = /store/buildroot-ccache\n\
+            LINUX_ALL_DOWNLOADS = https://mirror.example/br/linux.tar.xz https://kernel.org/x\n";
+        let names = |ccache: &str, mirror: &str| -> Vec<(String, String)> {
+            vec![
+                (ccache.into(), "@ccache@".into()),
+                (mirror.into(), "@mirror@".into()),
+            ]
+        };
+        let one = named(
+            values,
+            &names("/store/buildroot-ccache", "https://mirror.example/br"),
+        );
+        assert_eq!(
+            one,
+            "HOST_CCACHE_DEFAULT_CCACHE_DIR = @ccache@\n\
+            LINUX_ALL_DOWNLOADS = @mirror@/linux.tar.xz https://kernel.org/x\n"
+        );
+        // Another store and another mirror give the same plan text.
+        let other = values
+            .replace("/store/buildroot-ccache", "/elsewhere/buildroot-ccache")
+            .replace("https://mirror.example/br", "https://second.example");
+        assert_eq!(
+            named(
+                &other,
+                &names("/elsewhere/buildroot-ccache", "https://second.example")
+            ),
+            one
+        );
+    }
+
+    /// No mirror and no compiler cache directory: nothing is replaced. An
+    /// empty path would otherwise match between every two characters.
+    #[test]
+    fn an_empty_path_names_nothing() {
+        let names = vec![
+            (String::new(), "@mirror@".into()),
+            ("/out".into(), "@out@".into()),
+        ];
+        assert_eq!(named("a/out/b", &names), "a@out@/b");
+    }
 }

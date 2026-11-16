@@ -1,6 +1,6 @@
 [package]
 name = "gaia-os-buildroot-cache"
-description = "Node: the caches around a Buildroot build: a download directory filled from the lock, a ccache directory shared between products, the config options that force a clean build, and recovery from an interrupted make"
+description = "Node: the caches around a Buildroot build: a download directory filled from the lock, the config options that force a clean build, and recovery from an interrupted make"
 edition.workspace = true
 version.workspace = true
 license.workspace = true

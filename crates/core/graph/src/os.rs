@@ -204,10 +204,11 @@ pub(crate) fn plan(
         config: OsConfig::default(),
         inputs: Vec::new(),
     };
-    let mut fragments = vec![ConfigFragment {
+    let mut fragments = defaults();
+    fragments.push(ConfigFragment {
         name: "board.target".into(),
         text: target(board)?,
-    }];
+    });
     if let Some(kernel) = &board.kernel {
         let mut lines = vec!["BR2_LINUX_KERNEL=y".to_string()];
         if let Some(name) = &kernel.source {
@@ -475,6 +476,23 @@ pub(crate) fn plan(
         .check()
         .map_err(|e| Error::at(product_file, format!("images[{index}].os"), e))?;
     Ok(plan)
+}
+
+/// The fragments every OS build starts from, before the board's and the
+/// image's own. A later line for a symbol replaces this one, so an image
+/// turns a default off by writing its `# NAME is not set` line.
+fn defaults() -> Vec<ConfigFragment> {
+    vec![ccache_default()]
+}
+
+/// Buildroot's compiler cache is on: target and host compilers go through
+/// ccache. Only that is in the fragment: the cache's directory is given to
+/// make by the host, so the key does not change with the store's place.
+fn ccache_default() -> ConfigFragment {
+    ConfigFragment {
+        name: "gaia.ccache".into(),
+        text: "BR2_CCACHE=y\n".into(),
+    }
 }
 
 /// The architecture's and the CPU's options.
@@ -851,6 +869,17 @@ mod tests {
         assert!(parts_of("BR2_LINUX_KERNEL", false, false) == vec![Part::Rootfs]);
         assert!(parts_of("BR2_TARGET_UBOOT", false, false) == vec![Part::Rootfs]);
         assert!(parts_of("BR2_PACKAGE_HOST_DTC", false, false) == vec![Part::Rootfs]);
+    }
+
+    /// The compiler cache is on by default, as the first fragment, and its
+    /// text is a constant: where the cache is, is not in it.
+    #[test]
+    fn the_compiler_cache_is_on_by_a_constant_default_fragment() {
+        let fragments = defaults();
+        assert_eq!(fragments.len(), 1);
+        assert_eq!(fragments[0].name, "gaia.ccache");
+        assert_eq!(fragments[0].text, "BR2_CCACHE=y\n");
+        assert!(!fragments[0].text.contains('/'));
     }
 
     #[test]

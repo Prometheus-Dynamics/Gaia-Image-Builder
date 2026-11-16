@@ -19,9 +19,7 @@
 
 use gaia_lock::Lock;
 use gaia_os_buildroot::{BuildrootHost, ConfigFragment, OsConfig, build_os};
-use gaia_os_buildroot_cache::{
-    ccache_fragment, fill, interrupted, locked_file, os_buildroot_downloads, settings,
-};
+use gaia_os_buildroot_cache::{fill, interrupted, locked_file, os_buildroot_downloads, settings};
 use gaia_source_files::source_download;
 use gaia_step::{Ctx, Store, logs_dir, step_records};
 use gaia_store::{Kind, ObjectRef};
@@ -145,14 +143,16 @@ fn offline_build() {
     println!("second fill: {second} file(s) copied");
     assert_eq!(second, 0, "a second fill copies nothing");
 
-    let ccache = ccache_fragment(&env_abs("GAIA_BUILDROOT_CCACHE").display().to_string())
-        .expect("ccache fragment");
+    // The graph's default: the compiler cache on, its directory given to make.
     let fragments = vec![
+        ConfigFragment {
+            name: "gaia.ccache".into(),
+            text: "BR2_CCACHE=y\n".into(),
+        },
         ConfigFragment {
             name: "minimal-aarch64".into(),
             text: BASE.into(),
         },
-        ccache,
     ];
     let source = Tree {
         object: store
@@ -167,6 +167,8 @@ fn offline_build() {
         cpus: cpus(),
         jobs: jobs(),
         download_dir: dl.display().to_string(),
+        ccache_dir: env_abs("GAIA_BUILDROOT_CCACHE").display().to_string(),
+        mirror: String::new(),
         config_only: false,
     };
     let (rootfs, _kernel, _dt, _modules, _bootloader, images, config, _kernel_build, _toolchain) =

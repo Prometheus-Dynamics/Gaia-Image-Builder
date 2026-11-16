@@ -10,10 +10,10 @@
 //!   against its digest. A file already there with the right digest is kept.
 //!   With every file present, the build needs no network: Buildroot finds
 //!   each source by its hash file and never fetches it.
-//! - **ccache** (`ccache`): the fragment that turns on Buildroot's compiler
-//!   cache at a directory. Products that name the same directory share it.
-//!   The directory is not part of the output, so the key of a build has the
-//!   directory only as the fragment's text.
+//! - **ccache**: the compiler cache is on by the graph's default fragment
+//!   (`gaia.ccache`), and its directory is the host's (`ccache_dir`, one for
+//!   each store). Neither is a node here: the directory is no part of the
+//!   key or of the output.
 //! - **Clean builds** (`rebuild`): a config change makes a new key, and the
 //!   node rebuilds from nothing. It names the config options that changed
 //!   between the previous and the current fragments, so the reason is in
@@ -26,20 +26,17 @@
 //! Nothing here is a scheduler or a retry loop. Retries are Daedalus step
 //! policy; the store is the only state a node keeps.
 
-mod ccache;
 mod downloads;
 pub mod interrupted;
 mod rebuild;
 
-pub use ccache::fragment as ccache_fragment;
 pub use downloads::{Filled, LockedFile, fill, locked_file, os_buildroot_downloads};
 pub use rebuild::{reasons, settings};
 
 use daedalus::prelude::NodeRecord;
 
 /// The nodes, for a registry.
-pub const NODES: [&NodeRecord; 3] = [
-    &ccache::OS_BUILDROOT_CCACHE_NODE,
+pub const NODES: [&NodeRecord; 2] = [
     &downloads::OS_BUILDROOT_DOWNLOADS_NODE,
     &rebuild::OS_BUILDROOT_REBUILD_REASON_NODE,
 ];

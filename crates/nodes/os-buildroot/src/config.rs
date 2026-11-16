@@ -268,6 +268,23 @@ mod tests {
         assert_eq!(merged, "# BR2_PACKAGE_BUSYBOX is not set\n");
     }
 
+    /// The compiler cache is on from the default fragment, and an image's
+    /// `# BR2_CCACHE is not set` after it turns it off: no ccache line is
+    /// left in the merged config.
+    #[test]
+    fn a_description_turns_the_compiler_cache_off_after_the_default() {
+        let defaults = [fragment("gaia.ccache", "BR2_CCACHE=y\n")];
+        let on = merge("", &defaults).expect("merge");
+        assert_eq!(on, "BR2_CCACHE=y\n");
+        let image = [
+            fragment("gaia.ccache", "BR2_CCACHE=y\n"),
+            fragment("image.0.os.fragment", "# BR2_CCACHE is not set\n"),
+        ];
+        let off = merge("", &image).expect("merge");
+        assert_eq!(off, "# BR2_CCACHE is not set\n");
+        assert!(!off.contains("BR2_CCACHE=y"));
+    }
+
     #[test]
     fn blank_and_comment_lines_are_dropped() {
         let merged =
