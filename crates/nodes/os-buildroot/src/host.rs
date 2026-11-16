@@ -48,6 +48,9 @@ use std::sync::{Arc, Mutex};
 const PLAN: &str = "gaia.os.buildroot.host-plan";
 const NAME: &str = "gaia.os.buildroot.host";
 const KEY_VERSION: u32 = 1;
+/// The work directory a host-tools build expects when no earlier run recorded
+/// its size.
+const WORK_BYTES: u64 = 8 << 30;
 /// What stands for the output directory in the seed's text files.
 const MARKER: &str = "@GAIA_BUILDROOT_OUT@";
 /// Variables every host package is built with, beside its own.
@@ -124,6 +127,7 @@ pub fn build_host(
     }
     let goals: Vec<&str> = goals.split_whitespace().collect();
     let made = Step::new(&store, cx, NAME, key.finish())
+        .ram_work(WORK_BYTES)
         .look_up_or_make(&[("seed", Path::new("seed"))], |work| {
             build(work, &prepared, &goals, host)
         })?;

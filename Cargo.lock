@@ -1249,6 +1249,7 @@ dependencies = [
 name = "gaia-store"
 version = "2.0.6-dev"
 dependencies = [
+ "rustix",
  "serde",
  "serde_json",
  "sha2 0.11.1",

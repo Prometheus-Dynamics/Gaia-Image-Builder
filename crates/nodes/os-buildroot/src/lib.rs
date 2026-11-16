@@ -62,6 +62,9 @@ pub(crate) const NAME: &str = "gaia.os.buildroot";
 /// (The check that every config line was taken changes no output, so no
 /// new version.) 3: the host tools another step built, as an input.
 const KEY_VERSION: u32 = 3;
+/// The work directory an OS build expects when no earlier run recorded its
+/// size: about what a full build leaves in its output directory.
+const WORK_BYTES: u64 = 24 << 30;
 /// The environment every make runs with. Nothing else is inherited.
 pub(crate) const PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 
@@ -311,6 +314,7 @@ pub fn build_os(
         .map(|(name, path)| (*name, Path::new(*path)))
         .collect();
     let made = Step::new(&store, cx, NAME, key.finish())
+        .ram_work(WORK_BYTES)
         .look_up_or_make(&outputs, |work| build(work, &prepared, &seed_dir, host))?;
     // Read back on a hit too: the entries are part of what the step made.
     let listed = fs::read(store.path(&made.outputs["rootfs-entries"]))

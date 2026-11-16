@@ -19,6 +19,7 @@ pub struct Step<'a> {
     key: StepKey,
     check: Check,
     logs: PathBuf,
+    ram_work: Option<u64>,
 }
 
 /// What [`Step::look_up_or_make`] gives back.
@@ -51,7 +52,18 @@ impl<'a> Step<'a> {
             key,
             check: Check::Digest,
             logs: crate::logs_dir(store),
+            ram_work: None,
         }
+    }
+
+    /// Lets the body's work directory be in RAM when the environment allows
+    /// it (`GAIA_WORK_DIR`, `GAIA_RAM_MAX`; see `gaia_store::Store::scratch_for`).
+    /// `default_bytes` is the size expected when no earlier run of this step
+    /// recorded its own: the work directory's size is recorded for the next
+    /// run. The outputs are committed as usual, copied from RAM when needed.
+    pub fn ram_work(mut self, default_bytes: u64) -> Self {
+        self.ram_work = Some(default_bytes);
+        self
     }
 
     /// Where this step's run logs go, when not [`crate::logs_dir`].
@@ -107,7 +119,14 @@ impl<'a> Step<'a> {
         {
             return self.recorded(start_ns, entry.outputs, false);
         }
-        let scratch = self.store.scratch().map_err(&store_error)?;
+        let scratch = match self.ram_work {
+            Some(default_bytes) => {
+                let expected = self.expected_work(default_bytes);
+                self.store.scratch_for(expected)
+            }
+            None => self.store.scratch(),
+        }
+        .map_err(&store_error)?;
         let mut work = Work {
             dir: scratch.path(),
             cx: self.cx,
@@ -118,10 +137,20 @@ impl<'a> Step<'a> {
         if let Err(error) = body(&mut work) {
             return Err(self.logged(error));
         }
+        // Measured before the commit moves or copies the outputs out.
+        let work_bytes = self
+            .ram_work
+            .map(|_| gaia_store::used_bytes(scratch.path()));
         let entry = scratch
             .commit_step(&self.key, outputs)
             .map_err(&store_error)?;
-        self.recorded(start_ns, entry.outputs, true)
+        self.recorded_with(start_ns, entry.outputs, true, work_bytes)
+    }
+
+    /// The work directory size to expect: the last one a record of this step
+    /// has, else `default_bytes`.
+    fn expected_work(&self, default_bytes: u64) -> u64 {
+        expected_work_in(&self.logs, self.name, default_bytes)
     }
 
     /// A failure of the body's own code that a fault record cannot hold,
@@ -159,6 +188,16 @@ impl<'a> Step<'a> {
         outputs: BTreeMap<String, ObjectRef>,
         made: bool,
     ) -> Result<Made, StepError> {
+        self.recorded_with(start_ns, outputs, made, None)
+    }
+
+    fn recorded_with(
+        &self,
+        start_ns: u128,
+        outputs: BTreeMap<String, ObjectRef>,
+        made: bool,
+        work_bytes: Option<u64>,
+    ) -> Result<Made, StepError> {
         let record = crate::StepRecord {
             start_ns,
             end_ns: crate::now_ns(),
@@ -167,6 +206,7 @@ impl<'a> Step<'a> {
             step: self.name.to_string(),
             key: self.key,
             outputs,
+            work_bytes,
         };
         crate::log::record_step(&self.logs, &record)
             .map_err(|error| StepError::body(self.name, format!("step record: {error}")))?;
@@ -175,6 +215,18 @@ impl<'a> Step<'a> {
             made,
         })
     }
+}
+
+/// The work directory size of the step `name` to expect, from the step
+/// records in `logs`: the last one that recorded a size, else `default_bytes`.
+fn expected_work_in(logs: &Path, name: &str, default_bytes: u64) -> u64 {
+    let step = crate::log::file_name(name);
+    crate::log::step_records(logs)
+        .iter()
+        .rev()
+        .find(|record| record.step == step && record.work_bytes.is_some())
+        .and_then(|record| record.work_bytes)
+        .unwrap_or(default_bytes)
 }
 
 /// What a step's body works with: its own output directory, the run's
@@ -224,5 +276,70 @@ impl Work<'_> {
     /// [`StepError::log`]).
     pub fn run(&mut self, tool: &Tool) -> Result<ToolOutput, StepError> {
         tool::run(tool, self.cx, self.name, self.dir, self.logs, &self.key)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::StepRecord;
+    use gaia_store::Digest;
+
+    fn record(step: &str, work_bytes: Option<u64>) -> StepRecord {
+        StepRecord {
+            start_ns: 1,
+            end_ns: 2,
+            pid: 3,
+            made: true,
+            step: step.to_string(),
+            key: StepKey(Digest::of_bytes(step.as_bytes())),
+            outputs: BTreeMap::new(),
+            work_bytes,
+        }
+    }
+
+    fn append(logs: &Path, record: &StepRecord) {
+        crate::log::record_step(logs, record).expect("record");
+    }
+
+    #[test]
+    fn with_no_record_the_default_is_expected() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert_eq!(expected_work_in(dir.path(), "gaia.os.buildroot", 24), 24);
+    }
+
+    #[test]
+    fn the_last_recorded_size_of_the_same_step_is_expected() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        append(dir.path(), &record("gaia.os.buildroot", Some(10)));
+        append(dir.path(), &record("gaia.os.buildroot", Some(20)));
+        append(dir.path(), &record("gaia.os.buildroot.host", Some(99)));
+        append(dir.path(), &record("gaia.os.buildroot", None));
+        assert_eq!(expected_work_in(dir.path(), "gaia.os.buildroot", 24), 20);
+        assert_eq!(
+            expected_work_in(dir.path(), "gaia.os.buildroot.host", 8),
+            99
+        );
+    }
+
+    #[test]
+    fn a_record_with_a_size_round_trips_and_one_without_still_parses() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sized = record("gaia.os.buildroot", Some(7 << 30));
+        let plain = record("gaia.os.buildroot", None);
+        append(dir.path(), &sized);
+        append(dir.path(), &plain);
+        let read = crate::step_records(dir.path());
+        assert_eq!(read, vec![sized, plain]);
+    }
+
+    #[test]
+    fn an_old_line_without_a_size_has_none() {
+        let line = format!("1 2 3 made gaia.os.buildroot {}\n", Digest::of_bytes(b"k"));
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("steps.log"), line).expect("write");
+        let read = crate::step_records(dir.path());
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].work_bytes, None);
     }
 }
