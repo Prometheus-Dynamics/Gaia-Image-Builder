@@ -30,6 +30,7 @@
 //! entries: what a later step keys on so an owner change reaches it.
 
 mod accounts;
+mod artifact;
 mod by_role;
 mod cmdline;
 mod file;
@@ -74,7 +75,8 @@ use gaia_store::Digest;
 use gaia_types::Tree;
 
 /// The nodes, for a registry.
-pub const NODES: [&NodeRecord; 16] = [
+pub const NODES: [&NodeRecord; 17] = [
+    &artifact::TREE_ARTIFACT_NODE,
     &generate_image::GENERATE_IMAGE_NODE,
     &generate_image::GENERATE_TREE_NODE,
     &role::TREE_ROLE_NODE,

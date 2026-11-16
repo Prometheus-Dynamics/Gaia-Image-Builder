@@ -1622,6 +1622,15 @@ fn image_blobs(g: &mut Graph<'_>, at: &ImageIn<'_>, recipe: &str) -> Result<u32,
             )?;
             g.set(input, "path", Lit::Str(beside.path().display().to_string()));
             g.set(input, "name", Lit::Str(file_name.clone()));
+            // A disk blob takes an artifact: the file's one-file tree as one.
+            let artifact = g.add(
+                "gaia.tree.artifact",
+                format!("{name}.file-artifact.{}", need.name),
+                &board.file,
+                &format!("partitions[{i}].file"),
+            )?;
+            g.set(artifact, "kind", Lit::Str("board-file".into()));
+            g.edge((input, "tree"), (artifact, "tree"));
             let blob = g.add(
                 "gaia.disk.blob",
                 format!("{name}.blob.{}", need.name),
@@ -1631,7 +1640,7 @@ fn image_blobs(g: &mut Graph<'_>, at: &ImageIn<'_>, recipe: &str) -> Result<u32,
             g.set(blob, "path", Lit::Str(file_name));
             g.set(blob, "name", Lit::Str(need.name.clone()));
             g.set(blob, "offset", Lit::Int(offset.0.0 as i64));
-            g.edge((input, "tree"), (blob, "from"));
+            g.edge((artifact, "artifact"), (blob, "from"));
             g.edge((blob, "blob"), (list, &format!("blobs{k}")));
             k += 1;
             continue;

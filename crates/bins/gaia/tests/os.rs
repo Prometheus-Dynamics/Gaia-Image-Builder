@@ -2268,10 +2268,18 @@ fn the_k230_wrapped_areas_go_through_firmware_k230() {
     ] {
         assert!(text.contains(edge), "missing edge {edge:?}\n{text}");
     }
-    // The environment area has no wrap: its blob takes the bootloader output directly.
+    // The environment areas are the board's own files: each a file input, as a
+    // one-file tree and an artifact, into its blob; not fed from the bootloader.
+    for edge in [
+        "k230d-ai-cam.file.uboot-env.tree -> k230d-ai-cam.file-artifact.uboot-env.tree",
+        "k230d-ai-cam.file-artifact.uboot-env.artifact -> k230d-ai-cam.blob.uboot-env.from",
+        "k230d-ai-cam.file-artifact.uboot-env-redund.artifact -> k230d-ai-cam.blob.uboot-env-redund.from",
+    ] {
+        assert!(text.contains(edge), "missing edge {edge:?}\n{text}");
+    }
     assert!(
-        text.contains("k230d-ai-cam.bootloader.bootloader -> k230d-ai-cam.blob.uboot-env.from"),
-        "{text}"
+        !text.contains("k230d-ai-cam.bootloader.bootloader -> k230d-ai-cam.blob.uboot-env"),
+        "an environment area is fed from the bootloader:\n{text}"
     );
     assert!(!text.contains("k230d-ai-cam.wrap.uboot-env"), "{text}");
     assert!(
