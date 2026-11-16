@@ -1,7 +1,7 @@
 diff -ruN uboot-c/arch/riscv/dts/k230d-ai-cam.dts uboot-d/arch/riscv/dts/k230d-ai-cam.dts
 --- a/arch/riscv/dts/k230d-ai-cam.dts	1969-12-31 16:00:00.000000000 -0800
-+++ b/arch/riscv/dts/k230d-ai-cam.dts	2026-11-16 02:55:09.121925927 -0700
-@@ -0,0 +1,74 @@
++++ b/arch/riscv/dts/k230d-ai-cam.dts	2026-11-16 03:06:15.104545153 -0700
+@@ -0,0 +1,88 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/*
 + * CanMV K230D AI-CAM, U-Boot (SPL and U-Boot) device tree. Our own file, not
@@ -11,6 +11,20 @@ diff -ruN uboot-c/arch/riscv/dts/k230d-ai-cam.dts uboot-d/arch/riscv/dts/k230d-a
 + *   UART0      IO38 (TXD), IO39 (RXD)
 + *   SDIO1      IO26 (clk), IO27 (cmd), IO28-IO31 (d0-d3)
 + * and no others: no drop_pins, no other pinctrl-single entries.
++ *
++ * INPUT CONTRACT. Each of the 8 pad entries below takes a raw 32-bit register
++ * value plus the label of the dump it came from (Lemnos's read-only dump of the
++ * pad registers). A value counts as ROM-proven for this table only if its SEL
++ * field (bits 11 and up, k230_evb.h:48) shows the function the entry needs in
++ * that dump: SEL = 1 for the SDIO1 pads IO26-IO31 as the SDK sets them
++ * (k230d_canmv_bpi.dts:124-129), and SEL = 1 for UART0 IO38/IO39
++ * (k230d_canmv_bpi.dts:144-145). Otherwise the value is a reset default and its
++ * bank bit proves nothing.
++ * The ROM sets up pads only for the boot source it tries. A session entered
++ * with KEY held tries MMC0, not SD, so the labelled dump that counts for SD is
++ * the no-KEY reset in which the ROM attempted SD. Each entry records that label.
++ * Until a labelled SD-attempt dump or the AI-CAM schematic gives the two bank
++ * voltages, the #error guards below keep the build refused.
 + *
 + * Every pad entry below is copied from the SDK's k230d_canmv_bpi.dts, so its
 + * register value is the SDK's, with one exception: the bank-voltage field

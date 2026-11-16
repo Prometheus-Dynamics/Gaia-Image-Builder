@@ -1,0 +1,22 @@
+[package]
+name = "gaia-k230-image"
+description = "The K230 boot ROM's first-stage header (K230, length, type, SHA-256) and the priv gzip marker that its SPL undoes"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+flate2 = "=1.1.11"
+sha2 = "=0.11.1"
+
+[[bin]]
+name = "k230-firstage"
+path = "src/main.rs"
+
+[dev-dependencies]
+
+[lints]
+workspace = true
