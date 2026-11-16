@@ -546,6 +546,68 @@ fn an_image_that_does_not_hold_the_tree_fails_whatever_the_tool_said() {
     );
 }
 
+/// A mkfs.erofs that drops every `-E` option and makes the rest as the real
+/// one does: the image holds no fragments, and the step fails on its
+/// superblock, not on anything the tool said.
+#[test]
+fn a_tool_that_drops_an_option_fails_the_superblock_check() {
+    if !available() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("src");
+    sample(&src);
+    let store_path = dir.path().join("store");
+    let store = Store::open(&store_path).expect("store");
+    let tools = dir.path().join("tools");
+    std::fs::create_dir_all(&tools).expect("mkdir");
+    let real = tool("mkfs.erofs");
+    let script = format!(
+        "#!/bin/sh\n\
+         case \"$1\" in --version|--help) exec {real} \"$@\" ;; esac\n\
+         for a in \"$@\"; do case \"$a\" in -z*) z=$a ;; esac; done\n\
+         for last in \"$@\"; do prev=$image; image=$last; done\n\
+         exec {real} --quiet --tar=f ${{z:+\"$z\"}} \"$prev\" \"$image\"\n"
+    );
+    let dropping = tools.join("mkfs.erofs");
+    std::fs::write(&dropping, script).expect("write");
+    std::fs::set_permissions(
+        &dropping,
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .expect("chmod");
+    std::os::unix::fs::symlink(tool("fsck.erofs"), tools.join("fsck.erofs")).expect("symlink");
+    let tree = Tree {
+        object: store.put_tree(&src).expect("put").into(),
+        entries: Vec::new(),
+    };
+    let fragments = true;
+    let why = fs_erofs(
+        &store_path.display().to_string(),
+        Some(&dropping.display().to_string()),
+        None,
+        tree,
+        "lz4hc",
+        0,
+        None,
+        None,
+        Some(&fragments),
+        None,
+        None,
+        None,
+        None,
+        &Ctx::new(),
+    )
+    .expect_err("fragments were asked for, and the image has none")
+    .to_string();
+    println!("{why}");
+    assert!(
+        why.contains("the image made is not as asked")
+            && why.contains("fragments were asked, and the image has no packed inode"),
+        "{why}"
+    );
+}
+
 /// The mode of `inside` in the image at `path`, extracted with its modes.
 fn extracted_mode(root: &Path, path: &Path, inside: &str) -> u32 {
     let x = root.join(format!("x-{}", file_digest(path).expect("digest")));

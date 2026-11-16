@@ -899,6 +899,7 @@ dependencies = [
  "gaia-build-rust",
  "gaia-compress",
  "gaia-describe",
+ "gaia-fs-erofs",
  "gaia-lock",
  "gaia-recipe",
  "gaia-source-files",

@@ -10,8 +10,11 @@
 //!
 //! Compression is declared: `none`, or one `mkfs.erofs` was built with
 //! (`lz4`, `lz4hc`, `lzma`, `deflate`, `zstd`), with an optional level.
-//! `mkfs.erofs` is pinned by path; its version is in the key, with the
-//! tree's `owned_digest`, so an owner change remakes the image.
+//! `mkfs.erofs` is the build machine's when it meets the floor, else the
+//! image's Buildroot host tool (see [`tool`]). Its full `--version` text is
+//! in the key, with the tree's `owned_digest`, so an owner change remakes the
+//! image and another erofs-utils makes another key. The bytes depend on the
+//! erofs-utils that made them, and the key records which one.
 //!
 //! No setuid or setgid bit reaches the image unless asked for: every one is
 //! cleared except on the paths in `keep_setid` (absolute, as the image has
@@ -24,6 +27,9 @@
 /// The libraries this node links, pinned in its Cargo.toml. Its step key names
 /// them, and `tests/libs.rs` checks each version against the pin.
 pub const LIBS: &[(&str, &str)] = &[("tar", "0.4.46")];
+
+pub mod superblock;
+pub mod tool;
 
 use daedalus::prelude::*;
 use gaia_step::{Ctx, KeyBuilder, Step, StepError, Store, Tool, once_per_process};
@@ -159,9 +165,11 @@ pub fn kernel_new_enough(version: (u32, u32), asked: &[&str]) -> Result<(), Stri
 /// said; one that does is kept with the step's second output, `read-back`,
 /// a line that says how many were compared.
 ///
-/// `tools` is the image's build's host tools, when it has an OS: the
-/// `mkfs.erofs` in them makes the image, and `mkfs_erofs` (a path on this
-/// machine) is used only for an image with no OS build.
+/// `mkfs_erofs` is the program that makes the image when it is given (not
+/// empty): the build machine's, which must meet the floor of [`tool`]. Empty
+/// or none, the image's `tools` make it with their `mkfs.erofs`, which the
+/// plan put there (Buildroot's host erofs-utils) when the machine's tool is
+/// not used.
 ///
 /// `keep_setid`: the paths whose setuid and setgid bits are kept,
 /// separated by whitespace; every other such bit is cleared (see the
@@ -208,18 +216,6 @@ pub fn fs_erofs(
 ) -> Result<Image, StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
     let fail = |e: String| StepError::body(NAME, e);
-    // The image's own build's mkfs.erofs when it has one, never this
-    // machine's: what makes the image is pinned with it.
-    let program = gaia_step::image_tool(
-        &store,
-        tools.and_then(|tree| tree.object.object_ref()).as_ref(),
-        mkfs_erofs.map(String::as_str),
-        "mkfs.erofs",
-        "BR2_PACKAGE_HOST_EROFS_UTILS=y",
-    )
-    .map_err(fail)?;
-    let program = program.display().to_string();
-    let mkfs_erofs: &str = &program;
     if !COMPRESSORS.contains(&compression) {
         return Err(fail(format!(
             "compression {compression:?} is not one of {}",
@@ -259,6 +255,30 @@ pub fn fs_erofs(
             extended.join(", ")
         )));
     }
+    // The build machine's tool when one is given, checked against what this
+    // image asks of it; else the image's own tools' (the plan gave no
+    // machine tool because its floor was not met, or the setting forbids it).
+    let asked = tool::Asked {
+        compression,
+        extended: &extended,
+    };
+    let program = match mkfs_erofs.map(String::as_str).filter(|p| !p.is_empty()) {
+        Some(machine) => {
+            tool::check(machine, &asked).map_err(fail)?;
+            machine.to_string()
+        }
+        None => gaia_step::image_tool(
+            &store,
+            tools.and_then(|tree| tree.object.object_ref()).as_ref(),
+            None,
+            "mkfs.erofs",
+            tool::BUILDROOT_LINE,
+        )
+        .map_err(fail)?
+        .display()
+        .to_string(),
+    };
+    let mkfs_erofs: &str = &program;
     // Checked on every run, found in the store or not: the kernel is not in
     // the key, so a kernel that lost the option fails here all the same.
     if let Some(kernel) = kernel
@@ -363,6 +383,19 @@ pub fn fs_erofs(
                     .arg(&tar_path),
             )?;
             std::fs::remove_file(&tar_path).map_err(|e| fail(e.to_string()))?;
+            // The superblock says what the tool made: a compressor or option
+            // it ignored fails the step, whatever its exit status.
+            let head = {
+                use std::io::Read;
+                let mut head = Vec::new();
+                std::fs::File::open(&image)
+                    .and_then(|file| file.take(4096).read_to_end(&mut head))
+                    .map_err(|e| fail(format!("read the image's superblock: {e}")))?;
+                head
+            };
+            let superblock = superblock::read(&head)
+                .and_then(|sb| superblock::check(&sb, compression, &extended))
+                .map_err(|e| fail(format!("the image made is not as asked: {e}")))?;
             // Read back with the same tools: the tool's exit status is not
             // proof that the image holds the tree.
             let fsck = Path::new(mkfs_erofs).with_file_name("fsck.erofs");
@@ -391,7 +424,7 @@ pub fn fs_erofs(
             // The record that it was: what a size is read beside.
             std::fs::write(
                 work.dir().join("read-back.txt"),
-                format!("{compared} files and links read back with fsck.erofs: all as the tree has them\n"),
+                format!("{compared} files and links read back with fsck.erofs: all as the tree has them\n{superblock}\n"),
             )
             .map_err(|e| fail(e.to_string()))?;
             Ok(())
@@ -433,7 +466,10 @@ pub fn image_key(version: &[u8], options: &ImageOptions<'_>, owned: &Digest) -> 
     // 2: what is made is read back, and the step says so in an output of
     // its own. No image made before that is taken for one that was.
     // 3: setuid and setgid bits are cleared but for those kept.
-    let mut key = KeyBuilder::new(NAME, 3)
+    // 4: the superblock is read back, and the compression, fragments and
+    // ztailpacking asked for are checked against it. No image made before
+    // that is taken for one that was.
+    let mut key = KeyBuilder::new(NAME, 4)
         .config("mkfs.erofs", version)
         .config("compression", options.compression)
         .config("level", options.level.to_string())

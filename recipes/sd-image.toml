@@ -59,8 +59,10 @@ system = ["erofs.tree"]
 # be able to read the erofs made here, or the build fails saying which
 # option is missing.
 kernel-build = ["erofs.kernel"]
-# The image's own build's host tools: its mkfs.erofs makes the slot, not
-# this machine's. An image with no OS is given them as tools.
+# The image's host tools: an image with an OS has them from its build, and
+# its mkfs.erofs makes the slot only when the build machine's does not meet the
+# floor (see crates/nodes/fs-erofs/src/tool.rs). An image with no OS is given
+# them as tools.
 host-tools = ["erofs.tools"]
 data = ["slot.tree"]
 disk = ["disk.layout"]
@@ -157,7 +159,7 @@ sets = ["rootp.offset", "datap.offset", "rootp.size", "datap.size"]
 [parameters.compression]
 type = "string"
 default = "lzma"
-description = "The slot's EROFS compression. An image with an OS is made with its build's own mkfs.erofs, which writes none, lz4, lz4hc and lzma; deflate and zstd are for a tool given to an image with no OS. lzma is the default because it is the smallest the pinned tool writes, not as a decision: the algorithm is to be decided by a board measurement on the first slot image (lzma, lz4hc, and zstd from an unpinned tool for comparison). For an iteration build, `--setting <image>.compression=lz4` is the fastest to make (lz4hc packs tighter and takes longer); release and bench images keep lzma. A root bigger than lzma's may not fit the slot partition the board gives it."
+description = "The slot's EROFS compression. An image with an OS is made with the build machine's mkfs.erofs when it is erofs-utils 1.8 or later and writes the compression; otherwise with its build's own host erofs-utils, which writes none, lz4, lz4hc and lzma. deflate and zstd need the machine's tool. lzma is the default because it is the smallest the pinned tool writes, not as a decision: the algorithm is to be decided by a board measurement on the first slot image (lzma, lz4hc, and zstd from an unpinned tool for comparison). For an iteration build, `--setting <image>.compression=lz4` is the fastest to make (lz4hc packs tighter and takes longer); release and bench images keep lzma. A root bigger than lzma's may not fit the slot partition the board gives it."
 sets = ["erofs.compression"]
 
 [parameters.cluster]

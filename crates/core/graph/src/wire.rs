@@ -35,12 +35,9 @@ struct Graph<'r> {
     generators: BTreeMap<String, Vec<Generator>>,
     /// Each image's host tools step.
     host_tools: BTreeMap<String, u32>,
+    /// What the plan says about its tools, a line each (the erofs tool).
+    notes: Vec<String>,
 }
-
-/// The erofs compressions the host `mkfs.erofs` of a Buildroot build
-/// writes: Buildroot configures the host erofs-utils with lz4 and lzma, and
-/// without zstd, deflate or zlib.
-const HOST_EROFS_COMPRESSIONS: [&str; 4] = ["none", "lz4", "lz4hc", "lzma"];
 
 /// A component's `[generate]` step in one image.
 #[derive(Clone)]
@@ -216,7 +213,12 @@ impl Graph<'_> {
 }
 
 /// The wired graph body, the origin of each node, and the host inputs `gaia build` feeds.
-pub(crate) type Wired = (GraphBody, Vec<crate::Origin>, BTreeMap<String, HostInput>);
+pub(crate) type Wired = (
+    GraphBody,
+    Vec<crate::Origin>,
+    BTreeMap<String, HostInput>,
+    Vec<String>,
+);
 
 pub(crate) fn wire(
     loaded: &Loaded,
@@ -241,6 +243,7 @@ pub(crate) fn wire(
         used_inputs: BTreeSet::new(),
         generators: BTreeMap::new(),
         host_tools: BTreeMap::new(),
+        notes: Vec::new(),
     };
     // Each built component once, by the product's name for it.
     let mut built: BTreeMap<String, u32> = BTreeMap::new();
@@ -373,7 +376,14 @@ pub(crate) fn wire(
             product_file: &product_file,
             os,
         };
-        image_recipe(&mut g, &image_in, recipes, &mut host_ports, &mut inputs)?;
+        image_recipe(
+            &mut g,
+            &image_in,
+            recipes,
+            setup,
+            &mut host_ports,
+            &mut inputs,
+        )?;
     }
     for name in setup.inputs.keys() {
         if !g.used_inputs.contains(name) {
@@ -403,6 +413,7 @@ pub(crate) fn wire(
         },
         g.origins,
         inputs,
+        g.notes,
     ))
 }
 
@@ -955,6 +966,7 @@ fn image_recipe(
     g: &mut Graph<'_>,
     at: &ImageIn<'_>,
     recipes: &Recipes,
+    setup: &Setup,
     host_ports: &mut BTreeMap<String, String>,
     inputs: &mut BTreeMap<String, HostInput>,
 ) -> Result<(), Error> {
@@ -1310,53 +1322,7 @@ fn image_recipe(
         }
         // Any other input is filled like a stage's own: store or a tool.
     }
-    // An image with an OS makes its slot with that build's own tools: the
-    // lines that make the build provide them, and a compression those tools
-    // write. The steps refuse the same at build time, which is the truth;
-    // here it is seen in seconds, before anything is built.
-    if at.os.is_some() {
-        let prefix = format!("{}.os", image.name);
-        let stated = |line: &str| {
-            inputs.iter().any(|(port, input)| {
-                (port == &prefix || port.starts_with(&format!("{prefix}.")))
-                    && matches!(input, HostInput::Os(config) if config
-                        .fragments
-                        .iter()
-                        .any(|f| f.text.lines().any(|have| have.trim() == line)))
-            })
-        };
-        for (stage, id) in &group.stages {
-            let (program, line) = match id.as_str() {
-                "gaia.fs.erofs" => ("mkfs.erofs", "BR2_PACKAGE_HOST_EROFS_UTILS=y"),
-                _ => continue,
-            };
-            if !stated(line) {
-                return Err(Error::at(
-                    product_file,
-                    format!("images[{i}].os.fragments"),
-                    format!(
-                        "recipe {}'s stage `{stage}` makes part of the image {} with the build's own {program}, and no OS fragment of the image has `{line}`: add it",
-                        recipe.name, image.name
-                    ),
-                ));
-            }
-            if id == "gaia.fs.erofs"
-                && let Some(Lit::Str(compression)) =
-                    g.nodes[stages[stage] as usize].consts.get("compression")
-                && !HOST_EROFS_COMPRESSIONS.contains(&compression.as_str())
-            {
-                return Err(Error::at(
-                    product_file,
-                    format!("images[{i}].settings.compression"),
-                    format!(
-                        "the image {} sets erofs compression `{compression}`, which its build's own mkfs.erofs does not write: Buildroot builds the host erofs-utils with {} and without zstd, deflate and zlib, and no tool of the build machine makes an image. Set `compression` to one of those; `{compression}` needs a host erofs-utils built with it, which this builder does not have yet",
-                        image.name,
-                        HOST_EROFS_COMPRESSIONS[1..].join(", ")
-                    ),
-                ));
-            }
-        }
-    }
+    erofs_tools(g, at, setup, &group, &stages, inputs)?;
     // What an image names for its recipe to take, and the recipe inputs that
     // take it. A key the recipe takes none of would be accepted and in no
     // output: refused, by name.
@@ -1433,6 +1399,113 @@ fn image_recipe(
         }
         host_ports.insert(port.clone(), ty);
         g.edge((node, &at.port), (0, &port));
+    }
+    Ok(())
+}
+
+/// The tool that makes each EROFS stage of the image, and the plan's words
+/// about it. The build machine's `mkfs.erofs` makes it when it meets the
+/// floor for what the stage asks (see `gaia_fs_erofs::tool`). Otherwise, for
+/// an image with an OS, Buildroot's host erofs-utils makes it: the stage gets
+/// no machine tool, and the OS config gets the line that builds that tool
+/// (`gaia.erofs-host`), so the host stage builds it and no other. An image
+/// with no OS has no such tool to fall back to: the plan refuses it.
+fn erofs_tools(
+    g: &mut Graph<'_>,
+    at: &ImageIn<'_>,
+    setup: &Setup,
+    group: &daedalus::layers::graph::GroupDoc,
+    stages: &BTreeMap<String, u32>,
+    inputs: &mut BTreeMap<String, HostInput>,
+) -> Result<(), Error> {
+    let (i, image, product_file) = (at.index, at.image, at.product_file);
+    let forced = gaia_fs_erofs::tool::forced_by_setting(
+        std::env::var(gaia_fs_erofs::tool::ENV).ok().as_deref(),
+    )
+    .map_err(|e| Error::at(product_file, "", e))?;
+    for (stage, id) in &group.stages {
+        if id != "gaia.fs.erofs" {
+            continue;
+        }
+        let node = stages[stage];
+        let compression = match g.nodes[node as usize].consts.get("compression") {
+            Some(Lit::Str(text)) => text.clone(),
+            _ => "none".to_string(),
+        };
+        let flag = |name: &str| {
+            matches!(
+                g.nodes[node as usize].consts.get(name),
+                Some(Lit::Bool(true))
+            )
+        };
+        let extended: Vec<&str> = [
+            ("fragments", flag("fragments")),
+            ("ztailpacking", flag("ztailpacking")),
+            ("dedupe", flag("dedupe")),
+        ]
+        .into_iter()
+        .filter(|(_, on)| *on)
+        .map(|(name, _)| name)
+        .collect();
+        let asked = gaia_fs_erofs::tool::Asked {
+            compression: &compression,
+            extended: &extended,
+        };
+        let machine = setup.tools.get("mkfs_erofs").map(String::as_str);
+        let label = format!("{}::{stage}", image.name);
+        // An image with no OS has no tool to fall back to: its tool is the
+        // machine's, and the step checks the floor when it makes the image
+        // (the plan runs no tool).
+        if at.os.is_none() {
+            let program = machine.unwrap_or("none");
+            g.notes.push(format!(
+                "erofs   {label}: {program} makes the image, its floor checked when it is built (an image with no OS has no other tool)"
+            ));
+            continue;
+        }
+        match gaia_fs_erofs::tool::choose(machine, forced, &asked) {
+            gaia_fs_erofs::tool::Choice::Machine(facts) => {
+                g.set(node, "mkfs_erofs", Lit::Str(facts.program.clone()));
+                g.notes.push(format!(
+                    "erofs   {label}: {} makes the image ({}); no host erofs-utils in the OS config",
+                    facts.program, facts.version
+                ));
+            }
+            gaia_fs_erofs::tool::Choice::Buildroot(reason) => {
+                if !gaia_fs_erofs::tool::BUILDROOT_COMPRESSIONS.contains(&compression.as_str()) {
+                    return Err(Error::at(
+                        product_file,
+                        format!("images[{i}].settings.compression"),
+                        format!(
+                            "the image {} sets erofs compression `{compression}`, and its EROFS is made with Buildroot's host erofs-utils ({reason}), which writes {}",
+                            image.name,
+                            gaia_fs_erofs::tool::BUILDROOT_COMPRESSIONS[1..].join(", ")
+                        ),
+                    ));
+                }
+                // An empty program: the stage makes the image with the OS
+                // build's own tool.
+                g.set(node, "mkfs_erofs", Lit::Str(String::new()));
+                let port = format!("{}.os", image.name);
+                for (key, input) in inputs.iter_mut() {
+                    if let HostInput::Os(config) = input
+                        && key == &port
+                        && !config
+                            .fragments
+                            .iter()
+                            .any(|f| f.name == gaia_fs_erofs::tool::FRAGMENT)
+                    {
+                        config.fragments.push(gaia_types::ConfigFragment {
+                            name: gaia_fs_erofs::tool::FRAGMENT.into(),
+                            text: format!("{}\n", gaia_fs_erofs::tool::BUILDROOT_LINE),
+                        });
+                    }
+                }
+                g.notes.push(format!(
+                    "erofs   {label}: Buildroot's host erofs-utils makes the image, fallback: {reason}"
+                ));
+            }
+        }
     }
     Ok(())
 }

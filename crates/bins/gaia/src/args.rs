@@ -56,6 +56,14 @@ plan prints the graph document and the plan and runs nothing. build runs
 the graph; Ctrl-C stops at the next step boundary. clean keeps what the
 latest N builds (default 3) used and removes the rest. show prints what an
 output of the latest build holds and the steps it came from.
+
+environment:
+  GAIA_EROFS_TOOL=buildroot  an image with an OS makes its EROFS with its
+                     build's own host erofs-utils, not the build machine's
+                     mkfs.erofs, so a release can pin that tool. Unset or
+                     `machine` (the default): the machine's mkfs.erofs when it
+                     is erofs-utils 1.8 or later with what the image asks.
+                     Plan says which tool each image uses and why.
 ";
 
 /// `gaia validate`: the files, and the kind to check each as.

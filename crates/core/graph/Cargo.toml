@@ -13,6 +13,7 @@ daedalus = { workspace = true }
 daedalus-cpu = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "b3916178f255ab9f55d230dff1395c08b3bca2c9" }
 daedalus-registry = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "b3916178f255ab9f55d230dff1395c08b3bca2c9" }
 gaia-describe = { path = "../describe" }
+gaia-fs-erofs = { path = "../../nodes/fs-erofs" }
 gaia-lock = { path = "../lock" }
 gaia-recipe = { path = "../recipe" }
 gaia-types = { path = "../types" }

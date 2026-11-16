@@ -32,6 +32,11 @@ fn project() -> tempfile::TempDir {
 }
 
 fn plan(dir: &Path, extra: &[&str]) -> Output {
+    plan_env(dir, extra, &[])
+}
+
+/// `plan` with environment variables set for the run.
+fn plan_env(dir: &Path, extra: &[&str], env: &[(&str, &str)]) -> Output {
     let mut args = vec![
         "plan",
         "examples/products/zero-3e-demo/product.toml",
@@ -61,6 +66,8 @@ fn plan(dir: &Path, extra: &[&str]) -> Output {
         .env_remove("GAIA_CPUS")
         .env_remove("GAIA_BUILDROOT_DL")
         .env_remove("XDG_CACHE_HOME")
+        .env_remove("GAIA_EROFS_TOOL")
+        .envs(env.iter().copied())
         .output()
         .expect("runs");
     println!("$ gaia {}", args.join(" "));
@@ -831,19 +838,25 @@ fn a_component_generates_from_the_boards_description() {
     }
 }
 
-/// An image with an OS makes its slot with that build's own tools: the
-/// fragment lines that provide them, and a compression they write, are
-/// held at plan time, before anything is built.
+/// The build machine's mkfs.erofs makes an image with an OS when it meets the
+/// floor: the plan adds no host erofs-utils to the OS config, and a
+/// compression that tool writes is accepted (zstd, which Buildroot's tool does
+/// not write).
 #[test]
-fn a_slot_needs_the_builds_own_tools_and_a_compression_they_write() {
+fn the_build_machines_erofs_makes_the_image_and_no_host_erofs_is_built() {
     let dir = project();
     let product = dir
         .path()
         .join("examples/products/zero-3e-demo/product.toml");
-    let fragment = dir
-        .path()
-        .join("examples/products/zero-3e-demo/os.fragment");
-    assert!(plan(dir.path(), &[]).status.success());
+    let out = plan(dir.path(), &[]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("erofs   zero-3e-demo::erofs: /usr/bin/mkfs.erofs makes the image"),
+        "{text}"
+    );
+    assert!(!text.contains("gaia.erofs-host"), "{text}");
+    assert!(!text.contains("BR2_PACKAGE_HOST_EROFS_UTILS"), "{text}");
 
     edit(
         &product,
@@ -851,35 +864,71 @@ fn a_slot_needs_the_builds_own_tools_and_a_compression_they_write() {
         "id = \"zero-3e-demo\"\ncompression = \"zstd\"",
     );
     let out = plan(dir.path(), &[]);
+    assert!(
+        out.status.success(),
+        "zstd is written by the machine's tool"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("makes the image"),
+        "zstd is made with the machine's tool"
+    );
+}
+
+/// The setting forces Buildroot's tool: the OS config gets the host line
+/// from Gaia, the plan says why, and a compression Buildroot's tool does not
+/// write is refused at plan time. An unknown setting fails the plan.
+#[test]
+fn the_setting_forces_buildroots_tool_with_its_line_and_its_compressions() {
+    let dir = project();
+    let product = dir
+        .path()
+        .join("examples/products/zero-3e-demo/product.toml");
+    let out = plan_env(dir.path(), &[], &[("GAIA_EROFS_TOOL", "buildroot")]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("erofs   zero-3e-demo::erofs: Buildroot's host erofs-utils makes the image, fallback: GAIA_EROFS_TOOL=buildroot"),
+        "{text}"
+    );
+    assert!(text.contains("[gaia.erofs-host]"), "{text}");
+    assert!(text.contains("BR2_PACKAGE_HOST_EROFS_UTILS=y"), "{text}");
+
+    edit(
+        &product,
+        "id = \"zero-3e-demo\"",
+        "id = \"zero-3e-demo\"\ncompression = \"zstd\"",
+    );
+    let out = plan_env(dir.path(), &[], &[("GAIA_EROFS_TOOL", "buildroot")]);
     assert_eq!(out.status.code(), Some(2));
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("images[0].settings.compression"), "{err}");
     assert!(
-        err.contains("sets erofs compression `zstd`, which its build's own mkfs.erofs does not write: Buildroot builds the host erofs-utils with lz4, lz4hc, lzma and without zstd")
-            && err.contains("`zstd` needs a host erofs-utils built with it, which this builder does not have yet"),
+        err.contains("sets erofs compression `zstd`, and its EROFS is made with Buildroot's host erofs-utils (GAIA_EROFS_TOOL=buildroot), which writes lz4, lz4hc, lzma"),
         "{err}"
     );
-    edit(
-        &product,
-        "compression = \"zstd\"",
-        "compression = \"lz4hc\"",
-    );
-    assert!(plan(dir.path(), &[]).status.success());
 
-    // The slot's verity tree needs no host tool; only mkfs.erofs does.
-    let (line, program) = ("BR2_PACKAGE_HOST_EROFS_UTILS=y\n", "mkfs.erofs");
-    edit(&fragment, line, "");
-    let out = plan(dir.path(), &[]);
-    assert_eq!(out.status.code(), Some(2), "{line}");
+    let out = plan_env(dir.path(), &[], &[("GAIA_EROFS_TOOL", "host")]);
+    assert_eq!(out.status.code(), Some(2));
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("images[0].os.fragments"), "{err}");
-    assert!(
-        err.contains(&format!(
-            "with the build's own {program}, and no OS fragment of the image has `{}`: add it",
-            line.trim()
-        )),
-        "{err}"
+    assert!(err.contains("GAIA_EROFS_TOOL is `host`"), "{err}");
+}
+
+/// With no mkfs.erofs on the machine, an image with an OS falls back to
+/// Buildroot's tool, with the reason in the plan.
+#[test]
+fn no_machine_tool_falls_back_to_buildroots_with_the_reason() {
+    let dir = project();
+    let out = plan(
+        dir.path(),
+        &["--tool", "mkfs_erofs=/nonexistent/mkfs.erofs"],
     );
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("erofs   zero-3e-demo::erofs: Buildroot's host erofs-utils makes the image, fallback: /nonexistent/mkfs.erofs --version:"),
+        "{text}"
+    );
+    assert!(text.contains("[gaia.erofs-host]"), "{text}");
 }
 
 /// A recipe has the generator's tool write a file that holds the whole

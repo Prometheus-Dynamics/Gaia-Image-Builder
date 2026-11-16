@@ -125,6 +125,9 @@ pub struct Built {
     pub origins: Vec<Origin>,
     /// The values the host feeds before the run, by host input port.
     pub inputs: BTreeMap<String, HostInput>,
+    /// What the plan says about its tools (the erofs tool of each image),
+    /// a line each.
+    pub notes: Vec<String>,
 }
 
 impl Built {
@@ -317,7 +320,8 @@ pub fn build(
     setup: &Setup,
     builders: &Builders,
 ) -> Result<Built, Error> {
-    let (body, origins, inputs) = wire::wire(loaded, lock, recipes, registry, setup, builders)?;
+    let (body, origins, inputs, notes) =
+        wire::wire(loaded, lock, recipes, registry, setup, builders)?;
     let mut ids: Vec<String> = body
         .nodes
         .iter()
@@ -335,6 +339,7 @@ pub fn build(
         doc,
         origins,
         inputs,
+        notes,
     })
 }
 
