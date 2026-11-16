@@ -1,0 +1,43 @@
+From: Gaia Image Builder <noreply@anthropic.com>
+Subject: [PATCH] package/pkg-utils.mk: clone per-package trees with reflinks
+
+With BR2_PER_PACKAGE_DIRECTORIES, target-finalize and host-finalize
+assemble TARGET_DIR and HOST_DIR by copying every package's tree with a
+single rsync, which reads and writes every file. For large configurations
+on a rotating disk this takes tens of minutes on every `make`.
+
+On filesystems that support reflinks (btrfs, XFS with reflink=1, bcachefs),
+`cp --reflink` creates the same files as copy-on-write clones without
+copying their data. The clones stay independent of the per-package trees,
+so later in-place modifications (stripping, patchelf, post-build scripts)
+do not leak back, which is why this copies rather than hard-links.
+
+Packages are cloned in list order, so the last package's file wins where
+two trees hold the same path; the reversed list fed to rsync, which keeps
+the first file it finds, gave the same result.
+
+On filesystems without reflinks `cp --reflink=auto` falls back to a full
+copy of every file on every `make`, whereas rsync only copies what changed,
+so this is only a win where reflinks are available. Gaia applies it only
+after checking that the output directory supports them; upstream would
+want a config option or a runtime check.
+
+---
+ package/pkg-utils.mk | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/package/pkg-utils.mk b/package/pkg-utils.mk
+index 17b0aa1760..889c9b1ea2 100644
+--- a/package/pkg-utils.mk
++++ b/package/pkg-utils.mk
+@@ -267,8 +267,8 @@ define per-package-rsync
+ 		$(foreach pkg,$(1),\
+ 			rsync -a --hard-links --link-dest=$(PER_PACKAGE_DIR)/$(pkg)/$(2)/ \
+ 				$(PER_PACKAGE_DIR)/$(pkg)/$(2)/ $(3)$(sep)), \
+-		printf "%s/$(2)/\n" $(1) | tac \
+-			| rsync -a --hard-links --files-from=- --no-R -r $(PER_PACKAGE_DIR) $(3))
++		$(foreach pkg,$(1),\
++			cp -a --reflink=auto --remove-destination $(PER_PACKAGE_DIR)/$(pkg)/$(2)/. $(3)/$(sep)))
+ endef
+ 
+ # prepares the per-package HOST_DIR and TARGET_DIR of the current

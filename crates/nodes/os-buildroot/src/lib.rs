@@ -73,6 +73,7 @@ mod config;
 mod contract;
 mod host;
 mod out;
+mod patches;
 mod perms;
 mod ppd;
 mod progress;
@@ -197,6 +198,9 @@ pub(crate) struct Prepared {
     /// The contracts the kernel's final config must meet, each with the
     /// path of its file in the store.
     pub contracts: Vec<(gaia_types::KernelContract, PathBuf)>,
+    /// The value of the key entry the Gaia patches add, when the choice is
+    /// not the default (see [`patches`]). `None` for the default.
+    pub patch_key: Option<String>,
 }
 
 impl Prepared {
@@ -222,6 +226,7 @@ impl Prepared {
         for fragment in &self.defaults {
             key = key.config(&format!("defaults.{}", fragment.name), &fragment.text);
         }
+        key = self.patch_config(key);
         for fragment in &config.fragments {
             key = key.config(&format!("fragment.{}", fragment.name), &fragment.text);
         }
@@ -244,6 +249,15 @@ impl Prepared {
             );
         }
         key
+    }
+
+    /// `key` with the entry the Gaia patches add, when there is one. The
+    /// source's digest in the key is the unpatched one.
+    pub fn patch_config(&self, key: KeyBuilder) -> KeyBuilder {
+        match &self.patch_key {
+            Some(value) => key.config(patches::KEY_NAME, value),
+            None => key,
+        }
     }
 }
 
@@ -316,6 +330,7 @@ pub(crate) fn prepare(
         fragments,
         defaults,
         contracts,
+        patch_key: None,
     })
 }
 
@@ -348,7 +363,9 @@ pub fn build_os(
 ) -> Result<Outputs, StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
     let fail = |why: String| StepError::body(NAME, why);
-    let prepared = prepare(&store, &source, config, inputs, host).map_err(fail)?;
+    let mut prepared = prepare(&store, &source, config, inputs, host).map_err(fail)?;
+    let mode = patches::mode_from_env().map_err(fail)?;
+    patches::apply_to(&store, cx, &mut prepared, mode)?;
     let (seed_dir, seed_digest) = in_store(&store, seed, "the host tools").map_err(fail)?;
     let key = prepared
         .key(NAME, KEY_VERSION, config, host)
@@ -807,6 +824,7 @@ fn prepared_for_test(fragments: Vec<ConfigFragment>, defaults: Vec<ConfigFragmen
         fragments,
         defaults,
         contracts: Vec::new(),
+        patch_key: None,
     }
 }
 
@@ -974,6 +992,7 @@ mod bound_tests {
             fragments: vec![fragment("BR2_CCACHE=y\n")],
             defaults: Vec::new(),
             contracts: Vec::new(),
+            patch_key: None,
         };
         let on = OsConfig {
             fragments: vec![fragment("BR2_CCACHE=y\n")],

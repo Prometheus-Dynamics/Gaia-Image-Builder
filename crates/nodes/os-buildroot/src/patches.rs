@@ -1,0 +1,415 @@
+//! Gaia's own changes to the Buildroot source it builds with.
+//!
+//! Two patches ship in `patches/`, as `git format-patch` writes them for
+//! Buildroot (`-p1`). They are applied to a copy of the source before any
+//! Buildroot step uses it, so every make (the host stage, its plan, the OS
+//! build) runs the same patched tree:
+//!
+//! - **0001**: per-package trees are cloned with `cp --reflink=auto`
+//!   instead of one `rsync`, so assembling `target/` and `host/` makes
+//!   copy-on-write clones on a filesystem with reflinks.
+//! - **0002**: two `$(shell)` calls made while the Makefiles are read become
+//!   `:=` and `firstword`/`patsubst`, with the same values.
+//!
+//! Neither changes what a package builds, so the patches are applied to the
+//! exact upstream text, strictly (`patch -p1 --fuzz=0`). A patch that does
+//! not apply to a Buildroot version is skipped with a warning line that
+//! names it: both are speed changes, and a future Buildroot must still build.
+//!
+//! The keys: the package-level keys (the host stage's and the plan's, and
+//! the OS build's) hash the unpatched source's digest. A patch that changes
+//! no output adds nothing to the key when it applies, so the two shipped
+//! patches add nothing to any key. A skipped patch, or the off switch, adds
+//! an entry, because the build then differs from the default one. A patch
+//! that changes outputs (`changes_outputs`) adds its digest when it applies.
+//!
+//! `GAIA_BUILDROOT_PATCHES=off` builds the upstream source, for debugging.
+
+use gaia_step::{Ctx, Digest, KeyBuilder, Step, StepError, Store, Tool, Work};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+const NAME: &str = "gaia.os.buildroot.patch";
+/// Changes when how the patches are applied changes.
+const RECIPE_VERSION: u32 = 1;
+/// The environment variable that turns the patches off (`off`) or on.
+pub(crate) const ENV: &str = "GAIA_BUILDROOT_PATCHES";
+/// The key entry the choice adds, when it is not the default.
+pub(crate) const KEY_NAME: &str = "gaia.buildroot-patches";
+/// The step's report: one line per patch, `applied <name>` or `skipped <name>`.
+const REPORT: &str = "patches.txt";
+
+/// One patch of Buildroot's source, as the text `patch` reads.
+pub(crate) struct GaiaPatch {
+    pub name: &'static str,
+    pub text: &'static str,
+    /// Whether the patch changes what Buildroot makes (not only how fast):
+    /// when it applies, its digest is in the key of every build.
+    pub changes_outputs: bool,
+}
+
+/// The patches, in the order they are applied.
+pub(crate) const PATCHES: [GaiaPatch; 2] = [
+    GaiaPatch {
+        name: "0001-package-pkg-utils-clone-per-package-trees-with-reflinks.patch",
+        text: include_str!(
+            "../patches/0001-package-pkg-utils-clone-per-package-trees-with-reflinks.patch"
+        ),
+        changes_outputs: false,
+    },
+    GaiaPatch {
+        name: "0002-package-avoid-shell-calls-while-parsing-the-Makefiles.patch",
+        text: include_str!(
+            "../patches/0002-package-avoid-shell-calls-while-parsing-the-Makefiles.patch"
+        ),
+        changes_outputs: false,
+    },
+];
+
+/// Whether the patches are applied.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Mode {
+    On,
+    Off,
+}
+
+/// The mode for the value of [`ENV`] (`None` when unset): unset, empty or
+/// `on` is on, `off` is off, anything else is an error.
+pub(crate) fn mode(value: Option<&str>) -> Result<Mode, String> {
+    match value {
+        None | Some("") | Some("on") => Ok(Mode::On),
+        Some("off") => Ok(Mode::Off),
+        Some(other) => Err(format!("{ENV} is {other:?}: it must be on or off")),
+    }
+}
+
+/// The mode the process's environment asks for.
+pub(crate) fn mode_from_env() -> Result<Mode, String> {
+    mode(std::env::var(ENV).ok().as_deref())
+}
+
+/// A patched source: the tree in the store, and each patch's outcome in
+/// [`PATCHES`] order (`true` when it applied).
+pub(crate) struct Patched {
+    pub tree: PathBuf,
+    pub outcomes: Vec<(String, bool)>,
+}
+
+/// The key entry the choice of patches adds to a build's key, or `None` for
+/// the default: every patch applied, and none that changes outputs.
+pub(crate) fn key_entry(mode: Mode, outcomes: &[(String, bool)]) -> Option<String> {
+    if mode == Mode::Off {
+        return Some("off".into());
+    }
+    let mut lines = Vec::new();
+    for patch in &PATCHES {
+        let applied = outcomes
+            .iter()
+            .find(|(name, _)| name == patch.name)
+            .is_some_and(|(_, applied)| *applied);
+        if !applied {
+            lines.push(format!("skipped {}", patch.name));
+        } else if patch.changes_outputs {
+            lines.push(format!(
+                "applied {} {}",
+                patch.name,
+                Digest::of_bytes(patch.text.as_bytes())
+            ));
+        }
+    }
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+/// Reads a step's report: each line `applied <name>` or `skipped <name>`.
+pub(crate) fn parse_report(text: &str) -> Result<Vec<(String, bool)>, String> {
+    text.lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| match line.split_once(' ') {
+            Some(("applied", name)) => Ok((name.to_string(), true)),
+            Some(("skipped", name)) => Ok((name.to_string(), false)),
+            _ => Err(format!("the patches report has a line {line:?}")),
+        })
+        .collect()
+}
+
+/// The report text for `outcomes`.
+fn report_text(outcomes: &[(String, bool)]) -> String {
+    outcomes
+        .iter()
+        .map(|(name, applied)| {
+            let word = if *applied { "applied" } else { "skipped" };
+            format!("{word} {name}\n")
+        })
+        .collect()
+}
+
+/// Applies [`PATCHES`] to a copy of `source` (the store path of the
+/// Buildroot tree, with digest `source_digest`) and returns the copy. The
+/// copy is a step's output, keyed on the source's digest and the patches'
+/// texts, so a copy made once is looked up after.
+pub(crate) fn patched_source(
+    store: &Store,
+    cx: &Ctx,
+    source: &Path,
+    source_digest: Digest,
+) -> Result<Patched, StepError> {
+    let mut key = KeyBuilder::new(NAME, RECIPE_VERSION).input("source", source_digest);
+    for patch in &PATCHES {
+        key = key.input(
+            &format!("patch {}", patch.name),
+            Digest::of_bytes(patch.text.as_bytes()),
+        );
+    }
+    let made = Step::new(store, cx, NAME, key.finish()).look_up_or_make(
+        &[("tree", Path::new("tree")), ("report", Path::new(REPORT))],
+        |work| make_patched(work, source),
+    )?;
+    let report = fs::read_to_string(store.path(&made.outputs["report"]))
+        .map_err(|e| StepError::body(NAME, format!("the patches report: {e}")))?;
+    let outcomes = parse_report(&report).map_err(|e| StepError::body(NAME, e))?;
+    Ok(Patched {
+        tree: store.path(&made.outputs["tree"]),
+        outcomes,
+    })
+}
+
+/// The body of [`patched_source`]: a copy of `source` in the step's
+/// directory, the patches applied to it in turn, and the report.
+fn make_patched(work: &mut Work<'_>, source: &Path) -> Result<(), StepError> {
+    let dir = work.dir().to_path_buf();
+    let tree = dir.join("tree");
+    // Files are written as the user's umask allows, not as the store has
+    // them: a patch edits its copy.
+    let copy = Tool::new("cp")
+        .args(["-R", "--reflink=auto", "--no-preserve=mode"])
+        .arg(source)
+        .arg(&tree)
+        .env("PATH", crate::PATH);
+    work.run(&copy)?;
+    let outcomes = apply_all(&tree, &dir.join("patches"))
+        .map_err(|why| StepError::body(NAME, why))?;
+    fs::write(dir.join(REPORT), report_text(&outcomes))
+        .map_err(|e| StepError::body(NAME, format!("the patches report: {e}")))?;
+    Ok(())
+}
+
+/// Applies each of [`PATCHES`] to the tree at `tree` in turn, writing the
+/// patch texts into `scratch` first. Returns each patch's outcome.
+fn apply_all(tree: &Path, scratch: &Path) -> Result<Vec<(String, bool)>, String> {
+    fs::create_dir_all(scratch).map_err(|e| format!("{}: {e}", scratch.display()))?;
+    let mut outcomes = Vec::with_capacity(PATCHES.len());
+    for patch in &PATCHES {
+        let file = scratch.join(patch.name);
+        fs::write(&file, patch.text).map_err(|e| format!("{}: {e}", patch.name))?;
+        let applied = apply_one(tree, &file).map_err(|why| format!("{}: {why}", patch.name))?;
+        outcomes.push((patch.name.to_string(), applied));
+    }
+    Ok(outcomes)
+}
+
+/// Applies the patch in `file` to the tree at `tree`, strictly, if it
+/// applies to the exact text: a dry run first, so a patch that does not
+/// apply leaves the tree as it was. Returns whether it applied.
+fn apply_one(tree: &Path, file: &Path) -> Result<bool, String> {
+    let dry = patch_command(tree, file).arg("--dry-run").output();
+    let dry = dry.map_err(|e| format!("patch: {e}"))?;
+    if !dry.status.success() {
+        return Ok(false);
+    }
+    let applied = patch_command(tree, file)
+        .output()
+        .map_err(|e| format!("patch: {e}"))?;
+    if !applied.status.success() {
+        return Err(format!(
+            "patch failed after its dry run: {}",
+            String::from_utf8_lossy(&applied.stdout).trim()
+        ));
+    }
+    Ok(true)
+}
+
+/// `patch` for `file` in `tree`, with the options Gaia applies patches with.
+fn patch_command(tree: &Path, file: &Path) -> Command {
+    let mut command = Command::new("patch");
+    command
+        .args(["-p1", "--fuzz=0", "--batch", "--forward", "-s"])
+        .args(["--no-backup-if-mismatch", "-i"])
+        .arg(file)
+        .current_dir(tree)
+        .env_clear()
+        .env("PATH", crate::PATH)
+        .env("LC_ALL", "C");
+    command
+}
+
+/// Warns, one line per skipped patch, on standard error.
+pub(crate) fn warn_skipped(outcomes: &[(String, bool)]) {
+    for (name, applied) in outcomes {
+        if !applied {
+            eprintln!(
+                "warning: Buildroot patch {name} does not apply to this Buildroot source, and is left out of the build"
+            );
+        }
+    }
+}
+
+/// Makes `prepared`'s source the patched copy (or leaves the upstream one
+/// for [`Mode::Off`]), and sets the key entry the choice makes. Every
+/// Buildroot step of a build calls this before it keys or runs anything.
+pub(crate) fn apply_to(
+    store: &Store,
+    cx: &Ctx,
+    prepared: &mut crate::Prepared,
+    mode: Mode,
+) -> Result<(), StepError> {
+    if mode == Mode::Off {
+        prepared.patch_key = key_entry(mode, &[]);
+        return Ok(());
+    }
+    let patched = patched_source(store, cx, &prepared.src, prepared.src_digest)?;
+    warn_skipped(&patched.outcomes);
+    prepared.patch_key = key_entry(mode, &patched.outcomes);
+    prepared.src = patched.tree;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The touched files of a Buildroot tree, from the fixtures of `version`.
+    fn fixture(version: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(format!("buildroot-{version}"))
+    }
+
+    /// A copy of the fixture's touched files in a new directory.
+    fn copy_of(version: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let from = fixture(version).join("package");
+        let to = dir.path().join("package");
+        fs::create_dir(&to).expect("package dir");
+        for file in ["pkg-utils.mk", "Makefile.in", "pkg-luarocks.mk"] {
+            fs::copy(from.join(file), to.join(file)).expect("copy fixture");
+        }
+        dir
+    }
+
+    fn read(dir: &Path, file: &str) -> String {
+        fs::read_to_string(dir.join("package").join(file)).expect("read")
+    }
+
+    fn all_applied(outcomes: &[(String, bool)]) -> bool {
+        outcomes.len() == PATCHES.len() && outcomes.iter().all(|(_, applied)| *applied)
+    }
+
+    #[test]
+    fn both_patches_apply_to_buildroot_2026_02_3() {
+        let tree = copy_of("2026.02.3");
+        let scratch = tempfile::tempdir().expect("tempdir");
+        let outcomes = apply_all(tree.path(), scratch.path().join("patches").as_path())
+            .expect("apply");
+        assert!(all_applied(&outcomes), "{outcomes:?}");
+        assert!(read(tree.path(), "pkg-utils.mk").contains("cp -a --reflink=auto"));
+        assert!(read(tree.path(), "Makefile.in").contains("export PERL:=$(shell which perl)"));
+        assert!(read(tree.path(), "pkg-luarocks.mk").contains("firstword"));
+    }
+
+    #[test]
+    fn both_patches_apply_to_buildroot_2026_08() {
+        let tree = copy_of("2026.08");
+        let scratch = tempfile::tempdir().expect("tempdir");
+        let outcomes = apply_all(tree.path(), scratch.path()).expect("apply");
+        assert!(all_applied(&outcomes), "{outcomes:?}");
+        assert!(read(tree.path(), "pkg-utils.mk").contains("cp -a --reflink=auto"));
+        assert!(read(tree.path(), "Makefile.in").contains("export PERL:=$(shell which perl)"));
+        assert!(read(tree.path(), "pkg-luarocks.mk").contains("firstword"));
+    }
+
+    #[test]
+    fn a_patch_that_does_not_apply_is_skipped_and_leaves_its_files_as_they_were() {
+        let tree = copy_of("2026.08");
+        // Makefile.in differs from upstream: 0002 names it, so 0002 must not
+        // apply at all, not even to pkg-luarocks.mk, which it also changes.
+        let makefile = tree.path().join("package/Makefile.in");
+        let text = fs::read_to_string(&makefile).expect("read");
+        let changed = text.replace(
+            "export PERL=$(shell which perl)",
+            "export PERL=/usr/bin/perl",
+        );
+        assert_ne!(text, changed, "the fixture names the line");
+        fs::write(&makefile, changed).expect("write");
+        let before = read(tree.path(), "pkg-luarocks.mk");
+        let scratch = tempfile::tempdir().expect("tempdir");
+        let outcomes = apply_all(tree.path(), scratch.path()).expect("apply");
+        assert_eq!(
+            outcomes,
+            vec![
+                (PATCHES[0].name.to_string(), true),
+                (PATCHES[1].name.to_string(), false),
+            ]
+        );
+        assert_eq!(read(tree.path(), "pkg-luarocks.mk"), before);
+        assert!(read(tree.path(), "pkg-utils.mk").contains("cp -a --reflink=auto"));
+    }
+
+    #[test]
+    fn the_shipped_patches_are_git_format_patches() {
+        // The texts are `git format-patch` output: a mail header and the
+        // diff, one `diff` per touched file.
+        for patch in &PATCHES {
+            assert!(patch.text.starts_with("From: "), "{}", patch.name);
+            assert!(patch.text.contains("\n---\n"), "{}", patch.name);
+        }
+    }
+
+    #[test]
+    fn all_applied_and_no_output_change_adds_nothing_to_the_key() {
+        let outcomes: Vec<(String, bool)> = PATCHES
+            .iter()
+            .map(|p| (p.name.to_string(), true))
+            .collect();
+        assert_eq!(key_entry(Mode::On, &outcomes), None);
+    }
+
+    #[test]
+    fn a_skipped_patch_is_in_the_key() {
+        let mut outcomes: Vec<(String, bool)> = PATCHES
+            .iter()
+            .map(|p| (p.name.to_string(), true))
+            .collect();
+        outcomes[1].1 = false;
+        let entry = key_entry(Mode::On, &outcomes).expect("an entry");
+        assert_eq!(entry, format!("skipped {}", PATCHES[1].name));
+    }
+
+    #[test]
+    fn the_off_switch_is_in_the_key() {
+        let outcomes: Vec<(String, bool)> = PATCHES
+            .iter()
+            .map(|p| (p.name.to_string(), true))
+            .collect();
+        assert_eq!(key_entry(Mode::Off, &outcomes).as_deref(), Some("off"));
+        assert_ne!(key_entry(Mode::Off, &[]), key_entry(Mode::On, &outcomes));
+    }
+
+    #[test]
+    fn the_mode_is_on_unless_off_is_asked_for() {
+        assert_eq!(mode(None), Ok(Mode::On));
+        assert_eq!(mode(Some("")), Ok(Mode::On));
+        assert_eq!(mode(Some("on")), Ok(Mode::On));
+        assert_eq!(mode(Some("off")), Ok(Mode::Off));
+        let why = mode(Some("0")).expect_err("not a mode");
+        assert!(why.contains(ENV), "{why}");
+    }
+
+    #[test]
+    fn the_report_reads_back_what_it_wrote() {
+        let outcomes = vec![("a.patch".to_string(), true), ("b.patch".to_string(), false)];
+        let text = report_text(&outcomes);
+        assert_eq!(parse_report(&text).expect("parse"), outcomes);
+        assert!(parse_report("maybe a.patch\n").is_err());
+    }
+}
