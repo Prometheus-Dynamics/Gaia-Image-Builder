@@ -1,0 +1,36 @@
+# Drops the boot-timing prologue the Canaan SDK overlay puts at the top of
+# arch/riscv/cpu/start.S (k230_linux_sdk v0.6.1 and fc6cc215 alike): rdtime,
+# rdcycle and stores to 0x80200000.. before csrr mhartid. On the K230D AI-CAM
+# the boot ROM printed "boot failed with exit code 19" and never reached the
+# SPL banner with it; the same SPL with those instructions replaced by c.nop
+# booted to U-Boot and OpenSBI (bench, 2026-11-16). Canaan's CanMV U-Boot,
+# whose SPL boots this board, starts at csrr a0, mhartid too. The T-Head MCOR
+# write after csrr stays (the test SPL kept it).
+--- a/arch/riscv/cpu/start.S
++++ b/arch/riscv/cpu/start.S
+@@ -40,25 +40,6 @@
+ .section .text
+ .globl _start
+ _start:
+-	li t0, 0x80200000
+-	rdtime t1
+-	sd t1, (t0)
+-
+-	li t0, 0x80200008
+-	rdcycle t1
+-	sd t1, (t0)
+-
+-	li t0, 0x80200010
+-	#rdinstret t1
+-	li t1, 0x736273
+-	sd t1, (t0)
+-
+-	li t0, 0x80200020
+-	sd x0, (t0)
+-	li t0, 0x80208008
+-	sd x0, (t0)
+-
+-
+ #if CONFIG_IS_ENABLED(RISCV_MMODE)
+ 	csrr	a0, CSR_MHARTID
+ #endif
