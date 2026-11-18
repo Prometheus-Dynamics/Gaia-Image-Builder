@@ -13,12 +13,53 @@ use gaia_store::{ObjectRef, Store};
 use gaia_types::{Artifact, Image, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 static INTERRUPTS: AtomicU32 = AtomicU32::new(0);
+static HANDLER: AtomicBool = AtomicBool::new(false);
+static CANCEL: Mutex<Option<daedalus::runner::owned_run::CancelHandle>> = Mutex::new(None);
 
 pub fn build(options: &args::Project) -> Result<(), Stop> {
+    let dev_run = build_one(options)?;
+    if !options.verify {
+        return Ok(());
+    }
+    let mut clean = options.clone();
+    clean.dev_reuse = false;
+    clean.verify = false;
+    eprintln!("gaia: --verify: building the same product clean, to compare");
+    let clean_run = build_one(&clean)?;
+    let project = Project::open(&clean)?;
+    let store = Store::open(&project.setup.store).map_err(Stop::usage)?;
+    let lines = crate::dev::compare(&store, &dev_run, &clean_run);
+    if lines.is_empty() {
+        println!("verify: the dev build equals the clean build");
+        return Ok(());
+    }
+    println!(
+        "verify: {} difference(s) between the dev and the clean build:",
+        lines.len()
+    );
+    for line in &lines {
+        println!("  {line}");
+    }
+    Err(Stop {
+        code: FAILED,
+        message: "verify: the dev build differs from the clean build; a difference outside \
+                  the files that differ between any two builds (a build date, the build \
+                  directory's path) is a stale reuse"
+            .into(),
+    })
+}
+
+/// One build of `options`; its record.
+fn build_one(options: &args::Project) -> Result<Run, Stop> {
     let project = Project::open(options)?;
+    if options.dev_reuse {
+        let doc = serde_json::to_value(&project.built.doc).map_err(Stop::usage)?;
+        crate::dev::check(&doc)?;
+    }
     let planned = project.plan()?;
     let store = Store::open(&project.setup.store).map_err(Stop::usage)?;
     let mut loaded = LoadedHost::load(planned, LoadOptions::default()).map_err(Stop::usage)?;
@@ -46,14 +87,21 @@ pub fn build(options: &args::Project) -> Result<(), Stop> {
     }
 
     let cancel = loaded.cancel_handle();
-    ctrlc::set_handler(move || {
-        if INTERRUPTS.fetch_add(1, Ordering::SeqCst) > 0 {
-            std::process::exit(i32::from(CANCELLED));
-        }
-        eprintln!("gaia: stopping at the next step boundary (Ctrl-C again quits now)");
-        cancel.cancel();
-    })
-    .map_err(Stop::usage)?;
+    // A second build of one process (--verify) has its own graph: the
+    // handler cancels whichever is running.
+    *CANCEL.lock().unwrap_or_else(|e| e.into_inner()) = Some(cancel);
+    if !HANDLER.swap(true, Ordering::SeqCst) {
+        ctrlc::set_handler(move || {
+            if INTERRUPTS.fetch_add(1, Ordering::SeqCst) > 0 {
+                std::process::exit(i32::from(CANCELLED));
+            }
+            eprintln!("gaia: stopping at the next step boundary (Ctrl-C again quits now)");
+            if let Some(cancel) = CANCEL.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+                cancel.cancel();
+            }
+        })
+        .map_err(Stop::usage)?;
+    }
 
     let jobs = options.jobs.unwrap_or_else(|| {
         std::thread::available_parallelism()
@@ -177,9 +225,18 @@ pub fn build(options: &args::Project) -> Result<(), Stop> {
     run.outputs = outputs;
     run.steps = steps;
     run.critical_path = critical_path;
+    if options.dev_reuse {
+        run.build = Some(crate::dev::BUILD.into());
+    }
     let path = run.write(&store)?;
-    for (port, output) in &run.outputs {
-        println!("{port}  {}", store.path(&output.object).display());
+    if options.dev_reuse {
+        for (port, copy) in crate::dev::mark_outputs(&store, &run, &path)? {
+            println!("{port}  {}", copy.display());
+        }
+    } else {
+        for (port, output) in &run.outputs {
+            println!("{port}  {}", store.path(&output.object).display());
+        }
     }
     // On stderr, so the port lines on stdout stay as they are; the last
     // line on stdout is the outcome and the record.
@@ -189,7 +246,10 @@ pub fn build(options: &args::Project) -> Result<(), Stop> {
         (end_ns - start_ns) as f64 / 1e9,
         path.display()
     );
-    stop.map_or(Ok(()), Err)
+    if options.dev_reuse {
+        eprintln!("DEV BUILD — not for release (gaia build --dev-reuse; the record says so)");
+    }
+    stop.map_or(Ok(run), Err)
 }
 
 /// The graph's node ids, and each node's direct upstream nodes, for the

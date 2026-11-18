@@ -196,6 +196,7 @@ fn a_minimal_aarch64_buildroot_build_and_its_rebuilds() {
         ccache_dir: String::new(),
         mirror: String::new(),
         config_only: false,
+        dev_reuse: String::new(),
     };
     let dir = tempfile::tempdir().expect("tempdir");
     let store_dir = dir.path().join("store");

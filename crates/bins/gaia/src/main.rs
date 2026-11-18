@@ -16,6 +16,7 @@
 mod args;
 mod build;
 mod clean;
+mod dev;
 mod image_sizes;
 mod project;
 mod record;

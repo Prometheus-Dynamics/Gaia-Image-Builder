@@ -74,6 +74,7 @@
 
 mod config;
 mod contract;
+mod dev;
 mod host;
 mod jobs;
 mod kbuild;
@@ -264,6 +265,45 @@ impl Prepared {
 
     /// `key` with the entry the Gaia patches add, when there is one. The
     /// source's digest in the key is the unpatched one.
+    /// The parts of a dev build's identity (see `dev`): the key without the
+    /// config text and the input trees' content.
+    pub fn identity(
+        &self,
+        name: &str,
+        version: u32,
+        config: &OsConfig,
+        host: &BuildrootHost,
+        seed: Digest,
+    ) -> Vec<(String, String)> {
+        let mut parts = vec![
+            ("step".to_string(), format!("{name} {version}")),
+            ("source".to_string(), self.src_digest.hex()),
+            (
+                "patches".to_string(),
+                self.patch_key.clone().unwrap_or_default(),
+            ),
+            ("seed".to_string(), seed.hex()),
+            ("make".to_string(), host.make.clone()),
+        ];
+        for fragment in &self.defaults {
+            parts.push((format!("defaults.{}", fragment.name), fragment.text.clone()));
+        }
+        let names = |list: Vec<&str>| list.join(" ");
+        parts.push((
+            "fragments".into(),
+            names(config.fragments.iter().map(|f| f.name.as_str()).collect()),
+        ));
+        parts.push((
+            "inputs".into(),
+            names(self.dirs.iter().map(|(n, _, _)| n.as_str()).collect()),
+        ));
+        for o in &config.overrides {
+            parts.push((format!("override.{}", o.package), o.input.clone()));
+        }
+        parts.push(("externals".into(), config.externals.join("\n")));
+        parts
+    }
+
     pub fn patch_config(&self, key: KeyBuilder) -> KeyBuilder {
         match &self.patch_key {
             Some(value) => key.config(patches::KEY_NAME, value),
@@ -444,16 +484,34 @@ pub fn build_os(
     let mode = patches::mode_from_env().map_err(fail)?;
     patches::apply_to(&store, cx, &mut prepared, mode)?;
     let (seed_dir, seed_digest) = in_store(&store, seed, "the host tools").map_err(fail)?;
-    let key = prepared
-        .key(NAME, KEY_VERSION, config, host)
-        .input("seed", seed_digest);
+    let key = step_key(&prepared, config, host, seed_digest);
     let outputs: Vec<(&str, &Path)> = OUTPUTS
         .iter()
         .map(|(name, path)| (*name, Path::new(*path)))
         .collect();
-    let made = Step::new(&store, cx, NAME, key.finish())
-        .ram_work(WORK_BYTES)
-        .look_up_or_make(&outputs, |work| build(work, &prepared, &seed_dir, host))?;
+    let warm = if host.dev_reuse.is_empty() {
+        None
+    } else {
+        let mut parts = prepared.identity(NAME, KEY_VERSION, config, host, seed_digest);
+        parts.push(("dev".to_string(), dev::VERSION.to_string()));
+        let identity = dev::identity(&parts);
+        Some((PathBuf::from(&host.dev_reuse), identity))
+    };
+    let step = Step::new(&store, cx, NAME, key.finish());
+    let made = match &warm {
+        None => step
+            .ram_work(WORK_BYTES)
+            .look_up_or_make(&outputs, |work| {
+                build(work, &prepared, &seed_dir, host, None)
+            })?,
+        // On the store's own disk: the warm directory is there, and the
+        // outputs are copied out of it.
+        Some((root, identity)) => step.look_up_or_make(&outputs, |work| {
+            let warm = dev::Warm::open(root, identity)
+                .map_err(|e| StepError::body(NAME, format!("the dev build's directory: {e}")))?;
+            build(work, &prepared, &seed_dir, host, Some(&warm))
+        })?,
+    };
     // Read back on a hit too: the entries are part of what the step made.
     let listed = fs::read(store.path(&made.outputs["rootfs-entries"]))
         .map_err(|e| StepError::body(NAME, format!("the root filesystem's entries: {e}")))?;
@@ -481,6 +539,23 @@ pub fn build_os(
         tree("kernel-build"),
         tree("toolchain"),
     ))
+}
+
+/// The step's key. A dev build's is never a clean build's (see `dev`).
+fn step_key(
+    prepared: &Prepared,
+    config: &OsConfig,
+    host: &BuildrootHost,
+    seed: Digest,
+) -> KeyBuilder {
+    let key = prepared
+        .key(NAME, KEY_VERSION, config, host)
+        .input("seed", seed);
+    if host.dev_reuse.is_empty() {
+        key
+    } else {
+        key.config("build", format!("dev-reuse {}", dev::VERSION))
+    }
 }
 
 fn check(config: &OsConfig, inputs: usize, host: &BuildrootHost) -> Result<(), String> {
@@ -624,9 +699,13 @@ fn build(
     prepared: &Prepared,
     seed: &Path,
     host: &BuildrootHost,
+    warm: Option<&dev::Warm>,
 ) -> Result<(), StepError> {
-    let out = work.dir().join("out");
-    let result = build_steps(work, prepared, seed, host);
+    let out = match warm {
+        Some(warm) => warm.out(),
+        None => work.dir().join("out"),
+    };
+    let result = build_steps(work, prepared, seed, host, warm);
     times::record(work, &out, host.jobs);
     result
 }
@@ -636,6 +715,7 @@ fn build_steps(
     prepared: &Prepared,
     seed: &Path,
     host: &BuildrootHost,
+    warm: Option<&dev::Warm>,
 ) -> Result<(), StepError> {
     // The builds of this process share one job count: this build's slot in
     // it, held until the build's last make is done.
@@ -646,17 +726,18 @@ fn build_steps(
     };
     let (src, vars) = (&prepared.src, &prepared.vars);
     let dir = work.dir().to_path_buf();
-    let out = dir.join("out");
-    fs::create_dir(&out).map_err(io_fail("output directory"))?;
-    // The host tools another step built, before Buildroot looks: it finds
-    // them installed and builds none of them again.
-    host::plant(seed, &out).map_err(io_fail("the host tools"))?;
+    let (out, resolved, manifest) = match warm {
+        None => {
+            let out = dir.join("out");
+            let resolved = fresh_out(work, prepared, seed, host, &slot, &out)?;
+            (out, resolved, None)
+        }
+        Some(warm) => {
+            let (resolved, manifest) = warm_out(work, prepared, seed, host, &slot, warm)?;
+            (warm.out(), resolved, Some(manifest))
+        }
+    };
     let config = out.join(".config");
-    let resolved = configure(NAME, work, prepared, &out, host, &slot)?;
-    // With per-package directories on, the seed's packages get their own
-    // trees, complete and installed, before anything builds.
-    host::plant_per_package(seed, &out, &resolved)
-        .map_err(io_fail("the host tools' per-package directories"))?;
 
     // The kernel's and the bootloader's own configs, before anything
     // compiles: every line their fragment files ask for must be in the
@@ -796,7 +877,8 @@ fn build_steps(
             Err(error) => return Err(io_fail("Buildroot's own file in the target")(error)),
         }
     }
-    fs::rename(out.join("target"), dir.join("rootfs")).map_err(io_fail("the target tree"))?;
+    take(&out.join("target"), &dir.join("rootfs"), warm.is_some())
+        .map_err(io_fail("the target tree"))?;
     let left = out::bookkeeping_in(&dir.join("rootfs"));
     if !left.is_empty() {
         return Err(fail(format!(
@@ -827,7 +909,7 @@ fn build_steps(
             // output path (a `.pc` prefix, a script's interpreter): the
             // marker stands for it, so the stored tree is the same whether
             // the build ran in RAM or on disk.
-            fs::rename(out.join("host"), dir.join("toolchain"))
+            take(&out.join("host"), &dir.join("toolchain"), warm.is_some())
                 .map_err(io_fail("the toolchain"))?;
             host::mark_out(&dir.join("toolchain"), &out.display().to_string())
                 .map_err(io_fail("the toolchain's paths"))?;
@@ -837,7 +919,138 @@ fn build_steps(
             fs::create_dir(dir.join("toolchain")).map_err(io_fail("the toolchain"))?;
         }
     }
+    if let (Some(warm), Some(manifest)) = (warm, manifest) {
+        warm.finish(&manifest)
+            .map_err(io_fail("the dev build's manifest"))?;
+    }
     Ok(())
+}
+
+/// Moves a tree out of Buildroot's output directory; copies it when the
+/// directory is kept (a dev build).
+fn take(from: &Path, to: &Path, keep: bool) -> io::Result<()> {
+    if keep {
+        out::copy_tree(from, to)
+    } else {
+        fs::rename(from, to)
+    }
+}
+
+/// A new output directory `out`, with the seed planted and the config
+/// resolved. Returns the resolved config.
+fn fresh_out(
+    work: &mut Work<'_>,
+    prepared: &Prepared,
+    seed: &Path,
+    host: &BuildrootHost,
+    slot: &jobs::Slot<'_>,
+    out: &Path,
+) -> Result<String, StepError> {
+    let io_fail = |what: &'static str| {
+        move |error: io::Error| StepError::body(NAME, format!("{what}: {error}"))
+    };
+    fs::create_dir_all(out).map_err(io_fail("output directory"))?;
+    // The host tools another step built, before Buildroot looks: it finds
+    // them installed and builds none of them again.
+    host::plant(seed, out).map_err(io_fail("the host tools"))?;
+    let resolved = configure(NAME, work, prepared, out, host, slot)?;
+    // With per-package directories on, the seed's packages get their own
+    // trees, complete and installed, before anything builds.
+    host::plant_per_package(seed, out, &resolved)
+        .map_err(io_fail("the host tools' per-package directories"))?;
+    Ok(resolved)
+}
+
+/// The warm directory made ready for the make (see `dev`): kept, with what
+/// changed removed, or emptied and made fresh. Returns the resolved config
+/// and the manifest to record when the build succeeds. The decision is in
+/// the step's record.
+fn warm_out(
+    work: &mut Work<'_>,
+    prepared: &Prepared,
+    seed: &Path,
+    host: &BuildrootHost,
+    slot: &jobs::Slot<'_>,
+    warm: &dev::Warm,
+) -> Result<(String, dev::Manifest), StepError> {
+    let fail = |why: String| StepError::body(NAME, why);
+    let io_fail = |what: &'static str| {
+        move |error: io::Error| StepError::body(NAME, format!("{what}: {error}"))
+    };
+    let (src, vars) = (&prepared.src, &prepared.vars);
+    let out = warm.out();
+    let old = warm.manifest().filter(|_| out.is_dir());
+    warm.begin().map_err(io_fail("the dev build's manifest"))?;
+    let mut places: Vec<(PathBuf, String)> = prepared
+        .dirs
+        .iter()
+        .map(|(name, path, _)| (path.clone(), format!("@{name}@")))
+        .collect();
+    places.push((prepared.src.clone(), "@buildroot@".into()));
+    places.push((out.clone(), "@out@".into()));
+    let kconfig_dirclean = std::env::var(dev::KCONFIG_ENV).is_ok_and(|v| v == "dirclean");
+    let reuse = if old.is_some() {
+        let resolved = configure(NAME, work, prepared, &out, host, slot)?;
+        let info = host::captured(work, make_tool(host, src, &out, vars, &["show-info"], slot))?;
+        let new = dev::fingerprint(&resolved, &info, &places).map_err(fail)?;
+        let reverse = dev::reverse_dependencies(&info).map_err(fail)?;
+        let reuse = if ppd::enabled(&resolved) {
+            dev::plan(old.as_ref(), &new, &reverse, kconfig_dirclean)
+        } else {
+            dev::Reuse::Clean("per-package directories are off".into())
+        };
+        if let dev::Reuse::Keep {
+            dirclean,
+            reconfigure,
+        } = &reuse
+        {
+            if !dirclean.is_empty() {
+                let goals: Vec<String> = dirclean.iter().map(|p| format!("{p}-dirclean")).collect();
+                let goals: Vec<&str> = goals.iter().map(String::as_str).collect();
+                work.run(&make_tool(host, src, &out, vars, &goals, slot))?;
+            }
+            for package in reconfigure {
+                let build_dir = dev::build_dir(&info, package).ok_or_else(|| {
+                    fail(format!(
+                        "make show-info names no build directory for {package}"
+                    ))
+                })?;
+                dev::reconfigure(&out, package, &build_dir)
+                    .map_err(io_fail("a package configured again"))?;
+            }
+            // Made again: target/ from every package's own, by each make;
+            // images/ by each package installing its images again.
+            dev::forget_images(&out).map_err(io_fail("the packages' images installed again"))?;
+            for made in ["target", "images"] {
+                match fs::remove_dir_all(out.join(made)) {
+                    Err(error) if error.kind() != io::ErrorKind::NotFound => {
+                        return Err(io_fail("the last dev build's target and images")(error));
+                    }
+                    _ => {}
+                }
+            }
+            work.detail(
+                "dev-reuse",
+                serde_json::json!({ "kept": true, "dirclean": dirclean, "reconfigure": reconfigure }),
+            );
+            return Ok((resolved, new));
+        }
+        reuse
+    } else {
+        dev::Reuse::Clean("no earlier dev build of this identity".into())
+    };
+    let dev::Reuse::Clean(why) = reuse else {
+        unreachable!("a kept directory returned above")
+    };
+    warm.clear().map_err(io_fail("the dev build's directory"))?;
+    let resolved = fresh_out(work, prepared, seed, host, slot, &out)?;
+    let info = host::captured(work, make_tool(host, src, &out, vars, &["show-info"], slot))?;
+    let new = dev::fingerprint(&resolved, &info, &places).map_err(fail)?;
+    work.detail(
+        "dev-reuse",
+        serde_json::json!({ "kept": false, "why": why }),
+    );
+    Ok((resolved, new))
 }
 
 /// This build's slot in the process's make jobserver (see [`jobs`]), taken
@@ -966,6 +1179,60 @@ mod toolchain_tests {
         }
     }
 
+    /// A dev build's key is never a clean build's, and where it is kept
+    /// does not change it.
+    #[test]
+    fn a_dev_key_is_never_a_clean_key() {
+        let prepared = prepared_for_test(Vec::new(), Vec::new());
+        let seed = Digest::of_bytes(b"seed");
+        let config = OsConfig::default();
+        let mut host = host_for_test();
+        let clean = step_key(&prepared, &config, &host, seed).finish();
+        host.dev_reuse = "/store/dev-buildroot".into();
+        let dev = step_key(&prepared, &config, &host, seed).finish();
+        host.dev_reuse = "/elsewhere/dev-buildroot".into();
+        let moved = step_key(&prepared, &config, &host, seed).finish();
+        assert_ne!(clean, dev);
+        assert_eq!(dev, moved);
+    }
+
+    /// A warm directory's identity names the fragments, not their text: a
+    /// config change keeps the directory, and another set of fragments (the
+    /// kernel's part against the root's) has its own.
+    #[test]
+    fn the_identity_names_fragments_not_their_text() {
+        let fragment = |name: &str, text: &str| ConfigFragment {
+            name: name.into(),
+            text: text.into(),
+        };
+        let identity = |fragments: Vec<ConfigFragment>| {
+            let config = OsConfig {
+                fragments,
+                ..OsConfig::default()
+            };
+            let prepared = prepared_for_test(Vec::new(), Vec::new());
+            dev::identity(&prepared.identity(
+                NAME,
+                KEY_VERSION,
+                &config,
+                &host_for_test(),
+                Digest::of_bytes(b"seed"),
+            ))
+        };
+        let base = identity(vec![fragment("os", "BR2_PACKAGE_A=y\n")]);
+        assert_eq!(
+            base,
+            identity(vec![fragment("os", "BR2_PACKAGE_A=y\nBR2_PACKAGE_B=y\n")])
+        );
+        assert_ne!(
+            base,
+            identity(vec![
+                fragment("gaia.no-root", ""),
+                fragment("os", "BR2_PACKAGE_A=y\n")
+            ])
+        );
+    }
+
     fn key_of(prepared: &Prepared) -> gaia_step::StepKey {
         prepared
             .key(
@@ -985,6 +1252,7 @@ mod toolchain_tests {
             jobs: 4,
             download_dir: "/dl".into(),
             config_only: false,
+            dev_reuse: String::new(),
             ccache_dir: String::new(),
             mirror: String::new(),
         }
@@ -1080,6 +1348,7 @@ mod bound_tests {
             ccache_dir: String::new(),
             mirror: String::new(),
             config_only: false,
+            dev_reuse: String::new(),
         }
     }
 

@@ -84,6 +84,7 @@ impl Fixture {
             ccache_dir: String::new(),
             mirror: String::new(),
             config_only: false,
+            dev_reuse: String::new(),
         };
         let out = build_os(
             &self.store.display().to_string(),

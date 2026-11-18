@@ -12,6 +12,7 @@ usage:
   gaia validate <file.toml>... [--kind product|board|family|component] [--recipes DIR]
   gaia plan  <product.toml> [project flags] [--json]
   gaia build <product.toml> [project flags] [--jobs N] [--config-only | --until STEP]
+             [--dev-reuse [--verify]]
   gaia lock  <product.toml> [--update SOURCE]... [--check]  (see gaia lock --help)
   gaia clean [--store DIR] [--keep N] [--dry-run]
   gaia store verify [--store DIR] [--fix]
@@ -40,6 +41,21 @@ project flags:
                      (a list of strings: comma-separated). A parameter the
                      product sets, one the recipe does not declare and an
                      image the product does not have are refused.
+
+dev builds (bench iteration only; never a release):
+  --dev-reuse        each Buildroot step keeps its output directory under
+                     <store>/dev-buildroot and rebuilds only the packages a
+                     config change touches, and what depends on them. Its
+                     results are keyed apart from clean builds, and a clean
+                     build never uses them. Steps that sign with a key,
+                     publish or bundle with a signing key are refused. Every
+                     printed output gets <output>.gaia-build.json beside it,
+                     {\"build\":\"dev-reuse\"}, and the run record says so.
+  --verify           after the dev build, build the same product clean and
+                     compare every output and Buildroot step, file by file.
+                     Run it before trusting a dev image for anything but the
+                     bench: a difference beyond the known nondeterminism is
+                     a stale reuse.
 
 validate checks description files and what they name: no lock, no tools,
 no inputs, no network. It stops at the first bad file, naming the key. Without --kind,
@@ -94,7 +110,7 @@ pub enum Command {
 }
 
 /// What `plan` and `build` read.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Project {
     pub product: PathBuf,
     pub store: Option<PathBuf>,
@@ -111,6 +127,10 @@ pub struct Project {
     /// `build` only: resolve and check each image's OS configuration and
     /// make nothing.
     pub config_only: bool,
+    /// `build` only: dev reuse of Buildroot's output directories.
+    pub dev_reuse: bool,
+    /// `build` only, with `dev_reuse`: build clean too and compare.
+    pub verify: bool,
     /// `plan` only: the graph and plan as JSON.
     pub json: bool,
 }
@@ -253,12 +273,19 @@ pub fn parse(words: &[String]) -> Result<Command, Stop> {
                     }
                     "--until" if build => project.until = Some(words.value(word)?.to_string()),
                     "--config-only" if build => project.config_only = true,
+                    "--dev-reuse" if build => project.dev_reuse = true,
+                    "--verify" if build => project.verify = true,
                     _ => words.positional(word, &mut product)?,
                 }
             }
             project.product = product
                 .ok_or_else(|| Stop::usage(format!("{first} needs a product.toml")))?
                 .into();
+            if project.verify && !project.dev_reuse {
+                return Err(Stop::usage(
+                    "--verify checks a dev build: it needs --dev-reuse",
+                ));
+            }
             if build {
                 Command::Build(project)
             } else {

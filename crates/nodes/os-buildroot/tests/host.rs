@@ -110,6 +110,7 @@ impl Fixture {
             ccache_dir: String::new(),
             mirror: String::new(),
             config_only: false,
+            dev_reuse: String::new(),
         }
     }
 

@@ -170,6 +170,7 @@ fn offline_build() {
         ccache_dir: env_abs("GAIA_BUILDROOT_CCACHE").display().to_string(),
         mirror: String::new(),
         config_only: false,
+        dev_reuse: String::new(),
     };
     let (rootfs, _kernel, _dt, _modules, _bootloader, images, config, _kernel_build, _toolchain) =
         build_os(

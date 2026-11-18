@@ -46,6 +46,11 @@ pub struct BuildrootHost {
     /// make no host tools. For a check of a product that compiles nothing.
     #[serde(default)]
     pub config_only: bool,
+    /// Dev reuse (`gaia build --dev-reuse`): the directory the warm Buildroot
+    /// output directories are kept in, one for each identity. Empty: off,
+    /// every build is clean. Never on for a release.
+    #[serde(default)]
+    pub dev_reuse: String,
 }
 
 /// A package Buildroot builds from one of the input trees instead of

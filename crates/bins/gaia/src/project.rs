@@ -50,6 +50,11 @@ impl Project {
         let setup = Setup {
             buildroot: buildroot_host(&store, &tools, options.jobs).map(|mut host| {
                 host.config_only = options.config_only;
+                if options.dev_reuse {
+                    host.dev_reuse = absolute(&store.join(crate::dev::WARM))
+                        .display()
+                        .to_string();
+                }
                 host
             }),
             store,
@@ -507,6 +512,7 @@ fn buildroot_host(
             .trim()
             .to_string(),
         config_only: false,
+        dev_reuse: String::new(),
     })
 }
 

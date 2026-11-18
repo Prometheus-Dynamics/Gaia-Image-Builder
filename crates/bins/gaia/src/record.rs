@@ -33,6 +33,10 @@ pub struct Run {
     /// time in milliseconds: the chain of dependencies that ended last.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub critical_path: Vec<PathStep>,
+    /// `dev-reuse` for a dev build (`gaia build --dev-reuse`); absent for a
+    /// clean build. A release refuses a run that has it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<String>,
 }
 
 /// One step on the critical path.
@@ -128,6 +132,7 @@ impl Run {
             outputs: BTreeMap::new(),
             steps: Vec::new(),
             critical_path: Vec::new(),
+            build: None,
         }
     }
 
@@ -233,6 +238,7 @@ mod tests {
             outputs: BTreeMap::new(),
             steps,
             critical_path,
+            build: None,
         }
     }
 

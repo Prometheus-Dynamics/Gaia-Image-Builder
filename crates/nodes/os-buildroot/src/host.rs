@@ -213,7 +213,7 @@ pub fn build_host(
 }
 
 /// One make run whose standard output is kept.
-fn captured(work: &mut Work<'_>, tool: Tool) -> Result<String, StepError> {
+pub(crate) fn captured(work: &mut Work<'_>, tool: Tool) -> Result<String, StepError> {
     let shown = Arc::new(Mutex::new(String::new()));
     let sink = shown.clone();
     work.run(&tool.on_line(move |stream, line| {
