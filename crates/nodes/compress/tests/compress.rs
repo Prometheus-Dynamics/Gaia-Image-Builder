@@ -50,34 +50,56 @@ fn compression_is_the_same_at_every_thread_count() {
     let source = input(root.path());
     let artifact = stored(&store, &source);
     let original = std::fs::read(&source).expect("read");
+    // Every run has its own store, so all eight run at once.
+    let runs: Vec<(&str, i64, i64)> = [("xz", 1), ("zstd", 3)]
+        .into_iter()
+        .flat_map(|(format, level)| [1, 2, 4, 8].map(|threads| (format, level, threads)))
+        .collect();
+    let results = std::thread::scope(|s| {
+        let handles: Vec<_> = runs
+            .iter()
+            .map(|&(format, level, threads)| {
+                let root = root.path();
+                let source = &source;
+                s.spawn(move || {
+                    // A store per run, so every run compresses rather than finds.
+                    let fresh = root.join(format!("store-{format}-{level}-{threads}"));
+                    let fresh_str = fresh.display().to_string();
+                    let fresh_store = Store::open(&fresh).expect("store");
+                    let artifact = stored(&fresh_store, source);
+                    let start = std::time::Instant::now();
+                    let out = match format {
+                        "xz" => compress_xz(&fresh_str, artifact, level, threads, &Ctx::new()),
+                        _ => compress_zstd(&fresh_str, artifact, level, threads, &Ctx::new()),
+                    }
+                    .expect("compresses");
+                    let path = out.object.path_in(&fresh_store).expect("in store");
+                    println!(
+                        "{format} -{level} threads {threads}: {} ({} bytes, {} ms)",
+                        digest_of(&out),
+                        std::fs::metadata(&path).expect("size").len(),
+                        start.elapsed().as_millis()
+                    );
+                    assert_eq!(out.kind.as_str(), format!("disk+{format}"));
+                    (digest_of(&out), path)
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("a compress run"))
+            .collect::<Vec<_>>()
+    });
     for (format, level) in [("xz", 1), ("zstd", 3)] {
         let mut seen = Vec::new();
-        for threads in [1, 2, 4, 8] {
-            // A store per run, so every run compresses rather than finds.
-            let fresh = root
-                .path()
-                .join(format!("store-{format}-{level}-{threads}"));
-            let fresh_str = fresh.display().to_string();
-            let fresh_store = Store::open(&fresh).expect("store");
-            let artifact = stored(&fresh_store, &source);
-            let start = std::time::Instant::now();
-            let out = match format {
-                "xz" => compress_xz(&fresh_str, artifact, level, threads, &Ctx::new()),
-                _ => compress_zstd(&fresh_str, artifact, level, threads, &Ctx::new()),
+        for (&(f, l, threads), (digest, path)) in runs.iter().zip(&results) {
+            if (f, l) != (format, level) {
+                continue;
             }
-            .expect("compresses");
-            let path = out.object.path_in(&fresh_store).expect("in store");
-            println!(
-                "{format} -{level} threads {threads}: {} ({} bytes, {} ms)",
-                digest_of(&out),
-                std::fs::metadata(&path).expect("size").len(),
-                start.elapsed().as_millis()
-            );
-            assert_eq!(out.kind.as_str(), format!("disk+{format}"));
-            seen.push(digest_of(&out));
+            seen.push(*digest);
             if threads == 1 {
                 let mut back = Vec::new();
-                let file = std::fs::File::open(&path).expect("open");
+                let file = std::fs::File::open(path).expect("open");
                 match format {
                     "xz" => xz2::read::XzDecoder::new_multi_decoder(file).read_to_end(&mut back),
                     _ => zstd::stream::read::Decoder::new(file)
@@ -88,6 +110,7 @@ fn compression_is_the_same_at_every_thread_count() {
                 assert!(back == original, "{format} round trip");
             }
         }
+        assert_eq!(seen.len(), 4, "{format}: four thread counts");
         assert!(
             seen.windows(2).all(|w| w[0] == w[1]),
             "{format} -{level}: {seen:?}"
