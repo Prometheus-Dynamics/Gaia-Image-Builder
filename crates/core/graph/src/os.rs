@@ -709,6 +709,20 @@ fn text(lines: &[String]) -> String {
     text
 }
 
+/// What the kernel's and the bootloader's builds start from: no init system,
+/// no `/bin/sh` and no BusyBox. Buildroot's allnoconfig picks BusyBox init,
+/// which builds busybox, initscripts and the SysV skeleton into a root those
+/// builds never use (measured: busybox 272 s of package time in a kernel
+/// build). The root's own build is not given this; its init lines are its
+/// own (an init line always goes to the root part).
+fn no_root() -> ConfigFragment {
+    ConfigFragment {
+        name: "gaia.no-root".into(),
+        text: "BR2_INIT_NONE=y\nBR2_SYSTEM_BIN_SH_NONE=y\n# BR2_PACKAGE_BUSYBOX is not set\n"
+            .into(),
+    }
+}
+
 /// The parts of one image's OS, each a build of its own.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Parts {
@@ -795,6 +809,9 @@ pub(crate) fn split(plan: &OsPlan, board: &Board) -> Parts {
     let (has_kernel, has_bootloader) = (board.kernel.is_some(), board.bootloader.is_some());
     let part = |which: Part| -> OsPlan {
         let mut fragments = Vec::new();
+        if which != Part::Rootfs {
+            fragments.push(no_root());
+        }
         for fragment in &plan.config.fragments {
             let whole = match fragment.name.as_str() {
                 "board.target" => Some(true),

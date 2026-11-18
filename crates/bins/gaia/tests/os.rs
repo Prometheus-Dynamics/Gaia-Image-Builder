@@ -204,11 +204,17 @@ fn the_json_plan_has_the_os_config_as_a_host_input() {
     assert_eq!(
         names,
         [
+            "gaia.no-root",
             "board.target",
             "board.kernel",
             "gaia.parallel",
             "image.0.os.fragment"
         ]
+    );
+    // The kernel's build makes no root: no init, no /bin/sh, no BusyBox.
+    assert_eq!(
+        os["value"]["fragments"][0]["text"],
+        "BR2_INIT_NONE=y\nBR2_SYSTEM_BIN_SH_NONE=y\n# BR2_PACKAGE_BUSYBOX is not set\n"
     );
     assert_eq!(os["value"]["overrides"][0]["package"], "LINUX");
     let host = inputs
