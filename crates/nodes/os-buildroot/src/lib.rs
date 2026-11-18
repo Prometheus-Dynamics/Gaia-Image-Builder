@@ -895,11 +895,12 @@ fn build_steps(
     if let Some(final_config) =
         out::package_config(&out.join("build"), "uboot").map_err(io_fail("U-Boot's config"))?
     {
-        fs::copy(&final_config, dir.join("bootloader/u-boot.config"))
+        gaia_store::copy_file(&final_config, dir.join("bootloader/u-boot.config"))
             .map_err(io_fail("U-Boot's config"))?;
     }
     fs::create_dir(dir.join("config")).map_err(io_fail("the config directory"))?;
-    fs::copy(&config, dir.join("config/buildroot.config")).map_err(io_fail("the config"))?;
+    gaia_store::copy_file(&config, dir.join("config/buildroot.config"))
+        .map_err(io_fail("the config"))?;
     match out::kernel_build_source(&out.join("build")).map_err(io_fail("the kernel build"))? {
         Some(source) => {
             out::copy_kernel_build(&source, &dir.join("kernel-build"))

@@ -86,7 +86,7 @@ pub fn tree_file(
                 ));
             }
             make_dirs(parent).map_err(io)?;
-            std::fs::copy(&source_path, &dst).map_err(io)?;
+            gaia_store::copy_file(&source_path, &dst).map_err(io)?;
             set_mode(&dst, MODE).map_err(io)
         },
     )?;

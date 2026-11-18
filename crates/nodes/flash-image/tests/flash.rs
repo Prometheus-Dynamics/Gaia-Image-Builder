@@ -75,7 +75,7 @@ fn key_env(text: String) -> impl Fn(&str) -> Option<String> {
 fn dump(name: &str, path: &Path, raw: &[u8]) {
     if let Some(dir) = std::env::var_os("GAIA_FLASH_DUMP") {
         let dir = PathBuf::from(dir);
-        std::fs::copy(path, dir.join(name)).expect("dump");
+        gaia_store::copy_file(path, dir.join(name)).expect("dump");
         std::fs::write(dir.join(format!("{name}.raw")), raw).expect("dump");
     }
 }

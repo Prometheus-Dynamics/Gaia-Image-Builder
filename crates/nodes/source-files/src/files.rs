@@ -19,7 +19,7 @@ pub(crate) fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
             copy_tree(&src, &dst)?;
             fs::set_permissions(&dst, fs::metadata(&src)?.permissions())?;
         } else if kind.is_file() {
-            fs::copy(&src, &dst)?;
+            gaia_store::copy_file(&src, &dst)?;
         } else {
             return Err(io::Error::other(format!(
                 "{} is not a file, directory or symlink",

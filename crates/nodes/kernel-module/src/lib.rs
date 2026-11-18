@@ -328,7 +328,7 @@ fn build_and_place(
         let placed = stage
             .join("lib/modules")
             .join(module::placed_path(release, name));
-        fs::copy(ko, &placed).map_err(io_fail("placing a module"))?;
+        gaia_store::copy_file(ko, &placed).map_err(io_fail("placing a module"))?;
     }
 
     work.run(

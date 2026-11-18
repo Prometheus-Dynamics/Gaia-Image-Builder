@@ -319,8 +319,16 @@ pub(crate) fn bury(path: &Path, trash: &Path) -> Result<()> {
 
 /// Copies one regular file, as a reflink (a copy-on-write clone: metadata
 /// only, on btrfs and XFS) where the file system and the two files allow it,
-/// and as a byte copy otherwise. Either way the mode is copied.
-pub(crate) fn copy_file(from: &Path, to: &Path) -> io::Result<()> {
+/// and as a byte copy otherwise. Either way the mode is set after the
+/// bytes, so the setuid and setgid bits are kept.
+///
+/// Every file copy in Gaia is this one: `std::fs::copy`, which it stands in
+/// for and whose paths it takes, is disallowed (`clippy.toml`).
+pub fn copy_file(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
+    copy_one(from.as_ref(), to.as_ref())
+}
+
+fn copy_one(from: &Path, to: &Path) -> io::Result<()> {
     if clone_file(from, to).is_ok() {
         return Ok(());
     }
@@ -333,6 +341,7 @@ pub(crate) fn copy_file(from: &Path, to: &Path) -> io::Result<()> {
 /// clears the setuid and setgid bits when a process without `CAP_FSETID`
 /// writes the file: a copy where no reflink is possible lost them, and the
 /// tree's digest changed with the file system it was copied on.
+#[allow(clippy::disallowed_methods)] // The one place `fs::copy` is called.
 fn plain_copy(from: &Path, to: &Path) -> io::Result<()> {
     fs::copy(from, to)?;
     fs::set_permissions(to, fs::metadata(from)?.permissions())
@@ -371,19 +380,37 @@ mod tests {
 
     /// The setuid, setgid and sticky bits survive a copy that is not a
     /// reflink, as they do a reflink.
+    /// The setuid, setgid and sticky bits survive each copy: the byte copy,
+    /// and [`copy_file`], the one every node uses (a reflink where the temp
+    /// dir's file system has them), onto a new name and over an old file.
     #[test]
-    fn a_plain_copy_keeps_the_special_bits() {
+    fn every_copy_keeps_the_special_bits() {
         let dir = base();
-        for mode in [0o4755, 0o2755, 0o1755, 0o6711] {
-            let (from, to) = (dir.path().join("from"), dir.path().join("to"));
-            fs::write(&from, b"data").expect("file");
-            fs::set_permissions(&from, fs::Permissions::from_mode(mode)).expect("mode");
-            plain_copy(&from, &to).expect("copy");
-            let copied = fs::metadata(&to).expect("copy").permissions().mode() & 0o7777;
-            assert_eq!(copied, mode, "{mode:o}");
-            assert_eq!(fs::read(&to).expect("bytes"), b"data");
-            fs::remove_file(&from).expect("remove");
-            fs::remove_file(&to).expect("remove");
+        type Copy = fn(&Path, &Path) -> io::Result<()>;
+        let copies: [(&str, Copy); 2] = [
+            ("plain_copy", plain_copy),
+            ("copy_file", |from, to| copy_file(from, to)),
+        ];
+        for (name, copy) in copies {
+            for mode in [0o4755, 0o2755, 0o1755, 0o6711] {
+                let (from, to) = (dir.path().join("from"), dir.path().join("to"));
+                fs::write(&from, b"data").expect("file");
+                fs::set_permissions(&from, fs::Permissions::from_mode(mode)).expect("mode");
+                for over in [false, true] {
+                    if over {
+                        fs::write(&to, b"old bytes").expect("old file");
+                    }
+                    if name == "plain_copy" && over {
+                        fs::remove_file(&to).expect("plain_copy makes a new file");
+                    }
+                    copy(&from, &to).expect("copy");
+                    let copied = fs::metadata(&to).expect("copy").permissions().mode() & 0o7777;
+                    assert_eq!(copied, mode, "{name} {mode:o} over={over}");
+                    assert_eq!(fs::read(&to).expect("bytes"), b"data", "{name}");
+                    fs::remove_file(&to).expect("remove");
+                }
+                fs::remove_file(&from).expect("remove");
+            }
         }
     }
 

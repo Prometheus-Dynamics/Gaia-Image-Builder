@@ -672,7 +672,7 @@ mod tests {
         // The same content in another place: nothing changed.
         let moved = scratch.path().join("board-4567");
         fs::create_dir_all(&moved).expect("moved");
-        fs::copy(tree.join("trim.config"), moved.join("trim.config")).expect("copy");
+        gaia_store::copy_file(tree.join("trim.config"), moved.join("trim.config")).expect("copy");
         let at_moved = manifest(
             &resolved.replace("board-0123", "board-4567"),
             &[(moved.clone(), "@board@".to_string())],

@@ -151,17 +151,9 @@ pub fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
         } else if kind.is_dir() {
             copy_tree(&src, &dst)?;
         } else {
-            copy_file(&src, &dst)?;
+            gaia_store::copy_file(&src, &dst)?;
         }
     }
-    fs::set_permissions(to, fs::metadata(from)?.permissions())
-}
-
-/// A file's bytes, then its mode. `fs::copy` sets the mode first, and the
-/// kernel clears the setuid and setgid bits when a process without
-/// `CAP_FSETID` writes the file.
-fn copy_file(from: &Path, to: &Path) -> io::Result<()> {
-    fs::copy(from, to)?;
     fs::set_permissions(to, fs::metadata(from)?.permissions())
 }
 
@@ -240,7 +232,7 @@ fn copy_kept(from: &Path, to: &Path, rel: &str) -> io::Result<()> {
             if kind.is_symlink() {
                 std::os::unix::fs::symlink(fs::read_link(&src)?, &dest)?;
             } else {
-                copy_file(&src, &dest)?;
+                gaia_store::copy_file(&src, &dest)?;
             }
         }
     }

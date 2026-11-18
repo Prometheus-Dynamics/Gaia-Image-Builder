@@ -34,7 +34,7 @@ fn make_root(dir: &Path, programs: &[(&str, &str)]) {
         let to = dir.join(at.strip_prefix("/").expect("absolute"));
         if !to.exists() {
             std::fs::create_dir_all(to.parent().expect("parent")).expect("mkdir");
-            std::fs::copy(from, &to).expect("copy");
+            gaia_store::copy_file(from, &to).expect("copy");
         }
     };
     for (name, at) in programs {

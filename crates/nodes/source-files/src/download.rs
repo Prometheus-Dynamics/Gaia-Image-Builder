@@ -82,7 +82,7 @@ pub fn source_download(
             let file = work.dir().join("file");
             match fs::rename(&partial, &file) {
                 Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
-                    fs::copy(&partial, &file).and_then(|_| fs::remove_file(&partial))
+                    gaia_store::copy_file(&partial, &file).and_then(|_| fs::remove_file(&partial))
                 }
                 done => done,
             }

@@ -17,7 +17,7 @@ pub fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
         } else if kind.is_dir() {
             copy_tree(&src, &dst)?;
         } else {
-            fs::copy(&src, &dst)?;
+            gaia_store::copy_file(&src, &dst)?;
         }
     }
     fs::set_permissions(to, fs::metadata(from)?.permissions())

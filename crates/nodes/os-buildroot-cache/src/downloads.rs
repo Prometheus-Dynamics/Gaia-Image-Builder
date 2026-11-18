@@ -121,7 +121,7 @@ pub fn fill(store: &Store, root: &Path, files: &[LockedFile]) -> Result<u32, Str
             .ok_or_else(|| format!("{}: no parent directory", file.path))?;
         fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
         let temporary = temporary_beside(&target);
-        fs::copy(store.path(&object), &temporary)
+        gaia_store::copy_file(store.path(&object), &temporary)
             .map_err(|e| format!("{}: copy from the store: {e}", file.path))?;
         let got = file_digest(&temporary).map_err(|e| e.to_string())?;
         if got != want {

@@ -164,7 +164,7 @@ fn copy_dir(from: &Path, to: &Path) {
         } else if kind.is_dir() {
             copy_dir(&src, &dst);
         } else {
-            fs::copy(&src, &dst).expect("copy");
+            gaia_store::copy_file(&src, &dst).expect("copy");
         }
     }
 }

@@ -77,7 +77,7 @@ fn build(jdk: &Path, root: &Path) -> (Vec<(String, u64, String)>, PathBuf) {
     let libs = root.join("libs");
     std::fs::create_dir_all(&libs).expect("mkdir");
     let handle = Store::open(&store).expect("store");
-    std::fs::copy(
+    gaia_store::copy_file(
         greet.object.path_in(&handle).expect("in"),
         libs.join("greet.jar"),
     )

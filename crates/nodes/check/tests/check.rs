@@ -430,7 +430,7 @@ fn binary_tree(
         &lib_dir.join("libdep.so.1").display().to_string(),
         &src.join("dep.c").display().to_string(),
     ]);
-    fs::copy(lib_dir.join("libdep.so.1"), lib_dir.join("libdep.so")).expect("copy");
+    gaia_store::copy_file(lib_dir.join("libdep.so.1"), lib_dir.join("libdep.so")).expect("copy");
     let app = scratch.join("app");
     compile(&[
         "-nostdlib",
@@ -444,9 +444,9 @@ fn binary_tree(
     ]);
     fs::create_dir_all(image.join("usr/bin")).expect("mkdir");
     fs::create_dir_all(image.join("usr/lib")).expect("mkdir");
-    fs::copy(&app, image.join("usr/bin/app")).expect("copy");
+    gaia_store::copy_file(&app, image.join("usr/bin/app")).expect("copy");
     if !lib_missing {
-        fs::copy(
+        gaia_store::copy_file(
             lib_dir.join("libdep.so.1"),
             image.join("usr/lib/libdep.so.1"),
         )

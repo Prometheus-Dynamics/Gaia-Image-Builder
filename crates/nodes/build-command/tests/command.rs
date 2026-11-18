@@ -58,7 +58,7 @@ fn fixture() -> Fixture {
     let mut libs = std::collections::BTreeSet::new();
     for tool in TOOLS {
         let host = which(tool);
-        std::fs::copy(&host, image.join("usr/bin").join(tool)).expect("copy tool");
+        gaia_store::copy_file(&host, image.join("usr/bin").join(tool)).expect("copy tool");
         let ldd = std::process::Command::new("ldd")
             .arg(&host)
             .output()
@@ -76,7 +76,7 @@ fn fixture() -> Fixture {
     }
     for lib in libs {
         let name = lib.file_name().expect("name");
-        std::fs::copy(&lib, image.join("usr/lib64").join(name)).expect("copy lib");
+        gaia_store::copy_file(&lib, image.join("usr/lib64").join(name)).expect("copy lib");
     }
     std::fs::write(image.join("etc/image-file"), "from the image\n").expect("write");
     let store_path = root.join("store");

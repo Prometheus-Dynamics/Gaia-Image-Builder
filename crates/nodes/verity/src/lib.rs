@@ -103,7 +103,7 @@ pub fn verity(
         ],
         |work| {
             let data = work.dir().join(IMAGE_FILE);
-            std::fs::copy(&src, &data).map_err(|e| fail(format!("copy: {e}")))?;
+            gaia_store::copy_file(&src, &data).map_err(|e| fail(format!("copy: {e}")))?;
             let padded = padded_len(len, BLOCK);
             std::fs::OpenOptions::new()
                 .write(true)

@@ -216,7 +216,7 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
         } else if kind.is_dir() {
             copy_dir(&src, &dst)?;
         } else {
-            std::fs::copy(&src, &dst)?;
+            gaia_store::copy_file(&src, &dst)?;
             let mode = std::fs::metadata(&dst)?.permissions().mode();
             std::fs::set_permissions(&dst, std::fs::Permissions::from_mode(mode | 0o200))?;
         }

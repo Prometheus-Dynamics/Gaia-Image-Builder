@@ -123,7 +123,7 @@ pub fn build_java(
                 for file in files(&resources, |_| true).map_err(fail)? {
                     let to = classes.join(&file);
                     std::fs::create_dir_all(to.parent().unwrap_or(&classes)).map_err(fail)?;
-                    std::fs::copy(resources.join(&file), to).map_err(fail)?;
+                    gaia_store::copy_file(resources.join(&file), to).map_err(fail)?;
                 }
             }
             let lib = work.dir().join("out/lib");
@@ -143,7 +143,7 @@ pub fn build_java(
             work.run(&jar)?;
             for dep in &jars {
                 let file = dep.file_name().unwrap_or(dep.as_os_str());
-                std::fs::copy(libs_dir.join(dep), lib.join(file)).map_err(fail)?;
+                gaia_store::copy_file(libs_dir.join(dep), lib.join(file)).map_err(fail)?;
             }
             Ok(())
         })?;

@@ -214,7 +214,7 @@ fn copy_writable(from: &Path, to: &Path) -> std::io::Result<()> {
         } else if kind.is_dir() {
             copy_writable(&src, &dst)?;
         } else {
-            std::fs::copy(&src, &dst)?;
+            gaia_store::copy_file(&src, &dst)?;
             let mode = std::fs::metadata(&src)?.permissions().mode() | 0o200;
             std::fs::set_permissions(&dst, std::fs::Permissions::from_mode(mode & 0o7777))?;
         }

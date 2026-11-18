@@ -105,7 +105,7 @@ impl Fixture {
         if !dir.exists() {
             std::fs::create_dir_all(&dir).expect("mkdir");
             for (from, name) in [(&self.dtc, "dtc"), (&self.fdtoverlay, "fdtoverlay")] {
-                std::fs::copy(from, dir.join(name)).expect("copy");
+                gaia_store::copy_file(from, dir.join(name)).expect("copy");
                 std::fs::set_permissions(dir.join(name), std::fs::Permissions::from_mode(0o755))
                     .expect("chmod");
             }

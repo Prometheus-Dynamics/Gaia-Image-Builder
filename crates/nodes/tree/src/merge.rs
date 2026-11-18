@@ -322,7 +322,7 @@ fn write(out: &Path, claims: &BTreeMap<String, Claim>) -> std::io::Result<()> {
         match &claim.node {
             Node::Dir => std::fs::create_dir(&dst)?,
             Node::File => {
-                std::fs::copy(&claim.from, &dst)?;
+                gaia_store::copy_file(&claim.from, &dst)?;
             }
             Node::Link(_) => copy(&claim.from, &dst)?,
         }

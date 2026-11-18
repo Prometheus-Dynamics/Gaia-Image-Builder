@@ -756,6 +756,7 @@ dependencies = [
  "daedalus-registry",
  "daedalus-types",
  "gaia-step",
+ "gaia-store",
  "gaia-types",
  "serde",
  "serde_json",
@@ -1270,6 +1271,7 @@ dependencies = [
  "daedalus-registry",
  "daedalus-types",
  "gaia-step",
+ "gaia-store",
  "gaia-types",
  "tempfile",
 ]

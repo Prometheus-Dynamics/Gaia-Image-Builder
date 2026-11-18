@@ -422,7 +422,7 @@ mod tests {
         for rel in TOUCHED {
             let to = dir.path().join(rel);
             fs::create_dir_all(to.parent().expect("a parent")).expect("dirs");
-            fs::copy(fixture(version).join(rel), to).expect("copy fixture");
+            gaia_store::copy_file(fixture(version).join(rel), to).expect("copy fixture");
         }
         dir
     }

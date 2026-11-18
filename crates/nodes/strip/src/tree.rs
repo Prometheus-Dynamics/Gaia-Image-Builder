@@ -66,7 +66,7 @@ pub fn copy(from: &Path, to: &Path) -> Result<(), String> {
                 dirs.push((src, dst));
             }
             Kind::File => {
-                fs::copy(&src, &dst).map_err(fail)?;
+                gaia_store::copy_file(&src, &dst).map_err(fail)?;
             }
             Kind::Link => {
                 let target = fs::read_link(&src).map_err(fail)?;

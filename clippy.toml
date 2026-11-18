@@ -1,0 +1,6 @@
+# `fs::copy` sets a file's mode before it writes the bytes, and the kernel
+# then clears the setuid and setgid bits. `gaia_store::copy_file` is the one
+# copy: the bytes (or a reflink), then the mode.
+disallowed-methods = [
+    { path = "std::fs::copy", reason = "use gaia_store::copy_file: fs::copy loses setuid and setgid" },
+]

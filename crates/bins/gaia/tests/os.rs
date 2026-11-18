@@ -18,7 +18,7 @@ fn copy_dir(from: &Path, to: &Path) {
         if entry.file_type().expect("type").is_dir() {
             copy_dir(&src, &dst);
         } else {
-            std::fs::copy(&src, &dst).expect("copy");
+            gaia_store::copy_file(&src, &dst).expect("copy");
         }
     }
 }

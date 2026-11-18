@@ -57,7 +57,7 @@ mod verify;
 
 pub use digest::{Digest, file_digest, tree_digest};
 pub use entry::{StepEntry, StepKey};
-pub use fsutil::used_bytes;
+pub use fsutil::{copy_file, used_bytes};
 pub use object::{Kind, ObjectRef};
 pub use placement::{Mode, Room, Settings, parse_size, ram_root};
 pub use retain::{Keep, RetainReport};

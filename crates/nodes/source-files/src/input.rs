@@ -61,7 +61,7 @@ pub fn source_input(store: &str, path: &str, name: &str, cx: &Ctx) -> Result<Tre
             let dir = work.dir().join("tree");
             std::fs::create_dir(&dir).map_err(|e| StepError::body(NAME, e))?;
             let copy = dir.join(name);
-            std::fs::copy(file, &copy)
+            gaia_store::copy_file(file, &copy)
                 .map_err(|e| StepError::body(NAME, format!("{path}: {e}")))?;
             std::fs::set_permissions(&copy, std::fs::Permissions::from_mode(mode))
                 .map_err(|e| StepError::body(NAME, e))?;

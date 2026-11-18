@@ -76,7 +76,7 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
         if entry.file_type()?.is_dir() {
             copy_tree(&entry.path(), &target)?;
         } else {
-            std::fs::copy(entry.path(), &target)?;
+            gaia_store::copy_file(entry.path(), &target)?;
         }
     }
     Ok(())

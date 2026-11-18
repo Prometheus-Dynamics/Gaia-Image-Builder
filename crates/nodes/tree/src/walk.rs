@@ -104,8 +104,7 @@ pub(crate) fn copy(from: &Path, to: &Path) -> io::Result<()> {
         }
         fs::set_permissions(to, meta.permissions())
     } else {
-        fs::copy(from, to)?;
-        fs::set_permissions(to, meta.permissions())
+        gaia_store::copy_file(from, to)
     }
 }
 

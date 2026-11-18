@@ -141,7 +141,7 @@ pub fn build_plan(
     let scratch = store.scratch().map_err(StepError::store(PLAN))?;
     let dir = scratch.path().join("plan");
     fs::create_dir(&dir).map_err(|e| StepError::body(PLAN, e.to_string()))?;
-    fs::copy(store.path(&planned.outputs["plan"]), dir.join(PLAN_FILE))
+    gaia_store::copy_file(store.path(&planned.outputs["plan"]), dir.join(PLAN_FILE))
         .map_err(|e| StepError::body(PLAN, format!("the plan: {e}")))?;
     let object = store.put_tree(&dir).map_err(StepError::store(PLAN))?;
     Ok(Tree {
@@ -523,7 +523,8 @@ fn build_steps(
         let name = entry.file_name().to_string_lossy().into_owned();
         let path = entry.path();
         if name == "packages-file-list-host.txt" {
-            fs::copy(&path, build.join(&name)).map_err(io_fail("the host file list"))?;
+            gaia_store::copy_file(&path, build.join(&name))
+                .map_err(io_fail("the host file list"))?;
             continue;
         }
         if !name.starts_with("host-") || !path.is_dir() {
@@ -534,7 +535,7 @@ fn build_steps(
             let file = file.map_err(io_fail("a package's marks"))?;
             let mark = file.file_name().to_string_lossy().into_owned();
             if mark.starts_with('.') && file.path().is_file() {
-                fs::copy(file.path(), build.join(&name).join(&mark))
+                gaia_store::copy_file(file.path(), build.join(&name).join(&mark))
                     .map_err(io_fail("a package's marks"))?;
                 kept.insert(format!("{name}/{mark}"));
             }

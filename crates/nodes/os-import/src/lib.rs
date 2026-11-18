@@ -275,7 +275,7 @@ fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
         } else if kind.is_dir() {
             copy_dir(&src, &dst)?;
         } else {
-            fs::copy(&src, &dst)?;
+            gaia_store::copy_file(&src, &dst)?;
         }
     }
     fs::set_permissions(to, fs::metadata(from)?.permissions())

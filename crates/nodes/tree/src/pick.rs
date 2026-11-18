@@ -36,7 +36,7 @@ pub fn tree_pick(store: &str, tree: Tree, path: &str, cx: &Ctx) -> Result<Tree, 
             let io = |e: std::io::Error| StepError::body(NAME, e.to_string());
             let to = work.dir().join("tree").join(&relative);
             std::fs::create_dir_all(to.parent().unwrap_or(work.dir())).map_err(io)?;
-            std::fs::copy(&src, &to).map_err(io)?;
+            gaia_store::copy_file(&src, &to).map_err(io)?;
             Ok(())
         },
     )?;

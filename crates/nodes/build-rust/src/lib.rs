@@ -453,7 +453,7 @@ fn collect_package(profile: &Path, out: &Path, files: &[group::Built]) -> Result
         }
         let dir = out.join(file.sub);
         std::fs::create_dir_all(&dir).map_err(fail)?;
-        std::fs::copy(&from, dir.join(&file.file)).map_err(fail)?;
+        gaia_store::copy_file(&from, dir.join(&file.file)).map_err(fail)?;
     }
     std::fs::create_dir_all(out).map_err(fail)
 }
@@ -525,7 +525,7 @@ fn collect(profile: &Path, out: &Path) -> Result<(), StepError> {
         };
         let dir = out.join(sub);
         std::fs::create_dir_all(&dir).map_err(fail)?;
-        std::fs::copy(entry.path(), dir.join(&name)).map_err(fail)?;
+        gaia_store::copy_file(entry.path(), dir.join(&name)).map_err(fail)?;
     }
     std::fs::create_dir_all(out).map_err(fail)
 }

@@ -464,7 +464,7 @@ fn copy_with_libraries(program: &str, root: &Path, ldd: &str) {
     for file in files {
         let dest = root.join(file.trim_start_matches('/'));
         std::fs::create_dir_all(dest.parent().expect("parent")).expect("mkdir");
-        std::fs::copy(&file, &dest).expect("copy");
+        gaia_store::copy_file(&file, &dest).expect("copy");
     }
 }
 

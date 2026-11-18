@@ -260,7 +260,7 @@ pub fn disk_blob(
     let made = Step::new(&store, cx, BLOB, key).look_up_or_make(
         &[("blob", Path::new("blob.bin"))],
         |work| {
-            std::fs::copy(&file, work.dir().join("blob.bin"))
+            gaia_store::copy_file(&file, work.dir().join("blob.bin"))
                 .map(|_| ())
                 .map_err(|e| fail(e.to_string()))
         },

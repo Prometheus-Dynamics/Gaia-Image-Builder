@@ -47,7 +47,7 @@ fn value(kind: ParamType) -> &'static str {
 
 fn copy(from: &Path, to: &Path) {
     std::fs::create_dir_all(to.parent().expect("parent")).expect("mkdir");
-    std::fs::copy(from, to).expect("copy");
+    gaia_store::copy_file(from, to).expect("copy");
 }
 
 /// The product for `recipe`, under `dir`, with its one image.

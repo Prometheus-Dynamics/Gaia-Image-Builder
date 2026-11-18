@@ -270,7 +270,7 @@ fn stage(source: &Path, staging: &Path) -> Result<(), String> {
             std::fs::create_dir_all(&target).map_err(|e| fail("create", &target, e))?;
             dirs.push(target);
         } else if meta.is_file() {
-            std::fs::copy(path, &target).map_err(|e| fail("copy", path, e))?;
+            gaia_store::copy_file(path, &target).map_err(|e| fail("copy", path, e))?;
             std::fs::File::open(&target)
                 .and_then(|f| f.set_times(std::fs::FileTimes::new().set_modified(fixed)))
                 .map_err(|e| fail("time", &target, e))?;
