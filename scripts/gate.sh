@@ -30,8 +30,15 @@ lock() {
 # nextest, cargo test runs the same cases, one binary after another.
 tests() {
   if cargo nextest --version > /dev/null 2>&1; then
-    cargo nextest run --locked --workspace --all-features
-    cargo test --locked --workspace --all-features --doc
+    # Both run and both statuses count: the step fails if either fails,
+    # whether or not errexit applies where the step is called.
+    local cases=0 docs=0
+    cargo nextest run --locked --workspace --all-features || cases=$?
+    cargo test --locked --workspace --all-features --doc || docs=$?
+    if [ "$cases" -ne 0 ] || [ "$docs" -ne 0 ]; then
+      echo "tests failed: nextest exit $cases, doc tests exit $docs" >&2
+      return 1
+    fi
   else
     echo "cargo-nextest not installed: cargo test runs the binaries one at a time"
     cargo test --locked --workspace --all-features
