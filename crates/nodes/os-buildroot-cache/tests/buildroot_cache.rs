@@ -171,6 +171,11 @@ fn offline_build() {
         mirror: String::new(),
         config_only: false,
         dev_reuse: String::new(),
+        bwrap: ["/usr/bin/bwrap"]
+            .into_iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .unwrap_or_default()
+            .into(),
     };
     let (rootfs, _kernel, _dt, _modules, _bootloader, images, config, _kernel_build, _toolchain) =
         build_os(

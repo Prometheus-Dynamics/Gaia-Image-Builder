@@ -45,26 +45,25 @@ board's own security settings, and is not Gaia's to state.
 ## Check it: `--verify`
 
 `gaia build <product.toml> --dev-reuse --verify` builds dev, then builds the
-same product clean, and compares every output and every Buildroot step's
-outputs, file by file. **Run it before trusting a dev image for anything but
-bench iteration.** It exits non-zero and lists the files when anything
-differs.
+same product clean, and compares every output that ships, file by file: every
+product output, and each Buildroot step's outputs except its build side
+(`config`, `kernel-build` and `toolchain`, which are inputs to later steps and
+are compared through what those steps make). **Run it before trusting a dev
+image for anything but bench iteration.** It is pass or fail: it exits 0 when
+everything compared is equal, and non-zero, listing the files, when anything
+differs. A difference is a stale reuse: a bug in the fingerprint.
 
-Some files differ between any two builds of the same inputs, dev or not, and
-are expected in the list: a package's build date (busybox), the build
-directory's path written into a file (the libstdc++ gdb helper, the dbus user
-socket, udev's `hwdb.bin`), files whose layout depends on that path's
-length (util-linux's `mount`, `umount`, `fsck`, `libmount`), and the host
-programs the kernel's build compiles for itself (`kernel-build`'s
-`scripts/…`, `lib/crc/gen_crc*table`, the toolchain's `bin/linux-dtc`),
-which run on the build machine and are not in the image. A difference
-anywhere else is a stale reuse: a bug in the fingerprint.
-
-Until those files are made the same in every build, `--verify` exits
-non-zero for every product that has them, and the outputs made from the
-root (its file system image, the kernel command line that names its hash,
-the boot files, the bundle, the disk) are listed too. Read the list: a dev
-build is good when every Buildroot step's lines are among the files above.
+There is no expected noise. Two clean builds of the same inputs, each from an
+empty store, are byte-identical in everything `--verify` compares, the disk
+image included, because every Buildroot make runs where it sees one fixed
+build directory, `/dev/shm/gaia-buildroot/out`, bound over its real one with
+`bwrap`, and with the date pinned (`SOURCE_DATE_EPOCH` is Buildroot's release
+date, `TZ=UTC`). Without `bwrap` on the build machine a build still runs, in
+its real directory, and two builds then differ where that path is written
+into a file; `--verify` reports them. What still differs
+between two stores is build side only: the Buildroot `.config` names each
+store's own path, and some host libraries and Python caches in the toolchain
+carry dates; none of them is in the image.
 
 ## Disk
 

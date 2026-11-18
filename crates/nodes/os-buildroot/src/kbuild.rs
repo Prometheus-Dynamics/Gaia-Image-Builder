@@ -12,8 +12,12 @@
 //!   `SOURCE_DATE_EPOCH` when nothing sets one, written as `date` writes it in
 //!   UTC. A source with no such line gives the epoch itself.
 //!
+//! Any other package that stamps a build date (BusyBox's banner, for one)
+//! takes it from `SOURCE_DATE_EPOCH`, the same release time, with `TZ` UTC
+//! for one that formats it in local time.
+//!
 //! These are Buildroot's own values under `BR2_REPRODUCIBLE`, without the
-//! rest of what that option changes.
+//! rest of what that option changes. Where the build runs is `place`.
 use std::fs;
 use std::path::Path;
 
@@ -23,11 +27,14 @@ pub(crate) const USER: &str = "gaia";
 pub(crate) const HOST: &str = "gaia";
 
 /// The environment for every make of the Buildroot source at `src`.
-pub(crate) fn env(src: &Path) -> [(&'static str, String); 3] {
+pub(crate) fn env(src: &Path) -> [(&'static str, String); 5] {
+    let epoch = release_epoch(src);
     [
         ("KBUILD_BUILD_USER", USER.to_string()),
         ("KBUILD_BUILD_HOST", HOST.to_string()),
-        ("KBUILD_BUILD_TIMESTAMP", date(release_epoch(src))),
+        ("KBUILD_BUILD_TIMESTAMP", date(epoch)),
+        ("SOURCE_DATE_EPOCH", epoch.to_string()),
+        ("TZ", "UTC".to_string()),
     ]
 }
 

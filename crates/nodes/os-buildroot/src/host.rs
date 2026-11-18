@@ -62,7 +62,8 @@ use std::sync::{Arc, Mutex};
 
 const PLAN: &str = "gaia.os.buildroot.host-plan";
 const NAME: &str = "gaia.os.buildroot.host";
-const KEY_VERSION: u32 = 3;
+/// 4: built at the fixed path the build sees (`place`).
+const KEY_VERSION: u32 = 4;
 /// The work directory a host-tools build expects when no earlier run recorded
 /// its size.
 const WORK_BYTES: u64 = 8 << 30;
@@ -191,6 +192,12 @@ pub fn build_host(
     let mut key = KeyBuilder::new(NAME, KEY_VERSION)
         .input("source", prepared.src_digest)
         .config("make", &host.make)
+        .config(
+            "seen",
+            crate::place::seen(host, Path::new(""))
+                .display()
+                .to_string(),
+        )
         .config("goals", &goals)
         .input("values", Digest::of_bytes(text.as_bytes()));
     key = prepared.patch_config(key);
@@ -417,7 +424,10 @@ fn plan(work: &mut Work<'_>, prepared: &Prepared, host: &BuildrootHost) -> Resul
             .arg("PARALLEL_JOBS=1");
         let values = captured(work, tool)?;
         let mut names: Vec<(String, String)> = vec![
-            (out.display().to_string(), "@out@".into()),
+            (
+                crate::place::seen(host, &out).display().to_string(),
+                "@out@".into(),
+            ),
             (src.display().to_string(), "@buildroot@".into()),
             (host.download_dir.clone(), "@downloads@".into()),
         ];
@@ -490,22 +500,30 @@ fn build_steps(
     // With per-package directories, the goals installed into their own
     // trees: merge them into `host/` as Buildroot's finalize would.
     if ppd::enabled(&resolved) {
-        ppd::merge_host(&out, goals).map_err(io_fail("the host directory"))?;
+        ppd::merge_host(&out, &crate::place::seen(host, &out), goals)
+            .map_err(io_fail("the host directory"))?;
     }
     // Library search paths relative to the binary, as Buildroot does at the
     // end of a whole build and for its SDK.
     if out.join("host/bin/patchelf").is_file() {
-        let fix = Tool::new(src.join("support/scripts/fix-rpath").display().to_string())
-            .arg("host")
+        // Where the build saw them: the rpaths name that path.
+        let seen = crate::place::seen(host, &out);
+        let words = vec![
+            src.join("support/scripts/fix-rpath").display().to_string(),
+            "host".to_string(),
+        ];
+        let mut words = crate::place::wrapped(host, &out, words).into_iter();
+        let fix = Tool::new(words.next().unwrap_or_default())
+            .args(words)
             .cwd(src)
             .env("PATH", crate::PATH)
             .env("LC_ALL", "C")
-            .env("HOST_DIR", out.join("host").display().to_string())
-            .env("STAGING_DIR", out.join("staging").display().to_string())
-            .env("TARGET_DIR", out.join("target").display().to_string())
+            .env("HOST_DIR", seen.join("host").display().to_string())
+            .env("STAGING_DIR", seen.join("staging").display().to_string())
+            .env("TARGET_DIR", seen.join("target").display().to_string())
             .env(
                 "PER_PACKAGE_DIR",
-                out.join("per-package").display().to_string(),
+                seen.join("per-package").display().to_string(),
             )
             .env("PARALLEL_JOBS", host.jobs.to_string());
         work.run(&fix)?;
@@ -542,7 +560,8 @@ fn build_steps(
         }
     }
     let (relocs, links, binaries) =
-        unplant(&seed, &out.display().to_string()).map_err(io_fail("the seed's paths"))?;
+        unplant(&seed, &crate::place::seen(host, &out).display().to_string())
+            .map_err(io_fail("the seed's paths"))?;
     fs::write(seed.join("relocs"), relocs.join("\n")).map_err(io_fail("the seed"))?;
     fs::write(seed.join("links"), links.join("\n")).map_err(io_fail("the seed"))?;
     fs::write(seed.join("binaries"), binaries.join("\n")).map_err(io_fail("the seed"))?;
@@ -655,13 +674,13 @@ pub(crate) fn write_keeping_mode(path: &Path, meta: &fs::Metadata, bytes: &[u8])
 }
 
 /// Plants the seed in the output directory `out`, before Buildroot runs
-/// there: its `host/` and package marks, with `out`'s own path where the
-/// marker is. An empty seed plants nothing.
-pub(crate) fn plant(seed: &Path, out: &Path) -> io::Result<()> {
+/// there: its `host/` and package marks, with `seen`, the path the build
+/// sees `out` at, where the marker is. An empty seed plants nothing.
+pub(crate) fn plant(seed: &Path, out: &Path, seen: &Path) -> io::Result<()> {
     if !seed.join("host").is_dir() {
         return Ok(());
     }
-    let here = out.display().to_string();
+    let here = seen.display().to_string();
     for part in ["host", "build"] {
         crate::out::copy_tree(&seed.join(part), &out.join(part))?;
     }

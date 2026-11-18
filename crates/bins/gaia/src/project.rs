@@ -513,6 +513,7 @@ fn buildroot_host(
             .to_string(),
         config_only: false,
         dev_reuse: String::new(),
+        bwrap: found("bwrap").unwrap_or_default(),
     })
 }
 

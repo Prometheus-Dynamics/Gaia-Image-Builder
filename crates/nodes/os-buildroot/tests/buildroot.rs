@@ -197,6 +197,11 @@ fn a_minimal_aarch64_buildroot_build_and_its_rebuilds() {
         mirror: String::new(),
         config_only: false,
         dev_reuse: String::new(),
+        bwrap: ["/usr/bin/bwrap"]
+            .into_iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .unwrap_or_default()
+            .into(),
     };
     let dir = tempfile::tempdir().expect("tempdir");
     let store_dir = dir.path().join("store");

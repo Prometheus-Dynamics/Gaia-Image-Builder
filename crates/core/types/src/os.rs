@@ -51,6 +51,12 @@ pub struct BuildrootHost {
     /// every build is clean. Never on for a release.
     #[serde(default)]
     pub dev_reuse: String,
+    /// Absolute path of `bwrap` (bubblewrap): each make runs under it with
+    /// its output directory at one fixed path, so two builds of the same
+    /// inputs write the same paths into their files. Empty: none, and the
+    /// build runs at its own path.
+    #[serde(default)]
+    pub bwrap: String,
 }
 
 /// A package Buildroot builds from one of the input trees instead of

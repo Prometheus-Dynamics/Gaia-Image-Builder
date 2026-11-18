@@ -52,10 +52,11 @@ dev builds (bench iteration only; never a release):
                      printed output gets <output>.gaia-build.json beside it,
                      {\"build\":\"dev-reuse\"}, and the run record says so.
   --verify           after the dev build, build the same product clean and
-                     compare every output and Buildroot step, file by file.
-                     Run it before trusting a dev image for anything but the
-                     bench: a difference beyond the known nondeterminism is
-                     a stale reuse.
+                     compare, file by file, every output and what each
+                     Buildroot step ships. Run it before trusting a dev image
+                     for anything but the bench. Two clean builds are equal
+                     in all of it: any difference is a stale reuse, and the
+                     build exits non-zero.
 
 validate checks description files and what they name: no lock, no tools,
 no inputs, no network. It stops at the first bad file, naming the key. Without --kind,

@@ -46,9 +46,8 @@ pub fn build(options: &args::Project) -> Result<(), Stop> {
     }
     Err(Stop {
         code: FAILED,
-        message: "verify: the dev build differs from the clean build; a difference outside \
-                  the files that differ between any two builds (a build date, the build \
-                  directory's path) is a stale reuse"
+        message: "verify: the dev build differs from the clean build: a stale reuse. \
+                  Two clean builds of the same inputs are equal in all of these."
             .into(),
     })
 }

@@ -81,6 +81,7 @@ mod kbuild;
 mod out;
 mod patches;
 mod perms;
+mod place;
 mod ppd;
 mod progress;
 mod times;
@@ -100,8 +101,10 @@ pub(crate) const NAME: &str = "gaia.os.buildroot";
 /// (The check that every config line was taken changes no output, so no
 /// new version.) 3: the host tools another step built, as an input. 4: the
 /// kernel's build user, host and time are fixed (see `kbuild`). 5: a
-/// kernel with Rust keeps `rust/` in `kernel-build` (see `out`).
-const KEY_VERSION: u32 = 5;
+/// kernel with Rust keeps `rust/` in `kernel-build` (see `out`). 6: every
+/// make sees its output directory at one fixed path, and a pinned source date
+/// (see `place`, `kbuild`).
+const KEY_VERSION: u32 = 6;
 /// The work directory an OS build expects when no earlier run recorded its
 /// size: about what a full build leaves in its output directory.
 const WORK_BYTES: u64 = 24 << 30;
@@ -230,7 +233,11 @@ impl Prepared {
         let mut key = KeyBuilder::new(name, version)
             .input("source", self.src_digest)
             .config("base", "allnoconfig")
-            .config("make", &host.make);
+            .config("make", &host.make)
+            .config(
+                "seen",
+                place::seen(host, Path::new("")).display().to_string(),
+            );
         for (name, _, digest) in &self.dirs {
             key = key.input(&format!("input.{name}"), *digest);
         }
@@ -943,8 +950,11 @@ fn build_steps(
             // the build ran in RAM or on disk.
             take(&out.join("host"), &dir.join("toolchain"), warm.is_some())
                 .map_err(io_fail("the toolchain"))?;
-            host::mark_out(&dir.join("toolchain"), &out.display().to_string())
-                .map_err(io_fail("the toolchain's paths"))?;
+            host::mark_out(
+                &dir.join("toolchain"),
+                &place::seen(host, &out).display().to_string(),
+            )
+            .map_err(io_fail("the toolchain's paths"))?;
         }
         None => {
             fs::create_dir(dir.join("kernel-build")).map_err(io_fail("the kernel build"))?;
@@ -984,7 +994,7 @@ fn fresh_out(
     fs::create_dir_all(out).map_err(io_fail("output directory"))?;
     // The host tools another step built, before Buildroot looks: it finds
     // them installed and builds none of them again.
-    host::plant(seed, out).map_err(io_fail("the host tools"))?;
+    host::plant(seed, out, &place::seen(host, out)).map_err(io_fail("the host tools"))?;
     let resolved = configure(NAME, work, prepared, out, host, slot)?;
     // With per-package directories on, the seed's packages get their own
     // trees, complete and installed, before anything builds.
@@ -1027,6 +1037,7 @@ fn warm_out(
         .collect();
     places.push((prepared.src.clone(), "@buildroot@".into()));
     places.push((out.clone(), "@out@".into()));
+    places.push((place::seen(host, &out), "@out@".into()));
     let kconfig_dirclean = std::env::var(dev::KCONFIG_ENV).is_ok_and(|v| v == "dirclean");
     let reuse = if old.is_some() {
         let resolved = configure(NAME, work, prepared, &out, host, slot)?;
@@ -1165,7 +1176,9 @@ pub(crate) fn make_tool(
     goals: &[&str],
     slot: &jobs::Slot<'_>,
 ) -> Tool {
-    let mut words = arguments(host, out, vars, goals, slot.makeflags().is_some()).into_iter();
+    let seen = place::seen(host, out);
+    let words = arguments(host, &seen, vars, goals, slot.makeflags().is_some());
+    let mut words = place::wrapped(host, out, words).into_iter();
     let program = words.next().unwrap_or_default();
     let mut tool = Tool::new(program)
         .cwd(src)
@@ -1173,7 +1186,7 @@ pub(crate) fn make_tool(
         .env("PATH", PATH)
         .env("LC_ALL", "C")
         .env("CCACHE_MAXSIZE", CCACHE_MAX_SIZE)
-        .env("HOME", out.display().to_string());
+        .env("HOME", seen.display().to_string());
     for (name, value) in kbuild::env(src) {
         tool = tool.env(name, value);
     }
@@ -1292,6 +1305,7 @@ mod toolchain_tests {
             download_dir: "/dl".into(),
             config_only: false,
             dev_reuse: String::new(),
+            bwrap: String::new(),
             ccache_dir: String::new(),
             mirror: String::new(),
         }
@@ -1388,6 +1402,7 @@ mod bound_tests {
             mirror: String::new(),
             config_only: false,
             dev_reuse: String::new(),
+            bwrap: String::new(),
         }
     }
 
@@ -1547,6 +1562,8 @@ mod bound_tests {
             debug.contains(r#"("KBUILD_BUILD_TIMESTAMP", "Thu Jan  1 00:00:00 UTC 1970")"#),
             "{debug}"
         );
+        assert!(debug.contains(r#"("SOURCE_DATE_EPOCH", "0")"#), "{debug}");
+        assert!(debug.contains(r#"("TZ", "UTC")"#), "{debug}");
     }
 
     /// A configuration that forces host builds is refused; the option off,

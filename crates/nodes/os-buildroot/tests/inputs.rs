@@ -85,6 +85,7 @@ impl Fixture {
             mirror: String::new(),
             config_only: false,
             dev_reuse: String::new(),
+            bwrap: String::new(),
         };
         let out = build_os(
             &self.store.display().to_string(),

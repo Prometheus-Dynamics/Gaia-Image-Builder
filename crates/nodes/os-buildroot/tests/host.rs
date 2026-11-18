@@ -111,6 +111,7 @@ impl Fixture {
             mirror: String::new(),
             config_only: false,
             dev_reuse: String::new(),
+            bwrap: String::new(),
         }
     }
 

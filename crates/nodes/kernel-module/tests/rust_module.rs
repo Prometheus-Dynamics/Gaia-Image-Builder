@@ -112,6 +112,11 @@ fn host() -> BuildrootHost {
         mirror: String::new(),
         config_only: false,
         dev_reuse: String::new(),
+        bwrap: ["/usr/bin/bwrap"]
+            .into_iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .unwrap_or_default()
+            .into(),
     }
 }
 

@@ -18,10 +18,9 @@
 //!   it); and the build's last line on stderr, `DEV BUILD — not for release`.
 //! - **Checked on demand:** `--verify` builds the same product clean after
 //!   the dev build and compares each output, and each Buildroot step's
-//!   outputs, file by file. Run it before trusting a dev image for anything
-//!   but the bench. Some files differ between any two builds (a build date,
-//!   the build directory's path); a difference anywhere else is a stale
-//!   reuse.
+//!   outputs that ship, file by file. Run it before trusting a dev image for
+//!   anything but the bench. Two clean builds of the same inputs are equal
+//!   in all of these, so any difference is a stale reuse.
 use crate::Stop;
 use crate::record::Run;
 use gaia_store::{Digest, ObjectRef, Store};
@@ -41,6 +40,18 @@ pub const OUTPUTS: &str = "dev-outputs";
 const SIGN: &str = "gaia.sign";
 /// The input that names a signing key's variable.
 const KEY_ENV: &str = "key_env";
+/// A Buildroot step's outputs that never reach an image: its resolved
+/// config, and the kernel build tree and toolchain later steps build with.
+/// What those steps make from them (a module, a program) is an output of
+/// theirs, compared where it ships; the host programs inside them (the
+/// kernel's own build tools, the device-tree compiler) run only on the build
+/// machine.
+const BUILD_SIDE: [&str; 3] = ["config", "kernel-build", "toolchain"];
+
+/// Whether a Buildroot step's output `name` is part of what ships.
+fn ships(name: &str) -> bool {
+    !BUILD_SIDE.contains(&name)
+}
 
 /// The steps of a graph document (`doc`, as JSON) a dev build refuses: each
 /// node that signs, by its label.
@@ -120,8 +131,9 @@ fn copy_any(from: &Path, to: &Path) -> io::Result<()> {
 }
 
 /// What differs between a dev build and a clean build of the same product:
-/// each output, and each Buildroot step's outputs (paired by the config
-/// they resolved), file by file. One line each; empty when they are equal.
+/// each output, and each Buildroot step's outputs that ship (paired by the
+/// config they resolved), file by file. One line each; empty when they are
+/// equal.
 pub fn compare(store: &Store, dev: &Run, clean: &Run) -> Vec<String> {
     let mut lines = Vec::new();
     for (port, output) in &dev.outputs {
@@ -149,7 +161,7 @@ pub fn compare(store: &Store, dev: &Run, clean: &Run) -> Vec<String> {
             ));
             continue;
         };
-        for (name, object) in &outputs {
+        for (name, object) in outputs.iter().filter(|(name, _)| ships(name)) {
             if let Some(twin) = other.get(name) {
                 for diff in differ(store, object, twin) {
                     lines.push(format!("gaia.os.buildroot {name}: {diff}"));
@@ -240,6 +252,25 @@ mod tests {
             {"id": "gaia.flash.image", "label": "p::flash", "consts": {}},
         ]}});
         assert!(check(&unsigned).is_ok());
+    }
+
+    #[test]
+    fn only_what_ships_is_compared() {
+        for name in [
+            "rootfs",
+            "rootfs-entries",
+            "kernel",
+            "modules",
+            "device-trees",
+        ] {
+            assert!(ships(name), "{name}");
+        }
+        for name in ["bootloader", "images"] {
+            assert!(ships(name), "{name}");
+        }
+        for name in ["config", "kernel-build", "toolchain"] {
+            assert!(!ships(name), "{name}");
+        }
     }
 
     #[test]

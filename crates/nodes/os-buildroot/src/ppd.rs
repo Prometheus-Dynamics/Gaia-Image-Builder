@@ -70,9 +70,10 @@ pub(crate) fn enabled(resolved: &str) -> bool {
 /// Copies every tree of `packages` under `out/per-package/` that has a
 /// `host/` into `out/host`, in name order: a file two trees hold is the
 /// later one's. Missing trees are skipped (a package that installed nothing
-/// has none). Then the paths in the merged text files are fixed. Creates
-/// `out/host` when there is no tree at all.
-pub(crate) fn merge_host(out: &Path, packages: &[&str]) -> io::Result<()> {
+/// has none). Then the paths in the merged text files are fixed: they name
+/// `seen`, the path the build saw `out` at. Creates `out/host` when there is
+/// no tree at all.
+pub(crate) fn merge_host(out: &Path, seen: &Path, packages: &[&str]) -> io::Result<()> {
     let host = out.join("host");
     fs::create_dir_all(&host)?;
     let mut names: Vec<&str> = packages.to_vec();
@@ -84,7 +85,7 @@ pub(crate) fn merge_host(out: &Path, packages: &[&str]) -> io::Result<()> {
             copy_into(&tree, &host)?;
         }
     }
-    fix_text_files(&host, out)
+    fix_text_files(&host, seen)
 }
 
 /// Where [`plant`] keeps its reference links and their manifest, in the
@@ -411,7 +412,7 @@ mod tests {
         )
         .expect("script");
         fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).expect("mode");
-        merge_host(out, &["host-b", "host-a", "host-missing"]).expect("merge");
+        merge_host(out, out, &["host-b", "host-a", "host-missing"]).expect("merge");
         let host = out.join("host");
         assert_eq!(
             fs::read_to_string(host.join("share.txt")).expect("share"),
@@ -431,7 +432,7 @@ mod tests {
     #[test]
     fn a_merge_with_no_tree_gives_an_empty_host() {
         let dir = tempfile::tempdir().expect("tempdir");
-        merge_host(dir.path(), &["host-a"]).expect("merge");
+        merge_host(dir.path(), dir.path(), &["host-a"]).expect("merge");
         assert!(dir.path().join("host").is_dir());
         assert!(files(&dir.path().join("host")).expect("list").is_empty());
     }
