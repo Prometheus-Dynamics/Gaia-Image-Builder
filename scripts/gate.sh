@@ -25,11 +25,24 @@ lock() {
   fi
 }
 
+# The tests: every test binary's cases at once under cargo-nextest (each case
+# its own process), then the doc tests, which nextest does not run. Without
+# nextest, cargo test runs the same cases, one binary after another.
+tests() {
+  if cargo nextest --version > /dev/null 2>&1; then
+    cargo nextest run --locked --workspace --all-features
+    cargo test --locked --workspace --all-features --doc
+  else
+    echo "cargo-nextest not installed: cargo test runs the binaries one at a time"
+    cargo test --locked --workspace --all-features
+  fi
+}
+
 if compgen -G "crates/*/*/Cargo.toml" > /dev/null; then
   step lock lock
   step format cargo fmt --all --check
   step clippy cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-  step tests cargo test --locked --workspace --all-features
+  step tests tests
 else
   echo "no crates yet"
 fi
