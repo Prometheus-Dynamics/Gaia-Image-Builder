@@ -55,8 +55,9 @@ else
 fi
 
 # Gaia's code names no board, product or camera. Those live in descriptions.
+# The names are in scripts/product-names; scripts/check.sh reads the same file.
 if compgen -G "crates/*/*/src" > /dev/null; then
-  step "no product names in code" bash -c '! grep -rn -i -E "\b(raze|helios|photonvision|ov9782|ov9281|systemcore|roborio)\b" crates/*/*/src'
+  step "no product names in code" bash -c '! grep -rn -i -E -f scripts/product-names crates/*/*/src'
 fi
 
 if [ -x scripts/check-boundaries.sh ]; then
