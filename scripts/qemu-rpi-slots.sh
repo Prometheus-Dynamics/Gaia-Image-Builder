@@ -346,9 +346,15 @@ plan_boot() {
 	boot_source="$config: ${prefix}$kernel${initramfs:+, $prefix$initramfs}, $prefix$cmdline"
 }
 
+# The machine. With "probe" as $1 it is for a QEMU that starts no guest
+# (dumpdtb, info qtree): its network is user mode with no forwards, so a
+# probe binds no host port and two runs can probe at once. The guest's
+# hardware, and so its device tree, is the same either way.
 machine_args() {
 	local fwd netdev=tap,id=net0,ifname=qtap0,script=no,downscript=no
-	if [[ $net == user ]]; then
+	if [[ ${1:-} == probe ]]; then
+		netdev=user,id=net0
+	elif [[ $net == user ]]; then
 		netdev=user,id=net0
 		for fwd in "${hostfwds[@]}"; do
 			netdev+=",hostfwd=tcp::${fwd%%:*}-:${fwd##*:}"
@@ -366,7 +372,7 @@ machine_args() {
 # device tree of buses.
 disk_transport() {
 	local args
-	mapfile -t args < <(machine_args)
+	mapfile -t args < <(machine_args probe)
 	printf 'info qtree\nquit\n' |
 		"$qemu" "${args[@]}" -S -display none -serial none -monitor stdio 2> /dev/null |
 		awk '/^ *mmio [0-9a-f]+\// { split($2, a, "/"); base = a[1] }
@@ -378,7 +384,7 @@ disk_transport() {
 # boot source's path $3 when there is one.
 make_dtb() {
 	local args base
-	mapfile -t args < <(machine_args)
+	mapfile -t args < <(machine_args probe)
 	"$qemu" "${args[@]}" -machine "dumpdtb=$state/virt.dtb" > /dev/null
 	fdtput -p -t x "$state/virt.dtb" /chosen/bootloader tryboot "$1"
 	fdtput -t x "$state/virt.dtb" /chosen/bootloader boot-mode "$(printf %x "$2")"

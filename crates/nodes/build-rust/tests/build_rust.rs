@@ -146,15 +146,34 @@ fn stored_tree(store: &Path, dir: &Path) -> Tree {
 /// The artifacts, and each file of the output tree: path, size and digest.
 type Built = (Vec<Artifact>, Vec<(String, u64, String)>);
 
-/// Builds `app` in a fresh store; gives its artifacts and their files.
-/// `None` when the image cannot be pulled here.
-fn build(root: &Path, triple: &str, cpu: &str, features: &[&str]) -> Option<Built> {
+/// The image `pulled` into the store at `from`, put into the store at
+/// `store` by its content: the same object, with no second pull.
+fn image_in(store: &Path, from: &Path, pulled: &Tree) -> Tree {
+    let from = Store::open(from).expect("store");
+    let dir = pulled.object.path_in(&from).expect("the pulled image");
+    let object = Store::open(store)
+        .expect("store")
+        .put_tree(&dir)
+        .expect("put")
+        .into();
+    assert_eq!(
+        object, pulled.object,
+        "the image is one object in every store"
+    );
+    Tree {
+        object,
+        entries: pulled.entries.clone(),
+    }
+}
+
+/// Builds `app` with `image` in the store under `root`; gives its artifacts
+/// and their files.
+fn build(root: &Path, image: Tree, triple: &str, cpu: &str, features: &[&str]) -> Built {
     let src = root.join("src");
     let vendor = root.join("vendor");
     workspace(&src);
     vendored(&vendor);
     let store = root.join("store");
-    let image = pull(&store)?;
     let toolchain = toolchain();
     let (tree, artifacts) = build_rust(
         &store.display().to_string(),
@@ -192,7 +211,7 @@ fn build(root: &Path, triple: &str, cpu: &str, features: &[&str]) -> Option<Buil
         }
     }
     files.sort();
-    Some((artifacts, files))
+    (artifacts, files)
 }
 
 /// Whether the toolchain can build `triple` here: a skip unless required.
@@ -222,22 +241,28 @@ fn aarch64_musl_twice_gives_identical_digests() {
         tempfile::tempdir().expect("tempdir"),
         tempfile::tempdir().expect("tempdir"),
     );
+    // The image is pulled once, then put into the other two stores by its
+    // content: one network fetch, and either every build has it or the test
+    // is skipped (a pull that fails for one build of three is no result).
+    let Some(image) = pull(&a.path().join("store")) else {
+        return;
+    };
+    let image_b = image_in(&b.path().join("store"), &a.path().join("store"), &image);
+    let image_c = image_in(&c.path().join("store"), &a.path().join("store"), &image);
     // The two builds compared, and the one with a feature, each in its own
     // store: independent, so they run at once.
     let (first, second, loud) = std::thread::scope(|s| {
-        let first = s.spawn(|| build(a.path(), TRIPLE, "cortex-a55", &[]));
-        let second = s.spawn(|| build(b.path(), TRIPLE, "cortex-a55", &[]));
-        let loud = s.spawn(|| build(c.path(), TRIPLE, "cortex-a55", &["loud"]));
+        let first = s.spawn(|| build(a.path(), image, TRIPLE, "cortex-a55", &[]));
+        let second = s.spawn(|| build(b.path(), image_b, TRIPLE, "cortex-a55", &[]));
+        let loud = s.spawn(|| build(c.path(), image_c, TRIPLE, "cortex-a55", &["loud"]));
         (
             first.join().expect("first build"),
             second.join().expect("second build"),
             loud.join().expect("loud build"),
         )
     });
-    let Some((artifacts, first)) = first else {
-        return;
-    };
-    let (_, second) = second.expect("pulls again");
+    let (artifacts, first) = first;
+    let (_, second) = second;
     println!("{TRIPLE} cortex-a55 (sandboxed, image {IMAGE_DIGEST}):");
     for (path, size, digest) in &first {
         println!("  {path:<12} {size:>8} bytes  {digest}");
@@ -262,7 +287,7 @@ fn aarch64_musl_twice_gives_identical_digests() {
     assert_eq!(artifacts[0].kind, ArtifactKind::Binary);
 
     // A feature is another build.
-    let (_, loud) = loud.expect("pulls");
+    let (_, loud) = loud;
     assert_ne!(loud[0].2, first[0].2);
 
     // The run logs: every tool ran under bubblewrap, and cargo did.
