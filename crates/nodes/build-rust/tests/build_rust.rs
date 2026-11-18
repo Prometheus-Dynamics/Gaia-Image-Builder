@@ -217,14 +217,27 @@ fn aarch64_musl_twice_gives_identical_digests() {
     if !sandbox_here() || !target_here(TRIPLE) {
         return;
     }
-    let (a, b) = (
+    let (a, b, c) = (
+        tempfile::tempdir().expect("tempdir"),
         tempfile::tempdir().expect("tempdir"),
         tempfile::tempdir().expect("tempdir"),
     );
-    let Some((artifacts, first)) = build(a.path(), TRIPLE, "cortex-a55", &[]) else {
+    // The two builds compared, and the one with a feature, each in its own
+    // store: independent, so they run at once.
+    let (first, second, loud) = std::thread::scope(|s| {
+        let first = s.spawn(|| build(a.path(), TRIPLE, "cortex-a55", &[]));
+        let second = s.spawn(|| build(b.path(), TRIPLE, "cortex-a55", &[]));
+        let loud = s.spawn(|| build(c.path(), TRIPLE, "cortex-a55", &["loud"]));
+        (
+            first.join().expect("first build"),
+            second.join().expect("second build"),
+            loud.join().expect("loud build"),
+        )
+    });
+    let Some((artifacts, first)) = first else {
         return;
     };
-    let (_, second) = build(b.path(), TRIPLE, "cortex-a55", &[]).expect("pulls again");
+    let (_, second) = second.expect("pulls again");
     println!("{TRIPLE} cortex-a55 (sandboxed, image {IMAGE_DIGEST}):");
     for (path, size, digest) in &first {
         println!("  {path:<12} {size:>8} bytes  {digest}");
@@ -249,8 +262,7 @@ fn aarch64_musl_twice_gives_identical_digests() {
     assert_eq!(artifacts[0].kind, ArtifactKind::Binary);
 
     // A feature is another build.
-    let c = tempfile::tempdir().expect("tempdir");
-    let (_, loud) = build(c.path(), TRIPLE, "cortex-a55", &["loud"]).expect("pulls");
+    let (_, loud) = loud.expect("pulls");
     assert_ne!(loud[0].2, first[0].2);
 
     // The run logs: every tool ran under bubblewrap, and cargo did.
