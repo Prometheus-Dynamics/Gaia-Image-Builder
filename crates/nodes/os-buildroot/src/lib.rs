@@ -49,6 +49,9 @@
 //! compiler cache is on only when a description says `BR2_CCACHE=y`: that
 //! line is in the key, and the cache's directory is not.
 //!
+//! Every make gets a fixed kernel build user, host and time (see `kbuild`), so
+//! no image carries the builder's login or machine name.
+//!
 //! Settings, from the host (`gaia::project`), none of them in the key:
 //!
 //! - `GAIA_BUILDROOT_DL`: the download directory (`BR2_DL_DIR`). Default:
@@ -73,6 +76,7 @@ mod config;
 mod contract;
 mod host;
 mod jobs;
+mod kbuild;
 mod out;
 mod patches;
 mod perms;
@@ -93,8 +97,9 @@ use std::sync::{Arc, Mutex};
 pub(crate) const NAME: &str = "gaia.os.buildroot";
 /// 2: the root filesystem's owners and modes, from Buildroot's own tar.
 /// (The check that every config line was taken changes no output, so no
-/// new version.) 3: the host tools another step built, as an input.
-const KEY_VERSION: u32 = 3;
+/// new version.) 3: the host tools another step built, as an input. 4: the
+/// kernel's build user, host and time are fixed (see `kbuild`).
+const KEY_VERSION: u32 = 4;
 /// The work directory an OS build expects when no earlier run recorded its
 /// size: about what a full build leaves in its output directory.
 const WORK_BYTES: u64 = 24 << 30;
@@ -910,13 +915,16 @@ pub(crate) fn make_tool(
 ) -> Tool {
     let mut words = arguments(host, out, vars, goals, slot.makeflags().is_some()).into_iter();
     let program = words.next().unwrap_or_default();
-    let tool = Tool::new(program)
+    let mut tool = Tool::new(program)
         .cwd(src)
         .args(words)
         .env("PATH", PATH)
         .env("LC_ALL", "C")
         .env("CCACHE_MAXSIZE", CCACHE_MAX_SIZE)
         .env("HOME", out.display().to_string());
+    for (name, value) in kbuild::env(src) {
+        tool = tool.env(name, value);
+    }
     match slot.makeflags() {
         Some(flags) => tool.env("MAKEFLAGS", flags),
         None => tool,
@@ -1202,6 +1210,35 @@ mod bound_tests {
         assert!(entries.iter().all(|dir| dir.starts_with('/')), "{PATH}");
         assert!(entries.contains(&"/usr/bin"), "{PATH}");
         assert!(!PATH.contains(' ') && !PATH.contains('\t'), "{PATH}");
+    }
+
+    /// Every make names the fixed kernel build user and host, not the
+    /// machine's, and a build time.
+    #[test]
+    fn make_names_no_builder() {
+        let pool = jobs::Jobserver::new(4, false).expect("a pool");
+        let slot = pool.admit(&|| false).expect("a slot");
+        let tool = make_tool(
+            &host(4, ""),
+            Path::new("/src"),
+            Path::new("/out"),
+            &[],
+            &[],
+            &slot,
+        );
+        let debug = format!("{tool:?}");
+        assert!(
+            debug.contains(r#"("KBUILD_BUILD_USER", "gaia")"#),
+            "{debug}"
+        );
+        assert!(
+            debug.contains(r#"("KBUILD_BUILD_HOST", "gaia")"#),
+            "{debug}"
+        );
+        assert!(
+            debug.contains(r#"("KBUILD_BUILD_TIMESTAMP", "Thu Jan  1 00:00:00 UTC 1970")"#),
+            "{debug}"
+        );
     }
 
     /// A configuration that forces host builds is refused; the option off,
