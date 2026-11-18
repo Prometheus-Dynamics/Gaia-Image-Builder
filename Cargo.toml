@@ -26,6 +26,11 @@ dbg_macro = "deny"
 todo = "deny"
 unwrap_used = "warn"
 
+[profile.dev]
+# Line tables keep file:line in backtraces and panics; full debug info more
+# than doubled the target dir (6.9 GB against 3.0 GB) with no build or test time to show for it.
+debug = "line-tables-only"
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
