@@ -41,6 +41,28 @@ The work is a pre-planned list of PRs into `next`.
 - A PR merges when `scripts/gate.sh` passes. Paste the proof named in the brief into the PR
   description.
 
+## Workers
+
+A worker is a session given one change to land. These hold in every repo:
+
+1. The landing gate is the proof. A worker does not run the full gate before pushing: it runs
+   `scripts/check.sh`, the fail-before proof for its change (the test fails without the change,
+   passes with it), and `cargo fmt` and clippy on what it touched. The lander runs
+   `scripts/gate.sh` once. Nothing lands on a red gate.
+2. How many times a proof is repeated is set by its risk and stated with the result, not by habit.
+3. A red landing gate is read and given a named cause before anything is run again. Never rerun in
+   hope.
+4. Heavy jobs at once are capped to the cores they are given.
+5. A worker starts warm: a kept worktree and its build directory, or a seed. Image work reuses the
+   warm store.
+6. A brief names the exact base commit and the files in scope, and is small enough to finish in one
+   context. Long work hands off through a written state file.
+7. Board runners run one per board, in parallel with software work.
+
+A full image build is the costliest proof here. Use one only where the claim is about the whole
+image (two builds from scratch, compared, for reproducibility); a change to one step is shown on
+that step, with the rest of the build taken from the store.
+
 ## Rules
 
 - Gaia is general. No board, product or camera name appears in code. They live in descriptions
