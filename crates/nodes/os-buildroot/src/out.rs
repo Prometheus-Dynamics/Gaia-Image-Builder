@@ -151,9 +151,17 @@ pub fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
         } else if kind.is_dir() {
             copy_tree(&src, &dst)?;
         } else {
-            fs::copy(&src, &dst)?;
+            copy_file(&src, &dst)?;
         }
     }
+    fs::set_permissions(to, fs::metadata(from)?.permissions())
+}
+
+/// A file's bytes, then its mode. `fs::copy` sets the mode first, and the
+/// kernel clears the setuid and setgid bits when a process without
+/// `CAP_FSETID` writes the file.
+fn copy_file(from: &Path, to: &Path) -> io::Result<()> {
+    fs::copy(from, to)?;
     fs::set_permissions(to, fs::metadata(from)?.permissions())
 }
 
@@ -232,7 +240,7 @@ fn copy_kept(from: &Path, to: &Path, rel: &str) -> io::Result<()> {
             if kind.is_symlink() {
                 std::os::unix::fs::symlink(fs::read_link(&src)?, &dest)?;
             } else {
-                fs::copy(&src, &dest)?;
+                copy_file(&src, &dest)?;
             }
         }
     }
@@ -298,6 +306,24 @@ fn build_file(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_copied_tree_keeps_the_special_bits() {
+        use std::os::unix::fs::PermissionsExt;
+        let scratch = tempfile::tempdir().expect("tempdir");
+        let (from, to) = (scratch.path().join("from"), scratch.path().join("to"));
+        fs::create_dir_all(from.join("bin")).expect("dir");
+        for (name, mode) in [("su", 0o4755), ("wall", 0o2755), ("plain", 0o755)] {
+            let file = from.join("bin").join(name);
+            fs::write(&file, name).expect("file");
+            fs::set_permissions(&file, fs::Permissions::from_mode(mode)).expect("mode");
+        }
+        copy_tree(&from, &to).expect("copy");
+        for (name, mode) in [("su", 0o4755), ("wall", 0o2755), ("plain", 0o755)] {
+            let meta = fs::metadata(to.join("bin").join(name)).expect("copied");
+            assert_eq!(meta.permissions().mode() & 0o7777, mode, "{name}");
+        }
+    }
 
     #[test]
     fn files_go_to_the_bucket_their_name_says() {
