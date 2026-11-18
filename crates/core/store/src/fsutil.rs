@@ -108,7 +108,7 @@ fn copy_into(from: &Path, to: &Path) -> io::Result<()> {
     let copied = if from.is_dir() {
         copy_tree(from, &temp).map_err(|e| io::Error::other(e.to_string()))
     } else {
-        fs::copy(from, &temp).map(|_| ())
+        copy_file(from, &temp)
     };
     if let Err(error) = copied {
         let _ = remove_tree(&temp);
@@ -326,7 +326,16 @@ pub(crate) fn copy_file(from: &Path, to: &Path) -> io::Result<()> {
     }
     // A failed clone may have left an empty file behind.
     let _ = fs::remove_file(to);
-    fs::copy(from, to).map(|_| ())
+    plain_copy(from, to)
+}
+
+/// The bytes, then the mode. `fs::copy` sets the mode first, and the kernel
+/// clears the setuid and setgid bits when a process without `CAP_FSETID`
+/// writes the file: a copy where no reflink is possible lost them, and the
+/// tree's digest changed with the file system it was copied on.
+fn plain_copy(from: &Path, to: &Path) -> io::Result<()> {
+    fs::copy(from, to)?;
+    fs::set_permissions(to, fs::metadata(from)?.permissions())
 }
 
 /// The reflink half of [`copy_file`]: `to` must not exist.
@@ -358,6 +367,24 @@ mod tests {
 
     fn failing(_: &Path) -> io::Result<()> {
         Err(io::Error::other("refused"))
+    }
+
+    /// The setuid, setgid and sticky bits survive a copy that is not a
+    /// reflink, as they do a reflink.
+    #[test]
+    fn a_plain_copy_keeps_the_special_bits() {
+        let dir = base();
+        for mode in [0o4755, 0o2755, 0o1755, 0o6711] {
+            let (from, to) = (dir.path().join("from"), dir.path().join("to"));
+            fs::write(&from, b"data").expect("file");
+            fs::set_permissions(&from, fs::Permissions::from_mode(mode)).expect("mode");
+            plain_copy(&from, &to).expect("copy");
+            let copied = fs::metadata(&to).expect("copy").permissions().mode() & 0o7777;
+            assert_eq!(copied, mode, "{mode:o}");
+            assert_eq!(fs::read(&to).expect("bytes"), b"data");
+            fs::remove_file(&from).expect("remove");
+            fs::remove_file(&to).expect("remove");
+        }
     }
 
     #[test]

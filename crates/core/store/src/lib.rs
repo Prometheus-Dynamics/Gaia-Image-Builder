@@ -207,7 +207,7 @@ impl Store {
     pub fn put_file(&self, path: &Path) -> Result<ObjectRef> {
         let scratch = self.scratch()?;
         let copy = scratch.path().join("file");
-        fs::copy(path, &copy).map_err(|e| Error::io("copy", path, e))?;
+        fsutil::copy_file(path, &copy).map_err(|e| Error::io("copy", path, e))?;
         scratch.commit_one(Path::new("file"))
     }
 
