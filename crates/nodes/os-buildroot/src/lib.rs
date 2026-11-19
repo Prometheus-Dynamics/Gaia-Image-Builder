@@ -858,9 +858,11 @@ fn build_steps(
             set.insert(name.to_string());
         }
     });
-    work.run(&build)?;
+    let made = work.run(&build);
     // The planted host tools are links every seeded package shares: one
     // written in place through any of them fails the build (see `ppd`).
+    // Checked when make failed too: the write may be why it failed, and a
+    // failure named for something else must not hide it.
     let started = std::time::Instant::now();
     let changed = ppd::plant_changes(&out).map_err(io_fail("the planted host tools"))?;
     work.detail(
@@ -868,14 +870,19 @@ fn build_steps(
         serde_json::json!({ "changed": changed.len(), "seconds": started.elapsed().as_secs_f64() }),
     );
     if !changed.is_empty() {
+        let make = match &made {
+            Ok(_) => String::new(),
+            Err(error) => format!("\nmake failed as well: {error}"),
+        };
         return Err(fail(format!(
             "{} planted host tool file{} changed in place during the build; the seed's \
-             packages share them as hard links, so the change reached every one of them:\n  {}",
+             packages share them as hard links, so the change reached every one of them:\n  {}{make}",
             changed.len(),
             if changed.len() == 1 { " was" } else { "s were" },
             changed.join("\n  ")
         )));
     }
+    made?;
     let installed = installed.lock().map(|set| set.clone()).unwrap_or_default();
     work.progress(progress::done(&installed, &targets), total);
 
