@@ -18,8 +18,13 @@
 //!   (`CONFIG_CC_IS_CLANG=y` is llvm), or the step refuses. With `llvm` the
 //!   module is built as the kernel was: `LLVM=` the toolchain's
 //!   `opt/llvm-prebuilt/bin/` (clang, lld and the LLVM tools; no
-//!   `CROSS_COMPILE`), and, when the kernel has Rust (`CONFIG_RUST=y`),
-//!   `RUSTC=` its `bin/rustc`.
+//!   `CROSS_COMPILE`). When the kernel has Rust (`CONFIG_RUST=y`), every Rust
+//!   tool is the toolchain's too, named on make's command line and never
+//!   left to PATH: `RUSTC=` and `HOSTRUSTC=` its `bin/rustc`, `BINDGEN=` its
+//!   `bin/bindgen` (a module's Kbuild may run bindgen itself, as the
+//!   kernel's `rust/Makefile` does), and `LIBCLANG_PATH` its
+//!   `opt/llvm-prebuilt/lib`. PATH holds the toolchain and the system's
+//!   directories, never a user's (`~/.cargo/bin`).
 //! - **kernel-modules**: the image's kernel modules, Buildroot's `modules`
 //!   artifact (`<release>/...`).
 //! - **names**: the module names Kbuild builds (`obj-m`), space-separated,
@@ -57,11 +62,14 @@ use std::process::Command;
 const NAME: &str = "gaia.kernel-module";
 /// 2: the kernel toolchain, and modules built with LLVM. 3: modinfo,
 /// depmod and the cross prefix from the toolchain, `ARCH` from the kernel's
-/// `.config`, the source input named `source`.
-const KEY_VERSION: u32 = 3;
+/// `.config`, the source input named `source`. 4: a Rust kernel's bindgen,
+/// host rustc and libclang named from the toolchain.
+const KEY_VERSION: u32 = 4;
 /// Where the toolchain tree holds the pinned LLVM (Gaia's Buildroot patch
 /// 0006, `host-llvm-prebuilt`).
 const LLVM_BIN: &str = "opt/llvm-prebuilt/bin";
+/// Where it holds that LLVM's libclang, which bindgen loads.
+const LLVM_LIB: &str = "opt/llvm-prebuilt/lib";
 /// The directories every tool's PATH ends with, after the toolchain's `bin`.
 const BASE_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 /// Fixed build stamps, so the same source gives the same module bytes.
@@ -156,9 +164,16 @@ pub fn kernel_module(
     };
     let bin = tool_dir.join("bin");
     let llvm = tool_dir.join(LLVM_BIN);
-    let (cc, rustc) = match compile {
+    let (cc, rust) = match compile {
         module::Compile::Gcc => (bin.join(format!("{}gcc", host.cross_compile)), None),
-        module::Compile::Llvm { rust } => (llvm.join("clang"), rust.then(|| bin.join("rustc"))),
+        module::Compile::Llvm { rust } => (
+            llvm.join("clang"),
+            rust.then(|| RustTools {
+                rustc: bin.join("rustc"),
+                bindgen: bin.join("bindgen"),
+                libclang: tool_dir.join(LLVM_LIB),
+            }),
+        ),
     };
     if !cc.is_file() {
         return Err(fail(format!(
@@ -167,11 +182,8 @@ pub fn kernel_module(
             host.cross_compile
         )));
     }
-    if let Some(rustc) = rustc.as_ref().filter(|rustc| !rustc.is_file()) {
-        return Err(fail(format!(
-            "the kernel has Rust, and the toolchain has no rustc {}",
-            rustc.display()
-        )));
+    if let Some(rust) = &rust {
+        rust.check().map_err(fail)?;
     }
     let modules_object = kernel_modules
         .object
@@ -195,9 +207,12 @@ pub fn kernel_module(
 
     let make = tool_version(&host.make, &["--version"]).map_err(fail)?;
     let compiler = tool_version(&path_string(&cc), &["--version"]).map_err(fail)?;
-    let rustc_version = match &rustc {
-        Some(rustc) => tool_version(&path_string(rustc), &["--version"]).map_err(fail)?,
-        None => Vec::new(),
+    let (rustc_version, bindgen_version) = match &rust {
+        Some(rust) => (
+            tool_version(&path_string(&rust.rustc), &["--version"]).map_err(fail)?,
+            tool_version(&path_string(&rust.bindgen), &["--version"]).map_err(fail)?,
+        ),
+        None => (Vec::new(), Vec::new()),
     };
     let modinfo = tool_version(&host.modinfo, &["--version"]).map_err(fail)?;
     let depmod = tool_version(&host.depmod, &["--version"]).map_err(fail)?;
@@ -210,6 +225,7 @@ pub fn kernel_module(
         .config("kernel toolchain", &kernel_toolchain)
         .config("tool cc", compiler)
         .config("tool rustc", rustc_version)
+        .config("tool bindgen", bindgen_version)
         .config("tool modinfo", modinfo)
         .config("tool depmod", depmod)
         .input("source", src_digest)
@@ -230,7 +246,7 @@ pub fn kernel_module(
                     cc: &cc,
                     bin: &bin,
                     llvm: matches!(compile, module::Compile::Llvm { .. }).then_some(llvm.as_path()),
-                    rustc: rustc.as_deref(),
+                    rust: rust.as_ref(),
                 },
                 &release,
                 &names,
@@ -245,13 +261,51 @@ pub fn kernel_module(
 }
 
 /// The compiler the kernel build uses, and the toolchain's `bin` for PATH.
-/// For a kernel built with LLVM, the LLVM `bin` (`LLVM=`), and rustc when it
-/// has Rust.
+/// For a kernel built with LLVM, the LLVM `bin` (`LLVM=`), and the Rust
+/// tools when it has Rust.
 struct Compiler<'a> {
     cc: &'a Path,
     bin: &'a Path,
     llvm: Option<&'a Path>,
-    rustc: Option<&'a Path>,
+    rust: Option<&'a RustTools>,
+}
+
+/// A Rust kernel's tools, all the toolchain's: rustc (for the module and
+/// for the host's procedural macros), bindgen, and the libclang it loads.
+struct RustTools {
+    rustc: PathBuf,
+    bindgen: PathBuf,
+    libclang: PathBuf,
+}
+
+impl RustTools {
+    /// Each is in the toolchain: a Rust kernel's module is not built with a
+    /// tool from anywhere else.
+    fn check(&self) -> Result<(), String> {
+        for (what, path) in [("rustc", &self.rustc), ("bindgen", &self.bindgen)] {
+            if !path.is_file() {
+                return Err(format!(
+                    "the kernel has Rust, and the toolchain has no {what} {}",
+                    path.display()
+                ));
+            }
+        }
+        let has_libclang = fs::read_dir(&self.libclang).is_ok_and(|entries| {
+            entries.flatten().any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("libclang.so")
+            })
+        });
+        if !has_libclang {
+            return Err(format!(
+                "the kernel has Rust, and the toolchain has no libclang in {}",
+                self.libclang.display()
+            ));
+        }
+        Ok(())
+    }
 }
 
 fn check(names: &[String], host: &BuildrootHost) -> Result<(), String> {
@@ -452,6 +506,9 @@ fn make_tool(
     for arg in compile_args(host, compiler) {
         tool = tool.arg(arg);
     }
+    if let Some(rust) = compiler.rust {
+        tool = tool.env("LIBCLANG_PATH", path_string(&rust.libclang));
+    }
     tool.arg("modules")
         .env("PATH", path_env(compiler))
         .env("LC_ALL", "C")
@@ -463,7 +520,9 @@ fn make_tool(
 
 /// make's compiler words: as the kernel was built. gcc: `CC=` the
 /// toolchain's and its `CROSS_COMPILE`. LLVM: `LLVM=` its `bin/` (clang takes
-/// the target from `ARCH`), and `RUSTC=` for a kernel with Rust.
+/// the target from `ARCH`), and for a kernel with Rust `RUSTC=`,
+/// `HOSTRUSTC=` and `BINDGEN=`, so make's own defaults (`rustc`,
+/// `bindgen`, looked up on PATH) are never used.
 fn compile_args(host: &KernelModuleHost, compiler: &Compiler<'_>) -> Vec<String> {
     let Some(llvm) = compiler.llvm else {
         let mut args = vec![format!("CC={}", path_string(compiler.cc))];
@@ -473,8 +532,10 @@ fn compile_args(host: &KernelModuleHost, compiler: &Compiler<'_>) -> Vec<String>
         return args;
     };
     let mut args = vec![format!("LLVM={}/", path_string(llvm))];
-    if let Some(rustc) = compiler.rustc {
-        args.push(format!("RUSTC={}", path_string(rustc)));
+    if let Some(rust) = compiler.rust {
+        args.push(format!("RUSTC={}", path_string(&rust.rustc)));
+        args.push(format!("HOSTRUSTC={}", path_string(&rust.rustc)));
+        args.push(format!("BINDGEN={}", path_string(&rust.bindgen)));
     }
     args
 }
@@ -522,7 +583,7 @@ mod tests {
             cc,
             bin,
             llvm: None,
-            rustc: None,
+            rust: None,
         };
         assert_eq!(
             compile_args(&host(), &gcc),
@@ -538,7 +599,7 @@ mod tests {
             cc: clang,
             bin,
             llvm: Some(llvm),
-            rustc: None,
+            rust: None,
         };
         assert_eq!(
             compile_args(&host(), &c),
@@ -548,13 +609,66 @@ mod tests {
             path_env(&c),
             format!("/t/opt/llvm-prebuilt/bin:/t/bin:{BASE_PATH}")
         );
+        // The plant's mirror: a Rust kernel's every Rust tool is named,
+        // the toolchain's, and libclang is given; none is left to PATH.
+        let tools = RustTools {
+            rustc: "/t/bin/rustc".into(),
+            bindgen: "/t/bin/bindgen".into(),
+            libclang: "/t/opt/llvm-prebuilt/lib".into(),
+        };
         let rust = Compiler {
-            rustc: Some(Path::new("/t/bin/rustc")),
+            rust: Some(&tools),
             ..c
         };
         assert_eq!(
             compile_args(&host(), &rust),
-            ["LLVM=/t/opt/llvm-prebuilt/bin/", "RUSTC=/t/bin/rustc"]
+            [
+                "LLVM=/t/opt/llvm-prebuilt/bin/",
+                "RUSTC=/t/bin/rustc",
+                "HOSTRUSTC=/t/bin/rustc",
+                "BINDGEN=/t/bin/bindgen"
+            ]
         );
+        let make = format!(
+            "{:?}",
+            make_tool(&host(), Path::new("/b"), Path::new("/s"), &rust)
+        );
+        assert!(
+            make.contains(r#"("LIBCLANG_PATH", "/t/opt/llvm-prebuilt/lib")"#),
+            "{make}"
+        );
+        assert!(!make.contains(".cargo"), "{make}");
+        let gcc_make = format!(
+            "{:?}",
+            make_tool(&host(), Path::new("/b"), Path::new("/s"), &gcc)
+        );
+        assert!(
+            !gcc_make.contains("LIBCLANG_PATH") && !gcc_make.contains("BINDGEN"),
+            "{gcc_make}"
+        );
+    }
+
+    /// A toolchain missing any Rust tool is refused by name.
+    #[test]
+    fn a_rust_kernel_without_a_toolchain_rust_tool_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let t = dir.path();
+        let tools = RustTools {
+            rustc: t.join("bin/rustc"),
+            bindgen: t.join("bin/bindgen"),
+            libclang: t.join("opt/llvm-prebuilt/lib"),
+        };
+        fs::create_dir_all(t.join("bin")).expect("bin");
+        fs::create_dir_all(&tools.libclang).expect("lib");
+        let why = tools.check().expect_err("nothing");
+        assert!(why.contains("has no rustc"), "{why}");
+        fs::write(&tools.rustc, "").expect("rustc");
+        let why = tools.check().expect_err("no bindgen");
+        assert!(why.contains("has no bindgen"), "{why}");
+        fs::write(&tools.bindgen, "").expect("bindgen");
+        let why = tools.check().expect_err("no libclang");
+        assert!(why.contains("has no libclang"), "{why}");
+        fs::write(tools.libclang.join("libclang.so.23.1"), "").expect("libclang");
+        tools.check().expect("all three");
     }
 }

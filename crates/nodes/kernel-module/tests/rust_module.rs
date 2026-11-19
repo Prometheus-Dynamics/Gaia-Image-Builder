@@ -10,7 +10,7 @@
 //! `GAIA_STORE`, that build's store. Without them it prints SKIPPED.
 
 use gaia_kernel_module::kernel_module;
-use gaia_step::{Ctx, Store};
+use gaia_step::{Ctx, Store, logs_dir};
 use gaia_types::{Artifact, ArtifactKind, BuildrootHost, Tree};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -184,6 +184,32 @@ fn a_rust_module_builds_against_an_llvm_kernel_and_gcc_is_refused() {
         fs::metadata(&ko).expect("ko").len()
     );
 
+    // The make that built it named every Rust tool, the toolchain's, and
+    // none from a user's PATH.
+    let make_line = newest_make_line(&logs_dir(&store));
+    let toolchain = kernel.toolchain.display().to_string();
+    for word in [
+        format!("BINDGEN={toolchain}/bin/bindgen"),
+        format!("RUSTC={toolchain}/bin/rustc"),
+        format!("HOSTRUSTC={toolchain}/bin/rustc"),
+        format!("LLVM={toolchain}/opt/llvm-prebuilt/bin/"),
+    ] {
+        assert!(make_line.contains(&word), "{word} in {make_line}");
+    }
+    assert!(!make_line.contains(".cargo"), "{make_line}");
+    for tool in ["bin/bindgen", "bin/rustc"] {
+        let out = std::process::Command::new(kernel.toolchain.join(tool))
+            .arg("--version")
+            .env_clear()
+            .output()
+            .expect("version");
+        println!(
+            "ran {tool}: {}",
+            String::from_utf8_lossy(&out.stdout).trim()
+        );
+    }
+    println!("make: {make_line}");
+
     // The planted fault: a kernel build for another release than the
     // image's modules. Its module would not load, and the node refuses it.
     let release = release.to_string_lossy().into_owned();
@@ -214,4 +240,24 @@ fn copy_dir(from: &Path, to: &Path) {
             gaia_store::copy_file(&src, &dst).expect("copy");
         }
     }
+}
+
+/// The command line of the newest module make in the store's run logs.
+fn newest_make_line(logs: &Path) -> String {
+    let mut lines: Vec<(String, String)> = fs::read_dir(logs.join("gaia.kernel-module"))
+        .expect("the node's run logs")
+        .flatten()
+        .filter_map(|entry| {
+            let text = fs::read_to_string(entry.path()).ok()?;
+            let tool = text.lines().find_map(|line| line.strip_prefix("# tool "))?;
+            tool.ends_with(" modules").then(|| {
+                (
+                    entry.file_name().to_string_lossy().into_owned(),
+                    tool.to_string(),
+                )
+            })
+        })
+        .collect();
+    lines.sort();
+    lines.pop().expect("a module make's run log").1
 }
