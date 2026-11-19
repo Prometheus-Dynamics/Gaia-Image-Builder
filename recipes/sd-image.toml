@@ -209,3 +209,13 @@ type = "string"
 default = "/data/slots/root.img"
 description = "Where the running system reads the slot from, for its dm-verity table."
 sets = ["verity.device"]
+
+[consts]
+# mke2fs's own inode count, features and journal size for both filesystems
+# (the tree's inodes, mke2fs's defaults, 1/64 of the image).
+"root.inode_ratio" = 0
+"root.features" = ""
+"root.journal_size" = 0
+"data.inode_ratio" = 0
+"data.features" = ""
+"data.journal_size" = 0

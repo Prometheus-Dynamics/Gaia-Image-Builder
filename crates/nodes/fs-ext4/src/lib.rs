@@ -11,6 +11,12 @@
 //! rounded up to a block), the inode tables, the metadata overhead and the
 //! journal, plus a declared margin, rounded up to 1 MiB.
 //!
+//! Three settings are for a filesystem that grows on the device (a data
+//! partition): `inode_ratio` (`-i`, bytes per inode; 0 gives the inode count
+//! the tree needs, `-N`), `features` (`-O`, a comma list such as
+//! `meta_bg,^resize_inode`; empty for mke2fs's defaults) and `journal_size`
+//! (`-J size=`, in MiB; 0 is 1/64 of the image, 4 to 128 MiB).
+//!
 //! `mke2fs` and `debugfs` are pinned by path; their versions are in the key.
 //! The key is the tree's `owned_digest`, so an owner change remakes it.
 
@@ -36,10 +42,24 @@ const FAKE_TIME: &str = "1";
 
 /// The ext4 image of `tree`: `size` bytes, or sized from the content plus
 /// `margin` bytes when `size` is 0. `label` may be empty; `journal` keeps a
-/// journal (1/64 of the image, 4 to 128 MiB).
+/// journal (`journal_size` MiB, or 1/64 of the image, 4 to 128 MiB, when it
+/// is 0). `inode_ratio` and `features` are mke2fs's `-i` and `-O` (see the
+/// module docs).
 #[node(
     id = "gaia.fs.ext4",
-    inputs(store, mke2fs, debugfs, tree, size, margin, label, journal),
+    inputs(
+        store,
+        mke2fs,
+        debugfs,
+        tree,
+        size,
+        margin,
+        label,
+        journal,
+        inode_ratio,
+        features,
+        journal_size
+    ),
     outputs(image)
 )]
 #[allow(clippy::too_many_arguments)]
@@ -52,10 +72,14 @@ pub fn fs_ext4(
     margin: u64,
     label: &str,
     journal: bool,
+    inode_ratio: u64,
+    features: &str,
+    journal_size: u64,
     cx: &Ctx,
 ) -> Result<Image, StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
     let fail = |e: String| StepError::body(NAME, e);
+    let options = Options::new(journal, inode_ratio, features, journal_size).map_err(fail)?;
     let owned =
         owned_digest(&tree).ok_or_else(|| fail("a tree that is not in the store".into()))?;
     let dir = tree
@@ -70,13 +94,16 @@ pub fn fs_ext4(
             .map_err(|e| fail(format!("{program} -V: {e}")))
             .map(|o| [o.stdout, o.stderr].concat())
     };
-    let key = KeyBuilder::new(NAME, 1)
+    let key = KeyBuilder::new(NAME, 2)
         .config("mke2fs", version(mke2fs)?)
         .config("debugfs", version(debugfs)?)
         .config("size", size.to_string())
         .config("margin", margin.to_string())
         .config("label", label)
         .config("journal", if journal { "yes" } else { "no" })
+        .config("inode ratio", inode_ratio.to_string())
+        .config("features", features)
+        .config("journal size", journal_size.to_string())
         .input("tree", owned)
         .finish();
     let paths = walk(&dir).map_err(|e| fail(format!("{}: {e}", dir.display())))?;
@@ -87,7 +114,7 @@ pub fn fs_ext4(
             let bytes = if size > 0 {
                 size
             } else {
-                auto_bytes(&paths, margin)
+                auto_bytes(&paths, margin, &options)
             };
             if bytes % BLOCK != 0 {
                 return Err(fail(format!(
@@ -98,23 +125,25 @@ pub fn fs_ext4(
             file.set_len(bytes).map_err(|e| fail(e.to_string()))?;
             drop(file);
             let uuid = uuid_of(&owned);
+            if let Some(ratio) = options.inode_ratio {
+                let inodes = bytes / ratio;
+                let needed = inode_count(paths.len());
+                if inodes < needed {
+                    return Err(fail(format!(
+                        "{bytes} bytes at one inode per {ratio} bytes is {inodes} inodes; the tree needs {needed}"
+                    )));
+                }
+            }
             let mut mkfs = Tool::new(mke2fs)
                 .env("E2FSPROGS_FAKE_TIME", FAKE_TIME)
                 .args([
                     "-q", "-F", "-t", "ext4", "-b", "4096", "-I", "256", "-m", "0",
                 ])
-                .arg("-N")
-                .arg(inode_count(paths.len()).to_string())
+                .args(options.mke2fs_args(paths.len(), bytes))
                 .arg("-U")
                 .arg(&uuid)
                 .arg("-E")
                 .arg(format!("hash_seed={uuid},root_owner=0:0"));
-            mkfs = if journal {
-                mkfs.arg("-J")
-                    .arg(format!("size={}", journal_bytes(bytes) / MIB))
-            } else {
-                mkfs.args(["-O", "^has_journal"])
-            };
             if !label.is_empty() {
                 mkfs = mkfs.arg("-L").arg(label);
             }
@@ -205,6 +234,100 @@ fn walk(root: &Path) -> std::io::Result<BTreeMap<String, Found>> {
     Ok(out)
 }
 
+/// The settings mke2fs takes beyond the fixed ones, checked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Options {
+    journal: bool,
+    /// `-i`: bytes per inode, or `None` for the tree's count (`-N`).
+    inode_ratio: Option<u64>,
+    /// `-O` words, the journal's `^has_journal` among them when it has none.
+    features: Vec<String>,
+    /// `-J size=` in MiB, or `None` for 1/64 of the image.
+    journal_mib: Option<u64>,
+}
+
+impl Options {
+    fn new(
+        journal: bool,
+        inode_ratio: u64,
+        features: &str,
+        journal_size: u64,
+    ) -> Result<Options, String> {
+        // mke2fs's own bounds: 1 KiB to 64 MiB, and not below a block.
+        if inode_ratio != 0 && !(BLOCK..=64 * MIB).contains(&inode_ratio) {
+            return Err(format!(
+                "inode_ratio {inode_ratio} is outside {BLOCK} to {} bytes per inode (0 sizes it to the tree)",
+                64 * MIB
+            ));
+        }
+        let mut words = Vec::new();
+        for word in features.split(',').filter(|w| !w.is_empty()) {
+            let name = word.strip_prefix('^').unwrap_or(word);
+            if name.is_empty()
+                || !name
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+            {
+                return Err(format!(
+                    "feature {word:?} is not an ext4 feature name (letters, digits and _, `^` to turn one off)"
+                ));
+            }
+            if name == "has_journal" {
+                return Err(format!(
+                    "feature {word:?}: the journal is the `journal` setting"
+                ));
+            }
+            words.push(word.to_string());
+        }
+        if !journal {
+            words.push("^has_journal".into());
+        }
+        if journal_size != 0 && !journal {
+            return Err(format!(
+                "journal_size {journal_size} MiB for a filesystem with no journal"
+            ));
+        }
+        if journal_size != 0 && !(1..=10240).contains(&journal_size) {
+            return Err(format!(
+                "journal_size {journal_size} MiB is outside mke2fs's 1 to 10240 MiB"
+            ));
+        }
+        Ok(Options {
+            journal,
+            inode_ratio: (inode_ratio != 0).then_some(inode_ratio),
+            features: words,
+            journal_mib: (journal_size != 0).then_some(journal_size),
+        })
+    }
+
+    /// The journal's bytes in an image of `image` bytes: none without one.
+    fn journal_bytes(&self, image: u64) -> u64 {
+        match (self.journal, self.journal_mib) {
+            (false, _) => 0,
+            (true, Some(mib)) => mib * MIB,
+            (true, None) => journal_bytes(image),
+        }
+    }
+
+    /// mke2fs's inode, feature and journal words for a tree of `paths`
+    /// entries in `bytes`.
+    fn mke2fs_args(&self, paths: usize, bytes: u64) -> Vec<String> {
+        let mut args = match self.inode_ratio {
+            Some(ratio) => vec!["-i".to_string(), ratio.to_string()],
+            None => vec!["-N".to_string(), inode_count(paths).to_string()],
+        };
+        if !self.features.is_empty() {
+            args.push("-O".into());
+            args.push(self.features.join(","));
+        }
+        if self.journal {
+            args.push("-J".into());
+            args.push(format!("size={}", self.journal_bytes(bytes) / MIB));
+        }
+        args
+    }
+}
+
 fn inode_count(paths: usize) -> u64 {
     paths as u64 * 2 + 64
 }
@@ -214,14 +337,22 @@ fn journal_bytes(image: u64) -> u64 {
 }
 
 /// The content, inode tables, overhead and journal, plus `margin`, in MiB.
-fn auto_bytes(paths: &BTreeMap<String, Found>, margin: u64) -> u64 {
+/// With an inode ratio, the inode tables grow with the image: one inode of
+/// `INODE_BYTES` per `ratio` bytes of it.
+fn auto_bytes(paths: &BTreeMap<String, Found>, margin: u64, options: &Options) -> u64 {
     let content: u64 = BLOCK
         + paths
             .values()
             .map(|f| f.len.map_or(BLOCK, |len| len.div_ceil(BLOCK) * BLOCK))
             .sum::<u64>();
-    let base = content + inode_count(paths.len()) * INODE_BYTES + OVERHEAD + margin;
-    (base + journal_bytes(base)).div_ceil(MIB) * MIB
+    let base = match options.inode_ratio {
+        None => content + inode_count(paths.len()) * INODE_BYTES + OVERHEAD + margin,
+        Some(ratio) => {
+            let rest = content + OVERHEAD + margin;
+            (rest * ratio).div_ceil(ratio - INODE_BYTES)
+        }
+    };
+    (base + options.journal_bytes(base)).div_ceil(MIB) * MIB
 }
 
 /// A UUID from the tree's digest, version 4 and variant bits set.

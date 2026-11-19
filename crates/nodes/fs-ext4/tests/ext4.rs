@@ -79,6 +79,9 @@ fn image(root: &Path, uid: u32, size: u64) -> (Image, std::path::PathBuf) {
         1024 * 1024,
         "rootfs",
         true,
+        0,
+        "",
+        0,
         &Ctx::new(),
     )
     .expect("builds");
@@ -208,8 +211,164 @@ fn a_fixed_size_is_kept_and_too_small_fails() {
         0,
         "",
         false,
+        0,
+        "",
+        0,
         &Ctx::new(),
     )
     .expect_err("too small");
     println!("64 KiB: {error}");
+}
+
+/// A filesystem made to grow on the device (a data partition): one inode per
+/// `inode_ratio` bytes, the features asked for (`meta_bg`, no
+/// `resize_inode`), and a journal of the size asked for. dumpe2fs reads all
+/// three back, and e2fsck finds it clean.
+#[test]
+fn a_data_filesystem_takes_its_inode_ratio_features_and_journal_size() {
+    if !available() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("src");
+    sample(&src);
+    let store_path = dir.path().join("store");
+    let store = Store::open(&store_path).expect("store");
+    let tree = Tree {
+        object: store.put_tree(&src).expect("put").into(),
+        entries: entries(0),
+    };
+    // 64 MiB: its default journal (1/64, at least 4 MiB) is not the 8 MiB
+    // asked for.
+    let size = 64 * 1024 * 1024;
+    let made = fs_ext4(
+        &store_path.display().to_string(),
+        &tool("mke2fs"),
+        &tool("debugfs"),
+        tree,
+        size,
+        0,
+        "data",
+        true,
+        16384,
+        "meta_bg,^resize_inode",
+        8,
+        &Ctx::new(),
+    )
+    .expect("builds");
+    let path = made.object.path_in(&store).expect("in store");
+    let out = Command::new(tool("dumpe2fs"))
+        .arg("-h")
+        .arg(&path)
+        .env_clear()
+        .output()
+        .expect("dumpe2fs");
+    let text = String::from_utf8_lossy(&out.stdout);
+    let field = |name: &str| {
+        text.lines()
+            .find_map(|l| l.strip_prefix(name))
+            .map(|v| v.trim().to_string())
+            .unwrap_or_else(|| panic!("no {name} in\n{text}"))
+    };
+    assert_eq!(field("Inode count:"), (size / 16384).to_string());
+    let features = field("Filesystem features:");
+    assert!(
+        features.split_whitespace().any(|f| f == "meta_bg"),
+        "{features}"
+    );
+    assert!(
+        !features.split_whitespace().any(|f| f == "resize_inode"),
+        "{features}"
+    );
+    assert!(
+        features.split_whitespace().any(|f| f == "has_journal"),
+        "{features}"
+    );
+    assert_eq!(
+        field("Total journal blocks:"),
+        (8 * 1024 * 1024 / 4096).to_string()
+    );
+    let fsck = Command::new(tool("e2fsck"))
+        .args(["-fn"])
+        .arg(&path)
+        .env_clear()
+        .output()
+        .expect("e2fsck");
+    assert!(
+        fsck.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fsck.stdout)
+    );
+}
+
+/// Settings mke2fs would take wrongly or not at all are refused before it
+/// runs, each by name.
+#[test]
+fn a_data_filesystem_setting_out_of_bounds_is_refused() {
+    if !available() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("src");
+    sample(&src);
+    let store_path = dir.path().join("store");
+    let store = Store::open(&store_path).expect("store");
+    let tree = Tree {
+        object: store.put_tree(&src).expect("put").into(),
+        entries: entries(0),
+    };
+    let run = |journal: bool, ratio: u64, features: &str, journal_size: u64| {
+        fs_ext4(
+            &store_path.display().to_string(),
+            &tool("mke2fs"),
+            &tool("debugfs"),
+            tree.clone(),
+            64 * 1024 * 1024,
+            0,
+            "",
+            journal,
+            ratio,
+            features,
+            journal_size,
+            &Ctx::new(),
+        )
+        .expect_err("refused")
+        .to_string()
+    };
+    let why = run(true, 512, "", 0);
+    assert!(why.contains("inode_ratio 512 is outside"), "{why}");
+    let why = run(true, 0, "meta_bg,-resize_inode", 0);
+    assert!(
+        why.contains("feature \"-resize_inode\" is not an ext4 feature name"),
+        "{why}"
+    );
+    let why = run(true, 0, "^has_journal", 0);
+    assert!(
+        why.contains("the journal is the `journal` setting"),
+        "{why}"
+    );
+    let why = run(false, 0, "", 4);
+    assert!(
+        why.contains("journal_size 4 MiB for a filesystem with no journal"),
+        "{why}"
+    );
+    // A ratio that leaves fewer inodes than the tree has entries.
+    let small = 4 * 1024 * 1024;
+    let why = fs_ext4(
+        &store_path.display().to_string(),
+        &tool("mke2fs"),
+        &tool("debugfs"),
+        tree.clone(),
+        small,
+        0,
+        "",
+        false,
+        64 * 1024 * 1024,
+        "",
+        0,
+        &Ctx::new(),
+    )
+    .expect_err("too few inodes")
+    .to_string();
+    assert!(why.contains("inodes; the tree needs"), "{why}");
 }

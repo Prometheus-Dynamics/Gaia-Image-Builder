@@ -362,3 +362,21 @@ type = "bool"
 default = true
 description = "Whether the data filesystem has a journal."
 sets = ["datafs.journal"]
+
+[parameters.data_inode_ratio]
+type = "int"
+default = 0
+description = "The data filesystem's bytes per inode (mke2fs -i), for a partition that grows on the device; 0 gives the inodes the tree needs."
+sets = ["datafs.inode_ratio"]
+
+[parameters.data_features]
+type = "string"
+default = ""
+description = "The data filesystem's ext4 features, as mke2fs -O takes them (`meta_bg,^resize_inode`); empty for mke2fs's defaults."
+sets = ["datafs.features"]
+
+[parameters.data_journal_size]
+type = "int"
+default = 0
+description = "The data filesystem's journal size in MiB (mke2fs -J size=); 0 is 1/64 of the image, 4 to 128 MiB."
+sets = ["datafs.journal_size"]

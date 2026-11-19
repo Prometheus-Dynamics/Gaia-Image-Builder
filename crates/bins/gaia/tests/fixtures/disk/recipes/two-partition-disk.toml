@@ -75,3 +75,11 @@ sets = ["data.label", "datap.name", "datap.role"]
 type = "string"
 default = "0fc63daf-8483-4772-8e79-3d69d8477de4"
 sets = ["rootp.table_type", "datap.table_type"]
+
+[consts]
+"root.inode_ratio" = 0
+"root.features" = ""
+"root.journal_size" = 0
+"data.inode_ratio" = 0
+"data.features" = ""
+"data.journal_size" = 0
