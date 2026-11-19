@@ -6,7 +6,10 @@
 //! from it. So owners reach the image without root, and the builder's own
 //! uid never does. The UUID comes from the tree's [`owned_digest`], the
 //! build time is 0 and extended attributes are off, so the same tree gives
-//! the same bytes on every host.
+//! the same bytes on every host. The block size is 4096 bytes, named
+//! (`-b4096`), not the build machine's page size, which is mkfs.erofs's
+//! default: a host with 16 KiB pages would make an image a 4 KiB-page
+//! kernel cannot mount. The superblock read back must say 4096.
 //!
 //! Compression is declared: `none`, or one `mkfs.erofs` was built with
 //! (`lz4`, `lz4hc`, `lzma`, `deflate`, `zstd`), with an optional level.
@@ -469,7 +472,8 @@ pub fn image_key(version: &[u8], options: &ImageOptions<'_>, owned: &Digest) -> 
     // 4: the superblock is read back, and the compression, fragments and
     // ztailpacking asked for are checked against it. No image made before
     // that is taken for one that was.
-    let mut key = KeyBuilder::new(NAME, 4)
+    // 5: the block size is 4096, named, and checked in the superblock.
+    let mut key = KeyBuilder::new(NAME, 5)
         .config("mkfs.erofs", version)
         .config("compression", options.compression)
         .config("level", options.level.to_string())
@@ -491,8 +495,8 @@ pub fn image_key(version: &[u8], options: &ImageOptions<'_>, owned: &Digest) -> 
 }
 
 /// The arguments of `mkfs.erofs` that make an image from a tar, all but
-/// the image's path and the tar's: the quiet, tar, deterministic-time and
-/// no-xattr flags, the UUID, the compressor with its level and dictionary,
+/// the image's path and the tar's: the quiet, tar, deterministic-time,
+/// no-xattr and block-size flags, the UUID, the compressor with its level and dictionary,
 /// the cluster, the packing options and `workers` (see [`workers_flag`]).
 pub fn mkfs_options(
     uuid: &str,
@@ -504,6 +508,7 @@ pub fn mkfs_options(
         "--tar=f".into(),
         "-T0".into(),
         "-x-1".into(),
+        format!("-b{}", superblock::BLOCK_SIZE),
         "-U".into(),
         uuid.into(),
     ];
@@ -820,6 +825,7 @@ mod tests {
                 "--tar=f",
                 "-T0",
                 "-x-1",
+                "-b4096",
                 "-U",
                 "6f1c2a3b-4d5e-4f60-8a71-b2c3d4e5f607",
             ]

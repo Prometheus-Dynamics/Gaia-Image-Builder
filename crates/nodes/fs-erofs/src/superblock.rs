@@ -1,7 +1,8 @@
 //! What an erofs image says it was made with, read from its superblock.
 //!
 //! The superblock is 144 bytes at offset 1024 (`erofs_fs.h`, erofs-utils and
-//! the kernel agree): `feature_compat` at 8, `feature_incompat` at 80, the
+//! the kernel agree): `feature_compat` at 8, `blkszbits` at 12 (the block
+//! size is `1 << blkszbits`), `feature_incompat` at 80, the
 //! two-byte `u1` at 84 (the `lz4_max_distance`, or with `compr_cfgs` the
 //! bitmap of compression algorithms), and `packed_nid` at 96. The bits were
 //! checked against `dump.erofs -s` on images made with `mkfs.erofs`:
@@ -21,6 +22,9 @@
 
 /// The magic number at the superblock.
 pub const MAGIC: u32 = 0xE0F5_E1E2;
+/// The block size every image is made with (`mkfs.erofs -b`), and the
+/// superblock must say.
+pub const BLOCK_SIZE: u32 = 4096;
 /// Where the superblock starts in an image.
 const OFFSET: usize = 1024;
 const FEATURE_LZ4_0PADDING: u32 = 0x1;
@@ -32,6 +36,8 @@ const FEATURE_FRAGMENTS: u32 = 0x20;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Superblock {
     pub feature_compat: u32,
+    /// The block size's power of two.
+    pub blkszbits: u8,
     pub feature_incompat: u32,
     pub u1: u16,
     pub packed_nid: u64,
@@ -77,6 +83,7 @@ pub fn read(bytes: &[u8]) -> Result<Superblock, String> {
     let packed_nid = u64::from_le_bytes(at(96, 8)?.try_into().unwrap_or([0; 8]));
     Ok(Superblock {
         feature_compat: word(8)?,
+        blkszbits: at(12, 1)?[0],
         feature_incompat: word(80)?,
         u1,
         packed_nid,
@@ -109,15 +116,23 @@ pub fn compressor(sb: &Superblock) -> Result<Compressor, String> {
     }
 }
 
-/// Checks the image's superblock against what was asked: the compression
-/// (`none`, lz4 or lz4hc, lzma, deflate, zstd), `fragments` and
-/// `ztailpacking`. Returns one line of what the image holds.
+/// Checks the image's superblock against what was asked: the block size
+/// ([`BLOCK_SIZE`]), the compression (`none`, lz4 or lz4hc, lzma, deflate,
+/// zstd), `fragments` and `ztailpacking`. Returns one line of what the image
+/// holds.
 ///
 /// # Errors
 ///
 /// A compressor, fragments or ztailpacking that the image does not hold as
 /// asked, named, so a tool that ignores an option fails the step.
 pub fn check(sb: &Superblock, compression: &str, extended: &[&str]) -> Result<String, String> {
+    let block = 1u64.checked_shl(u32::from(sb.blkszbits)).unwrap_or(0);
+    if block != u64::from(BLOCK_SIZE) {
+        return Err(format!(
+            "the image's blocks are {block} bytes (blkszbits {}), and {BLOCK_SIZE} was asked: the tool did not write it",
+            sb.blkszbits
+        ));
+    }
     let got = compressor(sb)?;
     let (want, label) = match compression {
         "none" => (Compressor::None, "none"),
@@ -165,6 +180,7 @@ mod tests {
         let mut b = vec![0u8; OFFSET + 144];
         b[OFFSET..OFFSET + 4].copy_from_slice(&MAGIC.to_le_bytes());
         b[OFFSET + 8..OFFSET + 12].copy_from_slice(&3u32.to_le_bytes());
+        b[OFFSET + 12] = 12;
         b[OFFSET + 80..OFFSET + 84].copy_from_slice(&incompat.to_le_bytes());
         b[OFFSET + 84..OFFSET + 86].copy_from_slice(&u1.to_le_bytes());
         b[OFFSET + 96..OFFSET + 104].copy_from_slice(&packed_nid.to_le_bytes());
@@ -184,6 +200,21 @@ mod tests {
         assert_eq!(compressor(&sb(0x3, 0x4, 0)), Ok(Compressor::Deflate));
         assert_eq!(compressor(&sb(0x3, 0x8, 0)), Ok(Compressor::Zstd));
         assert!(compressor(&sb(0x3, 0x3, 0)).is_err(), "two algorithms");
+    }
+
+    /// The block size must be the one asked: 4096 reads back, a 16 KiB
+    /// image (a 16 KiB-page host's default) is refused.
+    #[test]
+    fn the_block_size_must_be_4096() {
+        let mut b = image(0, 0, 0);
+        assert_eq!(read(&b).expect("read").blkszbits, 12);
+        assert!(check(&read(&b).expect("read"), "none", &[]).is_ok());
+        b[OFFSET + 12] = 14;
+        let why = check(&read(&b).expect("read"), "none", &[]).expect_err("16 KiB");
+        assert!(
+            why.contains("the image's blocks are 16384 bytes (blkszbits 14), and 4096 was asked"),
+            "{why}"
+        );
     }
 
     /// The image must be an erofs one, and long enough.
