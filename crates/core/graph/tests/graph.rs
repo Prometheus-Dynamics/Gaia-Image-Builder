@@ -315,6 +315,26 @@ fn a_graph_is_cut_down_to_a_step_and_what_it_needs() {
     let planned = cut.plan(&registry).expect("plans");
     assert_eq!(explain_plan(&planned).nodes.len(), 9);
 
+    // One step by its name: that build and what it reads, not the other.
+    let one = whole.clone().until("hello-b.build").expect("cut by name");
+    let labels: Vec<&str> = one
+        .doc
+        .graph
+        .nodes
+        .iter()
+        .map(|n| n.label.as_deref().unwrap_or("host"))
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            "host",
+            "hello-b.build",
+            "hello-b.src",
+            "hello-b.root",
+            "hello-b.vendor"
+        ]
+    );
+
     let why = whole.until("gaia.os.buildroot.host").expect_err("no OS");
     assert!(
         why.starts_with("the product has no step `gaia.os.buildroot.host`; its steps are gaia.build.rust, gaia.compress.tar"),

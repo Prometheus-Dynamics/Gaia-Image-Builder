@@ -137,8 +137,8 @@ pub struct Built {
 }
 
 impl Built {
-    /// The graph cut down to the steps `step` (a node id) and what they
-    /// need: for running a product only as far as a check of it, such as
+    /// The graph cut down to the steps `step` (a node id, or one step by
+    /// its name, such as `<image>.kernel`) and what they need: for running a product only as far as a check of it, such as
     /// the resolution of its OS configuration, with nothing after. No
     /// output is left for the host to take.
     ///
@@ -148,13 +148,15 @@ impl Built {
     pub fn until(mut self, step: &str) -> Result<Self, String> {
         let nodes = &self.doc.graph.nodes;
         let mut keep = vec![false; nodes.len()];
-        let mut todo: Vec<usize> = (1..nodes.len()).filter(|&n| nodes[n].id == step).collect();
+        let mut todo: Vec<usize> = (1..nodes.len())
+            .filter(|&n| nodes[n].id == step || nodes[n].label.as_deref() == Some(step))
+            .collect();
         if todo.is_empty() {
             let mut ids: Vec<&str> = nodes.iter().skip(1).map(|n| n.id.as_str()).collect();
             ids.sort_unstable();
             ids.dedup();
             return Err(format!(
-                "the product has no step `{step}`; its steps are {}",
+                "the product has no step `{step}`; its steps are {} (or one step by its name, as `gaia plan` lists them)",
                 ids.join(", ")
             ));
         }
