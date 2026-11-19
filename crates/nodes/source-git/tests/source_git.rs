@@ -96,9 +96,19 @@ fn checkout_in(
     commit: &str,
     subdir: Option<&String>,
 ) -> Result<(Digest, PathBuf), StepError> {
+    checkout_with(GIT, store, url, commit, subdir)
+}
+
+fn checkout_with(
+    git: &str,
+    store: &Path,
+    url: &str,
+    commit: &str,
+    subdir: Option<&String>,
+) -> Result<(Digest, PathBuf), StepError> {
     let tree = source(
         &store.display().to_string(),
-        GIT,
+        git,
         url,
         commit,
         subdir,
@@ -309,4 +319,54 @@ fn a_missing_or_file_subdir_fails_naming_the_commit() {
             .iter()
             .all(|r| r.report.failed && r.outputs.is_empty())
     );
+}
+
+/// A fetch killed part way (SIGKILL, as a cancelled run kills it) leaves git's
+/// lock files; the step removes those its fetch made, so the next fetch into
+/// the cache works. A lock that was there before the fetch is not its own and
+/// is left.
+#[test]
+fn a_killed_fetch_leaves_no_lock_of_its_own() {
+    let remote = remote();
+    let root = tempfile::tempdir().expect("tempdir");
+    let store = root.path().join("store");
+    checkout(&store, &remote.url, &remote.first).expect("the first commit");
+    let cache = gaia_source_git::cache_repository(
+        &cache_dir(&Store::open(&store).expect("store")),
+        &remote.url,
+    );
+    assert!(cache.join("HEAD").is_file(), "{}", cache.display());
+    // Another process's lock, there before the fetch.
+    let other = cache.join("packed-refs.lock");
+    std::fs::write(&other, "").expect("plant");
+    // git, but a fetch makes git's locks and is killed.
+    let killed = root.path().join("killed-git");
+    std::fs::write(
+        &killed,
+        format!(
+            "#!/bin/sh\ncase \" $* \" in *\" fetch \"*) touch \"$2/shallow.lock\"; mkdir -p \"$2/refs/heads\"; touch \"$2/refs/heads/main.lock\"; kill -KILL $$;; esac\nexec {GIT} \"$@\"\n"
+        ),
+    )
+    .expect("killed-git");
+    std::fs::set_permissions(&killed, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    let error = checkout_with(
+        &killed.display().to_string(),
+        &store,
+        &remote.url,
+        &remote.second,
+        None,
+    )
+    .expect_err("the fetch is killed");
+    println!("killed fetch: {error}");
+    assert!(
+        !cache.join("shallow.lock").exists(),
+        "its shallow.lock is left"
+    );
+    assert!(
+        !cache.join("refs/heads/main.lock").exists(),
+        "its ref lock is left"
+    );
+    assert!(other.exists(), "another process's lock was removed");
+    std::fs::remove_file(&other).expect("the other process is done");
+    checkout(&store, &remote.url, &remote.second).expect("the next fetch works");
 }

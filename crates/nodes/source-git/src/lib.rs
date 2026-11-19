@@ -190,7 +190,12 @@ fn fetch(
     {
         return Ok(());
     }
-    work.run(&git_in(&[
+    // A fetch that is killed (a cancelled run, a fail-fast sibling) leaves
+    // git's lock files behind, and every later fetch into the cache fails on
+    // them. Those it made are removed when it fails; a lock that was there
+    // before it started is not its own, and is left.
+    let before = git_locks(cache);
+    let fetched = work.run(&git_in(&[
         "fetch",
         "--quiet",
         "--no-tags",
@@ -200,8 +205,13 @@ fn fetch(
         "1",
         url,
         commit,
-    ]))
-    .map_err(|error| {
+    ]));
+    if fetched.is_err() {
+        for lock in git_locks(cache).difference(&before) {
+            let _ = fs::remove_file(lock);
+        }
+    }
+    fetched.map_err(|error| {
         let tail = error.stderr_tail().join("\n");
         let mut why = StepError::body(NAME, format!("{url}: cannot fetch commit {commit}: {tail}"));
         if let Some(log) = error.log() {
@@ -223,6 +233,29 @@ fn fetch(
         )
     })?;
     Ok(())
+}
+
+/// git's lock files in a cache repository: at its top (`shallow.lock`,
+/// `packed-refs.lock`, `config.lock`) and under `refs/`.
+fn git_locks(cache: &Path) -> std::collections::BTreeSet<PathBuf> {
+    fn walk(dir: &Path, deep: bool, found: &mut std::collections::BTreeSet<PathBuf>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let is_dir = entry.file_type().is_ok_and(|kind| kind.is_dir());
+            if is_dir && deep {
+                walk(&path, true, found);
+            } else if !is_dir && path.extension().is_some_and(|ext| ext == "lock") {
+                found.insert(path);
+            }
+        }
+    }
+    let mut found = std::collections::BTreeSet::new();
+    walk(cache, false, &mut found);
+    walk(&cache.join("refs"), true, &mut found);
+    found
 }
 
 /// A read-only git query on the cache: its stdout, or `None` when git fails.
