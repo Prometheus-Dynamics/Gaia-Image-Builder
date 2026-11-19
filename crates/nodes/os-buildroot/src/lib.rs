@@ -499,9 +499,9 @@ pub fn build_os(
         Some((PathBuf::from(&host.dev_reuse), identity))
     };
     let step = Step::new(&store, cx, NAME, key.finish());
-    // The seed's plant, known before the work directory is chosen: a
-    // toolchain's host (LLVM's is 2 GB) cloned for each of its packages is
-    // more than RAM can hold, whatever the last build of another seed used.
+    // The seed's plant, known before the work directory is chosen: the
+    // host twice (LLVM's is 2 GB), whatever the last build of another seed
+    // used (see `ppd::plant_bytes`).
     let plant = ppd::plant_bytes(&seed_dir)
         .map_err(|e| StepError::body(NAME, format!("the host tools' size: {e}")))?;
     let made = match &warm {
@@ -859,6 +859,23 @@ fn build_steps(
         }
     });
     work.run(&build)?;
+    // The planted host tools are links every seeded package shares: one
+    // written in place through any of them fails the build (see `ppd`).
+    let started = std::time::Instant::now();
+    let changed = ppd::plant_changes(&out).map_err(io_fail("the planted host tools"))?;
+    work.detail(
+        "plant-check",
+        serde_json::json!({ "changed": changed.len(), "seconds": started.elapsed().as_secs_f64() }),
+    );
+    if !changed.is_empty() {
+        return Err(fail(format!(
+            "{} planted host tool file{} changed in place during the build; the seed's \
+             packages share them as hard links, so the change reached every one of them:\n  {}",
+            changed.len(),
+            if changed.len() == 1 { " was" } else { "s were" },
+            changed.join("\n  ")
+        )));
+    }
     let installed = installed.lock().map(|set| set.clone()).unwrap_or_default();
     work.progress(progress::done(&installed, &targets), total);
 
@@ -964,8 +981,15 @@ fn fresh_out(
     let resolved = configure(NAME, work, prepared, out, host, slot)?;
     // With per-package directories on, the seed's packages get their own
     // trees, complete and installed, before anything builds.
-    host::plant_per_package(seed, out, &resolved)
+    let started = std::time::Instant::now();
+    let files = host::plant_per_package(seed, out, &resolved)
         .map_err(io_fail("the host tools' per-package directories"))?;
+    if files > 0 {
+        work.detail(
+            "plant",
+            serde_json::json!({ "files": files, "seconds": started.elapsed().as_secs_f64() }),
+        );
+    }
     Ok(resolved)
 }
 

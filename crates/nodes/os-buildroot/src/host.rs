@@ -703,12 +703,12 @@ pub(crate) fn plant(seed: &Path, out: &Path) -> io::Result<()> {
 
 /// Plants the seed's packages into `out`'s per-package directories, after
 /// the build's config is resolved: only when that config has them on (see
-/// [`ppd`]). Each seeded package gets a clone of the planted `host/`, so it
+/// [`ppd`]). Each seeded package gets links to the planted `host/`, so it
 /// is complete, and an empty `target/`. A seed with no host packages plants
-/// nothing.
-pub(crate) fn plant_per_package(seed: &Path, out: &Path, resolved: &str) -> io::Result<()> {
+/// nothing. Returns the number of files planted (see [`ppd::plant`]).
+pub(crate) fn plant_per_package(seed: &Path, out: &Path, resolved: &str) -> io::Result<usize> {
     if !ppd::enabled(resolved) || !seed.join("host").is_dir() {
-        return Ok(());
+        return Ok(0);
     }
     let packages = ppd::read_packages(seed)?;
     ppd::plant(&out.join("host"), out, &packages)
