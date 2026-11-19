@@ -195,12 +195,29 @@ pub fn kernel_build_source(build: &Path) -> io::Result<Option<std::path::PathBuf
 /// (drivers, filesystems, networking and so on) is dropped, as the distribution
 /// `kernel-devel` packages do; their `Makefile`, `Kbuild` and `Kconfig` files
 /// stay so the tree still reads as a kernel. Empty directories are not kept.
+///
+/// A kernel built with Rust (`CONFIG_RUST=y` in its `.config`) keeps its
+/// `rust/` too, but for object and dependency files: an external Rust
+/// module is compiled against the crates' metadata (`*.rmeta`), the
+/// procedural macros (`libmacros.so` and the like), the target and the
+/// generated bindings there.
 pub fn copy_kernel_build(from: &Path, to: &Path) -> io::Result<()> {
     fs::create_dir_all(to)?;
-    copy_kept(from, to, "")
+    let config = fs::read_to_string(from.join(".config"))?;
+    let keep = Keep {
+        rust: config.lines().any(|line| line == "CONFIG_RUST=y"),
+    };
+    copy_kept(from, to, "", keep)
 }
 
-fn copy_kept(from: &Path, to: &Path, rel: &str) -> io::Result<()> {
+/// What a kernel build tree keeps beyond what every one does.
+#[derive(Clone, Copy)]
+struct Keep {
+    /// The kernel has Rust: `rust/` is kept.
+    rust: bool,
+}
+
+fn copy_kept(from: &Path, to: &Path, rel: &str, keep: Keep) -> io::Result<()> {
     let dir = if rel.is_empty() {
         from.to_path_buf()
     } else {
@@ -221,12 +238,12 @@ fn copy_kept(from: &Path, to: &Path, rel: &str) -> io::Result<()> {
             // A directory is made only when something in it is kept.
             if !prunes_dir(&child) {
                 fs::create_dir(&dest)?;
-                copy_kept(from, to, &child)?;
+                copy_kept(from, to, &child, keep)?;
                 if fs::read_dir(&dest)?.next().is_none() {
                     fs::remove_dir(&dest)?;
                 }
             }
-        } else if keep_file(&child, &name) {
+        } else if keep_file(&child, &name, keep) {
             let src = from.join(&child);
             let dest = to.join(&child);
             if kind.is_symlink() {
@@ -246,11 +263,16 @@ fn prunes_dir(rel: &str) -> bool {
 }
 
 /// The files a kernel build tree keeps, by path (`rel`) and name.
-fn keep_file(rel: &str, name: &str) -> bool {
+fn keep_file(rel: &str, name: &str, keep: Keep) -> bool {
+    let parts: Vec<&str> = rel.split('/').collect();
+    if keep.rust && parts[0] == "rust" {
+        // The shared objects here are the procedural macros a Rust module's
+        // compiler loads, not leftovers.
+        return name.ends_with(".so") || !is_object_leftover(name);
+    }
     if is_object_leftover(name) {
         return false;
     }
-    let parts: Vec<&str> = rel.split('/').collect();
     if parts[0] == "Documentation" {
         return build_file(name);
     }
@@ -429,6 +451,47 @@ mod tests {
             "tools/perf",
         ] {
             assert!(!to.join(dropped).exists(), "{dropped} is dropped");
+        }
+    }
+
+    /// A kernel built with Rust keeps what an external Rust module is
+    /// compiled against in `rust/`: the crates' metadata, the procedural
+    /// macros, the generated bindings. Its objects go, as everywhere. A
+    /// kernel without Rust keeps none of `rust/` but its build files.
+    #[test]
+    fn a_kernel_with_rust_keeps_its_rust_directory() {
+        const RUST_KEPT: [&str; 5] = [
+            "rust/libkernel.rmeta",
+            "rust/libcore.rmeta",
+            "rust/libmacros.so",
+            "rust/bindings/bindings_generated.rs",
+            "rust/Makefile",
+        ];
+        const RUST_DROPPED: [&str; 3] = ["rust/core.o", "rust/.core.o.cmd", "rust/.kernel.o.d"];
+        for (config, rust) in [
+            ("CONFIG_RUST=y\n", true),
+            ("# CONFIG_RUST is not set\n", false),
+        ] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let from = dir.path().join("linux-1");
+            let write = |rel: &str, text: &str| {
+                fs::create_dir_all(from.join(rel).parent().expect("parent")).expect("mkdir");
+                fs::write(from.join(rel), text).expect("write");
+            };
+            write(".config", &format!("CONFIG_A=y\n{config}"));
+            write("Module.symvers", "");
+            for file in RUST_KEPT.iter().chain(&RUST_DROPPED) {
+                write(file, file);
+            }
+            let to = dir.path().join("kernel-build");
+            copy_kernel_build(&from, &to).expect("copy");
+            for file in RUST_KEPT {
+                let kept = rust || file.ends_with("Makefile");
+                assert_eq!(to.join(file).is_file(), kept, "{config}: {file}");
+            }
+            for file in RUST_DROPPED {
+                assert!(!to.join(file).exists(), "{config}: {file} is dropped");
+            }
         }
     }
 

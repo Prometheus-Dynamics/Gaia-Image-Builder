@@ -99,8 +99,9 @@ pub(crate) const NAME: &str = "gaia.os.buildroot";
 /// 2: the root filesystem's owners and modes, from Buildroot's own tar.
 /// (The check that every config line was taken changes no output, so no
 /// new version.) 3: the host tools another step built, as an input. 4: the
-/// kernel's build user, host and time are fixed (see `kbuild`).
-const KEY_VERSION: u32 = 4;
+/// kernel's build user, host and time are fixed (see `kbuild`). 5: a
+/// kernel with Rust keeps `rust/` in `kernel-build` (see `out`).
+const KEY_VERSION: u32 = 5;
 /// The work directory an OS build expects when no earlier run recorded its
 /// size: about what a full build leaves in its output directory.
 const WORK_BYTES: u64 = 24 << 30;
