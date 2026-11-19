@@ -574,9 +574,15 @@ mod tests {
         // The kernel links its host programs with -fuse-ld=lld when LLVM is
         // set, and HOSTCC is the machine's gcc: the pinned lld is named.
         assert!(
-            linux.contains(r#"HOSTLDFLAGS="-B$(HOST_DIR)/opt/llvm-prebuilt/bin/ -fuse-ld=lld""#),
+            linux.contains(
+                r#"HOSTLDFLAGS="-B$(HOST_DIR)/opt/llvm-prebuilt/bin/ -fuse-ld=lld $(HOST_LDFLAGS)""#
+            ),
             "{linux}"
         );
+        // rustc gets HOSTCC unquoted as its linker, so HOSTCC is the
+        // compiler alone, not Buildroot's compiler-and-flags string.
+        assert!(linux.contains(r#"HOSTCC="$(HOSTCC_NOCCACHE)""#), "{linux}");
+        assert!(linux.contains(r#"HOSTCFLAGS="$(subst -I/,"#), "{linux}");
         assert!(
             linux.contains("LLVM=$(HOST_DIR)/opt/llvm-prebuilt/bin/"),
             "{linux}"

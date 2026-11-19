@@ -62,7 +62,7 @@ diff --git a/linux/linux.mk b/linux/linux.mk
 index b66ec18f..e6ba0d26 100644
 --- a/linux/linux.mk
 +++ b/linux/linux.mk
-@@ -193,6 +193,34 @@ ifeq ($(BR2_LINUX_KERNEL_DTB_OVERLAY_SUPPORT),y)
+@@ -193,6 +193,39 @@ ifeq ($(BR2_LINUX_KERNEL_DTB_OVERLAY_SUPPORT),y)
  LINUX_MAKE_ENV += DTC_FLAGS=-@
  endif
  
@@ -75,6 +75,9 @@ index b66ec18f..e6ba0d26 100644
 +# -fuse-ld=lld, and HOSTCC stays the machine's gcc, which finds no
 +# ld.lld on the PATH: the pre-built LLVM's is named with -B, so the host
 +# programs and kconfig link with the pinned lld.
++# The kernel also hands HOSTCC to rustc as -Clinker=$(HOSTCC), unquoted,
++# so HOSTCC is the compiler alone and the host flags Buildroot puts in it
++# go in HOSTCFLAGS and HOSTLDFLAGS instead: rustc read -O2 as -O -2.
 +ifeq ($(BR2_LINUX_KERNEL_LLVM),y)
 +ifneq ($(BR2_PACKAGE_HOST_RUST_BIN),y)
 +$(error BR2_LINUX_KERNEL_LLVM needs the pre-built Rust compiler (BR2_PACKAGE_HOST_RUST_BIN): the kernel builds its core from rust-src)
@@ -86,7 +89,9 @@ index b66ec18f..e6ba0d26 100644
 +LINUX_MAKE_FLAGS += \
 +	CROSS_COMPILE= \
 +	LLVM=$(HOST_DIR)/opt/llvm-prebuilt/bin/ \
-+	HOSTLDFLAGS="-B$(HOST_DIR)/opt/llvm-prebuilt/bin/ -fuse-ld=lld" \
++	HOSTCC="$(HOSTCC_NOCCACHE)" \
++	HOSTCFLAGS="$(subst -I/,-isystem /,$(subst -I /,-isystem /,$(HOST_CFLAGS)))" \
++	HOSTLDFLAGS="-B$(HOST_DIR)/opt/llvm-prebuilt/bin/ -fuse-ld=lld $(HOST_LDFLAGS)" \
 +	RUSTC=$(HOST_DIR)/bin/rustc \
 +	HOSTRUSTC=$(HOST_DIR)/bin/rustc \
 +	BINDGEN=$(HOST_DIR)/bin/bindgen \
