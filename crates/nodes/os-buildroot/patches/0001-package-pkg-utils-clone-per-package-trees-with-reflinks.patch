@@ -18,9 +18,11 @@ the first file it finds, gave the same result.
 
 On filesystems without reflinks `cp --reflink=auto` falls back to a full
 copy of every file on every `make`, whereas rsync only copies what changed,
-so this is only a win where reflinks are available. Gaia applies it only
-after checking that the output directory supports them; upstream would
-want a config option or a runtime check.
+so this is only a win where reflinks are available. Gaia applies it to
+every build, reflinks or not: without them (a tmpfs work directory) each
+finalize copies HOST_DIR and TARGET_DIR once in full, a cost bounded by
+one copy of each tree, not one per package. Upstream would want a config
+option or a runtime check.
 
 ---
  package/pkg-utils.mk | 4 ++--
