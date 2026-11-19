@@ -571,6 +571,12 @@ mod tests {
             linux.contains("ifeq ($(BR2_LINUX_KERNEL_LLVM),y)"),
             "{linux}"
         );
+        // The kernel links its host programs with -fuse-ld=lld when LLVM is
+        // set, and HOSTCC is the machine's gcc: the pinned lld is named.
+        assert!(
+            linux.contains(r#"HOSTLDFLAGS="-B$(HOST_DIR)/opt/llvm-prebuilt/bin/ -fuse-ld=lld""#),
+            "{linux}"
+        );
         assert!(
             linux.contains("LLVM=$(HOST_DIR)/opt/llvm-prebuilt/bin/"),
             "{linux}"

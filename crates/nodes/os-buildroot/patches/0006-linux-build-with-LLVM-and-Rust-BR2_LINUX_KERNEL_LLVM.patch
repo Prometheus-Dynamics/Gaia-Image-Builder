@@ -62,7 +62,7 @@ diff --git a/linux/linux.mk b/linux/linux.mk
 index b66ec18f..e6ba0d26 100644
 --- a/linux/linux.mk
 +++ b/linux/linux.mk
-@@ -193,6 +193,30 @@ ifeq ($(BR2_LINUX_KERNEL_DTB_OVERLAY_SUPPORT),y)
+@@ -193,6 +193,34 @@ ifeq ($(BR2_LINUX_KERNEL_DTB_OVERLAY_SUPPORT),y)
  LINUX_MAKE_ENV += DTC_FLAGS=-@
  endif
  
@@ -71,7 +71,10 @@ index b66ec18f..e6ba0d26 100644
 +# they are there before it is made. CROSS_COMPILE is emptied (the later of
 +# two values on make's command line is the one taken): clang takes its
 +# target from ARCH. The gcc warning options in LINUX_CFLAGS are not
-+# clang's.
++# clang's. With LLVM set the kernel links its host programs with
++# -fuse-ld=lld, and HOSTCC stays the machine's gcc, which finds no
++# ld.lld on the PATH: the pre-built LLVM's is named with -B, so the host
++# programs and kconfig link with the pinned lld.
 +ifeq ($(BR2_LINUX_KERNEL_LLVM),y)
 +ifneq ($(BR2_PACKAGE_HOST_RUST_BIN),y)
 +$(error BR2_LINUX_KERNEL_LLVM needs the pre-built Rust compiler (BR2_PACKAGE_HOST_RUST_BIN): the kernel builds its core from rust-src)
@@ -83,6 +86,7 @@ index b66ec18f..e6ba0d26 100644
 +LINUX_MAKE_FLAGS += \
 +	CROSS_COMPILE= \
 +	LLVM=$(HOST_DIR)/opt/llvm-prebuilt/bin/ \
++	HOSTLDFLAGS="-B$(HOST_DIR)/opt/llvm-prebuilt/bin/ -fuse-ld=lld" \
 +	RUSTC=$(HOST_DIR)/bin/rustc \
 +	HOSTRUSTC=$(HOST_DIR)/bin/rustc \
 +	BINDGEN=$(HOST_DIR)/bin/bindgen \
