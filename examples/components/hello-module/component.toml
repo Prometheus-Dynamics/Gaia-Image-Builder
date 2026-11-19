@@ -1,0 +1,24 @@
+# An out-of-tree kernel module built for the image's kernel: the form a
+# kernel-module component takes.
+#
+# - `src` holds the module's Kbuild and sources. A git source works the same
+#   way, with `subdir` for a module inside a larger repository
+#   (`git = "...", ref = "...", subdir = "drivers/hello"`).
+# - `names` are the modules Kbuild builds (`obj-m`), each giving <name>.ko.
+# - Nothing else is set: the module is made against the image's own kernel
+#   build, with the toolchain that kernel was built with (the board's
+#   `[kernel] toolchain`, gcc or llvm), and placed under
+#   /lib/modules/<release>/updates/ with depmod's index. A module whose
+#   vermagic is for another release is refused.
+version = 1
+name = "hello-module"
+
+[sources.src]
+path = "src"
+
+[build]
+builder = "kernel-module"
+source = "src"
+
+[build.settings]
+names = ["hello"]

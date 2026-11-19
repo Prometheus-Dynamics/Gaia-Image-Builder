@@ -1,7 +1,7 @@
 //! Laying the descriptions out as nodes and edges.
 
 use crate::os::{self, InputFrom};
-use crate::{Builders, Error, FUSION, HostInput, STEP, Setup};
+use crate::{Builders, Error, FUSION, HostInput, KERNEL_MODULE_BUILDER, STEP, Setup};
 use daedalus::layers::graph::{
     EdgeDoc, EdgePolicyDoc, GraphBody, Lit, NodeDoc, NodeKindDoc, PortRefDoc,
 };
@@ -307,6 +307,20 @@ pub(crate) fn wire(
                     initramfs_members.push(component);
                 }
                 if component.build.is_none() {
+                    continue;
+                }
+                // A kernel module is built with the image's kernel, in its OS.
+                if is_kernel_module(component) {
+                    if list != "components" {
+                        return Err(Error::at(
+                            &component.file,
+                            "build.builder",
+                            format!(
+                                "{name} is a kernel module, placed with the image's kernel: list it in the components of the image {}, not its {list}",
+                                image.name
+                            ),
+                        ));
+                    }
                     continue;
                 }
                 // Once per board: a build takes its target from the board.
@@ -2020,8 +2034,26 @@ fn image_os(
     let mut boot_layers: Vec<u32> = Vec::new();
     // What the kernel's build made that the root filesystem carries: its
     // modules, and its image and device trees when the image wants them.
+    let module_members: Vec<&Component> = at
+        .members
+        .iter()
+        .copied()
+        .filter(|component| is_kernel_module(component))
+        .collect();
+    if let Some(component) = module_members.first()
+        && kernel.is_none()
+    {
+        return Err(Error::at(
+            &component.file,
+            "build.builder",
+            format!(
+                "{} is a kernel module, and the board {} of the image {} has no kernel build of its own to make it against",
+                component.name, at.board.name, at.image.name
+            ),
+        ));
+    }
     if let Some(kernel) = kernel {
-        let under = |g: &mut Graph<'_>, what: &str, port: &str, prefix: &str| {
+        let under = |g: &mut Graph<'_>, what: &str, from: (u32, &str), prefix: &str| {
             let node = g.add(
                 "gaia.tree.under",
                 format!("{name}.kernel.{what}"),
@@ -2030,13 +2062,31 @@ fn image_os(
             )?;
             g.set(node, "owner", Lit::Str("os".into()));
             g.set(node, "prefix", Lit::Str(prefix.into()));
-            g.edge((kernel, port), (node, "from"));
+            g.edge(from, (node, "from"));
             Ok::<u32, Error>(node)
         };
-        layers.push(under(g, "modules", "modules", "/lib/modules")?);
+        // The kernel's modules, then each out-of-tree module's set: each
+        // takes the one before and gives it back with its own placed.
+        let mut modules = (kernel, "modules");
+        for component in &module_members {
+            let node = kernel_module_build(g, at, component)?;
+            g.edge((kernel, "kernel_build"), (node, "kernel_build"));
+            g.edge((kernel, "toolchain"), (node, "toolchain"));
+            g.edge(modules, (node, "kernel_modules"));
+            host_input(
+                g,
+                host_ports,
+                inputs,
+                "buildroot-host",
+                HostInput::Buildroot(buildroot.clone()),
+                (node, "host"),
+            )?;
+            modules = (node, "modules");
+        }
+        layers.push(under(g, "modules", modules, "/lib/modules")?);
         if boot_in_rootfs {
-            boot_layers.push(under(g, "image", "kernel", "/boot")?);
-            boot_layers.push(under(g, "device-trees", "device_trees", "/boot")?);
+            boot_layers.push(under(g, "image", (kernel, "kernel"), "/boot")?);
+            boot_layers.push(under(g, "device-trees", (kernel, "device_trees"), "/boot")?);
         }
     }
     for component in at.members {
@@ -2108,6 +2158,84 @@ fn image_os(
         system,
         initramfs,
     })
+}
+
+/// Whether the component's build is an out-of-tree kernel module.
+fn is_kernel_module(component: &Component) -> bool {
+    component
+        .build
+        .as_ref()
+        .is_some_and(|build| build.builder == KERNEL_MODULE_BUILDER)
+}
+
+/// The build of a kernel-module component, for the image's kernel: its
+/// source, the module names it gives, and the board's kernel toolchain. The
+/// kernel build, toolchain, modules and host are the caller's to wire.
+fn kernel_module_build(
+    g: &mut Graph<'_>,
+    at: &OsIn<'_>,
+    component: &Component,
+) -> Result<u32, Error> {
+    let build = component.build.as_ref().expect("a kernel-module build");
+    let file = &component.file;
+    if let Some(key) = build.settings.keys().find(|key| key.as_str() != "names") {
+        return Err(Error::at(
+            file,
+            format!("build.settings.{key}"),
+            format!(
+                "a kernel-module build takes one setting, `names` (the modules it builds); the kernel, toolchain and host tools come from the image's kernel build, not `{key}`"
+            ),
+        ));
+    }
+    // The node takes the names as one string, space-separated.
+    let names = match build.settings.get("names") {
+        Some(toml::Value::Array(items)) if !items.is_empty() => items
+            .iter()
+            .map(|item| item.as_str().filter(|name| !name.is_empty() && !name.contains(char::is_whitespace)))
+            .collect::<Option<Vec<&str>>>(),
+        _ => None,
+    }
+    .ok_or_else(|| {
+        Error::at(
+            file,
+            "build.settings.names",
+            "a kernel-module build names the modules it builds: `names = [\"<module>\"]`, each giving <module>.ko",
+        )
+    })?;
+    let mut build = build.clone();
+    build
+        .settings
+        .insert("names".into(), names.join(" ").into());
+    let build = &build;
+    if let Some(n) = component
+        .install
+        .iter()
+        .position(|install| matches!(install.from, InstallFrom::Built(_)))
+    {
+        return Err(Error::at(
+            file,
+            format!("install[{n}].from"),
+            "a kernel module's build is placed under /lib/modules/<release>/updates/; install takes nothing from it",
+        ));
+    }
+    let node = component_build(
+        g,
+        component,
+        build,
+        "build",
+        at.lock,
+        at.builders,
+        at.board,
+        false,
+    )?;
+    let toolchain = at
+        .board
+        .kernel
+        .as_ref()
+        .and_then(|kernel| kernel.toolchain.clone())
+        .unwrap_or_else(|| "gcc".into());
+    g.set(node, "kernel_toolchain", Lit::Str(toolchain));
+    Ok(node)
 }
 
 /// A host input on `port`, fed to `to`. One port the images share (the
@@ -2329,7 +2457,8 @@ fn generate_node(g: &mut Graph<'_>, at: &OsIn<'_>, component: &Component) -> Res
                     format!("the product has no component `{wanted}`"),
                 )
             })?;
-            let Some(other_build) = &other.build else {
+            let Some(other_build) = other.build.as_ref().filter(|_| !is_kernel_module(other))
+            else {
                 return Err(Error::at(
                     file,
                     &key,

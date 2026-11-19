@@ -16,7 +16,6 @@ daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", 
 gaia-step = { path = "../../core/step" }
 gaia-store = { path = "../../core/store" }
 gaia-types = { path = "../../core/types" }
-serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 gaia-os-buildroot = { path = "../os-buildroot" }

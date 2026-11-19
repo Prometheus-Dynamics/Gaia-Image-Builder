@@ -2,15 +2,16 @@
 //! with LLVM and Rust (a board with `toolchain = "llvm"` and
 //! `CONFIG_RUST=y`): it builds, its vermagic is the kernel's release, and it
 //! is placed with depmod's index. The same kernel with the board's
-//! toolchain declared gcc is refused, naming both.
+//! toolchain declared gcc is refused, naming both, and so is a kernel build
+//! for another release than the image's modules.
 //!
 //! Gated: it runs only with `GAIA_RUST_KERNEL_RUN`, a run record (the JSON a
 //! build names) whose Buildroot steps include a kernel built so, and
 //! `GAIA_STORE`, that build's store. Without them it prints SKIPPED.
 
-use gaia_kernel_module::{KernelModuleHost, kernel_module};
+use gaia_kernel_module::kernel_module;
 use gaia_step::{Ctx, Store};
-use gaia_types::{Artifact, ArtifactKind, Tree};
+use gaia_types::{Artifact, ArtifactKind, BuildrootHost, Tree};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -100,16 +101,17 @@ fn tree(store: &Store, dir: &Path) -> Tree {
     }
 }
 
-fn host() -> KernelModuleHost {
-    KernelModuleHost {
+fn host() -> BuildrootHost {
+    BuildrootHost {
         make: "/usr/bin/make".into(),
-        modinfo: "/usr/bin/modinfo".into(),
-        depmod: "/usr/bin/depmod".into(),
-        arch: "arm64".into(),
-        cross_compile: String::new(),
         taskset: "/usr/bin/taskset".into(),
         cpus: std::env::var("GAIA_BUILDROOT_CPUS").unwrap_or_default(),
         jobs: 8,
+        download_dir: String::new(),
+        ccache_dir: String::new(),
+        mirror: String::new(),
+        config_only: false,
+        dev_reuse: String::new(),
     }
 }
 
@@ -139,22 +141,23 @@ fn a_rust_module_builds_against_an_llvm_kernel_and_gcc_is_refused() {
         kind: ArtifactKind::parse("modules"),
         object: store.put_tree(&kernel.modules).expect("modules").into(),
     };
-    let run_node = |declared: &str| {
+    let build = tree(&store, &kernel.kernel_build);
+    let run_node = |declared: &str, build: &Tree| {
         kernel_module(
             &store_dir.display().to_string(),
             tree(&store, &src),
-            tree(&store, &kernel.kernel_build),
+            build.clone(),
             tree(&store, &kernel.toolchain),
             declared.into(),
             modules.clone(),
-            vec!["gaia_hello".into()],
-            host(),
+            "gaia_hello".into(),
+            &host(),
             &Ctx::new(),
         )
         .map_err(|error| error.to_string())
     };
 
-    let why = run_node("gcc").expect_err("a clang kernel for a gcc board");
+    let why = run_node("gcc", &build).expect_err("a clang kernel for a gcc board");
     println!("gcc: {why}");
     assert!(
         why.contains(
@@ -163,7 +166,7 @@ fn a_rust_module_builds_against_an_llvm_kernel_and_gcc_is_refused() {
         "{why}"
     );
 
-    let made = run_node("llvm").expect("the Rust module builds");
+    let made = run_node("llvm", &build).expect("the Rust module builds");
     let out = store.path(&made.object.object_ref().expect("an object"));
     let release = fs::read_dir(&out)
         .expect("release dir")
@@ -180,4 +183,35 @@ fn a_rust_module_builds_against_an_llvm_kernel_and_gcc_is_refused() {
         ko.display(),
         fs::metadata(&ko).expect("ko").len()
     );
+
+    // The planted fault: a kernel build for another release than the
+    // image's modules. Its module would not load, and the node refuses it.
+    let release = release.to_string_lossy().into_owned();
+    let mutant_dir = scratch.path().join("kernel-build-mutant");
+    copy_dir(&kernel.kernel_build, &mutant_dir);
+    let header = mutant_dir.join("include/generated/utsrelease.h");
+    let text = fs::read_to_string(&header).expect("utsrelease.h");
+    assert!(text.contains(&release), "{text}");
+    fs::write(&header, text.replace(&release, "0.0.0-gaia-mutant")).expect("plant");
+    let why = run_node("llvm", &tree(&store, &mutant_dir)).expect_err("another release");
+    println!("another release: {why}");
+    assert!(
+        why.contains("0.0.0-gaia-mutant") && why.contains(&release),
+        "{why}"
+    );
+}
+
+fn copy_dir(from: &Path, to: &Path) {
+    fs::create_dir_all(to).expect("mkdir");
+    for entry in fs::read_dir(from).expect("read_dir").flatten() {
+        let (src, dst) = (entry.path(), to.join(entry.file_name()));
+        let kind = entry.file_type().expect("type");
+        if kind.is_symlink() {
+            std::os::unix::fs::symlink(fs::read_link(&src).expect("link"), &dst).expect("link");
+        } else if kind.is_dir() {
+            copy_dir(&src, &dst);
+        } else {
+            gaia_store::copy_file(&src, &dst).expect("copy");
+        }
+    }
 }

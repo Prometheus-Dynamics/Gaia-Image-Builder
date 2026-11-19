@@ -10,7 +10,7 @@
 //! at `/usr/bin/taskset`) and `GAIA_BUILDROOT_JOBS` (default 13). Without the
 //! gate it prints SKIPPED.
 
-use gaia_kernel_module::{KernelModuleHost, kernel_module};
+use gaia_kernel_module::kernel_module;
 use gaia_os_buildroot::{BuildrootHost, ConfigFragment, OsConfig, build_os};
 use gaia_step::{Ctx, Store, logs_dir, step_records};
 use gaia_types::{Artifact, ArtifactKind, Tree};
@@ -94,19 +94,6 @@ fn buildroot_host() -> BuildrootHost {
     }
 }
 
-fn module_host() -> KernelModuleHost {
-    KernelModuleHost {
-        make: "/usr/bin/make".into(),
-        modinfo: "/usr/bin/modinfo".into(),
-        depmod: "/usr/bin/depmod".into(),
-        arch: "arm64".into(),
-        cross_compile: "aarch64-linux-".into(),
-        taskset: "/usr/bin/taskset".into(),
-        cpus: cpus(),
-        jobs: jobs(),
-    }
-}
-
 fn module_source(scratch: &Path) -> PathBuf {
     let dir = scratch.join("hello");
     fs::create_dir_all(&dir).expect("module dir");
@@ -138,8 +125,8 @@ fn run_module(
         toolchain,
         "gcc".into(),
         modules,
-        vec!["hello".into()],
-        module_host(),
+        "hello".into(),
+        &buildroot_host(),
         &Ctx::new(),
     )
     .map_err(|error| error.to_string())?;

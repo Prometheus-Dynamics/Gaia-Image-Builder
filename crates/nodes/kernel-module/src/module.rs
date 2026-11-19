@@ -104,6 +104,56 @@ pub fn placed_path(release: &str, name: &str) -> String {
     format!("{release}/{UPDATES_DIR}/{name}.ko")
 }
 
+/// The kernel's `ARCH`, from its `.config`: the one architecture symbol it
+/// sets. The module is built for the architecture the kernel was.
+pub fn arch_of(config: &str) -> Result<&'static str, String> {
+    const ARCHES: [(&str, &str); 7] = [
+        ("CONFIG_ARM64", "arm64"),
+        ("CONFIG_ARM", "arm"),
+        ("CONFIG_X86", "x86"),
+        ("CONFIG_RISCV", "riscv"),
+        ("CONFIG_MIPS", "mips"),
+        ("CONFIG_PPC", "powerpc"),
+        ("CONFIG_LOONGARCH", "loongarch"),
+    ];
+    let set: Vec<&str> = ARCHES
+        .iter()
+        .filter(|(symbol, _)| config.lines().any(|line| line == format!("{symbol}=y")))
+        .map(|(_, arch)| *arch)
+        .collect();
+    match set.as_slice() {
+        [arch] => Ok(arch),
+        [] => Err("the kernel build's .config sets no architecture Gaia knows (CONFIG_ARM64, CONFIG_ARM, CONFIG_X86, CONFIG_RISCV, CONFIG_MIPS, CONFIG_PPC, CONFIG_LOONGARCH)".into()),
+        more => Err(format!(
+            "the kernel build's .config sets more than one architecture: {}",
+            more.join(", ")
+        )),
+    }
+}
+
+/// The toolchain's `CROSS_COMPILE` prefix, from the target C compiler
+/// Buildroot records in its toolchain's `share/buildroot/toolchainfile.cmake`
+/// (`set(CMAKE_C_COMPILER "${RELOCATED_HOST_DIR}/bin/<prefix>gcc")`).
+pub fn cross_prefix(toolchainfile: &str) -> Result<String, String> {
+    const LEAD: &str = "set(CMAKE_C_COMPILER \"${RELOCATED_HOST_DIR}/bin/";
+    let mut found = toolchainfile
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix(LEAD))
+        .filter_map(|rest| rest.strip_suffix("\")"));
+    let (Some(compiler), None) = (found.next(), found.next()) else {
+        return Err(
+            "the toolchain's toolchainfile.cmake does not name one target C compiler in its bin/"
+                .into(),
+        );
+    };
+    match compiler.strip_suffix("gcc") {
+        Some(prefix) if !prefix.contains('/') => Ok(prefix.to_string()),
+        _ => Err(format!(
+            "the toolchain's target C compiler {compiler:?} is not a gcc in its bin/"
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +232,49 @@ mod tests {
             why.contains("kernel toolchain \"clang\" is not one"),
             "{why}"
         );
+    }
+
+    #[test]
+    fn the_architecture_is_the_one_the_kernel_config_sets() {
+        assert_eq!(arch_of("CONFIG_64BIT=y\nCONFIG_ARM64=y\n"), Ok("arm64"));
+        assert_eq!(arch_of("CONFIG_X86_64=y\nCONFIG_X86=y\n"), Ok("x86"));
+        assert_eq!(arch_of("CONFIG_RISCV=y\n"), Ok("riscv"));
+        // A symbol that only starts like one is not it.
+        assert_eq!(
+            arch_of("CONFIG_ARM=y\nCONFIG_ARM64_4K_PAGES=y\n"),
+            Ok("arm")
+        );
+        let why = arch_of("# CONFIG_ARM64 is not set\n").expect_err("none");
+        assert!(why.contains("sets no architecture"), "{why}");
+        let why = arch_of("CONFIG_ARM64=y\nCONFIG_X86=y\n").expect_err("two");
+        assert!(
+            why.contains("more than one architecture: arm64, x86"),
+            "{why}"
+        );
+    }
+
+    #[test]
+    fn the_cross_prefix_is_the_toolchains_recorded_compiler() {
+        let file = |compiler: &str| {
+            format!(
+                "if(NOT DEFINED CMAKE_C_COMPILER)\n  set(CMAKE_C_COMPILER \"${{RELOCATED_HOST_DIR}}/bin/{compiler}\")\nendif()\n  set(CMAKE_CXX_COMPILER \"${{RELOCATED_HOST_DIR}}/bin/aarch64-linux-g++\")\n"
+            )
+        };
+        assert_eq!(
+            cross_prefix(&file("aarch64-linux-gcc")),
+            Ok("aarch64-linux-".into())
+        );
+        assert_eq!(
+            cross_prefix(&file("riscv64-buildroot-linux-musl-gcc")),
+            Ok("riscv64-buildroot-linux-musl-".into())
+        );
+        let why = cross_prefix(&file("aarch64-linux-clang")).expect_err("not gcc");
+        assert!(why.contains("is not a gcc"), "{why}");
+        let why = cross_prefix(&file("sub/aarch64-linux-gcc")).expect_err("a path");
+        assert!(why.contains("is not a gcc"), "{why}");
+        let why = cross_prefix("project(x)\n").expect_err("none");
+        assert!(why.contains("does not name one target C compiler"), "{why}");
+        let two = format!("{}{}", file("a-gcc"), file("b-gcc"));
+        assert!(cross_prefix(&two).is_err());
     }
 }

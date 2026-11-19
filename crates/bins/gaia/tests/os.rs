@@ -2041,3 +2041,104 @@ fn the_host_plan_does_not_wait_for_the_trees_it_does_not_read() {
         assert!(!text.contains(edge), "the plan waits for {edge:?}");
     }
 }
+
+/// A kernel-module component is built against the image's kernel build,
+/// with its toolchain, after the kernel's own modules, and its set is what
+/// /lib/modules takes. It sets only `names`; anything the kernel build gives
+/// is refused as a setting. It is not a root filesystem layer, a program, an
+/// initramfs member or anything on a board with no kernel build.
+#[test]
+fn a_kernel_module_is_built_against_the_image_kernel() {
+    let dir = project();
+    let product = dir
+        .path()
+        .join("examples/products/zero-3e-demo/product.toml");
+    let component = dir
+        .path()
+        .join("examples/components/hello-module/component.toml");
+    edit(
+        &product,
+        "hello-rust = \"../../components/hello-rust/component.toml\"\n",
+        "hello-rust = \"../../components/hello-rust/component.toml\"\nhello-module = \"../../components/hello-module/component.toml\"\n",
+    );
+    edit(
+        &product,
+        "\"hello-rust\"]",
+        "\"hello-rust\", \"hello-module\"]",
+    );
+    let out = plan(dir.path(), &[]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    for line in [
+        "hello-module.build                      gaia.kernel-module",
+        "hello-module.src.tree -> hello-module.build.source",
+        "zero-3e-demo.kernel.kernel_build -> hello-module.build.kernel_build",
+        "zero-3e-demo.kernel.toolchain -> hello-module.build.toolchain",
+        "zero-3e-demo.kernel.modules -> hello-module.build.kernel_modules",
+        "host.buildroot-host -> hello-module.build.host",
+        "hello-module.build.modules -> zero-3e-demo.kernel.modules.from",
+    ] {
+        assert!(text.contains(line), "{line}\n{text}");
+    }
+    // The kernel's own set no longer goes straight to /lib/modules, and the
+    // module's build is no layer of its own.
+    assert!(!text.contains("zero-3e-demo.kernel.modules -> zero-3e-demo.kernel.modules.from"));
+    assert!(!text.contains("hello-module.layer"), "{text}");
+
+    let refused = |want: &str| {
+        let out = plan(dir.path(), &[]);
+        assert_eq!(out.status.code(), Some(2));
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(want), "{want}\n{err}");
+    };
+    // A setting the kernel build gives.
+    edit(
+        &component,
+        "names = [\"hello\"]",
+        "names = [\"hello\"]\nkernel_toolchain = \"gcc\"",
+    );
+    refused("build.settings.kernel_toolchain: a kernel-module build takes one setting, `names`");
+    edit(&component, "\nkernel_toolchain = \"gcc\"", "");
+    // No module named.
+    edit(&component, "names = [\"hello\"]", "names = []");
+    refused("build.settings.names: a kernel-module build names the modules it builds");
+    edit(&component, "names = []", "names = [\"hello\"]");
+    // A file taken from its build.
+    let text = std::fs::read_to_string(&component).expect("read");
+    std::fs::write(
+        &component,
+        format!("{text}\n[[install]]\nfrom = \"hello.ko\"\nto = \"/hello.ko\"\n"),
+    )
+    .expect("write");
+    refused(
+        "install[0].from: a kernel module's build is placed under /lib/modules/<release>/updates/",
+    );
+    std::fs::write(&component, text).expect("write");
+    // In the initramfs.
+    edit(
+        &product,
+        "\"hello-rust\", \"hello-module\"]",
+        "\"hello-rust\"]\ninitramfs = [\"hello-module\"]",
+    );
+    refused(
+        "hello-module is a kernel module, placed with the image's kernel: list it in the components of the image zero-3e-demo, not its initramfs",
+    );
+    edit(
+        &product,
+        "\"hello-rust\"]\ninitramfs = [\"hello-module\"]",
+        "\"hello-rust\", \"hello-module\"]",
+    );
+    // On a board with no kernel build.
+    edit(
+        &product,
+        "boards/zero-3e/board.toml",
+        "boards/generic-test/board.toml",
+    );
+    refused(
+        "hello-module is a kernel module, and the board generic-test of the image zero-3e-demo has no kernel build of its own",
+    );
+}

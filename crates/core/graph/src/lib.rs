@@ -99,6 +99,11 @@ pub struct Setup {
     pub inputs: BTreeMap<String, PathBuf>,
 }
 
+/// The builder of an out-of-tree kernel module. Its build is not a layer
+/// of the root filesystem: it is made against the image's kernel and placed
+/// with that kernel's modules, under `/lib/modules/<release>/updates/`.
+pub const KERNEL_MODULE_BUILDER: &str = "kernel-module";
+
 /// A component's `builder` name to the node that builds it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Builders(pub BTreeMap<String, String>);
@@ -109,6 +114,7 @@ impl Default for Builders {
             [
                 ("rust", "gaia.build.rust"),
                 ("command", "gaia.build.command"),
+                (KERNEL_MODULE_BUILDER, "gaia.kernel-module"),
             ]
             .into_iter()
             .map(|(a, b)| (a.to_string(), b.to_string()))

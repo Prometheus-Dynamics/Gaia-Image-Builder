@@ -2,14 +2,17 @@
 //! placed for the image's kernel with `depmod`'s index.
 //!
 //! Inputs:
-//! - **module**: the module's source tree, with a `Kbuild` or `Makefile`.
+//! - **source**: the module's source tree, with a `Kbuild` or `Makefile`.
 //! - **kernel-build**: the kernel build tree Buildroot's `kernel-build` output
 //!   gives (`.config`, `Module.symvers`, `include/generated/utsrelease.h`,
 //!   `scripts/`, the headers). It is read, never written: make builds the module
 //!   in the step's own copy of the source.
 //! - **toolchain**: the cross toolchain that kernel was built with, Buildroot's
-//!   `toolchain` output. The compiler is `bin/<cross-compile>gcc` inside it, and
-//!   its directory leads PATH. No compiler path comes from the host.
+//!   `toolchain` output (its whole host directory). The compiler is the target
+//!   C compiler Buildroot records in its `share/buildroot/toolchainfile.cmake`,
+//!   `bin/<cross-compile>gcc`, and its directory leads PATH. `modinfo` and
+//!   `depmod` are its `sbin/` ones (host-kmod, which Buildroot builds with a
+//!   kernel). No compiler or module tool comes from the host.
 //! - **kernel-toolchain**: the board's declared kernel toolchain, `gcc` or
 //!   `llvm` (`[kernel] toolchain`). The kernel build's `.config` must agree
 //!   (`CONFIG_CC_IS_CLANG=y` is llvm), or the step refuses. With `llvm` the
@@ -19,10 +22,11 @@
 //!   `RUSTC=` its `bin/rustc`.
 //! - **kernel-modules**: the image's kernel modules, Buildroot's `modules`
 //!   artifact (`<release>/...`).
-//! - **names**: the module names Kbuild builds (`obj-m`), each giving
-//!   `<name>.ko`.
-//! - **host**: make, modinfo, depmod, the architecture, the cross prefix, the
-//!   job count and the CPU pin.
+//! - **names**: the module names Kbuild builds (`obj-m`), space-separated,
+//!   each giving `<name>.ko`.
+//! - **host**: the Buildroot host: make, the job count and the CPU pin.
+//!
+//! The architecture (`ARCH`) is the one the kernel build's `.config` sets.
 //!
 //! Output **modules**: the same shape as Buildroot's `modules` artifact,
 //! `<release>/` with the input set, each new module under `updates/`, and
@@ -44,16 +48,17 @@ mod module;
 
 use daedalus::prelude::*;
 use gaia_step::{Ctx, Digest, KeyBuilder, Step, StepError, Store, Tool, Work, once_per_process};
-use gaia_types::{Artifact, ArtifactKind, Tree};
-use serde::{Deserialize, Serialize};
+use gaia_types::{Artifact, ArtifactKind, BuildrootHost, Tree};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const NAME: &str = "gaia.kernel-module";
-/// 2: the kernel toolchain, and modules built with LLVM.
-const KEY_VERSION: u32 = 2;
+/// 2: the kernel toolchain, and modules built with LLVM. 3: modinfo,
+/// depmod and the cross prefix from the toolchain, `ARCH` from the kernel's
+/// `.config`, the source input named `source`.
+const KEY_VERSION: u32 = 3;
 /// Where the toolchain tree holds the pinned LLVM (Gaia's Buildroot patch
 /// 0006, `host-llvm-prebuilt`).
 const LLVM_BIN: &str = "opt/llvm-prebuilt/bin";
@@ -66,30 +71,22 @@ const BUILD_HOST: &str = "gaia";
 /// The step's output directory, in the scratch space.
 const OUTPUT: &str = "modules";
 
-/// The host side of a module build: the host's make, modinfo and depmod, the
-/// kernel's architecture and cross prefix, and the job count. The compiler is
-/// not here: it comes from the toolchain input.
-#[derive(Clone, Debug, PartialEq, Eq, Type, Serialize, Deserialize)]
-#[type_key("gaia:kernel-module-host")]
-pub struct KernelModuleHost {
-    /// Absolute path of make.
-    pub make: String,
-    /// Absolute path of modinfo, which reads a module's vermagic.
-    pub modinfo: String,
-    /// Absolute path of depmod, which writes the module index.
-    pub depmod: String,
-    /// The kernel's `ARCH`, such as `arm64`.
-    pub arch: String,
-    /// The `CROSS_COMPILE` prefix of the toolchain's compiler, such as
-    /// `aarch64-linux-`. The compiler is `bin/<prefix>gcc`.
-    pub cross_compile: String,
-    /// Absolute path of taskset, used when `cpus` is set.
-    pub taskset: String,
-    /// A CPU list such as `6-31`; empty for no pinning.
-    pub cpus: String,
-    /// Make jobs, at least 1.
-    pub jobs: u32,
+/// What a module build runs: the Buildroot host's make, taskset, CPU pin and
+/// jobs, and, from the kernel build and its toolchain, the architecture, the
+/// cross prefix (empty with LLVM), modinfo and depmod.
+struct KernelModuleHost {
+    make: String,
+    modinfo: String,
+    depmod: String,
+    arch: String,
+    cross_compile: String,
+    taskset: String,
+    cpus: String,
+    jobs: u32,
 }
+
+/// Where Buildroot records its toolchain's target compiler.
+const TOOLCHAIN_FILE: &str = "share/buildroot/toolchainfile.cmake";
 
 /// Builds the modules `names` from `module`, against the kernel build tree
 /// `kernel-build` and the `toolchain` it was built with, and places them in a
@@ -99,7 +96,7 @@ pub struct KernelModuleHost {
     id = "gaia.kernel-module",
     inputs(
         store,
-        module,
+        source,
         kernel_build,
         toolchain,
         kernel_toolchain,
@@ -111,19 +108,20 @@ pub struct KernelModuleHost {
 )]
 pub fn kernel_module(
     store: &str,
-    module: Tree,
+    source: Tree,
     kernel_build: Tree,
     toolchain: Tree,
     kernel_toolchain: String,
     kernel_modules: Artifact,
-    names: Vec<String>,
-    host: KernelModuleHost,
+    names: String,
+    host: &BuildrootHost,
     cx: &Ctx,
 ) -> Result<Artifact, StepError> {
     let store = Store::open(store).map_err(StepError::store(NAME))?;
     let fail = |why: String| StepError::body(NAME, why);
-    check(&names, &host).map_err(fail)?;
-    let (src, src_digest) = in_store(&store, &module, "the module source").map_err(fail)?;
+    let names: Vec<String> = names.split_whitespace().map(str::to_string).collect();
+    check(&names, host).map_err(fail)?;
+    let (src, src_digest) = in_store(&store, &source, "the module source").map_err(fail)?;
     let (build_dir, build_digest) =
         in_store(&store, &kernel_build, "the kernel build tree").map_err(fail)?;
     let (tool_dir, tool_digest) = in_store(&store, &toolchain, "the toolchain").map_err(fail)?;
@@ -134,6 +132,28 @@ pub fn kernel_module(
         ))
     })?;
     let compile = module::compile_of(&config, &kernel_toolchain).map_err(fail)?;
+    let cross_compile = match compile {
+        module::Compile::Gcc => {
+            let file = tool_dir.join(TOOLCHAIN_FILE);
+            let text = fs::read_to_string(&file).map_err(|error| {
+                fail(format!(
+                    "the toolchain is not a Buildroot one (no {TOOLCHAIN_FILE}): {error}"
+                ))
+            })?;
+            module::cross_prefix(&text).map_err(fail)?
+        }
+        module::Compile::Llvm { .. } => String::new(),
+    };
+    let host = KernelModuleHost {
+        make: host.make.clone(),
+        modinfo: kmod_tool(&tool_dir, "modinfo").map_err(fail)?,
+        depmod: kmod_tool(&tool_dir, "depmod").map_err(fail)?,
+        arch: module::arch_of(&config).map_err(fail)?.to_string(),
+        cross_compile,
+        taskset: host.taskset.clone(),
+        cpus: host.cpus.clone(),
+        jobs: host.jobs,
+    };
     let bin = tool_dir.join("bin");
     let llvm = tool_dir.join(LLVM_BIN);
     let (cc, rustc) = match compile {
@@ -192,7 +212,7 @@ pub fn kernel_module(
         .config("tool rustc", rustc_version)
         .config("tool modinfo", modinfo)
         .config("tool depmod", depmod)
-        .input("module", src_digest)
+        .input("source", src_digest)
         .input("kernel-build", build_digest)
         .input("toolchain", tool_digest)
         .input("modules", modules_object.digest)
@@ -234,7 +254,7 @@ struct Compiler<'a> {
     rustc: Option<&'a Path>,
 }
 
-fn check(names: &[String], host: &KernelModuleHost) -> Result<(), String> {
+fn check(names: &[String], host: &BuildrootHost) -> Result<(), String> {
     if names.is_empty() {
         return Err("no module names: the node builds nothing without one".into());
     }
@@ -247,11 +267,7 @@ fn check(names: &[String], host: &KernelModuleHost) -> Result<(), String> {
     if host.jobs == 0 {
         return Err("host jobs must be at least 1".into());
     }
-    let mut tools = vec![
-        ("make", &host.make),
-        ("modinfo", &host.modinfo),
-        ("depmod", &host.depmod),
-    ];
+    let mut tools = vec![("make", &host.make)];
     if !host.cpus.is_empty() {
         tools.push(("taskset", &host.taskset));
     }
@@ -261,6 +277,18 @@ fn check(names: &[String], host: &KernelModuleHost) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// The toolchain's `sbin/<name>` (host-kmod's link), or `bin/<name>`.
+fn kmod_tool(toolchain: &Path, name: &str) -> Result<String, String> {
+    ["sbin", "bin"]
+        .iter()
+        .map(|dir| toolchain.join(dir).join(name))
+        .find(|path| path.is_file())
+        .map(|path| path_string(&path))
+        .ok_or_else(|| {
+            format!("the toolchain has no {name} in sbin/ or bin/ (Buildroot builds host-kmod with a kernel)")
+        })
 }
 
 /// A tree in the store: its path there and its digest.
