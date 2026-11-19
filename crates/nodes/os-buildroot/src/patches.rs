@@ -1,6 +1,6 @@
 //! Gaia's own changes to the Buildroot source it builds with.
 //!
-//! Four patches ship in `patches/`, as `git format-patch` writes them for
+//! Six patches ship in `patches/`, as `git format-patch` writes them for
 //! Buildroot (`-p1`). They are applied to a copy of the source before any
 //! Buildroot step uses it, so every make (the host stage, its plan, the OS
 //! build) runs the same patched tree:
@@ -16,12 +16,22 @@
 //!   program on the PATH. The dtc host build uses that choice.
 //! - **0004**: the kernel's dtc parser (`linux/linux.mk`) uses the same
 //!   choice, instead of always building host-bison and host-flex.
+//! - **0005**: Rust 1.99.0 (`package/rust`, `package/rust-bin`, by
+//!   Buildroot's `utils/update-rust`): its LLVM, 23.1, is the pinned
+//!   LLVM's.
+//! - **0006**: the kernel built with LLVM and Rust: `host-llvm-prebuilt`
+//!   (LLVM 23.1.5's own release build: clang, lld, the binary tools,
+//!   libclang), rust-src with `host-rust-bin`, bindgen 0.73.2 on that
+//!   libclang, and `BR2_LINUX_KERNEL_LLVM` (`LLVM=1`, `RUSTC`, `BINDGEN`,
+//!   `RUST_LIB_SRC`, the tools there before the kernel's configuration).
+//!   A board's `[kernel] toolchain = "llvm"` asks for it.
 //!
 //! 0001 and 0002 change no output, so they are applied to the exact upstream
-//! text, strictly (`patch -p1 --fuzz=0`). 0003 and 0004 change what the host
-//! stage builds (`changes_outputs`). A patch that does not apply to a Buildroot
-//! version is skipped with a warning line that names it: all four are
-//! changes a future Buildroot must still build without.
+//! text, strictly (`patch -p1 --fuzz=0`). 0003 to 0006 change what a build
+//! makes (`changes_outputs`). A patch that does not apply to a Buildroot
+//! version is skipped with a warning line that names it: a build that needs
+//! none of them still builds. One that needs 0006 does not, loudly: its
+//! `BR2_LINUX_KERNEL_LLVM=y` is a config line Buildroot did not take.
 //!
 //! The keys: the package-level keys (the host stage's and the plan's, and
 //! the OS build's) hash the unpatched source's digest. A patch that changes
@@ -81,7 +91,7 @@ pub(crate) struct GaiaPatch {
 /// (`dtc-parser.y` uses `%locations`, `dtc-lexer.l` `%option noyywrap nounput
 /// noinput never-interactive`). A program older than the minimum is not used:
 /// the build makes host-bison or host-flex, as it did before.
-pub(crate) const PATCHES: [GaiaPatch; 4] = [
+pub(crate) const PATCHES: [GaiaPatch; 6] = [
     GaiaPatch {
         name: "0001-package-pkg-utils-clone-per-package-trees-with-reflinks.patch",
         text: include_str!(
@@ -107,6 +117,18 @@ pub(crate) const PATCHES: [GaiaPatch; 4] = [
         name: "0004-linux-kernel-dtc-parser-uses-the-machine-s-bison-and-flex.patch",
         text: include_str!(
             "../patches/0004-linux-kernel-dtc-parser-uses-the-machine-s-bison-and-flex.patch"
+        ),
+        changes_outputs: true,
+    },
+    GaiaPatch {
+        name: "0005-package-rust-bump-to-version-1.99.0.patch",
+        text: include_str!("../patches/0005-package-rust-bump-to-version-1.99.0.patch"),
+        changes_outputs: true,
+    },
+    GaiaPatch {
+        name: "0006-linux-build-with-LLVM-and-Rust-BR2_LINUX_KERNEL_LLVM.patch",
+        text: include_str!(
+            "../patches/0006-linux-build-with-LLVM-and-Rust-BR2_LINUX_KERNEL_LLVM.patch"
         ),
         changes_outputs: true,
     },
@@ -407,19 +429,33 @@ mod tests {
     }
 
     /// The files the shipped patches touch, relative to a Buildroot root.
-    const TOUCHED: [&str; 6] = [
+    /// The files the patches change. The 2026.02.3 fixture has only the
+    /// first six (0005 and 0006 are not made for it).
+    const TOUCHED: [&str; 15] = [
         "package/pkg-utils.mk",
         "package/Makefile.in",
         "package/pkg-luarocks.mk",
         "package/dtc/dtc.mk",
         "support/dependencies/check-host-bison-flex.mk",
         "linux/linux.mk",
+        "package/rust/rust.mk",
+        "package/rust/rust.hash",
+        "package/rust-bin/rust-bin.mk",
+        "package/rust-bin/rust-bin.hash",
+        "package/rustc/Config.in.host",
+        "package/rust-bindgen/rust-bindgen.mk",
+        "package/rust-bindgen/rust-bindgen.hash",
+        "package/Config.in.host",
+        "linux/Config.in",
     ];
 
     /// A copy of the fixture's touched files, in a new Buildroot root.
     fn copy_of(version: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("tempdir");
         for rel in TOUCHED {
+            if !fixture(version).join(rel).exists() {
+                continue;
+            }
             let to = dir.path().join(rel);
             fs::create_dir_all(to.parent().expect("a parent")).expect("dirs");
             gaia_store::copy_file(fixture(version).join(rel), to).expect("copy fixture");
@@ -455,13 +491,20 @@ mod tests {
         outcomes.len() == PATCHES.len() && outcomes.iter().all(|(_, applied)| *applied)
     }
 
+    /// 0001 to 0004 apply to 2026.02.3. 0005 and 0006 are made against
+    /// 2026.08's Rust and kernel files and are skipped there.
     #[test]
-    fn both_patches_apply_to_buildroot_2026_02_3() {
+    fn the_patches_apply_to_buildroot_2026_02_3() {
         let tree = copy_of("2026.02.3");
         let scratch = tempfile::tempdir().expect("tempdir");
         let outcomes =
             apply_all(tree.path(), scratch.path().join("patches").as_path()).expect("apply");
-        assert!(all_applied(&outcomes), "{outcomes:?}");
+        let applied: Vec<bool> = outcomes.iter().map(|(_, applied)| *applied).collect();
+        assert_eq!(
+            applied,
+            [true, true, true, true, false, false],
+            "{outcomes:?}"
+        );
         assert!(read(tree.path(), "pkg-utils.mk").contains("cp -a --reflink=auto"));
         assert!(read(tree.path(), "Makefile.in").contains("export PERL:=$(shell which perl)"));
         assert!(read(tree.path(), "pkg-luarocks.mk").contains("firstword"));
@@ -480,7 +523,7 @@ mod tests {
     }
 
     #[test]
-    fn both_patches_apply_to_buildroot_2026_08() {
+    fn every_patch_applies_to_buildroot_2026_08() {
         let tree = copy_of("2026.08");
         let scratch = tempfile::tempdir().expect("tempdir");
         let outcomes = apply_all(tree.path(), scratch.path()).expect("apply");
@@ -500,6 +543,39 @@ mod tests {
             text_of(tree.path(), "linux/linux.mk")
                 .contains("LINUX_DEPENDENCIES += $(BR2_BISON_HOST_DEPENDENCY)")
         );
+        // 0005: Rust 1.99.0, the pinned archives' digests.
+        assert!(read(tree.path(), "rust-bin/rust-bin.mk").contains("RUST_BIN_VERSION = 1.99.0"));
+        let hashes = read(tree.path(), "rust-bin/rust-bin.hash");
+        assert!(
+            hashes.contains(
+                "891c6366d7100feda0bca4c03ce63f3c9ac827cbebbc283e7433061d42c6a376  rust-1.99.0-x86_64-unknown-linux-gnu.tar.xz"
+            ),
+            "{hashes}"
+        );
+        // 0006: rust-src, the pinned LLVM, bindgen 0.73.2 and the kernel's option.
+        assert!(
+            hashes.contains(
+                "3f1f9b7ed48f4596fc87889b7b3c61747336a55c9c22db1ab0c697e0aadb77aa  rust-src-1.99.0.tar.xz"
+            ),
+            "{hashes}"
+        );
+        assert!(read(tree.path(), "llvm-prebuilt/llvm-prebuilt.hash").contains(
+            "f72edb0b36580ece7f52e23858f00c18fad4e87395ea7ad05d7e55c39f8fc78a  LLVM-23.1.5-Linux-X64.tar.xz"
+        ));
+        assert!(
+            read(tree.path(), "rust-bindgen/rust-bindgen.mk")
+                .contains("RUST_BINDGEN_VERSION = 0.73.2")
+        );
+        let linux = text_of(tree.path(), "linux/linux.mk");
+        assert!(
+            linux.contains("ifeq ($(BR2_LINUX_KERNEL_LLVM),y)"),
+            "{linux}"
+        );
+        assert!(
+            linux.contains("LLVM=$(HOST_DIR)/opt/llvm-prebuilt/bin/"),
+            "{linux}"
+        );
+        assert!(text_of(tree.path(), "linux/Config.in").contains("config BR2_LINUX_KERNEL_LLVM\n"));
     }
 
     #[test]
@@ -525,6 +601,8 @@ mod tests {
                 (PATCHES[1].name.to_string(), false),
                 (PATCHES[2].name.to_string(), true),
                 (PATCHES[3].name.to_string(), true),
+                (PATCHES[4].name.to_string(), true),
+                (PATCHES[5].name.to_string(), true),
             ]
         );
         assert_eq!(read(tree.path(), "pkg-luarocks.mk"), before);
@@ -579,7 +657,7 @@ mod tests {
         let outcomes: Vec<(String, bool)> =
             PATCHES.iter().map(|p| (p.name.to_string(), true)).collect();
         let entry = key_entry(Mode::On, &outcomes).expect("an entry");
-        let expected: Vec<String> = [2, 3]
+        let expected: Vec<String> = [2, 3, 4, 5]
             .iter()
             .map(|&index| {
                 format!(
@@ -625,12 +703,16 @@ mod tests {
             PATCHES.iter().map(|p| (p.name.to_string(), true)).collect();
         outcomes[1].1 = false;
         let entry = key_entry(Mode::On, &outcomes).expect("an entry");
-        // 0003 and 0004 apply and change outputs, so their digests are there.
+        // 0003 to 0006 apply and change outputs, so their digests are there.
         let lines: Vec<&str> = entry.lines().collect();
-        assert_eq!(lines.len(), 3, "{entry}");
+        assert_eq!(lines.len(), 5, "{entry}");
         assert_eq!(lines[0], format!("skipped {}", PATCHES[1].name));
-        assert!(lines[1].starts_with(&format!("applied {}", PATCHES[2].name)));
-        assert!(lines[2].starts_with(&format!("applied {}", PATCHES[3].name)));
+        for (line, index) in lines[1..].iter().zip(2..) {
+            assert!(
+                line.starts_with(&format!("applied {}", PATCHES[index].name)),
+                "{entry}"
+            );
+        }
     }
 
     #[test]

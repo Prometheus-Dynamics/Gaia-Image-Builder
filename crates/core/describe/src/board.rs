@@ -65,6 +65,11 @@ pub const KERNEL_IMAGES: [(&str, &str); 6] = [
     ("vmlinux", "BR2_LINUX_KERNEL_VMLINUX"),
 ];
 
+/// The compilers a board's kernel can be built with: `gcc`, the
+/// toolchain's (the default), or `llvm`, clang and the LLVM tools of
+/// Gaia's pinned LLVM, with Rust (`[kernel] toolchain`).
+pub const KERNEL_TOOLCHAINS: [&str; 2] = ["gcc", "llvm"];
+
 /// The kernel: its source, configuration and device trees.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -101,6 +106,15 @@ pub struct Kernel {
     /// or `vmlinux`. The form the board's firmware loads: a fact of the
     /// board, not of a product. Unset: the architecture's usual form.
     pub image: Option<String>,
+    /// The compilers the kernel is built with (see [`KERNEL_TOOLCHAINS`]):
+    /// `gcc` (unset means it), or `llvm`: the kernel and its out-of-tree
+    /// modules are built with `LLVM=1` from Gaia's pinned LLVM, with the
+    /// pinned rustc, its standard library's source and bindgen, so the
+    /// kernel's Rust support (`CONFIG_RUST`) is available to its
+    /// configuration. It is stated once, here, for everything that reads
+    /// the board. A board's replaces its family's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub toolchain: Option<String>,
     /// Patch series applied to the source before it is built, in order:
     /// each a patch file, or a directory of patches (its `series` order,
     /// or its `*.patch` files by name), beside the board file (`file`) or
@@ -560,6 +574,18 @@ fn check_refs(
             ),
         ));
     }
+    if let Some(toolchain) = file.kernel.as_ref().and_then(|k| k.toolchain.as_deref())
+        && !KERNEL_TOOLCHAINS.contains(&toolchain)
+    {
+        return Err(Error::new(
+            path,
+            "kernel.toolchain",
+            format!(
+                "`{toolchain}` is not a kernel toolchain; the toolchains are {}",
+                KERNEL_TOOLCHAINS.join(", ")
+            ),
+        ));
+    }
     if let Some(words) = file.kernel.as_ref().and_then(|k| k.cmdline.as_deref())
         && words.contains(['\n', '\r'])
     {
@@ -769,6 +795,7 @@ fn merge(board: BoardFile, family: BoardFile) -> BoardFile {
                 storage_drivers: b.storage_drivers.or(f.storage_drivers),
                 cmdline: b.cmdline.or(f.cmdline),
                 image: b.image.or(f.image),
+                toolchain: b.toolchain.or(f.toolchain),
                 patches: join_patches(b.patches, f.patches, b.inherit_patches),
                 inherit_patches: None,
             }),

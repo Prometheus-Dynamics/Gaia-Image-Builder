@@ -14,6 +14,9 @@
 //!   architecture's default), the fragment files, the in-tree device tree,
 //!   the board's device tree directory, and the overlays by name (built by
 //!   the kernel build; they come out with the device trees).
+//!   `toolchain = "llvm"` is `BR2_LINUX_KERNEL_LLVM` (the kernel built
+//!   with `LLVM=1`, the pinned LLVM and Rust; an option of Gaia's Buildroot
+//!   patch set).
 //! - **Bootloader:** the same for U-Boot (`UBOOT`), its defconfig and
 //!   fragment files; each blob is given to U-Boot's make as
 //!   `<NAME>=<path>`, so a blob's name in the board file is the make
@@ -281,6 +284,13 @@ pub(crate) fn plan(
                 .find(|(name, _)| name == image)
         {
             lines.push(format!("{option}=y"));
+        }
+        // The kernel built with LLVM and Rust (Gaia's Buildroot patch set
+        // adds the option, the pinned LLVM and the Rust tools). Buildroot
+        // refusing the line fails the build: a line it did not take is an
+        // error, so no board asks for LLVM and gets gcc.
+        if kernel.toolchain.as_deref() == Some("llvm") {
+            lines.push("BR2_LINUX_KERNEL_LLVM=y".into());
         }
         if let Some(dt) = &kernel.device_tree {
             lines.push(format!("BR2_LINUX_KERNEL_INTREE_DTS_NAME={}", quoted(dt)));

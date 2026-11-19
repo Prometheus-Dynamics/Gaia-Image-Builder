@@ -1178,6 +1178,45 @@ fn a_board_states_the_form_of_its_kernel_image() {
     );
 }
 
+/// A board's kernel toolchain is stated once, in the board or its family:
+/// `llvm` builds the kernel with LLVM and Rust (`BR2_LINUX_KERNEL_LLVM`),
+/// `gcc` or nothing with the toolchain's gcc, and a board's word replaces
+/// its family's. Any other word is refused, by name.
+#[test]
+fn a_board_states_its_kernel_toolchain_once() {
+    let dir = project();
+    let board = dir.path().join("examples/boards/zero-3e/board.toml");
+    let family = dir.path().join("examples/boards/rk35xx/family.toml");
+    let line = "BR2_LINUX_KERNEL_LLVM=y";
+    // Unset: gcc, and nothing is said.
+    let out = plan(dir.path(), &[]);
+    assert!(out.status.success());
+    assert!(!String::from_utf8_lossy(&out.stdout).contains(line));
+
+    // The family says llvm: the board, which says nothing, takes it.
+    edit(&family, "[kernel]\n", "[kernel]\ntoolchain = \"llvm\"\n");
+    let out = plan(dir.path(), &[]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains(line), "{text}");
+
+    // The board says gcc: its word replaces the family's.
+    edit(&board, "[kernel]\n", "[kernel]\ntoolchain = \"gcc\"\n");
+    let out = plan(dir.path(), &[]);
+    assert!(out.status.success());
+    assert!(!String::from_utf8_lossy(&out.stdout).contains(line));
+
+    edit(&board, "toolchain = \"gcc\"", "toolchain = \"clang\"");
+    let out = plan(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("kernel.toolchain"), "{err}");
+    assert!(
+        err.contains("`clang` is not a kernel toolchain; the toolchains are gcc, llvm"),
+        "{err}"
+    );
+}
+
 /// An image that names an initramfs with a recipe that takes none would
 /// ship those components in no output: refused, by name.
 #[test]

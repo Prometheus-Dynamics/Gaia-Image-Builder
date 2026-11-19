@@ -1,0 +1,282 @@
+From: Gaia Image Builder <noreply@anthropic.com>
+Subject: [PATCH 6/6] linux: build with LLVM and Rust (BR2_LINUX_KERNEL_LLVM)
+
+A new host package, llvm-prebuilt, installs the LLVM project's release
+build of clang, lld, the LLVM binary tools and libclang under
+$(HOST_DIR)/opt/llvm-prebuilt. rust-bin installs the standard library's
+source when BR2_PACKAGE_HOST_RUST_BIN_SRC is set. rust-bindgen is 0.73.2,
+and loads the pre-built libclang when that package is enabled instead of
+building clang.
+
+BR2_LINUX_KERNEL_LLVM builds the kernel with LLVM=1 from the pre-built
+LLVM, gives it rustc, rust-src and bindgen, and has them in place before
+the kernel's configuration is made, so CONFIG_RUST is available.
+---
+ linux/Config.in                          | 19 ++++++++++++
+ linux/linux.mk                           | 24 +++++++++++++++
+ package/Config.in.host                   |  1 +
+ package/llvm-prebuilt/Config.in.host     | 16 ++++++++++
+ package/llvm-prebuilt/llvm-prebuilt.hash |  2 ++
+ package/llvm-prebuilt/llvm-prebuilt.mk   | 37 ++++++++++++++++++++++++
+ package/rust-bin/rust-bin.hash           |  2 ++
+ package/rust-bin/rust-bin.mk             | 14 +++++++++
+ package/rust-bindgen/rust-bindgen.hash   |  2 +-
+ package/rust-bindgen/rust-bindgen.mk     |  9 ++++--
+ package/rustc/Config.in.host             |  7 +++++
+ 11 files changed, 130 insertions(+), 3 deletions(-)
+ create mode 100644 package/llvm-prebuilt/Config.in.host
+ create mode 100644 package/llvm-prebuilt/llvm-prebuilt.hash
+ create mode 100644 package/llvm-prebuilt/llvm-prebuilt.mk
+
+diff --git a/linux/Config.in b/linux/Config.in
+index 401f2828..671af864 100644
+--- a/linux/Config.in
++++ b/linux/Config.in
+@@ -549,6 +549,25 @@ config BR2_LINUX_KERNEL_NEEDS_HOST_LIBELF
+ 	  CONFIG_UNWINDER_ORC=y, please install libelf-dev,
+ 	  libelf-devel or elfutils-libelf-devel".
+ 
++config BR2_LINUX_KERNEL_LLVM
++	bool "Build with LLVM, and Rust"
++	depends on BR2_PACKAGE_HOST_LLVM_PREBUILT_ARCH_SUPPORTS
++	depends on BR2_PACKAGE_HOST_RUSTC_ARCH_SUPPORTS
++	select BR2_PACKAGE_HOST_LLVM_PREBUILT
++	select BR2_PACKAGE_HOST_RUSTC
++	select BR2_PACKAGE_HOST_RUST_BIN_SRC
++	help
++	  Build the kernel with clang and the LLVM tools (LLVM=1) of
++	  the pre-built LLVM (host-llvm-prebuilt), and give it the
++	  Rust tools its Rust support needs: rustc and the standard
++	  library's source (host-rust-bin), and bindgen with that
++	  LLVM's libclang. CONFIG_RUST is then available to the
++	  kernel's configuration; without this option it is not.
++	  The kernel's host programs are still built with the host
++	  compiler, and the target's userland with the toolchain.
++
++	  Needs the pre-built Rust compiler (the default variant).
++
+ config BR2_LINUX_KERNEL_NEEDS_HOST_PAHOLE
+ 	bool "Needs host pahole"
+ 	help
+diff --git a/linux/linux.mk b/linux/linux.mk
+index b66ec18f..e6ba0d26 100644
+--- a/linux/linux.mk
++++ b/linux/linux.mk
+@@ -193,6 +193,30 @@ ifeq ($(BR2_LINUX_KERNEL_DTB_OVERLAY_SUPPORT),y)
+ LINUX_MAKE_ENV += DTC_FLAGS=-@
+ endif
+ 
++# The kernel built with LLVM=1 and the pre-built LLVM, and its Rust support.
++# The kernel's configuration checks the tools (CONFIG_RUST_IS_AVAILABLE), so
++# they are there before it is made. CROSS_COMPILE is emptied (the later of
++# two values on make's command line is the one taken): clang takes its
++# target from ARCH. The gcc warning options in LINUX_CFLAGS are not
++# clang's.
++ifeq ($(BR2_LINUX_KERNEL_LLVM),y)
++ifneq ($(BR2_PACKAGE_HOST_RUST_BIN),y)
++$(error BR2_LINUX_KERNEL_LLVM needs the pre-built Rust compiler (BR2_PACKAGE_HOST_RUST_BIN): the kernel builds its core from rust-src)
++endif
++LINUX_LLVM_DEPENDENCIES = host-llvm-prebuilt host-rustc host-rust-bindgen
++LINUX_DEPENDENCIES += $(LINUX_LLVM_DEPENDENCIES)
++LINUX_KCONFIG_DEPENDENCIES += $(LINUX_LLVM_DEPENDENCIES)
++LINUX_CFLAGS =
++LINUX_MAKE_FLAGS += \
++	CROSS_COMPILE= \
++	LLVM=$(HOST_DIR)/opt/llvm-prebuilt/bin/ \
++	RUSTC=$(HOST_DIR)/bin/rustc \
++	HOSTRUSTC=$(HOST_DIR)/bin/rustc \
++	BINDGEN=$(HOST_DIR)/bin/bindgen \
++	RUST_LIB_SRC=$(HOST_DIR)/lib/rustlib/src/rust/library
++LINUX_MAKE_ENV += LIBCLANG_PATH=$(HOST_DIR)/opt/llvm-prebuilt/lib
++endif
++
+ # Get the real Linux version, which tells us where kernel modules are
+ # going to be installed in the target filesystem.
+ # Filter out 'w' from MAKEFLAGS, to workaround a bug in make 4.1 (#13141)
+diff --git a/package/Config.in.host b/package/Config.in.host
+index 595caf9e..3a290f8e 100644
+--- a/package/Config.in.host
++++ b/package/Config.in.host
+@@ -63,6 +63,7 @@ menu "Host utilities"
+ 	source "package/kmod/Config.in.host"
+ 	source "package/libp11/Config.in.host"
+ 	source "package/llvm-project/lld/Config.in.host"
++	source "package/llvm-prebuilt/Config.in.host"
+ 	source "package/lpc3250loader/Config.in.host"
+ 	source "package/lttng-babeltrace/Config.in.host"
+ 	source "package/lzma-alone/Config.in.host"
+diff --git a/package/llvm-prebuilt/Config.in.host b/package/llvm-prebuilt/Config.in.host
+new file mode 100644
+index 00000000..e3a7931c
+--- /dev/null
++++ b/package/llvm-prebuilt/Config.in.host
+@@ -0,0 +1,16 @@
++config BR2_PACKAGE_HOST_LLVM_PREBUILT_ARCH_SUPPORTS
++	bool
++	default y if BR2_HOSTARCH = "x86_64"
++
++config BR2_PACKAGE_HOST_LLVM_PREBUILT
++	bool "host llvm (pre-built)"
++	depends on BR2_PACKAGE_HOST_LLVM_PREBUILT_ARCH_SUPPORTS
++	help
++	  The LLVM project's own release build of clang, lld, the LLVM
++	  binary tools and libclang, for an x86_64 build machine.
++	  Installed under $(HOST_DIR)/opt/llvm-prebuilt, away from the
++	  host programs of the same names other packages may build.
++	  The Linux kernel uses it to build with LLVM=1 and Rust
++	  (BR2_LINUX_KERNEL_LLVM), and bindgen loads its libclang.
++
++	  https://github.com/llvm/llvm-project/releases
+diff --git a/package/llvm-prebuilt/llvm-prebuilt.hash b/package/llvm-prebuilt/llvm-prebuilt.hash
+new file mode 100644
+index 00000000..f758b977
+--- /dev/null
++++ b/package/llvm-prebuilt/llvm-prebuilt.hash
+@@ -0,0 +1,2 @@
++# From the release's own checksum, checked against the archive
++sha256  f72edb0b36580ece7f52e23858f00c18fad4e87395ea7ad05d7e55c39f8fc78a  LLVM-23.1.5-Linux-X64.tar.xz
+diff --git a/package/llvm-prebuilt/llvm-prebuilt.mk b/package/llvm-prebuilt/llvm-prebuilt.mk
+new file mode 100644
+index 00000000..0d46dd37
+--- /dev/null
++++ b/package/llvm-prebuilt/llvm-prebuilt.mk
+@@ -0,0 +1,37 @@
++################################################################################
++#
++# llvm-prebuilt
++#
++################################################################################
++
++# The clang, lld and LLVM tools the kernel's LLVM=1 build runs, and the
++# libclang bindgen loads; their LLVM is the one rustc 1.99.0 uses (23.1).
++LLVM_PREBUILT_VERSION = 23.1.5
++LLVM_PREBUILT_SOURCE = LLVM-$(LLVM_PREBUILT_VERSION)-Linux-X64.tar.xz
++LLVM_PREBUILT_SITE = https://github.com/llvm/llvm-project/releases/download/llvmorg-$(LLVM_PREBUILT_VERSION)
++LLVM_PREBUILT_LICENSE = Apache-2.0 with exceptions
++
++HOST_LLVM_PREBUILT_PREFIX = $(HOST_DIR)/opt/llvm-prebuilt
++
++# Only what the kernel and bindgen use is extracted and installed: the
++# whole release is several GB.
++HOST_LLVM_PREBUILT_MEMBERS = \
++	bin/clang bin/clang-[0-9]* bin/ld.lld bin/lld \
++	bin/llvm-ar bin/llvm-nm bin/llvm-objcopy bin/llvm-objdump \
++	bin/llvm-readelf bin/llvm-readobj bin/llvm-strip bin/llvm-config \
++	lib/libclang.so* lib/clang
++
++HOST_LLVM_PREBUILT_EXTRACT_DEPENDENCIES = $(BR2_XZCAT_HOST_DEPENDENCY)
++
++define HOST_LLVM_PREBUILT_EXTRACT_CMDS
++	$(XZCAT) $(HOST_LLVM_PREBUILT_DL_DIR)/$(LLVM_PREBUILT_SOURCE) | \
++		$(TAR) -x -C $(@D) --strip-components=1 --wildcards \
++			$(addprefix 'LLVM-$(LLVM_PREBUILT_VERSION)-Linux-X64/,$(addsuffix ',$(HOST_LLVM_PREBUILT_MEMBERS)))
++endef
++
++define HOST_LLVM_PREBUILT_INSTALL_CMDS
++	mkdir -p $(HOST_LLVM_PREBUILT_PREFIX)
++	cp -a $(@D)/bin $(@D)/lib $(HOST_LLVM_PREBUILT_PREFIX)/
++endef
++
++$(eval $(host-generic-package))
+diff --git a/package/rust-bin/rust-bin.hash b/package/rust-bin/rust-bin.hash
+index b84c4eac..4a34ea85 100644
+--- a/package/rust-bin/rust-bin.hash
++++ b/package/rust-bin/rust-bin.hash
+@@ -67,6 +67,8 @@ sha256  ef4399ed88f527bb71b937583a7e5bf36177d83fb55b8c58973ae146579c5ed6  rust-s
+ sha256  3e58dff2d0b72196b5ea4e90536e174d400de88564a52694686b81e091169933  rust-std-1.99.0-x86_64-unknown-linux-gnu.tar.xz
+ # From https://static.rust-lang.org/dist/rust-std-1.99.0-x86_64-unknown-linux-musl.tar.xz.sha256
+ sha256  b106b0aa4565cc3525fd3161c69203a9e39044e6e6b4d618f261c3eeda14ad50  rust-std-1.99.0-x86_64-unknown-linux-musl.tar.xz
++# From https://static.rust-lang.org/dist/rust-src-1.99.0.tar.xz.sha256
++sha256  3f1f9b7ed48f4596fc87889b7b3c61747336a55c9c22db1ab0c697e0aadb77aa  rust-src-1.99.0.tar.xz
+ # Locally generated
+ sha256  62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a  LICENSE-APACHE
+ sha256  b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1  LICENSE-MIT
+diff --git a/package/rust-bin/rust-bin.mk b/package/rust-bin/rust-bin.mk
+index b58274cb..ddc91cdd 100644
+--- a/package/rust-bin/rust-bin.mk
++++ b/package/rust-bin/rust-bin.mk
+@@ -19,6 +19,12 @@ ifeq ($(BR2_PACKAGE_HOST_RUSTC_TARGET_ARCH_SUPPORTS),y)
+ HOST_RUST_BIN_EXTRA_DOWNLOADS += rust-std-$(RUST_BIN_VERSION)-$(RUSTC_TARGET_NAME).tar.xz
+ endif
+ 
++# The standard library's source, which the Linux kernel's Rust support
++# builds its own core from (BR2_LINUX_KERNEL_LLVM).
++ifeq ($(BR2_PACKAGE_HOST_RUST_BIN_SRC),y)
++HOST_RUST_BIN_EXTRA_DOWNLOADS += rust-src-$(RUST_BIN_VERSION).tar.xz
++endif
++
+ HOST_RUST_BIN_LIBSTD_HOST_PREFIX = rust-std-$(RUSTC_HOST_NAME)
+ 
+ define HOST_RUST_BIN_LIBSTD_EXTRACT
+@@ -54,9 +60,17 @@ define HOST_RUST_BIN_INSTALL_LIBSTD_TARGET
+ endef
+ endif
+ 
++ifeq ($(BR2_PACKAGE_HOST_RUST_BIN_SRC),y)
++define HOST_RUST_BIN_INSTALL_SRC
++	(cd $(@D)/std/rust-src-$(RUST_BIN_VERSION); \
++		./install.sh $(HOST_RUST_BIN_INSTALL_COMMON_OPTS))
++endef
++endif
++
+ define HOST_RUST_BIN_INSTALL_CMDS
+ 	$(HOST_RUST_BIN_INSTALL_RUSTC)
+ 	$(HOST_RUST_BIN_INSTALL_LIBSTD_TARGET)
++	$(HOST_RUST_BIN_INSTALL_SRC)
+ endef
+ 
+ HOST_RUST_BIN_POST_INSTALL_HOOKS += HOST_RUST_INSTALL_CARGO_CONFIG
+diff --git a/package/rust-bindgen/rust-bindgen.hash b/package/rust-bindgen/rust-bindgen.hash
+index fecafcd4..cc471457 100644
+--- a/package/rust-bindgen/rust-bindgen.hash
++++ b/package/rust-bindgen/rust-bindgen.hash
+@@ -1,3 +1,3 @@
+ # Locally calculated
+-sha256  8e5a0999c2f4f6ab1cdee508e913e2ffef5225fb313816a0151742cd2103576c  rust-bindgen-0.72.1-cargo6.tar.gz
++sha256  7b9902040f3ecbe84d2acaca91f171ab34cc19b84cbd3c4cba89a637f714e6c7  rust-bindgen-0.73.2-cargo6.tar.gz
+ sha256  c23953d9deb0a3312dbeaf6c128a657f3591acee45067612fa68405eaa4525db  LICENSE
+diff --git a/package/rust-bindgen/rust-bindgen.mk b/package/rust-bindgen/rust-bindgen.mk
+index 55f3b4d5..3ac9df5b 100644
+--- a/package/rust-bindgen/rust-bindgen.mk
++++ b/package/rust-bindgen/rust-bindgen.mk
+@@ -4,15 +4,20 @@
+ #
+ ################################################################################
+ 
+-RUST_BINDGEN_VERSION = 0.72.1
++RUST_BINDGEN_VERSION = 0.73.2
+ RUST_BINDGEN_SITE = $(call github,rust-lang,rust-bindgen,refs/tags/v$(RUST_BINDGEN_VERSION))
+ RUST_BINDGEN_LICENSE = BSD-3-clause
+ RUST_BINDGEN_LICENSE_FILES = LICENSE
+ 
+ # This is actually a runtime dependency (bindgen loads libclang at
+ # runtime), but as it's a host package, we have no other option but to
+-# handle it as a build dependency.
++# handle it as a build dependency. With the pre-built LLVM, its libclang is
++# the one loaded (LIBCLANG_PATH), and no clang is built.
++ifeq ($(BR2_PACKAGE_HOST_LLVM_PREBUILT),y)
++HOST_RUST_BINDGEN_DEPENDENCIES = host-llvm-prebuilt
++else
+ HOST_RUST_BINDGEN_DEPENDENCIES = host-clang
++endif
+ 
+ # The Cargo.toml at the root directory is a "virtual manifest".
+ # Since we only want to build and install bindgen use the Cargo.toml
+diff --git a/package/rustc/Config.in.host b/package/rustc/Config.in.host
+index 9cd912fc..f9d49705 100644
+--- a/package/rustc/Config.in.host
++++ b/package/rustc/Config.in.host
+@@ -171,6 +171,13 @@ endchoice
+ 
+ endif
+ 
++config BR2_PACKAGE_HOST_RUST_BIN_SRC
++	bool
++	depends on BR2_PACKAGE_HOST_RUST_BIN
++	help
++	  Install the standard library's source (rust-src) with the
++	  pre-built compiler.
++
+ config BR2_PACKAGE_PROVIDES_HOST_RUSTC
+ 	string
+ 	default "host-rust" if BR2_PACKAGE_HOST_RUST
