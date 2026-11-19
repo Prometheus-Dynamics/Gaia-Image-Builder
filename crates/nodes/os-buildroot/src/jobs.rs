@@ -22,8 +22,12 @@
 //! whole job count, as before.
 //!
 //! The fifo is unlinked as soon as it is open. The pool keeps its descriptor,
-//! and each make opens the same pipe through `/proc/<pid>/fd/<n>`, so the pipe
-//! lives as long as this process does and leaves no name behind.
+//! open across exec, so every process this one starts has it at the same
+//! number, and each make opens the same pipe through `/proc/self/fd/<n>`. The
+//! pipe lives as long as this process does and leaves no name behind. The
+//! name is the make's own, not this process's `/proc/<pid>/fd/<n>`: a make in
+//! the build's sandbox (bwrap, in its own user namespace) may not open
+//! another process's descriptors, and would fall back to one job.
 
 use rustix::fs::{CWD, Mode, mkfifoat};
 use std::fs::{self, File, OpenOptions};
@@ -201,7 +205,8 @@ pub(crate) fn admit(
 }
 
 /// A fifo holding `tokens` tokens, and the `fifo:` name of it that a make is
-/// given: the pipe, opened through this process's `/proc` entry.
+/// given: the pipe, kept open across exec and opened through the make's own
+/// `/proc/self` entry.
 fn fifo_pipe(tokens: usize) -> io::Result<(File, String)> {
     let index = FIFOS.fetch_add(1, Ordering::Relaxed);
     let path: PathBuf =
@@ -213,8 +218,9 @@ fn fifo_pipe(tokens: usize) -> io::Result<(File, String)> {
     let _ = fs::remove_file(&path);
     let mut pipe = opened?;
     pipe.write_all(&vec![b'+'; tokens])?;
+    rustix::io::fcntl_setfd(&pipe, rustix::io::FdFlags::empty()).map_err(io::Error::from)?;
     let fd = pipe.as_raw_fd();
-    Ok((pipe, format!("fifo:/proc/{}/fd/{fd}", std::process::id())))
+    Ok((pipe, format!("fifo:/proc/self/fd/{fd}")))
 }
 
 #[cfg(test)]
@@ -300,6 +306,56 @@ t%:
             return None;
         }
         Some(Jobserver::new(jobs, true).expect("a pool"))
+    }
+
+    /// A make in the sandbox the step runs it in (bwrap, with its own user
+    /// namespace, for the fixed build path) reads the pool as one outside it
+    /// does: recipes overlap, and make never falls back to one job.
+    #[test]
+    fn a_build_in_the_sandbox_reads_the_pool() {
+        const BWRAP: &str = "/usr/bin/bwrap";
+        let Some(pool) = fifo_pool(13) else { return };
+        if !std::path::Path::new(BWRAP).is_file() {
+            eprintln!("skipped: no {BWRAP}");
+            return;
+        }
+        let dir = tempfile::tempdir().expect("a directory");
+        let out = dir.path().join("out");
+        std::fs::create_dir_all(&out).expect("out");
+        write_makefile(&out);
+        let host = gaia_types::BuildrootHost {
+            make: "/usr/bin/make".into(),
+            taskset: String::new(),
+            cpus: String::new(),
+            jobs: 13,
+            download_dir: String::new(),
+            ccache_dir: String::new(),
+            mirror: String::new(),
+            config_only: false,
+            dev_reuse: String::new(),
+            bwrap: BWRAP.into(),
+        };
+        let slot = pool.admit(&|| false).expect("a slot");
+        let make = build_make(&out, &slot, pool.jobs, "all");
+        let mut words = vec![make.get_program().to_string_lossy().into_owned()];
+        words.extend(
+            make.get_args()
+                .map(|arg| arg.to_string_lossy().into_owned()),
+        );
+        let words = crate::place::wrapped(&host, &out, words);
+        let mut command = Command::new(&words[0]);
+        command.args(&words[1..]).current_dir(&out).env_clear();
+        for (key, value) in make.get_envs() {
+            if let Some(value) = value {
+                command.env(key, value);
+            }
+        }
+        let output = command.output().expect("bwrap");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        assert!(!stderr.contains("jobserver"), "{stderr}");
+        let most = most_running(&std::fs::read_to_string(out.join("log")).unwrap_or_default());
+        assert!(most > 1, "{most} recipe at once in the sandbox: {stderr}");
     }
 
     #[test]
