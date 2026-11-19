@@ -85,6 +85,30 @@ pub(crate) fn plant(host: &Path, out: &Path, packages: &[String]) -> io::Result<
     Ok(())
 }
 
+/// The bytes a build's work directory holds once `seed` is planted, before
+/// anything builds: the seed's `host/` once in the output directory's own
+/// `host/`, and once more for each package the seed holds, each a clone of
+/// it (see [`plant`]). Clones copy every byte where there are no reflinks, as
+/// in RAM, so this is the size with none. Counted as if per-package
+/// directories are on, as Gaia's default is: the plant is known before the
+/// build's config is resolved. A seed with no host plants nothing.
+pub(crate) fn plant_bytes(seed: &Path) -> io::Result<u64> {
+    let host = seed.join("host");
+    if !host.is_dir() {
+        return Ok(0);
+    }
+    let packages = match read_packages(seed) {
+        Ok(packages) => packages.len() as u64,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => 0,
+        Err(error) => return Err(error),
+    };
+    let mut bytes = 0_u64;
+    for relative in files(&host)? {
+        bytes = bytes.saturating_add(fs::symlink_metadata(host.join(relative))?.len());
+    }
+    Ok(bytes.saturating_mul(packages + 1))
+}
+
 /// The packages the seed holds, from its `packages` file.
 pub(crate) fn read_packages(seed: &Path) -> io::Result<Vec<String>> {
     Ok(fs::read_to_string(seed.join(PACKAGES_FILE))?
@@ -310,6 +334,19 @@ mod tests {
             fs::read_to_string(out.join("per-package/host-b/host/bin/tool")).expect("tool"),
             "tool"
         );
+    }
+
+    #[test]
+    fn a_plant_counts_the_seed_host_once_and_once_per_package() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let seed = dir.path();
+        assert_eq!(plant_bytes(seed).expect("no host"), 0);
+        fs::create_dir_all(seed.join("host/bin")).expect("host");
+        fs::write(seed.join("host/bin/tool"), vec![0_u8; 1000]).expect("tool");
+        fs::write(seed.join("host/bin/lib"), vec![0_u8; 24]).expect("lib");
+        assert_eq!(plant_bytes(seed).expect("no packages file"), 1024);
+        fs::write(seed.join(PACKAGES_FILE), "host-a\nhost-b\nhost-c\n").expect("packages");
+        assert_eq!(plant_bytes(seed).expect("three packages"), 4 * 1024);
     }
 
     #[test]

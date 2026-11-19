@@ -499,9 +499,15 @@ pub fn build_os(
         Some((PathBuf::from(&host.dev_reuse), identity))
     };
     let step = Step::new(&store, cx, NAME, key.finish());
+    // The seed's plant, known before the work directory is chosen: a
+    // toolchain's host (LLVM's is 2 GB) cloned for each of its packages is
+    // more than RAM can hold, whatever the last build of another seed used.
+    let plant = ppd::plant_bytes(&seed_dir)
+        .map_err(|e| StepError::body(NAME, format!("the host tools' size: {e}")))?;
     let made = match &warm {
         None => step
             .ram_work(WORK_BYTES)
+            .ram_floor(plant)
             .look_up_or_make(&outputs, |work| {
                 build(work, &prepared, &seed_dir, host, None)
             })?,

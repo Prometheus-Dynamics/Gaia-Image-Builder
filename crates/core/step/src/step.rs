@@ -20,6 +20,7 @@ pub struct Step<'a> {
     check: Check,
     logs: PathBuf,
     ram_work: Option<u64>,
+    ram_floor: u64,
 }
 
 /// What [`Step::look_up_or_make`] gives back.
@@ -53,6 +54,7 @@ impl<'a> Step<'a> {
             check: Check::Digest,
             logs: crate::logs_dir(store),
             ram_work: None,
+            ram_floor: 0,
         }
     }
 
@@ -63,6 +65,15 @@ impl<'a> Step<'a> {
     /// run. The outputs are committed as usual, copied from RAM when needed.
     pub fn ram_work(mut self, default_bytes: u64) -> Self {
         self.ram_work = Some(default_bytes);
+        self
+    }
+
+    /// The least work directory size to expect for this run, whatever the
+    /// records say: a size the step knows from its inputs before it runs,
+    /// which an earlier run of other inputs cannot have measured. Only read
+    /// with [`Step::ram_work`].
+    pub fn ram_floor(mut self, bytes: u64) -> Self {
+        self.ram_floor = bytes;
         self
     }
 
@@ -121,7 +132,7 @@ impl<'a> Step<'a> {
         }
         let scratch = match self.ram_work {
             Some(default_bytes) => {
-                let expected = self.expected_work(default_bytes);
+                let expected = self.expected(default_bytes);
                 self.store.scratch_for(expected)
             }
             None => self.store.scratch(),
@@ -144,7 +155,12 @@ impl<'a> Step<'a> {
                 failed: true,
                 ..report
             };
-            let _ = self.write_record(start_ns, BTreeMap::new(), true, failed, None);
+            // What it took before it failed: a run that ran out of room
+            // raises what the next run expects (see `expected_work_in`).
+            let work_bytes = self
+                .ram_work
+                .map(|_| gaia_store::used_bytes(scratch.path()));
+            let _ = self.write_record(start_ns, BTreeMap::new(), true, failed, work_bytes);
             return Err(self.logged(error));
         }
         // Measured before the commit moves or copies the outputs out.
@@ -161,6 +177,12 @@ impl<'a> Step<'a> {
     /// has, else `default_bytes`.
     fn expected_work(&self, default_bytes: u64) -> u64 {
         expected_work_in(&self.logs, self.name, default_bytes)
+    }
+
+    /// What the work directory is chosen for: the records' size, or the
+    /// floor when that is more (see [`Step::ram_floor`]).
+    fn expected(&self, default_bytes: u64) -> u64 {
+        self.expected_work(default_bytes).max(self.ram_floor)
     }
 
     /// A failure of the body's own code that a fault record cannot hold,
@@ -246,15 +268,25 @@ impl<'a> Step<'a> {
 }
 
 /// The work directory size of the step `name` to expect, from the step
-/// records in `logs`: the last one that recorded a size, else `default_bytes`.
+/// records in `logs`: the last run that succeeded and recorded a size, else
+/// `default_bytes`; raised to the largest size a failed run recorded since.
+/// A failed run measured what it used before it stopped, so it says at least
+/// that much is needed, and a run that ran out of room says it needs more
+/// than it had. It never lowers what the last success measured.
 fn expected_work_in(logs: &Path, name: &str, default_bytes: u64) -> u64 {
     let step = crate::log::file_name(name);
-    crate::log::step_records(logs)
-        .iter()
-        .rev()
-        .find(|record| record.step == step && record.work_bytes.is_some())
-        .and_then(|record| record.work_bytes)
-        .unwrap_or(default_bytes)
+    let mut failed_since = 0;
+    for record in crate::log::step_records(logs).iter().rev() {
+        let (true, Some(bytes)) = (record.step == step, record.work_bytes) else {
+            continue;
+        };
+        if record.report.failed {
+            failed_since = failed_since.max(bytes);
+        } else {
+            return bytes.max(failed_since);
+        }
+    }
+    default_bytes.max(failed_since)
 }
 
 /// What a step's body works with: its own output directory, the run's
@@ -371,6 +403,72 @@ mod tests {
         assert_eq!(
             expected_work_in(dir.path(), "gaia.os.buildroot.host", 8),
             99
+        );
+    }
+
+    fn failed(step: &str, work_bytes: u64) -> StepRecord {
+        StepRecord {
+            report: crate::Report {
+                failed: true,
+                ..crate::Report::default()
+            },
+            ..record(step, Some(work_bytes))
+        }
+    }
+
+    #[test]
+    fn a_failed_run_that_used_more_raises_what_is_expected() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        append(dir.path(), &record("gaia.os.buildroot", Some(10)));
+        append(dir.path(), &failed("gaia.os.buildroot", 50));
+        append(dir.path(), &failed("gaia.os.buildroot", 30));
+        assert_eq!(expected_work_in(dir.path(), "gaia.os.buildroot", 24), 50);
+        // With no success at all, past the default too.
+        let none = tempfile::tempdir().expect("tempdir");
+        append(none.path(), &failed("gaia.os.buildroot", 40));
+        assert_eq!(expected_work_in(none.path(), "gaia.os.buildroot", 24), 40);
+    }
+
+    #[test]
+    fn a_failed_run_that_used_less_does_not_lower_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        append(dir.path(), &failed("gaia.os.buildroot", 90));
+        append(dir.path(), &record("gaia.os.buildroot", Some(20)));
+        append(dir.path(), &failed("gaia.os.buildroot", 5));
+        // The failure before the last success is past: that success measured.
+        assert_eq!(expected_work_in(dir.path(), "gaia.os.buildroot", 24), 20);
+    }
+
+    #[test]
+    fn a_failed_run_records_its_size_and_the_floor_is_expected() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path().join("store")).expect("store");
+        let cx = Ctx::new();
+        let key = StepKey(Digest::of_bytes(b"floor"));
+        let result = Step::new(&store, &cx, "gaia.test.floor", key)
+            .ram_work(1)
+            .look_up_or_make(&[("out", Path::new("out"))], |work| {
+                std::fs::write(work.dir().join("used"), vec![0_u8; 1 << 20])
+                    .map_err(|e| StepError::body("gaia.test.floor", e))?;
+                Err(StepError::body("gaia.test.floor", "planted failure"))
+            });
+        assert!(result.is_err());
+        let logs = crate::logs_dir(&store);
+        let records = crate::step_records(&logs);
+        let last = records.last().expect("a record");
+        assert!(last.report.failed);
+        assert!(last.work_bytes.expect("a size") >= 1 << 20);
+        assert!(expected_work_in(&logs, "gaia.test.floor", 1) >= 1 << 20);
+        let step = Step::new(&store, &cx, "gaia.test.floor", key)
+            .ram_work(1)
+            .ram_floor(7 << 40);
+        assert_eq!(step.expected(1), 7 << 40, "the floor, when it is more");
+        let low = Step::new(&store, &cx, "gaia.test.floor", key)
+            .ram_work(1)
+            .ram_floor(1);
+        assert!(
+            low.expected(1) >= 1 << 20,
+            "the records, when they are more"
         );
     }
 
