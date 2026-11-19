@@ -1191,10 +1191,23 @@ pub(crate) fn make_tool(
         tool = tool.env(name, value);
     }
     match slot.makeflags() {
-        Some(flags) => tool.env("MAKEFLAGS", flags),
+        Some(flags) => {
+            let mut tool = tool.env("MAKEFLAGS", flags);
+            for line in JOBSERVER_LOST {
+                tool = tool.refuse_line(line, JOBSERVER_WHY);
+            }
+            tool
+        }
         None => tool,
     }
 }
+
+/// What GNU make prints when it cannot use the jobserver its `MAKEFLAGS`
+/// names: a warning, and it goes on with one job. A pool make that prints
+/// either fails at once, so a build that would run serially never passes.
+pub(crate) const JOBSERVER_LOST: [&str; 2] = ["cannot open jobserver", "jobserver unavailable"];
+const JOBSERVER_WHY: &str =
+    "make could not use the build's job pool and would run one job at a time";
 
 /// The node, for a registry.
 pub const NODES: [&NodeRecord; 3] = [
@@ -1605,5 +1618,55 @@ mod bound_tests {
             !shared.iter().any(|arg| arg.starts_with("-j")),
             "{shared:?}"
         );
+    }
+
+    /// The plant: a pool make that cannot open its jobserver (here a fifo
+    /// that is not there, as the sandbox once could not open the pool's)
+    /// fails the step as make says so, and is not left to build with one
+    /// job. The same make with the pool's own `MAKEFLAGS` runs.
+    #[test]
+    fn a_pool_make_that_loses_the_jobserver_fails_at_once() {
+        if !jobs::make_has_fifo_jobserver("/usr/bin/make") {
+            eprintln!("skipped: /usr/bin/make is older than 4.4");
+            return;
+        }
+        let dir = tempfile::tempdir().expect("tempdir");
+        let src = dir.path().join("src");
+        fs::create_dir_all(&src).expect("src");
+        fs::write(src.join("Makefile"), "slow:\n\tsleep 30\nquick:\n\ttrue\n").expect("Makefile");
+        let store = Store::open(dir.path().join("store")).expect("store");
+        let cx = Ctx::new();
+        let pool = jobs::Jobserver::new(13, true).expect("a pool");
+        let slot = pool.admit(&|| false).expect("a slot");
+        let host = host(13, "");
+        let out = dir.path().join("out");
+        let run =
+            |name: &str, tool: Tool| {
+                Step::new(&store, &cx, "test.make", KeyBuilder::new(name, 1).finish())
+                    .look_up_or_make(&[("out", Path::new("out"))], |work| {
+                        work.run(&tool)?;
+                        fs::write(work.dir().join("out"), "x").map_err(|e| StepError::body("t", e))
+                    })
+            };
+        let started = std::time::Instant::now();
+        let lost = make_tool(&host, &src, &out, &[], &["slow"], &slot).env(
+            "MAKEFLAGS",
+            "-j --jobserver-auth=fifo:/nonexistent/gaia-planted",
+        );
+        let error = run("lost", lost).expect_err("the jobserver is lost");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "make ran on for {:?}",
+            started.elapsed()
+        );
+        let ErrorKind::Body(why) = error.kind() else {
+            panic!("{error}");
+        };
+        assert!(
+            why.contains(JOBSERVER_WHY) && why.contains("jobserver"),
+            "{why}"
+        );
+        run("kept", make_tool(&host, &src, &out, &[], &["quick"], &slot))
+            .expect("the pool's own jobserver");
     }
 }

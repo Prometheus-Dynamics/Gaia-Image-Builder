@@ -12,6 +12,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 /// Lines of each stream kept for the failure report.
@@ -39,6 +40,8 @@ pub struct Tool {
     env: Vec<(OsString, OsString)>,
     cwd: Option<PathBuf>,
     on_line: Option<LineSink>,
+    /// Lines that fail the run as soon as the tool prints them, and why.
+    refused: Vec<(String, String)>,
 }
 
 impl fmt::Debug for Tool {
@@ -60,6 +63,7 @@ impl Tool {
             env: Vec::new(),
             cwd: None,
             on_line: None,
+            refused: Vec::new(),
         }
     }
 
@@ -87,6 +91,15 @@ impl Tool {
     /// Called with every line the tool prints, as it prints it.
     pub fn on_line(mut self, sink: impl Fn(Stream, &str) + Send + Sync + 'static) -> Self {
         self.on_line = Some(Box::new(sink));
+        self
+    }
+
+    /// Fails the run as soon as the tool prints a line holding `text`: its
+    /// process group is killed, and the error gives `why` and the line. For
+    /// a warning that means the run, if it went on, would make the wrong
+    /// thing or make it the wrong way.
+    pub fn refuse_line(mut self, text: impl Into<String>, why: impl Into<String>) -> Self {
+        self.refused.push((text.into(), why.into()));
         self
     }
 }
@@ -146,17 +159,21 @@ pub(crate) fn run(
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let sink = tool.on_line.as_deref();
+    let watch = Watch {
+        refused: &tool.refused,
+        seen: OnceLock::new(),
+    };
 
     std::thread::scope(|scope| {
-        let log = &log;
-        let out = scope.spawn(move || tail(stdout, Stream::Stdout, sink, log));
-        let err = scope.spawn(move || tail(stderr, Stream::Stderr, sink, log));
+        let (log, watch) = (&log, &watch);
+        let out = scope.spawn(move || tail(stdout, Stream::Stdout, sink, watch, log));
+        let err = scope.spawn(move || tail(stderr, Stream::Stderr, sink, watch, log));
         // Waits for the exit without reaping it: the child stays a zombie
         // until its CPU time is read below.
         let cancelled = loop {
             match exited(group) {
                 Ok(true) => break false,
-                Ok(false) if cx.cancelled() => break true,
+                Ok(false) if cx.cancelled() || watch.seen.get().is_some() => break true,
                 Ok(false) => std::thread::sleep(POLL),
                 Err(_) => break false,
             }
@@ -174,26 +191,30 @@ pub(crate) fn run(
         let status = child.wait().ok().filter(|_| !cancelled);
         let stdout_tail = out.join().unwrap_or_default();
         let stderr_tail = err.join().unwrap_or_default();
-        let kind = match status {
-            None => ErrorKind::Cancelled,
-            Some(status) if status.success() => {
-                log.end("ok");
-                return Ok(ToolOutput {
-                    stdout_tail,
-                    stderr_tail,
-                    log: log.path.clone(),
-                });
-            }
-            Some(status) => match (status.code(), status.signal()) {
-                (Some(code), _) => ErrorKind::Exit(code),
-                (None, Some(signal)) => ErrorKind::Signal(signal),
-                (None, None) => ErrorKind::Exit(-1),
+        let kind = match (watch.seen.get(), status) {
+            (Some(refused), _) => ErrorKind::Body(refused.clone()),
+            (None, status) => match status {
+                None => ErrorKind::Cancelled,
+                Some(status) if status.success() => {
+                    log.end("ok");
+                    return Ok(ToolOutput {
+                        stdout_tail,
+                        stderr_tail,
+                        log: log.path.clone(),
+                    });
+                }
+                Some(status) => match (status.code(), status.signal()) {
+                    (Some(code), _) => ErrorKind::Exit(code),
+                    (None, Some(signal)) => ErrorKind::Signal(signal),
+                    (None, None) => ErrorKind::Exit(-1),
+                },
             },
         };
         log.end(
             match &kind {
                 ErrorKind::Exit(code) => format!("exit {code}"),
                 ErrorKind::Signal(signal) => format!("signal {signal}"),
+                ErrorKind::Body(why) => format!("refused: {why}"),
                 _ => "cancelled".to_string(),
             }
             .as_str(),
@@ -254,10 +275,17 @@ fn cpu_time_ns(pid: u32) -> Option<u64> {
 /// Reads a stream to its end, writing every line whole to the run log,
 /// handing it whole to `sink`, and keeping the last [`TAIL_LINES`] (each
 /// cut to 1 KiB).
+/// The lines a run refuses, and the first refused line seen, with why.
+struct Watch<'a> {
+    refused: &'a [(String, String)],
+    seen: OnceLock<String>,
+}
+
 fn tail(
     stream: Option<impl Read>,
     which: Stream,
     sink: Option<&LineFn>,
+    watch: &Watch<'_>,
     log: &RunLog,
 ) -> Vec<String> {
     let Some(stream) = stream else {
@@ -290,6 +318,13 @@ fn tail(
         // be one long line (a tool's JSON). Only the kept tail is cut.
         if let Some(sink) = sink {
             sink(which, &line);
+        }
+        if let Some((_, why)) = watch
+            .refused
+            .iter()
+            .find(|(text, _)| line.contains(text.as_str()))
+        {
+            let _ = watch.seen.set(format!("{why} (it printed: {line})"));
         }
         if line.len() > LINE_BYTES {
             let mut end = LINE_BYTES;

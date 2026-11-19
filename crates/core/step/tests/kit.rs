@@ -357,3 +357,55 @@ fn two_makers_of_one_key_make_it_once() {
     assert!(a.0 != b.0, "one made it and one found it");
     assert_eq!(a.1, b.1, "both have the one recorded output");
 }
+
+/// A line the tool is refused to print fails the run as it is printed: the
+/// tool's group is killed at once, not left to run on, and the error names
+/// why and the line. A tool that never prints it runs to its end.
+#[test]
+fn a_refused_line_fails_the_run_as_it_is_printed() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("store")).expect("store");
+    let cx = Ctx::new();
+    let tool = |script: &str| {
+        Tool::new("/bin/sh")
+            .arg("-c")
+            .arg(script.to_string())
+            .refuse_line("jobserver unavailable", "make fell back to one job")
+    };
+    let started = std::time::Instant::now();
+    let error = Step::new(&store, &cx, "test.tool", KeyBuilder::new("x", 1).finish())
+        .look_up_or_make(&[("out", Path::new("out"))], |work| {
+            work.run(&tool(
+                "echo starting; echo 'make: warning: jobserver unavailable: using -j1.' >&2; sleep 30",
+            ))?;
+            Ok(())
+        })
+        .expect_err("refused");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "the tool ran on for {:?}",
+        started.elapsed()
+    );
+    let ErrorKind::Body(why) = error.kind() else {
+        panic!("{error}");
+    };
+    assert!(
+        why.contains("make fell back to one job")
+            && why.contains("make: warning: jobserver unavailable: using -j1."),
+        "{why}"
+    );
+    // Printed just before a clean exit, it still fails the run.
+    let error = Step::new(&store, &cx, "test.tool", KeyBuilder::new("y", 1).finish())
+        .look_up_or_make(&[("out", Path::new("out"))], |work| {
+            work.run(&tool("echo 'jobserver unavailable' >&2; exit 0"))?;
+            Ok(())
+        })
+        .expect_err("refused at exit");
+    assert!(matches!(error.kind(), ErrorKind::Body(_)), "{error}");
+    Step::new(&store, &cx, "test.tool", KeyBuilder::new("z", 1).finish())
+        .look_up_or_make(&[("out", Path::new("out"))], |work| {
+            work.run(&tool("echo 'all jobs ran' >&2"))?;
+            std::fs::write(work.dir().join("out"), "x").map_err(|e| StepError::body("t", e))
+        })
+        .expect("no refused line");
+}
