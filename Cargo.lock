@@ -941,6 +941,7 @@ dependencies = [
  "gaia-store",
  "gaia-types",
  "serde",
+ "serde_json",
  "tempfile",
 ]
 

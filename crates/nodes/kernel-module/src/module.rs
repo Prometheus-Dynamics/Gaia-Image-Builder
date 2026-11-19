@@ -24,6 +24,44 @@ pub fn valid_name(name: &str) -> Result<(), String> {
     }
 }
 
+/// How a module is compiled: as its kernel was. `Llvm` builds with `LLVM=1`
+/// from the toolchain's pinned LLVM, and with its rustc when the kernel has
+/// Rust.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Compile {
+    Gcc,
+    Llvm { rust: bool },
+}
+
+/// The compile mode for a kernel build's `.config` and the board's declared
+/// kernel toolchain (`gcc` or `llvm`). The two must agree: a kernel built
+/// with clang (`CONFIG_CC_IS_CLANG=y`) for a board that declares gcc, or the
+/// other way round, is refused, by both names.
+pub fn compile_of(config: &str, declared: &str) -> Result<Compile, String> {
+    let set = |name: &str| config.lines().any(|line| line == format!("{name}=y"));
+    let clang = set("CONFIG_CC_IS_CLANG");
+    let built = if clang { "llvm" } else { "gcc" };
+    match declared {
+        "gcc" | "llvm" if declared != built => Err(format!(
+            "the board's kernel toolchain is {declared}, but the kernel build was made with {} \
+             (its .config has {}): a module is built as its kernel was, and the two must agree",
+            if clang { "clang" } else { "gcc" },
+            if clang {
+                "CONFIG_CC_IS_CLANG=y"
+            } else {
+                "no CONFIG_CC_IS_CLANG"
+            }
+        )),
+        "gcc" => Ok(Compile::Gcc),
+        "llvm" => Ok(Compile::Llvm {
+            rust: set("CONFIG_RUST"),
+        }),
+        other => Err(format!(
+            "kernel toolchain {other:?} is not one: it is gcc or llvm"
+        )),
+    }
+}
+
 /// The release a kernel build is for: the `UTS_RELEASE` in its
 /// `include/generated/utsrelease.h`. That is the string the module's vermagic
 /// is built from, so it is the one to compare.
@@ -110,5 +148,39 @@ mod tests {
     #[test]
     fn modules_go_under_updates() {
         assert_eq!(placed_path("6.1.0", "hello"), "6.1.0/updates/hello.ko");
+    }
+
+    #[test]
+    fn a_module_is_compiled_as_its_kernel_was() {
+        let gcc = "CONFIG_CC_IS_GCC=y\nCONFIG_MODULES=y\n";
+        let clang = "CONFIG_CC_IS_CLANG=y\nCONFIG_MODULES=y\n";
+        let rust = "CONFIG_CC_IS_CLANG=y\nCONFIG_RUST=y\n";
+        assert_eq!(compile_of(gcc, "gcc"), Ok(Compile::Gcc));
+        assert_eq!(compile_of(clang, "llvm"), Ok(Compile::Llvm { rust: false }));
+        assert_eq!(compile_of(rust, "llvm"), Ok(Compile::Llvm { rust: true }));
+        // A line that only starts like the option is not it.
+        assert_eq!(
+            compile_of("CONFIG_CC_IS_CLANG=yes\n", "gcc"),
+            Ok(Compile::Gcc)
+        );
+    }
+
+    #[test]
+    fn a_kernel_built_otherwise_than_the_board_declares_is_refused() {
+        let why =
+            compile_of("CONFIG_CC_IS_GCC=y\nCONFIG_RUST=y\n", "llvm").expect_err("gcc kernel");
+        assert!(
+            why.contains(
+                "the board's kernel toolchain is llvm, but the kernel build was made with gcc"
+            ),
+            "{why}"
+        );
+        let why = compile_of("CONFIG_CC_IS_CLANG=y\n", "gcc").expect_err("clang kernel");
+        assert!(why.contains("the board's kernel toolchain is gcc, but the kernel build was made with clang (its .config has CONFIG_CC_IS_CLANG=y)"), "{why}");
+        let why = compile_of("CONFIG_CC_IS_CLANG=y\n", "clang").expect_err("not a toolchain");
+        assert!(
+            why.contains("kernel toolchain \"clang\" is not one"),
+            "{why}"
+        );
     }
 }

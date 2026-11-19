@@ -136,6 +136,7 @@ fn run_module(
         module,
         kernel_build,
         toolchain,
+        "gcc".into(),
         modules,
         vec!["hello".into()],
         module_host(),

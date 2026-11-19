@@ -10,6 +10,13 @@
 //! - **toolchain**: the cross toolchain that kernel was built with, Buildroot's
 //!   `toolchain` output. The compiler is `bin/<cross-compile>gcc` inside it, and
 //!   its directory leads PATH. No compiler path comes from the host.
+//! - **kernel-toolchain**: the board's declared kernel toolchain, `gcc` or
+//!   `llvm` (`[kernel] toolchain`). The kernel build's `.config` must agree
+//!   (`CONFIG_CC_IS_CLANG=y` is llvm), or the step refuses. With `llvm` the
+//!   module is built as the kernel was: `LLVM=` the toolchain's
+//!   `opt/llvm-prebuilt/bin/` (clang, lld and the LLVM tools; no
+//!   `CROSS_COMPILE`), and, when the kernel has Rust (`CONFIG_RUST=y`),
+//!   `RUSTC=` its `bin/rustc`.
 //! - **kernel-modules**: the image's kernel modules, Buildroot's `modules`
 //!   artifact (`<release>/...`).
 //! - **names**: the module names Kbuild builds (`obj-m`), each giving
@@ -27,9 +34,9 @@
 //! vermagic must start with that release.
 //!
 //! The key holds the digests of the module source, the kernel build, the
-//! toolchain and the modules, the names, the architecture, the cross prefix and
-//! the version of each tool (make, the compiler, modinfo, depmod), read once per
-//! process. The job count and CPU pin change how fast it runs, not what it
+//! toolchain and the modules, the names, the architecture, the cross prefix,
+//! the kernel toolchain and the version of each tool (make, the compiler,
+//! rustc for a Rust kernel, modinfo, depmod), read once per process. The job count and CPU pin change how fast it runs, not what it
 //! makes.
 
 mod copy;
@@ -45,7 +52,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const NAME: &str = "gaia.kernel-module";
-const KEY_VERSION: u32 = 1;
+/// 2: the kernel toolchain, and modules built with LLVM.
+const KEY_VERSION: u32 = 2;
+/// Where the toolchain tree holds the pinned LLVM (Gaia's Buildroot patch
+/// 0006, `host-llvm-prebuilt`).
+const LLVM_BIN: &str = "opt/llvm-prebuilt/bin";
 /// The directories every tool's PATH ends with, after the toolchain's `bin`.
 const BASE_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 /// Fixed build stamps, so the same source gives the same module bytes.
@@ -86,7 +97,16 @@ pub struct KernelModuleHost {
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 #[node(
     id = "gaia.kernel-module",
-    inputs(store, module, kernel_build, toolchain, kernel_modules, names, host),
+    inputs(
+        store,
+        module,
+        kernel_build,
+        toolchain,
+        kernel_toolchain,
+        kernel_modules,
+        names,
+        host
+    ),
     outputs(modules)
 )]
 pub fn kernel_module(
@@ -94,6 +114,7 @@ pub fn kernel_module(
     module: Tree,
     kernel_build: Tree,
     toolchain: Tree,
+    kernel_toolchain: String,
     kernel_modules: Artifact,
     names: Vec<String>,
     host: KernelModuleHost,
@@ -106,13 +127,30 @@ pub fn kernel_module(
     let (build_dir, build_digest) =
         in_store(&store, &kernel_build, "the kernel build tree").map_err(fail)?;
     let (tool_dir, tool_digest) = in_store(&store, &toolchain, "the toolchain").map_err(fail)?;
+    let config = fs::read_to_string(build_dir.join(".config")).map_err(|error| {
+        fail(format!(
+            "{} is not a kernel build tree (no .config): {error}",
+            build_dir.display()
+        ))
+    })?;
+    let compile = module::compile_of(&config, &kernel_toolchain).map_err(fail)?;
     let bin = tool_dir.join("bin");
-    let cc = bin.join(format!("{}gcc", host.cross_compile));
+    let llvm = tool_dir.join(LLVM_BIN);
+    let (cc, rustc) = match compile {
+        module::Compile::Gcc => (bin.join(format!("{}gcc", host.cross_compile)), None),
+        module::Compile::Llvm { rust } => (llvm.join("clang"), rust.then(|| bin.join("rustc"))),
+    };
     if !cc.is_file() {
         return Err(fail(format!(
-            "the toolchain has no compiler {} (cross-compile {:?})",
+            "the toolchain has no compiler {} (kernel toolchain {kernel_toolchain}, cross-compile {:?})",
             cc.display(),
             host.cross_compile
+        )));
+    }
+    if let Some(rustc) = rustc.as_ref().filter(|rustc| !rustc.is_file()) {
+        return Err(fail(format!(
+            "the kernel has Rust, and the toolchain has no rustc {}",
+            rustc.display()
         )));
     }
     let modules_object = kernel_modules
@@ -137,6 +175,10 @@ pub fn kernel_module(
 
     let make = tool_version(&host.make, &["--version"]).map_err(fail)?;
     let compiler = tool_version(&path_string(&cc), &["--version"]).map_err(fail)?;
+    let rustc_version = match &rustc {
+        Some(rustc) => tool_version(&path_string(rustc), &["--version"]).map_err(fail)?,
+        None => Vec::new(),
+    };
     let modinfo = tool_version(&host.modinfo, &["--version"]).map_err(fail)?;
     let depmod = tool_version(&host.depmod, &["--version"]).map_err(fail)?;
     let key = KeyBuilder::new(NAME, KEY_VERSION)
@@ -145,7 +187,9 @@ pub fn kernel_module(
         .config("cross", &host.cross_compile)
         .config("names", names.join("\n"))
         .config("tool make", make)
+        .config("kernel toolchain", &kernel_toolchain)
         .config("tool cc", compiler)
+        .config("tool rustc", rustc_version)
         .config("tool modinfo", modinfo)
         .config("tool depmod", depmod)
         .input("module", src_digest)
@@ -162,7 +206,12 @@ pub fn kernel_module(
                 &src,
                 &build_dir,
                 &modules_dir,
-                &Compiler { cc: &cc, bin: &bin },
+                &Compiler {
+                    cc: &cc,
+                    bin: &bin,
+                    llvm: matches!(compile, module::Compile::Llvm { .. }).then_some(llvm.as_path()),
+                    rustc: rustc.as_deref(),
+                },
                 &release,
                 &names,
                 &host,
@@ -176,9 +225,13 @@ pub fn kernel_module(
 }
 
 /// The compiler the kernel build uses, and the toolchain's `bin` for PATH.
+/// For a kernel built with LLVM, the LLVM `bin` (`LLVM=`), and rustc when it
+/// has Rust.
 struct Compiler<'a> {
     cc: &'a Path,
     bin: &'a Path,
+    llvm: Option<&'a Path>,
+    rustc: Option<&'a Path>,
 }
 
 fn check(names: &[String], host: &KernelModuleHost) -> Result<(), String> {
@@ -367,10 +420,9 @@ fn make_tool(
         .arg(build)
         .arg(format!("M={}", source.display()))
         .arg(format!("ARCH={}", host.arch))
-        .arg(format!("CC={}", path_string(compiler.cc)))
         .arg(format!("-j{}", host.jobs));
-    if !host.cross_compile.is_empty() {
-        tool = tool.arg(format!("CROSS_COMPILE={}", host.cross_compile));
+    for arg in compile_args(host, compiler) {
+        tool = tool.arg(arg);
     }
     tool.arg("modules")
         .env("PATH", path_env(compiler))
@@ -381,10 +433,100 @@ fn make_tool(
         .env("KBUILD_BUILD_HOST", BUILD_HOST)
 }
 
-/// The PATH every tool runs with: the toolchain's `bin`, then the base.
+/// make's compiler words: as the kernel was built. gcc: `CC=` the
+/// toolchain's and its `CROSS_COMPILE`. LLVM: `LLVM=` its `bin/` (clang takes
+/// the target from `ARCH`), and `RUSTC=` for a kernel with Rust.
+fn compile_args(host: &KernelModuleHost, compiler: &Compiler<'_>) -> Vec<String> {
+    let Some(llvm) = compiler.llvm else {
+        let mut args = vec![format!("CC={}", path_string(compiler.cc))];
+        if !host.cross_compile.is_empty() {
+            args.push(format!("CROSS_COMPILE={}", host.cross_compile));
+        }
+        return args;
+    };
+    let mut args = vec![format!("LLVM={}/", path_string(llvm))];
+    if let Some(rustc) = compiler.rustc {
+        args.push(format!("RUSTC={}", path_string(rustc)));
+    }
+    args
+}
+
+/// The PATH every tool runs with: the LLVM `bin` for a kernel built with
+/// LLVM, the toolchain's `bin`, then the base.
 fn path_env(compiler: &Compiler<'_>) -> String {
-    format!("{}:{BASE_PATH}", path_string(compiler.bin))
+    match compiler.llvm {
+        Some(llvm) => format!(
+            "{}:{}:{BASE_PATH}",
+            path_string(llvm),
+            path_string(compiler.bin)
+        ),
+        None => format!("{}:{BASE_PATH}", path_string(compiler.bin)),
+    }
 }
 
 /// The node, for a registry.
 pub const NODES: [&NodeRecord; 1] = [&KERNEL_MODULE_NODE];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn host() -> KernelModuleHost {
+        KernelModuleHost {
+            make: "/usr/bin/make".into(),
+            modinfo: "/usr/bin/modinfo".into(),
+            depmod: "/usr/bin/depmod".into(),
+            arch: "arm64".into(),
+            cross_compile: "aarch64-linux-".into(),
+            taskset: "/usr/bin/taskset".into(),
+            cpus: String::new(),
+            jobs: 1,
+        }
+    }
+
+    /// gcc: the toolchain's gcc and the cross prefix. LLVM: the LLVM prefix,
+    /// no gcc and no cross prefix, rustc only for a kernel with Rust, and
+    /// the LLVM `bin` first on PATH.
+    #[test]
+    fn a_module_is_made_with_the_compilers_its_kernel_was() {
+        let (cc, bin) = (Path::new("/t/bin/aarch64-linux-gcc"), Path::new("/t/bin"));
+        let gcc = Compiler {
+            cc,
+            bin,
+            llvm: None,
+            rustc: None,
+        };
+        assert_eq!(
+            compile_args(&host(), &gcc),
+            [
+                "CC=/t/bin/aarch64-linux-gcc",
+                "CROSS_COMPILE=aarch64-linux-"
+            ]
+        );
+        assert_eq!(path_env(&gcc), format!("/t/bin:{BASE_PATH}"));
+        let llvm = Path::new("/t/opt/llvm-prebuilt/bin");
+        let clang = Path::new("/t/opt/llvm-prebuilt/bin/clang");
+        let c = Compiler {
+            cc: clang,
+            bin,
+            llvm: Some(llvm),
+            rustc: None,
+        };
+        assert_eq!(
+            compile_args(&host(), &c),
+            ["LLVM=/t/opt/llvm-prebuilt/bin/"]
+        );
+        assert_eq!(
+            path_env(&c),
+            format!("/t/opt/llvm-prebuilt/bin:/t/bin:{BASE_PATH}")
+        );
+        let rust = Compiler {
+            rustc: Some(Path::new("/t/bin/rustc")),
+            ..c
+        };
+        assert_eq!(
+            compile_args(&host(), &rust),
+            ["LLVM=/t/opt/llvm-prebuilt/bin/", "RUSTC=/t/bin/rustc"]
+        );
+    }
+}
