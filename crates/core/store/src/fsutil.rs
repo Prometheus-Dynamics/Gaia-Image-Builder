@@ -123,13 +123,24 @@ fn copy_into(from: &Path, to: &Path) -> io::Result<()> {
 }
 
 /// The bytes the file or tree at `path` takes on disk: its blocks, for every
-/// entry in it. The size of a step's work, as a RAM work directory would
-/// hold it.
+/// entry in it, and a file with more than one link once, as `du` counts it.
+/// The size of a step's work, as a RAM work directory would hold it:
+/// Buildroot's per-package directories and Gaia's plant are hard links, and
+/// counting each link would give many times what the directory holds.
 pub fn used_bytes(path: &Path) -> u64 {
+    let mut seen = std::collections::HashSet::new();
+    used_bytes_in(path, &mut seen)
+}
+
+fn used_bytes_in(path: &Path, seen: &mut std::collections::HashSet<(u64, u64)>) -> u64 {
     use std::os::unix::fs::MetadataExt;
     let Ok(metadata) = fs::symlink_metadata(path) else {
         return 0;
     };
+    if !metadata.is_dir() && metadata.nlink() > 1 && !seen.insert((metadata.dev(), metadata.ino()))
+    {
+        return 0;
+    }
     let own = metadata.blocks().saturating_mul(512);
     if !metadata.is_dir() {
         return own;
@@ -137,12 +148,11 @@ pub fn used_bytes(path: &Path) -> u64 {
     let Ok(entries) = fs::read_dir(path) else {
         return own;
     };
-    own.saturating_add(
-        entries
-            .flatten()
-            .map(|entry| used_bytes(&entry.path()))
-            .sum::<u64>(),
-    )
+    let mut total = own;
+    for entry in entries.flatten() {
+        total = total.saturating_add(used_bytes_in(&entry.path(), seen));
+    }
+    total
 }
 
 /// Removes a file or a tree. Read-only directories inside it are made
@@ -365,6 +375,27 @@ mod tests {
     /// is btrfs where `TMPDIR` says so.
     fn base() -> tempfile::TempDir {
         tempfile::tempdir().expect("tempdir")
+    }
+
+    #[test]
+    fn a_file_with_many_links_is_counted_once() {
+        let dir = base();
+        let one = dir.path().join("one");
+        fs::write(&one, vec![7_u8; 1 << 20]).expect("file");
+        let alone = used_bytes(dir.path());
+        assert!(alone >= 1 << 20, "{alone}");
+        for n in 0..20 {
+            fs::hard_link(&one, dir.path().join(format!("link-{n}"))).expect("link");
+        }
+        let linked = used_bytes(dir.path());
+        // Twenty more names, a few bytes of directory: not twenty more files.
+        assert!(linked < alone + (1 << 20) / 2, "{alone} -> {linked}");
+        // A second, distinct file still counts.
+        fs::write(dir.path().join("two"), vec![9_u8; 1 << 20]).expect("file");
+        assert!(
+            used_bytes(dir.path()) >= linked + (1 << 20),
+            "a new file counts"
+        );
     }
 
     /// A tree with a read-only directory, as a build leaves one.
