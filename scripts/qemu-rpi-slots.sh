@@ -90,6 +90,9 @@
 #   --append ARGS   add ARGS to every boot's kernel command line
 #   --trial-append ARGS   add ARGS to tryboot boots' kernel command line
 #                   only, to fail a trial on purpose and see it roll back
+#   --trial-at N    with --trial-append: add them to the Nth tryboot of
+#                   this run only (1 is the first; repeatable). Without it,
+#                   every tryboot, an install's own trial among them
 #   --tryboot       make the first boot a tryboot
 #   --max-boots N   stop after N boots (default: no limit)
 #   --cpu --smp --mem   guest CPU (cortex-a76), CPUs (4), memory (4G)
@@ -119,6 +122,7 @@ hostfwds=()
 net=auto
 append=""
 trial_append=""
+trial_at=()
 mac=52:54:00:77:00:02
 serial=1000000052540077
 ssh_key=""
@@ -144,6 +148,7 @@ while [[ $# -gt 0 ]]; do
 	--net) net="$2"; shift 2 ;;
 	--append) append+="${append:+ }$2"; shift 2 ;;
 	--trial-append) trial_append+="${trial_append:+ }$2"; shift 2 ;;
+	--trial-at) trial_at+=("$2"); shift 2 ;;
 	--mac) mac="$2"; shift 2 ;;
 	--serial) serial="$2"; shift 2 ;;
 	--ssh-key) ssh_key="$2"; shift 2 ;;
@@ -183,6 +188,10 @@ for tool in mtype mcopy mmd sfdisk fdtput fdtget dtc python3; do
 	command -v "$tool" > /dev/null || { echo "missing $tool (mtools, util-linux, dtc, python3)" >&2; exit 2; }
 done
 [[ $boot_count =~ ^[0-9]+$ && $boot_count -lt 256 ]] || { echo "--boot-count is 0 to 255" >&2; exit 2; }
+for n in "${trial_at[@]}"; do
+	[[ $n =~ ^[1-9][0-9]*$ ]] || { echo "--trial-at $n: a tryboot's number, 1 or more" >&2; exit 2; }
+done
+[[ ${#trial_at[@]} -eq 0 || -n $trial_append ]] || { echo "--trial-at needs --trial-append" >&2; exit 2; }
 [[ $boot_mode =~ ^[0-9]+$ ]] || { echo "--boot-mode is a number" >&2; exit 2; }
 qemu=${QEMU:-qemu-system-aarch64}
 if [[ $print_only -eq 0 ]]; then
@@ -440,6 +449,14 @@ fi
 
 count=$boot_count
 boots=0
+trials=0
+# Whether the trial arguments go on this tryboot (the $trials-th of the run).
+trial_faulted() {
+	[[ ${#trial_at[@]} -eq 0 ]] && return 0
+	local n
+	for n in "${trial_at[@]}"; do [[ $n -eq $trials ]] && return 0; done
+	return 1
+}
 while :; do
 	this_tryboot=0
 	if [[ -e $state/tryboot-next ]]; then
@@ -448,7 +465,10 @@ while :; do
 	fi
 	plan_boot "$this_tryboot"
 	boot_cmdline+="${append:+ $append}"
-	[[ $this_tryboot -eq 0 || -z $trial_append ]] || boot_cmdline+=" $trial_append"
+	[[ $this_tryboot -eq 0 ]] || trials=$((trials + 1))
+	if [[ $this_tryboot -eq 1 && -n $trial_append ]] && trial_faulted; then
+		boot_cmdline+=" $trial_append"
+	fi
 	[[ -z $kernel_override ]] || boot_kernel=$kernel_override
 	mapfile -t args < <(machine_args)
 	args+=(-kernel "$boot_kernel" -append "$boot_cmdline")

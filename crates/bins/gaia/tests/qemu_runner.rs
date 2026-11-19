@@ -197,6 +197,85 @@ fn the_runner_boots_the_bay_its_config_names() {
     assert!(out.contains("boot source: /axi/nvme\n"), "{out}");
 }
 
+/// --trial-append fails trials on purpose: on every tryboot, or with
+/// --trial-at only on the tryboots it numbers, so an install's own trial
+/// can pass and a later one fail. A plain boot never takes them.
+#[test]
+fn trial_arguments_go_on_the_tryboots_asked() {
+    if !tools_here(&[
+        "mformat", "mcopy", "mmd", "mtype", "sfdisk", "fdtput", "fdtget", "dtc", "python3",
+    ]) {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let disk = disk(dir.path());
+    let fault = "systemd.setenv=UPDATE_UNAME_R=trial-fault";
+    let cmdline = |out: &str| {
+        out.lines()
+            .find_map(|l| l.strip_prefix("cmdline: "))
+            .unwrap_or_else(|| panic!("no cmdline in {out}"))
+            .to_string()
+    };
+    let (ok, out) = runner(
+        dir.path(),
+        &disk,
+        &["--fresh", "--tryboot", "--trial-append", fault, "--print"],
+    );
+    assert!(ok, "{out}");
+    assert!(cmdline(&out).ends_with(fault), "every tryboot: {out}");
+    // The first tryboot is number 1: faulted only when asked.
+    let (ok, out) = runner(
+        dir.path(),
+        &disk,
+        &[
+            "--tryboot",
+            "--trial-append",
+            fault,
+            "--trial-at",
+            "1",
+            "--print",
+        ],
+    );
+    assert!(ok, "{out}");
+    assert!(cmdline(&out).ends_with(fault), "--trial-at 1: {out}");
+    let (ok, out) = runner(
+        dir.path(),
+        &disk,
+        &[
+            "--tryboot",
+            "--trial-append",
+            fault,
+            "--trial-at",
+            "2",
+            "--print",
+        ],
+    );
+    assert!(ok, "{out}");
+    assert!(
+        !cmdline(&out).contains(fault),
+        "--trial-at 2, first trial: {out}"
+    );
+    // A plain boot never.
+    let (ok, out) = runner(dir.path(), &disk, &["--trial-append", fault, "--print"]);
+    assert!(ok, "{out}");
+    assert!(!cmdline(&out).contains(fault), "a plain boot: {out}");
+    // Refused: no number, and a number without the arguments.
+    let (ok, out) = runner(
+        dir.path(),
+        &disk,
+        &["--trial-append", fault, "--trial-at", "0", "--print"],
+    );
+    assert!(
+        !ok && out.contains("--trial-at 0: a tryboot's number"),
+        "{out}"
+    );
+    let (ok, out) = runner(dir.path(), &disk, &["--trial-at", "1", "--print"]);
+    assert!(
+        !ok && out.contains("--trial-at needs --trial-append"),
+        "{out}"
+    );
+}
+
 /// The disk's node is moved to the boot source's path in the device tree
 /// the guest gets, and checked there.
 #[test]
