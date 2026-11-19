@@ -103,28 +103,227 @@ pub fn parse_size(text: &str) -> Option<u64> {
 }
 
 /// What the machine has free right now: the memory the kernel expects to
-/// give without swapping, and the room in `/dev/shm`. A value that cannot be
-/// read is `None`, and the automatic choice then uses the disk.
+/// give without swapping, the room in `/dev/shm`, and what this process's
+/// disk quota there still allows. A free value that cannot be read is
+/// `None`, and the automatic choice then uses the disk. `shm_quota` is
+/// `None` when no quota applies.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Room {
     pub mem_available: Option<u64>,
     pub shm_free: Option<u64>,
+    pub shm_quota: Option<u64>,
 }
 
 impl Room {
-    /// Reads `/proc/meminfo` and the free space of `shm`.
-    pub fn read(shm: &Path) -> Self {
+    /// Reads `/proc/meminfo`, the free space of `shm` and the quota on it
+    /// (see [`quota_headroom`]). A quota that is on and cannot be read is an
+    /// error: the free space alone would put a step where the quota refuses
+    /// its writes.
+    pub fn read(shm: &Path) -> Result<Self> {
         let mem_available = fs::read_to_string("/proc/meminfo")
             .ok()
             .and_then(|text| parse_mem_available(&text));
         let shm_free = rustix::fs::statvfs(shm)
             .ok()
             .map(|stat| stat.f_bavail.saturating_mul(stat.f_frsize));
-        Self {
+        let shm_quota = quota_headroom(shm)?;
+        Ok(Self {
             mem_available,
             shm_free,
+            shm_quota,
+        })
+    }
+
+    /// The bytes `/dev/shm` takes now: its free space, or the quota's
+    /// headroom when that is less.
+    fn shm_room(&self) -> Option<u64> {
+        let free = self.shm_free?;
+        Some(self.shm_quota.map_or(free, |quota| quota.min(free)))
+    }
+}
+
+/// Which quotas a mount has on, from its options.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct QuotaKinds {
+    pub user: bool,
+    pub group: bool,
+    pub project: bool,
+}
+
+/// The mount `path` is on, from `/proc/self/mountinfo` text: its mount point
+/// and the quotas its options turn on. `path` must be absolute and
+/// canonical. The deepest mount point that holds `path` is its mount.
+pub fn mount_quotas(mountinfo: &str, path: &Path) -> Option<(PathBuf, QuotaKinds)> {
+    let mut found: Option<(PathBuf, QuotaKinds)> = None;
+    for line in mountinfo.lines() {
+        let Some((head, tail)) = line.split_once(" - ") else {
+            continue;
+        };
+        let fields: Vec<&str> = head.split(' ').collect();
+        let (Some(point), Some(options)) = (fields.get(4), fields.get(5)) else {
+            continue;
+        };
+        let point = PathBuf::from(unescape_mount(point));
+        if !path.starts_with(&point) {
+            continue;
+        }
+        if found
+            .as_ref()
+            .is_some_and(|(deepest, _)| deepest.components().count() > point.components().count())
+        {
+            continue;
+        }
+        let super_options = tail.split(' ').nth(2).unwrap_or("");
+        let mut kinds = QuotaKinds::default();
+        for option in options.split(',').chain(super_options.split(',')) {
+            let name = option.split('=').next().unwrap_or("");
+            match name {
+                "usrquota" | "usrjquota" | "quota" | "uquota" | "uqnoenforce" | "qnoenforce" => {
+                    kinds.user = true;
+                }
+                "grpquota" | "grpjquota" | "gquota" | "gqnoenforce" => kinds.group = true,
+                "prjquota" | "pquota" | "pqnoenforce" => kinds.project = true,
+                _ => {}
+            }
+        }
+        found = Some((point, kinds));
+    }
+    found
+}
+
+/// A mount point as mountinfo writes it, with `\040` and the like read back.
+fn unescape_mount(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] == b'\\'
+            && at + 3 < bytes.len()
+            && bytes[at + 1..at + 4]
+                .iter()
+                .all(|b| (b'0'..=b'7').contains(b))
+        {
+            let value =
+                (bytes[at + 1] - b'0') * 64 + (bytes[at + 2] - b'0') * 8 + (bytes[at + 3] - b'0');
+            out.push(value);
+            at += 4;
+        } else {
+            out.push(bytes[at]);
+            at += 1;
         }
     }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// What the quota report of `quota -v -w -p --show-mntpoint` allows still at
+/// `mount`, in bytes: for each id it reports, the lower of its soft and hard
+/// block limits that is set, less the blocks used (1 KiB blocks), and the
+/// least of those. `None` when no id has a limit there. A report with no line
+/// for `mount` is an error: `-v` lists every quota-enabled mount.
+pub fn quota_report_headroom(report: &str, mount: &Path) -> Result<Option<u64>> {
+    let mount_text = mount.display().to_string();
+    let mut headroom: Option<u64> = None;
+    let mut lines = 0;
+    for line in report.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.get(1) != Some(&mount_text.as_str()) {
+            continue;
+        }
+        lines += 1;
+        let number = |at: usize, what: &str| -> Result<u64> {
+            fields
+                .get(at)
+                .map(|text| text.trim_end_matches('*'))
+                .and_then(|text| text.parse::<u64>().ok())
+                .ok_or_else(|| {
+                    Error::work(format!(
+                        "the quota report's {what} for {mount_text} does not read: {line}"
+                    ))
+                })
+        };
+        let used = number(2, "blocks used")?;
+        let soft = number(3, "soft block limit")?;
+        let hard = number(4, "hard block limit")?;
+        let limit = match (soft, hard) {
+            (0, 0) => continue,
+            (0, limit) | (limit, 0) => limit,
+            (soft, hard) => soft.min(hard),
+        };
+        let left = limit.saturating_sub(used).saturating_mul(1024);
+        headroom = Some(headroom.map_or(left, |least| least.min(left)));
+    }
+    if lines == 0 {
+        return Err(Error::work(format!(
+            "the quota report names no line for {mount_text}:\n{report}"
+        )));
+    }
+    Ok(headroom)
+}
+
+/// What the disk quotas on the mount `shm` is on still allow this process
+/// to write there, in bytes. `None` when the mount has no quota on (its
+/// options in `/proc/self/mountinfo` turn none on), or no limit is set for
+/// this user and its groups. A quota that is on is read with `quota`
+/// (quota-tools); a tool that cannot be run, or fails, or a project quota,
+/// which this does not read, is an error that names it.
+pub fn quota_headroom(shm: &Path) -> Result<Option<u64>> {
+    let path = fs::canonicalize(shm).map_err(|e| Error::work(format!("{}: {e}", shm.display())))?;
+    let mountinfo = fs::read_to_string("/proc/self/mountinfo")
+        .map_err(|e| Error::work(format!("/proc/self/mountinfo: {e}")))?;
+    quota_headroom_with(&path, &mountinfo, |flag, mount| {
+        std::process::Command::new("quota")
+            .args(["-v", "-w", "-p", "--show-mntpoint", flag, "-f"])
+            .arg(mount)
+            .env("LC_ALL", "C")
+            .output()
+    })
+}
+
+/// [`quota_headroom`] with the mount table and the way `quota` is run given,
+/// so each answer can be tested. `run` takes `-u` or `-g` and the mount point.
+pub(crate) fn quota_headroom_with(
+    path: &Path,
+    mountinfo: &str,
+    run: impl Fn(&str, &Path) -> std::io::Result<std::process::Output>,
+) -> Result<Option<u64>> {
+    let (mount, kinds) = mount_quotas(mountinfo, path).ok_or_else(|| {
+        Error::work(format!(
+            "/proc/self/mountinfo has no mount that holds {}",
+            path.display()
+        ))
+    })?;
+    if kinds.project {
+        return Err(Error::work(format!(
+            "{} has project quotas on, which RAM placement does not read; \
+             set GAIA_WORK_DIR=disk or ram to choose for it",
+            mount.display()
+        )));
+    }
+    let mut headroom: Option<u64> = None;
+    for (on, flag) in [(kinds.user, "-u"), (kinds.group, "-g")] {
+        if !on {
+            continue;
+        }
+        let output = run(flag, &mount).map_err(|e| {
+            Error::work(format!(
+                "{} has quotas on ({flag}), and `quota` could not be run to read them: {e}",
+                mount.display()
+            ))
+        })?;
+        if !output.status.success() {
+            return Err(Error::work(format!(
+                "`quota {flag} -f {}` failed ({}): {}",
+                mount.display(),
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        let report = String::from_utf8_lossy(&output.stdout);
+        if let Some(left) = quota_report_headroom(&report, &mount)? {
+            headroom = Some(headroom.map_or(left, |least| least.min(left)));
+        }
+    }
+    Ok(headroom)
 }
 
 /// The `MemAvailable` line of `/proc/meminfo`, in bytes.
@@ -137,10 +336,10 @@ pub fn parse_mem_available(meminfo: &str) -> Option<u64> {
 }
 
 /// Whether the automatic choice takes RAM for a step expecting `expected`
-/// bytes: the memory left after the reserve, and `/dev/shm`, must each hold
-/// it.
+/// bytes: the memory left after the reserve, and `/dev/shm` within its
+/// quota, must each hold it.
 pub(crate) fn auto_fits(room: Room, expected: u64) -> bool {
-    match (room.mem_available, room.shm_free) {
+    match (room.mem_available, room.shm_room()) {
         (Some(mem), Some(shm)) => mem.saturating_sub(RESERVE_BYTES) >= expected && shm >= expected,
         _ => false,
     }
@@ -216,6 +415,7 @@ mod tests {
         Room {
             mem_available: Some(mem_gib * GIB),
             shm_free: Some(shm_gib * GIB),
+            shm_quota: None,
         }
     }
 
@@ -242,8 +442,160 @@ mod tests {
         let no_shm = Room {
             mem_available: Some(100 * GIB),
             shm_free: None,
+            shm_quota: None,
         };
         assert!(!auto_fits(no_shm, 1));
+    }
+
+    #[test]
+    fn auto_needs_room_within_the_shm_quota() {
+        // 52 GiB free in /dev/shm, but the quota leaves 34: a 40 GiB step
+        // would be refused its writes.
+        let quota = Room {
+            shm_quota: Some(34 * GIB),
+            ..room(100, 52)
+        };
+        assert!(!auto_fits(quota, 40 * GIB));
+        assert!(auto_fits(quota, 30 * GIB));
+        // A quota past the free space: the free space decides.
+        let loose = Room {
+            shm_quota: Some(500 * GIB),
+            ..room(100, 52)
+        };
+        assert!(!auto_fits(loose, 60 * GIB));
+    }
+
+    const MOUNTINFO: &str = "\
+22 1 0:21 / / rw,relatime shared:1 - btrfs /dev/sda2 rw,space_cache=v2
+43 22 0:27 / /dev/shm rw,nosuid,nodev shared:3 - tmpfs tmpfs rw,inode64,usrquota
+44 22 0:28 / /run rw,nosuid - tmpfs tmpfs rw,mode=755
+45 22 0:29 / /srv/q rw - ext4 /dev/sdb1 rw,grpjquota=aquota.group,jqfmt=vfsv0
+46 22 0:30 / /srv/p rw - xfs /dev/sdc1 rw,prjquota
+47 22 0:31 / /mnt/my\\040disk rw - tmpfs tmpfs rw
+";
+
+    #[test]
+    fn a_mount_s_quotas_are_read_from_its_options() {
+        let at = |path: &str| mount_quotas(MOUNTINFO, Path::new(path)).expect("a mount");
+        assert_eq!(
+            at("/dev/shm/gaia-1/x"),
+            (
+                PathBuf::from("/dev/shm"),
+                QuotaKinds {
+                    user: true,
+                    ..QuotaKinds::default()
+                }
+            )
+        );
+        assert_eq!(at("/run/user").1, QuotaKinds::default());
+        assert_eq!(at("/home").0, PathBuf::from("/"));
+        assert!(at("/srv/q/a").1.group);
+        assert!(at("/srv/p").1.project);
+        assert_eq!(at("/mnt/my disk/x").0, PathBuf::from("/mnt/my disk"));
+    }
+
+    #[test]
+    fn a_quota_report_gives_the_least_headroom_of_its_lines() {
+        let report = "\
+Disk quotas for user sozo (uid 1000):
+     Filesystem  blocks   quota   limit   grace   files   quota   limit   grace
+tmpfs /dev/shm 17772784  52705190 52705190       0  250878       0       0       0
+";
+        assert_eq!(
+            quota_report_headroom(report, Path::new("/dev/shm")).expect("reads"),
+            Some((52_705_190 - 17_772_784) * 1024)
+        );
+        // Over the soft limit, with a grace: marked with a star.
+        let over = "tmpfs /dev/shm 60000*  50000 70000  3days 1 0 0 0\n\
+                    tmpfs /dev/shm 10 0 0 0 1 0 0 0\n";
+        assert_eq!(
+            quota_report_headroom(over, Path::new("/dev/shm")).expect("reads"),
+            Some(0)
+        );
+        // No limit set for the id.
+        let unlimited = "tmpfs /dev/shm 10 0 0 0 1 0 0 0\n";
+        assert_eq!(
+            quota_report_headroom(unlimited, Path::new("/dev/shm")).expect("reads"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_quota_report_without_the_mount_or_with_a_bad_number_is_an_error() {
+        let other = "tmpfs /run 10 100 100 0 1 0 0 0\n";
+        assert!(quota_report_headroom(other, Path::new("/dev/shm")).is_err());
+        let bad = "tmpfs /dev/shm ten 100 100 0 1 0 0 0\n";
+        let error = quota_report_headroom(bad, Path::new("/dev/shm"))
+            .expect_err("does not read")
+            .to_string();
+        assert!(error.contains("blocks used"), "{error}");
+    }
+
+    fn output(code: i32, stdout: &str, stderr: &str) -> std::process::Output {
+        use std::os::unix::process::ExitStatusExt;
+        std::process::Output {
+            status: std::process::ExitStatus::from_raw(code << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    const SHM_LINE: &str = "tmpfs /dev/shm 100 1100 1100 0 1 0 0 0\n";
+
+    #[test]
+    fn a_mount_with_no_quota_on_is_not_asked() {
+        let asked = std::cell::Cell::new(false);
+        let headroom = quota_headroom_with(Path::new("/run/x"), MOUNTINFO, |_, _| {
+            asked.set(true);
+            Ok(output(0, "", ""))
+        });
+        assert_eq!(headroom.expect("no quota"), None);
+        assert!(!asked.get());
+    }
+
+    #[test]
+    fn a_quota_that_is_on_is_read() {
+        let headroom =
+            quota_headroom_with(Path::new("/dev/shm/gaia-1"), MOUNTINFO, |flag, mount| {
+                assert_eq!((flag, mount), ("-u", Path::new("/dev/shm")));
+                Ok(output(0, SHM_LINE, ""))
+            });
+        assert_eq!(headroom.expect("reads"), Some(1000 * 1024));
+    }
+
+    #[test]
+    fn a_quota_that_is_on_and_cannot_be_read_is_an_error_that_names_it() {
+        let shm = Path::new("/dev/shm/gaia-1");
+        let missing = quota_headroom_with(shm, MOUNTINFO, |_, _| {
+            Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+        })
+        .expect_err("no tool")
+        .to_string();
+        assert!(missing.contains("`quota` could not be run"), "{missing}");
+        let failed = quota_headroom_with(shm, MOUNTINFO, |_, _| {
+            Ok(output(
+                1,
+                "",
+                "quota: Not all specified mountpoints are using quota.",
+            ))
+        })
+        .expect_err("tool failed")
+        .to_string();
+        assert!(failed.contains("Not all specified mountpoints"), "{failed}");
+        let project = quota_headroom_with(Path::new("/srv/p/x"), MOUNTINFO, |_, _| {
+            Ok(output(0, "", ""))
+        })
+        .expect_err("project quota")
+        .to_string();
+        assert!(project.contains("project quotas"), "{project}");
+    }
+
+    /// This machine's own: run with `--ignored` to see what placement reads.
+    #[test]
+    #[ignore = "reads this machine's /dev/shm quota"]
+    fn this_machine_s_shm_quota_reads() {
+        let headroom = quota_headroom(Path::new(SHM)).expect("reads");
+        println!("/dev/shm quota headroom: {headroom:?}");
     }
 
     #[test]

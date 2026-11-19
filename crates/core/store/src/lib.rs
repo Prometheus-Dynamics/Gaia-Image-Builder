@@ -163,13 +163,13 @@ impl Store {
     pub fn scratch_for(&self, expected: u64) -> Result<Scratch<'_>> {
         let settings = Settings::from_env()?;
         let shm = std::path::Path::new(placement::SHM);
-        self.scratch_with(
-            expected,
-            &settings,
-            Room::read(shm),
-            shm,
-            &placement::BUDGET,
-        )
+        // Read only for the automatic choice: a quota that cannot be read
+        // stops it, and a chosen mode needs no reading.
+        let room = match settings.mode {
+            placement::Mode::Auto => Room::read(shm)?,
+            placement::Mode::Disk | placement::Mode::Ram => Room::default(),
+        };
+        self.scratch_with(expected, &settings, room, shm, &placement::BUDGET)
     }
 
     /// [`Store::scratch_for`] with what it reads from the environment and the

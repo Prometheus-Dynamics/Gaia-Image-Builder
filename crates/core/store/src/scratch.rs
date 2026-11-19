@@ -192,6 +192,7 @@ mod tests {
         Room {
             mem_available: Some(100 * GIB),
             shm_free: Some(100 * GIB),
+            shm_quota: None,
         }
     }
 
@@ -337,6 +338,7 @@ mod tests {
         let tight = Room {
             mem_available: Some(20 * GIB),
             shm_free: Some(100 * GIB),
+            shm_quota: None,
         };
         let scratch = store
             .scratch_with(
@@ -375,6 +377,7 @@ mod tests {
         let tight = Room {
             mem_available: Some(GIB),
             shm_free: Some(GIB),
+            shm_quota: None,
         };
         let scratch = store
             .scratch_with(
