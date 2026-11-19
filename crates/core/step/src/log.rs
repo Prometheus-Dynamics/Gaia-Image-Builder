@@ -126,10 +126,21 @@ pub struct Report {
     /// Whether the body failed.
     #[serde(default, skip_serializing_if = "is_false")]
     pub failed: bool,
+    /// How the record's `work=` size was measured, when it has one: see
+    /// [`SIZE_MEASURE`]. A size without it, or with an older one, is not
+    /// used for what the next run expects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_measure: Option<u32>,
     /// What the body reported with [`crate::Work::detail`], by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub details: BTreeMap<String, serde_json::Value>,
 }
+
+/// The way work directory sizes are measured now. 2: a file with many
+/// hard links is counted once. Sizes measured before counted every link,
+/// so a plant of hard-linked host tools read as many times its size, and
+/// those records would ask for far more room than a run needs.
+pub const SIZE_MEASURE: u32 = 2;
 
 /// For `skip_serializing_if`: a flag that is off is left out.
 fn is_false(flag: &bool) -> bool {

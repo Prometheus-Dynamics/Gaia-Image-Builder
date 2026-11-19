@@ -251,6 +251,10 @@ impl<'a> Step<'a> {
         report: Report,
         work_bytes: Option<u64>,
     ) -> std::io::Result<crate::StepRecord> {
+        let report = Report {
+            size_measure: work_bytes.map(|_| crate::log::SIZE_MEASURE),
+            ..report
+        };
         let record = crate::StepRecord {
             start_ns,
             end_ns: crate::now_ns(),
@@ -272,12 +276,15 @@ impl<'a> Step<'a> {
 /// `default_bytes`; raised to the largest size a failed run recorded since.
 /// A failed run measured what it used before it stopped, so it says at least
 /// that much is needed, and a run that ran out of room says it needs more
-/// than it had. It never lowers what the last success measured.
+/// than it had. It never lowers what the last success measured. Only sizes
+/// measured the way they are now count (see [`crate::log::SIZE_MEASURE`]);
+/// a record's time and outcome are kept whatever its size measure.
 fn expected_work_in(logs: &Path, name: &str, default_bytes: u64) -> u64 {
     let step = crate::log::file_name(name);
     let mut failed_since = 0;
     for record in crate::log::step_records(logs).iter().rev() {
-        let (true, Some(bytes)) = (record.step == step, record.work_bytes) else {
+        let current = record.report.size_measure >= Some(crate::log::SIZE_MEASURE);
+        let (true, true, Some(bytes)) = (record.step == step, current, record.work_bytes) else {
             continue;
         };
         if record.report.failed {
@@ -378,7 +385,10 @@ mod tests {
             key: StepKey(Digest::of_bytes(step.as_bytes())),
             outputs: BTreeMap::new(),
             work_bytes,
-            report: crate::Report::default(),
+            report: crate::Report {
+                size_measure: work_bytes.map(|_| crate::log::SIZE_MEASURE),
+                ..crate::Report::default()
+            },
         }
     }
 
@@ -407,13 +417,50 @@ mod tests {
     }
 
     fn failed(step: &str, work_bytes: u64) -> StepRecord {
+        let sized = record(step, Some(work_bytes));
         StepRecord {
             report: crate::Report {
                 failed: true,
-                ..crate::Report::default()
+                ..sized.report.clone()
             },
-            ..record(step, Some(work_bytes))
+            ..sized
         }
+    }
+
+    /// A failed record written before sizes had a measure: 143 GB, read off
+    /// a plant of hard links counted once per link.
+    fn unmeasured_failed(step: &str, work_bytes: u64) -> StepRecord {
+        let mut old = failed(step, work_bytes);
+        old.report.size_measure = None;
+        old
+    }
+
+    #[test]
+    fn a_size_from_before_the_measure_is_not_expected() {
+        let big = 143_094_362_112;
+        let dir = tempfile::tempdir().expect("tempdir");
+        append(dir.path(), &unmeasured_failed("gaia.os.buildroot", big));
+        // As for a new step: the default, under the 60G RAM cap, so a forced
+        // RAM run is not refused on it.
+        assert_eq!(expected_work_in(dir.path(), "gaia.os.buildroot", 24), 24);
+        let older = tempfile::tempdir().expect("tempdir");
+        let mut one = unmeasured_failed("gaia.os.buildroot", big);
+        one.report.size_measure = Some(crate::log::SIZE_MEASURE - 1);
+        append(older.path(), &one);
+        assert_eq!(expected_work_in(older.path(), "gaia.os.buildroot", 24), 24);
+        // Its time and outcome are still read.
+        let read = crate::step_records(dir.path());
+        assert!(read[0].report.failed);
+        assert_eq!(read[0].work_bytes, Some(big));
+    }
+
+    #[test]
+    fn a_measured_failed_size_is_still_expected_however_big() {
+        let big = 143_094_362_112;
+        let dir = tempfile::tempdir().expect("tempdir");
+        append(dir.path(), &unmeasured_failed("gaia.os.buildroot", 7));
+        append(dir.path(), &failed("gaia.os.buildroot", big));
+        assert_eq!(expected_work_in(dir.path(), "gaia.os.buildroot", 24), big);
     }
 
     #[test]
@@ -458,6 +505,7 @@ mod tests {
         let last = records.last().expect("a record");
         assert!(last.report.failed);
         assert!(last.work_bytes.expect("a size") >= 1 << 20);
+        assert_eq!(last.report.size_measure, Some(crate::log::SIZE_MEASURE));
         assert!(expected_work_in(&logs, "gaia.test.floor", 1) >= 1 << 20);
         let step = Step::new(&store, &cx, "gaia.test.floor", key)
             .ram_work(1)
