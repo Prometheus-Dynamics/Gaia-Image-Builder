@@ -11,9 +11,10 @@
 # as its last kernel fragment, and the product is built until its image's
 # `kernel` step, with the store the environment names (GAIA_STORE). Every
 # fragment line must take, as in any build: a line the kernel drops fails.
-# OUT/Image is the kernel (the build's `kernel` output, Image or Image.gz as
-# the board makes it; QEMU takes either), OUT/Image.sha256 its
-# digest, OUT/build.log the build. The kernel is the board's own source and
+# OUT/Image is the kernel, uncompressed. When the board makes an Image.gz
+# (the build's `kernel` output), that is kept beside it as OUT/Image.gz, and
+# OUT/Image is it decompressed. OUT/SHA256SUMS has the digest of each, and
+# OUT/build.log the build. The kernel is the board's own source and
 # configuration but for the added lines, so it boots the image's initramfs
 # and slot chain as the board would. Pi hardware (RP1, the bcm2835 watchdog,
 # the firmware's boot count) is absent on virt.
@@ -67,6 +68,15 @@ if len(found) != 1:
 print(found[0])
 PY
 )
-cp "$kernel" "$out/Image"
-(cd "$out" && sha256sum Image > Image.sha256)
-cat "$out/Image.sha256"
+case "$kernel" in
+*.gz)
+    cp "$kernel" "$out/Image.gz"
+    gzip -dc "$kernel" > "$out/Image"
+    (cd "$out" && sha256sum Image Image.gz > SHA256SUMS)
+    ;;
+*)
+    cp "$kernel" "$out/Image"
+    (cd "$out" && sha256sum Image > SHA256SUMS)
+    ;;
+esac
+cat "$out/SHA256SUMS"
