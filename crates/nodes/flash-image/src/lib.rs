@@ -30,6 +30,16 @@
 //! settings, the xz library versions, whether the file is signed and, when
 //! it is, the public key.
 //!
+//! Cost: the stream is put together from its blocks (see `blocks.rs`), so
+//! only blocks with data are encoded, on up to the allowed cores, and the
+//! zero block once. The encoder's memory is about 340 MB plus 224 MB for
+//! each block encoded at once (at most the allowed cores, and at most the
+//! blocks with data): 815 MB on a 15.6 GB disk image with three data blocks,
+//! and about 6 GB for a disk full of data on 26 cores. The step holds that
+//! much (rounded up) in the RAM placement's count while it encodes (see
+//! `gaia_store::hold_memory`). Its CPU, which runs inside Gaia's process,
+//! is counted in the step's report as its own CPU.
+//!
 //! This is not the general `gaia.compress.xz` node: that one is for any
 //! artifact and its presets above 6 use a dictionary a board refuses.
 
@@ -163,6 +173,7 @@ pub fn flash_image_with(
             let dir = work.dir().to_path_buf();
             let image_stream = dir.join("image.xz");
             let made = encode(&src, &image_stream, threads()).map_err(fail)?;
+            work.add_own_cpu(made.worker_cpu_ns);
             work.detail(
                 "blocks",
                 serde_json::json!({ "blocks": made.blocks, "zero": made.zero_blocks }),
@@ -533,6 +544,9 @@ mod tests {
                 let expect_zero = if name == "agreed" { 0 } else { 3 };
                 assert_eq!(made.zero_blocks, expect_zero, "{name}");
                 assert_eq!(made.blocks, (raw.len() as u64).div_ceil(BLOCK), "{name}");
+                // The encoder threads' CPU is counted: every sample has a
+                // block to encode.
+                assert!(made.worker_cpu_ns > 0, "{name}: encoder CPU not counted");
                 check_dictionary(&out).expect("within a board's limits");
             }
             let xz = std::process::Command::new("xz")

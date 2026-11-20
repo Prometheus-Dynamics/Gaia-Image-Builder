@@ -36,6 +36,27 @@ pub(crate) struct Block {
 pub(crate) struct Made {
     pub blocks: u64,
     pub zero_blocks: u64,
+    /// CPU time the encoding used beside the calling thread, in
+    /// nanoseconds: the process's CPU over the encode less the calling
+    /// thread's. liblzma's encoder runs in threads of its own, which only
+    /// the process's clock sees; other work inside the process at the same
+    /// time is counted too.
+    pub worker_cpu_ns: u64,
+}
+
+/// Memory the encoding takes besides its workers, in bytes: the zero block
+/// to compare with and the writer (measured about 340 MB).
+pub(crate) const MEMORY_BASE: u64 = 384 << 20;
+/// Memory each encoder thread takes, in bytes: its 64 MiB read buffer and
+/// liblzma's encoder at preset 6 with its block in and out (measured about
+/// 224 MB a worker on 4, 8 and 16 workers).
+pub(crate) const MEMORY_PER_WORKER: u64 = 256 << 20;
+
+/// CPU time this process has used, in nanoseconds.
+fn process_cpu_ns() -> u64 {
+    let time = rustix::time::clock_gettime(rustix::time::ClockId::ProcessCPUTime);
+    u64::try_from(time.tv_sec).unwrap_or(0) * 1_000_000_000
+        + u64::try_from(time.tv_nsec).unwrap_or(0)
 }
 
 /// `data` (at most one block of input) as the one block the multithreaded
@@ -133,6 +154,9 @@ pub(crate) fn write_stream(
     let workers = (threads.max(1) as usize).min(data.len()).max(1);
     // The zero block, encoded once, beside the data blocks.
     let zero_block: Mutex<Option<Result<Block, String>>> = Mutex::new(None);
+    let encoders = workers as u64 + u64::from(zero.iter().any(|z| *z));
+    let _memory = gaia_store::hold_memory(MEMORY_BASE + MEMORY_PER_WORKER * encoders);
+    let (process_start, thread_start) = (process_cpu_ns(), gaia_step::thread_cpu_ns());
     std::thread::scope(|scope| {
         if zero.iter().any(|z| *z) {
             scope.spawn(|| {
@@ -181,6 +205,9 @@ pub(crate) fn write_stream(
             });
         }
     });
+    let worker_cpu_ns = process_cpu_ns()
+        .saturating_sub(process_start)
+        .saturating_sub(gaia_step::thread_cpu_ns().saturating_sub(thread_start));
     if let Some(why) = failed
         .into_inner()
         .map_err(|_| "an encoder thread panicked")?
@@ -226,6 +253,7 @@ pub(crate) fn write_stream(
     Ok(Made {
         blocks: count,
         zero_blocks: zero.iter().filter(|z| **z).count() as u64,
+        worker_cpu_ns,
     })
 }
 
