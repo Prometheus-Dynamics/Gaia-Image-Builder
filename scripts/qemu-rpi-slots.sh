@@ -76,7 +76,8 @@
 # - auto (default): tap when qtap0 exists, else netns.
 # The guest's MAC is fixed (--mac, default 52:54:00:77:00:02), so its lease
 # and name stay the same across boots. An i6300esb watchdog is attached for
-# kernels that carry its driver.
+# kernels that carry its driver, unless --no-watchdog leaves it out (each
+# boot records which).
 #
 # The image is never written: its contents are copied (sparse) to
 # <state>/disk.img once, and the guest writes that copy. --fresh copies again.
@@ -106,6 +107,8 @@
 #                   every tryboot, an install's own trial among them
 #   --tryboot       make the first boot a tryboot
 #   --max-boots N   stop after N boots (default: no limit)
+#   --no-watchdog   attach no i6300esb watchdog: a guest that feeds none
+#                   is then not reset by it
 #   --cpu --smp --mem   guest CPU (cortex-a76), CPUs (4), memory (4G)
 #   --print         print what the first boot would use and the QEMU
 #                   command, then exit (needs no QEMU)
@@ -142,6 +145,7 @@ boot_count=0
 boot_mode=1
 tryboot=0
 max_boots=0
+watchdog=1
 cpu=cortex-a76
 smp=4
 mem=4G
@@ -168,6 +172,7 @@ while [[ $# -gt 0 ]]; do
 	--boot-mode) boot_mode="$2"; shift 2 ;;
 	--tryboot) tryboot=1; shift ;;
 	--max-boots) max_boots="$2"; shift 2 ;;
+	--no-watchdog) watchdog=0; shift ;;
 	--cpu) cpu="$2"; shift 2 ;;
 	--smp) smp="$2"; shift 2 ;;
 	--mem) mem="$2"; shift 2 ;;
@@ -397,7 +402,8 @@ machine_args() {
 		-drive "if=none,id=disk0,format=raw,file=$disk,discard=unmap" \
 		-device virtio-blk-device,drive=disk0 \
 		-netdev "$netdev" -device "virtio-net-pci,netdev=net0,mac=$mac" \
-		-device virtio-rng-pci -device i6300esb
+		-device virtio-rng-pci
+	[[ $watchdog -eq 0 ]] || printf '%s\n' -device i6300esb
 }
 
 # The virt-mmio transport the disk is on: its base address, from QEMU's own
@@ -538,6 +544,7 @@ while :; do
 		echo "from: $boot_source"
 		echo "kernel: $boot_kernel"
 		echo "initramfs: ${boot_initramfs:-none}"
+		echo "watchdog: $([[ $watchdog -eq 1 ]] && echo i6300esb || echo "none (--no-watchdog)")"
 		echo "cmdline: $boot_cmdline"
 		echo "overlays: ${boot_overlays[*]:-none}"
 		printf 'qemu:'
@@ -559,6 +566,11 @@ while :; do
 		echo "kernel $boot_kernel sha256 $(sha256sum < "$boot_kernel" | cut -d' ' -f1) ($whose)"
 		echo "device tree $state/virt.dtb sha256 $(sha256sum < "$state/virt.dtb" | cut -d' ' -f1) (the virt machine's; not the image's)"
 		echo "$marker_note"
+		if [[ $watchdog -eq 1 ]]; then
+			echo "watchdog: i6300esb attached"
+		else
+			echo "watchdog: NONE, left out (--no-watchdog); a board has one"
+		fi
 		[[ -z $boot_initramfs ]] || echo "initramfs from the image sha256 $(sha256sum < "$boot_initramfs" | cut -d' ' -f1)"
 		if [[ $boot_cmdline == "$image_cmdline" ]]; then
 			echo "command line: the image's"

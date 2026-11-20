@@ -459,3 +459,22 @@ fn the_board_overlays_marker_is_emulated_from_the_boots_overlay() {
     );
     assert_eq!(get(&dtb_of(&out), &["/lemnos", "lemnos,board"]), None);
 }
+
+/// The watchdog is attached unless --no-watchdog leaves it out, and the
+/// boot says which.
+#[test]
+fn no_watchdog_leaves_the_i6300esb_out() {
+    if !tools_here(&["mformat", "mcopy", "mmd", "mtype", "sfdisk", "dtc"]) {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let disk = disk(dir.path());
+    let (ok, out) = runner(dir.path(), &disk, &["--fresh", "--print"]);
+    assert!(ok, "{out}");
+    assert!(out.contains("\nwatchdog: i6300esb\n"), "{out}");
+    assert!(out.contains(" -device i6300esb"), "{out}");
+    let (ok, out) = runner(dir.path(), &disk, &["--fresh", "--no-watchdog", "--print"]);
+    assert!(ok, "{out}");
+    assert!(out.contains("\nwatchdog: none (--no-watchdog)\n"), "{out}");
+    assert!(!out.contains("i6300esb"), "{out}");
+}
