@@ -12,6 +12,10 @@
 //!   process together. A RAM work directory counts from its creation until
 //!   the step ends.
 //!
+//! Work inside Gaia's own process that is about to use much memory (an
+//! in-process encoder's buffers) holds it with [`hold_memory`] while it
+//! runs; the automatic choice counts held memory as taken.
+//!
 //! A RAM work directory is `/dev/shm/gaia-<store id>/<scratch name>`, where
 //! the store id is a short digest of the store's root path, so two stores on
 //! one machine do not share a directory.
@@ -115,14 +119,16 @@ pub struct Room {
 }
 
 impl Room {
-    /// Reads `/proc/meminfo`, the free space of `shm` and the quota on it
+    /// Reads `/proc/meminfo` (less the memory held with [`hold_memory`]),
+    /// the free space of `shm` and the quota on it
     /// (see [`quota_headroom`]). A quota that is on and cannot be read is an
     /// error: the free space alone would put a step where the quota refuses
     /// its writes.
     pub fn read(shm: &Path) -> Result<Self> {
         let mem_available = fs::read_to_string("/proc/meminfo")
             .ok()
-            .and_then(|text| parse_mem_available(&text));
+            .and_then(|text| parse_mem_available(&text))
+            .map(|available| available.saturating_sub(held_memory()));
         let shm_free = rustix::fs::statvfs(shm)
             .ok()
             .map(|stat| stat.f_bavail.saturating_mul(stat.f_frsize));
@@ -352,6 +358,40 @@ pub fn ram_root(root: &Path, shm: &Path) -> PathBuf {
     shm.join(format!("gaia-{}", &id[..16]))
 }
 
+/// Memory that work inside this process has said it is using or about to
+/// use, in bytes.
+static HELD: Mutex<u64> = Mutex::new(0);
+
+/// Holds `bytes` of memory for in-process work until the hold is dropped:
+/// [`Room::read`] counts them as taken, so a step placed in RAM meanwhile
+/// does not count on them. Memory the work has already touched is gone
+/// from `MemAvailable` too and is then counted twice, which errs towards
+/// the disk.
+pub fn hold_memory(bytes: u64) -> MemoryHold {
+    let mut held = HELD.lock().unwrap_or_else(PoisonError::into_inner);
+    *held = held.saturating_add(bytes);
+    MemoryHold { bytes }
+}
+
+/// The memory held with [`hold_memory`] now, in bytes.
+pub fn held_memory() -> u64 {
+    *HELD.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A hold from [`hold_memory`], returned when dropped.
+#[derive(Debug)]
+#[must_use = "the memory is held only while this lives"]
+pub struct MemoryHold {
+    bytes: u64,
+}
+
+impl Drop for MemoryHold {
+    fn drop(&mut self) {
+        let mut held = HELD.lock().unwrap_or_else(PoisonError::into_inner);
+        *held = held.saturating_sub(self.bytes);
+    }
+}
+
 /// The RAM work directories that are in use by this process, in bytes, and
 /// the cap on them. A claim is made before a RAM work directory is created
 /// and returned when the directory is gone.
@@ -410,6 +450,23 @@ mod tests {
     use super::*;
 
     const GIB: u64 = 1 << 30;
+
+    /// Held memory adds up while its holds live, is returned when they are
+    /// dropped, and is taken off the memory the automatic choice reads.
+    #[test]
+    fn held_memory_is_counted_until_dropped() {
+        let before = held_memory();
+        let one = hold_memory(3 * GIB);
+        let two = hold_memory(GIB);
+        assert_eq!(held_memory() - before, 4 * GIB);
+        drop(one);
+        assert_eq!(held_memory() - before, GIB);
+        let all = hold_memory(u64::MAX / 2);
+        let room = Room::read(Path::new("/proc")).expect("room");
+        assert_eq!(room.mem_available, Some(0), "held memory is not counted");
+        drop((two, all));
+        assert_eq!(held_memory(), before);
+    }
 
     fn room(mem_gib: u64, shm_gib: u64) -> Room {
         Room {
