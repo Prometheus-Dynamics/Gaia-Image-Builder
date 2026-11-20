@@ -354,3 +354,81 @@ fn refusals_are_by_name() {
     assert!(error.contains("not a minisign"), "{error}");
     assert!(!error.contains("QUFB"), "{error}");
 }
+
+/// A raw image of four 64 MiB blocks' worth, the last one short: data in
+/// the first, zeros in the second, data in the third and in the short
+/// last one, so the stream has a zero block between data blocks and data
+/// in a last, shorter block. The data is 1 MiB at each block's start.
+fn multi_block_image() -> Vec<u8> {
+    const BLOCK: usize = 64 * 1024 * 1024;
+    let mut raw = vec![0_u8; 3 * BLOCK + 1024 * 1024 + 7];
+    let data = raw_image(1024 * 1024 + 7);
+    for at in [0, 2 * BLOCK, 3 * BLOCK] {
+        let n = data.len().min(raw.len() - at);
+        raw[at..at + n].copy_from_slice(&data[..n]);
+    }
+    raw
+}
+
+/// The 64 MiB-block form through the step, unsigned and signed: four
+/// blocks, one stream or two, each read back as the image by liblzma and
+/// by stock `xz`. With `GAIA_FLASH_DUMP` set these are the fixtures for the
+/// board side's decoders (`multi-block-unsigned.img.xz`,
+/// `multi-block-signed.img.xz`, each with its `.raw`).
+#[test]
+fn a_multi_block_image_is_read_back_whole_unsigned_and_signed() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let store = store_path(&root.path().join("store"));
+    let raw = multi_block_image();
+    for signed in [false, true] {
+        let image = store_image(Path::new(&store), &raw);
+        let text = secret_file_text();
+        let key = signed.then_some(KEY_VAR);
+        let artifact = flash_image_with(
+            &store,
+            image,
+            BOARD,
+            FORMAT,
+            key,
+            &key_env(text),
+            &Ctx::new(),
+        )
+        .expect("flash");
+        let path = output(Path::new(&store), &artifact);
+        let name = if signed {
+            "multi-block-signed.img.xz"
+        } else {
+            "multi-block-unsigned.img.xz"
+        };
+        dump(name, &path, &raw);
+        assert_eq!(
+            dictionary::stream_count(&path),
+            Ok(1 + u64::from(signed)),
+            "{name}"
+        );
+        let first = decode_first_stream(&path);
+        assert!(first == raw, "{name}: stream 1 is not the image");
+        if !signed {
+            let declared = dictionary::read_back_all(&path).expect("reads back");
+            assert_eq!(declared.blocks, 4, "{name}");
+            assert_eq!(declared.dictionary, EIGHT_MIB, "{name}");
+            assert!(declared.sized, "{name}");
+        }
+        if stock_xz() {
+            let out = Command::new("/usr/bin/xz")
+                .args(["-dc", "--single-stream"])
+                .arg(&path)
+                .output()
+                .expect("xz");
+            assert!(
+                out.status.success(),
+                "{name}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(
+                out.stdout == raw,
+                "{name}: stock xz does not read back the image"
+            );
+        }
+    }
+}
