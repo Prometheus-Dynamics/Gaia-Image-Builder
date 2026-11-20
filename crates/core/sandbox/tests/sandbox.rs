@@ -234,3 +234,68 @@ fn a_sandboxed_tools_cpu_time_is_recorded() {
         "a loop of 300,000 shell steps takes well over 0.3 s: {cpu_ns} ns"
     );
 }
+
+/// The host processes whose command line holds `marker`.
+fn holding(marker: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir("/proc").expect("/proc").flatten() {
+        let cmdline = std::fs::read(entry.path().join("cmdline")).unwrap_or_default();
+        if String::from_utf8_lossy(&cmdline).contains(marker) {
+            found.push(entry.file_name().to_string_lossy().into_owned());
+        }
+    }
+    found
+}
+
+/// A tool stopped as Gaia stops one (a cancel or a refused line: SIGKILL to
+/// the bubblewrap's process group) ends at once with everything it started,
+/// though it is its namespace's first process with no handler for any
+/// signal (a shell), and a child of it is still running.
+#[test]
+fn a_stopped_sandboxed_tool_ends_with_everything_it_started() {
+    if !available() {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("store")).expect("store");
+    let cx = Ctx::new();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("time")
+        .subsec_nanos();
+    // Sleep lengths no other process has, to find them from the host.
+    let (child, own) = (format!("600.{nanos:09}"), format!("601.{nanos:09}"));
+    let script = format!("sleep {child} & echo started; sleep {own}");
+    let key = KeyBuilder::new("test.stop", 1)
+        .config("script", &script)
+        .finish();
+    let sandbox = sandbox(dir.path());
+    let started = std::time::Instant::now();
+    let error = Step::new(&store, &cx, "test.stop", key)
+        .look_up_or_make(&[("out", Path::new("out"))], |work| {
+            let tool = sandbox
+                .tool("/bin/sh")
+                .map_err(|e| StepError::body("test", e))?
+                .arg("-c")
+                .arg(&script)
+                .refuse_line("started", "stopped by the test");
+            work.run(&tool).map(|_| ())
+        })
+        .expect_err("stopped");
+    let stopped = started.elapsed();
+    println!("stopped after {stopped:?}: {error}");
+    assert!(error.to_string().contains("stopped by the test"), "{error}");
+    assert!(stopped < std::time::Duration::from_secs(10), "{stopped:?}");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let left = [holding(&child), holding(&own)].concat();
+        if left.is_empty() {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "left running in the sandbox: {left:?}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
