@@ -171,9 +171,14 @@ impl<'a> Step<'a> {
         let work_bytes = self
             .ram_work
             .map(|_| gaia_store::used_bytes(scratch.path()));
+        // The commit hashes every output, which for a large one (a disk
+        // image read whole, holes and all) is most of the step: it is the
+        // step's own CPU too.
+        let commit_start = crate::log::thread_cpu_ns();
         let entry = scratch
             .commit_step(&self.key, outputs)
             .map_err(&store_error)?;
+        report.own_cpu_ns += crate::log::thread_cpu_ns().saturating_sub(commit_start);
         self.recorded_with(start_ns, entry.outputs, true, report, work_bytes)
     }
 
@@ -575,6 +580,32 @@ mod tests {
         assert_eq!(report.cpu_ns, 0, "no tool ran");
         let [start, end] = report.load.expect("the load");
         assert!(start >= 0.0 && end >= 0.0);
+    }
+
+    /// Hashing the outputs into the store is the step's own CPU: a body
+    /// that only makes a large sparse file takes almost none, its commit
+    /// reads all of it.
+    #[test]
+    fn the_commits_hashing_is_the_steps_own_cpu() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path().join("store")).expect("store");
+        let cx = Ctx::new();
+        let key = StepKey(Digest::of_bytes(b"commit cpu"));
+        Step::new(&store, &cx, "gaia.test.commit-cpu", key)
+            .look_up_or_make(&[("out", Path::new("out"))], |work| {
+                let file = std::fs::File::create(work.dir().join("out"))
+                    .map_err(|e| StepError::body("gaia.test.commit-cpu", e))?;
+                file.set_len(64 << 20)
+                    .map_err(|e| StepError::body("gaia.test.commit-cpu", e))
+            })
+            .expect("made");
+        let records = crate::step_records(&crate::logs_dir(&store));
+        let own = records.last().expect("a record").report.own_cpu_ns;
+        println!("a 64 MiB sparse output: {} ms of own CPU", own / 1_000_000);
+        assert!(
+            own >= 20_000_000,
+            "hashing 64 MiB takes well over 20 ms: {own} ns"
+        );
     }
 
     #[test]
