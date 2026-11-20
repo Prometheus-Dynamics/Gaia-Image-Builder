@@ -120,6 +120,16 @@ pub struct Report {
     /// children those processes waited for, in nanoseconds.
     #[serde(default)]
     pub cpu_ns: u64,
+    /// CPU time of the step's own code, in nanoseconds: the thread that ran
+    /// the body, and threads it started that reported theirs (see
+    /// [`crate::Work::add_own_cpu`]). Work done in Gaia's process, which
+    /// [`Report::cpu_ns`] does not hold.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub own_cpu_ns: u64,
+    /// The machine's load (the 1-minute load average) when the body started
+    /// and when it ended, so a slow run says whether the machine was busy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub load: Option<[f32; 2]>,
     /// The job count the step was given, when it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jobs: Option<u32>,
@@ -141,6 +151,29 @@ pub struct Report {
 /// so a plant of hard-linked host tools read as many times its size, and
 /// those records would ask for far more room than a run needs.
 pub const SIZE_MEASURE: u32 = 2;
+
+/// For `skip_serializing_if`: a count of nothing is left out.
+fn is_zero(count: &u64) -> bool {
+    *count == 0
+}
+
+/// The 1-minute load average, from `/proc/loadavg`; `None` where there is
+/// none.
+pub(crate) fn load_now() -> Option<f32> {
+    std::fs::read_to_string("/proc/loadavg")
+        .ok()?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
+}
+
+/// CPU time the calling thread has used, in nanoseconds.
+pub fn thread_cpu_ns() -> u64 {
+    let time = rustix::time::clock_gettime(rustix::time::ClockId::ThreadCPUTime);
+    u64::try_from(time.tv_sec).unwrap_or(0) * 1_000_000_000
+        + u64::try_from(time.tv_nsec).unwrap_or(0)
+}
 
 /// For `skip_serializing_if`: a flag that is off is left out.
 fn is_false(flag: &bool) -> bool {

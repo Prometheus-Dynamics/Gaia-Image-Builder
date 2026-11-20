@@ -146,8 +146,12 @@ impl<'a> Step<'a> {
             logs: &self.logs,
             report: Report::default(),
         };
+        let load_start = crate::log::load_now();
+        let cpu_start = crate::log::thread_cpu_ns();
         let result = body(&mut work);
-        let report = work.report;
+        let mut report = work.report;
+        report.own_cpu_ns += crate::log::thread_cpu_ns().saturating_sub(cpu_start);
+        report.load = load_start.zip(crate::log::load_now()).map(|(a, b)| [a, b]);
         if let Err(error) = result {
             // The record says the body ran and failed, with what it measured
             // before it failed; the step's own error is what goes up.
@@ -355,6 +359,14 @@ impl Work<'_> {
         )
     }
 
+    /// Adds CPU time a thread the body started used, in nanoseconds, to the
+    /// step's own (see [`Report::own_cpu_ns`]). The body's own thread is
+    /// counted without it; a thread measures itself with
+    /// [`crate::thread_cpu_ns`] at its start and end.
+    pub fn add_own_cpu(&mut self, ns: u64) {
+        self.report.own_cpu_ns += ns;
+    }
+
     /// The job count this step was given, for its record: the `-j` of a
     /// make, say.
     pub fn jobs(&mut self, jobs: u32) {
@@ -518,6 +530,51 @@ mod tests {
             low.expected(1) >= 1 << 20,
             "the records, when they are more"
         );
+    }
+
+    /// Spends about `ms` of CPU on the calling thread.
+    fn spin(ms: u64) -> u64 {
+        let start = crate::thread_cpu_ns();
+        let mut x = 1_u64;
+        while crate::thread_cpu_ns() - start < ms * 1_000_000 {
+            x = x.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        }
+        x
+    }
+
+    /// Work done in Gaia's own process is in the record: the body's thread
+    /// by itself, a thread it starts when it reports, and the machine's load
+    /// at the start and end.
+    #[test]
+    fn the_steps_own_cpu_and_the_load_are_recorded() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path().join("store")).expect("store");
+        let cx = Ctx::new();
+        let key = StepKey(Digest::of_bytes(b"own cpu"));
+        Step::new(&store, &cx, "gaia.test.own-cpu", key)
+            .look_up_or_make(&[("out", Path::new("out"))], |work| {
+                std::hint::black_box(spin(60));
+                let worker = std::thread::spawn(|| {
+                    std::hint::black_box(spin(80));
+                    crate::thread_cpu_ns()
+                })
+                .join()
+                .expect("worker");
+                work.add_own_cpu(worker);
+                std::fs::write(work.dir().join("out"), b"made")
+                    .map_err(|e| StepError::body("gaia.test.own-cpu", e))
+            })
+            .expect("made");
+        let records = crate::step_records(&crate::logs_dir(&store));
+        let report = &records.last().expect("a record").report;
+        assert!(
+            report.own_cpu_ns >= 140_000_000,
+            "the body's 60 ms and the worker's 80 ms: {} ns",
+            report.own_cpu_ns
+        );
+        assert_eq!(report.cpu_ns, 0, "no tool ran");
+        let [start, end] = report.load.expect("the load");
+        assert!(start >= 0.0 && end >= 0.0);
     }
 
     #[test]

@@ -10,7 +10,7 @@ repository.workspace = true
 [dependencies]
 daedalus-cpu-author = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "b3916178f255ab9f55d230dff1395c08b3bca2c9" }
 gaia-store = { path = "../store" }
-rustix = { version = "1", features = ["process"] }
+rustix = { version = "1", features = ["process", "time"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11.0"
@@ -22,7 +22,7 @@ daedalus-cpu = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", re
 daedalus-registry = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "b3916178f255ab9f55d230dff1395c08b3bca2c9" }
 daedalus-types = { git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "b3916178f255ab9f55d230dff1395c08b3bca2c9" }
 tempfile = "3"
-rustix = { version = "1", features = ["process"] }
+rustix = { version = "1", features = ["process", "time"] }
 
 [lints]
 workspace = true
